@@ -7,6 +7,7 @@ use App\Models\AppSetting;
 use App\Models\MacroOutput;
 use App\Models\NightAstraRow;
 use App\Models\NightRunStep;
+use App\Services\AstraBarangayMatcher;
 use App\Services\AstraEncoder;
 use App\Services\MacroChecker;
 use Illuminate\Http\Client\ConnectionException;
@@ -720,5 +721,322 @@ class AstraAddressRulesTest extends NightAstraTestCase
         }
 
         $this->assertSame($this->pinned('S-33.4'), $seen);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  Ang text check ng barangay (pure): tinatawag nang direkta, kasama ang lahat ng label ng city
+    // ═════════════════════════════════════════════════════════════════════
+
+    private const PHRASE = ['result' => 'phrase', 'score' => 100];
+    private const NONE   = ['result' => 'none', 'score' => 0];
+
+    private const QC_HOLY_SPIRIT    = ['METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT'];
+    private const COTABATO_POB      = ['COTABATO', 'COTABATO-CITY', 'POBLACION'];
+    private const COTABATO_POB_2    = ['COTABATO', 'COTABATO-CITY', 'POBLACION II'];
+    private const COTABATO_POB_9    = ['COTABATO', 'COTABATO-CITY', 'POBLACION IX'];
+    private const CEBU_SANTA_CRUZ   = ['CEBU', 'CEBU-CITY', 'SANTA CRUZ (POB.)'];
+    private const NASIPIT_BRGY_1    = ['AGUSAN-DEL-NORTE', 'NASIPIT', 'BARANGAY 1 (POB.)'];
+    private const NASIPIT_BRGY_2    = ['AGUSAN-DEL-NORTE', 'NASIPIT', 'BARANGAY 2 (POB.)'];
+    private const NASIPIT_BRGY_5    = ['AGUSAN-DEL-NORTE', 'NASIPIT', 'BARANGAY 5 (POB.)'];
+    private const CABADBARAN_POB_1  = ['AGUSAN-DEL-NORTE', 'CABADBARAN-CITY', 'POBLACION 1'];
+    private const CABADBARAN_POB_2  = ['AGUSAN-DEL-NORTE', 'CABADBARAN-CITY', 'POBLACION 2'];
+    private const CABADBARAN_POB_10 = ['AGUSAN-DEL-NORTE', 'CABADBARAN-CITY', 'POBLACION 10'];
+    private const CABADBARAN_POB_12 = ['AGUSAN-DEL-NORTE', 'CABADBARAN-CITY', 'POBLACION 12'];
+    private const DASMA_ZONE_1      = ['CAVITE', 'DASMARINAS-CITY', 'ZONE I (POB.)'];
+    private const DASMA_ZONE_1B     = ['CAVITE', 'DASMARINAS-CITY', 'ZONE I-B'];
+    private const CALOOCAN_BRGY_28  = ['METRO-MANILA', 'CALOOCAN', 'BARANGAY 28'];
+    private const BINONDO_BRGY_287  = ['METRO-MANILA', 'BINONDO', 'BARANGAY 287'];
+    private const NAIC_IBAYO_SIL    = ['CAVITE', 'NAIC', 'IBAYO SILANGAN'];
+    private const LIGAO_BAY         = ['ALBAY', 'LIGAO-CITY', 'BAY'];
+    private const STO_TOMAS_EAST    = ['PANGASINAN', 'PANGASINAN-SANTO-TOMAS', 'POBLACION EAST'];
+    private const STO_TOMAS_WEST    = ['PANGASINAN', 'PANGASINAN-SANTO-TOMAS', 'POBLACION WEST'];
+    private const AGOO_SANTA_MARIA  = ['LA-UNION', 'AGOO', 'SANTA MARIA'];
+    private const AGOO_SANTA_RITA   = ['LA-UNION', 'AGOO', 'SANTA RITA (NALINAC)'];
+    private const AGOO_SAN_ANTONIO  = ['LA-UNION', 'AGOO', 'SAN ANTONIO'];
+    private const AGOO_SAN_ANTONINO = ['LA-UNION', 'AGOO', 'SAN ANTONINO'];
+    private const VIRAC_SAN_VICENTE = ['CATANDUANES', 'VIRAC', 'SAN VICENTE'];
+    private const VIRAC_DUGUI_SV    = ['CATANDUANES', 'VIRAC', 'DUGUI SAN VICENTE'];
+    private const VIRAC_IBONG_SAPA  = ['CATANDUANES', 'VIRAC', 'IBONG SAPA (SAN VICENTE SUR)'];
+    private const ABRA_BA_UG        = ['ABRA', 'ABRA-SAN-JUAN', 'BA-UG'];
+
+    /** Lahat ng label ng city ng line, mula sa totoong list. */
+    private function cityLabels(array $line): array
+    {
+        return $this->maps()['brgysByCityProv'][MacroChecker::normPlace($line[1]) . '|' . MacroChecker::normProv($line[0])] ?? [];
+    }
+
+    /** Ang text check sa isang line ng totoong list: [province, city, barangay]. */
+    private function confirmed(string $text, array $line): array
+    {
+        return AstraBarangayMatcher::confirm($text, $line[2], $this->cityLabels($line));
+    }
+
+    private function assertLinesInList(array ...$lines): void
+    {
+        foreach ($lines as $line) {
+            $this->assertInList(...$line);
+        }
+    }
+
+    /** Bawat row: [text, line, inaasahang sagot]. */
+    private function assertConfirmTable(array $rows): void
+    {
+        foreach ($rows as $name => [$text, $line, $expected]) {
+            $this->assertSame($expected, $this->confirmed($text, $line), (string) $name);
+        }
+    }
+
+    public function test_S_25_2_abbreviations_double_spaces_a_non_breaking_space_and_capitals_are_confirmed(): void
+    {
+        $this->assertLinesInList(self::COTABATO_POB, self::CEBU_SANTA_CRUZ, self::QC_HOLY_SPIRIT);
+
+        $this->assertConfirmTable([
+            'Pob.'                         => ['Pob.', self::COTABATO_POB, self::PHRASE],
+            'Sta. Cruz'                    => ['Sta. Cruz', self::CEBU_SANTA_CRUZ, self::PHRASE],
+            'double space, nbsp, capitals' => ["BRGY.  HOLY \u{00A0}SPIRIT", self::QC_HOLY_SPIRIT, self::PHRASE],
+        ]);
+    }
+
+    public function test_S_25_5_a_part_of_the_name_and_a_three_letter_near_miss_are_not_confirmed(): void
+    {
+        $this->assertLinesInList(self::NAIC_IBAYO_SIL, self::LIGAO_BAY);
+
+        $this->assertConfirmTable([
+            'half of the name'            => ['Blk 4 ibayo, Naic, Cavite', self::NAIC_IBAYO_SIL, self::NONE],
+            'three letters, one is wrong' => ['Purok 2 Bai Ligao City', self::LIGAO_BAY, self::NONE],
+        ]);
+    }
+
+    public function test_S_25_8_the_forms_own_wording_confirms_only_when_it_maps_to_that_very_label(): void
+    {
+        $this->assertLinesInList(self::ABRA_BA_UG, self::COTABATO_POB, self::COTABATO_POB_2, self::QC_HOLY_SPIRIT);
+        $withWording = fn (string $text, array $line, string $wording) => AstraBarangayMatcher::confirmWithWording($text, $line[2], $wording, $this->cityLabels($line));
+
+        // Ang label lang: ang "ba ug" ay wala sa text na "Baug" (masyadong maikli para sa dikit o halos-tugma).
+        $this->assertSame(self::NONE, $this->confirmed('taga Baug po kami, San Juan Abra', self::ABRA_BA_UG));
+
+        $seen = [
+            'the wording maps to this label'       => $withWording('taga Baug po kami, San Juan Abra', self::ABRA_BA_UG, 'Baug'),
+            'the label itself is in the text'      => $withWording('Brgy Holy Spirit, QC', self::QC_HOLY_SPIRIT, 'wala'),
+            'the wording maps to another label'    => $withWording('Brgy Poblacion, Cotabato City', self::COTABATO_POB_2, 'Poblacion'),
+            'the wording is the city, not a label' => $withWording('12 Sampaguita St, Quezon City', self::QC_HOLY_SPIRIT, 'Quezon City'),
+            'the wording is not in the text'       => $withWording('San Juan Abra', self::ABRA_BA_UG, 'Baug'),
+            'an empty wording'                     => $withWording('taga Baug po kami', self::ABRA_BA_UG, ''),
+        ];
+
+        $this->assertSame([
+            'the wording maps to this label'       => self::PHRASE,
+            'the label itself is in the text'      => self::PHRASE,
+            'the wording maps to another label'    => self::NONE,
+            'the wording is the city, not a label' => self::NONE,
+            'the wording is not in the text'       => self::NONE,
+            'an empty wording'                     => self::NONE,
+        ], $seen);
+    }
+
+    public function test_S_25_9_a_chat_of_300000_characters_gives_the_result_of_the_short_chat(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $short = '12 Sampaguita St, brgy holy sprit, Quezon City';
+        $long  = str_repeat("magkano po ang shipping\n", 12500) . $short;
+        $this->assertGreaterThanOrEqual(300000, strlen($long));
+
+        // "holy sprit" laban sa "holy spirit": 95.2 ang similar_text, kaya 95.
+        $near = ['result' => 'near', 'score' => 95];
+        $this->assertSame([$near, $near], [$this->confirmed($short, self::QC_HOLY_SPIRIT), $this->confirmed($long, self::QC_HOLY_SPIRIT)]);
+        // Isang salitang 300,000 character, walang espasyo.
+        $this->assertSame(self::NONE, $this->confirmed(str_repeat('holyspirit', 30000), self::QC_HOLY_SPIRIT));
+    }
+
+    public function test_S_25_10_invalid_utf8_does_not_throw_and_confirms_nothing(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT, self::NASIPIT_BRGY_1);
+
+        $this->assertConfirmTable([
+            'bytes that are no text at all'   => ["\xC3\x28\xFF\xFE\xA0\xA1", self::QC_HOLY_SPIRIT, self::NONE],
+            'a bad byte instead of the space' => ["Brgy Holy\xFFSpirit, QC", self::QC_HOLY_SPIRIT, self::NONE],
+            'a bad byte before the number'    => ["Brgy \xE2\x821, Nasipit", self::NASIPIT_BRGY_1, self::NONE],
+            'a character cut in half'         => ["Quezon City \xF0\x9F", self::QC_HOLY_SPIRIT, self::NONE],
+        ]);
+        $this->assertSame(self::NONE, AstraBarangayMatcher::confirmWithWording("Holy\xFFSpirit", 'HOLY SPIRIT', "Holy\xFFSpirit", $this->cityLabels(self::QC_HOLY_SPIRIT)));
+    }
+
+    public function test_S_26_1_a_one_digit_numbered_barangay_is_confirmed_by_its_number(): void
+    {
+        $this->assertLinesInList(self::NASIPIT_BRGY_1);
+
+        $this->assertSame(self::PHRASE, $this->confirmed('Purok 3 Brgy. 1, Nasipit, Agusan del Norte', self::NASIPIT_BRGY_1));
+    }
+
+    public function test_S_26_2_roman_and_arabic_forms_of_the_same_number_are_equal(): void
+    {
+        $this->assertLinesInList(self::COTABATO_POB_9, self::CABADBARAN_POB_1);
+
+        $this->assertConfirmTable([
+            'IX written as 9' => ['45 Sinsuat Ave, poblacion 9, Cotabato City', self::COTABATO_POB_9, self::PHRASE],
+            '1 written as I'  => ['Purok 2, Poblacion I, Cabadbaran City', self::CABADBARAN_POB_1, self::PHRASE],
+        ]);
+    }
+
+    public function test_S_26_3_every_way_of_writing_the_barangay_word_before_the_number_is_confirmed(): void
+    {
+        $this->assertLinesInList(self::NASIPIT_BRGY_1);
+
+        $rows = [];
+        foreach (['Barangay 1', 'BRGY. 1', 'Bgy 1', 'Brgy #1', 'Brgy: 1'] as $text) {
+            $rows[$text] = [$text, self::NASIPIT_BRGY_1, self::PHRASE];
+        }
+        $this->assertConfirmTable($rows);
+    }
+
+    public function test_S_26_4_another_number_is_never_confirmed_by_phrase_or_by_near_match(): void
+    {
+        $this->assertLinesInList(self::CABADBARAN_POB_1, self::CABADBARAN_POB_2, self::NASIPIT_BRGY_1, self::NASIPIT_BRGY_2);
+
+        $this->assertConfirmTable([
+            'Poblacion 2 for POBLACION 1' => ['Purok 2, Poblacion 2, Cabadbaran City', self::CABADBARAN_POB_1, self::NONE],
+            'Brgy 2 for BARANGAY 1'       => ['Brgy 2, Nasipit', self::NASIPIT_BRGY_1, self::NONE],
+        ]);
+    }
+
+    public function test_S_26_5_a_number_is_compared_as_a_whole_number(): void
+    {
+        $this->assertLinesInList(self::CALOOCAN_BRGY_28, self::BINONDO_BRGY_287);
+
+        $this->assertConfirmTable([
+            'Barangay 287 for BARANGAY 28' => ['Barangay 287, Caloocan', self::CALOOCAN_BRGY_28, self::NONE],
+            'Brgy 28 for BARANGAY 287'     => ['Brgy 28, Binondo, Manila', self::BINONDO_BRGY_287, self::NONE],
+        ]);
+    }
+
+    public function test_S_26_6_no_match_across_a_digit(): void
+    {
+        $this->assertLinesInList(self::CABADBARAN_POB_1, self::CABADBARAN_POB_10, self::CABADBARAN_POB_12);
+
+        $this->assertConfirmTable([
+            'Poblacion 12' => ['Poblacion 12, Cabadbaran City', self::CABADBARAN_POB_1, self::NONE],
+            'Poblacion 10' => ['Poblacion 10, Cabadbaran City', self::CABADBARAN_POB_1, self::NONE],
+        ]);
+    }
+
+    public function test_S_26_7_a_number_or_letter_the_label_does_not_have_is_never_bridged(): void
+    {
+        $this->assertLinesInList(self::COTABATO_POB, self::COTABATO_POB_9, self::DASMA_ZONE_1B, self::DASMA_ZONE_1);
+
+        $this->assertConfirmTable([
+            'Poblacion 9 for the bare POBLACION' => ['45 Sinsuat Ave, Poblacion 9, Cotabato City', self::COTABATO_POB, self::NONE],
+            'both Poblacion and Poblacion 9'     => ["Brgy Poblacion\nPoblacion 9 po pala, Cotabato City", self::COTABATO_POB, self::NONE],
+            'a full stop before the number'      => ['Brgy Poblacion. 9 Cotabato City', self::COTABATO_POB, self::NONE],
+            'Zone I-A for ZONE I-B'              => ['Zone I-A, Dasmarinas City', self::DASMA_ZONE_1B, self::NONE],
+            'Zone 1 for ZONE I-B'                => ['Zone 1, Dasmarinas City', self::DASMA_ZONE_1B, self::NONE],
+        ]);
+    }
+
+    public function test_S_26_8_a_number_alone_counts_only_when_attached_to_a_barangay_word(): void
+    {
+        $this->assertLinesInList(self::CALOOCAN_BRGY_28);
+
+        $this->assertSame(self::NONE, $this->confirmed('bili po ako ng 28 pcs, house 28', self::CALOOCAN_BRGY_28));
+    }
+
+    public function test_S_26_10_a_number_on_the_next_line_is_never_joined_to_the_name(): void
+    {
+        $this->assertLinesInList(self::COTABATO_POB_2, self::NASIPIT_BRGY_1);
+
+        $this->assertConfirmTable([
+            'a line break'       => ["Brgy Poblacion\n2 pcs po", self::COTABATO_POB_2, self::NONE],
+            'a comma'            => ['Brgy Poblacion, 2 pcs po', self::COTABATO_POB_2, self::NONE],
+            'a dash with spaces' => ['Brgy Poblacion - 2 pcs po', self::COTABATO_POB_2, self::NONE],
+            'a slash'            => ['Brgy Poblacion/2 pcs po', self::COTABATO_POB_2, self::NONE],
+            'a bracket'          => ['Brgy Poblacion (2 pcs po)', self::COTABATO_POB_2, self::NONE],
+            'the barangay word on the line before the number' => ["Brgy\n1 pc lang po", self::NASIPIT_BRGY_1, self::NONE],
+            // Ang tuldok ng dulo ng pangungusap ay hindi rin tinatawid; ang tuldok ng daglat ay bahagi ng pangalan.
+            'a full stop'                 => ['Brgy Poblacion. 2 pcs po', self::COTABATO_POB_2, self::NONE],
+            'a full stop without a space' => ['Brgy Poblacion.2 pcs po', self::COTABATO_POB_2, self::NONE],
+            'a question mark after the barangay word' => ['Brgy? 1 pc lang po', self::NASIPIT_BRGY_1, self::NONE],
+            'a closing bracket'           => ['Brgy Poblacion) 2 pcs po', self::COTABATO_POB_2, self::NONE],
+            'the stop of an abbreviation' => ['Brgy Pob. 2 Cotabato City', self::COTABATO_POB_2, self::PHRASE],
+        ]);
+    }
+
+    public function test_S_26_11_a_street_initial_after_a_comma_is_not_a_suffix_letter(): void
+    {
+        $this->assertLinesInList(self::DASMA_ZONE_1B);
+
+        $this->assertSame(self::NONE, $this->confirmed('Zone 1, B. Aquino St, Dasmarinas City', self::DASMA_ZONE_1B));
+    }
+
+    public function test_S_26_12_digits_written_apart_are_not_one_number(): void
+    {
+        $this->assertLinesInList(self::CABADBARAN_POB_12, self::CABADBARAN_POB_1);
+
+        $this->assertConfirmTable([
+            'for POBLACION 12' => ['Poblacion 1 2 boxes', self::CABADBARAN_POB_12, self::NONE],
+            'for POBLACION 1'  => ['Poblacion 1 2 boxes', self::CABADBARAN_POB_1, self::NONE],
+        ]);
+    }
+
+    /** Walang city sa list na may SANTA MARIA at SANTA MARTA; ang Agoo ay may SANTA MARIA at SANTA RITA, SAN ANTONIO at SAN ANTONINO. */
+    public function test_S_26_13_a_name_that_is_nearer_to_another_barangay_of_the_city_is_not_confirmed(): void
+    {
+        $this->assertLinesInList(self::STO_TOMAS_EAST, self::STO_TOMAS_WEST, self::AGOO_SANTA_MARIA, self::AGOO_SANTA_RITA, self::AGOO_SAN_ANTONIO, self::AGOO_SAN_ANTONINO);
+
+        $this->assertConfirmTable([
+            'Poblacion Wst for POBLACION EAST' => ['Poblacion Wst, Santo Tomas, Pangasinan', self::STO_TOMAS_EAST, self::NONE],
+            'Santa Rita for SANTA MARIA'       => ['Santa Rita, Agoo, La Union', self::AGOO_SANTA_MARIA, self::NONE],
+            'San Antonino for SAN ANTONIO'     => ['San Antonino, Agoo, La Union', self::AGOO_SAN_ANTONIO, self::NONE],
+            'both names in the text'           => ["Poblacion West\nPoblacion East po pala", self::STO_TOMAS_EAST, self::NONE],
+            // Ang tamang label mismo ay nakukumpirma pa rin: 96.3 laban sa 88.9 ng kapatid.
+            'Poblacion Wst for POBLACION WEST' => ['Poblacion Wst, Santo Tomas, Pangasinan', self::STO_TOMAS_WEST, ['result' => 'near', 'score' => 96]],
+        ]);
+    }
+
+    public function test_S_26_14_a_longer_barangay_name_of_the_city_around_the_hit_is_not_confirmed(): void
+    {
+        $this->assertLinesInList(self::VIRAC_SAN_VICENTE, self::VIRAC_DUGUI_SV, self::VIRAC_IBONG_SAPA);
+
+        $this->assertConfirmTable([
+            'Dugui San Vicente for SAN VICENTE' => ['Dugui San Vicente, Virac', self::VIRAC_SAN_VICENTE, self::NONE],
+            'a typo in the name itself'         => ['Dugui San Vicnte, Virac', self::VIRAC_SAN_VICENTE, self::NONE],
+            'the name inside a parenthesis'     => ['San Vicente Sur, Virac', self::VIRAC_SAN_VICENTE, self::NONE],
+            'the longer label is confirmed'     => ['Dugui San Vicente, Virac', self::VIRAC_DUGUI_SV, self::PHRASE],
+            'the short name alone is confirmed' => ['San Vicente, Virac', self::VIRAC_SAN_VICENTE, self::PHRASE],
+        ]);
+    }
+
+    public function test_S_26_15_an_initial_is_neither_a_number_nor_a_suffix_letter(): void
+    {
+        $this->assertLinesInList(self::NASIPIT_BRGY_5, self::QC_HOLY_SPIRIT, self::DASMA_ZONE_1, self::DASMA_ZONE_1B);
+
+        $this->assertConfirmTable([
+            'Brgy. V. Luna for BARANGAY 5'        => ['Brgy. V. Luna, Nasipit', self::NASIPIT_BRGY_5, self::NONE],
+            'Holy Spirit Q.C.'                    => ['12 Sampaguita St, Holy Spirit Q.C.', self::QC_HOLY_SPIRIT, self::PHRASE],
+            'Zone 1 B for ZONE I'                 => ['Zone 1 B Dasmarinas City', self::DASMA_ZONE_1, self::NONE],
+            'Zone 1-B for ZONE I'                 => ['Zone 1-B Dasmarinas City', self::DASMA_ZONE_1, self::NONE],
+            'Zone 1 B. where ZONE I-B is a label' => ['Zone 1 B. Dasmarinas City', self::DASMA_ZONE_1, self::NONE],
+        ]);
+    }
+
+    public function test_S_33_5_one_numbered_barangay_repeated_over_200000_characters_gives_the_result_of_the_short_text(): void
+    {
+        $this->assertLinesInList(self::CABADBARAN_POB_1, self::CABADBARAN_POB_2);
+        $long = str_repeat('Poblacion 1 ', 16700);
+        $typo = str_repeat('Poblacon 1 ', 18200);
+        $this->assertGreaterThanOrEqual(200000, min(strlen($long), strlen($typo)));
+
+        $start = hrtime(true);
+        $seen  = [
+            'short'              => $this->confirmed('Poblacion 1 Poblacion 1', self::CABADBARAN_POB_1),
+            'long'               => $this->confirmed($long, self::CABADBARAN_POB_1),
+            'long, other number' => $this->confirmed($long, self::CABADBARAN_POB_2),
+            'short, a typo'      => $this->confirmed('Poblacon 1 Poblacon 1', self::CABADBARAN_POB_1),
+            'long, a typo'       => $this->confirmed($typo, self::CABADBARAN_POB_1),
+        ];
+        $seconds = (hrtime(true) - $start) / 1e9;
+
+        // "poblacon 1" laban sa "poblacion 1": 95.2.
+        $near = ['result' => 'near', 'score' => 95];
+        $this->assertSame(['short' => self::PHRASE, 'long' => self::PHRASE, 'long, other number' => self::NONE, 'short, a typo' => $near, 'long, a typo' => $near], $seen);
+        $this->assertLessThan(5.0, $seconds);
     }
 }
