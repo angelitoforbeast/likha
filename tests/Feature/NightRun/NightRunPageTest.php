@@ -80,7 +80,9 @@ class NightRunPageTest extends NightAstraTestCase
         }
         $step->update(['rows_found' => 9, 'rows_over_max' => 2]);
         $html = $this->logs()->getContent();
-        $this->assertTrue(str_contains($html, '9 rows · 1 PROCEED · 1 for a person · 1 failed · 1 skipped · 3 not run · 2 queued/running'), 'one-line summary');
+        // Ang text ng linya, walang tags: link na ang "for a person" pero pareho pa rin ang mga salita at ang pagkakasunod.
+        $text = preg_replace('/\s+/', ' ', strip_tags($html));
+        $this->assertTrue(str_contains($text, '9 rows · 1 PROCEED · 1 for a person · 1 failed · 1 skipped · 3 not run · 2 queued/running'), 'one-line summary');
         $this->assertTrue(str_contains($html, '2 not run: over the safety maximum of 2,500'), 'over max line');
 
         // Mahabang text mula sa labas: nababali, hindi nag-s-scroll pahalang. At bawat click sa Show rows ay kumukuha ulit.
@@ -88,6 +90,86 @@ class NightRunPageTest extends NightAstraTestCase
         $this->assertSame(1, preg_match('/class="[^"]*break-words[^"]*" x-text="r\.reason"/', $html), 'row reason wraps');
         $this->assertTrue(str_contains($html, 'if (this.loading) return;'), 'refetch on every click');
         $this->assertFalse(str_contains($html, 'this.rows !== null || this.loading'), 'no cached rows');
+    }
+
+    /** Ang address ng link na ang text ay eksaktong `$words`, bilang [path, query]; null kapag walang ganoong link. */
+    private function linkTo(string $html, string $words): ?array
+    {
+        if (preg_match('/<a href="([^"]*)" class="[^"]*\bwhitespace-nowrap\b[^"]*">' . preg_quote($words, '/') . '<\/a>/', $html, $m) !== 1) {
+            return null;
+        }
+        $url = html_entity_decode($m[1], ENT_QUOTES);
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+        return [parse_url($url, PHP_URL_PATH), $query];
+    }
+
+    public function test_S_09_1_the_collapsed_count_is_a_link(): void
+    {
+        $step = $this->seedNight();
+
+        $html = $this->logs()->getContent();
+
+        // Ang mga order ng gabing 2026-10-05 ay ang sa 2026-10-04. Buo ang "1 for a person" sa loob ng link (hindi napuputol).
+        $this->assertSame(
+            ['/encoder/checker_1', ['date' => '2026-10-04', 'night_step' => (string) $step->id]],
+            $this->linkTo($html, '1 for a person')
+        );
+        $this->assertStringNotContainsString('target=', $html);
+    }
+
+    public function test_S_09_2_the_expanded_count_is_the_same_link(): void
+    {
+        $this->seedNight();
+
+        $html = $this->logs()->getContent();
+
+        $this->assertNotNull($this->linkTo($html, '1 left for a person'));
+        $this->assertSame($this->linkTo($html, '1 for a person'), $this->linkTo($html, '1 left for a person'));
+        // Ang hati kada code ay plain text pa rin, sa labas ng link.
+        $this->assertSame(1, preg_match('/1 left for a person<\/a>\s*\(TO FIX 1\)/', $html));
+    }
+
+    public function test_S_09_3_a_count_of_zero_is_plain_text(): void
+    {
+        $this->seedNight();
+        NightAstraRow::where('state', 'done')->where('proceed', false)->delete();
+
+        $html = $this->logs()->getContent();
+
+        $this->assertStringContainsString('1 PROCEED · 0 for a person · 1 failed', preg_replace('/\s+/', ' ', strip_tags($html)));
+        $this->assertStringContainsString('0 left for a person', $html);
+        $this->assertStringNotContainsString('night_step=', $html);
+    }
+
+    public function test_S_09_4_no_astra_step_no_link(): void
+    {
+        $this->seedNight();
+        NightAstraRow::query()->delete();
+        NightRunStep::where('kind', 'astra')->delete();
+
+        $response = $this->logs();
+
+        $response->assertOk()->assertSee('Mon, Oct 5');
+        $this->assertStringNotContainsString('night_step=', $response->getContent());
+        $this->assertStringNotContainsString('for a person', $response->getContent());
+    }
+
+    public function test_S_09_5_a_non_ceo_sees_the_link_too(): void
+    {
+        $step = $this->seedNight();
+
+        $html = $this->logs('Marketing')->getContent();
+
+        $this->assertSame(
+            ['/encoder/checker_1', ['date' => '2026-10-04', 'night_step' => (string) $step->id]],
+            $this->linkTo($html, '1 for a person')
+        );
+        $this->assertNotNull($this->linkTo($html, '1 left for a person'));
+        // Ang para sa CEO lang ay para sa CEO pa rin.
+        foreach (['Show rows', 'estimated', 'Retry failed', '/rows'] as $ceoOnly) {
+            $this->assertStringNotContainsString($ceoOnly, $html);
+        }
     }
 
     public function test_a_marketing_user_sees_the_counts_but_nothing_for_the_ceo(): void

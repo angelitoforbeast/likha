@@ -57,6 +57,11 @@
         $a       = $n['astra'] ?? null;
         $worst   = collect($imports)->sortByDesc(fn ($i) => $importRank[$i['status']] ?? 0)->first();
         $doneCount = collect($imports)->whereIn('status', ['done', 'done_with_failures'])->count();
+        // Ang mga row na iniwan para sa tao, sa Checker 1 (parehong tab). Walang link kapag 0: walang maipapakita.
+        $forPersonUrl = $a && $a['for_person'] > 0
+            ? route('macro_output.index', ['date' => $n['orders_date'], 'night_step' => $a['step_id']])
+            : null;
+        $forPersonLink = 'text-blue-600 underline hover:text-blue-800 whitespace-nowrap';
       @endphp
       <div class="p-3 text-sm"
            x-data="{ open: false, rows: null, loading: false, failed: false,
@@ -97,7 +102,7 @@
             <span class="text-xs text-gray-500 mr-1">Astra</span>
             @if ($a)
               <span class="{{ $badge }} {{ $astraColor[$a['status']] ?? 'bg-gray-100 text-gray-700' }}">{{ $a['state'] }}</span>
-              <span class="text-gray-700 break-words">{{ $nightPlural($a['rows_found'], 'row') }} · {{ $a['proceed'] }} PROCEED · {{ $a['for_person'] }} for a person · {{ $a['failed'] }} failed{{ $a['skipped'] > 0 ? ' · ' . $a['skipped'] . ' skipped' : '' }}{{-- Kasama sa "not run" ang sobra sa maximum (hiwalay sa not_run, kaya hindi nadodoble) --}}{{ ($a['not_run'] + $a['over_max']) > 0 ? ' · ' . ($a['not_run'] + $a['over_max']) . ' not run' : '' }}{{ ($a['queued'] + $a['running']) > 0 ? ' · ' . ($a['queued'] + $a['running']) . ' queued/running' : '' }}</span>
+              <span class="text-gray-700 break-words">{{ $nightPlural($a['rows_found'], 'row') }} · {{ $a['proceed'] }} PROCEED · @if ($forPersonUrl)<a href="{{ $forPersonUrl }}" class="{{ $forPersonLink }}">{{ $a['for_person'] }} for a person</a>@else{{ $a['for_person'] . ' for a person' }}@endif · {{ $a['failed'] }} failed{{ $a['skipped'] > 0 ? ' · ' . $a['skipped'] . ' skipped' : '' }}{{-- Kasama sa "not run" ang sobra sa maximum (hiwalay sa not_run, kaya hindi nadodoble) --}}{{ ($a['not_run'] + $a['over_max']) > 0 ? ' · ' . ($a['not_run'] + $a['over_max']) . ' not run' : '' }}{{ ($a['queued'] + $a['running']) > 0 ? ' · ' . ($a['queued'] + $a['running']) . ' queued/running' : '' }}</span>
             @else
               —
             @endif
@@ -140,7 +145,8 @@
                 <li>{{ $nightPlural($a['rows_found'], 'row') }} found</li>
                 <li>{{ $a['proceed'] }} PROCEED</li>
                 <li>
-                  {{ $a['for_person'] }} left for a person
+                  @if ($forPersonUrl)<a href="{{ $forPersonUrl }}" class="{{ $forPersonLink }}">{{ $a['for_person'] }} left for a person</a>@else{{ $a['for_person'] . ' left for a person' }}@endif
+
                   @if (!empty($a['for_person_by_code']))
                     ({{ collect($a['for_person_by_code'])->map(fn ($c, $code) => $code . ' ' . $c)->implode(' · ') }})
                   @endif
