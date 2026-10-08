@@ -781,6 +781,12 @@ class SuppliersGroupTest extends ItemTestCase
         foreach ([160, 142, 148, 155] as $price) $this->quote('HAND GRIP', $this->supplier("S{$price}"), $price);
 
         $this->assertSame(['S142', 'S148', 'S155', 'S160'], array_column($this->listed(), 'supplier'));
+
+        // May sentimo at magkakaibang haba ng numero: bilang ang pinagkukumpara, hindi text ("1000.5" < "9.5" kung text).
+        foreach ([['D100', 100], ['D9', 9.5], ['D1000', 1000.5], ['D99', 99.99]] as [$name, $price]) {
+            $this->quote('GLOW TAPE', $this->supplier($name), $price);
+        }
+        $this->assertSame(['D9', 'D99', 'D100', 'D1000'], array_column($this->listed('GLOW TAPE'), 'supplier'));
     }
 
     public function test_S_14_2_a_quote_without_a_price_is_last(): void
@@ -906,7 +912,7 @@ class SuppliersGroupTest extends ItemTestCase
         }
         $rows = $this->getJson('/item/quotes')->assertOk()->json('quotes.hand grip');
         $this->assertCount(5, $rows);
-        // Set lang ng supplier — ang pagkakasunod ay magbabago sa susunod na task.
+        // Set lang ng supplier ang tinitingnan dito — ang pagkakasunod ay may sarili nang mga test.
         $names = array_column($rows, 'supplier');
         sort($names);
         $this->assertSame(['Acme', 'Beta', 'Delta', 'Epsilon', 'Gamma'], $names);

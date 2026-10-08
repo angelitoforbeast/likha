@@ -149,7 +149,7 @@
               <td class="spl-c2" style="text-align:center;">
                 <template x-if="row.hasPages">
                   <div class="spl-cnt"
-                       x-text="row.pages_count +(row.pages_count===1?' running page':' running pages')"></div>
+                       x-text="row.pages_count + (row.pages_count===1?' running page':' running pages')"></div>
                 </template>
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
