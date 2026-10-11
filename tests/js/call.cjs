@@ -10,7 +10,9 @@ const vm = require('vm');
 const page = {};
 page.self = page;
 vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), page, { filename: process.argv[2] });
-const api = page.ItemTableFit;
+// Ang pangalang inilalagay ng script: ikalawang argument, ItemTableFit kapag wala.
+const api = page[process.argv[3] || 'ItemTableFit'];
+if (!api) { process.stderr.write('no ' + (process.argv[3] || 'ItemTableFit') + ' in ' + process.argv[2]); process.exit(1); }
 
 let input = '';
 process.stdin.setEncoding('utf8');

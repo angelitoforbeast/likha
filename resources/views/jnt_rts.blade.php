@@ -36,6 +36,35 @@
     .dataTables_scroll   { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 
     .flatpickr-calendar { z-index: 9999 !important; }
+
+    /* Filter kada column: ang button sa header at ang panel nito */
+    .rts-cf-btn {
+      display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
+      width: 18px; height: 18px; margin-left: 4px; padding: 0; border-radius: 4px;
+      border: 1px solid #cbd5e1; background: #fff; color: #64748b; cursor: pointer;
+    }
+    .rts-cf-btn:hover, .rts-cf-btn:focus-visible { border-color: #0d9488; color: #0d9488; outline: none; box-shadow: 0 0 0 2px rgba(13,148,136,.3); }
+    .rts-cf-btn.is-active { background: #0d9488; border-color: #0d9488; color: #fff; }
+    #rtsTable_wrapper th.rts-cf-on { background: #ccfbf1; }
+    /* Kinokopya ng DataTables ang header sa loob ng scroll body (pansukat lang ng lapad, hindi nakikita):
+       ang button doon ay hindi dapat maabot ng Tab. */
+    .dataTables_scrollBody thead .rts-cf-btn { visibility: hidden; }
+    #rtsCfPanel {
+      position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 8px; padding: 10px;
+      background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      font-size: 12px; color: #374151; box-sizing: border-box;
+    }
+    #rtsCfPanel[hidden], #rtsCfRange[hidden] { display: none; }
+    #rtsCfPanel input[type=text] { border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 8px; font-size: 12px; width: 100%; box-sizing: border-box; }
+    #rtsCfPanel button { border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 10px; font-size: 12px; background: #fff; color: #374151; cursor: pointer; }
+    #rtsCfPanel #rtsCfApply { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
+    #rtsCfRange { display: flex; gap: 8px; }
+    #rtsCfRange label { flex: 1; font-size: 11px; color: #6b7280; }
+    #rtsCfList { flex: 1; min-height: 60px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px; }
+    .rts-cf-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+    .rts-cf-item:hover, .rts-cf-item:focus-within { background: #f1f5f9; }
+    .rts-cf-item span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rts-cf-item span:last-of-type { color: #9ca3af; font-size: 11px; }
   </style>
 
   {{-- Root: fixed below nav (nav = h-16 = 64px, position:fixed top-0) --}}
@@ -124,7 +153,11 @@
 
     {{-- Controls: length left, info+pagination right --}}
     <div style="flex-shrink:0; padding:2px 16px 6px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
-      <div id="dt-length-slot" style="font-size:12px; color:#6b7280;"></div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div id="dt-length-slot" style="font-size:12px; color:#6b7280;"></div>
+        <button type="button" id="rtsCfClearAll" hidden
+                style="font-size:12px; font-weight:600; color:#0f766e; background:#ccfbf1; border:1px solid #0d9488; border-radius:6px; padding:2px 10px; cursor:pointer;">Clear column filters</button>
+      </div>
       <div style="display:flex; align-items:center; gap:14px;">
         <span id="dt-info-slot" style="font-size:12px; color:#6b7280; white-space:nowrap;"></span>
         <div id="dt-paging-slot"></div>
@@ -138,19 +171,19 @@
         <table id="rtsTable" class="text-sm" style="width:100%;">
           <thead>
             <tr>
-              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Date Range</th>
-              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Sender</th>
-              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Item</th>
-              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">COD</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Qty</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">RTS Qty</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Del Qty</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Transit Qty</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">RTS%</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Delivered%</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">In Transit%</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Current RTS%</th>
-              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">MAX RTS%</th>
+              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Date Range <button type="button" class="rts-cf-btn" data-col="0" aria-label="Filter Date Range" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Sender <button type="button" class="rts-cf-btn" data-col="1" aria-label="Filter Sender" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Item <button type="button" class="rts-cf-btn" data-col="2" aria-label="Filter Item" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">COD <button type="button" class="rts-cf-btn" data-col="3" aria-label="Filter COD" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Qty <button type="button" class="rts-cf-btn" data-col="4" aria-label="Filter Qty" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">RTS Qty <button type="button" class="rts-cf-btn" data-col="5" aria-label="Filter RTS Qty" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Del Qty <button type="button" class="rts-cf-btn" data-col="6" aria-label="Filter Del Qty" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Transit Qty <button type="button" class="rts-cf-btn" data-col="7" aria-label="Filter Transit Qty" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">RTS% <button type="button" class="rts-cf-btn" data-col="8" aria-label="Filter RTS%" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Delivered% <button type="button" class="rts-cf-btn" data-col="9" aria-label="Filter Delivered%" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">In Transit% <button type="button" class="rts-cf-btn" data-col="10" aria-label="Filter In Transit%" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Current RTS% <button type="button" class="rts-cf-btn" data-col="11" aria-label="Filter Current RTS%" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
+              <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">MAX RTS% <button type="button" class="rts-cf-btn" data-col="12" aria-label="Filter MAX RTS%" aria-haspopup="dialog" aria-expanded="false"><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M1 2h10L7 6.5V10L5 11V6.5z" fill="currentColor"/></svg></button></th>
             </tr>
           </thead>
           <tbody>
@@ -203,6 +236,26 @@
         </table>
       </div>
     </div>
+
+    {{-- Panel ng filter kada column: iisa lang, inilalagay ng script sa ilalim ng header na pinindot --}}
+    <div id="rtsCfPanel" role="dialog" aria-modal="true" aria-labelledby="rtsCfTitle" hidden>
+      <div id="rtsCfTitle" style="font-weight:700; color:#1f2937;"></div>
+      <input type="text" id="rtsCfSearch" placeholder="Search values…" aria-label="Search values" autocomplete="off">
+      <div id="rtsCfRange">
+        <label>At least <input type="text" id="rtsCfMin" inputmode="decimal" autocomplete="off"></label>
+        <label>At most <input type="text" id="rtsCfMax" inputmode="decimal" autocomplete="off"></label>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button type="button" id="rtsCfAll">Select all</button>
+        <button type="button" id="rtsCfNone">Clear</button>
+        <span id="rtsCfCount" aria-live="polite" style="margin-left:auto; color:#6b7280; font-size:11px;"></span>
+      </div>
+      <div id="rtsCfList" role="group" aria-label="Values"></div>
+      <div style="display:flex; justify-content:flex-end; gap:6px;">
+        <button type="button" id="rtsCfCancel">Cancel</button>
+        <button type="button" id="rtsCfApply">Apply</button>
+      </div>
+    </div>
     @else
     <div style="flex:1; padding:0 16px;">
       <p style="color:#6b7280; font-size:14px;">No data to display. Please select a date range.</p>
@@ -252,6 +305,7 @@
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="{{ asset('js/rts-column-filter.js') }}?v={{ substr(md5_file(public_path('js/rts-column-filter.js')), 0, 10) }}"></script>
   <script>
     function fmtNum(n) { return Number(n).toLocaleString('en-PH'); }
 
@@ -373,7 +427,196 @@
       }
     }
 
+    // ── Filter kada column (gaya ng filter ng Google Sheet) ──
+    // Ang lohika ay nasa RtsColumnFilter (public/js/rts-column-filter.js). Dito ang pagkabit lang: pumapasok ito
+    // sa parehong daan ng Search box (filter ng DataTables + draw), kaya ang rows, paging, "Showing…", TOTAL row
+    // at ang dalawang donut ay sumusunod dito gaya ng pagsunod nila sa search (drawCallback → updateTotals).
+    const CF_STORE = 'rtsColumnFilters';
+    const CF_TYPES = ['date', 'text', 'text', 'number', 'number', 'number', 'number', 'number',
+                      'number', 'number', 'number', 'number', 'number'];
+
+    // Ang Apply ng form sa itaas ay nagre-reload ng page: doon lang dinadala ang mga filter (isang beses), kaya
+    // ang Reset at ang bagong bukas ng page ay laging walang filter, gaya ng Search box.
+    function takeSavedColumnFilters() {
+      try {
+        const raw = sessionStorage.getItem(CF_STORE);
+        sessionStorage.removeItem(CF_STORE);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    }
+
+    function initColumnFilters(dt, tableEl, saved) {
+      const panel = document.getElementById('rtsCfPanel');
+      if (!window.RtsColumnFilter || !panel) return;
+      const el = id => document.getElementById(id);
+      const titleEl = el('rtsCfTitle'), searchEl = el('rtsCfSearch'), rangeEl = el('rtsCfRange'),
+            minEl = el('rtsCfMin'), maxEl = el('rtsCfMax'), listEl = el('rtsCfList'),
+            countEl = el('rtsCfCount'), clearAllEl = el('rtsCfClearAll');
+      const btns = Array.from(dt.table().header().querySelectorAll('.rts-cf-btn'));
+
+      // Ang mga row ng table bilang { text, key } kada cell (ang index = index ng row sa DataTables).
+      const rows = [];
+      dt.rows().every(function () {
+        const tds = this.node().cells;
+        rows[this.index()] = CF_TYPES.map(function (type, i) {
+          const td = tds[i], text = td.textContent.trim();
+          let key = null;
+          if (type === 'date') key = td.dataset.start || '';
+          else if (type === 'number') key = RtsColumnFilter.parseNumber(td.dataset.raw ?? (text === 'N/A' ? '' : (td.dataset.order ?? text)));
+          return { text: text, key: key };
+        });
+      });
+
+      let filters = RtsColumnFilter.reconcile(saved, rows);
+      // Ang mga row na pumasa sa Search at Item (exact): sila ang pinagkukunan ng listahan ng panel. Ang filter
+      // na ito ang huling tinatawag ng DataTables sa bawat pag-filter, kaya ang nakikita nito ay sila na.
+      let top = rows.map((_, i) => i), seen = [];
+      $.fn.dataTable.ext.search.push(function (settings, _data, dataIndex) {
+        if (settings.nTable !== tableEl) return true;
+        seen.push(dataIndex);
+        return RtsColumnFilter.passes(rows[dataIndex], filters);
+      });
+      $(tableEl).on('search.dt', function () { top = seen; seen = []; });
+
+      function mark() {
+        btns.forEach(function (btn) {
+          const on = !!filters[btn.dataset.col];
+          btn.classList.toggle('is-active', on);
+          btn.title = on ? 'May filter ang column na ito' : 'Filter';
+          btn.closest('th').classList.toggle('rts-cf-on', on);
+        });
+        clearAllEl.hidden = Object.keys(filters).length === 0;
+      }
+
+      let open = null;   // { col, btn, values: [{value, count}], checked: Set } — iisang panel lang ang bukas
+      function visible() {
+        const q = searchEl.value.trim().toLowerCase();
+        return open.values.filter(v => !q || (v.value === '' ? '(blank)' : v.value.toLowerCase()).indexOf(q) !== -1);
+      }
+      function count() {
+        const n = open.values.filter(v => open.checked.has(v.value)).length;
+        countEl.textContent = fmtNum(n) + ' of ' + fmtNum(open.values.length) + ' selected';
+      }
+      function renderList() {
+        listEl.textContent = '';
+        const shown = visible();
+        shown.forEach(function (v) {
+          // textContent lang: ang value ay text na galing sa upload, hindi HTML.
+          const item = document.createElement('label'); item.className = 'rts-cf-item';
+          const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = open.checked.has(v.value);
+          cb.addEventListener('change', function () {
+            if (cb.checked) open.checked.add(v.value); else open.checked.delete(v.value);
+            count();
+          });
+          const name = document.createElement('span'); name.textContent = v.value === '' ? '(Blank)' : v.value;
+          name.title = v.value;
+          const n = document.createElement('span'); n.textContent = fmtNum(v.count);
+          item.append(cb, name, n);
+          listEl.appendChild(item);
+        });
+        if (!shown.length) listEl.textContent = 'Walang value na tugma.';
+        count();
+      }
+      function setVisible(on) {
+        visible().forEach(v => { if (on) open.checked.add(v.value); else open.checked.delete(v.value); });
+        renderList();
+      }
+
+      function place(btn) {   // sa ilalim ng header, at laging nasa loob ng screen
+        const r = btn.closest('th').getBoundingClientRect();
+        const w = Math.min(280, window.innerWidth - 16);
+        const need = Math.min(300, window.innerHeight - 16);
+        const topPx = Math.max(8, Math.min(r.bottom, window.innerHeight - 8 - need));
+        panel.style.width = w + 'px';
+        panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+        panel.style.top = topPx + 'px';
+        panel.style.maxHeight = (window.innerHeight - topPx - 8) + 'px';
+      }
+      function closePanel(refocus) {
+        if (!open) return;
+        const btn = open.btn;
+        open = null;
+        panel.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+        if (refocus) btn.focus();
+      }
+      function openPanel(btn) {
+        if (open && open.btn === btn) { closePanel(true); return; }
+        closePanel(false);
+        const col = btn.dataset.col, cur = filters[col];
+        const values = RtsColumnFilter.distinctValues(top.map(i => rows[i]), Number(col), CF_TYPES[col]);
+        open = { col: col, btn: btn, values: values,
+                 checked: new Set(cur && cur.values ? cur.values : values.map(v => v.value)) };
+        titleEl.textContent = btn.getAttribute('aria-label');
+        searchEl.value = '';
+        rangeEl.hidden = CF_TYPES[col] !== 'number';
+        minEl.value = cur && cur.min !== null ? cur.min : '';
+        maxEl.value = cur && cur.max !== null ? cur.max : '';
+        renderList();
+        panel.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        place(btn);
+        searchEl.focus();
+      }
+      function applyPanel() {
+        const isNum = CF_TYPES[open.col] === 'number';
+        const f = RtsColumnFilter.buildFilter(open.values.map(v => v.value), Array.from(open.checked),
+                                              isNum ? minEl.value : '', isNum ? maxEl.value : '');
+        if (f) filters[open.col] = f; else delete filters[open.col];
+        closePanel(true);
+        mark();
+        dt.draw();
+      }
+
+      btns.forEach(function (btn) {
+        // Hindi dapat umabot sa header ang click at Enter: doon nakakabit ang sort ng DataTables.
+        btn.addEventListener('click', function (e) { e.stopPropagation(); openPanel(btn); });
+        btn.addEventListener('keypress', function (e) { e.stopPropagation(); });
+      });
+      searchEl.addEventListener('input', renderList);
+      el('rtsCfAll').addEventListener('click', function () { setVisible(true); });
+      el('rtsCfNone').addEventListener('click', function () { setVisible(false); });
+      el('rtsCfApply').addEventListener('click', applyPanel);
+      el('rtsCfCancel').addEventListener('click', function () { closePanel(true); });
+      panel.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); closePanel(true); return; }
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+          e.preventDefault();
+          if (e.target.type === 'checkbox') e.target.click(); else applyPanel();
+          return;
+        }
+        if (e.key === 'Tab') {   // umiikot ang Tab sa loob ng panel habang bukas ito
+          const stops = Array.from(panel.querySelectorAll('input, button')).filter(n => n.offsetParent !== null);
+          const first = stops[0], last = stops[stops.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      });
+      document.addEventListener('mousedown', function (e) {
+        if (open && !panel.contains(e.target) && !e.target.closest?.('.rts-cf-btn')) closePanel(false);
+      });
+      window.addEventListener('resize', function () { closePanel(false); });
+      tableEl.closest('.dataTables_scrollBody')?.addEventListener('scroll', function () { closePanel(false); });
+
+      clearAllEl.addEventListener('click', function () {
+        closePanel(false);
+        filters = {};
+        mark();
+        dt.draw();
+        btns[0]?.focus();
+      });
+      document.getElementById('rtsFilterForm')?.addEventListener('submit', function () {
+        try {
+          if (Object.keys(filters).length) sessionStorage.setItem(CF_STORE, JSON.stringify(filters));
+        } catch (e) { /* walang storage: hindi lang madadala ang mga filter */ }
+      });
+
+      mark();
+      dt.draw();
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
+      const savedColumnFilters = takeSavedColumnFilters();
       const tableEl = document.getElementById('rtsTable');
       if (!tableEl) return;
 
@@ -435,6 +678,8 @@
       itemExactInput?.addEventListener('input', function () {
         if ((this.value || '').trim() === '') dt.column(ITEM_COL).search('').draw();
       });
+
+      initColumnFilters(dt, tableEl, savedColumnFilters);
     });
   </script>
 </x-layout>
