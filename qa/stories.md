@@ -860,3 +860,11 @@ non-CEO render pass without being edited.
 | S-42.4 | Given `/owner/private` and `/owner/column-settings`, then each renders byte for byte as at the base: capture the base hashes in the test-only commit before changing anything | feature (new pins) | Passed · 2026-10-08 · auto |
 | S-42.5 | Given the suppliers table, then the quotes and PO-suppliers routes are each fetched once at load as before, and the panel, the sets and the period switch send no request | pin: S-21.1 extended | Passed · 2026-10-08 · auto |
 | S-42.6 | Given the promises of slices 017 and 019 that this spec does not replace, then each still holds: add, edit and remove a quote with link and photo, the five chips and counts, sorting, the TOTAL row, expand-all and page rows, Change and Copy, "walang running page", the date range kept by the two layout links, the Marketing refusals | the existing tests + browser | Passed · 2026-10-08 · auto; browser half not run |
+
+## Slice 025 – The JNT hold page heading
+
+### S-025 The /jnt/hold heading reads "JNT Hold Item" (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-025.1 | Given a signed-in user opens /jnt/hold, when the page renders, then the heading reads "JNT Hold Item" and not "JNT Hold Items" | feature (view render): `tests/Feature/Jnt/JntHoldHeadingTest.php` | Passed · 2026-10-15 · auto |
