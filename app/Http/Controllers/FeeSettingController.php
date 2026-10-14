@@ -29,7 +29,7 @@ class FeeSettingController extends Controller
         $scope = str_contains($host, 'incepxion') ? 'incepxion' : 'likha';
 
         $validated = $request->validate([
-            'setting_key'    => 'required|in:cod_fee_rate,cod_fee_vat_rate,shipping_fee_per_order',
+            'setting_key'    => 'required|in:cod_fee_rate,cod_fee_vat_rate,shipping_fee_per_order,shipping_fee_per_order_m',
             'setting_value'  => 'required|numeric|min:0',
             'effective_date' => 'required|date',
             'description'    => 'nullable|string|max:255',
@@ -53,6 +53,7 @@ class FeeSettingController extends Controller
         }
 
         FeeSetting::create($validated);
+        OwnerPrivateController::bumpCacheVersion();   // ginagamit ng naka-cache na /owner/private payload ang fees
 
         return redirect()->route('fee-settings.index')->with('success', 'Fee setting created successfully.');
     }
@@ -82,6 +83,7 @@ class FeeSettingController extends Controller
         }
 
         $fee_setting->update($validated);
+        OwnerPrivateController::bumpCacheVersion();
 
         return redirect()->route('fee-settings.index')->with('success', 'Fee setting updated successfully.');
     }
@@ -89,6 +91,7 @@ class FeeSettingController extends Controller
     public function destroy(FeeSetting $fee_setting)
     {
         $fee_setting->delete();
+        OwnerPrivateController::bumpCacheVersion();
 
         return redirect()->route('fee-settings.index')->with('success', 'Fee setting deleted successfully.');
     }

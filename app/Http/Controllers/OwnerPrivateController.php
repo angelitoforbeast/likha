@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use App\Models\Cogs;
 use App\Models\FeeSetting;
 use App\Models\SupplyExcludedPage;
+use App\Support\ProfitDayM;
 
 class OwnerPrivateController extends Controller
 {
@@ -1708,6 +1709,8 @@ class OwnerPrivateController extends Controller
             ]);
             abort(422, "Missing fee_settings for {$date} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
         }
+        // SF_M (PROF(1D)-M lang) — walang 422: kapag wala, null lang ang -M column.
+        $shippingFeeM = FeeSetting::getRate('shipping_fee_per_order_m', $host, $date);
 
         // ── COD column detection ───────────────────────────────────────────────
         $codCol   = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
@@ -2388,6 +2391,7 @@ class OwnerPrivateController extends Controller
             // ending at $endDate (inclusive). 1D = end_date strictly.
             // Strict — if a window has no slice for this page+item, the % is null.
             $projProfitLastDay   = null; $grossSalesLastDay   = 0.0; $ordersLastDay   = 0; $procOrdersLastDay   = 0;
+            $projProfitLastDayM  = null;   // PROF(1D)-M — end-date slice lang, ProfitDayM formula
             $projProfitLast3Day  = null; $grossSalesLast3Day  = 0.0; $ordersLast3Day  = 0; $procOrdersLast3Day  = 0;
             $projProfitLast7Day  = null; $grossSalesLast7Day  = 0.0; $ordersLast7Day  = 0; $procOrdersLast7Day  = 0;
 
@@ -2469,6 +2473,15 @@ class OwnerPrivateController extends Controller
 
                     $dayRts  = $rRts['val'];   $dayCost = $rCost['val'];
                     $dayCodR = $rCodR['val'];  $dayVat  = $rVat['val'];  $dayShip = $rShip['val'];
+
+                    // PROF(1D)-M: parehong araw at parehong RTS/cogs/COD fee, pero SF_M,
+                    // COGS sa lahat ng proceed at ads × 1.12. Null kapag may kulang.
+                    if ($isLastDay) {
+                        $rShipM = $resolveAsOf($feeHistoryMap['shipping_fee_per_order_m'] ?? [], (string)$d);
+                        $projProfitLastDayM = ProfitDayM::compute(
+                            (float)$proceedDay, $pDay, $dayRts, $dayCost, $adsDay, $dayCodR, $dayVat, $rShipM['val']
+                        );
+                    }
 
                     // Missing essential value (null) OR no price → can't compute
                     // revenue; subtract adspent only so ROI isn't overstated.
@@ -2571,9 +2584,15 @@ class OwnerPrivateController extends Controller
                             - $pdAdspent                                              // adspent
                             - $projectedProceedPd * $deliverFactor * $codFeeDay;     // COD fee
                         $grossSalesLastDay = $pdModeCod * $pdOrders;
+                        // -M: parehong projection; SF_M as-of end_date (gaya ng $shippingFee).
+                        $projProfitLastDayM = ProfitDayM::compute(
+                            $projectedProceedPd, $pdModeCod, $rtsPct, $itemValue, $pdAdspent,
+                            $codFeeRate, $codFeeVatRate, $shippingFeeM
+                        );
                     } else {
                         // Missing inputs — null out profit projection but keep orders display
                         $projProfitLastDay = null;
+                        $projProfitLastDayM = null;
                         $grossSalesLastDay = $pdModeCod > 0 ? $pdModeCod * $pdOrders : 0.0;
                     }
                 } else {
@@ -2582,6 +2601,7 @@ class OwnerPrivateController extends Controller
                     $ordersLastDay     = 0;
                     $procOrdersLastDay = 0;
                     $projProfitLastDay = null;
+                    $projProfitLastDayM = null;
                     $grossSalesLastDay = 0.0;
                 }
             }
@@ -2632,6 +2652,8 @@ class OwnerPrivateController extends Controller
                 // Trailing-window variants ending at end_date (inclusive). Null when
                 // window has no slice for this page+item, or RTS/item_value missing.
                 'projected_profit_last_day' => $projProfitLastDay,
+                // PROF(1D)-M — same day, stricter rules (App\Support\ProfitDayM).
+                'projected_profit_last_day_m' => $projProfitLastDayM,
                 'proj_pct_last_day'         => $projPctLastDay,
                 'orders_last_day'           => $ordersLastDay,
                 'proceed_last_day'          => $procOrdersLastDay,

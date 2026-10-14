@@ -14,10 +14,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SharedPagesBasePinTest extends OwnerPrivateTestCase
 {
-    /** sha1 ng normalised render ng CEO, galing sa base commit. */
+    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff). */
     private const BASE = [
-        '/owner/private' => '067263d7e7d32deea63c4719a2cc1b63e9780298',
-        '/owner/column-settings/owner-private' => 'd3addc22ef3add48e36fab166406f0d20ff04c80',
+        '/owner/private' => '2309335d958dbebb0d781ee82604b5e9d811a137',
+        '/owner/column-settings/owner-private' => 'ce0fff4796f1dec01038c2b3d4e9d38b419c17b9',
     ];
 
     protected function setUp(): void

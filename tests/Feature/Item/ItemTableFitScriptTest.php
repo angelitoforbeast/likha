@@ -687,7 +687,7 @@ class ItemTableFitScriptTest extends TestCase
         $this->assertSame(1, preg_match("/'owner_private'\s*=>\s*\[(.*?)\n        \],/s", $source, $block));
         preg_match_all("/'id'\s*=>\s*'([a-z0-9_]+)'/", $block[1], $m);
         $ids = $m[1];
-        $this->assertCount(44, $ids);
+        $this->assertCount(45, $ids);
 
         $calls = [];
         foreach ($ids as $id) {

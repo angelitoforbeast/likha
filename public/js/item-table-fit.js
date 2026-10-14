@@ -121,7 +121,7 @@
   function unitOf(id) { return Object.prototype.hasOwnProperty.call(UNIT, id) ? UNIT[id] : id; }
 
   var MINW = {
-    promo: 72, price: 58, np_per_order_1m: 64, adspent: 76, orders_1d: 56, proj_prof_1d: 78, item_val: 66,
+    promo: 72, price: 58, np_per_order_1m: 64, adspent: 76, orders_1d: 56, proj_prof_1d: 78, proj_prof_1d_m: 78, item_val: 66,
     item_val_ceo: 66, cpp: 56, rts_set: 66, jnt_rdt: 104, tcpr: 52, breakeven_cpp: 74, proj_profit: 80,
     prof_pct: 94, hold: 48, action: 96, stock: 52, incoming: 76, units_per_day: 58, doi: 74, order_qty: 68,
     lifecycle: 98,
@@ -137,7 +137,7 @@
     'proj_prof_3d', 'proj_prof_7d', 'ship', 'cod_fee', 'claude_action', 'claude_reason', 'ceo_action',
     'ceo_reason', 'category',
     'promo', 'rts_set', 'breakeven_cpp', 'action', 'item_val', 'price', 'jnt_rdt', 'tcpr', 'hold', 'cpp',
-    'orders_1d', 'np_per_order_1m', 'adspent', 'proj_prof_1d', 'units_per_day', 'incoming', 'stock',
+    'orders_1d', 'np_per_order_1m', 'adspent', 'proj_prof_1d', 'proj_prof_1d_m', 'units_per_day', 'incoming', 'stock',
     'lifecycle', 'order_qty', 'doi', 'item_val_ceo', 'proj_profit', 'prof_pct',
   ];
 

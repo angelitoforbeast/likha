@@ -41,6 +41,7 @@
               <option value="cod_fee_rate">COD Fee Rate</option>
               <option value="cod_fee_vat_rate">COD Fee VAT Rate</option>
               <option value="shipping_fee_per_order">Shipping Fee per Order</option>
+              <option value="shipping_fee_per_order_m">Shipping Fee per Order (M) — PROF(1D)-M</option>
             </select>
           </div>
           <div>
@@ -141,6 +142,74 @@
               </tr>
             @empty
               <tr><td colspan="4" class="px-3 py-4 text-center text-gray-500">No Shipping Fee settings yet.</td></tr>
+            @endforelse
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {{-- Shipping Fee per Order (M) Settings — PROF(1D)-M column lang sa /owner/private --}}
+    <section class="bg-white rounded-xl shadow p-4 mb-4">
+      <h2 class="font-semibold text-lg mb-3">🚚 Shipping Fee per Order (M) History
+        <span class="text-sm font-normal text-gray-500">(scope: {{ $scope }} · PROF(1D)-M lang sa /owner/private)</span>
+      </h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full border border-gray-200 bg-white text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-3 py-2 border-b text-left">Effective Date</th>
+              <th class="px-3 py-2 border-b text-right">Amount (PHP)</th>
+              <th class="px-3 py-2 border-b text-left">Description</th>
+              <th class="px-3 py-2 border-b text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @php $shippingMSettings = $settings->where('setting_key', 'shipping_fee_per_order_m'); @endphp
+            @forelse($shippingMSettings as $s)
+              <tr class="hover:bg-gray-50" x-data="{ editing: false }">
+                {{-- View mode --}}
+                <template x-if="!editing">
+                  <td class="px-3 py-2 border-b">{{ $s->effective_date->format('M d, Y') }}</td>
+                </template>
+                <template x-if="!editing">
+                  <td class="px-3 py-2 border-b text-right font-mono font-semibold">₱{{ number_format((float)$s->setting_value, 2) }}</td>
+                </template>
+                <template x-if="!editing">
+                  <td class="px-3 py-2 border-b text-gray-600">{{ $s->description ?? '—' }}</td>
+                </template>
+                <template x-if="!editing">
+                  <td class="px-3 py-2 border-b text-center">
+                    <button @click="editing = true" class="text-blue-600 hover:underline text-xs mr-2">Edit</button>
+                    <form action="{{ route('fee-settings.destroy', $s) }}" method="POST" class="inline"
+                          onsubmit="return confirm('Are you sure you want to delete this setting?')">
+                      @csrf @method('DELETE')
+                      <button type="submit" class="text-red-600 hover:underline text-xs">Delete</button>
+                    </form>
+                  </td>
+                </template>
+
+                {{-- Edit mode --}}
+                <template x-if="editing">
+                  <td colspan="4" class="px-3 py-2 border-b">
+                    <form action="{{ route('fee-settings.update', $s) }}" method="POST" class="flex items-center gap-2 flex-wrap">
+                      @csrf @method('PUT')
+                      <input type="date" name="effective_date" value="{{ $s->effective_date->format('Y-m-d') }}"
+                             class="border rounded px-2 py-1 text-sm" required>
+                      <div class="flex items-center gap-1">
+                        <span class="text-sm">₱</span>
+                        <input type="number" name="setting_value" value="{{ $s->setting_value }}" step="0.01" min="0" max="99999"
+                               class="border rounded px-2 py-1 text-sm w-32" required>
+                      </div>
+                      <input type="text" name="description" value="{{ $s->description }}"
+                             class="border rounded px-2 py-1 text-sm flex-1" placeholder="Description">
+                      <button type="submit" class="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700">Save</button>
+                      <button type="button" @click="editing = false" class="px-3 py-1 bg-gray-300 rounded text-xs hover:bg-gray-400">Cancel</button>
+                    </form>
+                  </td>
+                </template>
+              </tr>
+            @empty
+              <tr><td colspan="4" class="px-3 py-4 text-center text-gray-500">Walang Shipping Fee (M) setting — blangko ang PROF(1D)-M.</td></tr>
             @endforelse
           </tbody>
         </table>
@@ -305,7 +374,7 @@
         selectedKey: '{{ old("setting_key", "cod_fee_rate") }}',
         rateHint: '',
         get isShippingFee() {
-          return this.selectedKey === 'shipping_fee_per_order';
+          return this.selectedKey === 'shipping_fee_per_order' || this.selectedKey === 'shipping_fee_per_order_m';
         },
         init() {
           this.updateHint();
