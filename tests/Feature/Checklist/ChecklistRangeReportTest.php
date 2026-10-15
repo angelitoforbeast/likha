@@ -44,6 +44,7 @@ class ChecklistRangeReportTest extends ChecklistTestCase
         return [
             'daily'                 => [['frequency' => 'daily'], ['2026-10-06'], 'MDMMMMM'],
             'weekly on Wednesday'   => [['frequency' => 'weekly', 'frequency_day' => 3], [], '..M....'],
+            'monthly on the 9th'    => [['frequency' => 'monthly', 'frequency_day' => 9], [], '....M..'],
             'once, done on the 8th' => [['frequency' => 'once'], ['2026-10-08'], 'MMMD...'],
             'created mid-range'     => [['created_at' => '2026-10-08 10:00:00'], [], '...MMMM'],
             'deleted mid-range'     => [['deleted_at' => '2026-10-09 10:00:00'], [], 'MMMM...'],
@@ -132,7 +133,8 @@ class ChecklistRangeReportTest extends ChecklistTestCase
 
     public function test_the_csv_downloads_carry_a_header_and_a_row_per_task_and_per_person(): void
     {
-        $staff = $this->user('Staff', null, 'Juana');
+        // Pangalang mukhang formula (galing sa public registration): hindi dapat basahin ng Excel bilang formula
+        $staff = $this->user('Staff', null, '=SUM(A1)');
         $task  = $this->task(['title' => 'Linisin ang bodega', 'department' => 'Ops', 'created_at' => '2026-10-10 08:00:00'], [$staff]);
         $this->approval($this->submission($task, $staff, '2026-10-10'), 'approved', '2026-10-10 09:00:00');
 
@@ -143,7 +145,7 @@ class ChecklistRangeReportTest extends ChecklistTestCase
 
         $people = array_map('str_getcsv', explode("\n", trim($this->range(['csv' => 'people'])->assertOk()->streamedContent())));
         $this->assertSame(['Person', 'Submissions', 'Approved', 'Not approved', 'Days with a due task', 'Missed days'], $people[0]);
-        $this->assertSame([$staff->name, '1', '1', '0', '2', '1'], $people[1]);
+        $this->assertSame(["'" . $staff->name, '1', '1', '0', '2', '1'], $people[1]);
     }
 
     public function test_the_range_defaults_to_the_last_14_days_and_is_capped_at_62(): void

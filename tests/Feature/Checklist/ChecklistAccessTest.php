@@ -39,6 +39,7 @@ class ChecklistAccessTest extends ChecklistTestCase
         $this->theTask = $this->task([
             'department' => 'Ops',
             'created_by' => $this->actors['creator']->id,
+            'sort_order' => 5,   // para may mabago ang reorder
         ], [$this->actors['owner']]);
         $this->theSubmission = $this->submission($this->theTask, $this->actors['owner'], now()->toDateString());
     }
@@ -79,6 +80,12 @@ class ChecklistAccessTest extends ChecklistTestCase
 
         if ($allowed) {
             $this->assertContains($response->status(), [200, 302], "$route as $actor dapat payagan");
+            $response->assertSessionHasNoErrors();
+            if (str_ends_with($route, '-logs')) {
+                $response->assertJsonStructure(['logs']);
+            } else {
+                $this->assertNotSame($before, $this->fingerprint(), "$route as $actor: dapat may nagbago");
+            }
             return;
         }
 
@@ -101,6 +108,26 @@ class ChecklistAccessTest extends ChecklistTestCase
             ->assertStatus(403);
 
         $this->assertSame($before, $this->fingerprint());
+    }
+
+    /** Department ng OIC vs ng task: trimmed at case-insensitive; ang blangko ay walang katapat. */
+    public static function oicDepartments(): array
+    {
+        return [
+            'other spelling'         => ['ops ', 'Ops', 302],
+            'blank OIC, blank task'  => ['', null, 403],
+            'blank OIC, empty task'  => ['', '', 403],
+        ];
+    }
+
+    #[DataProvider('oicDepartments')]
+    public function test_an_oic_manages_a_task_only_when_the_departments_match(string $oicDept, ?string $taskDept, int $status): void
+    {
+        $task = $this->task(['title' => 'Ayusin ang istante', 'department' => $taskDept]);
+
+        $this->actingAs($this->user('Ops - OIC', $oicDept))
+            ->post(route('checklist.bulk-type'), ['task_ids' => [$task->id], 'type' => 'photo'])
+            ->assertStatus($status);
     }
 
     /** Iisang CEO comparison: trimmed at case-insensitive, pati sa pagbura ng submission. */
