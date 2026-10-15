@@ -523,7 +523,7 @@ class ChecklistController extends Controller
     public function manage()
     {
         $user   = Auth::user();
-        $dept   = $user?->employeeProfile?->department ?? '';
+        $dept   = $this->oicDepartment();
         $userId = $user?->id;
 
         $query = ChecklistTask::with(['assignedUsers', 'creator'])
@@ -533,8 +533,8 @@ class ChecklistController extends Controller
         if ($this->isCeo()) {
             // sees all — no filter
         } elseif ($this->isOic() && $dept !== '') {
-            // OIC sees tasks tagged with their department
-            $query->where('department', $dept);
+            // OIC sees tasks tagged with their department (trimmed, case-insensitive, gaya ng isOicOf)
+            $query->whereRaw('LOWER(TRIM(department)) = ?', [$dept]);
         } else {
             // others see tasks they created OR are assigned to
             $query->where(function ($q) use ($userId) {
@@ -1174,10 +1174,26 @@ class ChecklistController extends Controller
         return str_contains($this->checklistRole(), 'OIC');
     }
 
+    /**
+     * Department ng OIC, lowercase at trimmed: ang nasa profile; kapag blangko, ang bahagi ng role
+     * bago ang "- OIC" (hal. "Marketing - OIC" → "marketing"), dahil blangko ang department ng mga
+     * OIC sa profile. Blangko kapag wala sa dalawa.
+     */
+    private function oicDepartment(): string
+    {
+        $profile = Auth::user()?->employeeProfile;
+        $dept    = trim((string) ($profile?->department ?? ''));
+        if ($dept === '' && preg_match('/^(.+?)\s*-\s*OIC\b/i', trim((string) ($profile?->role ?? '')), $m)) {
+            $dept = trim($m[1]);
+        }
+
+        return mb_strtolower($dept);
+    }
+
     /** OIC ng $department. Ang task na walang department ay hindi sakop ng kahit sinong OIC. */
     private function isOicOf(?string $department): bool
     {
-        $mine = mb_strtolower(trim((string) (Auth::user()?->employeeProfile?->department ?? '')));
+        $mine = $this->oicDepartment();
 
         return $this->isOic() && $mine !== '' && $mine === mb_strtolower(trim((string) $department));
     }

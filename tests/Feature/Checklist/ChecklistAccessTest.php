@@ -130,6 +130,40 @@ class ChecklistAccessTest extends ChecklistTestCase
             ->assertStatus($status);
     }
 
+    /** OIC na blangko ang department sa profile: galing sa role ("Marketing - OIC" → Marketing); ang profile ang masusunod kapag may laman. */
+    public static function oicDepartmentFromRole(): array
+    {
+        return [
+            'role gives Marketing'             => ['Marketing - OIC', '', 'Marketing', 302],
+            'role does not give Encoders'      => ['Marketing - OIC', '', 'Encoders', 403],
+            'two words, other case and spaces' => ['Data Encoder - OIC', null, ' data encoder', 302],
+            'profile department is used'       => ['Marketing - OIC', 'Encoders', 'Encoders', 302],
+            'profile department beats role'    => ['Marketing - OIC', 'Encoders', 'Marketing', 403],
+        ];
+    }
+
+    #[DataProvider('oicDepartmentFromRole')]
+    public function test_an_oic_without_a_profile_department_takes_it_from_the_role(string $role, ?string $profileDept, string $taskDept, int $status): void
+    {
+        $task = $this->task(['title' => 'Ayusin ang ads', 'department' => $taskDept]);
+
+        $this->actingAs($this->user($role, $profileDept))
+            ->patch(route('checklist.update-task', $task), ['title' => 'Inayos ang ads', 'type' => 'any'])
+            ->assertStatus($status);
+    }
+
+    public function test_the_manage_list_and_the_task_history_use_the_department_from_the_role(): void
+    {
+        $marketing = $this->task(['title' => 'Ayusin ang ads', 'department' => 'marketing ']);
+        $encoders  = $this->task(['title' => 'Bilangin ang encode', 'department' => 'Encoders']);
+        $oic       = $this->user('Marketing - OIC', '');
+
+        $this->actingAs($oic)->get(route('checklist.manage'))
+            ->assertOk()->assertSee('Ayusin ang ads')->assertDontSee('Bilangin ang encode');
+        $this->actingAs($oic)->get(route('checklist.history', ['task' => $marketing->id]))->assertOk();
+        $this->actingAs($oic)->get(route('checklist.history', ['task' => $encoders->id]))->assertStatus(403);
+    }
+
     /** Iisang CEO comparison: trimmed at case-insensitive, pati sa pagbura ng submission. */
     public static function ceoSpellings(): array
     {
