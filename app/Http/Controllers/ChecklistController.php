@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
@@ -117,6 +118,10 @@ class ChecklistController extends Controller
 
     public function report(Request $request)
     {
+        if ($request->query('view') === 'range') {
+            return $this->rangeReport($request);
+        }
+
         $date = $request->query('date', now()->toDateString());
 
         try {
@@ -236,6 +241,233 @@ class ChecklistController extends Controller
             'doneCount', 'totalTasks',
             'dateObj', 'prevDate', 'nextDate', 'isToday'
         ));
+    }
+
+    /**
+     * "Over several days" ng /checklist/report (?view=range): buod kada araw, kada task at
+     * kada tao sa isang date range (default huling 14 araw, hanggang 62).
+     *
+     * Visibility = day view: CEO lahat; ang iba, ang mga task lang na naka-assign sa kanila.
+     * Due rules = day view (frequency, frequency_day, once, created on/before ang araw, hindi
+     * pa deleted noon), dagdag ang is_active. Lahat ng bilang ay galing sa iisang GROUP BY
+     * (date, task, user) — walang query kada cell.
+     */
+    private function rangeReport(Request $request)
+    {
+        $parseDay = function ($value, Carbon $fallback): Carbon {
+            try {
+                return is_string($value) && $value !== '' ? Carbon::parse($value)->startOfDay() : $fallback;
+            } catch (\Exception $e) {
+                return $fallback;
+            }
+        };
+        $today = now()->startOfDay();
+        $to    = $parseDay($request->query('to'), $today->copy())->min($today);
+        $from  = $parseDay($request->query('from'), $to->copy()->subDays(13))->min($to);
+        if ($from->diffInDays($to) > 61) {
+            $from = $to->copy()->subDays(61);
+        }
+
+        $dayObjs = [];
+        for ($d = $from->copy(); $d->lte($to); $d->addDay()) {
+            $dayObjs[$d->toDateString()] = $d->copy();
+        }
+        $days = array_keys($dayObjs);
+
+        // Tasks na buhay kahit isang araw sa range
+        $taskQuery = ChecklistTask::withTrashed()
+            ->with('assignedUsers')
+            ->where('is_active', true)
+            ->whereDate('created_at', '<=', $to->toDateString())
+            ->where(function ($q) use ($from) {
+                $q->whereNull('deleted_at')
+                  ->orWhere('deleted_at', '>', $from->copy()->endOfDay());
+            });
+        if (!$this->isCeo()) {
+            $userId = Auth::id();
+            $taskQuery->whereHas('assignedUsers', fn ($q) => $q->where('users.id', $userId));
+        }
+        $tasks    = $taskQuery->orderBy('sort_order')->orderBy('id')->get();
+        $allDepts = $tasks->pluck('department')->filter()->unique()->sort()->values()->all();
+        $dept     = is_string($request->query('dept')) ? trim($request->query('dept')) : '';
+        if ($dept !== '') {
+            $tasks = $tasks->filter(fn ($t) => mb_strtolower((string) $t->department) === mb_strtolower($dept))->values();
+        }
+        $taskIds = $tasks->pluck('id')->all();
+
+        // 'once': due hanggang sa araw ng unang submission (kasama), hindi na pagkatapos
+        $onceIds   = $tasks->where('frequency', 'once')->pluck('id')->all();
+        $firstDone = empty($onceIds) ? collect() : DB::table('checklist_submissions')
+            ->whereIn('checklist_task_id', $onceIds)
+            ->groupBy('checklist_task_id')
+            ->selectRaw('checklist_task_id, MIN(checklist_submissions.date) AS first_date')
+            ->pluck('first_date', 'checklist_task_id')
+            ->map(fn ($d) => substr((string) $d, 0, 10));
+
+        // Submissions kada (araw, task, user), may bilang ng pinakahuling approval verdict
+        // ng bawat submission (hindi bawat re-run).
+        $rows = collect();
+        if (!empty($taskIds)) {
+            $latestVerdict = DB::table('checklist_analysis_logs as l')
+                ->selectRaw("COALESCE(l.verdict, 'unknown')")
+                ->whereColumn('l.submission_id', 's.id')
+                ->where('l.log_type', 'approval')
+                ->orderByDesc('l.created_at')
+                ->orderByDesc('l.id')
+                ->limit(1);
+            $perSubmission = DB::table('checklist_submissions as s')
+                ->select('s.date as sub_day', 's.checklist_task_id as task_id', 's.user_id as user_id')
+                ->selectSub($latestVerdict, 'verdict')
+                ->whereIn('s.checklist_task_id', $taskIds)
+                // < kinabukasan: tama rin kahit may oras ang naka-store na date
+                ->where('s.date', '>=', $from->toDateString())
+                ->where('s.date', '<', $to->copy()->addDay()->toDateString());
+            $rows = DB::query()->fromSub($perSubmission, 'x')
+                ->selectRaw("x.sub_day, x.task_id, x.user_id, COUNT(*) AS subs,
+                    SUM(CASE WHEN x.verdict = 'approved' THEN 1 ELSE 0 END) AS approved,
+                    SUM(CASE WHEN x.verdict = 'not_approved' THEN 1 ELSE 0 END) AS not_approved,
+                    SUM(CASE WHEN x.verdict IS NOT NULL AND x.verdict NOT IN ('approved', 'not_approved') THEN 1 ELSE 0 END) AS unknown")
+                ->groupBy('x.sub_day', 'x.task_id', 'x.user_id')
+                ->get();
+        }
+
+        $summary = array_fill_keys($days, ['due' => 0, 'done' => 0, 'pct' => null, 'approved' => 0, 'notApproved' => 0, 'unknown' => 0]);
+        $submittedOn = [];   // [task_id][day] = true
+        $taskSubs    = [];   // task_id => [subs, not_approved]
+        $userStats   = [];   // user_id => [subs, approved, notApproved, days[day] = true]
+        foreach ($rows as $r) {
+            $day = substr((string) $r->sub_day, 0, 10);
+            $tid = (int) $r->task_id;
+            $uid = (int) $r->user_id;
+            $submittedOn[$tid][$day] = true;
+            $taskSubs[$tid]['subs']        = ($taskSubs[$tid]['subs'] ?? 0) + (int) $r->subs;
+            $taskSubs[$tid]['notApproved'] = ($taskSubs[$tid]['notApproved'] ?? 0) + (int) $r->not_approved;
+            if (isset($summary[$day])) {
+                $summary[$day]['approved']    += (int) $r->approved;
+                $summary[$day]['notApproved'] += (int) $r->not_approved;
+                $summary[$day]['unknown']     += (int) $r->unknown;
+            }
+            $userStats[$uid]['subs']        = ($userStats[$uid]['subs'] ?? 0) + (int) $r->subs;
+            $userStats[$uid]['approved']    = ($userStats[$uid]['approved'] ?? 0) + (int) $r->approved;
+            $userStats[$uid]['notApproved'] = ($userStats[$uid]['notApproved'] ?? 0) + (int) $r->not_approved;
+            $userStats[$uid]['days'][$day]  = true;
+        }
+
+        $isDue = function (ChecklistTask $t, Carbon $day) use ($firstDone): bool {
+            $dayStr = $day->toDateString();
+            if ($t->created_at && $t->created_at->toDateString() > $dayStr) return false;
+            if ($t->deleted_at && $t->deleted_at->lte($day->copy()->endOfDay())) return false;
+
+            return match ($t->frequency ?? 'daily') {
+                'weekly'  => (int) $day->dayOfWeek === (int) $t->frequency_day,
+                'monthly' => (int) $day->day       === (int) $t->frequency_day,
+                'once'    => !isset($firstDone[$t->id]) || $firstDone[$t->id] >= $dayStr,
+                default   => true,
+            };
+        };
+
+        // Cell: done = may submission noong araw na iyon; missing = due pero wala; none = hindi due.
+        // Ang submission sa araw na hindi due ay "done" sa grid pero hindi bilang sa mga %.
+        $taskRows    = [];
+        $userDueDays = [];   // user_id => [day] = true
+        foreach ($tasks as $t) {
+            $cells = [];
+            $due   = 0;
+            $done  = 0;
+            foreach ($dayObjs as $dayStr => $dayObj) {
+                $submitted = isset($submittedOn[$t->id][$dayStr]);
+                $taskDue   = $isDue($t, $dayObj);
+                $cells[$dayStr] = $submitted ? 'done' : ($taskDue ? 'missing' : 'none');
+                if (!$taskDue) continue;
+                $due++;
+                $summary[$dayStr]['due']++;
+                if ($submitted) {
+                    $done++;
+                    $summary[$dayStr]['done']++;
+                }
+                foreach ($t->assignedUsers as $u) {
+                    $userDueDays[$u->id][$dayStr] = true;
+                }
+            }
+            $subs = $taskSubs[$t->id]['subs'] ?? 0;
+            if ($due === 0 && $subs === 0) continue;   // hal. 'once' na tapos na bago ang range
+            $notApproved = $taskSubs[$t->id]['notApproved'] ?? 0;
+            $taskRows[] = [
+                'task'           => $t,
+                'cells'          => $cells,
+                'due'            => $due,
+                'done'           => $done,
+                'pct'            => $due > 0 ? (int) round($done / $due * 100) : null,
+                'subs'           => $subs,
+                'notApproved'    => $notApproved,
+                'notApprovedPct' => $subs > 0 ? (int) round($notApproved / $subs * 100) : null,
+            ];
+        }
+        // Pinakamahina sa itaas; ang walang due day ay sa dulo
+        usort($taskRows, fn ($a, $b) => ($a['pct'] ?? 101) <=> ($b['pct'] ?? 101));
+
+        foreach ($summary as $day => $s) {
+            $summary[$day]['pct'] = $s['due'] > 0 ? (int) round($s['done'] / $s['due'] * 100) : null;
+        }
+
+        // Kada tao: lahat ng naka-assign sa kahit isang nakikitang task
+        $people = [];
+        foreach ($tasks->flatMap(fn ($t) => $t->assignedUsers)->unique('id') as $u) {
+            $stats   = $userStats[$u->id] ?? [];
+            $dueDays = array_keys($userDueDays[$u->id] ?? []);
+            $people[] = [
+                'user'        => $u,
+                'subs'        => $stats['subs'] ?? 0,
+                'approved'    => $stats['approved'] ?? 0,
+                'notApproved' => $stats['notApproved'] ?? 0,
+                'dueDays'     => count($dueDays),
+                'missed'      => count(array_filter($dueDays, fn ($d) => !isset($stats['days'][$d]))),
+            ];
+        }
+        usort($people, fn ($a, $b) => [$b['missed'], $a['user']->name] <=> [$a['missed'], $b['user']->name]);
+
+        $from = $from->toDateString();
+        $to   = $to->toDateString();
+
+        $csv = $request->query('csv');
+        if ($csv === 'tasks' || $csv === 'people') {
+            return $this->rangeCsv($csv, $days, $taskRows, $people, $from, $to);
+        }
+
+        return view('checklist.report-range', compact(
+            'days', 'summary', 'taskRows', 'people', 'from', 'to', 'dept', 'allDepts'
+        ));
+    }
+
+    /** CSV ng per-task o per-person table ng range view. */
+    private function rangeCsv(string $part, array $days, array $taskRows, array $people, string $from, string $to)
+    {
+        // Ang text na galing sa user (title, department, pangalan) ay hindi dapat basahin ng Excel bilang formula
+        $text = fn ($v) => preg_match('/^[=+\-@\t\r]/', (string) $v) ? "'" . $v : (string) $v;
+
+        if ($part === 'tasks') {
+            $header = array_merge(['Task', 'Department'], $days,
+                ['Due days', 'Done', 'Completion %', 'Submissions', 'Not approved', 'Not approved %']);
+            $lines = array_map(fn ($r) => array_merge(
+                [$text($r['task']->title), $text($r['task']->department ?? '')],
+                array_map(fn ($c) => $c === 'none' ? '' : $c, array_values($r['cells'])),
+                [$r['due'], $r['done'], $r['pct'] ?? '', $r['subs'], $r['notApproved'], $r['notApprovedPct'] ?? '']
+            ), $taskRows);
+        } else {
+            $header = ['Person', 'Submissions', 'Approved', 'Not approved', 'Days with a due task', 'Missed days'];
+            $lines  = array_map(fn ($p) => [
+                $text($p['user']->name), $p['subs'], $p['approved'], $p['notApproved'], $p['dueDays'], $p['missed'],
+            ], $people);
+        }
+
+        return response()->streamDownload(function () use ($header, $lines) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, $header, ',', '"', '');
+            foreach ($lines as $line) {
+                fputcsv($out, $line, ',', '"', '');
+            }
+            fclose($out);
+        }, "checklist-{$part}-{$from}-to-{$to}.csv", ['Content-Type' => 'text/csv']);
     }
 
     public function manage()

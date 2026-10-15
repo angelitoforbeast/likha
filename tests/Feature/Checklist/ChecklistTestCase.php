@@ -143,22 +143,29 @@ abstract class ChecklistTestCase extends TestCase
             'is_active' => true,
             'frequency' => 'daily',
         ], $attrs));
-        if (isset($attrs['created_at'])) {
-            DB::table('checklist_tasks')->where('id', $task->id)->update(['created_at' => $attrs['created_at']]);
+        // Hindi fillable ang mga oras na ito; diretso sa table.
+        $stamps = array_intersect_key($attrs, array_flip(['created_at', 'deleted_at']));
+        if ($stamps) {
+            DB::table('checklist_tasks')->where('id', $task->id)->update($stamps);
         }
         $task->assignedUsers()->sync(collect($assigned)->pluck('id')->all());
 
-        return $task->fresh();
+        return ChecklistTask::withTrashed()->find($task->id);
     }
 
+    /** 'Y-m-d' lang ang date, gaya ng DATE column sa MySQL (ang date cast ng model ay nagdadagdag ng oras sa sqlite). */
     protected function submission(ChecklistTask $task, User $user, string $date): ChecklistSubmission
     {
-        return ChecklistSubmission::create([
+        $id = DB::table('checklist_submissions')->insertGetId([
             'checklist_task_id' => $task->id,
             'user_id'           => $user->id,
             'date'              => $date,
             'notes'             => 'Tapos na po.',
+            'created_at'        => now(),
+            'updated_at'        => now(),
         ]);
+
+        return ChecklistSubmission::find($id);
     }
 
     /** Isang approval run; $at = oras ng run (para masubok ang "pinakahuling verdict"). */

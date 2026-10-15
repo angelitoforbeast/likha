@@ -106,6 +106,8 @@
               </form>
             @endif
           </div>
+          <a href="{{ route('checklist.report', ['view' => 'range']) }}"
+             class="text-xs font-medium text-blue-600 hover:underline whitespace-nowrap">Over several days</a>
         </div>
 
         {{-- Next day --}}
