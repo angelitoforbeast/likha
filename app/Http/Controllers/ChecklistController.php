@@ -8,6 +8,7 @@ use App\Models\ChecklistSubmissionFile;
 use App\Models\ChecklistSubmissionLog;
 use App\Models\ChecklistAnalysisLog;
 use App\Models\User;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
@@ -130,10 +131,8 @@ class ChecklistController extends Controller
         // Non-CEO users only see tasks where they're explicitly assigned
         // (via the assignedUsers pivot). Submissions are correspondingly
         // filtered to those tasks the user can see.
-        $authUser = \Illuminate\Support\Facades\Auth::user();
-        $userId   = $authUser?->id;
-        $role     = strtoupper(trim((string)($authUser?->employeeProfile?->role ?? '')));
-        $isCEO    = $role === 'CEO';
+        $userId   = Auth::id();
+        $isCEO    = $this->isCeo();
 
         if ($isToday) {
             // Today: same as index — only currently active tasks
@@ -242,7 +241,6 @@ class ChecklistController extends Controller
     public function manage()
     {
         $user   = Auth::user();
-        $role   = $user?->employeeProfile?->role ?? '';
         $dept   = $user?->employeeProfile?->department ?? '';
         $userId = $user?->id;
 
@@ -250,9 +248,9 @@ class ChecklistController extends Controller
             ->orderBy('sort_order')
             ->orderBy('id');
 
-        if ($role === 'CEO') {
+        if ($this->isCeo()) {
             // sees all — no filter
-        } elseif (str_contains($role, 'OIC') && $dept !== '') {
+        } elseif ($this->isOic() && $dept !== '') {
             // OIC sees tasks tagged with their department
             $query->where('department', $dept);
         } else {
@@ -355,8 +353,7 @@ class ChecklistController extends Controller
 
     public function deleteSubmission(ChecklistSubmission $submission)
     {
-        if ($submission->user_id !== Auth::id() &&
-            Auth::user()?->employeeProfile?->role !== 'CEO') {
+        if ($submission->user_id !== Auth::id() && !$this->isCeo()) {
             abort(403);
         }
 
@@ -377,8 +374,7 @@ class ChecklistController extends Controller
     {
         $submission = $file->submission;
 
-        if ($submission->user_id !== Auth::id() &&
-            Auth::user()?->employeeProfile?->role !== 'CEO') {
+        if ($submission->user_id !== Auth::id() && !$this->isCeo()) {
             abort(403);
         }
 
@@ -390,6 +386,10 @@ class ChecklistController extends Controller
 
     public function storeTask(Request $request)
     {
+        if (!$this->isCeo() && !$this->isOic()) {
+            $this->refuse('CEO o OIC lang ang puwedeng gumawa ng task.');
+        }
+
         $validated = $request->validate([
             'title'           => 'required|string|max:255',
             'description'     => 'nullable|string|max:1000',
@@ -423,6 +423,8 @@ class ChecklistController extends Controller
 
     public function updateTask(Request $request, ChecklistTask $task)
     {
+        $this->authorizeEditTask($task);
+
         $validated = $request->validate([
             'title'           => 'required|string|max:255',
             'description'     => 'nullable|string|max:1000',
@@ -449,6 +451,8 @@ class ChecklistController extends Controller
 
     public function destroyTask(ChecklistTask $task)
     {
+        $this->authorizeEditTask($task);
+
         // Hard delete — cascades to submissions and assignments via FK
         $task->delete();
         return back()->with('success', 'Task deleted.');
@@ -456,6 +460,8 @@ class ChecklistController extends Controller
 
     public function duplicateTask(ChecklistTask $task)
     {
+        $this->authorizeEditTask($task);
+
         $new = ChecklistTask::create([
             'title'           => $task->title . ' (Copy)',
             'description'     => $task->description,
@@ -480,12 +486,14 @@ class ChecklistController extends Controller
 
     public function bulkAssign(Request $request)
     {
+        $this->authorizeManageTasks([]);
         $request->validate([
             'task_ids'   => 'required|array',
             'task_ids.*' => 'integer|exists:checklist_tasks,id',
             'user_ids'   => 'nullable|array',
             'user_ids.*' => 'nullable|integer|exists:users,id',
         ]);
+        $this->authorizeManageTasks($request->input('task_ids'));
 
         // If "clear_assign" is checked, sync to empty (anyone can submit)
         $userIds = $request->boolean('clear_assign')
@@ -505,11 +513,13 @@ class ChecklistController extends Controller
 
     public function bulkType(Request $request)
     {
+        $this->authorizeManageTasks([]);
         $request->validate([
             'task_ids'   => 'required|array',
             'task_ids.*' => 'integer|exists:checklist_tasks,id',
             'type'       => 'required|in:any,photo,note,both',
         ]);
+        $this->authorizeManageTasks($request->input('task_ids'));
 
         $count = ChecklistTask::whereIn('id', $request->input('task_ids'))
             ->update(['type' => $request->input('type')]);
@@ -519,11 +529,13 @@ class ChecklistController extends Controller
 
     public function bulkSubmissionType(Request $request)
     {
+        $this->authorizeManageTasks([]);
         $request->validate([
             'task_ids'        => 'required|array',
             'task_ids.*'      => 'integer|exists:checklist_tasks,id',
             'submission_type' => 'required|in:group,individual',
         ]);
+        $this->authorizeManageTasks($request->input('task_ids'));
 
         $count = ChecklistTask::whereIn('id', $request->input('task_ids'))
             ->update(['submission_type' => $request->input('submission_type')]);
@@ -533,6 +545,8 @@ class ChecklistController extends Controller
 
     public function reorderTasks(Request $request)
     {
+        $this->authorizeManageTasks((array) $request->input('order', []), true);
+
         foreach ($request->input('order', []) as $index => $id) {
             ChecklistTask::where('id', $id)->update(['sort_order' => $index]);
         }
@@ -541,6 +555,8 @@ class ChecklistController extends Controller
 
     public function analyzeSubmission(Request $request, ChecklistSubmission $submission)
     {
+        $this->authorizeReviewSubmission($submission);
+
         $submission->load(['task', 'files']);
         $task     = $submission->task;
         $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
@@ -620,6 +636,8 @@ class ChecklistController extends Controller
 
     public function getAnalysisLogs(ChecklistSubmission $submission)
     {
+        $this->authorizeReviewSubmission($submission);
+
         $logs = $submission->analysisLogs()->with('user')->get()->map(fn($log) => [
             'id'          => $log->id,
             'analysis'    => $log->analysis_result,
@@ -633,6 +651,8 @@ class ChecklistController extends Controller
 
     public function approvalCheck(Request $request, ChecklistSubmission $submission)
     {
+        $this->authorizeReviewSubmission($submission);
+
         $submission->load(['task', 'files']);
         $task     = $submission->task;
         $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
@@ -700,6 +720,8 @@ class ChecklistController extends Controller
 
     public function getApprovalLogs(ChecklistSubmission $submission)
     {
+        $this->authorizeReviewSubmission($submission);
+
         $logs = $submission->approvalLogs()->with('user')->get()->map(fn($log) => [
             'id'          => $log->id,
             'verdict'     => $log->verdict,
@@ -710,6 +732,86 @@ class ChecklistController extends Controller
         ]);
 
         return response()->json(['logs' => $logs]);
+    }
+
+    // ── Access rules ──────────────────────────────────────────────────────────
+    // Iisang lugar ng lahat ng role check ng /checklist. Ang role ay galing sa
+    // employeeProfile->role, trimmed at case-insensitive.
+
+    private function checklistRole(): string
+    {
+        return strtoupper(trim((string) (Auth::user()?->employeeProfile?->role ?? '')));
+    }
+
+    private function isCeo(): bool
+    {
+        return $this->checklistRole() === 'CEO';
+    }
+
+    private function isOic(): bool
+    {
+        return str_contains($this->checklistRole(), 'OIC');
+    }
+
+    /** OIC ng $department. Ang task na walang department ay hindi sakop ng kahit sinong OIC. */
+    private function isOicOf(?string $department): bool
+    {
+        $mine = mb_strtolower(trim((string) (Auth::user()?->employeeProfile?->department ?? '')));
+
+        return $this->isOic() && $mine !== '' && $mine === mb_strtolower(trim((string) $department));
+    }
+
+    /** Reorder at bulk changes: CEO, o OIC ng department ng task. */
+    private function canManageTask(ChecklistTask $task): bool
+    {
+        return $this->isCeo() || $this->isOicOf($task->department);
+    }
+
+    /** Edit, delete, duplicate: pati ang gumawa ng task. */
+    private function authorizeEditTask(ChecklistTask $task): void
+    {
+        $isCreator = $task->created_by !== null && (int) $task->created_by === (int) Auth::id();
+        if (!$this->canManageTask($task) && !$isCreator) {
+            $this->refuse('Hindi mo puwedeng baguhin ang task na ito.');
+        }
+    }
+
+    /** CEO o OIC lang; at bawat task sa $ids ay dapat sakop mo. Kapag may isang hindi, walang mababago. */
+    private function authorizeManageTasks(array $ids, bool $json = false): void
+    {
+        $message = 'CEO o OIC ng department lang ang puwedeng mag-ayos ng mga task na ito.';
+        if (!$this->isCeo() && !$this->isOic()) {
+            $this->refuse($message, $json);
+        }
+        if ($this->isCeo() || empty($ids)) {
+            return;
+        }
+        foreach (ChecklistTask::whereIn('id', $ids)->get() as $task) {
+            if (!$this->canManageTask($task)) {
+                $this->refuse($message, $json);
+            }
+        }
+    }
+
+    /** AI analysis, approval check at ang logs nila: CEO, may-ari ng submission, o OIC ng department ng task. */
+    private function authorizeReviewSubmission(ChecklistSubmission $submission): void
+    {
+        if ($this->isCeo() || (int) $submission->user_id === (int) Auth::id()) {
+            return;
+        }
+        $task = ChecklistTask::withTrashed()->find($submission->checklist_task_id);
+        if (!$task || !$this->isOicOf($task->department)) {
+            $this->refuse('Sa sarili mong submission lang ito puwede (o sa department mo kung OIC ka).', true);
+        }
+    }
+
+    /** 403: JSON {"ok":false,...} para sa fetch() ng page, HTML 403 para sa mga form. */
+    private function refuse(string $message, bool $json = false): never
+    {
+        if ($json || request()->expectsJson()) {
+            throw new HttpResponseException(response()->json(['ok' => false, 'message' => $message], 403));
+        }
+        abort(403, $message);
     }
 
     private function runAutoAnalysis(ChecklistSubmission $submission): void
