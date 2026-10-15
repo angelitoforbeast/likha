@@ -179,6 +179,7 @@
                         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"></textarea>
             </div>
           </div>
+          @include('checklist.partials.extract-fields', ['fields' => []])
           {{-- Frequency, Required Photos, Department --}}
           <div x-data="{ freq: 'daily' }" class="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
             <div>
@@ -393,6 +394,10 @@
                   @if($t->approval_prompt)
                     <p class="text-xs text-emerald-500 mt-0.5 truncate max-w-xs" title="{{ $t->approval_prompt }}">✔ {{ $t->approval_prompt }}</p>
                   @endif
+                  @if($t->extract_fields)
+                    @php $fieldLabels = collect($t->extract_fields)->pluck('label')->implode(', '); @endphp
+                    <p class="text-xs text-sky-600 mt-0.5 truncate max-w-xs" title="Fields to extract: {{ $fieldLabels }}">📊 {{ $fieldLabels }}</p>
+                  @endif
                 </td>
 
                 {{-- Type --}}
@@ -588,6 +593,7 @@
                                   class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none">{{ $t->approval_prompt }}</textarea>
                       </div>
                     </div>
+                    @include('checklist.partials.extract-fields', ['fields' => $t->extract_fields ?? []])
                     <input type="hidden" name="is_active" value="{{ $t->is_active ? '1' : '0' }}">
                     {{-- Frequency, Required Photos, Department --}}
                     <div x-data="{ freq: '{{ $t->frequency ?? 'daily' }}' }" class="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">

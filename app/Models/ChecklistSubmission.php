@@ -38,6 +38,12 @@ class ChecklistSubmission extends Model
         return $this->hasMany(ChecklistSubmissionLog::class)->orderBy('created_at', 'desc');
     }
 
+    /** Mga value na nakuha ng AI (kapag may "fields to extract" ang task). */
+    public function values(): HasMany
+    {
+        return $this->hasMany(ChecklistSubmissionValue::class, 'submission_id')->orderBy('id');
+    }
+
     public function analysisLogs(): HasMany
     {
         return $this->hasMany(ChecklistAnalysisLog::class, 'submission_id')

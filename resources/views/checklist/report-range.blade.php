@@ -44,6 +44,9 @@
              class="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 hover:bg-gray-50">⬇ CSV per task</a>
           <a href="{{ route('checklist.report', $csvParams + ['csv' => 'people']) }}"
              class="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 hover:bg-gray-50">⬇ CSV per person</a>
+          <a href="{{ route('checklist.report', $csvParams + ['csv' => 'values']) }}"
+             title="Ang mga value na nakuha ng AI sa mga submission (date, task, field, value, submitter)"
+             class="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 hover:bg-gray-50">⬇ Values CSV</a>
         </span>
       </form>
     </div>

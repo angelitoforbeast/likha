@@ -21,14 +21,17 @@ use Tests\TestCase;
  */
 abstract class ChecklistTestCase extends TestCase
 {
+    /** Ang isasagot ng (fake) OpenAI; puwedeng palitan ng test bago ang request. */
+    protected string $aiAnswer = "APPROVED\n\nMukhang kumpleto ang submission.";
+
     protected function setUp(): void
     {
         parent::setUp();
 
         Storage::fake('public');
         Http::preventStrayRequests();
-        Http::fake(['api.openai.com/*' => Http::response([
-            'choices' => [['message' => ['content' => "APPROVED\n\nMukhang kumpleto ang submission."]]],
+        Http::fake(['api.openai.com/*' => fn () => Http::response([
+            'choices' => [['message' => ['content' => $this->aiAnswer]]],
         ])]);
 
         Schema::create('users', function (Blueprint $t) {
@@ -132,6 +135,8 @@ abstract class ChecklistTestCase extends TestCase
 
     private const MIGRATIONS = [
         '2026_10_15_000001_create_checklist_task_changes_table.php',
+        '2026_10_15_000002_add_extract_fields_to_checklist_tasks.php',
+        '2026_10_15_000003_create_checklist_submission_values_table.php',
     ];
 
     protected function user(string $role, ?string $department = null, string $name = 'Tester'): User

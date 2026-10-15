@@ -13,13 +13,14 @@ class ChecklistTask extends Model
     protected $fillable = [
         'title', 'description', 'type', 'is_active', 'sort_order',
         'scheduled_time', 'submission_type', 'ai_prompt', 'approval_prompt',
-        'required_photos', 'frequency', 'frequency_day', 'department', 'created_by',
+        'required_photos', 'frequency', 'frequency_day', 'department', 'created_by', 'extract_fields',
     ];
 
     protected $casts = [
         'is_active'       => 'boolean',
         'required_photos' => 'integer',
         'frequency_day'   => 'integer',
+        'extract_fields'  => 'array',   // [{key, label, type, hint}] na kinukuha ng AI sa bawat submission
     ];
 
     public function submissions(): HasMany

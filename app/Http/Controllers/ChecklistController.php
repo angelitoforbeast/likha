@@ -8,12 +8,14 @@ use App\Models\ChecklistSubmissionFile;
 use App\Models\ChecklistSubmissionLog;
 use App\Models\ChecklistAnalysisLog;
 use App\Models\ChecklistTaskChange;
+use App\Models\ChecklistSubmissionValue;
 use App\Models\User;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 
@@ -191,7 +193,7 @@ class ChecklistController extends Controller
         })->values();
 
         // Submissions for this date — load all that the user is allowed to see.
-        $subQuery = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
+        $subQuery = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user', 'values'])
             ->withCount(['analysisLogs', 'approvalLogs'])
             ->where('date', $dateObj->toDateString());
 
@@ -295,6 +297,10 @@ class ChecklistController extends Controller
             $tasks = $tasks->filter(fn ($t) => mb_strtolower((string) $t->department) === mb_strtolower($dept))->values();
         }
         $taskIds = $tasks->pluck('id')->all();
+
+        if ($request->query('csv') === 'values') {
+            return $this->valuesCsv($tasks, $from->toDateString(), $to->toDateString());
+        }
 
         // 'once': due hanggang sa araw ng unang submission (kasama), hindi na pagkatapos
         $onceIds   = $tasks->where('frequency', 'once')->pluck('id')->all();
@@ -469,6 +475,49 @@ class ChecklistController extends Controller
             }
             fclose($out);
         }, "checklist-{$part}-{$from}-to-{$to}.csv", ['Content-Type' => 'text/csv']);
+    }
+
+    /**
+     * "Values" CSV ng range view: isang row kada value na nakuha ng AI (date, task, field, value,
+     * submitter), para sa mga task na nakikita sa view (parehong visibility at department filter).
+     */
+    private function valuesCsv($tasks, string $from, string $to)
+    {
+        // Ang text na galing sa user o sa AI ay hindi dapat basahin ng Excel bilang formula
+        $text   = fn ($v) => preg_match('/^[=+\-@\t\r]/', (string) $v) ? "'" . $v : (string) $v;
+        $byId   = $tasks->keyBy('id');
+        $values = $tasks->isEmpty() ? collect() : ChecklistSubmissionValue::query()
+            ->join('checklist_submissions as s', 's.id', '=', 'checklist_submission_values.submission_id')
+            ->leftJoin('users as u', 'u.id', '=', 's.user_id')
+            ->whereIn('checklist_submission_values.checklist_task_id', $byId->keys()->all())
+            ->where('checklist_submission_values.date', '>=', $from)
+            ->where('checklist_submission_values.date', '<', Carbon::parse($to)->addDay()->toDateString())
+            ->orderBy('checklist_submission_values.date')
+            ->orderBy('checklist_submission_values.checklist_task_id')
+            ->orderBy('checklist_submission_values.id')
+            ->get(['checklist_submission_values.*', 'u.name as submitter']);
+
+        $lines = $values->map(function ($v) use ($byId, $text) {
+            $task  = $byId->get($v->checklist_task_id);
+            $label = collect($task?->extract_fields ?? [])->firstWhere('key', $v->field_key)['label'] ?? $v->field_key;
+
+            return [
+                substr((string) $v->getRawOriginal('date'), 0, 10),
+                $text($task?->title ?? ''),
+                $text($label),
+                $v->value_text !== null ? $text($v->plain()) : $v->plain(),
+                $text($v->submitter ?? ''),
+            ];
+        });
+
+        return response()->streamDownload(function () use ($lines) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['Date', 'Task', 'Field', 'Value', 'Submitter'], ',', '"', '');
+            foreach ($lines as $line) {
+                fputcsv($out, $line, ',', '"', '');
+            }
+            fclose($out);
+        }, "checklist-values-{$from}-to-{$to}.csv", ['Content-Type' => 'text/csv']);
     }
 
     public function manage()
@@ -715,7 +764,9 @@ class ChecklistController extends Controller
             'frequency'       => 'nullable|in:daily,weekly,monthly,once',
             'frequency_day'   => 'nullable|integer|min:0|max:31',
             'department'      => 'nullable|string|max:100',
-        ]);
+            ...$this->extractFieldRules(),
+        ], self::EXTRACT_FIELD_MESSAGES);
+        $validated = $this->cleanExtractFields($validated);
 
         $userIds = array_filter((array) $request->input('assigned_users', []));
 
@@ -763,7 +814,10 @@ class ChecklistController extends Controller
             'frequency'       => 'nullable|in:daily,weekly,monthly,once',
             'frequency_day'   => 'nullable|integer|min:0|max:31',
             'department'      => 'nullable|string|max:100',
-        ]);
+            ...$this->extractFieldRules(),
+        ], self::EXTRACT_FIELD_MESSAGES);
+        // Ang form na walang extract_fields (hal. ang Disable button) ay hindi nagagalaw ang fields.
+        $validated = $this->cleanExtractFields($validated);
 
         // Sync assigned users (empty array = all users can submit)
         $userIds = array_filter((array) $request->input('assigned_users', []));
@@ -778,6 +832,10 @@ class ChecklistController extends Controller
 
             if ($beforeIds !== $this->idList($userIds)) {
                 $changes['assigned_users'] = [$beforeIds, $this->idList($userIds)];
+            }
+            if (array_key_exists('extract_fields', $changes)) {
+                $this->logTaskChange($task->id, 'fields_changed', ['extract_fields' => $changes['extract_fields']]);
+                unset($changes['extract_fields']);
             }
             // Ang pag-on/off ang hinahanap kapag may nawawalang task, kaya iyon ang action kapag kasama.
             $action = isset($changes['is_active']) ? ($task->is_active ? 'activated' : 'deactivated') : 'updated';
@@ -818,6 +876,7 @@ class ChecklistController extends Controller
                 'frequency'       => $task->frequency,
                 'frequency_day'   => $task->frequency_day,
                 'department'      => $task->department,
+                'extract_fields'  => $task->extract_fields,
                 'created_by'      => Auth::id(),
             ]);
 
@@ -1031,6 +1090,7 @@ class ChecklistController extends Controller
             ?: 'Evaluate whether the submission properly completes the task based on the title, description, and submitted content (notes and/or images). Assess overall quality and completeness.';
         $prompt .= "\nApproval Criteria: {$criteria}\n";
         $prompt .= "\nIMPORTANT: Your response MUST start with exactly \"APPROVED\" or \"NOT APPROVED\" on the first line, followed by a blank line, then your explanation in 2-3 sentences.";
+        $prompt .= $this->extractionPrompt($task);
 
         $content = [['type' => 'text', 'text' => $prompt]];
         foreach ($imgFiles->take(5) as $f) {
@@ -1054,6 +1114,7 @@ class ChecklistController extends Controller
             $firstLine = strtoupper(trim(explode("\n", trim($text))[0]));
             $verdict   = str_starts_with($firstLine, 'NOT APPROVED') ? 'not_approved'
                        : (str_starts_with($firstLine, 'APPROVED')    ? 'approved' : 'unknown');
+            $text      = $this->takeExtractedValues($submission, $task, (string) $text);
 
             ChecklistAnalysisLog::create([
                 'submission_id'   => $submission->id,
@@ -1185,7 +1246,7 @@ class ChecklistController extends Controller
     /** Ang mga field ng task na sinusulat sa checklist_task_changes kapag nagbago. */
     private const LOGGED_TASK_FIELDS = [
         'title', 'description', 'type', 'is_active', 'scheduled_time', 'submission_type', 'ai_prompt',
-        'approval_prompt', 'required_photos', 'frequency', 'frequency_day', 'department',
+        'approval_prompt', 'required_photos', 'frequency', 'frequency_day', 'department', 'extract_fields',
     ];
 
     /** Isang row ng kasaysayan, ng naka-login na user. Kapag walang nagbago, walang row. */
@@ -1211,6 +1272,11 @@ class ChecklistController extends Controller
             $after  = $task->getAttribute($field);
             // "08:00" at "08:00:00" ay iisang oras (time input vs TIME column)
             if ($field === 'scheduled_time' && substr((string) $before, 0, 5) === substr((string) $after, 0, 5)) {
+                continue;
+            }
+            // Iba ang ayos ng keys na ibinabalik ng JSON column ng MySQL; ang laman ang ikinukumpara
+            $sorted = fn ($fields) => array_map(function ($f) { ksort($f); return $f; }, (array) $fields);
+            if ($field === 'extract_fields' && $sorted($before) === $sorted($after)) {
                 continue;
             }
             $changes[$field] = [$before, $after];
@@ -1242,6 +1308,107 @@ class ChecklistController extends Controller
 
             return $count;
         });
+    }
+
+    // ── Fields to extract ─────────────────────────────────────────────────────
+
+    /** Simula ng huling linya ng approval answer na may mga value (JSON). */
+    private const VALUES_MARKER = 'EXTRACTED_VALUES:';
+
+    private const EXTRACT_FIELD_MESSAGES = [
+        'extract_fields.*.key.regex'    => 'Ang key ng field ay snake_case lang (a-z, 0-9, _), hal. total_sticker.',
+        'extract_fields.*.key.distinct' => 'Dalawang field ang may parehong key; dapat iba-iba.',
+        'extract_fields.*.type.in'      => 'Ang type ng field ay number, money, percent, text, date o yes_no lang.',
+    ];
+
+    private function extractFieldRules(): array
+    {
+        return [
+            'extract_fields'         => 'nullable|array|max:20',
+            'extract_fields.*.key'   => ['required', 'string', 'max:40', 'regex:/^[a-z][a-z0-9_]*$/', 'distinct'],
+            'extract_fields.*.label' => 'required|string|max:100',
+            'extract_fields.*.type'  => ['required', \Illuminate\Validation\Rule::in(ChecklistSubmissionValue::TYPES)],
+            'extract_fields.*.hint'  => 'nullable|string|max:300',
+        ];
+    }
+
+    /** Pare-parehong hugis ng bawat field ({key, label, type, hint}); walang field = null. */
+    private function cleanExtractFields(array $validated): array
+    {
+        if (array_key_exists('extract_fields', $validated)) {
+            $fields = array_map(fn ($f) => [
+                'key'   => $f['key'],
+                'label' => $f['label'],
+                'type'  => $f['type'],
+                'hint'  => ($f['hint'] ?? null) ?: null,
+            ], array_values($validated['extract_fields'] ?? []));
+            $validated['extract_fields'] = $fields ?: null;
+        }
+
+        return $validated;
+    }
+
+    /** Dagdag sa approval prompt kapag may fields ang task; blangko kapag wala. */
+    private function extractionPrompt(ChecklistTask $task): string
+    {
+        if (empty($task->extract_fields)) {
+            return '';
+        }
+        $kinds = [
+            'number' => 'a number', 'money' => 'an amount in PHP', 'percent' => 'a percentage',
+            'text' => 'short text', 'date' => 'a date', 'yes_no' => 'true or false',
+        ];
+        $prompt  = "\n\nAfter your explanation, add ONE last line that starts with \"" . self::VALUES_MARKER . "\" followed by a JSON object on the same line, with exactly these keys. Read the values from the staff notes AND the images:\n";
+        foreach ($task->extract_fields as $f) {
+            $prompt .= "- {$f['key']}: {$f['label']} (" . ($kinds[$f['type']] ?? 'text') . ')' . (!empty($f['hint']) ? " — {$f['hint']}" : '') . "\n";
+        }
+        $prompt .= "Copy each value as written (e.g. \"1,612\", \"₱2,295.67\", \"2,01%\"). Use null when a value is not in the notes or images; never guess. The verdict stays on the first line.";
+
+        return $prompt;
+    }
+
+    /**
+     * Kinukuha ang values line sa approval answer at sine-save ang mga value (pinapalitan ang dati
+     * ng submission). Ibinabalik ang answer na wala na ang values line. Kapag sira o wala ang
+     * line: walang sine-save (nananatili ang dating value), warning lang; hindi naaapektuhan ang verdict.
+     */
+    private function takeExtractedValues(ChecklistSubmission $submission, ChecklistTask $task, string $text): string
+    {
+        if (empty($task->extract_fields)) {
+            return $text;
+        }
+        $pos   = strrpos($text, self::VALUES_MARKER);
+        $clean = $pos === false ? $text : rtrim(substr($text, 0, $pos));
+        $rest  = $pos === false ? '' : substr($text, $pos + strlen(self::VALUES_MARKER));
+        $start = strpos($rest, '{');
+        $end   = strrpos($rest, '}');
+        $data  = $start !== false && $end > $start ? json_decode(substr($rest, $start, $end - $start + 1)) : null;
+
+        if (!$data instanceof \stdClass) {
+            Log::warning('Checklist values: malformed AI answer, nothing stored', ['submission_id' => $submission->id]);
+            return $clean;
+        }
+
+        try {
+            $data = (array) $data;
+            DB::transaction(function () use ($submission, $task, $data) {
+                ChecklistSubmissionValue::where('submission_id', $submission->id)->delete();
+                foreach ($task->extract_fields as $f) {
+                    ChecklistSubmissionValue::create([
+                        ...ChecklistSubmissionValue::fromAi($f['type'], $data[$f['key']] ?? null),
+                        'submission_id'     => $submission->id,
+                        'checklist_task_id' => $task->id,
+                        'date'              => substr((string) $submission->getRawOriginal('date'), 0, 10),
+                        'field_key'         => $f['key'],
+                        'source'            => 'ai',
+                    ]);
+                }
+            });
+        } catch (\Throwable $e) {
+            Log::warning('Checklist values: could not store values', ['submission_id' => $submission->id, 'error' => $e->getMessage()]);
+        }
+
+        return $clean;
     }
 
     private function runAutoAnalysis(ChecklistSubmission $submission): void
@@ -1304,6 +1471,7 @@ class ChecklistController extends Controller
             if ($imgFiles->isEmpty()) $aPrompt .= "\n(No images were submitted.)\n";
             $aPrompt .= "\nApproval Criteria: {$criteria}\n";
             $aPrompt .= "\nIMPORTANT: Your response MUST start with exactly \"APPROVED\" or \"NOT APPROVED\" on the first line, followed by a blank line, then your explanation in 2-3 sentences.";
+            $aPrompt .= $this->extractionPrompt($task);
 
             $aContent = [['type' => 'text', 'text' => $aPrompt]];
             foreach ($imgFiles->take(5) as $f) {
@@ -1325,6 +1493,7 @@ class ChecklistController extends Controller
                 $firstLine = strtoupper(trim(explode("\n", trim($text))[0]));
                 $verdict   = str_starts_with($firstLine, 'NOT APPROVED') ? 'not_approved'
                            : (str_starts_with($firstLine, 'APPROVED')    ? 'approved' : 'unknown');
+                $text      = $this->takeExtractedValues($submission, $task, (string) $text);
 
                 ChecklistAnalysisLog::create([
                     'submission_id'   => $submission->id,

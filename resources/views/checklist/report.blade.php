@@ -465,6 +465,9 @@
                       @else
                         <span class="text-gray-200">—</span>
                       @endif
+                      @if($done)
+                        @include('checklist.partials.values', ['sub' => $sub])
+                      @endif
                     </td>
 
                     {{-- Submitted by --}}
@@ -839,6 +842,7 @@
                         @else
                           <span class="text-gray-200">—</span>
                         @endif
+                        @include('checklist.partials.values', ['sub' => $userSub])
                       </td>
                       {{-- Submitted by --}}
                       <td class="px-3 py-3 align-top">
