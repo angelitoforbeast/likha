@@ -7,6 +7,7 @@ use App\Models\ChecklistSubmission;
 use App\Models\ChecklistSubmissionFile;
 use App\Models\ChecklistSubmissionLog;
 use App\Models\ChecklistAnalysisLog;
+use App\Models\ChecklistTaskChange;
 use App\Models\User;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -495,8 +496,88 @@ class ChecklistController extends Controller
 
         $allTasks = $query->get();
         $allUsers = User::with('employeeProfile')->orderBy('name')->get();
+        // "History" link: sa mga task lang na puwede mong i-edit
+        $editableIds = $allTasks->filter(fn ($t) => $this->canEditTask($t))->pluck('id')->all();
 
-        return view('checklist.manage', compact('allTasks', 'allUsers'));
+        return view('checklist.manage', compact('allTasks', 'allUsers', 'editableIds'));
+    }
+
+    /**
+     * /checklist/manage/history: sino ang nagbago ng aling task, kailan, at ano ang dati → bago.
+     * Pinakabago muna. Nakikita lang ang mga task na puwede mong i-edit (CEO lahat; OIC ang
+     * department niya; ang gumawa ang sarili niyang task). ?task= = iisang task (403 kung hindi sa iyo).
+     */
+    public function history(Request $request)
+    {
+        $visible = ChecklistTask::withTrashed()->get(['id', 'title', 'department', 'created_by'])
+            ->filter(fn ($t) => $this->canEditTask($t))
+            ->keyBy('id');
+
+        $task = null;
+        if ($request->filled('task')) {
+            $task = ChecklistTask::withTrashed()->findOrFail((int) $request->query('task'));
+            if (!$visible->has($task->id)) {
+                $this->refuse('Hindi mo puwedeng tingnan ang kasaysayan ng task na ito.');
+            }
+        }
+
+        $parseDay = function ($value, ?Carbon $fallback): ?Carbon {
+            try {
+                return is_string($value) && $value !== '' ? Carbon::parse($value)->startOfDay() : $fallback;
+            } catch (\Exception $e) {
+                return $fallback;
+            }
+        };
+        $to     = $parseDay($request->query('to'), now()->startOfDay());
+        // Iisang task: buong kasaysayan; ang buong listahan: huling 30 araw
+        $from   = $parseDay($request->query('from'), $task ? null : now()->startOfDay()->subDays(29));
+        $userId = (int) $request->query('user');
+
+        $taskIds = $task ? [$task->id] : $visible->keys()->all();
+        $users   = User::whereIn('id', ChecklistTaskChange::whereIn('checklist_task_id', $taskIds)->select('user_id'))
+            ->orderBy('name')->get(['id', 'name']);
+
+        $changes = ChecklistTaskChange::with('user')
+            ->whereIn('checklist_task_id', $taskIds)
+            ->when($from, fn ($q) => $q->where('created_at', '>=', $from))
+            ->where('created_at', '<', $to->copy()->addDay())
+            ->when($userId, fn ($q) => $q->where('user_id', $userId))
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->paginate(100)->withQueryString();
+
+        // Mga pangalan para sa "Assigned to" (id ang naka-store)
+        $names = User::whereIn('id', $changes->getCollection()
+                ->flatMap(fn ($c) => collect($c->changes['assigned_users'] ?? [])->flatten())->unique()->all())
+            ->pluck('name', 'id');
+        $show = function (string $field, $v) use ($names): string {
+            if ($field === 'assigned_users') {
+                return $v ? collect($v)->map(fn ($id) => $names[$id] ?? "#$id")->implode(', ') : 'Anyone';
+            }
+            if ($field === 'extract_fields') {
+                return $v ? collect($v)->map(fn ($f) => ($f['label'] ?? '?') . ' (' . ($f['type'] ?? '?') . ')')->implode(', ') : '—';
+            }
+            if ($v === null || $v === '') return '—';
+            if (is_bool($v)) return $v ? 'Yes' : 'No';
+            if (is_array($v)) return json_encode($v, JSON_UNESCAPED_UNICODE);
+
+            return \Illuminate\Support\Str::limit((string) $v, 300);
+        };
+        $rows = $changes->getCollection()->map(fn ($c) => [
+            'when'   => $c->created_at,
+            'who'    => $c->user?->name ?? '—',
+            'action' => ChecklistTaskChange::ACTION_LABELS[$c->action] ?? $c->action,
+            'task'   => $visible->get($c->checklist_task_id)?->title ?? '#' . $c->checklist_task_id,
+            'lines'  => collect($c->changes ?? [])->map(fn ($pair, $field) => [
+                'label'  => ChecklistTaskChange::FIELD_LABELS[$field] ?? $field,
+                'before' => $show($field, $pair[0] ?? null),
+                'after'  => $show($field, $pair[1] ?? null),
+            ])->values()->all(),
+        ]);
+
+        $from = $from?->toDateString();
+        $to   = $to->toDateString();
+
+        return view('checklist.history', compact('changes', 'rows', 'task', 'users', 'from', 'to', 'userId'));
     }
 
     public function submit(Request $request, ChecklistTask $task)
@@ -636,19 +717,31 @@ class ChecklistController extends Controller
             'department'      => 'nullable|string|max:100',
         ]);
 
-        $task = ChecklistTask::create([
-            ...$validated,
-            'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
-            'submission_type' => $validated['submission_type'] ?? 'group',
-            'frequency'       => $validated['frequency'] ?? 'daily',
-            'required_photos' => $validated['required_photos'] ?? 0,
-            'is_active'       => true,
-            'created_by'      => Auth::id(),
-        ]);
-
-        // Sync assigned users
         $userIds = array_filter((array) $request->input('assigned_users', []));
-        $task->assignedUsers()->sync($userIds);
+
+        DB::transaction(function () use ($validated, $userIds) {
+            $task = ChecklistTask::create([
+                ...$validated,
+                'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
+                'submission_type' => $validated['submission_type'] ?? 'group',
+                'frequency'       => $validated['frequency'] ?? 'daily',
+                'required_photos' => $validated['required_photos'] ?? 0,
+                'is_active'       => true,
+                'created_by'      => Auth::id(),
+            ]);
+
+            // Sync assigned users
+            $task->assignedUsers()->sync($userIds);
+
+            $changes = collect($task->only(self::LOGGED_TASK_FIELDS))
+                ->reject(fn ($v) => $v === null || $v === '' || $v === [])
+                ->map(fn ($v) => [null, $v])
+                ->all();
+            if ($userIds) {
+                $changes['assigned_users'] = [[], $this->idList($userIds)];
+            }
+            $this->logTaskChange($task->id, 'created', $changes);
+        });
 
         return back()->with('success', 'Task added!');
     }
@@ -672,11 +765,24 @@ class ChecklistController extends Controller
             'department'      => 'nullable|string|max:100',
         ]);
 
-        $task->update($validated);
-
         // Sync assigned users (empty array = all users can submit)
         $userIds = array_filter((array) $request->input('assigned_users', []));
-        $task->assignedUsers()->sync($userIds);
+
+        DB::transaction(function () use ($task, $validated, $userIds) {
+            $beforeIds = $this->idList($task->assignedUsers()->pluck('users.id')->all());
+
+            $task->fill($validated);
+            $changes = $this->dirtyChanges($task);
+            $task->save();
+            $task->assignedUsers()->sync($userIds);
+
+            if ($beforeIds !== $this->idList($userIds)) {
+                $changes['assigned_users'] = [$beforeIds, $this->idList($userIds)];
+            }
+            // Ang pag-on/off ang hinahanap kapag may nawawalang task, kaya iyon ang action kapag kasama.
+            $action = isset($changes['is_active']) ? ($task->is_active ? 'activated' : 'deactivated') : 'updated';
+            $this->logTaskChange($task->id, $action, $changes);
+        });
 
         return back()->with('success', 'Task updated!');
     }
@@ -686,7 +792,10 @@ class ChecklistController extends Controller
         $this->authorizeEditTask($task);
 
         // Hard delete — cascades to submissions and assignments via FK
-        $task->delete();
+        DB::transaction(function () use ($task) {
+            $task->delete();
+            $this->logTaskChange($task->id, 'deleted', ['deleted' => [false, true]]);
+        });
         return back()->with('success', 'Task deleted.');
     }
 
@@ -694,24 +803,31 @@ class ChecklistController extends Controller
     {
         $this->authorizeEditTask($task);
 
-        $new = ChecklistTask::create([
-            'title'           => $task->title . ' (Copy)',
-            'description'     => $task->description,
-            'type'            => $task->type,
-            'scheduled_time'  => $task->scheduled_time,
-            'submission_type' => $task->submission_type,
-            'ai_prompt'       => $task->ai_prompt,
-            'approval_prompt' => $task->approval_prompt,
-            'is_active'       => $task->is_active,
-            'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
-            'required_photos' => $task->required_photos,
-            'frequency'       => $task->frequency,
-            'frequency_day'   => $task->frequency_day,
-            'department'      => $task->department,
-            'created_by'      => Auth::id(),
-        ]);
+        DB::transaction(function () use ($task) {
+            $new = ChecklistTask::create([
+                'title'           => $task->title . ' (Copy)',
+                'description'     => $task->description,
+                'type'            => $task->type,
+                'scheduled_time'  => $task->scheduled_time,
+                'submission_type' => $task->submission_type,
+                'ai_prompt'       => $task->ai_prompt,
+                'approval_prompt' => $task->approval_prompt,
+                'is_active'       => $task->is_active,
+                'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
+                'required_photos' => $task->required_photos,
+                'frequency'       => $task->frequency,
+                'frequency_day'   => $task->frequency_day,
+                'department'      => $task->department,
+                'created_by'      => Auth::id(),
+            ]);
 
-        $new->assignedUsers()->sync($task->assignedUsers->pluck('id'));
+            $new->assignedUsers()->sync($task->assignedUsers->pluck('id'));
+
+            $this->logTaskChange($new->id, 'duplicated', [
+                'copy_of' => [null, "#{$task->id} {$task->title}"],
+                'title'   => [null, $new->title],
+            ]);
+        });
 
         return back()->with('success', 'Task duplicated! Edit the copy to rename it.');
     }
@@ -732,13 +848,19 @@ class ChecklistController extends Controller
             ? []
             : array_filter((array) $request->input('user_ids', []));
         $count   = 0;
-        foreach ($request->input('task_ids') as $taskId) {
-            $task = ChecklistTask::find($taskId);
-            if ($task) {
-                $task->assignedUsers()->sync($userIds);
-                $count++;
+        DB::transaction(function () use ($request, $userIds, &$count) {
+            foreach ($request->input('task_ids') as $taskId) {
+                $task = ChecklistTask::find($taskId);
+                if ($task) {
+                    $beforeIds = $this->idList($task->assignedUsers()->pluck('users.id')->all());
+                    $task->assignedUsers()->sync($userIds);
+                    $count++;
+                    if ($beforeIds !== $this->idList($userIds)) {
+                        $this->logTaskChange($task->id, 'bulk_assigned', ['assigned_users' => [$beforeIds, $this->idList($userIds)]]);
+                    }
+                }
             }
-        }
+        });
 
         return back()->with('success', $count . ' task(s) updated.');
     }
@@ -753,8 +875,7 @@ class ChecklistController extends Controller
         ]);
         $this->authorizeManageTasks($request->input('task_ids'));
 
-        $count = ChecklistTask::whereIn('id', $request->input('task_ids'))
-            ->update(['type' => $request->input('type')]);
+        $count = $this->bulkUpdateLogged($request->input('task_ids'), 'type', $request->input('type'), 'bulk_type');
 
         return back()->with('success', $count . ' task(s) updated.');
     }
@@ -769,8 +890,7 @@ class ChecklistController extends Controller
         ]);
         $this->authorizeManageTasks($request->input('task_ids'));
 
-        $count = ChecklistTask::whereIn('id', $request->input('task_ids'))
-            ->update(['submission_type' => $request->input('submission_type')]);
+        $count = $this->bulkUpdateLogged($request->input('task_ids'), 'submission_type', $request->input('submission_type'), 'bulk_submission_type');
 
         return back()->with('success', $count . ' task(s) updated.');
     }
@@ -779,9 +899,17 @@ class ChecklistController extends Controller
     {
         $this->authorizeManageTasks((array) $request->input('order', []), true);
 
-        foreach ($request->input('order', []) as $index => $id) {
-            ChecklistTask::where('id', $id)->update(['sort_order' => $index]);
-        }
+        $order = (array) $request->input('order', []);
+        DB::transaction(function () use ($order) {
+            $before = ChecklistTask::whereIn('id', $order)->pluck('sort_order', 'id')->all();
+            foreach ($order as $index => $id) {
+                ChecklistTask::where('id', $id)->update(['sort_order' => $index]);
+                if (isset($before[$id]) && (int) $before[$id] !== (int) $index) {
+                    $this->logTaskChange((int) $id, 'reordered', ['sort_order' => [(int) $before[$id], (int) $index]]);
+                    $before[$id] = $index;
+                }
+            }
+        });
         return response()->json(['ok' => true]);
     }
 
@@ -999,11 +1127,17 @@ class ChecklistController extends Controller
         return $this->isCeo() || $this->isOicOf($task->department);
     }
 
-    /** Edit, delete, duplicate: pati ang gumawa ng task. */
-    private function authorizeEditTask(ChecklistTask $task): void
+    /** Edit, delete, duplicate (at ang kasaysayan ng task): pati ang gumawa ng task. */
+    private function canEditTask(ChecklistTask $task): bool
     {
         $isCreator = $task->created_by !== null && (int) $task->created_by === (int) Auth::id();
-        if (!$this->canManageTask($task) && !$isCreator) {
+
+        return $this->canManageTask($task) || $isCreator;
+    }
+
+    private function authorizeEditTask(ChecklistTask $task): void
+    {
+        if (!$this->canEditTask($task)) {
             $this->refuse('Hindi mo puwedeng baguhin ang task na ito.');
         }
     }
@@ -1044,6 +1178,70 @@ class ChecklistController extends Controller
             throw new HttpResponseException(response()->json(['ok' => false, 'message' => $message], 403));
         }
         abort(403, $message);
+    }
+
+    // ── Change log ng mga task ────────────────────────────────────────────────
+
+    /** Ang mga field ng task na sinusulat sa checklist_task_changes kapag nagbago. */
+    private const LOGGED_TASK_FIELDS = [
+        'title', 'description', 'type', 'is_active', 'scheduled_time', 'submission_type', 'ai_prompt',
+        'approval_prompt', 'required_photos', 'frequency', 'frequency_day', 'department',
+    ];
+
+    /** Isang row ng kasaysayan, ng naka-login na user. Kapag walang nagbago, walang row. */
+    private function logTaskChange(int $taskId, string $action, array $changes): void
+    {
+        if (empty($changes)) {
+            return;
+        }
+        ChecklistTaskChange::create([
+            'checklist_task_id' => $taskId,
+            'user_id'           => Auth::id(),
+            'action'            => $action,
+            'changes'           => $changes,
+        ]);
+    }
+
+    /** {field: [before, after]} ng binago ng fill(), bago i-save. */
+    private function dirtyChanges(ChecklistTask $task): array
+    {
+        $changes = [];
+        foreach (array_keys($task->getDirty()) as $field) {
+            $before = $task->getOriginal($field);
+            $after  = $task->getAttribute($field);
+            // "08:00" at "08:00:00" ay iisang oras (time input vs TIME column)
+            if ($field === 'scheduled_time' && substr((string) $before, 0, 5) === substr((string) $after, 0, 5)) {
+                continue;
+            }
+            $changes[$field] = [$before, $after];
+        }
+
+        return $changes;
+    }
+
+    /** Ayos na listahan ng user id, para maikumpara ang dati at bagong assignees. */
+    private function idList(array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', array_filter($ids))));
+        sort($ids);
+
+        return $ids;
+    }
+
+    /** Bulk na pagpalit ng isang column; may row lang ang mga task na talagang nagbago. */
+    private function bulkUpdateLogged(array $ids, string $field, string $value, string $action): int
+    {
+        return DB::transaction(function () use ($ids, $field, $value, $action) {
+            $before = ChecklistTask::whereIn('id', $ids)->pluck($field, 'id');
+            $count  = ChecklistTask::whereIn('id', $ids)->update([$field => $value]);
+            foreach ($before as $id => $old) {
+                if ((string) $old !== $value) {
+                    $this->logTaskChange((int) $id, $action, [$field => [$old, $value]]);
+                }
+            }
+
+            return $count;
+        });
     }
 
     private function runAutoAnalysis(ChecklistSubmission $submission): void

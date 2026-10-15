@@ -123,7 +123,16 @@ abstract class ChecklistTestCase extends TestCase
             $t->string('verdict')->nullable();
             $t->timestamps();
         });
+
+        // Ang mga mas bagong checklist table ay sqlite-safe: ang migration mismo ang nagpapatakbo.
+        foreach (self::MIGRATIONS as $file) {
+            (require database_path("migrations/$file"))->up();
+        }
     }
+
+    private const MIGRATIONS = [
+        '2026_10_15_000001_create_checklist_task_changes_table.php',
+    ];
 
     protected function user(string $role, ?string $department = null, string $name = 'Tester'): User
     {

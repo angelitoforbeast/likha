@@ -30,6 +30,10 @@
              class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
             📋 View Report
           </a>
+          <a href="{{ route('checklist.history') }}"
+             class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+            🕘 History
+          </a>
           <a href="{{ route('checklist.index') }}"
              class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
             ← Checklist
@@ -537,6 +541,10 @@
                         Del
                       </button>
                     </form>
+                    @if(in_array($t->id, $editableIds))
+                      <a href="{{ route('checklist.history', ['task' => $t->id]) }}"
+                         class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-600">History</a>
+                    @endif
                   </div>
                 </td>
               </tr>
