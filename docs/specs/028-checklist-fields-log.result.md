@@ -176,3 +176,50 @@ None (fast mode, no stories file for this brief).
 ## Conflicts
 
 None between the brief and the project's instructions.
+
+## Amendment 028-1
+
+Three changes, each its own commit, in the order asked.
+
+| Commit | What |
+| --- | --- |
+| `9c38689` | `git merge develop` (b594f45, the role assignment page guard of brief 027): no conflicts. It brought `RoleAssignmentController`, `routes/web.php` (the `/assign-roles` lines; this branch's `/checklist/manage/history` line is elsewhere in the file), the 027 docs and `tests/Feature/Auth/AssignRolesGuardTest.php` |
+| `ae0f207` | An OIC's department when the profile has none |
+| `96be897` | Group tasks in the multi-day report's missed days |
+
+**1. OIC department from the role.** One helper, `oicDepartment()`: the profile's department, trimmed and lowercased;
+when it is empty, the part of the role before "- OIC" (spaces around the dash optional, any case: "Marketing - OIC"
+gives "marketing", "Data Encoder - OIC" gives "data encoder"); empty when neither gives one (an OIC with neither still
+matches no department). A filled profile department wins over the role. Used by `isOicOf()` (so: edit, delete,
+duplicate, reorder, bulk actions, the AI checks on submissions of the department, and history visibility) and by the
+`manage()` listing, which now compares `LOWER(TRIM(department))` with it instead of an exact match (same rule as
+`isOicOf()`; works on MySQL, pgsql and sqlite).
+
+**2. Group tasks in "Over several days".** For a `group` task (or no submission type, the column's default), a day
+on which anyone submitted it is done for the whole team: it no longer makes that day a missed day for any assignee.
+Individual tasks still count per person. "Days with a due task" is unchanged (the task was still due for each
+assignee); only "Missed days" changes, on the page and in "CSV per person". The page's note under "Per person" now
+says "(a group task one teammate did is done for all)". A day stays missed when the person also had an individual
+task due that day and submitted nothing.
+
+**Tests added**
+
+| Test | Result |
+| --- | --- |
+| OIC "Marketing - OIC" with an empty profile department may edit a "Marketing" task, not an "Encoders" one; "Data Encoder - OIC" matches " data encoder"; a filled profile department ("Encoders") is used and beats the role | 5 pass |
+| The manage list and the task history of that OIC follow the department from the role (a "marketing " task listed and its history open; the "Encoders" task neither) | pass |
+| A group task with three assignees where one submitted: zero missed days for all three that day; an individual task's assignee who did not submit still has one; same in the CSV | pass |
+
+**Red runs:** the OIC cases failed with `Expected response status code [302] but received 403` ("role gives
+Marketing", "two words, other case and spaces") and the manage list did not contain the Marketing task; the group
+case failed with `Failed asserting that two arrays are identical` (`[1, 1]` instead of `[1, 0]` for the second
+assignee).
+
+**Full suite after the amendment** (`vendor/bin/phpunit`): 1078 tests (1064 + 7 from brief 027 + 7 new), 14918
+assertions, 1 error and 1 failure, both known: `ImportStartTest` (`storage/app/credentials.json` missing in a fresh
+worktree) and `ExampleTest` (302 instead of 200). No other failure. `php -l` clean on the controller.
+
+**For the owner, after release:** ask a Marketing OIC (profile department empty, role "Marketing - OIC") to open
+Checklist → Manage: they see the Marketing tasks and can **Edit** one they did not create and open its **History**;
+an Encoders task is not in their list. In **Over several days**, a group task done by one teammate shows no missed day
+for the others in **Per person**.
