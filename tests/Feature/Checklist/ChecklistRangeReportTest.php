@@ -131,6 +131,29 @@ class ChecklistRangeReportTest extends ChecklistTestCase
         $this->assertSame([$diligent->id, 0], [$people[1]['user']->id, $people[1]['missed']]);
     }
 
+    public function test_a_group_task_done_by_one_assignee_is_no_missed_day_for_the_team_but_an_individual_task_is(): void
+    {
+        [$ana, $ben, $cris] = [$this->user('Staff', null, 'Ana'), $this->user('Staff', null, 'Ben'), $this->user('Staff', null, 'Cris')];
+        [$dan, $eli]        = [$this->user('Staff', null, 'Dan'), $this->user('Staff', null, 'Eli')];
+        $group = $this->task(['title' => 'Bilangin ang stock', 'created_at' => '2026-09-01', 'submission_type' => 'group'], [$ana, $ben, $cris]);
+        $solo  = $this->task(['title' => 'Sariling ulat', 'created_at' => '2026-09-01', 'submission_type' => 'individual'], [$dan, $eli]);
+        $this->submission($group, $ana, '2026-10-07');
+        $this->submission($solo, $dan, '2026-10-07');
+        $day = ['from' => '2026-10-07', 'to' => '2026-10-07'];
+
+        $missed = collect($this->range($day)->viewData('people'))->mapWithKeys(fn ($p) => [$p['user']->id => [$p['dueDays'], $p['missed']]]);
+        $this->assertSame([1, 0], $missed[$ana->id]);
+        $this->assertSame([1, 0], $missed[$ben->id]);
+        $this->assertSame([1, 0], $missed[$cris->id]);
+        $this->assertSame([1, 0], $missed[$dan->id]);
+        $this->assertSame([1, 1], $missed[$eli->id]);   // individual: bawat tao pa rin
+
+        $csv = collect(array_map('str_getcsv', explode("\n", trim($this->range($day + ['csv' => 'people'])->streamedContent()))))
+            ->keyBy(0);
+        $this->assertSame('0', $csv[$ben->name][5]);
+        $this->assertSame('1', $csv[$eli->name][5]);
+    }
+
     public function test_the_csv_downloads_carry_a_header_and_a_row_per_task_and_per_person(): void
     {
         // Pangalang mukhang formula (galing sa public registration): hindi dapat basahin ng Excel bilang formula

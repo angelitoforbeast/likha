@@ -377,6 +377,7 @@ class ChecklistController extends Controller
         // Ang submission sa araw na hindi due ay "done" sa grid pero hindi bilang sa mga %.
         $taskRows    = [];
         $userDueDays = [];   // user_id => [day] = true
+        $userOpenDays = [];  // user_id => [day] = true: may due task na hindi pa tapos para sa kanya
         foreach ($tasks as $t) {
             $cells = [];
             $due   = 0;
@@ -392,8 +393,14 @@ class ChecklistController extends Controller
                     $done++;
                     $summary[$dayStr]['done']++;
                 }
+                // Group task na may submission na noong araw: tapos na para sa buong team, kaya hindi
+                // "missed" ng kahit sinong naka-assign. Ang individual ay bawat tao pa rin.
+                $teamDone = $submitted && ($t->submission_type ?? 'group') === 'group';
                 foreach ($t->assignedUsers as $u) {
                     $userDueDays[$u->id][$dayStr] = true;
+                    if (!$teamDone) {
+                        $userOpenDays[$u->id][$dayStr] = true;
+                    }
                 }
             }
             $subs = $taskSubs[$t->id]['subs'] ?? 0;
@@ -428,7 +435,7 @@ class ChecklistController extends Controller
                 'approved'    => $stats['approved'] ?? 0,
                 'notApproved' => $stats['notApproved'] ?? 0,
                 'dueDays'     => count($dueDays),
-                'missed'      => count(array_filter($dueDays, fn ($d) => !isset($stats['days'][$d]))),
+                'missed'      => count(array_filter(array_keys($userOpenDays[$u->id] ?? []), fn ($d) => !isset($stats['days'][$d]))),
             ];
         }
         usort($people, fn ($a, $b) => [$b['missed'], $a['user']->name] <=> [$a['missed'], $b['user']->name]);
