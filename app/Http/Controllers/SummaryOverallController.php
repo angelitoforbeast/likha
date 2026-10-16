@@ -1094,6 +1094,24 @@ class SummaryOverallController extends Controller
             ];
         }
 
+        // ===== Gaano na ka-final ang bawat row (dagdag na field lang; walang binagong formula)
+        // Realized = actual Net Profit; Expected = Projected Net Profit (sa TOTAL: suma ng mga row);
+        // Pending = Expected − Realized; Settled % = (delivered + returned + for return) ÷ proceed;
+        // final = walang hold at walang in transit.
+        foreach ($rows as &$r) {
+            $realized = (float)($r['net_profit'] ?? 0.0);
+            $expected = !empty($r['is_total']) ? ($sumProjNP ?? 0.0) : (float)($r['projected_net_profit'] ?? 0.0);
+            $proc     = (int)($r['proceed'] ?? 0);
+            $doneCnt  = (int)($r['delivered'] ?? 0) + (int)($r['returned'] ?? 0) + (int)($r['for_return'] ?? 0);
+
+            $r['realized_net_profit'] = $realized;
+            $r['expected_net_profit'] = $expected;
+            $r['pending_net_profit']  = $expected - $realized;
+            $r['settled_pct']         = $proc > 0 ? max(0.0, min(100.0, $doneCnt / $proc * 100.0)) : null;
+            $r['is_final']            = (int)($r['hold'] ?? 0) <= 0 && (int)($r['in_transit'] ?? 0) === 0;
+        }
+        unset($r);
+
         // ===== TOP SUMMARY
         $topSummary = [];
         if (!$AGGREGATE_RANGE) {

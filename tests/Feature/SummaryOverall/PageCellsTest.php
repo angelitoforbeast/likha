@@ -68,6 +68,11 @@ class PageCellsTest extends SummaryOverallTestCase
             [['cellClass', 'orders', ['orders' => 1]], ''],
             [['cellStyle', 'net_profit_pct', ['net_profit_pct' => 20]], ['backgroundColor' => '#00ff00', 'color' => '#052e16']],
             [['cellStyle', 'orders', ['orders' => 1]], ''],
+            [['cellText', 'settlement', ['realized_net_profit' => 863.4, 'expected_net_profit' => 2431.98, 'pending_net_profit' => 1568.58, 'settled_pct' => 55.556, 'is_final' => false]],
+                "₱863.40 → ₱2,431.98\npending ₱1,568.58\n55.56% settled"],
+            [['cellText', 'settlement', ['realized_net_profit' => -150, 'expected_net_profit' => -150, 'pending_net_profit' => 0, 'settled_pct' => null, 'is_final' => true]],
+                "₱-150.00 → ₱-150.00\npending ₱0.00\n— settled · ✓ final"],
+            [['cellClass', 'settlement', ['is_final' => true]], 'whitespace-pre-line leading-tight text-[11px] text-green-700'],
         ];
         $values = $this->js($this->page(), array_column($cases, 0));
 

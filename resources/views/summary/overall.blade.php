@@ -433,6 +433,7 @@
         { key: 'tcpr',                       label: 'TCPR',                    align: 'right', sortable: true  },
         { key: 'net_profit_pct',             label: 'Net Profit(%)',            align: 'right', sortable: true  },
         { key: 'projected_net_profit_pct',   label: 'Projected Net Profit(%)', align: 'right', sortable: true  },
+        { key: 'settlement',                 label: 'Realized → Expected',     align: 'right', sortable: true, sortKey: 'pending_net_profit' },
       ];
 
       const DEFAULT_FULL_COLS = [
@@ -464,6 +465,7 @@
         { key: 'cpp',                        label: 'CPP',                     align: 'right', sortable: true  },
         { key: 'projected_net_profit',       label: 'Projected Net Profit',    align: 'right', sortable: false },
         { key: 'projected_net_profit_pct',   label: 'Projected Net Profit(%)', align: 'right', sortable: true  },
+        { key: 'settlement',                 label: 'Realized → Expected',     align: 'right', sortable: true, sortKey: 'pending_net_profit' },
       ];
 
       const LS_KEY_LIMITED = 'likha_col_order_limited';
@@ -639,6 +641,11 @@
             case 'rts_pct': case 'actual_rts_pct': case 'in_transit_pct': case 'tcpr': case 'net_profit_pct':
               return this.percent(row[key]);
             case 'projected_net_profit_pct': return this.percent(this.projectedPct(row));
+            // Realized → Expected, ang pending, at gaano na ka-settled (isang cell para walang horizontal scroll)
+            case 'settlement':
+              return this.money(row.realized_net_profit) + ' → ' + this.money(row.expected_net_profit)
+                + '\npending ' + this.money(row.pending_net_profit)
+                + '\n' + this.percent(row.settled_pct) + ' settled' + (row.is_final ? ' · ✓ final' : '');
             default: return this.num(row[key]);
           }
         },
@@ -648,6 +655,7 @@
             case 'tcpr': return 'px-2 py-0.5 rounded ' + this.tcprClass(row.tcpr);
             case 'net_profit_pct': return 'px-2 py-0.5 rounded font-bold ' + this.netClass(row.net_profit_pct);
             case 'projected_net_profit_pct': return 'px-2 py-0.5 rounded font-bold ' + this.netClass(this.projectedPct(row));
+            case 'settlement': return 'whitespace-pre-line leading-tight text-[11px]' + (row.is_final ? ' text-green-700' : '');
             default: return '';
           }
         },
