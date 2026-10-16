@@ -102,6 +102,23 @@ class SyncAllTest extends BotcakeApiTestCase
         $this->assertSame([2, 1], [$this->progress()['done'], $this->progress()['failed']]);
     }
 
+    public function test_a_job_whose_run_state_is_gone_logs_a_warning_and_stops(): void
+    {
+        Queue::fake();
+        Http::fake();
+        $this->press()->assertOk();
+        $job = Queue::pushed(SyncAllBotcakeCustomersJob::class)->sole();
+        Cache::forget(BotcakeSyncAll::STATE); // hal. cache:clear sa deploy
+        \Illuminate\Support\Facades\Log::spy();
+
+        $job->handle(app(BotcakeCustomerSync::class), app(BotcakeSyncAll::class));
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->once()
+            ->withArgs(fn ($msg, $ctx = []) => str_contains($msg, 'Sync lahat') && $ctx === ['run_id' => $job->runId, 'index' => 0]);
+        Http::assertNothingSent();
+        Queue::assertPushed(SyncAllBotcakeCustomersJob::class, 1);
+    }
+
     public function test_a_second_press_during_a_run_starts_nothing(): void
     {
         Queue::fake();

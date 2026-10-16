@@ -9,6 +9,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -30,7 +32,14 @@ class SyncAllBotcakeCustomersJob implements ShouldQueue
     public function handle(BotcakeCustomerSync $sync, BotcakeSyncAll $all): void
     {
         $state = $all->state($this->runId);
-        if (!$state) return;
+        if (!$state) {
+            // Walang state (hal. cache:clear sa deploy, o naubos ang TTL sa mahabang backlog): titigil ang run, kaya
+            // nag-iiwan ng bakas. Ang job ng ibang run o ng tapos na run ay tahimik na humihinto.
+            if (!Cache::has(BotcakeSyncAll::STATE)) {
+                Log::warning('Sync lahat: wala na ang state ng run sa cache; tumigil ang run', ['run_id' => $this->runId, 'index' => $this->index]);
+            }
+            return;
+        }
 
         $page = $state['pages'][$this->index] ?? null;
         if ($page === null) {
