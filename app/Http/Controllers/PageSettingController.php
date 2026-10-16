@@ -8,6 +8,7 @@ use App\Models\PageSetting;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakeException;
+use App\Services\BotcakeSyncAll;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
 use Illuminate\Http\Request;
@@ -219,6 +220,16 @@ class PageSettingController extends Controller
         SyncBotcakeCustomersJob::dispatch($page);
 
         return redirect()->route('page-settings.index')->with('success', $page . ': naka-queue ang Botcake sync. I-refresh mamaya para sa bilang.');
+    }
+
+    /** "Sync lahat": isang run lang sabay; ang pangalawang pindot habang tumatakbo ay walang sinisimulan. */
+    public function syncAll(BotcakeSyncAll $all)
+    {
+        $this->checkAccess();
+
+        $started = $all->start();
+
+        return response()->json(['status' => $started ? 'started' : 'running', 'sync_all' => $started ?? $all->progress()]);
     }
 
     public function deactivate(int $id)

@@ -60,6 +60,8 @@
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
         <button id="test-all" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">Test lahat ng token</button>
         <span id="test-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
+        <button id="sync-all" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50">Sync lahat</button>
+        <span id="sync-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
     </div>
 
     {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
@@ -82,6 +84,7 @@
          data-test-token-url="{{ route('page-settings.test-token') }}"
          data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
+         data-sync-all-url="{{ route('page-settings.sync-all') }}"
          data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}"
          data-customers-url="{{ route('page-settings.customers') }}">
         <table id="grid-table" class="text-sm border-collapse min-w-full"></table>
@@ -395,6 +398,7 @@
             since = data.now;
             document.getElementById('sync-lock').classList.toggle('hidden', !data.sync_lock);
             document.getElementById('sync-lock-since').textContent = data.sync_lock || '';
+            showSyncAll(data.sync_all);
             if (structure || data.cells.some(c => c.key === 'botcake.page_id' || c.key === 'botcake.token')) render();
         } catch (err) { /* susubukan ulit sa susunod na poll */ }
     }
@@ -483,6 +487,35 @@
         btn.disabled = false;
     });
 
+    // ---- Sync lahat: sa queue, isa-isang page; ang progreso ay mula sa poll ----
+
+    function showSyncAll(p) {
+        const out = document.getElementById('sync-all-status'), btn = document.getElementById('sync-all');
+        const running = !!(p && !p.finished_at);
+        btn.disabled = running;
+        if (!p) { out.textContent = ''; return; }
+        out.textContent = running
+            ? 'Sync lahat: ' + p.done + ' / ' + p.total + (p.current ? ', ngayon: ' + p.current : '')
+                + (p.waiting ? ' (naghihintay matapos ang ibang sync)' : '')
+            : 'Sync lahat tapos (' + p.finished_at + '): ' + p.ok + ' ok, ' + p.failed + ' failed sa ' + p.total + ' page.';
+    }
+
+    document.getElementById('sync-all').addEventListener('click', async e => {
+        const btn = e.currentTarget;
+        if (!confirm('I-sync ang lahat ng page na may Botcake ID at token (isa-isa, sa queue)?')) return;
+        btn.disabled = true;
+        try {
+            const res = await fetch(url.syncAllUrl, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { notice(data.message || 'Hindi nasimulan ang Sync lahat.', 'text-red-600'); btn.disabled = false; return; }
+            showSyncAll(data.sync_all);
+            if (data.status === 'running') notice('May tumatakbo nang Sync lahat; walang bagong sinimulan.', 'text-amber-700');
+        } catch (err) {
+            notice('Walang koneksyon: hindi nasimulan ang Sync lahat.', 'text-red-600');
+            btn.disabled = false;
+        }
+    });
+
     // ---- + Page, + Column, filter ----
 
     document.getElementById('add-page').addEventListener('submit', async e => {
@@ -518,6 +551,7 @@
 
     document.getElementById('filter').addEventListener('input', () => render());
 
+    showSyncAll(initial.sync_all);
     render();
 })();
 </script>

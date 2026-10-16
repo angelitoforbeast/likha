@@ -31,7 +31,7 @@ class PageSettingsGrid
         'botcake.token_status'     => 'Token status',
     ];
 
-    public function __construct(private PageSettings $settings, private BotcakeCustomerSync $sync)
+    public function __construct(private PageSettings $settings, private BotcakeCustomerSync $sync, private BotcakeSyncAll $syncAll)
     {
     }
 
@@ -71,7 +71,7 @@ class PageSettingsGrid
 
         return [
             'columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now,
-            'sync_lock' => $this->syncLock(), 'order_days' => $this->orderDays(),
+            'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->progress(), 'order_days' => $this->orderDays(),
         ];
     }
 
@@ -135,7 +135,10 @@ class PageSettingsGrid
         $runPages = BotcakePsidImportRun::where('source', 'api')->where('updated_at', '>=', $since)->distinct()->pluck('page_name')
             ->filter()->map(fn ($p) => $this->settings->pageKey($p))->unique()->values()->all();
 
-        return ['cells' => array_values($cells), 'info' => $runPages ? $this->info($runPages) : [], 'now' => $now, 'sync_lock' => $this->syncLock()];
+        return [
+            'cells' => array_values($cells), 'info' => $runPages ? $this->info($runPages) : [], 'now' => $now,
+            'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->progress(),
+        ];
     }
 
     /** Ang dating values ng isang cell (pinalitan o na-clear), pinakabago muna. Secret = huling 4 lang. */

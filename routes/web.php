@@ -252,6 +252,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name(
     Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1')->name('test-token');
     Route::post('/test-token/one', [PageSettingController::class, 'testTokenJson'])->middleware('throttle:120,1')->name('test-token-one');
     Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
+    Route::post('/sync-all', [PageSettingController::class, 'syncAll'])->middleware('throttle:10,1')->name('sync-all');
     Route::get('/customers', [BotcakeCustomersController::class, 'index'])->name('customers');
     Route::get('/psid-coverage', [PsidCoverageController::class, 'index'])->name('psid-coverage');
     Route::get('/psid-coverage/orders', [PsidCoverageController::class, 'orders'])->name('psid-coverage.orders');
