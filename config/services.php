@@ -74,6 +74,13 @@ return [
     'key' => env('AUTOMATION_KEY'),
 ],
 
+    // Botcake customer sync (botcake:sync-customers sa schedule). Naka-off kapag walang laman.
+    'botcake' => [
+        'sync_enabled' => (bool) env('BOTCAKE_SYNC_ENABLED', false),
+        // Max na batch (10 customer bawat isa) kada incremental run ng isang page; walang cap ang --full.
+        'sync_max_batches' => (int) env('BOTCAKE_SYNC_MAX_BATCHES', 300),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),

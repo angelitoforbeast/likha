@@ -16,7 +16,7 @@ class BotcakePsidGsheetController extends Controller
         $settings = BotcakePsidSetting::all();
 
         // If user refreshed, we can show latest run (optional)
-        $latestRun = BotcakePsidImportRun::latest('id')->first();
+        $latestRun = BotcakePsidImportRun::where('source', 'sheet')->latest('id')->first(); // hindi ang Botcake API syncs
 
         return view('botcake.psid.import', [
             'settings'  => $settings,
@@ -80,6 +80,12 @@ class BotcakePsidGsheetController extends Controller
             'total_imported'   => $run->total_imported,
             'total_not_existing'=> $run->total_not_existing,
             'total_skipped'    => $run->total_skipped,
+            'total_waiting'    => $run->total_waiting,
+            'total_matched_from_waiting' => $run->total_matched_from_waiting,
+            'total_expired'    => $run->total_expired,
+            'total_conflicts'  => $run->total_conflicts,
+            'total_reorder_copies' => $run->total_reorder_copies,
+            'total_deleted_rows' => $run->total_deleted_rows,
             'current_setting_id'=> $run->current_setting_id,
             'current_gsheet_name'=> $run->current_gsheet_name,
             'current_sheet_name'=> $run->current_sheet_name,

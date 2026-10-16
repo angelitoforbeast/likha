@@ -55,6 +55,8 @@ use App\Http\Controllers\PaymentActivityController;
 use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
+use App\Http\Controllers\PageSettingController;
+use App\Http\Controllers\PsidCoverageController;
 use App\Http\Controllers\JntStatusController;
 use App\Http\Controllers\Encoder\Tools\AiController;
 use App\Http\Controllers\JntChatblastGsheetController;
@@ -236,6 +238,17 @@ Route::get('/encoder/tools/ai', [AiController::class, 'index'])->name('encoder.t
 Route::post('/encoder/tools/ai/run', [AiController::class, 'run'])->name('encoder.tools.ai.run');
 Route::get('/encoder/tools/ai/health', [AiController::class, 'health'])->middleware('auth');
 
+
+// Settings kada page (Page | Provider | Key | Value). CEO lang: ang controller ang nagbabalik ng 404 sa iba.
+Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name('page-settings.')->group(function () {
+    Route::get('/', [PageSettingController::class, 'index'])->name('index');
+    Route::post('/', [PageSettingController::class, 'store'])->name('store');
+    Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
+    Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1')->name('test-token');
+    Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
+    Route::get('/psid-coverage', [PsidCoverageController::class, 'index'])->name('psid-coverage');
+    Route::get('/psid-coverage/orders', [PsidCoverageController::class, 'orders'])->name('psid-coverage.orders');
+});
 
 Route::prefix('botcake/psid')->group(function () {
 
