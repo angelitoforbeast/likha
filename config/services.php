@@ -74,6 +74,11 @@ return [
     'key' => env('AUTOMATION_KEY'),
 ],
 
+    // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
+    'staff_feed' => [
+        'key' => env('STAFF_FEED_KEY'),
+    ],
+
 
 
 

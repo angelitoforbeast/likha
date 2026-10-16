@@ -1,0 +1,259 @@
+<?php
+
+namespace Tests\Feature\StaffActivity;
+
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\DataProvider;
+
+/**
+ * Part B: ang read-only staff feed (/api/staff-status, /api/staff-events) sa likod ng X-STAFF-FEED-KEY.
+ */
+class StaffFeedApiTest extends StaffActivityTestCase
+{
+    private const KEY = 'test-feed-key-placeholder';
+
+    private const STAFF_KEYS = [
+        'user_id', 'name', 'role', 'department', 'last_seen_at', 'last_seen_path', 'last_login_at',
+        'online', 'last_event', 'counts', 'checklist_due_not_submitted',
+    ];
+
+    private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'method', 'status', 'ref', 'created_at'];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.staff_feed.key' => self::KEY, 'session.driver' => 'database']);
+        Carbon::setTestNow('2026-10-16 10:00:00'); // Biyernes
+
+        Schema::create('sessions', function (Blueprint $t) {
+            $t->string('id')->primary();
+            $t->foreignId('user_id')->nullable();
+            $t->string('ip_address', 45)->nullable();
+            $t->text('user_agent')->nullable();
+            $t->longText('payload');
+            $t->integer('last_activity');
+        });
+        Schema::create('checklist_tasks', function (Blueprint $t) {
+            $t->id();
+            $t->string('title');
+            $t->string('frequency')->default('daily');
+            $t->unsignedTinyInteger('frequency_day')->nullable();
+            $t->boolean('is_active')->default(true);
+            $t->integer('sort_order')->default(0);
+            $t->string('submission_type')->default('group');
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        Schema::create('checklist_task_users', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('checklist_task_id');
+            $t->foreignId('user_id');
+            $t->timestamps();
+        });
+        Schema::create('checklist_submissions', function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('checklist_task_id');
+            $t->foreignId('user_id');
+            $t->date('date');
+            $t->text('notes')->nullable();
+            $t->timestamps();
+        });
+    }
+
+    private function feed(string $uri, ?string $key = self::KEY)
+    {
+        return $this->getJson($uri, $key === null ? [] : ['X-STAFF-FEED-KEY' => $key]);
+    }
+
+    private function event(int $userId, string $kind, string $at, string $role = 'Data Encoder'): void
+    {
+        DB::table('staff_events')->insert([
+            'user_id' => $userId, 'role' => $role, 'kind' => $kind, 'method' => 'POST', 'status' => 302,
+            'ref' => '9', 'created_at' => $at,
+        ]);
+    }
+
+    private function checklistTask(string $title, array $users, array $attrs = []): int
+    {
+        $id = DB::table('checklist_tasks')->insertGetId(array_merge([
+            'title' => $title, 'frequency' => 'daily', 'is_active' => true,
+            'created_at' => '2026-10-01 08:00:00', 'updated_at' => '2026-10-01 08:00:00',
+        ], $attrs));
+        foreach ($users as $u) {
+            DB::table('checklist_task_users')->insert(['checklist_task_id' => $id, 'user_id' => $u->id]);
+        }
+
+        return $id;
+    }
+
+    public static function badKeys(): array
+    {
+        return [
+            'no key'    => [null, null, 401],
+            'wrong key' => ['mali-na-key', null, 401],
+            'unset key' => [self::KEY, '', 503],
+        ];
+    }
+
+    #[DataProvider('badKeys')]
+    public function test_the_feed_refuses_without_the_right_key(?string $sent, ?string $configured, int $status): void
+    {
+        if ($configured !== null) {
+            config(['services.staff_feed.key' => $configured]);
+        }
+
+        $this->feed('/api/staff-status', $sent)->assertStatus($status);
+        $this->feed('/api/staff-events?since=2026-10-16', $sent)->assertStatus($status);
+    }
+
+    public function test_post_to_the_feed_routes_is_405(): void
+    {
+        foreach (['/api/staff-status', '/api/staff-events'] as $uri) {
+            $this->postJson($uri, [], ['X-STAFF-FEED-KEY' => self::KEY])->assertStatus(405);
+        }
+    }
+
+    public function test_status_has_exactly_the_documented_keys_and_no_private_data(): void
+    {
+        $user = $this->staff('Marketing', 'Staff', 'Sales');
+        DB::table('employee_profiles')->where('user_id', $user->id)->update(['phone' => '09170000000']);
+        DB::table('users')->where('id', $user->id)->update([
+            'last_seen_at' => '2026-10-16 09:58:00', 'last_seen_path' => 'checklist', 'last_login_at' => '2026-10-16 08:00:00',
+        ]);
+        DB::table('sessions')->insert(['id' => 'sess-secret', 'user_id' => $user->id, 'ip_address' => '10.9.8.7',
+            'user_agent' => 'AgentX', 'payload' => 'payload-secret', 'last_activity' => now()->subMinutes(3)->timestamp]);
+        $this->event($user->id, 'checklist.submit', '2026-10-16 09:30:00');
+        $inactive = $this->staff('Marketing');
+        DB::table('employee_profiles')->where('user_id', $inactive->id)->update(['status' => 'Inactive']);
+
+        $response = $this->feed('/api/staff-status')->assertOk();
+
+        $this->assertSame(['date', 'generated_at', 'staff'], array_keys($response->json()));
+        $this->assertSame('2026-10-16', $response->json('date'));
+        $this->assertCount(1, $response->json('staff'));
+        $row = $response->json('staff.0');
+        $this->assertSame(self::STAFF_KEYS, array_keys($row));
+        $this->assertSame(['kind', 'at'], array_keys($row['last_event']));
+        $this->assertSame($user->id, $row['user_id']);
+        $this->assertSame('Marketing', $row['role']);
+        $this->assertSame('Sales', $row['department']);
+        $this->assertSame('checklist', $row['last_seen_path']);
+        $this->assertSame('2026-10-16T09:58:00+08:00', $row['last_seen_at']);
+        $this->assertSame('2026-10-16T08:00:00+08:00', $row['last_login_at']);
+        $this->assertTrue($row['online']);
+        $this->assertSame(['kind' => 'checklist.submit', 'at' => '2026-10-16T09:30:00+08:00'], $row['last_event']);
+
+        foreach ([$user->email, '09170000000', 'sess-secret', '10.9.8.7', 'AgentX', 'payload-secret', 'EMP-'] as $secret) {
+            $this->assertStringNotContainsString($secret, $response->getContent());
+        }
+    }
+
+    public function test_online_is_false_after_10_minutes_and_null_when_sessions_are_not_in_the_database(): void
+    {
+        $user = $this->staff();
+        DB::table('sessions')->insert(['id' => 's1', 'user_id' => $user->id, 'payload' => 'x',
+            'last_activity' => now()->subMinutes(11)->timestamp]);
+
+        $this->assertFalse($this->feed('/api/staff-status')->json('staff.0.online'));
+
+        config(['session.driver' => 'file']);
+        $this->assertNull($this->feed('/api/staff-status')->json('staff.0.online'));
+    }
+
+    public function test_counts_per_kind_are_for_the_requested_manila_day(): void
+    {
+        $user = $this->staff();
+        $this->event($user->id, 'orders.save', '2026-10-14 23:59:59');
+        $this->event($user->id, 'orders.save', '2026-10-15 00:00:00');
+        $this->event($user->id, 'orders.save', '2026-10-15 18:00:00');
+        $this->event($user->id, 'login', '2026-10-15 08:00:00');
+        $this->event($user->id, 'orders.save', '2026-10-16 00:00:00');
+
+        $row = $this->feed('/api/staff-status?date=2026-10-15')->assertOk()->json('staff.0');
+
+        $this->assertSame(['login' => 1, 'orders.save' => 2], $row['counts']);
+        $this->assertSame('2026-10-16T00:00:00+08:00', $row['last_event']['at']);
+    }
+
+    public function test_a_bad_date_is_422(): void
+    {
+        $this->feed('/api/staff-status?date=16-10-2026')->assertStatus(422);
+    }
+
+    public function test_checklist_due_not_submitted_lists_due_tasks_without_a_submission_that_day(): void
+    {
+        $user = $this->staff();
+        $other = $this->staff();
+        $this->checklistTask('Bilangin ang stock', [$user]);
+        $doneId = $this->checklistTask('Linisin ang bodega', [$user]);
+        DB::table('checklist_submissions')->insert(['checklist_task_id' => $doneId, 'user_id' => $user->id, 'date' => '2026-10-16']);
+        $this->checklistTask('Lingguhang ulat (Biyernes)', [$user], ['frequency' => 'weekly', 'frequency_day' => 5]);
+        $this->checklistTask('Lingguhang ulat (Lunes)', [$user], ['frequency' => 'weekly', 'frequency_day' => 1]);
+        $this->checklistTask('Buwanang ulat', [$user], ['frequency' => 'monthly', 'frequency_day' => 16]);
+        $onceId = $this->checklistTask('Isang beses, tapos na', [$user], ['frequency' => 'once']);
+        DB::table('checklist_submissions')->insert(['checklist_task_id' => $onceId, 'user_id' => $user->id, 'date' => '2026-10-10']);
+        $this->checklistTask('Hindi aktibo', [$user], ['is_active' => false]);
+        $this->checklistTask('Bukas pa gagawin', [$user], ['created_at' => '2026-10-17 08:00:00']);
+        $this->checklistTask('Binura na', [$user], ['deleted_at' => '2026-10-15 12:00:00']);
+        $this->checklistTask('Sa iba naka-assign', [$other]);
+        $groupId = $this->checklistTask('Group: iba ang nag-submit', [$user, $other]);
+        DB::table('checklist_submissions')->insert(['checklist_task_id' => $groupId, 'user_id' => $other->id, 'date' => '2026-10-16']);
+        $indivId = $this->checklistTask('Individual: iba ang nag-submit', [$user, $other], ['submission_type' => 'individual']);
+        DB::table('checklist_submissions')->insert(['checklist_task_id' => $indivId, 'user_id' => $other->id, 'date' => '2026-10-16']);
+
+        $staff = collect($this->feed('/api/staff-status')->assertOk()->json('staff'))->keyBy('user_id');
+
+        $this->assertSame(
+            ['Bilangin ang stock', 'Lingguhang ulat (Biyernes)', 'Buwanang ulat', 'Individual: iba ang nag-submit'],
+            $staff[$user->id]['checklist_due_not_submitted']
+        );
+        $this->assertSame(['Sa iba naka-assign'], $staff[$other->id]['checklist_due_not_submitted']);
+    }
+
+    public function test_events_since_newest_first_with_exact_keys(): void
+    {
+        $a = $this->staff('Marketing');
+        $b = $this->staff('Data Encoder');
+        $this->event($a->id, 'old', '2026-10-15 09:00:00', 'Marketing');
+        $this->event($a->id, 'first', '2026-10-16 08:00:00', 'Marketing');
+        $this->event($b->id, 'second', '2026-10-16 09:00:00');
+
+        $response = $this->feed('/api/staff-events?since=2026-10-16 00:00:00')->assertOk();
+
+        $this->assertSame(['since', 'count', 'events'], array_keys($response->json()));
+        $this->assertSame(['second', 'first'], array_column($response->json('events'), 'kind'));
+        $this->assertSame(self::EVENT_KEYS, array_keys($response->json('events.0')));
+        $this->assertSame($b->name, $response->json('events.0.name'));
+        $this->assertSame('2026-10-16T09:00:00+08:00', $response->json('events.0.created_at'));
+        $this->assertStringNotContainsString($a->email, $response->getContent());
+
+        $this->assertSame(['first'], array_column(
+            $this->feed("/api/staff-events?since=2026-10-16&user_id={$a->id}")->json('events'), 'kind'
+        ));
+    }
+
+    public function test_events_limit_defaults_to_200_and_caps_at_1000(): void
+    {
+        $user = $this->staff();
+        $rows = [];
+        for ($i = 0; $i < 1001; $i++) {
+            $rows[] = ['user_id' => $user->id, 'kind' => 'k', 'created_at' => '2026-10-16 09:00:00'];
+        }
+        foreach (array_chunk($rows, 200) as $chunk) {
+            DB::table('staff_events')->insert($chunk);
+        }
+
+        $this->assertCount(200, $this->feed('/api/staff-events?since=2026-10-16')->json('events'));
+        $this->assertCount(3, $this->feed('/api/staff-events?since=2026-10-16&limit=3')->json('events'));
+        $this->assertCount(1000, $this->feed('/api/staff-events?since=2026-10-16&limit=5000')->json('events'));
+    }
+
+    public function test_events_without_a_valid_since_is_422(): void
+    {
+        $this->feed('/api/staff-events')->assertStatus(422);
+        $this->feed('/api/staff-events?since=hindi-petsa')->assertStatus(422);
+    }
+}
