@@ -84,3 +84,16 @@ Schedule::command('staff-events:prune')
     ->timezone('Asia/Manila')
     ->dailyAt('04:20')
     ->withoutOverlapping();
+
+// Botcake PSID import: kusa kada oras (lahat ng settings, walang cutoff), maliban sa 03:00.
+// 03:00 Manila: binubura muna sa sheet ang mga row na naitala na sa botcake_psids, saka ang import (tahimik na oras,
+// tuloy-tuloy ang dagdag ng Botcake). Naka-queue ang trabaho; ang lock sa job ang pumipigil sa dalawang sabay, kasama ang button.
+Schedule::command('botcake:psid-import')
+    ->timezone('Asia/Manila')
+    ->cron('0 0-2,4-23 * * *')
+    ->withoutOverlapping();
+
+Schedule::command('botcake:psid-import --clean-sheet')
+    ->timezone('Asia/Manila')
+    ->dailyAt('03:00')
+    ->withoutOverlapping();
