@@ -99,7 +99,7 @@ class BotcakeClient
                 throw new BotcakeException('Botcake: HTTP ' . $status);
             }
             if ($attempt >= $this->retries) {
-                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ' pagkatapos ng ' . $attempt . ' retry', false, $status === 429 ? 'rate_limited' : 'error');
+                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ($attempt ? ' pagkatapos ng ' . $attempt . ' retry' : ''), false, $status === 429 ? 'rate_limited' : 'error');
             }
 
             $wait = 2 ** ($attempt + 1); // 2, 4, 8

@@ -4,6 +4,7 @@ namespace Tests\Feature\PageSettings;
 
 use App\Services\PageSettings;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\Feature\Botcake\BotcakeApiTestCase;
 
 /** "Test lahat ng token": tinatawag ng browser ang JSON endpoint na ito kada page, isa-isa. */
@@ -49,6 +50,7 @@ class BulkTokenTestTest extends BotcakeApiTestCase
         if ($expected === 'error') {
             $this->assertNull($recorded, 'ang error ay hindi itinatala, gaya ng row button');
             $this->assertNull($res->json('cell'));
+            $this->assertSame('Botcake: HTTP 500', $res->json('error'), 'walang "pagkatapos ng 0 retry"');
         } else {
             $this->assertStringStartsWith($expected . ' ', (string) $recorded);
             $this->assertSame($recorded, $res->json('cell.value'));
@@ -66,6 +68,16 @@ class BulkTokenTestTest extends BotcakeApiTestCase
         $this->test('Page Wala')->assertOk()->assertJsonPath('status', 'skipped');
 
         Http::assertNothingSent();
+    }
+
+    public function test_testing_45_pages_does_not_use_up_the_limit_of_the_other_buttons(): void
+    {
+        Http::fake();
+        Queue::fake();
+
+        for ($i = 0; $i < 45; $i++) $this->test('Page Wala ' . $i)->assertOk();
+
+        $this->postJson('/page-settings/sync-all')->assertOk();
     }
 
     public function test_only_the_ceo_reaches_it(): void
