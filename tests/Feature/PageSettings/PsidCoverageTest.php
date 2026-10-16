@@ -2,10 +2,13 @@
 
 namespace Tests\Feature\PageSettings;
 
+use App\Http\Controllers\BotcakeCustomersController;
 use App\Http\Controllers\PsidCoverageController;
 use App\Models\BotcakePsid;
 use App\Services\PageSettings;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\Feature\Botcake\BotcakeApiTestCase;
 
 /**
@@ -81,7 +84,7 @@ class PsidCoverageTest extends BotcakeApiTestCase
         ];
 
         $res = $this->list('');
-        $this->assertSame(['ambiguous' => 3, 'no_match' => 2, 'not_synced' => 1], $res->viewData('split'));
+        $this->assertSame(['with' => 0, 'ambiguous' => 3, 'no_match' => 2, 'not_synced' => 1], $res->viewData('split'));
         $reasons = collect($res->viewData('orders')->items())->pluck('reason', 'id')->all();
         $this->assertSame('ambiguous', $reasons[$ids['ambiguous name']]);
         $this->assertSame('ambiguous', $reasons[$ids['ambiguous phone']]);
@@ -99,10 +102,10 @@ class PsidCoverageTest extends BotcakeApiTestCase
         $this->actingAs($this->user());
         $this->order('Page Uno', 'Zed Ko');
 
-        $this->assertSame(['ambiguous' => 0, 'no_match' => 0, 'not_synced' => 1], $this->list('')->viewData('split'));
+        $this->assertSame(['with' => 0, 'ambiguous' => 0, 'no_match' => 0, 'not_synced' => 1], $this->list('')->viewData('split'));
     }
 
-    public function test_a_page_lists_its_orders_without_psid_50_at_a_time_newest_first_with_the_jnt_filter(): void
+    public function test_a_page_lists_its_orders_50_at_a_time_newest_first_with_the_jnt_filter(): void
     {
         $this->actingAs($this->user());
         for ($i = 0; $i < 55; $i++) {
@@ -113,7 +116,8 @@ class PsidCoverageTest extends BotcakeApiTestCase
         DB::table('macro_output')->where('id', $transit->id)->update(['waybill' => 'WB-1']);
         DB::table('from_jnts')->insert(['waybill_number' => 'WB-1', 'status' => 'In Transit']);
 
-        $page = $this->list('')->viewData('orders');
+        $this->assertSame(57, $this->list('')->viewData('orders')->total(), 'lahat ng order, kasama ang may PSID');
+        $page = $this->list('&psid=without')->viewData('orders');
         $this->assertSame(56, $page->total());
         $this->assertCount(50, $page->items());
         $dates = array_map(fn ($o) => (string) $o->ts_date, $page->items());
@@ -125,6 +129,73 @@ class PsidCoverageTest extends BotcakeApiTestCase
         $this->assertSame(0, $this->list('&jnt=Delivering')->viewData('orders')->total());
     }
 
+
+    private function adsTable(): void
+    {
+        Schema::create('ads_manager_reports', function (Blueprint $t) {
+            $t->id();
+            $t->date('day')->nullable();
+            $t->string('page_name');
+            $t->string('campaign_name')->nullable();
+            $t->string('ad_set_name')->nullable();
+            $t->string('headline')->nullable();
+            $t->string('ad_id')->nullable()->index();
+            $t->timestamps();
+        });
+    }
+
+    public function test_the_list_shows_every_order_with_a_psid_filter_and_the_ad_of_each_order(): void
+    {
+        $this->actingAs($this->user());
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'token', 'tok-coverage-test-4r4r');
+        $this->adsTable();
+        DB::table('ads_manager_reports')->insert([
+            ['day' => '2026-10-01', 'page_name' => 'Page Uno', 'campaign_name' => 'Lumang Campaign', 'ad_set_name' => 'Lumang Set', 'headline' => 'Luma', 'ad_id' => '120250000000000001'],
+            ['day' => '2026-10-15', 'page_name' => 'Page Uno', 'campaign_name' => 'Oktubre Sale', 'ad_set_name' => 'Set A', 'headline' => 'Bili na', 'ad_id' => '120250000000000001'],
+        ]);
+        $withAd = $this->order('Page Uno', 'Ana Cruz', null, 'psid-a', $this->day(0));
+        DB::table('macro_output')->where('id', $withAd->id)->update(['botcake_ad_id' => '120250000000000001']);
+        $unknownAd = $this->order('Page Uno', 'Ben Lim', null, 'psid-b', $this->day(1));
+        DB::table('macro_output')->where('id', $unknownAd->id)->update(['botcake_ad_id' => '120259999999999999']);
+        $without = $this->order('Page Uno', 'Zed Ko', null, null, $this->day(2));
+
+        $all = $this->list('');
+        $this->assertSame([$withAd->id, $unknownAd->id, $without->id], collect($all->viewData('orders')->items())->pluck('id')->all(), 'lahat, pinakabago muna');
+        $this->assertSame(['with' => 2, 'ambiguous' => 0, 'no_match' => 1, 'not_synced' => 0], $all->viewData('split'), 'may Botcake settings, walang customer: walang tugma');
+        $rows = collect($all->viewData('orders')->items())->keyBy('id');
+        $this->assertSame(['psid-a', '120250000000000001', null], [$rows[$withAd->id]->botcake_psid, $rows[$withAd->id]->botcake_ad_id, $rows[$withAd->id]->reason]);
+        $this->assertSame('no_match', $rows[$without->id]->reason);
+        $this->assertSame(['120250000000000001' => 'Oktubre Sale / Set A / Bili na'], $all->viewData('adNames'), 'ang pinakahuling row ng ad');
+
+        $html = $all->getContent();
+        $this->assertStringContainsString('Oktubre Sale / Set A / Bili na', $html);
+        $this->assertStringContainsString('120259999999999999', $html);
+        $this->assertStringNotContainsString('Lumang Campaign', $html);
+        $this->assertStringNotContainsString('tok-coverage', $html);
+
+        $this->assertSame([$withAd->id, $unknownAd->id], collect($this->list('&psid=with')->viewData('orders')->items())->pluck('id')->all());
+        $this->assertSame([$without->id], collect($this->list('&psid=without')->viewData('orders')->items())->pluck('id')->all());
+        $this->assertSame([$without->id], collect($this->list('&reason=no_match')->viewData('orders')->items())->pluck('id')->all(), 'ang dahilan ay para sa walang PSID lang');
+    }
+
+    public function test_the_ad_names_of_50_orders_are_one_query(): void
+    {
+        $this->actingAs($this->user());
+        $this->adsTable();
+        for ($i = 0; $i < 50; $i++) {
+            $adId = '1202500000000' . str_pad((string) $i, 5, '0', STR_PAD_LEFT);
+            DB::table('ads_manager_reports')->insert(['page_name' => 'Page Uno', 'campaign_name' => 'C' . $i, 'ad_id' => $adId]);
+            $o = $this->order('Page Uno', 'Cust ' . $i, null, 'psid-' . $i, $this->day(0));
+            DB::table('macro_output')->where('id', $o->id)->update(['botcake_ad_id' => $adId]);
+        }
+
+        $queries = 0;
+        DB::listen(function ($q) use (&$queries) { if (str_contains($q->sql, 'ads_manager_reports')) $queries++; });
+        $res = $this->list('');
+
+        $this->assertSame(1, $queries);
+        $this->assertCount(50, $res->viewData('adNames'));
+    }
     public function test_only_the_ceo_reaches_it_and_page_settings_links_to_it(): void
     {
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
@@ -152,5 +223,16 @@ class PsidCoverageTest extends BotcakeApiTestCase
         $this->assertStringContainsString('botcake_psids_source_page_status_phone_key_psid_index', $p2);
         $this->assertStringNotContainsString('SCAN mo', $p2);
         $this->assertStringNotContainsString('SCAN b', $p2);
+
+        // Ang "walang PSID" ay hindi dumadaan sa botcake_psid index (halos lahat ay NULL), at ang "may PSID" din.
+        foreach (['with', 'without'] as $psid) {
+            $p = $plan($c->ordersQuery('page uno', 'Page Uno', '2026-10-01', '2026-10-17', 'all', 'all', true, $psid));
+            $this->assertStringContainsString('macro_output_ts_date_page_idx', $p, $psid);
+            $this->assertStringNotContainsString('macro_output_botcake_psid_idx', $p, $psid);
+        }
+
+        // Ang bilang ng orders kada customer (customers view) ay sa botcake_psid index.
+        $count = app(BotcakeCustomersController::class)->orderCountsQuery('Page Uno', ['a', 'b']);
+        $this->assertStringContainsString('macro_output_botcake_psid_idx', $plan($count));
     }
 }

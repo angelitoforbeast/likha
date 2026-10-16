@@ -117,7 +117,7 @@ class PageSettingsTest extends BotcakeApiTestCase
         $this->assertFalse((bool) $row->active);
         $this->assertNotNull($row->replaced_at);
         $this->assertNull(app(PageSettings::class)->get('Page Uno', 'botcake', 'page_id'));
-        $this->assertStringContainsString('1111', $this->get('/page-settings')->getContent(), 'nasa history pa rin');
+        $this->assertSame('1111', $this->getJson('/page-settings/history?page_name=Page%20Uno&provider=botcake&key=page_id')->json('history.0.value'), 'nasa history pa rin');
     }
 
     public function test_only_the_ceo_reaches_the_page(): void

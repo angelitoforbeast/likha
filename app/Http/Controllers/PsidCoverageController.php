@@ -20,6 +20,10 @@ class PsidCoverageController extends Controller
     public const MAX_DAYS = 31;
     public const JNT = ['all', 'In Transit', 'Delivering'];
     public const REASONS = ['all', 'ambiguous', 'no_match', 'not_synced'];
+    public const PSID = ['all', 'with', 'without'];
+
+    /** Walang PSID: NULL o ''. Naka-COALESCE para hindi piliin ang botcake_psid index (halos lahat ay NULL). */
+    private const EMPTY_PSID = "COALESCE(mo.botcake_psid, '') = ''";
 
     private function getNormalizedRole(): string
     {
@@ -67,10 +71,6 @@ class PsidCoverageController extends Controller
         return [$from->toDateString(), $to->toDateString()];
     }
 
-    private function emptyPsid(Builder $q): Builder
-    {
-        return $q->where(fn ($w) => $w->whereNull('mo.botcake_psid')->orWhere('mo.botcake_psid', ''));
-    }
 
     /** Isang grouped query: bawat page, ilang order at ilan ang may PSID. */
     public function summaryQuery(string $from, string $to): Builder
@@ -117,16 +117,17 @@ class PsidCoverageController extends Controller
     }
 
     /**
-     * Ang orders ng isang page na walang PSID, may dahilan, pinakabago muna. $apiPage = null: walang Botcake
-     * customers ang page, kaya lahat ay "hindi pa nasusuri".
+     * Ang orders ng isang page (lahat, may PSID, o wala), pinakabago muna. Ang walang PSID ay may dahilan; ang may
+     * PSID ay reason = null. $apiPage = null: walang Botcake customers ang page, kaya "hindi pa nasusuri" ang wala.
      * @param bool $withReasonFilter false = para sa bilang kada dahilan
+     * @param string $psid all | with | without
      */
-    public function ordersQuery(string $pageKey, ?string $apiPage, string $from, string $to, string $jnt, string $reason, bool $withReasonFilter = true): Builder
+    public function ordersQuery(string $pageKey, ?string $apiPage, string $from, string $to, string $jnt, string $reason, bool $withReasonFilter = true, string $psid = 'all'): Builder
     {
-        $q = $this->emptyPsid(DB::table('macro_output as mo'))
+        $q = DB::table('macro_output as mo')
             ->whereBetween('mo.ts_date', [$from, $to])
             ->whereRaw($this->pageExpr() . ' = ?', [$pageKey])
-            ->select('mo.id', 'mo.ts_date', 'mo.fb_name', 'mo.waybill')
+            ->select('mo.id', 'mo.ts_date', 'mo.fb_name', 'mo.waybill', 'mo.botcake_psid', 'mo.botcake_ad_id')
             ->selectRaw($this->col('PHONE NUMBER') . ' AS phone')
             ->selectSub(fn ($s) => $s->from('from_jnts as js')->whereColumn('js.waybill_number', 'mo.waybill')->selectRaw('MAX(js.status)'), 'jnt_status');
 
@@ -140,11 +141,16 @@ class PsidCoverageController extends Controller
             });
         }
 
+        if ($psid === 'with') $q->whereRaw('NOT (' . self::EMPTY_PSID . ')');
+        if ($psid === 'without') $q->whereRaw(self::EMPTY_PSID);
+
         if ($apiPage === null) {
-            $withReason = DB::query()->fromSub($q, 'o')->select('o.*')->selectRaw("'not_synced' AS reason");
+            $withReason = DB::query()->fromSub($q, 'o')->select('o.*')
+                ->selectRaw("CASE WHEN COALESCE(o.botcake_psid, '') = '' THEN 'not_synced' END AS reason");
         } else {
-            // Bilang ng available na customer na tugma sa pangalan, sa phone, at sa dalawa; bawat isa ay index lookup.
-            $count = fn (string $where) => "(SELECT COUNT(DISTINCT b.psid) FROM botcake_psids b WHERE b.source = 'api' AND b.page = ? AND b.status = 'available' AND $where)";
+            // Bilang ng available na customer na tugma sa pangalan, sa phone, at sa dalawa; bawat isa ay index lookup,
+            // at para lang sa walang PSID (ang may PSID ay 0, hindi na hinahanap).
+            $count = fn (string $where) => '(CASE WHEN ' . self::EMPTY_PSID . " THEN (SELECT COUNT(DISTINCT b.psid) FROM botcake_psids b WHERE b.source = 'api' AND b.page = ? AND b.status = 'available' AND $where) ELSE 0 END)";
             $name  = 'b.name_key = ' . $this->nameExpr();
             $phone = 'b.phone_key = ' . $this->phoneExpr();
             $q->selectRaw($count($name) . ' AS n_name', [$apiPage])
@@ -153,8 +159,9 @@ class PsidCoverageController extends Controller
 
             // Gaya ng BotcakeCustomerMatcher::decide: ang "maikakabit" ay hindi pa lang dinadaanan ng matching.
             $withReason = DB::query()->fromSub($q, 'o')
-                ->select('o.id', 'o.ts_date', 'o.fb_name', 'o.waybill', 'o.phone', 'o.jnt_status')
+                ->select('o.id', 'o.ts_date', 'o.fb_name', 'o.waybill', 'o.phone', 'o.jnt_status', 'o.botcake_psid', 'o.botcake_ad_id')
                 ->selectRaw("CASE
+                    WHEN COALESCE(o.botcake_psid, '') <> '' THEN NULL
                     WHEN o.n_name = 1 THEN 'not_synced'
                     WHEN o.n_name > 1 THEN CASE WHEN o.n_both = 1 THEN 'not_synced' ELSE 'ambiguous' END
                     WHEN o.n_phone = 1 THEN 'not_synced'
@@ -198,18 +205,38 @@ class PsidCoverageController extends Controller
         $pageName = preg_replace('/\s+/u', ' ', trim((string) $request->query('page_name', '')));
         $jnt      = in_array($request->query('jnt'), self::JNT, true) ? $request->query('jnt') : 'all';
         $reason   = in_array($request->query('reason'), self::REASONS, true) ? $request->query('reason') : 'all';
+        $psid     = in_array($request->query('psid'), self::PSID, true) ? $request->query('psid') : 'all';
 
         $pageKey = mb_strtolower($pageName, 'UTF-8');
         $apiPage = $this->apiPageName($pageKey);
 
-        $orders = $this->ordersQuery($pageKey, $apiPage, $from, $to, $jnt, $reason)->paginate(50)->withQueryString();
+        $orders = $this->ordersQuery($pageKey, $apiPage, $from, $to, $jnt, $reason, true, $psid)->paginate(50)->withQueryString();
 
-        // Bilang kada dahilan para sa page, range at J&T filter na ipinapakita (isang grouped query).
-        $split = ['ambiguous' => 0, 'no_match' => 0, 'not_synced' => 0];
+        // Bilang ng may PSID at kada dahilan ng wala, para sa page, range at J&T filter na ipinapakita (isang grouped query).
+        $split = ['with' => 0, 'ambiguous' => 0, 'no_match' => 0, 'not_synced' => 0];
         $counts = DB::query()->fromSub($this->ordersQuery($pageKey, $apiPage, $from, $to, $jnt, 'all', false)->reorder(), 'x')
-            ->selectRaw('x.reason, COUNT(*) AS c')->groupBy('x.reason')->pluck('c', 'reason');
-        foreach ($counts as $k => $c) $split[$k] = (int) $c;
+            ->selectRaw('x.reason, COUNT(*) AS c')->groupBy('x.reason')->get();
+        foreach ($counts as $row) $split[$row->reason ?? 'with'] = (int) $row->c;
 
-        return view('page_settings.psid_coverage_orders', compact('orders', 'split', 'pageName', 'from', 'to', 'jnt', 'reason'));
+        $adNames = $this->adNames(collect($orders->items())->pluck('botcake_ad_id')->filter()->unique()->values()->all());
+
+        return view('page_settings.psid_coverage_orders', compact('orders', 'split', 'adNames', 'pageName', 'from', 'to', 'jnt', 'reason', 'psid'));
+    }
+
+    /**
+     * Pangalan ng bawat ad mula sa pinakahuling row nito sa ads_manager_reports (campaign / ad set / headline).
+     * Isang query para sa lahat ng ad id na nakikita.
+     * @param array<int, string> $adIds
+     * @return array<string, string>
+     */
+    private function adNames(array $adIds): array
+    {
+        if (!$adIds) return [];
+
+        return DB::table('ads_manager_reports')
+            ->whereIn('id', fn ($q) => $q->from('ads_manager_reports')->whereIn('ad_id', $adIds)->selectRaw('MAX(id)')->groupBy('ad_id'))
+            ->get(['ad_id', 'campaign_name', 'ad_set_name', 'headline'])
+            ->mapWithKeys(fn ($r) => [(string) $r->ad_id => implode(' / ', array_filter([$r->campaign_name, $r->ad_set_name, $r->headline], fn ($v) => trim((string) $v) !== ''))])
+            ->all();
     }
 }

@@ -3,15 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Walang PSID · {{ $pageName }}</title>
+    <title>Orders · {{ $pageName }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
 
-<div class="max-w-6xl mx-auto p-4 sm:p-6">
+<div class="p-4 sm:p-6">
     <div class="flex items-center justify-between mb-4">
-        <h1 class="text-xl font-semibold">Walang PSID · {{ $pageName }}</h1>
-        <a href="{{ route('page-settings.psid-coverage', ['from' => $from, 'to' => $to]) }}" class="text-sm text-blue-700 hover:underline">Lahat ng page</a>
+        <h1 class="text-xl font-semibold">Orders · {{ $pageName }}</h1>
+        <div class="flex gap-4 text-sm">
+            <a href="{{ route('page-settings.customers', ['page' => $pageName]) }}" class="text-blue-700 hover:underline">Botcake customers</a>
+            <a href="{{ route('page-settings.psid-coverage', ['from' => $from, 'to' => $to]) }}" class="text-blue-700 hover:underline">Lahat ng page</a>
+        </div>
     </div>
 
     <form method="GET" action="{{ route('page-settings.psid-coverage.orders') }}" class="flex flex-wrap items-center gap-2 mb-4 text-sm">
@@ -23,8 +26,13 @@
                 <option value="{{ $v }}" @selected($jnt === $v)>{{ $label }}</option>
             @endforeach
         </select>
+        <select name="psid" class="border rounded px-2 py-1">
+            @foreach(['all' => 'May PSID at wala', 'with' => 'May PSID', 'without' => 'Walang PSID'] as $v => $label)
+                <option value="{{ $v }}" @selected($psid === $v)>{{ $label }}</option>
+            @endforeach
+        </select>
         <select name="reason" class="border rounded px-2 py-1">
-            @foreach(['all' => 'Lahat ng dahilan', 'ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma', 'not_synced' => 'Maikakabit pa / hindi pa nasusuri'] as $v => $label)
+            @foreach(['all' => 'Lahat ng dahilan (walang PSID)', 'ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma', 'not_synced' => 'Maikakabit pa / hindi pa nasusuri'] as $v => $label)
                 <option value="{{ $v }}" @selected($reason === $v)>{{ $label }}</option>
             @endforeach
         </select>
@@ -33,7 +41,7 @@
     </form>
 
     <p class="text-sm mb-1">
-        Ambiguous: {{ number_format($split['ambiguous']) }} · Walang tugma: {{ number_format($split['no_match']) }} ·
+        May PSID: {{ number_format($split['with']) }} · Walang PSID → Ambiguous: {{ number_format($split['ambiguous']) }} · Walang tugma: {{ number_format($split['no_match']) }} ·
         Maikakabit pa / hindi pa nasusuri: {{ number_format($split['not_synced']) }}
     </p>
     <p class="text-xs text-gray-500 mb-4">
@@ -44,7 +52,7 @@
     <div class="bg-white rounded shadow overflow-x-auto">
         <table class="w-full text-sm">
             <thead class="text-left text-gray-500">
-                <tr><th class="px-4 py-2">Order</th><th class="px-2 py-2">Petsa</th><th class="px-2 py-2">FB name</th><th class="px-2 py-2">Phone</th><th class="px-2 py-2">Waybill</th><th class="px-2 py-2">J&amp;T</th><th class="px-2 py-2">Dahilan</th></tr>
+                <tr><th class="px-4 py-2">Order</th><th class="px-2 py-2">Petsa</th><th class="px-2 py-2">FB name</th><th class="px-2 py-2">Phone</th><th class="px-2 py-2">Waybill</th><th class="px-2 py-2">J&amp;T</th><th class="px-2 py-2">PSID</th><th class="px-2 py-2">Ad ID</th><th class="px-2 py-2">Ad</th><th class="px-2 py-2">Dahilan (walang PSID)</th></tr>
             </thead>
             <tbody>
             @forelse($orders as $o)
@@ -55,10 +63,13 @@
                     <td class="px-2 py-1">{{ $o->phone }}</td>
                     <td class="px-2 py-1">{{ $o->waybill }}</td>
                     <td class="px-2 py-1">{{ $o->jnt_status }}</td>
-                    <td class="px-2 py-1">{{ ['ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma'][$o->reason] ?? 'Maikakabit pa / hindi pa nasusuri' }}</td>
+                    <td class="px-2 py-1 font-mono">{{ $o->botcake_psid }}</td>
+                    <td class="px-2 py-1 font-mono">{{ $o->botcake_ad_id }}</td>
+                    <td class="px-2 py-1">{{ $o->botcake_ad_id ? ($adNames[$o->botcake_ad_id] ?? '') : '' }}</td>
+                    <td class="px-2 py-1">{{ $o->reason === null ? '' : (['ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma'][$o->reason] ?? 'Maikakabit pa / hindi pa nasusuri') }}</td>
                 </tr>
             @empty
-                <tr><td colspan="7" class="px-4 py-2 text-gray-500">Walang order.</td></tr>
+                <tr><td colspan="10" class="px-4 py-2 text-gray-500">Walang order.</td></tr>
             @endforelse
             </tbody>
         </table>

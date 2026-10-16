@@ -79,6 +79,8 @@ return [
         'sync_enabled' => (bool) env('BOTCAKE_SYNC_ENABLED', false),
         // Max na batch (10 customer bawat isa) kada incremental run ng isang page; walang cap ang --full.
         'sync_max_batches' => (int) env('BOTCAKE_SYNC_MAX_BATCHES', 300),
+        // Hanggang ilang araw pabalik ang binabasa (date_subscribed_at); humihinto ang sync sa unang mas lumang customer.
+        'sync_max_age_days' => (int) env('BOTCAKE_SYNC_MAX_AGE_DAYS', 45),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
