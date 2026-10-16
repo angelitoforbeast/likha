@@ -881,3 +881,25 @@ non-CEO render pass without being edited.
 | S-035.4 | Given no role or another role, then every /jnt_upload route is 404 and nothing is stored | same | Passed · 2026-10-16 · auto |
 | S-035.5 | Given a Data Encoder or Data Encoder - OIC, then the menu shows the Waybill link to /jnt_upload | same | Passed · 2026-10-16 · auto |
 | S-035.6 | Given the menu migration ran, when it runs again, then no row is added or changed, and the Waybill link is visible to exactly CEO, Marketing, Marketing - OIC and both Data Encoder roles | same | Passed · 2026-10-16 · auto |
+
+## Slice 037 – Marketing OICs get supplier work on /item, and every edit there is logged
+
+### S-37A Marketing - OIC sees and uses the supplier work on /item; the CEO profit view stays CEO-only (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-37A.1 | Given a quote, a PO line and an item on hold, when CEO or Marketing - OIC calls /item/suppliers, /item/quotes and /item/worklist, then each returns the data; plain Marketing gets the empty shape; another role gets 404 | `MoicSupplierAccessTest::test_S_37A_1…` | Passed · 2026-10-16 · auto |
+| S-37A.2 | Given Marketing - OIC, when they save and delete a quote, set a category and save lead / palugit, then each is 200 and stored; plain Marketing gets 403 and nothing is stored | `MoicSupplierAccessTest::test_S_37A_2…` | Passed · 2026-10-16 · auto |
+| S-37A.3 | Given Marketing - OIC opens /item?layout=suppliers, then the table with suppliers, its header link and the sourcing chips show, and the view toggle, Daily, Snapshots and column settings do not; plain Marketing sees none of the supplier parts | `MoicSupplierAccessTest::test_S_37A_3…` | Passed · 2026-10-16 · auto |
+| S-37A.4 | Given Marketing - OIC, when they call /item/stock, then no `item_value_ceo` is returned | `StockEndpointTest::test_item_value_ceo_only_for_ceo_viewing_as_ceo` | Passed · 2026-10-16 · auto |
+
+### S-37B Every edit on /item is logged with old and new value, and listed for CEO and Marketing - OIC (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-37B.1 | When a quote is created, changed or deleted, then one row per changed field (`price · Acme` etc., old → new) with user, role and item; saving the same values writes nothing; the quote history table still gets its row | `ItemEditLogTest::test_S_37B_1…` | Passed · 2026-10-16 · auto |
+| S-37B.2 | When a category is set or cleared and lead / palugit are saved, then one row per changed field; same values again = no row | `ItemEditLogTest::test_S_37B_2…` | Passed · 2026-10-16 · auto |
+| S-37B.3 | When an item photo is uploaded, replaced or deleted, then a row with the file names only; deleting when there is no photo = no row | `ItemEditLogTest::test_S_37B_3…` | Passed · 2026-10-16 · auto |
+| S-37B.4 | Given the log table is missing, when a quote is saved, then the save still succeeds | `ItemEditLogTest::test_S_37B_4…` | Passed · 2026-10-16 · auto |
+| S-37B.5 | /item/edit-logs: 200 for CEO and Marketing - OIC, 404 for Marketing and others; newest first, 50 per page; filters by item, user, action, from and to date | `ItemEditLogTest::test_S_37B_5…` | Passed · 2026-10-16 · auto |
+| S-37B.6 | /item shows the "🧾 Item logs" link to Marketing - OIC (and CEO view), not to plain Marketing | `ItemEditLogTest::test_S_37B_6…` | Passed · 2026-10-16 · auto |
