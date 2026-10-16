@@ -17,6 +17,10 @@ Commits (branch `feat/043-ad-delivery-status`, from `develop` at 26d5d4f; not pu
 - `chore: merge develop (spec 042) into spec 043` (amendment 1)
 - `feat: Total ng page (ayon sa order) line in each expanded page, after the campaigns and Walang ad id, from the same query (spec 043 amendment 1)`
 - `docs: result for spec 043 amendment 1`
+- `fix: one J&T bucket per waybill in the delivery counts (returned, delivered, for return, in transit), so a waybill with several J&T rows is never counted twice (spec 043 amendment 2)`
+- `fix: delivery endpoint caps the range at 92 days, caches each result for 10 minutes under the /owner/private cache version, and accepts POST for long page lists (spec 043 amendment 2)`
+- `fix: expand posts the delivery request with CSRF, shows the reason when it is refused (over 92 days), and marks campaign rows that have orders but no spend in the range (spec 043 amendment 2)`
+- `docs: result for spec 043 amendment 2`
 
 ## Amendment 1 (2026-10-17)
 
@@ -38,6 +42,38 @@ The amendment is saved, never committed, in the main checkout as `handoff/043-ad
   - The merge changed no pinned render: `/owner/private` and the eight `/item` hashes were identical before and after it.
   - The new Total line then changed them. I re-pinned all of them after diffing every render: the only lines that differ are the Total line's markup and functions.
 - **Story:** added S-043.10 to `qa/stories.md`.
+
+## Amendment 2 (2026-10-17)
+
+The amendment is saved, never committed, in the main checkout as `handoff/043-ad-delivery-status/AMENDMENT-2.md`. These are the reviewer's findings; no owner decision was needed.
+
+- **One bucket per waybill (`AdDeliveryStatus::statusGroups`).**
+  - The outer query now puts each waybill in exactly one bucket: returned if any row is returned, else delivered, else for return, else in transit. In transit is the rest.
+  - So delivered + in transit + for return + returned = shipped, always.
+  - `jntFlagsSql()` and `data()` are unchanged.
+  - With one J&T row per waybill (production today, per the reviewer's check) the counts are the same as before. S-043.1 to S-043.10 still pass unchanged.
+  - Test S-043.11: "Picked up" + "Delivered" counts once as Delivered; "For Return" + "Returned" once as Returned; "Delivered" + "Returned" as Returned; "In Transit" + "For Return" as For return. The sum equals shipped for the ad, "Walang ad id" and the page.
+  - Red run: `Failed asserting that two arrays are equal`; the old sums counted those waybills twice.
+- **92-day cap.**
+  - A longer range gets a 422 with `message` = "Hanggang 92 araw lang ang range ng Delivered / RTS% sa expand.", counting both end days.
+  - The expand then shows "—" in the five columns, and the header reads "· Delivered / In transit / For return / Returned / RTS%: — (Hanggang 92 araw lang …)".
+  - Test S-043.12: 92 days → 200, 93 days → 422 with that message.
+  - Red run: `Expected response status code [422] but received 200`.
+- **Cache.**
+  - Each result is kept 10 minutes with `Cache::remember`. The key is `owner_private:ad_delivery:<cache version>:md5(sorted unique pages, start, end)`.
+  - The version is the one `/owner/private` uses (`cacheVersion()`, moved forward by `bumpCacheVersion()` on uploads and saves), so a new upload means a new count.
+  - Test S-043.12: the second call returns the cached count even after a new order is added; after `bumpCacheVersion()` the new order is counted.
+  - Red run: `Failed asserting that 2 is identical to 1`.
+- **POST.**
+  - `POST /owner/private/ad-delivery` (route name `owner.private.ad-delivery.post`) runs the same method, with the same access and validation. The GET route stays.
+  - The expand now always posts JSON with the `X-CSRF-TOKEN` header, for one page as for "Expand all".
+  - Test S-043.13: a POST with 301 long page names → 200; a Data Encoder → 404. S-043.9 checks that the page posts.
+  - Red run: `Expected response status code [200] but received 405`.
+- **Delivery-only campaigns are marked.** Under the name of a campaign that has orders but no spend in the list: "walang spend sa range — orders lang, kaya walang ad set sa ilalim" (S-043.14, checked in S-043.9). The note is tied to the row itself, so `/item` never shows it.
+- **Checked in node:** the inline script of the rendered page compiles. `_fetchAdDelivery` posts with the CSRF token and the JSON body. A 422 leaves the map empty and puts its message in the label. Delivery-only rows are marked.
+- **Re-pinned render hashes:** `/owner/private` and the eight `/item` hashes changed. Each was diffed against the commit before: the only lines that differ are this change's.
+- **`TODO.md`:** the "any date range" line is marked fixed, and the delivery-only line mentions the new note.
+- **Stories:** S-043.11 to S-043.14 added to `qa/stories.md`.
 
 No migration, no new table, nothing writes. Plan: `docs/plans/043-ad-delivery-status.md`.
 
@@ -137,6 +173,10 @@ Command: `php.bat vendor/bin/phpunit --filter AdDelivery` (and `SharedPagesBaseP
 | S-043.8 | `AdDeliveryColumnsTest::test_S_043_8_new_columns_start_visible_for_every_role_of_owner_private`, `…_nothing_saved_shows_them_to_the_ceo` | pass, pass |
 | S-043.9 | `AdDeliveryColumnsTest::test_S_043_9_owner_private_lists_the_columns_and_loads_the_delivery_map_on_expand` | pass |
 | S-043.10 | `AdDeliveryStatusTest::test_S_043_10_total_of_the_page_is_campaigns_plus_walang_ad_id`, plus the Total assertions in `AdDeliveryColumnsTest::test_S_043_9…` | pass |
+| S-043.11 | `AdDeliveryStatusTest::test_S_043_11_a_waybill_with_several_jnt_rows_lands_in_one_bucket` | pass |
+| S-043.12 | `AdDeliveryEndpointTest::test_S_043_12_the_range_is_capped_at_92_days`, `…_the_result_is_cached_until_the_owner_private_cache_version_changes`, plus `adDeliveryErrors` in S-043.9 | pass, pass |
+| S-043.13 | `AdDeliveryEndpointTest::test_S_043_13_expand_all_posts_the_page_list`, plus the POST check in S-043.9 | pass |
+| S-043.14 | "walang spend sa range" check in `AdDeliveryColumnsTest::test_S_043_9…` | pass |
 | (pins) | `SharedPagesBasePinTest` (2), `SuppliersGroupTest` (/item renders), re-pinned; every diff checked to be only this change | pass |
 
 Red runs:
@@ -148,6 +188,7 @@ Red runs:
 
 ## Suite
 
+**After amendment 2:** `php.bat vendor/bin/phpunit` gives `Tests: 1347, Assertions: 16928, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The two that don't pass are again only the known `ExampleTest` (failure) and `ImportStartTest` (error).
 **After amendment 1 (merge of develop 59b725c and the Total line):** `php.bat vendor/bin/phpunit` gives `Tests: 1343, Assertions: 16907, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The two that don't pass are again only the known `ExampleTest` (failure) and `ImportStartTest` (error). The 19 tests added by 042 pass.
 `php.bat vendor/bin/phpunit` on the final tree: `Tests: 1324, Assertions: 16694, Errors: 1, Failures: 1, PHPUnit Deprecations: 4, Skipped: 3`. The two that don't pass are the known ones:
 - `ExampleTest::test_the_application_returns_a_successful_response` (failure);

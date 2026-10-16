@@ -442,6 +442,6 @@ Accepted, not fixed:
 - **`partial_date` is ignored by the delivery columns** (they stop at the end date). Reason: `data()` ignores it as well.
 - **On MySQL, an accent-insensitive collation can return a page key spelled differently from the one asked for, and that page then shows zeros.** Reason: rare; the front end sends the page labels as stored.
 - **`AdDeliveryStatus` writes `PAGE` by hand where `data()` looks the column name up (`pickCol`).** Reason: trusted schema; production is MySQL with `PAGE`.
-- **The endpoint accepts any date range for up to 500 pages.** Reason: `data()` accepts the same; one grouped query.
+- **~~The endpoint accepts any date range for up to 500 pages.~~** Fixed in amendment 2: at most 92 days, and each result is cached for 10 minutes under the /owner/private cache version.
 - **After a date change, an expand that is already loaded keeps its old numbers** (existing expand behaviour). The label shows the range those numbers came from.
-- **A delivery-only campaign row (orders but no spend in the window) shows "Off" and no ad sets.** Reason: its ad sets are not in the window's list; its numbers are needed for the sum.
+- **A delivery-only campaign row (orders but no spend in the window) shows "Off" and no ad sets.** Amendment 2 adds the note "walang spend sa range — orders lang, kaya walang ad set sa ilalim". It still shows "Off": its ad sets are not in the window's list, and its numbers are needed for the sum.
