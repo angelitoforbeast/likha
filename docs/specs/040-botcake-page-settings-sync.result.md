@@ -76,6 +76,48 @@
   - `botcake:sync-customers --full`: Sunday 01:00.
   - 039's entries are unchanged.
 
+**Amendment 1** (`feat: inactive Botcake customers, per-run cap and stop reasons, safer phone rule, and a paginated PSID coverage page (spec 040 amendment 1)`)
+
+- Migration `2026_10_17_100200`:
+  - `botcake_psids.last_seen_at`, with an index on (source, page, status, last_seen_at).
+  - `botcake_psid_import_runs.stop_reason`.
+  - A new table `botcake_psid_misses` (`order_id` unique, `page_key`, `ts_date`, `reason`, `checked_at`; indexes on (page_key, ts_date, reason) and ts_date). It holds the last matching reason (`ambiguous` / `no_match`) of each order still without a PSID, so `macro_output` itself is not altered.
+- Inactive customers:
+  - API customers are never deleted. Every sync that returns a customer sets its `last_seen_at`.
+  - After a `--full` read that reaches the empty batch without error (`stop_reason = end`), that page's `available` API rows whose `last_seen_at` is older than 30 days (or null) become `inactive`.
+  - A customer seen again goes back to `available` (counted as updated).
+  - Nothing is marked inactive after an errored or capped full read, or after an incremental run.
+  - Matching reads `available` rows only.
+- Per-run cap: an incremental run reads at most `config('services.botcake.sync_max_batches')` batches (env `BOTCAKE_SYNC_MAX_BATCHES`, default 300, added to `.env.example`), then stops with `stop_reason = cap`. The next run starts again from page 1. The known-batch stop is checked first. `--full` has no cap except the old 20,000-batch guard.
+- Stop reasons (`stop_reason` on every API run, also shown in the panel):
+  - `known_batch`, `end`, `cap`.
+  - `rate_limited`: still 429 after 3 retries.
+  - `token_invalid`: 401, 403 or `success:false`.
+  - `error`: 5xx or a dropped connection after the retries, an unexpected body, or a missing page id / token.
+- Phone rule, safer version (`BotcakeCustomerMatcher::decide`):
+  - Exactly one name candidate → by name.
+  - Two or more name candidates → by phone only if exactly one of those candidates also has the order's phone; otherwise ambiguous. A phone never brings in a third person.
+  - No name candidate → by phone if the phone belongs to exactly one customer; two or more → ambiguous; none → no match.
+- Matching records each unmatched order's reason in `botcake_psid_misses`, writing only when the reason changes. It deletes the row when the order gets a PSID, and prunes rows of that page older than 45 days.
+- Botcake fields: `date_subscribed_at` (falls back to `subscribed_at`, then `inserted_at`) and `last_interactive_at` (read as UTC, stored in the app's timezone).
+- PSID coverage page, CEO only (404 for everyone else), linked from the top of `/page-settings` and from each Botcake card:
+  - `GET /page-settings/psid-coverage?from=&to=`. Default range is the last 7 days (Manila); anything longer is cut to the 31 days ending at `to`.
+  - One grouped query over `macro_output` left-joined to `botcake_psid_misses`, giving per page: orders, with PSID, %, without PSID, ambiguous, no match, not yet checked (= without − ambiguous − no match).
+  - `GET /page-settings/psid-coverage/orders?page_name=&from=&to=&jnt=&reason=` lists that page's orders without PSID, newest first (ts_date, id), 50 per page with previous / next.
+  - Filter `jnt`: all / In Transit / Delivering, via `EXISTS` on `from_jnts` by waybill. Delivering excludes rows with an RTS reason, the same rule as the J&T status page.
+  - Filter `reason`: all / ambiguous / no_match / not_synced.
+  - Columns: order id, date, fb name, phone, waybill, J&T status, reason.
+- The old `?details=` list on `/page-settings` is removed (it loaded every row).
+- Indexes:
+  - Both coverage queries use the existing `macro_output_ts_date_page_idx` (ts_date, PAGE) for the date range, and `botcake_psid_misses_order_id_unique` for the join. The J&T status lookup uses the existing `idx_from_jnts_waybill`.
+  - The one test with a query plan asserts these indexes are used and `macro_output` is never scanned.
+  - No new index on `macro_output`, so no long ALTER on the big table.
+- Load check: a throwaway phpunit file outside the repo, not committed, loaded 1,000,000 `macro_output` rows (40 pages over 365 days) and 111,111 miss rows into sqlite, then ran `ANALYZE`.
+  - The 31-day summary returned 40 pages in 0.15 s.
+  - One 50-row page of a page's list took 0.005 s; its pagination count took 0.016 s.
+  - Plan: `SEARCH mo USING INDEX macro_output_ts_date_page_idx (ts_date>? AND ts_date<?) | SEARCH m USING INDEX botcake_psid_misses_order_id_unique (order_id=?)`, plus temp B-trees for GROUP BY / ORDER BY.
+  - I did not run EXPLAIN on MySQL (no production-like MySQL on this machine). At 100k orders a day, a 31-day summary is about 3.1M index-range rows; if that is slow on MySQL, the next step is a covering index (ts_date, PAGE, botcake_psid). It is not added now.
+
 ## Keeping 039 unchanged
 
 - `BotcakePsidMatcher::tableQuery` (conflict detection, waiting → conflict) now looks at `source = sheet` records only. Without this, a Botcake customer with the same name and a different psid would turn a sheet PSID into a `conflict`. A test pins this.
@@ -105,17 +147,26 @@ Laktaw kapag --apply: 1.
 | CEO only (404) | `PageSettingsTest::test_only_the_ceo_reaches_the_page`, `BotcakePanelTest::test_the_buttons_are_ceo_only` | pass |
 | Test token: ok / success:false / 401, one call, no token in the response | `BotcakePanelTest::test_test_token_makes_one_custom_fields_call_and_records_ok_or_invalid` (3 rows) | pass |
 | Sync now queues an incremental sync | `BotcakePanelTest::test_sync_now_queues_an_incremental_sync_for_that_page` | pass |
-| Panel: customers, last sync counts, the ambiguous / no-match list under details | `BotcakePanelTest::test_the_panel_shows_customers_the_last_sync_and_the_orders_still_without_a_psid` | pass |
+| Panel: customers, last sync counts, a link to the paginated list (no names on the card) | `BotcakePanelTest::test_the_panel_shows_customers_the_last_sync_and_links_to_the_orders_without_a_psid` | pass |
 | Import dry run writes nothing and never prints a token | `ImportBotcakeSettingsTest::test_dry_run_writes_nothing_and_never_prints_a_token` | pass |
 | Import --apply writes the three keys and skips a bad flow id; re-run adds nothing | `ImportBotcakeSettingsTest::test_apply_writes_the_three_keys_and_skips_a_bad_flow_id` | pass |
-| Incremental stops at the first all-known batch | `BotcakeCustomerSyncTest::test_incremental_stops_at_the_first_batch_whose_psids_are_all_known` | pass |
-| Full reads to the empty page; one row per page + psid; a changed name is updated | `BotcakeCustomerSyncTest::test_full_reads_to_the_empty_page_and_updates_changed_names` | pass |
+| Incremental stops at the first all-known batch; stop reason `known_batch` | `BotcakeCustomerSyncTest::test_incremental_stops_at_the_first_batch_whose_psids_are_all_known` | pass |
+| Full reads to the empty page; one row per page + psid; a changed name is updated; stop reason `end` | `BotcakeCustomerSyncTest::test_full_reads_to_the_empty_page_and_updates_changed_names` | pass |
 | 429 then 503 then success: backoff 2 s, 4 s; every request ≥ 0.5 s after the previous one (clock) | `BotcakeCustomerSyncTest::test_429_then_success_retries_with_backoff_and_requests_stay_at_most_two_a_second` | pass |
-| Four 429s: the page stops and the run reports the error | `BotcakeCustomerSyncTest::test_four_429s_stop_the_page_and_report` | pass |
-| 401 marks the token invalid, stops the page, no token in logs or output | `BotcakeCustomerSyncTest::test_401_marks_the_token_invalid_and_stops_that_page_without_logging_the_token` | pass |
-| Matching: unique name written; two psids same name → ambiguous, nothing written; phone when the name fails; non-empty never overwritten; older than 30 days untouched; other page and sheet records are not candidates | `BotcakeCustomerMatchTest::test_orders_get_a_psid_only_when_exactly_one_customer_fits` | pass |
+| Four 429s / four 500s: the page stops; stop reason `rate_limited` / `error` | `BotcakeCustomerSyncTest::test_four_failures_stop_the_page_and_report_why` (2 rows) | pass |
+| 401 marks the token invalid, stops the page (stop reason `token_invalid`), no token in logs or output | `BotcakeCustomerSyncTest::test_401_marks_the_token_invalid_and_stops_that_page_without_logging_the_token` | pass |
+| Matching: unique name written; two psids same name → ambiguous, nothing written; phone when there is no name candidate; phone decides between two same-name candidates; a third person's phone does not override an ambiguous name; inactive rows unused; non-empty never overwritten; older than 30 days untouched; other page and sheet records are not candidates | `BotcakeCustomerMatchTest::test_orders_get_a_psid_only_when_exactly_one_customer_fits` | pass |
 | An API customer never turns a sheet PSID into a conflict (039 unchanged) | `BotcakeCustomerMatchTest::test_an_api_customer_never_turns_a_sheet_psid_into_a_conflict` | pass |
-| Preview lists ambiguous / no match and writes nothing | `BotcakeCustomerMatchTest::test_the_preview_lists_unmatched_orders_and_writes_nothing` | pass |
+| Each unmatched order keeps its reason until it gets a PSID (amendment 1) | `BotcakeCustomerMatchTest::test_each_unmatched_order_keeps_its_reason_until_it_gets_a_psid` | pass |
+| Cap: an incremental run stops at 300 batches (default config) with reason `cap`; the next run starts from page 1 (amendment 1) | `BotcakeCustomerSyncTest::test_an_incremental_run_stops_at_the_cap_of_300_batches_and_starts_from_page_1_next_run` | pass |
+| A clean full read marks customers unseen for 30 days inactive, a returning one available, deletes nothing (amendment 1) | `BotcakeCustomerSyncTest::test_a_clean_full_read_marks_customers_unseen_for_30_days_inactive_and_a_returning_one_available` | pass |
+| An errored full read (stop reason `error`) or an incremental run marks nobody inactive (amendment 1) | `BotcakeCustomerSyncTest::test_an_errored_full_read_or_an_incremental_run_marks_nobody_inactive` | pass |
+| `date_subscribed_at` and `last_interactive_at` (UTC) are read (amendment 1) | `BotcakeCustomerSyncTest::test_the_live_field_names_for_subscribed_and_last_interactive_are_read` | pass |
+| Coverage summary per page in one grouped query: orders, with, %, ambiguous / no match / not yet checked; default 7 days (amendment 1) | `PsidCoverageTest::test_the_summary_counts_each_page_in_one_grouped_query` | pass |
+| Range at most 31 days (amendment 1) | `PsidCoverageTest::test_the_range_is_at_most_31_days` | pass |
+| A page's orders without PSID: 50 per page, newest first, reason and J&T filters (amendment 1) | `PsidCoverageTest::test_a_page_lists_its_orders_without_psid_50_at_a_time_newest_first_with_filters` | pass |
+| Coverage CEO only, linked from /page-settings (amendment 1) | `PsidCoverageTest::test_only_the_ceo_reaches_it_and_page_settings_links_to_it` | pass |
+| Coverage queries use the (ts_date, PAGE) and misses order_id indexes, no scan of macro_output (amendment 1) | `PsidCoverageTest::test_the_queries_use_the_ts_date_page_index_and_the_misses_order_index` | pass |
 | Schedules exist (hourly :15, Sunday 01:00, Manila, withoutOverlapping) and do nothing when the flag is off | `BotcakeSyncScheduleTest::test_hourly_sync_and_the_sunday_full_sync_exist_and_run_only_when_the_flag_is_on` | pass |
 | Flag off by default | `BotcakeSyncScheduleTest::test_the_flag_is_off_by_default` | pass |
 | The 039 hourly import also matches pages with tokens (no HTTP) | `BotcakeSyncScheduleTest::test_the_hourly_sheet_import_also_matches_pages_with_tokens` | pass |
@@ -127,16 +178,20 @@ Red runs:
 - Schedule: failed on "Failed asserting that two arrays are equal" (no entries), and the 039 hook on "null is identical to 'psid-a'".
 - Panel: failed on 404.
 - The 039 conflict guard was written after its fix. I then confirmed it by removing the fix: "Failed asserting that two strings are identical".
+- Amendment 1:
+  - Sync tests failed on "Failed asserting that two arrays are identical" (no `stop_reason`) and "null is identical to 'error'".
+  - The matching test failed on the safer phone rule and inactive rows; the misses test on the missing reasons.
+  - The coverage tests failed on 404 (no route) and the missing controller.
 
-Full suite (`vendor/bin/phpunit`): `Tests: 1261, Assertions: 15966, Errors: 1, Failures: 1, Skipped: 3`. The only reds are the known `ExampleTest::test_the_application_returns_a_successful_response` and, in this fresh worktree, `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. All 33 new tests (49 with the 039 Botcake tests) pass.
+Full suite (`vendor/bin/phpunit`), after amendment 1: `Tests: 1271, Assertions: 16326, Errors: 1, Failures: 1, Skipped: 3` (before the amendment: 1261 tests). The only reds are the known `ExampleTest::test_the_application_returns_a_successful_response` and, in this fresh worktree, `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. All 43 tests of this spec pass (59 with the 039 Botcake tests).
 
 ## After release (server)
 
-1. `php artisan migrate --force` (two new migrations, plus 039's two if they are not run yet).
+1. `php artisan migrate --force` (three new migrations, plus 039's two if they are not run yet).
 2. `php artisan page-settings:import-botcake <spreadsheetId>`: dry run; check every row says `orders: oo` and the keys.
 3. `php artisan page-settings:import-botcake <spreadsheetId> --apply`
 4. On `/page-settings`, press "Test token" for one page, or skip it and go to step 5.
-5. `php artisan botcake:sync-customers --page="<Page Name>" --full`, then read the printed counts and the page's panel (customers, matches, ambiguous / no match).
+5. `php artisan botcake:sync-customers --page="<Page Name>" --full`, then read the printed line (batches, stop reason, new, updated, inactive, matches) and `/page-settings/psid-coverage` for that page.
 6. When that page looks right: set `BOTCAKE_SYNC_ENABLED=true` in the server's environment, then `php artisan config:cache` if the config is cached. `php artisan schedule:list` shows the two `botcake:sync-customers` entries either way.
 
 The `--range` default is `'BOTCAKE API'!A2:D`; pass `--range=...` only if the tab is named differently.
@@ -145,13 +200,25 @@ The `--range` default is `'BOTCAKE API'!A2:D`; pass `--range=...` only if the ta
 
 - **`edited_phone_number` is not a phone.** In `macro_output` it is a boolean edit flag (migration `2025_07_21_174014`); an edited phone overwrites `PHONE NUMBER` itself. Matching uses `PHONE NUMBER` only.
 - The repo has no `CLAUDE.md`; I followed `CLAUDE.local.md`.
-- Rule (2) is applied as written: when the name gives no single psid (none, or two or more), a phone that belongs to exactly one customer is written. So an order whose name has two candidates can still get a PSID by phone. If that is too loose, the safer variant is "phone only when the name had no candidate, or the phone's psid is one of the name's candidates"; it is a one-line change.
+- Rule (2): replaced by the safer version (amendment 1). When two or more name candidates exist and two or more of them share the order's phone, the order stays ambiguous.
 - "Who and when" for edits: each new row carries `created_by` and `created_at`; a replaced row carries `replaced_at`. Deactivation and replacement also write a log line with the user id. There is no `deactivated_by` column, to keep to the brief's column list.
-- The orders-without-PSID list is a live query per page, so it loads only for the page opened with `?details=`. The card for every page shows the last run's ambiguous / no-match counts instead.
-- The brief does not name the Botcake fields for `subscribed_at` / `last_interactive_at`. They are read from `subscribed_at` (or `inserted_at`) and `last_interactive_at` when present, otherwise left null. Check them against a real response during the one-page test.
+- The orders-without-PSID list moved to `/page-settings/psid-coverage` (amendment 1). "Not yet synced" in the amendment is shown as "Hindi pa nasusuri": the order has no miss row, because its page has no token or the order arrived after the last match. The reasons need one new narrow table, `botcake_psid_misses`. A column on `macro_output` would have meant altering the largest table and the orders schema, so I chose the separate table; it can be dropped without touching orders.
+- Botcake fields: now `date_subscribed_at` and `last_interactive_at` (UTC), with the old fallbacks (amendment 1).
+- Inactive marking also covers API rows whose `last_seen_at` is null: after a clean full read, a row not returned is not a current customer. On the server there are none yet, since no API row exists before release.
 - Hourly sync runs at :15, not :00, to stay clear of the 039 import at :00. It shares nothing with that import's lock.
 - Rate: one client per page and pages run in sequence, so the 2/s limit also holds across pages.
 - Conflict with `CLAUDE.local.md`: none.
+
+## Amendment changes
+
+Amendment 1 (kept in the handoff folder, not committed):
+1. `last_seen_at`; `inactive` after 30 days unseen, only on a clean `--full` read; seen again → `available`; matching uses `available` only; customers never deleted.
+2. Per-run cap for incremental runs, `BOTCAKE_SYNC_MAX_BATCHES` (default 300); reason `cap`; next run from page 1.
+3. `stop_reason` on every API run: known_batch, end, cap, rate_limited, token_invalid, error.
+4. `/page-settings/psid-coverage`: grouped summary per page for 7 to 31 days, and a paginated list per page with J&T status and reason filters; per-order reasons in the new `botcake_psid_misses` table; index use checked in a test and on 1M rows in sqlite.
+5. Safer phone rule.
+6. Botcake field names `date_subscribed_at` and `last_interactive_at` (UTC).
+7. The tests listed above, marked "(amendment 1)".
 
 ## Story changes
 
