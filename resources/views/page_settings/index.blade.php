@@ -118,6 +118,11 @@
         return e;
     }
 
+    // replaceChildren() turns a null into the text "null": always drop the empty parts first
+    function put(node, ...kids) {
+        node.replaceChildren(...kids.filter(k => k != null));
+    }
+
     function notice(text, cls = 'text-gray-600') {
         const n = document.getElementById('notice');
         n.className = 'text-xs ' + cls;
@@ -189,7 +194,7 @@
         const mark = marks.get(cellId(row.key, col.key));
         td.title = cell ? (cell.by + ' · ' + cell.at) : '';
         td.classList.toggle('bg-red-50', !!(mark && mark.cls === 'text-red-600'));
-        td.replaceChildren(
+        put(td,
             el('span', {class: 'font-mono break-all', text: cell ? cell.value : ''}),
             mark ? el('span', {class: 'ml-1 text-xs ' + mark.cls, title: mark.title || '', text: mark.text}) : null,
             mark && mark.title ? el('div', {class: 'text-xs text-red-600', text: mark.title}) : null,
@@ -276,7 +281,7 @@
             placeholder: secret ? 'bagong value (blangko = walang palit)' : ''});
         input.value = original;
         const mark = el('span', {class: 'block text-xs'});
-        td.replaceChildren(input, mark);
+        put(td, input, mark);
         input.focus();
         editing = {pk: row.key, key: col.key, td, input, mark, original, secret, timer: null};
 
@@ -390,7 +395,7 @@
         document.getElementById('history-title').textContent = row.name + ' · ' + col.label;
         const cur = row.cells[key];
         const current = document.getElementById('history-current');
-        current.replaceChildren(
+        put(current,
             el('div', {class: 'text-xs text-gray-500', text: 'Ngayon'}),
             el('div', {class: 'font-mono break-all', text: cur ? cur.value : '(walang laman)'}),
             cur ? el('div', {class: 'text-xs text-gray-500', text: cur.by + ' · ' + cur.at}) : null,
