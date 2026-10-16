@@ -56,6 +56,7 @@ use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
+use App\Http\Controllers\BotcakeCustomersController;
 use App\Http\Controllers\PsidCoverageController;
 use App\Http\Controllers\JntStatusController;
 use App\Http\Controllers\Encoder\Tools\AiController;
@@ -250,6 +251,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name(
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
     Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1')->name('test-token');
     Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
+    Route::get('/customers', [BotcakeCustomersController::class, 'index'])->name('customers');
     Route::get('/psid-coverage', [PsidCoverageController::class, 'index'])->name('psid-coverage');
     Route::get('/psid-coverage/orders', [PsidCoverageController::class, 'orders'])->name('psid-coverage.orders');
 });

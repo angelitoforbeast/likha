@@ -76,7 +76,8 @@
          data-page-check-url="{{ route('page-settings.page-check') }}"
          data-test-token-url="{{ route('page-settings.test-token') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
-         data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}">
+         data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}"
+         data-customers-url="{{ route('page-settings.customers') }}">
         <table id="grid-table" class="text-sm border-collapse min-w-full"></table>
     </div>
 
@@ -232,7 +233,8 @@
             out.push(postForm(url.testTokenUrl, r.name, 'Test token', 'bg-gray-200 hover:bg-gray-300 px-2 py-0.5 rounded mr-1 text-xs'));
             out.push(postForm(url.syncUrl, r.name, 'Sync now', 'bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded mr-1 text-xs'));
         }
-        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), text: 'Coverage'}));
+        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs mr-2', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), text: 'Customers'}));
+        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), text: 'Orders'}));
         return out;
     }
 
