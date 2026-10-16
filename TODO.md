@@ -424,3 +424,14 @@ Accepted, not fixed:
 - **Postgres `NULLS LAST` ordering in the customers view is not run by a test** (the suite is sqlite only, and sqlite already sorts NULLs last when descending).
 - **Between pages, a run can lose the lock to another run** (one lock per page): the second run then syncs while the first prints "Skipped" and stops. The two never sync at the same time. Reason: a lock per page keeps every lock well inside its 2 h TTL.
 - **`botcake_psids` has no unique index on (source, page, psid) (already true before this brief).** Two syncs at the same moment could insert a duplicate row. Reason: the lock prevents concurrent syncs; storage changes are outside this brief.
+
+### 043 delivery status per campaign / ad set / ad (2026-10-17)
+
+- **The visible /owner/private page row is not the row these numbers add up to.** The page loads `itemSummary()`, whose J&T figures match `from_jnts` by sender (`page_sender_mappings`), over the 60 days before the date, per item + COD. The new columns follow `data()` (orders in the filter range, J&T by waybill), which is the only way to attribute to an ad. Reason: the brief names `data()`; which row the owner wants matched is a decision for the owner.
+- **No test compares the campaigns + "Walang ad id" with the real `data()` row.** `data()` cannot run on sqlite (`::int` casts, `ALTER TABLE … ADD PRIMARY KEY`); the flag SQL is shared code instead of a copy, and the test checks the service's own total. Check on the server: compare one page's `page` total from `/owner/private/ad-delivery` with `/owner/private/data` for the same range.
+- **`partial_date` is ignored by the delivery columns** (they stop at the end date). Reason: `data()` ignores it as well.
+- **On MySQL, an accent-insensitive collation can return a page key spelled differently from the one asked for, and that page then shows zeros.** Reason: rare; the front end sends the page labels as stored.
+- **`AdDeliveryStatus` writes `PAGE` by hand where `data()` looks the column name up (`pickCol`).** Reason: trusted schema; production is MySQL with `PAGE`.
+- **The endpoint accepts any date range for up to 500 pages.** Reason: `data()` accepts the same; one grouped query.
+- **After a date change, an expand that is already loaded keeps its old numbers** (existing expand behaviour). The label shows the range those numbers came from.
+- **A delivery-only campaign row (orders but no spend in the window) shows "Off" and no ad sets.** Reason: its ad sets are not in the window's list; its numbers are needed for the sum.
