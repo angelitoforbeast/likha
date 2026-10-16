@@ -30,6 +30,15 @@ class AppServiceProvider extends ServiceProvider
             \Illuminate\Auth\Events\Logout::class,
             [\App\Listeners\RefuseRememberedLoginUnlessCeo::class, 'forgetSinceCookie']
         );
+        // last_login_at at login/logout sa staff_events.
+        \Illuminate\Support\Facades\Event::listen(
+            \Illuminate\Auth\Events\Login::class,
+            [\App\Listeners\StaffLoginActivity::class, 'recordLogin']
+        );
+        \Illuminate\Support\Facades\Event::listen(
+            \Illuminate\Auth\Events\Logout::class,
+            [\App\Listeners\StaffLoginActivity::class, 'recordLogout']
+        );
     }
     public function deleteAll()
 {

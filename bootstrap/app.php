@@ -19,6 +19,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'allowed_ip' => \App\Http\Middleware\AllowedIpMiddleware::class,
         ]);
+
+        // Last seen at staff_events ng naka-login na staff (para sa staff feed ng owner).
+        $middleware->appendToGroup('web', \App\Http\Middleware\RecordStaffActivity::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Huwag kailanman i-flash sa session ang API key fields (/boardroom/agents) kapag may validation error.
