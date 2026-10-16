@@ -18,16 +18,17 @@ class SuppliersGroupTest extends ItemTestCase
     /**
      * sha1 ng normalised render ng item.index, galing sa base commit (bago ang anumang pagbabago).
      * Key: <layout>.<viewer>. Ang old.ceo ay ikinukumpara sa orihinal na table ng CEO, pagkatapos tanggalin ang link nito sa toolbar at ang salitang pinapanatili nito sa address.
+     * Muling na-pin nang palitan ang mensahe ng Primary Items recompute ("ties skipped" → "tie(s) resolved"); iyon lang ang diff.
      */
     private const BASE = [
-        'default.ceo'              => '5bc06183505014c1c76d6a4ad3b2a64d85bae452',
-        'default.ceo_as_marketing' => 'a7f063ad4ee56665ad763514b4dfa513284ec91e',
-        'default.marketing'        => 'c87616640b0ef585d2217aec00eb419124757f9b',
-        'default.marketing_oic'    => '57c713bd753a02648b4d8cd765188dfacf37e323',
-        'old.ceo'                  => 'b8395ba9d734e304e8bc7afc39bade923db1674a', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
-        'old.ceo_as_marketing'     => '25d69d35fb68970d598e8ab622cda967ee5b4ec5',
-        'old.marketing'            => '85aaefd987989115e948a47f1d62bd6949cdba27',
-        'old.marketing_oic'        => '97a1c74f5b91bc47b9738d5cb82f3da82dc7c0b4',
+        'default.ceo'              => '73759d0db9b19cd39f7fd7b9e1f6e7142113bf18',
+        'default.ceo_as_marketing' => '0e9dcaa0c6da9bda04c4f6a48627ca8bf3e964d5',
+        'default.marketing'        => '8b8cfd960cc3b097b5af0b0c51ed049c532c9e91',
+        'default.marketing_oic'    => 'cb7c850008ab9de4a68b3350b8554a9dcd5f0e98',
+        'old.ceo'                  => '75b0c17366cd7beb8f723d3c7be3b8e151bdda4d', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
+        'old.ceo_as_marketing'     => '0dc8775b2c30ea421d392c01fbd96a8314d36f86',
+        'old.marketing'            => '8e87611778b9f93a6a269ceae74656d362275aed',
+        'old.marketing_oic'        => 'f7c6fdd5d235a258dffea3a78cbf85bee3f87f20',
     ];
 
     protected function setUp(): void
