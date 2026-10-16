@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\FromJnt;
+use App\Support\StaffEvents;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -1182,6 +1183,7 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
         }
 
         $batches = array_chunk($data, 1000);
+        $statusChanged = [];
 
         foreach ($batches as $batch) {
             $waybills = array_column($batch, 'Waybill Number');
@@ -1219,6 +1221,10 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
                         $existing->status_logs = json_encode($logsArray, JSON_UNESCAPED_UNICODE);
                         $existing->updated_at  = now();
                         $existing->save();
+
+                        if (trim((string)$oldStatus) !== trim((string)$newStatus)) {
+                            $statusChanged[] = $existing->id;
+                        }
                     }
                 } else {
                     // 🔰 Bagong waybill: treat as from = null → to = $newStatus
@@ -1251,6 +1257,9 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
                 FromJnt::insert($insertRows);
             }
         }
+
+        // Bagong waybill ay hindi edit: ang nagbagong status lang ng dating row ang binibilang.
+        StaffEvents::recordChecker('checker.status', 'jnt', $statusChanged);
 
         return redirect()->back()->with('success', 'Database updated via JNT_UPDATE.');
     }

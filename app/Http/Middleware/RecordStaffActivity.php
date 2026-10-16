@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\FromJntController;
+use App\Http\Controllers\MacroOutputController;
 use App\Support\StaffEvents;
 use Closure;
 use Illuminate\Http\Request;
@@ -32,6 +34,16 @@ class RecordStaffActivity
     /** Ang login at logout action: ang listener ang nagtatala ng mga ito bilang `login` / `logout`. */
     private const AUTH_ACTIONS = [LoginController::class . '@login', LoginController::class . '@logout'];
 
+    /** Ang Checker 1 at J&T status actions: sila mismo ang nagtatala ng checker.* event kada order na nagbago. */
+    private const CHECKER_ACTIONS = [
+        MacroOutputController::class . '@updateField',
+        MacroOutputController::class . '@bulkUpdate',
+        MacroOutputController::class . '@validateItems',
+        MacroOutputController::class . '@validateAddresses',
+        MacroOutputController::class . '@validateCheckerToFix',
+        FromJntController::class . '@updateOrInsert',
+    ];
+
     public function handle(Request $request, Closure $next): Response
     {
         $userBefore = $this->userId();
@@ -48,7 +60,8 @@ class RecordStaffActivity
             if ($userBefore !== null && $userBefore === $userAfter
                 && in_array($request->getMethod(), self::WRITE_METHODS, true)
                 && $status >= 200 && $status < 400
-                && !$this->isLoginOrLogout($request)) {
+                && !$this->isLoginOrLogout($request)
+                && !$this->isCheckerAction($request)) {
                 [$kind, $ref] = $this->describe($request);
                 StaffEvents::record($userBefore, $kind, $request->getMethod(), $status, $ref);
             }
@@ -75,6 +88,13 @@ class RecordStaffActivity
         $route = $request->route();
 
         return $route instanceof Route && in_array($route->getActionName(), self::AUTH_ACTIONS, true);
+    }
+
+    private function isCheckerAction(Request $request): bool
+    {
+        $route = $request->route();
+
+        return $route instanceof Route && in_array($route->getActionName(), self::CHECKER_ACTIONS, true);
     }
 
     private function touchLastSeen(int $userId, Request $request): void
