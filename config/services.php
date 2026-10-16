@@ -77,6 +77,7 @@ return [
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),
+        'bot_user_ids' => env('STAFF_FEED_BOT_USER_IDS', ''),
     ],
 
 

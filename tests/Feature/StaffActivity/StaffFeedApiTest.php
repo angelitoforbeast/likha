@@ -17,10 +17,10 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
     private const STAFF_KEYS = [
         'user_id', 'name', 'role', 'department', 'last_seen_at', 'last_seen_path', 'last_login_at',
-        'online', 'last_event', 'counts', 'checklist_due_not_submitted',
+        'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot',
     ];
 
-    private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'method', 'status', 'ref', 'created_at'];
+    private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'method', 'status', 'ref', 'created_at', 'is_bot'];
 
     protected function setUp(): void
     {
@@ -149,6 +149,58 @@ class StaffFeedApiTest extends StaffActivityTestCase
         foreach ([$user->email, '09170000000', 'sess-secret', '10.9.8.7', 'AgentX', 'payload-secret', 'EMP-'] as $secret) {
             $this->assertStringNotContainsString($secret, $response->getContent());
         }
+    }
+
+    public static function statuses(): array
+    {
+        return [
+            'NULL'         => [null, true],
+            'blank'        => ['', true],
+            'spaces lang'  => ['  ', true],
+            'Active'       => ['Active', true],
+            'Inactive'     => ['Inactive', false],
+            'Resigned'     => ['Resigned', false],
+            'Terminated'   => ['Terminated', false],
+            'ibang casing' => [' resigned ', false],
+        ];
+    }
+
+    #[DataProvider('statuses')]
+    public function test_only_explicitly_inactive_statuses_are_left_out(?string $status, bool $listed): void
+    {
+        $user = $this->staff();
+        DB::table('employee_profiles')->where('user_id', $user->id)->update(['status' => $status]);
+
+        $ids = array_column($this->feed('/api/staff-status')->assertOk()->json('staff'), 'user_id');
+
+        $this->assertSame($listed ? [$user->id] : [], $ids);
+    }
+
+    public static function botIds(): array
+    {
+        return [
+            'walang laman'        => ['', [false, false]],
+            'hindi nakaset'       => [null, [false, false]],
+            'malformed'           => ['abc, 1.5, -2, ,', [false, false]],
+            'unang user'          => ['{a}', [true, false]],
+            'may sira sa paligid' => [' x, {b} ,9x', [false, true]],
+        ];
+    }
+
+    #[DataProvider('botIds')]
+    public function test_is_bot_is_true_only_for_the_configured_user_ids(?string $env, array $expected): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        config(['services.staff_feed.bot_user_ids' => $env === null ? null : strtr($env, ['{a}' => $a->id, '{b}' => $b->id])]);
+        $this->event($a->id, 'login', '2026-10-16 08:00:00');
+        $this->event($b->id, 'login', '2026-10-16 09:00:00');
+
+        $staff = collect($this->feed('/api/staff-status')->assertOk()->json('staff'))->keyBy('user_id');
+        $events = collect($this->feed('/api/staff-events?since=2026-10-16')->assertOk()->json('events'))->keyBy('user_id');
+
+        $this->assertSame($expected, [$staff[$a->id]['is_bot'], $staff[$b->id]['is_bot']]);
+        $this->assertSame($expected, [$events[$a->id]['is_bot'], $events[$b->id]['is_bot']]);
     }
 
     public function test_online_is_false_after_10_minutes_and_null_when_sessions_are_not_in_the_database(): void
