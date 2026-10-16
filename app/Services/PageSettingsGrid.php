@@ -30,7 +30,7 @@ class PageSettingsGrid
         'botcake.token_status'     => 'Token status',
     ];
 
-    public function __construct(private PageSettings $settings)
+    public function __construct(private PageSettings $settings, private BotcakeCustomerSync $sync)
     {
     }
 
@@ -56,7 +56,7 @@ class PageSettingsGrid
 
         uasort($rows, fn ($a, $b) => strnatcasecmp($a['name'], $b['name']));
 
-        return ['columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now];
+        return ['columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now, 'sync_lock' => $this->syncLock()];
     }
 
     /**
@@ -81,7 +81,7 @@ class PageSettingsGrid
         $runPages = BotcakePsidImportRun::where('source', 'api')->where('updated_at', '>=', $since)->distinct()->pluck('page_name')
             ->filter()->map(fn ($p) => $this->settings->pageKey($p))->unique()->values()->all();
 
-        return ['cells' => array_values($cells), 'info' => $runPages ? $this->info($runPages) : [], 'now' => $now];
+        return ['cells' => array_values($cells), 'info' => $runPages ? $this->info($runPages) : [], 'now' => $now, 'sync_lock' => $this->syncLock()];
     }
 
     /** Ang dating values ng isang cell (pinalitan o na-clear), pinakabago muna. Secret = huling 4 lang. */
@@ -114,6 +114,12 @@ class PageSettingsGrid
      * Ang "since" ng susunod na poll. Segundo lang ang created_at, at maaaring ma-commit ang save pagkatapos ng query
      * ngunit may naunang segundo: kaya 2 segundong overlap. Ang naulit na cell ay walang pinsala.
      */
+    /** Kailan nagsimula ang Botcake sync na may hawak ng lock (Manila), o null. Mula sa cache, hindi sa database. */
+    private function syncLock(): ?string
+    {
+        return $this->sync->lockedSince()?->timezone('Asia/Manila')->format('Y-m-d H:i');
+    }
+
     private function now(): string
     {
         return now()->subSeconds(2)->format('Y-m-d H:i:s');

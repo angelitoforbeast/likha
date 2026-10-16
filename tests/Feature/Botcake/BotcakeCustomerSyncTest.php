@@ -4,10 +4,12 @@ namespace Tests\Feature\Botcake;
 
 use App\Models\BotcakePsid;
 use App\Models\BotcakePsidImportRun;
+use App\Services\BotcakeCustomerSync;
 use App\Services\PageSettings;
 use Illuminate\Http\Client\Request;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 
@@ -149,11 +151,12 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertSame('known_batch', BotcakePsidImportRun::where('source', 'api')->latest('id')->value('stop_reason'));
     }
 
-    private function apiRow(string $psid, string $status, ?int $seenDaysAgo): BotcakePsid
+    private function apiRow(string $psid, string $status, ?int $seenDaysAgo, ?int $subscribedDaysAgo = 20): BotcakePsid
     {
         return BotcakePsid::create([
             'page' => 'Page Uno', 'fb_name' => 'Name ' . $psid, 'psid' => $psid, 'status' => $status, 'source' => 'api',
             'last_seen_at' => $seenDaysAgo === null ? null : now()->subDays($seenDaysAgo),
+            'subscribed_at' => $subscribedDaysAgo === null ? null : now()->subDays($subscribedDaysAgo),
         ]);
     }
 
@@ -223,5 +226,102 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
 
         $ana->refresh();
         $this->assertSame(['120250000000000002', ['120250000000000001', '120250000000000002']], [$ana->ad_id, $ana->ad_ids]);
+    }
+
+    /** Isang customer na naka-subscribe $days na araw na ang nakaraan. */
+    private function subscribed(string $psid, int $days): array
+    {
+        return $this->customer($psid, 'Name ' . $psid) + ['date_subscribed_at' => now()->subDays($days)->toIso8601String()];
+    }
+
+    public static function windows(): array
+    {
+        // [--full, max age config (null = default 45), araw ng pinakalumang customer sa page 2, inaasahang pages na binasa, stop reason]
+        return [
+            'incremental, 46 araw'         => [false, null, 46, [1, 2], 'age'],
+            'full, 46 araw'                => [true, null, 46, [1, 2], 'age'],
+            'full, 44 araw: tuloy'         => [true, null, 44, [1, 2, 3, 4], 'end'],
+            'config 10 araw, 11 araw'      => [true, 10, 11, [1, 2], 'age'],
+        ];
+    }
+
+    /** @dataProvider windows */
+    public function test_every_sync_stops_at_the_first_batch_with_a_customer_subscribed_before_the_window(bool $full, ?int $maxAge, int $oldest, array $asked, string $reason): void
+    {
+        if ($maxAge !== null) config(['services.botcake.sync_max_age_days' => $maxAge]);
+        $page2 = array_map(fn ($i) => $this->subscribed('q' . $i, 3), range(1, 9));
+        $page2[] = $this->subscribed('q-old', $oldest);
+        $this->fakeCustomers([
+            1 => array_map(fn ($i) => $this->subscribed('p' . $i, 1), range(1, 10)),
+            2 => $page2,
+            3 => [$this->subscribed('r1', $oldest)],
+        ]);
+
+        Artisan::call('botcake:sync-customers', $full ? ['--full' => true] : []);
+
+        $this->assertSame($asked, $this->asked);
+        $this->assertSame($reason, BotcakePsidImportRun::where('source', 'api')->sole()->stop_reason);
+        $this->assertTrue(BotcakePsid::where('psid', 'q-old')->exists(), 'ang batch na binasa ay naitatala buo');
+    }
+
+    public function test_the_all_known_batch_stop_comes_before_the_age_stop(): void
+    {
+        $old = array_map(fn ($i) => $this->subscribed('p' . $i, 60), range(1, 10));
+        foreach ($old as $c) $this->apiRow($c['psid'], 'available', 1, 60);
+        $this->fakeCustomers([1 => $old]);
+
+        Artisan::call('botcake:sync-customers');
+
+        $this->assertSame('known_batch', BotcakePsidImportRun::where('source', 'api')->sole()->stop_reason);
+    }
+
+    public function test_a_windowed_full_read_marks_inactive_only_customers_subscribed_within_the_window(): void
+    {
+        $inWindow  = $this->apiRow('gone-new', 'available', 31, 20);
+        $outside   = $this->apiRow('gone-old', 'available', 31, 100);
+        $undated   = $this->apiRow('gone-undated', 'available', 31, null);
+        $this->fakeCustomers([1 => array_merge(array_map(fn ($i) => $this->subscribed('p' . $i, 2), range(1, 9)), [$this->subscribed('p-old', 50)])]);
+
+        Artisan::call('botcake:sync-customers', ['--full' => true]);
+
+        $this->assertSame('age', BotcakePsidImportRun::where('source', 'api')->sole()->stop_reason);
+        $this->assertSame('inactive', $inWindow->fresh()->status);
+        $this->assertSame('available', $outside->fresh()->status, 'lampas sa window: hindi na nakikita, pero hindi inactive');
+        $this->assertSame('available', $undated->fresh()->status, 'walang petsa: hindi alam kung nasa window');
+    }
+
+    public function test_the_lock_expires_after_2_hours_and_shows_since_when_it_is_held(): void
+    {
+        $sync = app(BotcakeCustomerSync::class);
+        $this->assertNull($sync->lockedSince());
+
+        $sync->withLock(function () use ($sync) {
+            $this->assertSame(now()->format('Y-m-d H:i:s'), $sync->lockedSince()->format('Y-m-d H:i:s'));
+            $this->assertNull($sync->withLock(fn () => 'second'), 'may hawak: laktaw');
+
+            // Isang run na pinatay (hindi nakapag-release): pagkalipas ng 2 oras, malaya na ulit.
+            $this->travel(119)->minutes();
+            $this->assertFalse(Cache::lock(BotcakeCustomerSync::LOCK, 10)->get());
+            $this->travel(2)->minutes();
+            $this->assertTrue(Cache::lock(BotcakeCustomerSync::LOCK, 10)->get());
+            Cache::lock(BotcakeCustomerSync::LOCK)->forceRelease();
+        });
+
+        $this->assertNull($sync->lockedSince(), 'nawawala kasama ng lock');
+    }
+
+    public function test_a_signal_handler_force_releases_the_lock_and_the_skip_message_says_since_when(): void
+    {
+        $sync = app(BotcakeCustomerSync::class);
+        $this->travelTo('2026-10-17 08:30:00');
+        Cache::lock(BotcakeCustomerSync::LOCK, BotcakeCustomerSync::LOCK_TTL)->get();
+        Cache::put(BotcakeCustomerSync::LOCK . ':since', now()->toIso8601String(), BotcakeCustomerSync::LOCK_TTL);
+
+        Artisan::call('botcake:sync-customers');
+        $this->assertStringContainsString('Skipped: may tumatakbo pang Botcake customer sync (mula 2026-10-17 08:30).', Artisan::output());
+
+        $sync->forceRelease();
+        $this->assertNull($sync->lockedSince());
+        $this->assertTrue(Cache::lock(BotcakeCustomerSync::LOCK, 10)->get());
     }
 }

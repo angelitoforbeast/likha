@@ -5,6 +5,7 @@ namespace Tests\Feature\PageSettings;
 use App\Models\BotcakePsid;
 use App\Models\BotcakePsidImportRun;
 use App\Models\PageSetting;
+use App\Services\BotcakeCustomerSync;
 use App\Services\PageSettings;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -239,6 +240,21 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertStringContainsString(route('page-settings.test-token'), $html);
         $this->assertStringContainsString(route('page-settings.sync'), $html);
         $this->assertStringContainsString('/page-settings/psid-coverage/orders', $html);
+    }
+
+    public function test_the_grid_and_the_poll_show_since_when_a_sync_holds_the_lock(): void
+    {
+        $this->travelTo('2026-10-17 08:30:00');
+        $sync = app(BotcakeCustomerSync::class);
+
+        $this->assertNull($this->grid()['sync_lock']);
+        $sync->withLock(function () {
+            $this->travelTo('2026-10-17 08:45:00');
+            $this->assertSame('2026-10-17 08:30', $this->grid()['sync_lock']);
+            $this->assertSame('2026-10-17 08:30', $this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
+            $this->assertStringContainsString('May tumatakbong Botcake sync', $this->get('/page-settings')->getContent());
+        });
+        $this->assertNull($this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
     }
 
     public function test_the_query_count_stays_flat_from_5_to_50_pages(): void

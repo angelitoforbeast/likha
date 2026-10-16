@@ -14,6 +14,9 @@ use Illuminate\Support\Facades\Log;
  * Incremental: page 1, 2, … hanggang sa unang batch na naitala na lahat ang psid (pinakabago muna ang listahan),
  * walang laman, o ang cap (services.botcake.sync_max_batches); ang susunod na run ay mula page 1 ulit.
  * Full: hanggang walang laman; pagkatapos ng malinis na basa, ang hindi nakita nang 30 araw ay inactive (hindi binubura).
+ * Window: lahat ng sync ay humihinto sa unang batch na may customer na naka-subscribe bago ang huling N araw
+ * (services.botcake.sync_max_age_days, default 45; stop reason age). Pinakabagong subscriber muna ang listahan, kaya
+ * mas luma na ang lahat ng kasunod. Ang inactive ay para lang sa mga naka-subscribe sa loob ng window.
  * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason.
  */
 class BotcakeCustomerSync
@@ -21,6 +24,7 @@ class BotcakeCustomerSync
     public const LOCK = 'botcake-sync-customers';
     public const MAX_BATCHES = 20000; // pananggalang ng --full kung paulit-ulit ang sagot ng API
     public const INACTIVE_DAYS = 30;
+    public const LOCK_TTL = 2 * 3600; // ang run na pinatay (hindi nakapag-release) ay hindi humaharang nang higit dito
 
     public function __construct(
         private PageSettings $settings,
@@ -38,14 +42,30 @@ class BotcakeCustomerSync
     /** Patakbuhin habang hawak ang lock (isa lang sabay: schedule, command at button). Null = may tumatakbo na. */
     public function withLock(callable $fn): mixed
     {
-        $lock = Cache::lock(self::LOCK, 3 * 3600);
+        $lock = Cache::lock(self::LOCK, self::LOCK_TTL);
         if (!$lock->get()) return null;
 
+        Cache::put(self::LOCK . ':since', now()->toIso8601String(), self::LOCK_TTL);
         try {
             return $fn();
         } finally {
             $lock->release();
+            Cache::forget(self::LOCK . ':since');
         }
+    }
+
+    /** Kailan nagsimula ang sync na may hawak ng lock, o null kapag walang tumatakbo. */
+    public function lockedSince(): ?Carbon
+    {
+        $since = Cache::get(self::LOCK . ':since');
+        return is_string($since) ? Carbon::parse($since)->setTimezone(config('app.timezone')) : null;
+    }
+
+    /** Para sa SIGTERM / SIGINT ng command: bitawan ang lock kahit hindi natapos ang run. */
+    public function forceRelease(): void
+    {
+        Cache::lock(self::LOCK)->forceRelease();
+        Cache::forget(self::LOCK . ':since');
     }
 
     public function syncPage(string $page, bool $full = false): BotcakePsidImportRun
@@ -62,6 +82,7 @@ class BotcakeCustomerSync
         $reason = null;
         $inactive = 0;
         $limit  = $full ? self::MAX_BATCHES : max(1, (int) config('services.botcake.sync_max_batches', 300));
+        $oldest = now()->subDays(max(1, (int) config('services.botcake.sync_max_age_days', 45)));
 
         if (!$pageId || !$token) {
             $error = 'Walang botcake.page_id o botcake.token ang page';
@@ -80,13 +101,16 @@ class BotcakeCustomerSync
                     $allKnown = $this->store($page, $batch, $run);
                     $run->save();
                     if ($allKnown && !$full) $reason = 'known_batch';
+                    elseif ($this->reachesBefore($batch, $oldest)) $reason = 'age';
                     elseif ($n >= $limit) $reason = 'cap';
                 }
                 $this->tokenStatus($page, 'ok');
 
-                // Buong basa hanggang dulo nang walang error: nakita ang lahat ng kasalukuyang customer.
-                if ($full && $reason === 'end') {
+                // Buong basa hanggang dulo (o hanggang sa window) nang walang error: nakita ang lahat ng kasalukuyang
+                // customer na naka-subscribe sa loob ng window. Ang mas luma ay hindi na binabasa, kaya hindi ginagalaw.
+                if ($full && in_array($reason, ['end', 'age'], true)) {
                     $inactive = BotcakePsid::where('source', 'api')->where('page', $page)->where('status', 'available')
+                        ->where('subscribed_at', '>=', $oldest)
                         ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(self::INACTIVE_DAYS)))
                         ->update(['status' => 'inactive', 'last_checked_at' => now()]);
                 }
@@ -115,6 +139,16 @@ class BotcakeCustomerSync
         Log::info('BotcakeCustomerSync: ' . $run->last_message, ['run_id' => $run->id, 'error' => $error]);
 
         return $run;
+    }
+
+    /** May customer ba sa batch na naka-subscribe bago ang $oldest (walang petsa = hindi alam, hindi binibilang). */
+    private function reachesBefore(array $batch, Carbon $oldest): bool
+    {
+        foreach ($batch as $c) {
+            $at = $this->time($c['date_subscribed_at'] ?? $c['subscribed_at'] ?? $c['inserted_at'] ?? null);
+            if ($at && $at->lt($oldest)) return true;
+        }
+        return false;
     }
 
     /** @return bool true kapag naitala na dati ang lahat ng psid ng batch */

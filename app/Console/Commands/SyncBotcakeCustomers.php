@@ -28,6 +28,15 @@ class SyncBotcakeCustomers extends Command
             }
         }
 
+        // Kapag pinatay ang run (SIGTERM / SIGINT), bitawan ang lock para hindi ma-"Skipped" ang susunod na run.
+        // Sa platform na walang pcntl (hal. Windows), ang TTL ng lock ang sasalo.
+        if (extension_loaded('pcntl')) {
+            $this->trap([SIGTERM, SIGINT], function () use ($sync) {
+                $sync->forceRelease();
+                exit(1);
+            });
+        }
+
         $runs = $sync->withLock(function () use ($pages, $sync) {
             $runs = [];
             foreach ($pages as $page) {
@@ -39,7 +48,8 @@ class SyncBotcakeCustomers extends Command
         });
 
         if ($runs === null) {
-            $this->line('Skipped: may tumatakbo pang Botcake customer sync.');
+            $since = $sync->lockedSince();
+            $this->line('Skipped: may tumatakbo pang Botcake customer sync' . ($since ? ' (mula ' . $since->copy()->timezone('Asia/Manila')->format('Y-m-d H:i') . ')' : '') . '.');
         }
 
         return self::SUCCESS;

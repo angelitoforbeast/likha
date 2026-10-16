@@ -57,6 +57,11 @@
         <span id="notice" class="text-xs"></span>
     </div>
 
+    {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
+    <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
+        May tumatakbong Botcake sync mula <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Ang ibang sync ay lalaktaw hanggang matapos ito (o hanggang 2 oras kung naputol).
+    </div>
+
     <p class="mb-2 text-xs text-gray-500">
         I-click ang cell at mag-type: kusa itong nase-save (Enter, pag-alis sa cell, o ilang segundong walang type). Blangko = burahin ang setting.
         Token / secret: blangko = walang palit; ang laman ay hindi kailanman ipinapakita (huling 4 lang). Kada ilang segundo, kinukuha ang binago ng iba.
@@ -368,6 +373,8 @@
                 refreshInfo(pk);
             }
             since = data.now;
+            document.getElementById('sync-lock').classList.toggle('hidden', !data.sync_lock);
+            document.getElementById('sync-lock-since').textContent = data.sync_lock || '';
             if (structure || data.cells.some(c => c.key === 'botcake.page_id' || c.key === 'botcake.token')) render();
         } catch (err) { /* susubukan ulit sa susunod na poll */ }
     }
