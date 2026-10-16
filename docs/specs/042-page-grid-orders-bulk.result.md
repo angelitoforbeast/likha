@@ -253,4 +253,4 @@ Full suite after amendment 2: `Tests: 1318, Assertions: 16805, Errors: 1, Failur
 
 - **Named limiter.** The amendment says "named throttle". I used the throttle's prefix argument (`throttle:10,1,page-settings-sync-all`), which gives each route its own counter without a `RateLimiter::for` in a service provider. It is the same mechanism as `/test-token/one`.
 - **The SELECT still reads the page's recent orders with `LOWER(TRIM(PAGE))`,** as the PSID matching select does. It is a plain read and takes no row locks under InnoDB's consistent read. Only the chosen ids are locked, and only for their chunk's UPDATE.
-- **The `TODO.md` item on the shared throttle counter is now resolved** for these routes. Cell edits and page-check still share one counter, which is fine at 120 and 30 a minute.
+- **Cell edits and page-check still share one per-user counter,** which is fine at 120 and 30 a minute.
