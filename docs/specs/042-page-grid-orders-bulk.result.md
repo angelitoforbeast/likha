@@ -154,3 +154,44 @@ Not done. The app needs the server database (`.env`, not read), and this session
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories. The cases above come from its Tests list.
+
+## Amendment 1
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. Matching also fills the ad id of orders that already have a PSID but no ad id, from the page's API customer with that PSID. It is counted in the match result (`ad_filled`), and the sync and import logs show the count.
+
+Commit: `feat: matching fills the ad id of recent orders that already have a PSID but no ad id from the page's API customer, once, in one update per page, and the sync and import logs count it (spec 042 amendment 1)`
+
+### What changed (`BotcakeCustomerMatcher::matchPage`)
+
+- **One UPDATE per page.** It runs after the PSID matching, with no query per order:
+  - **Orders it touches:** the page's orders (`LOWER(TRIM(PAGE))` = page key) with `ts_date` within the matcher's `DAYS` (30). `botcake_psid` must be set, and `botcake_ad_id` must be NULL or `''`.
+  - **What it writes:** `botcake_ad_id` = the `ad_id` of a `botcake_psids` row with `source = 'api'`, the same page key and the same PSID, whose `ad_id` is non-empty. If there are several, the newest row (highest `id`) wins.
+  - **Customer status:** customers marked inactive count too. Their ad still brought the order.
+  - **Orders left as they are:** orders whose PSID has no such row (`EXISTS` guard). This includes a customer of another page.
+- **Never overwritten.** The "empty ad id" condition is checked in the UPDATE itself. The PSID is never written.
+- **Counted.** `matchPage()` and `matchPagesWithTokens()` return `ad_filled`.
+  - The sync's run message now ends with `…, N ad id`.
+  - The hourly sheet import's "Botcake customer match" log line is also written when only ad ids were filled.
+- **Every caller gets it:** the sync after each page, the per-row Sync now, Sync lahat, and the hourly sheet import. Old sheet PSIDs therefore get their ad id on the next run, as long as their customer row has one.
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| A sheet PSID without an ad id gets the ad id (NULL and `''`); an existing ad id is kept; another page's customer is not used; a customer without an ad id and a PSID with no API row leave the order as it is; the PSID never changes; an order 31 days old is untouched; `ad_filled` = 2, then 0 on a second run; `matchPagesWithTokens` returns `ad_filled` | `BotcakeCustomerMatchTest::test_an_order_with_a_psid_but_no_ad_id_gets_the_ad_id_of_its_page_customer` | pass |
+| The sync's run message shows the count (`…, 1 ad id`) | `BotcakeCustomerSyncTest::test_incremental_stops_at_the_first_batch_whose_psids_are_all_known` (extended) | pass |
+
+Red runs:
+- The matcher test failed on "Failed asserting that two arrays are identical": the ad id was still NULL.
+- The sync message failed on "… 0 ambiguous, 0 wala' ends with ', 1 ad id'".
+- That sync test was then reworked. Its first fixture gave the ad id to a customer that the sync re-reads, and the payload has no ad id. It now uses a stored customer outside the read batches.
+
+Full suite after the amendment: `Tests: 1315, Assertions: 16759, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`. `php -l` passes on the three changed PHP files.
+
+### Notes
+
+- **Each sync rewrites the ad id from Botcake's answer.** When the sync re-reads a customer, it stores that answer's `ad_id`, and the answer can be empty. The fill then uses whatever ad id the row holds at matching time. This was already the case before the amendment; it is noted because the fill depends on it.
+- **The query scans the page's recent orders,** like the existing matching select: `LOWER(TRIM(PAGE))` cannot use the `(ts_date, PAGE)` index beyond `ts_date`. The subquery uses the `botcake_psids.psid` index from 041.
+- **Review:** no separate review for this amendment. It is one bounded UPDATE on a trusted path, with tests on every case the amendment lists.
