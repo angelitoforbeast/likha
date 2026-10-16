@@ -61,8 +61,8 @@
             <th style="width:64px;" class="ph-sort" @click="sortBy('photo')" title="Walang photo muna / may photo muna">Photo<span class="arr" x-text="arrow('photo')"></span></th>
             <th class="ph-sort" @click="sortBy('item')" title="A–Z / Z–A">Item<span class="arr" x-text="arrow('item')"></span></th>
             <th style="width:90px;" class="ph-sort" @click="sortBy('hold')" title="Pinakamaraming hold muna">HOLD<span class="arr" x-text="arrow('hold')"></span></th>
-            @if($isCEO)<th style="min-width:220px;" class="ph-sort" @click="sortBy('po')" title="Pinakamababang presyo sa PO muna; walang PO sa dulo">Supplier / Presyo<span class="arr" x-text="arrow('po')"></span></th>@endif
-            @if($isCEO)<th style="min-width:300px;" class="ph-sort" @click="sortBy('quote')" title="WALANG supplier muna; ulitin ang click = pinakamaraming supplier muna">Suppliers (quote)<span class="arr" x-text="arrow('quote')"></span></th>@endif
+            @if($canSupplierWork)<th style="min-width:220px;" class="ph-sort" @click="sortBy('po')" title="Pinakamababang presyo sa PO muna; walang PO sa dulo">Supplier / Presyo<span class="arr" x-text="arrow('po')"></span></th>@endif
+            @if($canSupplierWork)<th style="min-width:300px;" class="ph-sort" @click="sortBy('quote')" title="WALANG supplier muna; ulitin ang click = pinakamaraming supplier muna">Suppliers (quote)<span class="arr" x-text="arrow('quote')"></span></th>@endif
             <th style="width:230px;">Actions</th>
           </tr>
         </thead>
@@ -84,7 +84,7 @@
                 <template x-if="!it.image_url"><span class="ph-badge-no">wala pang photo</span></template>
               </td>
               <td><span class="ph-hold" x-text="Number(it.hold||0).toLocaleString()"></span></td>
-              @if($isCEO)
+              @if($canSupplierWork)
               <td style="font-size:11px;line-height:1.4;">
                 {{-- Supplier(s) + latest unit cost (Supply Finance) — CEO LANG, isang linya kada supplier. --}}
                 <template x-if="(it.suppliers||[]).length">
@@ -291,7 +291,7 @@
               fetch('{{ route('item.data') }}?date_range=' + encodeURIComponent(range), {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('owner.private.item-summary') }}?start_date=' + this.startDate + '&end_date=' + this.endDate, {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('item.images') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
-              @if($isCEO)
+              @if($canSupplierWork)
               fetch('{{ route('item.suppliers') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('item.quotes') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               @else

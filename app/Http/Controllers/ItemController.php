@@ -858,7 +858,8 @@ class ItemController extends Controller
             'focus'     => trim((string) $request->query('item', '')),
             'startDate' => $start,
             'endDate'   => $end,
-            'isCEO'     => $this->getNormalizedRole() === 'CEO', // supplier/presyo column = CEO lang
+            // supplier / quote columns = supplier work (CEO at Marketing - OIC); walang CEO item value sa page na ito
+            'canSupplierWork' => $this->canSupplierWork(),
         ]);
     }
 

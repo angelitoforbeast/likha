@@ -8,6 +8,7 @@ Branch `feat/037-item-suppliers-moic-logs`, from `develop` at 0bbe481.
 - `feat: marketing OIC gets supplier work on /item …` (Part A, access)
 - `feat: item_edit_logs records every edit on /item …` (Part B, logs)
 - `docs: result of spec 037`
+- `feat: marketing OIC sees the supplier and quote columns on /item/photo (spec 037, amendment 1)`
 
 ## Part A: access
 
@@ -26,7 +27,7 @@ There is one check, `ItemController::canSupplierWork()` (`app/Http/Controllers/I
 | `ItemController.php:538` | `categorySave()` 403 | moved |
 | `ItemController.php:613` | `supplySettingsSave()` 403 | moved |
 | `ItemController.php:742` | `quoteDelete()` 403 | moved |
-| `ItemController.php:861` | `/item/photo` supplier / quote columns (`$isCEO`) | kept CEO-only: the brief does not list /item/photo (see "Suggestions") |
+| `ItemController.php:861` | `/item/photo` supplier / quote columns (was `$isCEO`) | moved by amendment 1: `canSupplierWork` |
 | `_agg_cells.blade.php:160` | ITEM VAL. (CEO) cell | kept: `item_value_ceo` |
 | `_agg_cells.blade.php:179` | category select | moved |
 | `_agg_cells.blade.php:238` | lead / palugit ✎ | moved |
@@ -56,6 +57,13 @@ There is one check, `ItemController::canSupplierWork()` (`app/Http/Controllers/I
 | `index.blade.php:3810, 3816` | `worklistItem` / `worklistKeep` | moved |
 | `index.blade.php:4020` | `loadItemSuppliers()` / `loadItemQuotes()` on init | moved |
 | `index.blade.php:1095, 2195, 2250` | edit modal's CEO unit cost field (`isCeoView`) | kept |
+
+## Amendment 1
+
+| Change | Done |
+|---|---|
+| `/item/photo` supplier and quote columns use `canSupplierWork()`, so Marketing - OIC sees them | `photoForm()` now passes `canSupplierWork` instead of `isCEO` (`ItemController.php:861`). `photo.blade.php:64, 65, 87, 294` (the two column headers, the cells, and the `/item/suppliers` + `/item/quotes` fetch) use it. The page shows no CEO item value or CEO unit cost, so nothing on it stays CEO-only. Test S-37A.5. |
+| The "≈ ₱" order-cost line stays CEO-only | Unchanged (`_table_order.blade.php:96, 165`, `index.blade.php:3566, 3573`). |
 
 ## Part B: edit logs
 
@@ -101,6 +109,7 @@ Case table (stories in `qa/stories.md`, slice 037):
 | S-37A.2 | `MoicSupplierAccessTest::test_S_37A_2_marketing_oic_edits_quotes_category_and_settings_plain_marketing_gets_403` | pass |
 | S-37A.3 | `MoicSupplierAccessTest::test_S_37A_3_marketing_oic_sees_the_supplier_table_but_not_the_ceo_profit_view` | pass |
 | S-37A.4 | `StockEndpointTest::test_item_value_ceo_only_for_ceo_viewing_as_ceo` (OIC case added) | pass |
+| S-37A.5 | `MoicSupplierAccessTest::test_S_37A_5_marketing_oic_sees_the_supplier_and_quote_columns_on_the_photo_page` | pass |
 | S-37B.1 | `ItemEditLogTest::test_S_37B_1_quote_save_and_delete_log_each_changed_field_and_nothing_when_unchanged` | pass |
 | S-37B.2 | `ItemEditLogTest::test_S_37B_2_category_and_supply_settings_log_old_and_new` | pass |
 | S-37B.3 | `ItemEditLogTest::test_S_37B_3_item_photo_upload_replace_and_delete_log_file_names_only` | pass |
@@ -108,9 +117,9 @@ Case table (stories in `qa/stories.md`, slice 037):
 | S-37B.5 | `ItemEditLogTest::test_S_37B_5_the_logs_page_is_for_ceo_and_marketing_oic_newest_first_with_filters` | pass |
 | S-37B.6 | `ItemEditLogTest::test_S_37B_6_the_item_page_links_to_the_logs_page_for_supplier_work_only` | pass |
 
-Red runs: S-37A.1 failed with `Failed asserting that null is identical to 'Acme'`, S-37A.2 with `Failed asserting that 403 is identical to 200`, and S-37A.3 with an ErrorException because `canSupplierWork` was missing from the view data. S-37B.1–3 failed with `Failed asserting that two arrays are identical`, S-37B.5 with `Failed asserting that 404 is identical to 200`, and S-37B.6 with `RouteNotFoundException`.
+Red runs: S-37A.1 failed with `Failed asserting that null is identical to 'Acme'`, S-37A.2 with `Failed asserting that 403 is identical to 200`, S-37A.3 with an ErrorException because `canSupplierWork` was missing from the view data, and S-37A.5 with `Marketing - OIC: Supplier / Presyo` (column absent). S-37B.1–3 failed with `Failed asserting that two arrays are identical`, S-37B.5 with `Failed asserting that 404 is identical to 200`, and S-37B.6 with `RouteNotFoundException`.
 
-Item suite: `OK (236 tests, 5266 assertions)`. Full suite: `Tests: 1202, Assertions: 15667, Errors: 1, Failures: 1, Skipped: 3`. The two that fail are the known `ExampleTest::test_the_application_returns_a_successful_response` and `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. Lint (`php -l`) is clean on every changed PHP file.
+Full suite after amendment 1: `Tests: 1203, Assertions: 15682, Errors: 1, Failures: 1, Skipped: 3`. The two that fail are the known `ExampleTest::test_the_application_returns_a_successful_response` and `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. Lint (`php -l`) is clean on every changed PHP file.
 
 ### Story changes (existing tests that pinned "Marketing - OIC gets nothing")
 
@@ -131,14 +140,16 @@ Item suite: `OK (236 tests, 5266 assertions)`. Full suite: `Tests: 1202, Asserti
 2. Sign in as a Marketing - OIC and open `/item`. Check that the "Sourcing:" chips show. Then click "🗂 Old view": it opens the table with suppliers, quotes and prices, and "🗂 Original table" / "🏷 Table with suppliers" switch between the two tables.
 3. Edit a quote price, and set a category and a lead time.
 4. Click "🧾 Item logs" (`/item/edit-logs`): each change shows who made it, when, and old → new.
-5. As plain Marketing, `/item` looks as before, and `/item/edit-logs` is a 404.
+5. As Marketing - OIC, open `/item/photo`: the "Supplier / Presyo" and "Suppliers (quote)" columns show.
+6. As plain Marketing, `/item` and `/item/photo` look as before, and `/item/edit-logs` is a 404.
 
 ## What the brief got wrong or left open
 
-- `/item/photo` also shows supplier and quote columns to the CEO only. The brief did not list it, so it stays CEO-only. It is a one-line change in `photoForm()` if the owner wants it.
-- The "≈ ₱" order-cost line in "To order" stays CEO-only, because it falls back to the CEO item value. Opening it to OICs needs a decision on that fallback.
+- `/item/photo` was not in the brief. Amendment 1 opened its supplier and quote columns to Marketing - OIC.
+- The "≈ ₱" order-cost line in "To order" stays CEO-only, because it falls back to the CEO item value (confirmed by amendment 1).
 - `page_item_settings_log` cannot be merged into the new list as one simple query (different row shape, and it carries the CEO item value). The page links to it instead.
 
 ## Suggestions for the owner (not done)
 
-- Open `/item/photo`'s supplier columns to Marketing - OIC with the same check.
+- None.
+

@@ -892,6 +892,7 @@ non-CEO render pass without being edited.
 | S-37A.2 | Given Marketing - OIC, when they save and delete a quote, set a category and save lead / palugit, then each is 200 and stored; plain Marketing gets 403 and nothing is stored | `MoicSupplierAccessTest::test_S_37A_2…` | Passed · 2026-10-16 · auto |
 | S-37A.3 | Given Marketing - OIC opens /item?layout=suppliers, then the table with suppliers, its header link and the sourcing chips show, and the view toggle, Daily, Snapshots and column settings do not; plain Marketing sees none of the supplier parts | `MoicSupplierAccessTest::test_S_37A_3…` | Passed · 2026-10-16 · auto |
 | S-37A.4 | Given Marketing - OIC, when they call /item/stock, then no `item_value_ceo` is returned | `StockEndpointTest::test_item_value_ceo_only_for_ceo_viewing_as_ceo` | Passed · 2026-10-16 · auto |
+| S-37A.5 | Given Marketing - OIC opens /item/photo, then the "Supplier / Presyo" and "Suppliers (quote)" columns and their fetches show (as for CEO); plain Marketing sees neither | `MoicSupplierAccessTest::test_S_37A_5…` | Passed · 2026-10-16 · auto |
 
 ### S-37B Every edit on /item is logged with old and new value, and listed for CEO and Marketing - OIC (P1)
 

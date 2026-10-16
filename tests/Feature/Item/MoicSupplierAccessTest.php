@@ -138,4 +138,16 @@ class MoicSupplierAccessTest extends ItemTestCase
             $this->assertStringNotContainsString($needle, (string) $res->getContent(), $needle);
         }
     }
+
+    public function test_S_37A_5_marketing_oic_sees_the_supplier_and_quote_columns_on_the_photo_page(): void
+    {
+        $columns = ['Supplier / Presyo', 'Suppliers (quote)', "fetch('" . route('item.suppliers') . "'", "fetch('" . route('item.quotes') . "', {headers"];
+        foreach (['CEO' => ['ceo@example.test', true], 'Marketing - OIC' => ['oic@example.test', true], 'Marketing' => ['mkt@example.test', false]] as $role => [$email, $sees]) {
+            $body = (string) $this->actingAs($this->user($role, $email))->get('/item/photo')->assertOk()->getContent();
+            foreach ($columns as $needle) {
+                $sees ? $this->assertStringContainsString($needle, $body, "{$role}: {$needle}")
+                      : $this->assertStringNotContainsString($needle, $body, "{$role}: {$needle}");
+            }
+        }
+    }
 }
