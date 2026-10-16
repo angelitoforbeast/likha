@@ -38,8 +38,8 @@ class BotcakeCustomersController extends Controller
     {
         $this->checkAccess();
 
-        $page   = $this->settings->normPage((string) $request->query('page', ''));
-        $search = trim((string) $request->query('q', ''));
+        $page   = $this->settings->normPage($this->text($request->query('page')));
+        $search = trim($this->text($request->query('q')));
         $status = in_array($request->query('status'), self::STATUSES, true) ? $request->query('status') : 'all';
         $hasAd  = $request->boolean('has_ad');
 
@@ -68,16 +68,27 @@ class BotcakeCustomersController extends Controller
 
         // Ilang order ng page ang may PSID ng bawat customer na nakikita: isang grouped query.
         $psids = collect($customers->items())->pluck('psid')->filter()->unique()->values()->all();
-        $orderCounts = [];
-        if ($psids) {
-            $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-            $col  = DB::getDriverName() === 'pgsql' ? '"PAGE"' : '`PAGE`';
-            $orderCounts = DB::table('macro_output')->whereIn('botcake_psid', $psids)
-                ->whereRaw("LOWER($trim($col)) = ?", [$this->settings->pageKey($page)])
-                ->groupBy('botcake_psid')->selectRaw('botcake_psid, COUNT(*) AS c')
-                ->pluck('c', 'botcake_psid')->map(fn ($c) => (int) $c)->all();
-        }
+        $orderCounts = $psids
+            ? $this->orderCountsQuery($page, $psids)->pluck('c', 'botcake_psid')->map(fn ($c) => (int) $c)->all()
+            : [];
 
         return view('page_settings.customers', compact('customers', 'orderCounts', 'page', 'search', 'status', 'hasAd'));
+    }
+
+    /** Bilang ng orders ng page kada PSID (sa botcake_psid index). */
+    public function orderCountsQuery(string $page, array $psids)
+    {
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $col  = DB::getDriverName() === 'pgsql' ? '"PAGE"' : '`PAGE`';
+
+        return DB::table('macro_output')->whereIn('botcake_psid', $psids)
+            ->whereRaw("LOWER($trim($col)) = ?", [$this->settings->pageKey($page)])
+            ->groupBy('botcake_psid')->selectRaw('botcake_psid, COUNT(*) AS c');
+    }
+
+    /** Query string bilang text; ang array (hal. ?q[]=x) ay itinuturing na blangko. */
+    private function text(mixed $v): string
+    {
+        return is_string($v) ? $v : '';
     }
 }

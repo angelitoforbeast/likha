@@ -28,28 +28,33 @@ class SyncBotcakeCustomers extends Command
             }
         }
 
-        // Kapag pinatay ang run (SIGTERM / SIGINT), bitawan ang lock para hindi ma-"Skipped" ang susunod na run.
-        // Sa platform na walang pcntl (hal. Windows), ang TTL ng lock ang sasalo.
+        // Kapag pinatay ang run (SIGTERM / SIGINT) habang hawak nito ang lock, bitawan ito para hindi ma-"Skipped"
+        // ang susunod na run. Hindi ginagalaw ang lock ng ibang proseso. Walang pcntl (hal. Windows): ang TTL ang sasalo.
+        $holding = false;
         if (extension_loaded('pcntl')) {
-            $this->trap([SIGTERM, SIGINT], function () use ($sync) {
-                $sync->forceRelease();
+            $this->trap([SIGTERM, SIGINT], function () use ($sync, &$holding) {
+                if ($holding) $sync->forceRelease();
                 exit(1);
             });
         }
 
-        $runs = $sync->withLock(function () use ($pages, $sync) {
-            $runs = [];
-            foreach ($pages as $page) {
-                $run = $sync->syncPage($page, (bool) $this->option('full'));
-                $this->line(($run->status === 'done' ? 'OK ' : 'FAILED ') . $run->last_message . ($run->last_error ? ' | ' . $run->last_error : ''));
-                $runs[] = $run;
-            }
-            return $runs;
-        });
+        // Isang lock kada page (TTL 2 oras bawat isa), para hindi maubos ang TTL sa mahabang run ng maraming page.
+        foreach ($pages as $page) {
+            $run = $sync->withLock(function () use ($page, $sync, &$holding) {
+                $holding = true;
+                try {
+                    return $sync->syncPage($page, (bool) $this->option('full'));
+                } finally {
+                    $holding = false;
+                }
+            });
 
-        if ($runs === null) {
-            $since = $sync->lockedSince();
-            $this->line('Skipped: may tumatakbo pang Botcake customer sync' . ($since ? ' (mula ' . $since->copy()->timezone('Asia/Manila')->format('Y-m-d H:i') . ')' : '') . '.');
+            if ($run === null) {
+                $since = $sync->lockedSince();
+                $this->line('Skipped: may tumatakbo pang Botcake customer sync' . ($since ? ' (mula ' . $since->copy()->timezone('Asia/Manila')->format('Y-m-d H:i') . ')' : '') . '.');
+                break;
+            }
+            $this->line(($run->status === 'done' ? 'OK ' : 'FAILED ') . $run->last_message . ($run->last_error ? ' | ' . $run->last_error : ''));
         }
 
         return self::SUCCESS;

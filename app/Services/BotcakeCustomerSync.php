@@ -24,7 +24,7 @@ class BotcakeCustomerSync
     public const LOCK = 'botcake-sync-customers';
     public const MAX_BATCHES = 20000; // pananggalang ng --full kung paulit-ulit ang sagot ng API
     public const INACTIVE_DAYS = 30;
-    public const LOCK_TTL = 2 * 3600; // ang run na pinatay (hindi nakapag-release) ay hindi humaharang nang higit dito
+    public const LOCK_TTL = 2 * 3600; // kada page; ang run na pinatay (hindi nakapag-release) ay hindi humaharang nang higit dito
 
     public function __construct(
         private PageSettings $settings,

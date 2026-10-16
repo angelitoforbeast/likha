@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\PageSettings;
 
+use App\Http\Controllers\BotcakeCustomersController;
 use App\Http\Controllers\PsidCoverageController;
 use App\Models\BotcakePsid;
 use App\Services\PageSettings;
@@ -231,8 +232,7 @@ class PsidCoverageTest extends BotcakeApiTestCase
         }
 
         // Ang bilang ng orders kada customer (customers view) ay sa botcake_psid index.
-        $count = DB::table('macro_output')->whereIn('botcake_psid', ['a', 'b'])->whereRaw('LOWER(TRIM(`PAGE`)) = ?', ['page uno'])
-            ->groupBy('botcake_psid')->selectRaw('botcake_psid, COUNT(*) AS c');
+        $count = app(BotcakeCustomersController::class)->orderCountsQuery('Page Uno', ['a', 'b']);
         $this->assertStringContainsString('macro_output_botcake_psid_idx', $plan($count));
     }
 }

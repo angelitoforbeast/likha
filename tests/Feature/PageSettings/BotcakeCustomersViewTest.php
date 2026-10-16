@@ -135,5 +135,8 @@ class BotcakeCustomersViewTest extends BotcakeApiTestCase
 
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
         $this->get('/page-settings/customers?page=Page%20Uno')->assertNotFound();
+
+        $this->actingAs($this->user('CEO', 'ceo2@example.test'));
+        $this->get('/page-settings/customers?page[]=x&q[]=y')->assertOk();
     }
 }
