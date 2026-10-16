@@ -19,9 +19,24 @@ class BotcakeClient
     public const MAX_RETRIES = 3;
 
     private ?float $lastRequestAt = null;
+    private int $retries = self::MAX_RETRIES;
+    private int $timeout = 30;
 
     public function __construct(private BotcakeClock $clock)
     {
+    }
+
+    /**
+     * Isang subok lang, walang retry, at mas maikling timeout: para sa web request na tumatawag sa Botcake
+     * (hal. "Test lahat ng token", kada page), para hindi lumampas nang ~30 segundo ang isang request.
+     */
+    public function once(int $timeout = 20): static
+    {
+        $client = clone $this;
+        $client->retries = 0;
+        $client->timeout = $timeout;
+
+        return $client;
     }
 
     /**
@@ -64,7 +79,7 @@ class BotcakeClient
                 $res = Http::withHeaders(['access-token' => $token])
                     ->acceptJson()
                     ->connectTimeout(10)
-                    ->timeout(30)
+                    ->timeout($this->timeout)
                     ->get(self::BASE . $path, $query);
                 $status = $res->status();
             } catch (ConnectionException $e) {
@@ -83,8 +98,8 @@ class BotcakeClient
             if (!$retryable) {
                 throw new BotcakeException('Botcake: HTTP ' . $status);
             }
-            if ($attempt >= self::MAX_RETRIES) {
-                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ' pagkatapos ng ' . self::MAX_RETRIES . ' retry', false, $status === 429 ? 'rate_limited' : 'error');
+            if ($attempt >= $this->retries) {
+                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ' pagkatapos ng ' . $attempt . ' retry', false, $status === 429 ? 'rate_limited' : 'error');
             }
 
             $wait = 2 ** ($attempt + 1); // 2, 4, 8

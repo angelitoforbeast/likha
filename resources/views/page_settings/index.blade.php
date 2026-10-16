@@ -57,6 +57,11 @@
         <span id="notice" class="text-xs"></span>
     </div>
 
+    <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
+        <button id="test-all" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">Test lahat ng token</button>
+        <span id="test-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
+    </div>
+
     {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
     <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
         May tumatakbong Botcake sync mula <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Ang ibang sync ay lalaktaw hanggang matapos ito (o hanggang 2 oras kung naputol).
@@ -75,6 +80,7 @@
          data-history-url="{{ route('page-settings.history') }}"
          data-page-check-url="{{ route('page-settings.page-check') }}"
          data-test-token-url="{{ route('page-settings.test-token') }}"
+         data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
          data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}"
          data-customers-url="{{ route('page-settings.customers') }}">
@@ -130,12 +136,14 @@
         n.textContent = text;
     }
 
+    // Pinakamaraming order muna; ang walang order sa window ay nasa ibaba, ayon sa pangalan.
+    const gridOrder = (a, b) => ((b.info.orders || 0) - (a.info.orders || 0)) || a.name.localeCompare(b.name, undefined, {numeric: true, sensitivity: 'base'});
+
     function sortedRows() {
         const q = document.getElementById('filter').value.trim().toLowerCase();
         return [...rows.values()]
             .filter(r => !q || r.name.toLowerCase().includes(q))
-            // Pinakamaraming order muna; ang walang order sa window ay nasa ibaba, ayon sa pangalan.
-            .sort((a, b) => ((b.info.orders || 0) - (a.info.orders || 0)) || a.name.localeCompare(b.name, undefined, {numeric: true, sensitivity: 'base'}));
+            .sort(gridOrder);
     }
 
     function ensureColumn(key, secret) {
@@ -435,6 +443,45 @@
         if (!list.children.length) list.append(el('li', {class: 'text-gray-400', text: 'Walang dating value.'}));
     }
     document.getElementById('history-close').addEventListener('click', () => document.getElementById('history').classList.add('hidden'));
+
+    // ---- Test lahat ng token: isang page kada request, isa-isa, sa ayos ng grid ----
+
+    document.getElementById('test-all').addEventListener('click', async e => {
+        const btn = e.currentTarget, out = document.getElementById('test-all-status');
+        const all = [...rows.values()].sort(gridOrder);
+        const targets = all.filter(r => r.info.botcake);
+        const sum = {ok: 0, invalid: 0, error: 0, skipped: all.length - targets.length};
+        btn.disabled = true;
+
+        for (let i = 0; i < targets.length; i++) {
+            const r = targets[i], id = cellId(r.key, 'botcake.token_status');
+            out.textContent = 'Test token: ' + (i + 1) + ' / ' + targets.length + ' · ' + r.name;
+            marks.set(id, {text: 'Testing…', cls: 'text-gray-400'});
+            repaint(r.key, 'botcake.token_status');
+            let data = {};
+            try {
+                const res = await fetch(url.testTokenOneUrl, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf},
+                    body: JSON.stringify({page_name: r.name}),
+                });
+                data = await res.json().catch(() => ({}));
+                if (!res.ok) data = {status: 'error', error: data.error || data.message || ('HTTP ' + res.status)};
+            } catch (err) {
+                data = {status: 'error', error: 'Walang koneksyon.'};
+            }
+            const status = ['ok', 'invalid', 'skipped'].includes(data.status) ? data.status : 'error';
+            sum[status]++;
+            if (data.cell) r.cells['botcake.token_status'] = data.cell;
+            if (status === 'error') marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || 'Hindi nasubukan.'});
+            else marks.set(id, {text: status, cls: status === 'ok' ? 'text-green-600' : 'text-red-600'});
+            repaint(r.key, 'botcake.token_status');
+        }
+
+        out.textContent = 'Test token tapos: ' + sum.ok + ' ok, ' + sum.invalid + ' invalid, ' + sum.error + ' error, '
+            + sum.skipped + ' walang Botcake ID o token (nilaktawan).';
+        btn.disabled = false;
+    });
 
     // ---- + Page, + Column, filter ----
 
