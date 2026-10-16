@@ -10,6 +10,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SameNumbersTest extends SummaryOverallTestCase
 {
+    /** Bilang ng statements ng lumang code kada /data call sa fixture na ito (sqlite). */
+    private const OLD_STATEMENTS = 42;
 
     public static function modes(): array
     {
@@ -40,4 +42,33 @@ class SameNumbersTest extends SummaryOverallTestCase
         }
     }
 
+    #[DataProvider('modes')]
+    public function test_data_runs_fewer_statements_than_before(string $page): void
+    {
+        $this->seedFixture();
+        [, $count] = $this->fetchData(['start_date' => self::START, 'end_date' => self::END, 'page_name' => $page]);
+
+        $this->assertLessThanOrEqual(self::OLD_STATEMENTS / 2, $count);
+    }
+
+    public function test_page_list_is_the_trimmed_distinct_ads_pages(): void
+    {
+        $this->seedFixture();
+        $this->actingAs($this->user());
+
+        $this->get('/summary/overall')->assertOk()
+            ->assertViewHas('pages', ['Page Alpha', 'Page Beta', 'Page Gamma']);
+    }
+
+    public function test_data_without_dates_uses_the_last_30_days(): void
+    {
+        $this->seedFixture();
+        $this->travelTo(new \DateTimeImmutable('2026-10-20 12:00:00', new \DateTimeZone('Asia/Manila')));
+        [$json] = $this->fetchData(['page_name' => 'all']);
+
+        // Sept 21 – Oct 20: kasama ang Oct 1-2, hindi ang Sept 20.
+        $total = end($json['ads_daily']);
+        $this->assertSame(1650.5, (float) $total['adspent']);
+        $this->assertSame(15, $total['orders']);
+    }
 }

@@ -32,6 +32,16 @@ abstract class SummaryOverallTestCase extends MacroOutputTestCase
             $t->timestamps();
         });
 
+        // tasks: binibilang ng view composer sa bawat page
+        Schema::create('tasks', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('user_id');
+            $t->string('task_name')->nullable();
+            $t->date('due_date')->nullable();
+            $t->string('status')->nullable();
+            $t->timestamps();
+        });
+
         foreach ([['cod_fee_rate', 0.015], ['cod_fee_vat_rate', 0.12]] as [$key, $value]) {
             DB::table('fee_settings')->insert([
                 'setting_key' => $key, 'setting_value' => $value, 'effective_date' => '2025-01-01',

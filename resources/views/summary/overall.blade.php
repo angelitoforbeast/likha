@@ -272,7 +272,8 @@
 
       <div class="overflow-x-visible">
         <!-- LIMITED COLUMNS -->
-        <table class="min-w-full w-full text-xs" x-show="!isCEO || (isCEO && !showAllColumns)">
+        <template x-if="!isCEO || (isCEO && !showAllColumns)">
+        <table class="min-w-full w-full text-xs">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
               <template x-for="col in activeColumns('limited')" :key="col.key">
@@ -309,53 +310,8 @@
                     <template x-if="col.key === 'items_with_costs'">
                       <span x-html="fmtItemsWithCosts(row.items_with_costs)"></span>
                     </template>
-                    <template x-if="col.key === 'date'">
-                      <span x-text="fmtDate(row.date)"></span>
-                    </template>
-                    <template x-if="col.key === 'page'">
-                      <span x-text="row.page ?? '\u2014'"></span>
-                    </template>
-                    <template x-if="col.key === 'adspent'">
-                      <span x-text="money(row.adspent)"></span>
-                    </template>
-                    <template x-if="col.key === 'orders'">
-                      <span x-text="num(row.orders)"></span>
-                    </template>
-                    <template x-if="col.key === 'proceed_cpp'">
-                      <span x-text="moneyOrDash(row.proceed_cpp)"></span>
-                    </template>
-                    <template x-if="col.key === 'shipped'">
-                      <span x-text="num(row.shipped)"></span>
-                    </template>
-                    <template x-if="col.key === 'avg_delay_days'">
-                      <span x-text="days(row.avg_delay_days)"></span>
-                    </template>
-                    <template x-if="col.key === 'hold'">
-                      <span x-text="num(row.hold)"></span>
-                    </template>
-                    <template x-if="col.key === 'rts_pct'">
-                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'actual_rts_pct'">
-                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'in_transit_pct'">
-                      <span x-text="percent(row.in_transit_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'tcpr'">
-                      <span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
-                    </template>
-                    <template x-if="col.key === 'net_profit_pct'">
-                      <span class="px-2 py-0.5 rounded font-bold"
-                            :class="netClass(row.net_profit_pct)"
-                            :style="netStyle(row.net_profit_pct)"
-                            x-text="percent(row.net_profit_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'projected_net_profit_pct'">
-                      <span class="px-2 py-0.5 rounded font-bold"
-                            :class="netClass(projectedPct(row))"
-                            :style="netStyle(projectedPct(row))"
-                            x-text="percent(projectedPct(row))"></span>
+                    <template x-if="col.key !== 'items_with_costs'">
+                      <span :class="cellClass(col.key, row)" :style="cellStyle(col.key, row)" x-text="cellText(col.key, row)"></span>
                     </template>
                   </td>
                 </template>
@@ -363,9 +319,11 @@
             </template>
           </tbody>
         </table>
+        </template>
 
         <!-- FULL COLUMNS (CEO) -->
-        <table class="min-w-full w-full text-xs" x-show="isCEO && showAllColumns">
+        <template x-if="isCEO && showAllColumns">
+        <table class="min-w-full w-full text-xs">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
               <template x-for="col in activeColumns('full')" :key="col.key">
@@ -402,92 +360,8 @@
                     <template x-if="col.key === 'items_with_costs'">
                       <span x-html="fmtItemsWithCosts(row.items_with_costs)"></span>
                     </template>
-                    <template x-if="col.key === 'date'">
-                      <span x-text="fmtDate(row.date)"></span>
-                    </template>
-                    <template x-if="col.key === 'page'">
-                      <span x-text="row.page ?? '\u2014'"></span>
-                    </template>
-                    <template x-if="col.key === 'adspent'">
-                      <span x-text="money(row.adspent)"></span>
-                    </template>
-                    <template x-if="col.key === 'orders'">
-                      <span x-text="num(row.orders)"></span>
-                    </template>
-                    <template x-if="col.key === 'proceed_cpp'">
-                      <span x-text="moneyOrDash(row.proceed_cpp)"></span>
-                    </template>
-                    <template x-if="col.key === 'shipped'">
-                      <span x-text="num(row.shipped)"></span>
-                    </template>
-                    <template x-if="col.key === 'avg_delay_days'">
-                      <span x-text="days(row.avg_delay_days)"></span>
-                    </template>
-                    <template x-if="col.key === 'hold'">
-                      <span x-text="num(row.hold)"></span>
-                    </template>
-                    <template x-if="col.key === 'rts_pct'">
-                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'actual_rts_pct'">
-                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'in_transit_pct'">
-                      <span x-text="percent(row.in_transit_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'tcpr'">
-                      <span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
-                    </template>
-                    <template x-if="col.key === 'net_profit_pct'">
-                      <span class="px-2 py-0.5 rounded font-bold"
-                            :class="netClass(row.net_profit_pct)"
-                            :style="netStyle(row.net_profit_pct)"
-                            x-text="percent(row.net_profit_pct)"></span>
-                    </template>
-                    <template x-if="col.key === 'proceed'">
-                      <span x-text="num(row.proceed)"></span>
-                    </template>
-                    <template x-if="col.key === 'cannot_proceed'">
-                      <span x-text="num(row.cannot_proceed)"></span>
-                    </template>
-                    <template x-if="col.key === 'odz'">
-                      <span x-text="num(row.odz)"></span>
-                    </template>
-                    <template x-if="col.key === 'delivered'">
-                      <span x-text="num(row.delivered)"></span>
-                    </template>
-                    <template x-if="col.key === 'gross_sales'">
-                      <span x-text="money(row.gross_sales)"></span>
-                    </template>
-                    <template x-if="col.key === 'shipping_fee'">
-                      <span x-text="money(row.shipping_fee)"></span>
-                    </template>
-                    <template x-if="col.key === 'cogs'">
-                      <span x-text="money(row.cogs)"></span>
-                    </template>
-                    <template x-if="col.key === 'net_profit'">
-                      <span x-text="money(row.net_profit)"></span>
-                    </template>
-                    <template x-if="col.key === 'returned'">
-                      <span x-text="num(row.returned)"></span>
-                    </template>
-                    <template x-if="col.key === 'for_return'">
-                      <span x-text="num(row.for_return)"></span>
-                    </template>
-                    <template x-if="col.key === 'in_transit'">
-                      <span x-text="num(row.in_transit)"></span>
-                    </template>
-                    <template x-if="col.key === 'cpp'">
-                      <span x-text="moneyOrDash(row.cpp)"></span>
-                    </template>
-                    <template x-if="col.key === 'projected_net_profit'">
-                      <span x-text="moneyOrDash(row.projected_net_profit)"></span>
-                    </template>
-                    <template x-if="col.key === 'projected_net_profit_pct'">
-                      <span class="px-2 py-0.5 rounded font-bold"
-                            :class="netClass(projectedPct(row))"
-                            :style="netStyle(projectedPct(row))"
-                            x-text="percent(projectedPct(row))"></span>
+                    <template x-if="col.key !== 'items_with_costs'">
+                      <span :class="cellClass(col.key, row)" :style="cellStyle(col.key, row)" x-text="cellText(col.key, row)"></span>
                     </template>
                   </td>
                 </template>
@@ -495,6 +369,7 @@
             </template>
           </tbody>
         </table>
+        </template>
       </div>
     </section>
   </main>
@@ -750,6 +625,37 @@
         percent(v){ return (v==null || isNaN(v)) ? '\u2014' : (Number(v).toFixed(2) + '%'); },
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
         days(v){ return (v==null || isNaN(v)) ? '\u2014' : Number(v).toFixed(2); },
+
+        // Isang formatter kada column (imbes na hanay ng x-if sa bawat cell)
+        cellText(key, row){
+          switch (key) {
+            case 'date': return this.fmtDate(row.date);
+            case 'page': return row.page ?? '\u2014';
+            case 'adspent': case 'gross_sales': case 'shipping_fee': case 'cogs': case 'net_profit':
+              return this.money(row[key]);
+            case 'proceed_cpp': case 'cpp': case 'projected_net_profit':
+              return this.moneyOrDash(row[key]);
+            case 'avg_delay_days': return this.days(row.avg_delay_days);
+            case 'rts_pct': case 'actual_rts_pct': case 'in_transit_pct': case 'tcpr': case 'net_profit_pct':
+              return this.percent(row[key]);
+            case 'projected_net_profit_pct': return this.percent(this.projectedPct(row));
+            default: return this.num(row[key]);
+          }
+        },
+        cellClass(key, row){
+          switch (key) {
+            case 'rts_pct': case 'actual_rts_pct': return 'px-2 py-0.5 rounded ' + this.rtsClass(row[key]);
+            case 'tcpr': return 'px-2 py-0.5 rounded ' + this.tcprClass(row.tcpr);
+            case 'net_profit_pct': return 'px-2 py-0.5 rounded font-bold ' + this.netClass(row.net_profit_pct);
+            case 'projected_net_profit_pct': return 'px-2 py-0.5 rounded font-bold ' + this.netClass(this.projectedPct(row));
+            default: return '';
+          }
+        },
+        cellStyle(key, row){
+          if (key === 'net_profit_pct') return this.netStyle(row.net_profit_pct);
+          if (key === 'projected_net_profit_pct') return this.netStyle(this.projectedPct(row));
+          return '';
+        },
 
         fmtItemsWithCosts(items){
           if (!Array.isArray(items) || items.length===0) return '\u2014';

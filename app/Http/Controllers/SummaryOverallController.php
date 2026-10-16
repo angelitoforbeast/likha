@@ -6,22 +6,88 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use App\Models\FeeSetting;
 
 class SummaryOverallController extends Controller
 {
-    public function index()
+    /** Mga column name na nahanap na, kada driver (para sa buong process). */
+    private static array $columnsByDriver = [];
+
+    /**
+     * Ang mga column name na ginagamit ng page (candidates gaya ng dati), naka-cache nang isang araw
+     * para hindi na mag-Schema::hasColumn kada request.
+     */
+    private function columns(): array
     {
         $driver = DB::getDriverName();
-        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        $pages = DB::table('ads_manager_reports')
+        return self::$columnsByDriver[$driver] ??= Cache::remember("summary_overall.columns.$driver", 86400, function () use ($driver) {
+            $listing = function (string $table) use ($driver): array {
+                if ($driver === 'pgsql') {
+                    $rows = DB::select(
+                        "SELECT column_name FROM information_schema.columns
+                         WHERE table_schema = current_schema() AND table_name = ?",
+                        [$table]
+                    );
+                    return array_map(fn($r) => $r->column_name, $rows);
+                }
+                return Schema::getColumnListing($table);
+            };
+            $tables = [];
+            foreach (['macro_output', 'from_jnts', 'cogs'] as $t) $tables[$t] = $listing($t);
+
+            // pgsql: eksaktong pangalan; iba: case-insensitive gaya ng Schema::hasColumn
+            $pick = function (string $table, array $candidates) use ($tables, $driver) {
+                $have = $driver === 'pgsql' ? $tables[$table] : array_map('strtolower', $tables[$table]);
+                foreach ($candidates as $c) {
+                    if (in_array($driver === 'pgsql' ? $c : strtolower($c), $have, true)) return $c;
+                }
+                return null;
+            };
+
+            // Collation ng from_jnts.status: _ci = hindi na kailangan ang UPPER na LIKE
+            $statusCi = false;
+            if ($driver === 'mysql') {
+                $row = DB::selectOne(
+                    "SELECT COLLATION_NAME AS c FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = 'from_jnts' AND column_name = 'status'"
+                );
+                $statusCi = $row && str_ends_with(strtolower((string)$row->c), '_ci');
+            }
+
+            return [
+                'mo_page'        => $pick('macro_output', ['PAGE','page','page_name','Page','Page_Name']),
+                'mo_status'      => $pick('macro_output', ['STATUS','status','Status']) ?? 'status',
+                'mo_waybill'     => $pick('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill',
+                'mo_item'        => $pick('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']),
+                'mo_cod'         => $pick('macro_output', ['COD','cod','Cod']) ?? 'COD',
+                'mo_has_ts_date' => $pick('macro_output', ['ts_date']) !== null,
+                'mo_ts_cols'     => array_values(array_filter(['TIMESTAMP','timestamp'], fn($c) => $pick('macro_output', [$c]) !== null)),
+                'j_submit'       => $pick('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time',
+                'j_status_ci'    => $statusCi,
+                'cogs_item'      => $pick('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name',
+                'cogs_date'      => $pick('cogs', ['effective_date','date','valid_from','cogs_date']) ?? 'effective_date',
+                'cogs_unit'      => $pick('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost',
+            ];
+        });
+    }
+
+    public function index()
+    {
+        // DISTINCT sa raw page_name (gamit ang index), tapos trim + isang label kada page sa PHP
+        $pages = [];
+        $raw = DB::table('ads_manager_reports')
             ->whereNotNull('page_name')
-            ->selectRaw("$trimFn(page_name) AS page_name")
             ->distinct()
             ->orderBy('page_name')
-            ->pluck('page_name')
-            ->toArray();
+            ->pluck('page_name');
+        foreach ($raw as $p) {
+            $p = trim((string)$p);
+            $pages[mb_strtolower($p)] ??= $p;
+        }
+        $pages = array_values($pages);
+        usort($pages, fn($a, $b) => strcasecmp($a, $b));
 
         // role detection
         $userRoleRaw    = Auth::user()?->employeeProfile?->role ?? '';
@@ -41,6 +107,12 @@ class SummaryOverallController extends Controller
         $start    = $request->input('start_date');
         $end      = $request->input('end_date');
         $pageName = $request->input('page_name', 'all');
+
+        // Walang petsa: huling 30 araw (PH), gaya ng default ng page
+        if (!$start && !$end) {
+            $end   = now('Asia/Manila')->format('Y-m-d');
+            $start = now('Asia/Manila')->subDays(29)->format('Y-m-d');
+        }
 
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
@@ -73,29 +145,6 @@ class SummaryOverallController extends Controller
             return '—';
         };
 
-        $pgColumns = function (string $table): array {
-            if (DB::getDriverName() === 'pgsql') {
-                $rows = DB::select(
-                    "SELECT column_name FROM information_schema.columns
-                     WHERE table_schema = current_schema() AND table_name = ?",
-                    [$table]
-                );
-                return array_map(fn($r) => $r->column_name, $rows);
-            }
-            return [];
-        };
-
-        $pickCol = function (string $table, array $candidates) use ($pgColumns) {
-            if (DB::getDriverName() === 'pgsql') {
-                $cols = $pgColumns($table);
-                foreach ($candidates as $c) if (in_array($c, $cols, true)) return $c;
-                return null;
-            } else {
-                foreach ($candidates as $c) if (Schema::hasColumn($table, $c)) return $c;
-                return null;
-            }
-        };
-
         // money sanitizer
         $castMoney = function (string $expr) use ($driver) {
             return $driver === 'pgsql'
@@ -103,46 +152,37 @@ class SummaryOverallController extends Controller
                 : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
         };
 
+        // Mga column name: naka-cache (hindi na Schema::hasColumn kada request)
+        $cols = $this->columns();
+
         // resolve macro_output columns
-        $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
+        $pageColName = $cols['mo_page'];
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
         $moPageSql = 'mo.' . $quote($pageColName);
-        $moPageCol = 'mo.' . $pageColName;
 
         $pageLabelExpr = "$trimFn(COALESCE($moPageSql,''))";
         $pageKeyExpr   = "LOWER($pageLabelExpr)";
 
-        $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
-        $statusExpr    = 'mo.' . $quote($statusColName);
+        $statusExpr    = 'mo.' . $quote($cols['mo_status']);
         $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
 
-        $wbColName    = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
-        $moWaybillSql = 'mo.' . $quote($wbColName);
-        $moWaybillCol = 'mo.' . $wbColName;
+        $moWaybillSql = 'mo.' . $quote($cols['mo_waybill']);
 
-        $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']);
+        $itemColName = $cols['mo_item'];
         if (!$itemColName) throw new \RuntimeException('macro_output: item column not found');
         $moItemExpr = 'mo.' . $quote($itemColName);
         $itemLabel  = "$trimFn(COALESCE($moItemExpr,''))";
         $itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($itemLabel,' ',''),'-',''),'_',''))";
 
         // COD from macro_output
-        $moCodColName = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
-        $moCodExpr    = 'mo.' . $quote($moCodColName);
-        $moCodClean   = $castMoney($moCodExpr);
+        $moCodExpr = 'mo.' . $quote($cols['mo_cod']);
 
-        // =====================================================
-        // OPTIMIZATION #1: Use ts_date instead of COALESCE/STR_TO_DATE
-        // ts_date is a pre-computed indexed column on macro_output
-        // =====================================================
-        $hasTsDate = Schema::hasColumn('macro_output', 'ts_date');
-
-        if ($hasTsDate) {
+        // ts_date = pre-computed indexed column sa macro_output
+        if ($cols['mo_has_ts_date']) {
             $dateExpr = "mo.ts_date";
         } else {
             // Fallback to old computed date expression
-            $tsCols = [];
-            foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
+            $tsCols = $cols['mo_ts_cols'];
 
             if ($driver === 'mysql') {
                 if (!empty($tsCols)) {
@@ -171,25 +211,19 @@ class SummaryOverallController extends Controller
         $castSpend = $castMoney('amount_spent_php');
 
         // from_jnts columns
-        $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
+        $jSubmitColName = $cols['j_submit'];
 
         // cogs columns
-        $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
-        $cogsItemExpr    = 'c.' . $quote($cogsItemColName);
-        $cogsItemNorm    = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($cogsItemExpr,'')),' ',''),'-',''),'_',''))";
-
-        $cogsDateColName = $pickCol('cogs', ['effective_date','date','valid_from','cogs_date']) ?? 'effective_date';
-        $cogsDateExpr    = 'c.' . $quote($cogsDateColName);
-
-        $cogsUnitColName = $pickCol('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost';
-        $cogsUnitExpr    = 'c.' . $quote($cogsUnitColName);
+        $cogsItemColName = $cols['cogs_item'];
+        $cogsDateColName = $cols['cogs_date'];
+        $cogsUnitColName = $cols['cogs_unit'];
 
         // aggregate mode: All Pages?
         $AGGREGATE_RANGE = ($pageName === 'all');
         $pageNameNorm = $AGGREGATE_RANGE ? null : mb_strtolower(trim((string)$pageName));
 
         // ======================
-        // ADS (ads_manager_reports)
+        // ADS (ads_manager_reports) — walang function sa `day` para magamit ang index
         // ======================
         $adsPageLabelExpr = "$trimFn(COALESCE(page_name,''))";
         $adsPageKeyExpr   = "LOWER($adsPageLabelExpr)";
@@ -197,11 +231,11 @@ class SummaryOverallController extends Controller
         $adsBase = DB::table('ads_manager_reports');
 
         if ($start && $end) {
-            $adsBase->whereRaw('DATE(day) BETWEEN ? AND ?', [$start, $end]);
+            $adsBase->whereBetween('day', [$start, $end]);
         } elseif ($start) {
-            $adsBase->whereRaw('DATE(day) >= ?', [$start]);
+            $adsBase->where('day', '>=', $start);
         } elseif ($end) {
-            $adsBase->whereRaw('DATE(day) <= ?', [$end]);
+            $adsBase->where('day', '<=', $end);
         }
 
         if (!$AGGREGATE_RANGE && $pageNameNorm !== null && $pageNameNorm !== '') {
@@ -240,183 +274,103 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ======================
-        // ORDERS / PROCEED / CANNOT / ODZ (macro_output) — now using ts_date
-        // ======================
-        $mo = DB::table('macro_output as mo');
-
+        // =====================================================
+        // _mo_norm: ang macro_output rows sa range, na-normalize nang ISANG beses
+        // (PAGE, STATUS, ITEM, waybill; raw COD). Lahat ng sumunod na query dito na nagbabasa.
+        // Raw ang COD dito: ang CAST sa CREATE ... SELECT ay error sa strict mode kapag may maduming COD.
+        // =====================================================
+        $moWhere    = [];
+        $moBindings = [];
         if ($start && $end) {
-            $mo->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end]);
+            $moWhere[] = "$dateExpr BETWEEN ? AND ?";
+            $moBindings = [$start, $end];
         } elseif ($start) {
-            $mo->whereRaw("$dateExpr >= ?", [$start]);
+            $moWhere[] = "$dateExpr >= ?";
+            $moBindings = [$start];
         } elseif ($end) {
-            $mo->whereRaw("$dateExpr <= ?", [$end]);
+            $moWhere[] = "$dateExpr <= ?";
+            $moBindings = [$end];
         }
-
         if (!$AGGREGATE_RANGE && $pageNameNorm !== null && $pageNameNorm !== '') {
-            $mo->whereRaw("$pageKeyExpr = ?", [$pageNameNorm]);
+            $moWhere[] = "$pageKeyExpr = ?";
+            $moBindings[] = $pageNameNorm;
         }
+        $moWhereSql = $moWhere ? 'WHERE ' . implode(' AND ', $moWhere) : '';
 
-        if ($AGGREGATE_RANGE) {
-            $selectKeyAgg  = "$pageKeyExpr AS page_key, MIN($pageLabelExpr) AS page_label";
-            $groupByKey    = "$pageKeyExpr";
-            $selectKeyBase = "$pageKeyExpr AS page_key, $pageLabelExpr AS page_label";
-        } else {
-            $selectKeyAgg  = "$dateExpr AS day_key, $pageKeyExpr AS page_key, MIN($pageLabelExpr) AS page_label";
-            $groupByKey    = "$dateExpr, $pageKeyExpr";
-            $selectKeyBase = "$dateExpr AS day_key, $pageKeyExpr AS page_key, $pageLabelExpr AS page_label";
-        }
+        $tmpDrop = $driver === 'mysql' ? 'DROP TEMPORARY TABLE IF EXISTS' : 'DROP TABLE IF EXISTS';
+        DB::statement("$tmpDrop _mo_norm");
+        DB::statement("$tmpDrop _jnt_agg");
 
-        // Orders agg
-        $orderAgg = (clone $mo)
-            ->selectRaw("$selectKeyAgg,
-                COUNT(*) AS orders_total,
-                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_total,
-                SUM(CASE WHEN $statusNorm = 'cannotproceed' THEN 1 ELSE 0 END) AS cannot_total,
-                SUM(CASE WHEN $statusNorm = 'odz' THEN 1 ELSE 0 END) AS odz_total
-            ")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $ordersMap = $proceedMap = $cannotMap = $odzMap = [];
-        foreach ($orderAgg as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $ordersMap[$k]  = (int)($r->orders_total ?? 0);
-            $proceedMap[$k] = (int)($r->proceed_total ?? 0);
-            $cannotMap[$k]  = (int)($r->cannot_total ?? 0);
-            $odzMap[$k]     = (int)($r->odz_total ?? 0);
-            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
-        }
+        DB::statement("
+            CREATE TEMPORARY TABLE _mo_norm AS
+            SELECT
+                $dateExpr      AS day_key,
+                $pageKeyExpr   AS page_key,
+                $pageLabelExpr AS page_label,
+                $statusNorm    AS status_n,
+                $moWaybillSql  AS wb,
+                $itemNorm      AS item_key,
+                $itemLabel     AS item_label,
+                $moCodExpr     AS cod_raw
+            FROM macro_output mo
+            $moWhereSql
+        ", $moBindings);
 
         // =====================================================
-        // OPTIMIZATION #2: Create temp table with from_jnts aggregation
-        // using a subquery JOIN to filter only relevant waybills.
-        // Run this ONCE and reuse for all subsequent joins.
+        // _jnt_agg: per-waybill J&T status, ginawa nang isang beses para sa mga waybill sa _mo_norm.
+        // Case-insensitive ang LIKE kapag _ci ang collation ng status (o sqlite), kaya isang pattern na lang.
         // =====================================================
+        $like = function (string $pattern) use ($cols, $driver) {
+            $variants = ($driver === 'sqlite' || $cols['j_status_ci'])
+                ? [$pattern]
+                : [$pattern, strtoupper($pattern)];
+            return '(' . implode(' OR ', array_map(fn($p) => "j.status LIKE '$p%'", $variants)) . ')';
+        };
+        $isDel = $like('Delivered');
+        $isRet = $like('Returned');
+        $isFr  = $like('For Return');
+        $int   = $driver === 'pgsql' ? '::int' : '';
 
-        // Build the date filter clause for the subquery
-        $dateFilterParts = [];
-        $dateFilterBindings = [];
-        if ($start && $end) {
-            $dateFilterParts[] = "$dateExpr BETWEEN ? AND ?";
-            $dateFilterBindings = [$start, $end];
-        } elseif ($start) {
-            $dateFilterParts[] = "$dateExpr >= ?";
-            $dateFilterBindings = [$start];
-        } elseif ($end) {
-            $dateFilterParts[] = "$dateExpr <= ?";
-            $dateFilterBindings = [$end];
-        }
-
-        $pageFilterSql = '';
-        if (!$AGGREGATE_RANGE && $pageNameNorm !== null && $pageNameNorm !== '') {
-            $pageFilterSql = " AND $pageKeyExpr = ?";
-            $dateFilterBindings[] = $pageNameNorm;
-        }
-
-        $dateWhere = !empty($dateFilterParts) ? 'WHERE ' . implode(' AND ', $dateFilterParts) . $pageFilterSql : ($pageFilterSql ? 'WHERE 1=1' . $pageFilterSql : '');
-
-        if ($driver === 'mysql') {
-            DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg");
-
-            $jaMinTsExpr = "MIN(COALESCE(
-                STR_TO_DATE(j.`$jSubmitColName`, '%Y-%m-%d %H:%i:%s'),
-                STR_TO_DATE(j.`$jSubmitColName`, '%Y/%m/%d %H:%i:%s'),
-                STR_TO_DATE(j.`$jSubmitColName`, '%Y-%m-%d'),
-                j.`created_at`
-            ))";
-
-            DB::statement("
-                CREATE TEMPORARY TABLE _jnt_agg AS
-                SELECT
-                    j.waybill_number AS wb,
-                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
-                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
-                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
-                    MAX(CASE
-                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                        ELSE 1
-                    END) AS is_in_transit,
-                    $jaMinTsExpr AS min_submit_ts,
-                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
-                FROM from_jnts j
-                WHERE j.waybill_number IN (
-                    SELECT DISTINCT $moWaybillSql
-                    FROM macro_output mo
-                    $dateWhere
-                    AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
-                )
-                GROUP BY j.waybill_number
-            ", $dateFilterBindings);
-
-            DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
-        } elseif ($driver === 'sqlite') {
-            // sqlite (tests lang): parehong aggregate, walang STR_TO_DATE at ALTER
-            DB::statement("DROP TABLE IF EXISTS _jnt_agg");
-            DB::statement("
-                CREATE TEMPORARY TABLE _jnt_agg AS
-                SELECT
-                    j.waybill_number AS wb,
-                    MAX(CASE WHEN j.status LIKE 'Delivered%'  THEN 1 ELSE 0 END) AS is_delivered,
-                    MAX(CASE WHEN j.status LIKE 'Returned%'   THEN 1 ELSE 0 END) AS is_returned,
-                    MAX(CASE WHEN j.status LIKE 'For Return%' THEN 1 ELSE 0 END) AS is_for_return,
-                    MAX(CASE
-                        WHEN j.status LIKE 'Delivered%'  THEN 0
-                        WHEN j.status LIKE 'Returned%'   THEN 0
-                        WHEN j.status LIKE 'For Return%' THEN 0
-                        ELSE 1
-                    END) AS is_in_transit,
-                    MIN(COALESCE(j.`$jSubmitColName`, j.created_at)) AS min_submit_ts,
-                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
-                FROM from_jnts j
-                WHERE j.waybill_number IN (
-                    SELECT DISTINCT $moWaybillSql
-                    FROM macro_output mo
-                    $dateWhere
-                    AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
-                )
-                GROUP BY j.waybill_number
-            ", $dateFilterBindings);
-        } else {
-            // PostgreSQL path
-            DB::statement("DROP TABLE IF EXISTS _jnt_agg");
-
+        if ($driver === 'pgsql') {
             $jaMinTsExpr = "MIN(COALESCE(
                 TO_TIMESTAMP(NULLIF(j.\"$jSubmitColName\",'') , 'YYYY-MM-DD HH24:MI:SS'),
                 TO_TIMESTAMP(NULLIF(j.\"$jSubmitColName\",'') , 'YYYY/MM/DD HH24:MI:SS'),
                 TO_TIMESTAMP(NULLIF(j.\"$jSubmitColName\",'') , 'YYYY-MM-DD'),
                 j.\"created_at\"
             ))";
+        } else {
+            // submission_time ay DATETIME na; wala nang STR_TO_DATE
+            $jaMinTsExpr = "MIN(COALESCE(j." . $quote($jSubmitColName) . ", j.created_at))";
+        }
 
-            DB::statement("
-                CREATE TEMPORARY TABLE _jnt_agg AS
-                SELECT
-                    j.waybill_number AS wb,
-                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
-                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
-                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int AS is_for_return,
-                    MAX(CASE
-                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                        ELSE 1
-                    END)::int AS is_in_transit,
-                    $jaMinTsExpr AS min_submit_ts,
-                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
-                FROM from_jnts j
-                WHERE j.waybill_number IN (
-                    SELECT DISTINCT $moWaybillSql
-                    FROM macro_output mo
-                    $dateWhere
-                    AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
-                )
-                GROUP BY j.waybill_number
-            ", $dateFilterBindings);
-
+        // MySQL: primary key sa mismong CREATE (walang ALTER)
+        $jaKey = $driver === 'mysql' ? '(PRIMARY KEY (wb))' : '';
+        DB::statement("
+            CREATE TEMPORARY TABLE _jnt_agg $jaKey AS
+            SELECT
+                j.waybill_number AS wb,
+                MAX(CASE WHEN $isDel THEN 1 ELSE 0 END)$int AS is_delivered,
+                MAX(CASE WHEN $isRet THEN 1 ELSE 0 END)$int AS is_returned,
+                MAX(CASE WHEN $isFr  THEN 1 ELSE 0 END)$int AS is_for_return,
+                MAX(CASE
+                    WHEN $isDel THEN 0
+                    WHEN $isRet THEN 0
+                    WHEN $isFr  THEN 0
+                    ELSE 1
+                END)$int AS is_in_transit,
+                $jaMinTsExpr AS min_submit_ts,
+                COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
+            FROM from_jnts j
+            WHERE j.waybill_number IN (
+                SELECT wb FROM _mo_norm WHERE wb IS NOT NULL AND wb != ''
+            )
+            GROUP BY j.waybill_number
+        ");
+        if ($driver === 'pgsql') {
             DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
         }
+
+        $codClean = $castMoney('n.cod_raw');
 
         // =====================================================
         // OPTIMIZATION #3: Pre-load cogs into a PHP lookup array
@@ -501,130 +455,131 @@ class SummaryOverallController extends Controller
         };
 
         // =====================================================
-        // Now use _jnt_agg temp table for all joins (runs ONCE, reused many times)
+        // Mga query sa _mo_norm (n) at _jnt_agg (ja): conditional aggregation,
+        // tatlong pass imbes na pito na hiwalay na join.
         // =====================================================
+        $proceedCase = "n.status_n = 'proceed'";
+        $keyOf = fn($r) => $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+        $selKey = $AGGREGATE_RANGE ? 'n.page_key' : 'n.day_key, n.page_key';
 
-        // Base join: macro_output JOIN _jnt_agg (temp table with index)
-        $joinedBase = (clone $mo)
-            ->whereNotNull($moWaybillCol)
-            ->where($moWaybillCol, '!=', '')
-            ->join('_jnt_agg AS ja', $moWaybillCol, '=', 'ja.wb');
+        // 1) ORDERS / PROCEED / CANNOT / ODZ + PROCEED COD SUM (lahat ng rows)
+        $orderAgg = DB::select("
+            SELECT $selKey,
+                MIN(n.page_label) AS page_label,
+                COUNT(*) AS orders_total,
+                SUM(CASE WHEN $proceedCase THEN 1 ELSE 0 END) AS proceed_total,
+                SUM(CASE WHEN n.status_n = 'cannotproceed' THEN 1 ELSE 0 END) AS cannot_total,
+                SUM(CASE WHEN n.status_n = 'odz' THEN 1 ELSE 0 END) AS odz_total,
+                SUM(CASE WHEN $proceedCase THEN $codClean END) AS proceed_cod_sum
+            FROM _mo_norm n
+            GROUP BY $selKey
+        ");
 
-        // ======================
-        // Shipped & status counts
-        // ======================
-        $shipAgg = (clone $joinedBase)
-            ->selectRaw("$selectKeyAgg,
-                COUNT(DISTINCT $moWaybillSql) AS shipped_total,
-                COUNT(DISTINCT CASE WHEN ja.is_delivered  = 1 THEN $moWaybillSql END) AS delivered_total,
-                COUNT(DISTINCT CASE WHEN ja.is_returned   = 1 THEN $moWaybillSql END) AS returned_total,
-                COUNT(DISTINCT CASE WHEN ja.is_for_return = 1 THEN $moWaybillSql END) AS for_return_total,
-                COUNT(DISTINCT CASE WHEN ja.is_in_transit = 1 THEN $moWaybillSql END) AS in_transit_total
-            ")
-            ->groupByRaw($groupByKey)
-            ->get();
+        $ordersMap = $proceedMap = $cannotMap = $odzMap = [];
+        $proceedCodSumMap = [];
+        foreach ($orderAgg as $r) {
+            $k = $keyOf($r);
+            $ordersMap[$k]  = (int)($r->orders_total ?? 0);
+            $proceedMap[$k] = (int)($r->proceed_total ?? 0);
+            $cannotMap[$k]  = (int)($r->cannot_total ?? 0);
+            $odzMap[$k]     = (int)($r->odz_total ?? 0);
+            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
+            if ((int)($r->proceed_total ?? 0) > 0) {
+                $proceedCodSumMap[$k] = (float)($r->proceed_cod_sum ?? 0);
+            }
+        }
+
+        // 2) SHIPPED na waybills: per (key, waybill) muna, tapos per key.
+        //    Status counts, actual shipping, gross (delivered), all COD, delay — isang join.
+        if ($driver === 'mysql') {
+            $delayDays = "DATEDIFF(DATE(ja.min_submit_ts), n.day_key)";
+        } elseif ($driver === 'sqlite') {
+            $delayDays = "CAST(julianday(DATE(ja.min_submit_ts)) - julianday(n.day_key) AS INTEGER)";
+        } else {
+            $delayDays = "(DATE(ja.min_submit_ts) - n.day_key)";
+        }
+        $shippedAgg = function (string $keyCols) use ($codClean, $delayDays) {
+            $outerKey = str_replace('n.', 'w.', $keyCols);
+            return DB::select("
+                SELECT $outerKey,
+                    MIN(w.page_label)            AS page_label,
+                    COUNT(*)                     AS shipped_total,
+                    SUM(w.is_delivered)          AS delivered_total,
+                    SUM(w.is_returned)           AS returned_total,
+                    SUM(w.is_for_return)         AS for_return_total,
+                    SUM(w.is_in_transit)         AS in_transit_total,
+                    SUM(w.ship_sum)              AS total_actual_shipping,
+                    SUM(CASE WHEN w.is_delivered = 1 THEN w.cod_mo ELSE 0 END) AS gross_sales,
+                    SUM(w.cod_mo)                AS all_cod,
+                    AVG(w.delay_days)            AS avg_delay_days
+                FROM (
+                    SELECT $keyCols, n.wb,
+                        MIN(n.page_label)            AS page_label,
+                        MAX(ja.is_delivered)         AS is_delivered,
+                        MAX(ja.is_returned)          AS is_returned,
+                        MAX(ja.is_for_return)        AS is_for_return,
+                        MAX(ja.is_in_transit)        AS is_in_transit,
+                        SUM(ja.actual_shipping_cost) AS ship_sum,
+                        MAX($codClean)               AS cod_mo,
+                        MIN($delayDays)              AS delay_days
+                    FROM _mo_norm n
+                    JOIN _jnt_agg ja ON ja.wb = n.wb
+                    WHERE n.wb IS NOT NULL AND n.wb != ''
+                    GROUP BY $keyCols, n.wb
+                ) w
+                GROUP BY $outerKey
+            ");
+        };
 
         $shippedMap = $deliveredMap = $returnedMap = $forReturnMap = $inTransitMap = [];
-        foreach ($shipAgg as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $shippedMap[$k]   = (int)($r->shipped_total   ?? 0);
-            $deliveredMap[$k] = (int)($r->delivered_total ?? 0);
-            $returnedMap[$k]  = (int)($r->returned_total  ?? 0);
-            $forReturnMap[$k] = (int)($r->for_return_total?? 0);
-            $inTransitMap[$k] = (int)($r->in_transit_total?? 0);
-            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
-        }
-
-        // ======================
-        // ACTUAL SHIPPING COST (from from_jnts total_shipping_cost per waybill)
-        // ======================
-        $actualShipAgg = (clone $joinedBase)
-            ->selectRaw("$selectKeyAgg,
-                SUM(ja.actual_shipping_cost) AS total_actual_shipping")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $actualShippingMap = [];
-        foreach ($actualShipAgg as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+        $actualShippingMap = $grossMap = $allCodMap = $avgDelayMap = [];
+        $shippedLabelMap = [];
+        foreach ($shippedAgg($selKey) as $r) {
+            $k = $keyOf($r);
+            $shippedMap[$k]        = (int)($r->shipped_total   ?? 0);
+            $deliveredMap[$k]      = (int)($r->delivered_total ?? 0);
+            $returnedMap[$k]       = (int)($r->returned_total  ?? 0);
+            $forReturnMap[$k]      = (int)($r->for_return_total?? 0);
+            $inTransitMap[$k]      = (int)($r->in_transit_total?? 0);
             $actualShippingMap[$k] = (float)($r->total_actual_shipping ?? 0);
+            $grossMap[$k]          = (float)($r->gross_sales ?? 0);
+            $allCodMap[$k]         = (float)($r->all_cod ?? 0);
+            $avgDelayMap[$k]       = (float)($r->avg_delay_days ?? 0);
+            if (!empty($r->page_label)) $shippedLabelMap[$k] = (string)$r->page_label;
         }
 
-        // ======================
-        // Gross Sales (Delivered-only)
-        // ======================
-        $innerDeliveredCod = (clone $joinedBase)
-            ->whereRaw('ja.is_delivered = 1')
-            ->selectRaw("$selectKeyAgg, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
-            ->groupByRaw("$groupByKey, $moWaybillSql");
+        // 3) ITEMS: proceed items (qty, unit cost, COD range) + delivered items (COGS) — isang pass
+        $itemsRows = DB::select("
+            SELECT $selKey, n.item_key,
+                MIN(CASE WHEN $proceedCase THEN n.page_label END) AS page_label,
+                MIN(CASE WHEN $proceedCase THEN n.item_label END) AS item_label,
+                SUM(CASE WHEN $proceedCase THEN 1 ELSE 0 END)     AS qty,
+                MAX(CASE WHEN $proceedCase THEN n.day_key END)    AS last_order_date,
+                MIN(CASE WHEN $proceedCase THEN $codClean END)    AS min_cod,
+                MAX(CASE WHEN $proceedCase THEN $codClean END)    AS max_cod,
+                COUNT(DISTINCT CASE WHEN ja.is_delivered = 1 THEN n.wb END) AS delivered_qty,
+                MAX(CASE WHEN ja.is_delivered = 1 THEN n.day_key END)       AS delivered_last_date
+            FROM _mo_norm n
+            LEFT JOIN _jnt_agg ja ON ja.wb = n.wb
+            GROUP BY $selKey, n.item_key
+        ");
 
-        if ($AGGREGATE_RANGE) {
-            $grossRows = DB::query()
-                ->fromSub($innerDeliveredCod, 'd')
-                ->selectRaw("page_key, SUM(cod_mo) AS gross_sales")
-                ->groupBy('page_key')
-                ->get();
-        } else {
-            $grossRows = DB::query()
-                ->fromSub($innerDeliveredCod, 'd')
-                ->selectRaw("day_key, page_key, SUM(cod_mo) AS gross_sales")
-                ->groupBy('day_key','page_key')
-                ->get();
+        $itemsProceedRows = [];
+        $cogsMap = [];
+        foreach ($itemsRows as $r) {
+            if ((int)($r->qty ?? 0) > 0) $itemsProceedRows[] = $r;
+            if ((int)($r->delivered_qty ?? 0) > 0) {
+                $k = $keyOf($r);
+                $unitCost = $findUnitCost((string)$r->item_key, (string)$r->delivered_last_date);
+                $cogsMap[$k] = ($cogsMap[$k] ?? 0.0) + ((int)$r->delivered_qty * $unitCost);
+            }
         }
-
-        $grossMap = [];
-        foreach ($grossRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $grossMap[$k] = (float)($r->gross_sales ?? 0);
-        }
-
-        // ======================
-        // ALL COD (all shipped)
-        // ======================
-        $innerAllCod = (clone $joinedBase)
-            ->selectRaw("$selectKeyAgg, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
-            ->groupByRaw("$groupByKey, $moWaybillSql");
-
-        if ($AGGREGATE_RANGE) {
-            $allCodRows = DB::query()
-                ->fromSub($innerAllCod, 'd')
-                ->selectRaw("page_key, SUM(cod_mo) AS all_cod")
-                ->groupBy('page_key')
-                ->get();
-        } else {
-            $allCodRows = DB::query()
-                ->fromSub($innerAllCod, 'd')
-                ->selectRaw("day_key, page_key, SUM(cod_mo) AS all_cod")
-                ->groupBy('day_key','page_key')
-                ->get();
-        }
-
-        $allCodMap = [];
-        foreach ($allCodRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $allCodMap[$k] = (float)($r->all_cod ?? 0);
-        }
-
-        // ======================
-        // ITEMS + UNIT COST LISTS (PROCEED ONLY) — now using PHP lookup instead of correlated subquery
-        // ======================
-        $moProceedOnly = (clone $mo)->whereRaw("$statusNorm = 'proceed'");
-
-        $itemsProceedRows = (clone $moProceedOnly)
-            ->selectRaw("$selectKeyAgg,
-                          $itemNorm AS item_key,
-                          MIN($itemLabel) AS item_label,
-                          COUNT(*) AS qty,
-                          MAX($dateExpr) AS last_order_date,
-                          MIN($moCodClean) AS min_cod,
-                          MAX($moCodClean) AS max_cod")
-            ->groupByRaw("$groupByKey, $itemNorm")
-            ->get();
 
         $itemsListMap = [];
         $itemsCostRows = []; // keep for later use in target CPP calc
+        $proceedUnitCostSumMap = [];
         foreach ($itemsProceedRows as $r) {
-            $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
+            $key = $keyOf($r);
             $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
             $allCosts = $findAllUnitCosts((string)$r->item_key, $start, $end);
 
@@ -637,7 +592,6 @@ class SummaryOverallController extends Controller
                 'min_cod'   => (float)($r->min_cod ?? 0),
                 'max_cod'   => (float)($r->max_cod ?? 0),
             ];
-            if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
 
             // Store for target CPP calculation
             $itemsCostRows[] = (object)[
@@ -645,114 +599,17 @@ class SummaryOverallController extends Controller
                 'qty' => (int)($r->qty ?? 0),
                 'unit_cost_disp' => $unitCost,
             ];
-        }
-
-        // PROCEED COD SUM
-        $procCodRows = (clone $moProceedOnly)
-            ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
-            ->groupByRaw("$groupByKey")
-            ->get();
-
-        $proceedCodSumMap = [];
-        foreach ($procCodRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $proceedCodSumMap[$k] = (float)($r->proceed_cod_sum ?? 0);
-            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
-        }
-
-        // PROCEED Unit Cost SUM — now computed in PHP from itemsProceedRows
-        $proceedUnitCostSumMap = [];
-        foreach ($itemsProceedRows as $r) {
-            $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
-            $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
             $proceedUnitCostSumMap[$key] = ($proceedUnitCostSumMap[$key] ?? 0.0) + ((int)$r->qty * $unitCost);
             if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
         }
 
-        // ======================
-        // DELAY (avg days) — now using _jnt_agg temp table
-        // ======================
-        if ($driver === 'mysql') {
-            $jSubmitDate = "DATE(ja.min_submit_ts)";
-            $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)";
-        } elseif ($driver === 'sqlite') {
-            $jSubmitDate = "DATE(ja.min_submit_ts)";
-            $delayDays   = "CAST(julianday($jSubmitDate) - julianday($dateExpr) AS INTEGER)";
-        } else {
-            $jSubmitDate = "DATE(ja.min_submit_ts)";
-            $delayDays   = "($jSubmitDate - $dateExpr)";
-        }
+        // Page label: gaya ng dati, ang label ng shipped rows ang huling panalo
+        foreach ($shippedLabelMap as $k => $lbl) $labelMap[$k] = $lbl;
 
-        $delayRaw = (clone $joinedBase)
-            ->selectRaw("$selectKeyBase, $moWaybillSql AS wb, $delayDays AS delay_days");
-
-        if ($AGGREGATE_RANGE) {
-            $delayDistinct = DB::query()
-                ->fromSub($delayRaw, 'r')
-                ->selectRaw("page_key, MIN(page_label) AS page_label, wb, MIN(delay_days) AS delay_days")
-                ->groupBy('page_key','wb');
-
-            $delayAvgRows = DB::query()
-                ->fromSub($delayDistinct, 'd')
-                ->selectRaw("page_key, MIN(page_label) AS page_label, AVG(delay_days) AS avg_delay_days")
-                ->groupBy('page_key')
-                ->get();
-        } else {
-            $delayDistinct = DB::query()
-                ->fromSub($delayRaw, 'r')
-                ->selectRaw("day_key, page_key, MIN(page_label) AS page_label, wb, MIN(delay_days) AS delay_days")
-                ->groupBy('day_key','page_key','wb');
-
-            $delayAvgRows = DB::query()
-                ->fromSub($delayDistinct, 'd')
-                ->selectRaw("day_key, page_key, MIN(page_label) AS page_label, AVG(delay_days) AS avg_delay_days")
-                ->groupBy('day_key','page_key')
-                ->get();
-        }
-
-        $avgDelayMap = [];
-        foreach ($delayAvgRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $avgDelayMap[$k] = (float)($r->avg_delay_days ?? 0);
-            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
-        }
-
-        // ======================
-        // COGS (Delivered-only) — now using PHP lookup + _jnt_agg temp table
-        // ======================
-        $deliveredItemsRows = (clone $joinedBase)
-            ->whereRaw('ja.is_delivered = 1')
-            ->selectRaw("$selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
-                         COUNT(DISTINCT $moWaybillSql) AS qty, MAX($dateExpr) AS last_order_date")
-            ->groupByRaw("$groupByKey, $itemNorm")
-            ->get();
-
-        $cogsMap = [];
-        foreach ($deliveredItemsRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
-            $cogsMap[$k] = ($cogsMap[$k] ?? 0.0) + ((int)$r->qty * $unitCost);
-        }
-
-        // ======================
-        // PER-DATE PER-PAGE shipped/status counts (for Estimated RTS in All Pages view)
-        // This runs the ship aggregation grouped by BOTH date and page
-        // so we can compute per-page Estimated RTS using settled dates (In Transit < 3%)
-        // ======================
+        // PER-DATE PER-PAGE shipped/status counts (para sa Estimated RTS ng All Pages view)
         $perDatePageShipMap = [];
         if ($AGGREGATE_RANGE) {
-            $perDatePageShipRows = (clone $joinedBase)
-                ->selectRaw("$dateExpr AS day_key, $pageKeyExpr AS page_key,
-                    COUNT(DISTINCT $moWaybillSql) AS shipped_total,
-                    COUNT(DISTINCT CASE WHEN ja.is_delivered  = 1 THEN $moWaybillSql END) AS delivered_total,
-                    COUNT(DISTINCT CASE WHEN ja.is_returned   = 1 THEN $moWaybillSql END) AS returned_total,
-                    COUNT(DISTINCT CASE WHEN ja.is_for_return = 1 THEN $moWaybillSql END) AS for_return_total,
-                    COUNT(DISTINCT CASE WHEN ja.is_in_transit = 1 THEN $moWaybillSql END) AS in_transit_total
-                ")
-                ->groupByRaw("$dateExpr, $pageKeyExpr")
-                ->get();
-
-            foreach ($perDatePageShipRows as $r) {
+            foreach ($shippedAgg('n.day_key, n.page_key') as $r) {
                 $pk = (string)$r->page_key;
                 $perDatePageShipMap[$pk][] = [
                     'shipped'    => (int)($r->shipped_total ?? 0),
@@ -764,12 +621,22 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // Clean up temp table
-        if ($driver === 'mysql') {
-            DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg");
-        } else {
-            DB::statement("DROP TABLE IF EXISTS _jnt_agg");
+        // Mode ng proceed COD (para sa Target CPP, single page lang)
+        $codModeRow = null;
+        if (!$AGGREGATE_RANGE) {
+            $codModeRow = DB::selectOne("
+                SELECT $codClean AS cod_clean, COUNT(*) AS cnt
+                FROM _mo_norm n
+                WHERE $proceedCase
+                GROUP BY $codClean
+                ORDER BY COUNT(*) DESC
+                LIMIT 1
+            ");
         }
+
+        // Clean up temp tables
+        DB::statement("$tmpDrop _jnt_agg");
+        DB::statement("$tmpDrop _mo_norm");
 
         // ======================
         // Merge (+ derived metrics) — same logic as before
@@ -1302,12 +1169,6 @@ class SummaryOverallController extends Controller
             }
 
             $codMode = null;
-            $codModeRow = (clone $moProceedOnly)
-                ->selectRaw("$moCodClean AS cod_clean, COUNT(*) AS cnt")
-                ->groupByRaw("$moCodClean")
-                ->orderByRaw("COUNT(*) DESC")
-                ->limit(1)
-                ->first();
             if ($codModeRow) {
                 $codMode = (float)$codModeRow->cod_clean;
             }
