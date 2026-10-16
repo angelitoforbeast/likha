@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -31,6 +32,40 @@ class StaffEvents
             ]);
         } catch (\Throwable $e) {
             Log::warning('staff_events: hindi na-record ang event', ['kind' => $kind, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Isang checker.* event kada order na talagang nagbago, para sa naka-login na staff lang:
+     * ang imports, Astra, night run at queue jobs ay walang Auth user kaya walang naitatala. Ang id ay nasa
+     * ref para sa pagbilang lang; walang customer data na pumapasok.
+     */
+    public static function recordChecker(string $kind, string $source, array $ids): void
+    {
+        try {
+            $userId = Auth::id();
+            if ($userId === null || !$ids || !Schema::hasTable('staff_events')) {
+                return;
+            }
+            $role = DB::table('employee_profiles')->where('user_id', $userId)->value('role');
+            $now = now();
+
+            $rows = array_map(fn ($id) => [
+                'user_id'    => (int) $userId,
+                'role'       => $role,
+                'kind'       => $kind,
+                'source'     => $source,
+                'method'     => 'POST',
+                'status'     => 200,
+                'ref'        => (string) $id,
+                'created_at' => $now,
+            ], array_values(array_unique($ids)));
+
+            foreach (array_chunk($rows, 500) as $chunk) {
+                DB::table('staff_events')->insert($chunk);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('staff_events: hindi na-record ang checker event', ['kind' => $kind, 'error' => $e->getMessage()]);
         }
     }
 }

@@ -63,6 +63,7 @@ abstract class StaffActivityTestCase extends TestCase
     private const MIGRATIONS = [
         '2026_10_16_100001_add_last_seen_and_login_to_users.php',
         '2026_10_16_100002_create_staff_events_table.php',
+        '2026_10_16_200001_add_source_to_staff_events.php',
     ];
 
     protected function staff(string $role = 'Data Encoder', string $name = 'Staff', ?string $department = null): User

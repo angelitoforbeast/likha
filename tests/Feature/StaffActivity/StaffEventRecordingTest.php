@@ -48,7 +48,7 @@ class StaffEventRecordingTest extends StaffActivityTestCase
         $this->assertSame('42', $e['ref']);
         $this->assertNotNull($e['created_at']);
         $this->assertSame(
-            ['id', 'user_id', 'role', 'kind', 'method', 'status', 'ref', 'created_at'],
+            ['id', 'user_id', 'role', 'kind', 'method', 'status', 'ref', 'created_at', 'source'],
             array_keys($e)
         );
         $this->assertStringNotContainsString('Lihim', json_encode($e));

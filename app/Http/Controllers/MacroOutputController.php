@@ -14,6 +14,7 @@ use App\Models\FbnameBlacklist;
 use App\Models\KeywordBlacklist;
 use App\Models\AddressKeywordBlacklist;
 use App\Support\NightStepFilter;
+use App\Support\StaffEvents;
 
 class MacroOutputController extends Controller
 {
@@ -331,16 +332,28 @@ class MacroOutputController extends Controller
     }
 
     // ✅ persist item_checker based on HARD rules only
+    $flagChanged = array_merge($this->flagChangedIds($validIds, 'item_checker', 1), $this->flagChangedIds($invalidIds, 'item_checker', 0));
     if (!empty($validIds)) {
         MacroOutput::whereIn('id', $validIds)->update(['item_checker' => 1]);
     }
     if (!empty($invalidIds)) {
         MacroOutput::whereIn('id', $invalidIds)->update(['item_checker' => 0]);
     }
+    StaffEvents::recordChecker('checker.validate', 'checker_1', $flagChanged);
 
     return response()->json($results);
 }
 
+
+    /** Mga id na talagang mababago ang $flag papuntang $value (para sa checker.validate events). */
+    private function flagChangedIds(array $ids, string $flag, int $value): array
+    {
+        if (empty($ids)) return [];
+
+        return MacroOutput::whereIn('id', $ids)
+            ->where(fn ($q) => $q->whereNull($flag)->orWhere($flag, '<>', $value))
+            ->pluck('id')->all();
+    }
 
     public function validateAddresses(Request $request)
     {
@@ -546,12 +559,14 @@ class MacroOutputController extends Controller
         }
 
         // ✅ Update DB flags
+        $flagChanged = array_merge($this->flagChangedIds($validIds, 'validate_2', 1), $this->flagChangedIds($invalidIds, 'validate_2', 0));
         if (!empty($validIds)) {
             MacroOutput::whereIn('id', $validIds)->update(['validate_2' => 1]);
         }
         if (!empty($invalidIds)) {
             MacroOutput::whereIn('id', $invalidIds)->update(['validate_2' => 0]);
         }
+        StaffEvents::recordChecker('checker.validate', 'checker_1', $flagChanged);
 
         return response()->json($results);
     }
@@ -620,7 +635,9 @@ class MacroOutputController extends Controller
     });
 
     // ✅ Mark validate_1 = 1 for all rows in scope (excluding cannot proceed)
+    $flagChanged = (clone $base)->where(fn ($q) => $q->whereNull('validate_1')->orWhere('validate_1', '<>', 1))->pluck('id')->all();
     $marked = (clone $base)->update(['validate_1' => 1]);
+    StaffEvents::recordChecker('checker.validate', 'checker_1', $flagChanged);
 
     // phone duplicate counts across whole scope
     $allPhones = (clone $base)
@@ -1587,6 +1604,8 @@ class MacroOutputController extends Controller
             $oldDate = $record->getOriginal('ts_date');
             $record->save();
 
+            StaffEvents::recordChecker($field === 'STATUS' ? 'checker.status' : 'checker.edit', 'checker_1', [$record->id]);
+
             if (in_array($field, self::ORDER_COUNT_FIELDS, true)) {
                 // ts_date ay galing sa DB trigger (TIMESTAMP) → basahin ulit pagkatapos mag-save.
                 $this->ordersChanged([$oldDate, MacroOutput::where('id', $record->id)->value('ts_date')]);
@@ -1645,18 +1664,43 @@ class MacroOutputController extends Controller
         return $digits === '' ? 0 : (int)$digits;
     }
 
+    /**
+     * Bago i-save: checker.status kung magbabago ang STATUS, checker.edit kung ibang field lang, null kung
+     * walang talagang magbabago (o wala ang row). Isang event kada order kahit maraming field ang nabago.
+     */
+    private function bulkChangeKind($id, $fields): ?string
+    {
+        if (!is_array($fields) || !$fields) return null;
+        $before = MacroOutput::where('id', $id)->first();
+        if (!$before) return null;
+
+        $kind = null;
+        foreach ($fields as $field => $value) {
+            if ((string)($before->{$field} ?? '') === (string)($value ?? '')) continue;
+            if ($field === 'STATUS') return 'checker.status';
+            $kind = 'checker.edit';
+        }
+        return $kind;
+    }
+
     public function bulkUpdate(Request $request)
     {
         $countsChanged = false;
         $dates = [];
+        $changed = ['checker.status' => [], 'checker.edit' => []];
         foreach ($request->input('records', []) as $id => $fields) {
             $touchesCounts = is_array($fields) && array_intersect(array_keys($fields), self::ORDER_COUNT_FIELDS);
             if ($touchesCounts) $dates[] = MacroOutput::where('id', $id)->value('ts_date');
+            $kind = $this->bulkChangeKind($id, $fields);
             MacroOutput::where('id', $id)->update($fields);
+            if ($kind !== null) $changed[$kind][] = $id;
             if ($touchesCounts) {
                 $countsChanged = true;
                 $dates[] = MacroOutput::where('id', $id)->value('ts_date');
             }
+        }
+        foreach ($changed as $kind => $ids) {
+            StaffEvents::recordChecker($kind, 'checker_1', $ids);
         }
         if ($countsChanged) {
             $this->ordersChanged($dates);
