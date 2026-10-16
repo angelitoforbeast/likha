@@ -19,6 +19,12 @@ class StaffFeedController extends Controller
 {
     private const TZ = 'Asia/Manila';
 
+    /**
+     * Mga employee_profiles.status na tahasang hindi na aktibo (lowercase, trimmed). Ang ibang value,
+     * pati NULL o blangko, ay aktibo: maraming staff ang walang status pero araw-araw pumapasok.
+     */
+    private const INACTIVE_STATUSES = ['inactive', 'resigned', 'terminated'];
+
     private function authorizeFeed(Request $request): void
     {
         $expected = (string) config('services.staff_feed.key');
@@ -42,7 +48,10 @@ class StaffFeedController extends Controller
 
         $staff = DB::table('employee_profiles as ep')
             ->join('users as u', 'u.id', '=', 'ep.user_id')
-            ->where('ep.status', 'Active')
+            ->where(function ($q) {
+                $q->whereNull('ep.status')
+                    ->orWhereRaw('LOWER(TRIM(ep.status)) NOT IN (?, ?, ?)', self::INACTIVE_STATUSES);
+            })
             ->orderBy('u.id')
             ->get([
                 'u.id', 'u.name as user_name', 'ep.name', 'ep.role', 'ep.department',
@@ -73,11 +82,12 @@ class StaffFeedController extends Controller
         }
 
         $dueOpen = $this->checklistDueNotSubmitted($ids, $day);
+        $bots = $this->botUserIds();
 
         return response()->json([
             'date'         => $dayStr,
             'generated_at' => Carbon::now(self::TZ)->toIso8601String(),
-            'staff'        => $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen) {
+            'staff'        => $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots) {
                 $id = (int) $s->id;
                 $last = $lastEvents->get($id);
 
@@ -93,6 +103,7 @@ class StaffFeedController extends Controller
                     'last_event'     => $last ? ['kind' => $last->kind, 'at' => $this->iso($last->created_at)] : null,
                     'counts'         => (object) ($counts[$id] ?? []),
                     'checklist_due_not_submitted' => $dueOpen[$id] ?? [],
+                    'is_bot'         => isset($bots[$id]),
                 ];
             })->values(),
         ]);
@@ -136,6 +147,8 @@ class StaffFeedController extends Controller
             ->get(['u.id', 'u.name as user_name', 'ep.name'])
             ->mapWithKeys(fn ($r) => [(int) $r->id => $r->name ?: $r->user_name]) : collect();
 
+        $bots = $this->botUserIds();
+
         return response()->json([
             'since'  => $sinceAt->toIso8601String(),
             'count'  => $rows->count(),
@@ -148,8 +161,23 @@ class StaffFeedController extends Controller
                 'status'     => $r->status === null ? null : (int) $r->status,
                 'ref'        => $r->ref,
                 'created_at' => $this->iso($r->created_at),
+                'is_bot'     => isset($bots[(int) $r->user_id]),
             ])->values(),
         ]);
+    }
+
+    /** user_id => true ng mga automation account (STAFF_FEED_BOT_USER_IDS, comma-separated); hindi integer na bahagi ay nilalaktawan. */
+    private function botUserIds(): array
+    {
+        $out = [];
+        foreach (explode(',', (string) config('services.staff_feed.bot_user_ids')) as $part) {
+            $part = trim($part);
+            if ($part !== '' && ctype_digit($part)) {
+                $out[(int) $part] = true;
+            }
+        }
+
+        return $out;
     }
 
     /** user_id => true ng may session na aktibo sa huling 10 minuto; null kapag hindi database ang session driver. */
