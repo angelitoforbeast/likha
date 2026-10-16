@@ -193,5 +193,5 @@ Full suite after the amendment: `Tests: 1315, Assertions: 16759, Errors: 1, Fail
 ### Notes
 
 - **Each sync rewrites the ad id from Botcake's answer.** When the sync re-reads a customer, it stores that answer's `ad_id`, and the answer can be empty. The fill then uses whatever ad id the row holds at matching time. This was already the case before the amendment; it is noted because the fill depends on it.
-- **The query scans the page's recent orders,** like the existing matching select: `LOWER(TRIM(PAGE))` cannot use the `(ts_date, PAGE)` index beyond `ts_date`. The subquery uses the `botcake_psids.psid` index from 041.
+- **The query scans the page's recent orders,** like the existing matching select: `LOWER(TRIM(PAGE))` cannot use the `(ts_date, PAGE)` index beyond `ts_date`. The subquery uses the existing `botcake_psids.psid` index.
 - **Review:** no separate review for this amendment. It is one bounded UPDATE on a trusted path, with tests on every case the amendment lists.
