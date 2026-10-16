@@ -140,6 +140,26 @@ class AdDeliveryStatusTest extends AdDeliveryTestCase
         }
     }
 
+    public function test_S_043_11_a_waybill_with_several_jnt_rows_lands_in_one_bucket(): void
+    {
+        $this->ad('AD1', 'SET1', 'CMP1');
+        $jnt = fn (string $wb, string $status) => DB::table('from_jnts')->insert(['waybill_number' => $wb, 'status' => $status]);
+        $this->order('WB1', 'AD1', 'Picked up');   $jnt('WB1', 'Delivered');     // → Delivered
+        $this->order('WB2', 'AD1', 'For Return');  $jnt('WB2', 'Returned');      // → Returned
+        $this->order('WB3', 'AD1', 'Delivered');   $jnt('WB3', 'Returned');      // returned muna → Returned
+        $this->order('WB4', 'AD1', 'In Transit');  $jnt('WB4', 'For Return');    // → For return
+        $this->order('WB5', 'AD1', 'In Transit');  $jnt('WB5', 'Picked up');     // → In transit
+        $this->order('WB6', null, 'Picked up');    $jnt('WB6', 'Delivered');     // walang ad id → Delivered
+
+        $page = $this->read()[self::PAGE];
+        $this->assertEquals($this->counts(5, 1, 1, 1, 2), $page['ads']['AD1']);
+        $this->assertEquals($this->counts(1, 1, 0, 0, 0), $page['no_ad']);
+        $this->assertEquals($this->counts(6, 2, 1, 1, 2), $page['page']);
+        foreach ([$page['ads']['AD1'], $page['no_ad'], $page['page']] as $c) {
+            $this->assertSame($c['shipped'], $c['delivered'] + $c['in_transit'] + $c['for_return'] + $c['returned']);
+        }
+    }
+
     public function test_S_043_6_one_grouped_query_however_many_ads(): void
     {
         $pages = ['Page A', 'Page B', 'Page C'];

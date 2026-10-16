@@ -114,13 +114,16 @@ class AdDeliveryStatus
         $pageKey = "LOWER($trim(COALESCE($pageCol,'')))";
         $marks   = implode(',', array_fill(0, count($pageKeys), '?'));
 
+        // Iisang bucket kada waybill (returned, saka delivered, saka for return, saka in transit), para hindi
+        // lumampas sa shipped ang suma kahit may ilang J&T row ang waybill. Sa isang row kada waybill,
+        // pareho ito ng bilang ng data().
         $rows = DB::select("
             SELECT w.page_key, w.ad_id,
-                   COUNT(*)             AS shipped,
-                   SUM(w.is_delivered)  AS delivered,
-                   SUM(w.is_in_transit) AS in_transit,
-                   SUM(w.is_for_return) AS for_return,
-                   SUM(w.is_returned)   AS returned
+                   COUNT(*) AS shipped,
+                   SUM(CASE WHEN w.is_returned = 1 THEN 1 ELSE 0 END) AS returned,
+                   SUM(CASE WHEN w.is_returned = 0 AND w.is_delivered = 1 THEN 1 ELSE 0 END) AS delivered,
+                   SUM(CASE WHEN w.is_returned = 0 AND w.is_delivered = 0 AND w.is_for_return = 1 THEN 1 ELSE 0 END) AS for_return,
+                   SUM(CASE WHEN w.is_returned = 0 AND w.is_delivered = 0 AND w.is_for_return = 0 THEN 1 ELSE 0 END) AS in_transit
             FROM (
                 SELECT $pageKey AS page_key, mo.waybill AS wb,
                        MAX(NULLIF($trim(COALESCE(mo.botcake_ad_id,'')), '')) AS ad_id,
