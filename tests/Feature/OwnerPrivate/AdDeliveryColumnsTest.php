@@ -72,6 +72,12 @@ class AdDeliveryColumnsTest extends OwnerPrivateTestCase
         $this->assertSame(0, preg_match('/(?<!\$data\.)adDelivery(Label|NoAdText)\(/', $partial));
         $this->assertStringContainsString('<template x-if="$data.adDeliveryNoAd && $data.adDeliveryNoAd(row.page_name)">', $partial);
         $this->assertStringContainsString('x-show="$data.adDeliveryNoAd && $data.adDeliveryNoAd(row.page_name)"', $partial);
+        // S-043.10: ang "Total ng page (ayon sa order)" na linya, pagkatapos ng "Walang ad id", sa table at sa page na walang campaign row
+        $this->assertStringContainsString('Total ng page (ayon sa order)', $html);
+        $this->assertStringContainsString('<template x-if="$data.adDeliveryTotal && $data.adDeliveryTotal(row.page_name)">', $partial);
+        $this->assertStringContainsString('x-show="$data.adDeliveryTotal && $data.adDeliveryTotal(row.page_name)"', $partial);
+        $this->assertGreaterThan(strpos($partial, '<template x-if="$data.adDeliveryNoAd'), strpos($partial, '<template x-if="$data.adDeliveryTotal'));
+        $this->assertSame(0, preg_match('/(?<!\$data\.)adDeliveryTotalText\(/', $partial));
     }
 
     public function test_S_043_8_nothing_saved_shows_them_to_the_ceo(): void

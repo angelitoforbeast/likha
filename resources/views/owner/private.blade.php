@@ -3428,6 +3428,11 @@
         const map = this.adDelivery[pageName];
         return map ? this._adDeliveryCols(map.no_ad) : null;
       },
+      // Ang "Total ng page (ayon sa order)": kabuuan mula sa parehong query (= campaigns + "Walang ad id").
+      adDeliveryTotal(pageName){
+        const map = this.adDelivery[pageName];
+        return map ? this._adDeliveryCols(map.page) : null;
+      },
       // Label ng delivery columns: ang range na talagang kinuha (hindi luma kapag binago ang petsa nang hindi nire-reload ang expand).
       adDeliveryLabel(pageName){
         const r = (this.adDelivery[pageName] || {}).range;
@@ -3435,9 +3440,14 @@
       },
       // "Walang ad id" bilang isang linya ng teksto, para sa page na walang campaign row.
       adDeliveryNoAdText(pageName){
-        const n = this.adDeliveryNoAd(pageName);
+        return this._adDeliveryText('Walang ad id', this.adDeliveryNoAd(pageName));
+      },
+      adDeliveryTotalText(pageName){
+        return this._adDeliveryText('Total ng page (ayon sa order)', this.adDeliveryTotal(pageName));
+      },
+      _adDeliveryText(label, n){
         if (!n) return '';
-        return 'Walang ad id: Delivered ' + this.num(n.ad_delivered) + ' · In transit ' + this.num(n.ad_in_transit)
+        return label + ': Delivered ' + this.num(n.ad_delivered) + ' · In transit ' + this.num(n.ad_in_transit)
              + ' · For return ' + this.num(n.ad_for_return) + ' · Returned ' + this.num(n.ad_returned)
              + ' · RTS% ' + (n.ad_rts_pct != null ? Number(n.ad_rts_pct).toFixed(1) + '%' : '—');
       },

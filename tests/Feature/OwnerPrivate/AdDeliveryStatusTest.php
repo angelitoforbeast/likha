@@ -113,6 +113,33 @@ class AdDeliveryStatusTest extends AdDeliveryTestCase
         }
     }
 
+    public function test_S_043_10_total_of_the_page_is_campaigns_plus_walang_ad_id(): void
+    {
+        $this->ad('AD1', 'SET1', 'CMP1');
+        $this->ad('AD2', 'SET2', 'CMP2');
+        $this->ad('AD3', 'SET3', 'CMP3');
+        $this->order('WB1', 'AD1', 'Delivered');
+        $this->order('WB2', 'AD1', 'Returned');
+        $this->order('WB3', 'AD2', 'Delivered');
+        $this->order('WB4', 'AD2', 'For Return');
+        $this->order('WB5', 'AD3', 'In Transit');
+        $this->order('WB6', null, 'Delivered');
+        $this->order('WB7', null, 'Returned');
+        $this->order('WB8', 'UNKNOWN_AD', 'Delivered');
+
+        $page = $this->read()[self::PAGE];
+        $this->assertCount(3, $page['campaigns']);
+        // kamay: 8 waybill, 4 delivered, 1 in transit, 1 for return, 2 returned → RTS% = 3 / 8
+        $this->assertEquals($this->counts(8, 4, 1, 1, 2), $page['page']);
+        $this->assertEqualsWithDelta(37.5, $page['page']['rts_pct'], 1e-9);
+
+        $keys = ['shipped', 'delivered', 'in_transit', 'for_return', 'returned'];
+        foreach ($keys as $k) {
+            $sum = $page['no_ad'][$k] + array_sum(array_map(fn ($c) => $c['counts'][$k], $page['campaigns']));
+            $this->assertSame($page['page'][$k], $sum, $k);
+        }
+    }
+
     public function test_S_043_6_one_grouped_query_however_many_ads(): void
     {
         $pages = ['Page A', 'Page B', 'Page C'];

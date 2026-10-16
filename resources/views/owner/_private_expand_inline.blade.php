@@ -15,7 +15,7 @@
     helpers: money, num, fmtDate, daysSince, visibleCampaignsCols,
              campLabel(col, level), campRowName(row, level)
     optional (/owner/private lang; kasama rin ang file na ito sa /item, kaya $data.<name> ang tawag):
-             adDeliveryLabel, adDeliveryNoAd, adDeliveryNoAdText
+             adDeliveryLabel, adDeliveryNoAd, adDeliveryNoAdText, adDeliveryTotal, adDeliveryTotalText
 --}}
 <div class="expand-panel">
 
@@ -47,6 +47,7 @@
                  && (expandedPages[row.page_name] || {}).campaigns.length === 0">
     <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Walang campaigns na may spend para sa page na ito sa selected date range.
       <div style="font-style:normal;margin-top:6px;" x-show="$data.adDeliveryNoAd && $data.adDeliveryNoAd(row.page_name)" x-text="$data.adDeliveryNoAdText ? $data.adDeliveryNoAdText(row.page_name) : ''"></div>
+      <div style="font-style:normal;font-weight:600;margin-top:2px;" x-show="$data.adDeliveryTotal && $data.adDeliveryTotal(row.page_name)" x-text="$data.adDeliveryTotalText ? $data.adDeliveryTotalText(row.page_name) : ''"></div>
     </div>
   </template>
 
@@ -427,6 +428,26 @@
                 </template>
                 <template x-if="col.id.startsWith('ad_') && col.type==='percent'">
                   <span x-text="adDeliveryNoAd(row.page_name)[col.id] != null ? (Number(adDeliveryNoAd(row.page_name)[col.id]).toFixed(1) + '%') : '—'"></span>
+                </template>
+              </td>
+            </template>
+          </tr>
+        </tbody>
+      </template>
+
+      {{-- Kabuuan ng orders ng page mula sa parehong query: campaigns + "Walang ad id" = ito. Hindi ito ang RTS% ng page row (J&T sender, 60 araw). --}}
+      <template x-if="$data.adDeliveryTotal && $data.adDeliveryTotal(row.page_name)">
+        <tbody style="border-top:1px solid #cbd5e1;background:#f1f5f9;font-weight:600;">
+          <tr>
+            <td></td>
+            <template x-for="col in visibleCampaignsCols()" :key="'ec-t-'+col.id">
+              <td :class="(col.align==='right' ? 'num' : '')">
+                <template x-if="col.type==='name'"><span style="color:#334155;">Total ng page (ayon sa order)</span></template>
+                <template x-if="col.id.startsWith('ad_') && col.type==='integer'">
+                  <span x-text="num(adDeliveryTotal(row.page_name)[col.id])"></span>
+                </template>
+                <template x-if="col.id.startsWith('ad_') && col.type==='percent'">
+                  <span x-text="adDeliveryTotal(row.page_name)[col.id] != null ? (Number(adDeliveryTotal(row.page_name)[col.id]).toFixed(1) + '%') : '—'"></span>
                 </template>
               </td>
             </template>
