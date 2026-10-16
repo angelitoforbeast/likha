@@ -3,19 +3,21 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SyncBotcakeCustomersJob;
-use App\Models\BotcakePsid;
-use App\Models\BotcakePsidImportRun;
+use App\Models\MacroOutput;
 use App\Models\PageSetting;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakeException;
 use App\Services\PageSettings;
+use App\Services\PageSettingsGrid;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 /**
- * /page-settings: settings kada page bilang rows (Page | Provider | Key | Value). CEO lang (404 sa iba).
- * Ang secret ay hindi kailanman ibinabalik: huling 4 na character lang ang nasa page.
+ * /page-settings: settings kada page bilang rows (Page | Provider | Key | Value), ipinapakita bilang grid na parang
+ * Google Sheet. CEO lang (404 sa iba). Ang secret ay hindi kailanman ibinabalik: huling 4 na character lang.
  */
 class PageSettingController extends Controller
 {
@@ -34,49 +36,99 @@ class PageSettingController extends Controller
         if ($this->getNormalizedRole() !== 'CEO') abort(404);
     }
 
-    public function index(Request $request)
+    /** Ang grid: isang row kada page, isang column kada provider + key. Ang JS ang nag-e-edit at nagpo-poll. */
+    public function index(PageSettingsGrid $grid)
     {
         $this->checkAccess();
 
-        $filters = [
-            'page'     => trim((string) $request->query('page', '')),
-            'provider' => strtolower(trim((string) $request->query('provider', ''))),
-            'key'      => strtolower(trim((string) $request->query('key', ''))),
-        ];
+        return view('page_settings.index', ['grid' => $grid->build()]);
+    }
 
-        $q = PageSetting::query();
-        if ($filters['page'] !== '') $q->whereRaw('LOWER(page_name) LIKE ?', ['%' . mb_strtolower($filters['page'], 'UTF-8') . '%']);
-        if ($filters['provider'] !== '') $q->where('provider', $filters['provider']);
-        if ($filters['key'] !== '') $q->where('key', 'like', '%' . $filters['key'] . '%');
+    /** Poll: kapag may ?since=, ang mga cell lang na nagbago mula noon; kung wala, ang buong grid. */
+    public function grid(Request $request, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
 
-        $rows = $q->orderBy('page_name')->orderBy('provider')->orderBy('key')->orderByDesc('id')->get();
+        $since = (string) $request->query('since', '');
+        if ($since === '') return response()->json($grid->build());
 
-        // Kada page: ang active rows, at ang history (pinalitan / naka-deactivate) kada provider + key.
-        $pages = $rows->groupBy(fn ($r) => $this->settings->pageKey($r->page_name))->map(function ($g) {
-            return [
-                'name'    => $g->sortBy('id')->first()->page_name,
-                'active'  => $g->where('active', true)->values(),
-                'history' => $g->where('active', false)->groupBy(fn ($r) => $r->fullKey()),
-            ];
-        })->sortBy('name');
-
-        // Botcake panel kada page na may botcake settings. Ang orders na wala pang PSID ay nasa /page-settings/psid-coverage.
-        $botcake = [];
-        foreach ($pages as $pageKey => $p) {
-            if (!$p['active']->contains(fn ($r) => $r->provider === 'botcake')) continue;
-
-            $botcake[$pageKey] = [
-                'customers'    => BotcakePsid::where('source', 'api')->whereRaw('LOWER(page) = ?', [$pageKey])->count(),
-                'last_run'     => BotcakePsidImportRun::where('source', 'api')->whereRaw('LOWER(page_name) = ?', [$pageKey])->latest('id')->first(),
-                'token_status' => $this->settings->get($p['name'], 'botcake', 'token_status'),
-            ];
+        if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $since)) {
+            return response()->json(['error' => 'Mali ang since (YYYY-MM-DD HH:MM:SS).'], 422);
         }
 
-        return view('page_settings.index', [
-            'botcake'   => $botcake,
-            'pages'     => $pages,
-            'filters'   => $filters,
-            'providers' => PageSetting::distinct()->orderBy('provider')->pluck('provider'),
+        return response()->json($grid->changes(Carbon::parse($since)));
+    }
+
+    /**
+     * Auto-save ng isang cell. Blangko = i-clear (deactivate), maliban sa secret: doon ang blangko ay walang binago,
+     * at ang "clear" lang ang nagbubura. Last write wins.
+     */
+    public function saveCell(Request $request, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
+
+        $page     = (string) $request->input('page_name', '');
+        $provider = strtolower(trim((string) $request->input('provider', '')));
+        $key      = strtolower(trim((string) $request->input('key', '')));
+        $value    = trim((string) $request->input('value', ''));
+
+        $errors = $this->settings->validate($page, $provider, $key, 'x');
+        if ($errors && !isset($errors['value'])) {
+            return response()->json(['error' => reset($errors)], 422);
+        }
+
+        $trim    = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $current = PageSetting::whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])
+            ->where('provider', $provider)->where('key', $key)->where('active', true)->orderByDesc('id')->first();
+        $secret  = $request->boolean('is_secret') || (bool) $current?->is_secret;
+
+        if ($request->boolean('clear') || ($value === '' && !$secret)) {
+            if (!$current) return response()->json(['status' => 'unchanged', 'cell' => null]);
+            if (in_array($provider . '.' . $key, PageSettings::SYSTEM_KEYS, true)) {
+                return response()->json(['error' => 'Ang ' . $provider . '.' . $key . ' ay isinusulat ng system.'], 422);
+            }
+            $this->settings->deactivate($current, Auth::id());
+            return response()->json(['status' => 'cleared', 'cell' => null]);
+        }
+
+        if ($value === '') {
+            return response()->json(['status' => 'unchanged', 'cell' => $current ? $grid->cell($current) : null]);
+        }
+
+        $errors = $this->settings->validate($page, $provider, $key, $value);
+        if ($errors) return response()->json(['error' => reset($errors)], 422);
+
+        $res = $this->settings->set($page, $provider, $key, $value, $secret, Auth::id());
+
+        return response()->json(['status' => $res['status'], 'cell' => $grid->cell($res['setting'])]);
+    }
+
+    /** Ang dating values ng isang cell (secret = huling 4 lang). */
+    public function history(Request $request, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
+
+        return response()->json(['history' => $grid->history(
+            (string) $request->query('page_name', ''),
+            (string) $request->query('provider', ''),
+            (string) $request->query('key', ''),
+        )]);
+    }
+
+    /** "+ Page": ang pangalang gagamitin (trim) at kung may orders na ganitong PAGE. Walang isinusulat. */
+    public function pageCheck(Request $request)
+    {
+        $this->checkAccess();
+
+        $name = $this->settings->normPage((string) $request->query('page_name', ''));
+        if ($name === '') return response()->json(['error' => 'Kailangan ang page.'], 422);
+
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $col  = DB::getDriverName() === 'pgsql' ? '"PAGE"' : '`PAGE`';
+
+        return response()->json([
+            'name'      => $name,
+            'in_orders' => MacroOutput::whereRaw("LOWER($trim($col)) = ?", [$this->settings->pageKey($name)])->exists(),
         ]);
     }
 

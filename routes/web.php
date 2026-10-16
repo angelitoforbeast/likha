@@ -243,6 +243,10 @@ Route::get('/encoder/tools/ai/health', [AiController::class, 'health'])->middlew
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name('page-settings.')->group(function () {
     Route::get('/', [PageSettingController::class, 'index'])->name('index');
     Route::post('/', [PageSettingController::class, 'store'])->name('store');
+    Route::get('/grid', [PageSettingController::class, 'grid'])->name('grid');
+    Route::post('/cell', [PageSettingController::class, 'saveCell'])->middleware('throttle:120,1')->name('cell');
+    Route::get('/history', [PageSettingController::class, 'history'])->name('history');
+    Route::get('/page-check', [PageSettingController::class, 'pageCheck'])->middleware('throttle:30,1')->name('page-check');
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
     Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1')->name('test-token');
     Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
