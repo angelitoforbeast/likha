@@ -124,9 +124,140 @@ Other checks:
 - The JavaScript is checked by syntax and by reading only.
 - The steps to check are in `TODO.md`: edit a cell while another tab changes it, then press Escape; type a token and press Enter; add a page and a column.
 
+## Amendment 1
+
+Commits:
+- `feat: Botcake sync reads only the last 45 days of subscribers, and its lock expires after 2 hours, is released on SIGTERM/SIGINT and shows since when on the grid (spec 041 amendment 1)`
+- `feat: read-only Botcake customers view per page with PSID, ad ids, phones, dates and order count, linked from the grid (spec 041 amendment 1)`
+- `feat: the coverage list shows every order of the page with a With / Without PSID filter, its PSID, ad id and ad name (spec 041 amendment 1)`
+- `fix: one sync lock per page so a long run never outlives the 2 h TTL, the signal handler frees only its own lock, and the customers view ignores array query parameters (spec 041 amendment 1)`
+
+The second commit on its own leaves `PsidCoverageTest`'s query-plan test red: its new index made sqlite pick that index for the old "empty PSID" condition. The third commit fixes this. The branch is squash-merged, so no red commit reaches `develop`.
+
+### Sync window (`App\Services\BotcakeCustomerSync`)
+
+- **Window:** every sync stops after storing the first batch that holds a customer subscribed more than N days ago, with stop reason `age`. This covers incremental runs, `--full`, the button and the schedule.
+  - N is `config('services.botcake.sync_max_age_days')`, env `BOTCAKE_SYNC_MAX_AGE_DAYS`, default 45. It was added to `config/services.php` and `.env.example`.
+  - The date is `date_subscribed_at`, falling back to `subscribed_at`, then `inserted_at`.
+  - A customer with no date never triggers the stop.
+  - "Older than" is strict: exactly 45 days does not stop.
+- **Order of the stop checks:** all-known batch (incremental only), then `age`, then `cap`.
+- **Inactive marking:** it now also runs after a full read that stops on `age`, not only on `end`, and only touches customers with `subscribed_at` inside the window. Older customers and customers with no `subscribed_at` are never marked inactive.
+
+### Lock
+
+- **TTL:** 2 hours (it was 3), and there is now one lock per page. The command takes and releases the lock for each page, so a run over many pages never outlives the TTL.
+  - A run that finds the lock held prints `Skipped: may tumatakbo pang Botcake customer sync (mula YYYY-MM-DD HH:MM).` and stops.
+  - The queued job (one page) still takes one lock.
+- **Since when:** a cache key `botcake-sync-customers:since` holds when the lock was taken, with the same TTL. It is cleared on release. `BotcakeCustomerSync::lockedSince()` reads it.
+- **Signals:** `botcake:sync-customers` traps SIGTERM and SIGINT when pcntl is loaded. If the run holds a lock at that moment, it force-releases the lock, then exits. Without pcntl (Windows), the TTL covers it.
+- **Grid:** the grid and every poll return `sync_lock` (Manila time, or null). The page shows "May tumatakbong Botcake sync mula …" while a lock is held.
+
+### Customers view: `GET /page-settings/customers?page=<page name>` (CEO only, read-only)
+
+- **Rows:** that page's `botcake_psids` rows with `source = api`. They are matched on the page's spelling in the Botcake settings, which is the spelling the sync wrote.
+- **Order and pages:** newest `last_interactive_at` first, with rows that have no date last (`NULLS LAST` on Postgres), then id. 50 per page, with `p` as the page parameter.
+- **Search (`q`):**
+  - A PH mobile number (any of the 09 / 9 / 63 / +63 forms) matches `phone_key` exactly.
+  - Anything else matches the start of `name_key` (`LIKE 'name%'`).
+  - Both use the existing indexes.
+- **Filters:** `status` (all / available / inactive) and `has_ad` (an `ad_id` is present).
+- **Columns:** FB name, PSID, ad id (with "+N" when `ad_ids` has more, and the full list on hover), phones, subscribed, last interaction, last seen, status, orders.
+- **Orders column:** one grouped query (`macro_output` where `botcake_psid IN (the 50 PSIDs)` and the page matches), served by a new index on `macro_output.botcake_psid`.
+- **Links:** "Customers" in each grid row, and links between this view and the page's orders list.
+- **Robustness:** an array in `page` or `q` (`?q[]=x`) counts as blank instead of returning a 500.
+
+### Orders view: `GET /page-settings/psid-coverage/orders?page_name=…`
+
+The amendment names `?details=`, but that list moved to this route in 040 amendment 1. I extended the existing route.
+
+- **Rows:** every order of the page in the range by default. A new filter `psid` = all / with / without.
+- **Reasons:** only orders without a PSID get a reason. Orders with a PSID have `reason = null`, and the reason filter only returns orders without a PSID. The correlated customer counts run only for orders without a PSID (`CASE WHEN … THEN (subquery) ELSE 0`).
+- **Counts above the list:** one grouped query gives "May PSID: N" and the ambiguous / no match / not yet checked split.
+- **New columns:** PSID, ad id, and the ad name ("campaign / ad set / headline").
+  - The name comes from the ad's row with the highest `id` in `ads_manager_reports`.
+  - It is one query for all ad ids on the page shown: `id IN (SELECT MAX(id) … WHERE ad_id IN (…) GROUP BY ad_id)`.
+- **Query plan:**
+  - The "empty PSID" test is now `COALESCE(mo.botcake_psid, '') = ''`. Without that, the new PSID index was chosen for `IS NULL OR = ''`, which matches almost every order.
+  - The plan test asserts that "with" and "without" use `macro_output_ts_date_page_idx` and never the PSID index.
+  - It also asserts that the customers view's order count uses `macro_output_botcake_psid_idx`.
+- **Unchanged:** 50 per page, newest first, and the J&T filter.
+
+### Migration `2026_10_17_110000_add_botcake_psid_index_to_macro_output`
+
+- Adds index `macro_output_botcake_psid_idx` on `macro_output (botcake_psid)`.
+- It is guarded:
+  - It skips when the table or column is missing.
+  - On MySQL it skips when any index already starts with `botcake_psid`.
+  - On Postgres it runs `CREATE INDEX CONCURRENTLY IF NOT EXISTS` outside a transaction.
+- `down()` drops only this index.
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| The sync stops at the first batch with a customer older than the window (stop reason `age`): incremental and full at 46 days; full at 44 days reads to the end; config 10 days → stops at 11 | `BotcakeCustomerSyncTest::test_every_sync_stops_at_the_first_batch_with_a_customer_subscribed_before_the_window` (4 rows) | pass |
+| The all-known-batch stop comes before `age` | `…::test_the_all_known_batch_stop_comes_before_the_age_stop` | pass |
+| A windowed full read marks inactive only customers subscribed within the window; older and undated stay available | `…::test_a_windowed_full_read_marks_inactive_only_customers_subscribed_within_the_window` | pass |
+| The lock has a 2 h TTL (held at 1 h 59, free at 2 h 01); "since" set while held and cleared after; a second `withLock` skips | `…::test_the_lock_expires_after_2_hours_and_shows_since_when_it_is_held` | pass |
+| The skip message says since when; `forceRelease` frees the lock and the "since" key | `…::test_a_signal_handler_force_releases_the_lock_and_the_skip_message_says_since_when` | pass |
+| The grid and the poll show since when a sync holds the lock | `PageSettingsGridTest::test_the_grid_and_the_poll_show_since_when_a_sync_holds_the_lock` | pass |
+| Customers: API rows of the page only, newest interaction first, 50 per page, no date last, page 2 link | `BotcakeCustomersViewTest::test_the_page_lists_its_api_customers_newest_interaction_first_50_at_a_time` | pass |
+| Customers: search by name start / full name / phone (09 and +63 forms), status and has-ad filters (9 rows) | `…::test_search_by_name_or_phone_and_filter_by_status_and_ad` | pass |
+| Customers: ad id with "+2" and the full list on hover, phones, subscribed; order count per PSID (other page excluded); no token or setting value in the HTML | `…::test_each_customer_shows_its_ad_ids_and_its_orders_with_one_grouped_count` | pass |
+| Customers: the same query count for 5 and 50 customers (at most 6) | `…::test_the_query_count_is_the_same_for_5_and_50_customers` | pass |
+| Customers: CEO only, linked from the grid, an array query parameter does not break the page | `…::test_only_the_ceo_reaches_it_and_the_grid_links_to_it` | pass |
+| Orders: every order by default, with / without filter, PSID and ad id columns, reason only without PSID, ad name from the latest row, unknown ad id shown without a name, no token in the HTML | `PsidCoverageTest::test_the_list_shows_every_order_with_a_psid_filter_and_the_ad_of_each_order` | pass |
+| Orders: the ad names of 50 orders are one query | `…::test_the_ad_names_of_50_orders_are_one_query` | pass |
+| Orders: 50 per page, newest first, J&T filter (now with the `psid` filter) | `…::test_a_page_lists_its_orders_50_at_a_time_newest_first_with_the_jnt_filter` (updated) | pass |
+| Query plans: ts_date/page index for all / with / without, never the PSID index; the order count uses the PSID index | `…::test_the_queries_use_the_ts_date_page_index_and_the_customer_key_indexes` (extended) | pass |
+
+Red runs:
+- Sync window: failed on "Failed asserting that two arrays are identical" (pages 3 and 4 were read) for three data rows. The inactive test failed on "two strings are identical".
+- Lock: failed on `Call to undefined method …::lockedSince()` and `Undefined constant …::LOCK_TTL`.
+- Grid lock notice: failed on `Undefined array key "sync_lock"`.
+- Orders view: failed on 56 vs 57 (the default was still "without"), on the missing `with` split, and on 0 vs 1 ad query.
+- Customers view: not a clean red. The tests were written before the controller, but their first run happened after it, and it died on a helper named `view()` that clashed with Laravel's. The array-parameter case was also written together with its fix.
+
+Updated existing tests:
+- `apiRow()` in `BotcakeCustomerSyncTest` now gives rows a `subscribed_at` (20 days ago by default), because inactive marking needs it.
+- The `split` expectations in `PsidCoverageTest` now include `with`.
+
+Full suite on the final tree: `Tests: 1300, Assertions: 16597, Errors: 1, Failures: 1, PHPUnit Deprecations: 4, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`.
+
+### Review (amendment 1)
+
+- One review at standard depth found no blockers and no majors.
+- These minors were fixed:
+  - One lock per page, so the TTL cannot run out during a long full run.
+  - The signal handler frees only a lock its own run holds.
+  - An array in a query parameter no longer gives a 500.
+  - The plan test now uses the controller's real order-count query.
+- The rest are accepted in `TODO.md` under "041 amendment 1", with reasons: the ad name by highest id, `LIKE` wildcards, the third copy of the page-match SQL, no test for the signal handler or Postgres `NULLS LAST`, interleaving between pages, and the existing lack of a unique key on `botcake_psids`.
+
+### Amendment changes (amendment 1, kept in the handoff folder, not committed)
+
+1. A read-only customers view per page: PSID, ad ids, phones, dates, status, order count; search, filters, 50 per page; linked from the grid.
+2. The coverage list shows every order with a With / Without PSID filter, plus PSID, ad id and ad name columns.
+3. A 45-day sync window (`BOTCAKE_SYNC_MAX_AGE_DAYS`, stop reason `age`); inactive marking limited to the window.
+4. The sync lock: 2 h TTL, released on SIGTERM/SIGINT, "since when" shown on the grid and in the skip message.
+5. Tests for the above.
+
+### What the amendment got wrong, and decisions it left open
+
+- **`?details=<page>`** no longer exists. The per-page list has been `/page-settings/psid-coverage/orders?page_name=` since 040 amendment 1, and that is the list I extended.
+- **A new index was needed.** Counting orders per PSID needs `macro_output.botcake_psid` indexed, or every customers page reads the whole table. The brief kept storage unchanged, but this is an additive index, not a change to how data is stored.
+- **"Latest row" of an ad** is taken as the highest `id`, which keeps it to one simple query.
+- **Lock TTL per page,** not per run, so that a full run over many pages stays inside the 2 h TTL.
+- **Customers with no `subscribed_at`** never trigger the window stop and are never marked inactive by a windowed read.
+
 ## After release (server)
 
-Nothing to run: no migration and no new config. `npm run build` is not needed, because the page uses the Tailwind CDN like before, with no Vite asset.
+1. `php artisan migrate --force`: one new migration, `2026_10_17_110000`, an index on `macro_output.botcake_psid`. It is additive, but building the index on the biggest table takes time, so run it in a quiet hour. Postgres builds it `CONCURRENTLY`.
+2. Optional: set `BOTCAKE_SYNC_MAX_AGE_DAYS` in the server's environment (default 45), then `php artisan config:cache` if the config is cached.
+3. If a stuck lock is still held from the earlier killed run, it now expires within 2 hours on its own. The grid shows since when it has been held.
+
+`npm run build` is not needed: the pages use the Tailwind CDN like before.
 
 ## What the brief got wrong, and decisions it left open
 

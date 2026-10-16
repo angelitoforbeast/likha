@@ -414,3 +414,13 @@ Accepted, not fixed:
 - **After a token or Botcake ID edit by Enter, the table is rebuilt when the save returns and keyboard focus goes back to the top.** Reason: minor; the refocus covers every other cell.
 - **Each editable cell takes two Tab stops (the cell, then its History button).** Reason: usable; a key for history would need more keyboard handling than this brief asks.
 - **The grid's JavaScript has no automated test and was not opened in a browser in this run** (no JS test setup in the repo; the app needs the server database to run). Reason: the server-side rules are tested; the owner's first use is the browser check. Check: edit a cell while another tab changes it, then press Escape; type a token and press Enter; add a page and a column.
+
+### 041 amendment 1 (2026-10-17)
+
+- **The ad name on the orders list comes from the ad's row with the highest `id` in `ads_manager_reports`, not the newest `day`.** If an older day is imported later, its name is shown. Reason: one simple grouped query; reports are normally imported in date order. Revisit if names look stale.
+- **`%` and `_` typed in the customers search act as wildcards.** Reason: read-only and CEO only; sqlite needs an `ESCAPE` clause the other drivers don't, so escaping would need a driver branch.
+- **The `macro_output` page-name match (`LOWER(TRIM(PAGE)) = ?`) is now written by hand in three places** (`PsidCoverageController::pageExpr`, `ImportBotcakePageSettings`, `BotcakeCustomersController::orderCountsQuery`). Reason: no shared helper exists for `macro_output`; one is worth adding on the next change there.
+- **The SIGTERM/SIGINT handler is not covered by a test.** pcntl is not on this Windows machine; the test calls `forceRelease()` directly. Check on the server: kill a `botcake:sync-customers --page=… --full` run with Ctrl+C and confirm the next run does not print "Skipped".
+- **Postgres `NULLS LAST` ordering in the customers view is not run by a test** (the suite is sqlite only, and sqlite already sorts NULLs last when descending).
+- **Between pages, a run can lose the lock to another run** (one lock per page): the second run then syncs while the first prints "Skipped" and stops. The two never sync at the same time. Reason: a lock per page keeps every lock well inside its 2 h TTL.
+- **`botcake_psids` has no unique index on (source, page, psid) (already true before this brief).** Two syncs at the same moment could insert a duplicate row. Reason: the lock prevents concurrent syncs; storage changes are outside this brief.
