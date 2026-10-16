@@ -3267,7 +3267,7 @@
           { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
           { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },
           { id:'purchases',      label:'Purchases',        sort:null,             type:'integer',      align:'right', minw:100 },
-          // J&T status ng orders ng ad (botcake_ad_id), parehong range ng page row — galing sa /owner/private/ad-delivery.
+          // J&T status ng orders ng ad (botcake_ad_id) sa range ng filter — galing sa /owner/private/ad-delivery.
           { id:'ad_delivered',   label:'Delivered',        sort:null,             type:'integer',      align:'right', minw:80  },
           { id:'ad_in_transit',  label:'In transit',       sort:null,             type:'integer',      align:'right', minw:80  },
           { id:'ad_for_return',  label:'For return',       sort:null,             type:'integer',      align:'right', minw:80  },
@@ -3367,11 +3367,12 @@
         return j;
       },
 
-      // Delivery status kada campaign / ad set / ad ng mga page (isang request, parehong range ng page row:
-      // startDate..endDate, hindi ang anchor window ng spend). Hindi sinisira ang expand kapag pumalya:
-      // null ang page = "—" ang mga column.
+      // Delivery status kada campaign / ad set / ad ng mga page (isang request): orders ng startDate..endDate
+      // (hindi ang anchor window ng spend), J&T sa waybill. Itinatabi ang range na ginamit para sa label.
+      // Hindi sinisira ang expand kapag pumalya: null ang page = "—" ang mga column.
       async _fetchAdDelivery(pageNames){
-        const qs = new URLSearchParams({ start_date: this.startDate, end_date: this.endDate });
+        const range = { start: this.startDate, end: this.endDate };
+        const qs = new URLSearchParams({ start_date: range.start, end_date: range.end });
         for (const p of pageNames) qs.append('pages[]', p);
         try {
           const res = await fetch('{{ route('owner.private.ad-delivery') }}?' + qs.toString(), { headers: { 'Accept': 'application/json' } });
@@ -3379,7 +3380,7 @@
           const j = await res.json();
           const byPage = (j && j.by_page) || {};
           for (const p of pageNames) {
-            this.adDelivery[p] = byPage[p] || { campaigns: {}, adsets: {}, ads: {}, no_ad: null, page: null };
+            this.adDelivery[p] = Object.assign({ campaigns: {}, adsets: {}, ads: {}, no_ad: null, page: null }, byPage[p] || {}, { range });
           }
         } catch (e) {
           console.warn('[ad-delivery] failed:', e);
@@ -3409,7 +3410,7 @@
         };
       },
       // Campaign na may orders pero wala sa listahan (walang spend sa window, o nasa ibang page name ang
-      // campaign): idinadagdag bilang delivery-only na row para nagsusuma pa rin sa page row.
+      // campaign): idinadagdag bilang delivery-only na row para kumpleto ang suma ng page.
       _withDeliveryOnlyCampaigns(pageName, campaigns){
         const map = this.adDelivery[pageName];
         if (!map) return campaigns;
@@ -3426,6 +3427,19 @@
       adDeliveryNoAd(pageName){
         const map = this.adDelivery[pageName];
         return map ? this._adDeliveryCols(map.no_ad) : null;
+      },
+      // Label ng delivery columns: ang range na talagang kinuha (hindi luma kapag binago ang petsa nang hindi nire-reload ang expand).
+      adDeliveryLabel(pageName){
+        const r = (this.adDelivery[pageName] || {}).range;
+        return r ? ('· Delivered / In transit / For return / Returned / RTS%: orders ' + this.fmtMD(r.start) + ' → ' + this.fmtMD(r.end) + ', J&T sa waybill') : '';
+      },
+      // "Walang ad id" bilang isang linya ng teksto, para sa page na walang campaign row.
+      adDeliveryNoAdText(pageName){
+        const n = this.adDeliveryNoAd(pageName);
+        if (!n) return '';
+        return 'Walang ad id: Delivered ' + this.num(n.ad_delivered) + ' · In transit ' + this.num(n.ad_in_transit)
+             + ' · For return ' + this.num(n.ad_for_return) + ' · Returned ' + this.num(n.ad_returned)
+             + ' · RTS% ' + (n.ad_rts_pct != null ? Number(n.ad_rts_pct).toFixed(1) + '%' : '—');
       },
 
       // Compute profit% per campaign using parent page row's data.

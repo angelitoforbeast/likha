@@ -27,8 +27,7 @@
         <span x-text="endDate"></span>
         · all campaigns with spend
       </span>
-      <span style="margin-left:6px;color:#65676b;"
-            x-text="'· Delivered / In transit / For return / Returned / RTS%: orders ' + fmtMD(startDate) + ' → ' + fmtMD(endDate) + ' (gaya ng page row)'"></span>
+      <span style="margin-left:6px;color:#65676b;" x-text="adDeliveryLabel(row.page_name)"></span>
     </div>
     <button class="expand-close" @click="togglePageExpand(row.page_name)">✕ Close</button>
   </div>
@@ -44,7 +43,9 @@
                  && !(expandedPages[row.page_name] || {}).error
                  && Array.isArray((expandedPages[row.page_name] || {}).campaigns)
                  && (expandedPages[row.page_name] || {}).campaigns.length === 0">
-    <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Walang campaigns na may spend para sa page na ito sa selected date range.</div>
+    <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Walang campaigns na may spend para sa page na ito sa selected date range.
+      <div style="font-style:normal;margin-top:6px;" x-show="adDeliveryNoAd(row.page_name)" x-text="adDeliveryNoAdText(row.page_name)"></div>
+    </div>
   </template>
 
   <template x-if="!(expandedPages[row.page_name] || {}).loading
@@ -411,7 +412,7 @@
         </tbody>
       </template>
 
-      {{-- Orders ng page na walang ad id (o ad id na wala sa ads_manager_reports): campaigns + ito = page row. --}}
+      {{-- Orders ng page na walang ad id (o ad id na wala sa ads_manager_reports): campaigns + ito = lahat ng orders ng page. --}}
       <template x-if="adDeliveryNoAd(row.page_name)">
         <tbody style="border-top:2px solid #cbd5e1;background:#f8fafc;">
           <tr>

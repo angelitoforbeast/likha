@@ -1539,7 +1539,8 @@ class OwnerPrivateController extends Controller
 
     /**
      * Delivered / In transit / For return / Returned / RTS% kada campaign, ad set at ad (sa botcake_ad_id ng order)
-     * para sa expand, at ang "Walang ad id" na linya. Parehong range at patakaran ng page row, kaya nagsusuma.
+     * para sa expand, at ang "Walang ad id" na linya. Patakaran ng data() (orders sa range, J&T sa waybill), kaya
+     * ang campaigns + "Walang ad id" = lahat ng orders ng page.
      * Isang request para sa lahat ng page ng "Expand all". Read-only.
      */
     public function adDelivery(Request $request, \App\Services\AdDeliveryStatus $status)

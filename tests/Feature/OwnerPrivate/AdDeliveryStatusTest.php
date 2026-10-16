@@ -93,10 +93,15 @@ class AdDeliveryStatusTest extends AdDeliveryTestCase
         // dalawang order, iisang waybill: isang beses lang ang bilang (distinct waybill, gaya ng page row)
         $this->order('WB6', 'AD1', 'Returned');
         $this->order('WB6', 'AD1', null);
+        // iisang waybill na may dalawang ad id: isang beses, sa isang ad lang (ang MAX na id)
+        $this->order('WB7', 'AD1', 'Delivered');
+        $this->order('WB7', 'AD2', null);
 
         $page = $this->read()[self::PAGE];
         $this->assertEquals($this->counts(3, 1, 1, 1, 0), $page['no_ad']);
-        $this->assertEquals($this->counts(6, 2, 1, 1, 2), $page['page']);
+        $this->assertEquals($this->counts(2, 1, 0, 0, 1), $page['ads']['AD1']);
+        $this->assertEquals($this->counts(2, 1, 0, 0, 1), $page['ads']['AD2']);
+        $this->assertEquals($this->counts(7, 3, 1, 1, 2), $page['page']);
 
         $keys = ['shipped', 'delivered', 'in_transit', 'for_return', 'returned'];
         $sum  = $page['no_ad'];

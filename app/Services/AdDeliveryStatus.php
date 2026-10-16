@@ -53,7 +53,8 @@ class AdDeliveryStatus
     {
         $byKey = [];
         foreach ($pageNames as $name) {
-            $key = mb_strtolower(trim((string) $name));
+            // espasyo lang ang tinatanggal, gaya ng TRIM ng SQL, para tugma ang susi sa page_key ng query
+            $key = mb_strtolower(trim((string) $name, ' '));
             if ($key !== '') $byKey[$key] ??= (string) $name;
         }
         if ($byKey === []) return [];

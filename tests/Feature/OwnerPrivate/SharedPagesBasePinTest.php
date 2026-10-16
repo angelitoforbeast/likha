@@ -16,7 +16,7 @@ class SharedPagesBasePinTest extends OwnerPrivateTestCase
 {
     /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute, at ang limang delivery column ng campaigns (ad_delivered … ad_rts_pct) kasama ang "Walang ad id" na linya ng expand. */
     private const BASE = [
-        '/owner/private' => '0d5e95dd1c2d07ea22347ad438d2734362acd079',
+        '/owner/private' => 'b10b401af3cf94309a73f1f7dd34826c94865862',
         '/owner/column-settings/owner-private' => 'd7d0797a3b814628d30b1424c4b448f6ec22512c',
     ];
 

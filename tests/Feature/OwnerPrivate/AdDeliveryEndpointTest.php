@@ -46,6 +46,7 @@ class AdDeliveryEndpointTest extends AdDeliveryTestCase
 
     public function test_S_043_7_other_roles_get_404(): void
     {
+        $this->getJson($this->url($this->valid()))->assertStatus(401);   // guest: hinaharang ng auth bago pa ang controller
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->getJson($this->url($this->valid()))->assertNotFound();
         $this->actingAs($this->user('', 'none@example.test'))->getJson($this->url($this->valid()))->assertNotFound();
     }
@@ -60,6 +61,9 @@ class AdDeliveryEndpointTest extends AdDeliveryTestCase
             'no pages'          => [['start_date' => self::START, 'end_date' => self::END]],
             'pages not a list'  => [['start_date' => self::START, 'end_date' => self::END, 'pages' => self::PAGE]],
             'page is an array'  => [['start_date' => self::START, 'end_date' => self::END, 'pages' => [[self::PAGE]]]],
+            'pages keyed'       => [['start_date' => self::START, 'end_date' => self::END, 'pages' => ['x' => self::PAGE]]],
+            '501 pages'         => [['start_date' => self::START, 'end_date' => self::END, 'pages' => array_map(fn ($i) => "P$i", range(1, 501))]],
+            'name over 255'     => [['start_date' => self::START, 'end_date' => self::END, 'pages' => [str_repeat('a', 256)]]],
         ];
     }
 
