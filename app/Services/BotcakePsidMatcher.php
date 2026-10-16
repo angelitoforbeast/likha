@@ -35,7 +35,7 @@ class BotcakePsidMatcher
     ];
 
     /** Mga J text na puwedeng burahin sa sheet (kapag kapareho ng record ang laman). */
-    public const DELETABLE_LABELS = ['imported', 'waiting', 'conflict'];
+    public const DELETABLE_LABELS = ['imported', 'waiting', 'conflict', 'expired'];
 
     public function norm(?string $s): string
     {
@@ -100,6 +100,46 @@ class BotcakePsidMatcher
         }
 
         return $rec->status;
+    }
+
+    /**
+     * Lumang sheet row na "imported" na (naisulat na sa macro_output noon): itala bilang matched para mabura
+     * rin sa sheet. Walang sinusulat sa macro_output; ang matched_rows ay ang bilang ng order row na may hawak
+     * na ng PSID ngayon. Kapag may ibang PSID nang naitala para sa customer → conflict, gaya ng dati.
+     * @return string|null ang status, o null kapag naitala na ang row
+     */
+    public function recordImported(BotcakePsidSetting $setting, string $page, string $name, string $psid, string $sheetDate): ?string
+    {
+        $exists = BotcakePsid::where('setting_id', $setting->id)
+            ->where('page', $page)->where('fb_name', $name)->where('psid', $psid)
+            ->where('sheet_date', $sheetDate)
+            ->exists();
+        if ($exists) return null;
+
+        $otherPsid = $this->tableQuery($page, $name)->where('psid', '<>', $psid)->exists();
+        $orders = $this->orderQuery($page, $name);
+        $holding = $orders ? (clone $orders)->where('botcake_psid', $psid)->count() : 0;
+
+        BotcakePsid::create([
+            'setting_id'      => $setting->id,
+            'page'            => $page,
+            'fb_name'         => $name,
+            'psid'            => $psid,
+            'sheet_date'      => $sheetDate,
+            'status'          => $otherPsid ? self::CONFLICT : self::MATCHED,
+            'first_seen_at'   => now(),
+            'matched_at'      => $otherPsid ? null : now(),
+            'matched_rows'    => $otherPsid ? 0 : $holding,
+            'last_checked_at' => now(),
+        ]);
+
+        if ($otherPsid) {
+            $this->tableQuery($page, $name)->where('status', self::WAITING)
+                ->update(['status' => self::CONFLICT, 'last_checked_at' => now()]);
+            return self::CONFLICT;
+        }
+
+        return self::MATCHED;
     }
 
     /** Itala ang sheet row bilang waiting; ang parehong row na naitala na ay hindi dinodoble. */
@@ -233,7 +273,7 @@ class BotcakePsidMatcher
     }
 
     /**
-     * Burahin sa sheet ang mga row na naitala na (J imported/waiting/conflict at kapareho ng record ang
+     * Burahin sa sheet ang mga row na naitala na (J imported/waiting/conflict/expired at kapareho ng record ang
      * page + pangalan + PSID + petsa). Binabasa ulit ang sheet bago burahin; header at blank J ay hindi kasama.
      * @return int bilang ng row na binura
      */

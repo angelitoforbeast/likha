@@ -151,7 +151,7 @@ class BotcakePsidImportTest extends BotcakePsidTestCase
 
     public function test_daily_clean_deletes_only_recorded_rows_with_matching_content_bottom_to_top_then_imports(): void
     {
-        foreach (['PSID-1' => 'matched', 'PSID-4' => 'waiting', 'PSID-5' => 'matched', 'PSID-6' => 'conflict', 'PSID-7' => 'waiting'] as $psid => $status) {
+        foreach (['PSID-1' => 'matched', 'PSID-4' => 'waiting', 'PSID-5' => 'matched', 'PSID-6' => 'conflict', 'PSID-7' => 'waiting', 'PSID-8' => 'expired'] as $psid => $status) {
             BotcakePsid::create([
                 'setting_id' => $this->setting->id, 'page' => 'Page One', 'fb_name' => 'Tao ' . $psid,
                 'psid' => $psid, 'sheet_date' => 'D' . $psid, 'status' => $status, 'first_seen_at' => now(),
@@ -164,16 +164,17 @@ class BotcakePsidImportTest extends BotcakePsidTestCase
             ['Page One', 'Tao PSID-5', 'PSID-5', 'IBANG PETSA', '', '', '', '', '', 'imported'], // row 5: iba ang laman, maiiwan
             ['Page One', 'Tao PSID-6', 'PSID-6', 'DPSID-6', '', '', '', '', '', 'conflict'],     // row 6: buburahin
             ['Page One', 'Tao PSID-7', 'PSID-7', 'DPSID-7', '', '', '', '', '', 'waiting'],      // row 7: buburahin
+            ['Page One', 'Tao PSID-8', 'PSID-8', 'DPSID-8', '', '', '', '', '', 'expired'],      // row 8: dobleng expired, buburahin
         ]);
 
         $run = $this->runImport(cleanSheet: true);
 
-        $this->assertSame([[6, 7], [4, 4], [2, 2]], $this->sheet->deletedRanges);
+        $this->assertSame([[6, 8], [4, 4], [2, 2]], $this->sheet->deletedRanges);
         $this->assertSame(1, $this->sheet->deleteCalls);
         $sheet = $this->currentSheet();
         $this->assertSame(['PSID', 'PSID-3', 'PSID-5'], array_values(array_map(fn ($r) => $r[2], $sheet)));
         $this->assertSame('waiting', $sheet[2][9]); // tumakbo ang import pagkatapos ng pagbura
-        $this->assertSame(4, $run->total_deleted_rows);
+        $this->assertSame(5, $run->total_deleted_rows);
     }
 
     public function test_second_import_while_one_is_running_is_skipped(): void
