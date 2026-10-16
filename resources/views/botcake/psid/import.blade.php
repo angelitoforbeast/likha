@@ -32,8 +32,8 @@
     <div class="mb-5 bg-white p-4 rounded shadow text-sm text-gray-700">
         <ul class="list-disc ml-5 space-y-1">
             <li>Updates <code>macro_output.botcake_psid</code> using <b>PAGE (A) + FULL NAME (B)</b>.</li>
-            <li>Writes <code>imported</code> or <code>not existing</code> into column <b>J</b> (blank rows only).</li>
-            <li>Uses cell <b>K1</b> as starting seed (initial search).</li>
+            <li>Writes <code>imported</code>, <code>waiting</code> (wala pang order) or <code>conflict</code> into column <b>J</b> (blank rows only).</li>
+            <li>Ang <code>waiting</code> ay sinusubukan ulit kada import (hanggang 30 araw). Kusa itong tumatakbo kada oras; 03:00 binubura sa sheet ang mga row na naitala na.</li>
             <li>OPTIONAL cutoff uses <b>DATE (D)</b> on/before cutoff.</li>
         </ul>
     </div>
@@ -109,6 +109,12 @@
             <div><span class="text-gray-500">Imported:</span> <span id="totalImported">0</span></div>
             <div><span class="text-gray-500">Not existing:</span> <span id="totalNotExisting">0</span></div>
             <div><span class="text-gray-500">Skipped:</span> <span id="totalSkipped">0</span></div>
+            <div><span class="text-gray-500">Waiting:</span> <span id="totalWaiting">0</span></div>
+            <div><span class="text-gray-500">Matched from waiting:</span> <span id="totalMatchedFromWaiting">0</span></div>
+            <div><span class="text-gray-500">Expired:</span> <span id="totalExpired">0</span></div>
+            <div><span class="text-gray-500">Conflicts:</span> <span id="totalConflicts">0</span></div>
+            <div><span class="text-gray-500">Reorder copies:</span> <span id="totalReorderCopies">0</span></div>
+            <div><span class="text-gray-500">Deleted sheet rows:</span> <span id="totalDeletedRows">0</span></div>
             <div><span class="text-gray-500">Updated at:</span> <span id="updatedAt">-</span></div>
         </div>
 
@@ -200,6 +206,12 @@
             $('totalImported').textContent = data.total_imported ?? 0;
             $('totalNotExisting').textContent = data.total_not_existing ?? 0;
             $('totalSkipped').textContent = data.total_skipped ?? 0;
+            $('totalWaiting').textContent = data.total_waiting ?? 0;
+            $('totalMatchedFromWaiting').textContent = data.total_matched_from_waiting ?? 0;
+            $('totalExpired').textContent = data.total_expired ?? 0;
+            $('totalConflicts').textContent = data.total_conflicts ?? 0;
+            $('totalReorderCopies').textContent = data.total_reorder_copies ?? 0;
+            $('totalDeletedRows').textContent = data.total_deleted_rows ?? 0;
             $('updatedAt').textContent = data.updated_at ?? '-';
 
             $('currentSheet').textContent =

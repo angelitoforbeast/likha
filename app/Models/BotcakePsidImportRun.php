@@ -22,6 +22,12 @@ class BotcakePsidImportRun extends Model
         'total_imported',
         'total_not_existing',
         'total_skipped',
+        'total_waiting',
+        'total_matched_from_waiting',
+        'total_expired',
+        'total_conflicts',
+        'total_reorder_copies',
+        'total_deleted_rows',
         'last_message',
         'last_error',
     ];

@@ -3,41 +3,59 @@
 namespace App\Jobs;
 
 use App\Models\BotcakePsidSetting;
-use App\Models\MacroOutput;
 use App\Models\BotcakePsidImportRun;
 use App\Models\BotcakePsidImportEvent;
+use App\Services\BotcakePsidMatcher;
+use App\Services\BotcakePsidSheet;
 use Carbon\Carbon;
-use Google\Client as GoogleClient;
-use Google\Service\Sheets;
-use Google\Service\Sheets\BatchUpdateValuesRequest;
-use Google\Service\Sheets\ValueRange;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    private const BATCH_SIZE      = 500;
-    private const SCAN_CHUNK_SIZE = 500;
+    // Isang import lang sa isang pagkakataon (button, oras-oras at 03:00), para walang dobleng sulat sa J.
+    public const LOCK_KEY = 'botcake-psid-import';
+    private const LOCK_SECONDS = 1800;
 
     public int $timeout = 1200; // 20 minutes
 
     protected ?string $cutoffDateTime;
     protected ?int $runId;
+    protected bool $cleanSheet;
 
-    public function __construct(?string $cutoffDateTime = null, ?int $runId = null)
+    public function __construct(?string $cutoffDateTime = null, ?int $runId = null, bool $cleanSheet = false)
     {
         $this->cutoffDateTime = $cutoffDateTime;
         $this->runId = $runId;
+        $this->cleanSheet = $cleanSheet;
     }
 
     public function handle(): void
+    {
+        $lock = Cache::lock(self::LOCK_KEY, self::LOCK_SECONDS);
+        if (!$lock->get()) {
+            $this->updateRun([
+                'status'       => 'done',
+                'last_message' => 'Skipped: may ibang PSID import na tumatakbo.',
+            ]);
+            return;
+        }
+
+        try {
+            $this->runImport();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function runImport(): void
     {
         $run = $this->getRun();
 
@@ -50,23 +68,45 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
                 ]);
             }
 
+            $sheet    = app(BotcakePsidSheet::class);
+            $matcher  = app(BotcakePsidMatcher::class);
             $settings = BotcakePsidSetting::all();
-            if ($settings->isEmpty()) {
-                Log::warning('ImportBotcakePsid: no settings found.');
-                $this->updateRun([
-                    'status' => 'done',
-                    'last_message' => 'No settings found.',
-                ]);
-                return;
+
+            // Ang pagbura ay bago ang import: ang mga row na naitala na lang ang nawawala, ang bago ay iimport pa.
+            if ($this->cleanSheet) {
+                $deleted = 0;
+                foreach ($settings as $setting) {
+                    $target = $this->target($setting);
+                    if (!$target) continue;
+                    try {
+                        $deleted += $matcher->cleanSheet($sheet, $setting, $target[0], $target[1]);
+                    } catch (\Throwable $e) {
+                        Log::error('ImportBotcakePsid: clean failed for setting ID ' . $setting->id . ' - ' . $e->getMessage());
+                        $this->addEvent([
+                            'type'       => 'error',
+                            'setting_id' => $setting->id,
+                            'gsheet_name'=> $setting->gsheet_name ?? null,
+                            'message'    => 'Clean failed: ' . $e->getMessage(),
+                        ]);
+                    }
+                }
+                Log::info('ImportBotcakePsid: daily clean deleted ' . $deleted . ' sheet rows.');
+                $this->updateRun(['total_deleted_rows' => $deleted, 'last_message' => "Deleted {$deleted} processed sheet rows"]);
+                $this->addEvent(['type' => 'clean_done', 'message' => "Deleted {$deleted} processed sheet rows"]);
             }
 
-            $client = new GoogleClient();
-            $client->setApplicationName('Laravel Botcake PSID Import');
-            $client->setScopes([Sheets::SPREADSHEETS]); // read/write
-            $client->setAuthConfig(storage_path('app/credentials.json'));
-            $client->setAccessType('offline');
+            // Bawat run (kahit walang bagong sheet row): subukan ulit ang mga naghihintay na PSID.
+            $retry = $matcher->retryWaiting();
+            $this->updateRun([
+                'total_matched_from_waiting' => $retry['matched'],
+                'total_expired'              => $retry['expired'],
+                'total_conflicts'            => $retry['conflicts'],
+                'last_message'               => 'Waiting PSIDs retried',
+            ]);
 
-            $service = new Sheets($client);
+            if ($settings->isEmpty()) {
+                Log::warning('ImportBotcakePsid: no settings found.');
+            }
 
             foreach ($settings as $setting) {
                 try {
@@ -83,7 +123,7 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
                         'message'    => 'Setting started',
                     ]);
 
-                    $this->processSettingInBatches($service, $setting);
+                    $this->processSetting($sheet, $matcher, $setting);
 
                     $this->addEvent([
                         'type'       => 'setting_done',
@@ -113,9 +153,12 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
                 }
             }
 
+            $copies = $matcher->copyReorders();
+            $this->updateRun(['total_reorder_copies' => $copies]);
+
             $this->updateRun([
                 'status'       => 'done',
-                'last_message' => 'All settings processed.',
+                'last_message' => $settings->isEmpty() ? 'No settings found.' : 'All settings processed.',
             ]);
 
             $this->addEvent([
@@ -170,306 +213,101 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
         }
     }
 
-    protected function extractSpreadsheetId(string $url): ?string
+    /** @return array{0:string,1:string}|null [spreadsheetId, sheet name] */
+    protected function target(BotcakePsidSetting $setting): ?array
     {
-        if (preg_match('/\/d\/([a-zA-Z0-9-_]+)/', $url, $m)) {
-            return $m[1];
+        $target = BotcakePsidSheet::target($setting);
+        if (!$target) {
+            Log::error('ImportBotcakePsid: invalid sheet URL', ['setting_id' => $setting->id]);
+            $this->updateRun(['last_message' => 'Invalid sheet URL for setting #' . $setting->id]);
         }
-        return null;
+
+        return $target;
     }
 
-    protected function norm(?string $s): string
+    protected function cutoff(): ?Carbon
     {
-        $s = (string)($s ?? '');
-        return preg_replace('/\s+/', ' ', trim($s));
-    }
+        if (empty($this->cutoffDateTime)) return null;
 
-    protected function lower(string $s): string
-    {
-        return mb_strtolower($s, 'UTF-8');
+        try {
+            return Carbon::parse($this->cutoffDateTime, 'Asia/Manila');
+        } catch (\Throwable $e) {
+            Log::warning('ImportBotcakePsid: invalid cutoff datetime, ignoring.', [
+                'cutoff' => $this->cutoffDateTime,
+                'error'  => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**
-     * Eligible row for START SEARCH:
-     * - J is blank
-     * - row has any content (A..I)
-     * - if cutoff exists:
-     *     - D blank -> allowed
-     *     - D parseable and <= cutoff -> allowed
-     *     - D parseable and > cutoff -> NOT eligible
-     *     - D non-empty but unparseable -> NOT eligible
+     * Binabasa ang buong sheet at pinoproseso ang bawat row na blank ang J. Walang K1 seed o cursor:
+     * maliit ang sheet dahil binubura araw-araw ang naitala na, at ang pagbura ay nagpapalipat ng row numbers,
+     * kaya ang row number ay galing mismo sa pagbasang ito, ilang sandali bago isulat ang J.
      */
-    protected function isEligibleRow(array $row, ?Carbon $cutoff): bool
+    protected function processSetting(BotcakePsidSheet $sheet, BotcakePsidMatcher $matcher, BotcakePsidSetting $setting): void
     {
-        $row = array_pad($row, 10, '');
-
-        $statusJ = trim((string)($row[9] ?? ''));
-        if ($statusJ !== '') return false;
-
-        $hasAny = false;
-        for ($i = 0; $i <= 8; $i++) {
-            $v = $row[$i] ?? '';
-            if ($v !== null && $v !== '') { $hasAny = true; break; }
-        }
-        if (!$hasAny) return false;
-
-        if ($cutoff) {
-            $dateStr = trim((string)($row[3] ?? '')); // D
-            if ($dateStr === '') return true;
-
-            $cellDate = $this->parseCellDateTime($dateStr);
-            if (!$cellDate) return false;
-            if ($cellDate->gt($cutoff)) return false;
-        }
-
-        return true;
-    }
-
-    protected function findNextEligibleStartRow(
-        Sheets $service,
-        string $spreadsheetId,
-        string $sheetName,
-        int $fromRow,
-        ?Carbon $cutoff
-    ): ?int {
-        $scanStart = max(2, $fromRow);
-
-        while (true) {
-            $scanEnd = $scanStart + self::SCAN_CHUNK_SIZE - 1;
-            $range   = $sheetName . '!A' . $scanStart . ':J' . $scanEnd;
-
-            $resp = $service->spreadsheets_values->get($spreadsheetId, $range);
-            $rows = $resp->getValues() ?? [];
-
-            if (empty($rows)) {
-                return null;
-            }
-
-            $rowCount = count($rows);
-
-            for ($i = 0; $i < $rowCount; $i++) {
-                $row = array_pad($rows[$i] ?? [], 10, '');
-                if ($this->isEligibleRow($row, $cutoff)) {
-                    return $scanStart + $i;
-                }
-            }
-
-            $scanStart = $scanStart + $rowCount;
-
-            if ($rowCount < self::SCAN_CHUNK_SIZE) {
-                return null;
-            }
-        }
-    }
-
-    protected function col(string $name): string
-    {
-        $driver = DB::getDriverName();
-        if ($driver === 'pgsql') {
-            return '"' . str_replace('"', '""', $name) . '"';
-        }
-        return '`' . str_replace('`', '``', $name) . '`';
-    }
-
-    protected function processSettingInBatches(Sheets $service, BotcakePsidSetting $setting): void
-    {
-        $spreadsheetId = $this->extractSpreadsheetId($setting->sheet_url);
-        if (!$spreadsheetId) {
-            Log::error('ImportBotcakePsid: invalid sheet URL', ['url' => $setting->sheet_url]);
-            $this->updateRun(['last_message' => 'Invalid sheet URL for setting #' . $setting->id]);
-            return;
-        }
-
-        $range     = $setting->sheet_range;
-        $sheetName = strpos($range, '!') !== false ? explode('!', $range)[0] : $range;
+        $target = $this->target($setting);
+        if (!$target) return;
+        [$spreadsheetId, $sheetName] = $target;
 
         $this->updateRun([
             'current_sheet_name' => $sheetName,
+            'seed_row'           => 2,
         ]);
 
-        // Cutoff (optional)
-        $cutoff = null;
-        if (!empty($this->cutoffDateTime)) {
-            try {
-                $cutoff = Carbon::parse($this->cutoffDateTime, 'Asia/Manila');
-            } catch (\Throwable $e) {
-                Log::warning('ImportBotcakePsid: invalid cutoff datetime, ignoring.', [
-                    'cutoff' => $this->cutoffDateTime,
-                    'error'  => $e->getMessage(),
-                ]);
-                $cutoff = null;
+        $cutoff = $this->cutoff();
+        $rows   = $sheet->readRows($spreadsheetId, $sheetName);
+
+        $statuses = [];
+        $imported = $waiting = $conflicts = $notExisting = $skipped = 0;
+
+        foreach ($rows as $rowNo => $row) {
+            if ($rowNo < 2) continue; // header
+
+            $row = array_pad($row, 10, '');
+
+            // ONLY BLANK J gets edited
+            if (trim((string) $row[9]) !== '') continue;
+
+            // totally blank row -> keep J
+            $hasAny = false;
+            for ($i = 0; $i <= 8; $i++) {
+                if ((string) $row[$i] !== '') { $hasAny = true; break; }
             }
-        }
+            if (!$hasAny) continue;
 
-        /**
-         * ✅ INITIAL SEED = K1 ONLY
-         */
-        $seedRow = 2;
-        $k1Value = null;
-
-        try {
-            $k1Resp = $service->spreadsheets_values->get($spreadsheetId, $sheetName . '!K1');
-            $valK1  = $k1Resp->getValues()[0][0] ?? null;
-
-            if (!empty($valK1) && is_numeric($valK1) && (int)$valK1 >= 2) {
-                $seedRow = (int)$valK1;
-                $k1Value = (int)$valK1;
-            } else {
-                $k1Value = $valK1 !== null ? (string)$valK1 : null;
-            }
-        } catch (\Throwable $e) {
-            Log::warning('ImportBotcakePsid: cannot read K1, using seedRow=2. ' . $e->getMessage());
-        }
-
-        $this->updateRun([
-            'k1_value'  => is_numeric($k1Value) ? (int)$k1Value : null,
-            'seed_row'  => $seedRow,
-            'last_message' => 'Seed row selected from K1',
-        ]);
-
-        // Find first eligible start
-        $startRow = $this->findNextEligibleStartRow($service, $spreadsheetId, $sheetName, $seedRow, $cutoff);
-
-        $this->updateRun([
-            'selected_start_row' => $startRow,
-        ]);
-
-        if (!$startRow) {
-            Log::info('ImportBotcakePsid: no eligible rows found from seed.', [
-                'setting_id' => $setting->id,
-                'seed_row'   => $seedRow,
-                'cutoff'     => $this->cutoffDateTime,
-            ]);
-
-            $this->updateRun([
-                'last_message' => 'No eligible rows found from K1 seed.',
-            ]);
-
-            return;
-        }
-
-        $batchNo = 0;
-
-        while (true) {
-            $batchNo++;
-
-            $endRow = $startRow + self::BATCH_SIZE - 1;
-            $dataRange = $sheetName . '!A' . $startRow . ':J' . $endRow;
-
-            $resp = $service->spreadsheets_values->get($spreadsheetId, $dataRange);
-            $rows = $resp->getValues() ?? [];
-
-            if (empty($rows)) {
-                $this->updateRun([
-                    'last_message' => 'No rows returned; stopping.',
-                ]);
-                break;
-            }
-
-            $rowCount    = count($rows);
-            $batchEndRow = $startRow + $rowCount - 1;
-
-            $this->updateRun([
-                'batch_no'        => $batchNo,
-                'batch_start_row' => $startRow,
-                'batch_end_row'   => $batchEndRow,
-                'last_message'    => "Processing batch #{$batchNo} ({$startRow} → {$batchEndRow})",
-            ]);
-
-            $statuses = [];
-            $updatedCount = 0;
-            $notExistingCnt = 0;
-            $skippedCnt = 0;
-
-            for ($i = 0; $i < $rowCount; $i++) {
-                $row = array_pad($rows[$i] ?? [], 10, '');
-
-                $existingStatus = trim((string)($row[9] ?? '')); // J
-                $statusToWrite  = $existingStatus;
-
-                // totally blank row -> keep J
-                $hasAny = false;
-                foreach ($row as $v) {
-                    if ($v !== null && $v !== '') { $hasAny = true; break; }
-                }
-                if (!$hasAny) {
-                    $statuses[] = [$statusToWrite];
+            // cutoff: if date exists but > cutoff or invalid -> skip (leave blank)
+            $dateStr = trim((string) $row[3]); // D
+            if ($cutoff && $dateStr !== '') {
+                $cellDate = $this->parseCellDateTime($dateStr);
+                if (!$cellDate || $cellDate->gt($cutoff)) {
+                    $skipped++;
                     continue;
                 }
-
-                // ONLY BLANK J gets edited
-                if ($existingStatus !== '') {
-                    $statuses[] = [$statusToWrite];
-                    continue;
-                }
-
-                // cutoff: if date exists but > cutoff or invalid -> skip (leave blank)
-                if ($cutoff) {
-                    $dateStr = trim((string)($row[3] ?? '')); // D
-                    if ($dateStr !== '') {
-                        $cellDate = $this->parseCellDateTime($dateStr);
-                        if (!$cellDate || $cellDate->gt($cutoff)) {
-                            $skippedCnt++;
-                            $statuses[] = [$statusToWrite]; // keep blank
-                            continue;
-                        }
-                    }
-                }
-
-                $pageName = $this->norm((string)($row[0] ?? ''));
-                $fullName = $this->norm((string)($row[1] ?? ''));
-                $psid     = $this->norm((string)($row[2] ?? ''));
-
-                $statusText = 'not existing';
-
-                if ($pageName !== '' && $fullName !== '' && $psid !== '') {
-                    $affected = MacroOutput::where('PAGE', $pageName)
-                        ->where('fb_name', $fullName)
-                        ->update(['botcake_psid' => $psid]);
-
-                    if ($affected === 0) {
-                        $colPage = $this->col('PAGE');
-                        $colFb   = $this->col('fb_name');
-
-                        $affected = MacroOutput::whereRaw("LOWER($colPage) = ?", [$this->lower($pageName)])
-                            ->whereRaw("LOWER($colFb) = ?", [$this->lower($fullName)])
-                            ->update(['botcake_psid' => $psid]);
-                    }
-
-                    if ($affected > 0) {
-                        $statusText = 'imported';
-                        $updatedCount++;
-                    } else {
-                        $notExistingCnt++;
-                    }
-                } else {
-                    $notExistingCnt++;
-                }
-
-                $statuses[] = [$statusText];
             }
 
-            $probeRow = $batchEndRow + 1;
+            $pageName = $matcher->norm($row[0]);
+            $fullName = $matcher->norm($row[1]);
+            $psid     = $matcher->norm($row[2]);
 
-            // write J + L1 cursor
+            if ($pageName === '' || $fullName === '' || $psid === '') {
+                $statuses[$rowNo] = 'not existing';
+                $notExisting++;
+                continue;
+            }
+
+            $status = $matcher->recordSheetRow($setting, $pageName, $fullName, $psid, $dateStr);
+            $statuses[$rowNo] = BotcakePsidMatcher::SHEET_LABELS[$status];
+
+            if ($status === BotcakePsidMatcher::MATCHED) $imported++;
+            elseif ($status === BotcakePsidMatcher::WAITING) $waiting++;
+            elseif ($status === BotcakePsidMatcher::CONFLICT) $conflicts++;
+        }
+
+        if (!empty($statuses)) {
             try {
-                $updates = [
-                    new ValueRange([
-                        'range'  => $sheetName . '!J' . $startRow . ':J' . $batchEndRow,
-                        'values' => $statuses,
-                    ]),
-                    new ValueRange([
-                        'range'  => $sheetName . '!L1',
-                        'values' => [[(string)$probeRow]],
-                    ]),
-                ];
-
-                $batchBody = new BatchUpdateValuesRequest([
-                    'valueInputOption' => 'RAW',
-                    'data'             => $updates,
-                ]);
-
-                $service->spreadsheets_values->batchUpdate($spreadsheetId, $batchBody);
+                $sheet->writeStatuses($spreadsheetId, $sheetName, $statuses);
             } catch (\Throwable $e) {
                 $this->updateRun([
                     'last_error'   => $e->getMessage(),
@@ -477,55 +315,35 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
                 ]);
                 throw $e;
             }
-
-            // Update run totals (aggregate)
-            $run = $this->getRun();
-            if ($run) {
-                $this->updateRun([
-                    'next_scan_from'   => $probeRow,
-                    'total_imported'   => (int)$run->total_imported + $updatedCount,
-                    'total_not_existing'=> (int)$run->total_not_existing + $notExistingCnt,
-                    'total_skipped'    => (int)$run->total_skipped + $skippedCnt,
-                    'last_message'     => "Batch #{$batchNo} done. Next scan from {$probeRow}",
-                ]);
-            } else {
-                $this->updateRun([
-                    'next_scan_from' => $probeRow,
-                ]);
-            }
-
-            $this->addEvent([
-                'type'         => 'batch_done',
-                'setting_id'   => $setting->id,
-                'gsheet_name'  => $setting->gsheet_name ?? null,
-                'sheet_name'   => $sheetName,
-                'batch_no'     => $batchNo,
-                'start_row'    => $startRow,
-                'end_row'      => $batchEndRow,
-                'rows_in_batch'=> $rowCount,
-                'imported'     => $updatedCount,
-                'not_existing' => $notExistingCnt,
-                'skipped'      => $skippedCnt,
-                'message'      => "Wrote statuses to J{$startRow}:J{$batchEndRow}; L1={$probeRow}",
-            ]);
-
-            // Next batch: find next eligible startRow from probeRow
-            $nextStart = $this->findNextEligibleStartRow($service, $spreadsheetId, $sheetName, $probeRow, $cutoff);
-            if (!$nextStart) {
-                $this->updateRun([
-                    'last_message' => 'No more eligible rows found. Stopping.',
-                ]);
-                break;
-            }
-
-            $startRow = $nextStart;
-
-            // If fewer than batch size returned, likely end -> but we still continue scanning
-            if ($rowCount < self::BATCH_SIZE) {
-                // optional: continue scanning anyway (your rule says continue)
-                // so DO NOTHING here
-            }
         }
+
+        $run = $this->getRun();
+        if ($run) {
+            $this->updateRun([
+                'total_imported'     => (int) $run->total_imported + $imported,
+                'total_not_existing' => (int) $run->total_not_existing + $notExisting,
+                'total_skipped'      => (int) $run->total_skipped + $skipped,
+                'total_waiting'      => (int) $run->total_waiting + $waiting,
+                'total_conflicts'    => (int) $run->total_conflicts + $conflicts,
+                'last_message'       => 'Setting #' . $setting->id . ': ' . count($statuses) . ' rows written',
+            ]);
+        }
+
+        $rowNos = array_keys($statuses);
+        $this->addEvent([
+            'type'         => 'batch_done',
+            'setting_id'   => $setting->id,
+            'gsheet_name'  => $setting->gsheet_name ?? null,
+            'sheet_name'   => $sheetName,
+            'batch_no'     => 1,
+            'start_row'    => $rowNos ? min($rowNos) : null,
+            'end_row'      => $rowNos ? max($rowNos) : null,
+            'rows_in_batch'=> count($statuses),
+            'imported'     => $imported,
+            'not_existing' => $notExisting,
+            'skipped'      => $skipped,
+            'message'      => "Wrote " . count($statuses) . " statuses to J; waiting={$waiting}, conflict={$conflicts}",
+        ]);
     }
 
     protected function parseCellDateTime(string $dateStr): ?Carbon
