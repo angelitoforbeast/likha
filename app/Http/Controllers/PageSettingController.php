@@ -196,7 +196,7 @@ class PageSettingController extends Controller
         try {
             $status = $client->once()->testToken($pageId, $token) ? 'ok' : 'invalid';
         } catch (BotcakeException $e) {
-            return response()->json(['status' => 'error', 'error' => $e->getMessage(), 'cell' => null]);
+            return response()->json(['status' => 'error', 'error' => $e->getMessage(), 'reason' => $e->reason, 'cell' => null]);
         }
 
         $sync->tokenStatus($page, $status, true);

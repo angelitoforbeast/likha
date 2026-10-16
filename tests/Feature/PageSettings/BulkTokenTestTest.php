@@ -34,6 +34,7 @@ class BulkTokenTestTest extends BotcakeApiTestCase
             'success:false' => [200, ['success' => false], 'invalid'],
             '401'           => [401, ['message' => 'Unauthorized'], 'invalid'],
             '500'           => [500, ['message' => 'down'], 'error'],
+            '429'           => [429, ['message' => 'slow down'], 'error'],
         ];
     }
 
@@ -50,7 +51,9 @@ class BulkTokenTestTest extends BotcakeApiTestCase
         if ($expected === 'error') {
             $this->assertNull($recorded, 'ang error ay hindi itinatala, gaya ng row button');
             $this->assertNull($res->json('cell'));
-            $this->assertSame('Botcake: HTTP 500', $res->json('error'), 'walang "pagkatapos ng 0 retry"');
+            $this->assertSame('Botcake: HTTP ' . $status, $res->json('error'), 'walang "pagkatapos ng 0 retry"');
+            // Ang 429 ng Botcake ay "rate_limited": maghihintay ang browser at susubok ulit nang isang beses.
+            $this->assertSame($status === 429 ? 'rate_limited' : 'error', $res->json('reason'));
         } else {
             $this->assertStringStartsWith($expected . ' ', (string) $recorded);
             $this->assertSame($recorded, $res->json('cell.value'));

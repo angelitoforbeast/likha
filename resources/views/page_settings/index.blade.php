@@ -450,6 +450,29 @@
 
     // ---- Test lahat ng token: isang page kada request, isa-isa, sa ayos ng grid ----
 
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const BETWEEN_MS = 500, RATE_WAIT_MS = 5000;
+
+    // Isang page. Ang wait = ilang ms bago subukan ulit kapag rate limit (429 ng Likha o "rate_limited" ng Botcake).
+    async function testOne(r) {
+        try {
+            const res = await fetch(url.testTokenOneUrl, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf},
+                body: JSON.stringify({page_name: r.name}),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 429) {
+                const after = parseFloat(res.headers.get('Retry-After'));
+                return {data: {status: 'error', error: 'Rate limit (HTTP 429)'}, wait: after > 0 ? after * 1000 : RATE_WAIT_MS};
+            }
+            if (!res.ok) return {data: {status: 'error', error: data.error || data.message || ('HTTP ' + res.status)}};
+            return {data, wait: data.reason === 'rate_limited' ? RATE_WAIT_MS : 0};
+        } catch (err) {
+            return {data: {status: 'error', error: 'Walang koneksyon.'}};
+        }
+    }
+
     document.getElementById('test-all').addEventListener('click', async e => {
         const btn = e.currentTarget, out = document.getElementById('test-all-status');
         const all = [...rows.values()].sort(gridOrder);
@@ -459,20 +482,16 @@
 
         for (let i = 0; i < targets.length; i++) {
             const r = targets[i], id = cellId(r.key, 'botcake.token_status');
+            if (i > 0) await sleep(BETWEEN_MS);
             out.textContent = 'Test token: ' + (i + 1) + ' / ' + targets.length + ' · ' + r.name;
             marks.set(id, {text: 'Testing…', cls: 'text-gray-400'});
             repaint(r.key, 'botcake.token_status');
-            let data = {};
-            try {
-                const res = await fetch(url.testTokenOneUrl, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf},
-                    body: JSON.stringify({page_name: r.name}),
-                });
-                data = await res.json().catch(() => ({}));
-                if (!res.ok) data = {status: 'error', error: data.error || data.message || ('HTTP ' + res.status)};
-            } catch (err) {
-                data = {status: 'error', error: 'Walang koneksyon.'};
+            let {data, wait} = await testOne(r);
+            if (wait) {
+                // Isang ulit lang ang parehong page, pagkatapos maghintay; kapag rate limit pa rin, error.
+                out.textContent = 'Test token: ' + (i + 1) + ' / ' + targets.length + ' · ' + r.name + ' (rate limit, maghihintay ' + Math.ceil(wait / 1000) + ' s)';
+                await sleep(wait);
+                ({data} = await testOne(r));
             }
             const status = ['ok', 'invalid', 'skipped'].includes(data.status) ? data.status : 'error';
             sum[status]++;
