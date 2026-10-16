@@ -176,7 +176,7 @@
 <template x-if="col.id==='category'">
   <span :title="stockTip('Category ng item na ito', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
-    @if($effectiveIsCEO)
+    @if(!empty($canSupplierWork))
     {{-- CEO: palitan ang category (para sa lahat ng variant ng base item). --}}
     <span x-show="!stockPending()" @click.stop title="para sa lahat ng variant ng item na ito">
       <select aria-label="Category ng item" :disabled="stockEdit.saving"
@@ -235,7 +235,7 @@
     <span x-show="!stockPending()">
       <span :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
-        @if($effectiveIsCEO)
+        @if(!empty($canSupplierWork))
         <div @if(!empty($rdtOneLine))class="spl-lead" @endif@click.stop>
           <button type="button" title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba — i-click para palitan (para sa lahat ng variant ng item na ito)"
                   x-show="!(stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup')"

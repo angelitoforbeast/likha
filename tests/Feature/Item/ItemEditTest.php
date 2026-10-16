@@ -32,7 +32,7 @@ class ItemEditTest extends ItemTestCase
 
     public function test_non_ceo_gets_403_and_nothing_is_written(): void
     {
-        foreach (['Marketing', 'Marketing - OIC'] as $role) {
+        foreach (['Marketing'] as $role) { // Marketing - OIC: may supplier work na (MoicSupplierAccessTest)
             $this->send('/item/category', ['item_name' => 'Glow Tape', 'new_category' => 'Bago'], $role)
                 ->assertStatus(403)->assertJson(['ok' => false, 'error' => 'CEO lang']);
             $this->send('/item/supply-settings', ['item_name' => 'Glow Tape', 'lead_time_days' => 5, 'safety_days' => 2], $role)

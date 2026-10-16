@@ -34,13 +34,13 @@
     <template x-if="rows.length === 0 && !loading">
       <tr class="il-empty-row"><td :colspan="ilOrderColspan()">No data for the selected dates.</td></tr>
     </template>
-    @if(!empty($effectiveIsCEO))
+    @if(!empty($canSupplierWork))
     <template x-if="worklist.list !== 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
       <tr class="il-empty-row"><td :colspan="ilOrderColspan()"
           x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded || !holdLoaded ? 'Loading…' : 'No items in this list.')"></td></tr>
     </template>
     @endif
-    <template x-if="categoryFilter !== '' && categoryColVisible() && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
+    <template x-if="categoryFilter !== '' && categoryColVisible() && (!canSupplierWork || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
       <tr class="il-empty-row"><td :colspan="ilOrderColspan()"
           x-text="!stock.loaded ? 'Loading…' : 'No items in this category.'"></td></tr>
     </template>

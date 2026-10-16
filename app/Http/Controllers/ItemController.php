@@ -32,6 +32,15 @@ class ItemController extends Controller
         return preg_replace('/\s+/u', ' ', trim((string) $raw));
     }
 
+    /**
+     * Supplier work sa /item (suppliers, worklist, quotes, category, lead / palugit): CEO at Marketing - OIC.
+     * Hindi kasama ang CEO-only profit view (view_as, cogs_ceo, item_value_ceo) — iyon ay $effectiveIsCEO pa rin.
+     */
+    private function canSupplierWork(): bool
+    {
+        return in_array($this->getNormalizedRole(), ['CEO', 'Marketing - OIC'], true);
+    }
+
     private function checkAccess(): void
     {
         $role = $this->getNormalizedRole();
@@ -88,11 +97,12 @@ class ItemController extends Controller
         // CEO view, iisa ang tatlo: ang lumang table (walang suppliers markup na lalabas).
         // Lahat ng iba = bagong layout.
         $layout          = $request->query('layout');
-        $layoutSuppliers = ($layout === 'old' || $layout === 'suppliers') && $effectiveIsCEO;
+        $canSupplierWork = $effectiveIsCEO || $isMarketingOIC;
+        $layoutSuppliers = ($layout === 'old' || $layout === 'suppliers') && $canSupplierWork;
         $layoutOld       = $layout === 'old' || $layout === 'suppliers' || $layout === 'original';
 
         return view('item.index', compact(
-            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'layoutOld', 'layoutSuppliers',
+            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'canSupplierWork', 'layoutOld', 'layoutSuppliers',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
             'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
             'feeShipping', 'feeCodRate', 'feeVatRate'
@@ -195,9 +205,9 @@ class ItemController extends Controller
     public function suppliers(Request $request)
     {
         $this->checkAccess();
-        // CEO LANG ang makakakita ng supplier + presyo (data-layer: hindi lang UI hide —
-        // walang ibabalik sa hindi-CEO, same pattern ng item_value_ceo).
-        if ($this->getNormalizedRole() !== 'CEO') {
+        // CEO at Marketing - OIC LANG ang makakakita ng supplier + presyo (data-layer: hindi lang UI hide —
+        // walang ibabalik sa iba, same pattern ng item_value_ceo).
+        if (! $this->canSupplierWork()) {
             return response()->json(['ok' => true, 'suppliers' => []]);
         }
         $map = [];
@@ -243,8 +253,8 @@ class ItemController extends Controller
     public function worklist(Request $request)
     {
         $this->checkAccess();
-        // CEO LANG (data-layer, same pattern ng suppliers()/quotes()).
-        if ($this->getNormalizedRole() !== 'CEO') {
+        // CEO at Marketing - OIC LANG (data-layer, same pattern ng suppliers()/quotes()).
+        if (! $this->canSupplierWork()) {
             return response()->json(['ok' => true, 'counts' => new \stdClass(), 'items' => []]);
         }
 
@@ -430,7 +440,7 @@ class ItemController extends Controller
     public function quotes(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => true, 'suppliers' => [], 'quotes' => []]);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => true, 'suppliers' => [], 'quotes' => []]);
 
         $suppliers = []; $map = [];
         try {
@@ -450,7 +460,7 @@ class ItemController extends Controller
     public function quoteSave(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
 
         $data = $request->validate([
             'item_name'   => 'required|string|max:255',
@@ -470,12 +480,14 @@ class ItemController extends Controller
             $newPath = $request->file('photo')->store('supplier-quote-images', 'public');
         }
         $oldPath = null;
+        $before  = null;
 
         try {
-            DB::transaction(function () use ($key, $data, $newPath, &$oldPath) {
+            DB::transaction(function () use ($key, $data, $newPath, &$oldPath, &$before) {
                 // History: kung nagbago ang presyo / MOQ / link → itala muna ang LUMANG values.
                 $existing = \App\Models\ItemSupplierQuote::where('item_key', $key)
                     ->where('supplier_id', (int) $data['supplier_id'])->lockForUpdate()->first();
+                $before = $existing?->only(['price', 'moq', 'link', 'note', 'photo_path']);
                 if ($existing && $this->quoteChanged($existing, $data)) {
                     $this->writeQuoteHistory($existing, 'update');
                 }
@@ -506,6 +518,13 @@ class ItemController extends Controller
             try { Storage::disk('public')->delete($oldPath); } catch (\Throwable $e) {}
         }
 
+        $supplier = $this->supplierName((int) $data['supplier_id']);
+        $changes  = $this->quoteLogFields($supplier, $before ?? [], $data);
+        if ($newPath !== null) {
+            $changes["photo · {$supplier}"] = [isset($before['photo_path']) ? basename($before['photo_path']) : null, basename($newPath)];
+        }
+        \App\Support\ItemEditLog::write('quote.save', $data['item_name'], $changes, $key);
+
         return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
     }
 
@@ -516,7 +535,7 @@ class ItemController extends Controller
     public function categorySave(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
         if (! Schema::hasTable('item_categories') || ! Schema::hasTable('item_category_assignments')) {
             return response()->json(['ok' => false, 'message' => 'item_categories table wala pa — patakbuhin: php artisan migrate --force'], 200);
         }
@@ -540,6 +559,9 @@ class ItemController extends Controller
         if ($newName !== '' && isset($data['category_id'])) {
             throw \Illuminate\Validation\ValidationException::withMessages(['new_category' => 'Pumili ng category O maglagay ng bago, hindi pareho.']);
         }
+
+        $categoryName = fn ($id) => $id === null ? null : \App\Models\ItemCategory::whereKey($id)->value('name');
+        $oldCategory  = $categoryName(\App\Models\ItemCategoryAssignment::where('item_key', $key)->value('category_id'));
 
         $categoryId = DB::transaction(function () use ($data, $key, $newName) {
             $categoryId = isset($data['category_id']) ? (int) $data['category_id'] : null;
@@ -576,6 +598,7 @@ class ItemController extends Controller
 
             return $categoryId;
         });
+        \App\Support\ItemEditLog::write('category.set', $data['item_name'], ['category' => [$oldCategory, $categoryName($categoryId)]], $key);
 
         $categories = \App\Models\ItemCategory::orderBy('sort_order')->orderBy('id')->get(['id', 'name'])
             ->map(fn ($c) => ['id' => $c->id, 'name' => $c->name])->all();
@@ -587,7 +610,7 @@ class ItemController extends Controller
     public function supplySettingsSave(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
         if (! Schema::hasTable('supply_item_settings')) {
             return response()->json(['ok' => false, 'message' => 'supply_item_settings table wala pa — patakbuhin: php artisan migrate --force'], 200);
         }
@@ -602,6 +625,12 @@ class ItemController extends Controller
         if ($parsed['key'] === '') {
             throw \Illuminate\Validation\ValidationException::withMessages(['item_name' => 'Walang laman ang pangalan ng item.']);
         }
+
+        // Lumang lead / palugit para sa item_edit_logs (palugit = palugit_override; kung wala ang column, safety_days).
+        $hasOverride = Schema::hasColumn('supply_item_settings', 'palugit_override');
+        $old = DB::table('supply_item_settings')->get()
+            ->first(fn ($r) => \App\Support\ItemBaseKey::key((string) $r->item_name) === $parsed['key']);
+        $oldPalugit = $old ? ($hasOverride ? $old->palugit_override : $old->safety_days) : null;
 
         DB::transaction(function () use ($data, $parsed) {
             $values = [
@@ -640,6 +669,13 @@ class ItemController extends Controller
             DB::table('supply_item_settings')->whereIn('id', $ids)->update($values);
         });
 
+        $newPalugit = $data['safety_days'] ?? null;
+        if (! $hasOverride && $newPalugit === null) $newPalugit = $oldPalugit; // blangko = hindi ginagalaw ang safety_days
+        \App\Support\ItemEditLog::write('supply_settings.save', $data['item_name'], [
+            'lead_time_days' => [$old?->lead_time_days, (int) $data['lead_time_days']],
+            'palugit'        => [$oldPalugit, $newPalugit],
+        ], $parsed['key']);
+
         return response()->json(['ok' => true]);
     }
 
@@ -653,6 +689,30 @@ class ItemController extends Controller
         return $price($q->price) !== $price($data['price'] ?? null)
             || $moq($q->moq)     !== $moq($data['moq'] ?? null)
             || $link($q->link)   !== $link($data['link'] ?? null);
+    }
+
+    /** Para sa item_edit_logs: "price · Acme" => [luma, bago], parehong format ng quoteChanged() (presyo 2dp). */
+    private function quoteLogFields(string $supplier, array $old, array $new): array
+    {
+        $price = fn ($v) => ($v === null || $v === '') ? null : number_format((float) $v, 2, '.', '');
+        $moq   = fn ($v) => ($v === null || $v === '') ? null : (int) $v;
+        $out = [];
+        foreach (['price' => $price, 'moq' => $moq, 'link' => null, 'note' => null] as $field => $fmt) {
+            $o = $old[$field] ?? null;
+            $n = $new[$field] ?? null;
+            $out["{$field} · {$supplier}"] = $fmt ? [$fmt($o), $fmt($n)] : [$o, $n];
+        }
+        return $out;
+    }
+
+    private function supplierName(int $id): string
+    {
+        try {
+            $name = \App\Models\Supplier::whereKey($id)->value('name');
+        } catch (\Throwable $e) {
+            $name = null;
+        }
+        return $name ?? ('#' . $id);
     }
 
     /** Isang history row ng LUMANG values ng quote (best-effort kung wala pang table). */
@@ -679,21 +739,29 @@ class ItemController extends Controller
     public function quoteDelete(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
 
         $data = $request->validate(['id' => 'required|integer', 'item_name' => 'required|string|max:255']);
         $key  = \App\Models\ItemSupplierQuote::keyFor($data['item_name']);
         $photo = null;
-        DB::transaction(function () use ($data, $key, &$photo) {
+        $gone  = null;
+        DB::transaction(function () use ($data, $key, &$photo, &$gone) {
             $q = \App\Models\ItemSupplierQuote::where('id', (int) $data['id'])->where('item_key', $key)->lockForUpdate()->first();
             if ($q) {
                 $photo = $q->photo_path;
+                $gone  = $q->only(['supplier_id', 'price', 'moq', 'link', 'note']);
                 $this->writeQuoteHistory($q, 'delete');
                 $q->delete();
             }
         });
         if ($photo) {
             try { Storage::disk('public')->delete($photo); } catch (\Throwable $e) {}
+        }
+        if ($gone) {
+            $supplier = $this->supplierName((int) $gone['supplier_id']);
+            $changes  = $this->quoteLogFields($supplier, $gone, []);
+            if ($photo) $changes["photo · {$supplier}"] = [basename($photo), null];
+            \App\Support\ItemEditLog::write('quote.delete', $data['item_name'], $changes, $key);
         }
 
         return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
@@ -790,7 +858,8 @@ class ItemController extends Controller
             'focus'     => trim((string) $request->query('item', '')),
             'startDate' => $start,
             'endDate'   => $end,
-            'isCEO'     => $this->getNormalizedRole() === 'CEO', // supplier/presyo column = CEO lang
+            // supplier / quote columns = supplier work (CEO at Marketing - OIC); walang CEO item value sa page na ito
+            'canSupplierWork' => $this->canSupplierWork(),
         ]);
     }
 
@@ -816,6 +885,9 @@ class ItemController extends Controller
             ['item_name' => $data['item_name']],
             ['image_path' => $path, 'updated_by' => Auth::id()]
         );
+        \App\Support\ItemEditLog::write('photo.save', $data['item_name'], [
+            'photo' => [$existing?->image_path ? basename($existing->image_path) : null, basename($path)],
+        ]);
 
         return redirect()
             ->route('item.photo', ['item' => $data['item_name']])
@@ -836,6 +908,9 @@ class ItemController extends Controller
                 try { Storage::disk('public')->delete($rec->image_path); } catch (\Throwable $e) {}
             }
             $rec->delete();
+            \App\Support\ItemEditLog::write('image.delete', $data['item_name'], [
+                'photo' => [$rec->image_path ? basename($rec->image_path) : null, null],
+            ]);
         }
         return response()->json(['ok' => true]);
     }
@@ -863,8 +938,58 @@ class ItemController extends Controller
             ['item_name' => $data['item_name']],
             ['image_path' => $path, 'updated_by' => Auth::id()]
         );
+        \App\Support\ItemEditLog::write('image.upload', $data['item_name'], [
+            'photo' => [$existing?->image_path ? basename($existing->image_path) : null, basename($path)],
+        ]);
 
         return response()->json(['ok' => true, 'url' => url(Storage::disk('public')->url($path))]);
+    }
+
+    /**
+     * GET /item/edit-logs — item_edit_logs, pinakabago muna, 50 kada page. CEO at Marketing - OIC lang (404 sa iba).
+     * Filters: item (bahagi ng pangalan), user (id), action, from_date / to_date (Y-m-d, Manila).
+     * Ang RTS % / item value edits ay nasa lumang /owner/private/edit-logs (iba ang hugis ng row) — naka-link lang.
+     */
+    public function editLogs(Request $request)
+    {
+        $this->checkAccess();
+        if (! $this->canSupplierWork()) abort(404);
+
+        $date   = fn ($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s) ? $s : '';
+        $item   = trim((string) $request->query('item', ''));
+        $user   = (int) $request->query('user', 0);
+        $action = trim((string) $request->query('action', ''));
+        $from   = $date($request->query('from_date'));
+        $to     = $date($request->query('to_date'));
+
+        $users = collect(); $actions = collect();
+        if (! Schema::hasTable('item_edit_logs')) {
+            $rows = new \Illuminate\Pagination\LengthAwarePaginator([], 0, 50);
+        } else {
+            $q = DB::table('item_edit_logs as l')
+                ->leftJoin('users as u', 'u.id', '=', 'l.user_id')
+                ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+                ->select(['l.*', DB::raw('COALESCE(ep.name, u.name) AS user_name')])
+                ->orderByDesc('l.created_at')->orderByDesc('l.id');
+            if ($item !== '') {
+                $like = '%' . mb_strtolower($item, 'UTF-8') . '%';
+                $q->where(fn ($w) => $w->where('l.item_key', 'like', $like)->orWhereRaw('LOWER(l.item_name) LIKE ?', [$like]));
+            }
+            if ($user > 0)       $q->where('l.user_id', $user);
+            if ($action !== '')  $q->where('l.action', $action);
+            if ($from !== '')    $q->where('l.created_at', '>=', $from . ' 00:00:00');
+            if ($to !== '')      $q->where('l.created_at', '<=', $to . ' 23:59:59');
+            $rows = $q->paginate(50)->withQueryString();
+
+            $users = DB::table('item_edit_logs as l')
+                ->join('users as u', 'u.id', '=', 'l.user_id')
+                ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+                ->select(['u.id', DB::raw('MAX(COALESCE(ep.name, u.name)) AS name')])
+                ->groupBy('u.id')->orderBy('name')->get();
+            $actions = DB::table('item_edit_logs')->distinct()->orderBy('action')->pluck('action');
+        }
+
+        return view('item.edit_logs', compact('rows', 'users', 'actions', 'item', 'user', 'action', 'from', 'to'));
     }
 
     /** date_range "YYYY-MM-DD to YYYY-MM-DD" → [startDate, endDate] 'Y-m-d' (para sa ts_date). */
