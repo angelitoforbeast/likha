@@ -20,8 +20,8 @@
         <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Ipakita</button>
     </form>
     <p class="text-xs text-gray-500 mb-4">
-        Batay sa petsa ng order (ts_date), hanggang 31 araw. Ambiguous = dalawa o higit pang Botcake customer ang tugma;
-        walang tugma = walang customer na tugma; hindi pa nasusuri = hindi pa dumaan sa matching (walang token ang page, o bago pa ang order).
+        Batay sa petsa ng order (ts_date), hanggang 31 araw. I-click ang page para sa mga order na walang PSID at ang dahilan
+        (ambiguous / walang tugma / maikakabit pa).
     </p>
 
     <div class="bg-white rounded shadow overflow-x-auto">
@@ -33,9 +33,6 @@
                     <th class="px-2 py-2 text-right">May PSID</th>
                     <th class="px-2 py-2 text-right">%</th>
                     <th class="px-2 py-2 text-right">Walang PSID</th>
-                    <th class="px-2 py-2 text-right">Ambiguous</th>
-                    <th class="px-2 py-2 text-right">Walang tugma</th>
-                    <th class="px-2 py-2 text-right">Hindi pa nasusuri</th>
                 </tr>
             </thead>
             <tbody>
@@ -48,12 +45,9 @@
                     <td class="px-2 py-1 text-right">{{ number_format($row['with_psid']) }}</td>
                     <td class="px-2 py-1 text-right">{{ number_format($row['pct'], 1) }}</td>
                     <td class="px-2 py-1 text-right">{{ number_format($row['without_psid']) }}</td>
-                    <td class="px-2 py-1 text-right">{{ number_format($row['ambiguous']) }}</td>
-                    <td class="px-2 py-1 text-right">{{ number_format($row['no_match']) }}</td>
-                    <td class="px-2 py-1 text-right">{{ number_format($row['not_synced']) }}</td>
                 </tr>
             @empty
-                <tr><td colspan="8" class="px-4 py-2 text-gray-500">Walang order sa range na ito.</td></tr>
+                <tr><td colspan="5" class="px-4 py-2 text-gray-500">Walang order sa range na ito.</td></tr>
             @endforelse
             </tbody>
         </table>

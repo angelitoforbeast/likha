@@ -137,6 +137,9 @@ class BotcakeCustomerSync
                 'botcake_customer_id' => isset($c['id']) && is_scalar($c['id']) ? mb_substr((string) $c['id'], 0, 64) : null,
                 'subscribed_at'       => $this->time($c['date_subscribed_at'] ?? $c['subscribed_at'] ?? $c['inserted_at'] ?? null),
                 'last_interactive_at' => $this->time($c['last_interactive_at'] ?? null, 'UTC'), // UTC sa Botcake
+                // Ang ad na pinanggalingan; napapalitan kada sync (maaaring madagdagan ang listahan).
+                'ad_id'               => isset($c['ad_id']) && is_scalar($c['ad_id']) && (string) $c['ad_id'] !== '' ? mb_substr((string) $c['ad_id'], 0, 64) : null,
+                'ad_ids'              => is_array($c['ad_ids'] ?? null) ? array_values(array_map('strval', array_filter($c['ad_ids'], 'is_scalar'))) : null,
             ];
             $seen = ['last_seen_at' => now(), 'last_checked_at' => now()];
 

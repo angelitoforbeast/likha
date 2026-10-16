@@ -199,4 +199,29 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertSame('2026-10-16 22:15:00', $row->last_interactive_at->copy()->utc()->format('Y-m-d H:i:s'), 'UTC ang last_interactive_at');
         $this->assertSame(['09171112222'], $row->phone_numbers);
     }
+    public function test_the_ad_id_and_ad_ids_are_stored_and_follow_the_customer(): void
+    {
+        $withAd = fn (array $ids, ?string $adId) => $this->customer('p1', 'Ana Cruz') + ['ad_id' => $adId, 'ad_ids' => $ids];
+        $round = 1;
+        $this->fakeCustomers(function (int $n) use (&$round, $withAd) {
+            if ($n !== 1) return [];
+            return $round === 1
+                ? [$withAd(['120250000000000001'], '120250000000000001'), $this->customer('p2', 'Ben Reyes') + ['ad_id' => null, 'ad_ids' => []]]
+                : [$withAd(['120250000000000001', '120250000000000002'], '120250000000000002')];
+        });
+
+        Artisan::call('botcake:sync-customers', ['--full' => true]);
+
+        $ana = BotcakePsid::where('psid', 'p1')->sole();
+        $this->assertSame(['120250000000000001', ['120250000000000001']], [$ana->ad_id, $ana->ad_ids]);
+        $ben = BotcakePsid::where('psid', 'p2')->sole();
+        $this->assertSame([null, []], [$ben->ad_id, $ben->ad_ids], 'null / walang laman ay nananatiling null / []');
+
+        // Bagong ad sa susunod na sync: lumalaki ang listahan, napapalitan ang ad_id.
+        $round = 2;
+        Artisan::call('botcake:sync-customers', ['--full' => true]);
+
+        $ana->refresh();
+        $this->assertSame(['120250000000000002', ['120250000000000001', '120250000000000002']], [$ana->ad_id, $ana->ad_ids]);
+    }
 }

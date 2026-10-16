@@ -8,11 +8,11 @@ use App\Services\BotcakeCustomerMatcher;
 /** Ang orders (huling 30 araw, walang PSID) ay kinakabitan ng PSID mula sa mga available na Botcake customer ng page. */
 class BotcakeCustomerMatchTest extends BotcakeApiTestCase
 {
-    private function available(string $psid, string $name, array $phones = [], string $page = 'Page Uno', string $status = 'available'): void
+    private function available(string $psid, string $name, array $phones = [], string $page = 'Page Uno', string $status = 'available', ?string $adId = null): BotcakePsid
     {
-        BotcakePsid::create([
+        return BotcakePsid::create([
             'page' => $page, 'fb_name' => $name, 'psid' => $psid, 'status' => $status, 'source' => 'api',
-            'phone_numbers' => $phones,
+            'phone_numbers' => $phones, 'ad_id' => $adId, 'ad_ids' => $adId ? [$adId] : [],
         ]);
     }
 
@@ -65,21 +65,40 @@ class BotcakeCustomerMatchTest extends BotcakeApiTestCase
         $this->assertSame('psid-sheet', $order->fresh()->botcake_psid);
     }
 
-    public function test_each_unmatched_order_keeps_its_reason_until_it_gets_a_psid(): void
+    public function test_the_customers_ad_id_is_written_with_the_psid_and_never_changed_afterwards(): void
     {
-        $this->available('psid-b1', 'Ben Reyes');
-        $this->available('psid-b2', 'Ben Reyes');
-        $twins = $this->order('Page Uno', 'Ben Reyes');
-        $dino  = $this->order('Page Uno', 'Dino Lim');
+        $ana = $this->available('psid-a', 'Ana Cruz', [], 'Page Uno', 'available', '120250000000000001');
+        $this->available('psid-c', 'Carla S.', ['09171112222'], 'Page Uno', 'available', '120250000000000003');
+        $this->available('psid-n', 'Nina Go'); // walang ad
+        $byName  = $this->order('Page Uno', 'Ana Cruz');
+        $byPhone = $this->order('Page Uno', 'Carla Santos', '09171112222');
+        $noAd    = $this->order('Page Uno', 'Nina Go');
         $m = app(BotcakeCustomerMatcher::class);
 
         $m->matchPage('Page Uno');
-        $this->assertSame([$twins->id => 'ambiguous', $dino->id => 'no_match'],
-            \Illuminate\Support\Facades\DB::table('botcake_psid_misses')->orderBy('order_id')->pluck('reason', 'order_id')->all());
 
-        $this->available('psid-d', 'Dino Lim');
+        $this->assertSame(['psid-a', '120250000000000001'], [$byName->fresh()->botcake_psid, $byName->fresh()->botcake_ad_id]);
+        $this->assertSame(['psid-c', '120250000000000003'], [$byPhone->fresh()->botcake_psid, $byPhone->fresh()->botcake_ad_id]);
+        $this->assertSame(['psid-n', null], [$noAd->fresh()->botcake_psid, $noAd->fresh()->botcake_ad_id]);
+
+        // Bagong ad ng customer sa susunod na sync: hindi nagbabago ang naitala sa order, kahit ma-match ulit.
+        $ana->update(['ad_id' => '120250000000000009', 'ad_ids' => ['120250000000000001', '120250000000000009']]);
         $m->matchPage('Page Uno');
-        $this->assertSame('psid-d', $dino->fresh()->botcake_psid);
-        $this->assertSame([$twins->id], \Illuminate\Support\Facades\DB::table('botcake_psid_misses')->pluck('order_id')->all());
+        $this->assertSame('120250000000000001', $byName->fresh()->botcake_ad_id);
+
+        \Illuminate\Support\Facades\DB::table('macro_output')->where('id', $byName->id)->update(['botcake_psid' => null]);
+        $m->matchPage('Page Uno');
+        $this->assertSame(['psid-a', '120250000000000001'], [$byName->fresh()->botcake_psid, $byName->fresh()->botcake_ad_id]);
+    }
+
+    public function test_a_psid_from_the_sheet_import_leaves_the_ad_id_empty(): void
+    {
+        $this->available('psid-a', 'Ana Cruz', [], 'Page Uno', 'available', '120250000000000001');
+        $order = $this->order('Page Uno', 'Ana Cruz');
+        $setting = \App\Models\BotcakePsidSetting::create(['gsheet_name' => 'T', 'sheet_url' => 'https://docs.google.com/spreadsheets/d/T1/edit', 'sheet_range' => 'PSID!A:J']);
+
+        app(\App\Services\BotcakePsidMatcher::class)->recordSheetRow($setting, 'Page Uno', 'Ana Cruz', 'psid-a', '2026-10-17');
+
+        $this->assertSame(['psid-a', null], [$order->fresh()->botcake_psid, $order->fresh()->botcake_ad_id]);
     }
 }

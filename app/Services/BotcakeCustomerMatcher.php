@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BotcakePsid;
 use App\Models\MacroOutput;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Kinakabitan ng PSID ang orders ng isang page (huling 30 araw, walang laman ang botcake_psid) mula sa mga
@@ -12,7 +13,8 @@ use Illuminate\Support\Facades\DB;
  * pangalan: ang phone ang nagpapasya kung iisa sa kanila ang may phone na iyon; walang kandidato sa pangalan: ang phone
  * na iisang customer lang ang may-ari; (3) kung hindi: ambiguous o no_match, walang isusulat. Hindi kailanman pumapalit
  * ang phone ng ibang tao sa ambiguous na pangalan: mas masama ang waybill / COD sa maling tao kaysa walang mensahe.
- * Ang dahilan ng bawat order na walang PSID ay nasa botcake_psid_misses (para sa psid-coverage page).
+ * Kasabay ng PSID, isinusulat ang ad_id ng customer sa macro_output.botcake_ad_id, isang beses lang: ang ad na
+ * nagdala ng customer bago umorder ang may kredito, kahit magbago pa ang ads niya.
  */
 class BotcakeCustomerMatcher
 {
@@ -22,13 +24,13 @@ class BotcakeCustomerMatcher
     {
     }
 
-    public function normName(?string $s): string
+    public static function normName(?string $s): string
     {
         return mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $s)), 'UTF-8');
     }
 
     /** Phone sa anyong 09XXXXXXXXX, o '' kapag hindi PH mobile. */
-    public function normPhone(?string $s): string
+    public static function normPhone(?string $s): string
     {
         $d = preg_replace('/\D+/', '', (string) $s);
         if (strlen($d) === 12 && str_starts_with($d, '639')) $d = '0' . substr($d, 2);
@@ -54,11 +56,13 @@ class BotcakeCustomerMatcher
         // Kandidato: available na API rows ng page (hindi inactive). pangalan → psids, phone → psids.
         $byName = [];
         $byPhone = [];
+        $adOf = [];
         BotcakePsid::where('source', 'api')->where('status', 'available')
             ->whereRaw("LOWER($trim(page)) = ?", [$key])
-            ->select('id', 'psid', 'fb_name', 'phone_numbers')
-            ->chunkById(2000, function ($rows) use (&$byName, &$byPhone) {
+            ->select('id', 'psid', 'fb_name', 'phone_numbers', 'ad_id')
+            ->chunkById(2000, function ($rows) use (&$byName, &$byPhone, &$adOf) {
                 foreach ($rows as $r) {
+                    $adOf[$r->psid] = $r->ad_id;
                     $n = $this->normName($r->fb_name);
                     if ($n !== '') $byName[$n][$r->psid] = true;
                     foreach ((array) $r->phone_numbers as $ph) {
@@ -70,6 +74,7 @@ class BotcakeCustomerMatcher
 
         $since = now('Asia/Manila')->subDays(self::DAYS)->toDateString();
         $phoneCol = $this->col('PHONE NUMBER');
+        $hasAdCol = Schema::hasColumn('macro_output', 'botcake_ad_id');
 
         MacroOutput::query()
             ->whereRaw('LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ?', [$key])
@@ -77,10 +82,7 @@ class BotcakeCustomerMatcher
             ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
             ->selectRaw("id, ts_date, fb_name, $phoneCol AS phone")
             ->orderBy('id')
-            ->chunkById(1000, function ($orders) use (&$out, $byName, $byPhone, $key) {
-                $misses = DB::table('botcake_psid_misses')->whereIn('order_id', $orders->pluck('id'))->pluck('reason', 'order_id');
-                $done = [];
-
+            ->chunkById(1000, function ($orders) use (&$out, $byName, $byPhone, $adOf, $hasAdCol) {
                 foreach ($orders as $o) {
                     [$psid, $how] = $this->decide(
                         array_keys($byName[$this->normName($o->fb_name)] ?? []),
@@ -89,29 +91,22 @@ class BotcakeCustomerMatcher
 
                     if ($psid === null) {
                         $out[$how]++;
-                        if (($misses[$o->id] ?? null) !== $how) {
-                            DB::table('botcake_psid_misses')->updateOrInsert(
-                                ['order_id' => $o->id],
-                                ['page_key' => $key, 'ts_date' => $o->ts_date, 'reason' => $how, 'checked_at' => now()]
-                            );
-                        }
                         continue;
                     }
 
                     // Muling sinusuri ang laman sa mismong update: hindi kailanman pinapalitan ang may PSID na.
-                    $written = MacroOutput::whereKey($o->id)
-                        ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
-                        ->update(['botcake_psid' => $psid]);
+                    // Ang botcake_ad_id ay naitatala isang beses lang (COALESCE): hindi napapalitan kahit ma-match ulit.
+                    $written = $hasAdCol
+                        ? DB::update(
+                            "UPDATE macro_output SET botcake_psid = ?, botcake_ad_id = COALESCE(botcake_ad_id, ?) WHERE id = ? AND (botcake_psid IS NULL OR botcake_psid = '')",
+                            [$psid, $adOf[$psid] ?? null, $o->id]
+                        )
+                        : MacroOutput::whereKey($o->id)
+                            ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
+                            ->update(['botcake_psid' => $psid]);
                     if ($written) $out[$how]++;
-                    $done[] = $o->id;
                 }
-
-                if ($done) DB::table('botcake_psid_misses')->whereIn('order_id', $done)->delete();
             }, 'id');
-
-        // Ang mga lumang dahilan (lampas sa 30-araw na window, may palugit) ay hindi na kailangan.
-        DB::table('botcake_psid_misses')->where('page_key', $key)
-            ->where('ts_date', '<', now('Asia/Manila')->subDays(self::DAYS + 15)->toDateString())->delete();
 
         return $out;
     }

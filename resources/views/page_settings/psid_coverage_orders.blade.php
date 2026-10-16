@@ -24,13 +24,22 @@
             @endforeach
         </select>
         <select name="reason" class="border rounded px-2 py-1">
-            @foreach(['all' => 'Lahat ng dahilan', 'ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma', 'not_synced' => 'Hindi pa nasusuri'] as $v => $label)
+            @foreach(['all' => 'Lahat ng dahilan', 'ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma', 'not_synced' => 'Maikakabit pa / hindi pa nasusuri'] as $v => $label)
                 <option value="{{ $v }}" @selected($reason === $v)>{{ $label }}</option>
             @endforeach
         </select>
         <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Filter</button>
         <span class="text-gray-500">{{ number_format($orders->total()) }} order</span>
     </form>
+
+    <p class="text-sm mb-1">
+        Ambiguous: {{ number_format($split['ambiguous']) }} · Walang tugma: {{ number_format($split['no_match']) }} ·
+        Maikakabit pa / hindi pa nasusuri: {{ number_format($split['not_synced']) }}
+    </p>
+    <p class="text-xs text-gray-500 mb-4">
+        Mula sa mga available na Botcake customer ng page ngayon. Ambiguous = dalawa o higit pang customer ang tugma;
+        maikakabit pa = isang customer ang tugma pero hindi pa dumaan ang matching, o walang Botcake customers ang page.
+    </p>
 
     <div class="bg-white rounded shadow overflow-x-auto">
         <table class="w-full text-sm">
@@ -46,7 +55,7 @@
                     <td class="px-2 py-1">{{ $o->phone }}</td>
                     <td class="px-2 py-1">{{ $o->waybill }}</td>
                     <td class="px-2 py-1">{{ $o->jnt_status }}</td>
-                    <td class="px-2 py-1">{{ ['ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma'][$o->reason] ?? 'Hindi pa nasusuri' }}</td>
+                    <td class="px-2 py-1">{{ ['ambiguous' => 'Ambiguous', 'no_match' => 'Walang tugma'][$o->reason] ?? 'Maikakabit pa / hindi pa nasusuri' }}</td>
                 </tr>
             @empty
                 <tr><td colspan="7" class="px-4 py-2 text-gray-500">Walang order.</td></tr>
