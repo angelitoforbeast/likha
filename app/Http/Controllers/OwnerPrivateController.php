@@ -1554,9 +1554,24 @@ class OwnerPrivateController extends Controller
             'pages.*'    => ['required', 'string', 'max:255'],
         ]);
 
+        // Hanggang 92 araw: bawat araw pa ay dagdag na orders na ijo-join sa from_jnts.
+        $days = (new \DateTime($v['start_date']))->diff(new \DateTime($v['end_date']))->days + 1;
+        if ($days > 92) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'end_date' => 'Hanggang 92 araw lang ang range ng Delivered / RTS% sa expand.',
+            ]);
+        }
+
+        // Cache 10 minuto kada (pages, range), kasama ang version ng /owner/private: bagong upload = bagong bilang.
+        $pages = array_values(array_unique($v['pages']));
+        sort($pages, SORT_STRING);
+        $key = 'owner_private:ad_delivery:' . $this->cacheVersion() . ':'
+             . md5(json_encode([$pages, $v['start_date'], $v['end_date']]));
+        $byPage = Cache::remember($key, 600, fn () => $status->forPages($pages, $v['start_date'], $v['end_date']));
+
         return response()->json([
             'ok'      => true,
-            'by_page' => (object) $status->forPages($v['pages'], $v['start_date'], $v['end_date']),
+            'by_page' => (object) $byPage,
         ]);
     }
 

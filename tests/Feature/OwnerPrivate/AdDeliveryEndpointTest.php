@@ -67,6 +67,47 @@ class AdDeliveryEndpointTest extends AdDeliveryTestCase
         ];
     }
 
+    public function test_S_043_12_the_range_is_capped_at_92_days(): void
+    {
+        $user = $this->user();
+        $this->actingAs($user)->getJson($this->url(['start_date' => '2026-07-16', 'end_date' => '2026-10-15', 'pages' => [self::PAGE]]))->assertOk();   // 92 araw, kasama ang dalawang dulo
+        $this->actingAs($user)->getJson($this->url(['start_date' => '2026-07-15', 'end_date' => '2026-10-15', 'pages' => [self::PAGE]]))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Hanggang 92 araw lang ang range ng Delivered / RTS% sa expand.');
+    }
+
+    public function test_S_043_12_the_result_is_cached_until_the_owner_private_cache_version_changes(): void
+    {
+        $this->ad('AD1', 'SET1', 'CMP1');
+        $this->order('WB1', 'AD1', 'Delivered');
+        // lumang version (ang bumpCacheVersion ay time() ng PHP, hindi gumagalaw sa travel)
+        \Illuminate\Support\Facades\Cache::forever('owner_private:cache_version', '1');
+        $user = $this->user();
+        $get  = fn () => $this->actingAs($user)->getJson($this->url($this->valid()))->assertOk()->json('by_page.' . self::PAGE . '.page.shipped');
+        $this->assertSame(1, $get());
+
+        $this->order('WB2', 'AD1', 'Delivered');
+        $this->assertSame(1, $get());   // galing sa cache
+
+        \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
+        $this->assertSame(2, $get());
+    }
+
+    public function test_S_043_13_expand_all_posts_the_page_list(): void
+    {
+        $this->ad('AD1', 'SET1', 'CMP1');
+        $this->order('WB1', 'AD1', 'Delivered');
+        $pages = array_merge([self::PAGE], array_map(fn ($i) => "Page number $i with a long name", range(1, 300)));
+
+        $this->actingAs($this->user())
+            ->postJson('/owner/private/ad-delivery', ['start_date' => self::START, 'end_date' => self::END, 'pages' => $pages])
+            ->assertOk()
+            ->assertJsonPath('by_page.' . self::PAGE . '.ads.AD1.delivered', 1);
+        $this->actingAs($this->user('Data Encoder', 'enc2@example.test'))
+            ->postJson('/owner/private/ad-delivery', ['start_date' => self::START, 'end_date' => self::END, 'pages' => [self::PAGE]])
+            ->assertNotFound();
+    }
+
     #[DataProvider('badQueries')]
     public function test_S_043_7_a_bad_query_is_422(array $query): void
     {

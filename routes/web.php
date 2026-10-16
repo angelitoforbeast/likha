@@ -554,6 +554,8 @@ Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('ow
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
 // Delivery status kada campaign / ad set / ad para sa expand (CEO + Marketing-OIC + Marketing, read-only).
 Route::get('/owner/private/ad-delivery', [OwnerPrivateController::class, 'adDelivery'])->name('owner.private.ad-delivery');
+// POST din: ang "Expand all" ay may daan-daang page, lalampas sa haba ng URL kapag GET.
+Route::post('/owner/private/ad-delivery', [OwnerPrivateController::class, 'adDelivery'])->name('owner.private.ad-delivery.post');
 Route::get('/owner/private/item-summary', [OwnerPrivateController::class, 'itemSummary'])->name('owner.private.item-summary');
 Route::post('/owner/private/item-setting', [OwnerPrivateController::class, 'saveItemSetting'])->name('owner.private.item-setting.save');
 Route::post('/owner/private/item-setting/delete', [OwnerPrivateController::class, 'deleteItemSetting'])->name('owner.private.item-setting.delete');
