@@ -2030,6 +2030,7 @@
       expandedCampaigns: {},  // campaign_id → { open, loading, error, adsets:[] }
       expandedAdSets: {},     // ad_set_id   → { open, loading, error, ads:[] }
       adDelivery: {},         // page_name → { campaigns, adsets, ads, no_ad, page } (null = hindi nakuha)
+      adDeliveryErrors: {},   // page_name → dahilan kung bakit hindi nakuha (hal. lampas 92 araw)
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
@@ -3371,20 +3372,29 @@
       // (hindi ang anchor window ng spend), J&T sa waybill. Itinatabi ang range na ginamit para sa label.
       // Hindi sinisira ang expand kapag pumalya: null ang page = "—" ang mga column.
       async _fetchAdDelivery(pageNames){
+        // POST: daan-daang page ang "Expand all", lalampas sa haba ng URL kapag GET.
         const range = { start: this.startDate, end: this.endDate };
-        const qs = new URLSearchParams({ start_date: range.start, end_date: range.end });
-        for (const p of pageNames) qs.append('pages[]', p);
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
         try {
-          const res = await fetch('{{ route('owner.private.ad-delivery') }}?' + qs.toString(), { headers: { 'Accept': 'application/json' } });
-          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const res = await fetch('{{ route('owner.private.ad-delivery.post') }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
+            body: JSON.stringify({ start_date: range.start, end_date: range.end, pages: pageNames }),
+          });
+          if (!res.ok) {
+            // 422 (hal. lampas 92 araw): ipakita ang dahilan sa label ng expand
+            const j = await res.json().catch(() => null);
+            throw new Error((j && j.message) || ('HTTP ' + res.status));
+          }
           const j = await res.json();
           const byPage = (j && j.by_page) || {};
           for (const p of pageNames) {
             this.adDelivery[p] = Object.assign({ campaigns: {}, adsets: {}, ads: {}, no_ad: null, page: null }, byPage[p] || {}, { range });
+            delete this.adDeliveryErrors[p];
           }
         } catch (e) {
           console.warn('[ad-delivery] failed:', e);
-          for (const p of pageNames) this.adDelivery[p] = null;
+          for (const p of pageNames) { this.adDelivery[p] = null; this.adDeliveryErrors[p] = e.message || 'Hindi nakuha'; }
         }
       },
 
@@ -3435,6 +3445,8 @@
       },
       // Label ng delivery columns: ang range na talagang kinuha (hindi luma kapag binago ang petsa nang hindi nire-reload ang expand).
       adDeliveryLabel(pageName){
+        const err = this.adDeliveryErrors[pageName];
+        if (err) return '· Delivered / In transit / For return / Returned / RTS%: — (' + err + ')';
         const r = (this.adDelivery[pageName] || {}).range;
         return r ? ('· Delivered / In transit / For return / Returned / RTS%: orders ' + this.fmtMD(r.start) + ' → ' + this.fmtMD(r.end) + ', J&T sa waybill') : '';
       },

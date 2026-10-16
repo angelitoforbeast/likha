@@ -63,6 +63,11 @@ class AdDeliveryColumnsTest extends OwnerPrivateTestCase
             $this->assertMatchesRegularExpression("/\\{ id:'$id',/", $html, $id);
         }
         $this->assertStringContainsString(route('owner.private.ad-delivery'), $html);
+        // S-043.13: POST na may CSRF (mahabang listahan ng page); S-043.12: ang dahilan ng 422 ay ipinapakita
+        $this->assertMatchesRegularExpression("~fetch\('" . preg_quote(route('owner.private.ad-delivery.post'), '~') . "', \{\s*method: 'POST'~", $html);
+        $this->assertStringContainsString('adDeliveryErrors', $html);
+        // S-043.14: ang delivery-only na campaign row ay may tanda
+        $this->assertStringContainsString('walang spend sa range', $html);
         $this->assertStringContainsString('Walang ad id', $html);
         // ang ibang screen ng campaigns table ay walang bagong column
         $this->assertStringNotContainsString('ad_delivered', file_get_contents(resource_path('views/ads_manager/campaigns.blade.php')));

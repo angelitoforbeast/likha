@@ -100,6 +100,10 @@
                        onmouseover="this.style.textDecoration='underline';"
                        onmouseout="this.style.textDecoration='none';"
                        x-text="campRowName(c, 'campaigns')"></a>
+                    {{-- Campaign na may orders pero walang spend sa listahan: walang ad set sa ilalim nito. --}}
+                    <template x-if="c._delivery_only">
+                      <div style="font-size:10px;color:#94a3b8;">walang spend sa range — orders lang, kaya walang ad set sa ilalim</div>
+                    </template>
                   </div>
                 </template>
                 <template x-if="col.type==='date'">
