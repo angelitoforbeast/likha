@@ -195,3 +195,62 @@ Full suite after the amendment: `Tests: 1315, Assertions: 16759, Errors: 1, Fail
 - **Each sync rewrites the ad id from Botcake's answer.** When the sync re-reads a customer, it stores that answer's `ad_id`, and the answer can be empty. The fill then uses whatever ad id the row holds at matching time. This was already the case before the amendment; it is noted because the fill depends on it.
 - **The query scans the page's recent orders,** like the existing matching select: `LOWER(TRIM(PAGE))` cannot use the `(ts_date, PAGE)` index beyond `ts_date`. The subquery uses the existing `botcake_psids.psid` index.
 - **Review:** no separate review for this amendment. It is one bounded UPDATE on a trusted path, with tests on every case the amendment lists.
+
+## Amendment 2
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. The ad-id fill (amendment 1) selects the order ids first and updates them by id, in chunks of up to 1000, instead of one UPDATE over the page's 30 days.
+2. A Sync lahat job whose run state is gone from the cache logs a warning.
+3. Test lahat ng token waits 500 ms between pages, and retries a page once after a rate limit.
+4. Sync lahat, Sync now and Test token each get their own rate-limit counter.
+
+Commits:
+- `fix: the ad id fill selects the order ids first and updates them by id in chunks of 1000, so it no longer locks every recent order of the page (spec 042 amendment 2)`
+- `fix: a Sync lahat job whose run state is gone from the cache logs a warning with the run id and index instead of stopping silently (spec 042 amendment 2)`
+- `fix: Sync lahat, Sync now and Test token each have their own rate-limit counter, so editing cells no longer uses up their budget (spec 042 amendment 2)`
+- `fix: Test lahat ng token waits 500 ms between pages and, on a rate limit from Likha or Botcake, waits (Retry-After or 5 s) and retries the same page once before marking it error (spec 042 amendment 2)`
+
+### What changed
+
+- **Ad-id fill (`BotcakeCustomerMatcher::matchPage`).** This replaces the "one UPDATE per page" of amendment 1.
+  - **Read first, without locks:** a plain SELECT of `id`, chunked by id. It uses the same filters (page key, `ts_date` within 30 days, PSID set, ad id NULL or `''`) plus `EXISTS` for an API customer row of the same page and PSID that has an ad id.
+  - **Then update by id:** for each chunk of up to 1000 ids, `UPDATE macro_output SET botcake_ad_id = (newest such row's ad_id) WHERE id IN (…) AND (botcake_ad_id IS NULL OR botcake_ad_id = '') AND EXISTS (…)`. The empty-ad-id check stays inside the UPDATE.
+  - **Unchanged:** the results and the `ad_filled` count. The PSID is never written.
+- **Missing run state (`SyncAllBotcakeCustomersJob`).** When the cache has no `botcake-sync-all` state at all, the job logs `Sync lahat: wala na ang state ng run sa cache; tumigil ang run` with `{run_id, index}`, then stops. A job from another run or from a finished run still stops silently, because a state exists then.
+- **Test lahat ng token (browser).**
+  - It waits 500 ms between pages.
+  - On HTTP 429 from Likha, it waits for the `Retry-After` header, or 5 s if there is none. On a `reason: "rate_limited"` answer from the endpoint (Botcake's 429), it waits 5 s.
+  - It then retries the same page once. If that also fails, the page is counted as error.
+  - The status line shows the wait. The endpoint's error JSON now carries `reason` (`rate_limited` or `error`).
+- **Rate limits (`routes/web.php`).** Each now has its own counter, through the throttle's third argument (a key prefix):
+  - `/sync-all` (10 a minute, `page-settings-sync-all`)
+  - `/sync` (10, `page-settings-sync`)
+  - `/test-token` (20, `page-settings-test-token`)
+
+  Cell edits (120) and page-check (30) keep sharing the per-user counter with each other only.
+
+### Tests (amendment 2)
+
+| Case | Test | Result |
+|---|---|---|
+| Every ad-id UPDATE is by `id IN (…)`; another page's order with the same PSID is not written; all amendment 1 cases unchanged | `BotcakeCustomerMatchTest::test_an_order_with_a_psid_but_no_ad_id_gets_the_ad_id_of_its_page_customer` (extended) | pass |
+| A job whose run state is gone logs one warning with run id and index; no Botcake call and no next job | `SyncAllTest::test_a_job_whose_run_state_is_gone_logs_a_warning_and_stops` | pass |
+| 25 cell edits, then Sync lahat, Sync now and Test token all go through (no 429) | `SyncAllTest::test_editing_cells_does_not_use_up_the_limit_of_the_sync_and_test_buttons` | pass |
+| Botcake 429 → `error` with `reason: rate_limited`; 500 → `reason: error`; one call, no sleep | `BulkTokenTestTest::test_one_page_is_tested_with_one_call_and_recorded_like_the_row_button` (new 429 row) | pass |
+
+Red runs:
+- **Ad-id fill:** the UPDATE without `id IN` failed the regex. The other-page order passed before and after, because the old UPDATE was already filtered by page.
+- **Warning:** the test failed on "Method warning(…) should be called at least 1 times but called 0 times".
+- **Rate limits:** Sync lahat after 25 edits failed on "Expected response status code [200] but received 429".
+- **Reason:** the 429 and 500 rows failed on "Failed asserting that null is identical to 'rate_limited'" and "… to 'error'".
+
+The browser-side wait and retry has no automated test (no JS test setup). `node --check` passes and `artisan view:cache` compiles.
+
+Full suite after amendment 2: `Tests: 1318, Assertions: 16805, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`.
+
+### Notes
+
+- **Named limiter.** The amendment says "named throttle". I used the throttle's prefix argument (`throttle:10,1,page-settings-sync-all`), which gives each route its own counter without a `RateLimiter::for` in a service provider. It is the same mechanism as `/test-token/one`.
+- **The SELECT still reads the page's recent orders with `LOWER(TRIM(PAGE))`,** as the PSID matching select does. It is a plain read and takes no row locks under InnoDB's consistent read. Only the chosen ids are locked, and only for their chunk's UPDATE.
+- **The `TODO.md` item on the shared throttle counter is now resolved** for these routes. Cell edits and page-check still share one counter, which is fine at 120 and 30 a minute.
