@@ -7,7 +7,6 @@ use App\Models\BotcakePsid;
 use App\Models\BotcakePsidImportRun;
 use App\Models\PageSetting;
 use App\Services\BotcakeClient;
-use App\Services\BotcakeCustomerMatcher;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakeException;
 use App\Services\PageSettings;
@@ -61,9 +60,7 @@ class PageSettingController extends Controller
             ];
         })->sortBy('name');
 
-        // Botcake panel kada page na may botcake settings. Ang listahan ng orders na wala pang PSID ay live query,
-        // kaya para lang sa page na binuksan (?details=), hindi para sa lahat sa bawat load.
-        $details = $this->settings->pageKey((string) $request->query('details', ''));
+        // Botcake panel kada page na may botcake settings. Ang orders na wala pang PSID ay nasa /page-settings/psid-coverage.
         $botcake = [];
         foreach ($pages as $pageKey => $p) {
             if (!$p['active']->contains(fn ($r) => $r->provider === 'botcake')) continue;
@@ -72,7 +69,6 @@ class PageSettingController extends Controller
                 'customers'    => BotcakePsid::where('source', 'api')->whereRaw('LOWER(page) = ?', [$pageKey])->count(),
                 'last_run'     => BotcakePsidImportRun::where('source', 'api')->whereRaw('LOWER(page_name) = ?', [$pageKey])->latest('id')->first(),
                 'token_status' => $this->settings->get($p['name'], 'botcake', 'token_status'),
-                'preview'      => $details !== '' && $details === $pageKey ? app(BotcakeCustomerMatcher::class)->matchPage($p['name'], false) : null,
             ];
         }
 

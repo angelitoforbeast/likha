@@ -11,13 +11,16 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Botcake customer list → botcake_psids (source api, status available; isang row kada page + psid), saka matching.
- * Incremental: page 1, 2, … hanggang sa unang batch na naitala na lahat ang psid (pinakabago muna ang listahan)
- * o walang laman. Full: hanggang walang laman. Isang page sa isang pagkakataon; bawat sync ay isang run.
+ * Incremental: page 1, 2, … hanggang sa unang batch na naitala na lahat ang psid (pinakabago muna ang listahan),
+ * walang laman, o ang cap (services.botcake.sync_max_batches); ang susunod na run ay mula page 1 ulit.
+ * Full: hanggang walang laman; pagkatapos ng malinis na basa, ang hindi nakita nang 30 araw ay inactive (hindi binubura).
+ * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason.
  */
 class BotcakeCustomerSync
 {
     public const LOCK = 'botcake-sync-customers';
-    public const MAX_BATCHES = 20000; // pananggalang kung paulit-ulit ang sagot ng API
+    public const MAX_BATCHES = 20000; // pananggalang ng --full kung paulit-ulit ang sagot ng API
+    public const INACTIVE_DAYS = 30;
 
     public function __construct(
         private PageSettings $settings,
@@ -56,24 +59,40 @@ class BotcakeCustomerSync
         $pageId = $this->settings->get($page, 'botcake', 'page_id');
         $token  = $this->settings->get($page, 'botcake', 'token');
         $error  = null;
+        $reason = null;
+        $inactive = 0;
+        $limit  = $full ? self::MAX_BATCHES : max(1, (int) config('services.botcake.sync_max_batches', 300));
 
         if (!$pageId || !$token) {
             $error = 'Walang botcake.page_id o botcake.token ang page';
+            $reason = 'error';
         } else {
             $client = app(BotcakeClient::class); // bago kada page: sariling rate at retry
             try {
-                for ($n = 1; $n <= self::MAX_BATCHES; $n++) {
+                for ($n = 1; $reason === null; $n++) {
                     $batch = $client->customers($pageId, $token, $n);
                     $run->batches_read++;
-                    if (!$batch) break;
+                    if (!$batch) {
+                        $reason = 'end';
+                        break;
+                    }
 
                     $allKnown = $this->store($page, $batch, $run);
                     $run->save();
-                    if ($allKnown && !$full) break;
+                    if ($allKnown && !$full) $reason = 'known_batch';
+                    elseif ($n >= $limit) $reason = 'cap';
                 }
                 $this->tokenStatus($page, 'ok');
+
+                // Buong basa hanggang dulo nang walang error: nakita ang lahat ng kasalukuyang customer.
+                if ($full && $reason === 'end') {
+                    $inactive = BotcakePsid::where('source', 'api')->where('page', $page)->where('status', 'available')
+                        ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(self::INACTIVE_DAYS)))
+                        ->update(['status' => 'inactive', 'last_checked_at' => now()]);
+                }
             } catch (BotcakeException $e) {
                 $error = $e->getMessage();
+                $reason = $e->reason;
                 if ($e->auth) $this->tokenStatus($page, 'invalid');
             }
         }
@@ -83,13 +102,14 @@ class BotcakeCustomerSync
         $run->fill([
             'status'           => $error ? 'failed' : 'done',
             'last_error'       => $error,
+            'stop_reason'      => $reason,
             'seconds'          => (int) round($this->clock->now() - $started),
             'matched_by_name'  => $m['by_name'],
             'matched_by_phone' => $m['by_phone'],
             'ambiguous'        => $m['ambiguous'],
             'no_match'         => $m['no_match'],
-            'last_message'     => sprintf('%s: %d batch, %d bago, %d na-update; match %d pangalan, %d phone, %d ambiguous, %d wala',
-                $page, $run->batches_read, $run->customers_new, $run->customers_updated, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match']),
+            'last_message'     => sprintf('%s: %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala',
+                $page, $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match']),
         ])->save();
 
         Log::info('BotcakeCustomerSync: ' . $run->last_message, ['run_id' => $run->id, 'error' => $error]);
@@ -115,21 +135,22 @@ class BotcakeCustomerSync
                 'fb_name'             => mb_substr(preg_replace('/\s+/u', ' ', trim((string) ($c['full_name'] ?? ''))), 0, 255),
                 'phone_numbers'       => array_values(array_filter(array_map(fn ($p) => is_scalar($p) ? (string) $p : '', (array) ($c['phone_numbers'] ?? $c['phone_number'] ?? [])))) ?: null, // walang phone = null, para hindi "nagbago" kada sync
                 'botcake_customer_id' => isset($c['id']) && is_scalar($c['id']) ? mb_substr((string) $c['id'], 0, 64) : null,
-                'subscribed_at'       => $this->time($c['subscribed_at'] ?? $c['inserted_at'] ?? null),
-                'last_interactive_at' => $this->time($c['last_interactive_at'] ?? null),
+                'subscribed_at'       => $this->time($c['date_subscribed_at'] ?? $c['subscribed_at'] ?? $c['inserted_at'] ?? null),
+                'last_interactive_at' => $this->time($c['last_interactive_at'] ?? null, 'UTC'), // UTC sa Botcake
             ];
+            $seen = ['last_seen_at' => now(), 'last_checked_at' => now()];
 
             $rec = $existing[$psid] ?? null;
             if (!$rec) {
-                BotcakePsid::create($attrs + [
+                BotcakePsid::create($attrs + $seen + [
                     'page' => $page, 'psid' => $psid, 'source' => 'api', 'status' => 'available', 'first_seen_at' => now(),
                 ]);
                 $run->customers_new++;
                 continue;
             }
 
-            $rec->fill($attrs + ['last_checked_at' => now()]);
-            if ($rec->isDirty(['fb_name', 'phone_numbers'])) {
+            $rec->fill($attrs + $seen + ['status' => 'available']); // inactive na nakita ulit → available
+            if ($rec->isDirty(['fb_name', 'phone_numbers', 'status'])) {
                 $run->customers_updated++;
             }
             $rec->save();
@@ -138,11 +159,12 @@ class BotcakeCustomerSync
         return $existing->count() === count($psids);
     }
 
-    private function time(mixed $v): ?Carbon
+    /** $tz = timezone ng text kapag walang offset; ibinabalik sa timezone ng app para tama ang naitatala. */
+    private function time(mixed $v, ?string $tz = null): ?Carbon
     {
         if (!is_string($v) || $v === '') return null;
         try {
-            return Carbon::parse($v);
+            return Carbon::parse($v, $tz)->setTimezone(config('app.timezone'));
         } catch (\Throwable $e) {
             return null;
         }

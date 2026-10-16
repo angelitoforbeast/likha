@@ -24,6 +24,7 @@ class BotcakePsid extends Model
         'subscribed_at',
         'last_interactive_at',
         'botcake_customer_id',
+        'last_seen_at',
     ];
 
     protected $casts = [
@@ -33,5 +34,6 @@ class BotcakePsid extends Model
         'phone_numbers'       => 'array',
         'subscribed_at'       => 'datetime',
         'last_interactive_at' => 'datetime',
+        'last_seen_at'        => 'datetime',
     ];
 }

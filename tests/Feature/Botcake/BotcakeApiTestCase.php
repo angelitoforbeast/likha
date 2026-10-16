@@ -62,7 +62,15 @@ abstract class BotcakeApiTestCase extends TestCase
             $t->boolean('edited_phone_number')->default(false);
             $t->string('botcake_psid', 64)->nullable();
             $t->date('ts_date')->nullable();
+            $t->string('waybill')->nullable();
             $t->timestamps();
+            $t->index(['ts_date', 'PAGE'], 'macro_output_ts_date_page_idx'); // kapareho ng production
+        });
+        Schema::create('from_jnts', function (Blueprint $t) {
+            $t->id();
+            $t->string('waybill_number')->nullable()->index('idx_from_jnts_waybill');
+            $t->string('status')->nullable();
+            $t->string('rts_reason')->nullable();
         });
 
         Artisan::call('migrate', ['--path' => [
@@ -73,6 +81,7 @@ abstract class BotcakeApiTestCase extends TestCase
             'database/migrations/2026_10_16_400100_add_pending_counts_to_botcake_psid_import_runs.php',
             'database/migrations/2026_10_17_100000_create_page_settings_table.php',
             'database/migrations/2026_10_17_100100_add_api_columns_to_botcake_psids.php',
+            'database/migrations/2026_10_17_100200_add_last_seen_and_misses_for_botcake_sync.php',
         ]]);
 
         $this->clock = new FakeBotcakeClock();

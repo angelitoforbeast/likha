@@ -8,9 +8,11 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Kinakabitan ng PSID ang orders ng isang page (huling 30 araw, walang laman ang botcake_psid) mula sa mga
- * available na Botcake customer ng page: (1) pangalan na iisang psid lang ang may-ari, (2) kung hindi, phone na
- * iisang customer lang ang may-ari, (3) dalawa o higit pang kandidato = walang isusulat (ambiguous). Mas masama
- * ang waybill / COD sa maling tao kaysa walang mensahe. Hindi kailanman pinapalitan ang may laman na.
+ * available na Botcake customer ng page: (1) pangalan na iisang psid lang ang may-ari; (2) dalawa o higit pa sa
+ * pangalan: ang phone ang nagpapasya kung iisa sa kanila ang may phone na iyon; walang kandidato sa pangalan: ang phone
+ * na iisang customer lang ang may-ari; (3) kung hindi: ambiguous o no_match, walang isusulat. Hindi kailanman pumapalit
+ * ang phone ng ibang tao sa ambiguous na pangalan: mas masama ang waybill / COD sa maling tao kaysa walang mensahe.
+ * Ang dahilan ng bawat order na walang PSID ay nasa botcake_psid_misses (para sa psid-coverage page).
  */
 class BotcakeCustomerMatcher
 {
@@ -41,16 +43,15 @@ class BotcakeCustomerMatcher
     }
 
     /**
-     * @param bool $write false = silip lang (para sa page): walang isusulat
-     * @return array{by_name:int, by_phone:int, ambiguous:int, no_match:int, unmatched:array<int, array{id:int, fb_name:string, phone:string, ts_date:?string, reason:string}>}
+     * @return array{by_name:int, by_phone:int, ambiguous:int, no_match:int}
      */
-    public function matchPage(string $page, bool $write = true): array
+    public function matchPage(string $page): array
     {
-        $out = ['by_name' => 0, 'by_phone' => 0, 'ambiguous' => 0, 'no_match' => 0, 'unmatched' => []];
+        $out = ['by_name' => 0, 'by_phone' => 0, 'ambiguous' => 0, 'no_match' => 0];
         $key  = $this->settings->pageKey($page);
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        // Kandidato: available na API rows ng page. pangalan → psids, phone → psids.
+        // Kandidato: available na API rows ng page (hindi inactive). pangalan → psids, phone → psids.
         $byName = [];
         $byPhone = [];
         BotcakePsid::where('source', 'api')->where('status', 'available')
@@ -74,41 +75,65 @@ class BotcakeCustomerMatcher
             ->whereRaw('LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ?', [$key])
             ->where('ts_date', '>=', $since)
             ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
-            ->selectRaw("id, fb_name, ts_date, $phoneCol AS phone")
+            ->selectRaw("id, ts_date, fb_name, $phoneCol AS phone")
             ->orderBy('id')
-            ->chunkById(1000, function ($orders) use (&$out, $byName, $byPhone, $write) {
-                foreach ($orders as $o) {
-                    $nameHits  = array_keys($byName[$this->normName($o->fb_name)] ?? []);
-                    $phone     = $this->normPhone($o->phone);
-                    $phoneHits = $phone !== '' ? array_keys($byPhone[$phone] ?? []) : [];
+            ->chunkById(1000, function ($orders) use (&$out, $byName, $byPhone, $key) {
+                $misses = DB::table('botcake_psid_misses')->whereIn('order_id', $orders->pluck('id'))->pluck('reason', 'order_id');
+                $done = [];
 
-                    if (count($nameHits) === 1) {
-                        [$psid, $how] = [$nameHits[0], 'by_name'];
-                    } elseif (count($phoneHits) === 1) {
-                        [$psid, $how] = [$phoneHits[0], 'by_phone'];
-                    } else {
-                        $how = (count($nameHits) > 1 || count($phoneHits) > 1) ? 'ambiguous' : 'no_match';
+                foreach ($orders as $o) {
+                    [$psid, $how] = $this->decide(
+                        array_keys($byName[$this->normName($o->fb_name)] ?? []),
+                        ($phone = $this->normPhone($o->phone)) !== '' ? array_keys($byPhone[$phone] ?? []) : []
+                    );
+
+                    if ($psid === null) {
                         $out[$how]++;
-                        $out['unmatched'][] = [
-                            'id' => (int) $o->id, 'fb_name' => (string) $o->fb_name, 'phone' => (string) $o->phone,
-                            'ts_date' => $o->ts_date ? (string) $o->ts_date : null, 'reason' => $how,
-                        ];
+                        if (($misses[$o->id] ?? null) !== $how) {
+                            DB::table('botcake_psid_misses')->updateOrInsert(
+                                ['order_id' => $o->id],
+                                ['page_key' => $key, 'ts_date' => $o->ts_date, 'reason' => $how, 'checked_at' => now()]
+                            );
+                        }
                         continue;
                     }
 
-                    if ($write) {
-                        // Muling sinusuri ang laman sa mismong update: hindi kailanman pinapalitan ang may PSID na.
-                        $done = MacroOutput::whereKey($o->id)
-                            ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
-                            ->update(['botcake_psid' => $psid]);
-                        if ($done) $out[$how]++;
-                    } else {
-                        $out[$how]++;
-                    }
+                    // Muling sinusuri ang laman sa mismong update: hindi kailanman pinapalitan ang may PSID na.
+                    $written = MacroOutput::whereKey($o->id)
+                        ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
+                        ->update(['botcake_psid' => $psid]);
+                    if ($written) $out[$how]++;
+                    $done[] = $o->id;
                 }
+
+                if ($done) DB::table('botcake_psid_misses')->whereIn('order_id', $done)->delete();
             }, 'id');
 
+        // Ang mga lumang dahilan (lampas sa 30-araw na window, may palugit) ay hindi na kailangan.
+        DB::table('botcake_psid_misses')->where('page_key', $key)
+            ->where('ts_date', '<', now('Asia/Manila')->subDays(self::DAYS + 15)->toDateString())->delete();
+
         return $out;
+    }
+
+    /**
+     * @param array<int, string> $nameHits mga psid na may parehong pangalan
+     * @param array<int, string> $phoneHits mga psid na may parehong phone
+     * @return array{0:?string, 1:string} [psid o null, by_name|by_phone|ambiguous|no_match]
+     */
+    public function decide(array $nameHits, array $phoneHits): array
+    {
+        if (count($nameHits) === 1) return [$nameHits[0], 'by_name'];
+
+        if (count($nameHits) > 1) {
+            // Ang phone ay nagpapasya lang sa pagitan ng mga may parehong pangalan, hindi nagdadala ng ibang tao.
+            $both = array_values(array_intersect($nameHits, $phoneHits));
+            return count($both) === 1 ? [$both[0], 'by_phone'] : [null, 'ambiguous'];
+        }
+
+        if (count($phoneHits) === 1) return [$phoneHits[0], 'by_phone'];
+
+        return [null, count($phoneHits) > 1 ? 'ambiguous' : 'no_match'];
     }
 
     /**

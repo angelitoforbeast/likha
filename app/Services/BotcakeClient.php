@@ -84,7 +84,7 @@ class BotcakeClient
                 throw new BotcakeException('Botcake: HTTP ' . $status);
             }
             if ($attempt >= self::MAX_RETRIES) {
-                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ' pagkatapos ng ' . self::MAX_RETRIES . ' retry');
+                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ' pagkatapos ng ' . self::MAX_RETRIES . ' retry', false, $status === 429 ? 'rate_limited' : 'error');
             }
 
             $wait = 2 ** ($attempt + 1); // 2, 4, 8

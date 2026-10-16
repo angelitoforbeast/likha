@@ -56,7 +56,7 @@ class BotcakePanelTest extends BotcakeApiTestCase
         Queue::assertPushed(SyncBotcakeCustomersJob::class, fn ($job) => $job->page === 'Page Uno' && $job->full === false);
     }
 
-    public function test_the_panel_shows_customers_the_last_sync_and_the_orders_still_without_a_psid(): void
+    public function test_the_panel_shows_customers_the_last_sync_and_links_to_the_orders_without_a_psid(): void
     {
         BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ben Reyes', 'psid' => 'b1', 'status' => 'available', 'source' => 'api']);
         BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ben Reyes', 'psid' => 'b2', 'status' => 'available', 'source' => 'api']);
@@ -67,11 +67,8 @@ class BotcakePanelTest extends BotcakeApiTestCase
         $html = $this->get('/page-settings')->assertOk()->getContent();
         $this->assertStringContainsString('Customers: 2', $html);
         $this->assertStringContainsString('21 bago', $html);
-        $this->assertStringNotContainsString('Dino Lim', $html, 'ang listahan ay sa details lang');
-
-        $html = $this->get('/page-settings?details=' . urlencode('Page Uno'))->assertOk()->getContent();
-        $this->assertMatchesRegularExpression('/Ambiguous \(1\).*Ben Reyes/s', $html);
-        $this->assertMatchesRegularExpression('/Walang tugma \(1\).*Dino Lim/s', $html);
+        $this->assertStringNotContainsString('Dino Lim', $html, 'ang listahan ay nasa psid-coverage, paginated');
+        $this->assertStringContainsString('/page-settings/psid-coverage/orders?page_name=Page%20Uno', $html);
     }
 
     public function test_the_buttons_are_ceo_only(): void

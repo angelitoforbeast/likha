@@ -11,7 +11,10 @@
 <div class="max-w-6xl mx-auto p-4 sm:p-6">
     <div class="flex items-center justify-between mb-4">
         <h1 class="text-2xl font-semibold">Page Settings</h1>
-        <a href="{{ url('/') }}" class="text-sm text-gray-600 hover:underline">Home</a>
+        <div class="flex gap-4 text-sm">
+            <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders na walang PSID)</a>
+            <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
+        </div>
     </div>
 
     @if(session('success'))

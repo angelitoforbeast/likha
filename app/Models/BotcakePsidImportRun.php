@@ -40,6 +40,7 @@ class BotcakePsidImportRun extends Model
         'matched_by_phone',
         'ambiguous',
         'no_match',
+        'stop_reason',
     ];
 
     public function events()
