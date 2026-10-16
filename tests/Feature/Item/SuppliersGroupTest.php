@@ -18,17 +18,17 @@ class SuppliersGroupTest extends ItemTestCase
     /**
      * sha1 ng normalised render ng item.index, galing sa base commit (bago ang anumang pagbabago).
      * Key: <layout>.<viewer>. Ang old.ceo ay ikinukumpara sa orihinal na table ng CEO, pagkatapos tanggalin ang link nito sa toolbar at ang salitang pinapanatili nito sa address.
-     * Muling na-pin nang palitan ang mensahe ng Primary Items recompute ("ties skipped" → "tie(s) resolved"); iyon lang ang diff.
+     * Muling na-pin nang palitan ang mensahe ng Primary Items recompute ("ties skipped" → "tie(s) resolved"); iyon lang ang diff. Muling na-pin nang idagdag sa expand partial (owner._private_expand_inline, kasama sa /item) ang delivery label at "Walang ad id" na linya, naka-$data. kaya walang epekto sa /item; iyon lang ang diff.
      */
     private const BASE = [
-        'default.ceo'              => '73759d0db9b19cd39f7fd7b9e1f6e7142113bf18',
-        'default.ceo_as_marketing' => '0e9dcaa0c6da9bda04c4f6a48627ca8bf3e964d5',
-        'default.marketing'        => '8b8cfd960cc3b097b5af0b0c51ed049c532c9e91',
-        'default.marketing_oic'    => 'af3562d183c1e3446e52e969bd98f0a5f21c88cf', // muling na-pin: may supplier work na ang Marketing - OIC
-        'old.ceo'                  => '75b0c17366cd7beb8f723d3c7be3b8e151bdda4d', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
-        'old.ceo_as_marketing'     => '0dc8775b2c30ea421d392c01fbd96a8314d36f86',
-        'old.marketing'            => '8e87611778b9f93a6a269ceae74656d362275aed',
-        'old.marketing_oic'        => 'f88d48f6edc05b94351b174562321a20d8c955ae', // muling na-pin: table na may suppliers para sa Marketing - OIC
+        'default.ceo'              => '085ebd285945676fbeea4718586e449c96f98bef',
+        'default.ceo_as_marketing' => 'f759bda75048462feebc39a3a7078f813c1a5af9',
+        'default.marketing'        => '72f6bec8c39294b35e4fde54da18e8be97563c0b',
+        'default.marketing_oic'    => '542a5cc6a0718465d166e175578d78c54dc9f670', // muling na-pin: may supplier work na ang Marketing - OIC
+        'old.ceo'                  => 'ad980663fd7266651ddf64223b431a1f5d33ffb3', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
+        'old.ceo_as_marketing'     => '76475ec0098c8fc22777df4230a147138e6d9152',
+        'old.marketing'            => '42ebc1a5267a0b001213d8051393d88dbe121ca5',
+        'old.marketing_oic'        => '0ab79a10499e94c3a225e780d320d96302ff8e87', // muling na-pin: table na may suppliers para sa Marketing - OIC
     ];
 
     protected function setUp(): void

@@ -67,6 +67,11 @@ class AdDeliveryColumnsTest extends OwnerPrivateTestCase
         // ang ibang screen ng campaigns table ay walang bagong column
         $this->assertStringNotContainsString('ad_delivered', file_get_contents(resource_path('views/ads_manager/campaigns.blade.php')));
         $this->assertStringNotContainsString('ad_delivered', file_get_contents(resource_path('views/item/index.blade.php')));
+        // kasama ang expand partial sa /item, na walang adDelivery* sa component: bawat pasukan ay sa $data.<name> dumadaan
+        $partial = file_get_contents(resource_path('views/owner/_private_expand_inline.blade.php'));
+        $this->assertSame(0, preg_match('/(?<!\$data\.)adDelivery(Label|NoAdText)\(/', $partial));
+        $this->assertStringContainsString('<template x-if="$data.adDeliveryNoAd && $data.adDeliveryNoAd(row.page_name)">', $partial);
+        $this->assertStringContainsString('x-show="$data.adDeliveryNoAd && $data.adDeliveryNoAd(row.page_name)"', $partial);
     }
 
     public function test_S_043_8_nothing_saved_shows_them_to_the_ceo(): void
