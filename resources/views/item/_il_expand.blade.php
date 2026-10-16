@@ -31,7 +31,7 @@
   <template x-if="!stockPending() && stockFor(G.item_name)">
     <div class="il-dl-i il-dl-wide" @click.stop>
       <div class="il-dl-l">Lead time</div>
-      @if($effectiveIsCEO)
+      @if(!empty($canSupplierWork))
       <div class="il-dl-v" style="display:flex;gap:4px;align-items:flex-start;"
            x-show="!(stockEdit.key === supKey(G.item_name) && stockEdit.mode === 'sup')">
         <span title="Days until an order arrives, plus extra days kept in reserve" x-text="ilLeadLine(G.item_name)"></span>
@@ -158,7 +158,7 @@
       <div class="il-dl-l">Category</div>
       <div class="il-dl-v" :title="ilTip('Category of this item', stockFor(G.item_name))">
         <span x-show="stockPending()" class="il-grey">…</span>
-        @if($effectiveIsCEO)
+        @if(!empty($canSupplierWork))
         {{-- CEO: palitan ang category (para sa lahat ng variant ng base item). --}}
         <span x-show="!stockPending()" title="For every variant of this item">
           <select aria-label="Item category" :disabled="stockEdit.saving"
@@ -199,7 +199,7 @@
   </div>
 </div>
 
-@if($effectiveIsCEO)
+@if(!empty($canSupplierWork))
 {{-- ── CEO LANG: sourcing-list info, supplier (PO) lines, quotes + inline add / edit / delete. Lahat x-text (escaped). ── --}}
 <div class="il-dl" @click.stop>
   <template x-if="worklistItem(G.item_name)">

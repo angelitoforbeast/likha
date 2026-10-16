@@ -695,7 +695,7 @@
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;margin-left:4px;">🗂 Old view</a>
     @endif
-@if(!empty($effectiveIsCEO) && !empty($layoutOld))
+@if(!empty($canSupplierWork) && !empty($layoutOld))
 @if(!empty($layoutSuppliers))
     <a href="?layout=original" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'original'); window.location.href = window.location.pathname + '?' + q.toString()"
        title="Open the table as it was before the suppliers columns"
@@ -802,7 +802,7 @@
                    font-size:11px;font-weight:700;margin-left:4px;">Clear all</button>
   </div>
 
-  @if(!empty($effectiveIsCEO))
+  @if(!empty($canSupplierWork))
   {{-- Sourcing worklists (CEO LANG) — "Lahat" = existing view; ang apat = galing /item/worklist.
        Naka-save sa URL (?list=) para sa reload / shared link. --}}
   <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;
@@ -1414,6 +1414,8 @@
       // Derived: true only when actual CEO AND currently in CEO view mode. Used
       // for column + modal field visibility downstream. Computed via Alpine getter.
       get effectiveIsCeo(){ return this.isCeoView && this.viewAs === 'ceo'; },
+      // Supplier work (suppliers, quotes, worklist, category, lead / palugit): CEO view o Marketing - OIC. Galing sa server.
+      canSupplierWork: @json(!empty($canSupplierWork)),
 
       // Modal-based edit state. Replaces old inline edit UX. Saves use the
       // same /owner/private/item-setting endpoint as the breakdown matrix
@@ -1747,10 +1749,10 @@
         // partial_date — only added when explicitly set by user (opt-in 1D override)
         if (this.partialDate) qsObj.partial_date = this.partialDate;
         // Sourcing worklist chip (CEO view lang) — panatilihin sa URL.
-        if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
+        if (this.canSupplierWork && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
         // Lumang table view — panatilihin ang ?layout=old sa URL.
         if (this.layoutOld) qsObj.layout = 'old';
-@if(!empty($effectiveIsCEO) && !empty($layoutOld) && empty($layoutSuppliers))
+@if(!empty($canSupplierWork) && !empty($layoutOld) && empty($layoutSuppliers))
         // Orihinal na table — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old (table na may suppliers) ng unang load.
         qsObj.layout = 'original';
 @endif
@@ -1766,7 +1768,7 @@
         // sabay sa mabigat na item-summary fetch (hindi na hinihintay).
         this.loadHold();
         this.loadStock();   // stock / DOI / item value — hindi hinihintay, hindi nagpapabagal sa table
-        if (this.effectiveIsCeo) this.loadWorklist();
+        if (this.canSupplierWork) this.loadWorklist();
         try{
           const r = await fetch('{{ route('owner.private.item-summary') }}?'+qs.toString());
           const j = await r.json();
@@ -3504,7 +3506,7 @@
       },
       // Supplier ng Next step: pinakamurang quote, else ang pinakabagong PO. CEO view lang (walang pangalan sa Marketing).
       ilSupplier(name){
-        if (!this.effectiveIsCeo) return '';
+        if (!this.canSupplierWork) return '';
         const q = this.ilCheapQuote(name);
         if (q) return String(q.supplier || '');
         const s = this.suppliersFor(name)[0];
@@ -3525,7 +3527,7 @@
           return st('barely', 4, '⚪ Barely selling', 'grey', 'Sells less than 0.5 a day, or is being phased out; order only what customers are waiting for');
         }
         if (P.order_qty === 0) return st('ok', 3, '🟢 OK', 'green', 'Enough stock and incoming; nothing to order now');
-        if (this.effectiveIsCeo && !this.suppliersFor(name).length && !this.quotesFor(name).length) return st('find', 0, '🔴 Find a supplier', 'red',
+        if (this.canSupplierWork && !this.suppliersFor(name).length && !this.quotesFor(name).length) return st('find', 0, '🔴 Find a supplier', 'red',
                     'This item needs ordering but has no supplier or quote yet');
         const sup = this.ilSupplier(name);
         if (P.order_by === 'now') {
@@ -3800,13 +3802,13 @@
       },
       // Worklist item ng row — CEO lang at habang may napiling chip (hindi "Lahat"); else null.
       worklistItem(name){
-        if (!this.effectiveIsCeo || this.worklist.list === 'lahat') return null;
+        if (!this.canSupplierWork || this.worklist.list === 'lahat') return null;
         return this.worklist.byKey[this.supKey(name)] || null;
       },
       // Itago ang row kung hindi kasama sa napiling listahan (base key = supKey). Lahat / hindi-CEO = ipakita lahat.
       // Habang may napiling list: HOLD 0 na row (hal. "1 x" na may page pero walang hold) = itago din.
       worklistKeep(name, hold){
-        if (!this.effectiveIsCeo || this.worklist.list === 'lahat') return true;
+        if (!this.canSupplierWork || this.worklist.list === 'lahat') return true;
         if (!(Number(hold) > 0)) return false;
         const it = this.worklist.byKey[this.supKey(name)];
         return !!it && it.list === this.worklist.list;
@@ -3919,7 +3921,7 @@
           if (!res.ok || !j.ok) { alert(j.error || j.message || ('HTTP ' + res.status)); return; }
           this.itemQuotes = Object.assign({}, this.itemQuotes, { [f.key]: (j.quotes || []) });
           this.quoteForm = { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', photo:null, saving:false };
-          if (this.effectiveIsCeo) this.loadWorklist(); // baka lumipat ng listahan
+          if (this.canSupplierWork) this.loadWorklist(); // baka lumipat ng listahan
         }catch(e){ alert(e.message); }
         finally{ f.saving = false; }
       },
@@ -3932,7 +3934,7 @@
           const j = await res.json().catch(() => ({}));
           if (j.ok) {
             this.itemQuotes = Object.assign({}, this.itemQuotes, { [this.supKey(name)]: (j.quotes || []) });
-            if (this.effectiveIsCeo) this.loadWorklist(); // baka lumipat ng listahan
+            if (this.canSupplierWork) this.loadWorklist(); // baka lumipat ng listahan
           }
           else alert(j.error || ('HTTP ' + res.status));
         }catch(e){ alert(e.message); }
@@ -4010,7 +4012,7 @@
         await Promise.all([
           this.load(),
           this.loadItemImages(),
-          @if($effectiveIsCEO)
+          @if(!empty($canSupplierWork))
           this.loadItemSuppliers(), // CEO lang — walang fetch para sa iba
           this.loadItemQuotes(),    // CEO lang — supplier quotes (item_supplier_quotes)
           @endif

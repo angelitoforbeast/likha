@@ -138,7 +138,7 @@ class WorklistTest extends ItemTestCase
     public function test_non_ceo_roles_get_the_empty_shape_or_404(): void
     {
         $this->seedWorld();
-        $cases = ['Marketing' => 200, 'Marketing - OIC' => 200, 'Encoder' => 404];
+        $cases = ['Marketing' => 200, 'Encoder' => 404]; // Marketing - OIC: may worklist na (MoicSupplierAccessTest)
         $i = 0;
         foreach ($cases as $role => $status) {
             $res = $this->actingAs($this->user($role, 'u' . (++$i) . '@example.test'))->getJson(self::RANGE);

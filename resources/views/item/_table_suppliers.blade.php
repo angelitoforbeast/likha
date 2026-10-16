@@ -162,7 +162,7 @@
             </td></tr>
           </template>
 
-          @if(!empty($effectiveIsCEO))
+          @if(!empty($canSupplierWork))
           {{-- Walang natira sa napiling sourcing list (CEO LANG). --}}
           <template x-if="worklist.list !== 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
             <tr><td :colspan="fitCols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
@@ -170,7 +170,7 @@
           </template>
           @endif
           {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
-          <template x-if="categoryFilter !== '' && categoryColVisible() && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
+          <template x-if="categoryFilter !== '' && categoryColVisible() && (!canSupplierWork || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
             <tr><td :colspan="fitCols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
           </template>
@@ -222,7 +222,7 @@
                     <span class="spl-warn" role="img" title="wala pang supplier" aria-label="wala pang supplier">!</span>
                   </template>
                 </div>
-                @if($effectiveIsCEO)
+                @if(!empty($canSupplierWork))
                 {{-- Extra info ng napiling sourcing list — CEO LANG, habang may napiling chip. Lahat x-text (escaped). --}}
                 <template x-if="worklistItem(row.item_name)">
                   <template x-for="W in [worklistItem(row.item_name)]" :key="'wl-'+row.item_name">

@@ -210,6 +210,10 @@ class StockEndpointTest extends ItemTestCase
 
         $marketing = $this->stock('Marketing', '&view_as=ceo')->assertOk()->json('values.1 x lamp');
         $this->assertArrayNotHasKey('item_value_ceo', $marketing);
+
+        // Supplier work ang bukas sa Marketing - OIC, hindi ang CEO cost.
+        $oic = $this->stock('Marketing - OIC', '&view_as=ceo')->assertOk()->json('values.1 x lamp');
+        $this->assertArrayNotHasKey('item_value_ceo', $oic);
     }
 
     public function test_marketing_gets_the_same_numbers(): void

@@ -26,7 +26,7 @@ class ItemPageTest extends ItemTestCase
         return view('item.index', [
             'layoutOld' => $layoutOld,
             'pages' => [], 'isCEO' => true, 'isMarketingOIC' => false,
-            'viewAs' => $effectiveIsCEO ? 'ceo' : 'marketing', 'effectiveIsCEO' => $effectiveIsCEO,
+            'viewAs' => $effectiveIsCEO ? 'ceo' : 'marketing', 'effectiveIsCEO' => $effectiveIsCEO, 'canSupplierWork' => $effectiveIsCEO,
             'ownerPrivateColsConfig' => null, 'campaignsColsConfig' => null, 'breakevenTargetPct' => 5,
             'colFormatRules' => [], 'campaignsColFormatRules' => [],
             'feeShipping' => null, 'feeCodRate' => null, 'feeVatRate' => null,
@@ -160,7 +160,8 @@ class ItemPageTest extends ItemTestCase
         // sha1 ng resources/views/item/_table_old.blade.php sa d9606c8 (hindi ginagalaw ng 006).
         // LF muna ang line endings para pareho ang hash kahit CRLF ang checkout (Windows).
         $src = str_replace("\r\n", "\n", file_get_contents(resource_path('views/item/_table_old.blade.php')));
-        $this->assertSame('d3b53d274bb451ee6173df0606d951563c84b299', sha1($src));
+        // Muling na-pin: ang supplier-work gates ($canSupplierWork) ang tanging binago.
+        $this->assertSame('b49b85147ff9ceabe62515237e48072e8fbc1c90', sha1($src));
     }
 
     public function test_item_views_have_no_x_html(): void
@@ -338,9 +339,9 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString('ilQtyCost(G.item_name)', $mkt);
         foreach ([$ceo, $mkt] as $html) {
             // JS gate din: walang pangalan / cost / Find a supplier kapag hindi CEO view.
-            $this->assertMatchesRegularExpression('/ilSupplier\(name\)\s*\{\s*if \(!this\.effectiveIsCeo\) return \'\';/', $html);
+            $this->assertMatchesRegularExpression('/ilSupplier\(name\)\s*\{\s*if \(!this\.canSupplierWork\) return \'\';/', $html);
             $this->assertMatchesRegularExpression('/ilQtyCost\(name\)\s*\{\s*if \(!this\.effectiveIsCeo\) return \'\';/', $html);
-            $this->assertStringContainsString("if (this.effectiveIsCeo && !this.suppliersFor(name).length && !this.quotesFor(name).length) return st('find'", $html);
+            $this->assertStringContainsString("if (this.canSupplierWork && !this.suppliersFor(name).length && !this.quotesFor(name).length) return st('find'", $html);
             // Supplier = pinakamurang quote na may presyo.
             $this->assertStringContainsString('Number(q.price) < Number(best.price)', $html);
             $this->assertStringContainsString("' (min '", $html);
@@ -649,7 +650,7 @@ class ItemPageTest extends ItemTestCase
         // Guards: lead/palugit validation, category-empty row ignores ?list= for non-CEO view.
         $this->assertStringContainsString('Lagyan ng numero (0–255) ang lead at palugit.', $ceo);
         foreach ([$ceo, $mkt] as $html) {
-            $this->assertStringContainsString("(!effectiveIsCeo || worklist.list === 'lahat')", $html);
+            $this->assertStringContainsString("(!canSupplierWork || worklist.list === 'lahat')", $html);
         }
     }
 

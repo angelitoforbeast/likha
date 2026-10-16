@@ -24,11 +24,11 @@ class SuppliersGroupTest extends ItemTestCase
         'default.ceo'              => '73759d0db9b19cd39f7fd7b9e1f6e7142113bf18',
         'default.ceo_as_marketing' => '0e9dcaa0c6da9bda04c4f6a48627ca8bf3e964d5',
         'default.marketing'        => '8b8cfd960cc3b097b5af0b0c51ed049c532c9e91',
-        'default.marketing_oic'    => 'cb7c850008ab9de4a68b3350b8554a9dcd5f0e98',
+        'default.marketing_oic'    => '4e6889270630193afa8c607ccdced88334395649', // muling na-pin: may supplier work na ang Marketing - OIC
         'old.ceo'                  => '75b0c17366cd7beb8f723d3c7be3b8e151bdda4d', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
         'old.ceo_as_marketing'     => '0dc8775b2c30ea421d392c01fbd96a8314d36f86',
         'old.marketing'            => '8e87611778b9f93a6a269ceae74656d362275aed',
-        'old.marketing_oic'        => 'f7c6fdd5d235a258dffea3a78cbf85bee3f87f20',
+        'old.marketing_oic'        => '377b24d3b96019e5d0d68900448a6e6978756d6d', // muling na-pin: table na may suppliers para sa Marketing - OIC
     ];
 
     protected function setUp(): void
@@ -100,7 +100,7 @@ class SuppliersGroupTest extends ItemTestCase
         return view('item.index', [
             'layoutOld' => $layoutOld, 'layoutSuppliers' => $layoutSuppliers,
             'pages' => [], 'isCEO' => $v[0], 'isMarketingOIC' => $v[1],
-            'viewAs' => $v[2], 'effectiveIsCEO' => $v[3],
+            'viewAs' => $v[2], 'effectiveIsCEO' => $v[3], 'canSupplierWork' => $v[3] || $v[1],
             'ownerPrivateColsConfig' => $columnSetting, 'campaignsColsConfig' => null, 'breakevenTargetPct' => 5,
             'colFormatRules' => [], 'campaignsColFormatRules' => [],
             'feeShipping' => null, 'feeCodRate' => null, 'feeVatRate' => null,
@@ -119,9 +119,24 @@ class SuppliersGroupTest extends ItemTestCase
         return (string) preg_replace('/<meta name="csrf-token" content="[^"]*"/', '<meta name="csrf-token" content="CSRF"', $html);
     }
 
+    /**
+     * Ang tanging pagbabago sa render ng CEO at plain Marketing nang buksan ang supplier work sa Marketing - OIC:
+     * ang bagong flag sa script, at ang JS gate ng supplier work na dating effectiveIsCeo. Ibinabalik dito sa
+     * dati para manatiling patunay ang mga hash ng base na walang ibang nagbago para sa kanila.
+     */
+    private function undoSupplierWorkGate(string $html): string
+    {
+        $html = (string) preg_replace("/      \/\/ Supplier work \(suppliers, quotes, worklist, category, lead \/ palugit\)[^\n]*\n      canSupplierWork: (true|false),\n/", '', $html, -1, $flags);
+        $this->assertSame(1, $flags, 'ang flag ng supplier work sa script');
+
+        return str_replace(['this.canSupplierWork', '(!canSupplierWork ||'], ['this.effectiveIsCeo', '(!effectiveIsCeo ||'], $html);
+    }
+
     private function hash(string $viewer, bool $old): string
     {
-        return sha1($this->normalise($this->render($viewer, $old)));
+        $html = $this->normalise($this->render($viewer, $old));
+
+        return sha1($viewer === 'marketing_oic' ? $html : $this->undoSupplierWorkGate($html));
     }
 
     // ── S-19.2 / S-18.4: ang base render ──────────────────────────────────────
@@ -165,13 +180,12 @@ class SuppliersGroupTest extends ItemTestCase
         . "        qsObj.layout = 'original';\n";
 
     /**
-     * Ang tatlong viewer na hindi CEO view: [key ng BASE, role, email, mga dagdag sa address na hindi dapat
+     * Ang dalawang viewer na walang supplier work (ang Marketing - OIC ay may supplier work na): [key ng BASE, role, email, mga dagdag sa address na hindi dapat
      * magbago ng anuman, ang view data na ginagamit ng render() para sa viewer na iyon:
      * isCEO, isMarketingOIC, viewAs, effectiveIsCEO].
      */
     private const NON_CEO_VIEWS = [
         ['marketing', 'Marketing', 'mkt@example.test', ['', '&view_as=ceo', '&view_as=CEO'], [false, false, 'ceo', false]],
-        ['marketing_oic', 'Marketing - OIC', 'oic@example.test', ['', '&view_as=ceo', '&view_as=CEO'], [false, true, 'ceo', false]],
         ['ceo_as_marketing', 'CEO', 'ceo@example.test', ['&view_as=marketing', '&view_as=MARKETING', '&view_as=marketing%20'], [true, false, 'marketing', false]],
     ];
 
@@ -330,7 +344,7 @@ class SuppliersGroupTest extends ItemTestCase
 
         $this->assertSame(1, substr_count($original, self::SUPPLIERS_TABLE_LINK));
         $this->assertSame(1, substr_count($original, self::ORIGINAL_ADDRESS));
-        $this->assertSame(self::BASE['old.ceo'], sha1(str_replace([self::SUPPLIERS_TABLE_LINK, self::ORIGINAL_ADDRESS], '', $original)));
+        $this->assertSame(self::BASE['old.ceo'], sha1(str_replace([self::SUPPLIERS_TABLE_LINK, self::ORIGINAL_ADDRESS], '', $this->undoSupplierWorkGate($original))));
     }
 
     public function test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word(): void
@@ -1799,7 +1813,7 @@ class SuppliersGroupTest extends ItemTestCase
         }
     }
 
-    // ── S-18.3: ang Marketing roles ay walang makukuha sa quote / supplier endpoints ──
+    // ── S-18.3: ang plain Marketing ay walang makukuha sa quote / supplier endpoints (ang Marketing - OIC ay mayroon na) ──
 
     public function test_S_18_3_marketing_roles_get_empty_quote_and_supplier_lists(): void
     {
@@ -1813,7 +1827,7 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertCount(2, $this->getJson('/item/quotes')->assertOk()->json('quotes.hand grip'));
         $this->assertSame('Acme', $this->getJson('/item/suppliers')->assertOk()->json('suppliers.hand grip.0.supplier'));
 
-        foreach (['Marketing' => 'mkt@example.test', 'Marketing - OIC' => 'oic@example.test'] as $role => $email) {
+        foreach (['Marketing' => 'mkt@example.test'] as $role => $email) {
             $this->actingAs($this->user($role, $email));
             $quotes = $this->getJson('/item/quotes')->assertOk();
             $suppliers = $this->getJson('/item/suppliers')->assertOk();

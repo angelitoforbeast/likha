@@ -32,6 +32,15 @@ class ItemController extends Controller
         return preg_replace('/\s+/u', ' ', trim((string) $raw));
     }
 
+    /**
+     * Supplier work sa /item (suppliers, worklist, quotes, category, lead / palugit): CEO at Marketing - OIC.
+     * Hindi kasama ang CEO-only profit view (view_as, cogs_ceo, item_value_ceo) — iyon ay $effectiveIsCEO pa rin.
+     */
+    private function canSupplierWork(): bool
+    {
+        return in_array($this->getNormalizedRole(), ['CEO', 'Marketing - OIC'], true);
+    }
+
     private function checkAccess(): void
     {
         $role = $this->getNormalizedRole();
@@ -88,11 +97,12 @@ class ItemController extends Controller
         // CEO view, iisa ang tatlo: ang lumang table (walang suppliers markup na lalabas).
         // Lahat ng iba = bagong layout.
         $layout          = $request->query('layout');
-        $layoutSuppliers = ($layout === 'old' || $layout === 'suppliers') && $effectiveIsCEO;
+        $canSupplierWork = $effectiveIsCEO || $isMarketingOIC;
+        $layoutSuppliers = ($layout === 'old' || $layout === 'suppliers') && $canSupplierWork;
         $layoutOld       = $layout === 'old' || $layout === 'suppliers' || $layout === 'original';
 
         return view('item.index', compact(
-            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'layoutOld', 'layoutSuppliers',
+            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'canSupplierWork', 'layoutOld', 'layoutSuppliers',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
             'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
             'feeShipping', 'feeCodRate', 'feeVatRate'
@@ -195,9 +205,9 @@ class ItemController extends Controller
     public function suppliers(Request $request)
     {
         $this->checkAccess();
-        // CEO LANG ang makakakita ng supplier + presyo (data-layer: hindi lang UI hide —
-        // walang ibabalik sa hindi-CEO, same pattern ng item_value_ceo).
-        if ($this->getNormalizedRole() !== 'CEO') {
+        // CEO at Marketing - OIC LANG ang makakakita ng supplier + presyo (data-layer: hindi lang UI hide —
+        // walang ibabalik sa iba, same pattern ng item_value_ceo).
+        if (! $this->canSupplierWork()) {
             return response()->json(['ok' => true, 'suppliers' => []]);
         }
         $map = [];
@@ -243,8 +253,8 @@ class ItemController extends Controller
     public function worklist(Request $request)
     {
         $this->checkAccess();
-        // CEO LANG (data-layer, same pattern ng suppliers()/quotes()).
-        if ($this->getNormalizedRole() !== 'CEO') {
+        // CEO at Marketing - OIC LANG (data-layer, same pattern ng suppliers()/quotes()).
+        if (! $this->canSupplierWork()) {
             return response()->json(['ok' => true, 'counts' => new \stdClass(), 'items' => []]);
         }
 
@@ -430,7 +440,7 @@ class ItemController extends Controller
     public function quotes(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => true, 'suppliers' => [], 'quotes' => []]);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => true, 'suppliers' => [], 'quotes' => []]);
 
         $suppliers = []; $map = [];
         try {
@@ -450,7 +460,7 @@ class ItemController extends Controller
     public function quoteSave(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
 
         $data = $request->validate([
             'item_name'   => 'required|string|max:255',
@@ -516,7 +526,7 @@ class ItemController extends Controller
     public function categorySave(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
         if (! Schema::hasTable('item_categories') || ! Schema::hasTable('item_category_assignments')) {
             return response()->json(['ok' => false, 'message' => 'item_categories table wala pa — patakbuhin: php artisan migrate --force'], 200);
         }
@@ -587,7 +597,7 @@ class ItemController extends Controller
     public function supplySettingsSave(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
         if (! Schema::hasTable('supply_item_settings')) {
             return response()->json(['ok' => false, 'message' => 'supply_item_settings table wala pa — patakbuhin: php artisan migrate --force'], 200);
         }
@@ -679,7 +689,7 @@ class ItemController extends Controller
     public function quoteDelete(Request $request)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! $this->canSupplierWork()) return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
 
         $data = $request->validate(['id' => 'required|integer', 'item_name' => 'required|string|max:255']);
         $key  = \App\Models\ItemSupplierQuote::keyFor($data['item_name']);
