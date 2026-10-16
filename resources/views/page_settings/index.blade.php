@@ -279,10 +279,15 @@
             if (!secret) editing.timer = setTimeout(() => save(editing), PAUSE_MS);
         });
         input.addEventListener('keydown', ev => {
-            if (ev.key === 'Enter') { ev.preventDefault(); finishEdit(true); td.focus(); }
-            if (ev.key === 'Escape') { ev.preventDefault(); finishEdit(false); td.focus(); }
+            if (ev.key === 'Enter') { ev.preventDefault(); finishEdit(true); refocus(row.key, col.key); }
+            if (ev.key === 'Escape') { ev.preventDefault(); finishEdit(false); refocus(row.key, col.key); }
         });
         input.addEventListener('blur', () => { if (editing && editing.input === input) finishEdit(true); });
+    }
+
+    // Bumabalik ang focus sa cell, kahit nabuo ulit ang table.
+    function refocus(pk, key) {
+        table.querySelector(`td.cell[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`)?.focus();
     }
 
     function finishEdit(doSave) {
@@ -320,6 +325,7 @@
                 marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || data.message || ('Hindi nai-save (' + res.status + ')')});
             } else {
                 if (data.cell) row.cells[ed.key] = data.cell; else delete row.cells[ed.key];
+                delete ed.server; // mas bago ang naisave kaysa sa itinabing value mula sa poll
                 if (ed.key === 'botcake.page_id' || ed.key === 'botcake.token') {
                     row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
                     if (!editing) { needsRender = true; }

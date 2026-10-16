@@ -404,3 +404,13 @@ Accepted, not fixed:
 - **Each inline edit of item, COD, status, date or page recomputes one or two days**, inside the request. Reason: one day per page is a few hundred rows; move to a queued job if encoders notice a slower save.
 - **The refresh button's error JSON shows the exception message (already true before this brief).** Reason: CEO-only route; outside this brief.
 - **Untested:** the SQL on real MySQL or pgsql (the suite is sqlite only; the `ts_date` trigger is emulated in one test), the macro import's own recompute (unchanged), and the "tie" marks in a browser (no browser in this run).
+
+## 041: /page-settings as a sheet-like grid (2026-10-17)
+
+- **"+ Page" and "+ Column" live only in that browser until a value is entered.** Storage is rows only (Page | Key | Value), so an empty page or column is not saved, and a reload or another user does not see it. Reason: the brief keeps the storage unchanged. Revisit if the owner wants empty rows to persist.
+- **The last-sync column reads `MAX(id)` per page over all API runs on each page load.** About 200 pages × 24 runs a day grow the table by about 5,000 rows a day; there is no (source, page_name) index. Reason: storage is out of scope for this brief. Suggestion: an index on `botcake_psid_import_runs (source, page_name, id)` if the page gets slow. The poll runs this only when a run changed.
+- **The poll query (`created_at >= ? OR replaced_at >= ?` on `page_settings`) has no index on those columns.** Reason: the table holds a few thousand rows (pages × keys × history); storage is out of scope.
+- **"+ Page" checks `macro_output` for the name without a `PAGE` index**, so a name that matches nothing scans the table once. Reason: same check as the 040 import command; one click by the CEO.
+- **After a token or Botcake ID edit by Enter, the table is rebuilt when the save returns and keyboard focus goes back to the top.** Reason: minor; the refocus covers every other cell.
+- **Each editable cell takes two Tab stops (the cell, then its History button).** Reason: usable; a key for history would need more keyboard handling than this brief asks.
+- **The grid's JavaScript has no automated test and was not opened in a browser in this run** (no JS test setup in the repo; the app needs the server database to run). Reason: the server-side rules are tested; the owner's first use is the browser check. Check: edit a cell while another tab changes it, then press Escape; type a token and press Enter; add a page and a column.
