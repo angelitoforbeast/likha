@@ -395,3 +395,12 @@ Accepted, not fixed:
 - **Reorder and bulk actions write one history row per task that changed**, so one drag can write many rows. Reason: per-task rows keep each task's history complete and follow the edit rights per task.
 - **`/checklist/manage/history` loads every task (with deleted ones) to apply the edit rule in PHP.** Reason: about 100 tasks; keeps the rule in the one helper the write routes use.
 - **Not seen in a browser** (fields editor at 1366 px, chips, history page). Reason: no browser in this session; listed for the owner's check after release.
+
+## 029: orders counted live, main item fresh, tie days kept (2026-10-16)
+
+- **`/encoder/checker_1/update` and `/encoder/checker_1/update-field` write any column named in the request (already true before this brief).** `bulkUpdate` passes `records[id][…]` straight to `update()`, and `updateField` sets `$record->{$field}`. Reason: outside this brief (only the recompute and cache bump were added). Suggestion for the owner: an allow-list of editable columns.
+- **JNT supply counts orders and proceed per base item ("1 x X" and "2 x X" together)**, as its proceed already did, while `/owner/private` counts the exact item. Reason: the brief asks for orders and proceed from the same query and key, and changing the supply page's proceed key would change its profit numbers. Revisit if supply profit % should follow the exact main item.
+- **An alias save recomputes only the last 90 days of that item.** Reason: same default window as the refresh button; older days follow on the next manual refresh.
+- **Each inline edit of item, COD, status, date or page recomputes one or two days**, inside the request. Reason: one day per page is a few hundred rows; move to a queued job if encoders notice a slower save.
+- **The refresh button's error JSON shows the exception message (already true before this brief).** Reason: CEO-only route; outside this brief.
+- **Untested:** the SQL on real MySQL or pgsql (the suite is sqlite only; the `ts_date` trigger is emulated in one test), the macro import's own recompute (unchanged), and the "tie" marks in a browser (no browser in this run).
