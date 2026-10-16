@@ -13,22 +13,48 @@ use Carbon\Carbon;
 class JntUploadController extends Controller
 {
     /**
-     * Allow only Marketing, Marketing - OIC, and CEO sa /jnt_upload at lahat
-     * ng sub-endpoints. Other roles → 404. Mirrors yung nav-link guard sa
-     * layout.blade.php para consistent kahit i-share/i-direct-access yung URL.
+     * Upload (store): Marketing, Marketing - OIC at CEO lang. Other roles → 404
+     * (Data Encoders → 403). Mirrors yung nav-link visibility para consistent
+     * kahit i-share/i-direct-access yung URL.
      */
     private function checkAccess(): void
     {
-        $raw  = Auth::user()?->employeeProfile?->role ?? '';
-        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+        if (!$this->canUpload()) abort(404);
+    }
+
+    private function canUpload(): bool
+    {
+        $norm = $this->normalizedRole();
         $isCEO       = preg_match('/^ceo$/iu', $norm) === 1;
         $isMOIC      = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $norm) === 1;
         $isMarketing = preg_match('/^marketing$/iu', $norm) === 1;
-        if (!($isCEO || $isMOIC || $isMarketing)) abort(404);
+        return $isCEO || $isMOIC || $isMarketing;
+    }
+
+    /**
+     * Data Encoder at Data Encoder - OIC: tingin lang (page, status, history).
+     * Sa upload sila ay 403, hindi 404, dahil alam na nila na may page ito.
+     */
+    private function isViewOnly(): bool
+    {
+        return preg_match('/^data encoder(\s*[-–—]\s*oic)?$/iu', $this->normalizedRole()) === 1;
+    }
+
+    private function normalizedRole(): string
+    {
+        $raw = Auth::user()?->employeeProfile?->role ?? '';
+        return preg_replace('/\s+/u', ' ', trim((string) $raw));
+    }
+
+    /** Para sa read routes: uploaders + view-only roles. Ibang role → 404. */
+    private function checkViewAccess(): void
+    {
+        if (!($this->canUpload() || $this->isViewOnly())) abort(404);
     }
 
     public function store(Request $request)
     {
+        if ($this->isViewOnly()) abort(403);
         $this->checkAccess();
 
         try {
@@ -104,7 +130,7 @@ $path = $file->storeAs($folder, $filename, $disk);
 
     public function index()
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
 
         // Latest 50 JNT uploads — visible sa lahat. Always renders sa bottom ng page,
         // hindi nawawala kahit may ongoing upload. Updates after own upload via
@@ -120,7 +146,9 @@ $path = $file->storeAs($folder, $filename, $disk);
                 'user_id', 'user_email',
             ]);
 
-        return view('jnt_upload', compact('recentUploads'));
+        $canUpload = $this->canUpload();
+
+        return view('jnt_upload', compact('recentUploads', 'canUpload'));
     }
 
     /**
@@ -129,7 +157,7 @@ $path = $file->storeAs($folder, $filename, $disk);
      */
     public function history()
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
 
         $rows = UploadLog::query()
             ->where('type', 'jnt')
@@ -147,7 +175,7 @@ $path = $file->storeAs($folder, $filename, $disk);
 
     public function status(UploadLog $uploadLog)
     {
-        $this->checkAccess();
+        $this->checkViewAccess();
 
         // Simple JSON status (front-end can poll every 2–5s)
         return response()->json([

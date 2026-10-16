@@ -868,3 +868,16 @@ non-CEO render pass without being edited.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-025.1 | Given a signed-in user opens /jnt/hold, when the page renders, then the heading reads "JNT Hold Item" and not "JNT Hold Items" | feature (view render): `tests/Feature/Jnt/JntHoldHeadingTest.php` | Passed · 2026-10-15 · auto |
+
+## Slice 035 – Data Encoders may view /jnt_upload
+
+### S-035 Data Encoders see the JNT upload page and its history, but cannot upload (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-035.1 | Given a Data Encoder or Data Encoder - OIC (any spacing, case or dash), when they open /jnt_upload, the status and the history, then each answers 200, the page has no upload form, button or date field, and reads "View only" | `tests/Feature/Jnt/JntUploadAccessTest.php` | Passed · 2026-10-16 · auto |
+| S-035.2 | Given a Data Encoder, when they POST /jnt_upload with a file, then 403, no upload log, no stored file, no job | same | Passed · 2026-10-16 · auto |
+| S-035.3 | Given CEO, Marketing or Marketing - OIC, then the form shows and the upload is accepted (201, job queued) | same | Passed · 2026-10-16 · auto |
+| S-035.4 | Given no role or another role, then every /jnt_upload route is 404 and nothing is stored | same | Passed · 2026-10-16 · auto |
+| S-035.5 | Given a Data Encoder or Data Encoder - OIC, then the menu shows the Waybill link to /jnt_upload | same | Passed · 2026-10-16 · auto |
+| S-035.6 | Given the menu migration ran, when it runs again, then no row is added or changed, and the Waybill link is visible to exactly CEO, Marketing, Marketing - OIC and both Data Encoder roles | same | Passed · 2026-10-16 · auto |

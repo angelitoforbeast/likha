@@ -3,6 +3,10 @@
   <x-slot name="heading">UPDATE FROM JNT</x-slot>
 
   <div class="space-y-4 max-w-3xl">
+    {{-- Data Encoders: tingin lang sa history, walang upload form. --}}
+    @if(!$canUpload)
+    <p class="text-sm text-gray-600">View only — hindi puwedeng mag-upload ang role mo rito.</p>
+    @else
     <form id="uploadForm" class="space-y-3" enctype="multipart/form-data" onsubmit="return false;">
       @csrf
       <div class="flex gap-3 items-center">
@@ -49,6 +53,7 @@
         Kapag empty, current date &amp; time ang gagamitin.
       </p>
     </div>
+    @endif
   </div>
 
   {{-- ───────────────────────────────────────────────────────────────────
@@ -167,14 +172,15 @@
       throw new Error(`Non-JSON response (${res.status}): ${text.slice(0, 200)}...`);
     }
 
-    fileInput.addEventListener('change', () => {
+    // Wala ang upload form kapag view only.
+    if (fileInput) fileInput.addEventListener('change', () => {
       btnUpload.disabled = !fileInput.files.length;
       selectedFile.textContent = fileInput.files.length
         ? `Selected: ${fileInput.files[0].name}`
         : '';
     });
 
-    btnUpload.addEventListener('click', async () => {
+    if (btnUpload) btnUpload.addEventListener('click', async () => {
       if (!fileInput.files.length) return;
 
       btnUpload.disabled = true;
