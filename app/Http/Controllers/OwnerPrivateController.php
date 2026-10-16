@@ -656,24 +656,7 @@ class OwnerPrivateController extends Controller
                 CREATE TEMPORARY TABLE _jnt_agg AS
                 SELECT
                     j.waybill_number AS wb,
-                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
-                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
-                    MAX(CASE
-                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1
-                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
-                             AND LOWER(j.status) NOT LIKE '%delivered%'
-                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 1
-                        ELSE 0
-                    END) AS is_for_return,
-                    MAX(CASE
-                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
-                             AND LOWER(j.status) NOT LIKE '%delivered%'
-                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 0
-                        ELSE 1
-                    END) AS is_in_transit,
+                    " . \App\Services\AdDeliveryStatus::jntFlagsSql('mysql') . ",
                     $jaMinTsExpr AS min_submit_ts,
                     COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
                 FROM from_jnts j
@@ -701,24 +684,7 @@ class OwnerPrivateController extends Controller
                 CREATE TEMPORARY TABLE _jnt_agg AS
                 SELECT
                     j.waybill_number AS wb,
-                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
-                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
-                    MAX(CASE
-                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1
-                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
-                             AND LOWER(j.status) NOT LIKE '%delivered%'
-                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 1
-                        ELSE 0
-                    END)::int AS is_for_return,
-                    MAX(CASE
-                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
-                             AND LOWER(j.status) NOT LIKE '%delivered%'
-                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 0
-                        ELSE 1
-                    END)::int AS is_in_transit,
+                    " . \App\Services\AdDeliveryStatus::jntFlagsSql('pgsql') . ",
                     $jaMinTsExpr AS min_submit_ts,
                     COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
                 FROM from_jnts j
@@ -1569,6 +1535,44 @@ class OwnerPrivateController extends Controller
             ->header('X-Cache-Status', $bypassCache ? 'REFRESH' : 'MISS')
             ->header('X-Cache-Key',    $cacheKey)
             ->header('X-Cache-Version', $this->cacheVersion());
+    }
+
+    /**
+     * Delivered / In transit / For return / Returned / RTS% kada campaign, ad set at ad (sa botcake_ad_id ng order)
+     * para sa expand, at ang "Walang ad id" na linya. Patakaran ng data() (orders sa range, J&T sa waybill), kaya
+     * ang campaigns + "Walang ad id" = lahat ng orders ng page.
+     * Isang request para sa lahat ng page ng "Expand all". Read-only.
+     */
+    public function adDelivery(Request $request, \App\Services\AdDeliveryStatus $status)
+    {
+        $this->checkAccess();
+
+        $v = $request->validate([
+            'start_date' => ['required', 'date_format:Y-m-d'],
+            'end_date'   => ['required', 'date_format:Y-m-d', 'after_or_equal:start_date'],
+            'pages'      => ['required', 'array', 'list', 'min:1', 'max:500'],
+            'pages.*'    => ['required', 'string', 'max:255'],
+        ]);
+
+        // Hanggang 92 araw: bawat araw pa ay dagdag na orders na ijo-join sa from_jnts.
+        $days = (new \DateTime($v['start_date']))->diff(new \DateTime($v['end_date']))->days + 1;
+        if ($days > 92) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'end_date' => 'Hanggang 92 araw lang ang range ng Delivered / RTS% sa expand.',
+            ]);
+        }
+
+        // Cache 10 minuto kada (pages, range), kasama ang version ng /owner/private: bagong upload = bagong bilang.
+        $pages = array_values(array_unique($v['pages']));
+        sort($pages, SORT_STRING);
+        $key = 'owner_private:ad_delivery:' . $this->cacheVersion() . ':'
+             . md5(json_encode([$pages, $v['start_date'], $v['end_date']]));
+        $byPage = Cache::remember($key, 600, fn () => $status->forPages($pages, $v['start_date'], $v['end_date']));
+
+        return response()->json([
+            'ok'      => true,
+            'by_page' => (object) $byPage,
+        ]);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

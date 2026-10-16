@@ -14,10 +14,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SharedPagesBasePinTest extends OwnerPrivateTestCase
 {
-    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute. */
+    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute, at ang limang delivery column ng campaigns (ad_delivered … ad_rts_pct) kasama ang "Walang ad id" at "Total ng page (ayon sa order)" na linya ng expand, at ang POST at tanda ng delivery-only na campaign. */
     private const BASE = [
-        '/owner/private' => '07469c675380fee5ddbf9c9c2635fe285fd20b1f',
-        '/owner/column-settings/owner-private' => 'ce0fff4796f1dec01038c2b3d4e9d38b419c17b9',
+        '/owner/private' => '0d8b2f4a8290074a3218d3a14454b5357af4283b',
+        '/owner/column-settings/owner-private' => 'd7d0797a3b814628d30b1424c4b448f6ec22512c',
     ];
 
     protected function setUp(): void

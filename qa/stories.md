@@ -904,3 +904,24 @@ non-CEO render pass without being edited.
 | S-37B.4 | Given the log table is missing, when a quote is saved, then the save still succeeds | `ItemEditLogTest::test_S_37B_4…` | Passed · 2026-10-16 · auto |
 | S-37B.5 | /item/edit-logs: 200 for CEO and Marketing - OIC, 404 for Marketing and others; newest first, 50 per page; filters by item, user, action, from and to date | `ItemEditLogTest::test_S_37B_5…` | Passed · 2026-10-16 · auto |
 | S-37B.6 | /item shows the "🧾 Item logs" link to Marketing - OIC (and CEO view), not to plain Marketing | `ItemEditLogTest::test_S_37B_6…` | Passed · 2026-10-16 · auto |
+
+## Slice 043 – Delivery status and RTS% per campaign, ad set and ad in the /owner/private expand
+
+### S-043 The owner sees which campaign, ad set and ad brings delivered or returned orders (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-043.1 | Given a page's orders in range with ad ids and J&T rows (delivered, returned, for return, in transit), when the delivery counts are read, then each ad shows those counts and RTS% = (returned + for return) / shipped | `AdDeliveryStatusTest::test_S_043_1…` | Passed · 2026-10-17 · auto |
+| S-043.2 | Given an order whose waybill has no J&T row yet, or no waybill, then it counts in no column and not in shipped (as on the page row) | `AdDeliveryStatusTest::test_S_043_2…` | Passed · 2026-10-17 · auto |
+| S-043.3 | Given two ads of one ad set and an ad of another ad set in the same campaign, then the ad set and the campaign rows are the sums of their ads, with RTS% recomputed from the sums; an ad listed under another page name still counts under its campaign | `AdDeliveryStatusTest::test_S_043_3…` | Passed · 2026-10-17 · auto |
+| S-043.4 | Given orders outside the date range or of another page, then they count nowhere for this page | `AdDeliveryStatusTest::test_S_043_4…` | Passed · 2026-10-17 · auto |
+| S-043.5 | Given orders with no ad id, an empty ad id, or an ad id not in ads_manager_reports, then they land in "Walang ad id", and the page total equals the campaigns plus "Walang ad id" | `AdDeliveryStatusTest::test_S_043_5…` | Passed · 2026-10-17 · auto |
+| S-043.6 | Given 40 ads over 3 pages, when the counts are read, then one query reads macro_output and from_jnts, and one reads ads_manager_reports | `AdDeliveryStatusTest::test_S_043_6…` | Passed · 2026-10-17 · auto |
+| S-043.7 | /owner/private/ad-delivery: 200 with the counts for CEO, Marketing - OIC and Marketing; 404 for others; 422 for a bad date or pages that are not a list of names | `AdDeliveryEndpointTest::test_S_043_7…` | Passed · 2026-10-17 · auto |
+| S-043.8 | Given a saved campaigns column config from before the new columns, then the five columns are visible for CEO, Marketing - OIC and Marketing; once a role's saved config hides one, it stays hidden | `AdDeliveryColumnsTest::test_S_043_8…` | Passed · 2026-10-17 · auto |
+| S-043.9 | /owner/private has the five columns in its campaigns column list, fetches the delivery map on expand, and renders the "Walang ad id" line | `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
+| S-043.10 | Given an expanded page with several campaigns and orders without an ad id, then a "Total ng page (ayon sa order)" line follows the campaign rows and "Walang ad id" with the five columns, equal to campaigns + "Walang ad id" (RTS% from the sums), also when the page has no campaign rows | `AdDeliveryStatusTest::test_S_043_10…`, `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
+| S-043.11 | Given a waybill with several J&T rows, then it counts in one bucket only (returned, else delivered, else for return, else in transit): "Picked up" + "Delivered" = Delivered, "For Return" + "Returned" = Returned; delivered + in transit + for return + returned = shipped per ad and per page | `AdDeliveryStatusTest::test_S_043_11…` | Passed · 2026-10-17 · auto |
+| S-043.12 | Given a range over 92 days, then 422 with "Hanggang 92 araw lang …" and the expand shows "—" with that reason; a result is cached 10 minutes per (pages, range) until the /owner/private cache version changes | `AdDeliveryEndpointTest::test_S_043_12…` (2), `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
+| S-043.13 | Given "Expand all" with hundreds of pages, then the list is sent as a POST with the CSRF token, same access as GET | `AdDeliveryEndpointTest::test_S_043_13…`, `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
+| S-043.14 | Given a campaign with orders but no spend in the list, then its row says "walang spend sa range — orders lang, kaya walang ad set sa ilalim" | `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
