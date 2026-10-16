@@ -119,6 +119,20 @@ class SyncAllTest extends BotcakeApiTestCase
         Queue::assertPushed(SyncAllBotcakeCustomersJob::class, 1);
     }
 
+    public function test_editing_cells_does_not_use_up_the_limit_of_the_sync_and_test_buttons(): void
+    {
+        Queue::fake();
+        Http::fake(['botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
+
+        for ($i = 0; $i < 25; $i++) {
+            $this->postJson('/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'sms', 'key' => 'sender', 'value' => 'S' . $i])->assertOk();
+        }
+
+        $this->press()->assertOk();
+        $this->post('/page-settings/sync', ['page_name' => 'Page Uno'])->assertRedirect();
+        $this->post('/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect();
+    }
+
     public function test_a_second_press_during_a_run_starts_nothing(): void
     {
         Queue::fake();

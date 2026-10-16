@@ -249,10 +249,10 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name(
     Route::get('/history', [PageSettingController::class, 'history'])->name('history');
     Route::get('/page-check', [PageSettingController::class, 'pageCheck'])->middleware('throttle:30,1')->name('page-check');
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
-    Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1')->name('test-token');
+    Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1,page-settings-test-token')->name('test-token');
     Route::post('/test-token/one', [PageSettingController::class, 'testTokenJson'])->middleware('throttle:120,1,page-settings-test-one')->name('test-token-one');
-    Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
-    Route::post('/sync-all', [PageSettingController::class, 'syncAll'])->middleware('throttle:10,1')->name('sync-all');
+    Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1,page-settings-sync')->name('sync');
+    Route::post('/sync-all', [PageSettingController::class, 'syncAll'])->middleware('throttle:10,1,page-settings-sync-all')->name('sync-all');
     Route::get('/customers', [BotcakeCustomersController::class, 'index'])->name('customers');
     Route::get('/psid-coverage', [PsidCoverageController::class, 'index'])->name('psid-coverage');
     Route::get('/psid-coverage/orders', [PsidCoverageController::class, 'orders'])->name('psid-coverage.orders');
