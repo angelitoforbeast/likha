@@ -109,18 +109,29 @@ class BotcakeCustomerMatcher
             }, 'id');
 
         // Ang may PSID na pero walang ad id (hal. PSID mula sa lumang sheet, na walang ad id): kunin ang ad_id ng API
-        // customer ng parehong page at PSID. Isang UPDATE para sa buong page; ang PSID ay hindi ginagalaw, at ang may
-        // ad id na ay hindi pinapalitan (sinusuri sa mismong UPDATE). Kailangan ito ng per-ad na report.
+        // customer ng parehong page at PSID. Kailangan ito ng per-ad na report. Plain SELECT muna ng mga id (walang lock),
+        // saka UPDATE ayon sa id, hanggang 1000 bawat isa: hindi nila-lock ng UPDATE ang lahat ng bagong order ng page.
+        // Ang PSID ay hindi ginagalaw, at ang may ad id na ay hindi pinapalitan (sinusuri sa mismong UPDATE).
         if ($hasAdCol) {
             $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source = 'api' AND LOWER($trim(bp.page)) = ?"
                 . " AND bp.psid = macro_output.botcake_psid AND bp.ad_id IS NOT NULL AND bp.ad_id <> ''";
-            $out['ad_filled'] = DB::update(
-                "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY bp.id DESC LIMIT 1)"
-                . ' WHERE LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ? AND ts_date >= ?'
-                . " AND botcake_psid IS NOT NULL AND botcake_psid <> '' AND (botcake_ad_id IS NULL OR botcake_ad_id = '')"
-                . " AND EXISTS ($adSql)",
-                [$key, $key, $since, $key]
-            );
+            $emptyAd = "(botcake_ad_id IS NULL OR botcake_ad_id = '')";
+
+            MacroOutput::query()
+                ->whereRaw('LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ?', [$key])
+                ->where('ts_date', '>=', $since)
+                ->whereNotNull('botcake_psid')->where('botcake_psid', '<>', '')
+                ->whereRaw($emptyAd)
+                ->whereRaw("EXISTS ($adSql)", [$key])
+                ->select('id')
+                ->chunkById(1000, function ($orders) use (&$out, $adSql, $emptyAd, $key) {
+                    $ids = $orders->pluck('id')->all();
+                    $out['ad_filled'] += DB::update(
+                        "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY bp.id DESC LIMIT 1)"
+                        . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ") AND $emptyAd AND EXISTS ($adSql)",
+                        array_merge([$key], $ids, [$key])
+                    );
+                }, 'id');
         }
 
         return $out;

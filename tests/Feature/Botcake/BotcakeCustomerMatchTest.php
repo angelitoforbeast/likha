@@ -106,9 +106,20 @@ class BotcakeCustomerMatchTest extends BotcakeApiTestCase
         $noAd   = $withAd('psid-n', null);
         $noRow  = $withAd('psid-wala', null);
         $old    = $withAd('psid-s', null, now('Asia/Manila')->subDays(31)->toDateString());
+        // Order ng ibang page na may PSID ng customer ng Page Uno: hindi isinusulat ng sync ng Page Uno.
+        $page2  = $this->order('Other Page', 'Buyer', null, 'psid-s');
 
         $m = app(BotcakeCustomerMatcher::class);
+        \Illuminate\Support\Facades\DB::enableQueryLog();
         $counts = $m->matchPage('Page Uno');
+        $updates = collect(\Illuminate\Support\Facades\DB::getQueryLog())->pluck('query')
+            ->filter(fn ($q) => stripos($q, 'update') === 0 && str_contains($q, 'botcake_ad_id'));
+        \Illuminate\Support\Facades\DB::disableQueryLog();
+        $this->assertNotEmpty($updates);
+        foreach ($updates as $q) {
+            $this->assertMatchesRegularExpression('/\bid\s+IN\s*\(/i', $q, 'UPDATE ayon sa id lang, hindi sa buong 30 araw ng page');
+        }
+        $this->assertSame(['psid-s', null], [$page2->fresh()->botcake_psid, $page2->fresh()->botcake_ad_id]);
 
         $got = fn ($o) => [$o->fresh()->botcake_psid, $o->fresh()->botcake_ad_id];
         $this->assertSame(['psid-s', '120250000000000001'], $got($sheet));
