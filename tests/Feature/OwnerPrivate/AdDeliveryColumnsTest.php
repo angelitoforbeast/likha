@@ -1,0 +1,54 @@
+<?php
+
+namespace Tests\Feature\OwnerPrivate;
+
+use App\Http\Controllers\OwnerColumnSettingsController;
+use Illuminate\Support\Facades\DB;
+
+class AdDeliveryColumnsTest extends OwnerPrivateTestCase
+{
+    private const COLS = ['ad_delivered', 'ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct'];
+
+    private function save(array $config): void
+    {
+        DB::table('app_settings')->updateOrInsert(['key' => 'campaigns_cols'], ['value' => json_encode($config), 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    public function test_S_043_8_new_columns_start_visible_for_every_role_of_owner_private(): void
+    {
+        $ctl = new OwnerColumnSettingsController();
+        // naka-save bago pa ang mga bagong column: wala sila sa order
+        $this->save([
+            'order'           => ['on', 'name', 'spend', 'cpp'],
+            'hidden'          => ['cpp'],
+            'visible_by_role' => ['Marketing' => ['name', 'spend'], 'Marketing - OIC' => ['name']],
+        ]);
+
+        foreach (['CEO', 'Marketing', 'Marketing - OIC'] as $role) {
+            $cfg = $ctl->loadConfig('campaigns', $role);
+            $this->assertSame([], array_values(array_intersect(self::COLS, $cfg['hidden'])), $role);
+            $this->assertSame(self::COLS, array_values(array_intersect($cfg['order'], self::COLS)), $role);
+        }
+        $this->assertContains('cpp', $ctl->loadConfig('campaigns', 'CEO')['hidden']);
+        $this->assertContains('cpp', $ctl->loadConfig('campaigns', 'Marketing')['hidden']);   // lumang column: gaya pa rin ng dati
+        $matrix = $ctl->loadConfigMatrix('campaigns');
+        $this->assertSame(self::COLS, array_values(array_intersect($matrix['visible_by_role']['Marketing'], self::COLS)));
+
+        // kapag na-save na kasama ang mga bagong column, ang saved list ng role ang masusunod
+        $this->save([
+            'order'           => array_merge(['on', 'name', 'spend', 'cpp'], self::COLS),
+            'hidden'          => ['ad_rts_pct'],
+            'visible_by_role' => ['Marketing' => ['name', 'ad_delivered'], 'Marketing - OIC' => self::COLS],
+        ]);
+        $this->assertSame(['ad_rts_pct'], array_values(array_intersect(self::COLS, $ctl->loadConfig('campaigns', 'CEO')['hidden'])));
+        $this->assertSame(['ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct'], array_values(array_intersect(self::COLS, $ctl->loadConfig('campaigns', 'Marketing')['hidden'])));
+        $this->assertSame([], array_values(array_intersect(self::COLS, $ctl->loadConfig('campaigns', 'Marketing - OIC')['hidden'])));
+    }
+
+    public function test_S_043_8_nothing_saved_shows_them_to_the_ceo(): void
+    {
+        $cfg = (new OwnerColumnSettingsController())->loadConfig('campaigns', 'CEO');
+        $this->assertSame(self::COLS, array_values(array_intersect($cfg['order'], self::COLS)));
+        $this->assertSame([], array_values(array_intersect(self::COLS, $cfg['hidden'])));
+    }
+}

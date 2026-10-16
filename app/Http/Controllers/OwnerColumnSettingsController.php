@@ -139,6 +139,12 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'profit_pct_7d',    'label' => 'Profit % (7D)'],
             ['id' => 'profit_pct_3d',    'label' => 'Profit % (3D)'],
             ['id' => 'profit_pct_today', 'label' => 'Profit % (Today)'],
+            // J&T status ng orders ng ad (botcake_ad_id) — /owner/private expand lang.
+            ['id' => 'ad_delivered',     'label' => 'Delivered (/owner/private)'],
+            ['id' => 'ad_in_transit',    'label' => 'In transit (/owner/private)'],
+            ['id' => 'ad_for_return',    'label' => 'For return (/owner/private)'],
+            ['id' => 'ad_returned',      'label' => 'Returned (/owner/private)'],
+            ['id' => 'ad_rts_pct',       'label' => 'RTS% (/owner/private)'],
         ],
         // CEO-only Daily Summary view (/owner/private/daily). One row per date.
         // Columns mirror those rendered sa private-daily.blade.php.
@@ -192,6 +198,15 @@ class OwnerColumnSettingsController extends Controller
         ],
     ];
 
+    /**
+     * Mga bagong column na dapat makita agad ng non-CEO roles: habang wala pa sila sa saved order (naka-save
+     * ang config bago sila idinagdag), idinadagdag sila sa naka-save na visible list ng role. Kapag na-save
+     * ulit ang config, ang saved list na ang masusunod (puwede nang itago kada role).
+     */
+    private const VISIBLE_TO_ROLES_UNTIL_SAVED = [
+        'campaigns' => ['ad_delivered', 'ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct'],
+    ];
+
     /** Mga column na CEO lang ang puwedeng makakita — laging hidden sa ibang role. */
     public const CEO_ONLY = ['claude_action', 'claude_reason', 'ceo_action', 'ceo_reason'];
 
@@ -224,6 +239,7 @@ class OwnerColumnSettingsController extends Controller
             'frequency',
             'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
+            'ad_delivered', 'ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct',
         ],
         'daily_summary' => [
             // All columns visible by default — CEO can hide via column-settings.
@@ -762,6 +778,7 @@ class OwnerColumnSettingsController extends Controller
                     }
                 }
                 if (!empty($decoded['visible_by_role']) && is_array($decoded['visible_by_role'])) {
+                    $unsaved = $this->visibleUntilSaved($table, $decoded);
                     foreach (self::NON_CEO_ROLES as $r) {
                         $list = $decoded['visible_by_role'][$r] ?? null;
                         if (is_array($list)) {
@@ -769,7 +786,7 @@ class OwnerColumnSettingsController extends Controller
                             foreach ($list as $id) {
                                 if (is_string($id) && isset($allowedSet[$id])) $clean[] = $id;
                             }
-                            $visibleByRole[$r] = array_values(array_unique($clean));
+                            $visibleByRole[$r] = array_values(array_unique(array_merge($clean, $unsaved)));
                         }
                     }
                 }
@@ -797,6 +814,14 @@ class OwnerColumnSettingsController extends Controller
         }
 
         return ['order' => $order, 'hidden' => array_values(array_unique($hidden))];
+    }
+
+    /** Ang VISIBLE_TO_ROLES_UNTIL_SAVED ng table na wala pa sa saved order. */
+    private function visibleUntilSaved(string $table, array $decoded): array
+    {
+        $ids = self::VISIBLE_TO_ROLES_UNTIL_SAVED[$table] ?? [];
+        if ($ids === [] || empty($decoded['order']) || !is_array($decoded['order'])) return [];
+        return array_values(array_diff($ids, array_filter($decoded['order'], 'is_string')));
     }
 
     /**
@@ -847,6 +872,7 @@ class OwnerColumnSettingsController extends Controller
                     }
                 }
                 if (!empty($decoded['visible_by_role']) && is_array($decoded['visible_by_role'])) {
+                    $unsaved = $this->visibleUntilSaved($table, $decoded);
                     foreach (self::NON_CEO_ROLES as $r) {
                         $list = $decoded['visible_by_role'][$r] ?? [];
                         if (is_array($list)) {
@@ -854,7 +880,7 @@ class OwnerColumnSettingsController extends Controller
                             foreach ($list as $id) {
                                 if (is_string($id) && isset($allowedSet[$id])) $clean[] = $id;
                             }
-                            $visibleByRole[$r] = array_values(array_unique($clean));
+                            $visibleByRole[$r] = array_values(array_unique(array_merge($clean, $unsaved)));
                         }
                     }
                 }
