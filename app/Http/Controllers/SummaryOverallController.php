@@ -352,6 +352,33 @@ class SummaryOverallController extends Controller
             ", $dateFilterBindings);
 
             DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
+        } elseif ($driver === 'sqlite') {
+            // sqlite (tests lang): parehong aggregate, walang STR_TO_DATE at ALTER
+            DB::statement("DROP TABLE IF EXISTS _jnt_agg");
+            DB::statement("
+                CREATE TEMPORARY TABLE _jnt_agg AS
+                SELECT
+                    j.waybill_number AS wb,
+                    MAX(CASE WHEN j.status LIKE 'Delivered%'  THEN 1 ELSE 0 END) AS is_delivered,
+                    MAX(CASE WHEN j.status LIKE 'Returned%'   THEN 1 ELSE 0 END) AS is_returned,
+                    MAX(CASE WHEN j.status LIKE 'For Return%' THEN 1 ELSE 0 END) AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'Delivered%'  THEN 0
+                        WHEN j.status LIKE 'Returned%'   THEN 0
+                        WHEN j.status LIKE 'For Return%' THEN 0
+                        ELSE 1
+                    END) AS is_in_transit,
+                    MIN(COALESCE(j.`$jSubmitColName`, j.created_at)) AS min_submit_ts,
+                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
+                FROM from_jnts j
+                WHERE j.waybill_number IN (
+                    SELECT DISTINCT $moWaybillSql
+                    FROM macro_output mo
+                    $dateWhere
+                    AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
+                )
+                GROUP BY j.waybill_number
+            ", $dateFilterBindings);
         } else {
             // PostgreSQL path
             DB::statement("DROP TABLE IF EXISTS _jnt_agg");
@@ -648,6 +675,9 @@ class SummaryOverallController extends Controller
         if ($driver === 'mysql') {
             $jSubmitDate = "DATE(ja.min_submit_ts)";
             $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)";
+        } elseif ($driver === 'sqlite') {
+            $jSubmitDate = "DATE(ja.min_submit_ts)";
+            $delayDays   = "CAST(julianday($jSubmitDate) - julianday($dateExpr) AS INTEGER)";
         } else {
             $jSubmitDate = "DATE(ja.min_submit_ts)";
             $delayDays   = "($jSubmitDate - $dateExpr)";

@@ -1,0 +1,165 @@
+{
+    "ads_daily": [
+        {
+            "date": "2026-10-01",
+            "page": "Page Beta",
+            "adspent": 400,
+            "orders": 3,
+            "proceed": 3,
+            "cannot_proceed": 0,
+            "odz": 0,
+            "shipped": 2,
+            "delivered": 2,
+            "avg_delay_days": 1.5,
+            "items_display": "Item One",
+            "unit_costs": [
+                400
+            ],
+            "items_with_costs": [
+                {
+                    "label": "Item One",
+                    "cost": "₱420.00",
+                    "cod": "₱1,250.00"
+                }
+            ],
+            "gross_sales": 2500,
+            "shipping_fee": 184,
+            "cod_fee": 37.5,
+            "cod_fee_vat": 4.5,
+            "cogs": 800,
+            "net_profit": 1074,
+            "net_profit_pct": 42.96,
+            "returned": 0,
+            "for_return": 0,
+            "in_transit": 0,
+            "cpp": 133.33333333333334,
+            "proceed_cpp": 133.33333333333334,
+            "rts_pct": 0,
+            "in_transit_pct": 0,
+            "tcpr": 0,
+            "hold": 1,
+            "is_total": false,
+            "all_cod": 2500,
+            "proceed_cod_sum": 3750,
+            "proceed_unit_cost_sum": 1200,
+            "actual_rts_pct": 0,
+            "projected_net_profit": 1988,
+            "projected_net_profit_pct": 53.013333333333335,
+            "_proj_cod_den": 3750
+        },
+        {
+            "date": "2026-10-02",
+            "page": "Page Beta",
+            "adspent": 200,
+            "orders": 1,
+            "proceed": 1,
+            "cannot_proceed": 0,
+            "odz": 0,
+            "shipped": 1,
+            "delivered": 0,
+            "avg_delay_days": 1,
+            "items_display": "Item-One",
+            "unit_costs": [
+                420
+            ],
+            "items_with_costs": [
+                {
+                    "label": "Item-One",
+                    "cost": "₱420.00",
+                    "cod": "₱1,300.00"
+                }
+            ],
+            "gross_sales": 0,
+            "shipping_fee": 70,
+            "cod_fee": 0,
+            "cod_fee_vat": 0,
+            "cogs": 0,
+            "net_profit": -270,
+            "net_profit_pct": -20.76923076923077,
+            "returned": 0,
+            "for_return": 0,
+            "in_transit": 1,
+            "cpp": 200,
+            "proceed_cpp": 200,
+            "rts_pct": 0,
+            "in_transit_pct": 100,
+            "tcpr": 0,
+            "hold": 0,
+            "is_total": false,
+            "all_cod": 1300,
+            "proceed_cod_sum": 1300,
+            "proceed_unit_cost_sum": 420,
+            "actual_rts_pct": 0,
+            "projected_net_profit": 625.1600000000001,
+            "projected_net_profit_pct": 48.089230769230774,
+            "_proj_cod_den": 1300
+        },
+        {
+            "date": "Total",
+            "page": "page beta",
+            "adspent": 600,
+            "orders": 4,
+            "proceed": 4,
+            "cannot_proceed": 0,
+            "odz": 0,
+            "shipped": 3,
+            "delivered": 2,
+            "avg_delay_days": 1.3333333333333333,
+            "items_display": "—",
+            "unit_costs": [],
+            "gross_sales": 2500,
+            "shipping_fee": 254,
+            "cod_fee": 37.5,
+            "cod_fee_vat": 4.5,
+            "cogs": 800,
+            "net_profit": 804,
+            "net_profit_pct": 21.157894736842106,
+            "returned": 0,
+            "for_return": 0,
+            "in_transit": 1,
+            "cpp": 150,
+            "proceed_cpp": 150,
+            "rts_pct": 0,
+            "in_transit_pct": 33.33333333333333,
+            "tcpr": 0,
+            "hold": 1,
+            "is_total": true,
+            "projected_net_profit": null,
+            "projected_net_profit_pct": 51.74574257425743,
+            "actual_rts_pct": 0
+        }
+    ],
+    "actual_rts_pct": 0,
+    "top_summary": [
+        {
+            "key": "filtered",
+            "rangeLabel": "Oct 1 – Oct 2",
+            "adspent": 600,
+            "proceed_cpp": 150,
+            "pn_pct": 51.74574257425743
+        },
+        {
+            "key": "last7",
+            "rangeLabel": "Last 7 Days",
+            "adspent": 400,
+            "proceed_cpp": 133.33333333333334,
+            "pn_pct": 53.013333333333335
+        },
+        {
+            "key": "last3",
+            "rangeLabel": "Last 3 Days",
+            "adspent": 400,
+            "proceed_cpp": 133.33333333333334,
+            "pn_pct": 53.013333333333335
+        },
+        {
+            "key": "last1",
+            "rangeLabel": "Last Day (Oct 2)",
+            "adspent": 200,
+            "proceed_cpp": 200,
+            "pn_pct": 48.089230769230774
+        }
+    ],
+    "target_cpp": 546,
+    "breakeven_cpp": 733.5
+}
