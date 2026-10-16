@@ -14,6 +14,30 @@ Commits (branch `feat/043-ad-delivery-status`, from `develop` at 26d5d4f; not pu
 - `docs: accepted findings of spec 043 in TODO`
 - `fix: the expand partial shared with /item reaches the delivery helpers through $data, so /item shows nothing new and throws nothing; /item render pins updated for the partial (spec 043)`
 - `docs: result for spec 043` (this file)
+- `chore: merge develop (spec 042) into spec 043` (amendment 1)
+- `feat: Total ng page (ayon sa order) line in each expanded page, after the campaigns and Walang ad id, from the same query (spec 043 amendment 1)`
+- `docs: result for spec 043 amendment 1`
+
+## Amendment 1 (2026-10-17)
+
+The amendment is saved, never committed, in the main checkout as `handoff/043-ad-delivery-status/AMENDMENT-1.md`.
+
+- **Keep the order-based count as built.** No code change: orders placed in the filter range, with their J&T status by waybill. The header says "orders <start> → <end>, J&T sa waybill". It does not claim to be the page row's sender-based 60-day RTS%. A comment in the partial says the same.
+- **"Total ng page (ayon sa order)" line.**
+  - In each expanded page it comes after the campaign rows and the "Walang ad id" line, with the same five columns, in bold on a grey band.
+  - Its values are `page` from the same grouped query. That is the sum of every waybill bucket, so campaigns + "Walang ad id" = Total exactly, and RTS% = (returned + for return) / shipped is recomputed from the sums.
+  - A page with no campaign rows shows it as a text line under "Walang ad id", inside the "Walang campaigns…" message.
+  - On `/item`, which includes the same partial, it calls through `$data.adDeliveryTotal`, so nothing shows there.
+  - Code: `adDeliveryTotal()` and `adDeliveryTotalText()` in `private.blade.php`. The two text lines share `_adDeliveryText()`.
+  - Test: `S-043.10` (`AdDeliveryStatusTest::test_S_043_10_total_of_the_page_is_campaigns_plus_walang_ad_id`) uses 3 campaigns, 2 orders without an ad id and 1 with an unknown ad id. Total = (8 shipped, 4 delivered, 1 in transit, 1 for return, 2 returned), RTS% 37.5, all computed by hand. It also checks that campaigns + "Walang ad id" = Total for each of the five counts.
+  - S-043.9 checks that the screen has the line, after "Walang ad id", in the table and in the empty-page text, and that it is guarded by `$data`.
+  - Red run: S-043.9 `Failed asserting that '<!doctype html>…' contains "Total ng page (ayon sa order)"`. S-043.10 passed at once: the service already returned `page`.
+- **Merged `develop` (59b725c, spec 042).**
+  - The only conflict was in `TODO.md`, where both sides had appended a section. I kept both: 042 first, then 043.
+  - `routes/web.php` merged by itself, with both sides' routes kept.
+  - The merge changed no pinned render: `/owner/private` and the eight `/item` hashes were identical before and after it.
+  - The new Total line then changed them. I re-pinned all of them after diffing every render: the only lines that differ are the Total line's markup and functions.
+- **Story:** added S-043.10 to `qa/stories.md`.
 
 No migration, no new table, nothing writes. Plan: `docs/plans/043-ad-delivery-status.md`.
 
@@ -112,6 +136,7 @@ Command: `php.bat vendor/bin/phpunit --filter AdDelivery` (and `SharedPagesBaseP
 | S-043.7 | `AdDeliveryEndpointTest::test_S_043_7_roles_of_owner_private_get_the_counts` (CEO, Marketing - OIC, Marketing), `…_other_roles_get_404` (incl. guest 401), `…_a_bad_query_is_422` (9 data sets) | pass (13 runs) |
 | S-043.8 | `AdDeliveryColumnsTest::test_S_043_8_new_columns_start_visible_for_every_role_of_owner_private`, `…_nothing_saved_shows_them_to_the_ceo` | pass, pass |
 | S-043.9 | `AdDeliveryColumnsTest::test_S_043_9_owner_private_lists_the_columns_and_loads_the_delivery_map_on_expand` | pass |
+| S-043.10 | `AdDeliveryStatusTest::test_S_043_10_total_of_the_page_is_campaigns_plus_walang_ad_id`, plus the Total assertions in `AdDeliveryColumnsTest::test_S_043_9…` | pass |
 | (pins) | `SharedPagesBasePinTest` (2), `SuppliersGroupTest` (/item renders), re-pinned; every diff checked to be only this change | pass |
 
 Red runs:
@@ -123,6 +148,7 @@ Red runs:
 
 ## Suite
 
+**After amendment 1 (merge of develop 59b725c and the Total line):** `php.bat vendor/bin/phpunit` gives `Tests: 1343, Assertions: 16907, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The two that don't pass are again only the known `ExampleTest` (failure) and `ImportStartTest` (error). The 19 tests added by 042 pass.
 `php.bat vendor/bin/phpunit` on the final tree: `Tests: 1324, Assertions: 16694, Errors: 1, Failures: 1, PHPUnit Deprecations: 4, Skipped: 3`. The two that don't pass are the known ones:
 - `ExampleTest::test_the_application_returns_a_successful_response` (failure);
 - `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` (error, fresh worktree).
@@ -168,7 +194,7 @@ All tests under `tests/Feature/OwnerPrivate` pass: 184 tests, 1443 assertions. `
    - Those rows carry no ad id, so they cannot be split per ad.
    - The new columns use `data()`'s rules, as the brief says: orders in the filter range, J&T by waybill, distinct waybills.
    - So campaigns + "Walang ad id" add up exactly to `data()`'s page numbers, but not to the RTS% the owner sees on the page row.
-   - **Decision needed from the owner:** keep this, which is attributable and order-based, or show a page-total line next to it so the two can be compared.
+   - **Decided by the owner (amendment 1):** keep the order-based count, and add a "Total ng page (ayon sa order)" line. Done.
 2. **"A waybill not yet in J&T counts as shipped only, as on the page row":** on the page row (`data()`) it is not shipped at all. See S-043.2.
 3. **"The page's date range from the filter":** the expand's spend metrics use a different window (`anchor_first_date` → end date). The delivery columns use the filter range, and the header says so. The two ranges can differ within one row.
 4. **The spec says to send the plan and wait for "go"; this run did not wait.** The start prompt asked for one run with a plan file and commits per part.
