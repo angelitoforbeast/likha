@@ -736,6 +736,11 @@
          style="background:#1e293b;color:#86efac;border:1px solid #475569;
                 border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
                 cursor:pointer;margin-left:4px;text-decoration:none;">📜 Logs</a>
+      <a href="{{ route('item.edit-logs') }}"
+         title="Who changed what on this page: quotes, category, lead time, photos"
+         style="background:#1e293b;color:#86efac;border:1px solid #475569;
+                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                cursor:pointer;margin-left:4px;text-decoration:none;">🧾 Item logs</a>
       <button id="refreshPrimaryBtn"
               @click="refreshPrimary()"
               :disabled="refreshing"

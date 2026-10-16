@@ -24,11 +24,11 @@ class SuppliersGroupTest extends ItemTestCase
         'default.ceo'              => '73759d0db9b19cd39f7fd7b9e1f6e7142113bf18',
         'default.ceo_as_marketing' => '0e9dcaa0c6da9bda04c4f6a48627ca8bf3e964d5',
         'default.marketing'        => '8b8cfd960cc3b097b5af0b0c51ed049c532c9e91',
-        'default.marketing_oic'    => '4e6889270630193afa8c607ccdced88334395649', // muling na-pin: may supplier work na ang Marketing - OIC
+        'default.marketing_oic'    => 'af3562d183c1e3446e52e969bd98f0a5f21c88cf', // muling na-pin: may supplier work na ang Marketing - OIC
         'old.ceo'                  => '75b0c17366cd7beb8f723d3c7be3b8e151bdda4d', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
         'old.ceo_as_marketing'     => '0dc8775b2c30ea421d392c01fbd96a8314d36f86',
         'old.marketing'            => '8e87611778b9f93a6a269ceae74656d362275aed',
-        'old.marketing_oic'        => '377b24d3b96019e5d0d68900448a6e6978756d6d', // muling na-pin: table na may suppliers para sa Marketing - OIC
+        'old.marketing_oic'        => 'f88d48f6edc05b94351b174562321a20d8c955ae', // muling na-pin: table na may suppliers para sa Marketing - OIC
     ];
 
     protected function setUp(): void
@@ -129,8 +129,17 @@ class SuppliersGroupTest extends ItemTestCase
         $html = (string) preg_replace("/      \/\/ Supplier work \(suppliers, quotes, worklist, category, lead \/ palugit\)[^\n]*\n      canSupplierWork: (true|false),\n/", '', $html, -1, $flags);
         $this->assertSame(1, $flags, 'ang flag ng supplier work sa script');
 
+        // Ang link sa /item/edit-logs: kasama ng 📜 Logs, kaya sa CEO view lang (at Marketing - OIC).
+        $html = str_replace(self::ITEM_LOGS_LINK, '', $html);
+
         return str_replace(['this.canSupplierWork', '(!canSupplierWork ||'], ['this.effectiveIsCeo', '(!effectiveIsCeo ||'], $html);
     }
+
+    private const ITEM_LOGS_LINK = "      <a href=\"APPROOT/item/edit-logs\"\n"
+        . "         title=\"Who changed what on this page: quotes, category, lead time, photos\"\n"
+        . "         style=\"background:#1e293b;color:#86efac;border:1px solid #475569;\n"
+        . "                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;\n"
+        . "                cursor:pointer;margin-left:4px;text-decoration:none;\">🧾 Item logs</a>\n";
 
     private function hash(string $viewer, bool $old): string
     {

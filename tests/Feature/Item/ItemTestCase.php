@@ -97,6 +97,7 @@ abstract class ItemTestCase extends TestCase
             'database/migrations/2026_10_02_100300_add_palugit_override_to_supply_item_settings.php',
             'database/migrations/2026_10_02_100400_seed_item_palugit_settings.php',
             'database/migrations/2026_10_02_100500_hide_category_column_owner_private.php',
+            'database/migrations/2026_10_16_300000_create_item_edit_logs_table.php',
         ];
     }
 

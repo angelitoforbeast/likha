@@ -1067,6 +1067,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/item/quotes/delete', [\App\Http\Controllers\ItemController::class, 'quoteDelete'])->middleware('throttle:60,1')->name('item.quotes.delete');
     Route::post('/item/category',        [\App\Http\Controllers\ItemController::class, 'categorySave'])       ->middleware('throttle:60,1')->name('item.category.save');
     Route::post('/item/supply-settings', [\App\Http\Controllers\ItemController::class, 'supplySettingsSave']) ->middleware('throttle:60,1')->name('item.supply-settings.save');
+    // Item edit logs (CEO + Marketing - OIC): sino ang nag-edit ng ano sa /item, luma → bago
+    Route::get ('/item/edit-logs',     [\App\Http\Controllers\ItemController::class, 'editLogs'])          ->name('item.edit-logs');
     Route::post('/item/image/delete', [\App\Http\Controllers\ItemController::class, 'deleteImage'])->middleware('throttle:60,1')->name('item.image.delete');
 
     // ── /astra — in-site AI chat (OpenAI via server-side proxy; key sa .env lang).
