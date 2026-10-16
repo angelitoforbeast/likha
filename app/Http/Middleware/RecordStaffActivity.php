@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Http\Controllers\Auth\LoginController;
 use App\Support\StaffEvents;
 use Closure;
 use Illuminate\Http\Request;
@@ -20,12 +21,16 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Route name, method, status at id lang ang naitatala: hindi binabasa ang body o ang query string, kaya walang
  * customer data, password o pera na pumapasok. Ang CSRF failure (419) ay hindi umaabot sa event. Ang login at
- * logout POST ay hindi dito naitatala (iba ang user bago at pagkatapos): ang StaffLoginActivity listener ang bahala.
+ * logout POST ay hindi kailanman dito naitatala, kahit naka-login na ang session bago mag-login ulit (pareho ang user
+ * bago at pagkatapos): ang StaffLoginActivity listener ang bahala sa mga iyon.
  * Hindi kailanman nagtatapon ng error sa request.
  */
 class RecordStaffActivity
 {
     private const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+
+    /** Ang login at logout action: ang listener ang nagtatala ng mga ito bilang `login` / `logout`. */
+    private const AUTH_ACTIONS = [LoginController::class . '@login', LoginController::class . '@logout'];
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -42,7 +47,8 @@ class RecordStaffActivity
             $status = $response->getStatusCode();
             if ($userBefore !== null && $userBefore === $userAfter
                 && in_array($request->getMethod(), self::WRITE_METHODS, true)
-                && $status >= 200 && $status < 400) {
+                && $status >= 200 && $status < 400
+                && !$this->isLoginOrLogout($request)) {
                 [$kind, $ref] = $this->describe($request);
                 StaffEvents::record($userBefore, $kind, $request->getMethod(), $status, $ref);
             }
@@ -62,6 +68,13 @@ class RecordStaffActivity
         }
 
         return $id === null ? null : (int) $id;
+    }
+
+    private function isLoginOrLogout(Request $request): bool
+    {
+        $route = $request->route();
+
+        return $route instanceof Route && in_array($route->getActionName(), self::AUTH_ACTIONS, true);
     }
 
     private function touchLastSeen(int $userId, Request $request): void

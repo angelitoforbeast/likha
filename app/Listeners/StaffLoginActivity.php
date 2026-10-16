@@ -25,6 +25,15 @@ class StaffLoginActivity
         } catch (\Throwable $e) {
             Log::warning('StaffLoginActivity: hindi na-update ang last_login_at', ['error' => $e->getMessage()]);
         }
+        // Dalawang beses nagpapaputok ng Login event ang login ng CEO sa iisang request (attempt, tapos
+        // Auth::login na may remember cookie): isang `login` row lang kada user kada request.
+        $attributes = request()->attributes;
+        $key = "staff_login_recorded:{$userId}";
+        if ($attributes->has($key)) {
+            return;
+        }
+        $attributes->set($key, true);
+
         StaffEvents::record($userId, 'login', request()->getMethod());
     }
 
