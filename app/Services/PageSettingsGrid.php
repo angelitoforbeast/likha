@@ -8,6 +8,7 @@ use App\Models\PageSetting;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -34,7 +35,13 @@ class PageSettingsGrid
     {
     }
 
-    /** Ang buong grid: columns, rows (kada page, ayon sa pangalan) at ang oras na gagamitin sa susunod na poll. */
+    /** Ilang segundo naka-cache ang bilang ng orders kada page (mabigat na query; hindi ito pinapatakbo ng poll). */
+    public const ORDER_COUNT_TTL = 600;
+
+    /**
+     * Ang buong grid: columns, rows at ang oras na gagamitin sa susunod na poll. Rows = mga page na may order sa huling
+     * N araw (pinakamaraming order muna), saka ang mga page na may settings pero walang order sa window (ayon sa pangalan).
+     */
     public function build(): array
     {
         $now    = $this->now();
@@ -48,15 +55,62 @@ class PageSettingsGrid
             $rows[$pk]['cells'][$s->fullKey()] = $this->cell($s, $names);
         }
 
+        // Ang page na may order pero walang settings: walang lamang cells, gaya ng row mula sa "+ Page".
+        $orders = $this->orderCounts();
+        foreach ($orders as $pk => $o) {
+            $rows[$pk] ??= ['key' => $pk, 'name' => $o['name'], 'cells' => []];
+        }
+
         $info = $this->info(array_keys($rows));
         foreach ($rows as $pk => &$row) {
-            $row['info'] = $this->rowInfo($row['cells'], $info, $pk);
+            $row['info'] = $this->rowInfo($row['cells'], $info, $pk) + ['orders' => $orders[$pk]['orders'] ?? 0];
         }
         unset($row);
 
-        uasort($rows, fn ($a, $b) => strnatcasecmp($a['name'], $b['name']));
+        uasort($rows, fn ($a, $b) => ($b['info']['orders'] <=> $a['info']['orders']) ?: strnatcasecmp($a['name'], $b['name']));
 
-        return ['columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now, 'sync_lock' => $this->syncLock()];
+        return [
+            'columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now,
+            'sync_lock' => $this->syncLock(), 'order_days' => $this->orderDays(),
+        ];
+    }
+
+    public function orderDays(): int
+    {
+        return max(1, (int) config('services.botcake.grid_order_days', 30));
+    }
+
+    /**
+     * Bilang ng orders kada page sa huling N araw (ts_date), sa isang grouped query na naka-cache nang 10 minuto.
+     * Pinagsasama ang mga baybay na pareho ang pageKey; ang pangalan ay ang pinakamadalas na baybay. Blangkong PAGE = wala.
+     * @return array<string, array{name:string, orders:int}> pageKey => pangalan at bilang
+     */
+    private function orderCounts(): array
+    {
+        $days = $this->orderDays();
+
+        return Cache::remember('page-settings-grid:orders:' . $days, self::ORDER_COUNT_TTL, function () use ($days) {
+            $counts = DB::table('macro_output')
+                ->where('ts_date', '>=', now('Asia/Manila')->subDays($days)->toDateString())
+                ->whereNotNull('PAGE')
+                ->select('PAGE')->selectRaw('COUNT(*) AS n')->groupBy('PAGE')->get();
+
+            $out = [];
+            $spellings = [];
+            foreach ($counts as $c) {
+                $name = $this->settings->normPage((string) $c->PAGE);
+                if ($name === '') continue;
+                $pk = $this->settings->pageKey($name);
+                $out[$pk] = ['name' => $name, 'orders' => ($out[$pk]['orders'] ?? 0) + (int) $c->n];
+                $spellings[$pk][$name] = ($spellings[$pk][$name] ?? 0) + (int) $c->n;
+            }
+            foreach ($spellings as $pk => $byName) {
+                arsort($byName);
+                $out[$pk]['name'] = (string) array_key_first($byName);
+            }
+
+            return $out;
+        });
     }
 
     /**

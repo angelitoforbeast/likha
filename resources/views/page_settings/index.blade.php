@@ -99,6 +99,7 @@
     const url = box.dataset;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const POLL_MS = 5000, PAUSE_MS = 1500;
+    const ORDERS_LABEL = @json('Orders (' . $grid['order_days'] . ' araw)');
 
     let columns = initial.columns;
     const rows = new Map(initial.rows.map(r => [r.key, r]));
@@ -133,7 +134,8 @@
         const q = document.getElementById('filter').value.trim().toLowerCase();
         return [...rows.values()]
             .filter(r => !q || r.name.toLowerCase().includes(q))
-            .sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true, sensitivity: 'base'}));
+            // Pinakamaraming order muna; ang walang order sa window ay nasa ibaba, ayon sa pangalan.
+            .sort((a, b) => ((b.info.orders || 0) - (a.info.orders || 0)) || a.name.localeCompare(b.name, undefined, {numeric: true, sensitivity: 'base'}));
     }
 
     function ensureColumn(key, secret) {
@@ -148,7 +150,7 @@
 
     function ensureRow(pk, name) {
         if (rows.has(pk)) return false;
-        rows.set(pk, {key: pk, name, cells: {}, info: {customers: 0, last_sync: null, botcake: false}});
+        rows.set(pk, {key: pk, name, cells: {}, info: {customers: 0, last_sync: null, botcake: false, orders: 0}});
         return true;
     }
 
@@ -164,21 +166,24 @@
                 c.label,
                 c.readonly ? el('span', {class: 'ml-1 text-gray-400', text: '(system)'}) : null,
             ])),
+            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: ORDERS_LABEL}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r', text: 'Customers'}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Huling sync'}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b', text: ''}),
         ]);
 
-        const body = sortedRows().map(r => el('tr', {class: 'hover:bg-blue-50/40', 'data-pk': r.key}, [
-            el('td', {class: 'sticky-col bg-white px-3 py-1 border-b border-r font-medium whitespace-nowrap', text: r.name}),
+        // Walang order sa window: naka-gray ang buong row (maaari pa ring i-edit; hindi nawawala ang settings).
+        const body = sortedRows().map(r => el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
+            el('td', {class: 'sticky-col ' + (r.info.orders ? 'bg-white' : 'bg-gray-50') + ' px-3 py-1 border-b border-r font-medium whitespace-nowrap', text: r.name}),
             ...columns.map(c => cellTd(r, c)),
+            el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'orders'}, String(r.info.orders || 0)),
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'customers'}, infoCustomers(r)),
             el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}, infoSync(r)),
             el('td', {class: 'px-3 py-1 border-b whitespace-nowrap'}, actions(r)),
         ]));
 
         table.replaceChildren(el('thead', {}, head), el('tbody', {}, body.length ? body
-            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 4), text: 'Wala pang page. Gamitin ang + Page.'}))));
+            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 5), text: 'Wala pang page. Gamitin ang + Page.'}))));
     }
 
     function cellTd(row, col) {

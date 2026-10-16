@@ -81,6 +81,8 @@ return [
         'sync_max_batches' => (int) env('BOTCAKE_SYNC_MAX_BATCHES', 300),
         // Hanggang ilang araw pabalik ang binabasa (date_subscribed_at); humihinto ang sync sa unang mas lumang customer.
         'sync_max_age_days' => (int) env('BOTCAKE_SYNC_MAX_AGE_DAYS', 45),
+        // /page-settings: rows = mga page na may order sa huling ilang araw (ts_date), saka ang mga may settings.
+        'grid_order_days' => (int) env('BOTCAKE_GRID_ORDER_DAYS', 30),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
