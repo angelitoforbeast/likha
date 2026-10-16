@@ -77,17 +77,19 @@ class PageSettingController extends Controller
             return response()->json(['error' => reset($errors)], 422);
         }
 
-        $trim    = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $current = PageSetting::whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])
-            ->where('provider', $provider)->where('key', $key)->where('active', true)->orderByDesc('id')->first();
-        $secret  = $request->boolean('is_secret') || (bool) $current?->is_secret;
+        $actives = $this->settings->pageQuery($page)->where('provider', $provider)->where('key', $key)
+            ->where('active', true)->orderByDesc('id')->get();
+        $current = $actives->first();
+        // Secret ang column kapag secret na ito sa alinmang page, hindi lang kapag sinabi ng browser.
+        $secret  = $request->boolean('is_secret')
+            || PageSetting::where('provider', $provider)->where('key', $key)->where('active', true)->where('is_secret', true)->exists();
 
         if ($request->boolean('clear') || ($value === '' && !$secret)) {
             if (!$current) return response()->json(['status' => 'unchanged', 'cell' => null]);
             if (in_array($provider . '.' . $key, PageSettings::SYSTEM_KEYS, true)) {
                 return response()->json(['error' => 'Ang ' . $provider . '.' . $key . ' ay isinusulat ng system.'], 422);
             }
-            $this->settings->deactivate($current, Auth::id());
+            foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());
             return response()->json(['status' => 'cleared', 'cell' => null]);
         }
 
@@ -128,6 +130,7 @@ class PageSettingController extends Controller
 
         return response()->json([
             'name'      => $name,
+            'key'       => $this->settings->pageKey($name),
             'in_orders' => MacroOutput::whereRaw("LOWER($trim($col)) = ?", [$this->settings->pageKey($name)])->exists(),
         ]);
     }

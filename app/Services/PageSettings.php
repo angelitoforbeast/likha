@@ -30,7 +30,7 @@ class PageSettings
         return mb_strtolower($this->normPage($page), 'UTF-8');
     }
 
-    protected function pageQuery(string $page)
+    public function pageQuery(string $page)
     {
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         return PageSetting::whereRaw("LOWER($trim(page_name)) = ?", [$this->pageKey($page)]);
@@ -48,6 +48,7 @@ class PageSettings
         $full     = $provider . '.' . $key;
 
         if ($this->normPage($page) === '') return ['page_name' => 'Kailangan ang page.'];
+        if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: hanggang 255 na character lang.'];
         if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: maliliit na letra, numero at _ lang.'];
         if (strlen($key) > 100 || !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key)) {
             return ['key' => 'Key: maliliit na letra, numero, _ at . lang (hal. flow.on_delivery).'];

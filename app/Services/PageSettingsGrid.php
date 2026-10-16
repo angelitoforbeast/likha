@@ -87,9 +87,7 @@ class PageSettingsGrid
     /** Ang dating values ng isang cell (pinalitan o na-clear), pinakabago muna. Secret = huling 4 lang. */
     public function history(string $page, string $provider, string $key): array
     {
-        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $rows = PageSetting::whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])
-            ->where('provider', strtolower(trim($provider)))->where('key', strtolower(trim($key)))
+        $rows = $this->settings->pageQuery($page)->where('provider', strtolower(trim($provider)))->where('key', strtolower(trim($key)))
             ->where('active', false)->orderByDesc('id')->limit(50)->get();
         $names = $this->userNames($rows);
 
@@ -112,9 +110,13 @@ class PageSettingsGrid
         ];
     }
 
+    /**
+     * Ang "since" ng susunod na poll. Segundo lang ang created_at, at maaaring ma-commit ang save pagkatapos ng query
+     * ngunit may naunang segundo: kaya 2 segundong overlap. Ang naulit na cell ay walang pinsala.
+     */
     private function now(): string
     {
-        return now()->format('Y-m-d H:i:s');
+        return now()->subSeconds(2)->format('Y-m-d H:i:s');
     }
 
     private function columns(Collection $active): array

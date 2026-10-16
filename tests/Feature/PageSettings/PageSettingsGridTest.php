@@ -110,6 +110,9 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         // Ang free secret key ay nananatiling secret kahit hindi ipinadala ang is_secret.
         $this->cell(['page_name' => 'Page Uno', 'provider' => 'sms', 'key' => 'api_key', 'value' => 'sms-secret-new-88zz'])->assertOk();
         $this->assertNotSame('sms-secret-new-88zz', PageSetting::where('key', 'api_key')->where('active', true)->value('value'));
+        // Secret din sa bagong page: may active na secret ang column na ito sa ibang page.
+        $this->cell(['page_name' => 'Page Dos', 'provider' => 'sms', 'key' => 'api_key', 'value' => 'sms-secret-dos-55kk', 'is_secret' => false])
+            ->assertOk()->assertJsonPath('cell.value', '••••55kk');
 
         $since = now()->subMinute()->format('Y-m-d H:i:s');
         $bodies = [
@@ -149,6 +152,12 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->settings()->set('Page Uno', 'botcake', 'token', self::TOKEN);
         $this->cell(['page_name' => 'Page Uno', 'key' => 'token', 'clear' => true])->assertOk()->assertJsonPath('status', 'cleared');
         $this->assertNull($this->settings()->get('Page Uno', 'botcake', 'token'));
+
+        // Dalawang active na row (sabay na unang save): ang clear ay nagbubura sa lahat, walang bumabalik na luma.
+        PageSetting::create(['page_name' => 'Page Uno', 'provider' => 'botcake', 'key' => 'flow.broadcast', 'value' => '701', 'active' => true]);
+        PageSetting::create(['page_name' => 'Page Uno', 'provider' => 'botcake', 'key' => 'flow.broadcast', 'value' => '702', 'active' => true]);
+        $this->cell(['page_name' => 'Page Uno', 'key' => 'flow.broadcast', 'value' => ''])->assertOk()->assertJsonPath('status', 'cleared');
+        $this->assertNull($this->settings()->get('Page Uno', 'botcake', 'flow.broadcast'));
     }
 
     public function test_a_new_page_and_a_new_column_exist_once_a_value_is_entered(): void
@@ -156,7 +165,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->order('Page Uno', 'Ana Cruz');
 
         $this->getJson('/page-settings/page-check?page_name=' . urlencode('  page   uno '))
-            ->assertOk()->assertJson(['name' => 'page uno', 'in_orders' => true]);
+            ->assertOk()->assertJson(['name' => 'page uno', 'key' => 'page uno', 'in_orders' => true]);
         $this->getJson('/page-settings/page-check?page_name=Page%20Wala')
             ->assertOk()->assertJson(['name' => 'Page Wala', 'in_orders' => false]);
         $this->getJson('/page-settings/page-check?page_name=%20')->assertStatus(422);
@@ -170,6 +179,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertContains('viber.bot_uri', array_column($grid['columns'], 'key'));
 
         $this->cell(['page_name' => 'Page Wala', 'provider' => 'Bad Provider!', 'key' => 'x', 'value' => '1'])->assertStatus(422);
+        $this->cell(['page_name' => str_repeat('P', 256), 'key' => 'page_id', 'value' => '1'])->assertStatus(422);
     }
 
     public function test_polling_returns_only_the_cells_changed_since_the_timestamp(): void
@@ -182,7 +192,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
         Carbon::setTestNow('2026-10-17 09:05:00');
         $since = $this->getJson('/page-settings/grid')->assertOk()->json('now');
-        $this->assertSame('2026-10-17 09:05:00', $since);
+        $this->assertSame('2026-10-17 09:04:58', $since, 'may 2 segundong overlap para walang makalusot na save');
 
         Carbon::setTestNow('2026-10-17 09:06:00');
         $s->set('Page Uno', 'botcake', 'page_id', '1111');
@@ -202,7 +212,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertNull($cells['page uno|botcake.flow.on_delivery']['cell'], 'na-clear');
         $this->assertSame('••••qq7z', $cells['page tres|botcake.token']['cell']['value']);
         $this->assertSame('Page Tres', $cells['page tres|botcake.token']['name']);
-        $this->assertSame('2026-10-17 09:07:00', $res->json('now'));
+        $this->assertSame('2026-10-17 09:06:58', $res->json('now'));
         $this->assertStringNotContainsString(self::TOKEN, $res->getContent());
 
         $this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 09:07:00'))->assertOk()->assertJsonPath('cells', []);

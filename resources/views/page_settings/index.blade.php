@@ -101,7 +101,6 @@
     let needsRender = false;
     const marks = new Map(); // "pk|key" → {text, cls, title}
 
-    const pageKey = name => name.trim().replace(/\s+/g, ' ').toLowerCase();
     const cellId = (pk, key) => pk + '|' + key;
 
     function el(tag, attrs = {}, children = []) {
@@ -174,6 +173,7 @@
     function cellTd(row, col) {
         const td = el('td', {class: 'cell px-3 py-1 border-b border-r align-top min-w-[9rem]' + (col.readonly ? ' readonly bg-gray-50 text-gray-600' : ''),
             'data-pk': row.key, 'data-key': col.key});
+        if (!col.readonly) td.tabIndex = 0;
         paint(td, row, col);
         return td;
     }
@@ -251,6 +251,15 @@
         startEdit(td, rows.get(pk), col);
     });
 
+    // Keyboard: Tab papunta sa cell, Enter o F2 para mag-edit, Enter ulit para i-save, Escape para hindi ituloy.
+    table.addEventListener('keydown', e => {
+        const td = e.target;
+        if (!td.matches || !td.matches('td.cell') || (e.key !== 'Enter' && e.key !== 'F2')) return;
+        e.preventDefault();
+        const col = columns.find(c => c.key === td.dataset.key);
+        if (!col.readonly) startEdit(td, rows.get(td.dataset.pk), col);
+    });
+
     function startEdit(td, row, col) {
         if (editing) finishEdit(true);
         const cell = row.cells[col.key];
@@ -270,8 +279,8 @@
             if (!secret) editing.timer = setTimeout(() => save(editing), PAUSE_MS);
         });
         input.addEventListener('keydown', ev => {
-            if (ev.key === 'Enter') { ev.preventDefault(); finishEdit(true); }
-            if (ev.key === 'Escape') { ev.preventDefault(); finishEdit(false); }
+            if (ev.key === 'Enter') { ev.preventDefault(); finishEdit(true); td.focus(); }
+            if (ev.key === 'Escape') { ev.preventDefault(); finishEdit(false); td.focus(); }
         });
         input.addEventListener('blur', () => { if (editing && editing.input === input) finishEdit(true); });
     }
@@ -280,6 +289,10 @@
         const ed = editing;
         if (!ed) return;
         clearTimeout(ed.timer);
+        if ('server' in ed) {
+            const row = rows.get(ed.pk);
+            if (ed.server) row.cells[ed.key] = ed.server; else delete row.cells[ed.key];
+        }
         editing = null;
         if (doSave) save(ed);
         if (needsRender) render(); else repaint(ed.pk, ed.key);
@@ -333,7 +346,11 @@
                 structure = ensureRow(c.page, c.name) || structure;
                 if (c.cell) structure = ensureColumn(c.key, c.cell.secret) || structure;
                 const row = rows.get(c.page);
-                if (editing && editing.pk === c.page && editing.key === c.key) continue;
+                if (editing && editing.pk === c.page && editing.key === c.key) {
+                    // Itatabi; ilalapat pagkatapos ng edit kung walang bagong value na nai-save.
+                    editing.server = c.cell;
+                    continue;
+                }
                 if (c.cell) row.cells[c.key] = c.cell; else delete row.cells[c.key];
                 row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
                 if (!structure) repaint(c.page, c.key);
@@ -402,7 +419,7 @@
         const res = await fetch(url.pageCheckUrl + '?' + new URLSearchParams({page_name: input.value}), {headers: {'Accept': 'application/json'}});
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { notice(data.error || 'Hindi naidagdag.', 'text-red-600'); return; }
-        const pk = pageKey(data.name);
+        const pk = data.key;
         const added = ensureRow(pk, data.name);
         input.value = '';
         notice(
