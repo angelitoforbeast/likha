@@ -27,6 +27,8 @@
         <span x-text="endDate"></span>
         · all campaigns with spend
       </span>
+      <span style="margin-left:6px;color:#65676b;"
+            x-text="'· Delivered / In transit / For return / Returned / RTS%: orders ' + fmtMD(startDate) + ' → ' + fmtMD(endDate) + ' (gaya ng page row)'"></span>
     </div>
     <button class="expand-close" @click="togglePageExpand(row.page_name)">✕ Close</button>
   </div>
@@ -70,7 +72,7 @@
           {{-- Campaign row --}}
           <tr>
             <td style="text-align:center;padding:8px 4px 8px 10px;">
-              <button @click="toggleCampaignExpand(c.campaign_id, row.page_name)"
+              <button x-show="!c._delivery_only" @click="toggleCampaignExpand(c.campaign_id, row.page_name)"
                       style="background:none;border:none;cursor:pointer;color:#65676b;font-size:11px;line-height:1;padding:2px;"
                       :title="(expandedCampaigns[c.campaign_id] || {}).open ? 'Hide ad sets' : 'Show ad sets'"
                       x-text="(expandedCampaigns[c.campaign_id] || {}).open ? '▼' : '▶'"></button>
@@ -406,6 +408,26 @@
             </td>
           </tr>
 
+        </tbody>
+      </template>
+
+      {{-- Orders ng page na walang ad id (o ad id na wala sa ads_manager_reports): campaigns + ito = page row. --}}
+      <template x-if="adDeliveryNoAd(row.page_name)">
+        <tbody style="border-top:2px solid #cbd5e1;background:#f8fafc;">
+          <tr>
+            <td></td>
+            <template x-for="col in visibleCampaignsCols()" :key="'ec-n-'+col.id">
+              <td :class="(col.align==='right' ? 'num' : '')">
+                <template x-if="col.type==='name'"><span style="font-style:italic;color:#475569;">Walang ad id</span></template>
+                <template x-if="col.id.startsWith('ad_') && col.type==='integer'">
+                  <span x-text="num(adDeliveryNoAd(row.page_name)[col.id])"></span>
+                </template>
+                <template x-if="col.id.startsWith('ad_') && col.type==='percent'">
+                  <span x-text="adDeliveryNoAd(row.page_name)[col.id] != null ? (Number(adDeliveryNoAd(row.page_name)[col.id]).toFixed(1) + '%') : '—'"></span>
+                </template>
+              </td>
+            </template>
+          </tr>
         </tbody>
       </template>
     </table>

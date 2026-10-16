@@ -2029,6 +2029,7 @@
       expandedPages: {},      // page_name → { open, loading, error, campaigns:[] }
       expandedCampaigns: {},  // campaign_id → { open, loading, error, adsets:[] }
       expandedAdSets: {},     // ad_set_id   → { open, loading, error, ads:[] }
+      adDelivery: {},         // page_name → { campaigns, adsets, ads, no_ad, page } (null = hindi nakuha)
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
@@ -3266,6 +3267,12 @@
           { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
           { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },
           { id:'purchases',      label:'Purchases',        sort:null,             type:'integer',      align:'right', minw:100 },
+          // J&T status ng orders ng ad (botcake_ad_id), parehong range ng page row — galing sa /owner/private/ad-delivery.
+          { id:'ad_delivered',   label:'Delivered',        sort:null,             type:'integer',      align:'right', minw:80  },
+          { id:'ad_in_transit',  label:'In transit',       sort:null,             type:'integer',      align:'right', minw:80  },
+          { id:'ad_for_return',  label:'For return',       sort:null,             type:'integer',      align:'right', minw:80  },
+          { id:'ad_returned',    label:'Returned',         sort:null,             type:'integer',      align:'right', minw:80  },
+          { id:'ad_rts_pct',     label:'RTS%',             sort:null,             type:'percent',      align:'right', minw:70  },
         ];
       },
       visibleCampaignsCols(){
@@ -3360,6 +3367,67 @@
         return j;
       },
 
+      // Delivery status kada campaign / ad set / ad ng mga page (isang request, parehong range ng page row:
+      // startDate..endDate, hindi ang anchor window ng spend). Hindi sinisira ang expand kapag pumalya:
+      // null ang page = "—" ang mga column.
+      async _fetchAdDelivery(pageNames){
+        const qs = new URLSearchParams({ start_date: this.startDate, end_date: this.endDate });
+        for (const p of pageNames) qs.append('pages[]', p);
+        try {
+          const res = await fetch('{{ route('owner.private.ad-delivery') }}?' + qs.toString(), { headers: { 'Accept': 'application/json' } });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const j = await res.json();
+          const byPage = (j && j.by_page) || {};
+          for (const p of pageNames) {
+            this.adDelivery[p] = byPage[p] || { campaigns: {}, adsets: {}, ads: {}, no_ad: null, page: null };
+          }
+        } catch (e) {
+          console.warn('[ad-delivery] failed:', e);
+          for (const p of pageNames) this.adDelivery[p] = null;
+        }
+      },
+
+      // Ilagay ang ad_* na value sa rows ng isang level ('campaigns' | 'adsets' | 'ads') mula sa delivery map.
+      _applyAdDelivery(pageName, rows, level){
+        const map = this.adDelivery[pageName];
+        if (!map || !Array.isArray(rows)) return rows;
+        for (const r of rows) {
+          const c = level === 'campaigns' ? ((map.campaigns || {})[r.campaign_id] || {}).counts
+                  : level === 'adsets'    ? (map.adsets || {})[r.ad_set_id]
+                  :                         (map.ads || {})[r.ad_id];
+          Object.assign(r, this._adDeliveryCols(c));
+        }
+        return rows;
+      },
+      _adDeliveryCols(c){
+        return {
+          ad_delivered:  c ? c.delivered  : 0,
+          ad_in_transit: c ? c.in_transit : 0,
+          ad_for_return: c ? c.for_return : 0,
+          ad_returned:   c ? c.returned   : 0,
+          ad_rts_pct:    c ? c.rts_pct    : null,
+        };
+      },
+      // Campaign na may orders pero wala sa listahan (walang spend sa window, o nasa ibang page name ang
+      // campaign): idinadagdag bilang delivery-only na row para nagsusuma pa rin sa page row.
+      _withDeliveryOnlyCampaigns(pageName, campaigns){
+        const map = this.adDelivery[pageName];
+        if (!map) return campaigns;
+        const listed = new Set(campaigns.map(c => String(c.campaign_id)));
+        for (const [id, c] of Object.entries(map.campaigns || {})) {
+          if (listed.has(String(id))) continue;
+          campaigns.push(Object.assign({
+            campaign_id: id, campaign_name: c.name || '', page_name: pageName, on: false, _delivery_only: true,
+          }, this._adDeliveryCols(c.counts)));
+        }
+        return campaigns;
+      },
+      // Ang "Walang ad id" na linya ng page (null kapag walang nakuhang delivery map).
+      adDeliveryNoAd(pageName){
+        const map = this.adDelivery[pageName];
+        return map ? this._adDeliveryCols(map.no_ad) : null;
+      },
+
       // Compute profit% per campaign using parent page row's data.
       // Inputs: campaign's cpp + parent.price/rts_pct/item_value + window.__FEES__
       // Formula:
@@ -3438,6 +3506,7 @@
           }
         }
         if (pages.length === 0) return;
+        const deliveryLoad = this._fetchAdDelivery(pages.map(p => p.name));
 
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const res = await fetch('{{ route('ads_manager.campaigns.batch-data') }}', {
@@ -3458,6 +3527,7 @@
         if (!res.ok) throw new Error('Batch HTTP ' + res.status);
         const j = await res.json();
         if (!j || !j.ok || !j.by_page) throw new Error('Invalid batch response');
+        await deliveryLoad;
 
         // Distribute results back into expandedPages map.
         for (const p of pages) {
@@ -3472,8 +3542,9 @@
             r.profit_pct_today = this._campaignProfitPctFromCpp(r, r.cpp_today);
           }
           this._markActiveOffDivider(campaigns);
+          this._applyAdDelivery(p.name, campaigns, 'campaigns');
           this.expandedPages[p.name] = {
-            open: true, loading: false, error: null, campaigns
+            open: true, loading: false, error: null, campaigns: this._withDeliveryOnlyCampaigns(p.name, campaigns)
           };
         }
       },
@@ -3502,12 +3573,14 @@
         this.expandedPages[pageName] = { open: true, loading: true, error: null, campaigns: null };
         try {
           const scope = this._pageScopeFor(pageName);
-          const j = await this._fetchCampaignsData(Object.assign({
-            level: 'campaigns', page_name: pageName,
-          }, scope));
+          const [j] = await Promise.all([
+            this._fetchCampaignsData(Object.assign({ level: 'campaigns', page_name: pageName }, scope)),
+            this._fetchAdDelivery([pageName]),
+          ]);
           const campaigns = j.rows || [];
           this._markActiveOffDivider(campaigns);
-          this.expandedPages[pageName] = { open: true, loading: false, error: null, campaigns };
+          this._applyAdDelivery(pageName, campaigns, 'campaigns');
+          this.expandedPages[pageName] = { open: true, loading: false, error: null, campaigns: this._withDeliveryOnlyCampaigns(pageName, campaigns) };
         } catch (e) {
           this.expandedPages[pageName] = { open: true, loading: false, error: e.message || 'Failed to load', campaigns: [] };
         }
@@ -3544,7 +3617,7 @@
           const j = await this._fetchCampaignsData(Object.assign({
             level: 'adsets', page_name: pageName, campaign_id: campaignId,
           }, scope));
-          this.expandedCampaigns[campaignId] = { open: true, loading: false, error: null, adsets: j.rows || [] };
+          this.expandedCampaigns[campaignId] = { open: true, loading: false, error: null, adsets: this._applyAdDelivery(pageName, j.rows || [], 'adsets') };
         } catch (e) {
           this.expandedCampaigns[campaignId] = { open: true, loading: false, error: e.message || 'Failed to load', adsets: [] };
         }
@@ -3563,7 +3636,7 @@
           const j = await this._fetchCampaignsData(Object.assign({
             level: 'ads', page_name: pageName, ad_set_id: adSetId,
           }, scope));
-          this.expandedAdSets[adSetId] = { open: true, loading: false, error: null, ads: j.rows || [] };
+          this.expandedAdSets[adSetId] = { open: true, loading: false, error: null, ads: this._applyAdDelivery(pageName, j.rows || [], 'ads') };
         } catch (e) {
           this.expandedAdSets[adSetId] = { open: true, loading: false, error: e.message || 'Failed to load', ads: [] };
         }

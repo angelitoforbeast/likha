@@ -3,7 +3,9 @@
 namespace Tests\Feature\OwnerPrivate;
 
 use App\Http\Controllers\OwnerColumnSettingsController;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AdDeliveryColumnsTest extends OwnerPrivateTestCase
 {
@@ -43,6 +45,28 @@ class AdDeliveryColumnsTest extends OwnerPrivateTestCase
         $this->assertSame(['ad_rts_pct'], array_values(array_intersect(self::COLS, $ctl->loadConfig('campaigns', 'CEO')['hidden'])));
         $this->assertSame(['ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct'], array_values(array_intersect(self::COLS, $ctl->loadConfig('campaigns', 'Marketing')['hidden'])));
         $this->assertSame([], array_values(array_intersect(self::COLS, $ctl->loadConfig('campaigns', 'Marketing - OIC')['hidden'])));
+    }
+
+    public function test_S_043_9_owner_private_lists_the_columns_and_loads_the_delivery_map_on_expand(): void
+    {
+        foreach (['tasks' => ['user_id', 'status'], 'ads_manager_reports' => ['page_name'], 'fee_settings' => ['setting_key', 'setting_value', 'effective_date', 'description', 'host_scope']] as $table => $columns) {
+            if (Schema::hasTable($table)) continue;
+            Schema::create($table, function (Blueprint $t) use ($columns) {
+                $t->id();
+                foreach ($columns as $column) $t->string($column)->nullable();
+                $t->timestamps();
+            });
+        }
+        $html = $this->actingAs($this->user('Marketing'))->get('/owner/private')->assertOk()->getContent();
+
+        foreach (self::COLS as $id) {
+            $this->assertMatchesRegularExpression("/\\{ id:'$id',/", $html, $id);
+        }
+        $this->assertStringContainsString(route('owner.private.ad-delivery'), $html);
+        $this->assertStringContainsString('Walang ad id', $html);
+        // ang ibang screen ng campaigns table ay walang bagong column
+        $this->assertStringNotContainsString('ad_delivered', file_get_contents(resource_path('views/ads_manager/campaigns.blade.php')));
+        $this->assertStringNotContainsString('ad_delivered', file_get_contents(resource_path('views/item/index.blade.php')));
     }
 
     public function test_S_043_8_nothing_saved_shows_them_to_the_ceo(): void
