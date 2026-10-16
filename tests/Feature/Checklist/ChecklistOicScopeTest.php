@@ -125,13 +125,13 @@ class ChecklistOicScopeTest extends ChecklistTestCase
         $this->actingAs($oic)->getJson(route('checklist.approval-logs', $theirs))->assertForbidden();
     }
 
-    public function test_manage_lists_the_oic_department_plus_tasks_they_created(): void
+    public function test_manage_lists_the_oic_department_plus_tasks_they_created_and_for_marketing_the_assigned(): void
     {
         [$oic, , $tasks] = $this->scopeTasks();
 
         $titles = $this->actingAs($oic)->get(route('checklist.manage'))
             ->viewData('allTasks')->pluck('title')->sort()->values()->all();
 
-        $this->assertSame(['Encoder, OIC ang gumawa', 'Marketing, hindi assigned'], $titles);
+        $this->assertSame(['Encoder, OIC ang gumawa', 'Marketing, hindi assigned', 'Walang dept, assigned'], $titles);
     }
 }
