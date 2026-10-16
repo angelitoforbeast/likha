@@ -1537,6 +1537,28 @@ class OwnerPrivateController extends Controller
             ->header('X-Cache-Version', $this->cacheVersion());
     }
 
+    /**
+     * Delivered / In transit / For return / Returned / RTS% kada campaign, ad set at ad (sa botcake_ad_id ng order)
+     * para sa expand, at ang "Walang ad id" na linya. Parehong range at patakaran ng page row, kaya nagsusuma.
+     * Isang request para sa lahat ng page ng "Expand all". Read-only.
+     */
+    public function adDelivery(Request $request, \App\Services\AdDeliveryStatus $status)
+    {
+        $this->checkAccess();
+
+        $v = $request->validate([
+            'start_date' => ['required', 'date_format:Y-m-d'],
+            'end_date'   => ['required', 'date_format:Y-m-d', 'after_or_equal:start_date'],
+            'pages'      => ['required', 'array', 'list', 'min:1', 'max:500'],
+            'pages.*'    => ['required', 'string', 'max:255'],
+        ]);
+
+        return response()->json([
+            'ok'      => true,
+            'by_page' => (object) $status->forPages($v['pages'], $v['start_date'], $v['end_date']),
+        ]);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Item Summary (one-day view, grouped by page, dominant item used for calcs)
     // ─────────────────────────────────────────────────────────────────────────
