@@ -8,6 +8,7 @@ use App\Models\PageSetting;
 use App\Services\BotcakeCustomerSync;
 use App\Services\PageSettings;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Tests\Feature\Botcake\BotcakeApiTestCase;
 
@@ -176,7 +177,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
             ->assertOk()->assertJsonPath('status', 'created');
 
         $grid = $this->grid();
-        $this->assertSame(['Page Wala'], array_column($grid['rows'], 'name'));
+        $this->assertSame(['Page Uno', 'Page Wala'], array_column($grid['rows'], 'name'), 'ang Page Uno ay may order');
         $this->assertContains('viber.bot_uri', array_column($grid['columns'], 'key'));
 
         $this->cell(['page_name' => 'Page Wala', 'provider' => 'Bad Provider!', 'key' => 'x', 'value' => '1'])->assertStatus(422);
@@ -257,7 +258,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertNull($this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
     }
 
-    public function test_the_query_count_stays_flat_from_5_to_50_pages(): void
+    public function test_the_query_count_stays_flat_from_5_to_60_pages(): void
     {
         $count = function (int $pages): array {
             $s = $this->settings();
@@ -268,11 +269,14 @@ class PageSettingsGridTest extends BotcakeApiTestCase
                 $s->set('Page ' . $i, 'sms', 'sender', 'S' . $i);
                 BotcakePsid::create(['page' => 'Page ' . $i, 'fb_name' => 'N' . $i, 'psid' => 'p' . $i, 'status' => 'available', 'source' => 'api']);
                 BotcakePsidImportRun::create(['status' => 'done', 'source' => 'api', 'page_name' => 'Page ' . $i, 'stop_reason' => 'end']);
+                $this->order('Page ' . $i, 'Buyer ' . $i);
+                $this->order('Page O' . $i, 'Buyer ' . $i); // may order, walang settings
             }
 
             $this->get('/page-settings')->assertOk(); // unang request: auth at profile, hindi bahagi ng grid
             $n = [];
             foreach (['/page-settings', '/page-settings/grid', '/page-settings/grid?since=' . urlencode('2000-01-01 00:00:00')] as $url) {
+                Cache::forget('page-settings-grid:orders:30'); // kasama sa bilang ang query ng orders (walang cache)
                 DB::flushQueryLog();
                 DB::enableQueryLog();
                 $this->get($url)->assertOk();
@@ -283,10 +287,10 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         };
 
         $five = $count(5);
-        $fifty = $count(50);
+        $fifty = $count(60);
         $this->assertSame($five, $fifty);
         $this->assertLessThanOrEqual(6, max($fifty), 'ilang query lang ang grid at ang poll');
-        $this->assertCount(50, $this->grid()['rows']);
+        $this->assertCount(120, $this->grid()['rows']);
     }
 
     public function test_only_the_ceo_reaches_the_grid_endpoints(): void

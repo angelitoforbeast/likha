@@ -8,6 +8,7 @@ use App\Models\PageSetting;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakeException;
+use App\Services\BotcakeSyncAll;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
 use Illuminate\Http\Request;
@@ -179,6 +180,32 @@ class PageSettingController extends Controller
         return redirect()->route('page-settings.index')->with($status === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $status);
     }
 
+    /**
+     * "Test lahat ng token": isang page kada request (isa-isang tinatawag ng browser), isang Botcake call na walang
+     * retry, kaya hindi lalampas nang ~20 segundo. Itinatala gaya ng row button; ang error ay hindi itinatala.
+     */
+    public function testTokenJson(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
+
+        $page   = (string) $request->input('page_name', '');
+        $pageId = $this->settings->get($page, 'botcake', 'page_id');
+        $token  = $this->settings->get($page, 'botcake', 'token');
+        if (!$pageId || !$token) return response()->json(['status' => 'skipped', 'cell' => null]);
+
+        try {
+            $status = $client->once()->testToken($pageId, $token) ? 'ok' : 'invalid';
+        } catch (BotcakeException $e) {
+            return response()->json(['status' => 'error', 'error' => $e->getMessage(), 'reason' => $e->reason, 'cell' => null]);
+        }
+
+        $sync->tokenStatus($page, $status, true);
+        $row = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'token_status')
+            ->where('active', true)->orderByDesc('id')->first();
+
+        return response()->json(['status' => $status, 'cell' => $row ? $grid->cell($row) : null]);
+    }
+
     /** Incremental sync ng isang page, sa queue. */
     public function sync(Request $request, BotcakeCustomerSync $sync)
     {
@@ -193,6 +220,16 @@ class PageSettingController extends Controller
         SyncBotcakeCustomersJob::dispatch($page);
 
         return redirect()->route('page-settings.index')->with('success', $page . ': naka-queue ang Botcake sync. I-refresh mamaya para sa bilang.');
+    }
+
+    /** "Sync lahat": isang run lang sabay; ang pangalawang pindot habang tumatakbo ay walang sinisimulan. */
+    public function syncAll(BotcakeSyncAll $all)
+    {
+        $this->checkAccess();
+
+        $started = $all->start();
+
+        return response()->json(['status' => $started ? 'started' : 'running', 'sync_all' => $started ?? $all->progress()]);
     }
 
     public function deactivate(int $id)
