@@ -25,6 +25,11 @@ class StaffFeedController extends Controller
      */
     private const INACTIVE_STATUSES = ['inactive', 'resigned', 'terminated'];
 
+    /** Mga event na isinusulat ng Checker 1 at J&T status saves, isa kada order na nagbago. */
+    private const CHECKER_KINDS = ['checker.status', 'checker.edit', 'checker.validate'];
+
+    private const CHECKER_ZERO = ['status_last_editor' => 0, 'edited_orders' => 0, 'status_changes' => 0, 'validates' => 0];
+
     private function authorizeFeed(Request $request): void
     {
         $expected = (string) config('services.staff_feed.key');
@@ -83,11 +88,12 @@ class StaffFeedController extends Controller
 
         $dueOpen = $this->checklistDueNotSubmitted($ids, $day);
         $bots = $this->botUserIds();
+        $checker = $this->checkerCounts($day, $next);
 
         return response()->json([
             'date'         => $dayStr,
             'generated_at' => Carbon::now(self::TZ)->toIso8601String(),
-            'staff'        => $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots) {
+            'staff'        => $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker) {
                 $id = (int) $s->id;
                 $last = $lastEvents->get($id);
 
@@ -104,6 +110,7 @@ class StaffFeedController extends Controller
                     'counts'         => (object) ($counts[$id] ?? []),
                     'checklist_due_not_submitted' => $dueOpen[$id] ?? [],
                     'is_bot'         => isset($bots[$id]),
+                    'checker'        => $checker[$id] ?? self::CHECKER_ZERO,
                 ];
             })->values(),
         ]);
@@ -137,7 +144,10 @@ class StaffFeedController extends Controller
                 ->orderByDesc('created_at')
                 ->orderByDesc('id')
                 ->limit($limit)
-                ->get(['user_id', 'role', 'kind', 'method', 'status', 'ref', 'created_at']);
+                ->get(array_merge(
+                    ['user_id', 'role', 'kind', 'method', 'status', 'ref', 'created_at'],
+                    Schema::hasColumn('staff_events', 'source') ? ['source'] : []
+                ));
         }
 
         $userIds = $rows->pluck('user_id')->unique()->values()->all();
@@ -157,13 +167,58 @@ class StaffFeedController extends Controller
                 'name'       => $names[(int) $r->user_id] ?? null,
                 'role'       => $r->role,
                 'kind'       => $r->kind,
+                'source'     => $r->source ?? null,
                 'method'     => $r->method,
                 'status'     => $r->status === null ? null : (int) $r->status,
-                'ref'        => $r->ref,
+                // order id ng checker events: pang-bilang lang, hindi inilalabas
+                'ref'        => in_array($r->kind, self::CHECKER_KINDS, true) ? null : $r->ref,
                 'created_at' => $this->iso($r->created_at),
                 'is_bot'     => isset($bots[(int) $r->user_id]),
             ])->values(),
         ]);
+    }
+
+    /**
+     * user_id => checker counts sa araw na iyon. Ang order ay source + ref (magkaiba ang id ng macro_output at
+     * from_jnts). status_last_editor: ilang order ang ang huling checker.status event ngayong araw ay sa user
+     * (parehong rule ng Checker 1 summary page); edited_orders: ilang order ang may kahit anong checker event niya.
+     */
+    private function checkerCounts(Carbon $day, Carbon $next): array
+    {
+        if (!Schema::hasTable('staff_events') || !Schema::hasColumn('staff_events', 'source')) {
+            return [];
+        }
+        $rows = DB::table('staff_events')
+            ->whereIn('kind', self::CHECKER_KINDS)
+            ->where('created_at', '>=', $day->format('Y-m-d H:i:s'))
+            ->where('created_at', '<', $next->format('Y-m-d H:i:s'))
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get(['user_id', 'kind', 'source', 'ref']);
+
+        $out = [];
+        $lastEditor = [];
+        $edited = [];
+        foreach ($rows as $r) {
+            $uid = (int) $r->user_id;
+            $order = $r->source . '|' . $r->ref;
+            $out[$uid] ??= self::CHECKER_ZERO;
+            $edited[$uid][$order] = true;
+            if ($r->kind === 'checker.status') {
+                $out[$uid]['status_changes']++;
+                $lastEditor[$order] = $uid;
+            } elseif ($r->kind === 'checker.validate') {
+                $out[$uid]['validates']++;
+            }
+        }
+        foreach ($edited as $uid => $orders) {
+            $out[$uid]['edited_orders'] = count($orders);
+        }
+        foreach ($lastEditor as $uid) {
+            $out[$uid]['status_last_editor']++;
+        }
+
+        return $out;
     }
 
     /** user_id => true ng mga automation account (STAFF_FEED_BOT_USER_IDS, comma-separated); hindi integer na bahagi ay nilalaktawan. */

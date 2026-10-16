@@ -17,10 +17,10 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
     private const STAFF_KEYS = [
         'user_id', 'name', 'role', 'department', 'last_seen_at', 'last_seen_path', 'last_login_at',
-        'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot',
+        'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot', 'checker',
     ];
 
-    private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'method', 'status', 'ref', 'created_at', 'is_bot'];
+    private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'source', 'method', 'status', 'ref', 'created_at', 'is_bot'];
 
     protected function setUp(): void
     {
@@ -307,5 +307,60 @@ class StaffFeedApiTest extends StaffActivityTestCase
     {
         $this->feed('/api/staff-events')->assertStatus(422);
         $this->feed('/api/staff-events?since=hindi-petsa')->assertStatus(422);
+    }
+
+    private function checkerEvent(int $userId, string $kind, string $ref, string $at, string $source = 'checker_1'): void
+    {
+        DB::table('staff_events')->insert([
+            'user_id' => $userId, 'role' => 'Data Encoder', 'kind' => $kind, 'source' => $source, 'method' => 'POST',
+            'status' => 200, 'ref' => $ref, 'created_at' => $at,
+        ]);
+    }
+
+    public function test_events_show_kind_and_source_of_checker_rows_but_never_their_ref(): void
+    {
+        $user = $this->staff();
+        $this->event($user->id, 'orders.save', '2026-10-16 08:00:00');
+        $this->checkerEvent($user->id, 'checker.status', '501', '2026-10-16 09:00:00', 'jnt');
+
+        $events = $this->feed('/api/staff-events?since=2026-10-16')->assertOk()->json('events');
+
+        $this->assertSame(['checker.status', 'jnt', null], [$events[0]['kind'], $events[0]['source'], $events[0]['ref']]);
+        $this->assertSame(['orders.save', null, '9'], [$events[1]['kind'], $events[1]['source'], $events[1]['ref']]);
+    }
+
+    public function test_checker_counts_per_person_use_the_last_editor_rule_for_the_manila_day(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $idle = $this->staff();
+        // Order 1: si A muna, si B ang huling nagpalit ng status ngayong araw.
+        $this->checkerEvent($a->id, 'checker.status', '1', '2026-10-15 09:00:00');
+        $this->checkerEvent($b->id, 'checker.status', '1', '2026-10-15 10:00:00');
+        // Order 2: si A ang huli ngayong araw; ang edit ni B kinabukasan ng 00:00 ay hindi na kasama.
+        $this->checkerEvent($b->id, 'checker.status', '2', '2026-10-15 08:00:00');
+        $this->checkerEvent($a->id, 'checker.status', '2', '2026-10-15 23:59:59');
+        $this->checkerEvent($b->id, 'checker.status', '2', '2026-10-16 00:00:00');
+        // Order 3: edit at validate lang ni A; ang status ni B kahapon ay ibang araw.
+        $this->checkerEvent($a->id, 'checker.edit', '3', '2026-10-15 11:00:00');
+        $this->checkerEvent($a->id, 'checker.validate', '3', '2026-10-15 11:05:00');
+        $this->checkerEvent($b->id, 'checker.status', '3', '2026-10-14 23:59:59');
+        // Parehong id pero J&T row: ibang order, hiwalay ang huling editor.
+        $this->checkerEvent($a->id, 'checker.status', '1', '2026-10-15 12:00:00', 'jnt');
+
+        $staff = collect($this->feed('/api/staff-status?date=2026-10-15')->assertOk()->json('staff'))->keyBy('user_id');
+
+        $this->assertSame(
+            ['status_last_editor' => 2, 'edited_orders' => 4, 'status_changes' => 3, 'validates' => 1],
+            $staff[$a->id]['checker']
+        );
+        $this->assertSame(
+            ['status_last_editor' => 1, 'edited_orders' => 2, 'status_changes' => 2, 'validates' => 0],
+            $staff[$b->id]['checker']
+        );
+        $this->assertSame(
+            ['status_last_editor' => 0, 'edited_orders' => 0, 'status_changes' => 0, 'validates' => 0],
+            $staff[$idle->id]['checker']
+        );
     }
 }
