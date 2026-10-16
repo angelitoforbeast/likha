@@ -9,7 +9,8 @@ Branch `feat/029-orders-live-primary-fresh`, cut from `develop` at 941d986.
 | `0de0d08` docs | The brief, verbatim |
 | `d3e2a0a` fix | Part A: orders counted live next to proceed; owner-private cache bumps |
 | `edd1d11` feat | Part B: main item recomputed on every change path, nightly 14-day refresh, tie rule with `is_tie` |
-| (this commit) docs | This result and the 029 entries in `TODO.md` |
+| `37a0d34` test | Item page render pins re-pinned for the new recompute message |
+| `95dc177` + this fix-up, docs | This result and the 029 entries in `TODO.md` |
 
 ## Part A: every reader of `primary_orders`
 
@@ -86,7 +87,13 @@ Changed: `SharedPagesBasePinTest` re-pinned for `/owner/private` (`07469c67…`)
 render is the blade change (the new "tie" span and the "tie(s) resolved" text): with `private.blade.php` reverted the
 old pin passes.
 
-Suite: SUITE_LINE
+`Item\SuppliersGroupTest` re-pinned too (all 8 item-page hashes): the only change in `item/index.blade.php` is the
+same recompute message ("ties skipped" → "tie(s) resolved").
+
+Suite (`php artisan test`, whole tree): `Tests: 2 failed, 956 warnings, 141 passed (14983 assertions)`. The 2
+failures are the known `ExampleTest` and `NightRun\ImportStartTest > macro job final write applies only while the run
+is still active`; nothing else is red. Base before this work: `2 failed, 935 warnings, 141 passed`. The runner lists
+tests that pass with a warning (the missing Vite manifest) as warnings; the 21 extra are the new tests.
 
 ## Review
 
