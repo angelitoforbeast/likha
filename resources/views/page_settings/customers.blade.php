@@ -25,7 +25,11 @@
                 <option value="{{ $v }}" @selected($status === $v)>{{ $label }}</option>
             @endforeach
         </select>
-        <label class="flex items-center gap-1"><input type="checkbox" name="has_ad" value="1" @checked($hasAd)> may ad id</label>
+        <select name="ad" class="border rounded px-2 py-1">
+            @foreach(['all' => 'May ad id o wala', 'with' => 'May ad id', 'without' => 'Walang ad id'] as $v => $label)
+                <option value="{{ $v }}" @selected($ad === $v)>{{ $label }}</option>
+            @endforeach
+        </select>
         <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Filter</button>
         <span class="text-gray-500">{{ number_format($customers->total()) }} customer</span>
     </form>

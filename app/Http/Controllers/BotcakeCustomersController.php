@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 class BotcakeCustomersController extends Controller
 {
     public const STATUSES = ['all', 'available', 'inactive'];
+    public const AD_FILTERS = ['all', 'with', 'without'];
 
     public function __construct(private PageSettings $settings)
     {
@@ -41,7 +42,9 @@ class BotcakeCustomersController extends Controller
         $page   = $this->settings->normPage($this->text($request->query('page')));
         $search = trim($this->text($request->query('q')));
         $status = in_array($request->query('status'), self::STATUSES, true) ? $request->query('status') : 'all';
-        $hasAd  = $request->boolean('has_ad');
+        // ad: all / with / without. Ang lumang ?has_ad=1 ay "with" pa rin, para gumana ang naka-save na link.
+        $ad = in_array($request->query('ad'), self::AD_FILTERS, true) ? $request->query('ad')
+            : ($request->boolean('has_ad') ? 'with' : 'all');
 
         // Ang botcake_psids.page ay ang baybay ng page sa Botcake settings (iyon ang ginamit ng sync).
         $apiPage = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('active', true)
@@ -49,7 +52,8 @@ class BotcakeCustomersController extends Controller
 
         $q = BotcakePsid::where('source', 'api')->where('page', $apiPage);
         if ($status !== 'all') $q->where('status', $status);
-        if ($hasAd) $q->whereNotNull('ad_id');
+        if ($ad === 'with') $q->whereNotNull('ad_id');
+        if ($ad === 'without') $q->whereNull('ad_id');
         if ($search !== '') {
             $phone = BotcakeCustomerMatcher::normPhone($search);
             if ($phone !== '') {
@@ -72,7 +76,7 @@ class BotcakeCustomersController extends Controller
             ? $this->orderCountsQuery($page, $psids)->pluck('c', 'botcake_psid')->map(fn ($c) => (int) $c)->all()
             : [];
 
-        return view('page_settings.customers', compact('customers', 'orderCounts', 'page', 'search', 'status', 'hasAd'));
+        return view('page_settings.customers', compact('customers', 'orderCounts', 'page', 'search', 'status', 'ad'));
     }
 
     /** Bilang ng orders ng page kada PSID (sa botcake_psid index). */

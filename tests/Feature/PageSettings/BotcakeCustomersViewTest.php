@@ -70,7 +70,11 @@ class BotcakeCustomersViewTest extends BotcakeApiTestCase
             '&q=' . urlencode('+639181112222') => ['ben'],
             '&status=inactive'       => ['anabel'],
             '&status=available'      => ['ana', 'ben'],
-            '&has_ad=1'              => ['ana'],
+            '&has_ad=1'              => ['ana'], // lumang link
+            '&ad=with'               => ['ana'],
+            '&ad=without'            => ['anabel', 'ben'],
+            '&ad=without&status=available' => ['ben'],
+            '&ad=zzz'                => ['ana', 'anabel', 'ben'],
             '&q=ana&status=available' => ['ana'],
             '&q=zzz'                 => [],
         ];
