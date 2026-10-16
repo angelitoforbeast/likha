@@ -1732,6 +1732,7 @@ class OwnerPrivateController extends Controller
                 'page_label', 'page_key', 'primary_item', 'primary_item_key',
                 'primary_orders', 'total_orders_all', 'primary_mode_cod',
                 'second_item', 'second_orders',
+                ...(Schema::hasColumn('daily_page_primary_item', 'is_tie') ? ['is_tie'] : []),
             ]);
 
         // Excluded pages (managed via /jnt/supply/excluded-pages) — never participate in profit compute
@@ -1933,6 +1934,7 @@ class OwnerPrivateController extends Controller
             $primary = [
                 'item_name'      => (string)$pr->primary_item,
                 'item_key'       => $anchorKey,
+                'is_tie'         => !empty($pr->is_tie),   // tie sa anchor date, pinili ng tie rule
                 'total_orders'   => $totalOrders,
                 'proceed_orders' => $proceedOrders,
                 'mode_cod'       => $anchorModeCod,
@@ -2640,6 +2642,7 @@ class OwnerPrivateController extends Controller
                 'hold_units'            => $holdMap[$holdKeyOf((string)$dominant['item_name'])] ?? null,
                 'hold_snap_date'        => $holdSnapDate ? substr((string)$holdSnapDate, 0, 10) : null,
                 'item_name'             => $dominant['item_name'],
+                'item_is_tie'           => (bool)($dominant['is_tie'] ?? false),
                 // Canonical alias (item_type family) for the dominant item —
                 // null kapag walang alias mapping. Ginagamit sa item search filter
                 // (masearch by name O alias) sa /owner/private.
@@ -3386,6 +3389,7 @@ class OwnerPrivateController extends Controller
             ->get([
                 'ts_date', 'page_key', 'page_label',
                 'primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod',
+                ...(Schema::hasColumn('daily_page_primary_item', 'is_tie') ? ['is_tie'] : []),
             ]);
 
         // Excluded pages (managed via /jnt/supply/excluded-pages)
@@ -3702,6 +3706,7 @@ class OwnerPrivateController extends Controller
                 // for non-aliased items so toggling shows no diff.
                 'item_alias_label'=> $aliases->canonicalLabel($itemName),
                 'item_key'        => $ik,
+                'is_tie'          => !empty($r->is_tie),
                 'orders'          => $ordersHere,
                 'mode_cod'        => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                 // Editable RTS state
@@ -3936,6 +3941,7 @@ class OwnerPrivateController extends Controller
                 'ts_date', 'page_label', 'primary_item', 'primary_item_key',
                 'primary_orders', 'total_orders_all', 'primary_mode_cod',
                 'second_item', 'second_orders',
+                ...(Schema::hasColumn('daily_page_primary_item', 'is_tie') ? ['is_tie'] : []),
             ]);
 
         // Fill missing dates as "no data / tied"
@@ -4283,6 +4289,7 @@ class OwnerPrivateController extends Controller
                     'date'             => $d,
                     'primary_item'     => (string)$r->primary_item,
                     'primary_item_key' => $ik,
+                    'is_tie'           => !empty($r->is_tie),
                     'item_alias'       => $aliasLabel,
                     'primary_orders'   => $dayOrders,
                     'total_orders'     => $dayAllOrders,

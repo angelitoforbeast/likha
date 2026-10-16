@@ -34,6 +34,9 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
     /** J1 resume formula — last row na may "DONE" sa col I (auto-update). */
     private const J1_FORMULA = '=ROW(I2)+MATCH(TRUE,INDEX(ISBLANK(I2:I),0),0)-2';
 
+    /** @var array<string,bool> ts_date (Y-m-d) ng mga row na ginawa o binago ng import na ito */
+    private array $touchedDates = [];
+
     public function __construct(int $runId)
     {
         $this->runId = $runId;
@@ -182,6 +185,15 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
     /** Bagong / binagong orders → huwag ipakita ang naka-cache na /owner/private numbers. */
     private function afterImport(): void
     {
+        // Main item ng bawat page-day ng mga petsang ginalaw — non-fatal, gaya ng macro import.
+        if (!empty($this->touchedDates)) {
+            try {
+                app(\App\Services\DailyPrimaryItemService::class)->recomputeDates(array_keys($this->touchedDates));
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('daily_page_primary_item recompute after Likha import failed (non-fatal): ' . $e->getMessage());
+            }
+        }
+
         \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
     }
 
@@ -376,6 +388,12 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             if (preg_match('/PRICE:\s*₱\s*([0-9][\d,]*(?:\.\d{1,2})?)/iu', $colF, $mCod)) {
                 $extractedCOD = str_replace(',', '', $mCod[1]);
             }
+        }
+
+        // ts_date ng row (same rule as the DB trigger: last 10 chars of TIMESTAMP, d-m-Y)
+        // → recompute ng main item pagkatapos ng import.
+        if (!empty($timestamp) && preg_match('/(\d{2})-(\d{2})-(\d{4})$/', $timestamp, $dm)) {
+            $this->touchedDates[$dm[3] . '-' . $dm[2] . '-' . $dm[1]] = true;
         }
 
         // Match existing by TIMESTAMP + PAGE + fb_name

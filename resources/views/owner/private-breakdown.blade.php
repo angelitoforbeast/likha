@@ -117,6 +117,7 @@
             </td>
             <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('primary_item')">
               <span x-text="r.primary_item || '— no data —'"></span>
+              <span x-show="r.is_tie" style="display:inline-block;margin-left:4px;padding:0 4px;border-radius:3px;font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;" title="Tie sa top count ng orders — pinili ng tie rule (proceed → main item kahapon → mas mataas na COD)">tie</span>
               <template x-if="r.second_item">
                 <span class="text-xs text-slate-400"
                       x-text="' (2nd: ' + r.second_item + ' × ' + r.second_orders + ')'"></span>

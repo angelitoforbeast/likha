@@ -10,6 +10,20 @@ use Illuminate\Support\Facades\DB;
 class ItemTypeMappingController extends Controller
 {
     /**
+     * Ibang item family na ang mga row ng mga pangalang ito → i-recompute ang main item ng mga
+     * araw nila (huling 90 araw) at huwag ipakita ang naka-cache na /owner/private numbers.
+     */
+    private function aliasesChanged(array $itemNames): void
+    {
+        try {
+            app(\App\Services\DailyPrimaryItemService::class)->recomputeForItemNames($itemNames);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('daily_page_primary_item recompute after alias change failed (non-fatal): ' . $e->getMessage());
+        }
+        OwnerPrivateController::bumpCacheVersion();
+    }
+
+    /**
      * Read-only consolidated view: each item_type and ALL its mapped item_names
      * in one row. Below the table, lists every item_name sa macro_output na
      * walang mapping yet — para makita agad anong items kailangan mappingan.
@@ -137,6 +151,7 @@ class ItemTypeMappingController extends Controller
         $inserted = 0;
         $updated  = 0;
         $skipped  = 0;
+        $changedNames = [];
 
         foreach ($lines as $line) {
             $line = trim($line);
@@ -160,6 +175,7 @@ class ItemTypeMappingController extends Controller
                         ->where('id', $existing->id)
                         ->update(['item_type' => $itemType, 'updated_at' => now()]);
                     $updated++;
+                    $changedNames[] = $itemName;
                 }
             } else {
                 DB::table('item_type_mappings')->insert([
@@ -169,7 +185,12 @@ class ItemTypeMappingController extends Controller
                     'updated_at' => now(),
                 ]);
                 $inserted++;
+                $changedNames[] = $itemName;
             }
+        }
+
+        if ($inserted || $updated) {
+            $this->aliasesChanged($changedNames);
         }
 
         $parts = [];
@@ -209,13 +230,17 @@ class ItemTypeMappingController extends Controller
             ]);
         }
 
+        $this->aliasesChanged([$itemName]);
+
         return response()->json(['ok' => true]);
     }
 
     // ── Delete (shared by both UIs) ──────────────────────────────────────────
     public function delete($id)
     {
+        $itemName = DB::table('item_type_mappings')->where('id', $id)->value('item_name');
         DB::table('item_type_mappings')->where('id', $id)->delete();
+        if ($itemName !== null) $this->aliasesChanged([$itemName]);
         return back()->with('success', 'Mapping deleted.');
     }
 }

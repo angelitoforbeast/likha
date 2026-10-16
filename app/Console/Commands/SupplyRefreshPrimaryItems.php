@@ -45,16 +45,17 @@ class SupplyRefreshPrimaryItems extends Command
         $this->info("Recomputing daily_page_primary_item for $from → $to ...");
         $t0 = microtime(true);
         $summary = $svc->recomputeRange($from, $to);
+        \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();   // bagong primary rows → hindi na valid ang cache
         $elapsed = round(microtime(true) - $t0, 2);
 
         $this->line('');
         $this->table(
-            ['dates', 'pages_seen', 'rows_upserted', 'ties_skipped', 'elapsed_s'],
+            ['dates', 'pages_seen', 'rows_upserted', 'ties_resolved', 'elapsed_s'],
             [[
                 $summary['dates'],
                 $summary['pages'],
                 $summary['rows_upserted'],
-                $summary['ties_skipped'],
+                $summary['ties_resolved'],
                 $elapsed,
             ]]
         );

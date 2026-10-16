@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\Schema;
  *
  * Rules (locked):
  *  - Order counting: raw row count (1 row = 1 order).
- *  - Tie on top count: skip the slice (no row inserted/retained).
+ *  - Tie on top count: the day is kept. Among the tied items: more proceed rows wins;
+ *    still tied, the page's previous-day main item if it is one of them; still tied,
+ *    the higher mode COD; then the item key alphabetically. The row is flagged is_tie.
  *  - Mode COD: most-frequent COD value among primary rows only.
  */
 class DailyPrimaryItemService
@@ -20,7 +22,7 @@ class DailyPrimaryItemService
     /**
      * Recompute all (date, page) slices within [$from, $to] inclusive.
      *
-     * @return array{dates:int,pages:int,rows_upserted:int,ties_skipped:int}
+     * @return array{dates:int,pages:int,rows_upserted:int,ties_resolved:int}
      */
     public function recomputeRange(string $from, string $to): array
     {
@@ -31,7 +33,7 @@ class DailyPrimaryItemService
      * Recompute only the specified ts_dates.
      *
      * @param  array<int,string> $dates  list of YYYY-MM-DD strings
-     * @return array{dates:int,pages:int,rows_upserted:int,ties_skipped:int}
+     * @return array{dates:int,pages:int,rows_upserted:int,ties_resolved:int}
      */
     public function recomputeDates(array $dates): array
     {
@@ -40,9 +42,47 @@ class DailyPrimaryItemService
             $dates
         ))));
         if (empty($dates)) {
-            return ['dates' => 0, 'pages' => 0, 'rows_upserted' => 0, 'ties_skipped' => 0];
+            return ['dates' => 0, 'pages' => 0, 'rows_upserted' => 0, 'ties_resolved' => 0];
         }
         return $this->recomputeWhere(['dates' => $dates]);
+    }
+
+    /**
+     * Recompute the ts_dates (last $days, Manila) that have rows of these item names — for an
+     * alias mapping change, which moves those rows to another item family.
+     *
+     * @param  array<int,string> $itemNames raw item labels
+     * @return array{dates:int,pages:int,rows_upserted:int,ties_resolved:int}
+     */
+    public function recomputeForItemNames(array $itemNames, int $days = 90): array
+    {
+        $keys = array_values(array_unique(array_filter(array_map(
+            fn($n) => ItemAliasResolver::normalize((string)$n),
+            $itemNames
+        ))));
+        $empty = ['dates' => 0, 'pages' => 0, 'rows_upserted' => 0, 'ties_resolved' => 0];
+        if (empty($keys) || !Schema::hasColumn('macro_output', 'ts_date')) return $empty;
+
+        $driver = DB::getDriverName();
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $quote  = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
+        $itemCol = null;
+        foreach (['ITEM_NAME','item_name','Product','product_name','ITEM','item'] as $c) {
+            if (Schema::hasColumn('macro_output', $c)) { $itemCol = $c; break; }
+        }
+        if ($itemCol === null) return $empty;
+        $itemKey = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($itemCol) . ",'')),' ',''),'-',''),'_',''))";
+
+        $from  = now('Asia/Manila')->subDays(max(1, $days) - 1)->toDateString();
+        $dates = DB::table('macro_output')
+            ->where('ts_date', '>=', $from)
+            ->whereIn(DB::raw($itemKey), $keys)
+            ->distinct()
+            ->pluck('ts_date')
+            ->map(fn($d) => substr((string)$d, 0, 10))
+            ->all();
+
+        return $this->recomputeDates($dates);
     }
 
     // ------------------------------------------------------------------
@@ -86,6 +126,7 @@ class DailyPrimaryItemService
         $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item'])
             ?? throw new \RuntimeException('macro_output: item column not found');
         $moCodColName = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
+        $moStatusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'STATUS';
 
         $moPageSql   = 'mo.' . $quote($pageColName);
         $moItemSql   = 'mo.' . $quote($itemColName);
@@ -96,6 +137,8 @@ class DailyPrimaryItemService
         $itemLabel   = "$trimFn(COALESCE($moItemSql,''))";
         $itemKey     = "LOWER(REPLACE(REPLACE(REPLACE($itemLabel,' ',''),'-',''),'_',''))";
         $codClean    = $castMoney($moCodSql);
+        // Same proceed rule as /owner/private (status 'proceed', spaces/underscores ignored).
+        $statusNorm  = "LOWER(REPLACE(REPLACE($trimFn(mo." . $quote($moStatusColName) . "),' ',''),'_',''))";
 
         // ---- Date expression ---------------------------------------------
         $hasTsDate = Schema::hasColumn('macro_output', 'ts_date');
@@ -135,7 +178,8 @@ class DailyPrimaryItemService
                 MIN($itemLabel)      AS item_label,
                 $itemKey             AS item_key,
                 $codClean            AS cod_val,
-                COUNT(*)             AS n
+                COUNT(*)             AS n,
+                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS p
             ")
             ->whereRaw("$pageLabel <> ''")
             ->whereRaw("$itemLabel <> ''")
@@ -187,11 +231,13 @@ class DailyPrimaryItemService
                 $slice[$d][$pk]['items'][$ik] = [
                     'label'          => $rawLabel,
                     'count'          => 0,
+                    'proceed'        => 0,
                     'cods'           => [],
                     'variant_counts' => [],
                 ];
             }
             $slice[$d][$pk]['items'][$ik]['count'] += $n;
+            $slice[$d][$pk]['items'][$ik]['proceed'] += (int)$r->p;
             $slice[$d][$pk]['items'][$ik]['variant_counts'][$rawLabel]
                 = ($slice[$d][$pk]['items'][$ik]['variant_counts'][$rawLabel] ?? 0) + $n;
             if ($cod !== null && $cod > 0) {
@@ -227,52 +273,71 @@ class DailyPrimaryItemService
         unset($pgInfo);
 
         // ---- Resolve primary per slice -----------------------------------
+        // Mode COD per item (most-frequent COD among that item's rows).
+        $modeOf = function (array $it): ?float {
+            if (empty($it['cods'])) return null;
+            arsort($it['cods']);
+            return (float) array_key_first($it['cods']);
+        };
+
+        // Previous-day main item per page — the tie rule's second step. A day inside this
+        // recompute's scope uses the pick made in this run (dates go oldest first); a day
+        // outside it uses the stored row.
+        $inScope = isset($filter['range'])
+            ? fn(string $d) => $d >= $filter['range'][0] && $d <= $filter['range'][1]
+            : fn(string $d) => in_array($d, $filter['dates'] ?? [], true);
+        $prevOf = fn(string $d) => date('Y-m-d', strtotime($d . ' -1 day'));
+        $storedPrev = [];
+        $prevDates = array_values(array_filter(array_map($prevOf, array_keys($slice)), fn($d) => !$inScope($d)));
+        if (!empty($prevDates)) {
+            foreach (DB::table('daily_page_primary_item')->whereIn('ts_date', array_unique($prevDates))
+                         ->get(['ts_date', 'page_key', 'primary_item_key']) as $pr) {
+                $storedPrev[substr((string)$pr->ts_date, 0, 10)][(string)$pr->page_key] = (string)$pr->primary_item_key;
+            }
+        }
+        ksort($slice);
+        $picked = []; // [date][page_key] => item key chosen in this run
+
         $now = now();
         $toUpsert = [];
-        $toDelete = []; // [date => [page_key, ...]]  (for ties / no-resolution)
-        $tiesSkipped = 0;
+        $tiesResolved = 0;
         $pageCount = 0;
         $dateSet = [];
 
         foreach ($slice as $d => $pages) {
             $dateSet[$d] = true;
+            $prevD = $prevOf((string)$d);
             foreach ($pages as $pk => $info) {
                 $pageCount++;
                 $items = $info['items'];
-                if (empty($items)) {
-                    $toDelete[$d][] = $pk;
-                    continue;
-                }
+                if (empty($items)) continue;
 
-                // Sort items by count DESC.
-                uasort($items, fn($a, $b) => $b['count'] <=> $a['count']);
-                $keys = array_keys($items);
-                $topKey = $keys[0];
+                $topCount = max(array_column($items, 'count'));
+                $tied = array_keys(array_filter($items, fn($it) => $it['count'] === $topCount));
+                $isTie = count($tied) >= 2;
+
+                if ($isTie) {
+                    $tiesResolved++;
+                    $prevKey = $inScope($prevD)
+                        ? ($picked[$prevD][$pk] ?? null)
+                        : ($storedPrev[$prevD][$pk] ?? null);
+                    usort($tied, function ($a, $b) use ($items, $prevKey, $modeOf) {
+                        return [$items[$b]['proceed'], $b === $prevKey, $modeOf($items[$b]) ?? 0.0, $a]
+                           <=> [$items[$a]['proceed'], $a === $prevKey, $modeOf($items[$a]) ?? 0.0, $b];
+                    });
+                }
+                $topKey = $tied[0];
                 $top    = $items[$topKey];
-                $secKey = $keys[1] ?? null;
-                $second = $secKey !== null ? $items[$secKey] : null;
+                $picked[$d][$pk] = (string)$topKey;
 
-                // Tie check: >=2 items sharing the top count
-                $topCount = $top['count'];
-                $tiedCount = 0;
-                foreach ($items as $it) {
-                    if ($it['count'] === $topCount) $tiedCount++;
-                }
-                if ($tiedCount >= 2) {
-                    $tiesSkipped++;
-                    $toDelete[$d][] = $pk;
-                    continue;
-                }
+                // Second = the next item by count (ties by key), for display only.
+                $rest = $items;
+                unset($rest[$topKey]);
+                uksort($rest, fn($a, $b) => [$rest[$b]['count'], $a] <=> [$rest[$a]['count'], $b]);
+                $secKey = array_key_first($rest);
+                $second = $secKey !== null ? $rest[$secKey] : null;
 
-                // Mode COD for primary
-                $modeCod = null;
-                if (!empty($top['cods'])) {
-                    arsort($top['cods']);
-                    $modeCod = (float) array_key_first($top['cods']);
-                }
-
-                $totalAll = 0;
-                foreach ($items as $it) $totalAll += $it['count'];
+                $totalAll = array_sum(array_column($items, 'count'));
 
                 $toUpsert[] = [
                     'ts_date'          => $d,
@@ -282,9 +347,10 @@ class DailyPrimaryItemService
                     'primary_item_key' => $topKey,
                     'primary_orders'   => $top['count'],
                     'total_orders_all' => $totalAll,
-                    'primary_mode_cod' => $modeCod,
+                    'primary_mode_cod' => $modeOf($top),
                     'second_item'      => $second['label'] ?? null,
                     'second_orders'    => $second['count'] ?? null,
+                    'is_tie'           => $isTie,
                     'computed_at'      => $now,
                     'created_at'       => $now,
                     'updated_at'       => $now,
@@ -292,11 +358,17 @@ class DailyPrimaryItemService
             }
         }
 
-        // ---- Persist: delete stale slices (ties) + upsert primaries ------
-        DB::transaction(function () use ($filter, $toUpsert, $toDelete) {
+        // Before the is_tie migration has run, write rows without the flag.
+        if (!Schema::hasColumn('daily_page_primary_item', 'is_tie')) {
+            foreach ($toUpsert as &$u) unset($u['is_tie']);
+            unset($u);
+        }
+
+        // ---- Persist: delete the scope + insert the resolved primaries ---
+        DB::transaction(function () use ($filter, $toUpsert) {
             // 1) Wipe everything that falls inside our scope first — then re-insert
-            //    only the resolved slices. This guarantees "tied / vanished" slices
-            //    leave no stale row behind.
+            //    only the resolved slices. This guarantees vanished slices (no orders
+            //    left on that page-day) leave no stale row behind.
             $del = DB::table('daily_page_primary_item');
             if (isset($filter['range'])) {
                 [$from, $to] = $filter['range'];
@@ -324,7 +396,7 @@ class DailyPrimaryItemService
             'dates'         => count($dateSet),
             'pages'         => $pageCount,
             'rows_upserted' => count($toUpsert),
-            'ties_skipped'  => $tiesSkipped,
+            'ties_resolved' => $tiesResolved,
             'prices_backfilled' => $backfilled,
         ];
     }

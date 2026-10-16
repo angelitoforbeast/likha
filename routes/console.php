@@ -71,3 +71,10 @@ if ($nightSettings['night_astra_enabled'] || $nightAstraActive) {
         ->everyMinute()
         ->withoutOverlapping(5); // 5 min: ang tick na nag-crash ay hindi haharang sa mga susunod nang isang araw
 }
+
+// Main item ng bawat page-day (daily_page_primary_item), huling 14 araw — safety net para sa lahat ng
+// paraan ng pagbabago ng macro_output rows. 03:50 Manila: pagkatapos ng Astra night step (03:00 hanggang ~03:45).
+Schedule::command('supply:refresh-primary-items --last=14')
+    ->timezone('Asia/Manila')
+    ->dailyAt('03:50')
+    ->withoutOverlapping();

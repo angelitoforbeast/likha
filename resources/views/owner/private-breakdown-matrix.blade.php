@@ -385,6 +385,7 @@
                       @endif
                       <div x-show="vis.item_name && !vis.show_alias" style="font-weight:600;">{{ $cell['item_name'] }}</div>
                       <div x-show="vis.item_name && vis.show_alias" style="font-weight:600;color:#6d28d9;">{{ $cell['item_alias_label'] }}</div>
+                      @if (!empty($cell['is_tie']))<span x-show="vis.item_name" style="display:inline-block;margin-left:4px;padding:0 4px;border-radius:3px;font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;" title="Tie sa top count ng orders — pinili ng tie rule (proceed → main item kahapon → mas mataas na COD)">tie</span>@endif
                       <div x-show="vis.cod" style="font-size:9px;color:#64748b;font-weight:400;">
                         {{ $cell['orders'] }}{{ $cell['mode_cod'] ? ' @ '.number_format($cell['mode_cod'],0) : '' }}
                         @if(!empty($cell['price_changed']) && $cell['price_delta'] !== null)
@@ -679,7 +680,7 @@
           const j = await r.json();
           if (!j.ok) { alert(j.message || 'Recompute failed'); return; }
           const s = j.summary || {};
-          this.recomputeMsg = `✓ ${s.rows_upserted||0} rows · ${s.ties_skipped||0} ties skipped (${s.elapsed_s||0}s)`;
+          this.recomputeMsg = `✓ ${s.rows_upserted||0} rows · ${s.ties_resolved||0} tie(s) resolved (${s.elapsed_s||0}s)`;
           await this.refreshMatrix();
           setTimeout(() => this.recomputeMsg = '', 8000);
         } catch(e) {

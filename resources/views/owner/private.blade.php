@@ -742,6 +742,7 @@
                 <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.35;"
                      :title="owCompact ? sq(row.item_name) : null"
                      x-text="sq(row.item_name)"></div>
+                <span x-show="row.item_is_tie" x-cloak style="display:inline-block;margin-left:4px;padding:0 4px;border-radius:3px;font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;" title="Tie sa top count ng orders — pinili ng tie rule (proceed → main item kahapon → mas mataas na COD)">tie</span>
                 <template x-for="s in (row.secondary_items||[])" :key="s.item_name">
                   <div style="font-size:10px;color:#94a3b8;line-height:1.4;"
                        :title="owCompact ? sq(s.item_name) + ' (' + s.total_orders + ')' + ((s.price && s.price !== row.price) ? ' · ' + money(s.price) : '') : null">
@@ -2344,7 +2345,7 @@
           const j = await r.json();
           if (j.ok && j.summary) {
             const s = j.summary;
-            this.saveMsg = `✓ ${s.rows_upserted} rows · ${s.ties_skipped} ties skipped (${s.from}→${s.to}, ${s.elapsed_s}s)`;
+            this.saveMsg = `✓ ${s.rows_upserted} rows · ${s.ties_resolved} tie(s) resolved (${s.from}→${s.to}, ${s.elapsed_s}s)`;
             setTimeout(() => this.saveMsg = '', 6000);
             await this.load();
           } else {

@@ -20,9 +20,20 @@ class MacroOutputController extends Controller
     /** Mga field na nagbabago ng bilang ng orders / proceed / presyo ng isang page-day sa /owner/private. */
     private const ORDER_COUNT_FIELDS = ['ITEM_NAME', 'COD', 'STATUS', 'TIMESTAMP', 'PAGE'];
 
-    /** May binagong order field → huwag nang ipakita ang naka-cache na /owner/private numbers. */
-    private function ordersChanged(): void
+    /**
+     * May binagong order field → i-recompute ang main item ng mga petsang iyon (luma at bagong
+     * ts_date) at huwag nang ipakita ang naka-cache na /owner/private numbers.
+     */
+    private function ordersChanged(array $dates): void
     {
+        $dates = array_values(array_filter(array_map(fn($d) => $d ? substr((string)$d, 0, 10) : null, $dates)));
+        if (!empty($dates)) {
+            try {
+                app(\App\Services\DailyPrimaryItemService::class)->recomputeDates($dates);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('daily_page_primary_item recompute after macro_output edit failed (non-fatal): ' . $e->getMessage());
+            }
+        }
         OwnerPrivateController::bumpCacheVersion();
     }
 
@@ -1573,10 +1584,12 @@ class MacroOutputController extends Controller
                 }
             }
 
+            $oldDate = $record->getOriginal('ts_date');
             $record->save();
 
             if (in_array($field, self::ORDER_COUNT_FIELDS, true)) {
-                $this->ordersChanged();
+                // ts_date ay galing sa DB trigger (TIMESTAMP) → basahin ulit pagkatapos mag-save.
+                $this->ordersChanged([$oldDate, MacroOutput::where('id', $record->id)->value('ts_date')]);
             }
         }
 
@@ -1635,14 +1648,18 @@ class MacroOutputController extends Controller
     public function bulkUpdate(Request $request)
     {
         $countsChanged = false;
+        $dates = [];
         foreach ($request->input('records', []) as $id => $fields) {
+            $touchesCounts = is_array($fields) && array_intersect(array_keys($fields), self::ORDER_COUNT_FIELDS);
+            if ($touchesCounts) $dates[] = MacroOutput::where('id', $id)->value('ts_date');
             MacroOutput::where('id', $id)->update($fields);
-            if (is_array($fields) && array_intersect(array_keys($fields), self::ORDER_COUNT_FIELDS)) {
+            if ($touchesCounts) {
                 $countsChanged = true;
+                $dates[] = MacroOutput::where('id', $id)->value('ts_date');
             }
         }
         if ($countsChanged) {
-            $this->ordersChanged();
+            $this->ordersChanged($dates);
         }
 
         return redirect()->back()->with('success', 'All updates saved!');

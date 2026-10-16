@@ -1835,7 +1835,7 @@
           const j = await r.json();
           if (j.ok && j.summary) {
             const s = j.summary;
-            this.saveMsg = `✓ ${s.rows_upserted} rows · ${s.ties_skipped} ties skipped (${s.from}→${s.to}, ${s.elapsed_s}s)`;
+            this.saveMsg = `✓ ${s.rows_upserted} rows · ${s.ties_resolved} tie(s) resolved (${s.from}→${s.to}, ${s.elapsed_s}s)`;
             setTimeout(() => this.saveMsg = '', 6000);
             await this.load();
           } else {
