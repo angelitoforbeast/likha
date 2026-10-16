@@ -131,6 +131,11 @@
                       @if($row['task']->department)
                         <div class="truncate text-[10px] text-gray-400">{{ $row['task']->department }}</div>
                       @endif
+                      @foreach($row['notSubmitted'] as $day => $names)
+                        <div class="text-[10px] text-red-600 leading-tight" title="{{ $day }}: hindi pa nagsumite">
+                          {{ \Carbon\Carbon::parse($day)->format('M j') }}: {{ implode(', ', $names) }}
+                        </div>
+                      @endforeach
                     </td>
                     @foreach($row['cells'] as $day => $cell)
                       <td class="px-0.5 py-1 border-b border-gray-100 text-center">
@@ -158,7 +163,7 @@
       <section class="bg-white rounded-xl border border-gray-200 shadow-sm">
         <div class="px-4 pt-3 pb-2 flex items-center gap-3">
           <h2 class="text-sm font-bold text-gray-700">Per person</h2>
-          <span class="text-xs text-gray-400">most missed days first · missed = a day with a due task and no submission (a group task one teammate did is done for all)</span>
+          <span class="text-xs text-gray-400">most missed days first · missed = a day an individual task of theirs was not submitted, or a day with an undone group task and no submission at all (a group task one teammate did is done for all)</span>
         </div>
         @if(empty($people))
           <p class="px-4 pb-4 text-sm text-gray-400">Walang naka-assign na tao sa mga task na ito.</p>

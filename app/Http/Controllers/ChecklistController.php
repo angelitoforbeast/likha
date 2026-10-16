@@ -164,7 +164,8 @@ class ChecklistController extends Controller
         $isToday = $dateObj->isToday();
 
         // Access policy: CEO sees ALL tasks + ALL submissions across users.
-        // Non-CEO users only see tasks where they're explicitly assigned
+        // OIC sees their department's tasks plus tasks they created or are assigned to;
+        // other users only see tasks where they're explicitly assigned
         // (via the assignedUsers pivot). Submissions are correspondingly
         // filtered to those tasks the user can see.
         $userId   = Auth::id();
@@ -189,12 +190,8 @@ class ChecklistController extends Controller
                 });
         }
 
-        // Non-CEO: scope to tasks where the user is among the assignees.
-        if (!$isCEO && $userId) {
-            $taskQuery->whereHas('assignedUsers', function ($q) use ($userId) {
-                $q->where('users.id', $userId);
-            });
-        }
+        // Non-CEO: OIC = department niya + ginawa o naka-assign; ang iba = naka-assign lang.
+        $this->scopeReportTasks($taskQuery);
 
         $tasks = $taskQuery->orderBy('sort_order')->orderBy('id')->get();
 
@@ -249,11 +246,7 @@ class ChecklistController extends Controller
                 $extraQuery = ChecklistTask::withTrashed()
                     ->with('assignedUsers')
                     ->whereIn('id', $missingIds);
-                if (!$isCEO && $userId) {
-                    $extraQuery->whereHas('assignedUsers', function ($q) use ($userId) {
-                        $q->where('users.id', $userId);
-                    });
-                }
+                $this->scopeReportTasks($extraQuery);
                 $extra = $extraQuery->get();
                 if ($extra->isNotEmpty()) {
                     $tasks = $tasks->merge($extra)->sortBy([['sort_order', 'asc'], ['id', 'asc']])->values();
@@ -278,7 +271,8 @@ class ChecklistController extends Controller
      * "Over several days" ng /checklist/report (?view=range): buod kada araw, kada task at
      * kada tao sa isang date range (default huling 14 araw, hanggang 62).
      *
-     * Visibility = day view: CEO lahat; ang iba, ang mga task lang na naka-assign sa kanila.
+     * Visibility = day view (scopeReportTasks): CEO lahat; OIC ang department niya at ang ginawa o
+     * naka-assign sa kanya; ang iba, ang mga task lang na naka-assign sa kanila.
      * Due rules = day view (frequency, frequency_day, once, created on/before ang araw, hindi
      * pa deleted noon), dagdag ang is_active. Lahat ng bilang ay galing sa iisang GROUP BY
      * (date, task, user) — walang query kada cell.
@@ -314,10 +308,7 @@ class ChecklistController extends Controller
                 $q->whereNull('deleted_at')
                   ->orWhere('deleted_at', '>', $from->copy()->endOfDay());
             });
-        if (!$this->isCeo()) {
-            $userId = Auth::id();
-            $taskQuery->whereHas('assignedUsers', fn ($q) => $q->where('users.id', $userId));
-        }
+        $this->scopeReportTasks($taskQuery);
         $tasks    = $taskQuery->orderBy('sort_order')->orderBy('id')->get();
         $allDepts = $tasks->pluck('department')->filter()->unique()->sort()->values()->all();
         $dept     = is_string($request->query('dept')) ? trim($request->query('dept')) : '';
@@ -368,6 +359,7 @@ class ChecklistController extends Controller
 
         $summary = array_fill_keys($days, ['due' => 0, 'done' => 0, 'pct' => null, 'approved' => 0, 'notApproved' => 0, 'unknown' => 0]);
         $submittedOn = [];   // [task_id][day] = true
+        $submittedBy = [];   // [task_id][day][user_id] = true
         $taskSubs    = [];   // task_id => [subs, not_approved]
         $userStats   = [];   // user_id => [subs, approved, notApproved, days[day] = true]
         foreach ($rows as $r) {
@@ -375,6 +367,7 @@ class ChecklistController extends Controller
             $tid = (int) $r->task_id;
             $uid = (int) $r->user_id;
             $submittedOn[$tid][$day] = true;
+            $submittedBy[$tid][$day][$uid] = true;
             $taskSubs[$tid]['subs']        = ($taskSubs[$tid]['subs'] ?? 0) + (int) $r->subs;
             $taskSubs[$tid]['notApproved'] = ($taskSubs[$tid]['notApproved'] ?? 0) + (int) $r->not_approved;
             if (isset($summary[$day])) {
@@ -405,11 +398,14 @@ class ChecklistController extends Controller
         // Ang submission sa araw na hindi due ay "done" sa grid pero hindi bilang sa mga %.
         $taskRows    = [];
         $userDueDays = [];   // user_id => [day] = true
-        $userOpenDays = [];  // user_id => [day] = true: may due task na hindi pa tapos para sa kanya
+        $userOpenDays = [];  // user_id => [day] = true: may group task na hindi pa tapos ng team
+        $userMissedDays = []; // user_id => [day] = true: may individual task na hindi niya naisumite
         foreach ($tasks as $t) {
             $cells = [];
             $due   = 0;
             $done  = 0;
+            $notSubmitted = [];   // individual: [day] = mga pangalang hindi nagsumite
+            $individual   = ($t->submission_type ?? 'group') === 'individual';
             foreach ($dayObjs as $dayStr => $dayObj) {
                 $submitted = isset($submittedOn[$t->id][$dayStr]);
                 $taskDue   = $isDue($t, $dayObj);
@@ -422,11 +418,16 @@ class ChecklistController extends Controller
                     $summary[$dayStr]['done']++;
                 }
                 // Group task na may submission na noong araw: tapos na para sa buong team, kaya hindi
-                // "missed" ng kahit sinong naka-assign. Ang individual ay bawat tao pa rin.
-                $teamDone = $submitted && ($t->submission_type ?? 'group') === 'group';
+                // "missed" ng kahit sinong naka-assign. Individual: missed ng bawat taong hindi
+                // nagsumite ng task na iyon, kahit may iba siyang naisumite noong araw.
                 foreach ($t->assignedUsers as $u) {
                     $userDueDays[$u->id][$dayStr] = true;
-                    if (!$teamDone) {
+                    if ($individual) {
+                        if (!isset($submittedBy[$t->id][$dayStr][$u->id])) {
+                            $userMissedDays[$u->id][$dayStr] = true;
+                            $notSubmitted[$dayStr][] = $u->name;
+                        }
+                    } elseif (!$submitted) {
                         $userOpenDays[$u->id][$dayStr] = true;
                     }
                 }
@@ -443,6 +444,7 @@ class ChecklistController extends Controller
                 'subs'           => $subs,
                 'notApproved'    => $notApproved,
                 'notApprovedPct' => $subs > 0 ? (int) round($notApproved / $subs * 100) : null,
+                'notSubmitted'   => $notSubmitted,
             ];
         }
         // Pinakamahina sa itaas; ang walang due day ay sa dulo
@@ -463,7 +465,10 @@ class ChecklistController extends Controller
                 'approved'    => $stats['approved'] ?? 0,
                 'notApproved' => $stats['notApproved'] ?? 0,
                 'dueDays'     => count($dueDays),
-                'missed'      => count(array_filter(array_keys($userOpenDays[$u->id] ?? []), fn ($d) => !isset($stats['days'][$d]))),
+                'missed'      => count(array_unique(array_merge(
+                    array_keys($userMissedDays[$u->id] ?? []),
+                    array_filter(array_keys($userOpenDays[$u->id] ?? []), fn ($d) => !isset($stats['days'][$d]))
+                ))),
             ];
         }
         usort($people, fn ($a, $b) => [$b['missed'], $a['user']->name] <=> [$a['missed'], $b['user']->name]);
@@ -568,8 +573,12 @@ class ChecklistController extends Controller
         if ($this->isCeo()) {
             // sees all — no filter
         } elseif ($this->isOic() && $dept !== '') {
-            // OIC sees tasks tagged with their department (trimmed, case-insensitive, gaya ng isOicOf)
-            $query->whereRaw('LOWER(TRIM(department)) = ?', [$dept]);
+            // OIC sees tasks tagged with their department (trimmed, case-insensitive, gaya ng isOicOf),
+            // pati ang mga task na siya ang gumawa kahit ibang department (hal. para sa Encoders)
+            $query->where(function ($q) use ($dept, $userId) {
+                $q->whereRaw('LOWER(TRIM(department)) = ?', [$dept])
+                  ->orWhere('created_by', $userId);
+            });
         } else {
             // others see tasks they created OR are assigned to
             $query->where(function ($q) use ($userId) {
@@ -1271,14 +1280,49 @@ class ChecklistController extends Controller
         }
     }
 
-    /** AI analysis, approval check at ang logs nila: CEO, may-ari ng submission, o OIC ng department ng task. */
+    /**
+     * Saklaw ng mga report (isang araw, ilang araw, CSV): CEO lahat; OIC ang mga task ng department
+     * niya, ang ginawa niya at ang naka-assign sa kanya; ang iba, ang naka-assign lang sa kanila.
+     */
+    private function scopeReportTasks($query): void
+    {
+        if ($this->isCeo()) {
+            return;
+        }
+        $userId = Auth::id();
+        $isOic  = $this->isOic();
+        $dept   = $this->oicDepartment();
+        $query->where(function ($q) use ($userId, $isOic, $dept) {
+            $q->whereHas('assignedUsers', fn ($r) => $r->where('users.id', $userId));
+            if ($isOic) {
+                $q->orWhere('created_by', $userId);
+                if ($dept !== '') {
+                    $q->orWhereRaw('LOWER(TRIM(department)) = ?', [$dept]);
+                }
+            }
+        });
+    }
+
+    /** OIC na nakakakita ng task sa report: department niya, o siya ang gumawa o naka-assign. */
+    private function oicSeesTask(ChecklistTask $task): bool
+    {
+        if (!$this->isOic()) {
+            return false;
+        }
+
+        return $this->isOicOf($task->department)
+            || (int) $task->created_by === (int) Auth::id()
+            || $task->assignedUsers()->where('users.id', Auth::id())->exists();
+    }
+
+    /** AI analysis, approval check at ang logs nila: CEO, may-ari ng submission, o OIC na nakakakita ng task sa report. */
     private function authorizeReviewSubmission(ChecklistSubmission $submission): void
     {
         if ($this->isCeo() || (int) $submission->user_id === (int) Auth::id()) {
             return;
         }
         $task = ChecklistTask::withTrashed()->find($submission->checklist_task_id);
-        if (!$task || !$this->isOicOf($task->department)) {
+        if (!$task || !$this->oicSeesTask($task)) {
             $this->refuse('Sa sarili mong submission lang ito puwede (o sa department mo kung OIC ka).', true);
         }
     }
