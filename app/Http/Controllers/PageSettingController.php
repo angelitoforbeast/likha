@@ -2,7 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SyncBotcakeCustomersJob;
+use App\Models\BotcakePsid;
+use App\Models\BotcakePsidImportRun;
 use App\Models\PageSetting;
+use App\Services\BotcakeClient;
+use App\Services\BotcakeCustomerMatcher;
+use App\Services\BotcakeCustomerSync;
+use App\Services\BotcakeException;
 use App\Services\PageSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -54,7 +61,23 @@ class PageSettingController extends Controller
             ];
         })->sortBy('name');
 
+        // Botcake panel kada page na may botcake settings. Ang listahan ng orders na wala pang PSID ay live query,
+        // kaya para lang sa page na binuksan (?details=), hindi para sa lahat sa bawat load.
+        $details = $this->settings->pageKey((string) $request->query('details', ''));
+        $botcake = [];
+        foreach ($pages as $pageKey => $p) {
+            if (!$p['active']->contains(fn ($r) => $r->provider === 'botcake')) continue;
+
+            $botcake[$pageKey] = [
+                'customers'    => BotcakePsid::where('source', 'api')->whereRaw('LOWER(page) = ?', [$pageKey])->count(),
+                'last_run'     => BotcakePsidImportRun::where('source', 'api')->whereRaw('LOWER(page_name) = ?', [$pageKey])->latest('id')->first(),
+                'token_status' => $this->settings->get($p['name'], 'botcake', 'token_status'),
+                'preview'      => $details !== '' && $details === $pageKey ? app(BotcakeCustomerMatcher::class)->matchPage($p['name'], false) : null,
+            ];
+        }
+
         return view('page_settings.index', [
+            'botcake'   => $botcake,
             'pages'     => $pages,
             'filters'   => $filters,
             'providers' => PageSetting::distinct()->orderBy('provider')->pluck('provider'),
@@ -80,6 +103,45 @@ class PageSettingController extends Controller
 
         $label = ['created' => 'Naidagdag', 'replaced' => 'Napalitan', 'unchanged' => 'Walang binago (parehong value)'][$res['status']];
         return redirect()->route('page-settings.index')->with('success', $label . ': ' . $res['setting']->page_name . ' · ' . $res['setting']->fullKey());
+    }
+
+    /** Isang custom_fields call: ok o invalid, itinatala sa botcake.token_status. */
+    public function testToken(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync)
+    {
+        $this->checkAccess();
+
+        $page   = (string) $request->input('page_name', '');
+        $pageId = $this->settings->get($page, 'botcake', 'page_id');
+        $token  = $this->settings->get($page, 'botcake', 'token');
+        if (!$pageId || !$token) {
+            return redirect()->route('page-settings.index')->with('error', 'Kailangan muna ang botcake.page_id at botcake.token ng page.');
+        }
+
+        try {
+            $status = $client->testToken($pageId, $token) ? 'ok' : 'invalid';
+        } catch (BotcakeException $e) {
+            return redirect()->route('page-settings.index')->with('error', 'Hindi nasubukan ang token: ' . $e->getMessage());
+        }
+
+        $sync->tokenStatus($page, $status, true);
+
+        return redirect()->route('page-settings.index')->with($status === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $status);
+    }
+
+    /** Incremental sync ng isang page, sa queue. */
+    public function sync(Request $request, BotcakeCustomerSync $sync)
+    {
+        $this->checkAccess();
+
+        $key  = $this->settings->pageKey((string) $request->input('page_name', ''));
+        $page = collect($sync->pages())->first(fn ($p) => $this->settings->pageKey($p) === $key);
+        if (!$page) {
+            return redirect()->route('page-settings.index')->with('error', 'Kailangan muna ang botcake.page_id at botcake.token ng page.');
+        }
+
+        SyncBotcakeCustomersJob::dispatch($page);
+
+        return redirect()->route('page-settings.index')->with('success', $page . ': naka-queue ang Botcake sync. I-refresh mamaya para sa bilang.');
     }
 
     public function deactivate(int $id)

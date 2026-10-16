@@ -16,7 +16,7 @@ class BotcakePsidGsheetController extends Controller
         $settings = BotcakePsidSetting::all();
 
         // If user refreshed, we can show latest run (optional)
-        $latestRun = BotcakePsidImportRun::latest('id')->first();
+        $latestRun = BotcakePsidImportRun::where('source', 'sheet')->latest('id')->first(); // hindi ang Botcake API syncs
 
         return view('botcake.psid.import', [
             'settings'  => $settings,

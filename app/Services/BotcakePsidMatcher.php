@@ -76,7 +76,9 @@ class BotcakePsidMatcher
 
     protected function tableQuery(string $page, string $name): Builder
     {
-        return BotcakePsid::whereRaw('LOWER(page) = ?', [$this->lower($page)])
+        // Sheet records lang: ang Botcake API customers (source api) ay lookup, hindi kasaysayan ng sheet.
+        return BotcakePsid::where('source', 'sheet')
+            ->whereRaw('LOWER(page) = ?', [$this->lower($page)])
             ->whereRaw('LOWER(fb_name) = ?', [$this->lower($name)]);
     }
 

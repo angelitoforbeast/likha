@@ -243,6 +243,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name(
     Route::get('/', [PageSettingController::class, 'index'])->name('index');
     Route::post('/', [PageSettingController::class, 'store'])->name('store');
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
+    Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1')->name('test-token');
+    Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1')->name('sync');
 });
 
 Route::prefix('botcake/psid')->group(function () {

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\BotcakePsidSetting;
 use App\Models\BotcakePsidImportRun;
 use App\Models\BotcakePsidImportEvent;
+use App\Services\BotcakeCustomerMatcher;
 use App\Services\BotcakePsidMatcher;
 use App\Services\BotcakePsidSheet;
 use Carbon\Carbon;
@@ -155,6 +156,17 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 
             $copies = $matcher->copyReorders();
             $this->updateRun(['total_reorder_copies' => $copies]);
+
+            // Mga page na may Botcake token: ang bagong orders ay kinakabitan din mula sa naitalang Botcake customers.
+            // Hiwalay na try: ang pagkakamali dito ay hindi dapat makasira sa sheet import.
+            try {
+                $api = app(BotcakeCustomerMatcher::class)->matchPagesWithTokens();
+                if ($api['by_name'] + $api['by_phone'] > 0) {
+                    Log::info('ImportBotcakePsid: Botcake customer match', $api);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('ImportBotcakePsid: Botcake customer match failed - ' . $e->getMessage());
+            }
 
             $this->updateRun([
                 'status'       => 'done',

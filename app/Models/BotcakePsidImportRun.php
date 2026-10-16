@@ -30,6 +30,16 @@ class BotcakePsidImportRun extends Model
         'total_deleted_rows',
         'last_message',
         'last_error',
+        'source',
+        'page_name',
+        'batches_read',
+        'customers_new',
+        'customers_updated',
+        'seconds',
+        'matched_by_name',
+        'matched_by_phone',
+        'ambiguous',
+        'no_match',
     ];
 
     public function events()

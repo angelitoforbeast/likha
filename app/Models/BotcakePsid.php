@@ -19,11 +19,19 @@ class BotcakePsid extends Model
         'matched_at',
         'matched_rows',
         'last_checked_at',
+        'source',
+        'phone_numbers',
+        'subscribed_at',
+        'last_interactive_at',
+        'botcake_customer_id',
     ];
 
     protected $casts = [
         'first_seen_at'   => 'datetime',
         'matched_at'      => 'datetime',
         'last_checked_at' => 'datetime',
+        'phone_numbers'       => 'array',
+        'subscribed_at'       => 'datetime',
+        'last_interactive_at' => 'datetime',
     ];
 }

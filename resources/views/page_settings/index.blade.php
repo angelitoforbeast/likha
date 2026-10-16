@@ -61,7 +61,9 @@
         <div class="bg-white rounded shadow mb-4">
             <div class="px-4 py-2 border-b font-semibold">{{ $p['name'] }}</div>
 
-            @includeIf('page_settings._botcake_panel', ['pageName' => $p['name']])
+            @isset($botcake[$pageKey])
+                @include('page_settings._botcake_panel', ['pageName' => $p['name'], 'panel' => $botcake[$pageKey]])
+            @endisset
 
             <div class="overflow-x-auto">
             <table class="w-full text-sm">

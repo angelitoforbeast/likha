@@ -74,6 +74,11 @@ return [
     'key' => env('AUTOMATION_KEY'),
 ],
 
+    // Botcake customer sync (botcake:sync-customers sa schedule). Naka-off kapag walang laman.
+    'botcake' => [
+        'sync_enabled' => (bool) env('BOTCAKE_SYNC_ENABLED', false),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),

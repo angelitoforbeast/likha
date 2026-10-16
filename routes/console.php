@@ -97,3 +97,18 @@ Schedule::command('botcake:psid-import --clean-sheet')
     ->timezone('Asia/Manila')
     ->dailyAt('03:00')
     ->withoutOverlapping();
+
+// Botcake customers mula sa API (mga page na may botcake.page_id at token), saka matching ng orders.
+// Kada oras sa :15 (pagkatapos ng :00 na sheet import) ang incremental; Linggo 01:00 Manila ang buong basa.
+// Tatakbo lang kapag BOTCAKE_SYNC_ENABLED=true (naka-off sa release; bubuksan pagkatapos ng one-page test).
+Schedule::command('botcake:sync-customers')
+    ->timezone('Asia/Manila')
+    ->hourlyAt(15)
+    ->when(fn () => (bool) config('services.botcake.sync_enabled'))
+    ->withoutOverlapping();
+
+Schedule::command('botcake:sync-customers --full')
+    ->timezone('Asia/Manila')
+    ->weeklyOn(0, '01:00')
+    ->when(fn () => (bool) config('services.botcake.sync_enabled'))
+    ->withoutOverlapping();
