@@ -49,7 +49,7 @@ class ChecklistController extends Controller
         });
 
         // Load all today's submissions once
-        $todaySubmissions = ChecklistSubmission::with(['user', 'files', 'logs.user'])
+        $todaySubmissions = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestApproval'])
             ->where('date', $today)->get();
 
         // Group tasks: any user's submission per task
@@ -87,10 +87,34 @@ class ChecklistController extends Controller
             $doneByTask[$t->id] = $reqPhotos === 0 || $photoCount >= $reqPhotos;
         }
 
-        // Smart sort: pending/photoWarn first, fully-done last; timed tasks before untimed within each group
-        $tasks = $tasks->sort(function ($a, $b) use ($doneByTask, $submissionsByTask, $mySubmissionsByTask) {
-            $aDone = $doneByTask[$a->id] ? 1 : 0;
-            $bDone = $doneByTask[$b->id] ? 1 : 0;
+        // Status kada task, galing sa pinakahuling approval verdict ng submission ngayong araw:
+        // approved / needs_fix (NOT APPROVED, o kulang pa ang photos) / checking (wala pang
+        // verdict o hindi malinaw) / pending (wala pang submission).
+        $statusByTask = [];
+        foreach ($tasks as $t) {
+            $sub = $t->submission_type === 'individual'
+                ? $mySubmissionsByTask->get($t->id)
+                : $submissionsByTask->get($t->id);
+            $verdict = $sub?->latestApproval?->verdict;
+            $state = match (true) {
+                !$sub                       => 'pending',
+                $verdict === 'not_approved' => 'needs_fix',
+                !$doneByTask[$t->id]        => 'needs_fix',
+                $verdict === 'approved'     => 'approved',
+                default                     => 'checking',
+            };
+            $statusByTask[$t->id] = [
+                'state'  => $state,
+                'reason' => $verdict === 'not_approved' ? mb_substr((string) $sub->latestApproval->analysis_result, 0, 300) : null,
+            ];
+        }
+
+        // Smart sort: kailangang ayusin at wala pang submission muna, sunod ang sinusuri pa,
+        // approved sa dulo; timed tasks before untimed within each group
+        $rank  = ['needs_fix' => 0, 'pending' => 0, 'checking' => 1, 'approved' => 2];
+        $tasks = $tasks->sort(function ($a, $b) use ($statusByTask, $rank) {
+            $aDone = $rank[$statusByTask[$a->id]['state']];
+            $bDone = $rank[$statusByTask[$b->id]['state']];
 
             if ($aDone !== $bDone) return $aDone - $bDone;
 
@@ -106,16 +130,20 @@ class ChecklistController extends Controller
             return $a->sort_order - $b->sort_order;
         })->values();
 
-        $doneCount  = $tasks->filter(function ($t) use ($submissionsByTask, $mySubmissionsByTask) {
-            return $t->submission_type === 'individual'
-                ? $mySubmissionsByTask->has($t->id)
-                : $submissionsByTask->has($t->id);
-        })->count();
+        $states = collect($statusByTask)->pluck('state')->countBy();
+        $counts = [
+            'approved'     => $states->get('approved', 0),
+            'needsFix'     => $states->get('needs_fix', 0),
+            'checking'     => $states->get('checking', 0),
+            'notSubmitted' => $states->get('pending', 0),
+        ];
+        // "Tapos" = approved lang; ang progress bar at "All tasks completed" ay dito nakabase
+        $doneCount  = $counts['approved'];
         $totalTasks = $tasks->count();
 
         return view('checklist.index', compact(
             'tasks', 'submissionsByTask', 'mySubmissionsByTask',
-            'today', 'doneCount', 'totalTasks'
+            'today', 'doneCount', 'totalTasks', 'statusByTask', 'counts'
         ));
     }
 

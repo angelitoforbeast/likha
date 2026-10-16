@@ -19,6 +19,14 @@
             </div>
             <span class="text-xs font-semibold text-gray-500">{{ $doneCount }}/{{ $totalTasks }}</span>
           </div>
+          <span class="text-xs text-gray-500">
+            <span class="text-green-600 font-semibold">{{ $counts['approved'] }} approved</span>
+            · <span class="{{ $counts['needsFix'] ? 'text-red-600 font-semibold' : '' }}">{{ $counts['needsFix'] }} kailangang ayusin</span>
+            · {{ $counts['notSubmitted'] }} hindi pa naisumite
+            @if($counts['checking'])
+              · {{ $counts['checking'] }} sinusuri pa
+            @endif
+          </span>
           <a href="{{ route('checklist.report') }}" class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">📋 Report</a>
           <a href="{{ route('checklist.manage') }}" class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">⚙ Manage</a>
         </div>
@@ -111,6 +119,8 @@
                   $assignedIds = $task->assignedUsers->pluck('id')->toArray();
                   $isAssigned  = empty($assignedIds) || in_array(Auth::id(), $assignedIds);
                   $canSubmit   = $sub === null && $isAssigned;
+                  $state       = $statusByTask[$task->id]['state'];
+                  $reason      = $statusByTask[$task->id]['reason'];
                 @endphp
 
                 <tbody
@@ -157,7 +167,7 @@
 
                     {{-- Status --}}
                     <td class="px-4 py-3 align-middle">
-                      <div class="w-2.5 h-2.5 rounded-full mx-auto {{ $done ? 'bg-green-400' : ($photoWarn ? 'bg-orange-400' : ($canSubmit ? 'bg-amber-300' : 'bg-gray-200')) }}"
+                      <div class="w-2.5 h-2.5 rounded-full mx-auto {{ $state === 'approved' ? 'bg-green-400' : ($state === 'needs_fix' ? ($photoWarn && !$reason ? 'bg-orange-400' : 'bg-red-500') : ($state === 'checking' ? 'bg-gray-400' : ($canSubmit ? 'bg-amber-300' : 'bg-gray-200'))) }}"
                            title="{{ $photoWarn ? $photoCount.'/'.$reqPhotos.' photos — needs '.($reqPhotos - $photoCount).' more' : '' }}"></div>
                     </td>
 
@@ -251,8 +261,13 @@
 
                     {{-- Status --}}
                     <td class="px-3 py-3 align-top">
-                      @if($done)
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">DONE</span>
+                      @if($reason !== null)
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">✗ Kailangang ayusin</span>
+                        <p class="text-xs text-red-600 mt-1 leading-snug whitespace-pre-line line-clamp-4" title="{{ $reason }}">{{ $reason }}</p>
+                      @elseif($state === 'approved')
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">✓ APPROVED</span>
+                      @elseif($state === 'checking')
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500" title="Wala pang resulta ang AI check">Sinusuri pa</span>
                       @elseif($photoWarn)
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">IN PROGRESS</span>
                       @else
