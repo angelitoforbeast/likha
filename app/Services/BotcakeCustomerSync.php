@@ -132,8 +132,8 @@ class BotcakeCustomerSync
             'matched_by_phone' => $m['by_phone'],
             'ambiguous'        => $m['ambiguous'],
             'no_match'         => $m['no_match'],
-            'last_message'     => sprintf('%s: %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala',
-                $page, $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match']),
+            'last_message'     => sprintf('%s: %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala, %d ad id',
+                $page, $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match'], $m['ad_filled']),
         ])->save();
 
         Log::info('BotcakeCustomerSync: ' . $run->last_message, ['run_id' => $run->id, 'error' => $error]);

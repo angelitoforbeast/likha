@@ -161,7 +161,7 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
             // Hiwalay na try: ang pagkakamali dito ay hindi dapat makasira sa sheet import.
             try {
                 $api = app(BotcakeCustomerMatcher::class)->matchPagesWithTokens();
-                if ($api['by_name'] + $api['by_phone'] > 0) {
+                if ($api['by_name'] + $api['by_phone'] + $api['ad_filled'] > 0) {
                     Log::info('ImportBotcakePsid: Botcake customer match', $api);
                 }
             } catch (\Throwable $e) {

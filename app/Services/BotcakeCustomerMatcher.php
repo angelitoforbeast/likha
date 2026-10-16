@@ -45,11 +45,11 @@ class BotcakeCustomerMatcher
     }
 
     /**
-     * @return array{by_name:int, by_phone:int, ambiguous:int, no_match:int}
+     * @return array{by_name:int, by_phone:int, ambiguous:int, no_match:int, ad_filled:int}
      */
     public function matchPage(string $page): array
     {
-        $out = ['by_name' => 0, 'by_phone' => 0, 'ambiguous' => 0, 'no_match' => 0];
+        $out = ['by_name' => 0, 'by_phone' => 0, 'ambiguous' => 0, 'no_match' => 0, 'ad_filled' => 0];
         $key  = $this->settings->pageKey($page);
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
 
@@ -108,6 +108,21 @@ class BotcakeCustomerMatcher
                 }
             }, 'id');
 
+        // Ang may PSID na pero walang ad id (hal. PSID mula sa lumang sheet, na walang ad id): kunin ang ad_id ng API
+        // customer ng parehong page at PSID. Isang UPDATE para sa buong page; ang PSID ay hindi ginagalaw, at ang may
+        // ad id na ay hindi pinapalitan (sinusuri sa mismong UPDATE). Kailangan ito ng per-ad na report.
+        if ($hasAdCol) {
+            $adSql = "SELECT bp.ad_id FROM botcake_psids bp WHERE bp.source = 'api' AND LOWER($trim(bp.page)) = ?"
+                . " AND bp.psid = macro_output.botcake_psid AND bp.ad_id IS NOT NULL AND bp.ad_id <> ''";
+            $out['ad_filled'] = DB::update(
+                "UPDATE macro_output SET botcake_ad_id = ($adSql ORDER BY bp.id DESC LIMIT 1)"
+                . ' WHERE LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ? AND ts_date >= ?'
+                . " AND botcake_psid IS NOT NULL AND botcake_psid <> '' AND (botcake_ad_id IS NULL OR botcake_ad_id = '')"
+                . " AND EXISTS ($adSql)",
+                [$key, $key, $since, $key]
+            );
+        }
+
         return $out;
     }
 
@@ -133,11 +148,11 @@ class BotcakeCustomerMatcher
 
     /**
      * Para sa oras-oras na sheet import: lahat ng page na may Botcake page id at token.
-     * @return array{by_name:int, by_phone:int, ambiguous:int, no_match:int}
+     * @return array{by_name:int, by_phone:int, ambiguous:int, no_match:int, ad_filled:int}
      */
     public function matchPagesWithTokens(): array
     {
-        $total = ['by_name' => 0, 'by_phone' => 0, 'ambiguous' => 0, 'no_match' => 0];
+        $total = ['by_name' => 0, 'by_phone' => 0, 'ambiguous' => 0, 'no_match' => 0, 'ad_filled' => 0];
         foreach ($this->settings->pagesWith('botcake', ['page_id', 'token']) as $page) {
             $r = $this->matchPage($page);
             foreach ($total as $k => $_) $total[$k] += $r[$k];

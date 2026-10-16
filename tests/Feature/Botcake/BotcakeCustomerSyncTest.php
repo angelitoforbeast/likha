@@ -59,15 +59,18 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         foreach ($this->psids('p', 11) as $psid) {
             BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Name ' . $psid, 'psid' => $psid, 'status' => 'available', 'source' => 'api']);
         }
+        BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Old', 'psid' => 'p99', 'status' => 'available', 'source' => 'api', 'ad_id' => '120250000000000099']);
+        $this->order('Page Uno', 'Buyer', null, 'p99'); // PSID mula sa sheet, walang ad id
         $this->fakeCustomers([1 => $this->psids('p', 1), 2 => $this->psids('p', 11), 3 => $this->psids('p', 21)]);
 
         $this->assertSame(0, Artisan::call('botcake:sync-customers', ['--page' => 'page uno']));
 
         $this->assertSame([1, 2], $this->asked, 'hindi na binasa ang page 3');
-        $this->assertSame(20, BotcakePsid::where('source', 'api')->count());
+        $this->assertSame(21, BotcakePsid::where('source', 'api')->count());
         $run = BotcakePsidImportRun::where('source', 'api')->sole();
         $this->assertSame(['done', 'Page Uno', 2, 10, 0, 'known_batch'], [$run->status, $run->page_name, $run->batches_read, $run->customers_new, $run->customers_updated, $run->stop_reason]);
         $this->assertSame('available', BotcakePsid::where('psid', 'p1')->value('status'));
+        $this->assertStringEndsWith(', 1 ad id', $run->last_message, 'nakikita sa log ang napunang ad id');
     }
 
     public function test_full_reads_to_the_empty_page_and_updates_changed_names(): void
