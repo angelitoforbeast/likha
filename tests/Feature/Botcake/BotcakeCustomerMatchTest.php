@@ -91,6 +91,50 @@ class BotcakeCustomerMatchTest extends BotcakeApiTestCase
         $this->assertSame(['psid-a', '120250000000000001'], [$byName->fresh()->botcake_psid, $byName->fresh()->botcake_ad_id]);
     }
 
+    public function test_an_order_with_a_psid_but_no_ad_id_gets_the_ad_id_of_its_page_customer(): void
+    {
+        $this->available('psid-s', 'Ana Cruz', [], 'Page Uno', 'inactive', '120250000000000001');
+        $this->available('psid-n', 'Nina Go'); // walang ad
+        $this->available('psid-o', 'Olga Ty', [], 'Other Page', 'available', '120250000000000099');
+        $withAd = fn (string $psid, ?string $ad, ?string $date = null) => tap($this->order('Page Uno', 'Buyer', null, $psid, $date),
+            fn ($o) => \Illuminate\Support\Facades\DB::table('macro_output')->where('id', $o->id)->update(['botcake_ad_id' => $ad]));
+
+        $sheet  = $withAd('psid-s', null);     // PSID mula sa lumang sheet, walang ad id
+        $blank  = $withAd('psid-s', '');
+        $kept   = $withAd('psid-s', '120250000000000005');
+        $other  = $withAd('psid-o', null);     // customer ng ibang page: hindi ginagamit
+        $noAd   = $withAd('psid-n', null);
+        $noRow  = $withAd('psid-wala', null);
+        $old    = $withAd('psid-s', null, now('Asia/Manila')->subDays(31)->toDateString());
+        // Order ng ibang page na may PSID ng customer ng Page Uno: hindi isinusulat ng sync ng Page Uno.
+        $page2  = $this->order('Other Page', 'Buyer', null, 'psid-s');
+
+        $m = app(BotcakeCustomerMatcher::class);
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+        $counts = $m->matchPage('Page Uno');
+        $updates = collect(\Illuminate\Support\Facades\DB::getQueryLog())->pluck('query')
+            ->filter(fn ($q) => stripos($q, 'update') === 0 && str_contains($q, 'botcake_ad_id'));
+        \Illuminate\Support\Facades\DB::disableQueryLog();
+        $this->assertNotEmpty($updates);
+        foreach ($updates as $q) {
+            $this->assertMatchesRegularExpression('/\bid\s+IN\s*\(/i', $q, 'UPDATE ayon sa id lang, hindi sa buong 30 araw ng page');
+        }
+        $this->assertSame(['psid-s', null], [$page2->fresh()->botcake_psid, $page2->fresh()->botcake_ad_id]);
+
+        $got = fn ($o) => [$o->fresh()->botcake_psid, $o->fresh()->botcake_ad_id];
+        $this->assertSame(['psid-s', '120250000000000001'], $got($sheet));
+        $this->assertSame(['psid-s', '120250000000000001'], $got($blank), 'ang blangkong ad id ay walang laman din');
+        $this->assertSame(['psid-s', '120250000000000005'], $got($kept), 'ang may laman ay hindi pinapalitan');
+        $this->assertSame(['psid-o', null], $got($other));
+        $this->assertSame(['psid-n', null], $got($noAd));
+        $this->assertSame(['psid-wala', null], $got($noRow));
+        $this->assertSame(['psid-s', null], $got($old), 'lampas 30 araw: hindi ginagalaw');
+        $this->assertSame(2, $counts['ad_filled']);
+
+        $this->assertSame(0, $m->matchPage('Page Uno')['ad_filled'], 'isang beses lang');
+        $this->assertArrayHasKey('ad_filled', $m->matchPagesWithTokens());
+    }
+
     public function test_a_psid_from_the_sheet_import_leaves_the_ad_id_empty(): void
     {
         $this->available('psid-a', 'Ana Cruz', [], 'Page Uno', 'available', '120250000000000001');
