@@ -17,6 +17,15 @@ use App\Support\NightStepFilter;
 
 class MacroOutputController extends Controller
 {
+    /** Mga field na nagbabago ng bilang ng orders / proceed / presyo ng isang page-day sa /owner/private. */
+    private const ORDER_COUNT_FIELDS = ['ITEM_NAME', 'COD', 'STATUS', 'TIMESTAMP', 'PAGE'];
+
+    /** May binagong order field → huwag nang ipakita ang naka-cache na /owner/private numbers. */
+    private function ordersChanged(): void
+    {
+        OwnerPrivateController::bumpCacheVersion();
+    }
+
     // ✅ Replace ENTIRE pancakeMore() with this (returns customers_chat ONLY)
     public function pancakeMore(Request $request)
     {
@@ -1565,6 +1574,10 @@ class MacroOutputController extends Controller
             }
 
             $record->save();
+
+            if (in_array($field, self::ORDER_COUNT_FIELDS, true)) {
+                $this->ordersChanged();
+            }
         }
 
         return response()->json([
@@ -1621,8 +1634,15 @@ class MacroOutputController extends Controller
 
     public function bulkUpdate(Request $request)
     {
+        $countsChanged = false;
         foreach ($request->input('records', []) as $id => $fields) {
             MacroOutput::where('id', $id)->update($fields);
+            if (is_array($fields) && array_intersect(array_keys($fields), self::ORDER_COUNT_FIELDS)) {
+                $countsChanged = true;
+            }
+        }
+        if ($countsChanged) {
+            $this->ordersChanged();
         }
 
         return redirect()->back()->with('success', 'All updates saved!');

@@ -1783,6 +1783,7 @@ class OwnerPrivateController extends Controller
                 $dateExpr AS d,
                 $pageKey AS page_key,
                 $itemTrim AS item_raw,
+                COUNT(*) AS orders_live,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders,
                 MAX($codClean) AS max_cod,
                 MIN(CASE WHEN $codClean > 0 THEN $codClean ELSE NULL END) AS min_cod
@@ -1802,12 +1803,14 @@ class OwnerPrivateController extends Controller
             $d = (string)$s->d;
             if (!isset($statByKeyDate[$k][$d])) {
                 $statByKeyDate[$k][$d] = (object)[
+                    'orders'         => (int)$s->orders_live,
                     'proceed_orders' => (int)$s->proceed_orders,
                     'max_cod'        => $s->max_cod !== null ? (float)$s->max_cod : 0.0,
                     'min_cod'        => $s->min_cod !== null ? (float)$s->min_cod : null,
                 ];
             } else {
                 $cur = $statByKeyDate[$k][$d];
+                $cur->orders         += (int)$s->orders_live;
                 $cur->proceed_orders += (int)$s->proceed_orders;
                 $cur->max_cod = max($cur->max_cod, $s->max_cod !== null ? (float)$s->max_cod : 0.0);
                 $sMin = $s->min_cod !== null ? (float)$s->min_cod : null;
@@ -1892,9 +1895,13 @@ class OwnerPrivateController extends Controller
                     $sliceCodInt = (int) round((float) $slice['mode_cod']);
                     if (abs($sliceCodInt - $anchorCodInt) > 1) continue;
                 }
-                $totalOrders += (int)$slice['orders'];
-
                 $stat = $statByKeyDate[$statKey][$d] ?? null;
+                // Orders = live count sa macro_output, kasabay ng proceed (same page, item, date),
+                // para proceed ≤ orders lagi. Ang naka-store na primary_orders ay snapshot lang
+                // ng huling recompute — fallback lang kapag walang live row.
+                $dayOrders = $stat ? (int)$stat->orders : (int)$slice['orders'];
+                $totalOrders += $dayOrders;
+
                 if ($stat) {
                     $proceedOrders += (int)$stat->proceed_orders;
                     $maxCod = max($maxCod, (float)($stat->max_cod ?? 0));
@@ -1905,7 +1912,7 @@ class OwnerPrivateController extends Controller
                 }
 
                 $includedDates[$d] = [
-                    'orders'   => (int)$slice['orders'],
+                    'orders'   => $dayOrders,
                     'mode_cod' => (float)$slice['mode_cod'],
                     'adspent'  => (float)($adsByDate[$pk][$d] ?? 0),
                     'proceed'  => $stat ? (int)$stat->proceed_orders : 0,
@@ -2557,7 +2564,9 @@ class OwnerPrivateController extends Controller
                         || abs((int)round((float)$pdSlice['mode_cod']) - $pdAnchorCodI) <= 1);
 
                 if ($pdAnchorMatch) {
-                    $pdOrders     = (int)   ($pdSlice['orders'] ?? 0);
+                    // Live count (kasabay ng proceed); naka-store na count kapag walang live row.
+                    $pdStat       = $statByKeyDate[$pdStatKey][$partialDate] ?? null;
+                    $pdOrders     = $pdStat ? (int) $pdStat->orders : (int) ($pdSlice['orders'] ?? 0);
                     $pdAdspent    = (float) ($adsByDate[$pk][$partialDate] ?? 0);
                     $pdModeCod    = (float) ($pdSlice['mode_cod'] ?? 0);
 
@@ -3269,6 +3278,7 @@ class OwnerPrivateController extends Controller
             $svc = app(\App\Services\DailyPrimaryItemService::class);
             $t0  = microtime(true);
             $summary = $svc->recomputeRange($from, $to);
+            self::bumpCacheVersion();   // bagong primary rows → huwag ipakita ang lumang naka-cache na numbers
             $summary['elapsed_s'] = round(microtime(true) - $t0, 2);
             $summary['from'] = $from;
             $summary['to']   = $to;
@@ -3577,6 +3587,7 @@ class OwnerPrivateController extends Controller
                 $moDateExpr AS d,
                 $moPageKey  AS pg,
                 $moItemTrim AS item_raw,
+                COUNT(*) AS orders,
                 SUM(CASE WHEN $moStatusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed
             ")
             ->groupByRaw("$moDateExpr, $moPageKey, $moItemTrim")
@@ -3589,6 +3600,7 @@ class OwnerPrivateController extends Controller
         // mappings, canonical == raw normalized → unchanged.
         $aliases = new \App\Services\ItemAliasResolver();
         $proceedMap = [];
+        $ordersMap  = []; // same shape; live orders, counted kasabay ng proceed
         foreach ($proceedRows as $pr) {
             $pk = (string)$pr->pg;
             $d  = (string)$pr->d;
@@ -3596,6 +3608,7 @@ class OwnerPrivateController extends Controller
             if ($pk === '' || $raw === '') continue;
             $ck = $aliases->canonicalKey($raw);
             $proceedMap[$pk][$d][$ck] = ($proceedMap[$pk][$d][$ck] ?? 0) + (int)$pr->proceed;
+            $ordersMap[$pk][$d][$ck]  = ($ordersMap[$pk][$d][$ck] ?? 0) + (int)$pr->orders;
         }
 
         // 2) Ads per (page_key, date)
@@ -3662,14 +3675,16 @@ class OwnerPrivateController extends Controller
             // Per-cell PROJ% — only computable when all ingredients are present.
             // Look up proceed by canonical key (matches alias-aware $proceedMap above).
             $proceedHere = (int) ($proceedMap[$pk][$cellDate][$ik] ?? 0);
+            // Live orders ng main item (fallback: naka-store na snapshot kapag walang live row).
+            $ordersHere  = (int) ($ordersMap[$pk][$cellDate][$ik] ?? $r->primary_orders);
             $adsHere     = (float) ($adsMap[$pk][$cellDate] ?? 0.0);
             $profitPct   = null;
             if ($cogsForProfit !== null
                 && ($rtsHit['rts_pct'] ?? null) !== null
                 && $r->primary_mode_cod !== null
-                && (int)$r->primary_orders > 0) {
+                && $ordersHere > 0) {
                 $modeCod = (float)$r->primary_mode_cod;
-                $orders  = (int)$r->primary_orders;
+                $orders  = $ordersHere;
                 $rts     = (float)$rtsHit['rts_pct'];
                 $deliver = max(0.0, 1.0 - $rts / 100.0);
                 $revenue  = $proceedHere * $modeCod * $deliver;
@@ -3687,7 +3702,7 @@ class OwnerPrivateController extends Controller
                 // for non-aliased items so toggling shows no diff.
                 'item_alias_label'=> $aliases->canonicalLabel($itemName),
                 'item_key'        => $ik,
-                'orders'          => (int)$r->primary_orders,
+                'orders'          => $ordersHere,
                 'mode_cod'        => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                 // Editable RTS state
                 'rts_pct'         => $rtsHit['rts_pct'] ?? null,
@@ -4227,6 +4242,13 @@ class OwnerPrivateController extends Controller
                 $dayAdspent = $adsByDate[$d] ?? 0.0;
                 $stat       = $proceedByDateItem[$d][$ik] ?? null;
                 $dayProceed = $stat ? (int)$stat['proceed'] : 0;
+                // Orders: live count kasabay ng proceed (snapshot fallback kapag walang live row).
+                $dayOrders  = $stat ? (int)$stat['orders'] : (int)$r->primary_orders;
+                $dayAllOrders = 0;
+                foreach ($proceedByDateItem[$d] ?? [] as $ck => $st) {
+                    if ($ck !== '') $dayAllOrders += (int)$st['orders'];
+                }
+                if ($dayAllOrders === 0) $dayAllOrders = (int)$r->total_orders_all;
                 $dayPrice   = $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null;
                 $dayRts     = $rtsRes['rts'];   // may be null
                 $dayCost    = $ivRes['val'];    // may be null
@@ -4254,7 +4276,7 @@ class OwnerPrivateController extends Controller
                 }
 
                 $cpp        = $dayProceed > 0 ? $dayAdspent / $dayProceed : null; // cost per proceed
-                $grossSales = ($dayPrice !== null) ? $dayPrice * (int)$r->primary_orders : 0.0;
+                $grossSales = ($dayPrice !== null) ? $dayPrice * $dayOrders : 0.0;
                 $projPct    = ($netProfit !== null && $grossSales > 0) ? ($netProfit / $grossSales) * 100.0 : null;
 
                 $out[] = [
@@ -4262,8 +4284,8 @@ class OwnerPrivateController extends Controller
                     'primary_item'     => (string)$r->primary_item,
                     'primary_item_key' => $ik,
                     'item_alias'       => $aliasLabel,
-                    'primary_orders'   => (int)$r->primary_orders,
-                    'total_orders'     => (int)$r->total_orders_all,
+                    'primary_orders'   => $dayOrders,
+                    'total_orders'     => $dayAllOrders,
                     'mode_cod'         => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                     'second_item'      => $r->second_item ? (string)$r->second_item : null,
                     'second_orders'    => $r->second_orders !== null ? (int)$r->second_orders : null,

@@ -484,13 +484,18 @@ class JntSupplyController extends Controller
                 $po_dateExpr   AS d,
                 $po_pageKey    AS page_key,
                 $po_itemTrim   AS item_raw,
+                COUNT(*)       AS orders_live,
                 SUM(CASE WHEN $po_statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders
             ")
             ->groupByRaw("$po_dateExpr, $po_pageKey, $po_itemTrim")
             ->get();
 
         // $proceedMap[base_key][date][page_key] = proceed_orders (summed across qty variants)
+        // $ordersLiveMap: same shape — lahat ng rows (any status), binilang sa parehong query
+        // at parehong key ng proceed, kaya proceed ≤ orders lagi. Ang naka-store na
+        // primary_orders ay snapshot lang ng huling recompute (pwedeng luma na).
         $proceedMap = [];
+        $ordersLiveMap = [];
         foreach ($proceedRows as $pr) {
             $raw = (string) $pr->item_raw;
             $pk  = (string) $pr->page_key;
@@ -500,6 +505,7 @@ class JntSupplyController extends Controller
             if ($baseName === '' || $baseName === '—') continue;
             $ik = $normItem($baseName);                           // same normalizer as upstream
             $proceedMap[$ik][$dd][$pk] = ($proceedMap[$ik][$dd][$pk] ?? 0) + (int) $pr->proceed_orders;
+            $ordersLiveMap[$ik][$dd][$pk] = ($ordersLiveMap[$ik][$dd][$pk] ?? 0) + (int) $pr->orders_live;
         }
 
         // Ads per (day, page_key) — mirrors /owner/private exactly (line 1367-1381):
@@ -756,7 +762,7 @@ class JntSupplyController extends Controller
             foreach ($perDate as $d => $pagesForDate) {
                 if ($d < $profitStartDate || $d > $asOfDate) continue;
                 foreach ($pagesForDate as $pgKey => $slice) {
-                    $orders  = (int) $slice['orders'];
+                    $orders  = (int) ($ordersLiveMap[$baseKey][$d][$pgKey] ?? $slice['orders']);
                     if ($orders <= 0) continue;
                     $modeCod = (float) $slice['mode_cod'];
 

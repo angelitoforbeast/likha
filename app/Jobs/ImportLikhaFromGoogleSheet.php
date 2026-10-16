@@ -62,7 +62,10 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             if (!$runSheet) continue;
 
             // Bago ang bawat sheet: basahin ulit ang status — kapag isinara na ang run, hinto na.
-            if (LikhaImportRun::where('id', $run->id)->value('status') !== 'running') return;
+            if (LikhaImportRun::where('id', $run->id)->value('status') !== 'running') {
+                $this->afterImport();   // may mga sheet nang na-import bago isinara
+                return;
+            }
 
             if (!$setting->sheet_id || !$setting->range) {
                 $runSheet->update([
@@ -172,6 +175,14 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             'status' => 'done',
             'finished_at' => now(),
         ]);
+
+        $this->afterImport();
+    }
+
+    /** Bagong / binagong orders → huwag ipakita ang naka-cache na /owner/private numbers. */
+    private function afterImport(): void
+    {
+        \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
     }
 
     /**
