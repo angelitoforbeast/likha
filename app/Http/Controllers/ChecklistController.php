@@ -575,9 +575,13 @@ class ChecklistController extends Controller
         } elseif ($this->isOic() && $dept !== '') {
             // OIC sees tasks tagged with their department (trimmed, case-insensitive, gaya ng isOicOf),
             // pati ang mga task na siya ang gumawa kahit ibang department (hal. para sa Encoders)
+            // Ang Marketing - OIC ay nakakakita rin ng naka-assign sa kanya, dahil puwede niyang i-edit ang mga iyon.
             $query->where(function ($q) use ($dept, $userId) {
                 $q->whereRaw('LOWER(TRIM(department)) = ?', [$dept])
                   ->orWhere('created_by', $userId);
+                if ($this->isMarketing()) {
+                    $q->orWhereHas('assignedUsers', fn ($r) => $r->where('users.id', $userId));
+                }
             });
         } else {
             // others see tasks they created OR are assigned to
@@ -590,7 +594,7 @@ class ChecklistController extends Controller
         $allTasks = $query->get();
         $allUsers = User::with('employeeProfile')->orderBy('name')->get();
         // "History" link: sa mga task lang na puwede mong i-edit
-        $editableIds = $allTasks->filter(fn ($t) => $this->canEditTask($t))->pluck('id')->all();
+        $editableIds = $allTasks->filter(fn ($t) => $this->canEditTaskContent($t))->pluck('id')->all();
 
         return view('checklist.manage', compact('allTasks', 'allUsers', 'editableIds'));
     }
@@ -603,7 +607,7 @@ class ChecklistController extends Controller
     public function history(Request $request)
     {
         $visible = ChecklistTask::withTrashed()->get(['id', 'title', 'department', 'created_by'])
-            ->filter(fn ($t) => $this->canEditTask($t))
+            ->filter(fn ($t) => $this->canEditTaskContent($t))
             ->keyBy('id');
 
         $task = null;
@@ -843,7 +847,9 @@ class ChecklistController extends Controller
 
     public function updateTask(Request $request, ChecklistTask $task)
     {
-        $this->authorizeEditTask($task);
+        if (!$this->canEditTaskContent($task)) {
+            $this->refuse('Hindi mo puwedeng baguhin ang task na ito.');
+        }
 
         $validated = $request->validate([
             'title'           => 'required|string|max:255',
@@ -1254,6 +1260,23 @@ class ChecklistController extends Controller
         $isCreator = $task->created_by !== null && (int) $task->created_by === (int) Auth::id();
 
         return $this->canManageTask($task) || $isCreator;
+    }
+
+    /** "Marketing" o "Marketing - OIC" (kahit anong espasyo sa paligid ng dash). */
+    private function isMarketing(): bool
+    {
+        return (bool) preg_match('/^MARKETING(\s*-\s*OIC)?$/', $this->checklistRole());
+    }
+
+    /**
+     * Edit form, updateTask at kasaysayan: ang canEditTask, pati ang Marketing / Marketing - OIC na
+     * naka-assign sa task, dahil karamihan ng task nila ay walang department o gumawa. Ang delete,
+     * duplicate at bulk ay hindi kasama.
+     */
+    private function canEditTaskContent(ChecklistTask $task): bool
+    {
+        return $this->canEditTask($task)
+            || ($this->isMarketing() && $task->assignedUsers()->where('users.id', Auth::id())->exists());
     }
 
     private function authorizeEditTask(ChecklistTask $task): void
