@@ -25,7 +25,7 @@ class StaffFeedController extends Controller
      */
     private const INACTIVE_STATUSES = ['inactive', 'resigned', 'terminated'];
 
-    /** Mga event na isinusulat ng Checker 1 at J&T status saves, isa kada order na nagbago. */
+    /** Mga event na isinusulat ng Checker 1 saves at validate buttons, isa kada order na nagbago. */
     private const CHECKER_KINDS = ['checker.status', 'checker.edit', 'checker.validate'];
 
     private const CHECKER_ZERO = ['status_last_editor' => 0, 'edited_orders' => 0, 'status_changes' => 0, 'validates' => 0];
@@ -189,8 +189,8 @@ class StaffFeedController extends Controller
     }
 
     /**
-     * user_id => checker counts sa araw na iyon. Ang order ay source + ref (magkaiba ang id ng macro_output at
-     * from_jnts). status_last_editor: ilang order ang ang huling checker.status event ngayong araw ay sa user
+     * user_id => checker counts sa araw na iyon. Ang order ay source + ref (para hindi magsalubong ang mga id
+     * kapag may ibang source na). status_last_editor: ilang order ang ang huling checker.status event ngayong araw ay sa user
      * (parehong rule ng Checker 1 summary page); edited_orders: ilang order ang may kahit anong checker event niya.
      */
     private function checkerCounts(Carbon $day, Carbon $next): array

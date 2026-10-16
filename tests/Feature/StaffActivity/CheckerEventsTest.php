@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\StaffActivity;
 
-use App\Http\Controllers\FromJntController;
+use App\Http\Controllers\MacroOutputController;
 use App\Http\Middleware\AllowedIpMiddleware;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -130,32 +130,28 @@ class CheckerEventsTest extends StaffActivityTestCase
 
         $this->assertSame([['checker.validate', 'checker_1', (string) $flips]], $this->recorded());
     }
-
-    public function test_a_jnt_status_update_writes_checker_status_per_changed_waybill(): void
+    public function test_a_jnt_upload_writes_one_generic_event_and_no_checker_event(): void
     {
         $user = $this->staff();
-        $moved = DB::table('from_jnts')->insertGetId(['waybill_number' => 'WB1', 'status' => 'In Transit']);
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB1', 'status' => 'In Transit']);
         DB::table('from_jnts')->insert(['waybill_number' => 'WB2', 'status' => 'In Transit']);
 
         $this->actingAs($user)->post('/jnt_update', ['jsonData' => json_encode([
             ['Waybill Number' => 'WB1', 'Status' => 'Delivered'],
-            ['Waybill Number' => 'WB2', 'Status' => 'In Transit'],
-            ['Waybill Number' => 'WB3', 'Status' => 'In Transit'],
+            ['Waybill Number' => 'WB2', 'Status' => 'Returned'],
         ])])->assertRedirect();
 
-        $this->assertSame([['checker.status', 'jnt', (string) $moved]], $this->recorded());
+        $this->assertSame([['POST jnt_update', null, null]], $this->recorded());
     }
 
     public function test_a_writer_without_a_signed_in_user_writes_no_event(): void
     {
-        DB::table('from_jnts')->insert(['waybill_number' => 'WB1', 'status' => 'In Transit']);
-        $request = Request::create('/jnt_update', 'POST', ['jsonData' => json_encode([
-            ['Waybill Number' => 'WB1', 'Status' => 'Delivered'],
-        ])]);
+        $id = $this->order();
+        $request = Request::create('/encoder/checker_1/update-field', 'POST', ['id' => $id, 'field' => 'STATUS', 'value' => 'PROCEED']);
 
-        app(FromJntController::class)->updateOrInsert($request);
+        app(MacroOutputController::class)->updateField($request);
 
-        $this->assertSame('Delivered', DB::table('from_jnts')->value('status'));
+        $this->assertSame('PROCEED', DB::table('macro_output')->value('STATUS'));
         $this->assertSame([], $this->recorded());
     }
 }

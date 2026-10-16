@@ -12,7 +12,7 @@ return new class extends Migration
             return;
         }
 
-        // Saang page galing ang checker.* event (checker_1, jnt); NULL sa route at login events.
+        // Saang page galing ang checker.* event (checker_1); NULL sa route at login events.
         Schema::table('staff_events', function (Blueprint $table) {
             $table->string('source', 32)->nullable();
         });

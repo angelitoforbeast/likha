@@ -3,7 +3,6 @@
 namespace App\Http\Middleware;
 
 use App\Http\Controllers\Auth\LoginController;
-use App\Http\Controllers\FromJntController;
 use App\Http\Controllers\MacroOutputController;
 use App\Support\StaffEvents;
 use Closure;
@@ -34,14 +33,13 @@ class RecordStaffActivity
     /** Ang login at logout action: ang listener ang nagtatala ng mga ito bilang `login` / `logout`. */
     private const AUTH_ACTIONS = [LoginController::class . '@login', LoginController::class . '@logout'];
 
-    /** Ang Checker 1 at J&T status actions: sila mismo ang nagtatala ng checker.* event kada order na nagbago. */
+    /** Ang Checker 1 edit at validate actions: sila mismo ang nagtatala ng checker.* event kada order na nagbago. */
     private const CHECKER_ACTIONS = [
         MacroOutputController::class . '@updateField',
         MacroOutputController::class . '@bulkUpdate',
         MacroOutputController::class . '@validateItems',
         MacroOutputController::class . '@validateAddresses',
         MacroOutputController::class . '@validateCheckerToFix',
-        FromJntController::class . '@updateOrInsert',
     ];
 
     public function handle(Request $request, Closure $next): Response

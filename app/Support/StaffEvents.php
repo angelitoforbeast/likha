@@ -36,7 +36,7 @@ class StaffEvents
     }
 
     /**
-     * Isang checker.* event kada order (o J&T row) na talagang nagbago, para sa naka-login na staff lang:
+     * Isang checker.* event kada order na talagang nagbago, para sa naka-login na staff lang:
      * ang imports, Astra, night run at queue jobs ay walang Auth user kaya walang naitatala. Ang id ay nasa
      * ref para sa pagbilang lang; walang customer data na pumapasok.
      */
