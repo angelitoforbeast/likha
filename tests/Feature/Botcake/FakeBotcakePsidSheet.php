@@ -15,6 +15,14 @@ class FakeBotcakePsidSheet extends BotcakePsidSheet
 
     public int $deleteCalls = 0;
 
+    /** @var array<string, array<int, array<int, string>>> "spreadsheetId|range" => rows (para sa readRange) */
+    public array $ranges = [];
+
+    public function readRange(string $spreadsheetId, string $range): array
+    {
+        return $this->ranges[$spreadsheetId . '|' . $range] ?? [];
+    }
+
     public function put(string $spreadsheetId, string $sheetName, array $rows): void
     {
         $data = [1 => array_pad(['PAGE', 'NAME', 'PSID', 'DATE'], 10, '')];

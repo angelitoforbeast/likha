@@ -58,6 +58,17 @@ class BotcakePsidSheet
         return $out;
     }
 
+    /**
+     * Isang range (hal. 'BOTCAKE API'!A2:D), bawat value bilang text. Read-only.
+     * @return array<int, array<int, string>>
+     */
+    public function readRange(string $spreadsheetId, string $range): array
+    {
+        $rows = $this->service()->spreadsheets_values->get($spreadsheetId, $range)->getValues() ?? [];
+
+        return array_map(fn ($row) => array_map(fn ($v) => (string) $v, $row ?? []), $rows);
+    }
+
     /** @param array<int, string> $statuses row number => text para sa column J */
     public function writeStatuses(string $spreadsheetId, string $sheetName, array $statuses): void
     {
