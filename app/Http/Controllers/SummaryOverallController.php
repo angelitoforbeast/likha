@@ -73,8 +73,22 @@ class SummaryOverallController extends Controller
         });
     }
 
+    private function getNormalizedRole(): string
+    {
+        $raw = Auth::user()?->employeeProfile?->role ?? '';
+        return preg_replace('/\s+/u', ' ', trim((string) $raw));
+    }
+
+    /** Profit ng owner ang page na ito: CEO lang. */
+    private function checkAccess(): void
+    {
+        if (preg_match('/^ceo$/iu', $this->getNormalizedRole()) !== 1) abort(403);
+    }
+
     public function index()
     {
+        $this->checkAccess();
+
         // DISTINCT sa raw page_name (gamit ang index), tapos trim + isang label kada page sa PHP
         $pages = [];
         $raw = DB::table('ads_manager_reports')
@@ -100,6 +114,8 @@ class SummaryOverallController extends Controller
 
     public function data(Request $request)
     {
+        $this->checkAccess();
+
         // PH timezone (for "Today" label in top summary)
         $phTz  = new \DateTimeZone('Asia/Manila');
         $today = (new \DateTime('now', $phTz))->format('Y-m-d');

@@ -568,7 +568,6 @@ Route::post('/owner/users/{id}/password', [\App\Http\Controllers\OwnerUsersContr
 
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
-Route::get('/summary/overall/daily', [SummaryOverallController::class, 'daily'])->name('summary.overall.daily');
 
 Route::get('/encoder/checker_1/summary', [Checker1SummaryController::class, 'index'])
      ->name('encoder.checker1.summary');
