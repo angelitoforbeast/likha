@@ -28,10 +28,15 @@
   - `botcake:psid-import --clean-sheet`, `dailyAt('03:00')`: delete first, then import.
 - The clean step, per setting:
   - Re-reads the sheet right before deleting.
-  - Candidates are rows from row 2 down whose J is imported, waiting or conflict and whose page, name, PSID and D (whitespace-normalised) equal a record of that setting.
+  - Candidates are rows from row 2 down whose J is imported, waiting, conflict or expired (expired added by amendment 1) and whose page, name, PSID and D (whitespace-normalised) equal a record of that setting.
   - Rows with a blank J, other J values, or content that differs from the record are kept, as is the header.
   - Consecutive rows are merged into ranges ordered bottom to top, and all of them go in one `batchUpdate` `deleteDimension` call (500 ranges per call).
   - The count is logged (`ImportBotcakePsid: daily clean deleted N sheet rows`), stored in `total_deleted_rows` and written as a `clean_done` event.
+
+**Amendment 1** (`feat: backfill records old imported PSID rows and the 03:00 clean removes expired ones (spec 039)`)
+
+- The backfill also reads every existing J = "imported" row of every setting and records it as `matched`: page, name, PSID and date, with `matched_rows` = how many `macro_output` rows of that page + name (exact, then case-insensitive) hold that PSID now. Nothing is written to `macro_output`, and J stays "imported". If the customer already has a different PSID recorded, the row becomes `conflict`, and any `waiting` record of that customer becomes `conflict` too. An imported row that is already recorded is skipped. The 03:00 clean then deletes these rows.
+- The 03:00 clean also deletes rows with J = "expired" whose content equals a recorded row.
 
 ## How the scan works after deletions
 
@@ -42,11 +47,11 @@ The K1 seed, the scan chunks and the L1 cursor are gone. Every run reads the who
 `php artisan botcake:psid-backfill` reads every setting and prints, without writing anything:
 
 ```
-Setting #1 (<gsheet name> / <tab>): N na "not existing" row ang itatala bilang waiting; M kulang ang page/pangalan/PSID, hindi gagalawin
-Dry run: walang isinulat. Kabuuan: N row. Patakbuhin ulit na may --apply para isulat.
+Setting #1 (<gsheet name> / <tab>): N na "not existing" row ang itatala bilang waiting; K na "imported" row ang itatala bilang matched; M kulang ang page/pangalan/PSID, hindi gagalawin
+Dry run: walang isinulat. Kabuuan: N "not existing" at K "imported" row. Patakbuhin ulit na may --apply para isulat.
 ```
 
-`--apply` records those rows as `waiting`, with `first_seen_at` = now so they get the full 30 days. It sets their J to "waiting", runs the waiting retry once and prints `Naitala: N. Matched: X, conflict: Y, expired: Z.` The next 03:00 run deletes these rows from the sheet.
+`--apply` records those rows as `waiting`, with `first_seen_at` = now so they get the full 30 days. It sets their J to "waiting", records the imported rows as `matched` or `conflict` (J unchanged) and prints `Imported rows: matched A, conflict B, naitala na dati C.` It then runs the waiting retry once and prints `Naitala: N. Matched: X, conflict: Y, expired: Z.` The next 03:00 run deletes all of these rows from the sheet.
 
 ## Case table
 
@@ -60,17 +65,18 @@ Dry run: walang isinulat. Kabuuan: N row. Patakbuhin ulit na may --apply para is
 | Two PSIDs in the sheet for one page + name → conflict, nothing written | `test_two_psids_for_one_customer_in_the_sheet_are_a_conflict_and_nothing_is_written` | pass |
 | Incoming PSID differs from the one on the customer's orders → conflict | `test_incoming_psid_that_differs_from_the_one_on_the_customers_orders_is_a_conflict` | pass |
 | Reorder copy (single PSID, last 30 days; skips two-PSID customers and old rows) | `test_reorder_gets_the_customers_single_known_psid_within_30_days` | pass |
-| 03:00 delete: only recorded rows with matching content, bottom to top, one call; keeps header, blank-J and changed rows; then imports | `test_daily_clean_deletes_only_recorded_rows_with_matching_content_bottom_to_top_then_imports` | pass |
+| 03:00 delete: only recorded rows with matching content, bottom to top, one call; keeps header, blank-J and changed rows; then imports; an expired duplicate is deleted too (amendment 1) | `test_daily_clean_deletes_only_recorded_rows_with_matching_content_bottom_to_top_then_imports` | pass |
 | Never two at once | `test_second_import_while_one_is_running_is_skipped` | pass |
 | Button page gets the new counts | `test_status_endpoint_returns_the_new_counts` | pass |
 | Backfill dry run writes nothing | `BotcakePsidBackfillTest::test_dry_run_writes_nothing_and_prints_the_counts` | pass |
 | Backfill --apply records, marks, matches | `test_apply_records_waiting_marks_the_sheet_and_matches_once` | pass |
 | Schedule entries and times | `BotcakePsidScheduleTest::test_hourly_import_and_the_0300_clean_then_import_are_scheduled_in_manila_time` | pass |
 | Command queues the import | `test_command_creates_a_run_and_queues_the_import` | pass |
+| Amendment 1: old imported rows backfilled as matched (matched_rows = rows holding the PSID, no macro_output write), a different recorded PSID → conflict, then deleted at 03:00 | `BotcakePsidBackfillTest::test_old_imported_rows_are_backfilled_as_matched_without_writing_macro_output_and_deleted_at_0300` | pass |
 
-Red runs: the import tests first failed on `ModelNotFoundException` (no `botcake_psids` record), the backfill and command tests on `CommandNotFoundException`, and the schedule test on "Failed asserting that two arrays are equal" (no entries).
+Red runs: the import tests first failed on `ModelNotFoundException` (no `botcake_psids` record), the backfill and command tests on `CommandNotFoundException`, and the schedule test on "Failed asserting that two arrays are equal" (no entries). Amendment 1: the new backfill test failed on `Output does not contain "2 na "imported" row ang itatala bilang matched"`, and the clean test (with an expired row added) on "Failed asserting that two arrays are identical" (row 8 not deleted).
 
-Full suite (`vendor/bin/phpunit`): `Tests: 1227, Assertions: 15784, Errors: 1, Failures: 1, Skipped: 3`. The only reds are the known `ExampleTest::test_the_application_returns_a_successful_response` and, in this fresh worktree, `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. All 15 new Botcake tests pass. (`artisan test` shows a `file_get_contents` warning on every test in this machine's environment, existing suites included; `vendor/bin/phpunit` runs clean.)
+Full suite (`vendor/bin/phpunit`): `Tests: 1228, Assertions: 15796, Errors: 1, Failures: 1, Skipped: 3` (after amendment 1). The only reds are the known `ExampleTest::test_the_application_returns_a_successful_response` and, in this fresh worktree, `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. All 16 new Botcake tests pass. (`artisan test` shows a `file_get_contents` warning on every test in this machine's environment, existing suites included; `vendor/bin/phpunit` runs clean.)
 
 ## After release (server)
 
@@ -81,13 +87,19 @@ Full suite (`vendor/bin/phpunit`): `Tests: 1227, Assertions: 15784, Errors: 1, F
 
 ## Notes and things the brief left open
 
-- Old rows with J = "imported" from before this change are not in the table, so the 03:00 clean never deletes them. The backfill only covers "not existing" rows. If the owner wants those old rows gone too, a small `--imported` option on the backfill could record them as `matched`. Not built.
 - Retrying a `waiting` record checks the exact PAGE + fb_name first (indexed). The case-insensitive fallback only looks at `macro_output` rows with `ts_date` from two days before the PSID was first seen, so an hourly retry does not scan the whole table for every waiting PSID. New sheet rows keep the old rule exactly: exact, then case-insensitive over all rows.
 - Conflict counts every recorded PSID of the customer, `expired` ones included. Once a customer is `conflict`, they never get an automatic PSID again, and reorders are skipped too.
-- A duplicate sheet row of an `expired` record gets J = "expired". The clean does not delete it, because "expired" is not in the brief's delete list.
+- A duplicate sheet row of an `expired` record gets J = "expired". Since amendment 1 the clean deletes it.
 - The lock uses the cache store. Production needs a store that supports locks (database, file and redis all do).
 - The reorder pass compares exact PAGE + fb_name, which uses the index. It runs one or two indexed queries per customer that has an empty-PSID row in the last 30 days.
 - Conflict with this file: none.
+
+## Amendment changes
+
+Amendment 1 (kept in the handoff folder, not committed):
+1. The backfill records old J = "imported" rows as `matched`, or `conflict` when a different PSID is already recorded, and prints their count separately in the dry run and in `--apply`.
+2. The 03:00 clean also deletes J = "expired" rows whose content equals a record.
+3. Tests: a new backfill test for imported rows, matched and then deleted; the clean test gained an expired duplicate row. The existing `--apply` test now also expects the old imported row recorded as `matched`.
 
 ## Story changes
 
