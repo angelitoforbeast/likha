@@ -17,7 +17,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
     private const STAFF_KEYS = [
         'user_id', 'name', 'role', 'department', 'last_seen_at', 'last_seen_path', 'last_login_at',
-        'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot', 'checker',
+        'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot', 'checker', 'checklist_approved_today',
     ];
 
     private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'source', 'method', 'status', 'ref', 'created_at', 'is_bot'];
@@ -59,6 +59,15 @@ class StaffFeedApiTest extends StaffActivityTestCase
             $t->foreignId('user_id');
             $t->date('date');
             $t->text('notes')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('checklist_analysis_logs', function (Blueprint $t) {
+            $t->id();
+            $t->string('log_type')->default('analysis');
+            $t->foreignId('submission_id');
+            $t->foreignId('user_id')->nullable();
+            $t->text('analysis_result');
+            $t->string('verdict')->nullable();
             $t->timestamps();
         });
     }
@@ -131,7 +140,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
         $response = $this->feed('/api/staff-status')->assertOk();
 
-        $this->assertSame(['date', 'generated_at', 'staff'], array_keys($response->json()));
+        $this->assertSame(['date', 'generated_at', 'staff', 'totals'], array_keys($response->json()));
         $this->assertSame('2026-10-16', $response->json('date'));
         $this->assertCount(1, $response->json('staff'));
         $row = $response->json('staff.0');
@@ -362,5 +371,70 @@ class StaffFeedApiTest extends StaffActivityTestCase
             ['status_last_editor' => 0, 'edited_orders' => 0, 'status_changes' => 0, 'validates' => 0],
             $staff[$idle->id]['checker']
         );
+    }
+
+    /** Isang submission at ang mga approval verdict nito ayon sa pagkakasunod (huli ang pinakabago). */
+    private function submission(int $taskId, int $userId, string $date, array $verdicts): void
+    {
+        $id = DB::table('checklist_submissions')->insertGetId([
+            'checklist_task_id' => $taskId, 'user_id' => $userId, 'date' => $date, 'notes' => 'Lihim na tala',
+        ]);
+        foreach ($verdicts as $i => $verdict) {
+            DB::table('checklist_analysis_logs')->insert([
+                'log_type' => 'approval', 'submission_id' => $id, 'analysis_result' => 'Paliwanag ng AI',
+                'verdict' => $verdict, 'created_at' => "$date 09:0{$i}:00",
+            ]);
+        }
+    }
+
+    public function test_checklist_approved_today_counts_submissions_whose_latest_verdict_is_approved(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $idle = $this->staff();
+        $group = $this->checklistTask('Group na gawain', [$a, $b]);
+        $solo = $this->checklistTask('Sariling gawain', [$a, $b], ['submission_type' => 'individual']);
+        $other = $this->checklistTask('Iba pa', [$a, $b]);
+        $flip = $this->checklistTask('Inulit', [$a, $b]);
+        $none = $this->checklistTask('Walang verdict', [$a, $b]);
+        $flop = $this->checklistTask('Binawi', [$a, $b]);
+
+        $this->submission($group, $a->id, '2026-10-15', ['approved']);              // group: unang nagsumite lang
+        $this->submission($solo, $a->id, '2026-10-15', ['approved']);               // individual: kanya-kanya
+        $this->submission($solo, $b->id, '2026-10-15', ['approved']);
+        $this->submission($other, $b->id, '2026-10-15', ['not_approved']);          // hindi approved
+        $this->submission($flip, $b->id, '2026-10-15', ['not_approved', 'approved']); // re-check: isang beses lang
+        $this->submission($none, $a->id, '2026-10-15', []);                         // walang verdict
+        $this->submission($flop, $a->id, '2026-10-15', ['approved', 'not_approved']); // huling verdict ang bilang
+        $this->submission($other, $a->id, '2026-10-14', ['approved']);              // ibang araw
+        $this->submission($none, $b->id, '2026-10-16', ['approved']);
+
+        $response = $this->feed('/api/staff-status?date=2026-10-15')->assertOk();
+        $staff = collect($response->json('staff'))->keyBy('user_id');
+
+        $this->assertSame([2, 2, 0], [
+            $staff[$a->id]['checklist_approved_today'],
+            $staff[$b->id]['checklist_approved_today'],
+            $staff[$idle->id]['checklist_approved_today'],
+        ]);
+        $this->assertSame(4, $response->json('totals.checklist_approved_today'));
+        foreach (['Group na gawain', 'Sariling gawain', 'not_approved'] as $private) {
+            $this->assertStringNotContainsString($private, $response->getContent());
+        }
+        $this->assertStringNotContainsString('Lihim na tala', $response->getContent());
+        $this->assertStringNotContainsString('Paliwanag', $response->getContent());
+    }
+
+    public function test_totals_sum_the_checker_counts_of_everyone_listed(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $this->checkerEvent($a->id, 'checker.status', '1', '2026-10-16 08:00:00');
+        $this->checkerEvent($b->id, 'checker.status', '1', '2026-10-16 09:00:00');
+        $this->checkerEvent($b->id, 'checker.edit', '2', '2026-10-16 09:30:00');
+
+        $totals = $this->feed('/api/staff-status')->assertOk()->json('totals');
+
+        $this->assertSame(['checklist_approved_today' => 0, 'status_changes' => 2, 'edited_orders' => 3], $totals);
     }
 }

@@ -89,30 +89,40 @@ class StaffFeedController extends Controller
         $dueOpen = $this->checklistDueNotSubmitted($ids, $day);
         $bots = $this->botUserIds();
         $checker = $this->checkerCounts($day, $next);
+        $approved = $this->checklistApproved($ids, $day);
+
+        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved) {
+            $id = (int) $s->id;
+            $last = $lastEvents->get($id);
+
+            return [
+                'user_id'        => $id,
+                'name'           => $s->name ?: $s->user_name,
+                'role'           => $s->role,
+                'department'     => $s->department,
+                'last_seen_at'   => $this->iso($s->last_seen_at),
+                'last_seen_path' => $s->last_seen_path,
+                'last_login_at'  => $this->iso($s->last_login_at),
+                'online'         => $online === null ? null : isset($online[$id]),
+                'last_event'     => $last ? ['kind' => $last->kind, 'at' => $this->iso($last->created_at)] : null,
+                'counts'         => (object) ($counts[$id] ?? []),
+                'checklist_due_not_submitted' => $dueOpen[$id] ?? [],
+                'is_bot'         => isset($bots[$id]),
+                'checker'        => $checker[$id] ?? self::CHECKER_ZERO,
+                'checklist_approved_today' => $approved[$id] ?? 0,
+            ];
+        })->values();
 
         return response()->json([
             'date'         => $dayStr,
             'generated_at' => Carbon::now(self::TZ)->toIso8601String(),
-            'staff'        => $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker) {
-                $id = (int) $s->id;
-                $last = $lastEvents->get($id);
-
-                return [
-                    'user_id'        => $id,
-                    'name'           => $s->name ?: $s->user_name,
-                    'role'           => $s->role,
-                    'department'     => $s->department,
-                    'last_seen_at'   => $this->iso($s->last_seen_at),
-                    'last_seen_path' => $s->last_seen_path,
-                    'last_login_at'  => $this->iso($s->last_login_at),
-                    'online'         => $online === null ? null : isset($online[$id]),
-                    'last_event'     => $last ? ['kind' => $last->kind, 'at' => $this->iso($last->created_at)] : null,
-                    'counts'         => (object) ($counts[$id] ?? []),
-                    'checklist_due_not_submitted' => $dueOpen[$id] ?? [],
-                    'is_bot'         => isset($bots[$id]),
-                    'checker'        => $checker[$id] ?? self::CHECKER_ZERO,
-                ];
-            })->values(),
+            'staff'        => $rows,
+            // kabuuan ng lahat ng nasa listahan: bilang lang
+            'totals'       => [
+                'checklist_approved_today' => $rows->sum('checklist_approved_today'),
+                'status_changes'           => $rows->sum('checker.status_changes'),
+                'edited_orders'            => $rows->sum('checker.edited_orders'),
+            ],
         ]);
     }
 
@@ -334,6 +344,39 @@ class StaffFeedController extends Controller
         }
 
         return $out;
+    }
+
+    /**
+     * user_id => bilang ng checklist submissions na naka-date sa araw na iyon na ang pinakahuling approval
+     * verdict ay approved (isang re-check na nag-approve ay isang beses lang binibilang). Ang credit ay sa
+     * user_id ng submission: sa group task iisa lang ang submission kada araw (ang unang nagsumite), sa
+     * individual task kanya-kanya. Bilang lang: walang title, notes o verdict text.
+     */
+    private function checklistApproved(array $ids, Carbon $day): array
+    {
+        if (!$ids || !Schema::hasTable('checklist_submissions') || !Schema::hasTable('checklist_analysis_logs')
+            || !Schema::hasColumn('checklist_analysis_logs', 'verdict')) {
+            return [];
+        }
+        $latestVerdict = DB::table('checklist_analysis_logs as l')
+            ->select('l.verdict')
+            ->whereColumn('l.submission_id', 's.id')
+            ->where('l.log_type', 'approval')
+            ->orderByDesc('l.created_at')
+            ->orderByDesc('l.id')
+            ->limit(1);
+
+        return DB::table('checklist_submissions as s')
+            ->select('s.user_id')
+            ->selectSub($latestVerdict, 'verdict')
+            ->whereIn('s.user_id', $ids)
+            // < kinabukasan: tama rin kahit may oras ang naka-store na date
+            ->where('s.date', '>=', $day->toDateString())
+            ->where('s.date', '<', $day->copy()->addDay()->toDateString())
+            ->get()
+            ->where('verdict', 'approved')
+            ->countBy(fn ($r) => (int) $r->user_id)
+            ->all();
     }
 
     private function iso($value): ?string
