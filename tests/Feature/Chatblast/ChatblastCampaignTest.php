@@ -151,6 +151,22 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertSame([['Araw dalawa']], $c->fresh()->days, 'kahit isang araw');
     }
 
+    public function test_new_send_times_on_an_auto_campaign_start_from_now_and_overlapping_campaigns_are_warned(): void
+    {
+        $c = $this->create();
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['mode' => 'auto', 'confirm' => true])->assertOk();
+        $this->travel(3)->hours();
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['send_times' => ['08:00', '12:00']])->assertOk();
+        $this->assertTrue($c->fresh()->auto_ran_at->eq(now()), 'ang bagong oras na lumipas na ay hindi tatakbo');
+
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB-X3', 'status' => 'In Transit']);
+        $this->assertSame([], $this->getJson('/chatblast/campaigns/data')->json('overlaps'));
+        $this->create(['name' => 'Biyahe rin', 'statuses' => ['In Transit'], 'pages' => ['Page Uno']]);
+        $this->create(['name' => 'Ibang page', 'statuses' => ['In Transit'], 'pages' => ['Page Dos']]);
+        $this->assertSame(['"In transit" at "Biyahe rin": In Transit sa Page Uno', '"In transit" at "Ibang page": In Transit sa Page Dos'],
+            $this->getJson('/chatblast/campaigns/data')->json('overlaps'));
+    }
+
     public function test_a_campaign_with_messages_cannot_be_deleted(): void
     {
         $used = $this->create();
@@ -174,6 +190,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $d = $this->getJson('/chatblast/campaigns/data')->assertOk()->json();
         $mine = collect($d['campaigns'])->firstWhere('id', $c->id);
         $this->assertSame(['built' => 3, 'sent' => 1, 'failed' => 1], $mine['today']);
+        $this->assertSame(1, $mine['ready'], 'ilang ready ngayon (para sa kumpirmasyon ng auto)');
         $rows = collect($d['sheet'])->where('campaign_id', $c->id)->values()->all();
         $this->assertSame([[1, 'A', 0], [1, 'B', 2]], array_map(fn ($r) => [$r['day'], $r['version'], $r['sent']], $rows));
         $this->assertContains('Problematic', $d['statuses']);

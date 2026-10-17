@@ -27,6 +27,7 @@ class Chatblast
     /** Ang status na ito na may RTS reason ay pabalik na sa seller (gaya ng /jnt status): hindi ito ang biyahe papunta. */
     private const RTS_EXCLUDED = ['In Transit', 'Delivering'];
     public const LOG_MAX = 200; // ilang pagbabago ang itinatago sa log ng campaign
+    public const CROSS = 'may naipadala na ngayong araw sa ibang campaign';
 
     /** Ang kailangan ng page para makapagpadala (page_id para sa bawat API path). */
     public const REQUIRED = ['page_id', 'token', 'flow.shipping', 'field.message'];
@@ -425,24 +426,58 @@ class Chatblast
     {
         $skipped = 0;
         BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
-            ->select('id', 'waybill')->chunkById(500, function ($rows) use (&$skipped, $c) {
+            ->select('id', 'waybill', 'page_name')->chunkById(500, function ($rows) use (&$skipped, $c) {
                 $now = $this->currentStatuses($rows->pluck('waybill')->unique()->values()->all());
                 foreach ($rows as $row) {
-                    if ($this->matches($c, $now[$row->waybill] ?? [])) continue;
-                    $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
-                        ->update(['status' => 'skipped', 'reason' => $this->staleReason($c, $now[$row->waybill] ?? [])]);
+                    $why = !$this->onPage($c, (string) $row->page_name) ? self::pageReason($row->page_name)
+                        : ($this->matches($c, $now[$row->waybill] ?? []) ? null : $this->staleReason($c, $now[$row->waybill] ?? []));
+                    if ($why === null) continue;
+                    $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)->update(['status' => 'skipped', 'reason' => $why]);
                 }
             });
 
         return $skipped;
     }
 
-    /** Ang dahilan kapag ang waybill ay wala na sa mga status ng campaign, o null kapag nasa status pa (para sa sender). */
-    public function staleFor(ChatblastCampaign $c, string $waybill): ?string
+    /**
+     * Ang dahilan kapag hindi na dapat ipadala ng campaign (para sa sender): wala na ang page sa campaign, o ang waybill
+     * ay wala na sa mga status nito; null kapag puwede pa.
+     */
+    public function staleFor(ChatblastCampaign $c, string $waybill, string $page): ?string
     {
+        if (!$this->onPage($c, $page)) return self::pageReason($page);
         $rows = $this->currentStatuses([$waybill])[$waybill] ?? [];
 
         return $this->matches($c, $rows) ? null : $this->staleReason($c, $rows);
+    }
+
+    public static function pageReason(string $page): string
+    {
+        return 'Wala na ang page na ' . $page . ' sa campaign';
+    }
+
+    /**
+     * Isang mensahe kada waybill kada araw (Manila) para sa parehong J&T status, kahit magkaibang campaign: kapag ang
+     * ibang campaign na may ganitong status din ay nakapagpadala na ngayong araw (sent o unknown), nagpapadala ngayon
+     * (sending), o nauna sa pila (queued, mas maliit na id), ang dahilan; null kapag puwede. Iisang page ang mga row ng
+     * isang waybill, kaya pareho rin ang page.
+     */
+    public function sentByOtherCampaign(BotcakeMessage $m, ChatblastCampaign $c): ?string
+    {
+        $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
+        $kinds = BotcakeMessage::where('waybill', $m->waybill)->where('kind', '<>', $m->kind)->where('is_test', false)
+            ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
+                ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
+                ->orWhere(fn ($x) => $x->where('status', 'sending')->where('updated_at', '>=', now()->subMinutes(10)))
+                ->orWhere(fn ($q) => $q->where('status', 'queued')->where('id', '<', $m->id)))
+            ->distinct()->pluck('kind')->all();
+        if (!$kinds) return null;
+
+        $status = $this->latest($this->currentStatuses([$m->waybill])[$m->waybill] ?? [])['status'] ?? null;
+        if (!in_array($status, (array) $c->statuses, true)) return null;
+        $shared = ChatblastCampaign::whereIn('kind', $kinds)->get(['statuses'])->contains(fn ($o) => in_array($status, (array) $o->statuses, true));
+
+        return $shared ? self::CROSS : null;
     }
 
     private function staleReason(ChatblastCampaign $c, array $rows): string
@@ -463,7 +498,7 @@ class Chatblast
     }
 
     /** Kasama ba ang page sa campaign (walang listahan = lahat ng page). */
-    private function onPage(ChatblastCampaign $c, string $page): bool
+    public function onPage(ChatblastCampaign $c, string $page): bool
     {
         if (!$c->pages) return true;
         $key = $this->settings->pageKey($page);
@@ -587,7 +622,10 @@ class Chatblast
             ->whereExists(fn ($e) => $e->from('from_jnts as j')->whereColumn('j.waybill_number', 'mo.waybill')->whereIn('j.status', (array) $c->statuses)
                 ->where(fn ($r) => $r->whereNotIn('j.status', self::RTS_EXCLUDED)->orWhereNull('j.rts_reason')->orWhereRaw("TRIM(j.rts_reason) = ''"))->selectRaw('1'))
             ->whereNotExists(fn ($e) => $e->from('botcake_messages as m')->whereColumn('m.waybill', 'mo.waybill')->where('m.kind', $kind)
-                ->where('m.is_test', false)->whereNotNull('m.dedupe_key') // ang itinabi dahil nagbago ang PSID/page ay hindi bilang
+                ->where('m.is_test', false)
+                // Ang itinabi dahil nagbago ang PSID/page ay hindi bilang; ang nilaktawan dahil may naipadala na ang ibang
+                // campaign ngayong araw ay bilang (walang bagong row hanggang bukas).
+                ->where(fn ($k) => $k->whereNotNull('m.dedupe_key')->orWhere('m.reason', self::CROSS))
                 ->where(fn ($t) => $t->where('m.created_at', '>=', $today)->orWhere('m.sent_at', '>=', $today)->orWhere('m.queued_at', '>=', $today)
                     ->orWhere(fn ($u) => $u->where('m.status', 'unknown')->where('m.updated_at', '>=', $today)))
                 ->selectRaw('1'))

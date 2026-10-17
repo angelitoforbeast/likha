@@ -27,6 +27,8 @@
 
     <p id="notice" class="text-xs mb-2 min-h-[1rem]" aria-live="polite"></p>
 
+    <div id="overlaps" class="hidden mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status"></div>
+
     {{-- Mga campaign --}}
     <div class="bg-white rounded shadow overflow-auto mb-3">
         <table id="camps" class="text-sm border-collapse min-w-full">
@@ -144,6 +146,11 @@
     // ---- mga campaign ----
 
     function drawCampaigns() {
+        const ov = document.getElementById('overlaps');
+        ov.classList.toggle('hidden', !(data.overlaps || []).length);
+        ov.replaceChildren(el('p', {class: 'font-medium', text: 'Magkapatong na campaign: isang mensahe lang kada waybill kada araw para sa parehong status, kaya lalaktawan ng isa ang naipadala na ng kabila.'}),
+            el('ul', {class: 'list-disc ml-4'}, (data.overlaps || []).map(x => el('li', {text: x}))));
+
         const f = document.getElementById('sheet-filter'), keep = f.value;
         f.replaceChildren(el('option', {value: '', text: 'Lahat'}), ...data.campaigns.map(c => el('option', {value: String(c.id), text: c.name})));
         f.value = keep;
@@ -153,7 +160,8 @@
                 text: c.mode === 'auto' ? 'auto (gawing manual)' : 'manual (gawing auto)', title: c.mode_changed_at ? 'Huling palit: ' + c.mode_changed_at : null});
             mode.addEventListener('click', () => {
                 const auto = c.mode !== 'auto';
-                if (auto && !confirm('Gawing AUTO ang "' + c.name + '"? Kusa itong kukuha at magpapadala sa customer sa ' + ((c.send_times || []).join(', ') || '(walang oras)') + ' araw-araw (Manila).')) return;
+                if (auto && !confirm('Gawing AUTO ang "' + c.name + '"? Kusa itong kukuha at magpapadala sa customer sa ' + ((c.send_times || []).join(', ') || '(walang oras)') + ' araw-araw (Manila).\n\n'
+                    + fmt(c.ready) + ' ang ready ngayon: HINDI ito ipapadala ng auto. Ang bago lang mula ngayon (ngayong araw) ang ipapadala; ang naipon ay sa /chatblast kung gusto.')) return;
                 save(c.id, auto ? {mode: 'auto', confirm: true} : {mode: 'manual'});
             });
             const on = el('input', {type: 'checkbox', 'aria-label': 'On/off ng ' + c.name});

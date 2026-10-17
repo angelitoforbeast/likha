@@ -51,10 +51,14 @@ class AutoChatblast extends Command
                 ->update(['auto_ran_at' => now()]);
             if (!$claimed) continue;
 
-            // Lahat ng ready ng campaign sa loob ng window, kasama ang nabuo noong nakaraang araw na naging ready lang
-            // ngayon (hal. natugma ang PSID sa gabi): ang sender ang nagbabantay ng isa kada araw at ng status.
+            // Ang bago lang: nabuo ngayong araw (Manila) at pagkatapos i-auto ang campaign. Ang naipong ready (backlog)
+            // ay hindi kailanman ipinapadala ng auto: sa /chatblast lang, kung gusto. Ang page na wala na sa campaign ay
+            // hindi rin (nilalaktawan din ito ng build at ng sender).
+            $from = $now->copy()->startOfDay();
+            if ($c->mode_changed_at && $c->mode_changed_at->gt($from)) $from = $c->mode_changed_at->copy();
             $ids = BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->where('status', 'ready')
-                ->where('created_at', '>=', $now->copy()->subDays($c->window_days)->startOfDay()->timezone(config('app.timezone')))->pluck('id')->all();
+                ->where('created_at', '>=', $from->timezone(config('app.timezone')))->get(['id', 'page_name'])
+                ->filter(fn ($m) => $chatblast->onPage($c, (string) $m->page_name))->pluck('id')->all();
             $queued = $sender->queue($ids, null);
 
             Log::info('chatblast: auto', ['campaign' => $c->id, 'slot' => $slot->format('H:i'), 'added' => $r['added'], 'queued' => $queued]);

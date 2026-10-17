@@ -103,17 +103,23 @@ class ChatblastAutoTest extends ChatblastTestCase
         foreach (['c-off', 'c-manual', 'c-late', 'c-new'] as $kind) $this->assertSame([], $this->statuses($kind), $kind);
     }
 
-    public function test_a_row_built_on_an_earlier_day_that_became_ready_is_queued_by_the_next_run(): void
+    public function test_auto_never_sends_the_backlog_only_rows_built_today_after_the_switch(): void
     {
-        $this->campaign(['send_times' => ['09:00']]);
-        $this->travelTo('2026-10-18 08:00:00');
-        $order = $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', null, 'In Transit');
-        $this->tick('2026-10-18 09:00:00');
-        $this->assertSame(['WB-1' => 'no_psid'], $this->statuses());
+        $this->travelTo('2026-10-17 08:00:00');
+        $this->campaign(['send_times' => ['09:00', '15:00'], 'mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1); // kahapon: ready, hindi naipadala
 
-        $order->update(['botcake_psid' => 'psid-a']); // natugma sa gabi
-        $this->tick('2026-10-19 09:00:00');
-        $this->assertSame(['WB-1' => 'queued'], $this->statuses());
+        $this->travelTo('2026-10-18 09:30:00');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1); // ngayong araw pero bago i-auto
+        $this->travelTo('2026-10-18 10:00:00');
+        ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
+
+        $this->travelTo('2026-10-18 12:00:00');
+        $this->shipped('Page Uno', 'Cora Diaz', 'WB-3', 'psid-c', 'In Transit');
+        $this->tick('2026-10-18 15:00:00');
+        $this->assertSame(['WB-1' => 'ready', 'WB-2' => 'ready', 'WB-3' => 'queued'], $this->statuses(), 'ang bago lang mula ngayong araw, pagkatapos i-auto');
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void

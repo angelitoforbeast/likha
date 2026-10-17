@@ -26,6 +26,7 @@ class ChatblastSender
     public const SENDABLE = ['ready', 'failed', 'field_mismatch', 'skipped'];
     public const QUEUE = 'chatblast';
     public const OFF = 'Naka-off ang campaign';
+    public const NO_CAMPAIGN = 'Walang campaign ang mensaheng ito';
     private const PAUSED = 'chatblast.paused';
     private const BODY_MAX = 1500;
 
@@ -171,7 +172,12 @@ class ChatblastSender
 
         // Ang campaign ay dapat naka-on, ang waybill ay nasa mga status pa nito (hal. hindi na "In Transit" kapag
         // Delivered na), isa lang kada araw ang mensahe ng campaign sa waybill, at dapat mayroon pa ang araw nito.
-        if (!$m->is_test && ($c = $this->chatblast->campaign($m->kind))) {
+        if (!$m->is_test) {
+            $c = $this->chatblast->campaign($m->kind);
+            if (!$c) { // walang campaign (hal. inalis): hindi ipinapadala nang walang patakaran
+                $this->finish($m, 'skipped', self::NO_CAMPAIGN, null, []);
+                return;
+            }
             if (!$c->active) {
                 $this->finish($m, 'skipped', self::OFF, null, []);
                 // Ang pag-on ulit ay gagawa ng bagong row para sa waybill (hindi naiipit sa key ng nilaktawan).
@@ -190,9 +196,15 @@ class ChatblastSender
                     return;
                 }
             }
-            $why = $this->chatblast->staleFor($c, $m->waybill) ?? $this->chatblast->blockedToday($m);
+            $why = $this->chatblast->staleFor($c, $m->waybill, $m->page_name) ?? $this->chatblast->blockedToday($m);
             if ($why !== null) {
                 $this->finish($m, 'skipped', $why, null, []);
+                return;
+            }
+            if (($why = $this->chatblast->sentByOtherCampaign($m, $c)) !== null) {
+                $this->finish($m, 'skipped', $why, null, []);
+                // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill sa campaign na ito.
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
         }

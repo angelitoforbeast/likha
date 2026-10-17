@@ -61,6 +61,7 @@ class ChatblastCampaignController extends Controller
         $real  = fn () => BotcakeMessage::where('is_test', false);
         $built  = $real()->where('created_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         $sent   = $real()->where('status', 'sent')->where('sent_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
+        $ready  = $real()->where('status', 'ready')->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind'); // para sa kumpirmasyon ng auto
         $failed = $real()->whereIn('status', ['failed', 'field_mismatch'])->where('updated_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         $sends  = [];
         $real()->where('status', 'sent')->selectRaw('kind, day, version, COUNT(*) AS n')->groupBy('kind', 'day', 'version')->get()
@@ -81,7 +82,8 @@ class ChatblastCampaignController extends Controller
         return response()->json([
             'campaigns' => $campaigns->map(fn ($c) => $this->present($c) + ['today' => [
                 'built' => (int) ($built[$c->kind] ?? 0), 'sent' => (int) ($sent[$c->kind] ?? 0), 'failed' => (int) ($failed[$c->kind] ?? 0),
-            ]])->values()->all(),
+            ], 'ready' => (int) ($ready[$c->kind] ?? 0)])->values()->all(),
+            'overlaps' => $this->overlaps($campaigns->where('active', true)->values()->all()),
             'sheet'    => $sheet,
             'statuses' => $this->jntStatuses(),
             'pages'    => $this->settings->pagesWith('botcake', Chatblast::REQUIRED),
@@ -157,6 +159,8 @@ class ChatblastCampaignController extends Controller
                 // Mula ngayon lang: ang oras na lumipas na bago i-on ang auto ay hindi na hinahabol.
                 if ($mode === 'auto') $c->auto_ran_at = now();
             }
+            // Ang bagong oras ng padala na lumipas na ngayong araw ay hindi tatakbo (mula ngayon lang ang auto).
+            if (in_array('send_times', $changed, true) && $mode === 'auto') $c->auto_ran_at = now();
             if ($active !== $c->active) {
                 Chatblast::log($c, Auth::id(), ['what' => 'active', 'old' => $c->active, 'new' => $active]);
                 $c->active = $active;
@@ -332,6 +336,32 @@ class ChatblastCampaignController extends Controller
         }
 
         return [$data, null];
+    }
+
+    /**
+     * Ang mga pares ng naka-on na campaign na may parehong status at page: ang waybill ay isang mensahe lang kada araw
+     * para sa parehong status, kaya ang isa sa kanila ang lalaktawan. Hal. "\"A\" at \"B\": In Transit sa Page Uno".
+     * @param  array<int, ChatblastCampaign> $campaigns
+     * @return array<int, string>
+     */
+    private function overlaps(array $campaigns): array
+    {
+        $out = [];
+        foreach ($campaigns as $i => $a) {
+            foreach (array_slice($campaigns, $i + 1) as $b) {
+                $statuses = array_values(array_intersect((array) $a->statuses, (array) $b->statuses));
+                if (!$statuses) continue;
+                if (!$a->pages && !$b->pages) $pages = ['lahat ng page'];
+                elseif (!$a->pages || !$b->pages) $pages = (array) ($a->pages ?: $b->pages);
+                else {
+                    $keys = array_map(fn ($p) => $this->settings->pageKey((string) $p), $a->pages);
+                    $pages = array_values(array_filter($b->pages, fn ($p) => in_array($this->settings->pageKey((string) $p), $keys, true)));
+                }
+                if ($pages) $out[] = '"' . $a->name . '" at "' . $b->name . '": ' . implode(', ', $statuses) . ' sa ' . implode(', ', $pages);
+            }
+        }
+
+        return $out;
     }
 
     /** Ang mga J&T status na nasa from_jnts (ang mapagpipilian ng trigger), naka-cache nang 10 minuto. */
