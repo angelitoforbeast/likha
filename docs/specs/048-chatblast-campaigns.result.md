@@ -63,7 +63,7 @@ One migration, `2026_10_18_400000_create_chatblast_campaigns_table.php`. It is a
   - The latest send time `t` of today counts when `t ≤ now < t + 3 h` and there has been no auto run since `t`.
   - It builds that campaign. A build already running means it waits for the next tick.
   - It then claims the slot atomically: `auto_ran_at` is set only if it is still before `t`, and only while the campaign is still on and auto.
-  - Then it queues the campaign's `ready` rows inside its window, including rows built earlier that only became ready later.
+  - Then it queues the campaign's `ready` rows built today (Manila) and after the switch to auto, never the backlog (amendment 2), and only for pages still in the campaign.
   - The sender keeps every rule: the per-page daily cap, pause, once per day, status at send, and On Delivery.
   - While paused, nothing runs and the slot is not marked: it runs after Resume within the 3 hours.
   - Switching to auto, or turning an auto campaign back on, does not catch up on send times that already passed.
@@ -81,13 +81,13 @@ Schedule::command('chatblast:auto')
     ->withoutOverlapping(30);
 ```
 
-Likha's cron already runs `schedule:run` every minute. Incepxion has no scheduler cron. The release must add this line to the crontab of the user that runs the app, with the app's real path:
+Likha's cron already runs `schedule:run` every minute. Incepxion has no scheduler cron. Per the release plan (amendment 2), the release adds only the chatblast command there, in the crontab of `www-data`:
 
 ```
-* * * * * cd /path/to/incepxion && php artisan schedule:run >> /dev/null 2>&1
+*/5 * * * * cd /var/www/incepxion.pro && php artisan chatblast:auto >> /dev/null 2>&1
 ```
 
-I don't have the server path, so the release fills it in. Adding the line also starts every other scheduled command in `routes/console.php` on Incepxion. Before adding it, check that each of them should run there (night import, holds snapshot, Botcake sync — the sync is gated by `BOTCAKE_SYNC_ENABLED`).
+This runs only `chatblast:auto`, not the other scheduled commands. It has no `withoutOverlapping`; the build lock and the atomic `auto_ran_at` claim keep two overlapping runs from sending a slot twice.
 
 ### The campaigns page and the flat sheet
 
@@ -202,7 +202,7 @@ Not done: there is no running app with the server database here. To check on the
 
 1. **`php artisan migrate --force`** creates the table, adds `campaign_id`, and moves the two kinds into campaigns.
 2. **`php artisan queue:restart`**, so the `chatblast` worker loads the new sender.
-3. **Incepxion:** add the cron line above, after checking the other scheduled commands. Likha needs nothing, because its scheduler cron already runs.
+3. **Incepxion:** add the cron line above as `www-data`. Likha needs nothing, because its scheduler cron already runs.
 4. Every campaign starts **manual**. Nothing sends by itself until someone switches a campaign to auto and confirms.
 
 ## What the brief got wrong, and decisions it left open
@@ -213,7 +213,7 @@ Not done: there is no running app with the server database here. To check on the
 - **Requires On Delivery on another status** would skip every row, so it is only allowed when the trigger is exactly Delivering.
 - **History:** "its history/version" is the campaign `log` (last 200 changes, old and new text), not a second table.
 - **"Kunin ang mga bago" with no campaign chosen** now builds every campaign that is on. The old page defaulted to delivering only.
-- **Incepxion cron:** adding `schedule:run` there starts every scheduled command in the repo on that server, not only chatblast (see above).
+- **Incepxion cron:** settled by amendment 2: only `chatblast:auto` every 5 minutes, not `schedule:run`.
 - **Conflict with `CLAUDE.local.md`:** the kit asks for a "go" on the plan before code. The brief said to write the plan first and set every product decision, so I committed the plan and went on.
 
 ## Story changes
@@ -286,3 +286,89 @@ Full suite on the final tree: `Tests: 1488, Assertions: 17448, Errors: 1, Failur
 - **No migration and no new setting.**
 - Open the panel for one page. Check that the flow and the template are the right ones, and that the shapes Botcake really returns are read; if a card says "hindi matukoy", set `botcake template.shipping` for that page in /page-settings.
 - If the panel is empty or wrong for every page, Botcake's answers have a different shape than assumed, and the parser needs one fix.
+
+## Amendment 2
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+An independent review found no blocker, two majors and four minors; all are fixed before release:
+
+1. **Auto sends only new rows, never the backlog.** The switch-to-auto confirmation says how many rows are ready now and that auto will not send them.
+2. **A campaign's page list is enforced at send time too.**
+3. **Adding a send time that already passed doesn't fire it.**
+4. **One message per waybill per J&T status per Manila day, across campaigns,** plus a warning on the campaigns page when two active campaigns overlap.
+5. **The Incepxion cron line runs `chatblast:auto` every 5 minutes as `www-data`,** not `schedule:run`.
+6. **A row whose kind has no campaign is skipped.**
+
+### What changed
+
+- **Auto (`chatblast:auto`):** it queues only ready rows built at or after max(start of today in Manila, the campaign's `mode_changed_at`), and only for pages still in the campaign.
+  - I read "today or after `mode_changed_at`" together with the confirmation's "only new ones from today" as both conditions.
+  - This replaces the main review's earlier fix that queued earlier-built rows once they became ready. Those rows now go only by hand from /chatblast.
+  - The confirmation reads "N ang ready ngayon: HINDI ito ipapadala ng auto…". The count comes from a new `ready` per campaign in `/chatblast/campaigns/data`.
+- **Pages:** a row whose page is no longer in its campaign is `skipped` with "Wala na ang page na X sa campaign":
+  - by the build (`skipStale`);
+  - by the sender, before any J&T call;
+  - inside `staleFor()`;
+  - and it is left out of the auto run's row query.
+  - The skip frees the dedupe key, so putting the page back builds the waybill again.
+- **Send times:** a newly added time that has already passed today stamps `auto_ran_at` at that time, so it doesn't fire. A time later today, or an earlier slot that isn't affected, still runs.
+- **One a day per status, across campaigns (`Chatblast::sentByOtherCampaign`):**
+  - It runs inside the per-customer lock, just before the Botcake steps. The rows of one waybill share page and PSID, so they never run at the same time.
+  - It counts another campaign's row for the same waybill that went out today (sent, or unknown: maybe sent) for the same status as the waybill's current status. Such a row is `skipped` with "may naipadala na ngayong araw sa ibang campaign".
+  - The skip frees the dedupe key, and the build adds no new row for that waybill in that campaign until the next day.
+  - The sender writes the current status to `jnt_status` before sending, so a row built under one status and sent under another counts for the one it went out under.
+  - A queued or sending row of the other campaign doesn't count, because it may still fail.
+- **Overlap warning:** `/chatblast/campaigns/data` lists pairs of active campaigns that share a status and a page (for example `"In transit" at "Biyahe rin": In Transit sa Page Uno`). The page shows them in an amber box.
+- **No campaign:** a real (non-test) row whose `kind` has no campaign is `skipped` with "Walang campaign ang mensaheng ito".
+
+### Tests (amendment 2)
+
+| Case | Test | Result |
+|---|---|---|
+| Auto at 15:00 after switching at 10:00 sends only the row built after the switch today. Yesterday's ready row and today's 09:30 row stay ready | `ChatblastAutoTest::test_auto_never_sends_the_backlog_only_rows_built_today_after_the_switch` | pass |
+| The data gives the ready count per campaign | `ChatblastCampaignTest::test_the_data_shows_…` (`$mine['ready']`) | pass |
+| A page taken out: the queued row is skipped at send, and the unsent row at build; nothing goes to Botcake | `ChatblastCampaignBuildTest::test_a_page_taken_out_of_the_campaign_is_skipped_at_build_and_at_send` | pass |
+| One a day across campaigns, same status. Covers: another campaign's queued row doesn't block; its sent row does (skip, key freed); no same-day rebuild; a new row the next day | `…::test_one_message_per_waybill_per_day_across_campaigns_with_the_same_status` | pass |
+| A message sent for another status doesn't block; a page taken out and put back is built again | `…::test_a_message_sent_for_another_status_does_not_block_and_a_page_put_back_is_built_again` | pass |
+| A row built In Transit and sent while Delivering records Delivering, and then blocks the Delivering campaign that day | `…::test_a_row_sent_after_its_status_moved_on_counts_for_the_status_it_went_out_under` | pass |
+| A row without a campaign is skipped and never sent | `…::test_a_row_without_a_campaign_is_never_sent` | pass |
+| New send times on an auto campaign: an added past time doesn't fire, an added future time changes nothing; overlapping active campaigns are listed | `ChatblastCampaignTest::test_new_send_times_on_an_auto_campaign_start_from_now_and_overlapping_campaigns_are_warned` | pass |
+
+Red runs:
+- **First run:** six reds for the right reasons.
+  - the backlog was queued;
+  - "Undefined array key ready";
+  - the page wasn't skipped;
+  - the across-campaigns skip was missing;
+  - the row without a campaign was sent;
+  - `auto_ran_at` wasn't stamped.
+- **Fix loop:** "'In Transit' is identical to 'Delivering'" for the status recorded at send.
+- **Written after the code:** the different-status / page-back test and the rewritten across-campaigns test came after the code in the first fix loop. They weren't seen red.
+- **Mistake, fixed:** the status list cached 10 minutes refused a status inserted later in the same test, so the insert moved up.
+
+Full suite on the final tree: `Tests: 1494, Assertions: 17477, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3`. The only reds are the known `ExampleTest` and `ImportStartTest`. The Chatblast folder alone: 108 tests, all pass.
+
+### Review (amendment 2)
+
+- **One adversarial `skeptic-reviewer` pass, then a scoped re-check, then one more fix.** That is past the two-loop default, because the open finding was a double send to customers.
+- **Majors from the first pass (fixed):**
+  - the across-campaigns rule ignored which status the other message was sent for;
+  - it counted rows that were only queued or sending, outside the customer lock, so a reserving row that failed left nothing sent;
+  - a page skip kept its dedupe key forever.
+- **Major from the re-check (fixed, not re-reviewed):** `jnt_status` was the build-day status. The sender now records the status the message goes out under.
+- **Minors fixed:**
+  - the page is checked before the J&T call;
+  - only an added past send time stamps `auto_ran_at`.
+- **Accepted in `TODO.md` under 048, with reasons:**
+  - backlog rows, including late PSID matches, go only by hand;
+  - the ready count leaves out waybills without a row yet;
+  - an added past time can swallow an earlier due slot;
+  - a hard-killed job past its lock;
+  - one extra build and skip around midnight.
+
+### After release, updated by amendment 2
+
+- **No new migration.** The changes are code only.
+- **Incepxion:** `*/5 * * * * cd /var/www/incepxion.pro && php artisan chatblast:auto >> /dev/null 2>&1` in `www-data`'s crontab.
+- Before switching a campaign to auto, read the warning box: two active campaigns with the same status and page mean the later one skips waybills the earlier one already messaged that day.
