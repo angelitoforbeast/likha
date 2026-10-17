@@ -50,10 +50,10 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         }]);
     }
 
-    private function pastRun(string $stop, int $batches = 1, ?string $kind = null, ?int $start = null): BotcakePsidImportRun
+    private function pastRun(?string $stop, int $batches = 1, ?string $kind = null, ?int $start = null, string $status = 'done'): BotcakePsidImportRun
     {
         return BotcakePsidImportRun::create([
-            'status' => 'done', 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => $stop,
+            'status' => $status, 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => $stop,
             'batches_read' => $batches, 'read_kind' => $kind, 'start_batch' => $start,
         ]);
     }
@@ -96,13 +96,17 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
             'known_batch pagkatapos ng age' => [[['age', 4, 'window', 1], ['known_batch', 1, 'incremental', 1]], 1, 'incremental'],
             'known_batch lang, hindi pa buo' => [[['known_batch', 1, null, null]], 1, 'window'],
             'lumang run na walang kind'  => [[['cap', 300, null, null]], 1, 'window'],
+            'rate limit sa gitna: tuloy' => [[['rate_limited', 12, 'window', 1, 'failed']], 7, 'window'],
+            'pinatay na run: tuloy'      => [[[null, 12, 'window', 1, 'running']], 7, 'window'],
+            '0 batch: parehong simula'   => [[['time', 20, 'window', 1], ['rate_limited', 0, 'window', 15, 'failed']], 15, 'window'],
+            '2 sunod na failed: mula 1'  => [[['error', 6, 'window', 15, 'failed'], ['error', 6, 'window', 15, 'failed']], 1, 'window'],
         ];
     }
 
     /** @dataProvider lastRuns */
     public function test_the_last_runs_decide_the_kind_of_read_and_where_it_starts(array $runs, int $first, string $kind): void
     {
-        foreach ($runs as [$stop, $batches, $k, $start]) $this->pastRun($stop, $batches, $k, $start);
+        foreach ($runs as $r) $this->pastRun(...$r);
         $this->fake(endAt: 50);
 
         $run = $this->sync();
@@ -112,26 +116,26 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         if ($kind === 'incremental') $this->assertCount(3, $this->asked, 'incremental: may cap pa rin');
     }
 
-    public function test_a_window_read_stops_after_25_minutes_and_the_next_one_continues_without_marking_inactive(): void
+    public function test_a_window_read_stops_after_22_minutes_and_the_next_one_continues_without_marking_inactive(): void
     {
         $stale = $this->stale();
-        $this->fake(secondsPerBatch: 60, endAt: 41);
+        $this->fake(secondsPerBatch: 60, endAt: 35);
 
         $first = $this->sync();
 
-        $this->assertSame(['time', 'window', 1, 25], [$first->stop_reason, $first->read_kind, $first->start_batch, $first->batches_read]);
+        $this->assertSame(['time', 'window', 1, 22], [$first->stop_reason, $first->read_kind, $first->start_batch, $first->batches_read]);
         $this->assertSame('available', $stale->fresh()->status, 'putol na basa: walang inactive');
 
         $this->asked = [];
         $second = $this->sync();
 
-        $this->assertSame(20, $this->asked[0], 'mula sa batch 25, minus 5 na overlap');
-        $this->assertSame(['end', 'window', 20], [$second->stop_reason, $second->read_kind, $second->start_batch]);
+        $this->assertSame(17, $this->asked[0], 'mula sa batch 22, minus 5 na overlap');
+        $this->assertSame(['end', 'window', 17], [$second->stop_reason, $second->read_kind, $second->start_batch]);
         $this->assertSame('available', $stale->fresh()->status, 'itinuloy na basa (hindi mula batch 1): walang inactive');
-        $this->assertStringContainsString('tuloy mula batch 20', $second->last_message);
+        $this->assertStringContainsString('tuloy mula batch 17', $second->last_message);
 
         $row = collect(app(\App\Services\PageSettingsGrid::class)->build()['rows'])->firstWhere('name', 'Page Uno');
-        $this->assertSame('window, tuloy mula batch 20', $row['info']['last_sync']['kind']);
+        $this->assertSame('window, tuloy mula batch 17', $row['info']['last_sync']['kind']);
         $this->assertSame('end', $row['info']['last_sync']['stop_reason']);
     }
 

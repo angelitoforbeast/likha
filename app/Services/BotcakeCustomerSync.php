@@ -20,8 +20,10 @@ use Illuminate\Support\Facades\Log;
  * mas luma na ang lahat ng kasunod. Ang inactive ay para lang sa mga naka-subscribe sa loob ng window.
  * Window read (walang cap at walang known-batch stop): kapag ang page ay wala pang run na umabot sa age o end, kapag cap
  * ang huling run, o kapag ang huling run ay window read na hindi natapos (oras, error, o pinatay): ang huli ay itinutuloy
- * mula sa naabot nitong batch, minus RESUME_OVERLAP (itinutulak pababa ng mga bagong subscriber ang listahan). Humihinto
- * ito pagkatapos ng WINDOW_SECONDS (stop reason time), para matapos bago ang 1800 s na timeout ng queue worker.
+ * mula sa naabot nitong batch, minus RESUME_OVERLAP (kapag may nawala sa unahan, umaakyat ang listahan at malalaktawan sana
+ * ang ilan; ang bagong subscriber naman ay nagtutulak pababa, kaya inuulit lang). Humihinto ito pagkatapos ng
+ * WINDOW_SECONDS (stop reason time). Dalawang sunod na failed na window read: mula batch 1 ulit, para hindi maipit sa
+ * batch na laging pumapalya.
  * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason, read_kind at start_batch.
  */
 class BotcakeCustomerSync
@@ -30,7 +32,9 @@ class BotcakeCustomerSync
     public const MAX_BATCHES = 20000; // pananggalang ng --full kung paulit-ulit ang sagot ng API
     public const INACTIVE_DAYS = 30;
     public const LOCK_TTL = 2 * 3600; // kada page; ang run na pinatay (hindi nakapag-release) ay hindi humaharang nang higit dito
-    public const WINDOW_SECONDS = 25 * 60; // window read: titigil (time) bago ang 1800 s na --timeout ng worker
+    // Window read: titigil (time) pagkatapos nito. Sinusuri sa pagitan ng mga batch; ang isang batch ay hanggang ~5 min
+    // (4 na subok × 30 s + backoff at Retry-After), saka ang matching: kasya pa rin sa 1800 s na --timeout ng worker.
+    public const WINDOW_SECONDS = 22 * 60;
     public const RESUME_OVERLAP = 5;       // batch na inuulit kapag itinutuloy ang window read
 
     public function __construct(
@@ -85,11 +89,16 @@ class BotcakeCustomerSync
 
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         $runs = fn () => BotcakePsidImportRun::where('source', 'api')->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)]);
-        $last = $runs()->orderByDesc('id')->first();
+        [$last, $before] = array_pad($runs()->orderByDesc('id')->limit(2)->get()->all(), 2, null);
 
+        // Hindi natapos na window read (oras, error, rate limit o pinatay): ituloy mula sa naabot nito.
         if ($last && $last->read_kind === 'window' && !in_array($last->stop_reason, ['age', 'end'], true)) {
-            $reached = ($last->start_batch ?: 1) + (int) $last->batches_read - 1;
-            return ['window', max(1, $reached - self::RESUME_OVERLAP)];
+            $failedTwice = $last->status === 'failed' && $before?->read_kind === 'window' && $before->status === 'failed';
+            if ($failedTwice) return ['window', 1];
+
+            $start = (int) ($last->start_batch ?: 1);
+            if ((int) $last->batches_read === 0) return ['window', $start]; // walang nabasa: parehong simula ulit
+            return ['window', max(1, $start + (int) $last->batches_read - 1 - self::RESUME_OVERLAP)];
         }
         if ($last && $last->stop_reason === 'cap') return ['window', 1];
 
