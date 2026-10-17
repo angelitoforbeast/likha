@@ -34,7 +34,7 @@ class SideBySide
 
         foreach ($groups as $key => $ls) {
             $g = $result['groups'][$key];
-            $meta = array_values(array_filter($metaById, fn ($m) => $m['date'] === $g['date'] && self::money($m['amount']) === $g['amount']));
+            $meta = array_values(array_filter(array_map(fn ($id) => $metaById[$id] ?? null, $g['meta_ids'])));
             $text = fn (int $n, string $total) => "{$n} x {$g['amount']} = {$total}";
             $row = self::row($g['tallied'] ? 'matched' : 'group_off', $ls, $meta);
             $row['group'] = [
@@ -42,6 +42,7 @@ class SideBySide
                 'card_text' => $text($g['card_count'], $g['card_total']),
                 'meta_text' => $text($g['meta_count'], $g['meta_total']),
                 'more'      => $g['tallied'] ? null : ($g['card_count'] > $g['meta_count'] ? 'card' : 'meta'),
+                'shift'     => $g['shift'], // may kinuha sa ±1 araw
             ];
             $rows[] = [$g['date'], [0, min(array_column($ls, 'line_no'))], $row];
         }

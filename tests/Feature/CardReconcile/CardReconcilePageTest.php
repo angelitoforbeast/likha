@@ -343,6 +343,21 @@ class CardReconcilePageTest extends TestCase
         $this->assertSame((int) $m1, (int) CardStatementLine::where('amount', '6278.17')->value('payment_activity_id'));
     }
 
+    public function test_S_049_10_a_group_tallied_with_meta_a_day_later_shows_one_row_marked_one_day(): void
+    {
+        $s = CardStatement::create(['bank' => 'rcbc', 'source_kind' => 'pdf', 'card_label' => self::CARD, 'status' => 'preview']);
+        foreach ([1, 2] as $n) {
+            CardStatementLine::create(['card_statement_id' => $s->id, 'line_no' => $n, 'sale_date' => '2026-09-09', 'post_date' => '2026-09-10', 'description' => "FACEBK *G{$n}", 'amount' => '100.00', 'is_ads' => true]);
+            $this->meta('2026-09-10', '100.00');
+        }
+        $this->actingAs($this->user());
+        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{}'])->assertSessionHasNoErrors();
+
+        $html = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
+        $this->assertMatchesRegularExpression('/<tr data-status="matched"[^>]*>(?:(?!<\/tr>).)*2 x 100\.00 = 200\.00(?:(?!<\/tr>).)*Tugma(?:(?!<\/tr>).)*±1 araw(?:(?!<\/tr>).)*2 x 100\.00 = 200\.00/su', $html);
+        $this->assertStringContainsString('Tugma 2 · ₱200.00', $html);
+    }
+
     public function test_S_049_19_a_statement_of_1200_lines_shows_one_page_of_whole_days_and_long_ids_are_shortened(): void
     {
         $s = CardStatement::create(['bank' => 'rcbc', 'source_kind' => 'pdf', 'card_label' => self::CARD, 'status' => 'preview', 'period_start' => '2026-09-01', 'period_end' => '2026-09-30']);

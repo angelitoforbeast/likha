@@ -128,6 +128,17 @@ class CardSideBySideTest extends TestCase
         ], 'umuulit na Meta-lang na amount sa isang araw = isang row');
     }
 
+    public function test_S_049_17_a_group_with_meta_one_day_later_is_one_row_on_the_sale_date(): void
+    {
+        $lines = [$this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00')];
+        $meta  = [$this->meta('2026-09-10', '100.00'), $this->meta('2026-09-10', '100.00'), $this->meta('2026-09-10', '100.00')];
+
+        $days = $this->build($lines, $meta);
+
+        $this->assertSame([['date' => '2026-09-09', 'rows' => [['matched', [1, 2, 3], [1, 2, 3], '3 x 100.00 = 300.00']], 'totals' => ['300.00', '300.00', '0.00']]], $this->shape($days));
+        $this->assertSame(1, $days[0]['rows'][0]['group']['shift']);
+    }
+
     public function test_S_049_18_filter_by_status_and_page_by_whole_days(): void
     {
         $lines = [];

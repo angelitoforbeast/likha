@@ -43,11 +43,41 @@ class CardMatcher
                 'date' => $date, 'amount' => $amount, 'card_count' => count($c), 'meta_count' => count($m),
                 'card_total' => self::money(self::cents($amount) * count($c)), 'meta_total' => self::money(self::cents($amount) * count($m)),
                 'tallied' => count($c) === count($m),
+                'meta_ids' => array_column($m, 'id'), 'shift' => null,
             ];
             foreach ($c as $l) $out[$l['id']] = ['match_kind' => 'group', 'payment_activity_id' => null, 'group_key' => $key, 'match_days' => null];
             foreach ($m as $r) $used[$r['id']] = true;
         }
         ksort($groups);
+
+        // 1b. Grupong kulang ang isang panig: ang parehong amount mula sa susunod na araw, tapos sa nakaraan
+        //     (hal. Meta na may petsang isang araw pagkatapos ng sale date). Hindi kinukuha ang kailangan ng
+        //     sariling one-to-one ng araw na iyon: may reserba para sa bawat bukas na linya / record doon.
+        $openOn = fn (string $d, int $cents) => array_values(array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === null && $l['sale_date'] === $d && self::cents($l['amount']) === $cents));
+        $freeOn = fn (string $d, int $cents) => array_values(array_filter($meta, fn ($m) => !isset($used[$m['id']]) && $m['date'] === $d && self::cents($m['amount']) === $cents));
+        foreach ($groups as $key => &$g) {
+            $cents = self::cents($g['amount']);
+            foreach ([1, -1] as $off) {
+                $d = gmdate('Y-m-d', strtotime($g['date'] . ' 00:00:00 UTC') + $off * 86400);
+                $short = $g['card_count'] - $g['meta_count'];
+                if ($short > 0) {
+                    $take = array_slice($freeOn($d, $cents), count($openOn($d, $cents)), $short);
+                    foreach ($take as $m) { $used[$m['id']] = true; $g['meta_ids'][] = $m['id']; }
+                    $g['meta_count'] += count($take);
+                } elseif ($short < 0) {
+                    $take = array_slice($openOn($d, $cents), count($freeOn($d, $cents)), -$short);
+                    foreach ($take as $l) $out[$l['id']] = ['match_kind' => 'group', 'payment_activity_id' => null, 'group_key' => $key, 'match_days' => $off];
+                    $g['card_count'] += count($take);
+                } else {
+                    break;
+                }
+                if (!empty($take)) $g['shift'] ??= $off;
+            }
+            $g['card_total'] = self::money($cents * $g['card_count']);
+            $g['meta_total'] = self::money($cents * $g['meta_count']);
+            $g['tallied'] = $g['card_count'] === $g['meta_count'];
+        }
+        unset($g);
 
         // 2. One-to-one sa eksaktong amount.
         $open = array_values(array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === null));

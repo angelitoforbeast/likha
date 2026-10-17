@@ -111,9 +111,9 @@ class CardMatcherTest extends TestCase
         $out = CardMatcher::match($lines, $meta);
 
         $this->assertSame([
-            '2026-09-09|100.00' => ['date' => '2026-09-09', 'amount' => '100.00', 'card_count' => 3, 'meta_count' => 3, 'card_total' => '300.00', 'meta_total' => '300.00', 'tallied' => true],
-            '2026-09-10|100.00' => ['date' => '2026-09-10', 'amount' => '100.00', 'card_count' => 2, 'meta_count' => 3, 'card_total' => '200.00', 'meta_total' => '300.00', 'tallied' => false],
-            '2026-09-12|250.00' => ['date' => '2026-09-12', 'amount' => '250.00', 'card_count' => 1, 'meta_count' => 2, 'card_total' => '250.00', 'meta_total' => '500.00', 'tallied' => false],
+            '2026-09-09|100.00' => ['date' => '2026-09-09', 'amount' => '100.00', 'card_count' => 3, 'meta_count' => 3, 'card_total' => '300.00', 'meta_total' => '300.00', 'tallied' => true, 'meta_ids' => [1, 2, 3], 'shift' => null],
+            '2026-09-10|100.00' => ['date' => '2026-09-10', 'amount' => '100.00', 'card_count' => 2, 'meta_count' => 3, 'card_total' => '200.00', 'meta_total' => '300.00', 'tallied' => false, 'meta_ids' => [4, 5, 6], 'shift' => null],
+            '2026-09-12|250.00' => ['date' => '2026-09-12', 'amount' => '250.00', 'card_count' => 1, 'meta_count' => 2, 'card_total' => '250.00', 'meta_total' => '500.00', 'tallied' => false, 'meta_ids' => [8, 9], 'shift' => null],
         ], $out['groups']);
         $this->assertSame(['group', 'group', 'group', 'group', 'group', 'sale_date', 'group'], array_column($out['lines'], 'match_kind'), 'isang 100 lang sa 09-11 = one-to-one');
         $this->assertSame('2026-09-10|100.00', $out['lines'][4]['group_key']);
@@ -122,6 +122,34 @@ class CardMatcherTest extends TestCase
             'tallied' => $out['totals']['groups_tallied'], 'untallied' => $out['totals']['groups_untallied'],
         ]);
         $this->assertSame([4, '400.00'], [$out['totals']['matched_count'], $out['totals']['matched_total']], '3 (tallied) + 1 one-to-one; 1 sa 09-11');
+    }
+
+    public function test_S_049_10_a_group_short_on_one_side_takes_the_same_amount_from_one_day_after_or_before(): void
+    {
+        // Meta ay may petsang isang araw pagkatapos ng sale date.
+        $lines = [$this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00')];
+        $meta  = [$this->meta('2026-09-10', '100.00'), $this->meta('2026-09-10', '100.00'), $this->meta('2026-09-10', '100.00')];
+        $out = CardMatcher::match($lines, $meta);
+        $g = $out['groups']['2026-09-09|100.00'];
+        $this->assertSame([3, 3, true, [1, 2, 3], 1], [$g['card_count'], $g['meta_count'], $g['tallied'], $g['meta_ids'], $g['shift']]);
+        $this->assertSame([], $out['meta_missing']);
+
+        // Card na kulang: ang card line ng susunod na araw ay sumasama sa grupo.
+        $this->lineId = $this->metaId = 0;
+        $lines = [$this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00'), $this->line('2026-09-10', '100.00')];
+        $meta  = [$this->meta('2026-09-09', '100.00'), $this->meta('2026-09-09', '100.00'), $this->meta('2026-09-09', '100.00')];
+        $out = CardMatcher::match($lines, $meta);
+        $g = $out['groups']['2026-09-09|100.00'];
+        $this->assertSame([3, 3, true, 1], [$g['card_count'], $g['meta_count'], $g['tallied'], $g['shift']]);
+        $this->assertSame(['group', '2026-09-09|100.00'], [$out['lines'][3]['match_kind'], $out['lines'][3]['group_key']]);
+
+        // Hindi inaagaw ang one-to-one ng kabilang araw: 09-10 ay may sariling card line at Meta record.
+        $this->lineId = $this->metaId = 0;
+        $lines = [$this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00'), $this->line('2026-09-10', '100.00')];
+        $meta  = [$this->meta('2026-09-10', '100.00')];
+        $out = CardMatcher::match($lines, $meta);
+        $this->assertSame([2, 0, false, null], [$out['groups']['2026-09-09|100.00']['card_count'], $out['groups']['2026-09-09|100.00']['meta_count'], $out['groups']['2026-09-09|100.00']['tallied'], $out['groups']['2026-09-09|100.00']['shift']]);
+        $this->assertSame(['sale_date', 1], [$out['lines'][3]['match_kind'], $out['lines'][3]['payment_activity_id']]);
     }
 
     public function test_S_049_11_per_day_card_and_meta_totals_with_the_difference(): void

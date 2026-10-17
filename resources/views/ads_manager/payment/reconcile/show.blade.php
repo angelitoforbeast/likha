@@ -99,6 +99,7 @@
                   {{ $row['status'] === 'matched' ? '✓ ' : '' }}{{ $marks[$row['status']] }}
                   @if ($row['match_kind'] === 'post_date') <div class="text-xs font-normal text-gray-500">post date</div>
                   @elseif ($row['match_kind'] === 'near') <div class="text-xs font-normal text-gray-500">{{ $row['match_days'] > 0 ? '+' : '' }}{{ $row['match_days'] }} araw</div>
+                  @elseif (($row['group']['shift'] ?? null) !== null) <div class="text-xs font-normal text-gray-500">±1 araw</div>
                   @endif
                 </td>
 
