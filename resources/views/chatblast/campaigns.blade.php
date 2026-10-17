@@ -237,17 +237,22 @@
             const show = () => { preview.textContent = render(area.value) || '(walang laman)'; };
             show();
             let saved = r.text, busy = false;
+            let again = false;
             const commit = async () => {
-                if (busy || area.value === saved) return;
+                if (busy) { again = true; return; } // ise-save pagkatapos ng kasalukuyan
+                if (area.value === saved) return;
                 busy = true;
+                const sending = area.value;
                 mark.className = 'text-xs text-gray-500'; mark.textContent = 'Saving…';
                 try {
-                    const d = await post(base + '/text', {day: r.day, version: r.version, text: area.value});
+                    // old: ang text na nakita; kapag nabago na ng iba (o nausog ang araw), hindi ito pinapalitan.
+                    const d = await post(base + '/text', {day: r.day, version: r.version, text: sending, old: saved});
                     saved = r.text = d.days[r.day - 1][r.version.charCodeAt(0) - 65];
-                    area.value = saved; show();
+                    if (area.value === sending) { area.value = saved; show(); } // ang tinype habang nagse-save ay hindi binubura
                     mark.className = 'text-xs text-green-700'; mark.textContent = 'Saved' + (d.changed ? ' (' + fmt(d.changed) + ' mensahe ang nabago)' : '');
                 } catch (e) { mark.className = 'text-xs text-red-600'; mark.textContent = e.message; }
                 busy = false;
+                if (again) { again = false; commit(); }
             };
             area.addEventListener('input', () => { show(); mark.textContent = area.value === saved ? '' : 'hindi pa naka-save'; mark.className = 'text-xs text-amber-700'; });
             area.addEventListener('blur', commit);
@@ -259,7 +264,7 @@
                 r.day === lastDay[r.campaign_id] && r.version === 'A' ? btn('+ araw', 'text-blue-700 ml-2', () => structural(base + '/day', {}, 'Nadagdagan ng araw (kopya ng huling araw).')) : null,
                 btn('alisin', 'text-red-600 ml-2', () => {
                     if (!confirm('Alisin ang Day ' + r.day + ' · ' + r.version + ' ng "' + r.name + '"? (Kapag ito na lang ang bersyon, maaalis ang araw at uusad ang mga kasunod.)')) return;
-                    structural(base + '/remove', {day: r.day, version: r.version}, 'Naalis.');
+                    structural(base + '/remove', {day: r.day, version: r.version, old: r.text}, 'Naalis.');
                 }),
             ];
             const td = (x, cls = '') => el('td', {class: 'px-2 py-1 border-b align-top ' + cls}, x);

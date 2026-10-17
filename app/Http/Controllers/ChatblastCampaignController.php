@@ -27,6 +27,7 @@ class ChatblastCampaignController extends Controller
     private const MAX_PAGES = 100;
     private const MAX_WINDOW = 60;
     private const MAX_TIMES = 6;
+    private const STALE = 'Nabago na ang cell na ito (ibang tab o tao); i-reload ang page.';
 
     public function __construct(private Chatblast $chatblast, private PageSettings $settings)
     {
@@ -143,7 +144,11 @@ class ChatblastCampaignController extends Controller
                 Chatblast::log($c, Auth::id(), ['what' => 'active', 'old' => $c->active, 'new' => $active]);
                 $c->active = $active;
                 if (!$active) {
-                    BotcakeMessage::where('kind', $c->kind)->where('status', 'queued')->update(['status' => 'skipped', 'reason' => ChatblastSender::OFF]);
+                    // Binibitawan ang key: ang pag-on ulit ay gagawa ng bagong row para sa mga waybill na ito.
+                    BotcakeMessage::where('kind', $c->kind)->where('status', 'queued')
+                        ->update(['status' => 'skipped', 'reason' => ChatblastSender::OFF, 'dedupe_key' => null]);
+                } elseif ($c->mode === 'auto') {
+                    $c->auto_ran_at = now(); // gaya ng paglipat sa auto: ang lumipas na oras habang naka-off ay hindi hinahabol
                 }
             }
             $c->save();
@@ -170,11 +175,13 @@ class ChatblastCampaignController extends Controller
     {
         $this->checkAccess();
         [$d, $v] = $this->cell($request);
+        $expect = $this->expected($request);
         $text = $request->input('text');
         if (!is_string($text)) return response()->json(['error' => 'Walang text.'], 422);
 
-        return $this->edit($id, function (array $days) use ($d, $v, $text, &$old) {
+        return $this->edit($id, function (array $days) use ($d, $v, $text, $expect, &$old) {
             if (!isset($days[$d][$v])) throw new InvalidArgumentException('Walang ganitong araw o bersyon.');
+            if ($expect !== null && $days[$d][$v] !== $expect) throw new InvalidArgumentException(self::STALE);
             $old = $days[$d][$v];
             $days[$d][$v] = $text;
             return $days;
@@ -210,9 +217,11 @@ class ChatblastCampaignController extends Controller
     {
         $this->checkAccess();
         [$d, $v] = $this->cell($request);
+        $expect = $this->expected($request);
 
-        return $this->edit($id, function (array $days) use ($d, $v, &$old) {
+        return $this->edit($id, function (array $days) use ($d, $v, $expect, &$old) {
             if (!isset($days[$d][$v])) throw new InvalidArgumentException('Walang ganitong araw o bersyon.');
+            if ($expect !== null && $days[$d][$v] !== $expect) throw new InvalidArgumentException(self::STALE);
             $old = $days[$d][$v];
             array_splice($days[$d], $v, 1);
             if (!$days[$d]) array_splice($days, $d, 1);
@@ -230,6 +239,13 @@ class ChatblastCampaignController extends Controller
         }
 
         return response()->json(['changed' => $changed, 'days' => ChatblastCampaign::findOrFail($id)->days]);
+    }
+
+    /** Ang text na nakita ng user sa cell (old), para hindi mapalitan ang cell na nabago o nausog na; null kapag wala. */
+    private function expected(Request $request): ?string
+    {
+        $old = $request->input('old');
+        return is_string($old) ? $old : null;
     }
 
     /** @return array{0:int, 1:int} [index ng araw, index ng bersyon] mula sa day (1, 2, …) at version (A, B, …) */
@@ -291,6 +307,11 @@ class ChatblastCampaignController extends Controller
         }
         if ($c === null || $request->has('requires_on_delivery')) {
             $data['requires_on_delivery'] = $request->boolean('requires_on_delivery');
+        }
+
+        $statuses = $data['statuses'] ?? (array) ($c?->statuses ?? []);
+        if (($data['requires_on_delivery'] ?? $c?->requires_on_delivery) && $statuses !== ['Delivering']) {
+            return [[], 'Ang "Requires On Delivery" ay para lang sa trigger na Delivering.'];
         }
 
         return [$data, null];

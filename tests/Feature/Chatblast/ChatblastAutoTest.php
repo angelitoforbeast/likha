@@ -55,10 +55,11 @@ class ChatblastAutoTest extends ChatblastTestCase
 
         $this->tick('2026-10-18 08:59:00');
         $this->assertSame([], $this->statuses(), 'hindi pa oras');
+        app(Chatblast::class)->build('in_transit', 1); // ready na row ng ibang (manual) campaign ngayong araw
 
         $this->tick('2026-10-18 09:00:00');
         $this->assertSame(['WB-1' => 'queued'], $this->statuses());
-        $this->assertSame([], $this->statuses('in_transit'), 'ang manual na campaign ay hindi ginagalaw');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses('in_transit'), 'ang ready ng manual na campaign ay hindi kinukuha');
         Queue::assertPushed(SendChatblastMessage::class, 1);
 
         $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
@@ -100,6 +101,19 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->tick('2026-10-18 11:10:00');
         $this->assertSame(['WB-1' => 'queued'], $this->statuses(), 'pagkatapos ng pause, sa loob ng 3 oras');
         foreach (['c-off', 'c-manual', 'c-late', 'c-new'] as $kind) $this->assertSame([], $this->statuses($kind), $kind);
+    }
+
+    public function test_a_row_built_on_an_earlier_day_that_became_ready_is_queued_by_the_next_run(): void
+    {
+        $this->campaign(['send_times' => ['09:00']]);
+        $this->travelTo('2026-10-18 08:00:00');
+        $order = $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', null, 'In Transit');
+        $this->tick('2026-10-18 09:00:00');
+        $this->assertSame(['WB-1' => 'no_psid'], $this->statuses());
+
+        $order->update(['botcake_psid' => 'psid-a']); // natugma sa gabi
+        $this->tick('2026-10-19 09:00:00');
+        $this->assertSame(['WB-1' => 'queued'], $this->statuses());
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void

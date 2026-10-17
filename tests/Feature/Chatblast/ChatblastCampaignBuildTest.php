@@ -103,7 +103,24 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
         $this->assertSame(0, app(Chatblast::class)->build(null, 1)['added']);
 
         app(ChatblastSender::class)->process($row->id); // ang job na naka-queue na bago in-off
-        $this->assertSame(['skipped', ChatblastSender::OFF], [$row->fresh()->status, $row->fresh()->reason]);
+        $this->assertSame(['skipped', ChatblastSender::OFF, null], [$row->fresh()->status, $row->fresh()->reason, $row->fresh()->dedupe_key]);
         Http::assertNothingSent();
+
+        // I-on ulit: ang waybill ay may bagong row (hindi naiipit sa key ng nilaktawang row).
+        ChatblastCampaign::where('kind', 'in_transit')->update(['active' => true]);
+        $this->travel(1)->days();
+        app(Chatblast::class)->build('in_transit', 1);
+        $this->assertSame([['WB-1', 'skipped'], ['WB-1', 'ready'], ['WB-2', 'ready']], $this->rows('in_transit')->map(fn ($r) => [$r->waybill, $r->status])->all());
+    }
+
+    public function test_a_status_outside_the_usual_order_still_beats_a_stale_in_transit_copy(): void
+    {
+        $this->campaign(['statuses' => ['Problematic']]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB-1', 'status' => 'Problematic']); // ang mas bagong kopya
+
+        app(Chatblast::class)->build(null, 1);
+        $this->assertSame(['WB-1'], $this->rows('c-test')->pluck('waybill')->all());
+        $this->assertSame([], $this->rows('in_transit')->pluck('waybill')->all(), 'hindi na In Transit ang waybill');
     }
 }

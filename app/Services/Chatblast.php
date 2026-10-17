@@ -43,7 +43,7 @@ class Chatblast
     public const MAX_TEXT = 1000;
     public const MAX_DAYS = 30;
     public const MAX_VERSIONS = 10;
-    public const MAX_TOTAL = 60000; // lahat ng text ng isang uri (kasya sa TEXT ng app_settings)
+    public const MAX_TOTAL = 60000; // lahat ng text ng isang campaign (bytes ng JSON)
 
     /**
      * Gaano kalayo na ang J&T status. Kapag may ilang from_jnts row ang waybill (may kopya na hindi na-update), ang
@@ -478,9 +478,19 @@ class Chatblast
     {
         $top = null;
         foreach ($rows as $r) {
-            if ($top === null || (self::PROGRESS[$r['status']] ?? 0) >= (self::PROGRESS[$top['status']] ?? 0)) $top = $r;
+            if ($top === null || self::rank($r['status']) >= self::rank($top['status'])) $top = $r;
         }
         return $top;
+    }
+
+    /**
+     * Ang status na wala sa PROGRESS (hal. Problematic) ay pagkatapos ng In Transit at bago ang tapos na: ang lumang
+     * kopyang "In Transit" ay hindi nananaig dito. Walang status: pinakamababa.
+     */
+    private static function rank(?string $status): int
+    {
+        if (trim((string) $status) === '') return 0;
+        return self::PROGRESS[$status] ?? self::PROGRESS['Delivering'];
     }
 
     /** @return array<string, array<int, array{status:?string, rts_reason:?string}>> waybill => mga J&T row, ayon sa id */

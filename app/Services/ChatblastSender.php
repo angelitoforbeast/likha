@@ -174,6 +174,8 @@ class ChatblastSender
         if (!$m->is_test && ($c = $this->chatblast->campaign($m->kind))) {
             if (!$c->active) {
                 $this->finish($m, 'skipped', self::OFF, null, []);
+                // Ang pag-on ulit ay gagawa ng bagong row para sa waybill (hindi naiipit sa key ng nilaktawan).
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
             // Requires On Delivery: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at

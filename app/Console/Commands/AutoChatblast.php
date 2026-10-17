@@ -9,6 +9,7 @@ use App\Services\ChatblastSender;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Auto mode ng /chatblast (naka-schedule kada 5 minuto): ang campaign na naka-on at auto ay binubuo at ipinapadala
@@ -30,8 +31,9 @@ class AutoChatblast extends Command
             return self::SUCCESS;
         }
 
-        $now   = Carbon::now('Asia/Manila');
-        $today = $now->copy()->startOfDay()->timezone(config('app.timezone'));
+        if (!Schema::hasTable('chatblast_campaigns')) return self::SUCCESS; // hindi pa na-migrate (mano-mano pagkatapos ng deploy)
+
+        $now = Carbon::now('Asia/Manila');
         foreach (ChatblastCampaign::where('active', true)->where('mode', 'auto')->orderBy('id')->get(ChatblastCampaign::COLUMNS) as $c) {
             $slot = $this->dueSlot($c, $now);
             if ($slot === null) continue;
@@ -49,8 +51,10 @@ class AutoChatblast extends Command
                 ->update(['auto_ran_at' => now()]);
             if (!$claimed) continue;
 
+            // Lahat ng ready ng campaign sa loob ng window, kasama ang nabuo noong nakaraang araw na naging ready lang
+            // ngayon (hal. natugma ang PSID sa gabi): ang sender ang nagbabantay ng isa kada araw at ng status.
             $ids = BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->where('status', 'ready')
-                ->where('created_at', '>=', $today)->pluck('id')->all();
+                ->where('created_at', '>=', $now->copy()->subDays($c->window_days)->startOfDay()->timezone(config('app.timezone')))->pluck('id')->all();
             $queued = $sender->queue($ids, null);
 
             Log::info('chatblast: auto', ['campaign' => $c->id, 'slot' => $slot->format('H:i'), 'added' => $r['added'], 'queued' => $queued]);

@@ -62,6 +62,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
             'window na 0'              => ['window_days' => 0],
             'blangkong text'           => ['text' => '   '],
             'hindi kilalang placeholder' => ['text' => 'Hi {pangalan}'],
+            'On Delivery sa ibang status' => ['requires_on_delivery' => true],
             'auto agad'                => ['mode' => 'auto'],
         ];
         $before = ChatblastCampaign::count();
@@ -82,6 +83,8 @@ class ChatblastCampaignTest extends ChatblastTestCase
     {
         $c = $this->create();
         $this->postJson('/chatblast/campaigns/' . $c->id, ['mode' => 'auto'])->assertStatus(422);
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['mode' => 'turbo'])->assertStatus(422);
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['active' => 'siguro'])->assertStatus(422);
         $this->assertSame('manual', $c->fresh()->mode);
 
         $this->postJson('/chatblast/campaigns/' . $c->id, ['mode' => 'auto', 'confirm' => true, 'name' => 'Problema 2'])->assertOk();
@@ -97,6 +100,11 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertSame(['skipped', ChatblastSender::OFF], [BotcakeMessage::find($queued)->status, BotcakeMessage::find($queued)->reason]);
         $this->assertSame('sent', BotcakeMessage::find($sent)->status);
         $this->assertSame(0, app(ChatblastSender::class)->queue([$queued], 1), 'hindi mai-queue ang row ng naka-off na campaign');
+        $this->postJson('/chatblast/build', ['kind' => $c->kind])->assertStatus(422);
+
+        // Ang sariling status ng campaign na wala na sa from_jnts ay puwede pa ring i-save.
+        ChatblastCampaign::whereKey($c->id)->update(['statuses' => json_encode(['Lumang status'])]);
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['statuses' => ['Lumang status', 'Problematic']])->assertOk();
     }
 
     public function test_one_cell_saves_its_text_logs_the_old_one_and_rewrites_the_unsent_rows(): void
@@ -107,7 +115,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
 
         $unsent = $this->msg($c, ['version' => 'B', 'waybill' => 'WB-1']);
         $sent   = $this->msg($c, ['status' => 'sent', 'sent_at' => now()]);
-        $res = $this->postJson('/chatblast/campaigns/' . $c->id . '/text', ['day' => 1, 'version' => 'B', 'text' => ' Hi {name}, {waybill} po. '])->assertOk();
+        $res = $this->postJson('/chatblast/campaigns/' . $c->id . '/text', ['day' => 1, 'version' => 'B', 'text' => ' Hi {name}, {waybill} po. ', 'old' => 'Hello {name}, may problema po ang {waybill}.'])->assertOk();
         $this->assertSame(1, $res->json('changed'));
         $this->assertSame('Hi {name}, {waybill} po.', $c->fresh()->days[0][1]);
         $this->assertSame(['what' => 'text', 'day' => 1, 'version' => 'B', 'old' => 'Hello {name}, may problema po ang {waybill}.', 'new' => 'Hi {name}, {waybill} po.'],
@@ -115,7 +123,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertSame('Hi Ana, WB-1 po.', BotcakeMessage::find($unsent)->text);
         $this->assertSame('luma', BotcakeMessage::find($sent)->text, 'ang naipadala ay hindi binabago');
 
-        foreach ([['day' => 1, 'version' => 'B', 'text' => ''], ['day' => 1, 'version' => 'B', 'text' => '{foo}'], ['day' => 2, 'version' => 'A', 'text' => 'x'], ['day' => 1, 'version' => 'C', 'text' => 'x']] as $body) {
+        foreach ([['day' => 1, 'version' => 'B', 'text' => ''], ['day' => 1, 'version' => 'B', 'text' => '{foo}'], ['day' => 2, 'version' => 'A', 'text' => 'x'], ['day' => 1, 'version' => 'C', 'text' => 'x'], ['day' => 1, 'version' => 'B', 'text' => 'x', 'old' => 'ibang nakita']] as $body) {
             $this->postJson('/chatblast/campaigns/' . $c->id . '/text', $body)->assertStatus(422);
         }
         $this->assertSame('Hi {name}, {waybill} po.', $c->fresh()->days[0][1], 'walang nabago sa mali');
