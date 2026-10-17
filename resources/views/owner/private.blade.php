@@ -3269,7 +3269,8 @@
           { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },
           { id:'purchases',      label:'Purchases',        sort:null,             type:'integer',      align:'right', minw:100 },
           // J&T status ng orders ng ad (botcake_ad_id) sa range ng filter — galing sa /owner/private/ad-delivery.
-          { id:'ad_delivered',   label:'Delivered',        sort:null,             type:'integer',      align:'right', minw:80  },
+          { id:'ad_rdt',         label:'RTS / DEL / INT (orders)', sort:null,   type:'ad_rdt',       align:'center', minw:135 },
+          { id:'ad_delivered',   label:'Delivered',       sort:null,             type:'integer',      align:'right', minw:80  },
           { id:'ad_in_transit',  label:'In transit',       sort:null,             type:'integer',      align:'right', minw:80  },
           { id:'ad_for_return',  label:'For return',       sort:null,             type:'integer',      align:'right', minw:80  },
           { id:'ad_returned',    label:'Returned',         sort:null,             type:'integer',      align:'right', minw:80  },
@@ -3417,6 +3418,7 @@
           ad_for_return: c ? c.for_return : 0,
           ad_returned:   c ? c.returned   : 0,
           ad_rts_pct:    c ? c.rts_pct    : null,
+          ad_rdt:        c ? (c.rdt || null) : null,
         };
       },
       // Campaign na may orders pero wala sa listahan (walang spend sa window, o nasa ibang page name ang

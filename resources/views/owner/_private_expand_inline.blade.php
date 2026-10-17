@@ -148,6 +148,9 @@
                 <template x-if="col.type==='percent'">
                   <span x-text="c[col.id] != null ? (Number(c[col.id]).toFixed(1) + '%') : '—'"></span>
                 </template>
+                <template x-if="col.type==='ad_rdt'">
+                  @include('owner._ad_rdt_cell', ['rdt' => 'c.ad_rdt'])
+                </template>
                 <template x-if="col.type==='account'">
                   <span>
                     <template x-if="c.account_id && c.account_name">
@@ -267,6 +270,9 @@
                             <template x-if="col.type==='percent'">
                               <span x-text="aset[col.id] != null ? (Number(aset[col.id]).toFixed(1) + '%') : '—'"></span>
                             </template>
+                            <template x-if="col.type==='ad_rdt'">
+                              @include('owner._ad_rdt_cell', ['rdt' => 'aset.ad_rdt'])
+                            </template>
                             <template x-if="col.type==='account'">
                               <span>
                                 <template x-if="aset.account_id && aset.account_name">
@@ -381,6 +387,9 @@
                                         <template x-if="col.type==='percent'">
                                           <span x-text="ad[col.id] != null ? (Number(ad[col.id]).toFixed(1) + '%') : '—'"></span>
                                         </template>
+                                        <template x-if="col.type==='ad_rdt'">
+                                          @include('owner._ad_rdt_cell', ['rdt' => 'ad.ad_rdt'])
+                                        </template>
                                         <template x-if="col.type==='account'">
                                           <span>
                                             <template x-if="ad.account_id && ad.account_name">
@@ -433,6 +442,9 @@
                 <template x-if="col.id.startsWith('ad_') && col.type==='percent'">
                   <span x-text="adDeliveryNoAd(row.page_name)[col.id] != null ? (Number(adDeliveryNoAd(row.page_name)[col.id]).toFixed(1) + '%') : '—'"></span>
                 </template>
+                <template x-if="col.type==='ad_rdt'">
+                  @include('owner._ad_rdt_cell', ['rdt' => 'adDeliveryNoAd(row.page_name).ad_rdt'])
+                </template>
               </td>
             </template>
           </tr>
@@ -452,6 +464,9 @@
                 </template>
                 <template x-if="col.id.startsWith('ad_') && col.type==='percent'">
                   <span x-text="adDeliveryTotal(row.page_name)[col.id] != null ? (Number(adDeliveryTotal(row.page_name)[col.id]).toFixed(1) + '%') : '—'"></span>
+                </template>
+                <template x-if="col.type==='ad_rdt'">
+                  @include('owner._ad_rdt_cell', ['rdt' => 'adDeliveryTotal(row.page_name).ad_rdt'])
                 </template>
               </td>
             </template>
