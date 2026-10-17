@@ -59,11 +59,16 @@ class CardNumberMask
                     $date[$k] = $date[$k + 1] = $date[$k + 2] = true;
                 }
             }
-            // Mga grupong bahagi ng amount ("100.00", "6,278.17"): ang ".dd" sa dulo at ang bago nito.
+            // Mga grupong bahagi ng amount ("100.00", "6,278.17", "1,234,567.89"): ang ".dd" sa dulo, ang bago nito,
+            // at bawat "," + 3 digit pa pabalik.
             for ($k = 1; $k < $n; $k++) {
                 $cents = in_array($seps[$k], ['.', ','], true) && $groups[$k]['len'] === 2 && ($k === $n - 1 || !in_array($seps[$k + 1], ['.', ','], true));
-                if ($cents) $date[$k - 1] = $date[$k] = true;
+                if (!$cents) continue;
+                $date[$k] = $date[$k - 1] = true;
+                for ($b = $k - 1; $b > 0 && $seps[$b] === ',' && $groups[$b]['len'] === 3; $b--) $date[$b - 1] = true;
             }
+            // Ang "," ay hindi separator, kaya ang "6" ng "6,278.17" ay ang huling grupo ng run: amount din iyon.
+            if (preg_match('/^[.,]\d/', substr($text, $start + strlen($run), 2))) $date[$n - 1] = true;
 
             // Bawat window ng buong grupo na 13–19 digit: nagsisimula sa grupong ≥4 digit (hindi dulo ng FACEBK
             // code o sentimo), nagtatapos sa grupong ≥4 digit o eksaktong 19 digit (4-4-4-4-3), walang petsa, at
