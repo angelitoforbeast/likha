@@ -418,4 +418,46 @@ class ChatblastTrackTest extends ChatblastTestCase
 
         $this->assertSame(['JT0000000002', 'JT0000000001', 'JT0000000004'], $this->jntCalls()[0], 'pinakalumang na-track muna, delivering bago in_transit; walang JT0000000003 (walang PSID)');
     }
+
+    public static function riderVersions(): array
+    {
+        // [mga bersyon ng araw, inaasahang status, inaasahang text]
+        return [
+            'may bersyong walang rider'  => [['Rider {rider} {rider_phone}', 'Walang rider {name}'], 'sent', 'Walang rider Ana Cruz'],
+            'lahat ay may rider'         => [['Rider {rider} {rider_phone}'], 'no_config', null],
+        ];
+    }
+
+    /**
+     * Ang rider ng kuha kahapon ay hindi ginagamit kapag walang sagot ang J&T bago ipadala ngayon.
+     * @dataProvider riderVersions
+     */
+    public function test_yesterdays_rider_is_dropped_when_the_send_time_track_gets_no_answer(array $versions, string $status, ?string $text): void
+    {
+        app(Chatblast::class)->setSequence('delivering', [$versions]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        $this->scans['JT0000000002'] = [$this->onDelivery()];
+        app(Chatblast::class)->build('delivering');
+        $this->assertSame('Rider Juan D. Cruz 09171234567', BotcakeMessage::sole()->text, 'kahapon: may rider');
+
+        $this->travel(1)->days();
+        unset($this->scans['JT0000000002']); // walang sagot ngayon
+        app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
+
+        $row = BotcakeMessage::sole();
+        $this->assertSame([$status, $text], [$row->status, $row->text]);
+        if ($status === 'no_config') $this->assertSame(Chatblast::RIDER_REASON, $row->reason);
+        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains((string) json_encode($r[0]->data()), 'Juan D. Cruz')), 'hindi naipadala ang rider kahapon');
+    }
+
+    public function test_a_from_jnts_copy_with_no_status_is_updated_too(): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        DB::table('from_jnts')->insert(['waybill_number' => 'JT0000000002', 'status' => null]);
+        $this->scans['JT0000000002'] = [$this->onDelivery()];
+
+        app(Chatblast::class)->build('delivering');
+
+        $this->assertSame('Juan D. Cruz', DB::table('from_jnts')->where('waybill_number', 'JT0000000002')->orderByDesc('id')->value('rider_name'));
+    }
 }

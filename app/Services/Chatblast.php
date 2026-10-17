@@ -154,28 +154,35 @@ class Chatblast
      * text gamit ang bagong rider (maaaring ibang bersyon na). Walang ginagawa kapag bago pa o walang J&T config.
      * Ang status ay nasa from_jnts na rin, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel; ang
      * bigong subok (Problematic, Delivery Fail…) ay hindi isinusulat doon, kaya ibinabalik dito ang dahilan para laktawan.
+     * Ang rider ay mula lang sa sagot na ito: kapag walang sagot o hindi mabasa ang rider, walang rider (hindi kailanman ang
+     * rider ng mas lumang kuha, na maaaring ibang araw). Kapag walang bersyong magagamit, no_config.
+     * @return array{0:string, 1:string}|null [status, dahilan] kapag hindi dapat ipadala; null kapag puwede
      */
-    public function refreshRider(BotcakeMessage $m): ?string
+    public function refreshRider(BotcakeMessage $m): ?array
     {
         $at = $m->vars['tracked_at'] ?? null;
         if ($at && Carbon::parse($at)->gt(now()->subSeconds(self::RIDER_MAX_AGE))) return null;
         $track = app(JntTracker::class)->refresh([$m->waybill], self::SEND_TRACK_BUDGET, 'chatblast', false);
 
         if (!$track || !isset($track['latest'][$m->waybill])) {
-            // Walang sagot (o walang config): ang rider ng sagot sa build kung na-track noon; kung hindi, walang rider.
-            if ($at) return null;
-            if (trim((string) ($m->vars['rider'] ?? '')) === '' && trim((string) ($m->vars['rider_phone'] ?? '')) === '') return null; // walang binago
+            if (trim((string) ($m->vars['rider'] ?? '')) === '' && trim((string) ($m->vars['rider_phone'] ?? '')) === '') return null; // walang rider na aalisin
             $vars = array_merge((array) $m->vars, ['rider' => '', 'rider_phone' => '']);
         } else {
             $scan = $track['latest'][$m->waybill];
-            if (!self::isOnDelivery($scan)) return 'Hindi na On Delivery ang huling scan ng J&T (' . ($scan ?: 'walang scantype') . ')';
-            // Ang rider ay mula lang sa sagot na ito: kapag hindi mabasa, walang rider (hindi ang nakatala kahapon).
+            if (!self::isOnDelivery($scan)) return ['skipped', 'Hindi na On Delivery ang huling scan ng J&T (' . ($scan ?: 'walang scantype') . ')'];
             [$rider, $phone] = $track['riders'][$m->waybill] ?? ['', ''];
             $vars = array_merge((array) $m->vars, ['rider' => self::riderName($rider), 'rider_phone' => self::riderPhone($phone), 'tracked_at' => now()->toIso8601String()]);
         }
+
         $days = $this->sequence($m->kind);
-        $pick = $m->day <= count($days) ? $this->pick($days[$m->day - 1], $m->waybill, $vars) : null;
-        $m->forceFill(['vars' => $vars] + ($pick ? ['version' => self::label($pick[0]), 'text' => $pick[1]] : []))->save();
+        if ($m->day > count($days)) return ['skipped', 'Wala nang Araw ' . $m->day . ' sa mga araw ng uri'];
+        $pick = $this->pick($days[$m->day - 1], $m->waybill, $vars);
+        if ($pick === null) {
+            // Walang bersyong buo kung wala ang rider: hindi ang lumang text (na may lumang rider) ang ipapadala.
+            $m->forceFill(['vars' => $vars, 'version' => null, 'text' => null])->save();
+            return ['no_config', $this->missingReason($days[$m->day - 1], $vars)];
+        }
+        $m->forceFill(['vars' => $vars, 'version' => self::label($pick[0]), 'text' => $pick[1]])->save();
 
         return null;
     }

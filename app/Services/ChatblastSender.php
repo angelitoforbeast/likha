@@ -171,12 +171,12 @@ class ChatblastSender
         if (!$m->is_test && isset(Chatblast::KINDS[$m->kind])) {
             // Delivering: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at buuin ulit ang text.
             if ($m->kind === 'delivering') {
-                $failed = $this->chatblast->refreshRider($m);
+                $stop = $this->chatblast->refreshRider($m);
                 $m->refresh();
-                if ($failed !== null) {
-                    $this->finish($m, 'skipped', $failed, null, []);
+                if ($stop !== null) {
+                    $this->finish($m, $stop[0], $stop[1], null, []);
                     // Pansamantala ang bigong subok: ang susunod na On Delivery (hal. kinabukasan) ay may sariling row.
-                    BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
+                    if ($stop[0] === 'skipped') BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                     return;
                 }
             }

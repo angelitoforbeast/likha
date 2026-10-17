@@ -145,7 +145,8 @@ class JntTracker
                     continue;
                 }
                 $found = $this->trackSet($client, $chunk, $cutoff);
-                $rows  = DB::table('from_jnts')->whereIn('waybill_number', $chunk)->whereNotIn('status', self::FINAL)
+                $rows  = DB::table('from_jnts')->whereIn('waybill_number', $chunk)
+                    ->where(fn ($w) => $w->whereNull('status')->orWhereNotIn('status', self::FINAL)) // ang NULL ay hindi tapos
                     ->get(['id', 'waybill_number', 'status', 'status_logs', 'rider_name', 'rider_phone'])->groupBy('waybill_number');
 
                 foreach ($chunk as $wb) {
