@@ -77,22 +77,32 @@ class ChatblastSafetyTest extends ChatblastTestCase
         $this->assertSame('sent', $this->row('WB-002', 'in_transit')->status);
     }
 
-    public function test_a_customer_gets_one_message_of_a_kind_per_day_even_with_two_orders(): void
+    public function test_two_waybills_of_one_customer_both_get_their_own_message_the_same_day_one_after_the_other(): void
     {
+        Queue::fake();
         $this->botcake();
+        app(Chatblast::class)->setSequence('in_transit', [['Una para sa {waybill}', 'Ikalawa para sa {waybill}']]);
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-002', 'psid-a', 'In Transit');
         app(Chatblast::class)->build('in_transit');
         $sender = app(ChatblastSender::class);
-
-        $sender->queue([$this->row('WB-001', 'in_transit')->id], 1);
-        $this->travel(21)->seconds();
-        $sender->queue([$this->row('WB-002', 'in_transit')->id], 1);
-
-        $this->assertSame('sent', $this->row('WB-001', 'in_transit')->status);
+        $first = $this->row('WB-001', 'in_transit');
         $second = $this->row('WB-002', 'in_transit');
-        $this->assertSame(['skipped', 'may mensahe na ngayong araw sa customer na ito'], [$second->status, $second->reason]);
-        $this->assertCount(3, Http::recorded());
+        $sender->queue([$first->id, $second->id], 1);
+
+        $sender->process($first->id);
+        $sender->process($second->id); // nasa gap pa: babalik sa queue, hindi nilalaktawan
+        $this->assertSame(['sent', 'queued'], [$first->fresh()->status, $second->fresh()->status]);
+
+        $this->travel(21)->seconds();
+        $sender->process($second->id);
+
+        $this->assertSame(['sent', 'sent'], [$first->fresh()->status, $second->fresh()->status]);
+        $writes = collect(Http::recorded())->map(fn ($r) => $r[0])->filter(fn ($req) => $req->method() === 'POST' && str_ends_with($req->url(), '/customer_fields'))
+            ->map(fn ($req) => $req->data()['data'][0]['value'])->values()->all();
+        $this->assertSame([$first->text, $second->text], $writes, 'sunod-sunod, bawat isa ang sariling text');
+        $this->assertNotSame($first->text, $second->text);
+        $this->assertCount(6, Http::recorded(), 'dalawang buong padala');
     }
 
     public static function missingValues(): array
@@ -178,17 +188,19 @@ class ChatblastSafetyTest extends ChatblastTestCase
         $this->assertSame('no_config', $this->row('WB-001')->status, 'hindi bumabalik sa ready ang text na tinanggihan');
     }
 
-    public function test_a_row_stuck_in_sending_for_long_does_not_block_the_customer(): void
+    public function test_a_row_of_the_waybill_stuck_in_sending_for_long_does_not_block_its_next_day(): void
     {
         $this->botcake();
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
-        $this->shipped('Page Uno', 'Ana Cruz', 'WB-002', 'psid-a', 'In Transit');
         app(Chatblast::class)->build('in_transit');
         DB::table('botcake_messages')->where('waybill', 'WB-001')->update(['status' => 'sending', 'updated_at' => now()->subHours(2)]);
+        $day2 = BotcakeMessage::create(['page_name' => 'Page Uno', 'macro_output_id' => MacroOutput::where('waybill', 'WB-001')->value('id'),
+            'waybill' => 'WB-001', 'kind' => 'in_transit', 'day' => 2, 'version' => 'A', 'psid' => 'psid-a', 'text' => 'Araw dalawa',
+            'status' => 'ready', 'dedupe_key' => 'WB-001|in_transit|2', 'vars' => []]);
 
-        app(ChatblastSender::class)->queue([$this->row('WB-002', 'in_transit')->id], 1);
+        app(ChatblastSender::class)->queue([$day2->id], 1);
 
-        $this->assertSame('sent', $this->row('WB-002', 'in_transit')->status, 'ang naiwang sending nang 2 oras ay hindi na humaharang');
+        $this->assertSame('sent', $day2->fresh()->status, 'ang naiwang sending nang 2 oras ay hindi na humaharang');
     }
 
     public function test_the_read_back_matches_on_either_id_or_custom_field_id(): void

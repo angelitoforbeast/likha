@@ -471,6 +471,5 @@ Accepted, not fixed:
 - **(amendment 1) A `skipped` row keeps its `waybill|kind|day` key.** That day is never built again for the waybill (a cap-skipped day can still be sent by hand from the list; a stale or removed day is not sendable). Reason: building it again would risk the same day twice; the owner sends it by hand.
 - **(amendment 1) Saving the days re-renders every unsent real row of the kind, one UPDATE per changed row, inside the request.** Reason: fine for the few thousand rows a kind holds; a queued job is worth it if a save gets slow.
 - **(amendment 1) The editor's preview uses a fixed sample order** (no rider info), not a row from the list. Reason: rows in the list do not carry their order details to the page.
-- **(amendment 2) Two rows of the same kind for one customer claimed at the same moment both see the other as sending and are both skipped.** The customer gets nothing that day; both can be sent by hand. Reason: fails safe; one worker (numprocs 1) makes it rare.
 - **(amendment 2) A Facebook name that itself contains a placeholder such as `{item}` makes the text refused for good** ("hindi buo ang text"). Reason: fails safe; such names are not expected.
 - **(amendment 2) The per-customer lock needs a cache store with locks** (`database` with `cache_locks`, as `.env.example`; also redis). Check the server's `CACHE_STORE` before release.

@@ -354,17 +354,9 @@ class Chatblast
                 ->orWhere(fn ($x) => $x->where('status', 'sending')->where('updated_at', '>=', now()->subMinutes(10))))
             ->exists();
 
-        if ($other) return 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas';
-
-        // Isang mensahe lang ng uri kada customer (page + PSID) kada araw, kahit dalawa ang order niya.
-        $customer = $m->psid !== null && BotcakeMessage::where('page_name', $m->page_name)->where('psid', $m->psid)->where('kind', $m->kind)
-            ->where('is_test', false)->whereKeyNot($m->id)
-            ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
-                ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
-                ->orWhere(fn ($x) => $x->where('status', 'sending')->where('updated_at', '>=', now()->subMinutes(10))))
-            ->exists();
-
-        return $customer ? 'may mensahe na ngayong araw sa customer na ito' : null;
+        // Kada waybill ang patakaran, hindi kada customer: ang customer na may dalawang waybill ay may tig-isang mensahe
+        // ang bawat waybill, kahit parehong uri sa parehong araw (sunod-sunod, dahil sa lock ng customer sa sender).
+        return $other ? 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas' : null;
     }
 
     /** Binubuo ulit ang text ng hindi pa naipapadala ayon sa bagong mga araw. @return int bilang ng nabago */
