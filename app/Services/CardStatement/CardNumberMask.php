@@ -59,6 +59,11 @@ class CardNumberMask
                     $date[$k] = $date[$k + 1] = $date[$k + 2] = true;
                 }
             }
+            // Mga grupong bahagi ng amount ("100.00", "6,278.17"): ang ".dd" sa dulo at ang bago nito.
+            for ($k = 1; $k < $n; $k++) {
+                $cents = in_array($seps[$k], ['.', ','], true) && $groups[$k]['len'] === 2 && ($k === $n - 1 || !in_array($seps[$k + 1], ['.', ','], true));
+                if ($cents) $date[$k - 1] = $date[$k] = true;
+            }
 
             // Bawat window ng buong grupo na 13–19 digit: nagsisimula sa grupong ≥4 digit (hindi dulo ng FACEBK
             // code o sentimo), nagtatapos sa grupong ≥4 digit o eksaktong 19 digit (4-4-4-4-3), walang petsa, at
@@ -71,7 +76,10 @@ class CardNumberMask
                 for ($j = $i; $j < $n && !isset($date[$j]); $j++) {
                     $digits += $groups[$j]['len'];
                     if ($digits > 19) break;
-                    if ($digits < 13 || ($groups[$j]['len'] < 4 && $digits !== 19)) continue;
+                    // Maikling huling grupo (Amex 4-4-4-3, Diners 4-4-4-2, 4-4-4-4-3) ay pwede kapag dito natatapos
+                    // ang numero (dulo ng run, o petsa/amount ang kasunod); sa gitna, ibang numero iyon.
+                    $endsRun = $j === $n - 1 || isset($date[$j + 1]);
+                    if ($digits < 13 || ($groups[$j]['len'] < 4 && $digits !== 19 && !$endsRun)) continue;
                     if (preg_match('/^[.,]\d/', substr($text, $start + $groups[$j]['to'], 2))) continue;
                     $last = array_key_last($spans);
                     if ($last !== null && $i <= $spans[$last][1]) $spans[$last][1] = max($spans[$last][1], $j);

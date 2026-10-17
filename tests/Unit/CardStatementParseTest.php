@@ -48,7 +48,7 @@ TXT;
             'statement_4111111111115003.pdf'    => 'statement_···· 5003.pdf',
             'FACEBK *34SCA52HS4 6,278.17'       => 'FACEBK *34SCA52HS4 6,278.17',
             'FACEBK *AB12 4111 1111 1111 5003'  => 'FACEBK *AB12 ···· 5003',
-            '4111 1111 1111 5003 12 DUBLIN'     => '···· 5003 12 DUBLIN',
+            '4111 1111 1111 5003 12 DUBLIN'     => '···· 0312 DUBLIN', // hindi matukoy kung 14-digit card: tinatakpan din
             'amex 3782-822463-10005 x'          => 'amex ···· 0005 x',
             'Card Number 4111  1111  1111  5003     Total Amount Due' => 'Card Number ···· 5003     Total Amount Due',
             "x 4111\u{00A0}1111\u{00A0}1111\u{00A0}5003 y" => 'x ···· 5003 y',
@@ -83,6 +83,13 @@ TXT;
             '4111111111115003 4111111111115004' => '···· 5003 ···· 5004',
             'REF 1234 4111 1111 1111 5003'      => 'REF ···· 5003',
             'x 4111 1111 1111 1111 503 y'       => 'x ···· 1503 y',
+            'FACEBK 3782 8224 6310 005 x'       => 'FACEBK ···· 0005 x',
+            'FACEBK 3782-8224-6310-005'         => 'FACEBK ···· 0005',
+            '3056 9309 0259 04 x'               => '···· 5904 x',
+            '4222 2222 2222 2 x'                => '···· 2222 x',
+            'x 4111 1111 1111 1111 50 y'        => 'x ···· 1150 y',
+            '3056-9309-0259-04 2026-09-10'      => '···· 5904 2026-09-10',
+            'FACEBK 4222 2222 2222 2 100.00'    => 'FACEBK ···· 2222 100.00', // 13-digit card, buo ang amount
             'x 4111 1111         1111 5003 y'   => 'x ···· 5003 y',
         ] as $in => $want) {
             $this->assertSame($want, CardNumberMask::mask($in), $in);
