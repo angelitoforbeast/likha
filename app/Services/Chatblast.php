@@ -91,7 +91,7 @@ class Chatblast
 
                 $rows[] = [
                     'page_name' => $page, 'macro_output_id' => $o->id, 'waybill' => $waybill, 'kind' => $kind,
-                    'fb_name' => $o->fb_name, 'psid' => trim((string) $o->botcake_psid) ?: null, 'vars' => json_encode($vars),
+                    'fb_name' => $o->fb_name, 'psid' => trim((string) $o->botcake_psid) ?: null, 'vars' => json_encode($vars, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE),
                     'text' => $this->render($template, $vars), 'jnt_status' => 'Delivering', 'status' => $status, 'reason' => $reason,
                     'attempts' => 0, 'is_test' => false, 'dedupe_key' => $waybill . '|' . $kind, 'created_by' => $userId,
                     'created_at' => $now, 'updated_at' => $now,
@@ -104,6 +104,11 @@ class Chatblast
             $out['added'] += $added;
             if ($added === count($rows)) {
                 foreach ($rows as $r) $out[$r['status']]++;
+            } elseif ($added > 0) {
+                // May naidagdag na ang sabay na kuha: bilangin lang ang mga row na ito ang nagdagdag.
+                $mine = DB::table('botcake_messages')->whereIn('dedupe_key', array_column($rows, 'dedupe_key'))->where('created_at', $now)
+                    ->selectRaw('status, COUNT(*) AS n')->groupBy('status')->pluck('n', 'status');
+                foreach ($mine as $status => $n) $out[$status] += (int) $n;
             }
         }, 'mo.id', 'id');
 

@@ -25,7 +25,7 @@ return new class extends Migration {
             $table->json('vars')->nullable();          // name, item, cod, waybill, page: para mabuo ulit ang text
             $table->text('text')->nullable();          // ang eksaktong text na ipapadala
             $table->string('jnt_status', 50)->nullable();
-            $table->string('status', 20);              // ready|no_psid|no_config|queued|sending|sent|failed|field_mismatch|skipped
+            $table->string('status', 20);              // ready|no_psid|no_config|queued|sending|sent|failed|field_mismatch|skipped|unknown
             $table->string('reason')->nullable();      // bakit no_psid / no_config / failed / skipped
             $table->unsignedSmallInteger('attempts')->default(0);
             $table->unsignedSmallInteger('last_http')->nullable();

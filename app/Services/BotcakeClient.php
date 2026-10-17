@@ -23,6 +23,7 @@ class BotcakeClient
     private int $retries = self::MAX_RETRIES;
     private int $timeout = 30;
     private ?string $rateKey = null;
+    private float $maxRetryAfter = 60;
 
     public function __construct(private BotcakeClock $clock)
     {
@@ -30,13 +31,15 @@ class BotcakeClient
 
     /**
      * Para sa mga job na tig-iisang mensahe (chatblast): ang 2 request kada segundo ay binabantayan sa cache para sa
-     * $rateKey (hal. hash ng token ng page), kaya hati ang lahat ng job ng parehong page; 15 s kada request.
+     * $rateKey (hal. hash ng token ng page), kaya hati ang lahat ng job ng parehong page; 15 s kada request, at ang
+     * Retry-After ay hanggang 10 s, para kasya ang tatlong hakbang sa timeout ng job.
      */
     public function shared(string $rateKey, int $timeout = 15): static
     {
         $client = clone $this;
         $client->rateKey = $rateKey;
         $client->timeout = $timeout;
+        $client->maxRetryAfter = 10;
 
         return $client;
     }
@@ -45,9 +48,11 @@ class BotcakeClient
      * Isang GET o POST (JSON) na may parehong retry (429, 5xx, putol na koneksyon: 2, 4, 8 s) at rate. Hindi nagtatapon
      * para sa HTTP na sagot: ibinabalik ang code (0 = walang koneksyon), ang body at ilang subok, para maitala ng tumawag.
      * Ang 401/403 ay ibinabalik agad. Ang token ay nasa header lang.
+     * $onlyRateLimit: para sa POST na hindi ligtas ulitin (hal. send_flow): ang 429 lang ang inuulit (tinanggihan ng
+     * Botcake, walang naipadala); ang 5xx o walang sagot ay maaaring natanggap na, kaya ibinabalik agad.
      * @return array{http:int, body:mixed, attempts:int}
      */
-    public function call(string $method, string $path, array $data, string $token): array
+    public function call(string $method, string $path, array $data, string $token, bool $onlyRateLimit = false): array
     {
         for ($attempt = 0; ; $attempt++) {
             $this->throttle();
@@ -61,7 +66,7 @@ class BotcakeClient
                 $status = 0;
             }
 
-            $retryable = $status === 0 || $status === 429 || $status >= 500;
+            $retryable = $onlyRateLimit ? $status === 429 : ($status === 0 || $status === 429 || $status >= 500);
             if (!$retryable || $attempt >= $this->retries) {
                 return ['http' => $status, 'body' => $res ? ($res->json() ?? $res->body()) : null, 'attempts' => $attempt + 1];
             }
@@ -69,7 +74,7 @@ class BotcakeClient
             $wait = 2 ** ($attempt + 1); // 2, 4, 8
             $after = $res?->header('Retry-After');
             if (is_numeric($after) && (float) $after > $wait) {
-                $wait = min((float) $after, 60);
+                $wait = min((float) $after, $this->maxRetryAfter);
             }
             $this->clock->sleep((float) $wait);
         }

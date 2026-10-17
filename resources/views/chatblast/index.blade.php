@@ -135,11 +135,12 @@
     const box = document.getElementById('cb'), url = box.dataset;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const LABEL = {ready: 'ready', no_psid: 'walang PSID', no_config: 'walang config', queued: 'queued', sending: 'sending', sent: 'sent',
-        failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped'};
+        failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped', unknown: 'hindi tiyak'};
     const COLOR = {ready: 'bg-blue-100 text-blue-800', no_psid: 'bg-gray-200 text-gray-700', no_config: 'bg-gray-200 text-gray-700',
         queued: 'bg-indigo-100 text-indigo-800', sending: 'bg-indigo-200 text-indigo-900', sent: 'bg-green-100 text-green-800',
-        failed: 'bg-red-100 text-red-800', field_mismatch: 'bg-orange-100 text-orange-800', skipped: 'bg-yellow-100 text-yellow-800'};
-    const ORDER = ['ready', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'no_psid', 'no_config'];
+        failed: 'bg-red-100 text-red-800', field_mismatch: 'bg-orange-100 text-orange-800', skipped: 'bg-yellow-100 text-yellow-800',
+        unknown: 'bg-purple-100 text-purple-800'};
+    const ORDER = ['ready', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'unknown', 'skipped', 'no_psid', 'no_config'];
     let page = 1, last = null, timer = null, openId = null;
     const selected = new Set();
 

@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\DB;
 class ChatblastController extends Controller
 {
     public const PER_PAGE = 100;
-    public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped'];
+    public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
     private const MAX_DAYS = 92;
 
     public function __construct(private Chatblast $chatblast, private ChatblastSender $sender, private PageSettings $settings)

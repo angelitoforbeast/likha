@@ -15,7 +15,8 @@ use Throwable;
  * (2) basahin ulit at dapat eksaktong pareho ang text, kung hindi ay field_mismatch at walang padala, (3) i-send ang
  * flow (flow.shipping). Ang bawat hakbang ay itinatala sa row (request na walang token, HTTP, sagot).
  * Ang naipadala ay hindi na mapapadala ulit: queue() ay tumatanggap lang ng hindi pa naipapadala, at may isang totoong
- * row lang kada waybill at uri (dedupe_key).
+ * row lang kada waybill at uri (dedupe_key). Kapag hindi tiyak kung natanggap ng Botcake ang send_flow (5xx, walang
+ * sagot, o naputol ang job pagkatawag nito), "unknown" ang row: hindi ito kinukuha ng anumang Send o Retry.
  */
 class ChatblastSender
 {
@@ -108,15 +109,29 @@ class ChatblastSender
             $this->deliver($m);
         } catch (Throwable $e) {
             report($e);
-            $this->finish($m, 'failed', 'Error: ' . mb_substr($e->getMessage(), 0, 200), null, $m->steps ?? []);
+            $steps = (array) ($m->fresh()->steps ?? []);
+            [$status, $why] = $this->flowCalled($steps) ? ['unknown', self::UNSURE] : ['failed', 'Error'];
+            $this->finish($m, $status, $why . ': ' . mb_substr($e->getMessage(), 0, 200), null, $steps);
         }
     }
 
-    /** Pinatay ang job (hal. timeout) habang nagpapadala. */
+    private const UNSURE = 'Hindi tiyak kung naipadala (tinawag na ang send_flow)';
+
+    /** Pinatay ang job (hal. timeout) habang nagpapadala. Ang mga hakbang ay naitala na habang nangyayari. */
     public function killed(int $id): void
     {
-        BotcakeMessage::whereKey($id)->where('status', 'sending')
-            ->update(['status' => 'failed', 'reason' => 'Pinatay ang job bago natapos (hal. timeout); suriin ang mga hakbang bago ipadala ulit']);
+        $m = BotcakeMessage::whereKey($id)->where('status', 'sending')->first();
+        if (!$m) return;
+
+        $unsure = $this->flowCalled((array) ($m->steps ?? []));
+        BotcakeMessage::whereKey($id)->where('status', 'sending')->update($unsure
+            ? ['status' => 'unknown', 'reason' => self::UNSURE . '; pinatay ang job. Tingnan sa Botcake bago magpadala ulit']
+            : ['status' => 'failed', 'reason' => 'Pinatay ang job bago tinawag ang send_flow (hal. timeout); ligtas ipadala ulit']);
+    }
+
+    private function flowCalled(array $steps): bool
+    {
+        return in_array('flow', array_column($steps, 'step'), true);
     }
 
     private function deliver(BotcakeMessage $m): void
@@ -139,17 +154,24 @@ class ChatblastSender
             }
         }
 
+        // Invalid na ang token (hal. 401 sa naunang mensahe): hindi na tinatawagan ang Botcake hangga't hindi naaayos.
+        if (str_starts_with((string) $this->settings->get($m->page_name, 'botcake', 'token_status'), 'invalid')) {
+            $this->finish($m, 'failed', 'Token invalid: ayusin sa /page-settings (Test token) bago magpadala', null, []);
+            return;
+        }
+
         $client = app(BotcakeClient::class)->shared(sha1($cfg['token']));
         $base   = '/pages/' . rawurlencode($cfg['page_id']);
         $field  = $base . '/customer/' . rawurlencode((string) $m->psid) . '/customer_fields';
         $steps  = [];
 
-        $step = function (string $name, string $method, string $path, array $data) use ($client, $cfg, &$steps) {
-            $r = $client->call($method, $path, $data, $cfg['token']);
-            $steps[] = [
-                'step' => $name, 'method' => $method, 'path' => $path, 'request' => $data, 'http' => $r['http'],
-                'attempts' => $r['attempts'], 'response' => $this->trim($r['body']), 'at' => now()->toIso8601String(),
-            ];
+        // Bawat hakbang ay itinatala bago at pagkatapos tawagin, para may bakas kahit pinatay ang job sa gitna.
+        $step = function (string $name, string $method, string $path, array $data, bool $onlyRateLimit = false) use ($client, $cfg, $m, &$steps) {
+            $steps[] = ['step' => $name, 'method' => $method, 'path' => $path, 'request' => $data, 'http' => null, 'attempts' => 0, 'response' => '', 'at' => now()->toIso8601String()];
+            $this->saveSteps($m, $steps);
+            $r = $client->call($method, $path, $data, $cfg['token'], $onlyRateLimit);
+            $steps[count($steps) - 1] = array_merge(end($steps), ['http' => $r['http'], 'attempts' => $r['attempts'], 'response' => $this->trim($r['body'])]);
+            $this->saveSteps($m, $steps);
             return $r;
         };
         $authFail = fn (array $r) => in_array($r['http'], [401, 403], true);
@@ -170,9 +192,13 @@ class ChatblastSender
             return;
         }
 
-        // 3. I-send ang flow.
-        $f = $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => (int) $cfg['flow.shipping']]);
+        // 3. I-send ang flow. Hindi ligtas ulitin: ang 429 lang ang inuulit; ang 5xx o walang sagot ay "unknown".
+        $f = $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => (int) $cfg['flow.shipping']], true);
         if ($authFail($f)) { $this->tokenInvalid($m, $f['http'], $steps); return; }
+        if ($f['http'] === 0 || $f['http'] >= 500) {
+            $this->finish($m, 'unknown', self::UNSURE . ' (HTTP ' . $f['http'] . '); tingnan sa Botcake bago magpadala ulit', $f['http'], $steps);
+            return;
+        }
         if (!$ok($f)) { $this->finish($m, 'failed', 'Hindi na-send ang flow (HTTP ' . $f['http'] . ')', $f['http'], $steps); return; }
 
         $this->finish($m, 'sent', null, $f['http'], $steps);
@@ -200,6 +226,11 @@ class ChatblastSender
             ->update(['status' => 'ready', 'reason' => 'Huminto: token invalid']);
     }
 
+    private function saveSteps(BotcakeMessage $m, array $steps): void
+    {
+        BotcakeMessage::whereKey($m->id)->update(['steps' => json_encode($steps, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE)]);
+    }
+
     private function finish(BotcakeMessage $m, string $status, ?string $reason, ?int $http, array $steps): void
     {
         $m->fill([
@@ -211,7 +242,8 @@ class ChatblastSender
     /** Ang sagot, pinaikli para sa talaan. */
     private function trim(mixed $body): string
     {
-        $text = is_string($body) ? $body : (string) json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $text = is_string($body) ? $body : (string) json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
         return mb_strlen($text) > self::BODY_MAX ? mb_substr($text, 0, self::BODY_MAX) . '…' : $text;
     }
 }

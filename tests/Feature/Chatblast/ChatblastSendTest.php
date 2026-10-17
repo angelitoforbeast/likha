@@ -201,4 +201,102 @@ class ChatblastSendTest extends ChatblastTestCase
         $this->assertCount(6, Http::recorded());
         $this->assertSame(array_fill(0, 5, 0.5), array_map(fn ($s) => round($s, 3), $this->clock->sleeps), '2 request kada segundo, kahit magkaibang job');
     }
+
+    public static function unsureFlows(): array
+    {
+        return [
+            '503 sa flow'      => [503],
+            'timeout sa flow'  => [0],
+        ];
+    }
+
+    /**
+     * Ang send_flow na 5xx o walang sagot ay maaaring natanggap na ng Botcake: hindi inuulit, at "unknown" ang row,
+     * na hindi na kinukuha ng Send o ng Retry failed (para hindi madoble ang mensahe sa customer).
+     * @dataProvider unsureFlows
+     */
+    public function test_an_unsure_send_flow_is_not_retried_and_never_sent_again(int $http): void
+    {
+        $flows = 0;
+        $this->botcake(['flow' => function () use (&$flows, $http) {
+            $flows++;
+            if ($http === 0) throw new \Illuminate\Http\Client\ConnectionException('cURL error 28: timed out');
+            return Http::response(['message' => 'gateway'], $http);
+        }]);
+
+        $row = $this->send($this->row());
+
+        $this->assertSame(1, $flows, 'walang retry ng send_flow');
+        $this->assertSame('unknown', $row->status);
+        $this->assertStringContainsString('Hindi tiyak', $row->reason);
+        $this->assertSame(0, app(ChatblastSender::class)->queue([$row->id], 1));
+        $this->assertSame('flow', collect($row->steps)->last()['step']);
+    }
+
+    public function test_a_429_on_send_flow_is_retried_because_botcake_refused_it(): void
+    {
+        $flows = 0;
+        $this->botcake(['flow' => function () use (&$flows) {
+            return ++$flows === 1 ? Http::response(['message' => 'slow'], 429, ['Retry-After' => '60']) : Http::response(['success' => true]);
+        }]);
+
+        $this->assertSame('sent', $this->send($this->row())->status);
+        $this->assertSame(2, $flows);
+        $this->assertContains(10.0, $this->clock->sleeps, 'ang Retry-After ay hanggang 10 s sa chatblast, para kasya sa timeout ng job');
+        $this->assertNotContains(60.0, $this->clock->sleeps);
+    }
+
+    public function test_a_5xx_on_the_write_is_retried_then_sent(): void
+    {
+        $writes = 0;
+        $this->botcake(['write' => function () use (&$writes) {
+            return ++$writes === 1 ? Http::response([], 503) : Http::response(['success' => true]);
+        }, 'read' => fn () => Http::response(['success' => true, 'data' => [['id' => 7701, 'value' => $this->row()->text]]])]);
+
+        $this->assertSame('sent', $this->send($this->row())->status);
+        $this->assertSame(2, $writes);
+    }
+
+    public function test_a_killed_job_keeps_its_steps_and_is_unknown_once_the_flow_was_called(): void
+    {
+        $sender = app(ChatblastSender::class);
+        $before = $this->row();
+        $before->update(['status' => 'sending', 'steps' => [['step' => 'write', 'http' => 200], ['step' => 'read', 'http' => 200]]]);
+        $sender->killed($before->id);
+        $this->assertSame(['failed', 2], [$before->fresh()->status, count($before->fresh()->steps)], 'bago ang flow: ligtas ipadala ulit');
+
+        $after = $this->row('WB-002');
+        $after->update(['status' => 'sending', 'steps' => [['step' => 'write', 'http' => 200], ['step' => 'read', 'http' => 200], ['step' => 'flow', 'http' => null]]]);
+        $sender->killed($after->id);
+        $this->assertSame('unknown', $after->fresh()->status);
+        $this->assertSame(0, $sender->queue([$after->id], 1), 'hindi kinukuha ng Retry failed');
+    }
+
+    public function test_the_steps_are_saved_as_they_happen(): void
+    {
+        $seen = null;
+        $this->botcake(['flow' => function () use (&$seen) {
+            $seen = \Illuminate\Support\Facades\DB::table('botcake_messages')->where('waybill', 'WB-001')->value('steps');
+            return Http::response(['success' => true]);
+        }]);
+
+        $this->send($this->row());
+
+        $steps = json_decode($seen, true);
+        $this->assertSame(['write', 'read', 'flow'], array_column($steps, 'step'), 'naitala na ang flow bago pa ito tinawag');
+        $this->assertNull($steps[2]['http']);
+    }
+
+    public function test_after_a_401_the_page_is_not_called_again_until_the_token_is_fixed(): void
+    {
+        $this->botcake(['write' => Http::response(['message' => 'Unauthorized'], 401)]);
+        $this->send($this->row());
+        $this->assertCount(1, Http::recorded());
+
+        $row = $this->send($this->row('WB-002'));
+
+        $this->assertCount(1, Http::recorded(), 'walang bagong tawag sa Botcake');
+        $this->assertSame('failed', $row->status);
+        $this->assertStringContainsString('Token invalid', $row->reason);
+    }
 }
