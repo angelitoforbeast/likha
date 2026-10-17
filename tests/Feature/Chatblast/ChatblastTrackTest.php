@@ -335,4 +335,87 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->assertSame(['skipped', null], [$row->status, $row->dedupe_key]);
         $this->assertStringContainsString('Delivery Fail', $row->reason);
     }
+
+    public function test_a_stale_stored_rider_is_never_used_when_the_fresh_answer_has_none(): void
+    {
+        app(Chatblast::class)->setSequence('delivering', [['Rider {rider} {rider_phone}', 'Walang rider {name}']]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        // Kahapon: rider A ang nakatala. Ngayon: On Delivery na hindi mabasa ang rider.
+        DB::table('from_jnts')->where('waybill_number', 'JT0000000002')->update(['rider_name' => 'Rider Kahapon', 'rider_phone' => '639170000000']);
+        $this->scans['JT0000000002'] = [['scantype' => 'On Delivery', 'desc' => 'out for delivery']];
+
+        app(Chatblast::class)->build('delivering');
+        $this->assertSame('Walang rider Ana Cruz', BotcakeMessage::sole()->text, 'hindi ang rider kahapon');
+
+        // Sa pagpapadala (lampas 30 min), walang sagot ang J&T: hindi rin ang rider kahapon.
+        BotcakeMessage::query()->update(['vars' => json_encode(array_merge(BotcakeMessage::sole()->vars, ['tracked_at' => null]))]);
+        unset($this->scans['JT0000000002']);
+        app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
+
+        $sent = BotcakeMessage::sole();
+        $this->assertSame('sent', $sent->status);
+        $this->assertStringNotContainsString('Kahapon', $sent->text);
+        $this->assertStringNotContainsString('0000000', $sent->text);
+    }
+
+    public function test_the_web_build_tracks_for_at_most_20_seconds_and_one_build_runs_at_a_time(): void
+    {
+        $this->actingAs($this->user());
+        foreach (range(1, 60) as $i) {
+            $wb = sprintf('JT%010d', $i);
+            $this->shipped('Page Uno', 'Buyer ' . $i, $wb, 'psid-' . $i);
+            $this->scans[$wb] = [$this->onDelivery()];
+        }
+        $this->secondsPerCall = 6;
+
+        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertOk();
+        $this->assertCount(2, $this->jntCalls(), 'walang bagong tawag pagkalipas ng 10 s, kaya kasya ang huling tawag (10 s) sa 20 s');
+
+        $lock = \Illuminate\Support\Facades\Cache::lock(Chatblast::BUILD_LOCK, 60);
+        $lock->get();
+        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertStatus(409)->assertJsonPath('error', 'May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito.');
+        $lock->release();
+    }
+
+    public function test_rows_already_delivered_or_returned_are_not_rewritten(): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        DB::table('from_jnts')->insert(['waybill_number' => 'JT0000000002', 'status' => 'Returned']);
+        $this->scans['JT0000000002'] = [$this->onDelivery()];
+
+        app(Chatblast::class)->build('delivering');
+
+        $returned = DB::table('from_jnts')->where('waybill_number', 'JT0000000002')->where('status', 'Returned')->sole();
+        $this->assertNull($returned->rider_name, 'ang final na kopya ay hindi ginagalaw');
+    }
+
+    public function test_a_single_waybill_is_one_call_and_a_send_does_not_record_a_run(): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        app(Chatblast::class)->build('delivering'); // walang sagot ang J&T
+        $this->assertCount(1, $this->jntCalls(), 'walang isa-isang ulit para sa iisang waybill');
+        $runs = DB::table('jnt_track_sync_runs')->count();
+
+        $this->calls = [];
+        app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
+
+        $this->assertCount(1, $this->jntCalls());
+        $this->assertSame($runs, DB::table('jnt_track_sync_runs')->count(), 'ang pagpapadala ay hindi nagtatala ng run');
+    }
+
+    public function test_the_least_recently_tracked_go_first_and_rows_without_psid_are_not_tracked(): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000001', 'psid-a');
+        $this->shipped('Page Uno', 'Ben Reyes', 'JT0000000002', 'psid-b');
+        $this->shipped('Page Uno', 'Cora Diaz', 'JT0000000003', null);
+        app(Chatblast::class)->build('delivering');
+        BotcakeMessage::where('waybill', 'JT0000000001')->update(['vars' => json_encode(['name' => 'Ana Cruz', 'tracked_at' => now()->subHours(1)->toIso8601String()])]);
+        BotcakeMessage::where('waybill', 'JT0000000002')->update(['vars' => json_encode(['name' => 'Ben Reyes', 'tracked_at' => now()->subHours(3)->toIso8601String()])]);
+        $this->shipped('Page Uno', 'Dino Lim', 'JT0000000004', 'psid-d', 'In Transit');
+        $this->calls = [];
+
+        app(Chatblast::class)->build();
+
+        $this->assertSame(['JT0000000002', 'JT0000000001', 'JT0000000004'], $this->jntCalls()[0], 'pinakalumang na-track muna, delivering bago in_transit; walang JT0000000003 (walang PSID)');
+    }
 }
