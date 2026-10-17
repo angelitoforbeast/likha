@@ -190,7 +190,7 @@
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'orders'}, String(r.info.orders || 0)),
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'customers'}, infoCustomers(r)),
             el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}, infoSync(r)),
-            el('td', {class: 'px-3 py-1 border-b whitespace-nowrap'}, actions(r)),
+            el('td', {class: 'px-3 py-1 border-b whitespace-nowrap', 'data-info': 'actions'}, actions(r)),
         ]));
 
         table.replaceChildren(el('thead', {}, head), el('tbody', {}, body.length ? body
@@ -259,6 +259,14 @@
         return out;
     }
 
+    // Kapag nagbago ang Botcake ID o token: ang mga button lang ng row ang binabago, hindi ang buong table
+    // (ang pagbuo ulit ng table habang nagki-click ay nagpapawala ng click).
+    function refreshActions(pk) {
+        const td = table.querySelector(`tr[data-pk="${CSS.escape(pk)}"] [data-info="actions"]`);
+        const r = rows.get(pk);
+        if (td && r) put(td, ...actions(r));
+    }
+
     function refreshInfo(pk) {
         const tr = table.querySelector(`tr[data-pk="${CSS.escape(pk)}"]`);
         const r = rows.get(pk);
@@ -289,7 +297,11 @@
     });
 
     function startEdit(td, row, col) {
-        if (editing) finishEdit(true);
+        if (editing) {
+            finishEdit(true);
+            // Kung nabuo ulit ang table, ang bagong td ng parehong cell ang gagamitin.
+            td = table.querySelector(`td.cell[data-pk="${CSS.escape(row.key)}"][data-key="${CSS.escape(col.key)}"]`) || td;
+        }
         const cell = row.cells[col.key];
         const secret = col.secret || !!(cell && cell.secret);
         const original = secret ? '' : (cell ? cell.value : '');
@@ -356,7 +368,7 @@
                 delete ed.server; // mas bago ang naisave kaysa sa itinabing value mula sa poll
                 if (ed.key === 'botcake.page_id' || ed.key === 'botcake.token') {
                     row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
-                    if (!editing) { needsRender = true; }
+                    refreshActions(ed.pk);
                 }
                 marks.set(id, {text: data.status === 'unchanged' ? '✓' : 'Saved', cls: 'text-green-600'});
                 setTimeout(() => { if (marks.get(id)?.cls === 'text-green-600') { marks.delete(id); repaint(ed.pk, ed.key); } }, 2500);
@@ -387,7 +399,7 @@
                 }
                 if (c.cell) row.cells[c.key] = c.cell; else delete row.cells[c.key];
                 row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
-                if (!structure) repaint(c.page, c.key);
+                if (!structure) { repaint(c.page, c.key); refreshActions(c.page); }
             }
             for (const [pk, info] of Object.entries(data.info || {})) {
                 const row = rows.get(pk);
@@ -399,7 +411,7 @@
             document.getElementById('sync-lock').classList.toggle('hidden', !data.sync_lock);
             document.getElementById('sync-lock-since').textContent = data.sync_lock || '';
             showSyncAll(data.sync_all);
-            if (structure || data.cells.some(c => c.key === 'botcake.page_id' || c.key === 'botcake.token')) render();
+            if (structure) render();
         } catch (err) { /* susubukan ulit sa susunod na poll */ }
     }
     setInterval(poll, POLL_MS);
