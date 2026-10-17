@@ -177,6 +177,8 @@ class CardReconcilePageTest extends TestCase
 
         Process::fake(['*' => Process::result('', '', 1)]);
         $this->upload([], $this->pdf(['scanned page, no lines']))->assertSessionHasErrors('statement');
+        $this->upload([], UploadedFile::fake()->createWithContent('statement.txt', implode("\n", self::RCBC)))->assertSessionHasErrors('statement');
+        $this->upload([], UploadedFile::fake()->create('big.pdf', 10241, 'application/pdf'))->assertSessionHasErrors('statement');
         $this->assertSame(1, CardStatement::count());
     }
 
@@ -214,19 +216,35 @@ class CardReconcilePageTest extends TestCase
         $other = CardStatement::create(['bank' => 'rcbc', 'source_kind' => 'pdf']);
         $foreign = CardStatementLine::create(['card_statement_id' => $other->id, 'line_no' => 1, 'description' => 'FACEBK X', 'amount' => '1.00', 'is_ads' => true]);
 
-        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => 'Visa ···· 9999'])->assertSessionHasErrors('card_label');
-        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'lines' => [$line->id => ['amount' => 'abc']]])->assertSessionHasErrors();
+        // Ang mga edit ay isang JSON field (hindi isang input bawat cell), para hindi maputol ng max_input_vars.
+        $match = fn (array $edits, string $card = self::CARD) => $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => $card, 'edits' => json_encode($edits)]);
+        $edit = ['sale_date' => '2026-09-15', 'post_date' => '2026-09-15', 'amount' => '423.10', 'is_credit' => false, 'is_ads' => true];
 
-        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'lines' => [
-            $line->id    => ['sale_date' => '2026-09-15', 'post_date' => '2026-09-15', 'amount' => '423.10', 'is_credit' => '0', 'is_ads' => '1'],
-            $foreign->id => ['sale_date' => '2026-09-15', 'amount' => '999.00', 'is_credit' => '0', 'is_ads' => '1'],
-        ]])->assertRedirect("/ads_manager/payment/reconcile/{$s->id}");
+        $match([], 'Visa ···· 9999')->assertSessionHasErrors('card_label');
+        foreach ([
+            'not a number'  => ['amount' => 'abc'],
+            'negative'      => ['amount' => '-1'],
+            'too large'     => ['amount' => '99999999999'],
+            'bad date'      => ['sale_date' => '09/15/26'],
+            'bad post date' => ['post_date' => '2026-13-01'],
+        ] as $case => $bad) {
+            $match([$line->id => $bad + $edit])->assertSessionHasErrors();
+        }
+        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{not json'])->assertSessionHasErrors('edits');
+        $this->assertSame(['preview', '432.10'], [$s->fresh()->status, $line->fresh()->amount], 'walang na-save sa maling edit');
+
+        $match([$line->id => $edit, $foreign->id => ['amount' => '999.00'] + $edit])->assertSessionHasNoErrors()->assertRedirect("/ads_manager/payment/reconcile/{$s->id}");
 
         $line->refresh();
         $this->assertSame(['2026-09-15', '423.10', 'sale_date', $fixed], [$line->sale_date->toDateString(), $line->amount, $line->match_kind, (int) $line->payment_activity_id]);
         $this->assertSame('1.00', $foreign->fresh()->amount, 'linya ng ibang statement ay hindi ginagalaw');
         $s->refresh();
         $this->assertSame(['matched', self::CARD, '2026-09-15'], [$s->status, $s->card_label, $s->period_end->toDateString()]);
+
+        // Itugma ulit pagkatapos ng edit: ang lumang tugma ay nabubura.
+        $match([$line->id => ['amount' => '500.00'] + $edit])->assertSessionHasNoErrors();
+        $line->refresh();
+        $this->assertSame(['none', null], [$line->match_kind, $line->payment_activity_id]);
     }
 
     public function test_S_049_16_the_list_the_statement_sheet_and_the_suriin_box(): void
@@ -244,6 +262,8 @@ class CardReconcilePageTest extends TestCase
         $preview = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
         $this->assertStringContainsString('Mungkahing card', $preview);
         $this->assertMatchesRegularExpression('/<option value="Visa ···· 5003"[^>]*selected/u', $preview, 'walang piniling card → ang mungkahi');
+        $this->assertStringContainsString('name="edits"', $preview);
+        $this->assertStringNotContainsString('name="lines[', $preview, 'walang input bawat cell (max_input_vars)');
 
         $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD])->assertSessionHasNoErrors()->assertRedirect();
 

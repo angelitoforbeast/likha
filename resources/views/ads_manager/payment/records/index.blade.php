@@ -20,7 +20,8 @@
     }
   </style>
 
-  @if ($isCEO)
+  {{-- Kapareho ng gate ng card check page (employee profile role), hindi ng $isCEO ng page na ito. --}}
+  @if (preg_match('/^\s*ceo\s*$/i', (string) auth()->user()?->employeeProfile?->role))
     <div class="mb-3 text-right">
       <a href="{{ route('ads_payment.reconcile.index') }}" class="text-sm text-blue-700 hover:underline">Card check: itugma sa card statement →</a>
     </div>

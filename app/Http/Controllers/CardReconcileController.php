@@ -74,33 +74,33 @@ class CardReconcileController extends Controller
         $suggest = $statement->status === 'preview' ? $this->reconcile->suggest($statement) : null;
         $result = $statement->status === 'matched' ? $this->reconcile->result($statement) : null;
 
-        $metaIds = array_filter($lines->pluck('payment_activity_id')->all());
-        $metaRows = $metaIds === [] ? [] : DB::table('payment_activity_ads_manager')->whereIn('id', $metaIds)
-            ->get(['id', 'date', 'transaction_id', 'ad_account'])->keyBy('id')->all();
-
         return view('ads_manager.payment.reconcile.show', [
-            's'        => $statement,
-            'lines'    => $lines,
-            'cards'    => $this->reconcile->cards(),
-            'suggest'  => $suggest,
-            'result'   => $result,
-            'metaRows' => $metaRows,
-            'status'   => (string) $request->query('status', ''),
+            's'       => $statement,
+            'lines'   => $lines,
+            'cards'   => $this->reconcile->cards(),
+            'suggest' => $suggest,
+            'result'  => $result,
+            'status'  => (string) $request->query('status', ''),
         ]);
     }
 
     public function match(Request $request, CardStatement $statement)
     {
         $this->ceoOnly();
-        $data = $request->validate([
+        // Ang mga edit ay dumarating bilang isang JSON field ("edits": {line id: {...}}), hindi isang input bawat
+        // cell: ang mahabang statement ay lalampas sa max_input_vars ng PHP at tahimik na mapuputol.
+        $request->validate(['edits' => ['nullable', 'string', 'json', 'max:1000000']]);
+        $edits = json_decode((string) $request->input('edits', ''), true) ?? [];
+        $data = validator(['card_label' => $request->input('card_label'), 'lines' => $edits], [
             'card_label'          => ['required', 'string', Rule::in($this->reconcile->cards())],
-            'lines'               => ['sometimes', 'array', 'max:2000'],
+            'lines'               => ['array', 'max:2000'],
+            'lines.*'             => ['array'],
             'lines.*.sale_date'   => ['nullable', 'date_format:Y-m-d'],
             'lines.*.post_date'   => ['nullable', 'date_format:Y-m-d'],
             'lines.*.amount'      => ['required', 'numeric', 'min:0', 'max:9999999999.99'],
             'lines.*.is_credit'   => ['sometimes', 'boolean'],
             'lines.*.is_ads'      => ['sometimes', 'boolean'],
-        ]);
+        ])->validate();
 
         // Mga edit sa preview: linya lang ng statement na ito ang ginagalaw.
         $own = $statement->lines()->pluck('id')->flip();
