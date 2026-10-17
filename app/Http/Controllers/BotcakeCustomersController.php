@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakePsid;
+use App\Support\NavAccess;
 use App\Services\BotcakeCustomerMatcher;
 use App\Services\PageSettings;
 use Illuminate\Http\Request;
@@ -32,7 +33,8 @@ class BotcakeCustomersController extends Controller
 
     private function checkAccess(): void
     {
-        if ($this->getNormalizedRole() !== 'CEO') abort(404);
+        // CEO, o ang role na naka-check sa /owner/nav-settings para sa Page Settings (404 sa iba).
+        if (!NavAccess::allows($this->getNormalizedRole(), '/page-settings')) abort(404);
     }
 
     public function index(Request $request)

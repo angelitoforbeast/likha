@@ -120,6 +120,37 @@ class PageSettingsTest extends BotcakeApiTestCase
         $this->assertSame('1111', $this->getJson('/page-settings/history?page_name=Page%20Uno&provider=botcake&key=page_id')->json('history.0.value'), 'nasa history pa rin');
     }
 
+    public function test_a_role_checked_in_nav_settings_reaches_the_pages_and_others_do_not(): void
+    {
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => 'database/migrations/2026_05_18_140000_create_nav_links_and_visibility_tables.php', '--force' => true]);
+        $link = \Illuminate\Support\Facades\DB::table('nav_links')->insertGetId([
+            'key' => 'page_settings_test', 'label' => 'Page Settings', 'route_url' => '/page-settings', 'is_active' => true,
+            'sort_order' => 999, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        foreach (['Marketing - OIC' => true, 'Marketing' => true, 'Data Encoder' => false] as $role => $visible) {
+            \Illuminate\Support\Facades\DB::table('nav_link_role_visibility')->insert([
+                'nav_link_id' => $link, 'role' => $role, 'is_visible' => $visible, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
+        $this->get('/page-settings')->assertOk();
+        $this->get('/page-settings/customers?page=Page%20Uno')->assertOk();
+        $this->get('/page-settings/psid-coverage')->assertOk();
+
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->get('/page-settings')->assertOk();
+
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->get('/page-settings')->assertNotFound();
+        $this->get('/page-settings/customers?page=Page%20Uno')->assertNotFound();
+
+        // naka-uncheck ulit: sarado na
+        \Illuminate\Support\Facades\DB::table('nav_link_role_visibility')->where('role', 'Marketing')->update(['is_visible' => false]);
+        $this->actingAs($this->user('Marketing', 'mkt2@example.test'));
+        $this->get('/page-settings')->assertNotFound();
+    }
+
     public function test_only_the_ceo_reaches_the_page(): void
     {
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));

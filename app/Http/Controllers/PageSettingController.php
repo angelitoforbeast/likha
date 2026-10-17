@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SyncBotcakeCustomersJob;
+use App\Support\NavAccess;
 use App\Models\MacroOutput;
 use App\Models\PageSetting;
 use App\Services\BotcakeClient;
@@ -34,7 +35,8 @@ class PageSettingController extends Controller
 
     private function checkAccess(): void
     {
-        if ($this->getNormalizedRole() !== 'CEO') abort(404);
+        // CEO, o ang role na naka-check sa /owner/nav-settings para sa Page Settings (404 sa iba).
+        if (!NavAccess::allows($this->getNormalizedRole(), '/page-settings')) abort(404);
     }
 
     /** Ang grid: isang row kada page, isang column kada provider + key. Ang JS ang nag-e-edit at nagpo-poll. */
