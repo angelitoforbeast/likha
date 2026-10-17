@@ -139,7 +139,9 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'profit_pct_7d',    'label' => 'Profit % (7D)'],
             ['id' => 'profit_pct_3d',    'label' => 'Profit % (3D)'],
             ['id' => 'profit_pct_today', 'label' => 'Profit % (Today)'],
-            // J&T status ng orders ng ad (botcake_ad_id) — /owner/private expand lang.
+            // J&T status ng orders ng ad (botcake_ad_id) — /owner/private expand lang. Ang ad_rdt ay ang
+            // iisang cell (RTS / DEL / INT) na gaya ng page row; ang lima ay ang detalye, hidden by default.
+            ['id' => 'ad_rdt',           'label' => 'RTS / DEL / INT (orders) (/owner/private)'],
             ['id' => 'ad_delivered',     'label' => 'Delivered (/owner/private)'],
             ['id' => 'ad_in_transit',    'label' => 'In transit (/owner/private)'],
             ['id' => 'ad_for_return',    'label' => 'For return (/owner/private)'],
@@ -204,7 +206,16 @@ class OwnerColumnSettingsController extends Controller
      * ulit ang config, ang saved list na ang masusunod (puwede nang itago kada role).
      */
     private const VISIBLE_TO_ROLES_UNTIL_SAVED = [
-        'campaigns' => ['ad_delivered', 'ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct'],
+        'campaigns' => ['ad_rdt'],
+    ];
+
+    /**
+     * [table][id] → mga column na pinalitan ng id na iyon: habang wala pa ang id sa saved order, hidden sila
+     * sa lahat ng role (ang limang delivery column ay pinalitan ng iisang RTS / DEL / INT cell). Kapag na-save
+     * ulit, ang saved lists na ang masusunod. Ang id ay isinisingit sa saved order bago ang unang pinalitan.
+     */
+    private const REPLACED_UNTIL_SAVED = [
+        'campaigns' => ['ad_rdt' => ['ad_delivered', 'ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct']],
     ];
 
     /** Mga column na CEO lang ang puwedeng makakita — laging hidden sa ibang role. */
@@ -239,7 +250,7 @@ class OwnerColumnSettingsController extends Controller
             'frequency',
             'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
-            'ad_delivered', 'ad_in_transit', 'ad_for_return', 'ad_returned', 'ad_rts_pct',
+            'ad_rdt',
         ],
         'daily_summary' => [
             // All columns visible by default — CEO can hide via column-settings.
@@ -790,6 +801,7 @@ class OwnerColumnSettingsController extends Controller
                         }
                     }
                 }
+                [$hiddenCEO, $visibleByRole] = $this->hideReplacedUntilSaved($table, $decoded, $hiddenCEO, $visibleByRole);
             }
         } else {
             // Nothing saved → derive CEO hidden from default-visible list,
@@ -824,6 +836,18 @@ class OwnerColumnSettingsController extends Controller
         return array_values(array_diff($ids, array_filter($decoded['order'], 'is_string')));
     }
 
+    /** REPLACED_UNTIL_SAVED: itago ang mga pinalitang column sa CEO at sa bawat role habang wala pa ang kapalit sa saved order. */
+    private function hideReplacedUntilSaved(string $table, array $decoded, array $hiddenCEO, array $visibleByRole): array
+    {
+        $saved = (!empty($decoded['order']) && is_array($decoded['order'])) ? array_filter($decoded['order'], 'is_string') : [];
+        foreach (self::REPLACED_UNTIL_SAVED[$table] ?? [] as $id => $replaced) {
+            if (in_array($id, $saved, true)) continue;
+            $hiddenCEO = array_values(array_unique(array_merge($hiddenCEO, $replaced)));
+            foreach ($visibleByRole as $r => $list) $visibleByRole[$r] = array_values(array_diff($list, $replaced));
+        }
+        return [$hiddenCEO, $visibleByRole];
+    }
+
     /**
      * Idagdag sa dulo ang catalog ids na wala sa saved order; ang CEO_ONLY ay isiningit
      * sa kasunod ng naunang catalog column nila (claude_* = kasunod ng Action).
@@ -832,6 +856,13 @@ class OwnerColumnSettingsController extends Controller
     {
         foreach ($allowedIds as $i => $id) {
             if (in_array($id, $valid, true)) continue;
+            // kapalit ng ibang column (REPLACED_UNTIL_SAVED): isingit bago ang unang pinalitan na nasa saved order
+            $replaced = array_merge([], ...array_values(array_column(self::REPLACED_UNTIL_SAVED, $id)));
+            $before   = array_values(array_intersect($valid, $replaced));
+            if ($before !== []) {
+                array_splice($valid, array_search($before[0], $valid, true), 0, [$id]);
+                continue;
+            }
             $pos = ($i > 0 && in_array($id, self::CEO_ONLY, true)) ? array_search($allowedIds[$i - 1], $valid, true) : false;
             if ($pos === false) $valid[] = $id;
             else array_splice($valid, $pos + 1, 0, [$id]);
@@ -884,9 +915,10 @@ class OwnerColumnSettingsController extends Controller
                         }
                     }
                 }
+                [$hidden, $visibleByRole] = $this->hideReplacedUntilSaved($table, $decoded, $hidden, $visibleByRole);
             }
         } else {
-            $vis = array_flip(self::DEFAULT_VISIBLE[$table] ?? $allowedIds);
+            $vis =array_flip(self::DEFAULT_VISIBLE[$table] ?? $allowedIds);
             $hidden = array_values(array_filter($allowedIds, fn($id) => !isset($vis[$id])));
         }
 

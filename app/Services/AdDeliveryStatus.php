@@ -196,6 +196,16 @@ class AdDeliveryStatus
     private static function withRts(array $c): array
     {
         $c['rts_pct'] = $c['shipped'] > 0 ? ($c['returned'] + $c['for_return']) / $c['shipped'] * 100.0 : null;
+
+        // Ang RTS / DEL / INT na cell (gaya ng page row): RTS = for return + returned; % = bilang / (RTS + DEL + INT).
+        $rts = $c['for_return'] + $c['returned'];
+        $den = $rts + $c['delivered'] + $c['in_transit'];
+        $c['rdt'] = $den > 0 ? [
+            'rts' => ['cnt' => $rts,              'pct' => $rts / $den * 100.0],
+            'del' => ['cnt' => $c['delivered'],  'pct' => $c['delivered'] / $den * 100.0],
+            'int' => ['cnt' => $c['in_transit'], 'pct' => $c['in_transit'] / $den * 100.0],
+        ] : null;
+
         return $c;
     }
 }

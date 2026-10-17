@@ -64,10 +64,19 @@ abstract class AdDeliveryTestCase extends OwnerPrivateTestCase
     /** @return array{shipped:int, delivered:int, in_transit:int, for_return:int, returned:int, rts_pct:?float} */
     protected function counts(int $shipped, int $delivered, int $inTransit, int $forReturn, int $returned): array
     {
+        $rts = $forReturn + $returned;
+        $den = $rts + $delivered + $inTransit;
+
         return [
             'shipped' => $shipped, 'delivered' => $delivered, 'in_transit' => $inTransit,
             'for_return' => $forReturn, 'returned' => $returned,
             'rts_pct' => $shipped > 0 ? ($returned + $forReturn) / $shipped * 100.0 : null,
+            // RTS / DEL / INT na cell: RTS = for return + returned, % = bilang / (RTS + DEL + INT)
+            'rdt' => $den > 0 ? [
+                'rts' => ['cnt' => $rts, 'pct' => $rts / $den * 100.0],
+                'del' => ['cnt' => $delivered, 'pct' => $delivered / $den * 100.0],
+                'int' => ['cnt' => $inTransit, 'pct' => $inTransit / $den * 100.0],
+            ] : null,
         ];
     }
 }
