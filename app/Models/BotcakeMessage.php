@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class BotcakeMessage extends Model
 {
     protected $fillable = [
-        'page_name', 'macro_output_id', 'waybill', 'kind', 'day', 'version', 'fb_name', 'psid', 'vars', 'text', 'jnt_status', 'status',
+        'page_name', 'macro_output_id', 'waybill', 'kind', 'campaign_id', 'day', 'version', 'fb_name', 'psid', 'vars', 'text', 'jnt_status', 'status',
         'reason', 'attempts', 'last_http', 'steps', 'is_test', 'test_of', 'dedupe_key', 'queued_at', 'sent_at',
         'created_by', 'sent_by',
     ];

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BotcakeMessage;
 use App\Models\BotcakePsid;
+use App\Models\ChatblastCampaign;
 use App\Models\User;
 use App\Services\BotcakeCustomerMatcher;
 use App\Services\Chatblast;
@@ -53,13 +54,8 @@ class ChatblastController extends Controller
     {
         $this->checkAccess();
 
-        $sequences = [];
-        foreach (array_keys(Chatblast::KINDS) as $kind) $sequences[$kind] = $this->chatblast->sequence($kind);
-
         return view('chatblast.index', [
-            'kinds'     => array_keys(Chatblast::KINDS),
-            'sequences' => $sequences,
-            'placeholders' => Chatblast::PLACEHOLDERS,
+            'campaigns' => ChatblastCampaign::orderBy('id')->get(['kind', 'name', 'active']),
             'statuses'  => self::STATUSES,
             'pages'     => BotcakeMessage::query()->distinct()->orderBy('page_name')->pluck('page_name')->all(),
             'today'     => Carbon::now('Asia/Manila')->toDateString(),
@@ -135,12 +131,13 @@ class ChatblastController extends Controller
         ]);
     }
 
-    /** "Kunin ang mga bago": para sa uri ng filter, o lahat ng uri kapag walang napili. */
+    /** "Kunin ang mga bago": para sa campaign ng filter, o lahat ng naka-on na campaign kapag walang napili. */
     public function build(Request $request)
     {
         $this->checkAccess();
         $kind = $this->str($request, 'kind', 30);
-        if ($kind !== '' && !isset(Chatblast::KINDS[$kind])) return response()->json(['error' => 'Hindi kilalang uri.'], 422);
+        if ($kind !== '' && !($c = $this->chatblast->campaign($kind))) return response()->json(['error' => 'Hindi kilalang campaign.'], 422);
+        if ($kind !== '' && !$c->active) return response()->json(['error' => 'Naka-off ang campaign na ito; i-on muna sa Campaigns.'], 422);
         @set_time_limit(55); // ang nginx ay naghihintay nang 60 s: 20 s ng J&T at ang pagbuo ay kasya rito
 
         // 20 s ng J&T (kasama ang tawag na tumatakbo pa); ang chatblast:build ay may 60 s.
@@ -201,20 +198,6 @@ class ChatblastController extends Controller
         if (!$test) return response()->json(['error' => 'Walang Test PSID ang page na ito. Pumili muna sa "Test PSID".'], 422);
 
         return response()->json(['id' => $test->id, 'status' => $test->status]);
-    }
-
-    /** I-save ang mga araw ng uri (bawat araw: mga bersyon ng text). Binubuo ulit ang text ng hindi pa naipapadala. */
-    public function saveSequence(Request $request)
-    {
-        $this->checkAccess();
-        $kind = $this->str($request, 'kind', 30);
-        try {
-            $changed = $this->chatblast->setSequence($kind, $request->input('days'));
-        } catch (\InvalidArgumentException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        }
-
-        return response()->json(['changed' => $changed, 'days' => $this->chatblast->sequence($kind)]);
     }
 
     /** Hanapin ang sariling account sa mga Botcake customer ng page (pangalan; huling 4 lang ng PSID ang ibinabalik). */

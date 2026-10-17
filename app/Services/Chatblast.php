@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
+use App\Models\ChatblastCampaign;
 use App\Models\PageSetting;
 use App\Services\Jnt\JntTracker;
 use Carbon\Carbon;
@@ -14,39 +14,19 @@ use InvalidArgumentException;
 /**
  * /chatblast: ang listahan ng mga order update na ipapadala sa customer sa Botcake, at ang text nila.
  *
- * Bawat uri (kind) ay may J&T status (from_jnts.status, walang RTS reason; kapareho ng /jnt status) at mga araw: Araw 1,
- * Araw 2, … bawat isa may isa o higit pang bersyon ng text (A, B, …), nakatala sa app_settings. Isang mensahe kada
- * waybill kada uri kada araw (Manila); ang araw = ilan na ang naipadala (sent o unknown) + 1. Humihinto kapag ubos na ang
- * araw o hindi na ganoong status ang waybill. Ang bersyon ay umiikot ayon sa numero ng waybill, kaya magkaiba ang
- * magkatabing customer at pareho ang napipili kapag binuo ulit. Ready kapag may PSID ang order at kumpleto ang Botcake
- * settings ng page; kung hindi, no_psid o no_config (kasama kung ano ang kulang).
+ * Bawat campaign (chatblast_campaigns; ang "kind" nito ang susi sa botcake_messages.kind) ay may mga J&T status na
+ * nagti-trigger (from_jnts.status), mga page, window, at mga araw: Araw 1, Araw 2, … bawat isa may isa o higit pang
+ * bersyon ng text (A, B, …). Isang mensahe kada waybill kada campaign kada araw (Manila); ang araw = ilan na ang
+ * naipadala (sent o unknown) + 1. Humihinto kapag ubos na ang araw o wala na sa mga status ng campaign ang waybill. Ang
+ * bersyon ay umiikot ayon sa numero ng waybill, kaya magkaiba ang magkatabing customer at pareho ang napipili kapag
+ * binuo ulit. Ready kapag may PSID ang order at kumpleto ang Botcake settings ng page; kung hindi, no_psid o no_config
+ * (kasama kung ano ang kulang). Ang naka-off na campaign ay walang binubuo at walang ipinapadala.
  */
 class Chatblast
 {
-    /**
-     * Mga uri: ang J&T status, ilang araw pabalik ang order (ts_date), at ang default na mga araw (walang emoji: lumabas
-     * na "�" ang isa sa naunang test).
-     */
-    public const KINDS = [
-        'delivering' => [
-            'status' => 'Delivering',
-            'window' => 7,
-            'days'   => [
-                ["Hello Ma'am/Sir {name}, Idedeliver po ngayon ang order niyo. Maraming salamat po sa pag-order, ingat po kayo at salamat ulit sa tiwala!"],
-            ],
-        ],
-        'in_transit' => [
-            'status' => 'In Transit',
-            'window' => 14,
-            'days'   => [
-                ["Hello Ma'am/Sir {name}, nasa biyahe na po ang order niyo ({item}). Ipapaalam po namin kapag malapit na. Salamat po!"],
-                ["Hi Ma'am/Sir {name}, tuloy-tuloy po ang biyahe ng order niyo. Waybill: {waybill}. Salamat po sa paghihintay!"],
-                ["Magandang araw po Ma'am/Sir {name}! Nasa daan pa rin po ang parcel niyo. Pakihanda na lang po ang PHP {cod} pagdating ng rider. Salamat po!"],
-                ["Hello po Ma'am/Sir {name}, malapit na po ang order niyo mula sa {page}. Paki-abangan po ang tawag o text ng rider. Maraming salamat po!"],
-                ["Hi Ma'am/Sir {name}, nasa biyahe pa rin po ang order niyo. Kung may tanong po kayo, mag-message lang po dito. Salamat po sa tiwala!"],
-            ],
-        ],
-    ];
+    /** Ang status na ito na may RTS reason ay pabalik na sa seller (gaya ng /jnt status): hindi ito ang biyahe papunta. */
+    private const RTS_EXCLUDED = ['In Transit', 'Delivering'];
+    public const LOG_MAX = 200; // ilang pagbabago ang itinatago sa log ng campaign
 
     /** Ang kailangan ng page para makapagpadala (page_id para sa bawat API path). */
     public const REQUIRED = ['page_id', 'token', 'flow.shipping', 'field.message'];
@@ -75,12 +55,18 @@ class Chatblast
     {
     }
 
-    /** Ang mga araw ng uri: listahan ng araw, bawat isa listahan ng text (bersyon A, B, …). */
+    /** Ang campaign ng kind (laging bago mula sa database: ang on/off at text ay maaaring nagbago). */
+    public function campaign(string $kind): ?ChatblastCampaign
+    {
+        return ChatblastCampaign::where('kind', $kind)->first(ChatblastCampaign::COLUMNS);
+    }
+
+    /** Ang mga araw ng campaign: listahan ng araw, bawat isa listahan ng text (bersyon A, B, …). */
     public function sequence(string $kind): array
     {
-        $saved = json_decode((string) AppSetting::get('chatblast.sequence.' . $kind), true);
+        $days = $this->campaign($kind)?->days;
 
-        return $this->invalid($saved) === null ? $saved : self::KINDS[$kind]['days'] ?? [];
+        return $this->invalid($days) === null ? $days : [];
     }
 
     /** Ang mali sa mga araw, o null kapag tama: kahit isang araw, bawat araw kahit isang bersyon, walang blangkong text. */
@@ -108,19 +94,45 @@ class Chatblast
         return null;
     }
 
-    /**
-     * Bagong mga araw ng uri (tinatanggal ang espasyo sa dulo ng bawat text). Binubuo ulit ang text ng mga hindi pa
-     * naipapadala, sa parehong araw at sa parehong pagpili ng bersyon. @return int bilang ng nabagong row
-     */
-    public function setSequence(string $kind, mixed $days): int
+    /** Bagong mga araw ng campaign (buo). @return int bilang ng nabagong row */
+    public function setSequence(string $kind, mixed $days, ?int $userId = null): int
     {
-        if (!isset(self::KINDS[$kind])) throw new InvalidArgumentException('Hindi kilalang uri.');
-        if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
+        $c = $this->campaign($kind);
+        if (!$c) throw new InvalidArgumentException('Hindi kilalang campaign.');
 
-        $days = array_map(fn ($versions) => array_map('trim', $versions), $days);
-        AppSetting::set('chatblast.sequence.' . $kind, json_encode($days, JSON_UNESCAPED_UNICODE));
+        return $this->editDays($c->id, fn () => $days, $userId, ['what' => 'days']);
+    }
 
-        return $this->rerender($kind, $days);
+    /**
+     * Baguhin ang mga araw ng campaign: $change(lumang mga araw) → bagong mga araw (InvalidArgumentException kapag
+     * hindi puwede). Naka-lock ang row habang binabago, kaya ang dalawang sabay na cell ay parehong naiiwan. Tinatanggal
+     * ang espasyo sa dulo ng bawat text, itinatala sa log, at binubuo ulit ang text ng mga hindi pa naipapadala (parehong
+     * araw at parehong pagpili ng bersyon). @return int bilang ng nabagong row
+     */
+    public function editDays(int $campaignId, callable $change, ?int $userId, array $entry): int
+    {
+        $c = DB::transaction(function () use ($campaignId, $change, $userId, $entry) {
+            $c = ChatblastCampaign::whereKey($campaignId)->lockForUpdate()->first();
+            if (!$c) throw new InvalidArgumentException('Walang ganitong campaign.');
+            $days = $change($c->days);
+            if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
+
+            $c->days = array_map(fn ($versions) => array_map('trim', $versions), $days);
+            self::log($c, $userId, $entry);
+            $c->save();
+
+            return $c;
+        });
+
+        return $this->rerender($c->kind, $c->days);
+    }
+
+    /** Itala ang pagbabago sa log ng campaign (hindi pa sine-save): sino, kailan, ano; ang huling LOG_MAX lang. */
+    public static function log(ChatblastCampaign $c, ?int $userId, array $entry): void
+    {
+        $log = (array) ($c->log ?? []);
+        $log[] = ['at' => now()->toIso8601String(), 'by' => $userId] + $entry;
+        $c->log = array_slice($log, -self::LOG_MAX);
     }
 
     /** Ang text: {name}, {item}, {cod}, {waybill}, {page}; {rider} at {rider_phone} ay walang laman hangga't wala pa. */
@@ -244,9 +256,9 @@ class Chatblast
     }
 
     /**
-     * "Kunin ang mga bago" para sa isang uri, o lahat (null): isang row kada waybill na nasa status ng uri at wala pang row
-     * ng uring iyon ngayong araw; sinusuri ulit ang no_psid / no_config, at nilalaktawan ang hindi pa naipapadala na wala
-     * na sa status ng uri.
+     * "Kunin ang mga bago" para sa isang campaign (kind), o lahat ng naka-on (null): isang row kada waybill na nasa mga
+     * status ng campaign at wala pang row ng campaign ngayong araw; sinusuri ulit ang no_psid / no_config, at nilalaktawan
+     * ang hindi pa naipapadala na wala na sa mga status ng campaign. Ang naka-off na campaign ay walang binubuo.
      * @return array{added:int, ready:int, no_psid:int, no_config:int, updated:int, skipped:int}
      */
     public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET): array
@@ -266,21 +278,23 @@ class Chatblast
     {
         $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0];
         $missing = $this->missingByPage();
-        $kinds = $kind === null ? array_keys(self::KINDS) : [$kind];
+        // Ang may "requires On Delivery" muna (ang tracking nila ang pinakamahalaga), saka ayon sa id.
+        $all = ChatblastCampaign::where('active', true)->orderByDesc('requires_on_delivery')->orderBy('id')->get(ChatblastCampaign::COLUMNS);
+        $campaigns = $kind === null ? $all : $all->where('kind', $kind)->values();
+        if ($campaigns->isEmpty()) return $out; // walang ganoon o naka-off: walang binubuo
 
-        // J&T: ang status at rider ng mga waybill na bubuuin at ng hindi pa naipapadalang delivering, hanggang $trackBudget
-        // segundo. Ayos: delivering bago in_transit; sa bawat uri, ang pinakamatagal nang hindi na-track muna (ang bago ay
-        // hindi pa kailanman), kaya naaabot ang lahat sa ilang pindot. Ang walang PSID o kulang ang settings ay hindi
-        // tinatawagan. Ang hindi naabot ay "rider pending": susunod na kuha, o bago ipadala.
+        // J&T: ang status at rider ng mga waybill na bubuuin at ng hindi pa naipapadala ng campaign na "requires On
+        // Delivery", hanggang $trackBudget segundo. Ayos: ang mga campaign na iyon muna; sa bawat campaign, ang
+        // pinakamatagal nang hindi na-track muna (ang bago ay hindi pa kailanman), kaya naaabot ang lahat sa ilang pindot.
+        // Ang walang PSID, kulang ang settings o ibang page ay hindi tinatawagan. Ang hindi naabot ay "rider pending".
         $waybills = [];
-        foreach ($kinds as $k) {
-            $since = now('Asia/Manila')->subDays(self::KINDS[$k]['window'])->toDateString();
+        foreach ($campaigns as $c) {
             $order = [];
-            foreach ($this->candidates($k, $since)->reorder()->get(['mo.waybill', 'mo.botcake_psid']) as $o) {
-                if (trim((string) $o->botcake_psid) !== '' && !isset($order[$o->waybill])) $order[$o->waybill] = '';
+            foreach ($this->candidates($c)->reorder()->get(['mo.waybill', 'mo.botcake_psid', 'mo.PAGE as page']) as $o) {
+                if (trim((string) $o->botcake_psid) !== '' && $this->onPage($c, (string) $o->page) && !isset($order[$o->waybill])) $order[$o->waybill] = '';
             }
-            BotcakeMessage::where('kind', $k)->where('is_test', false)->whereIn('status', ['ready', 'failed', 'field_mismatch'])
-                ->where('created_at', '>=', now()->subDays(self::KINDS[$k]['window']))->get(['waybill', 'vars'])
+            BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', ['ready', 'failed', 'field_mismatch'])
+                ->where('created_at', '>=', now()->subDays($c->window_days))->get(['waybill', 'vars'])
                 ->each(function ($m) use (&$order) { $order[$m->waybill] ??= (string) ($m->vars['tracked_at'] ?? ''); });
             asort($order); // '' (hindi pa na-track) muna, saka ang pinakaluma
             $waybills = array_merge($waybills, array_keys($order));
@@ -291,11 +305,12 @@ class Chatblast
         $out['tracked'] = count($tracked);
         $out['rider_pending'] = count($track['pending'] ?? []);
 
-        // Ang hindi pa naipapadalang delivering na ang bagong sagot ng J&T ay hindi na On Delivery (hal. Problematic,
-        // Delivery Fail): nilalaktawan at binibitawan ang key, para may sariling row ang susunod na subok.
+        // Ang hindi pa naipapadala ng campaign na "requires On Delivery" na ang bagong sagot ng J&T ay hindi na On Delivery
+        // (hal. Problematic, Delivery Fail): nilalaktawan at binibitawan ang key, para may sariling row ang susunod na subok.
         $failed = array_keys(array_filter($tracked, fn ($scan) => !self::isOnDelivery($scan)));
-        foreach (array_chunk($failed, 500) as $chunk) {
-            BotcakeMessage::where('kind', 'delivering')->where('is_test', false)->whereIn('waybill', $chunk)
+        $onDelivery = $all->where('requires_on_delivery', true)->pluck('kind')->all();
+        foreach ($onDelivery ? array_chunk($failed, 500) : [] as $chunk) {
+            BotcakeMessage::whereIn('kind', $onDelivery)->where('is_test', false)->whereIn('waybill', $chunk)
                 ->whereIn('status', array_diff(self::UNSENT, ['skipped']))->get(['id', 'waybill'])
                 ->each(function ($row) use ($tracked, &$out) {
                     $out['skipped'] += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)->update([
@@ -305,39 +320,40 @@ class Chatblast
                 });
         }
 
-        foreach ($kinds as $k) {
-            $out['skipped'] += $this->skipStale($k);
-            foreach ($this->buildKind($k, $userId, $missing, $tracked, $riders) as $key => $n) $out[$key] += $n;
-            $out['updated'] += $this->recheck($k, $missing);
+        foreach ($campaigns as $c) {
+            $out['skipped'] += $this->skipStale($c);
+            foreach ($this->buildKind($c, $userId, $missing, $tracked, $riders) as $key => $n) $out[$key] += $n;
+            $out['updated'] += $this->recheck($c->kind, $missing);
         }
 
         return $out;
     }
 
-    private function buildKind(string $kind, ?int $userId, array $missing, array $tracked = [], array $riders = []): array
+    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, array $tracked = [], array $riders = []): array
     {
         $out   = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0];
-        $days  = $this->sequence($kind);
-        $since = now('Asia/Manila')->subDays(self::KINDS[$kind]['window'])->toDateString();
+        $kind  = $c->kind;
+        $days  = $this->invalid($c->days) === null ? $c->days : [];
         $now   = now();
         $seen  = [];
 
-        $this->candidates($kind, $since)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $kind, $userId, $now, $tracked, $riders) {
+        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $tracked, $riders) {
             $rows = [];
             $jnt  = $this->currentStatuses($orders->pluck('waybill')->unique()->values()->all());
             foreach ($orders as $o) {
                 $waybill = trim((string) $o->waybill);
                 if ($waybill === '' || isset($seen[$waybill])) continue; // isang row kada waybill (kahit may kopya ang order)
                 $seen[$waybill] = true;
-                if (!$this->matches($kind, $jnt[$o->waybill] ?? [])) continue; // may kopyang mas malayo na ang status
+                if (!$this->matches($c, $jnt[$o->waybill] ?? [])) continue; // may kopyang mas malayo na ang status
 
                 $day = (int) $o->sent_n + 1;
                 if ($day > count($days)) continue; // ubos na ang mga araw ng uri
 
                 $page = $this->settings->normPage((string) $o->page);
-                // Delivering: ang pinakabagong scan ay dapat On Delivery pa (hindi Problematic, Delivery Fail…): ang
-                // "Idedeliver po ngayon" ay hindi totoo pagkatapos ng bigong subok. Susubukan ulit sa susunod na kuha.
-                if ($kind === 'delivering' && isset($tracked[$waybill]) && !self::isOnDelivery($tracked[$waybill])) continue;
+                if (!$this->onPage($c, $page)) continue; // hindi kasama ang page sa campaign
+                // Requires On Delivery: ang pinakabagong scan ay dapat On Delivery pa (hindi Problematic, Delivery Fail…):
+                // ang "Idedeliver po ngayon" ay hindi totoo pagkatapos ng bigong subok. Susubukan ulit sa susunod na kuha.
+                if ($c->requires_on_delivery && isset($tracked[$waybill]) && !self::isOnDelivery($tracked[$waybill])) continue;
 
                 // Ang rider ay mula lang sa sagot ng J&T sa kuhang ito (hindi ang nakatala noon, na maaaring ibang araw).
                 [$rider, $riderPhone] = $riders[$waybill] ?? ['', ''];
@@ -350,10 +366,10 @@ class Chatblast
                     : $this->readiness($o->botcake_psid, $missing[$this->settings->pageKey($page)] ?? self::REQUIRED);
 
                 $rows[] = [
-                    'page_name' => $page, 'macro_output_id' => $o->id, 'waybill' => $waybill, 'kind' => $kind, 'day' => $day,
+                    'page_name' => $page, 'macro_output_id' => $o->id, 'waybill' => $waybill, 'kind' => $kind, 'campaign_id' => $c->id, 'day' => $day,
                     'version' => $pick ? self::label($pick[0]) : null, 'fb_name' => $o->fb_name, 'psid' => trim((string) $o->botcake_psid) ?: null,
                     'vars' => json_encode($vars, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE), 'text' => $pick[1] ?? null,
-                    'jnt_status' => self::KINDS[$kind]['status'], 'status' => $status, 'reason' => $reason, 'attempts' => 0, 'is_test' => false,
+                    'jnt_status' => $this->latest($jnt[$o->waybill] ?? [])['status'] ?? null, 'status' => $status, 'reason' => $reason, 'attempts' => 0, 'is_test' => false,
                     'dedupe_key' => $waybill . '|' . $kind . '|' . $day, 'created_by' => $userId, 'created_at' => $now, 'updated_at' => $now,
                 ];
             }
@@ -404,42 +420,57 @@ class Chatblast
         return $changed;
     }
 
-    /** Ang hindi pa naipapadala na wala na sa status ng uri (hal. In Transit → Delivered): skipped. @return int bilang */
-    private function skipStale(string $kind): int
+    /** Ang hindi pa naipapadala na wala na sa mga status ng campaign (hal. In Transit → Delivered): skipped. @return int */
+    private function skipStale(ChatblastCampaign $c): int
     {
         $skipped = 0;
-        BotcakeMessage::where('kind', $kind)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
-            ->select('id', 'waybill')->chunkById(500, function ($rows) use (&$skipped, $kind) {
+        BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
+            ->select('id', 'waybill')->chunkById(500, function ($rows) use (&$skipped, $c) {
                 $now = $this->currentStatuses($rows->pluck('waybill')->unique()->values()->all());
                 foreach ($rows as $row) {
-                    if ($this->matches($kind, $now[$row->waybill] ?? [])) continue;
+                    if ($this->matches($c, $now[$row->waybill] ?? [])) continue;
                     $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
-                        ->update(['status' => 'skipped', 'reason' => $this->staleReason($kind, $now[$row->waybill] ?? [])]);
+                        ->update(['status' => 'skipped', 'reason' => $this->staleReason($c, $now[$row->waybill] ?? [])]);
                 }
             });
 
         return $skipped;
     }
 
-    /** Ang dahilan kapag ang waybill ay wala na sa status ng uri, o null kapag nasa status pa (para sa sender). */
-    public function staleFor(string $kind, string $waybill): ?string
+    /** Ang dahilan kapag ang waybill ay wala na sa mga status ng campaign, o null kapag nasa status pa (para sa sender). */
+    public function staleFor(ChatblastCampaign $c, string $waybill): ?string
     {
         $rows = $this->currentStatuses([$waybill])[$waybill] ?? [];
 
-        return $this->matches($kind, $rows) ? null : $this->staleReason($kind, $rows);
+        return $this->matches($c, $rows) ? null : $this->staleReason($c, $rows);
     }
 
-    private function staleReason(string $kind, array $rows): string
+    private function staleReason(ChatblastCampaign $c, array $rows): string
     {
         $top = $this->latest($rows);
-        return 'Hindi na ' . self::KINDS[$kind]['status'] . ' ang waybill (ngayon: ' . ($top['status'] ?? 'wala sa J&T') . ')';
+        return 'Hindi na ' . implode('/', (array) $c->statuses) . ' ang waybill (ngayon: ' . ($top['status'] ?? 'wala sa J&T') . ')';
     }
 
-    /** Nasa status ng uri ba ang waybill: ang pinakamalayong from_jnts row nito ang status ng uri, walang RTS reason. */
-    private function matches(string $kind, array $rows): bool
+    /**
+     * Nasa mga status ng campaign ba ang waybill: ang pinakamalayong from_jnts row nito ay isa sa mga status ng campaign
+     * (ang In Transit at Delivering ay walang RTS reason).
+     */
+    private function matches(ChatblastCampaign $c, array $rows): bool
     {
         $top = $this->latest($rows);
-        return $top !== null && $top['status'] === self::KINDS[$kind]['status'] && trim((string) $top['rts_reason']) === '';
+        return $top !== null && in_array($top['status'], (array) $c->statuses, true)
+            && (!in_array($top['status'], self::RTS_EXCLUDED, true) || trim((string) $top['rts_reason']) === '');
+    }
+
+    /** Kasama ba ang page sa campaign (walang listahan = lahat ng page). */
+    private function onPage(ChatblastCampaign $c, string $page): bool
+    {
+        if (!$c->pages) return true;
+        $key = $this->settings->pageKey($page);
+        foreach ($c->pages as $p) {
+            if ($this->settings->pageKey((string) $p) === $key) return true;
+        }
+        return false;
     }
 
     /** Ang pinakamalayong J&T row (PROGRESS; kapag pantay, ang pinakahuling naitala). */
@@ -525,11 +556,13 @@ class Chatblast
     }
 
     /**
-     * Ang mga order na nasa status ng uri sa loob ng window, na wala pang row ng uring ito ngayong araw (Manila), kasama
-     * kung ilan na ang naipadala (sent o unknown: maaaring naipadala) para sa waybill.
+     * Ang mga order na nasa mga status ng campaign sa loob ng window, na wala pang row ng campaign ngayong araw (Manila),
+     * kasama kung ilan na ang naipadala (sent o unknown: maaaring naipadala) para sa waybill.
      */
-    private function candidates(string $kind, string $since)
+    private function candidates(ChatblastCampaign $c)
     {
+        $kind  = $c->kind;
+        $since = now('Asia/Manila')->subDays($c->window_days)->toDateString();
         $col   = fn (string $c) => DB::getDriverName() === 'pgsql' ? 'mo."' . $c . '"' : 'mo.`' . $c . '`';
         $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
 
@@ -540,8 +573,8 @@ class Chatblast
             ->where('mo.id', '>=', $fromId)
             ->where('mo.ts_date', '>=', $since)
             ->whereNotNull('mo.waybill')->where('mo.waybill', '<>', '')
-            ->whereExists(fn ($e) => $e->from('from_jnts as j')->whereColumn('j.waybill_number', 'mo.waybill')->where('j.status', self::KINDS[$kind]['status'])
-                ->where(fn ($r) => $r->whereNull('j.rts_reason')->orWhereRaw("TRIM(j.rts_reason) = ''"))->selectRaw('1'))
+            ->whereExists(fn ($e) => $e->from('from_jnts as j')->whereColumn('j.waybill_number', 'mo.waybill')->whereIn('j.status', (array) $c->statuses)
+                ->where(fn ($r) => $r->whereNotIn('j.status', self::RTS_EXCLUDED)->orWhereNull('j.rts_reason')->orWhereRaw("TRIM(j.rts_reason) = ''"))->selectRaw('1'))
             ->whereNotExists(fn ($e) => $e->from('botcake_messages as m')->whereColumn('m.waybill', 'mo.waybill')->where('m.kind', $kind)
                 ->where('m.is_test', false)->whereNotNull('m.dedupe_key') // ang itinabi dahil nagbago ang PSID/page ay hindi bilang
                 ->where(fn ($t) => $t->where('m.created_at', '>=', $today)->orWhere('m.sent_at', '>=', $today)->orWhere('m.queued_at', '>=', $today)

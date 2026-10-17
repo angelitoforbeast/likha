@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\SendChatblastMessage;
 use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
+use App\Models\ChatblastCampaign;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,7 @@ class ChatblastSender
     /** Ang mga status na maaaring ipadala (o ipadala ulit). */
     public const SENDABLE = ['ready', 'failed', 'field_mismatch', 'skipped'];
     public const QUEUE = 'chatblast';
+    public const OFF = 'Naka-off ang campaign';
     private const PAUSED = 'chatblast.paused';
     private const BODY_MAX = 1500;
 
@@ -31,12 +33,13 @@ class ChatblastSender
     {
     }
 
-    /** Ilagay sa queue ang mga row na maaaring ipadala. @return int bilang na naka-queue */
+    /** Ilagay sa queue ang mga row na maaaring ipadala (hindi ang sa naka-off na campaign). @return int bilang na naka-queue */
     public function queue(array $ids, ?int $userId): int
     {
         $queued = 0;
+        $off = ChatblastCampaign::where('active', false)->pluck('kind')->all();
         foreach (array_unique(array_map('intval', $ids)) as $id) {
-            $ok = BotcakeMessage::whereKey($id)->whereIn('status', self::SENDABLE)->whereNotNull('psid')
+            $ok = BotcakeMessage::whereKey($id)->whereIn('status', self::SENDABLE)->whereNotNull('psid')->whereNotIn('kind', $off)
                 ->update(['status' => 'queued', 'queued_at' => now(), 'sent_by' => $userId, 'reason' => null]);
             if ($ok) {
                 SendChatblastMessage::dispatch($id);
@@ -166,11 +169,16 @@ class ChatblastSender
             return;
         }
 
-        // Ang waybill ay dapat nasa status pa rin ng uri (hal. hindi na "In Transit" kapag Delivered na), isa lang kada
-        // araw ang mensahe ng uri sa waybill, at dapat mayroon pa ang araw nito.
-        if (!$m->is_test && isset(Chatblast::KINDS[$m->kind])) {
-            // Delivering: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at buuin ulit ang text.
-            if ($m->kind === 'delivering') {
+        // Ang campaign ay dapat naka-on, ang waybill ay nasa mga status pa nito (hal. hindi na "In Transit" kapag
+        // Delivered na), isa lang kada araw ang mensahe ng campaign sa waybill, at dapat mayroon pa ang araw nito.
+        if (!$m->is_test && ($c = $this->chatblast->campaign($m->kind))) {
+            if (!$c->active) {
+                $this->finish($m, 'skipped', self::OFF, null, []);
+                return;
+            }
+            // Requires On Delivery: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at
+            // buuin ulit ang text.
+            if ($c->requires_on_delivery) {
                 $stop = $this->chatblast->refreshRider($m);
                 $m->refresh();
                 if ($stop !== null) {
@@ -180,7 +188,7 @@ class ChatblastSender
                     return;
                 }
             }
-            $why = $this->chatblast->staleFor($m->kind, $m->waybill) ?? $this->chatblast->blockedToday($m);
+            $why = $this->chatblast->staleFor($c, $m->waybill) ?? $this->chatblast->blockedToday($m);
             if ($why !== null) {
                 $this->finish($m, 'skipped', $why, null, []);
                 return;
