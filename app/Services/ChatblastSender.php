@@ -175,6 +175,8 @@ class ChatblastSender
                 $m->refresh();
                 if ($failed !== null) {
                     $this->finish($m, 'skipped', $failed, null, []);
+                    // Pansamantala ang bigong subok: ang susunod na On Delivery (hal. kinabukasan) ay may sariling row.
+                    BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                     return;
                 }
             }

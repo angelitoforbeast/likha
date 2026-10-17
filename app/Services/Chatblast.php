@@ -252,6 +252,12 @@ class Chatblast
         // J&T: ang status at rider ng mga waybill na bubuuin lang (delivering muna), hanggang TRACK_BUDGET segundo. Ang
         // hindi naabot ay "rider pending": susunod na kuha, o bago ipadala.
         $waybills = [];
+        if (in_array('delivering', $kinds, true)) {
+            // Pati ang hindi pa naipapadalang delivering: baka bigo na ang subok (nilalaktawan sa ibaba).
+            $waybills = BotcakeMessage::where('kind', 'delivering')->where('is_test', false)
+                ->whereIn('status', array_diff(self::UNSENT, ['skipped']))->where('created_at', '>=', now()->subDays(self::KINDS['delivering']['window']))
+                ->distinct()->pluck('waybill')->all();
+        }
         foreach ($kinds as $k) {
             $waybills = array_merge($waybills, $this->candidates($k, now('Asia/Manila')->subDays(self::KINDS[$k]['window'])->toDateString())
                 ->reorder()->distinct()->pluck('mo.waybill')->all());
@@ -260,6 +266,20 @@ class Chatblast
         $tracked = $track['latest'] ?? []; // waybill => pinakabagong scan ng J&T (ang mga sinagot lang)
         $out['tracked'] = count($tracked);
         $out['rider_pending'] = count($track['pending'] ?? []);
+
+        // Ang hindi pa naipapadalang delivering na ang bagong sagot ng J&T ay hindi na On Delivery (hal. Problematic,
+        // Delivery Fail): nilalaktawan at binibitawan ang key, para may sariling row ang susunod na subok.
+        $failed = array_keys(array_filter($tracked, fn ($scan) => !self::isOnDelivery($scan)));
+        foreach (array_chunk($failed, 500) as $chunk) {
+            BotcakeMessage::where('kind', 'delivering')->where('is_test', false)->whereIn('waybill', $chunk)
+                ->whereIn('status', array_diff(self::UNSENT, ['skipped']))->get(['id', 'waybill'])
+                ->each(function ($row) use ($tracked, &$out) {
+                    $out['skipped'] += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)->update([
+                        'status' => 'skipped', 'dedupe_key' => null,
+                        'reason' => 'Hindi na On Delivery ang huling scan ng J&T (' . ($tracked[$row->waybill] ?: 'walang scantype') . ')',
+                    ]);
+                });
+        }
 
         foreach ($kinds as $k) {
             $out['skipped'] += $this->skipStale($k);

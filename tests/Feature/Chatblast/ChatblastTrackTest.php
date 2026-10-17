@@ -301,4 +301,38 @@ class ChatblastTrackTest extends ChatblastTestCase
 
         $this->assertSame(['sent', 'Walang rider Ana Cruz'], [BotcakeMessage::sole()->status, BotcakeMessage::sole()->text]);
     }
+
+    public function test_after_a_failed_attempt_the_next_on_delivery_gets_its_message(): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        $this->scans['JT0000000002'] = [$this->onDelivery()];
+        app(Chatblast::class)->build('delivering');
+
+        $this->travel(40)->minutes();
+        $this->scans['JT0000000002'] = [['scantype' => 'Problematic', 'scantime' => '2026-10-18 09:35:00'], $this->onDelivery()];
+        app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
+        $this->assertSame('skipped', BotcakeMessage::sole()->status);
+
+        // Kinabukasan: ibang subok, On Delivery ulit.
+        $this->travelTo('2026-10-19 09:00:00');
+        $this->scans['JT0000000002'] = [$this->onDelivery(), ['scantype' => 'Problematic', 'scantime' => '2026-10-18 09:35:00']];
+        app(Chatblast::class)->build('delivering');
+
+        $this->assertSame(1, BotcakeMessage::where('status', 'ready')->count(), 'may bagong row para sa bagong subok');
+    }
+
+    public function test_a_later_build_that_sees_a_failed_attempt_skips_the_unsent_row(): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        $this->scans['JT0000000002'] = [$this->onDelivery()];
+        app(Chatblast::class)->build('delivering');
+
+        $this->travel(10)->minutes();
+        $this->scans['JT0000000002'] = [['scantype' => 'Delivery Fail', 'scantime' => '2026-10-18 09:05:00'], $this->onDelivery()];
+        app(Chatblast::class)->build('delivering');
+
+        $row = BotcakeMessage::sole();
+        $this->assertSame(['skipped', null], [$row->status, $row->dedupe_key]);
+        $this->assertStringContainsString('Delivery Fail', $row->reason);
+    }
 }
