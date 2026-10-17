@@ -32,7 +32,7 @@ class ChatblastBuildTest extends ChatblastTestCase
         $this->assertSame('walang page_id, token, flow.shipping, field.message', $rows['WB-004']->reason);
         $this->assertSame('psid-a', $rows['WB-001']->psid);
         $this->assertSame(['delivering', 'Delivering', false, 1], [$rows['WB-001']->kind, $rows['WB-001']->jnt_status, $rows['WB-001']->is_test, $rows['WB-001']->created_by]);
-        $this->assertSame(['added' => 4, 'ready' => 1, 'no_psid' => 1, 'no_config' => 2, 'updated' => 0], $first);
+        $this->assertSame(['added' => 4, 'ready' => 1, 'no_psid' => 1, 'no_config' => 2, 'updated' => 0, 'skipped' => 0], $first);
 
         $this->assertSame(0, app(Chatblast::class)->build('delivering')['added'], 'walang doble sa ikalawang kuha');
         $this->assertSame(4, BotcakeMessage::count());
@@ -55,7 +55,7 @@ class ChatblastBuildTest extends ChatblastTestCase
         $this->assertNull(BotcakeMessage::where('waybill', 'WB-003')->value('reason'));
     }
 
-    public function test_the_text_fills_the_placeholders_and_the_template_can_be_changed(): void
+    public function test_the_text_fills_the_placeholders_and_follows_a_change_of_the_days(): void
     {
         $this->page('Page Uno');
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'Delivering', 0, ['ITEM_NAME' => 'Sabon x2', 'COD' => '650']);
@@ -70,11 +70,11 @@ class ChatblastBuildTest extends ChatblastTestCase
         $this->assertStringContainsString('Sir Ben Receiver,', BotcakeMessage::where('waybill', 'WB-002')->value('text'), 'walang FB name: ang receiver');
 
         BotcakeMessage::where('waybill', 'WB-002')->update(['status' => 'sent']);
-        $chatblast->setTemplate('delivering', '{name}: {item}, COD {cod}, {waybill}, {page}');
+        $chatblast->setSequence('delivering', [['{name}: {item}, COD {cod}, {waybill}, {page}']]);
 
         $this->assertSame('Ana Cruz: Sabon x2, COD 650, WB-001, Page Uno', BotcakeMessage::where('waybill', 'WB-001')->value('text'));
         $this->assertStringStartsWith("Hello Ma'am/Sir Ben Receiver", BotcakeMessage::where('waybill', 'WB-002')->value('text'), 'ang naipadala na ay hindi binabago');
-        $this->assertSame('{name}: {item}, COD {cod}, {waybill}, {page}', $chatblast->template('delivering'));
+        $this->assertSame([['{name}: {item}, COD {cod}, {waybill}, {page}']], $chatblast->sequence('delivering'));
     }
 
     public function test_the_command_builds_the_list(): void

@@ -253,7 +253,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::post('/pause', [ChatblastController::class, 'pause'])->middleware('throttle:30,1,chatblast-control')->name('pause');
     Route::post('/resume', [ChatblastController::class, 'resume'])->middleware('throttle:30,1,chatblast-control')->name('resume');
     Route::post('/test', [ChatblastController::class, 'test'])->middleware('throttle:20,1,chatblast-test')->name('test');
-    Route::post('/template', [ChatblastController::class, 'saveTemplate'])->middleware('throttle:30,1,chatblast-template')->name('template');
+    Route::post('/sequence', [ChatblastController::class, 'saveSequence'])->middleware('throttle:30,1,chatblast-sequence')->name('sequence');
     Route::get('/test-psid', [ChatblastController::class, 'searchTestPsid'])->middleware('throttle:60,1,chatblast-test-psid')->name('test-psid.search');
     Route::post('/test-psid', [ChatblastController::class, 'saveTestPsid'])->middleware('throttle:20,1,chatblast-test-psid-save')->name('test-psid.save');
 });

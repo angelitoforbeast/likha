@@ -7,8 +7,9 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     /**
      * Ang send log ng /chatblast: isang row kada mensahe (ang order update na ipinapadala sa customer sa Botcake), kasama
-     * ang bawat hakbang ng pagpapadala para madaling ma-debug. dedupe_key = "waybill|kind" para sa totoong padala
-     * (unique: hindi kailanman makakatanggap ang customer ng parehong uri nang dalawang beses); NULL para sa test send.
+     * ang bawat hakbang ng pagpapadala para madaling ma-debug. dedupe_key = "waybill|kind|day" para sa totoong padala
+     * (unique: hindi kailanman makakatanggap ang customer ng parehong araw ng parehong uri nang dalawang beses); NULL para
+     * sa test send.
      */
     public function up(): void
     {
@@ -20,6 +21,8 @@ return new class extends Migration {
             $table->unsignedBigInteger('macro_output_id')->nullable();
             $table->string('waybill', 100);
             $table->string('kind', 30);
+            $table->unsignedSmallInteger('day')->default(1); // Araw 1, Araw 2, … ng uri
+            $table->string('version', 5)->nullable();      // A, B, … : ang bersyon ng text ng araw na iyon
             $table->string('fb_name')->nullable();
             $table->string('psid', 64)->nullable();
             $table->json('vars')->nullable();          // name, item, cod, waybill, page: para mabuo ulit ang text

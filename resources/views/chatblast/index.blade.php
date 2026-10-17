@@ -26,7 +26,7 @@
      data-pause-url="{{ route('chatblast.pause') }}"
      data-resume-url="{{ route('chatblast.resume') }}"
      data-test-url="{{ route('chatblast.test') }}"
-     data-template-url="{{ route('chatblast.template') }}"
+     data-sequence-url="{{ route('chatblast.sequence') }}"
      data-test-psid-url="{{ route('chatblast.test-psid.search') }}">
 
     <div class="flex items-center justify-between mb-3">
@@ -76,17 +76,25 @@
     </div>
 
     <details class="mb-3 bg-white rounded shadow px-4 py-2 text-sm">
-        <summary class="cursor-pointer font-medium">Text ng mensahe at Test PSID</summary>
-        <div class="grid md:grid-cols-2 gap-4 mt-2">
-            <form id="template-form">
-                <label class="block text-xs text-gray-600 mb-1">Uri
-                    <select name="kind" class="border rounded px-2 py-1 text-sm text-gray-900">
-                        @foreach($kinds as $k)<option value="{{ $k }}">{{ $k }}</option>@endforeach
-                    </select>
-                </label>
-                <textarea name="template" rows="4" maxlength="1000" class="w-full border rounded px-2 py-1 font-mono text-sm">{{ $templates[$kinds[0]] }}</textarea>
-                <p class="text-xs text-gray-500 mb-1">Mga placeholder: {name} {item} {cod} {waybill} {page}. Ang pag-save ay binabago rin ang text ng mga hindi pa naipapadala.</p>
-                <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">I-save ang text</button>
+        <summary class="cursor-pointer font-medium">Mga mensahe (Araw 1, Araw 2, …) at Test PSID</summary>
+        <div class="grid lg:grid-cols-3 gap-4 mt-2">
+            {{-- Mga araw kada uri: bawat araw may isa o higit pang bersyon (A, B, …) na iniikot sa mga customer. --}}
+            <form id="sequence-form" class="lg:col-span-2">
+                <div class="flex flex-wrap items-end gap-2 mb-1">
+                    <label class="text-xs text-gray-600">Uri
+                        <select name="kind" class="border rounded px-2 py-1 text-sm text-gray-900">
+                            @foreach($kinds as $k)<option value="{{ $k }}">{{ $k }}</option>@endforeach
+                        </select>
+                    </label>
+                    <button type="button" id="add-day" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">+ Araw</button>
+                    <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">I-save ang mga araw</button>
+                </div>
+                <p class="text-xs text-gray-500 mb-2">
+                    Mga placeholder: @foreach($placeholders as $ph)<code>{{ '{' . $ph . '}' }}</code> @endforeach.
+                    Ang {rider} at {rider_phone} ay wala pang laman: kapag wala, ibang bersyon ng araw ang ginagamit. Ang preview ay may halimbawang order.
+                    Ang pag-save ay binabago rin ang text ng mga hindi pa naipapadala.
+                </p>
+                <div id="days" class="space-y-3"></div>
             </form>
             <form id="test-psid-form">
                 <p class="text-xs text-gray-600 mb-1">Test PSID ng page (ang sarili mong account sa Botcake customers ng page): dito napupunta ang "Send test".</p>
@@ -224,7 +232,7 @@
                 el('td', {class: 'px-2 py-1 font-mono text-xs whitespace-nowrap', text: r.waybill}),
                 el('td', {class: 'px-2 py-1 whitespace-nowrap text-xs', text: r.jnt || ''}),
                 el('td', {class: 'px-2 py-1 font-mono text-xs', text: r.psid_last4 ? '…' + r.psid_last4 : '—'}),
-                el('td', {class: 'px-2 py-1 max-w-[22rem] truncate', title: r.text || '', text: r.first_line}),
+                el('td', {class: 'px-2 py-1 max-w-[22rem] truncate', title: r.text || ''}, [el('span', {class: 'text-xs text-gray-500 mr-1', text: r.step}), r.first_line]),
                 el('td', {class: 'px-2 py-1', title: r.reason || ''}, badge(r.status)),
                 el('td', {class: 'px-2 py-1 text-right', text: String(r.attempts || 0)}),
                 el('td', {class: 'px-2 py-1 text-right', text: r.http ? String(r.http) : ''}),
@@ -289,7 +297,7 @@
             actions,
             el('div', {class: 'text-xs text-gray-500', text: 'Buong text:'}),
             el('pre', {class: 'cb bg-gray-50 border rounded p-2 mb-2', text: m.text || ''}),
-            kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Uri', m.kind), kv('J&T', m.jnt_status),
+            kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Uri', m.kind), kv('Araw', m.step), kv('J&T', m.jnt_status),
             kv('Subok', m.attempts), kv('Huling HTTP', m.last_http), kv('Ginawa', m.created_at + ' · ' + m.created_by),
             kv('Na-queue', m.queued_at), kv('Naipadala', m.sent_at ? m.sent_at + ' · ' + (m.sent_by || '') : null),
             kv('Test ng', m.test_of), kv('Order id', m.macro_output_id),
@@ -357,20 +365,68 @@
     document.getElementById('prev').addEventListener('click', () => { page = Math.max(1, page - 1); load(); });
     document.getElementById('next').addEventListener('click', () => { page++; load(); });
 
-    // ---- text ng mensahe ----
+    // ---- mga araw at bersyon ng mensahe ----
 
-    const templates = @json($templates);
-    const tf = document.getElementById('template-form');
-    tf.kind.addEventListener('change', () => { tf.template.value = templates[tf.kind.value] || ''; });
-    tf.addEventListener('submit', async e => {
+    const sequences = @json($sequences);
+    const SAMPLE = {name: 'Juan Dela Cruz', item: 'Sample Item x2', cod: '499', waybill: 'JT0000000001', page: @json($pages[0] ?? 'Sample Page'), rider: '', rider_phone: ''};
+    const sf = document.getElementById('sequence-form');
+    let days = [];
+
+    // Kapareho ng Chatblast::render(): ang placeholder ay pinapalitan; walang laman ang wala.
+    const render = text => text.replace(/\{(name|item|cod|waybill|page|rider|rider_phone)\}/g, (m, k) => String(SAMPLE[k] || '')).trim();
+    const usesRider = text => text.includes('{rider}') || text.includes('{rider_phone}');
+
+    function drawDays() {
+        document.getElementById('days').replaceChildren(...days.map((versions, d) => {
+            const head = el('div', {class: 'flex items-center gap-2 mb-1'}, [el('span', {class: 'font-medium', text: 'Araw ' + (d + 1)})]);
+            const addV = el('button', {type: 'button', class: 'text-xs text-blue-700 hover:underline', text: '+ bersyon'});
+            addV.addEventListener('click', () => { versions.push(''); drawDays(); });
+            head.append(addV);
+            if (days.length > 1) {
+                const rmD = el('button', {type: 'button', class: 'text-xs text-red-600 hover:underline', text: 'alisin ang araw'});
+                rmD.addEventListener('click', () => { days.splice(d, 1); drawDays(); });
+                head.append(rmD);
+            }
+            const allRider = versions.every(usesRider);
+            return el('div', {class: 'border rounded p-2'}, [head, ...versions.map((text, v) => {
+                const area = el('textarea', {rows: '3', maxlength: '1000', class: 'w-full border rounded px-2 py-1 font-mono text-sm', 'aria-label': 'Araw ' + (d + 1) + ' bersyon ' + String.fromCharCode(65 + v)});
+                area.value = text;
+                const preview = el('div', {class: 'text-xs text-gray-600 bg-gray-50 rounded px-2 py-1 whitespace-pre-wrap'});
+                const show = () => {
+                    preview.textContent = 'Preview: ' + (render(area.value) || '(walang laman)')
+                        + (usesRider(area.value) ? (allRider ? ' (walang rider info: magiging walang config)' : ' (walang rider info: ibang bersyon ang gagamitin)') : '');
+                };
+                area.addEventListener('input', () => { versions[v] = area.value; show(); });
+                show();
+                const row = [el('span', {class: 'text-xs font-medium text-gray-700', text: 'Bersyon ' + String.fromCharCode(65 + v)})];
+                if (versions.length > 1) {
+                    const rmV = el('button', {type: 'button', class: 'ml-2 text-xs text-red-600 hover:underline', text: 'alisin'});
+                    rmV.addEventListener('click', () => { versions.splice(v, 1); drawDays(); });
+                    row.push(rmV);
+                }
+                return el('div', {class: 'mb-2'}, [el('div', {}, row), area, preview]);
+            })]);
+        }));
+    }
+
+    function loadKind() {
+        days = JSON.parse(JSON.stringify(sequences[sf.kind.value] || [['']]));
+        drawDays();
+    }
+
+    sf.kind.addEventListener('change', loadKind);
+    document.getElementById('add-day').addEventListener('click', () => { days.push(['']); drawDays(); });
+    sf.addEventListener('submit', async e => {
         e.preventDefault();
         try {
-            const d = await post(url.templateUrl, {kind: tf.kind.value, template: tf.template.value});
-            templates[tf.kind.value] = d.template;
-            notice('Na-save ang text; ' + fmt(d.changed) + ' mensahe ang nabago.', 'text-green-700');
+            const d = await post(url.sequenceUrl, {kind: sf.kind.value, days});
+            sequences[sf.kind.value] = d.days;
+            loadKind();
+            notice('Na-save ang mga araw; ' + fmt(d.changed) + ' mensahe ang nabago.', 'text-green-700');
             load();
         } catch (err) { notice(err.message, 'text-red-600'); }
     });
+    loadKind();
 
     // ---- Test PSID ----
 

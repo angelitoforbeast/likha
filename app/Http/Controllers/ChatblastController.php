@@ -52,12 +52,13 @@ class ChatblastController extends Controller
     {
         $this->checkAccess();
 
-        $templates = [];
-        foreach (array_keys(Chatblast::KINDS) as $kind) $templates[$kind] = $this->chatblast->template($kind);
+        $sequences = [];
+        foreach (array_keys(Chatblast::KINDS) as $kind) $sequences[$kind] = $this->chatblast->sequence($kind);
 
         return view('chatblast.index', [
             'kinds'     => array_keys(Chatblast::KINDS),
-            'templates' => $templates,
+            'sequences' => $sequences,
+            'placeholders' => Chatblast::PLACEHOLDERS,
             'statuses'  => self::STATUSES,
             'pages'     => BotcakeMessage::query()->distinct()->orderBy('page_name')->pluck('page_name')->all(),
             'today'     => Carbon::now('Asia/Manila')->toDateString(),
@@ -79,7 +80,7 @@ class ChatblastController extends Controller
         $page   = max(1, (int) $this->str($request, 'p', 6));
 
         $rows = $this->filtered($request, true)->orderByDesc('id')->offset(($page - 1) * self::PER_PAGE)->limit(self::PER_PAGE)
-            ->get(['id', 'created_at', 'page_name', 'kind', 'fb_name', 'waybill', 'jnt_status', 'psid', 'text', 'status', 'reason', 'attempts', 'last_http', 'sent_at', 'is_test']);
+            ->get(['id', 'created_at', 'page_name', 'kind', 'day', 'version', 'fb_name', 'waybill', 'jnt_status', 'psid', 'text', 'status', 'reason', 'attempts', 'last_http', 'sent_at', 'is_test']);
         $jnt = $rows->isEmpty() ? collect() : DB::table('from_jnts')->whereIn('waybill_number', $rows->pluck('waybill')->unique()->values())
             ->selectRaw('waybill_number, MAX(status) AS status')->groupBy('waybill_number')->pluck('status', 'waybill_number');
 
@@ -103,7 +104,8 @@ class ChatblastController extends Controller
         $at = fn ($t) => $t?->timezone('Asia/Manila')->format('Y-m-d H:i:s');
 
         return response()->json([
-            'id' => $m->id, 'page' => $m->page_name, 'kind' => $m->kind, 'waybill' => $m->waybill, 'customer' => $m->fb_name,
+            'id' => $m->id, 'page' => $m->page_name, 'kind' => $m->kind, 'day' => $m->day, 'version' => $m->version,
+            'step' => self::step($m), 'waybill' => $m->waybill, 'customer' => $m->fb_name,
             'psid' => $m->psid, 'text' => $m->text, 'vars' => $m->vars, 'jnt_status' => $m->jnt_status, 'status' => $m->status,
             'reason' => $m->reason, 'attempts' => $m->attempts, 'last_http' => $m->last_http, 'steps' => $m->steps ?? [],
             'is_test' => $m->is_test, 'test_of' => $m->test_of, 'macro_output_id' => $m->macro_output_id,
@@ -113,14 +115,14 @@ class ChatblastController extends Controller
         ]);
     }
 
-    /** "Kunin ang mga bago". */
+    /** "Kunin ang mga bago": para sa uri ng filter, o lahat ng uri kapag walang napili. */
     public function build(Request $request)
     {
         $this->checkAccess();
-        $kind = $this->kind($request);
-        if ($kind === null) return response()->json(['error' => 'Hindi kilalang uri.'], 422);
+        $kind = $this->str($request, 'kind', 30);
+        if ($kind !== '' && !isset(Chatblast::KINDS[$kind])) return response()->json(['error' => 'Hindi kilalang uri.'], 422);
 
-        return response()->json(['result' => $this->chatblast->build($kind, Auth::id())]);
+        return response()->json(['result' => $this->chatblast->build($kind ?: null, Auth::id())]);
     }
 
     /** "Send" / "Send selected": ang mga napiling row na maaaring ipadala. */
@@ -176,16 +178,18 @@ class ChatblastController extends Controller
         return response()->json(['id' => $test->id, 'status' => $test->status]);
     }
 
-    public function saveTemplate(Request $request)
+    /** I-save ang mga araw ng uri (bawat araw: mga bersyon ng text). Binubuo ulit ang text ng hindi pa naipapadala. */
+    public function saveSequence(Request $request)
     {
         $this->checkAccess();
-        $kind = $this->kind($request);
-        $template = $this->str($request, 'template', Chatblast::MAX_TEMPLATE + 1);
-        if ($kind === null) return response()->json(['error' => 'Hindi kilalang uri.'], 422);
-        if ($template === '') return response()->json(['error' => 'Kailangan ang text.'], 422);
-        if (mb_strlen($template) > Chatblast::MAX_TEMPLATE) return response()->json(['error' => 'Hanggang ' . Chatblast::MAX_TEMPLATE . ' na character lang.'], 422);
+        $kind = $this->str($request, 'kind', 30);
+        try {
+            $changed = $this->chatblast->setSequence($kind, $request->input('days'));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
 
-        return response()->json(['changed' => $this->chatblast->setTemplate($kind, $template), 'template' => $template]);
+        return response()->json(['changed' => $changed, 'days' => $this->chatblast->sequence($kind)]);
     }
 
     /** Hanapin ang sariling account sa mga Botcake customer ng page (pangalan; huling 4 lang ng PSID ang ibinabalik). */
@@ -221,12 +225,6 @@ class ChatblastController extends Controller
     {
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         return BotcakePsid::where('source', 'api')->whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)]);
-    }
-
-    private function kind(Request $request): ?string
-    {
-        $kind = $this->str($request, 'kind', 30) ?: 'delivering';
-        return isset(Chatblast::KINDS[$kind]) ? $kind : null;
     }
 
     /** @param array<int, string> $statuses */
@@ -273,10 +271,17 @@ class ChatblastController extends Controller
         ];
     }
 
+    /** Hal. "Araw 3 · B" (o "Araw 3" kapag walang bersyon, hal. kulang sa rider info). */
+    private static function step(BotcakeMessage $m): string
+    {
+        return 'Araw ' . $m->day . ($m->version ? ' · ' . $m->version : '');
+    }
+
     private function row(BotcakeMessage $m, ?string $jnt): array
     {
         return [
             'id' => $m->id, 'at' => $m->created_at?->timezone('Asia/Manila')->format('m-d H:i'), 'page' => $m->page_name, 'kind' => $m->kind,
+            'day' => $m->day, 'version' => $m->version, 'step' => self::step($m),
             'customer' => $m->fb_name, 'waybill' => $m->waybill, 'jnt' => $jnt ?? $m->jnt_status,
             'psid_last4' => $m->psid ? mb_substr($m->psid, -4) : null, 'first_line' => strtok((string) $m->text, "\n") ?: '',
             'text' => $m->text, 'status' => $m->status, 'reason' => $m->reason, 'attempts' => $m->attempts, 'http' => $m->last_http,

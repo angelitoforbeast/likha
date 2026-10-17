@@ -26,7 +26,7 @@ class ChatblastSender
     private const PAUSED = 'chatblast.paused';
     private const BODY_MAX = 1500;
 
-    public function __construct(private PageSettings $settings, private BotcakeCustomerSync $sync)
+    public function __construct(private PageSettings $settings, private BotcakeCustomerSync $sync, private Chatblast $chatblast)
     {
     }
 
@@ -141,6 +141,12 @@ class ChatblastSender
         $missing = array_keys(array_filter($cfg, fn ($v) => $v === ''));
         if ($missing) {
             $this->finish($m, 'no_config', 'walang ' . implode(', ', $missing), null, []);
+            return;
+        }
+
+        // Ang waybill ay dapat nasa status pa rin ng uri (hal. hindi na "In Transit" kapag Delivered na).
+        if (!$m->is_test && isset(Chatblast::KINDS[$m->kind]) && ($stale = $this->chatblast->staleFor($m->kind, $m->waybill)) !== null) {
+            $this->finish($m, 'skipped', $stale, null, []);
             return;
         }
 
