@@ -53,8 +53,13 @@ class CardMatcher
         // 1b. Grupong kulang ang isang panig: ang parehong amount mula sa susunod na araw, tapos sa nakaraan
         //     (hal. Meta na may petsang isang araw pagkatapos ng sale date). Hindi kinukuha ang kailangan ng
         //     sariling one-to-one ng araw na iyon: may reserba para sa bawat bukas na linya / record doon.
-        $openOn = fn (string $d, int $cents) => array_values(array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === null && $l['sale_date'] === $d && self::cents($l['amount']) === $cents));
-        $freeOn = fn (string $d, int $cents) => array_values(array_filter($meta, fn ($m) => !isset($used[$m['id']]) && $m['date'] === $d && self::cents($m['amount']) === $cents));
+        // By reference: bawat grupo ay dapat makakita ng kinuha ng naunang grupo (ang `fn` ay kumokopya ng $out/$used).
+        $openOn = function (string $d, int $cents) use (&$out, $charges) {
+            return array_values(array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === null && $l['sale_date'] === $d && self::cents($l['amount']) === $cents));
+        };
+        $freeOn = function (string $d, int $cents) use (&$used, $meta) {
+            return array_values(array_filter($meta, fn ($m) => !isset($used[$m['id']]) && $m['date'] === $d && self::cents($m['amount']) === $cents));
+        };
         foreach ($groups as $key => &$g) {
             $cents = self::cents($g['amount']);
             foreach ([1, -1] as $off) {
