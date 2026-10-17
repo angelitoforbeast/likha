@@ -158,3 +158,105 @@ Not done. There is no running app with the server database, and no J&T access he
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories. The cases above come from its Tests list.
+
+## Amendment 1
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. Never send a stale rider. `{rider}` / `{rider_phone}` come only from this build's or this send's J&T answer. A missing or unreadable rider counts as missing, and the spec 046 fallback applies.
+2. The web build finishes well inside nginx's 60 s:
+   - 20 s of tracking in total, including a call in flight, with 10 s J&T calls;
+   - `chatblast:build` keeps 60 s;
+   - one build at a time.
+3. `refresh()` leaves `from_jnts` rows that are already Delivered or Returned alone.
+4. A chunk of one waybill gets no single retry. Send-time tracking is one call with a 10 s timeout.
+5. Tracking errors mark the run `failed` with `last_error`.
+6. Runs are recorded only for builds (and the manual tool), not per send, and /jnt/track-sync shows the latest build run.
+7. Tracking order: least recently tracked first, delivering before in_transit, and waybills of rows without a PSID or settings are skipped.
+8. The chatblast job timeout goes back to at most 300 s.
+
+Commits:
+- `fix: chatblast takes the rider only from this build's or this send's J&T answer, the web build tracks for 20 s with 10 s calls and one build runs at a time, finished from_jnts rows are left alone, one waybill is one call, tracking errors mark the run failed, sends record no run, the least recently tracked go first, and the send job is back to 300 s (spec 047 amendment 1)`
+- `fix: a send-time track with no answer drops any earlier rider, a day with no usable version without the rider becomes no_config instead of keeping the old text, and from_jnts copies with no status are updated (spec 047 amendment 1)`
+- `docs: accepted review findings for spec 047 amendment 1 in TODO`
+- `docs: result for spec 047 amendment 1`
+
+### What changed
+
+- **The rider comes only from a fresh answer.**
+  - **`JntTracker::refresh()`** now also returns `riders` (waybill → [name, phone]), parsed from that answer's latest On Delivery scan by the mapper.
+  - **The build** fills `vars.rider` / `rider_phone` only from its own answer. A waybill that was not tracked or not answered has no rider. The stored `from_jnts.rider_*` is no longer read for messages.
+  - **At send:** when the row's tracking is older than 30 minutes, the waybill is tracked again (one call).
+    - **With an answer:** the rider comes from it. Unreadable means no rider.
+    - **No answer, or no J&T config:** any rider the row had is dropped.
+    - **Then** the version is picked again.
+    - **If no version of the day works without the rider:** the row becomes `no_config` "walang rider info" with no text. The old text with the old rider is never sent.
+- **The web build is bounded.**
+  - **Budget:** the controller passes a 20 s budget (`ChatblastController::WEB_TRACK_BUDGET`), and `chatblast:build` keeps 60 s.
+  - **Calls:** J&T calls have a 10 s HTTP timeout (`JntTracker::CALL_TIMEOUT`, through the new `JntClient::withTimeout()`).
+  - **Cutoff:** no new call starts after budget − 10 s. On the web that is 10 s, not the "~15 s" the amendment mentions, so the call still in flight ends inside the 20 s total.
+  - **Request limit:** the request sets `set_time_limit(55)`, inside nginx's 60 s.
+- **One build at a time:** a cache lock `chatblast-build` (300 s). A second press gets 409 "May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito."; the command prints the same and exits with failure.
+- **Finished rows:** `refresh()` writes only to `from_jnts` rows whose status is not Delivered or Returned. Rows with a NULL status are included. The answer is still used for the message decision.
+- **Single waybill:** a one-waybill chunk is one call, with no single retry, and send-time tracking is one call.
+- **Errors:** an error during tracking is reported, the run is marked `failed` with `last_error`, and what was reached is returned.
+- **Runs:** only builds record a run (`refresh(..., record: true)`); sends pass `record: false`. /jnt/track-sync's "Huling awtomatikong track" therefore shows the latest build.
+- **Order:** per kind (delivering first, then in_transit):
+  - first the waybills never tracked: new candidates, and unsent rows without `tracked_at`;
+  - then unsent rows (`ready`, `failed`, `field_mismatch`) by oldest `tracked_at`;
+  - candidates whose order has no PSID are not tracked, and rows in `no_psid` / `no_config` are not tracked.
+- **Job timeout:** `SendChatblastMessage::$timeout` is back to **300 s**. One J&T call (10 s) plus the send steps (about 270 s) fits. The worker stays at `--timeout=320`, as in spec 046. The earlier release step "raise to 350" is withdrawn.
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| Yesterday's stored rider + today's unreadable On Delivery: no old rider at build; at send with no answer, still no old rider | `ChatblastTrackTest::test_a_stale_stored_rider_is_never_used_when_the_fresh_answer_has_none` | pass |
+| Rider from yesterday's build, no answer at send: with a version without rider → sent with it; with only rider versions → `no_config` "walang rider info", nothing sent (2 rows) | `…::test_yesterdays_rider_is_dropped_when_the_send_time_track_gets_no_answer` | pass |
+| Web build: 6 s calls → 2 calls, then none after 10 s; a second press while a build holds the lock → 409 | `…::test_the_web_build_tracks_for_at_most_20_seconds_and_one_build_runs_at_a_time` | pass |
+| A Returned copy of the waybill is not rewritten | `…::test_rows_already_delivered_or_returned_are_not_rewritten` | pass |
+| A copy with a NULL status is updated | `…::test_a_from_jnts_copy_with_no_status_is_updated_too` | pass |
+| One waybill = one call (no retry); a send records no run | `…::test_a_single_waybill_is_one_call_and_a_send_does_not_record_a_run` | pass |
+| Order: oldest `tracked_at` first, then the next, then in_transit; the order without a PSID is not tracked | `…::test_the_least_recently_tracked_go_first_and_rows_without_psid_are_not_tracked` | pass |
+| Earlier 047 tests (budget at 60 s for the command, single retries at the budget, failed attempts, manual job, no config) | the rest of `ChatblastTrackTest` | pass |
+
+Red runs:
+- **First run:**
+  - "hindi ang rider kahapon";
+  - "walang bagong tawag pagkalipas ng 10 s…";
+  - `RecordsNotFoundException` (the Returned copy was rewritten);
+  - "walang isa-isang ulit para sa iisang waybill";
+  - "pinakalumang na-track muna…".
+- **Regression caught:** two spec 046 safety tests failed when a send re-picked text with nothing to change. Re-picking now happens only when the rider actually changes.
+- **Loop 2:** the two "yesterday's rider" rows and the NULL-status copy failed on "two arrays are identical" / "null is identical to 'Juan D. Cruz'".
+- **No test:** the try/catch that marks a run `failed` was checked by reading the code only. Errors from J&T calls are already caught inside `trackSet`, so only an unexpected error (such as a database error) reaches it.
+
+Full suite after amendment 1: `Tests: 1465, Assertions: 17280, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`. `php -l` passes on the changed PHP files.
+
+### Review (amendment 1)
+
+- **Two scoped adversarial re-checks** (two fix loops).
+- **Confirmed:**
+  - the 20 s web budget (at most about 20.5 s of tracking with the rate sleep);
+  - the lock and its 409;
+  - finished rows left alone;
+  - the single call;
+  - failed runs;
+  - no runs per send;
+  - the order;
+  - the 300 s job timeout.
+- **Majors fixed in loop 2:**
+  - a row built on an earlier day kept that build's rider when the send-time track got no answer;
+  - when every version of the day needs the rider, clearing it left the old text with the old rider. Such a row is now `no_config`.
+- **Minor fixed:** `from_jnts` copies with a NULL status were left out by `NOT IN`.
+- **Accepted in `TODO.md`:**
+  - the ordering query runs the candidates query with its subselects once per kind;
+  - a build does not refresh the vars of rows it built earlier, which are refreshed at send instead.
+  - The old item about the web build's 60 s no longer applies and was removed.
+
+### After release, updated by amendment 1
+
+- **No migration.**
+- **`php artisan queue:restart`.**
+- **The `chatblast` worker stays at `--timeout=320`:** the job is 300 s again. This withdraws step 3 of the release list above, "raise to 350".
+- **No nginx change:** the web build tracks for at most about 20 s, inside the default 60 s. Large lists go through `chatblast:build` (60 s of tracking).
