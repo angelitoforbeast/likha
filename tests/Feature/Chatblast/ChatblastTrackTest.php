@@ -164,6 +164,22 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->assertSame(20, json_decode(DB::table('jnt_track_sync_runs')->whereNull('date_from')->value('result_sample'), true)['pending']);
     }
 
+    public function test_the_single_retries_of_dropped_waybills_also_stop_at_the_budget(): void
+    {
+        foreach (range(1, 20) as $i) {
+            $wb = sprintf('JT%010d', $i);
+            $this->shipped('Page Uno', 'Buyer ' . $i, $wb, 'psid-' . $i);
+            $this->scans[$wb] = [$this->onDelivery()];
+        }
+        $this->drop = 15;          // 15 ang nalaglag sa batch
+        $this->secondsPerCall = 35; // bawat tawag ay 35 s
+
+        app(Chatblast::class)->build('delivering');
+
+        $this->assertCount(2, $this->jntCalls(), 'ang batch at isang isa-isang subok lang: lampas na sa 60 s');
+        $this->assertSame(14, json_decode(DB::table('jnt_track_sync_runs')->whereNull('date_from')->value('result_sample'), true)['pending'], '5 sa batch at 1 isa-isa ang nasagot; ang 14 na hindi nasubukan: pending, hindi "walang sagot"');
+    }
+
     public function test_a_delivering_row_is_tracked_again_before_sending_when_its_data_is_older_than_30_minutes(): void
     {
         app(Chatblast::class)->setSequence('delivering', [['Rider {rider} {rider_phone}', 'Walang rider {name}']]);

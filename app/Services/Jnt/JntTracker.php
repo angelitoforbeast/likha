@@ -42,10 +42,11 @@ class JntTracker
 
     /**
      * Track ng isang set ng waybill: isang tawag para sa hanggang 20, saka isa-isa ang hindi bumalik.
+     * $deadline (orasan ng BotcakeClock): wala nang isa-isang subok pagkalipas nito.
      * @param  string[] $waybills
      * @return array<string, array<int, array<string, mixed>>> waybill => details (pinakabago muna), ang may laman lang
      */
-    public function trackSet(JntClient $client, array $waybills): array
+    public function trackSet(JntClient $client, array $waybills, ?float $deadline = null): array
     {
         $found = [];
         try {
@@ -55,6 +56,7 @@ class JntTracker
         }
 
         foreach (array_values(array_diff($waybills, array_keys($found))) as $wb) {
+            if ($deadline !== null && $this->clock->now() >= $deadline) break; // ubos na ang oras: sa susunod na lang
             try {
                 $p = JntScanStatusMapper::parseResponse($this->call($client, $wb));
                 if (!empty($p[$wb])) $found[$wb] = $p[$wb];
@@ -130,11 +132,15 @@ class JntTracker
                 array_push($out['pending'], ...$chunk); // susunod na kuha o bago ipadala
                 continue;
             }
-            $found = $this->trackSet($client, $chunk);
+            $found = $this->trackSet($client, $chunk, $started + $budget);
             $rows  = DB::table('from_jnts')->whereIn('waybill_number', $chunk)
                 ->get(['id', 'waybill_number', 'status', 'status_logs', 'rider_name', 'rider_phone'])->groupBy('waybill_number');
 
             foreach ($chunk as $wb) {
+                if (empty($found[$wb]) && $this->clock->now() >= $started + $budget) {
+                    $out['pending'][] = $wb; // hindi na nasubukan nang isa-isa: ubos na ang oras
+                    continue;
+                }
                 $out['checked']++;
                 $out['tracked'][] = $wb;
                 if (empty($found[$wb])) { $out['errors']++; continue; } // walang sagot ang J&T

@@ -140,6 +140,7 @@ class ChatblastController extends Controller
         $this->checkAccess();
         $kind = $this->str($request, 'kind', 30);
         if ($kind !== '' && !isset(Chatblast::KINDS[$kind])) return response()->json(['error' => 'Hindi kilalang uri.'], 422);
+        @set_time_limit(180); // hanggang 60 s ng J&T tracking, at ang huling tawag (hanggang 30 s), at ang pagbuo
 
         return response()->json(['result' => $this->chatblast->build($kind ?: null, Auth::id())]);
     }
