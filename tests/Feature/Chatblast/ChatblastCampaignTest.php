@@ -93,7 +93,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertTrue($c->mode_changed_at->eq(now()));
         $this->assertEquals(['what' => 'mode', 'old' => 'manual', 'new' => 'auto', 'by' => auth()->id()], array_intersect_key(collect($c->log)->last(), array_flip(['what', 'old', 'new', 'by'])));
 
-        $queued = $this->msg($c, ['status' => 'queued']);
+        $queued = $this->msg($c, ['status' => 'queued', 'dedupe_key' => 'WB-Q|' . $c->kind . '|1']);
         $sent   = $this->msg($c, ['status' => 'sent', 'sent_at' => now()]);
         $this->postJson('/chatblast/campaigns/' . $c->id, ['active' => false])->assertOk();
         $this->assertFalse($c->fresh()->active);
@@ -101,6 +101,11 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertSame('sent', BotcakeMessage::find($sent)->status);
         $this->assertSame(0, app(ChatblastSender::class)->queue([$queued], 1), 'hindi mai-queue ang row ng naka-off na campaign');
         $this->postJson('/chatblast/build', ['kind' => $c->kind])->assertStatus(422);
+        $this->assertNull(BotcakeMessage::find($queued)->dedupe_key, 'binitawan ang key: ang pag-on ay gagawa ng bagong row');
+        $this->travel(2)->hours();
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['active' => true])->assertOk();
+        $this->assertTrue($c->fresh()->auto_ran_at->eq(now()), 'ang lumipas na oras habang naka-off ay hindi hinahabol');
+        $this->postJson('/chatblast/campaigns/' . $c->id, ['active' => false])->assertOk();
 
         // Ang sariling status ng campaign na wala na sa from_jnts ay puwede pa ring i-save.
         ChatblastCampaign::whereKey($c->id)->update(['statuses' => json_encode(['Lumang status'])]);
@@ -137,6 +142,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->postJson('/chatblast/campaigns/' . $c->id . '/version', ['day' => 2])->assertOk();
         $this->assertSame([['Araw isa'], ['Araw dalawa', 'Araw dalawa']], $c->fresh()->days);
 
+        $this->postJson('/chatblast/campaigns/' . $c->id . '/remove', ['day' => 2, 'version' => 'A', 'old' => 'iba na'])->assertStatus(422);
         $this->postJson('/chatblast/campaigns/' . $c->id . '/remove', ['day' => 2, 'version' => 'A'])->assertOk();
         $this->assertSame([['Araw isa'], ['Araw dalawa']], $c->fresh()->days);
         $this->postJson('/chatblast/campaigns/' . $c->id . '/remove', ['day' => 1, 'version' => 'A'])->assertOk();

@@ -484,13 +484,14 @@ class Chatblast
     }
 
     /**
-     * Ang status na wala sa PROGRESS (hal. Problematic) ay pagkatapos ng In Transit at bago ang tapos na: ang lumang
-     * kopyang "In Transit" ay hindi nananaig dito. Walang status: pinakamababa.
+     * Ang status na wala sa PROGRESS (hal. Problematic, o anumang isinulat ng upload) ay kapantay ng In Transit: sa
+     * pagitan nila, ang pinakabagong kopya ang nananaig (hindi ang lumang "In Transit", at hindi rin ang lumang status na
+     * mas maaga pa). Walang status: pinakamababa.
      */
     private static function rank(?string $status): int
     {
         if (trim((string) $status) === '') return 0;
-        return self::PROGRESS[$status] ?? self::PROGRESS['Delivering'];
+        return self::PROGRESS[$status] ?? self::PROGRESS['In Transit'];
     }
 
     /** @return array<string, array<int, array{status:?string, rts_reason:?string}>> waybill => mga J&T row, ayon sa id */

@@ -122,5 +122,12 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
         app(Chatblast::class)->build(null, 1);
         $this->assertSame(['WB-1'], $this->rows('c-test')->pluck('waybill')->all());
         $this->assertSame([], $this->rows('in_transit')->pluck('waybill')->all(), 'hindi na In Transit ang waybill');
+
+        // Kabaligtaran: ang lumang kopya ay ibang status at ang bago ay In Transit: In Transit ang totoo.
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'Problematic');
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB-2', 'status' => 'In Transit']);
+        app(Chatblast::class)->build(null, 1);
+        $this->assertSame(['WB-2'], $this->rows('in_transit')->pluck('waybill')->all());
+        $this->assertSame(['WB-1'], $this->rows('c-test')->pluck('waybill')->all());
     }
 }
