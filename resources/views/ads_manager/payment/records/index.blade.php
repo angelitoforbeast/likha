@@ -20,6 +20,12 @@
     }
   </style>
 
+  @if ($isCEO)
+    <div class="mb-3 text-right">
+      <a href="{{ route('ads_payment.reconcile.index') }}" class="text-sm text-blue-700 hover:underline">Card check: itugma sa card statement →</a>
+    </div>
+  @endif
+
   <div class="bg-white p-4 rounded shadow mb-4">
     <form method="GET" class="grid md:grid-cols-12 gap-3 items-end">
       {{-- Date range --}}
