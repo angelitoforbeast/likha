@@ -514,3 +514,6 @@ Accepted, not fixed:
 - **The PDF and screenshot size limits depend on the server** (`upload_max_filesize`, `post_max_size`, and the gateway timeout for a slow vision read, up to 90 s). Reason: server config, outside the code; to check on deploy.
 - **The screenshot itself goes to OpenAI with the full card number in the image.** Reason: the brief chose the vision model for screenshots; only the parsed, masked lines are stored. Use a PDF, or crop the number out, to avoid it.
 - **Missing tests (minor):** none of the browser behaviour is automated (the Alpine edit serializer, the status filter buttons); the vision answer with more than 500 lines is covered, an answer with a null `content` too.
+- **(amendment 1) A single day with more than 150 rows is never split across pages.** Reason: a page holds whole days so its total row stays whole; today's statements have far fewer FACEBK lines a day.
+- **(amendment 1) A Meta record outside the statement period that matches nothing is not shown.** Reason: it belongs to another statement's period; the spec counts "wala sa card" only inside the range.
+- **(amendment 1) The browser-only parts are not automated:** the unsaved-edits warning on the edit form's page links, and how the side-by-side columns look at phone width. Reason: no browser in this session; the rendered HTML is tested.
