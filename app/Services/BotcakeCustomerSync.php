@@ -7,6 +7,7 @@ use App\Models\BotcakePsidImportRun;
 use App\Support\BotcakeClock;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -17,7 +18,13 @@ use Illuminate\Support\Facades\Log;
  * Window: lahat ng sync ay humihinto sa unang batch na may customer na naka-subscribe bago ang huling N araw
  * (services.botcake.sync_max_age_days, default 45; stop reason age). Pinakabagong subscriber muna ang listahan, kaya
  * mas luma na ang lahat ng kasunod. Ang inactive ay para lang sa mga naka-subscribe sa loob ng window.
- * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason.
+ * Window read (walang cap at walang known-batch stop): kapag ang page ay wala pang run na umabot sa age o end, kapag cap
+ * ang huling run, o kapag ang huling run ay window read na hindi natapos (oras, error, o pinatay): ang huli ay itinutuloy
+ * mula sa naabot nitong batch, minus RESUME_OVERLAP (kapag may nawala sa unahan, umaakyat ang listahan at malalaktawan sana
+ * ang ilan; ang bagong subscriber naman ay nagtutulak pababa, kaya inuulit lang). Humihinto ito pagkatapos ng
+ * WINDOW_SECONDS (stop reason time). Dalawang sunod na window read na walang nabasa mula sa parehong simula: mula batch 1
+ * ulit, para hindi maipit sa batch na laging pumapalya.
+ * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason, read_kind at start_batch.
  */
 class BotcakeCustomerSync
 {
@@ -25,6 +32,10 @@ class BotcakeCustomerSync
     public const MAX_BATCHES = 20000; // pananggalang ng --full kung paulit-ulit ang sagot ng API
     public const INACTIVE_DAYS = 30;
     public const LOCK_TTL = 2 * 3600; // kada page; ang run na pinatay (hindi nakapag-release) ay hindi humaharang nang higit dito
+    // Window read: titigil (time) pagkatapos nito. Sinusuri sa pagitan ng mga batch; ang isang batch ay hanggang ~5 min
+    // (4 na subok × 30 s + backoff at Retry-After), saka ang matching: kasya pa rin sa 1800 s na --timeout ng worker.
+    public const WINDOW_SECONDS = 22 * 60;
+    public const RESUME_OVERLAP = 5;       // batch na inuulit kapag itinutuloy ang window read
 
     public function __construct(
         private PageSettings $settings,
@@ -68,12 +79,67 @@ class BotcakeCustomerSync
         Cache::forget(self::LOCK . ':since');
     }
 
+    /**
+     * Anong basa ang susunod na sync ng page, at mula saang batch. Mula sa mga naunang api run ng page.
+     * @return array{0:string, 1:int} [incremental|window|full, unang batch]
+     */
+    public function plan(string $page, bool $full = false): array
+    {
+        if ($full) return ['full', 1];
+
+        // Ang nagpapasya: ang pinakabagong run na cap / time / age / end, o window read na hindi natapos (failed, pinatay,
+        // rate limit). Ang ibang run sa pagitan (known_batch, failed na --full, error ng incremental) ay hindi binibilang,
+        // para hindi maging incremental habambuhay ang page na may customer pa sa window na hindi nababasa.
+        [$last, $before] = array_pad($this->runsOf($page)
+            ->where(fn ($w) => $w->whereIn('stop_reason', ['cap', 'time', 'age', 'end'])->orWhere('read_kind', 'window'))
+            ->orderByDesc('id')->limit(2)->get()->all(), 2, null);
+
+        if (!$last) return ['window', 1]; // hindi pa nakababasa ng buong window
+        if (in_array($last->stop_reason, ['age', 'end'], true)) return ['incremental', 1];
+        if ($last->read_kind !== 'window') return ['window', 1]; // cap ng incremental (o lumang run na walang kind)
+
+        // Hindi natapos na window read: ituloy mula sa naabot nito, minus ang overlap.
+        $start = (int) ($last->start_batch ?: 1);
+        if ((int) $last->batches_read > 0) return ['window', max(1, $start + (int) $last->batches_read - 1 - self::RESUME_OVERLAP)];
+
+        // Walang nabasa: parehong simula ulit. Dalawang sunod na walang nabasa mula sa parehong simula: mula batch 1, para
+        // hindi maipit sa batch na laging pumapalya.
+        $stuck = $before && $before->read_kind === 'window' && (int) $before->batches_read === 0
+            && (int) ($before->start_batch ?: 1) === $start && $start > 1;
+        return ['window', $stuck ? 1 : $start];
+    }
+
+    private function runsOf(string $page)
+    {
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        return BotcakePsidImportRun::where('source', 'api')->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)]);
+    }
+
+    /**
+     * Para sa failed() ng mga sync job (hal. pinatay ng worker sa timeout): ang run na "running" pa ng page ay failed na,
+     * stop reason killed, para hindi ito "tumatakbo" habambuhay sa grid. Itinutuloy pa rin ng plan() mula sa naabot nito.
+     */
+    public function markKilled(string $page): void
+    {
+        $this->runsOf($page)->where('status', 'running')->update([
+            'status' => 'failed', 'stop_reason' => 'killed', 'last_error' => 'Pinatay ang sync bago natapos (hal. timeout ng worker)',
+        ]);
+    }
+
+    /** Para sa run message at sa "Huling sync" ng grid: incremental / window / window, tuloy mula batch N / full. */
+    public static function kindLabel(?string $kind, ?int $start): ?string
+    {
+        if ($kind === 'window' && $start > 1) return 'window, tuloy mula batch ' . $start;
+        return $kind;
+    }
+
     public function syncPage(string $page, bool $full = false): BotcakePsidImportRun
     {
         $started = $this->clock->now();
+        [$kind, $start] = $this->plan($page, $full);
         $run = BotcakePsidImportRun::create([
-            'status' => 'running', 'source' => 'api', 'page_name' => $page,
-            'last_message' => $full ? 'Full sync' : 'Incremental sync',
+            'status' => 'running', 'source' => 'api', 'page_name' => $page, 'read_kind' => $kind, 'start_batch' => $start,
+            'last_message' => ucfirst(self::kindLabel($kind, $start)) . ' sync',
         ]);
 
         $pageId = $this->settings->get($page, 'botcake', 'page_id');
@@ -81,7 +147,7 @@ class BotcakeCustomerSync
         $error  = null;
         $reason = null;
         $inactive = 0;
-        $limit  = $full ? self::MAX_BATCHES : max(1, (int) config('services.botcake.sync_max_batches', 300));
+        $limit  = $kind === 'incremental' ? max(1, (int) config('services.botcake.sync_max_batches', 300)) : self::MAX_BATCHES;
         $oldest = now()->subDays(max(1, (int) config('services.botcake.sync_max_age_days', 45)));
 
         if (!$pageId || !$token) {
@@ -90,7 +156,7 @@ class BotcakeCustomerSync
         } else {
             $client = app(BotcakeClient::class); // bago kada page: sariling rate at retry
             try {
-                for ($n = 1; $reason === null; $n++) {
+                for ($n = $start; $reason === null; $n++) {
                     $batch = $client->customers($pageId, $token, $n);
                     $run->batches_read++;
                     if (!$batch) {
@@ -100,15 +166,17 @@ class BotcakeCustomerSync
 
                     $allKnown = $this->store($page, $batch, $run);
                     $run->save();
-                    if ($allKnown && !$full) $reason = 'known_batch';
+                    if ($allKnown && $kind === 'incremental') $reason = 'known_batch';
                     elseif ($this->reachesBefore($batch, $oldest)) $reason = 'age';
-                    elseif ($n >= $limit) $reason = 'cap';
+                    elseif ($kind === 'window' && $this->clock->now() - $started >= self::WINDOW_SECONDS) $reason = 'time';
+                    elseif ($run->batches_read >= $limit) $reason = 'cap';
                 }
                 $this->tokenStatus($page, 'ok');
 
-                // Buong basa hanggang dulo (o hanggang sa window) nang walang error: nakita ang lahat ng kasalukuyang
-                // customer na naka-subscribe sa loob ng window. Ang mas luma ay hindi na binabasa, kaya hindi ginagalaw.
-                if ($full && in_array($reason, ['end', 'age'], true)) {
+                // Buong basa mula batch 1 hanggang dulo (o hanggang sa window) nang walang error, sa iisang run: nakita ang
+                // lahat ng kasalukuyang customer na naka-subscribe sa loob ng window. Ang mas luma ay hindi binabasa, kaya
+                // hindi ginagalaw. Ang itinuloy o putol na basa ay hindi nakakita sa lahat: walang inactive.
+                if ($kind !== 'incremental' && $start === 1 && in_array($reason, ['end', 'age'], true)) {
                     $inactive = BotcakePsid::where('source', 'api')->where('page', $page)->where('status', 'available')
                         ->where('subscribed_at', '>=', $oldest)
                         ->where(fn ($w) => $w->whereNull('last_seen_at')->orWhere('last_seen_at', '<', now()->subDays(self::INACTIVE_DAYS)))
@@ -132,8 +200,8 @@ class BotcakeCustomerSync
             'matched_by_phone' => $m['by_phone'],
             'ambiguous'        => $m['ambiguous'],
             'no_match'         => $m['no_match'],
-            'last_message'     => sprintf('%s: %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala, %d ad id',
-                $page, $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match'], $m['ad_filled']),
+            'last_message'     => sprintf('%s: %s, %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala, %d ad id',
+                $page, self::kindLabel($kind, $start), $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match'], $m['ad_filled']),
         ])->save();
 
         Log::info('BotcakeCustomerSync: ' . $run->last_message, ['run_id' => $run->id, 'error' => $error]);

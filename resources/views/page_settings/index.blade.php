@@ -236,7 +236,8 @@
     function infoSync(r) {
         const s = r.info.last_sync;
         if (!s) return 'wala pa';
-        return [s.at, s.stop_reason || s.status].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
+        // hal. "2026-10-18 09:00 · window, tuloy mula batch 20 · time"
+        return [s.at, s.kind, s.stop_reason || s.status].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
     }
 
     function postForm(action, pageName, label, cls) {

@@ -73,7 +73,10 @@ class SyncAllBotcakeCustomersJob implements ShouldQueue
     {
         $all = app(BotcakeSyncAll::class);
         $state = $all->state($this->runId);
-        if ($state) $this->next($all, $state, false);
+        if (!$state) return;
+
+        if ($page = $state['pages'][$this->index] ?? null) app(BotcakeCustomerSync::class)->markKilled($page);
+        $this->next($all, $state, false);
     }
 
     private function next(BotcakeSyncAll $all, array $state, bool $ok): void

@@ -41,6 +41,8 @@ class BotcakePsidImportRun extends Model
         'ambiguous',
         'no_match',
         'stop_reason',
+        'read_kind',
+        'start_batch',
     ];
 
     public function events()

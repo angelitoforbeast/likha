@@ -85,6 +85,7 @@ abstract class BotcakeApiTestCase extends TestCase
             'database/migrations/2026_10_17_100300_add_ad_and_match_keys_to_botcake_psids.php',
             'database/migrations/2026_10_17_100400_add_botcake_ad_id_to_macro_output.php',
             'database/migrations/2026_10_17_110000_add_botcake_psid_index_to_macro_output.php',
+            'database/migrations/2026_10_18_100000_add_read_kind_and_start_batch_to_botcake_psid_import_runs.php',
         ]]);
 
         $this->clock = new FakeBotcakeClock();
