@@ -176,6 +176,14 @@ class CardReconcilePageTest extends TestCase
         $this->assertSame(['2026-09-20', '55.00'], [CardStatementLine::sole()->sale_date->toDateString(), CardStatementLine::sole()->amount]);
         Process::assertRan(fn ($p) => in_array('-layout', $p->command, true) && $p->timeout === 15);
 
+        // Natagalan ang pdftotext (15 s) → hindi na sinusubukan ang mas mabagal na smalot.
+        Process::fake(fn () => throw new \Illuminate\Process\Exceptions\ProcessTimedOutException(
+            new \Symfony\Component\Process\Exception\ProcessTimedOutException(new \Symfony\Component\Process\Process(['pdftotext']), \Symfony\Component\Process\Exception\ProcessTimedOutException::TYPE_GENERAL),
+            new \Illuminate\Process\FakeProcessResult(exitCode: 1),
+        ));
+        $this->upload([], $this->pdf([...self::RCBC, '09/16/26 09/17/26 FACEBK *SLOW01 DUBLIN IR 12.00']))->assertSessionHasErrors(['statement' => 'Natagalan basahin ang PDF. Hatiin ang PDF o i-upload ang screenshot.']);
+        $this->assertSame(1, CardStatement::count());
+
         // Walang pdftotext at malaking PDF → hindi na sa smalot (mabagal sa malaki), may mensahe.
         Process::fake(['*' => Process::result('', 'pdftotext: not found', 127)]);
         $big = UploadedFile::fake()->createWithContent('big.pdf', $this->pdf(self::RCBC)->get() . "\n%" . str_repeat('x', 5 * 1024 * 1024 + 10));
@@ -237,9 +245,33 @@ class CardReconcilePageTest extends TestCase
         $this->assertSame([1, 1], [CardStatement::count(), CardStatementLine::count()]);
         Http::assertSentCount(1);
 
-        $this->travel(2)->minutes();
+        $this->assertStringContainsString('Na-upload na ang file na ito kanina', $this->get("/ads_manager/payment/reconcile/{$first->id}")->getContent());
+
+        // Ibang user (ibang CEO account) → sariling statement.
+        $this->actingAs($this->user('CEO', 'ceo-b@example.test'));
         $this->upload([], $shot())->assertSessionHasNoErrors();
-        $this->assertSame(2, CardStatement::count(), 'lampas 10 minuto: bagong statement');
+        $this->assertSame(2, CardStatement::count(), 'ibang user: bagong statement');
+        $this->actingAs(\App\Models\User::where('email', 'ceo@example.test')->sole());
+
+        // Habang binabasa pa ang parehong file (double click), ang pangalawa ay hindi nagbabasa ulit.
+        $lock = \Illuminate\Support\Facades\Cache::lock('card-statement-upload:' . auth()->id() . ':' . hash('sha256', $bytes), 120);
+        $this->travel(2)->minutes();
+        $lock->get();
+        $this->upload([], $shot())->assertSessionHasErrors(['statement' => 'Binabasa pa ang file na ito. Hintayin ito, tapos buksan ang listahan.']);
+        $lock->release();
+
+        $this->upload([], $shot())->assertSessionHasNoErrors();
+        $this->assertSame(3, CardStatement::count(), 'lampas 10 minuto: bagong statement');
+        // Parehong PDF pero ibang bangko ang pinili → pinapalitan ang preview (hindi doble, hindi ang maling basa).
+        $pdf = $this->pdf(self::RCBC)->get();
+        $this->upload(['bank' => 'generic'], UploadedFile::fake()->createWithContent('s.pdf', $pdf))->assertSessionHasNoErrors();
+        $wrong = CardStatement::latest('id')->first();
+        $this->upload(['bank' => 'rcbc'], UploadedFile::fake()->createWithContent('s.pdf', $pdf))->assertSessionHasNoErrors();
+        $this->assertNull(CardStatement::find($wrong->id), 'ang lumang preview ay napalitan');
+        $this->assertSame(0, CardStatementLine::where('card_statement_id', $wrong->id)->count());
+        $this->assertSame('rcbc', CardStatement::latest('id')->first()->bank);
+        $this->assertSame(4, CardStatement::count());
+
         $this->assertNotNull($first->fresh()->file_hash);
         $this->assertSame(64, strlen($first->fresh()->file_hash), 'sha256 lang, hindi ang file');
     }

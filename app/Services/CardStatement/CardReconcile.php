@@ -5,6 +5,7 @@ namespace App\Services\CardStatement;
 use App\Models\CardStatement;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -32,16 +33,33 @@ class CardReconcile
     public function upload(UploadedFile $file, string $bank, ?string $card, ?int $userId): CardStatement
     {
         // Parehong file ng parehong user sa loob ng 10 minuto (hal. inulit pagkatapos ng 504 habang natapos pa ang
-        // basa) → ang dating statement, walang bagong basa at walang doble.
+        // basa) → ang dating statement, walang bagong basa at walang doble. Kapag ibang bangko ang pinili para sa
+        // PDF at preview pa ang dati, pinapalitan ito (ang dating basa ay malamang mali ang layout).
         $hash = hash_file('sha256', $file->getRealPath());
         $hasHash = Schema::hasColumn('card_statements', 'file_hash');
+        $isPdf = strtolower((string) $file->guessExtension()) === 'pdf';
+        $replace = null;
         if ($hasHash) {
             $earlier = CardStatement::where('file_hash', $hash)->where('uploaded_by', $userId)
                 ->where('created_at', '>=', now()->subMinutes(10))->orderByDesc('id')->first();
-            if ($earlier) return $earlier;
+            if ($earlier && (!$isPdf || $bank === 'auto' || $earlier->bank === $bank || $earlier->status !== 'preview')) return $earlier;
+            $replace = $earlier;
         }
 
-        $isPdf = strtolower((string) $file->guessExtension()) === 'pdf';
+        // Double click habang binabasa pa: ang pangalawa ay hindi nagbabasa ulit.
+        $lock = Cache::lock('card-statement-upload:' . $userId . ':' . $hash, 120);
+        if (!$lock->get()) {
+            throw new StatementReadException('Binabasa pa ang file na ito. Hintayin ito, tapos buksan ang listahan.');
+        }
+        try {
+            return $this->read($file, $bank, $card, $userId, $hash, $hasHash, $isPdf, $replace);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function read(UploadedFile $file, string $bank, ?string $card, ?int $userId, string $hash, bool $hasHash, bool $isPdf, ?CardStatement $replace): CardStatement
+    {
         if ($isPdf) {
             $text = $this->pdf->text($file->getRealPath());
             $read = $this->parser->parseText($text, $bank);
@@ -54,7 +72,11 @@ class CardReconcile
                 : 'Walang nabasang linya sa screenshot.');
         }
 
-        return DB::transaction(function () use ($read, $file, $isPdf, $card, $userId, $hash, $hasHash) {
+        return DB::transaction(function () use ($read, $file, $isPdf, $card, $userId, $hash, $hasHash, $replace) {
+            if ($replace) {
+                DB::table('card_statement_lines')->where('card_statement_id', $replace->id)->delete();
+                $replace->delete();
+            }
             [$start, $end] = CardMatcher::period($read['lines']);
             $s = CardStatement::create([
                 'card_label'    => $card,

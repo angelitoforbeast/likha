@@ -2,6 +2,7 @@
 
 namespace App\Services\CardStatement;
 
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Process;
 use Smalot\PdfParser\Parser;
 
@@ -20,6 +21,9 @@ class PdfText
         try {
             $res = Process::timeout(self::PDFTOTEXT_TIMEOUT)->run([(string) config('services.card_statement.pdftotext', 'pdftotext'), '-enc', 'UTF-8', '-layout', $path, '-']);
             if ($res->successful() && trim($res->output()) !== '') return $res->output();
+        } catch (ProcessTimedOutException $e) {
+            // Natagalan ang pdftotext: mas matagal pa ang smalot sa ganitong PDF, kaya tigil na.
+            throw new StatementReadException('Natagalan basahin ang PDF. Hatiin ang PDF o i-upload ang screenshot.');
         } catch (\Throwable $e) {
             // walang pdftotext o lumampas sa oras → smalot
         }
