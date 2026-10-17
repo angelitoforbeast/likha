@@ -282,9 +282,19 @@ class CardReconcilePageTest extends TestCase
         $this->assertLessThan(strpos($html, 'data-day-total="2026-09-11"'), strpos($html, 'data-day-total="2026-09-09"'), 'ayos ng petsa');
         foreach (['PREVIOUS STATEMENT BALANCE', 'CASH PAYMENT'] as $want) $this->assertStringContainsString($want, $html, 'ibang linya (credit / hindi ads)');
 
+        // Text mula sa statement at sa Meta ay naka-escape; Meta-lang na umuulit ay isang row na may kulay.
+        CardStatementLine::where('amount', '432.10')->update(['description' => 'FACEBK <script>alert(1)</script>']);
+        $this->meta('2026-09-12', '7.00', self::CARD, '<b>txn-x</b>');
+        $this->meta('2026-09-12', '7.00');
+        $html = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
+        $this->assertStringNotContainsString('<script>alert(1)</script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $html);
+        $this->assertStringNotContainsString('<b>txn-x</b>', $html);
+        $this->assertMatchesRegularExpression('/<tr[^>]*data-status="meta_only"[^>]*bg-amber[^>]*>(?:(?!<\/tr>).)*Wala sa card(?:(?!<\/tr>).)*2 x 7\.00 = 14\.00/su', $html);
+
         $only = $this->get("/ads_manager/payment/reconcile/{$s->id}?status=meta_only")->assertOk()->getContent();
-        $this->assertSame(1, substr_count($only, '<tr data-status="meta_only"'));
-        $this->assertSame(1, substr_count($only, '<tr data-status='), 'naka-filter: Meta lang');
+        $this->assertSame(2, substr_count($only, '<tr data-status="meta_only"'));
+        $this->assertSame(2, substr_count($only, '<tr data-status='), 'naka-filter: Meta lang');
 
         $list = $this->get('/ads_manager/payment/reconcile')->assertOk()->getContent();
         foreach ([self::CARD, '2026-09-09 – 2026-09-14', '75%', '-333.33', 'txn-future-09', 'Suriin'] as $want) {
@@ -324,6 +334,8 @@ class CardReconcilePageTest extends TestCase
         $this->assertSame(200, substr_count($html, '<tr data-line='), 'edit form: 200 linya bawat page');
         $this->assertStringContainsString('Linya 1–200 (1 / 6)', $html);
         $this->assertStringContainsString('Linya 1001–1200 (6 / 6)', $this->get("/ads_manager/payment/reconcile/{$s->id}?lp=6")->getContent());
+
+        $this->assertStringContainsString('?status=matched&amp;page=2', $this->get("/ads_manager/payment/reconcile/{$s->id}?status=matched")->getContent(), 'ang page link ay may filter pa rin');
 
         $last = $this->get("/ads_manager/payment/reconcile/{$s->id}?page=8")->assertOk()->getContent();
         $this->assertStringContainsString('2026-09-29 – 2026-09-30', $last);

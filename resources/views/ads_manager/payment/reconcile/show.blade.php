@@ -45,6 +45,7 @@
       <a href="{{ $link(['status' => 'group_off']) }}" class="px-3 py-1 rounded-full border {{ $status === 'group_off' ? 'ring-2 ring-gray-600' : '' }} bg-white text-gray-800">Hindi tally na grupo {{ $t['groups_untallied'] }}</a>
       <span class="px-3 py-1 rounded-full bg-white border {{ (float) $t['difference_total'] != 0 ? 'text-red-700 font-semibold' : 'text-gray-700' }}">Card {{ $peso($t['card_total']) }} · Meta {{ $peso($t['meta_total']) }} · Diperensya {{ $peso($t['difference_total']) }}</span>
     </div>
+    <p class="text-xs text-gray-500 -mt-2 mb-3">Ang bilang sa chips ay ng card lines at Meta records; ang umuulit na amount sa isang araw ay isang row.</p>
 
     @php
       $vdays = $view['days'];
@@ -62,7 +63,7 @@
     </div>
 
     <div class="bg-white rounded shadow overflow-x-auto mb-4">
-      <table class="min-w-full text-sm table-fixed">
+      <table class="min-w-full text-sm">
         <thead class="bg-gray-100">
           <tr>
             <th class="p-2 text-left w-[45%]" colspan="3">Card statement</th>
@@ -80,7 +81,7 @@
             <tr class="bg-gray-50"><td colspan="8" class="px-2 pt-3 pb-1 font-semibold font-mono">{{ $day['date'] ?? 'Walang petsa' }}</td></tr>
             @foreach ($day['rows'] as $row)
               <tr data-status="{{ $row['status'] }}" class="{{ $tint($row) }} border-t align-top">
-                @if ($row['group'])
+                @if ($row['group'] && $row['card'])
                   <td class="p-2 font-mono">{{ $row['card'][0]['sale_date'] }}</td>
                   <td class="p-2"><b>{{ $row['group']['card_text'] }}</b>
                     <details class="text-xs text-gray-500"><summary class="cursor-pointer">mga linya</summary>@foreach ($row['card'] as $l)<div class="font-mono">{{ $l['description'] }}</div>@endforeach</details></td>
@@ -120,7 +121,7 @@
               </tr>
             @endforeach
             <tr data-day-total="{{ $day['date'] ?? '' }}" class="border-t-2 border-gray-300 font-semibold text-xs">
-              <td class="p-2" colspan="2">Total ng araw</td>
+              <td class="p-2" colspan="2">Total ng araw{{ $status !== '' ? ' (buong araw, hindi lang ang naka-filter)' : '' }}</td>
               <td class="p-2 text-right">{{ $num($day['card_total']) }}</td>
               <td class="p-2 text-center text-gray-500">diff</td>
               <td class="p-2" colspan="2"></td>

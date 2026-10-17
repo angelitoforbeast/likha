@@ -87,6 +87,47 @@ class CardSideBySideTest extends TestCase
         ]);
     }
 
+    public function test_S_049_17_the_summary_equals_the_sum_of_the_days_and_every_record_shows_once(): void
+    {
+        $lines = [
+            $this->line('2026-10-01', '10.00'),                                         // tugma
+            $this->line('2026-10-05', '50.00'),                                         // near: Meta 10-07, labas sa period
+            $this->line('2026-10-03', '100.00'), $this->line('2026-10-03', '100.00'),  // grupo, tally
+            $this->line('2026-10-04', '20.00'),                                         // card lang
+            $this->line(null, '5.00'),                                                  // walang petsa
+        ];
+        $meta = [
+            $this->meta('2026-10-01', '10.00'), $this->meta('2026-10-07', '50.00'),
+            $this->meta('2026-10-03', '100.00'), $this->meta('2026-10-03', '100.00'),
+            $this->meta('2026-10-02', '7.00'), $this->meta('2026-10-02', '7.00'), $this->meta('2026-10-02', '7.00'), // Meta lang, umuulit
+            $this->meta('2026-10-02', '8.00'),                                          // Meta lang
+            $this->meta('2026-09-28', '99.00'),                                         // labas sa period, walang tugma: hindi kasama
+        ];
+        $result = CardMatcher::match($lines, $meta);
+        $days = SideBySide::days($result, $lines, array_column($meta, null, 'id'));
+
+        $sum = fn (string $k) => number_format(array_sum(array_map(fn ($d) => (float) $d[$k], $days)), 2, '.', '');
+        $this->assertSame(
+            [$result['totals']['card_total'], $result['totals']['meta_total'], $result['totals']['difference_total']],
+            [$sum('card_total'), $sum('meta_total'), $sum('diff')],
+            'ang summary bar = suma ng mga araw (kasama ang near match na labas sa period)'
+        );
+        $this->assertSame(['285.00', '289.00', '-4.00'], [$sum('card_total'), $sum('meta_total'), $sum('diff')]);
+
+        $rows = array_merge(...array_column($days, 'rows'));
+        $lineIds = array_merge(...array_map(fn ($r) => array_column($r['card'], 'id'), $rows));
+        $metaIds = array_merge(...array_map(fn ($r) => array_column($r['meta'], 'id'), $rows));
+        sort($lineIds);
+        sort($metaIds);
+        $this->assertSame([1, 2, 3, 4, 5, 6], $lineIds, 'bawat ads line, isang beses');
+        $this->assertSame([1, 2, 3, 4, 5, 6, 7, 8], $metaIds, 'bawat Meta record na nasa period o tumugma, isang beses');
+
+        $metaOnly = array_values(array_filter($rows, fn ($r) => $r['status'] === 'meta_only'));
+        $this->assertSame([[5, 6, 7], '3 x 7.00 = 21.00', [8], null], [
+            array_column($metaOnly[0]['meta'], 'id'), $metaOnly[0]['group']['meta_text'] ?? null, array_column($metaOnly[1]['meta'], 'id'), $metaOnly[1]['group'],
+        ], 'umuulit na Meta-lang na amount sa isang araw = isang row');
+    }
+
     public function test_S_049_18_filter_by_status_and_page_by_whole_days(): void
     {
         $lines = [];

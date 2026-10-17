@@ -1,7 +1,7 @@
 {{-- Mga linyang nabasa: pwedeng itama ang petsa, amount at flags bago itugma. Ang mga cell ay walang name;
      sa submit, isang JSON field ("edits") ang ipinapadala, para hindi maputol ng max_input_vars ang mahabang statement. --}}
 <form method="POST" action="{{ route('ads_payment.reconcile.match', $s) }}" class="space-y-3"
-      x-data="{ collect(form) {
+      x-data="{ dirty: false, collect(form) {
         const out = {};
         form.querySelectorAll('tr[data-line]').forEach(tr => {
           const row = {};
@@ -12,6 +12,7 @@
         });
         return JSON.stringify(out);
       } }"
+      @input="dirty = true" @change="dirty = true"
       @submit="$refs.edits.value = collect($el)">
   @csrf
   <input type="hidden" name="edits" x-ref="edits" value="">
@@ -29,8 +30,8 @@
   @if ($formPages > 1)
     <div class="text-sm flex items-center gap-2">
       <span class="text-gray-600">Linya {{ $lines->first()?->line_no }}–{{ $lines->last()?->line_no }} ({{ $formPage }} / {{ $formPages }}); ang mga linya sa page na ito lang ang ipapadala.</span>
-      @if ($formPage > 1) <a class="text-blue-700 hover:underline" href="{{ route('ads_payment.reconcile.show', [$s, 'lp' => $formPage - 1]) }}">← Nauna</a> @endif
-      @if ($formPage < $formPages) <a class="text-blue-700 hover:underline" href="{{ route('ads_payment.reconcile.show', [$s, 'lp' => $formPage + 1]) }}">Susunod →</a> @endif
+      @if ($formPage > 1) <a class="text-blue-700 hover:underline" @click="if (dirty && !confirm('May edit na hindi pa naitutugma sa page na ito. Lumipat pa rin?')) $event.preventDefault()" href="{{ route('ads_payment.reconcile.show', [$s, 'lp' => $formPage - 1]) }}">← Nauna</a> @endif
+      @if ($formPage < $formPages) <a class="text-blue-700 hover:underline" @click="if (dirty && !confirm('May edit na hindi pa naitutugma sa page na ito. Lumipat pa rin?')) $event.preventDefault()" href="{{ route('ads_payment.reconcile.show', [$s, 'lp' => $formPage + 1]) }}">Susunod →</a> @endif
     </div>
   @endif
   @if ($errors->any())

@@ -46,8 +46,16 @@ class SideBySide
             $rows[] = [$g['date'], [0, min(array_column($ls, 'line_no'))], $row];
         }
 
-        foreach ($result['meta_missing'] as $m) {
-            $rows[] = [$m['date'], [1, $m['id']], self::row('meta_only', [], [$m])];
+        // Meta lang: ang umuulit na amount sa isang araw ay isang row din ("3 x 7.00 = 21.00").
+        $missing = [];
+        foreach ($result['meta_missing'] as $m) $missing[$m['date'] . '|' . self::money($m['amount'])][] = $m;
+        foreach ($missing as $ms) {
+            $row = self::row('meta_only', [], $ms);
+            if (count($ms) > 1) {
+                $text = count($ms) . ' x ' . self::money($ms[0]['amount']) . ' = ' . self::fromCents($row['meta_cents']);
+                $row['group'] = ['text' => $text, 'card_text' => null, 'meta_text' => $text, 'more' => 'meta'];
+            }
+            $rows[] = [$ms[0]['date'], [1, $ms[0]['id']], $row];
         }
 
         $days = [];

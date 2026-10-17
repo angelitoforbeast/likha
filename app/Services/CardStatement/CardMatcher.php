@@ -88,10 +88,12 @@ class CardMatcher
         // 3. Wala sa card, per araw at totals — Meta sa loob lang ng period.
         $inPeriod = fn (?string $d) => $period[0] !== null && $d !== null && $d >= $period[0] && $d <= $period[1];
         $missing = array_values(array_filter($meta, fn ($m) => !isset($used[$m['id']]) && $inPeriod($m['date'])));
+        // Meta na binibilang sa totals: nasa period, o tumugma kahit 1–2 araw labas (kaya tugma ang summary sa mga araw).
+        $counted = fn (array $m) => $inPeriod($m['date']) || isset($used[$m['id']]);
 
         $days = [];
         foreach ($charges as $l) $days[$l['sale_date']]['card'] = ($days[$l['sale_date']]['card'] ?? 0) + self::cents($l['amount']);
-        foreach ($meta as $m) if ($inPeriod($m['date'])) $days[$m['date']]['meta'] = ($days[$m['date']]['meta'] ?? 0) + self::cents($m['amount']);
+        foreach ($meta as $m) if ($counted($m)) $days[$m['date']]['meta'] = ($days[$m['date']]['meta'] ?? 0) + self::cents($m['amount']);
         ksort($days);
         $days = array_map(fn ($d) => [
             'card' => self::money($d['card'] ?? 0), 'meta' => self::money($d['meta'] ?? 0), 'diff' => self::money(($d['card'] ?? 0) - ($d['meta'] ?? 0)),
@@ -102,7 +104,7 @@ class CardMatcher
             || ($out[$l['id']]['match_kind'] === 'group' && $groups[$out[$l['id']]['group_key']]['tallied']));
         $noMeta = array_merge(array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === 'none'), $undated);
         $cardTotal = $sum($charges) + $sum($undated);
-        $metaTotal = array_sum(array_map(fn ($m) => self::cents($m['amount']), array_filter($meta, fn ($m) => $inPeriod($m['date']))));
+        $metaTotal = array_sum(array_map(fn ($m) => self::cents($m['amount']), array_filter($meta, $counted)));
 
         return [
             'period'       => $period,
