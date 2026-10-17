@@ -19,6 +19,7 @@ SALE DATE  POST DATE  DESCRIPTION                          AMOUNT
 09/12/26   09/12/26   CASH PAYMENT                          5,000.00-
 09/14/26   09/15/26   FACEBK *MN90OP12QR DUBLIN IR            250.50-
 09/15/26   09/16/26   SHOPEE PH MANDALUYONG                   899.00
+13/09/26   09/16/26   FACEBK *BADDATE01 DUBLIN IR              77.00
 TXT;
 
     public function test_S_049_1_rcbc_lines_have_dates_amounts_credits_and_non_ads_are_listed(): void
@@ -33,6 +34,7 @@ TXT;
             ['2026-09-12', '2026-09-12', 'CASH PAYMENT', '5000.00', true, false],
             ['2026-09-14', '2026-09-15', 'FACEBK *MN90OP12QR DUBLIN IR', '250.50', true, true],
             ['2026-09-15', '2026-09-16', 'SHOPEE PH MANDALUYONG', '899.00', false, false],
+            [null, '2026-09-16', 'FACEBK *BADDATE01 DUBLIN IR', '77.00', false, true], // maling petsa: nasa preview pa rin, para maitama
         ], array_map(fn ($l) => [$l['sale_date'], $l['post_date'], $l['description'], $l['amount'], $l['is_credit'], $l['is_ads']], $out['lines']));
     }
 
@@ -48,6 +50,12 @@ TXT;
             'FACEBK *AB12 4111 1111 1111 5003'  => 'FACEBK *AB12 ···· 5003',
             '4111 1111 1111 5003 12 DUBLIN'     => '···· 5003 12 DUBLIN',
             'amex 3782-822463-10005 x'          => 'amex ···· 0005 x',
+            'Card Number 4111  1111  1111  5003     Total Amount Due' => 'Card Number ···· 5003     Total Amount Due',
+            "x 4111\u{00A0}1111\u{00A0}1111\u{00A0}5003 y" => 'x ···· 5003 y',
+            'x 4111.1111.1111.5003 y'           => 'x ···· 5003 y',
+            'CARDNO4111111111115003'            => 'CARDNO···· 5003',
+            'CARDNO4111 1111 1111 5003'         => 'CARDNO···· 5003',
+            'RCBC4111111111115003.pdf'          => 'RCBC···· 5003.pdf',
             'ref 123456789012'                  => 'ref 123456789012',
         ] as $in => $want) {
             $this->assertSame($want, CardNumberMask::mask($in), $in);

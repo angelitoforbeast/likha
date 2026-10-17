@@ -11,7 +11,7 @@ class CardMatcherTest extends TestCase
     private int $lineId = 0;
     private int $metaId = 0;
 
-    private function line(string $sale, string $amount, ?string $post = null, bool $credit = false, bool $ads = true): array
+    private function line(?string $sale, string $amount, ?string $post = null, bool $credit = false, bool $ads = true): array
     {
         return ['id' => ++$this->lineId, 'sale_date' => $sale, 'post_date' => $post, 'amount' => $amount, 'is_credit' => $credit, 'is_ads' => $ads];
     }
@@ -39,6 +39,9 @@ class CardMatcherTest extends TestCase
         $this->assertSame('Mastercard ···· 2222', $out['label']);
         $this->assertSame(['Mastercard ···· 2222' => 2, 'Visa ···· 1111' => 1, 'Visa ···· 3333' => 0], $out['scores']);
         $this->assertNull(CardMatcher::suggest($lines, ['Visa ···· 3333' => []])['label'], 'walang tugma = walang mungkahi');
+        $this->assertSame('Amex ···· 4444', CardMatcher::suggest($lines, [
+            'Visa ···· 1111' => [$this->meta('2026-09-09', '6278.17')], 'Amex ···· 4444' => [$this->meta('2026-09-10', '1500.00')],
+        ])['label'], 'tabla → alphabetical');
     }
 
     public function test_S_049_7_same_amount_on_the_sale_date_then_on_the_post_date(): void
@@ -96,11 +99,13 @@ class CardMatcherTest extends TestCase
             $this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00'), $this->line('2026-09-09', '100.00'),
             $this->line('2026-09-10', '100.00'), $this->line('2026-09-10', '100.00'),
             $this->line('2026-09-11', '100.00'),
+            $this->line('2026-09-12', '250.00'), // isa sa card, dalawa sa Meta → grupo pa rin, hindi tally
         ];
         $meta = [
             $this->meta('2026-09-09', '100.00'), $this->meta('2026-09-09', '100.00'), $this->meta('2026-09-09', '100.00'),
             $this->meta('2026-09-10', '100.00'), $this->meta('2026-09-10', '100.00'), $this->meta('2026-09-10', '100.00'),
             $this->meta('2026-09-11', '100.00'),
+            $this->meta('2026-09-12', '250.00'), $this->meta('2026-09-12', '250.00'),
         ];
 
         $out = CardMatcher::match($lines, $meta);
@@ -108,11 +113,12 @@ class CardMatcherTest extends TestCase
         $this->assertSame([
             '2026-09-09|100.00' => ['date' => '2026-09-09', 'amount' => '100.00', 'card_count' => 3, 'meta_count' => 3, 'card_total' => '300.00', 'meta_total' => '300.00', 'tallied' => true],
             '2026-09-10|100.00' => ['date' => '2026-09-10', 'amount' => '100.00', 'card_count' => 2, 'meta_count' => 3, 'card_total' => '200.00', 'meta_total' => '300.00', 'tallied' => false],
+            '2026-09-12|250.00' => ['date' => '2026-09-12', 'amount' => '250.00', 'card_count' => 1, 'meta_count' => 2, 'card_total' => '250.00', 'meta_total' => '500.00', 'tallied' => false],
         ], $out['groups']);
-        $this->assertSame(['group', 'group', 'group', 'group', 'group', 'sale_date'], array_column($out['lines'], 'match_kind'), 'isang 100 lang sa 09-11 = one-to-one');
+        $this->assertSame(['group', 'group', 'group', 'group', 'group', 'sale_date', 'group'], array_column($out['lines'], 'match_kind'), 'isang 100 lang sa 09-11 = one-to-one');
         $this->assertSame('2026-09-10|100.00', $out['lines'][4]['group_key']);
         $this->assertSame([], $out['meta_missing'], 'ang sobrang Meta 100 ay nasa grupo, hindi "wala sa card"');
-        $this->assertSame(['tallied' => 1, 'untallied' => 1], [
+        $this->assertSame(['tallied' => 1, 'untallied' => 2], [
             'tallied' => $out['totals']['groups_tallied'], 'untallied' => $out['totals']['groups_untallied'],
         ]);
         $this->assertSame([4, '400.00'], [$out['totals']['matched_count'], $out['totals']['matched_total']], '3 (tallied) + 1 one-to-one; 1 sa 09-11');
@@ -125,6 +131,7 @@ class CardMatcherTest extends TestCase
             $this->line('2026-09-10', '80.00'),
             $this->line('2026-09-10', '40.00', null, true),         // credit: hindi kasama sa card total
             $this->line('2026-09-10', '5000.00', null, false, false), // hindi ads
+            $this->line(null, '30.00'),                               // ads na walang petsa: wala sa Meta, kasama sa card total
         ];
         $meta = [$this->meta('2026-09-09', '1000.00'), $this->meta('2026-09-09', '250.50'), $this->meta('2026-09-11', '60.00')];
 
@@ -136,7 +143,7 @@ class CardMatcherTest extends TestCase
         ], $out['days'], '09-11 ay labas sa period (09-09..09-10)');
         $this->assertSame(['credit', 'not_ads'], [$out['lines'][4]['match_kind'], $out['lines'][5]['match_kind']]);
         $this->assertSame(
-            ['ads_count' => 3, 'card_total' => '1330.50', 'meta_total' => '1250.50', 'matched_count' => 2, 'matched_total' => '1250.50', 'no_meta_count' => 1, 'no_meta_total' => '80.00', 'no_card_count' => 0, 'no_card_total' => '0.00', 'difference_total' => '80.00', 'groups_tallied' => 0, 'groups_untallied' => 0],
+            ['ads_count' => 4, 'card_total' => '1360.50', 'meta_total' => '1250.50', 'matched_count' => 2, 'matched_total' => '1250.50', 'no_meta_count' => 2, 'no_meta_total' => '110.00', 'no_card_count' => 0, 'no_card_total' => '0.00', 'difference_total' => '110.00', 'groups_tallied' => 0, 'groups_untallied' => 0],
             $out['totals']
         );
     }

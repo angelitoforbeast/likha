@@ -28,10 +28,8 @@ class RcbcLayout implements StatementLayout
         foreach (preg_split('/\R/u', $text) as $raw) {
             $raw = trim($raw);
             if (preg_match('#^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}/\d{2}/\d{2,4})\s+(.+?)\s+' . self::AMOUNT . '#u', $raw, $m)) {
-                $sale = self::date($m[1]);
-                $post = self::date($m[2]);
-                if ($sale === null) continue;
-                $lines[] = ['sale_date' => $sale, 'post_date' => $post, 'description' => trim($m[3]), 'amount' => self::amount($m[4]), 'is_credit' => ($m[5] ?? '') === '-'];
+                // Maling petsa (hal. 13/09/26) → null, pero nasa listahan pa rin para maitama sa preview.
+                $lines[] = ['sale_date' => self::date($m[1]), 'post_date' => self::date($m[2]), 'description' => trim($m[3]), 'amount' => self::amount($m[4]), 'is_credit' => ($m[5] ?? '') === '-'];
             } elseif (preg_match('#^([^\d].*?)\s+' . self::AMOUNT . '#u', $raw, $m)) {
                 $lines[] = ['sale_date' => null, 'post_date' => null, 'description' => trim($m[1]), 'amount' => self::amount($m[2]), 'is_credit' => ($m[3] ?? '') === '-'];
             }

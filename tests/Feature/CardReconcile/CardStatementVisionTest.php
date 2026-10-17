@@ -4,6 +4,8 @@ namespace Tests\Feature\CardReconcile;
 
 use App\Services\CardStatement\StatementReadException;
 use App\Services\CardStatement\StatementVision;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -74,9 +76,19 @@ class CardStatementVisionTest extends TestCase
             'negative amount'   => [json_encode(['lines' => [['amount' => -5] + $line]]), 200],
             'credit not bool'   => [json_encode(['lines' => [['is_credit' => 'yes'] + $line]]), 200],
             'missing field'     => [json_encode(['lines' => [array_diff_key($line, ['description' => 1])]]), 200],
+            'extra key'         => [json_encode(['lines' => [['note' => 'x'] + $line]]), 200],
+            'null content'      => [null, 200],
+            'too many lines'    => [json_encode(['lines' => array_fill(0, 501, $line)]), 200],
             'http error'        => [json_encode(['error' => 'x']), 500],
+            'connection error'  => ['timeout', 0],
         ] as $case => [$content, $status]) {
-            $this->answer($content, $status);
+            Http::swap(new Factory()); // bagong fake bawat kaso: ang naunang stub ay laging nauunang tumugma
+            Http::preventStrayRequests();
+            if ($status === 0) {
+                Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out'));
+            } else {
+                Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => $content]]]], $status)]);
+            }
             try {
                 (new StatementVision())->read($this->image, 'image/png');
                 $this->fail("tinanggap: {$case}");

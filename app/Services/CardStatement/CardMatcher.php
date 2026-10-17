@@ -20,11 +20,12 @@ class CardMatcher
         $period = self::period($lines);
         $out    = [];
         $charges = [];
+        $undated = [];
         foreach ($lines as $l) {
             $kind = !$l['is_ads'] ? 'not_ads' : ($l['is_credit'] ? 'credit' : null);
             $out[$l['id']] = ['match_kind' => $kind, 'payment_activity_id' => null, 'group_key' => null, 'match_days' => null];
             if ($kind === null && $l['sale_date'] !== null) $charges[] = $l;
-            elseif ($kind === null) $out[$l['id']]['match_kind'] = 'none';
+            elseif ($kind === null) { $out[$l['id']]['match_kind'] = 'none'; $undated[] = $l; } // walang petsa: hindi matutugma, pero nasa card
         }
 
         // 1. Mga grupo: (petsa, amount) na ≥2 sa card (sale date) o ≥2 sa Meta.
@@ -99,8 +100,8 @@ class CardMatcher
         $sum = fn (array $ls) => array_sum(array_map(fn ($l) => self::cents($l['amount']), $ls));
         $matched = array_filter($charges, fn ($l) => in_array($out[$l['id']]['match_kind'], ['sale_date', 'post_date', 'near'], true)
             || ($out[$l['id']]['match_kind'] === 'group' && $groups[$out[$l['id']]['group_key']]['tallied']));
-        $noMeta = array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === 'none');
-        $cardTotal = $sum($charges);
+        $noMeta = array_merge(array_filter($charges, fn ($l) => $out[$l['id']]['match_kind'] === 'none'), $undated);
+        $cardTotal = $sum($charges) + $sum($undated);
         $metaTotal = array_sum(array_map(fn ($m) => self::cents($m['amount']), array_filter($meta, fn ($m) => $inPeriod($m['date']))));
 
         return [
@@ -110,7 +111,7 @@ class CardMatcher
             'meta_missing' => $missing,
             'days'         => $days,
             'totals'       => [
-                'ads_count'        => count($charges),
+                'ads_count'        => count($charges) + count($undated),
                 'card_total'       => self::money($cardTotal),
                 'meta_total'       => self::money($metaTotal),
                 'matched_count'    => count($matched),

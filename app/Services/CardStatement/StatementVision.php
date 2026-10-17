@@ -2,6 +2,7 @@
 
 namespace App\Services\CardStatement;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -25,20 +26,24 @@ TXT;
     /** @return list<array{sale_date: ?string, post_date: ?string, description: string, amount: string, is_credit: bool}> */
     public function read(string $path, string $mime): array
     {
-        $response = Http::withToken((string) config('services.openai.key'))
-            ->timeout(90)
-            ->post('https://api.openai.com/v1/chat/completions', [
-                'model'           => (string) config('services.card_statement.model', 'gpt-4o'),
-                'temperature'     => 0,
-                'response_format' => ['type' => 'json_object'],
-                'messages'        => [[
-                    'role'    => 'user',
-                    'content' => [
-                        ['type' => 'text', 'text' => self::PROMPT],
-                        ['type' => 'image_url', 'image_url' => ['url' => 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents($path)), 'detail' => 'high']],
-                    ],
-                ]],
-            ]);
+        try {
+            $response = Http::withToken((string) config('services.openai.key'))
+                ->timeout(90)
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model'           => (string) config('services.card_statement.model', 'gpt-4o'),
+                    'temperature'     => 0,
+                    'response_format' => ['type' => 'json_object'],
+                    'messages'        => [[
+                        'role'    => 'user',
+                        'content' => [
+                            ['type' => 'text', 'text' => self::PROMPT],
+                            ['type' => 'image_url', 'image_url' => ['url' => 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents($path)), 'detail' => 'high']],
+                        ],
+                    ]],
+                ]);
+        } catch (ConnectionException $e) {
+            throw new StatementReadException('Hindi naabot ang AI (timeout o walang koneksyon). Subukan ulit o PDF ang i-upload.');
+        }
 
         if (!$response->successful()) {
             throw new StatementReadException('Hindi nabasa ng AI ang screenshot (HTTP ' . $response->status() . '). Subukan ulit o PDF ang i-upload.');
@@ -60,6 +65,7 @@ TXT;
         $bad = fn (string $why) => new StatementReadException("Linya {$n} ng sagot ng AI: {$why}. Walang na-save; subukan ulit.");
 
         if (!is_array($l)) throw $bad('hindi object');
+        if (array_diff(array_keys($l), ['sale_date', 'post_date', 'description', 'amount', 'is_credit']) !== []) throw $bad('may ibang field');
         foreach (['sale_date', 'post_date', 'description', 'amount', 'is_credit'] as $k) {
             if (!array_key_exists($k, $l)) throw $bad("walang {$k}");
         }
@@ -76,7 +82,7 @@ TXT;
         return [
             'sale_date'   => $l['sale_date'],
             'post_date'   => $l['post_date'],
-            'description' => mb_substr(trim($l['description']), 0, 255),
+            'description' => trim($l['description']), // pinuputol sa 255 pagkatapos ma-mask (CardReconcile), hindi bago
             'amount'      => number_format((float) $amount, 2, '.', ''),
             'is_credit'   => $l['is_credit'],
         ];
