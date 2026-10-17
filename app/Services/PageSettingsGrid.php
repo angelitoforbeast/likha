@@ -75,7 +75,7 @@ class PageSettingsGrid
 
         return [
             'columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now,
-            'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->progress(), 'order_days' => $this->orderDays(),
+            'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->panel(), 'order_days' => $this->orderDays(),
             'plan_summary' => BotcakeSyncAll::summary($next),
         ];
     }
@@ -158,7 +158,7 @@ class PageSettingsGrid
 
         return [
             'cells' => array_values($cells), 'info' => $info, 'now' => $now,
-            'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->progress(),
+            'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->panel(),
         ];
     }
 
