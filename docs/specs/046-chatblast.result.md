@@ -253,3 +253,122 @@ Not done. The app needs the server database (`.env`, not read), and this session
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories. The cases above come from its Tests list.
+
+## Amendment 1
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. Days per kind (Araw 1, Araw 2, …), each day with one or more text versions, stored in `app_settings`, with an editor on /chatblast that has add/remove day, add/remove/edit version and a live preview. Defaults: `delivering` has 1 day (the brief's text); `in_transit` has 5 days with different, polite Tagalog texts and no emoji.
+2. A new kind `in_transit`: J&T `In Transit`, at most one message per waybill per Manila day. The day is the number of messages already sent + 1. It stops when the days run out or the status changes. `delivering` stays one message per waybill.
+3. Version rotation: deterministic, and different for neighbouring customers. Each row stores its day, version and text, shown as "Araw 3 · B" in the table and in the side panel.
+4. Uniqueness is now (waybill, kind, day), and a second build the same day adds nothing.
+5. `{rider}` / `{rider_phone}` are reserved and render empty. A version that uses them falls back to one that doesn't; if no version of the day can be used, the row is `no_config` with the reason "walang rider info".
+6. Tests for all of the above.
+
+Commits:
+- `feat: chatblast days per kind with versions, an in_transit kind sent once a day until its days run out or the waybill moves on, rotating versions by waybill, rider placeholders with a fallback, and an editor with a live preview (spec 046 amendment 1)`
+- `fix: chatblast sends at most one message of a kind per waybill per Manila day even when the row was built the day before, takes a waybill's most advanced J&T row as its status, never sends a removed day, and refuses unknown placeholders and oversized days (spec 046 amendment 1)`
+- `fix: the day editor refuses any unknown placeholder and caps the stored size in bytes, and the same-day guard is tested for unsure and sending rows (spec 046 amendment 1)`
+- `docs: accepted review findings for spec 046 amendment 1 in TODO`
+- `docs: result for spec 046 amendment 1`
+
+### What I changed in parts already built
+
+- **Text:** the single template per kind (`chatblast.template.<kind>`, `POST /chatblast/template`) is replaced by days, stored as `chatblast.sequence.<kind>` (a JSON list of days, each a list of version texts) and saved with `POST /chatblast/sequence`. If no days are saved, the defaults in `Chatblast::KINDS` apply. The old template editor on the page is replaced by the day editor.
+- **`botcake_messages`:**
+  - two new columns, `day` (default 1) and `version` (A, B, …);
+  - `dedupe_key` is now `waybill|kind|day`.
+  - I added these to the create migration itself. It has not been released or run anywhere, so editing it breaks no rule.
+- **"Kunin ang mga bago"** and `chatblast:build` build every kind when none is chosen. `--kind` / the kind filter limits it to one. The result also counts the rows skipped because their waybill moved on.
+- **The list and the side panel** show `step` ("Araw 1 · B"), `day` and `version`.
+- **Tests:** `ChatblastBuildTest` (the template test became a days test) and `ChatblastPageTest` (template → sequence endpoint) were adapted.
+
+### How it works now
+
+- **Kinds (`Chatblast::KINDS`):**
+  - `delivering`: J&T `Delivering`, orders of the last 7 days, 1 day.
+  - `in_transit`: J&T `In Transit`, orders of the last 14 days, 5 days.
+- **A waybill's status:** for both kinds, the waybill must be at that status with no RTS reason. When a waybill has several `from_jnts` rows, its status is its **most advanced** row (In Transit < Delivering < Delivered / For Return / Returned; ties go to the latest row). A stale copy still saying "In Transit" can't keep a delivered waybill in transit.
+- **Day number:** the waybill's real messages of that kind that are `sent` or `unknown` (possibly sent), + 1. Past the last day, nothing more is built.
+- **One per day:**
+  - **The build** adds nothing for a waybill and kind that already has a row created, sent or queued today (Manila), or an `unknown` updated today.
+  - **The sender** refuses a real send (row `skipped`, "May naipadala nang mensahe … ngayong araw; ipadala bukas") when another row of the same waybill and kind was sent or `unknown` today, or is being sent. This catches a row built yesterday and sent today.
+  - **An unsent day** is not built again the next day: its `waybill|kind|day` key exists. It stays in the list to be sent.
+- **Stop on a status change:**
+  - Each build marks the unsent rows of a waybill that moved on as `skipped`, with the reason, for example "Hindi na In Transit ang waybill (ngayon: Delivered)".
+  - The sender checks again just before step 1 and skips such a row.
+  - A day removed in the editor is never sent: the row becomes `skipped` with "Wala nang Araw N".
+- **Version:**
+  - The version index is the last 9 digits of the waybill, mod the number of usable versions; with no digits, `crc32` is used instead. Consecutive waybills therefore get different versions, and building again picks the same one.
+  - **Without rider info**, only versions without `{rider}` / `{rider_phone}` are usable.
+  - The row stores the version letter (its position in the day) and the final text.
+- **Saving the days:**
+  - Every unsent real row of the kind is re-rendered, keeping its day and version choice. Queued, sending, sent and unknown rows keep their text.
+  - **Validation:**
+    - 1–30 days, 1–10 versions per day.
+    - Each text non-empty and at most 1,000 characters.
+    - Every `{…}` must be a known placeholder: name, item, cod, waybill, page, rider, rider_phone.
+    - All texts together at most 60,000 bytes (`app_settings.value` is TEXT).
+    - Anything else → 422, and nothing is saved.
+- **The editor:**
+  - Per kind: a box per day with "+ bersyon", "alisin", "alisin ang araw", "+ Araw" and "I-save ang mga araw".
+  - Under each version, a live preview with a sample order. It notes when a version needs rider info and whether the day will fall back or become "walang config".
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| 5 different default days; one row a day; numbered by the ones sent; nothing after Araw 5; dedupe `waybill|kind|day` | `ChatblastSequenceTest::test_one_in_transit_message_per_day_numbered_by_the_ones_sent_until_the_days_run_out` | pass |
+| An unsent Araw 1 is not repeated the next day | `…::test_an_unsent_day_is_not_repeated_the_next_day` | pass |
+| Status changes to Delivering: no Araw 2, the unsent row skipped with the new status, the delivering kind picks it up | `…::test_the_messages_stop_when_the_waybill_is_no_longer_in_transit` | pass |
+| Sender skips a row whose waybill became Delivered (no HTTP) | `…::test_the_sender_skips_a_message_whose_waybill_changed_status_before_it_was_sent` | pass |
+| Built yesterday, sent today: no Araw 2 today; an Araw 2 row is refused today; unknown or sending today also block | `…::test_a_day_sent_today_blocks_the_next_day_until_tomorrow_even_if_it_was_built_yesterday` | pass |
+| A later `from_jnts` copy (Delivered / Delivering) ends In Transit, both in the build and in the sender | `…::test_a_waybill_with_a_later_jnt_row_is_no_longer_in_transit` | pass |
+| Rotation: 6 consecutive waybills, neighbours differ, all 3 versions used, same versions after building again | `…::test_versions_rotate_across_neighbouring_waybills_and_a_rebuild_keeps_the_same_version` | pass |
+| A waybill without digits gets the same version each time; very long digit strings use the last 9 | `…::test_a_waybill_without_digits_still_gets_the_same_version_every_time` | pass |
+| Rider fallback to the version without rider; all versions need rider → no_config "walang rider info" | `…::test_rider_placeholders_fall_back_to_a_version_without_them_or_no_config` | pass |
+| Editor saves; refuses no days, an empty day, blank, over 1,000, not a list, unknown kind; list row shows "Araw 1 · B" | `…::test_the_editor_saves_the_days_and_refuses_empty_ones` | pass |
+| Editor refuses non-strings, nested lists, 31 days, 11 versions, `{nmae}`, `{Name}`, `{rider-phone}`, over 60,000 bytes; nothing saved | `…::test_the_editor_refuses_bad_shapes_unknown_placeholders_and_huge_payloads` | pass |
+| A removed day is skipped and never sent; a queued row keeps its text | `…::test_a_removed_day_is_never_sent_and_queued_rows_keep_their_text` | pass |
+
+Red runs:
+- **First run:**
+  - "Call to undefined method Chatblast::sequence()" and "…::setSequence()".
+  - 404 on `/chatblast/sequence`.
+  - "Call to a member function update() on null" (no in_transit rows).
+- **Fix loop 1:**
+  - "Failed asserting that 1 is identical to 0": an Araw 2 was built the same day.
+  - "Requests were recorded" (twice): a sender with no status/day guard.
+  - 200 instead of 422: no placeholder or size check.
+- **Fix loop 2:** 200 instead of 422 for `{Name}`, `{rider-phone}` and the byte size.
+- **Already green when written:**
+  - the waybill-without-digits case;
+  - the unknown and sending branches of the same-day guard.
+
+  They pin behaviour the code already had.
+- **One test mistake, corrected:** "Araw 1 · A" expected for `WB-001`, where the rotation (1 mod 2) picks B by design.
+
+Full suite after amendment 1: `Tests: 1430, Assertions: 17155, Errors: 1, Failures: 1, PHPUnit Deprecations: 8, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`. `php -l`, `node --check` and `artisan view:cache` pass.
+
+### Review (amendment 1)
+
+- **One adversarial review:** two majors, then two scoped re-checks.
+  - **Major (fixed):** an in_transit row built late one day and sent the next morning let that morning's build add the next day. The customer got two messages in one day.
+  - **Major (fixed):** a duplicate `from_jnts` row still saying "In Transit" kept a delivered waybill getting in-transit messages.
+- **Minors fixed:**
+  - a removed day could still be sent by hand;
+  - re-rendering touched test rows;
+  - unknown or misspelled placeholders and oversized payloads were accepted;
+  - two branches of the same-day guard had no tests.
+- **Accepted in `TODO.md` (046, amendment 1):**
+  - a skipped row keeps its day key;
+  - saving re-renders row by row;
+  - the preview uses a fixed sample.
+
+### What the amendment left open, and decisions
+
+- **Also counted:** `unknown` counts as sent for the day number and the one-a-day rule, because it may have been delivered. A customer may therefore get the next day's text even if the unsure one never arrived; never the same day twice.
+- **"No RTS reason":** applies to `in_transit` too, so a waybill on its way back to the seller gets no "on its way to you" message.
+- **The order window:** 14 days for `in_transit` (5 daily messages need a wider window than the 7 for `delivering`). Both are in `Chatblast::KINDS`.
+- **Version letters** follow the version's position in the day. Removing version A re-letters the rest, and building again re-picks among the remaining versions for unsent rows.
+- **A cap-skipped day** (daily cap) stays `skipped` and can be sent by hand the next day. The next day's build does not make a new row for it.
