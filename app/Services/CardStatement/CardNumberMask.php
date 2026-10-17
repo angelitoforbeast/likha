@@ -6,9 +6,10 @@ namespace App\Services\CardStatement;
  * Buong card number ay hindi kailanman sine-save o pinapakita → "···· " + huling 4:
  *  1. Anumang 13–19 digit, magkakadikit o naka-grupo sa anumang hati (4-4-4-4, Diners 4-6-4, Amex 4-6-5, 8-8 …),
  *     na pinaghihiwalay ng space (pati NBSP at ibang Unicode space), tab, tuldok, dash, slash o asterisk.
- *     Ang unang grupo ay ≥4 digit, kaya hindi nakakain ang dulo ng FACEBK code ("*AB12") o ang "09/09/26";
- *     ang pinakamaikling buong grupo na umaabot sa 13 ang kinukuha, kaya ang kasunod na numero ("… 5003 12")
- *     ay naiiwan; hindi minamask kapag amount ang kasunod ("100.00") o petsa ang simula ("2026-09-10").
+ *     Bawat window ng buong grupo ay sinusuri (hindi lang mula sa simula), kaya ang petsa, amount o ibang numero
+ *     bago ang card number ("2026-09-10 4111…", "AUTH 123456 4111…") ay hindi nakakapagtago nito; ang petsa,
+ *     ang dulo ng FACEBK code ("*AB12"), ang amount ("100.00") at ang maikling numero pagkatapos ("… 5003 12")
+ *     ay hindi kinakain.
  *  2. Anumang ≥8 digit na katabi ng card / acct / account / no. / number sa iisang linya (hal. "Account No. 12345678").
  */
 class CardNumberMask
@@ -39,24 +40,50 @@ class CardNumberMask
 
     private static function maskRuns(string $text): string
     {
-        if (!preg_match_all('/(?<!\d)\d{4,}(?:' . self::SEP . '{1,8}\d+)*/u', $text, $all, PREG_OFFSET_CAPTURE)) return $text;
+        if (!preg_match_all('/(?<!\d)\d+(?:' . self::SEP . '{1,16}\d+)*/u', $text, $all, PREG_OFFSET_CAPTURE)) return $text;
 
         // Mula sa dulo, para hindi gumalaw ang mga byte offset ng mga nauna.
         foreach (array_reverse($all[0]) as [$run, $start]) {
-            if (self::isDate($run)) continue;
-            preg_match_all('/\d+/', $run, $groups, PREG_OFFSET_CAPTURE);
-            $digits = 0;
-            $end = null;
-            foreach ($groups[0] as [$g, $off]) {
-                $digits += strlen($g);
-                if ($digits >= 13) { $end = $off + strlen($g); break; }
+            preg_match_all('/\d+/', $run, $m, PREG_OFFSET_CAPTURE);
+            $groups = array_map(fn ($g) => ['len' => strlen($g[0]), 'from' => $g[1], 'to' => $g[1] + strlen($g[0])], $m[0]);
+            $n = count($groups);
+            $seps = [];
+            for ($k = 1; $k < $n; $k++) $seps[$k] = substr($run, $groups[$k - 1]['to'], $groups[$k]['from'] - $groups[$k - 1]['to']);
+
+            // Mga grupong bahagi ng petsa (2026-09-30, 12/31/2026, 09/09/26) — hindi kasama sa card number.
+            $date = [];
+            for ($k = 0; $k + 2 < $n; $k++) {
+                $tight = preg_match('/^[\-\/.]$/', $seps[$k + 1]) && preg_match('/^[\-\/.]$/', $seps[$k + 2]);
+                [$a, $b, $c] = [$groups[$k]['len'], $groups[$k + 1]['len'], $groups[$k + 2]['len']];
+                if ($tight && (($a === 4 && $b <= 2 && $c <= 2) || ($a <= 2 && $b <= 2 && in_array($c, [2, 4], true)))) {
+                    $date[$k] = $date[$k + 1] = $date[$k + 2] = true;
+                }
             }
-            if ($end === null || $digits > 19) continue;
 
-            $after = substr($text, $start + $end, 2);
-            if (preg_match('/^[.,]\d/', $after)) continue; // amount ang kasunod, hindi card
+            // Bawat window ng buong grupo na 13–19 digit: nagsisimula sa grupong ≥4 digit (hindi dulo ng FACEBK
+            // code o sentimo), nagtatapos sa grupong ≥4 digit o eksaktong 19 digit (4-4-4-4-3), walang petsa, at
+            // hindi sinusundan ng ".dd" (amount). Ang mga window na nagsasalo ng grupo ay pinagsasama; ang magkatabing
+            // card number na hindi nagsasalo ("4111…5003 4111…5004") ay tig-isang mask.
+            $spans = [];
+            for ($i = 0; $i < $n; $i++) {
+                if ($groups[$i]['len'] < 4 || isset($date[$i])) continue;
+                $digits = 0;
+                for ($j = $i; $j < $n && !isset($date[$j]); $j++) {
+                    $digits += $groups[$j]['len'];
+                    if ($digits > 19) break;
+                    if ($digits < 13 || ($groups[$j]['len'] < 4 && $digits !== 19)) continue;
+                    if (preg_match('/^[.,]\d/', substr($text, $start + $groups[$j]['to'], 2))) continue;
+                    $last = array_key_last($spans);
+                    if ($last !== null && $i <= $spans[$last][1]) $spans[$last][1] = max($spans[$last][1], $j);
+                    else $spans[] = [$i, $j];
+                }
+            }
 
-            $text = substr($text, 0, $start) . self::masked(substr($run, 0, $end)) . substr($text, $start + $end);
+            foreach (array_reverse($spans) as [$i, $j]) {
+                $from = $start + $groups[$i]['from'];
+                $to = $start + $groups[$j]['to'];
+                $text = substr($text, 0, $from) . self::masked(substr($text, $from, $to - $from)) . substr($text, $to);
+            }
         }
 
         return $text;
