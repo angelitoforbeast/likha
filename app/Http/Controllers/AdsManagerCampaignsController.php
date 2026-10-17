@@ -1310,7 +1310,7 @@ class AdsManagerCampaignsController extends Controller
             $base->whereIn('campaign_id', $campaignIds);
         }
         if ($level === 'ads' && !empty($adSetIds)) {
-            $base->whereIn('ad_set_id', $adSetIds);
+            $base->whereIn('ads_manager_reports.ad_set_id', $adSetIds);
         }
 
         // =========================
@@ -1516,7 +1516,8 @@ class AdsManagerCampaignsController extends Controller
         // Level: ADS
         // =========================
         } else {
-            if (empty($adSetIds) && $adSetId) $base->where('ad_set_id', $adSetId);
+            // Naka-qualify: ang ls subquery ay may sariling ad_set_id (ambiguous kung wala, HTTP 500).
+            if (empty($adSetIds) && $adSetId) $base->where('ads_manager_reports.ad_set_id', $adSetId);
 
             // Ads inherit status from latest-day Ad Set status
             $query = (clone $base)
@@ -1533,7 +1534,7 @@ class AdsManagerCampaignsController extends Controller
                     ads_manager_reports.ad_id,
                     MAX(headline)      AS headline,
                     MAX(item_name)     AS item_name,
-                    MAX(ad_set_id)     AS ad_set_id,
+                    MAX(ads_manager_reports.ad_set_id) AS ad_set_id,
                     MAX(ad_set_name)   AS ad_set_name,
                     MAX(campaign_id)   AS campaign_id,
                     MAX(campaign_name) AS campaign_name,
