@@ -17,7 +17,7 @@ Commits on `feat/049-card-reconcile` (cut from `develop` at 0056d2df):
 - `docs: accepted review findings for spec 049 in TODO` (twice)
 - `docs: result for spec 049`
 
-### Tables (migration `2026_10_18_400000_create_card_statements_tables.php`, both guarded with `Schema::hasTable`)
+### Tables (migration `2026_10_18_500000_create_card_statements_tables.php`, both guarded with `Schema::hasTable`)
 
 - **`card_statements`:** `card_label` (a Meta `payment_method`, e.g. "Visa ···· 5003"), `bank` (`rcbc`, `generic`, `image`), `source_kind` (`pdf`, `image`), `original_name` (masked), `period_start`, `period_end`, `status` (`preview`, `matched`), `lines_count`, `ads_count`, `card_total`, `meta_total`, `matched_count`, `matched_total`, `no_meta_count`, `no_meta_total`, `no_card_count`, `no_card_total`, `difference_total`, `groups_tallied`, `groups_untallied`, `uploaded_by` (user id), `matched_at`, timestamps.
 - **`card_statement_lines`:** `card_statement_id`, `line_no`, `sale_date`, `post_date`, `description` (masked, with the FACEBK code), `amount`, `is_credit`, `is_ads`, `payment_activity_id`, `group_key` (`Y-m-d|amount`), `match_kind` (`sale_date`, `post_date`, `near`, `group`, `none`, `credit`, `not_ads`), `match_days`, timestamps.

@@ -54,7 +54,7 @@ class CardReconcilePageTest extends TestCase
         });
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2025_10_19_131712_create_payment_activity_ads_manager_table.php',
-            'database/migrations/2026_10_18_400000_create_card_statements_tables.php',
+            'database/migrations/2026_10_18_500000_create_card_statements_tables.php',
         ]]);
     }
 
