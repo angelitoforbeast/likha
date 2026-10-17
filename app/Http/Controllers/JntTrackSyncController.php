@@ -32,9 +32,15 @@ class JntTrackSyncController extends Controller
         // Default = simula ng NAKARAANG buwan → ngayon (gaya ng /jnt/hold).
         $first = Carbon::now($tz)->startOfMonth()->subMonth()->toDateString();
 
+        // Ang huling awtomatikong track (mula sa chatblast: walang date range).
+        $auto = DB::table('jnt_track_sync_runs')->whereNull('date_from')->orderByDesc('id')->first();
+        $autoSample = $auto && $auto->result_sample ? (array) json_decode($auto->result_sample, true) : [];
+
         return view('jnt.track-sync.index', [
             'defaultFrom' => $first,
             'defaultTo'   => $today,
+            'autoRun'     => $auto,
+            'autoSample'  => $autoSample,
         ]);
     }
 
@@ -82,6 +88,7 @@ class JntTrackSyncController extends Controller
         $rows = DB::table('jnt_track_sync_runs')
             ->select('id', 'date_from', 'date_to', 'dry_run', 'status', 'total', 'processed',
                      'updated', 'unchanged', 'skipped', 'unmapped', 'failed', 'created_at', 'finished_at')
+            ->whereNotNull('date_from') // ang mga manual na run lang; ang awtomatiko ay nasa itaas ng page
             ->orderByDesc('id')->limit(25)->get();
 
         return response()->json(['ok' => true, 'runs' => $rows]);

@@ -169,6 +169,17 @@ class ChatblastSender
         // Ang waybill ay dapat nasa status pa rin ng uri (hal. hindi na "In Transit" kapag Delivered na), isa lang kada
         // araw ang mensahe ng uri sa waybill, at dapat mayroon pa ang araw nito.
         if (!$m->is_test && isset(Chatblast::KINDS[$m->kind])) {
+            // Delivering: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at buuin ulit ang text.
+            if ($m->kind === 'delivering') {
+                $stop = $this->chatblast->refreshRider($m);
+                $m->refresh();
+                if ($stop !== null) {
+                    $this->finish($m, $stop[0], $stop[1], null, []);
+                    // Pansamantala ang bigong subok: ang susunod na On Delivery (hal. kinabukasan) ay may sariling row.
+                    if ($stop[0] === 'skipped') BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
+                    return;
+                }
+            }
             $why = $this->chatblast->staleFor($m->kind, $m->waybill) ?? $this->chatblast->blockedToday($m);
             if ($why !== null) {
                 $this->finish($m, 'skipped', $why, null, []);

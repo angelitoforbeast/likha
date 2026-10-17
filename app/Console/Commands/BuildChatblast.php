@@ -20,8 +20,12 @@ class BuildChatblast extends Command
         }
 
         $r = $chatblast->build($kind ?: null);
-        $this->line(sprintf('%d bago (%d ready, %d walang PSID, %d walang config); %d na-update, %d nilaktawan (iba na ang status)',
-            $r['added'], $r['ready'], $r['no_psid'], $r['no_config'], $r['updated'], $r['skipped']));
+        if (!empty($r['busy'])) {
+            $this->error('May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito.');
+            return self::FAILURE;
+        }
+        $this->line(sprintf('%d bago (%d ready, %d walang PSID, %d walang config); %d na-update, %d nilaktawan (iba na ang status); J&T: %d na-track, %d rider pending',
+            $r['added'], $r['ready'], $r['no_psid'], $r['no_config'], $r['updated'], $r['skipped'], $r['tracked'], $r['rider_pending']));
 
         return self::SUCCESS;
     }

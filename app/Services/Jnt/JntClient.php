@@ -104,6 +104,15 @@ class JntClient
         );
     }
 
+    /** Parehong client na may ibang HTTP timeout (hal. maikli para sa web request ng chatblast). */
+    public function withTimeout(int $seconds): static
+    {
+        $client = clone $this;
+        $client->timeoutSeconds = $seconds;
+
+        return $client;
+    }
+
     public function getEccompanyid(): string        { return $this->eccompanyid; }
     public function getCustomerid(): string         { return $this->customerid; }
     public function isForceUppercase(): bool        { return $this->forceUppercase; }

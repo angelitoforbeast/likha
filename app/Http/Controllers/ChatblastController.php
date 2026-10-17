@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\DB;
 class ChatblastController extends Controller
 {
     public const PER_PAGE = 100;
+    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking sa web build (nginx: 60 s)
     public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
     private const MAX_DAYS = 92;
 
@@ -140,8 +141,13 @@ class ChatblastController extends Controller
         $this->checkAccess();
         $kind = $this->str($request, 'kind', 30);
         if ($kind !== '' && !isset(Chatblast::KINDS[$kind])) return response()->json(['error' => 'Hindi kilalang uri.'], 422);
+        @set_time_limit(55); // ang nginx ay naghihintay nang 60 s: 20 s ng J&T at ang pagbuo ay kasya rito
 
-        return response()->json(['result' => $this->chatblast->build($kind ?: null, Auth::id())]);
+        // 20 s ng J&T (kasama ang tawag na tumatakbo pa); ang chatblast:build ay may 60 s.
+        $result = $this->chatblast->build($kind ?: null, Auth::id(), self::WEB_TRACK_BUDGET);
+        if (!empty($result['busy'])) return response()->json(['error' => 'May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito.'], 409);
+
+        return response()->json(['result' => $result]);
     }
 
     /** "Send" / "Send selected": ang mga napiling row na maaaring ipadala. */

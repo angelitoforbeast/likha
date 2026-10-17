@@ -359,7 +359,8 @@
         btn.disabled = true;
         try {
             const r = (await post(url.buildUrl, {kind: filters().kind || 'delivering'})).result;
-            notice(fmt(r.added) + ' bago (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' walang PSID, ' + fmt(r.no_config) + ' walang config); ' + fmt(r.updated) + ' na-update.', 'text-green-700');
+            notice(fmt(r.added) + ' bago (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' walang PSID, ' + fmt(r.no_config) + ' walang config); ' + fmt(r.updated) + ' na-update; J&T: '
+                + fmt(r.tracked) + ' na-track' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (susunod na kuha o bago ipadala)' : '') + '.', 'text-green-700');
             load();
         } catch (err) { notice(err.message, 'text-red-600'); }
         btn.disabled = false;

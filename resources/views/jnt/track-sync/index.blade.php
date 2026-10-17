@@ -32,6 +32,19 @@
   </style>
 
   <div class="ts-wrap" x-data="trackSync()" x-init="init()">
+    {{-- Ang awtomatikong track ng chatblast (kapag kumukuha ng listahan at bago ipadala ang delivering). --}}
+    <div class="ts-card" style="font-size:13px">
+      @if($autoRun)
+        <b>Huling awtomatikong track</b> ({{ $autoSample['source'] ?? 'chatblast' }}):
+        {{ \Carbon\Carbon::parse($autoRun->finished_at ?? $autoRun->created_at)->format('Y-m-d H:i') }}
+        · nasuri: {{ (int) $autoRun->processed }} · nag-iba ang status: {{ (int) $autoRun->updated }}
+        · rider: {{ (int) ($autoSample['rider_found'] ?? 0) }} · walang sagot: {{ (int) $autoRun->skipped }}
+        · hindi naabot (sa susunod): {{ (int) ($autoSample['pending'] ?? 0) }}
+        @if($autoRun->last_error) · <span style="color:#b91c1c">error: {{ $autoRun->last_error }}</span> @endif
+      @else
+        <b>Huling awtomatikong track:</b> wala pa.
+      @endif
+    </div>
     <div class="ts-note">
       <b>Paano ito gumagana:</b> Kinukuha ang mga <b>non-final</b> na waybill sa <b>from_jnts</b> (status NOT <b>Delivered/Returned</b> — final na yun, di gagalawin) sa napiling <b>date range</b> (submission_time), tapos tinatawagan ang J&T <b>TRACKQUERY</b> (by batches) para i-refresh ang <b>status</b> + <b>status_logs</b> (from → to) + <b>signingtime</b>.<br>
       <b>Preview (dry-run)</b> = walang isusulat — makikita mo muna ang mga magbabago at ang <b>unmapped</b> (hal. <i>Problematic</i>) bago mag-<b>Apply</b>.
