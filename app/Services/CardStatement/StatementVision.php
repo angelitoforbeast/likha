@@ -14,6 +14,10 @@ class StatementVision
 {
     private const MAX_LINES = 500;
 
+    // Dapat matapos bago ang 60 s ng nginx (fastcgi_read_timeout), kasama ang pag-save: 5 s kumonekta + 45 s sagot.
+    private const CONNECT_TIMEOUT = 5;
+    private const TIMEOUT = 45;
+
     private const PROMPT = <<<'TXT'
 This image is a credit card statement. Read every transaction row and every amount row exactly as printed.
 Answer with JSON only, in this exact shape:
@@ -28,7 +32,8 @@ TXT;
     {
         try {
             $response = Http::withToken((string) config('services.openai.key'))
-                ->timeout(90)
+                ->connectTimeout(self::CONNECT_TIMEOUT)
+                ->timeout(self::TIMEOUT)
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model'           => (string) config('services.card_statement.model', 'gpt-4o'),
                     'temperature'     => 0,
@@ -42,7 +47,7 @@ TXT;
                     ]],
                 ]);
         } catch (ConnectionException $e) {
-            throw new StatementReadException('Hindi naabot ang AI (timeout o walang koneksyon). Subukan ulit o PDF ang i-upload.');
+            throw new StatementReadException('Hindi natapos basahin ang screenshot. Subukan ulit, o hatiin ang screenshot sa mas maliliit na bahagi.');
         }
 
         if (!$response->successful()) {

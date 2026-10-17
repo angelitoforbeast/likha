@@ -67,7 +67,8 @@ class CardReconcileController extends Controller
             return back()->withErrors(['statement' => $e->getMessage()])->withInput($request->except('statement'));
         }
 
-        return redirect()->route('ads_payment.reconcile.show', $s);
+        return redirect()->route('ads_payment.reconcile.show', $s)
+            ->with('status', $s->wasRecentlyCreated ? null : 'Na-upload na ang file na ito kanina; binuksan ang dating statement.');
     }
 
     public function show(Request $request, CardStatement $statement)

@@ -55,6 +55,7 @@ class CardReconcilePageTest extends TestCase
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2025_10_19_131712_create_payment_activity_ads_manager_table.php',
             'database/migrations/2026_10_18_500000_create_card_statements_tables.php',
+            'database/migrations/2026_10_18_500100_add_file_hash_to_card_statements.php',
         ]]);
     }
 
@@ -202,6 +203,40 @@ class CardReconcilePageTest extends TestCase
         $s = CardStatement::sole();
         $this->assertSame(['image', 'image'], [$s->source_kind, $s->bank]);
         $this->assertSame([['FACEBK *AB12 ···· 5003', true], ['CASH PAYMENT', false]], CardStatementLine::orderBy('line_no')->get()->map(fn ($l) => [$l->description, $l->is_ads])->all());
+    }
+
+    public function test_S_049_20_a_timed_out_read_saves_nothing_and_the_same_file_again_within_10_minutes_opens_the_earlier_statement(): void
+    {
+        config(['services.openai.key' => 'sk-test-fake']);
+        $this->meta('2026-09-09', '6278.17');
+        $bytes = UploadedFile::fake()->image('shot.png', 20, 20)->get();
+        $shot = fn () => UploadedFile::fake()->createWithContent('shot.png', $bytes);
+        $answer = ['choices' => [['message' => ['content' => json_encode(['lines' => [
+            ['sale_date' => '2026-09-09', 'post_date' => '2026-09-10', 'description' => 'FACEBK *AB12', 'amount' => 6278.17, 'is_credit' => false],
+        ]])]]]];
+        $this->actingAs($this->user());
+
+        Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException('cURL error 28: Operation timed out after 45001 milliseconds'));
+        $this->upload([], $shot())->assertSessionHasErrors(['statement' => 'Hindi natapos basahin ang screenshot. Subukan ulit, o hatiin ang screenshot sa mas maliliit na bahagi.']);
+        $this->assertSame([0, 0], [CardStatement::count(), CardStatementLine::count()]);
+
+        Http::swap(new \Illuminate\Http\Client\Factory()); // bagong fake: ang naunang stub ay laging nauuna
+        Http::preventStrayRequests();
+        Http::fake(['api.openai.com/*' => Http::response($answer)]);
+        $this->upload([], $shot())->assertSessionHasNoErrors();
+        $first = CardStatement::sole();
+
+        // Inulit (hal. pagkatapos ng 504 kahit natapos ang basa): ang dating statement ang binubuksan, walang bagong tawag.
+        $this->travel(9)->minutes();
+        $this->upload([], $shot())->assertSessionHasNoErrors()->assertRedirect("/ads_manager/payment/reconcile/{$first->id}");
+        $this->assertSame([1, 1], [CardStatement::count(), CardStatementLine::count()]);
+        Http::assertSentCount(1);
+
+        $this->travel(2)->minutes();
+        $this->upload([], $shot())->assertSessionHasNoErrors();
+        $this->assertSame(2, CardStatement::count(), 'lampas 10 minuto: bagong statement');
+        $this->assertNotNull($first->fresh()->file_hash);
+        $this->assertSame(64, strlen($first->fresh()->file_hash), 'sha256 lang, hindi ang file');
     }
 
     public function test_S_049_15_line_edits_are_saved_and_used_by_the_match(): void

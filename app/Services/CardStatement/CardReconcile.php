@@ -6,6 +6,7 @@ use App\Models\CardStatement;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Daloy ng card counter-check: basahin ang statement (PDF → text → layout, larawan → vision), i-save ang mga linya
@@ -30,6 +31,16 @@ class CardReconcile
     /** Basa + save bilang preview. Ang upload temp file ay binabasa lang, hindi kinokopya kahit saan. */
     public function upload(UploadedFile $file, string $bank, ?string $card, ?int $userId): CardStatement
     {
+        // Parehong file ng parehong user sa loob ng 10 minuto (hal. inulit pagkatapos ng 504 habang natapos pa ang
+        // basa) → ang dating statement, walang bagong basa at walang doble.
+        $hash = hash_file('sha256', $file->getRealPath());
+        $hasHash = Schema::hasColumn('card_statements', 'file_hash');
+        if ($hasHash) {
+            $earlier = CardStatement::where('file_hash', $hash)->where('uploaded_by', $userId)
+                ->where('created_at', '>=', now()->subMinutes(10))->orderByDesc('id')->first();
+            if ($earlier) return $earlier;
+        }
+
         $isPdf = strtolower((string) $file->guessExtension()) === 'pdf';
         if ($isPdf) {
             $text = $this->pdf->text($file->getRealPath());
@@ -43,7 +54,7 @@ class CardReconcile
                 : 'Walang nabasang linya sa screenshot.');
         }
 
-        return DB::transaction(function () use ($read, $file, $isPdf, $card, $userId) {
+        return DB::transaction(function () use ($read, $file, $isPdf, $card, $userId, $hash, $hasHash) {
             [$start, $end] = CardMatcher::period($read['lines']);
             $s = CardStatement::create([
                 'card_label'    => $card,
@@ -55,7 +66,7 @@ class CardReconcile
                 'status'        => 'preview',
                 'lines_count'   => count($read['lines']),
                 'uploaded_by'   => $userId,
-            ]);
+            ] + ($hasHash ? ['file_hash' => $hash] : []));
             $now = now();
             $rows = [];
             foreach ($read['lines'] as $i => $l) {
