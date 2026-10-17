@@ -35,6 +35,13 @@ return [
         ],
     ],
 
+    // /ads_manager/payment/reconcile: vision model na bumabasa ng screenshot ng card statement (OPENAI_API_KEY),
+    // at ang pdftotext binary para sa PDF (smalot/pdfparser kung wala).
+    'card_statement' => [
+        'model'     => env('OPENAI_STATEMENT_MODEL', 'gpt-4o'),
+        'pdftotext' => env('POPPLER_PDFTOTEXT', 'pdftotext'),
+    ],
+
     'openai' => [
     'key'   => env('OPENAI_API_KEY'),
     'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),

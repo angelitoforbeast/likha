@@ -373,6 +373,14 @@ Route::post('/ads_manager/ad_account', [AdAccountController::class, 'store'])
 Route::delete('/ads_manager/ad_account/{ad_account_id}', [AdAccountController::class, 'destroy'])
     ->name('ad_accounts.destroy');
 
+// Card statement vs Meta ad payments — CEO lang (sa controller, 404 sa iba).
+Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('ads_manager/payment/reconcile')->name('ads_payment.reconcile.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\CardReconcileController::class, 'index'])->name('index');
+    Route::post('/', [\App\Http\Controllers\CardReconcileController::class, 'store'])->name('store');
+    Route::get('/{statement}', [\App\Http\Controllers\CardReconcileController::class, 'show'])->whereNumber('statement')->name('show');
+    Route::post('/{statement}/match', [\App\Http\Controllers\CardReconcileController::class, 'match'])->whereNumber('statement')->name('match');
+});
+
 Route::get('/ads_manager/payment/upload', [PaymentActivityController::class, 'create'])
     ->name('ads_payment.upload');
 
