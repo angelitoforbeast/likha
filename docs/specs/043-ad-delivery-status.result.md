@@ -21,6 +21,10 @@ Commits (branch `feat/043-ad-delivery-status`, from `develop` at 26d5d4f; not pu
 - `fix: delivery endpoint caps the range at 92 days, caches each result for 10 minutes under the /owner/private cache version, and accepts POST for long page lists (spec 043 amendment 2)`
 - `fix: expand posts the delivery request with CSRF, shows the reason when it is refused (over 92 days), and marks campaign rows that have orders but no spend in the range (spec 043 amendment 2)`
 - `docs: result for spec 043 amendment 2`
+- `chore: merge develop (043 live and the ad set fix) into spec 043` (amendment 3)
+- `feat: RTS / DEL / INT figures per delivery row and a combined ad_rdt column that replaces the five delivery columns by default for every role (spec 043 amendment 3)`
+- `feat: one RTS / DEL / INT (orders) cell per campaign, ad set, ad, Walang ad id and Total row in the expand, styled like the page row's cell (spec 043 amendment 3)`
+- `docs: result for spec 043 amendment 3`
 
 ## Amendment 1 (2026-10-17)
 
@@ -74,6 +78,33 @@ The amendment is saved, never committed, in the main checkout as `handoff/043-ad
 - **Re-pinned render hashes:** `/owner/private` and the eight `/item` hashes changed. Each was diffed against the commit before: the only lines that differ are this change's.
 - **`TODO.md`:** the "any date range" line is marked fixed, and the delivery-only line mentions the new note.
 - **Stories:** S-043.11 to S-043.14 added to `qa/stories.md`.
+
+## Amendment 3 (2026-10-17)
+
+The amendment is saved, never committed, in the main checkout as `handoff/043-ad-delivery-status/AMENDMENT-3.md`.
+
+- **Merged `develop`** (1c6a879 = 043 live, plus 6b1f144, the fix for the HTTP 500 when the ads of an ad set loaded). No conflict. That fix's `AdsLevelCampaignsDataTest` passes here.
+- **One RTS / DEL / INT cell per delivery row.**
+  - **Where:** campaign, ad set, ad, "Walang ad id" and "Total ng page (ayon sa order)" rows now show one cell with three lines (label, %, count), e.g. `RTS 26.7% 211 / DEL 24.1% 191 / INT 49.2% 389`.
+  - **Style:** the same as the page row's `jnt_rdt` cell: 11px table, grey 9px bold labels, a bold dark %, the count in slate, separator lines.
+  - **Formula:** RTS = for return + returned, DEL = delivered, INT = in transit, each % = count / (RTS + DEL + INT).
+  - **No orders:** a row with no shipped orders shows "—".
+  - **Code:** `AdDeliveryStatus` adds `rdt` = `{rts, del, int: {cnt, pct}}` (null when there is nothing) to every counts block, so the figures are tested in PHP. The counts themselves are unchanged. The screen draws the cell with a new Blade partial, `owner/_ad_rdt_cell.blade.php`, included five times in the expand partial. It uses `x-text` only: the house tests (`ClaudeActionViewTest`) forbid `x-html` on these pages, which is why my first `x-html` version was dropped.
+  - **Cache key:** now has a `v2` segment, so a result cached before deploy (without `rdt`) is never served.
+- **Columns.**
+  - A new column `ad_rdt`, labelled "RTS / DEL / INT (orders)", is in the `campaigns` config, placed where the five were.
+  - It is in `DEFAULT_VISIBLE` instead of the five. The five stay in the catalog and in column settings, hidden by default.
+  - New rule `REPLACED_UNTIL_SAVED`: while a saved config does not yet contain `ad_rdt` in its order, the five are hidden for the CEO and for every role. `ad_rdt` is added to each role's visible list (`VISIBLE_TO_ROLES_UNTIL_SAVED` now holds `ad_rdt` only) and placed just before `ad_delivered`.
+  - Once the settings page is saved with `ad_rdt`, each role's saved lists decide again.
+- **Tests:**
+  - **S-043.15:** hand values for an ad (50/25/25: 2, 1, 1), a second ad (0/100/0), the ad set and the campaign (40/40/20), "Walang ad id" (33.3 each) and Total (37.5/37.5/25: 3, 3, 2). Percents add to 100. "Walang ad id" on a page that has none gives null, which shows as "—".
+  - **S-043.16** (4 runs): column settings saved before 043, saved after 043 but before this change, saved with `ad_rdt`, and nothing saved.
+  - **S-043.9:** the column definition, the five includes, the cell markup (no `x-html`), the "—" branch, and `/item` with no `ad_rdt` in its own list.
+  - **Red runs:** `Undefined array key "rdt"`, `Failed asserting that two arrays are identical` (defaults), and the S-043.9 render assertion.
+- **`/item`:**
+  - It still includes the expand partial, so its HTML contains the five cell templates. Its own column list has no `ad_rdt`, so they never render.
+  - Its eight render hashes, `/owner/private` and the column-settings page were re-pinned after diffing every render against the commit before this change: every changed line is the new cell or the column change.
+- **Story changes:** S-043.8 is marked as replaced by S-043.16; the five columns are now hidden by default. S-043.15 and S-043.16 added.
 
 No migration, no new table, nothing writes. Plan: `docs/plans/043-ad-delivery-status.md`.
 
@@ -177,6 +208,8 @@ Command: `php.bat vendor/bin/phpunit --filter AdDelivery` (and `SharedPagesBaseP
 | S-043.12 | `AdDeliveryEndpointTest::test_S_043_12_the_range_is_capped_at_92_days`, `…_the_result_is_cached_until_the_owner_private_cache_version_changes`, plus `adDeliveryErrors` in S-043.9 | pass, pass |
 | S-043.13 | `AdDeliveryEndpointTest::test_S_043_13_expand_all_posts_the_page_list`, plus the POST check in S-043.9 | pass |
 | S-043.14 | "walang spend sa range" check in `AdDeliveryColumnsTest::test_S_043_9…` | pass |
+| S-043.15 | `AdDeliveryStatusTest::test_S_043_15_each_row_carries_the_rts_del_int_cell`, plus the cell checks in `AdDeliveryColumnsTest::test_S_043_9…` | pass |
+| S-043.16 | `AdDeliveryColumnsTest::test_S_043_16_the_combined_cell_replaces_the_five_columns_by_default_for_every_role` (2 data sets), `…_once_saved_with_the_combined_cell_the_saved_lists_decide`, `…_nothing_saved_shows_the_combined_cell_to_the_ceo` | pass (4 runs) |
 | (pins) | `SharedPagesBasePinTest` (2), `SuppliersGroupTest` (/item renders), re-pinned; every diff checked to be only this change | pass |
 
 Red runs:
@@ -188,6 +221,7 @@ Red runs:
 
 ## Suite
 
+**After amendment 3:** `php.bat vendor/bin/phpunit` gives `Tests: 1351, Assertions: 16977, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The two that don't pass are again only the known `ExampleTest` (failure) and `ImportStartTest` (error).
 **After amendment 2:** `php.bat vendor/bin/phpunit` gives `Tests: 1347, Assertions: 16928, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The two that don't pass are again only the known `ExampleTest` (failure) and `ImportStartTest` (error).
 **After amendment 1 (merge of develop 59b725c and the Total line):** `php.bat vendor/bin/phpunit` gives `Tests: 1343, Assertions: 16907, Errors: 1, Failures: 1, PHPUnit Deprecations: 5, Skipped: 3`. The two that don't pass are again only the known `ExampleTest` (failure) and `ImportStartTest` (error). The 19 tests added by 042 pass.
 `php.bat vendor/bin/phpunit` on the final tree: `Tests: 1324, Assertions: 16694, Errors: 1, Failures: 1, PHPUnit Deprecations: 4, Skipped: 3`. The two that don't pass are the known ones:
