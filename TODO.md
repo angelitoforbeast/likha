@@ -468,3 +468,6 @@ Accepted, not fixed:
 - **The J&T column of the list uses `MAX(from_jnts.status)`** when a waybill has several rows (as /page-settings/psid-coverage/orders does). Reason: the usual case is one row per waybill.
 - **When two builds run in the same second, the counts in the notice can be off** (the rows themselves are never doubled: the unique `dedupe_key`).
 - **Saving a template re-renders the unsent rows one UPDATE each.** Reason: fine for a few thousand rows; a bulk CASE update is worth it if the list grows past that.
+- **(amendment 1) A `skipped` row keeps its `waybill|kind|day` key.** That day is never built again for the waybill (a cap-skipped day can still be sent by hand from the list; a stale or removed day is not sendable). Reason: building it again would risk the same day twice; the owner sends it by hand.
+- **(amendment 1) Saving the days re-renders every unsent real row of the kind, one UPDATE per changed row, inside the request.** Reason: fine for the few thousand rows a kind holds; a queued job is worth it if a save gets slow.
+- **(amendment 1) The editor's preview uses a fixed sample order** (no rider info), not a row from the list. Reason: rows in the list do not carry their order details to the page.
