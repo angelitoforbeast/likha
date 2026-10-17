@@ -158,8 +158,37 @@ class ChatblastSafetyTest extends ChatblastTestCase
         $this->assertSame('psid-z', BotcakeMessage::where('waybill', 'WB-001')->where('status', 'ready')->sole()->psid);
 
         MacroOutput::whereKey($order->id)->update(['PAGE' => 'Page Dos']);
-        app(ChatblastSender::class)->queue([BotcakeMessage::where('waybill', 'WB-001')->where('status', 'ready')->sole()->id], 1);
+        $fresh = BotcakeMessage::where('waybill', 'WB-001')->where('status', 'ready')->sole();
+        app(ChatblastSender::class)->queue([$fresh->id], 1);
         Http::assertNothingSent();
+        $this->assertSame(['skipped', 'nagbago ang PSID/page', null], [$fresh->fresh()->status, $fresh->fresh()->reason, $fresh->fresh()->dedupe_key]);
+    }
+
+    public function test_a_row_refused_for_its_text_stays_refused_after_the_next_build(): void
+    {
+        Http::fake();
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a');
+        app(Chatblast::class)->build('delivering');
+        $this->row('WB-001')->update(['text' => 'Hello {name}']);
+        app(ChatblastSender::class)->queue([$this->row('WB-001')->id], 1);
+        $this->assertSame('no_config', $this->row('WB-001')->status);
+
+        app(Chatblast::class)->build('delivering');
+
+        $this->assertSame('no_config', $this->row('WB-001')->status, 'hindi bumabalik sa ready ang text na tinanggihan');
+    }
+
+    public function test_a_row_stuck_in_sending_for_long_does_not_block_the_customer(): void
+    {
+        $this->botcake();
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-002', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('in_transit');
+        DB::table('botcake_messages')->where('waybill', 'WB-001')->update(['status' => 'sending', 'updated_at' => now()->subHours(2)]);
+
+        app(ChatblastSender::class)->queue([$this->row('WB-002', 'in_transit')->id], 1);
+
+        $this->assertSame('sent', $this->row('WB-002', 'in_transit')->status, 'ang naiwang sending nang 2 oras ay hindi na humaharang');
     }
 
     public function test_the_read_back_matches_on_either_id_or_custom_field_id(): void

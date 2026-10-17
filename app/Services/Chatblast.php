@@ -150,10 +150,10 @@ class Chatblast
         return $other ? 'walang {' . $other[0] . '}' : self::RIDER_REASON;
     }
 
-    /** Dahilan na galing sa kulang na laman ng text (hindi sa PSID o settings). */
+    /** Dahilan na galing sa kulang na laman ng text (hindi sa PSID o settings): hindi ito binabago ng recheck. */
     public static function isTextReason(?string $reason): bool
     {
-        return $reason === self::RIDER_REASON || str_starts_with((string) $reason, 'walang {');
+        return $reason === self::RIDER_REASON || str_starts_with((string) $reason, 'walang {') || str_starts_with((string) $reason, 'hindi buo ang text');
     }
 
     /**
@@ -340,7 +340,8 @@ class Chatblast
     /**
      * Ang dahilan kapag hindi dapat ipadala ngayong araw ang totoong mensahe (null kapag puwede): may naipadala na (o
      * maaaring naipadala, unknown) o ipinapadala na ang ibang mensahe ng parehong waybill at uri ngayong araw (Manila),
-     * o wala na ang araw nito sa mga araw ng uri.
+     * o wala na ang araw nito sa mga araw ng uri. Ang "sending" ay bilang lang sa loob ng 10 minuto (mas mahaba sa
+     * pinakamatagal na job): ang naiwan dahil pinatay ang worker ay hindi humaharang habambuhay.
      */
     public function blockedToday(BotcakeMessage $m): ?string
     {
@@ -350,7 +351,7 @@ class Chatblast
         $other = BotcakeMessage::where('waybill', $m->waybill)->where('kind', $m->kind)->where('is_test', false)->whereKeyNot($m->id)
             ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
                 ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
-                ->orWhere('status', 'sending'))
+                ->orWhere(fn ($x) => $x->where('status', 'sending')->where('updated_at', '>=', now()->subMinutes(10))))
             ->exists();
 
         if ($other) return 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas';
@@ -360,7 +361,7 @@ class Chatblast
             ->where('is_test', false)->whereKeyNot($m->id)
             ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
                 ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
-                ->orWhere('status', 'sending'))
+                ->orWhere(fn ($x) => $x->where('status', 'sending')->where('updated_at', '>=', now()->subMinutes(10))))
             ->exists();
 
         return $customer ? 'may mensahe na ngayong araw sa customer na ito' : null;
