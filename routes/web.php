@@ -56,6 +56,7 @@ use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
+use App\Http\Controllers\ChatblastController;
 use App\Http\Controllers\BotcakeCustomersController;
 use App\Http\Controllers\PsidCoverageController;
 use App\Http\Controllers\JntStatusController;
@@ -239,6 +240,23 @@ Route::get('/encoder/tools/ai', [AiController::class, 'index'])->name('encoder.t
 Route::post('/encoder/tools/ai/run', [AiController::class, 'run'])->name('encoder.tools.ai.run');
 Route::get('/encoder/tools/ai/health', [AiController::class, 'health'])->middleware('auth');
 
+
+// /chatblast: order updates sa customer sa Botcake. Access ayon sa /owner/nav-settings (NavAccess, sa controller).
+Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('chatblast.')->group(function () {
+    Route::get('/', [ChatblastController::class, 'index'])->name('index');
+    Route::get('/list', [ChatblastController::class, 'list'])->name('list');
+    Route::get('/messages/{id}', [ChatblastController::class, 'show'])->whereNumber('id')->name('show');
+    Route::post('/build', [ChatblastController::class, 'build'])->middleware('throttle:10,1,chatblast-build')->name('build');
+    Route::post('/send', [ChatblastController::class, 'send'])->middleware('throttle:60,1,chatblast-send')->name('send');
+    Route::post('/send-filtered', [ChatblastController::class, 'sendFiltered'])->middleware('throttle:10,1,chatblast-send-filtered')->name('send-filtered');
+    Route::post('/retry-failed', [ChatblastController::class, 'retryFailed'])->middleware('throttle:10,1,chatblast-retry')->name('retry-failed');
+    Route::post('/pause', [ChatblastController::class, 'pause'])->middleware('throttle:30,1,chatblast-control')->name('pause');
+    Route::post('/resume', [ChatblastController::class, 'resume'])->middleware('throttle:30,1,chatblast-control')->name('resume');
+    Route::post('/test', [ChatblastController::class, 'test'])->middleware('throttle:20,1,chatblast-test')->name('test');
+    Route::post('/sequence', [ChatblastController::class, 'saveSequence'])->middleware('throttle:30,1,chatblast-sequence')->name('sequence');
+    Route::get('/test-psid', [ChatblastController::class, 'searchTestPsid'])->middleware('throttle:60,1,chatblast-test-psid')->name('test-psid.search');
+    Route::post('/test-psid', [ChatblastController::class, 'saveTestPsid'])->middleware('throttle:20,1,chatblast-test-psid-save')->name('test-psid.save');
+});
 
 // Settings kada page (Page | Provider | Key | Value). CEO lang: ang controller ang nagbabalik ng 404 sa iba.
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name('page-settings.')->group(function () {

@@ -85,6 +85,10 @@ return [
         'grid_order_days' => (int) env('BOTCAKE_GRID_ORDER_DAYS', 30),
         // Sync lahat: nilalaktawan ang page na incremental lang ang kailangan at may matagumpay na sync sa huling ilang oras.
         'sync_all_fresh_hours' => (float) env('BOTCAKE_SYNC_ALL_FRESH_HOURS', 6),
+        // /chatblast: hanggang ilang totoong mensahe kada page kada araw (Manila).
+        'chatblast_daily_cap' => (int) env('BOTCAKE_CHATBLAST_DAILY_CAP', 3000),
+        // /chatblast: ilang segundo pagkatapos ng send_flow bago ang susunod na mensahe sa parehong customer (page + PSID).
+        'chatblast_customer_gap' => (int) env('BOTCAKE_CHATBLAST_CUSTOMER_GAP', 20),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

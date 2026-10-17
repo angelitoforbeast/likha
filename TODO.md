@@ -459,3 +459,17 @@ Accepted, not fixed:
 - **The poll reads the old cache key on every request (one cache query with the `database` store).** Reason: it is one indexed read. It can go in a later release, once no old run can be left.
 - **The rule "has a Botcake ID and token" appears three times** (`PageSettingsGrid::rowInfo`, the mini rows in `changes()`, the page's script), and the summary labels appear twice (`BotcakeSyncAll::SUMMARY` and the script). Reason: small; a shared helper is worth it on the next change there.
 - **A page killed by the 1800 s timeout leaves the Botcake lock held up to 2 h, so the next Sync lahat page re-queues itself every 30 s for that long** (from 042 and 044). Reason: rare, and it recovers on its own; Stop ends the run.
+
+## 046: /chatblast (2026-10-18)
+
+- **The 2 requests a second per token is shared by chatblast jobs only.** The Botcake sync on `default` keeps its own spacing, so one page's token can see about 4 a second while both run. Reason: the sync and chatblast rarely hit the same page at the same moment; giving the sync the cache-based rate key changes its tested timing and belongs in its own change.
+- **An `unknown` message (send_flow outcome unsure) cannot be resolved on the page** (marked sent or sent again). Reason: product decision; the safe default is never to send again. Check in Botcake and, if it did not arrive, add the order to a later kind or send by hand.
+- **The daily cap is counted, not reserved.** Safe because the `chatblast` worker runs with numprocs 1; with more processes two jobs could pass the cap by one each.
+- **The J&T column of the list uses `MAX(from_jnts.status)`** when a waybill has several rows (as /page-settings/psid-coverage/orders does). Reason: the usual case is one row per waybill.
+- **When two builds run in the same second, the counts in the notice can be off** (the rows themselves are never doubled: the unique `dedupe_key`).
+- **Saving a template re-renders the unsent rows one UPDATE each.** Reason: fine for a few thousand rows; a bulk CASE update is worth it if the list grows past that.
+- **(amendment 1) A `skipped` row keeps its `waybill|kind|day` key.** That day is never built again for the waybill (a cap-skipped day can still be sent by hand from the list; a stale or removed day is not sendable). Reason: building it again would risk the same day twice; the owner sends it by hand.
+- **(amendment 1) Saving the days re-renders every unsent real row of the kind, one UPDATE per changed row, inside the request.** Reason: fine for the few thousand rows a kind holds; a queued job is worth it if a save gets slow.
+- **(amendment 1) The editor's preview uses a fixed sample order** (no rider info), not a row from the list. Reason: rows in the list do not carry their order details to the page.
+- **(amendment 2) A Facebook name that itself contains a placeholder such as `{item}` makes the text refused for good** ("hindi buo ang text"). Reason: fails safe; such names are not expected.
+- **(amendment 2) The per-customer lock needs a cache store with locks** (`database` with `cache_locks`, as `.env.example`; also redis). Check the server's `CACHE_STORE` before release.
