@@ -57,6 +57,13 @@ class Chatblast
     public const MAX_TEXT = 1000;
     public const MAX_DAYS = 30;
     public const MAX_VERSIONS = 10;
+    public const MAX_TOTAL = 60000; // lahat ng text ng isang uri (kasya sa TEXT ng app_settings)
+
+    /**
+     * Gaano kalayo na ang J&T status. Kapag may ilang from_jnts row ang waybill (may kopya na hindi na-update), ang
+     * pinakamalayo ang totoo: ang kopyang "In Transit" pa rin ay hindi nagpapanatili sa waybill sa In Transit.
+     */
+    private const PROGRESS = ['In Transit' => 1, 'Delivering' => 2, 'Delivered' => 3, 'For Return' => 3, 'Returned' => 3];
 
     public function __construct(private PageSettings $settings)
     {
@@ -83,7 +90,13 @@ class Chatblast
                 $label = 'Araw ' . $n . ' · ' . self::label($j);
                 if (!is_string($text) || trim($text) === '') return $label . ': walang laman ang text.';
                 if (mb_strlen($text) > self::MAX_TEXT) return $label . ': hanggang ' . self::MAX_TEXT . ' na character lang.';
+                preg_match_all('/\{([a-z_]+)\}/', $text, $m);
+                $unknown = array_diff($m[1], self::PLACEHOLDERS);
+                if ($unknown) return $label . ': hindi kilalang placeholder {' . reset($unknown) . '}.';
             }
+        }
+        if (mb_strlen((string) json_encode($days, JSON_UNESCAPED_UNICODE)) > self::MAX_TOTAL) {
+            return 'Masyadong mahaba ang lahat ng text (hanggang ' . number_format(self::MAX_TOTAL) . ' na character).';
         }
 
         return null;
@@ -169,10 +182,12 @@ class Chatblast
 
         $this->candidates($kind, $since)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $kind, $userId, $now) {
             $rows = [];
+            $jnt  = $this->currentStatuses($orders->pluck('waybill')->unique()->values()->all());
             foreach ($orders as $o) {
                 $waybill = trim((string) $o->waybill);
                 if ($waybill === '' || isset($seen[$waybill])) continue; // isang row kada waybill (kahit may kopya ang order)
                 $seen[$waybill] = true;
+                if (!$this->matches($kind, $jnt[$o->waybill] ?? [])) continue; // may kopyang mas malayo na ang status
 
                 $day = (int) $o->sent_n + 1;
                 if ($day > count($days)) continue; // ubos na ang mga araw ng uri
@@ -265,28 +280,55 @@ class Chatblast
 
     private function staleReason(string $kind, array $rows): string
     {
-        $now = array_values(array_unique(array_column($rows, 'status')));
-        return 'Hindi na ' . self::KINDS[$kind]['status'] . ' ang waybill (ngayon: ' . ($now ? implode(', ', $now) : 'wala sa J&T') . ')';
+        $top = $this->latest($rows);
+        return 'Hindi na ' . self::KINDS[$kind]['status'] . ' ang waybill (ngayon: ' . ($top['status'] ?? 'wala sa J&T') . ')';
     }
 
-    /** Nasa status ng uri ba ang waybill (kahit isang from_jnts row, walang RTS reason). */
+    /** Nasa status ng uri ba ang waybill: ang pinakamalayong from_jnts row nito ang status ng uri, walang RTS reason. */
     private function matches(string $kind, array $rows): bool
     {
-        foreach ($rows as $r) {
-            if ($r['status'] === self::KINDS[$kind]['status'] && trim((string) $r['rts_reason']) === '') return true;
-        }
-        return false;
+        $top = $this->latest($rows);
+        return $top !== null && $top['status'] === self::KINDS[$kind]['status'] && trim((string) $top['rts_reason']) === '';
     }
 
-    /** @return array<string, array<int, array{status:?string, rts_reason:?string}>> waybill => mga J&T row */
+    /** Ang pinakamalayong J&T row (PROGRESS; kapag pantay, ang pinakahuling naitala). */
+    private function latest(array $rows): ?array
+    {
+        $top = null;
+        foreach ($rows as $r) {
+            if ($top === null || (self::PROGRESS[$r['status']] ?? 0) >= (self::PROGRESS[$top['status']] ?? 0)) $top = $r;
+        }
+        return $top;
+    }
+
+    /** @return array<string, array<int, array{status:?string, rts_reason:?string}>> waybill => mga J&T row, ayon sa id */
     private function currentStatuses(array $waybills): array
     {
         $out = [];
         if (!$waybills) return $out;
-        DB::table('from_jnts')->whereIn('waybill_number', $waybills)->get(['waybill_number', 'status', 'rts_reason'])
+        DB::table('from_jnts')->whereIn('waybill_number', $waybills)->orderBy('id')->get(['waybill_number', 'status', 'rts_reason'])
             ->each(function ($r) use (&$out) { $out[$r->waybill_number][] = ['status' => $r->status, 'rts_reason' => $r->rts_reason]; });
 
         return $out;
+    }
+
+    /**
+     * Ang dahilan kapag hindi dapat ipadala ngayong araw ang totoong mensahe (null kapag puwede): may naipadala na (o
+     * maaaring naipadala, unknown) o ipinapadala na ang ibang mensahe ng parehong waybill at uri ngayong araw (Manila),
+     * o wala na ang araw nito sa mga araw ng uri.
+     */
+    public function blockedToday(\App\Models\BotcakeMessage $m): ?string
+    {
+        if ($m->day > count($this->sequence($m->kind))) return 'Wala nang Araw ' . $m->day . ' sa mga araw ng uri';
+
+        $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
+        $other = BotcakeMessage::where('waybill', $m->waybill)->where('kind', $m->kind)->where('is_test', false)->whereKeyNot($m->id)
+            ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
+                ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
+                ->orWhere('status', 'sending'))
+            ->exists();
+
+        return $other ? 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas' : null;
     }
 
     /** Binubuo ulit ang text ng hindi pa naipapadala ayon sa bagong mga araw. @return int bilang ng nabago */
@@ -294,7 +336,7 @@ class Chatblast
     {
         $missing = $this->missingByPage();
         $changed = 0;
-        BotcakeMessage::where('kind', $kind)->whereIn('status', self::UNSENT)
+        BotcakeMessage::where('kind', $kind)->where('is_test', false)->whereIn('status', self::UNSENT)
             ->chunkById(500, function ($rows) use ($days, $missing, &$changed) {
                 foreach ($rows as $row) {
                     if ($row->day > count($days)) {
@@ -343,7 +385,10 @@ class Chatblast
             ->whereExists(fn ($e) => $e->from('from_jnts as j')->whereColumn('j.waybill_number', 'mo.waybill')->where('j.status', self::KINDS[$kind]['status'])
                 ->where(fn ($r) => $r->whereNull('j.rts_reason')->orWhereRaw("TRIM(j.rts_reason) = ''"))->selectRaw('1'))
             ->whereNotExists(fn ($e) => $e->from('botcake_messages as m')->whereColumn('m.waybill', 'mo.waybill')->where('m.kind', $kind)
-                ->where('m.is_test', false)->where('m.created_at', '>=', $today)->selectRaw('1'))
+                ->where('m.is_test', false)
+                ->where(fn ($t) => $t->where('m.created_at', '>=', $today)->orWhere('m.sent_at', '>=', $today)->orWhere('m.queued_at', '>=', $today)
+                    ->orWhere(fn ($u) => $u->where('m.status', 'unknown')->where('m.updated_at', '>=', $today)))
+                ->selectRaw('1'))
             ->select('mo.id', 'mo.fb_name', 'mo.waybill', 'mo.botcake_psid')
             ->selectRaw($col('PAGE') . ' AS page, ' . $col('ITEM_NAME') . ' AS item, ' . $col('COD') . ' AS cod')
             ->selectSub(fn ($s) => $s->from('from_jnts as r')->whereColumn('r.waybill_number', 'mo.waybill')->selectRaw('MAX(r.receiver)'), 'receiver')

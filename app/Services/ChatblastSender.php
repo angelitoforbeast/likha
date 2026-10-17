@@ -144,10 +144,14 @@ class ChatblastSender
             return;
         }
 
-        // Ang waybill ay dapat nasa status pa rin ng uri (hal. hindi na "In Transit" kapag Delivered na).
-        if (!$m->is_test && isset(Chatblast::KINDS[$m->kind]) && ($stale = $this->chatblast->staleFor($m->kind, $m->waybill)) !== null) {
-            $this->finish($m, 'skipped', $stale, null, []);
-            return;
+        // Ang waybill ay dapat nasa status pa rin ng uri (hal. hindi na "In Transit" kapag Delivered na), isa lang kada
+        // araw ang mensahe ng uri sa waybill, at dapat mayroon pa ang araw nito.
+        if (!$m->is_test && isset(Chatblast::KINDS[$m->kind])) {
+            $why = $this->chatblast->staleFor($m->kind, $m->waybill) ?? $this->chatblast->blockedToday($m);
+            if ($why !== null) {
+                $this->finish($m, 'skipped', $why, null, []);
+                return;
+            }
         }
 
         $cap = max(1, (int) config('services.botcake.chatblast_daily_cap', 3000));

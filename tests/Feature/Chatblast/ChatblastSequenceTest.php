@@ -159,4 +159,92 @@ class ChatblastSequenceTest extends ChatblastTestCase
         $row = $this->getJson('/chatblast/list?' . http_build_query(['kind' => 'in_transit']))->assertOk()->json('rows.0');
         $this->assertSame([1, 'B', 'Araw 1 · B'], [$row['day'], $row['version'], $row['step']], 'WB-001: 1 mod 2 = bersyon B');
     }
+
+    public function test_a_day_sent_today_blocks_the_next_day_until_tomorrow_even_if_it_was_built_yesterday(): void
+    {
+        Http::fake();
+        $this->travelTo('2026-10-17 22:00:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
+        $this->build();
+
+        $this->travelTo('2026-10-18 09:00:00');
+        $this->rows()->sole()->update(['status' => 'sent', 'sent_at' => now()]);
+        $this->travelTo('2026-10-18 10:00:00');
+
+        $this->assertSame(0, $this->build()['added'], 'naipadala ngayong araw ang Araw 1: walang Araw 2 ngayon');
+
+        // Kahit may Araw 2 na nabuo bago naipadala ang Araw 1, hindi ito ipinapadala sa parehong araw.
+        $day2 = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'WB-001', 'kind' => 'in_transit', 'day' => 2, 'version' => 'A',
+            'psid' => 'psid-a', 'text' => 'Araw dalawa', 'status' => 'ready', 'dedupe_key' => 'WB-001|in_transit|2', 'vars' => []]);
+        app(ChatblastSender::class)->queue([$day2->id], 1);
+        Http::assertNothingSent();
+        $this->assertSame('skipped', $day2->fresh()->status);
+        $this->assertStringContainsString('ngayong araw', $day2->fresh()->reason);
+
+        $this->travelTo('2026-10-19 09:00:00');
+        $this->assertSame(0, $this->build()['added'], 'ang Araw 2 ay mayroon na (ipadala ulit bukas)');
+    }
+
+    public function test_a_waybill_with_a_later_jnt_row_is_no_longer_in_transit(): void
+    {
+        Http::fake();
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
+        $this->build();
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB-001', 'status' => 'Delivered']); // kopya na na-update
+
+        $row = $this->rows()->sole();
+        app(ChatblastSender::class)->queue([$row->id], 1);
+        Http::assertNothingSent();
+        $this->assertSame('skipped', $row->fresh()->status, 'Delivered na ang isang kopya ng waybill');
+
+        $this->travel(1)->days();
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-002', 'psid-b', 'In Transit');
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB-002', 'status' => 'Delivering']);
+        $this->build();
+        $this->assertSame(0, $this->rows()->where('waybill', 'WB-002')->count(), 'Delivering na ang isang kopya: hindi na In Transit');
+    }
+
+    public function test_a_waybill_without_digits_still_gets_the_same_version_every_time(): void
+    {
+        $chatblast = app(Chatblast::class);
+        $first = $chatblast->pick(['A', 'B', 'C'], 'WAYBILL-ABC', []);
+        $this->assertSame($first, $chatblast->pick(['A', 'B', 'C'], 'WAYBILL-ABC', []));
+        $this->assertSame([0, 'A'], $chatblast->pick(['A', 'B', 'C'], 'JT99999999999999999999', []), 'huling 9 na digit lang: 999999999 mod 3 = 0');
+    }
+
+    public function test_the_editor_refuses_bad_shapes_unknown_placeholders_and_huge_payloads(): void
+    {
+        $this->actingAs($this->user());
+        foreach ([
+            'hindi string'          => [[123]],
+            'nested'                => [[['A']]],
+            '31 araw'               => array_fill(0, 31, ['A']),
+            '11 bersyon'            => [array_fill(0, 11, 'A')],
+            'maling placeholder'    => [['Hello {nmae}']],
+            'masyadong malaki'      => array_fill(0, 30, array_fill(0, 10, str_repeat('x', 900))),
+        ] as $case => $days) {
+            $this->postJson('/chatblast/sequence', ['kind' => 'in_transit', 'days' => $days])->assertStatus(422);
+        }
+        $this->assertSame(Chatblast::KINDS['in_transit']['days'], app(Chatblast::class)->sequence('in_transit'));
+    }
+
+    public function test_a_removed_day_is_never_sent_and_queued_rows_keep_their_text(): void
+    {
+        Http::fake();
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-002', 'psid-b', 'In Transit');
+        $this->build();
+        $queued = $this->rows()->firstWhere('waybill', 'WB-002');
+        $queued->update(['status' => 'queued']);
+        BotcakeMessage::where('waybill', 'WB-001')->update(['day' => 3, 'dedupe_key' => 'WB-001|in_transit|3']);
+
+        app(Chatblast::class)->setSequence('in_transit', [['Bago lang']]);
+
+        $this->assertSame('skipped', $this->rows()->firstWhere('waybill', 'WB-001')->status);
+        $this->assertNotSame('Bago lang', $queued->fresh()->text, 'ang naka-queue ay hindi binabago');
+
+        app(ChatblastSender::class)->queue([$this->rows()->firstWhere('waybill', 'WB-001')->id], 1);
+        Http::assertNothingSent();
+        $this->assertStringContainsString('Araw 3', $this->rows()->firstWhere('waybill', 'WB-001')->reason);
+    }
 }
