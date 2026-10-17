@@ -75,7 +75,8 @@ class CardReconcile
     public function lineArrays(CardStatement $s): array
     {
         return $s->lines()->get()->map(fn ($l) => [
-            'id' => $l->id, 'sale_date' => $l->sale_date?->toDateString(), 'post_date' => $l->post_date?->toDateString(),
+            'id' => $l->id, 'line_no' => $l->line_no, 'description' => $l->description,
+            'sale_date' => $l->sale_date?->toDateString(), 'post_date' => $l->post_date?->toDateString(),
             'amount' => (string) $l->amount, 'is_credit' => (bool) $l->is_credit, 'is_ads' => (bool) $l->is_ads,
         ])->all();
     }
@@ -117,6 +118,7 @@ class CardReconcile
         $meta = $this->meta(CardMatcher::period($lines), (string) $s->card_label);
         $result = CardMatcher::match($lines, $meta);
         $result['meta_by_id'] = array_column($meta, null, 'id');
+        $result['line_arrays'] = $lines;
 
         return $result;
     }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CardStatement;
 use App\Services\CardStatement\CardReconcile;
+use App\Services\CardStatement\SideBySide;
 use App\Services\CardStatement\StatementParser;
 use App\Services\CardStatement\StatementReadException;
 use Illuminate\Http\Request;
@@ -18,6 +19,8 @@ use Illuminate\Validation\Rule;
  */
 class CardReconcileController extends Controller
 {
+    private const FORM_LINES = 200;
+
     public function __construct(private CardReconcile $reconcile) {}
 
     private function getNormalizedRole(): string
@@ -74,13 +77,25 @@ class CardReconcileController extends Controller
         $suggest = $statement->status === 'preview' ? $this->reconcile->suggest($statement) : null;
         $result = $statement->status === 'matched' ? $this->reconcile->result($statement) : null;
 
+        // Side by side, isang page ng buong mga araw; ang edit form ay 200 linya bawat page (ang JSON edits
+        // ay ang mga linyang nakikita lang, ang iba ay hindi ginagalaw), para magaan kahit 1,000+ linya.
+        $status = in_array($request->query('status'), SideBySide::STATUSES, true) ? (string) $request->query('status') : '';
+        $page = max(1, (int) $request->query('page', 1));
+        $view = $result ? SideBySide::page(SideBySide::days($result, $result['line_arrays'], $result['meta_by_id']), $status, $page) : null;
+        $formPages = max(1, (int) ceil($lines->count() / self::FORM_LINES));
+        $formPage = min($formPages, max(1, (int) $request->query('lp', 1)));
+
         return view('ads_manager.payment.reconcile.show', [
-            's'       => $statement,
-            'lines'   => $lines,
-            'cards'   => $this->reconcile->cards(),
-            'suggest' => $suggest,
-            'result'  => $result,
-            'status'  => (string) $request->query('status', ''),
+            's'         => $statement,
+            'lines'     => $lines->forPage($formPage, self::FORM_LINES),
+            'others'    => $lines->filter(fn ($l) => !$l->is_ads || $l->is_credit),
+            'formPage'  => $formPage,
+            'formPages' => $formPages,
+            'cards'     => $this->reconcile->cards(),
+            'suggest'   => $suggest,
+            'result'    => $result,
+            'view'      => $view,
+            'status'    => $status,
         ]);
     }
 

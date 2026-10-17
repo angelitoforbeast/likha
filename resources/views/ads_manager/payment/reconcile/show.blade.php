@@ -3,18 +3,18 @@
   <x-slot name="heading">Card check: {{ $s->card_label ?: 'statement' }} · {{ $s->period_start?->toDateString() }} – {{ $s->period_end?->toDateString() }}</x-slot>
 
   @php
-    $peso = fn ($v) => '₱' . number_format((float) $v, 2);
-    $labels = ['matched' => 'Tugma', 'none' => 'Wala sa Meta', 'group_off' => 'Grupo, hindi tally', 'credit' => 'Credit', 'not_ads' => 'Not ads'];
+    $peso = fn ($v) => ((float) $v < 0 ? '-' : '') . '₱' . number_format(abs((float) $v), 2);
+    $num = fn ($v) => number_format((float) $v, 2);
+    $shortId = fn ($id) => mb_strlen((string) $id) > 14 ? mb_substr((string) $id, 0, 6) . '…' . mb_substr((string) $id, -4) : (string) $id;
     $selectedCard = old('card_label', $s->card_label ?: ($suggest['label'] ?? null));
-    $statusOf = function ($line) use ($result) {
-        $r = $result['lines'][$line->id] ?? null;
-        if (!$r) return 'none';
-        return match ($r['match_kind']) {
-            'sale_date', 'post_date', 'near' => 'matched',
-            'group' => ($result['groups'][$r['group_key']]['tallied'] ?? false) ? 'matched' : 'group_off',
-            default => $r['match_kind'],
-        };
+    $marks = ['matched' => 'Tugma', 'card_only' => 'Wala sa Meta', 'meta_only' => 'Wala sa card', 'group_off' => 'Hindi tally'];
+    $tint = fn ($row) => match ($row['status']) {
+        'card_only' => 'bg-red-50',
+        'meta_only' => 'bg-amber-50',
+        'group_off' => ($row['group']['more'] ?? '') === 'card' ? 'bg-red-50' : 'bg-amber-50',
+        default     => '',
     };
+    $link = fn (array $q) => route('ads_payment.reconcile.show', array_merge([$s], array_filter($q, fn ($v) => $v !== null && $v !== '')));
   @endphp
 
   <div class="mb-3 text-sm"><a href="{{ route('ads_payment.reconcile.index') }}" class="text-blue-700 hover:underline">← Lahat ng statement</a>
@@ -35,112 +35,122 @@
     </div>
   @else
     @php $t = $result['totals']; @endphp
-    <div class="flex flex-wrap gap-2 mb-4 text-sm">
-      <span class="px-3 py-1 rounded-full bg-green-100 text-green-800">Tugma {{ $t['matched_count'] }} · {{ $peso($t['matched_total']) }}</span>
-      <span class="px-3 py-1 rounded-full bg-orange-100 text-orange-800">Wala sa card {{ $t['no_card_count'] }} · {{ $peso($t['no_card_total']) }}</span>
-      <span class="px-3 py-1 rounded-full bg-red-100 text-red-800">Wala sa Meta {{ $t['no_meta_count'] }} · {{ $peso($t['no_meta_total']) }}</span>
-      <span class="px-3 py-1 rounded-full bg-gray-100 text-gray-800">100-groups: {{ $t['groups_tallied'] }} tally · {{ $t['groups_untallied'] }} hindi</span>
-      <span class="px-3 py-1 rounded-full bg-gray-100 text-gray-800">Card {{ $peso($t['card_total']) }} · Meta {{ $peso($t['meta_total']) }} · Diperensya {{ $peso($t['difference_total']) }}</span>
+
+    {{-- Summary bar: bawat chip ay filter ng mga row. --}}
+    <div class="flex flex-wrap gap-2 mb-3 text-sm sticky top-0 z-10 bg-gray-100 py-2">
+      <a href="{{ $link([]) }}" class="px-3 py-1 rounded-full border {{ $status === '' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white' }}">Lahat</a>
+      <a href="{{ $link(['status' => 'matched']) }}" class="px-3 py-1 rounded-full border border-green-300 {{ $status === 'matched' ? 'ring-2 ring-green-600' : '' }} bg-green-100 text-green-800">Tugma {{ $t['matched_count'] }} · {{ $peso($t['matched_total']) }}</a>
+      <a href="{{ $link(['status' => 'card_only']) }}" class="px-3 py-1 rounded-full border border-red-300 {{ $status === 'card_only' ? 'ring-2 ring-red-600' : '' }} bg-red-100 text-red-800">Wala sa Meta {{ $t['no_meta_count'] }} · {{ $peso($t['no_meta_total']) }}</a>
+      <a href="{{ $link(['status' => 'meta_only']) }}" class="px-3 py-1 rounded-full border border-amber-300 {{ $status === 'meta_only' ? 'ring-2 ring-amber-600' : '' }} bg-amber-100 text-amber-800">Wala sa card {{ $t['no_card_count'] }} · {{ $peso($t['no_card_total']) }}</a>
+      <a href="{{ $link(['status' => 'group_off']) }}" class="px-3 py-1 rounded-full border {{ $status === 'group_off' ? 'ring-2 ring-gray-600' : '' }} bg-white text-gray-800">Hindi tally na grupo {{ $t['groups_untallied'] }}</a>
+      <span class="px-3 py-1 rounded-full bg-white border {{ (float) $t['difference_total'] != 0 ? 'text-red-700 font-semibold' : 'text-gray-700' }}">Card {{ $peso($t['card_total']) }} · Meta {{ $peso($t['meta_total']) }} · Diperensya {{ $peso($t['difference_total']) }}</span>
     </div>
 
-    <div class="grid md:grid-cols-3 gap-4 mb-4">
-      <div class="bg-white rounded shadow overflow-x-auto">
-        <h3 class="font-semibold p-2">Bawat araw</h3>
-        <table class="min-w-full text-sm">
-          <thead class="bg-gray-100"><tr><th class="p-2 text-left">Petsa</th><th class="p-2 text-right">Card</th><th class="p-2 text-right">Meta</th><th class="p-2 text-right">Diff</th></tr></thead>
-          <tbody>
-            @foreach ($result['days'] as $date => $d)
-              <tr class="{{ (float) $d['diff'] != 0 ? 'bg-red-50' : '' }}">
-                <td class="p-2 border-t font-mono">{{ $date }}</td>
-                <td class="p-2 border-t text-right">{{ number_format((float) $d['card'], 2) }}</td>
-                <td class="p-2 border-t text-right">{{ number_format((float) $d['meta'], 2) }}</td>
-                <td class="p-2 border-t text-right {{ (float) $d['diff'] != 0 ? 'text-red-700 font-semibold' : 'text-gray-400' }}">{{ number_format((float) $d['diff'], 2) }}</td>
-              </tr>
-            @endforeach
-          </tbody>
-        </table>
-      </div>
-
-      <div class="bg-white rounded shadow overflow-x-auto">
-        <h3 class="font-semibold p-2">Mga grupo (umuulit na amount sa isang araw)</h3>
-        <table class="min-w-full text-sm">
-          <thead class="bg-gray-100"><tr><th class="p-2 text-left">Petsa</th><th class="p-2 text-right">Amount</th><th class="p-2 text-right">Card</th><th class="p-2 text-right">Meta</th></tr></thead>
-          <tbody>
-            @forelse ($result['groups'] as $g)
-              <tr class="{{ $g['tallied'] ? '' : 'bg-red-50' }}">
-                <td class="p-2 border-t font-mono">{{ $g['date'] }}</td>
-                <td class="p-2 border-t text-right">{{ number_format((float) $g['amount'], 2) }}</td>
-                <td class="p-2 border-t text-right">{{ $g['card_count'] }} · {{ number_format((float) $g['card_total'], 2) }}</td>
-                <td class="p-2 border-t text-right">{{ $g['meta_count'] }} · {{ number_format((float) $g['meta_total'], 2) }}</td>
-              </tr>
-            @empty
-              <tr><td colspan="4" class="p-2 text-gray-500">Wala.</td></tr>
-            @endforelse
-          </tbody>
-        </table>
-      </div>
-
-      <div class="bg-white rounded shadow overflow-x-auto">
-        <h3 class="font-semibold p-2">Nasa Meta pero wala sa card</h3>
-        <table class="min-w-full text-sm">
-          <tbody>
-            @forelse ($result['meta_missing'] as $m)
-              <tr>
-                <td class="p-2 border-t font-mono">{{ $m['date'] }}</td>
-                <td class="p-2 border-t">{{ $m['transaction_id'] }}<div class="text-xs text-gray-500">{{ $m['ad_account'] }}</div></td>
-                <td class="p-2 border-t text-right">{{ number_format((float) $m['amount'], 2) }}</td>
-              </tr>
-            @empty
-              <tr><td class="p-2 text-gray-500">Wala.</td></tr>
-            @endforelse
-          </tbody>
-        </table>
-      </div>
+    @php
+      $vdays = $view['days'];
+      $range = $vdays === [] ? '' : ($vdays[0]['date'] ?? 'walang petsa') . ' – ' . (end($vdays)['date'] ?? 'walang petsa');
+    @endphp
+    <div class="flex items-center justify-between text-sm mb-2">
+      <span class="text-gray-600">{{ $range }}</span>
+      @if ($view['pages'] > 1)
+        <span class="flex items-center gap-2">
+          @if ($view['page'] > 1) <a class="text-blue-700 hover:underline" href="{{ $link(['status' => $status, 'page' => $view['page'] - 1]) }}">← Nauna</a> @endif
+          <span>Page {{ $view['page'] }} / {{ $view['pages'] }}</span>
+          @if ($view['page'] < $view['pages']) <a class="text-blue-700 hover:underline" href="{{ $link(['status' => $status, 'page' => $view['page'] + 1]) }}">Susunod →</a> @endif
+        </span>
+      @endif
     </div>
 
-    <div class="bg-white rounded shadow mb-4" x-data="{ f: @js($status) }">
-      <div class="flex flex-wrap items-center gap-2 p-2 text-sm">
-        <span class="font-semibold mr-2">Mga linya</span>
-        <button type="button" @click="f = ''" :class="f === '' ? 'bg-blue-600 text-white' : 'bg-gray-100'" class="px-2 py-1 rounded">Lahat</button>
-        @foreach ($labels as $key => $label)
-          <button type="button" @click="f = @js($key)" :class="f === @js($key) ? 'bg-blue-600 text-white' : 'bg-gray-100'" class="px-2 py-1 rounded">{{ $label }}</button>
-        @endforeach
-      </div>
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead class="bg-gray-100">
-            <tr>
-              <th class="p-2 text-left">Sale</th><th class="p-2 text-left">Post</th><th class="p-2 text-left">Description</th>
-              <th class="p-2 text-right">Amount</th><th class="p-2 text-left">Status</th><th class="p-2 text-left">Meta transaction / ad account</th>
-            </tr>
-          </thead>
-          <tbody>
-            @foreach ($lines as $l)
-              @php
-                $st = $statusOf($l);
-                $r = $result['lines'][$l->id] ?? [];
-                $m = isset($r['payment_activity_id']) ? ($result['meta_by_id'][$r['payment_activity_id']] ?? null) : null;
-              @endphp
-              <tr data-status="{{ $st }}" x-show="f === '' || f === @js($st)" class="{{ in_array($st, ['none', 'group_off'], true) ? 'bg-red-50' : '' }}">
-                <td class="p-2 border-t font-mono">{{ $l->sale_date?->toDateString() }}</td>
-                <td class="p-2 border-t font-mono">{{ $l->post_date?->toDateString() }}</td>
-                <td class="p-2 border-t font-mono">{{ $l->description }}</td>
-                <td class="p-2 border-t text-right">{{ number_format((float) $l->amount, 2) }}{{ $l->is_credit ? '-' : '' }}</td>
-                <td class="p-2 border-t">{{ $labels[$st] ?? $st }}
-                  @if (($r['match_kind'] ?? '') === 'post_date') <span class="text-xs text-gray-500">(post date)</span>
-                  @elseif (($r['match_kind'] ?? '') === 'near') <span class="text-xs text-gray-500">({{ $r['match_days'] > 0 ? '+' : '' }}{{ $r['match_days'] }} araw)</span>
-                  @elseif (($r['match_kind'] ?? '') === 'group') <span class="text-xs text-gray-500">(grupo {{ $r['group_key'] }})</span>
+    <div class="bg-white rounded shadow overflow-x-auto mb-4">
+      <table class="min-w-full text-sm table-fixed">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="p-2 text-left w-[45%]" colspan="3">Card statement</th>
+            <th class="p-2 text-center w-28">Status</th>
+            <th class="p-2 text-left w-[45%]" colspan="4">Meta</th>
+          </tr>
+          <tr class="text-xs text-gray-600">
+            <th class="px-2 text-left">Sale / post</th><th class="px-2 text-left">Description</th><th class="px-2 text-right">Amount</th>
+            <th></th>
+            <th class="px-2 text-left">Petsa</th><th class="px-2 text-left">Transaction</th><th class="px-2 text-left">Ad account</th><th class="px-2 text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          @forelse ($vdays as $day)
+            <tr class="bg-gray-50"><td colspan="8" class="px-2 pt-3 pb-1 font-semibold font-mono">{{ $day['date'] ?? 'Walang petsa' }}</td></tr>
+            @foreach ($day['rows'] as $row)
+              <tr data-status="{{ $row['status'] }}" class="{{ $tint($row) }} border-t align-top">
+                @if ($row['group'])
+                  <td class="p-2 font-mono">{{ $row['card'][0]['sale_date'] }}</td>
+                  <td class="p-2"><b>{{ $row['group']['card_text'] }}</b>
+                    <details class="text-xs text-gray-500"><summary class="cursor-pointer">mga linya</summary>@foreach ($row['card'] as $l)<div class="font-mono">{{ $l['description'] }}</div>@endforeach</details></td>
+                  <td class="p-2 text-right">{{ $num($row['card_cents'] / 100) }}</td>
+                @elseif ($row['card'])
+                  @php $l = $row['card'][0]; @endphp
+                  <td class="p-2 font-mono whitespace-nowrap">{{ $l['sale_date'] ?? '—' }}<div class="text-xs text-gray-500">{{ $l['post_date'] }}</div></td>
+                  <td class="p-2 font-mono break-all">{{ $l['description'] }}</td>
+                  <td class="p-2 text-right">{{ $num($l['amount']) }}</td>
+                @else
+                  <td class="p-2" colspan="3"></td>
+                @endif
+
+                <td class="p-2 text-center whitespace-nowrap font-semibold {{ $row['status'] === 'matched' ? 'text-green-700' : ($row['status'] === 'card_only' ? 'text-red-700' : 'text-amber-700') }}">
+                  {{ $row['status'] === 'matched' ? '✓ ' : '' }}{{ $marks[$row['status']] }}
+                  @if ($row['match_kind'] === 'post_date') <div class="text-xs font-normal text-gray-500">post date</div>
+                  @elseif ($row['match_kind'] === 'near') <div class="text-xs font-normal text-gray-500">{{ $row['match_days'] > 0 ? '+' : '' }}{{ $row['match_days'] }} araw</div>
                   @endif
                 </td>
-                <td class="p-2 border-t">@if ($m) {{ $m['transaction_id'] }} <span class="text-xs text-gray-500">{{ $m['ad_account'] }} · {{ $m['date'] }}</span> @endif</td>
+
+                @if ($row['group'])
+                  <td class="p-2 font-mono">{{ $row['meta'][0]['date'] ?? '' }}</td>
+                  <td class="p-2" colspan="2"><b>{{ $row['group']['meta_text'] }}</b>
+                    @if ($row['meta'])
+                      <details class="text-xs text-gray-500"><summary class="cursor-pointer">mga transaction</summary>@foreach ($row['meta'] as $m)<div title="{{ $m['transaction_id'] }}">{{ $shortId($m['transaction_id']) }} · {{ $m['ad_account'] }}</div>@endforeach</details>
+                    @endif</td>
+                  <td class="p-2 text-right">{{ $num($row['meta_cents'] / 100) }}</td>
+                @elseif ($row['meta'])
+                  @php $m = $row['meta'][0]; @endphp
+                  <td class="p-2 font-mono whitespace-nowrap">{{ $m['date'] }}</td>
+                  <td class="p-2 font-mono" title="{{ $m['transaction_id'] }}">{{ $shortId($m['transaction_id']) }}</td>
+                  <td class="p-2">{{ $m['ad_account'] }}</td>
+                  <td class="p-2 text-right">{{ $num($m['amount']) }}</td>
+                @else
+                  <td class="p-2" colspan="4"></td>
+                @endif
               </tr>
             @endforeach
-          </tbody>
-        </table>
-      </div>
+            <tr data-day-total="{{ $day['date'] ?? '' }}" class="border-t-2 border-gray-300 font-semibold text-xs">
+              <td class="p-2" colspan="2">Total ng araw</td>
+              <td class="p-2 text-right">{{ $num($day['card_total']) }}</td>
+              <td class="p-2 text-center text-gray-500">diff</td>
+              <td class="p-2" colspan="2"></td>
+              <td class="p-2 text-right">{{ $num($day['meta_total']) }}</td>
+              <td class="p-2 text-right {{ (float) $day['diff'] != 0 ? 'text-red-700' : 'text-gray-400' }}">{{ $num($day['diff']) }}</td>
+            </tr>
+          @empty
+            <tr><td colspan="8" class="p-4 text-center text-gray-500">Walang row sa filter na ito.</td></tr>
+          @endforelse
+        </tbody>
+      </table>
     </div>
 
-    <details class="bg-white p-4 rounded shadow" @if ($errors->any()) open @endif>
+    @if ($others->isNotEmpty())
+      <details class="bg-white p-4 rounded shadow mb-4">
+        <summary class="cursor-pointer font-semibold">Ibang linya: credit at hindi ads ({{ $others->count() }}), hindi itinutugma</summary>
+        <table class="min-w-full text-sm mt-2">
+          @foreach ($others as $l)
+            <tr class="border-t text-gray-600">
+              <td class="p-1 font-mono">{{ $l->sale_date?->toDateString() }}</td>
+              <td class="p-1 font-mono">{{ $l->description }}</td>
+              <td class="p-1 text-right">{{ $num($l->amount) }}{{ $l->is_credit ? '-' : '' }}</td>
+              <td class="p-1">{{ $l->is_ads ? 'Credit' : 'Not ads' }}</td>
+            </tr>
+          @endforeach
+        </table>
+      </details>
+    @endif
+
+    <details class="bg-white p-4 rounded shadow" @if ($errors->any() || request()->has('lp')) open @endif>
       <summary class="cursor-pointer font-semibold">I-edit ang mga linya / itugma ulit (kasama ang mga bagong Meta import)</summary>
       <p class="text-xs text-gray-500 mt-1">Huling naitugma: {{ $s->matched_at?->timezone('Asia/Manila')->format('Y-m-d H:i') }}</p>
       <div class="mt-3">@include('ads_manager.payment.reconcile._lines_form')</div>

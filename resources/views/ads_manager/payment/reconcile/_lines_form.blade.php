@@ -26,6 +26,13 @@
     </label>
     <button class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">{{ $s->status === 'matched' ? 'Itugma ulit' : 'Itugma' }}</button>
   </div>
+  @if ($formPages > 1)
+    <div class="text-sm flex items-center gap-2">
+      <span class="text-gray-600">Linya {{ $lines->first()?->line_no }}–{{ $lines->last()?->line_no }} ({{ $formPage }} / {{ $formPages }}); ang mga linya sa page na ito lang ang ipapadala.</span>
+      @if ($formPage > 1) <a class="text-blue-700 hover:underline" href="{{ route('ads_payment.reconcile.show', [$s, 'lp' => $formPage - 1]) }}">← Nauna</a> @endif
+      @if ($formPage < $formPages) <a class="text-blue-700 hover:underline" href="{{ route('ads_payment.reconcile.show', [$s, 'lp' => $formPage + 1]) }}">Susunod →</a> @endif
+    </div>
+  @endif
   @if ($errors->any())
     <div class="text-red-600 text-sm">@foreach ($errors->all() as $e) <div>{{ $e }}</div> @endforeach</div>
   @endif

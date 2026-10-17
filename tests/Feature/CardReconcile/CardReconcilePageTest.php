@@ -269,15 +269,64 @@ class CardReconcilePageTest extends TestCase
         $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{}'])->assertSessionHasNoErrors()->assertRedirect();
 
         $html = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
-        foreach (['Tugma 3', '₱6,478.17', 'Wala sa card 1', '₱765.43', 'Wala sa Meta 1', '₱432.10', '100-groups: 1 tally · 0 hindi', 'txn-alpha-01', 'act-' , 'txn-gamma-03', 'Not ads', 'data-status="none"', 'data-status="matched"'] as $want) {
+        foreach (['Tugma 3 · ₱6,478.17', 'Wala sa Meta 1 · ₱432.10', 'Wala sa card 1 · ₱765.43', 'Hindi tally na grupo 0', 'Diperensya -₱333.33', '?status=card_only', '?status=meta_only'] as $want) {
             $this->assertStringContainsString($want, $html, $want);
         }
-        $this->assertStringContainsString('2026-09-11', $html, 'per-day: araw na Meta lang');
+        // Side by side: card | marka | Meta sa iisang row kapag tugma; isang panig lang = may kulay.
+        $row = fn (string $status, string ...$parts) => '/<tr[^>]*data-status="' . $status . '"[^>]*>(?:(?!<\/tr>).)*' . implode('(?:(?!<\/tr>).)*', array_map(fn ($p) => preg_quote($p, '/'), $parts)) . '/su';
+        $this->assertMatchesRegularExpression($row('matched', 'FACEBK *AB12CD34EF', '6,278.17', 'Tugma', 'txn-alpha-01', 'act-'), $html);
+        $this->assertMatchesRegularExpression($row('matched', '2 x 100.00 = 200.00', 'Tugma', '2 x 100.00 = 200.00'), $html);
+        $this->assertMatchesRegularExpression('/<tr[^>]*data-status="card_only"[^>]*bg-red[^>]*>(?:(?!<\/tr>).)*FACEBK \*MN90OP12QR(?:(?!<\/tr>).)*Wala sa Meta/su', $html);
+        $this->assertMatchesRegularExpression('/<tr[^>]*data-status="meta_only"[^>]*bg-amber[^>]*>(?:(?!<\/tr>).)*Wala sa card(?:(?!<\/tr>).)*txn-gamma-03/su', $html);
+        $this->assertMatchesRegularExpression('/<tr[^>]*data-day-total="2026-09-11"[^>]*>(?:(?!<\/tr>).)*0\.00(?:(?!<\/tr>).)*765\.43(?:(?!<\/tr>).)*-765\.43/su', $html);
+        $this->assertLessThan(strpos($html, 'data-day-total="2026-09-11"'), strpos($html, 'data-day-total="2026-09-09"'), 'ayos ng petsa');
+        foreach (['PREVIOUS STATEMENT BALANCE', 'CASH PAYMENT'] as $want) $this->assertStringContainsString($want, $html, 'ibang linya (credit / hindi ads)');
+
+        $only = $this->get("/ads_manager/payment/reconcile/{$s->id}?status=meta_only")->assertOk()->getContent();
+        $this->assertSame(1, substr_count($only, '<tr data-status="meta_only"'));
+        $this->assertSame(1, substr_count($only, '<tr data-status='), 'naka-filter: Meta lang');
 
         $list = $this->get('/ads_manager/payment/reconcile')->assertOk()->getContent();
         foreach ([self::CARD, '2026-09-09 – 2026-09-14', '75%', '-333.33', 'txn-future-09', 'Suriin'] as $want) {
             $this->assertStringContainsString($want, $list, $want);
         }
         $this->assertSame((int) $m1, (int) CardStatementLine::where('amount', '6278.17')->value('payment_activity_id'));
+    }
+
+    public function test_S_049_19_a_statement_of_1200_lines_shows_one_page_of_whole_days_and_long_ids_are_shortened(): void
+    {
+        $s = CardStatement::create(['bank' => 'rcbc', 'source_kind' => 'pdf', 'card_label' => self::CARD, 'status' => 'preview', 'period_start' => '2026-09-01', 'period_end' => '2026-09-30']);
+        $lines = [];
+        $meta = [];
+        $n = 0;
+        for ($d = 1; $d <= 30; $d++) {
+            $date = sprintf('2026-09-%02d', $d);
+            for ($i = 1; $i <= 40; $i++) {
+                $amount = sprintf('%d.%02d', $d * 1000 + $i, $i);
+                $lines[] = ['card_statement_id' => $s->id, 'line_no' => ++$n, 'sale_date' => $date, 'post_date' => $date, 'description' => "FACEBK *L{$d}X{$i} DUBLIN IR", 'amount' => $amount, 'is_credit' => false, 'is_ads' => true];
+                $meta[] = ['date' => $date, 'amount' => $amount, 'payment_method' => self::CARD, 'ad_account' => 'act-9', 'transaction_id' => sprintf('9876543210123456-%02d%02d', $d, $i)];
+            }
+        }
+        foreach (array_chunk($lines, 300) as $c) DB::table('card_statement_lines')->insert($c);
+        foreach (array_chunk($meta, 300) as $c) DB::table('payment_activity_ads_manager')->insert($c);
+        $this->actingAs($this->user());
+        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{}'])->assertSessionHasNoErrors();
+
+        $html = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
+        $this->assertStringContainsString('Tugma 1200', $html);
+        $this->assertSame(160, substr_count($html, '<tr data-status='), '4 araw × 40 row sa page 1');
+        $this->assertStringContainsString('2026-09-01 – 2026-09-04', $html);
+        $this->assertStringContainsString('Page 1 / 8', $html);
+        $this->assertStringContainsString('?page=2', $html);
+        $this->assertStringContainsString('title="9876543210123456-0101"', $html, 'buong transaction id kapag hover');
+        $this->assertStringContainsString('987654…0101', $html, 'pinaikling id');
+
+        $this->assertSame(200, substr_count($html, '<tr data-line='), 'edit form: 200 linya bawat page');
+        $this->assertStringContainsString('Linya 1–200 (1 / 6)', $html);
+        $this->assertStringContainsString('Linya 1001–1200 (6 / 6)', $this->get("/ads_manager/payment/reconcile/{$s->id}?lp=6")->getContent());
+
+        $last = $this->get("/ads_manager/payment/reconcile/{$s->id}?page=8")->assertOk()->getContent();
+        $this->assertStringContainsString('2026-09-29 – 2026-09-30', $last);
+        $this->get("/ads_manager/payment/reconcile/{$s->id}?status=bogus&page=abc")->assertOk();
     }
 }
