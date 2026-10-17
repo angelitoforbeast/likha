@@ -184,6 +184,12 @@ class ChatblastSender
                 BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
+            if (!$this->chatblast->onPage($c, $m->page_name)) {
+                $this->finish($m, 'skipped', Chatblast::pageReason($m->page_name), null, []);
+                // Maaaring ibalik ang page sa campaign: ang susunod na kuha ay gagawa ng bagong row.
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
+                return;
+            }
             // Requires On Delivery: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at
             // buuin ulit ang text.
             if ($c->requires_on_delivery) {
@@ -201,12 +207,7 @@ class ChatblastSender
                 $this->finish($m, 'skipped', $why, null, []);
                 return;
             }
-            if (($why = $this->chatblast->sentByOtherCampaign($m, $c)) !== null) {
-                $this->finish($m, 'skipped', $why, null, []);
-                // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill sa campaign na ito.
-                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
-                return;
-            }
+
         }
 
         // Walang blangko o kulang na text: "Hello Ma'am/Sir , …" o may {placeholder} pang hindi napalitan.
@@ -259,6 +260,14 @@ class ChatblastSender
         try {
             if (Cache::has($key . ':gap')) {
                 $this->later($m);
+                return;
+            }
+            // Sa loob ng lock ng customer: ang ibang campaign ng parehong waybill ay tapos na (sent o unknown) o hindi
+            // pa nagsisimula, kaya ang naipadala lang talaga ang humaharang (hindi ang naka-queue na maaaring mabigo).
+            if (!$m->is_test && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
+                $this->finish($m, 'skipped', $why, null, []);
+                // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill sa campaign na ito.
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
             try {

@@ -149,6 +149,7 @@ class ChatblastCampaignController extends Controller
         DB::transaction(function () use ($c, $data, $mode, $active) {
             $c = ChatblastCampaign::whereKey($c->id)->lockForUpdate()->first();
             $changed = array_keys(array_filter($data, fn ($v, $k) => $c->{$k} !== $v, ARRAY_FILTER_USE_BOTH));
+            $original = $c->send_times;
             $c->fill($data);
             if ($changed) Chatblast::log($c, Auth::id(), ['what' => 'settings', 'fields' => $changed]);
 
@@ -159,8 +160,14 @@ class ChatblastCampaignController extends Controller
                 // Mula ngayon lang: ang oras na lumipas na bago i-on ang auto ay hindi na hinahabol.
                 if ($mode === 'auto') $c->auto_ran_at = now();
             }
-            // Ang bagong oras ng padala na lumipas na ngayong araw ay hindi tatakbo (mula ngayon lang ang auto).
-            if (in_array('send_times', $changed, true) && $mode === 'auto') $c->auto_ran_at = now();
+            // Ang bagong idinagdag na oras ng padala na lumipas na ngayong araw ay hindi tatakbo; ang dating oras na
+            // hindi pa tumatakbo ay hindi naaapektuhan (kapag mas maaga ito sa bagong oras, ang bago ang huling oras).
+            if ($mode === 'auto' && isset($data['send_times'])) {
+                $now = Carbon::now('Asia/Manila');
+                $past = collect(array_diff($data['send_times'], (array) ($original ?? [])))
+                    ->map(fn ($t) => $now->copy()->setTimeFromTimeString($t))->filter(fn ($t) => $t->lte($now))->max();
+                if ($past && (!$c->auto_ran_at || $c->auto_ran_at->lt($past))) $c->auto_ran_at = $past->copy()->timezone(config('app.timezone'));
+            }
             if ($active !== $c->active) {
                 Chatblast::log($c, Auth::id(), ['what' => 'active', 'old' => $c->active, 'new' => $active]);
                 $c->active = $active;

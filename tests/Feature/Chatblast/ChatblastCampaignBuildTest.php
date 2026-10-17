@@ -141,21 +141,54 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
         $second = $this->rows('c-two')->sole();
         $this->assertLessThan($second->id, $first->id);
 
-        // Parehong naka-queue: ang mas nauna (mas maliit na id) ang ipapadala; ang isa ay nilalaktawan ngayong araw.
+        // Naka-queue lang ang isa (maaaring mabigo): hindi ito humaharang; ang kabila ay tumutuloy sa Botcake.
         BotcakeMessage::whereKey([$first->id, $second->id])->update(['status' => 'queued']);
         app(ChatblastSender::class)->process($second->id);
-        $this->assertSame(['skipped', 'may naipadala na ngayong araw sa ibang campaign', null],
-            [$second->fresh()->status, $second->fresh()->reason, $second->fresh()->dedupe_key]);
+        $this->assertNotSame(Chatblast::CROSS, $second->fresh()->reason);
+        Http::assertSent(fn ($req) => str_contains($req->url(), 'botcake.io'));
+
+        // Naipadala na ng isa para sa parehong status: ang kabila ay nilalaktawan ngayong araw, at walang bagong row.
+        $first->update(['status' => 'sent', 'sent_at' => now()]);
+        $second->update(['status' => 'queued', 'reason' => null]);
+        $this->travel(30)->seconds(); // lampas sa pagitan ng mensahe sa customer
+        app(ChatblastSender::class)->process($second->id);
+        $this->assertSame(['skipped', Chatblast::CROSS, null], [$second->fresh()->status, $second->fresh()->reason, $second->fresh()->dedupe_key]);
         app(Chatblast::class)->build(null, 1);
         $this->assertCount(1, $this->rows('c-two'), 'walang bagong row ngayong araw');
 
-        // Naipadala na ng isa: ang bagong row ng kabila bukas ay ipapadala (ibang araw).
-        $first->update(['status' => 'sent', 'sent_at' => now()]);
+        // Bukas: may bagong row ang kabila.
         $this->travel(1)->days();
         app(Chatblast::class)->build(null, 1);
         $next = $this->rows('c-two')->last();
         $this->assertNotSame($second->id, $next->id);
         $this->assertSame('ready', $next->status);
+    }
+
+    public function test_a_message_sent_for_another_status_does_not_block_and_a_page_put_back_is_built_again(): void
+    {
+        Queue::fake();
+        $c = $this->campaign(['kind' => 'c-two', 'statuses' => ['In Transit'], 'pages' => ['Page Uno']]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-1', 'kind' => 'delivering', 'day' => 1, 'psid' => 'psid-a',
+            'text' => 'x', 'jnt_status' => 'Delivering', 'status' => 'sent', 'sent_at' => now(), 'attempts' => 0, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
+        app(Chatblast::class)->build('c-two', 1);
+        $row = $this->rows('c-two')->sole();
+        BotcakeMessage::whereKey($row->id)->update(['status' => 'queued']);
+        app(ChatblastSender::class)->process($row->id);
+        $this->assertNotSame(Chatblast::CROSS, $row->fresh()->reason, 'ang naipadala ay para sa Delivering, hindi In Transit');
+
+        // Inalis ang page, saka ibinalik: may bagong row ang waybill.
+        $this->travel(1)->days();
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        app(Chatblast::class)->build('c-two', 1);
+        $two = $this->rows('c-two')->firstWhere('waybill', 'WB-2');
+        $c->update(['pages' => ['Page Dos']]);
+        app(Chatblast::class)->build('c-two', 1);
+        $this->assertSame(['skipped', null], [$two->fresh()->status, $two->fresh()->dedupe_key]);
+        $c->update(['pages' => ['Page Uno']]);
+        app(Chatblast::class)->build('c-two', 1);
+        $this->assertSame('ready', $this->rows('c-two')->where('waybill', 'WB-2')->last()->status);
+        $this->assertCount(2, $this->rows('c-two')->where('waybill', 'WB-2'));
     }
 
     public function test_a_row_without_a_campaign_is_never_sent(): void

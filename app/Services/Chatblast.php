@@ -429,10 +429,15 @@ class Chatblast
             ->select('id', 'waybill', 'page_name')->chunkById(500, function ($rows) use (&$skipped, $c) {
                 $now = $this->currentStatuses($rows->pluck('waybill')->unique()->values()->all());
                 foreach ($rows as $row) {
-                    $why = !$this->onPage($c, (string) $row->page_name) ? self::pageReason($row->page_name)
-                        : ($this->matches($c, $now[$row->waybill] ?? []) ? null : $this->staleReason($c, $now[$row->waybill] ?? []));
-                    if ($why === null) continue;
-                    $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)->update(['status' => 'skipped', 'reason' => $why]);
+                    if (!$this->onPage($c, (string) $row->page_name)) {
+                        // Maaaring ibalik ang page sa campaign: binibitawan ang key para may bagong row noon.
+                        $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
+                            ->update(['status' => 'skipped', 'reason' => self::pageReason($row->page_name), 'dedupe_key' => null]);
+                        continue;
+                    }
+                    if ($this->matches($c, $now[$row->waybill] ?? [])) continue;
+                    $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
+                        ->update(['status' => 'skipped', 'reason' => $this->staleReason($c, $now[$row->waybill] ?? [])]);
                 }
             });
 
@@ -457,27 +462,22 @@ class Chatblast
     }
 
     /**
-     * Isang mensahe kada waybill kada araw (Manila) para sa parehong J&T status, kahit magkaibang campaign: kapag ang
-     * ibang campaign na may ganitong status din ay nakapagpadala na ngayong araw (sent o unknown), nagpapadala ngayon
-     * (sending), o nauna sa pila (queued, mas maliit na id), ang dahilan; null kapag puwede. Iisang page ang mga row ng
-     * isang waybill, kaya pareho rin ang page.
+     * Isang mensahe kada waybill kada araw (Manila) para sa parehong J&T status, kahit magkaibang campaign: kapag may
+     * mensahe ng ibang campaign sa waybill ngayong araw na naipadala (sent, o unknown: maaaring naipadala) para sa
+     * kasalukuyang status ng waybill, ang dahilan; null kapag puwede. Tinatawag sa loob ng lock ng customer, kaya ang
+     * naka-queue o nagpapadala pa ay hindi bilang (maaaring mabigo). Iisang page ang mga row ng isang waybill.
      */
-    public function sentByOtherCampaign(BotcakeMessage $m, ChatblastCampaign $c): ?string
+    public function sentByOtherCampaign(BotcakeMessage $m): ?string
     {
-        $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
-        $kinds = BotcakeMessage::where('waybill', $m->waybill)->where('kind', '<>', $m->kind)->where('is_test', false)
-            ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
-                ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
-                ->orWhere(fn ($x) => $x->where('status', 'sending')->where('updated_at', '>=', now()->subMinutes(10)))
-                ->orWhere(fn ($q) => $q->where('status', 'queued')->where('id', '<', $m->id)))
-            ->distinct()->pluck('kind')->all();
-        if (!$kinds) return null;
-
         $status = $this->latest($this->currentStatuses([$m->waybill])[$m->waybill] ?? [])['status'] ?? null;
-        if (!in_array($status, (array) $c->statuses, true)) return null;
-        $shared = ChatblastCampaign::whereIn('kind', $kinds)->get(['statuses'])->contains(fn ($o) => in_array($status, (array) $o->statuses, true));
+        if ($status === null) return null;
+        $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
+        $sent = BotcakeMessage::where('waybill', $m->waybill)->where('kind', '<>', $m->kind)->where('is_test', false)->where('jnt_status', $status)
+            ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
+                ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today)))
+            ->exists();
 
-        return $shared ? self::CROSS : null;
+        return $sent ? self::CROSS : null;
     }
 
     private function staleReason(ChatblastCampaign $c, array $rows): string
