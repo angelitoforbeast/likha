@@ -483,3 +483,15 @@ Accepted, not fixed:
 - **Missing tests (minor):** the manual job's dry run and unmapped counters after the refactor; the flat single-item J&T answer shape (the parser already handles it); the build route returning `tracked` and `rider_pending`.
 - **(amendment 1) The tracking order runs the candidates query (with its subselects) once per kind, unchunked.** Reason: indexed and the same cost as before; it only orders the waybills to track.
 - **(amendment 1) A build does not refresh the vars of rows it already built;** their rider is refreshed at send time (re-tracked when older than 30 minutes, and dropped when J&T does not answer). Reason: never a stale rider either way; refreshing old rows at build is extra work for the same result.
+
+## 048: chatblast campaigns (2026-10-18)
+
+- **Saving a cell re-renders the unsent rows after the campaign row's lock is released.** Two saves a moment apart can let the older re-render finish last, so unsent rows carry the other cell's earlier text until the next edit. Reason: small window; the sender renders nothing itself, and the next save or build corrects it. Moving the re-render inside the lock holds the row lock for the whole re-render.
+- **Deleting a campaign checks for messages without a lock.** A build running at that moment can leave rows of a deleted campaign; those rows skip the off, stale and once-a-day checks at send. Reason: deleting is only for an unused campaign and is rare; "off" is the normal way to stop one.
+- **Only `chatblast:auto` checks that `chatblast_campaigns` exists.** Between the deploy and `migrate --force`, /chatblast's send and build and any queued job fail (jobs end `failed`, safe to resend). Reason: migrations run right after the deploy; skipping the checks without the table would be worse than failing.
+- **Removing a version that is the only one of a middle day removes that day, and the later days move up** (unsent rows of day 3 take the old day 4's text). Reason: the brief's remove button; the confirmation says so.
+- **Missing tests (minor):** the 3-hour edge of a send time (runs at 11:59, not at 12:00 for 09:00); a campaign turned off or made manual between the build and the claim.
+- **`Chatblast::setSequence()` is only used by the tests** of the day/version rules. Reason: it keeps the 046 validation tests readable; the routes use `editDays()`.
+- **The campaign `log` keeps the last 200 changes in the row** (text edits with old and new text). Reason: enough history for "who changed what"; it is left out of every read except the save itself.
+- **The stale-cell guard only runs when the request sends `old`.** The page always sends it; another caller that leaves it out edits by position. Reason: only the page calls these routes.
+- **A `from_jnts` status outside In Transit / Delivering / Delivered / For Return / Returned ties with In Transit,** so between such copies the newest row decides. Reason: uploads may write any report text; ranking unknown statuses higher let an early stage beat a real In Transit, ranking them lower let a stale In Transit beat Problematic. Worth a check of the distinct statuses on the server.
