@@ -483,3 +483,13 @@ Accepted, not fixed:
 - **Missing tests (minor):** the manual job's dry run and unmapped counters after the refactor; the flat single-item J&T answer shape (the parser already handles it); the build route returning `tracked` and `rider_pending`.
 - **(amendment 1) The tracking order runs the candidates query (with its subselects) once per kind, unchunked.** Reason: indexed and the same cost as before; it only orders the waybills to track.
 - **(amendment 1) A build does not refresh the vars of rows it already built;** their rider is refreshed at send time (re-tracked when older than 30 minutes, and dropped when J&T does not answer). Reason: never a stale rider either way; refreshing old rows at build is extra work for the same result.
+
+## 049: card counter-check of Meta ad payments (2026-10-18)
+
+- **"±2 days" is measured from the sale date only.** A charge with sale 09-09, post 09-12 and a Meta record on 09-13 is not matched. Reason: the brief orders the passes sale date, post date, ±2 days; measuring the near pass from the sale date keeps one meaning for `match_days`. Revisit if real statements show long sale-to-post gaps.
+- **The statement list shows the totals saved at the last "Itugma"; the statement view recomputes against today's Meta records.** After a new Meta import the two can differ until "Itugma ulit". Reason: the view shows the current truth and the list stays cheap; the view says when it was last matched.
+- **Route model binding reads `card_statements` before the `Schema::hasTable` guard,** so the statement and match routes answer 500 (not the "migrate" note) before the migration runs. Reason: only until the migration is run by hand on deploy; the list page has the guard.
+- **smalot/pdfparser parses the uploaded PDF without its own memory or time cap.** Reason: only the CEO uploads, a bank's own statement; PHP's memory_limit and max_execution_time still apply.
+- **The PDF and screenshot size limits depend on the server** (`upload_max_filesize`, `post_max_size`, and the gateway timeout for a slow vision read, up to 90 s). Reason: server config, outside the code; to check on deploy.
+- **The screenshot itself goes to OpenAI with the full card number in the image.** Reason: the brief chose the vision model for screenshots; only the parsed, masked lines are stored. Use a PDF, or crop the number out, to avoid it.
+- **Missing tests (minor):** none of the browser behaviour is automated (the Alpine edit serializer, the status filter buttons); the vision answer with more than 500 lines is covered, an answer with a null `content` too.
