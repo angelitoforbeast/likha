@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Services\Jnt\JntClient;
-use App\Support\JntScanStatusMapper;
+use App\Services\Jnt\JntTracker;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -21,6 +21,8 @@ use Throwable;
  *    status + status_logs (from→to) + signingtime. Itinatago ang unmapped
  *    (Problematic/unknown) para sa review (hindi isinusulat).
  *  - dry_run = preview lang (walang isusulat).
+ *  - Ang pag-track (20 kada tawag, isa-isa ang nalaglag, 2 tawag kada segundo) at ang isusulat kada row ay nasa
+ *    JntTracker, na ginagamit din ng chatblast.
  */
 class SyncFromJntStatusByTrack implements ShouldQueue
 {
@@ -53,7 +55,8 @@ class SyncFromJntStatusByTrack implements ShouldQueue
         $total = (clone $base)->count();
         $runs()->update(['status' => 'running', 'started_at' => $now, 'total' => $total, 'last_error' => null, 'updated_at' => $now]);
 
-        $client = JntClient::fromConfig();
+        $client  = JntClient::fromConfig();
+        $tracker = app(JntTracker::class);
 
         $processed = $updated = $unchanged = $skipped = $unmapped = $failed = 0;
         $cat = ['updated' => [], 'unchanged' => [], 'skipped' => [], 'unmapped' => []]; // per-category lists (clickable UI)
@@ -64,7 +67,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                 ->select('id', 'waybill_number', 'status', 'status_logs', 'rider_name', 'rider_phone')
                 ->orderBy('id')
                 ->chunkById(200, function ($rows) use (
-                    $client, &$processed, &$updated, &$unchanged, &$skipped, &$unmapped, &$failed,
+                    $client, $tracker, &$processed, &$updated, &$unchanged, &$skipped, &$unmapped, &$failed,
                     &$cat, &$unmappedTypes, $runs
                 ) {
                     // waybill → row
@@ -74,7 +77,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
 
                     foreach (array_chunk($waybills, self::API_CHUNK) as $sub) {
                         // Batch track + auto-retry ng mga na-drop (J&T cap ~20/call).
-                        $parsed = $this->trackSet($client, $sub);
+                        $parsed = $tracker->trackSet($client, $sub);
 
                         foreach ($sub as $wb) {
                             $row = $map[$wb];
@@ -87,45 +90,22 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                                 continue;
                             }
 
-                            $info = JntScanStatusMapper::fromDetails($details);
-                            $upd  = [];
+                            // Status + status_logs (kapag nagbago), signingtime, rider: kapareho ng chatblast.
+                            $c    = $tracker->changesFor($row, $details, 'track_sync', $this->runId);
+                            $info = $c['info'];
+                            $upd  = $c['update'];
 
                             if ($info['unmapped']) {
                                 $unmapped++;
                                 $st = $info['scantype'] !== '' ? $info['scantype'] : '(blank)';
                                 $unmappedTypes[$st] = ($unmappedTypes[$st] ?? 0) + 1;
                                 $this->pushCat($cat, 'unmapped', ['waybill' => $wb, 'status' => $row->status, 'scantype' => $info['scantype']]);
+                            } elseif (!$c['changed']) {
+                                $unchanged++;
+                                $this->pushCat($cat, 'unchanged', ['waybill' => $wb, 'status' => (string) $info['status']]);
                             } else {
-                                $old = (string) $row->status;
-                                $new = (string) $info['status'];
-                                if ($new === $old) {
-                                    $unchanged++;
-                                    $this->pushCat($cat, 'unchanged', ['waybill' => $wb, 'status' => $new]);
-                                } else {
-                                    $updated++;
-                                    $this->pushCat($cat, 'updated', ['waybill' => $wb, 'from' => $old, 'to' => $new, 'scantype' => $info['scantype']]);
-                                    $logs = json_decode((string) $row->status_logs, true);
-                                    if (!is_array($logs)) $logs = [];
-                                    $logs[] = [
-                                        'batch_at'      => now('Asia/Manila')->toDateTimeString(),
-                                        'upload_log_id' => null,
-                                        'from'          => $old ?: null,
-                                        'to'            => $new,
-                                        'src'           => 'track_sync',
-                                        'run_id'        => $this->runId,
-                                    ];
-                                    $upd['status']      = $new;
-                                    $upd['status_logs'] = json_encode($logs, JSON_UNESCAPED_UNICODE);
-                                    if (!empty($info['signingtime'])) $upd['signingtime'] = $info['signingtime'];
-                                }
-                            }
-
-                            // Rider — isulat kahit unchanged/unmapped ang status (kung may laman at iba).
-                            if (!empty($info['rider_phone']) && $info['rider_phone'] !== (string) ($row->rider_phone ?? '')) {
-                                $upd['rider_phone'] = $info['rider_phone'];
-                            }
-                            if (!empty($info['rider_name']) && $info['rider_name'] !== (string) ($row->rider_name ?? '')) {
-                                $upd['rider_name'] = $info['rider_name'];
+                                $updated++;
+                                $this->pushCat($cat, 'updated', ['waybill' => $wb, 'from' => (string) $row->status, 'to' => (string) $info['status'], 'scantype' => $info['scantype']]);
                             }
 
                             if (!empty($upd) && !$this->dryRun) {
@@ -160,33 +140,6 @@ class SyncFromJntStatusByTrack implements ShouldQueue
         }
     }
 
-    /**
-     * Track ng isang set ng waybill: batch muna, tapos i-retry nang ISA-ISA
-     * ang mga hindi bumalik (J&T TRACKQUERY may cap ~20/call — nadi-drop ang labis).
-     * Returns [ waybill => detailsArray ] (yung may laman lang).
-     *
-     * @param  string[] $waybills
-     * @return array<string,array<int,array<string,mixed>>>
-     */
-    private function trackSet(JntClient $client, array $waybills): array
-    {
-        $found = [];
-        try {
-            $resp  = $client->trackForJson(implode(',', $waybills), 'en');
-            $found = JntScanStatusMapper::parseResponse($resp);
-        } catch (Throwable $e) { $found = []; }
-
-        // Retry ang mga na-drop (wala sa batch response) nang isa-isa.
-        $missing = array_values(array_diff($waybills, array_keys($found)));
-        foreach ($missing as $wb) {
-            try {
-                $p = JntScanStatusMapper::parseResponse($client->trackForJson($wb, 'en'));
-                if (isset($p[$wb]) && !empty($p[$wb])) $found[$wb] = $p[$wb];
-            } catch (Throwable $e) { /* stays missing → tunay na skip */ }
-        }
-
-        return $found;
-    }
 
     /**
      * Idagdag sa per-category list (naka-cap para di lumaki masyado ang JSON).

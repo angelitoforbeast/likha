@@ -28,6 +28,8 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
         });
         Schema::table('from_jnts', function (Blueprint $t) {
             $t->string('receiver')->nullable();
+            $t->string('rider_name')->nullable(); // gaya ng production (2026_09_16_110000)
+            $t->string('rider_phone', 30)->nullable();
         });
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2026_04_10_000003_create_app_settings_table.php',

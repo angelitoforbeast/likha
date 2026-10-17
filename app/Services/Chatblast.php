@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
 use App\Models\PageSetting;
+use App\Services\Jnt\JntTracker;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -54,6 +55,8 @@ class Chatblast
 
     public const PLACEHOLDERS = ['name', 'item', 'cod', 'waybill', 'page', 'rider', 'rider_phone'];
     public const RIDER_REASON = 'walang rider info';
+    public const TRACK_BUDGET = 60;        // segundo ng J&T tracking kada "Kunin ang mga bago"
+    public const RIDER_MAX_AGE = 30 * 60;  // bago ipadala ang delivering: i-track ulit kapag mas luma rito
     public const MAX_TEXT = 1000;
     public const MAX_DAYS = 30;
     public const MAX_VERSIONS = 10;
@@ -126,6 +129,51 @@ class Chatblast
         return trim(strtr($template, $map));
     }
 
+    /** Ang pangalan ng rider para sa mensahe: walang code sa unahan ("OCW_Juan D. Cruz" → "Juan D. Cruz"). */
+    public static function riderName(?string $raw): string
+    {
+        return trim((string) preg_replace('/^[A-Z0-9]+_/', '', trim((string) $raw)));
+    }
+
+    /** Ang phone ng rider para sa mensahe: 09XXXXXXXXX (mula sa 639…, 9…), o walang laman kapag hindi PH mobile. */
+    public static function riderPhone(?string $raw): string
+    {
+        $d = preg_replace('/\D+/', '', (string) $raw);
+        if (strlen($d) === 12 && str_starts_with($d, '639')) $d = '0' . substr($d, 2);
+        if (strlen($d) === 10 && str_starts_with($d, '9')) $d = '0' . $d;
+
+        return preg_match('/^09\d{9}$/', $d) ? $d : '';
+    }
+
+    /** Ang rider ng waybill mula sa mga from_jnts row nito (ang pinakahuling may laman). @return array{0:string,1:string} */
+    private function riderOf(array $rows): array
+    {
+        $name = $phone = '';
+        foreach (array_reverse($rows) as $r) {
+            if ($name === '' && trim((string) ($r['rider_name'] ?? '')) !== '') $name = self::riderName($r['rider_name']);
+            if ($phone === '' && trim((string) ($r['rider_phone'] ?? '')) !== '') $phone = self::riderPhone($r['rider_phone']);
+        }
+        return [$name, $phone];
+    }
+
+    /**
+     * Bago ipadala ang delivering: i-track ulit ang waybill kapag luma na (o wala pa) ang rider data, saka buuin ulit ang
+     * text gamit ang bagong rider (maaaring ibang bersyon na). Walang ginagawa kapag bago pa o walang J&T config.
+     * Ang status ay nasa from_jnts na rin, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel.
+     */
+    public function refreshRider(BotcakeMessage $m): void
+    {
+        $at = $m->vars['tracked_at'] ?? null;
+        if ($at && Carbon::parse($at)->gt(now()->subSeconds(self::RIDER_MAX_AGE))) return;
+        if (!app(JntTracker::class)->refresh([$m->waybill], 20)) return;
+
+        [$rider, $phone] = $this->riderOf($this->currentStatuses([$m->waybill])[$m->waybill] ?? []);
+        $vars = array_merge((array) $m->vars, ['rider' => $rider, 'rider_phone' => $phone, 'tracked_at' => now()->toIso8601String()]);
+        $days = $this->sequence($m->kind);
+        $pick = $m->day <= count($days) ? $this->pick($days[$m->day - 1], $m->waybill, $vars) : null;
+        $m->forceFill(['vars' => $vars] + ($pick ? ['version' => self::label($pick[0]), 'text' => $pick[1]] : []))->save();
+    }
+
     public static function label(int $index): string
     {
         return chr(65 + $index);
@@ -185,19 +233,32 @@ class Chatblast
      */
     public function build(?string $kind = null, ?int $userId = null): array
     {
-        $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0];
+        $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0];
         $missing = $this->missingByPage();
+        $kinds = $kind === null ? array_keys(self::KINDS) : [$kind];
 
-        foreach ($kind === null ? array_keys(self::KINDS) : [$kind] as $k) {
+        // J&T: ang status at rider ng mga waybill na bubuuin lang (delivering muna), hanggang TRACK_BUDGET segundo. Ang
+        // hindi naabot ay "rider pending": susunod na kuha, o bago ipadala.
+        $waybills = [];
+        foreach ($kinds as $k) {
+            $waybills = array_merge($waybills, $this->candidates($k, now('Asia/Manila')->subDays(self::KINDS[$k]['window'])->toDateString())
+                ->reorder()->distinct()->pluck('mo.waybill')->all());
+        }
+        $track = app(JntTracker::class)->refresh($waybills, self::TRACK_BUDGET);
+        $tracked = array_flip($track['tracked'] ?? []);
+        $out['tracked'] = count($tracked);
+        $out['rider_pending'] = count($track['pending'] ?? []);
+
+        foreach ($kinds as $k) {
             $out['skipped'] += $this->skipStale($k);
-            foreach ($this->buildKind($k, $userId, $missing) as $key => $n) $out[$key] += $n;
+            foreach ($this->buildKind($k, $userId, $missing, $tracked) as $key => $n) $out[$key] += $n;
             $out['updated'] += $this->recheck($k, $missing);
         }
 
         return $out;
     }
 
-    private function buildKind(string $kind, ?int $userId, array $missing): array
+    private function buildKind(string $kind, ?int $userId, array $missing, array $tracked = []): array
     {
         $out   = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0];
         $days  = $this->sequence($kind);
@@ -205,7 +266,7 @@ class Chatblast
         $now   = now();
         $seen  = [];
 
-        $this->candidates($kind, $since)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $kind, $userId, $now) {
+        $this->candidates($kind, $since)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $kind, $userId, $now, $tracked) {
             $rows = [];
             $jnt  = $this->currentStatuses($orders->pluck('waybill')->unique()->values()->all());
             foreach ($orders as $o) {
@@ -218,7 +279,9 @@ class Chatblast
                 if ($day > count($days)) continue; // ubos na ang mga araw ng uri
 
                 $page = $this->settings->normPage((string) $o->page);
-                $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page];
+                [$rider, $riderPhone] = $this->riderOf($jnt[$o->waybill] ?? []);
+                $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page,
+                    'rider' => $rider, 'rider_phone' => $riderPhone, 'tracked_at' => isset($tracked[$waybill]) ? $now->toIso8601String() : null];
                 $pick = $this->pick($days[$day - 1], $waybill, $vars);
                 [$status, $reason] = $pick === null ? ['no_config', $this->missingReason($days[$day - 1], $vars)]
                     : $this->readiness($o->botcake_psid, $missing[$this->settings->pageKey($page)] ?? self::REQUIRED);
@@ -331,8 +394,10 @@ class Chatblast
     {
         $out = [];
         if (!$waybills) return $out;
-        DB::table('from_jnts')->whereIn('waybill_number', $waybills)->orderBy('id')->get(['waybill_number', 'status', 'rts_reason'])
-            ->each(function ($r) use (&$out) { $out[$r->waybill_number][] = ['status' => $r->status, 'rts_reason' => $r->rts_reason]; });
+        DB::table('from_jnts')->whereIn('waybill_number', $waybills)->orderBy('id')->get(['waybill_number', 'status', 'rts_reason', 'rider_name', 'rider_phone'])
+            ->each(function ($r) use (&$out) {
+                $out[$r->waybill_number][] = ['status' => $r->status, 'rts_reason' => $r->rts_reason, 'rider_name' => $r->rider_name, 'rider_phone' => $r->rider_phone];
+            });
 
         return $out;
     }
