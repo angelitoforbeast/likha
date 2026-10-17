@@ -6,6 +6,7 @@ use App\Jobs\SendChatblastMessage;
 use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -117,6 +118,27 @@ class ChatblastSender
 
     private const UNSURE = 'Hindi tiyak kung naipadala (tinawag na ang send_flow)';
 
+    /**
+     * Ang lock ng isang customer (page + PSID). Iisang custom field at flow ang gamit ng lahat ng mensahe ng page, kaya
+     * isang mensahe lang sabay sa isang customer: mula sa pagsulat ng field hanggang ilang segundo pagkatapos ng flow.
+     */
+    public static function customerLockKey(string $page, string $psid): string
+    {
+        return 'chatblast-customer:' . sha1(mb_strtolower(preg_replace('/\s+/u', ' ', trim($page)), 'UTF-8') . '|' . trim($psid));
+    }
+
+    /** Hindi pa puwede ngayon (may hawak ang ibang job o nasa gap pa): balik sa queue, subok ulit pagkatapos ng gap. */
+    private function later(BotcakeMessage $m): void
+    {
+        BotcakeMessage::whereKey($m->id)->where('status', 'sending')->update(['status' => 'queued', 'attempts' => DB::raw('CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END')]);
+        SendChatblastMessage::dispatch($m->id)->delay(now()->addSeconds($this->gap() + 1));
+    }
+
+    private function gap(): int
+    {
+        return max(0, (int) config('services.botcake.chatblast_customer_gap', 20));
+    }
+
     /** Pinatay ang job (hal. timeout) habang nagpapadala. Ang mga hakbang ay naitala na habang nangyayari. */
     public function killed(int $id): void
     {
@@ -154,14 +176,35 @@ class ChatblastSender
             }
         }
 
+        // Walang blangko o kulang na text: "Hello Ma'am/Sir , …" o may {placeholder} pang hindi napalitan.
+        if (trim((string) $m->text) === '') {
+            $this->finish($m, 'no_config', 'hindi buo ang text: walang laman', null, []);
+            return;
+        }
+        if (preg_match('/\{(' . implode('|', Chatblast::PLACEHOLDERS) . ')\}/', (string) $m->text, $left)) {
+            $this->finish($m, 'no_config', 'hindi buo ang text: may ' . $left[0] . ' pa', null, []);
+            return;
+        }
+
+        // Sa kasalukuyang PSID at page lang ng order: kapag naitama ang tugma, hindi ang dating tao ang tatanggap.
+        if (!$m->is_test && $m->macro_output_id) {
+            $order = DB::table('macro_output')->where('id', $m->macro_output_id)->first(['botcake_psid', 'PAGE']);
+            $samePsid = $order && trim((string) $order->botcake_psid) !== '' && trim((string) $order->botcake_psid) === (string) $m->psid;
+            $samePage = $order && trim((string) $order->PAGE) !== '' && $this->settings->pageKey((string) $order->PAGE) === $this->settings->pageKey($m->page_name);
+            if (!$samePsid || !$samePage) {
+                $this->finish($m, 'skipped', 'nagbago ang PSID/page', null, []);
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]); // ang susunod na kuha ay gagawa ng bagong row
+                return;
+            }
+        }
+
         $cap = max(1, (int) config('services.botcake.chatblast_daily_cap', 3000));
         if (!$m->is_test) {
-            // Kasama ang unknown: maaaring naipadala na.
+            // Kasama ang unknown: maaaring naipadala na. Dalawang bilang, bawat isa sa sariling index (walang OR).
             $start = Carbon::now('Asia/Manila')->startOfDay();
-            $today = BotcakeMessage::where('page_name', $m->page_name)->where('is_test', false)
-                ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $start))
-                    ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $start)))
-                ->count();
+            $count = fn (string $status, string $column) => BotcakeMessage::where('page_name', $m->page_name)->where('status', $status)
+                ->where($column, '>=', $start)->where('is_test', false)->count();
+            $today = $count('sent', 'sent_at') + $count('unknown', 'updated_at');
             if ($today >= $cap) {
                 $this->finish($m, 'skipped', 'Naabot ang daily cap ng page (' . $cap . ' ngayong araw); ipadala ulit bukas', null, []);
                 return;
@@ -174,6 +217,30 @@ class ChatblastSender
             return;
         }
 
+        $key  = self::customerLockKey($m->page_name, (string) $m->psid);
+        $lock = Cache::lock($key, 300); // mas mahaba sa pinakamatagal na mensahe (~270 s)
+        if (!$lock->get()) {
+            $this->later($m);
+            return;
+        }
+        try {
+            if (Cache::has($key . ':gap')) {
+                $this->later($m);
+                return;
+            }
+            try {
+                $this->sendSteps($m, $cfg);
+            } finally {
+                Cache::put($key . ':gap', 1, $this->gap()); // ilang segundo pa bago ang susunod na mensahe sa customer
+            }
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** Ang tatlong hakbang: isulat ang field, basahin ulit, i-send ang flow. */
+    private function sendSteps(BotcakeMessage $m, array $cfg): void
+    {
         $client = app(BotcakeClient::class)->shared(sha1($cfg['token']));
         $base   = '/pages/' . rawurlencode($cfg['page_id']);
         $field  = $base . '/customer/' . rawurlencode((string) $m->psid) . '/customer_fields';
@@ -226,8 +293,10 @@ class ChatblastSender
         $rows = is_array($body) ? ($body['data'] ?? (array_is_list($body) ? $body : [])) : [];
         foreach ((array) $rows as $row) {
             if (!is_array($row)) continue;
-            $id = (string) ($row['id'] ?? $row['custom_field_id'] ?? '');
-            if ($id === $fieldId) return isset($row['value']) ? (string) $row['value'] : null;
+            // Ang id o ang custom_field_id: alinman ang tumugma sa field.
+            if ((string) ($row['id'] ?? '') === $fieldId || (string) ($row['custom_field_id'] ?? '') === $fieldId) {
+                return isset($row['value']) ? (string) $row['value'] : null;
+            }
         }
 
         return null;

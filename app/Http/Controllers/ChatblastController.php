@@ -73,10 +73,12 @@ class ChatblastController extends Controller
     {
         $this->checkAccess();
 
+        // light=1: ang mabilis na poll (kada 4 s) ay hindi nagbibilang; ang bilang ay kinukuha kada 30 s o pagkatapos ng aksyon.
+        $light  = $this->str($request, 'light', 1) === '1';
         $status = $this->str($request, 'status');
-        $counts = $this->filtered($request, false)->selectRaw('status, COUNT(*) AS n')->groupBy('status')->pluck('n', 'status')
+        $counts = $light ? null : $this->filtered($request, false)->selectRaw('status, COUNT(*) AS n')->groupBy('status')->pluck('n', 'status')
             ->map(fn ($n) => (int) $n)->sortKeys()->all();
-        $total  = in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts);
+        $total  = $counts === null ? null : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts));
         $page   = max(1, (int) $this->str($request, 'p', 6));
 
         $rows = $this->filtered($request, true)->orderByDesc('id')->offset(($page - 1) * self::PER_PAGE)->limit(self::PER_PAGE)
@@ -91,7 +93,24 @@ class ChatblastController extends Controller
             'per_page' => self::PER_PAGE,
             'counts'   => $counts,
             'state'    => $this->state(),
+            'test_psid' => $this->testPsidOf($this->str($request, 'page')),
         ]);
+    }
+
+    /**
+     * Kanino ang Test PSID ng page na naka-filter (buong pangalan sa Botcake at huling 4 ng PSID), para makita bago mag
+     * "Send test" na hindi kapangalan ang tatanggap. Null kapag walang page na napili o walang Test PSID.
+     */
+    private function testPsidOf(string $page): ?array
+    {
+        if ($page === '') return null;
+        $psid = trim((string) $this->settings->get($page, 'botcake', 'test_psid'));
+        if ($psid === '') return null;
+
+        return [
+            'name' => $this->pageCustomers($page)->where('psid', $psid)->value('fb_name') ?? '(wala sa Botcake customers ng page)',
+            'psid_last4' => mb_substr($psid, -4),
+        ];
     }
 
     /** Ang side panel: lahat ng kailangan sa debug (buong text, bawat hakbang, mga oras, dahilan). Walang token. */

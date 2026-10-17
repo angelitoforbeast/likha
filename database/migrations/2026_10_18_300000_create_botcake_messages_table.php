@@ -47,6 +47,9 @@ return new class extends Migration {
             $table->index(['page_name', 'created_at']);
             $table->index(['waybill', 'kind']);
             $table->index(['page_name', 'sent_at']);
+            $table->index(['page_name', 'status', 'sent_at']);    // daily cap: naipadala ngayong araw
+            $table->index(['page_name', 'status', 'updated_at']); // daily cap: unknown ngayong araw
+            $table->index(['page_name', 'psid', 'kind']);         // isang mensahe ng uri kada customer kada araw
             $table->index('sent_at');
             $table->index('fb_name');
         });

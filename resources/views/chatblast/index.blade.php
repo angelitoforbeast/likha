@@ -62,6 +62,7 @@
     <div id="chips" class="flex flex-wrap gap-2 mb-2 text-xs" aria-label="Bilang kada status"></div>
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
         <span id="state" class="text-xs text-gray-700" aria-live="polite"></span>
+        <span id="test-psid-owner" class="text-xs text-gray-700"></span>
         <button id="pause" type="button" class="hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">Pause</button>
         <button id="resume" type="button" class="hidden bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">Resume</button>
     </div>
@@ -186,15 +187,23 @@
 
     // ---- listahan ----
 
-    async function load() {
-        const res = await fetch(url.listUrl + '?' + new URLSearchParams({...filters(), p: page}), {headers: {'Accept': 'application/json'}});
+    // Ang bilang kada status ay mabigat sa maraming row: kinukuha lang ito kada 30 s habang nagpo-poll, o sa bawat aksyon.
+    let countsAt = 0, counts = {}, total = 0;
+
+    async function load(light = false) {
+        const params = {...filters(), p: page};
+        if (light && Date.now() - countsAt < 30000) params.light = '1';
+        const res = await fetch(url.listUrl + '?' + new URLSearchParams(params), {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Hindi nakuha ang listahan (HTTP ' + res.status + ').', 'text-red-600'); return; }
         last = await res.json();
-        renderChips(last.counts);
+        if (last.counts) { counts = last.counts; total = last.total; countsAt = Date.now(); }
+        last.counts = counts;
+        renderChips(counts);
         renderState(last.state);
+        renderTestPsid(last.test_psid);
         renderRows(last.rows);
-        const pages = Math.max(1, Math.ceil(last.total / last.per_page));
-        document.getElementById('pager').textContent = 'Pahina ' + last.page + ' / ' + pages + ' · ' + fmt(last.total) + ' row';
+        const pages = Math.max(1, Math.ceil(total / last.per_page));
+        document.getElementById('pager').textContent = 'Pahina ' + last.page + ' / ' + pages + ' · ' + fmt(total) + ' row';
         document.getElementById('prev').disabled = last.page <= 1;
         document.getElementById('next').disabled = last.page >= pages;
         schedule();
@@ -257,7 +266,14 @@
     function schedule() {
         clearTimeout(timer);
         const active = last && (last.state.queued > 0 || last.rows.some(r => r.status === 'queued' || r.status === 'sending'));
-        if (active && !document.hidden) timer = setTimeout(() => { load(); if (openId) openPanel(openId, true); }, 4000);
+        if (active && !document.hidden) timer = setTimeout(() => { load(true); if (openId) openPanel(openId, true); }, 4000);
+    }
+
+    // Kanino ang Test PSID ng page na naka-filter: para makita bago mag-"Send test" na hindi kapangalan ang tatanggap.
+    function renderTestPsid(t) {
+        const page = filters().page;
+        document.getElementById('test-psid-owner').textContent = !page ? ''
+            : (t ? 'Test PSID ng ' + page + ': ' + t.name + ' (…' + t.psid_last4 + ')' : 'Walang Test PSID ang ' + page);
     }
     document.addEventListener('visibilitychange', schedule);
 
@@ -439,7 +455,8 @@
         document.getElementById('test-psid-results').replaceChildren(...(d.customers || []).map(c => {
             const b = el('button', {type: 'button', class: 'text-blue-700 hover:underline', text: c.name + ' (…' + c.psid_last4 + ')'});
             b.addEventListener('click', async () => {
-                try { const s = await post(url.testPsidUrl, {page: pf.page.value, customer_id: c.id}); document.getElementById('test-psid-current').textContent = 'Na-save: ' + s.name + ' (…' + s.psid_last4 + ')'; }
+                if (!confirm('Gawing Test PSID ng ' + pf.page.value + ' si "' + c.name + '" (PSID …' + c.psid_last4 + ')? Dito mapupunta ang lahat ng "Send test" ng page.')) return;
+                try { const s = await post(url.testPsidUrl, {page: pf.page.value, customer_id: c.id}); document.getElementById('test-psid-current').textContent = 'Na-save: ' + s.name + ' (…' + s.psid_last4 + ')'; load(); }
                 catch (err) { notice(err.message, 'text-red-600'); }
             });
             return el('li', {}, b);

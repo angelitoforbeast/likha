@@ -131,17 +131,42 @@ class Chatblast
         return chr(65 + $index);
     }
 
+    /** Ang mga placeholder ng text na walang laman para sa order (ang COD na 0 ay walang laman: walang babayaran). */
+    public function missingIn(string $text, array $vars): array
+    {
+        preg_match_all('/\{(' . implode('|', self::PLACEHOLDERS) . ')\}/', $text, $m);
+        return array_values(array_unique(array_filter($m[1], function ($k) use ($vars) {
+            $v = trim((string) ($vars[$k] ?? ''));
+            return $v === '' || ($k === 'cod' && is_numeric($v) && (float) $v == 0.0);
+        })));
+    }
+
+    /** Ang dahilan kapag walang bersyon ng araw na buo para sa order: "walang rider info", o "walang {x}". */
+    public function missingReason(array $versions, array $vars): string
+    {
+        $missing = array_unique(array_merge(...array_map(fn ($t) => $this->missingIn($t, $vars), $versions)));
+        $other = array_values(array_diff($missing, ['rider', 'rider_phone']));
+
+        return $other ? 'walang {' . $other[0] . '}' : self::RIDER_REASON;
+    }
+
+    /** Dahilan na galing sa kulang na laman ng text (hindi sa PSID o settings). */
+    public static function isTextReason(?string $reason): bool
+    {
+        return $reason === self::RIDER_REASON || str_starts_with((string) $reason, 'walang {');
+    }
+
     /**
      * Ang bersyon para sa waybill: umiikot ayon sa huling 9 na digit ng waybill (kaya magkaiba ang magkasunod na waybill),
-     * kung walang digit ay ayon sa hash. Kapag walang rider info, ang mga bersyong walang {rider}/{rider_phone} lang.
-     * @return array{0:int, 1:string}|null [index ng bersyon sa araw, text] o null kapag lahat ay kailangan ng rider info
+     * kung walang digit ay ayon sa hash. Ang mga bersyong may placeholder na walang laman para sa order ay hindi ginagamit
+     * (hal. walang COD, walang pangalan, wala pang rider info), para walang "Hello Ma'am/Sir , …" na lumalabas.
+     * @return array{0:int, 1:string}|null [index ng bersyon sa araw, text] o null kapag walang buong bersyon
      */
     public function pick(array $versions, string $waybill, array $vars): ?array
     {
         $usable = [];
         foreach ($versions as $i => $text) {
-            $needsRider = str_contains($text, '{rider}') || str_contains($text, '{rider_phone}');
-            if (!$needsRider || trim((string) ($vars['rider'] ?? '')) !== '') $usable[$i] = $text;
+            if (!$this->missingIn($text, $vars)) $usable[$i] = $text;
         }
         if (!$usable) return null;
 
@@ -195,7 +220,7 @@ class Chatblast
                 $page = $this->settings->normPage((string) $o->page);
                 $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page];
                 $pick = $this->pick($days[$day - 1], $waybill, $vars);
-                [$status, $reason] = $pick === null ? ['no_config', self::RIDER_REASON]
+                [$status, $reason] = $pick === null ? ['no_config', $this->missingReason($days[$day - 1], $vars)]
                     : $this->readiness($o->botcake_psid, $missing[$this->settings->pageKey($page)] ?? self::REQUIRED);
 
                 $rows[] = [
@@ -238,10 +263,10 @@ class Chatblast
     {
         $changed = 0;
         BotcakeMessage::where('kind', $kind)->where('is_test', false)->whereIn('status', ['no_psid', 'no_config'])
-            ->where(fn ($w) => $w->whereNull('reason')->orWhere('reason', '<>', self::RIDER_REASON))
             ->chunkById(500, function ($rows) use (&$changed, $missing) {
                 $psids = DB::table('macro_output')->whereIn('id', $rows->pluck('macro_output_id')->filter()->all())->pluck('botcake_psid', 'id');
                 foreach ($rows as $row) {
+                    if (self::isTextReason($row->reason)) continue; // ang pagbago ng mga araw ang bahala rito
                     $psid = trim((string) ($psids[$row->macro_output_id] ?? $row->psid)) ?: null;
                     [$status, $reason] = $this->readiness($psid, $missing[$this->settings->pageKey($row->page_name)] ?? self::REQUIRED);
                     if ($status === $row->status && $reason === $row->reason && $psid === $row->psid) continue;
@@ -328,7 +353,17 @@ class Chatblast
                 ->orWhere('status', 'sending'))
             ->exists();
 
-        return $other ? 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas' : null;
+        if ($other) return 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas';
+
+        // Isang mensahe lang ng uri kada customer (page + PSID) kada araw, kahit dalawa ang order niya.
+        $customer = $m->psid !== null && BotcakeMessage::where('page_name', $m->page_name)->where('psid', $m->psid)->where('kind', $m->kind)
+            ->where('is_test', false)->whereKeyNot($m->id)
+            ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $today))
+                ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $today))
+                ->orWhere('status', 'sending'))
+            ->exists();
+
+        return $customer ? 'may mensahe na ngayong araw sa customer na ito' : null;
     }
 
     /** Binubuo ulit ang text ng hindi pa naipapadala ayon sa bagong mga araw. @return int bilang ng nabago */
@@ -342,10 +377,10 @@ class Chatblast
                     if ($row->day > count($days)) {
                         $set = ['status' => 'skipped', 'reason' => 'Wala nang Araw ' . $row->day . ' sa mga araw ng uri'];
                     } elseif (($pick = $this->pick($days[$row->day - 1], $row->waybill, (array) $row->vars)) === null) {
-                        $set = ['status' => 'no_config', 'reason' => self::RIDER_REASON, 'version' => null, 'text' => null];
+                        $set = ['status' => 'no_config', 'reason' => $this->missingReason($days[$row->day - 1], (array) $row->vars), 'version' => null, 'text' => null];
                     } else {
                         $set = ['version' => self::label($pick[0]), 'text' => $pick[1]];
-                        if ($row->reason === self::RIDER_REASON) {
+                        if (self::isTextReason($row->reason)) {
                             [$set['status'], $set['reason']] = $this->readiness($row->psid, $missing[$this->settings->pageKey($row->page_name)] ?? self::REQUIRED);
                         }
                     }
@@ -379,13 +414,17 @@ class Chatblast
         $col   = fn (string $c) => DB::getDriverName() === 'pgsql' ? 'mo."' . $c . '"' : 'mo.`' . $c . '`';
         $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
 
+        // Pinakamababang id ng window (index ng ts_date), para hindi magsimula sa id 1 ang paglakad ng chunk.
+        $fromId = (int) DB::table('macro_output')->where('ts_date', '>=', $since)->min('id');
+
         return DB::table('macro_output as mo')
+            ->where('mo.id', '>=', $fromId)
             ->where('mo.ts_date', '>=', $since)
             ->whereNotNull('mo.waybill')->where('mo.waybill', '<>', '')
             ->whereExists(fn ($e) => $e->from('from_jnts as j')->whereColumn('j.waybill_number', 'mo.waybill')->where('j.status', self::KINDS[$kind]['status'])
                 ->where(fn ($r) => $r->whereNull('j.rts_reason')->orWhereRaw("TRIM(j.rts_reason) = ''"))->selectRaw('1'))
             ->whereNotExists(fn ($e) => $e->from('botcake_messages as m')->whereColumn('m.waybill', 'mo.waybill')->where('m.kind', $kind)
-                ->where('m.is_test', false)
+                ->where('m.is_test', false)->whereNotNull('m.dedupe_key') // ang itinabi dahil nagbago ang PSID/page ay hindi bilang
                 ->where(fn ($t) => $t->where('m.created_at', '>=', $today)->orWhere('m.sent_at', '>=', $today)->orWhere('m.queued_at', '>=', $today)
                     ->orWhere(fn ($u) => $u->where('m.status', 'unknown')->where('m.updated_at', '>=', $today)))
                 ->selectRaw('1'))
