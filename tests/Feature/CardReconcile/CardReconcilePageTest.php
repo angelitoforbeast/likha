@@ -174,7 +174,12 @@ class CardReconcilePageTest extends TestCase
 
         $this->upload()->assertSessionHasNoErrors()->assertRedirect();
         $this->assertSame(['2026-09-20', '55.00'], [CardStatementLine::sole()->sale_date->toDateString(), CardStatementLine::sole()->amount]);
-        Process::assertRan(fn ($p) => in_array('-layout', $p->command, true));
+        Process::assertRan(fn ($p) => in_array('-layout', $p->command, true) && $p->timeout === 15);
+
+        // Walang pdftotext at malaking PDF → hindi na sa smalot (mabagal sa malaki), may mensahe.
+        Process::fake(['*' => Process::result('', 'pdftotext: not found', 127)]);
+        $big = UploadedFile::fake()->createWithContent('big.pdf', $this->pdf(self::RCBC)->get() . "\n%" . str_repeat('x', 5 * 1024 * 1024 + 10));
+        $this->upload([], $big)->assertSessionHasErrors(['statement' => 'Masyadong malaki ang PDF para basahin dito (hanggang 5 MB kapag walang pdftotext sa server). Hatiin ang PDF o i-upload ang screenshot.']);
 
         Process::fake(['*' => Process::result('', '', 1)]);
         $this->upload([], $this->pdf(['scanned page, no lines']))->assertSessionHasErrors('statement');
