@@ -261,6 +261,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::prefix('campaigns')->name('campaigns.')->group(function () {
         Route::get('/', [ChatblastCampaignController::class, 'index'])->name('index');
         Route::get('/data', [ChatblastCampaignController::class, 'data'])->name('data');
+        Route::get('/flow', [ChatblastCampaignController::class, 'flow'])->middleware('throttle:30,1,chatblast-campaign-flow')->name('flow');
         Route::post('/', [ChatblastCampaignController::class, 'store'])->middleware('throttle:20,1,chatblast-campaign-create')->name('store');
         Route::post('/{id}', [ChatblastCampaignController::class, 'update'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-update')->name('update');
         Route::delete('/{id}', [ChatblastCampaignController::class, 'destroy'])->whereNumber('id')->middleware('throttle:20,1,chatblast-campaign-delete')->name('destroy');

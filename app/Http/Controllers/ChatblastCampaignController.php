@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
+use App\Services\ChatblastFlowInfo;
 use App\Services\ChatblastSender;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -85,6 +86,22 @@ class ChatblastCampaignController extends Controller
             'statuses' => $this->jntStatuses(),
             'pages'    => $this->settings->pagesWith('botcake', Chatblast::REQUIRED),
         ]);
+    }
+
+    /**
+     * "Flow at template" ng isang page na may chatblast settings (naka-cache nang 10 minuto; refresh=1 para kunin
+     * ulit). Walang token sa sagot.
+     */
+    public function flow(Request $request, ChatblastFlowInfo $info)
+    {
+        $this->checkAccess();
+        $page = $request->input('page');
+        $pages = $this->settings->pagesWith('botcake', Chatblast::REQUIRED);
+        $match = is_string($page) ? collect($pages)->first(fn ($p) => $this->settings->pageKey($p) === $this->settings->pageKey($page)) : null;
+        if ($match === null) return response()->json(['error' => 'Walang chatblast settings ang page na ito.'], 422);
+        @set_time_limit(55); // tatlong tawag sa Botcake, tig-10 s
+
+        return response()->json($info->forPage($match, $request->boolean('refresh')));
     }
 
     /** Bagong campaign: manual at naka-on, may isang araw na may isang text. */

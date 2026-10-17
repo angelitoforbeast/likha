@@ -179,7 +179,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertContains('Problematic', $d['statuses']);
         $this->assertContains('In transit', array_column($d['campaigns'], 'name'), 'ang mga dating uri ay campaign din');
 
-        $this->get('/chatblast/campaigns')->assertOk()->assertSee('Campaigns')->assertSee(route('chatblast.index'), false);
+        $this->get('/chatblast/campaigns')->assertOk()->assertSee('Campaigns')->assertSee('Flow at template')->assertSee(route('chatblast.index'), false);
     }
 
     public function test_only_the_ceo_and_a_checked_role_reach_the_campaigns(): void

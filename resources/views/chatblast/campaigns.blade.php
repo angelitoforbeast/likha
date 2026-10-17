@@ -14,7 +14,8 @@
 <body class="bg-gray-50 text-gray-900">
 <div class="p-4 sm:p-6" id="cc"
      data-data-url="{{ route('chatblast.campaigns.data') }}"
-     data-base-url="{{ url('/chatblast/campaigns') }}">
+     data-base-url="{{ url('/chatblast/campaigns') }}"
+     data-flow-url="{{ route('chatblast.campaigns.flow') }}">
 
     <div class="flex items-center justify-between mb-3">
         <h1 class="text-2xl font-semibold">Chatblast Campaigns</h1>
@@ -57,6 +58,17 @@
                 <button type="button" id="form-reset" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Bago</button>
             </div>
         </form>
+    </details>
+
+    {{-- Flow at template kada page: ano talaga ang matatanggap ng customer --}}
+    <details id="flow-box" class="mb-4 bg-white rounded shadow px-4 py-2 text-sm">
+        <summary class="cursor-pointer font-medium">Flow at template (kada page)</summary>
+        <p class="text-xs text-gray-500 mt-1">
+            Ang flow ay ang <code>flow.shipping</code> ng page; ang mensahe ay isinusulat sa <code>field.message</code> at lumalabas sa @{{1}} ng template.
+            Ang Botcake API ay nagbibigay lang ng pangalan ng flow, hindi ng laman ng mga hakbang nito: ang template ay ayon sa page setting na
+            <code>botcake template.shipping</code>, o sa pangalan ng flow. Naka-cache nang 10 minuto; "Refresh" para kunin ulit.
+        </p>
+        <div id="flow-cards" class="grid lg:grid-cols-2 gap-3 mt-2"></div>
     </details>
 
     {{-- Ang sheet: lahat ng text ng lahat ng campaign --}}
@@ -212,6 +224,46 @@
             load();
         } catch (err) { notice(err.message, 'text-red-600'); }
     });
+
+    // ---- flow at template kada page (kinukuha isa-isa pagbukas, para hindi sabay-sabay ang tawag sa Botcake) ----
+
+    let flowsLoaded = false;
+    document.getElementById('flow-box').addEventListener('toggle', async e => {
+        if (!e.target.open || flowsLoaded) return;
+        flowsLoaded = true;
+        const box = document.getElementById('flow-cards');
+        if (!data.pages.length) { box.replaceChildren(el('p', {class: 'text-gray-500', text: 'Walang page na may kumpletong Botcake settings.'})); return; }
+        const cards = data.pages.map(p => { const c = el('div', {class: 'border rounded p-2'}, el('p', {class: 'font-medium', text: p + ' …'})); return [p, c]; });
+        box.replaceChildren(...cards.map(([, c]) => c));
+        for (const [p, c] of cards) await flowCard(p, c, false);
+    });
+
+    async function flowCard(page, card, refresh) {
+        card.replaceChildren(el('p', {class: 'font-medium', text: page + ' …'}));
+        let d;
+        try {
+            const res = await fetch(url.flowUrl + '?' + new URLSearchParams({page, ...(refresh ? {refresh: 1} : {})}), {headers: {'Accept': 'application/json'}});
+            d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || d.message || ('HTTP ' + res.status));
+        } catch (e) { card.replaceChildren(el('p', {class: 'font-medium', text: page}), el('p', {class: 'text-red-600 text-xs', text: e.message})); return; }
+
+        const refreshBtn = el('button', {type: 'button', class: 'text-xs text-blue-700 hover:underline ml-2', text: 'Refresh'});
+        refreshBtn.addEventListener('click', () => flowCard(page, card, true));
+        const chip = d.check.length ? el('span', {class: 'ml-2 px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800', text: 'suriin'})
+            : el('span', {class: 'ml-2 px-2 py-0.5 rounded text-xs bg-green-100 text-green-800', text: 'OK'});
+        const line = (label, value, error) => el('p', {class: 'text-xs'}, [el('span', {class: 'text-gray-500', text: label + ': '}), value,
+            error ? el('span', {class: 'text-red-600 ml-1', text: '(' + error + ')'}) : null]);
+        const t = d.template;
+        card.replaceChildren(
+            el('p', {class: 'font-medium'}, [page, chip, refreshBtn, el('span', {class: 'text-xs text-gray-400 ml-2', text: d.fetched_at})]),
+            d.check.length ? el('ul', {class: 'text-xs text-amber-800 list-disc ml-4'}, d.check.map(x => el('li', {text: x}))) : null,
+            line('Flow', (d.flow.name || '?') + ' (' + d.flow.id + ')', d.flow.error),
+            line('Template', t ? t.name + ' · ' + t.status + ' · ' + t.category + ' (ayon sa ' + t.source + ')' : 'hindi matukoy', d.template_error),
+            line('Field', (d.field.name || '?') + ' (' + d.field.id + ')', d.field.error),
+            el('p', {class: 'text-xs text-gray-500 mt-1', text: 'Makikita ng customer' + (d.sample.campaign ? ' (halimbawa: ' + d.sample.campaign + ', Day 1 · A)' : '') + ':'}),
+            el('div', {class: 'text-xs bg-gray-50 rounded px-2 py-1 whitespace-pre-wrap', text: d.preview || '(walang template: ang mensahe lang) ' + d.sample.text}),
+        );
+    }
 
     // ---- ang sheet ----
 
