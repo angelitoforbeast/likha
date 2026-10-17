@@ -191,6 +191,31 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
         $this->assertCount(2, $this->rows('c-two')->where('waybill', 'WB-2'));
     }
 
+    public function test_a_row_sent_after_its_status_moved_on_counts_for_the_status_it_went_out_under(): void
+    {
+        Queue::fake();
+        $this->campaign(['kind' => 'c-both', 'statuses' => ['In Transit', 'Delivering']]);
+        $this->campaign(['kind' => 'c-dlv', 'statuses' => ['Delivering']]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('c-both', 1);
+        $both = $this->rows('c-both')->sole();
+        $this->assertSame('In Transit', $both->jnt_status);
+
+        $this->travel(1)->days();
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'Delivering']);
+        BotcakeMessage::whereKey($both->id)->update(['status' => 'queued']);
+        app(ChatblastSender::class)->process($both->id); // ipinadala ngayong Delivering na
+        $this->assertSame('Delivering', $both->fresh()->jnt_status);
+
+        $both->fresh()->update(['status' => 'sent', 'sent_at' => now()]);
+        $this->travel(30)->seconds();
+        app(Chatblast::class)->build('c-dlv', 1);
+        $dlv = $this->rows('c-dlv')->sole();
+        BotcakeMessage::whereKey($dlv->id)->update(['status' => 'queued']);
+        app(ChatblastSender::class)->process($dlv->id);
+        $this->assertSame(['skipped', Chatblast::CROSS], [$dlv->fresh()->status, $dlv->fresh()->reason]);
+    }
+
     public function test_a_row_without_a_campaign_is_never_sent(): void
     {
         $id = DB::table('botcake_messages')->insertGetId(['page_name' => 'Page Uno', 'waybill' => 'WB-1', 'kind' => 'nawala', 'day' => 1,

@@ -264,6 +264,11 @@ class ChatblastSender
             }
             // Sa loob ng lock ng customer: ang ibang campaign ng parehong waybill ay tapos na (sent o unknown) o hindi
             // pa nagsisimula, kaya ang naipadala lang talaga ang humaharang (hindi ang naka-queue na maaaring mabigo).
+            // Itala ang status na kasalukuyan (hindi ang noong binuo): ito ang status na ipapadalhan ng mensahe, at
+            // ito ang tinitingnan ng ibang campaign sa patakarang isa kada araw kada status.
+            if (!$m->is_test && ($status = $this->chatblast->currentStatus($m->waybill)) !== null && $status !== $m->jnt_status) {
+                $m->forceFill(['jnt_status' => $status])->save();
+            }
             if (!$m->is_test && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
                 $this->finish($m, 'skipped', $why, null, []);
                 // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill sa campaign na ito.

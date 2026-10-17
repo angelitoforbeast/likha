@@ -467,9 +467,15 @@ class Chatblast
      * kasalukuyang status ng waybill, ang dahilan; null kapag puwede. Tinatawag sa loob ng lock ng customer, kaya ang
      * naka-queue o nagpapadala pa ay hindi bilang (maaaring mabigo). Iisang page ang mga row ng isang waybill.
      */
+    /** Ang kasalukuyang J&T status ng waybill (ang pinakamalayong from_jnts row), o null. */
+    public function currentStatus(string $waybill): ?string
+    {
+        return $this->latest($this->currentStatuses([$waybill])[$waybill] ?? [])['status'] ?? null;
+    }
+
     public function sentByOtherCampaign(BotcakeMessage $m): ?string
     {
-        $status = $this->latest($this->currentStatuses([$m->waybill])[$m->waybill] ?? [])['status'] ?? null;
+        $status = $this->currentStatus($m->waybill);
         if ($status === null) return null;
         $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
         $sent = BotcakeMessage::where('waybill', $m->waybill)->where('kind', '<>', $m->kind)->where('is_test', false)->where('jnt_status', $status)
