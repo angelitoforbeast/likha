@@ -23,6 +23,44 @@ Commits on `feat/049-card-reconcile` (cut from `develop` at 0056d2df):
 - `fix: the summary counts Meta records matched just outside the period so it equals the day totals, repeated Meta-only amounts are one row, filtered day totals say they are the full day, and leaving a page of unsaved edits asks first (spec 049 amendment 1)`
 - `docs: accepted review findings for spec 049 amendment 1 in TODO`
 - `docs: result for spec 049 amendment 1`
+- `fix: mask any 13-19 digit card number whatever its grouping or separators (Diners, 8-8, slashes, asterisks), and 8+ digit numbers next to card, acct, account, no. or number (spec 049 amendment 2)`
+- `fix: the screenshot read stops at 5 s connect and 45 s so it ends inside nginx's 60 s with a clear message, and the same file again within 10 minutes opens the earlier statement instead of a duplicate (spec 049 amendment 2)`
+- `fix: pdftotext stops at 15 s and the smalot fallback only reads PDFs up to 5 MB, with a message for larger ones (spec 049 amendment 2)`
+- `feat: a repeated-amount group short on one side takes the same amount from one day after or before, without taking that day's own match, shown as ±1 araw (spec 049 amendment 2)`
+- `feat: the untallied-groups chip shows its card and Meta amounts so the chips add up to the overall difference (spec 049 amendment 2)`
+- `docs: story for the screenshot timeout and repeat upload (spec 049 amendment 2)`
+- `fix: the card number mask checks every window of whole groups, so a date, amount or other number before the card no longer hides it, two cards side by side are both masked, and wide column gaps are covered (spec 049 amendment 2)`
+- `fix: two repeated-amount groups next to the same day no longer take the same record or line, so a card overcharge cannot show as tallied (spec 049 amendment 2)`
+- `fix: a repeat upload with another bank replaces the earlier preview, a double submit of the same file does not read it twice, and a pdftotext timeout stops instead of trying the slower reader (spec 049 amendment 2)`
+- `fix: card numbers ending in a short group (Amex 4-4-4-3, Diners 4-4-4-2, 13-digit 4-4-4-1) are masked again, and amount cents are never part of a card number (spec 049 amendment 2)`
+- `fix: a whole comma-formatted amount after a card number is treated as an amount, so a card ending in a short group before it is masked (spec 049 amendment 2)`
+- `docs: accepted review findings for spec 049 amendment 2 in TODO` (twice)
+- `docs: result for spec 049 amendment 2`
+
+### Amendment 2: what changed
+
+- **Card-number masking (privacy major):**
+  - **Candidates:** any digit groups joined by up to 16 separator characters: any Unicode space (NBSP, thin space), tab, dot, dash, slash or asterisk.
+  - **Windows:** every window of whole groups is checked, not only from the start of the run. A window is masked when it:
+    - has 13–19 digits;
+    - starts on a group of 4+ digits, so the tail of a FACEBK code like `*AB12` is never eaten;
+    - ends on a group of 4+ digits, or totals exactly 19, or its short last group ends the number (the end of the run, or a date or amount follows). This covers Amex 4-4-4-3, Diners 4-4-4-2, 13-digit 4-4-4-1, 4-6-4, 4-6-5 and 8-8;
+    - contains no date group (`2026-09-10`, `12/31/2026`, `09/09/26`) and no amount group (`100.00`, `6,278.17`, `1,234,567.89`).
+  - **Merging:** windows that share a group are masked as one; two separate card numbers get one mask each.
+  - **Keyword rule:** 8+ digits next to card / acct / account / no. / number on the same line are masked too (`Account No. ···· 5678`).
+  - **Where:** every description (RCBC, generic, vision) and the file name. 49 variants in S-049.2.
+- **Screenshot timeout (major):**
+  - OpenAI is called with `connectTimeout(5)` and `timeout(45)`, so the read ends inside nginx's 60 s. A timeout says "Hindi natapos basahin ang screenshot. Subukan ulit, o hatiin ang screenshot sa mas maliliit na bahagi." and saves nothing, since the save is one transaction after the read.
+  - The file's sha256 (new nullable column `card_statements.file_hash`, migration `2026_10_18_500100_add_file_hash_to_card_statements.php`) lets the same file from the same user within 10 minutes open the earlier statement, with no new read and a note on the page. A PDF re-uploaded with a different bank replaces an earlier statement that is still a preview.
+  - A double submit of the same file is refused while the first read runs (a cache lock per user and file, 120 s).
+- **PDF:**
+  - `pdftotext` runs with `Process::timeout(15)`. If it times out, the read stops with "Natagalan basahin ang PDF…" and smalot is not tried.
+  - When pdftotext isn't installed, smalot reads only PDFs up to 5 MB; larger ones get a message.
+- **Repeated-amount groups ±1 day:**
+  - A group whose card and Meta counts differ takes unused records (or unmatched card lines) of the same amount from the next day, then the day before. It leaves enough for that day's own one-to-one matches.
+  - Each record and line goes to one group only; the matcher's helpers capture state by reference.
+  - The row's mark shows "±1 araw".
+- **Untallied-groups chip:** shows "Hindi tally na grupo N · card ₱X · Meta ₱Y". The note under the bar gives the identity: difference = Wala sa Meta − Wala sa card + (card − Meta of the untallied groups). It is tested.
 
 ### Amendment 1: what changed
 
@@ -55,14 +93,14 @@ Commits on `feat/049-card-reconcile` (cut from `develop` at 0056d2df):
   - **RCBC:** `MM/DD/YY MM/DD/YY DESCRIPTION AMOUNT`, a trailing `-` is a credit. Dateless amount lines (PREVIOUS STATEMENT BALANCE, totals) are listed as not ads. A line whose date doesn't parse is kept with a null date, so it shows in the preview to correct.
   - **Generic fallback:** a line with a date (`MM/DD/YY`, `MM/DD/YYYY`, `YYYY-MM-DD`, `Sep 09, 2026`, `09 Sep 2026`), a FACEBK/FACEBOOK/META PLATFORMS description and an amount (`-` or `CR` = credit). Other lines are ignored.
   - **Bank choice on upload:** Auto (RCBC when the text says RCBC, else generic), RCBC, Generic.
-- **Screenshot (PNG/JPG):** OpenAI chat completions, the image as a base64 data URL (never a public URL), `response_format: json_object`, temperature 0, 90 s timeout. Key: `OPENAI_API_KEY` (`services.openai.key`, already set). Model: `services.card_statement.model`, env `OPENAI_STATEMENT_MODEL`, default `gpt-4o` (the vision model the checklist analysis already uses). The answer must be exactly `{"lines":[{sale_date, post_date, description, amount, is_credit}]}`: any other shape, an extra field, a bad or impossible date, a non-number or negative amount, a non-boolean `is_credit`, more than 500 lines, an HTTP error or a timeout rejects the whole read, and nothing is saved.
+- **Screenshot (PNG/JPG):** OpenAI chat completions, the image as a base64 data URL (never a public URL), `response_format: json_object`, temperature 0, 5 s connect and 45 s timeout (amendment 2). Key: `OPENAI_API_KEY` (`services.openai.key`, already set). Model: `services.card_statement.model`, env `OPENAI_STATEMENT_MODEL`, default `gpt-4o` (the vision model the checklist analysis already uses). The answer must be exactly `{"lines":[{sale_date, post_date, description, amount, is_credit}]}`: any other shape, an extra field, a bad or impossible date, a non-number or negative amount, a non-boolean `is_credit`, more than 500 lines, an HTTP error or a timeout rejects the whole read, and nothing is saved.
 - **Ads rule (all paths):** description contains FACEBK, FACEBOOK or META PLATFORMS.
-- **Masking (all paths, before anything is saved or shown):** 13–19 contiguous digits, or card-shaped groups (4-4-4-x, Amex 4-6-5) separated by up to 8 of any space (NBSP, thin space), tab, dot or dash, become `···· ` + the last 4. Applied to every description and to the file name. The file itself is never written anywhere: it is read from PHP's upload temp file.
+- **Masking (all paths, before anything is saved or shown):** any 13–19 digit card number in any grouping, plus 8+ digits next to card/acct/account/no./number, become `···· ` + the last 4 (rules under "Amendment 2"). Applied to every description and to the file name. The file itself is never written anywhere: it is read from PHP's upload temp file.
 
 ### Matching rules as built (`CardMatcher`, per card)
 
 - Meta records of the chosen card dated from the first sale date − 2 days to the last sale date + 2 days are candidates.
-- **Groups:** a (date, amount) where the card has ≥2 ads charges on that sale date, or Meta has ≥2 records on that date. Statement count vs Meta count and both totals; tallied when the counts are equal. Those Meta records belong to the group, never to "wala sa card".
+- **Groups:** a (date, amount) where the card has ≥2 ads charges on that sale date, or Meta has ≥2 records on that date. Statement count vs Meta count and both totals; tallied when the counts are equal. Those Meta records belong to the group, never to "wala sa card". When the counts differ, the group also takes the same amount from ±1 day (amendment 2).
 - **One-to-one by exact amount**, each pass over all lines before the next: same sale date, then same post date, then 1–2 days from the sale date (closest first; ties: earlier line, lower Meta id). An exact match is never taken by a near one.
 - **Left over:** an ads charge with no record → "Wala sa Meta" (Nasa card pero wala sa Meta); a Meta record dated inside first..last sale date with no line → "Wala sa card" (Nasa Meta pero wala sa card). Credits and non-ads lines are listed, never matched. An ads charge with no date counts as "Wala sa Meta" and in the card total.
 - **Per day:** card total (ads charges by sale date) vs Meta total (the card's records in the period, plus any record matched 1–2 days outside it), difference = card − Meta. The side-by-side day totals are the sums of each day's rows. Over the whole statement they add up to the summary.
@@ -85,7 +123,7 @@ Commits on `feat/049-card-reconcile` (cut from `develop` at 0056d2df):
 | Case | Test | Result |
 |---|---|---|
 | S-049.1 | `CardStatementParseTest::test_S_049_1_rcbc_lines_have_dates_amounts_credits_and_non_ads_are_listed` | Pass |
-| S-049.2 | `CardStatementParseTest::test_S_049_2_card_numbers_are_masked_to_the_last_four` (18 variants) | Pass |
+| S-049.2 | `CardStatementParseTest::test_S_049_2_card_numbers_are_masked_to_the_last_four` (49 variants) | Pass |
 | S-049.3 | `CardStatementParseTest::test_S_049_3_other_banks_fall_back_to_lines_with_a_date_facebk_and_an_amount`, `CardReconcilePageTest::test_S_049_3_a_pdf_is_read_with_pdftotext_when_it_works_and_a_scan_without_text_is_refused` | Pass |
 | S-049.4 | `CardStatementVisionTest::test_S_049_4_strict_json_lines_from_the_vision_model_are_read`, `CardReconcilePageTest::test_S_049_4_a_screenshot_upload_is_read_by_the_vision_model_and_a_bad_read_saves_nothing` | Pass |
 | S-049.5 | `CardStatementVisionTest::test_S_049_5_an_answer_that_is_not_strict_json_lines_is_rejected` (14 variants) | Pass |
@@ -93,7 +131,7 @@ Commits on `feat/049-card-reconcile` (cut from `develop` at 0056d2df):
 | S-049.7 | `CardMatcherTest::test_S_049_7_same_amount_on_the_sale_date_then_on_the_post_date` | Pass |
 | S-049.8 | `CardMatcherTest::test_S_049_8_within_two_days_is_near_three_days_is_not` | Pass |
 | S-049.9 | `CardMatcherTest::test_S_049_9_one_to_one_closest_date_first_and_exact_before_near` | Pass |
-| S-049.10 | `CardMatcherTest::test_S_049_10_repeated_amounts_on_a_day_are_tallied_as_a_group` | Pass |
+| S-049.10 | `CardMatcherTest::test_S_049_10_repeated_amounts_on_a_day_are_tallied_as_a_group` , `…_a_group_short_on_one_side_takes_the_same_amount_from_one_day_after_or_before`, `…_two_groups_next_to_the_same_day_never_share_a_record`, `CardReconcilePageTest::test_S_049_10_a_group_tallied_with_meta_a_day_later_shows_one_row_marked_one_day` | Pass |
 | S-049.11 | `CardMatcherTest::test_S_049_11_per_day_card_and_meta_totals_with_the_difference` | Pass |
 | S-049.12 | `CardMatcherTest::test_S_049_12_meta_records_outside_the_statement_range_are_not_missing_from_the_card` | Pass |
 | S-049.13 | `CardReconcilePageTest::test_S_049_13_only_the_ceo_reaches_the_pages_even_with_nav_settings_checked` | Pass |
@@ -103,6 +141,7 @@ Commits on `feat/049-card-reconcile` (cut from `develop` at 0056d2df):
 | S-049.17 | `CardSideBySideTest::test_S_049_17_rows_pair_card_and_meta_by_day_with_groups_one_sided_rows_and_day_totals`, `…_an_untallied_group_shows_both_counts_and_which_side_has_more`, `…_the_summary_equals_the_sum_of_the_days_and_every_record_shows_once` | Pass |
 | S-049.18 | `CardSideBySideTest::test_S_049_18_filter_by_status_and_page_by_whole_days` | Pass |
 | S-049.19 | `CardReconcilePageTest::test_S_049_16_the_list_the_statement_sheet_and_the_suriin_box`, `CardReconcilePageTest::test_S_049_19_a_statement_of_1200_lines_shows_one_page_of_whole_days_and_long_ids_are_shortened` | Pass |
+| S-049.20 | `CardReconcilePageTest::test_S_049_20_a_timed_out_read_saves_nothing_and_the_same_file_again_within_10_minutes_opens_the_earlier_statement` | Pass |
 
 Red runs (first failure per slice): parse `Error: Class "App\Services\CardStatement\StatementParser" not found`; vision `Error: Class "App\Services\CardStatement\StatementVision" not found`; matcher `Error: Class "App\Services\CardStatement\CardMatcher" not found`; page `Session missing error: statement … The selected card label is invalid` (then the FACEBK-code mask bug, `'FACEBK *AB···· 5003'`); fix loop: mask `Card Number 4111  1111  1111  5003` not masked, matcher `test_S_049_11` totals, vision `tinanggap: extra key` and `ConnectionException: cURL error 28`, page `Session is missing expected key [errors]` (edits field ignored).
 
@@ -114,7 +153,19 @@ Red runs for amendment 1:
   - Meta-only group: `[5]` instead of `[5, 6, 7]`.
   - Meta-only row with no card side: HTTP 500.
 
-**Suite** (`php.bat vendor/bin/phpunit`, whole suite, on the final tree after the merge and amendment 1): `Tests: 1517, Assertions: 17690, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3.` The two reds are the known ones: `Tests\Feature\ExampleTest::test_the_application_returns_a_successful_response` and `Tests\Feature\NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. This slice's files alone: `OK (23 tests, 213 assertions)`. `php -l` clean on every changed PHP file.
+Red runs for amendment 2:
+- mask: `diners 3056 930902 5904 x` not masked.
+- timeout message: `Hindi naabot ang AI …` instead of `Hindi natapos basahin …`.
+- pdftotext: `An expected process was not invoked` (no 15 s timeout).
+- ±1 day: `test_S_049_10_a_group_short_on_one_side…` failed.
+- group chip: `Hindi tally na grupo 0 · card ₱0.00 · Meta ₱0.00` missing.
+- fix loops:
+  - mask: `FACEBK 2026-09-10 4111111111115003` not masked, then `FACEBK 3782 8224 6310 005 x`, then `3782 8224 6310 005 6,278.17`.
+  - groups: `bawat Meta record, isang grupo lang`.
+  - reuse: the lock case had `Session is missing expected key [errors]`; the pdftotext-timeout case read the PDF with smalot.
+- The "±1 araw" mark in the view had no red run: I added it just before its page test.
+
+**Suite** (`php.bat vendor/bin/phpunit`, whole suite, on the final tree after amendment 2): `Tests: 1522, Assertions: 17778, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3.` The two reds are the known ones: `Tests\Feature\ExampleTest::test_the_application_returns_a_successful_response` and `Tests\Feature\NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`. This slice's files alone: `OK (28 tests, 301 assertions)`. `php -l` clean on every changed PHP file.
 
 ## Review
 
@@ -142,6 +193,28 @@ One adversarial review (`skeptic-reviewer`, opus) on the whole diff, one fix loo
   - an unmatched Meta record outside the period is not shown;
   - the browser-only parts are not automated.
 
+**Amendment 2 review** (`skeptic-reviewer`, opus, adversarial, on the amendment's diff): two fix loops, then a re-check with no blocker or major.
+- **Fixed (majors):**
+  - **Mask skipped cards behind other numbers.** The first mask skipped a whole run when it began with a date, or when a number before the card pushed it past 19 digits. "FACEBK 2026-09-10 4111…", "AUTH 123456 4111…", "1000.00 4111…" and a second card in a row kept the full number. Fixed by checking every window.
+  - **±1 day groups shared records.** The helpers were PHP `fn` closures, which capture by value, so two groups next to one day could take the same record or line. An overcharge then showed as all tallied. Fixed by capturing by reference.
+  - **Loop-1 regression:** the window rule left 13–15 digit cards ending in a short group unmasked (Amex 4-4-4-3, Diners 4-4-4-2, Visa 4-4-4-1). Fixed by allowing a short last group where the number ends.
+- **Fixed (minors):**
+  - "REF 1234 …" no longer shows 8 card digits;
+  - wide column gaps are covered;
+  - a re-upload with another bank replaces the preview;
+  - a double submit is guarded;
+  - a pdftotext timeout skips smalot;
+  - a whole comma-formatted amount after a short-group card no longer hides it;
+  - new tests: the reused message, another user and a day-before group.
+- **Accepted, in `TODO.md`:**
+  - the ±1 day reserve vs a near match two days away;
+  - the timeout constants are not asserted by a test;
+  - reuse after a 504 relies on PHP-FPM finishing the request;
+  - more than 16 separator characters, or 20+ digits, are not masked as a card;
+  - two grouped cards side by side merge into one mask;
+  - a card glued to cents is read as an amount;
+  - the lock needs a cache store with locks.
+
 ## Story changes
 
 - Stories S-049.1–S-049.16 were written from the brief's test list (the brief brings no stories). The one-shot brief left no step to wait for a "go" on the stories or the plan, so the plan (`docs/plans/049-card-reconcile.md`) is the record; this differs from the kit's flow and goes to the reviewer here.
@@ -152,10 +225,17 @@ One adversarial review (`skeptic-reviewer`, opus) on the whole diff, one fix loo
 - (amendment 1) S-049.16: its statement-view part ("chips, per-day table, line statuses … status filter") is now met by the side-by-side view and checked with the new markup. The list and Suriin parts are unchanged.
 - (amendment 1) New S-049.17 (rows, groups, one-sided rows, day totals, summary = sum of days, each record once), S-049.18 (filter and paging by whole days), S-049.19 (the rendered side-by-side, chips as filters, tints, shortened ids, 1,200 lines).
 - (amendment 1) S-049.11: the Meta total also counts a record matched 1–2 days outside the period, so the summary and the days agree.
+- (amendment 2) S-049.2:
+  - grew to 49 variants: Diners 4-6-4 and 4-4-4-2, 8-8, slash, asterisk, " - ", NBSP, Amex 4-4-4-3, 13-digit 4-4-4-1, 4-4-4-4-2, and numbers after a date, an amount, an auth number or a FACEBK code;
+  - two cards in a row; keyword numbers; dates, amounts and FACEBK codes kept;
+  - **one Then changed:** "4111 1111 1111 5003 12" is now masked whole ("···· 0312"). Before, the "12" was kept. It can't be told apart from a 14-digit card, so privacy wins.
+- (amendment 2) S-049.3: pdftotext runs with a 15 s timeout; a timeout or a PDF over 5 MB without pdftotext gives a message.
+- (amendment 2) S-049.10: groups also take the same amount from ±1 day, never sharing a record; the untallied-group chip amounts make the chips add up to the difference.
+- (amendment 2) New S-049.20: the timeout message and nothing saved; the same file within 10 minutes reuses the statement; a different bank replaces the preview; double submit; another user.
 
 ## Browser check
 
-Not run, also not for amendment 1. The session has no running app with the database these pages need, and the brief kept this to tests. These are not covered by an automated test (in `TODO.md`):
+Not run, also not for amendments 1 and 2. The session has no running app with the database these pages need, and the brief kept this to tests. These are not covered by an automated test (in `TODO.md`):
 - the Alpine edit serializer;
 - the unsaved-edits prompt;
 - how the side-by-side columns look at phone width.
@@ -173,7 +253,8 @@ The rendered HTML is checked for the `edits` field, the row structure, the tints
 
 ## For deploy
 
-- Run `php artisan migrate --force` (one new migration).
-- Optional env: `OPENAI_STATEMENT_MODEL` (default `gpt-4o`), `POPPLER_PDFTOTEXT` (default `pdftotext`; without it smalot reads the PDF). `OPENAI_API_KEY` is already used by the app.
-- Check `upload_max_filesize` / `post_max_size` ≥ 10 MB and the gateway timeout ≥ 90 s for screenshots.
+- Run `php artisan migrate --force` (two new migrations: `2026_10_18_500000_create_card_statements_tables`, `2026_10_18_500100_add_file_hash_to_card_statements`).
+- Optional env: `OPENAI_STATEMENT_MODEL` (default `gpt-4o`), `POPPLER_PDFTOTEXT` (default `pdftotext`; without it smalot reads PDFs up to 5 MB). `OPENAI_API_KEY` is already used by the app.
+- Upload limits are fine (nginx 100–200M, PHP 200M on both servers). The screenshot read ends within nginx's 60 s (5 s + 45 s).
+- The double-submit lock needs the server's cache store to support locks (database, file or redis do).
 - No queue, no schedule, no npm build (no asset change).
