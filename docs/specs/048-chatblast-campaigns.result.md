@@ -219,3 +219,70 @@ Not done: there is no running app with the server database here. To check on the
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories; the cases above come from its Tests list.
+
+## Amendment 1
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+- **A per-page "Flow at template" panel on /chatblast/campaigns.** For every page with Botcake settings it shows:
+  - the name of its `flow.shipping`;
+  - the approved template the flow uses;
+  - the name of its `field.message`;
+  - a full preview of what the customer receives.
+  - Botcake answers are cached per page for 10 minutes, with a Refresh button. Errors are shown, never the token. The UI notes that Botcake's API does not return a flow's inner steps.
+- **"suriin" flag:** a page is flagged when its flow name has no "CHATBLAST" or its template has no `{{1}}`.
+
+### What changed
+
+- **`App\Services\ChatblastFlowInfo`:** three GETs per page, with no retry and 10 s each, under the page token's shared rate key: `/pages/{id}/flows`, `/custom_fields` and `/message_templates`.
+  - The flow and the field are found by id anywhere in the answer, because the flows are nested in folders.
+  - Templates are read from `components` (type BODY) or from `body`.
+  - **The template:** the page setting `botcake template.shipping` when set (a free-text key, so no page-settings change). Otherwise it is the one APPROVED template whose name (compared case-, space- and `_`-blind) contains, or is contained in, the flow name. No match, or more than one, means "hindi matukoy".
+  - **The preview:** the template BODY with `{{1}}` replaced by Day 1 · A of the first campaign that is on and sends to that page, rendered with a sample order.
+  - **Cache:** 10 minutes per page; an answer with an error is kept 60 s.
+- **"suriin" flags:**
+  - the flow name has no CHATBLAST (or the flow wasn't found);
+  - the template can't be identified;
+  - the template has no `{{1}}`;
+  - the template isn't APPROVED;
+  - the `field.message` isn't in Botcake's custom fields.
+  - The last two came from the review: a card with either problem showed "OK".
+- **Route `GET /chatblast/campaigns/flow?page=…&refresh=1`:** NavAccess `/chatblast`, its own throttle (30 a minute). It only accepts pages that have chatblast settings; any other page gets 422.
+- **The panel:** a collapsed "Flow at template (kada page)" box. On first open it loads the pages one at a time. Each card shows OK or suriin with the reasons, then Flow, Template (name · status · category, and whether it came from the setting or the name), Field, the errors, the time fetched, Refresh, and "Makikita ng customer" with the full preview. Every Botcake string is shown as text.
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| Flow name found in nested folders, template by name (APPROVED, UTILITY, BODY with `{{1}}`), field name, full preview with the In transit Day 1 text, no flags, no token; cached (3 calls), Refresh calls again | `ChatblastFlowInfoTest::test_the_flow_its_template_and_the_field_are_shown_with_the_full_preview_and_cached` | pass |
+| A flow without CHATBLAST, a template from the page setting without `{{1}}` and PAUSED: three flags | `…::test_a_flow_without_chatblast_or_a_template_without_the_slot_is_flagged_and_a_page_setting_picks_the_template` | pass |
+| Botcake 401: the error "HTTP 401" is shown, flagged, no token | `…::test_a_botcake_error_is_shown_without_the_token_and_flagged` | pass |
+| A missing `field.message` is flagged; the sample comes from a campaign that sends to the page | `…::test_a_missing_field_is_flagged_and_the_sample_comes_from_a_campaign_that_sends_to_the_page` | pass |
+| A page without chatblast settings gets 422; another role gets 404; no call to Botcake | `…::test_a_page_without_chatblast_settings_or_another_role_gets_nothing` | pass |
+| The campaigns page shows the panel | `ChatblastCampaignTest::test_the_data_shows_…` (`assertSee('Flow at template')`) | pass |
+
+- **Red first:** the four first tests failed with "404 is identical to 200 / 422" (no route).
+- **Written after the code:** the review's two extra flags and the page filter of the sample were fixed first, then tested, so those tests were not seen red.
+- **Mistake, fixed:** `{{ '{{1}}' }}` broke the Blade view. It is now `@{{1}}`.
+
+Full suite on the final tree: `Tests: 1488, Assertions: 17448, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3`. The only reds are the known `ExampleTest` and `ImportStartTest`. `php -l` passes on the changed PHP files and `view:cache` compiles.
+
+### Review (amendment 1)
+
+- **One standard-depth `skeptic-reviewer` pass: no blocker or major.**
+- **Minors fixed:**
+  - a field error and a non-approved template from the setting showed "OK";
+  - the sample ignored the campaign's pages;
+  - a refused 200 read "HTTP 200".
+- **Accepted in `TODO.md` under 048, with reasons:**
+  - id matching at any depth;
+  - Botcake's real answer shapes are not checked here;
+  - five missing tests;
+  - the sample text is cached with the answers.
+- **Not done:** the reviewer asked for `qa/stories.md` cases for the amendment. The brief brought none, as for the main spec, so the cases above come from the amendment's table.
+
+### After release, updated by amendment 1
+
+- **No migration and no new setting.**
+- Open the panel for one page. Check that the flow and the template are the right ones, and that the shapes Botcake really returns are read; if a card says "hindi matukoy", set `botcake template.shipping` for that page in /page-settings.
+- If the panel is empty or wrong for every page, Botcake's answers have a different shape than assumed, and the parser needs one fix.
