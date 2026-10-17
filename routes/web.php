@@ -56,6 +56,7 @@ use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
+use App\Http\Controllers\ChatblastCampaignController;
 use App\Http\Controllers\ChatblastController;
 use App\Http\Controllers\BotcakeCustomersController;
 use App\Http\Controllers\PsidCoverageController;
@@ -253,9 +254,22 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::post('/pause', [ChatblastController::class, 'pause'])->middleware('throttle:30,1,chatblast-control')->name('pause');
     Route::post('/resume', [ChatblastController::class, 'resume'])->middleware('throttle:30,1,chatblast-control')->name('resume');
     Route::post('/test', [ChatblastController::class, 'test'])->middleware('throttle:20,1,chatblast-test')->name('test');
-    Route::post('/sequence', [ChatblastController::class, 'saveSequence'])->middleware('throttle:30,1,chatblast-sequence')->name('sequence');
     Route::get('/test-psid', [ChatblastController::class, 'searchTestPsid'])->middleware('throttle:60,1,chatblast-test-psid')->name('test-psid.search');
     Route::post('/test-psid', [ChatblastController::class, 'saveTestPsid'])->middleware('throttle:20,1,chatblast-test-psid-save')->name('test-psid.save');
+
+    // Ang mga campaign at ang sheet ng lahat ng text (Araw 1, Araw 2, …).
+    Route::prefix('campaigns')->name('campaigns.')->group(function () {
+        Route::get('/', [ChatblastCampaignController::class, 'index'])->name('index');
+        Route::get('/data', [ChatblastCampaignController::class, 'data'])->name('data');
+        Route::get('/flow', [ChatblastCampaignController::class, 'flow'])->middleware('throttle:30,1,chatblast-campaign-flow')->name('flow');
+        Route::post('/', [ChatblastCampaignController::class, 'store'])->middleware('throttle:20,1,chatblast-campaign-create')->name('store');
+        Route::post('/{id}', [ChatblastCampaignController::class, 'update'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-update')->name('update');
+        Route::delete('/{id}', [ChatblastCampaignController::class, 'destroy'])->whereNumber('id')->middleware('throttle:20,1,chatblast-campaign-delete')->name('destroy');
+        Route::post('/{id}/text', [ChatblastCampaignController::class, 'text'])->whereNumber('id')->middleware('throttle:120,1,chatblast-campaign-text')->name('text');
+        Route::post('/{id}/day', [ChatblastCampaignController::class, 'addDay'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-rows')->name('day');
+        Route::post('/{id}/version', [ChatblastCampaignController::class, 'addVersion'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-rows')->name('version');
+        Route::post('/{id}/remove', [ChatblastCampaignController::class, 'remove'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-rows')->name('remove');
+    });
 });
 
 // Settings kada page (Page | Provider | Key | Value). CEO lang: ang controller ang nagbabalik ng 404 sa iba.

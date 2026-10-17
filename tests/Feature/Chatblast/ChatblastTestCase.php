@@ -35,6 +35,15 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
             'database/migrations/2026_04_10_000003_create_app_settings_table.php',
             'database/migrations/2026_10_18_300000_create_botcake_messages_table.php',
         ]]);
+        if ($this->withCampaigns) $this->migrateCampaigns();
+    }
+
+    /** false: ang test ang magpapatakbo ng migration ng campaigns (hal. para may laman muna bago ito). */
+    protected bool $withCampaigns = true;
+
+    protected function migrateCampaigns(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php']]);
     }
 
     /** Isang page na kumpleto ang Botcake settings para sa chatblast. */

@@ -122,7 +122,7 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->assertStringNotContainsString(self::TOKEN, $this->get('/chatblast')->assertOk()->getContent());
     }
 
-    public function test_the_buttons_build_send_retry_pause_and_save_the_days(): void
+    public function test_the_buttons_build_send_retry_and_pause(): void
     {
         Queue::fake();
         $this->page('Page Uno');
@@ -142,10 +142,7 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->postJson('/chatblast/pause')->assertOk()->assertJsonPath('state.paused', true);
         $this->postJson('/chatblast/resume')->assertOk()->assertJsonPath('state.paused', false);
 
-        $this->postJson('/chatblast/sequence', ['kind' => 'delivering', 'days' => [['Hi {name}, {waybill}']]])->assertOk();
-        $this->assertSame('Hi Cora Diaz, WB-003', BotcakeMessage::where('waybill', 'WB-003')->value('text'));
-        $this->postJson('/chatblast/sequence', ['kind' => 'delivering', 'days' => [['  ']]])->assertStatus(422);
-        $this->postJson('/chatblast/sequence', ['kind' => 'iba', 'days' => [['x']]])->assertStatus(422);
+        $this->postJson('/chatblast/build', ['kind' => 'iba'])->assertStatus(422);
         $this->postJson('/chatblast/send', ['ids' => 'hindi-listahan'])->assertStatus(422);
     }
 
@@ -198,7 +195,7 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->get('/chatblast')->assertNotFound();
         $this->getJson('/chatblast/list')->assertNotFound();
         $this->getJson('/chatblast/messages/' . $id)->assertNotFound();
-        foreach (['build', 'send', 'send-filtered', 'retry-failed', 'pause', 'resume', 'sequence', 'test', 'test-psid'] as $action) {
+        foreach (['build', 'send', 'send-filtered', 'retry-failed', 'pause', 'resume', 'test', 'test-psid'] as $action) {
             $this->postJson('/chatblast/' . $action, ['ids' => [$id], 'id' => $id])->assertNotFound();
         }
         Queue::assertNothingPushed();

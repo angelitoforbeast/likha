@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\SendChatblastMessage;
 use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
+use App\Models\ChatblastCampaign;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,8 @@ class ChatblastSender
     /** Ang mga status na maaaring ipadala (o ipadala ulit). */
     public const SENDABLE = ['ready', 'failed', 'field_mismatch', 'skipped'];
     public const QUEUE = 'chatblast';
+    public const OFF = 'Naka-off ang campaign';
+    public const NO_CAMPAIGN = 'Walang campaign ang mensaheng ito';
     private const PAUSED = 'chatblast.paused';
     private const BODY_MAX = 1500;
 
@@ -31,12 +34,13 @@ class ChatblastSender
     {
     }
 
-    /** Ilagay sa queue ang mga row na maaaring ipadala. @return int bilang na naka-queue */
+    /** Ilagay sa queue ang mga row na maaaring ipadala (hindi ang sa naka-off na campaign). @return int bilang na naka-queue */
     public function queue(array $ids, ?int $userId): int
     {
         $queued = 0;
+        $off = ChatblastCampaign::where('active', false)->pluck('kind')->all();
         foreach (array_unique(array_map('intval', $ids)) as $id) {
-            $ok = BotcakeMessage::whereKey($id)->whereIn('status', self::SENDABLE)->whereNotNull('psid')
+            $ok = BotcakeMessage::whereKey($id)->whereIn('status', self::SENDABLE)->whereNotNull('psid')->whereNotIn('kind', $off)
                 ->update(['status' => 'queued', 'queued_at' => now(), 'sent_by' => $userId, 'reason' => null]);
             if ($ok) {
                 SendChatblastMessage::dispatch($id);
@@ -166,11 +170,29 @@ class ChatblastSender
             return;
         }
 
-        // Ang waybill ay dapat nasa status pa rin ng uri (hal. hindi na "In Transit" kapag Delivered na), isa lang kada
-        // araw ang mensahe ng uri sa waybill, at dapat mayroon pa ang araw nito.
-        if (!$m->is_test && isset(Chatblast::KINDS[$m->kind])) {
-            // Delivering: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at buuin ulit ang text.
-            if ($m->kind === 'delivering') {
+        // Ang campaign ay dapat naka-on, ang waybill ay nasa mga status pa nito (hal. hindi na "In Transit" kapag
+        // Delivered na), isa lang kada araw ang mensahe ng campaign sa waybill, at dapat mayroon pa ang araw nito.
+        if (!$m->is_test) {
+            $c = $this->chatblast->campaign($m->kind);
+            if (!$c) { // walang campaign (hal. inalis): hindi ipinapadala nang walang patakaran
+                $this->finish($m, 'skipped', self::NO_CAMPAIGN, null, []);
+                return;
+            }
+            if (!$c->active) {
+                $this->finish($m, 'skipped', self::OFF, null, []);
+                // Ang pag-on ulit ay gagawa ng bagong row para sa waybill (hindi naiipit sa key ng nilaktawan).
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
+                return;
+            }
+            if (!$this->chatblast->onPage($c, $m->page_name)) {
+                $this->finish($m, 'skipped', Chatblast::pageReason($m->page_name), null, []);
+                // Maaaring ibalik ang page sa campaign: ang susunod na kuha ay gagawa ng bagong row.
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
+                return;
+            }
+            // Requires On Delivery: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at
+            // buuin ulit ang text.
+            if ($c->requires_on_delivery) {
                 $stop = $this->chatblast->refreshRider($m);
                 $m->refresh();
                 if ($stop !== null) {
@@ -180,11 +202,12 @@ class ChatblastSender
                     return;
                 }
             }
-            $why = $this->chatblast->staleFor($m->kind, $m->waybill) ?? $this->chatblast->blockedToday($m);
+            $why = $this->chatblast->staleFor($c, $m->waybill, $m->page_name) ?? $this->chatblast->blockedToday($m);
             if ($why !== null) {
                 $this->finish($m, 'skipped', $why, null, []);
                 return;
             }
+
         }
 
         // Walang blangko o kulang na text: "Hello Ma'am/Sir , …" o may {placeholder} pang hindi napalitan.
@@ -237,6 +260,19 @@ class ChatblastSender
         try {
             if (Cache::has($key . ':gap')) {
                 $this->later($m);
+                return;
+            }
+            // Sa loob ng lock ng customer: ang ibang campaign ng parehong waybill ay tapos na (sent o unknown) o hindi
+            // pa nagsisimula, kaya ang naipadala lang talaga ang humaharang (hindi ang naka-queue na maaaring mabigo).
+            // Itala ang status na kasalukuyan (hindi ang noong binuo): ito ang status na ipapadalhan ng mensahe, at
+            // ito ang tinitingnan ng ibang campaign sa patakarang isa kada araw kada status.
+            if (!$m->is_test && ($status = $this->chatblast->currentStatus($m->waybill)) !== null && $status !== $m->jnt_status) {
+                $m->forceFill(['jnt_status' => $status])->save();
+            }
+            if (!$m->is_test && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
+                $this->finish($m, 'skipped', $why, null, []);
+                // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill sa campaign na ito.
+                BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
             try {
