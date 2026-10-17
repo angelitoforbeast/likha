@@ -187,6 +187,9 @@ class ChatblastSendTest extends ChatblastTestCase
         $second = $this->send($this->row('WB-002'));
 
         $this->assertSame('skipped', $second->status);
+        BotcakeMessage::where('waybill', 'WB-001')->update(['status' => 'unknown', 'sent_at' => null]);
+        BotcakeMessage::whereKey($second->id)->update(['status' => 'ready']);
+        $this->assertSame('skipped', $this->send($second)->status, 'ang unknown ay bilang din sa cap');
         $this->assertStringContainsString('1', $second->reason);
         $this->assertCount(3, Http::recorded());
     }
@@ -207,6 +210,8 @@ class ChatblastSendTest extends ChatblastTestCase
         return [
             '503 sa flow'      => [503],
             'timeout sa flow'  => [0],
+            '408 sa flow'      => [408],
+            '200 na walang success' => [200],
         ];
     }
 
@@ -221,7 +226,7 @@ class ChatblastSendTest extends ChatblastTestCase
         $this->botcake(['flow' => function () use (&$flows, $http) {
             $flows++;
             if ($http === 0) throw new \Illuminate\Http\Client\ConnectionException('cURL error 28: timed out');
-            return Http::response(['message' => 'gateway'], $http);
+            return Http::response($http === 200 ? '<html>ok</html>' : ['message' => 'gateway'], $http);
         }]);
 
         $row = $this->send($this->row());

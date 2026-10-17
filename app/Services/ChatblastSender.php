@@ -146,8 +146,12 @@ class ChatblastSender
 
         $cap = max(1, (int) config('services.botcake.chatblast_daily_cap', 3000));
         if (!$m->is_test) {
-            $today = BotcakeMessage::where('page_name', $m->page_name)->where('is_test', false)->where('status', 'sent')
-                ->where('sent_at', '>=', Carbon::now('Asia/Manila')->startOfDay())->count();
+            // Kasama ang unknown: maaaring naipadala na.
+            $start = Carbon::now('Asia/Manila')->startOfDay();
+            $today = BotcakeMessage::where('page_name', $m->page_name)->where('is_test', false)
+                ->where(fn ($w) => $w->where(fn ($s) => $s->where('status', 'sent')->where('sent_at', '>=', $start))
+                    ->orWhere(fn ($u) => $u->where('status', 'unknown')->where('updated_at', '>=', $start)))
+                ->count();
             if ($today >= $cap) {
                 $this->finish($m, 'skipped', 'Naabot ang daily cap ng page (' . $cap . ' ngayong araw); ipadala ulit bukas', null, []);
                 return;
@@ -195,7 +199,9 @@ class ChatblastSender
         // 3. I-send ang flow. Hindi ligtas ulitin: ang 429 lang ang inuulit; ang 5xx o walang sagot ay "unknown".
         $f = $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => (int) $cfg['flow.shipping']], true);
         if ($authFail($f)) { $this->tokenInvalid($m, $f['http'], $steps); return; }
-        if ($f['http'] === 0 || $f['http'] >= 500) {
+        // Hindi tiyak: walang sagot, 408, 5xx, o 2xx na walang malinaw na success. Ang success:false lang ang tiyak na "hindi".
+        $refused = is_array($f['body']) && array_key_exists('success', $f['body']) && $f['body']['success'] === false;
+        if ($f['http'] === 0 || $f['http'] === 408 || $f['http'] >= 500 || ($f['http'] >= 200 && $f['http'] < 300 && !$ok($f) && !$refused)) {
             $this->finish($m, 'unknown', self::UNSURE . ' (HTTP ' . $f['http'] . '); tingnan sa Botcake bago magpadala ulit', $f['http'], $steps);
             return;
         }
