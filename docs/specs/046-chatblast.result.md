@@ -372,3 +372,101 @@ Full suite after amendment 1: `Tests: 1430, Assertions: 17155, Errors: 1, Failur
 - **The order window:** 14 days for `in_transit` (5 daily messages need a wider window than the 7 for `delivering`). Both are in `Chatblast::KINDS`.
 - **Version letters** follow the version's position in the day. Removing version A re-letters the rest, and building again re-picks among the remaining versions for unsent rows.
 - **A cap-skipped day** (daily cap) stays `skipped` and can be sent by hand the next day. The next day's build does not make a new row for it.
+
+## Amendment 2
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. **One message at a time per customer:**
+   - a per page + PSID lock from the field write until 20 s after send_flow (config);
+   - no second message of the same kind to the same page + PSID in a Manila day.
+2. **No blank or partial text:**
+   - a version whose placeholder has no value for the order is not used ("walang {x}");
+   - `deliver()` refuses blank text, and text that still contains a known `{placeholder}`.
+3. **Send only to the order's current PSID and page:** they are re-read right before the field write; on a change the row is skipped and the next build makes a fresh row.
+4. **Minor 4:** the daily cap uses two indexed counts instead of an OR.
+5. **Minor 6:** the Test PSID picker confirms with the full name and the last 4 digits of the PSID, and the header shows whose Test PSID the filtered page has.
+6. **Minor 7:** the read-back matches on `id` or `custom_field_id`.
+7. **Minors 5 and 8:** a lower id bound for the build's walk, and the counts kept off the 4 s poll.
+
+Commits:
+- `fix: chatblast sends one message at a time per customer with a 20 s gap and one of a kind per customer a day, never a text with an empty or unfilled placeholder, only to the order's current PSID and page, counts the cap on two indexes, reads back either field id, shows whose test PSID is set and polls without the counts (spec 046 amendment 2)`
+- `fix: a chatblast row refused for its text stays refused after the next build, and a row left sending by a killed worker blocks its customer for 10 minutes at most (spec 046 amendment 2)`
+- `docs: accepted review findings for spec 046 amendment 2 in TODO`
+- `docs: result for spec 046 amendment 2`
+
+### What changed
+
+- **One customer, one message at a time (`ChatblastSender`).**
+  - **The lock:** before the field write, the job takes a cache lock for the customer, `chatblast-customer:<sha1(page|psid)>`, for 300 s. That is longer than the slowest message.
+  - **The gap:** after the three steps, whatever their outcome, it sets a `:gap` key for `BOTCAKE_CHATBLAST_CUSTOMER_GAP` seconds (default 20, added to `config/services.php` and `.env.example`), then releases the lock.
+  - **Requeue:** a job that finds the lock taken or the gap still running puts its row back to `queued` without counting the attempt, and dispatches itself again after the gap plus 1 s. Pause still holds: a requeued job that wakes while paused leaves the row queued.
+  - **Store:** the lock needs a cache store with locks. `database`, as in `.env.example`, works.
+- **One of a kind per customer a day (`Chatblast::blockedToday`).** A real message is skipped with "may mensahe na ngayong araw sa customer na ito" when another real message of the same kind to the same page + PSID was sent or `unknown` today (Manila), or is being sent. A row counts as "being sent" only for 10 minutes, so a row left `sending` by a killed worker can't block the customer for good. This comes after the per-waybill check from amendment 1.
+- **No blank or partial text.**
+  - **Choosing a version:** a version is used only if every placeholder in it has a value for the order. A COD of 0 counts as empty, since nothing is to be paid.
+  - **When no version fits:** the row is `no_config` with "walang rider info" (only rider data missing) or "walang {x}" (the first missing other placeholder, e.g. `walang {cod}`, `walang {name}`).
+  - **Re-rendering after the days change** uses the same rule.
+  - **`deliver()`** refuses a text that is blank or still contains a known placeholder: the row becomes `no_config` "hindi buo ang text: …". The next build leaves it refused, because it is treated as a text reason.
+- **Current PSID and page.**
+  - **The check:** right before the write, `deliver()` re-reads `botcake_psid` and `PAGE` of the row's order. If either is empty or differs (the page compared by its key), nothing is sent. The row becomes `skipped` with "nagbago ang PSID/page".
+  - **A fresh row:** the skipped row's `dedupe_key` is cleared. The next build's one-a-day check ignores rows with no `dedupe_key`, so it makes a fresh row with the current PSID.
+  - **Resending by hand:** the old row hits the same check again, so it cannot reach the old person.
+- **Daily cap:** `count(sent today)` + `count(unknown today)`, each on its own index. New indexes on `botcake_messages`: `(page_name, status, sent_at)`, `(page_name, status, updated_at)`, `(page_name, psid, kind)`. They were added to the create migration, which is still unreleased.
+- **Read-back:** a row matches when either its `id` or its `custom_field_id` equals the field id.
+- **Test PSID:**
+  - **The picker** shows the full Botcake name and the last 4 digits of the PSID, and asks "Gawing Test PSID ng … si "…" (PSID …1234)?" before saving.
+  - **With a page filtered,** `/chatblast/list` returns `test_psid` {name, psid_last4}, and the header shows "Test PSID ng <page>: <name> (…1234)" or "Walang Test PSID ang <page>".
+- **Poll:** `GET /chatblast/list?light=1` skips the grouped count. The page's 4 s poll uses it and fetches the counts every 30 s, and after every action or filter change.
+- **Build:** the chunk walk starts at the lowest `macro_output.id` inside the window, one `MIN(id)` on the `ts_date` index, instead of id 1.
+
+### Tests (amendment 2)
+
+| Case | Test | Result |
+|---|---|---|
+| Lock taken: the row goes back to queued with a delayed retry and no call; once sent, a second message to the same customer waits for the 20 s gap and is sent after it | `ChatblastSafetyTest::test_one_message_at_a_time_per_customer_and_a_short_gap_after_each` | pass |
+| Two in-transit orders of one customer: one message that day, the other skipped "may mensahe na ngayong araw sa customer na ito" | `…::test_a_customer_gets_one_message_of_a_kind_per_day_even_with_two_orders` | pass |
+| COD null (other version used), COD 0 (`walang {cod}`), no name and no receiver (`walang {name}`), no rider phone (other version used) (4 rows) | `…::test_a_version_with_a_placeholder_without_a_value_is_never_used` | pass |
+| Blank text and text with `{name}` are refused, nothing sent | `…::test_deliver_refuses_a_blank_or_unfilled_text` | pass |
+| PSID changed: not sent, skipped "nagbago ang PSID/page", the next build makes a fresh row with the new PSID; page changed: not sent, skipped, key cleared | `…::test_a_changed_psid_or_page_is_not_messaged_and_the_next_build_makes_a_fresh_row` | pass |
+| Read-back on `custom_field_id` when `id` differs | `…::test_the_read_back_matches_on_either_id_or_custom_field_id` | pass |
+| Header shows the Test PSID owner for a page filter; `light=1` returns no counts | `…::test_the_header_shows_whose_test_psid_is_set_and_the_poll_can_skip_the_counts` | pass |
+| Cap counts sent and unknown with no OR; the two indexes exist | `…::test_the_daily_cap_uses_the_two_indexed_counts` | pass |
+| A row refused for its text stays refused after the next build | `…::test_a_row_refused_for_its_text_stays_refused_after_the_next_build` | pass |
+| A row stuck in `sending` for 2 hours does not block the customer | `…::test_a_row_stuck_in_sending_for_long_does_not_block_the_customer` | pass |
+
+Red runs:
+- **First run:**
+  - "Call to undefined method ChatblastSender::customerLockKey()".
+  - "two strings are identical" (a second message the same day).
+  - "'A' is identical to null" (COD 0, no name).
+  - "Requests were recorded" (blank text, changed PSID).
+  - "two strings are identical" (read-back).
+  - "null is identical to Array" (header).
+  - "walang OR sa bilang ng cap".
+- **Fix loop:** "hindi bumabalik sa ready …" and "ang naiwang sending nang 2 oras …" failed on "two strings are identical".
+- **Already green when written:** the "COD null, may ibang bersyon" and "walang rider phone" rows passed before the change, because the rotation happened to pick the other version. The COD 0 and no-name rows carry the red.
+
+Full suite after amendment 2: `Tests: 1443, Assertions: 17200, Errors: 1, Failures: 1, PHPUnit Deprecations: 9, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`. `php -l`, `node --check` and `artisan view:cache` pass.
+
+### Review (amendment 2)
+
+- **One adversarial re-check:** no blockers or majors. It confirmed:
+  - two messages to one customer cannot interleave: the lock outlives the job, the gap is set before the lock is released, and the requeue loop ends;
+  - a cleared `dedupe_key` cannot cause a second send;
+  - no path sends partial text;
+  - Pause still holds across a requeue.
+- **Minors fixed:**
+  - a refused text row came back as `ready` on the next build;
+  - a stuck `sending` row blocked the customer with no time limit;
+  - the changed-page test now asserts the status, the reason and the cleared key.
+- **Accepted in `TODO.md` (amendment 2):**
+  - two same-kind rows for one customer claimed at the same moment are both skipped (fails safe);
+  - a Facebook name containing a placeholder makes the text refused (fails safe);
+  - the per-customer lock needs a cache store with locks.
+
+### After release, added by amendment 2
+
+- **Check the server's `CACHE_STORE`:** it must support locks (`database` with the `cache_locks` table, or redis). `file` works only with one server.
+- **Optional:** set `BOTCAKE_CHATBLAST_CUSTOMER_GAP` (default 20).
+- **One worker is enough:** a worker that meets a busy customer requeues and moves on to the next message, so numprocs 1 stays right.
