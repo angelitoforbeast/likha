@@ -1565,7 +1565,7 @@ class OwnerPrivateController extends Controller
         // Cache 10 minuto kada (pages, range), kasama ang version ng /owner/private: bagong upload = bagong bilang.
         $pages = array_values(array_unique($v['pages']));
         sort($pages, SORT_STRING);
-        $key = 'owner_private:ad_delivery:' . $this->cacheVersion() . ':'
+        $key = 'owner_private:ad_delivery:v2:' . $this->cacheVersion() . ':'
              . md5(json_encode([$pages, $v['start_date'], $v['end_date']]));
         $byPage = Cache::remember($key, 600, fn () => $status->forPages($pages, $v['start_date'], $v['end_date']));
 

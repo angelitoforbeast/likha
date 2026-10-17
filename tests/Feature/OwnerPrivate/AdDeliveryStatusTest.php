@@ -160,6 +160,42 @@ class AdDeliveryStatusTest extends AdDeliveryTestCase
         }
     }
 
+    public function test_S_043_15_each_row_carries_the_rts_del_int_cell(): void
+    {
+        $this->ad('AD1', 'SET1', 'CMP1');
+        $this->ad('AD2', 'SET1', 'CMP1');
+        $this->order('WB1', 'AD1', 'Delivered');
+        $this->order('WB2', 'AD1', 'Returned');
+        $this->order('WB3', 'AD1', 'For Return');
+        $this->order('WB4', 'AD1', 'In Transit');
+        $this->order('WB5', 'AD2', 'Delivered');
+        $this->order('WB6', null, 'Delivered');
+        $this->order('WB7', null, 'Returned');
+        $this->order('WB8', null, 'In Transit');
+        $this->order('WB9', 'AD1', 'Delivered', page: 'Other Page');   // page na walang order na walang ad id
+
+        $result = $this->read([self::PAGE, 'Other Page']);
+        $page   = $result[self::PAGE];
+        // kamay: RTS = for return + returned, DEL = delivered, INT = in transit; % = bilang / (RTS + DEL + INT)
+        $cell = fn (int $rts, int $del, int $int) => [
+            'rts' => ['cnt' => $rts, 'pct' => $rts / ($rts + $del + $int) * 100],
+            'del' => ['cnt' => $del, 'pct' => $del / ($rts + $del + $int) * 100],
+            'int' => ['cnt' => $int, 'pct' => $int / ($rts + $del + $int) * 100],
+        ];
+        $this->assertEquals($cell(2, 1, 1), $page['ads']['AD1']['rdt']);                 // 50 / 25 / 25
+        $this->assertEquals($cell(0, 1, 0), $page['ads']['AD2']['rdt']);                 // 0 / 100 / 0
+        $this->assertEquals($cell(2, 2, 1), $page['adsets']['SET1']['rdt']);             // 40 / 40 / 20
+        $this->assertEquals($cell(2, 2, 1), $page['campaigns']['CMP1']['counts']['rdt']);
+        $this->assertEquals($cell(1, 1, 1), $page['no_ad']['rdt']);                      // 33.3 each
+        $this->assertEquals($cell(3, 3, 2), $page['page']['rdt']);                       // 37.5 / 37.5 / 25
+
+        foreach ([$page['ads']['AD1'], $page['adsets']['SET1'], $page['no_ad'], $page['page']] as $c) {
+            $this->assertEqualsWithDelta(100.0, $c['rdt']['rts']['pct'] + $c['rdt']['del']['pct'] + $c['rdt']['int']['pct'], 1e-9);
+        }
+        // walang shipped → walang cell ("—" sa screen)
+        $this->assertNull($result['Other Page']['no_ad']['rdt']);
+    }
+
     public function test_S_043_6_one_grouped_query_however_many_ads(): void
     {
         $pages = ['Page A', 'Page B', 'Page C'];
