@@ -118,3 +118,55 @@ Not done. The app needs the server database (`.env`, not read), and this session
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories. The cases above come from its Tests list.
+
+## Amendment 1
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. `plan()` decides from the newest run that is `cap`, `time`, `age` or `end`, or an unfinished window read. It no longer decides from the last run alone.
+2. Two failed window reads in a row restart from batch 1 only when both read 0 batches from the same start.
+3. A run killed by the worker is marked failed with stop reason `killed`, from both sync jobs' `failed()`.
+4. The migration's `down()` checks each column with `hasColumn`.
+
+Commit: `fix: the read plan follows the newest cap, time, age, end or unfinished window run instead of the last run, restarts from batch 1 only after two empty reads from the same start, marks a killed sync as killed, and the migration rollback checks each column (spec 044 amendment 1)`
+
+### The rule now (`BotcakeCustomerSync::plan`)
+
+1. **`--full`:** a full read from batch 1.
+2. **The deciding run** is the newest api run of the page that either:
+   - stopped at `cap`, `time`, `age` or `end`, or
+   - is a window read (`read_kind = window`), whatever its status or stop reason: failed, `killed`, rate-limited, or still marked running.
+
+   Runs in between are skipped: `known_batch`, a failed or killed `--full`, an incremental that errored.
+3. **No deciding run:** a window read from batch 1. The page never completed a window read.
+4. **The deciding run stopped at `age` or `end`:** incremental. This holds even after later `known_batch` runs.
+5. **The deciding run is not a window read:** it is an incremental `cap`, or an old run with no kind. A window read from batch 1.
+6. **An unfinished window read:**
+   - **It read some batches:** continue from `start_batch + batches_read − 1 − 5`, at least 1. Failed runs included, so two short rate-limited presses keep their progress.
+   - **It read 0 batches:** try the same start again. If the window read before it also read 0 batches from that same start (above batch 1), start again from batch 1.
+
+**Killed runs:** `SyncBotcakeCustomersJob::failed()` and `SyncAllBotcakeCustomersJob::failed()` call the new `BotcakeCustomerSync::markKilled($page)`. Sync lahat takes the page from its run state. That method changes every api run of the page still marked `running` to `failed` with stop reason `killed` and the error "Pinatay ang sync bago natapos (hal. timeout ng worker)". "Huling sync" shows `killed` instead of a run that looks endless. `plan()` continues from its saved batch.
+
+**Migration:** `down()` drops each of `read_kind` and `start_batch` only when it exists. I edited the migration file itself. That breaks no rule here, because the migration has not been released or run on the server yet.
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| `cap`, then `known_batch` → window from 1; an unfinished window (`time` at 20), then a failed `--full` → continue at 15; the same with a killed `--full` → 15; `age`, then two `known_batch` → incremental; two failed window reads that read 6 batches each from 15 → continue at 15; two 0-batch reads from 15 → batch 1 (plus all earlier rows) | `BotcakeWindowReadTest::test_the_last_runs_decide_the_kind_of_read_and_where_it_starts` (18 rows) | pass |
+| The row job's `failed()` marks the running run `failed` / `killed`, and `plan()` continues at 7; the Sync lahat job's `failed()` does the same for its page, and `plan()` continues at 31; a run already marked killed is left alone | `BotcakeWindowReadTest::test_a_run_killed_by_the_worker_is_marked_killed_and_the_next_sync_continues_from_it` | pass |
+
+Red runs:
+- "2 sunod na failed na may nabasa" failed on "1 is identical to 15".
+- "cap, saka known_batch" failed on "two arrays are identical" (it read incremental).
+- The two "saka failed / pinatay na full" rows failed on "1 is identical to 15".
+- The killed test failed on "Call to undefined method SyncBotcakeCustomersJob::failed()".
+- The "age, saka 2 known_batch" and "2 sunod na 0 batch" rows passed before the change. They pin behaviour the new rule must keep.
+- I replaced the earlier row "2 sunod na failed: mula 1" with the two rows above.
+
+Full suite after amendment 1: `Tests: 1372, Assertions: 16749, Errors: 1, Failures: 1, PHPUnit Deprecations: 6, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`. `php -l` passes on the four changed PHP files.
+
+### Notes
+
+- **What changed from the first version.** The review loop of the first version had made two failed window reads in a row restart from batch 1. This amendment narrows that to two reads that both read nothing from the same start. A page whose read always fails after a few batches now keeps continuing from the same place. That failure shows on the grid as the run's error.
+- **`markKilled()` changes every run of the page still marked `running`.** Only one sync of a page can run at a time, because of the lock. The job calling `failed()` is the one that held it, so no live run is marked.
