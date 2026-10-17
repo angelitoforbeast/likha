@@ -99,7 +99,12 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
             'rate limit sa gitna: tuloy' => [[['rate_limited', 12, 'window', 1, 'failed']], 7, 'window'],
             'pinatay na run: tuloy'      => [[[null, 12, 'window', 1, 'running']], 7, 'window'],
             '0 batch: parehong simula'   => [[['time', 20, 'window', 1], ['rate_limited', 0, 'window', 15, 'failed']], 15, 'window'],
-            '2 sunod na failed: mula 1'  => [[['error', 6, 'window', 15, 'failed'], ['error', 6, 'window', 15, 'failed']], 1, 'window'],
+            '2 sunod na failed na may nabasa: tuloy' => [[['rate_limited', 6, 'window', 15, 'failed'], ['rate_limited', 6, 'window', 15, 'failed']], 15, 'window'],
+            '2 sunod na 0 batch, parehong simula: mula 1' => [[['rate_limited', 0, 'window', 15, 'failed'], ['rate_limited', 0, 'window', 15, 'failed']], 1, 'window'],
+            'cap, saka known_batch'      => [[['end', 2, 'window', 1], ['cap', 3, 'incremental', 1], ['known_batch', 1, 'incremental', 1]], 1, 'window'],
+            'putol na window, saka failed na full' => [[['time', 20, 'window', 1], ['error', 3, 'full', 1, 'failed']], 15, 'window'],
+            'putol na window, saka pinatay na full' => [[['time', 20, 'window', 1], ['killed', 2, 'full', 1, 'failed']], 15, 'window'],
+            'age, saka 2 known_batch'    => [[['age', 4, 'window', 1], ['known_batch', 1, 'incremental', 1], ['known_batch', 1, 'incremental', 1]], 1, 'incremental'],
         ];
     }
 
@@ -137,6 +142,27 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         $row = collect(app(\App\Services\PageSettingsGrid::class)->build()['rows'])->firstWhere('name', 'Page Uno');
         $this->assertSame('window, tuloy mula batch 17', $row['info']['last_sync']['kind']);
         $this->assertSame('end', $row['info']['last_sync']['stop_reason']);
+    }
+
+    public function test_a_run_killed_by_the_worker_is_marked_killed_and_the_next_sync_continues_from_it(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $this->fake(endAt: 50);
+
+        // Row Sync now: pinatay habang window read sa batch 12.
+        $row = $this->pastRun(null, 12, 'window', 1, 'running');
+        (new SyncBotcakeCustomersJob('page uno'))->failed(new \RuntimeException('timeout'));
+        $this->assertSame(['failed', 'killed'], [$row->fresh()->status, $row->fresh()->stop_reason]);
+        $this->assertSame(['window', 7], app(BotcakeCustomerSync::class)->plan('Page Uno'));
+
+        // Sync lahat: ang page ng job ay mula sa state ng run.
+        app(\App\Services\BotcakeSyncAll::class)->start();
+        $job = \Illuminate\Support\Facades\Queue::pushed(\App\Jobs\SyncAllBotcakeCustomersJob::class)->sole();
+        $all = $this->pastRun(null, 30, 'window', 7, 'running');
+        $job->failed(new \RuntimeException('timeout'));
+        $this->assertSame(['failed', 'killed'], [$all->fresh()->status, $all->fresh()->stop_reason]);
+        $this->assertSame(['window', 31], app(BotcakeCustomerSync::class)->plan('Page Uno'));
+        $this->assertSame('killed', $row->fresh()->stop_reason, 'ang tapos nang run ay hindi ginagalaw');
     }
 
     public function test_sync_now_and_sync_lahat_use_the_same_rule(): void

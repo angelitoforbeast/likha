@@ -22,7 +22,9 @@ return new class extends Migration {
         if (!Schema::hasTable('botcake_psid_import_runs')) return;
 
         Schema::table('botcake_psid_import_runs', function (Blueprint $table) {
-            $table->dropColumn(['read_kind', 'start_batch']);
+            foreach (['read_kind', 'start_batch'] as $col) {
+                if (Schema::hasColumn('botcake_psid_import_runs', $col)) $table->dropColumn($col);
+            }
         });
     }
 };

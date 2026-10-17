@@ -22,8 +22,8 @@ use Illuminate\Support\Facades\Log;
  * ang huling run, o kapag ang huling run ay window read na hindi natapos (oras, error, o pinatay): ang huli ay itinutuloy
  * mula sa naabot nitong batch, minus RESUME_OVERLAP (kapag may nawala sa unahan, umaakyat ang listahan at malalaktawan sana
  * ang ilan; ang bagong subscriber naman ay nagtutulak pababa, kaya inuulit lang). Humihinto ito pagkatapos ng
- * WINDOW_SECONDS (stop reason time). Dalawang sunod na failed na window read: mula batch 1 ulit, para hindi maipit sa
- * batch na laging pumapalya.
+ * WINDOW_SECONDS (stop reason time). Dalawang sunod na window read na walang nabasa mula sa parehong simula: mula batch 1
+ * ulit, para hindi maipit sa batch na laging pumapalya.
  * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason, read_kind at start_batch.
  */
 class BotcakeCustomerSync
@@ -87,22 +87,43 @@ class BotcakeCustomerSync
     {
         if ($full) return ['full', 1];
 
+        // Ang nagpapasya: ang pinakabagong run na cap / time / age / end, o window read na hindi natapos (failed, pinatay,
+        // rate limit). Ang ibang run sa pagitan (known_batch, failed na --full, error ng incremental) ay hindi binibilang,
+        // para hindi maging incremental habambuhay ang page na may customer pa sa window na hindi nababasa.
+        [$last, $before] = array_pad($this->runsOf($page)
+            ->where(fn ($w) => $w->whereIn('stop_reason', ['cap', 'time', 'age', 'end'])->orWhere('read_kind', 'window'))
+            ->orderByDesc('id')->limit(2)->get()->all(), 2, null);
+
+        if (!$last) return ['window', 1]; // hindi pa nakababasa ng buong window
+        if (in_array($last->stop_reason, ['age', 'end'], true)) return ['incremental', 1];
+        if ($last->read_kind !== 'window') return ['window', 1]; // cap ng incremental (o lumang run na walang kind)
+
+        // Hindi natapos na window read: ituloy mula sa naabot nito, minus ang overlap.
+        $start = (int) ($last->start_batch ?: 1);
+        if ((int) $last->batches_read > 0) return ['window', max(1, $start + (int) $last->batches_read - 1 - self::RESUME_OVERLAP)];
+
+        // Walang nabasa: parehong simula ulit. Dalawang sunod na walang nabasa mula sa parehong simula: mula batch 1, para
+        // hindi maipit sa batch na laging pumapalya.
+        $stuck = $before && $before->read_kind === 'window' && (int) $before->batches_read === 0
+            && (int) ($before->start_batch ?: 1) === $start && $start > 1;
+        return ['window', $stuck ? 1 : $start];
+    }
+
+    private function runsOf(string $page)
+    {
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $runs = fn () => BotcakePsidImportRun::where('source', 'api')->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)]);
-        [$last, $before] = array_pad($runs()->orderByDesc('id')->limit(2)->get()->all(), 2, null);
+        return BotcakePsidImportRun::where('source', 'api')->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)]);
+    }
 
-        // Hindi natapos na window read (oras, error, rate limit o pinatay): ituloy mula sa naabot nito.
-        if ($last && $last->read_kind === 'window' && !in_array($last->stop_reason, ['age', 'end'], true)) {
-            $failedTwice = $last->status === 'failed' && $before?->read_kind === 'window' && $before->status === 'failed';
-            if ($failedTwice) return ['window', 1];
-
-            $start = (int) ($last->start_batch ?: 1);
-            if ((int) $last->batches_read === 0) return ['window', $start]; // walang nabasa: parehong simula ulit
-            return ['window', max(1, $start + (int) $last->batches_read - 1 - self::RESUME_OVERLAP)];
-        }
-        if ($last && $last->stop_reason === 'cap') return ['window', 1];
-
-        return $runs()->whereIn('stop_reason', ['age', 'end'])->exists() ? ['incremental', 1] : ['window', 1];
+    /**
+     * Para sa failed() ng mga sync job (hal. pinatay ng worker sa timeout): ang run na "running" pa ng page ay failed na,
+     * stop reason killed, para hindi ito "tumatakbo" habambuhay sa grid. Itinutuloy pa rin ng plan() mula sa naabot nito.
+     */
+    public function markKilled(string $page): void
+    {
+        $this->runsOf($page)->where('status', 'running')->update([
+            'status' => 'failed', 'stop_reason' => 'killed', 'last_error' => 'Pinatay ang sync bago natapos (hal. timeout ng worker)',
+        ]);
     }
 
     /** Para sa run message at sa "Huling sync" ng grid: incremental / window / window, tuloy mula batch N / full. */
