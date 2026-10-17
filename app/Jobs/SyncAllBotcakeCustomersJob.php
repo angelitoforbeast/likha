@@ -33,6 +33,12 @@ class SyncAllBotcakeCustomersJob implements ShouldQueue
 
     public function handle(BotcakeCustomerSync $sync, BotcakeSyncAll $all): void
     {
+        // Bago ang migrate (wala pa ang mga column): babalik mamaya ang parehong page, para hindi mawala ang kadena.
+        if (!$all->ready()) {
+            self::dispatch($this->runId, $this->index)->delay(now()->addSeconds(60));
+            return;
+        }
+
         $run = $all->find($this->runId);
         if (!$run) {
             // Walang ganitong run (hal. nabura ang lumang state sa cache bago ito naampon): nag-iiwan ng bakas.
@@ -74,6 +80,7 @@ class SyncAllBotcakeCustomersJob implements ShouldQueue
     public function failed(?Throwable $e): void
     {
         $all = app(BotcakeSyncAll::class);
+        if (!$all->ready()) return;
         $run = $all->find($this->runId);
         if (!$run || (int) $run->page_index !== $this->index) return;
 

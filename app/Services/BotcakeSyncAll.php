@@ -7,7 +7,9 @@ use App\Models\BotcakePsidImportRun;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -27,8 +29,22 @@ class BotcakeSyncAll
     public const WAIT_SECONDS = 30;                 // kapag may ibang sync na may hawak ng lock: subok ulit pagkatapos nito
     public const HISTORY = 10;
 
+    /** Ilang segundo naghihintay ang pindot sa pag-ampon na ginagawa ng poll (hal. ng ibang tab). */
+    public int $adoptWait = 10;
+
+    private ?bool $ready = null;
+
     public function __construct(private BotcakeCustomerSync $sync, private PageSettings $settings)
     {
+    }
+
+    /**
+     * Naka-migrate na ba ang mga column ng Sync lahat. Sa ilang segundo sa pagitan ng push at ng migrate, wala pa: ang
+     * pindot ay sumasagot ng not_ready at ang job ay bumabalik mamaya, kaya walang 500 at hindi nawawala ang kadena.
+     */
+    public function ready(): bool
+    {
+        return $this->ready ??= Schema::hasTable('botcake_psid_import_runs') && Schema::hasColumn('botcake_psid_import_runs', 'run_key');
     }
 
     /**
@@ -37,12 +53,16 @@ class BotcakeSyncAll
      */
     public function start(?int $userId = null): array
     {
+        if (!$this->ready()) return ['status' => 'not_ready', 'sync_all' => null];
+
         $lock = Cache::lock(self::LEGACY_STATE . ':start', 10);
         if (!$lock->get()) return ['status' => 'running', 'sync_all' => $this->panel()];
 
         try {
-            $this->adoptLegacy(false);
-            if ($this->active()) return ['status' => 'running', 'sync_all' => $this->panel()];
+            // Hinihintay ang pag-ampon ng poll: kung hindi, makakapagsimula ng ikalawang run sa tabi ng inaampon.
+            if (!$this->adoptLegacy(false, true)) return ['status' => 'running', 'sync_all' => $this->panel()];
+            $active = $this->active();
+            if ($active && !$this->closeIfOrphan($active)) return ['status' => 'running', 'sync_all' => $this->panel()];
 
             [$pages, $skipped] = $this->plannedPages();
             $run = BotcakePsidImportRun::create([
@@ -173,25 +193,66 @@ class BotcakeSyncAll
      * nito; may hawak na ang page na iyon (ang job ng lumang kadena), kaya walang bagong job na ipinapadala rito. Kapag ang
      * bagong code na ang nagpapatakbo ng job ($owner), binubura ang cache: ang database na ang may hawak.
      */
-    private function adoptLegacy(bool $owner): void
+    /** False kapag may ibang umaampon pa (hindi nakuha ang lock sa loob ng paghihintay); true kung hindi. */
+    private function adoptLegacy(bool $owner, bool $wait = false): bool
     {
         $state = Cache::get(self::LEGACY_STATE);
-        if (!is_array($state) || !isset($state['id'], $state['pages'])) return;
+        if (!is_array($state) || !isset($state['id'], $state['pages'])) return true;
 
-        // Isang pag-ampon lang sabay (ang poll at ang job): walang dalawang row para sa iisang lumang run. Ang job ay
-        // naghihintay sa lock; ang poll ay lumalaktaw na lang.
+        // Isang pag-ampon lang sabay (ang poll, ang pindot at ang job): walang dalawang row para sa iisang lumang run.
+        // Ang job at ang pindot ay naghihintay sa lock; ang poll ay lumalaktaw na lang.
         $lock = Cache::lock(self::LEGACY_STATE . ':adopt', 10);
         try {
-            if (!($owner ? $lock->block(10) : $lock->get())) return;
+            if (!($owner ? $lock->block(10) : ($wait ? $lock->block($this->adoptWait) : $lock->get()))) return false;
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
-            return;
+            return false;
         }
 
         try {
             $this->adoptLegacyState($state, $owner);
+        } catch (QueryException) {
+            // Wala pa ang mga column (bago ang migrate): hindi pa maaampon; ang cache ay naiiwan para sa susunod.
         } finally {
             $lock->release();
         }
+
+        return true;
+    }
+
+    /**
+     * Ang inampong lumang run na running pa, pero wala na ang cache key nito at walang job na may hawak (hal. tapos na ang
+     * huling page sa lumang code, saka nabura ang cache sa deploy): isinasara. Done kapag nasa huling page na ito; kung
+     * hindi, stopped (naputol ang lumang kadena). Ang naka-pause ay binibitawan ang page, para gumana ang Resume.
+     * True kapag isinara. Ang "walang job" ay nakikita lang sa database queue; sa iba, hindi ginagalaw.
+     */
+    private function closeIfOrphan(BotcakePsidImportRun $run): bool
+    {
+        if (empty($run->sync_state['legacy']) || $run->current_page === null || Cache::has(self::LEGACY_STATE)) return false;
+        if (!in_array($run->status, ['running', 'paused'], true) || $this->jobOwns((string) $run->run_key)) return false;
+
+        if ($run->status === 'paused') {
+            BotcakePsidImportRun::whereKey($run->id)->where('status', 'paused')->update(['current_page' => null]);
+            return false;
+        }
+
+        $total = count($run->sync_state['pages'] ?? []);
+        $last  = (int) $run->page_index >= $total - 1;
+
+        return (bool) BotcakePsidImportRun::whereKey($run->id)->where('status', 'running')->update($last
+            ? ['status' => 'done', 'page_index' => $total, 'current_page' => null, 'finished_at' => now()]
+            : ['status' => 'stopped', 'current_page' => null, 'finished_at' => now(), 'last_error' => 'Naputol ang lumang run: walang job at walang state sa cache']);
+    }
+
+    /** May naka-queue o tumatakbong job ba ang run (database queue lang). True kapag hindi masabi. */
+    private function jobOwns(string $runKey): bool
+    {
+        $queue = config('queue.default');
+        if (config('queue.connections.' . $queue . '.driver') !== 'database') return true;
+
+        $table = config('queue.connections.' . $queue . '.table', 'jobs');
+        if (!Schema::hasTable($table)) return true;
+
+        return DB::table($table)->where('payload', 'like', '%' . $runKey . '%')->exists();
     }
 
     private function adoptLegacyState(array $state, bool $owner): void
@@ -242,9 +303,21 @@ class BotcakeSyncAll
      */
     public function panel(): ?array
     {
+        try {
+            return $this->buildPanel();
+        } catch (QueryException) {
+            return null; // wala pa ang mga column (bago ang migrate): walang panel, hindi 500
+        }
+    }
+
+    private function buildPanel(): ?array
+    {
         $this->adoptLegacy(false);
         $runs = BotcakePsidImportRun::where('source', self::SOURCE)->orderByDesc('id')->limit(self::HISTORY)->get();
         if ($runs->isEmpty()) return null;
+        if ($this->closeIfOrphan($runs->first())) {
+            $runs = BotcakePsidImportRun::where('source', self::SOURCE)->orderByDesc('id')->limit(self::HISTORY)->get();
+        }
 
         $ids   = $runs->pluck('started_by')->filter()->unique()->values();
         $names = $ids->isEmpty() ? collect() : User::whereIn('id', $ids)->pluck('name', 'id');

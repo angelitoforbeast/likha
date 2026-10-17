@@ -214,10 +214,10 @@ class SyncAllTest extends BotcakeApiTestCase
     }
 
     /** Ang state na isinusulat ng lumang code sa cache ('botcake-sync-all'). */
-    private function legacy(int $done, ?string $current): void
+    private function legacy(int $done, ?string $current, string $id = 'legacy-run'): void
     {
         Cache::put(BotcakeSyncAll::LEGACY_STATE, [
-            'id' => 'legacy-run', 'pages' => ['Page Dos', 'Page Tres', 'Page Uno'], 'done' => $done, 'ok' => $done, 'failed' => 0,
+            'id' => $id, 'pages' => ['Page Dos', 'Page Tres', 'Page Uno'], 'done' => $done, 'ok' => $done, 'failed' => 0,
             'current' => $current, 'waiting' => false, 'started_at' => now()->subHour()->toIso8601String(), 'finished_at' => null,
         ], 3600);
     }
@@ -343,5 +343,81 @@ class SyncAllTest extends BotcakeApiTestCase
         $p = $this->panel();
         $this->assertSame(['stopped', null, false, 0], [$p['status'], $p['current'], $p['waiting'], $p['done']]);
         $this->assertCount(2, $this->jobs());
+    }
+
+    public function test_before_the_migration_the_page_the_poll_the_press_and_the_jobs_do_not_fail(): void
+    {
+        // Ang ilang segundo sa pagitan ng push at ng migrate: wala pa ang mga bagong column.
+        \Illuminate\Support\Facades\Schema::table('botcake_psid_import_runs', function ($t) {
+            $t->dropIndex(['run_key']);
+            $t->dropColumn(['ad_filled', 'run_key', 'sync_state', 'page_index', 'current_page', 'started_by', 'finished_at']);
+        });
+        Queue::fake();
+        Http::fake(['botcake.io/*' => Http::response([])]);
+        $this->legacy(1, 'Page Tres');
+
+        $this->get('/page-settings')->assertOk();
+        $this->assertNull($this->panel());
+        $this->press()->assertOk()->assertJsonPath('status', 'not_ready');
+        Queue::assertNothingPushed();
+
+        // Ang job ng lumang kadena na tumakbo sa bagong code bago ang migrate: hindi nawawala ang kadena.
+        $this->runJob(new SyncAllBotcakeCustomersJob('legacy-run', 1));
+        Http::assertNothingSent();
+        $again = $this->jobs()->sole();
+        $this->assertSame(['legacy-run', 1], [$again->runId, $again->index]);
+        $this->assertNotNull($again->delay);
+        $this->assertNotNull(Cache::get(BotcakeSyncAll::LEGACY_STATE), 'hindi pa naaampon');
+
+        // Ang row Sync now ay gumagana pa rin (walang ad_filled na isinusulat).
+        (new SyncBotcakeCustomersJob('Page Uno'))->handle(app(BotcakeCustomerSync::class));
+        $this->assertSame('done', BotcakePsidImportRun::where('source', 'api')->where('page_name', 'Page Uno')->value('status'));
+    }
+
+    public function test_a_press_waits_for_an_adoption_in_progress_and_never_starts_a_second_run(): void
+    {
+        Queue::fake();
+        $this->legacy(1, 'Page Tres');
+        $all = app(BotcakeSyncAll::class);
+        $all->adoptWait = 1;
+        $this->app->instance(BotcakeSyncAll::class, $all);
+
+        $poll = Cache::lock(BotcakeSyncAll::LEGACY_STATE . ':adopt', 10);
+        $this->assertTrue($poll->get(), 'ang poll ay umaampon ngayon');
+        $this->press()->assertOk()->assertJsonPath('status', 'running');
+        $poll->release();
+
+        $this->assertSame(0, BotcakePsidImportRun::where('source', BotcakeSyncAll::SOURCE)->count(), 'walang bagong run sa tabi');
+        Queue::assertNothingPushed();
+        $this->press()->assertOk()->assertJsonPath('status', 'running');
+        $this->assertSame(['legacy-run'], BotcakePsidImportRun::where('source', BotcakeSyncAll::SOURCE)->pluck('run_key')->all());
+    }
+
+    public function test_an_adopted_old_run_with_no_cache_key_and_no_job_is_closed(): void
+    {
+        config(['queue.default' => 'database']);
+        Artisan::call('migrate', ['--path' => 'database/migrations/0001_01_01_000002_create_jobs_table.php', '--force' => true]);
+        $job = fn (string $key) => DB::table('jobs')->insertGetId(['queue' => 'default', 'attempts' => 0, 'available_at' => now()->timestamp, 'created_at' => now()->timestamp,
+            'payload' => json_encode(['displayName' => SyncAllBotcakeCustomersJob::class, 'data' => ['command' => serialize(new SyncAllBotcakeCustomersJob($key, 2))]])]);
+
+        // Nasa huling page ang lumang run; nabura ang cache (optimize:clear sa deploy).
+        $this->legacy(2, 'Page Uno');
+        $this->assertSame('running', $this->panel()['status']);
+        Cache::forget(BotcakeSyncAll::LEGACY_STATE);
+
+        $queued = $job('legacy-run');
+        $this->assertSame('running', $this->panel()['status'], 'may job pa ng lumang kadena: hindi isinasara');
+
+        DB::table('jobs')->where('id', $queued)->delete();
+        $p = $this->panel();
+        $this->assertSame(['done', null, 3], [$p['status'], $p['current'], $p['done']], 'tapos na ang huling page, walang job: isinara');
+        $this->assertNotNull($p['finished_at']);
+
+        // Naputol sa gitna (walang job, walang cache): itinigil, hindi "tapos".
+        $this->legacy(1, 'Page Tres', 'legacy-mid');
+        $this->assertSame('running', $this->panel()['status']);
+        Cache::forget(BotcakeSyncAll::LEGACY_STATE);
+        $this->assertSame(['stopped', 1], [$this->panel()['status'], $this->panel()['done']]);
+        $this->press()->assertOk()->assertJsonPath('status', 'started');
     }
 }

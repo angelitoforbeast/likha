@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Botcake customer list → botcake_psids (source api, status available; isang row kada page + psid), saka matching.
@@ -37,6 +38,8 @@ class BotcakeCustomerSync
     public const WINDOW_SECONDS = 22 * 60;
     public const RESUME_OVERLAP = 5;       // batch na inuulit kapag itinutuloy ang window read
     private const DECIDING_STOPS = ['cap', 'time', 'age', 'end']; // ang mga run na nagpapasya sa plan(), kasama ang window read
+
+    private ?bool $hasAdFilled = null;
 
     public function __construct(
         private PageSettings $settings,
@@ -243,10 +246,12 @@ class BotcakeCustomerSync
             'matched_by_phone' => $m['by_phone'],
             'ambiguous'        => $m['ambiguous'],
             'no_match'         => $m['no_match'],
-            'ad_filled'        => $m['ad_filled'],
             'last_message'     => sprintf('%s: %s, %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala, %d ad id',
                 $page, self::kindLabel($kind, $start), $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match'], $m['ad_filled']),
-        ])->save();
+        ]);
+        // ad_filled: bago ang migrate ng spec 045 ay wala pa ang column; ang sync ay hindi dapat pumalya dahil dito.
+        if ($this->hasAdFilled ??= Schema::hasColumn('botcake_psid_import_runs', 'ad_filled')) $run->ad_filled = $m['ad_filled'];
+        $run->save();
 
         Log::info('BotcakeCustomerSync: ' . $run->last_message, ['run_id' => $run->id, 'error' => $error]);
 

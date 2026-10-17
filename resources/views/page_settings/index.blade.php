@@ -617,6 +617,7 @@
             if (!res.ok) { notice(data.message || 'Hindi nasimulan ang Sync lahat.', 'text-red-600'); btn.disabled = false; return; }
             showSyncAll(data.sync_all);
             if (data.status === 'running') notice('May tumatakbo o naka-pause nang Sync lahat; walang bagong sinimulan (gamitin ang Resume o Stop).', 'text-amber-700');
+            if (data.status === 'not_ready') { notice('Hindi pa handa ang Sync lahat (inaayos pa ang database pagkatapos ng update). Subukan ulit mamaya.', 'text-amber-700'); btn.disabled = false; }
         } catch (err) {
             notice('Walang koneksyon: hindi nasimulan ang Sync lahat.', 'text-red-600');
             btn.disabled = false;
