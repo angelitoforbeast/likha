@@ -28,6 +28,7 @@ class PageSettingsGrid
         'botcake.flow.in_transit'  => 'In transit flow ID',
         'botcake.flow.broadcast'   => 'Broadcast flow ID',
         'botcake.field.message'    => 'Message field ID',
+        'botcake.test_psid'        => 'Test PSID',
         'botcake.token_status'     => 'Token status',
     ];
 

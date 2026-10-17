@@ -6,6 +6,7 @@ use App\Jobs\SendChatblastMessage;
 use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -99,7 +100,7 @@ class ChatblastSender
 
         // Kunin ang row: isang job lang ang nagpapadala nito, kahit naulit ang job.
         $claimed = BotcakeMessage::whereKey($id)->where('status', 'queued')
-            ->update(['status' => 'sending', 'attempts' => \Illuminate\Support\Facades\DB::raw('attempts + 1')]);
+            ->update(['status' => 'sending', 'attempts' => DB::raw('attempts + 1')]);
         if (!$claimed) return;
 
         $m = BotcakeMessage::findOrFail($id);
