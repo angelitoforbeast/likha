@@ -59,6 +59,21 @@ TXT;
             'CARDNO4111 1111 1111 5003'         => 'CARDNO···· 5003',
             'RCBC4111111111115003.pdf'          => 'RCBC···· 5003.pdf',
             'ref 123456789012'                  => 'ref 123456789012',
+            'diners 3056 930902 5904 x'         => 'diners ···· 5904 x',
+            "diners 3056\u{00A0}930902\u{00A0}5904" => 'diners ···· 5904',
+            'x 41111111 11115003 y'             => 'x ···· 5003 y',
+            'x 4111/1111/1111/5003 y'           => 'x ···· 5003 y',
+            'x 4111*1111*1111*5003 y'           => 'x ···· 5003 y',
+            'x 4111 - 1111 - 1111 - 5003 y'     => 'x ···· 5003 y',
+            'statement 4111-1111-1111-5003 2026-09-30.pdf' => 'statement ···· 5003 2026-09-30.pdf',
+            'FACEBK 2026-09-10 2026-09-11 X'    => 'FACEBK 2026-09-10 2026-09-11 X',
+            '09/09/26 09/10/26 FACEBK *AB12'    => '09/09/26 09/10/26 FACEBK *AB12',
+            'FACEBK *1234567890 100.00'         => 'FACEBK *1234567890 100.00',
+            'Account No. 12345678 x'            => 'Account No. ···· 5678 x',
+            'CARD NUMBER: 0012 3456 789'        => 'CARD NUMBER: ···· 6789',
+            'acct#98765432'                     => 'acct#···· 5432',
+            '12345678 card member'              => '···· 5678 card member',
+            'card member since 2015'            => 'card member since 2015',
         ] as $in => $want) {
             $this->assertSame($want, CardNumberMask::mask($in), $in);
         }
