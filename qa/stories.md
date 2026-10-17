@@ -927,3 +927,26 @@ non-CEO render pass without being edited.
 | S-043.14 | Given a campaign with orders but no spend in the list, then its row says "walang spend sa range — orders lang, kaya walang ad set sa ilalim" | `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
 | S-043.15 | Given campaign, ad set, ad, "Walang ad id" and Total rows, then each shows one RTS / DEL / INT cell like the page row's: RTS = for return + returned, DEL = delivered, INT = in transit, each % = count / (RTS + DEL + INT), the three % add to 100; a row with no shipped orders shows "—"; /item shows no such cell | `AdDeliveryStatusTest::test_S_043_15…`, `AdDeliveryColumnsTest::test_S_043_9…` | Passed · 2026-10-17 · auto |
 | S-043.16 | Given column settings saved before the combined cell, or nothing saved, then "RTS / DEL / INT (orders)" shows by default for every role where the five were, and the five are hidden; once saved with the combined cell, the saved lists decide | `AdDeliveryColumnsTest::test_S_043_16…` (4) | Passed · 2026-10-17 · auto |
+
+## Slice 049 – Card counter-check of Meta ad payments against the card statement
+
+### S-049 The owner sees which Meta ad payments the card statement tallies with (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-049.1 | Given RCBC statement text with FACEBK lines, a credit ending in "-", PREVIOUS STATEMENT BALANCE and CASH PAYMENT lines, when parsed, then each FACEBK line has sale date, post date (MM/DD/YY), description and amount; the credit has is_credit; the balance and payment lines are listed as not ads; header lines are dropped | `CardStatementParseTest::test_S_049_1…` | — |
+| S-049.2 | Given a line with a 16-digit card number (plain, spaced or dashed) or a file name with one, then what is saved and shown has only `···· ` + the last 4 | `CardStatementParseTest::test_S_049_2…` | — |
+| S-049.3 | Given another bank's text (no RCBC), then the generic layout keeps only lines with a date, a FACEBK description and an amount; a PDF upload is read to text before the layout | `CardStatementParseTest::test_S_049_3…` | — |
+| S-049.4 | Given a screenshot and an OpenAI answer with strict JSON lines, then the lines are saved as read (masked, ads by FACEBK), with no real HTTP call | `CardStatementVisionTest::test_S_049_4…` | — |
+| S-049.5 | Given an answer that is not JSON, has no lines list, a bad date or a non-number amount, or an HTTP error, then the read is rejected with a message and nothing is saved | `CardStatementVisionTest::test_S_049_5…` | — |
+| S-049.6 | Given Meta records of two cards, then the card whose amounts match most statement lines is suggested | `CardMatcherTest::test_S_049_6…` | — |
+| S-049.7 | Given a line and a Meta record of the same card and amount on the sale date, then they match (sale date); a record on the post date matches as post date | `CardMatcherTest::test_S_049_7…` | — |
+| S-049.8 | Given a record 1 or 2 days from the sale date, then it matches as near with the day count; 3 days does not | `CardMatcherTest::test_S_049_8…` | — |
+| S-049.9 | Given two lines of one amount on different days and two records, then each record is used once and the closest date wins; an exact same-day match is never taken by a near one | `CardMatcherTest::test_S_049_9…` | — |
+| S-049.10 | Given 100.00 charges repeated on a day, then they are one group per day with statement count vs Meta count and totals: tallied when equal, not tallied when unequal | `CardMatcherTest::test_S_049_10…` | — |
+| S-049.11 | Given matched and unmatched lines, then the per-day table shows card total, Meta total and difference per date | `CardMatcherTest::test_S_049_11…` | — |
+| S-049.12 | Given Meta records of the card before the first or after the last sale date, then they are not "Nasa Meta pero wala sa card"; records inside the range are | `CardMatcherTest::test_S_049_12…` | — |
+| S-049.13 | Given a Marketing user with the page checked in nav settings, or any non-CEO role, then every reconcile route is 404; the CEO gets 200 | `CardReconcilePageTest::test_S_049_13…` | — |
+| S-049.14 | Given an uploaded statement, then no file is written to any disk and only the parsed lines are stored | `CardReconcilePageTest::test_S_049_14…` | — |
+| S-049.15 | Given a preview, when the CEO edits a line's amount or date and presses Itugma, then the edit is saved and the match uses it; a card label not in Meta records is rejected; a line id of another statement is ignored | `CardReconcilePageTest::test_S_049_15…` | — |
+| S-049.16 | Given a matched statement, then the list shows card, period, lines, matched % and difference; the view shows the chips, per-day table, line statuses with the Meta transaction id and ad account, and the status filter; the suriin box lists Meta records dated after today | `CardReconcilePageTest::test_S_049_16…` | — |
