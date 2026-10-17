@@ -55,7 +55,9 @@ class ChatblastFlowInfo
         $call = function (string $path) use ($client, $token): array {
             $r = $client->call('GET', $path, [], $token);
             $ok = $r['http'] >= 200 && $r['http'] < 300 && is_array($r['body']) && ($r['body']['success'] ?? true) !== false;
-            return $ok ? [$r['body'], null] : [null, 'Botcake: HTTP ' . ($r['http'] ?: 'walang sagot')];
+            if ($ok) return [$r['body'], null];
+            $refused = $r['http'] >= 200 && $r['http'] < 300;
+            return [null, $refused ? 'Botcake: tinanggihan (success:false)' : 'Botcake: HTTP ' . ($r['http'] ?: 'walang sagot')];
         };
 
         [$flows, $flowError] = $call($base . '/flows');
@@ -73,6 +75,8 @@ class ChatblastFlowInfo
         if ($flowName === null || stripos($flowName, 'CHATBLAST') === false) $check[] = 'Ang flow ay walang "CHATBLAST" sa pangalan (o hindi nakita): baka maling flow.';
         if ($template === null) $check[] = 'Hindi matukoy ang template ng flow: itakda ang botcake template.shipping sa /page-settings, o tingnan sa Botcake; ang {{1}} ay hindi matiyak.';
         elseif (!str_contains($template['body'], '{{1}}')) $check[] = 'Ang template ay walang {{1}}: hindi lalabas ang mensahe.';
+        if ($template !== null && strtoupper($template['status']) !== 'APPROVED') $check[] = 'Hindi APPROVED ang template (' . ($template['status'] ?: 'walang status') . ').';
+        if ($fieldName === null) $check[] = 'Hindi nakita ang field.message sa Botcake: hindi lalabas ang mensahe.';
 
         $sample = $this->sampleMessage($page);
 
@@ -147,10 +151,12 @@ class ChatblastFlowInfo
         return count($hits) === 1 ? $hits[0] + ['source' => 'pangalan'] : null;
     }
 
-    /** Ang Day 1 · A ng unang naka-on na campaign, gamit ang halimbawang order (at ang page na ito). */
+    /** Ang Day 1 · A ng unang naka-on na campaign na nagpapadala sa page na ito, gamit ang halimbawang order. */
     private function sampleMessage(string $page): array
     {
-        $c = ChatblastCampaign::where('active', true)->orderBy('id')->first(['id', 'name', 'days']);
+        $key = $this->settings->pageKey($page);
+        $c = ChatblastCampaign::where('active', true)->orderBy('id')->get(['id', 'name', 'days', 'pages'])
+            ->first(fn ($c) => !$c->pages || in_array($key, array_map(fn ($p) => $this->settings->pageKey((string) $p), $c->pages), true));
         $text = $c && $this->chatblast->invalid($c->days) === null ? $this->chatblast->render($c->days[0][0], self::SAMPLE + ['page' => $page]) : 'Hello po, ito ang mensahe.';
 
         return ['campaign' => $c?->name, 'text' => $text];

@@ -66,12 +66,24 @@ class ChatblastFlowInfoTest extends ChatblastTestCase
         app(PageSettings::class)->set('Page Uno', 'botcake', 'flow.shipping', '5500');
         app(PageSettings::class)->set('Page Uno', 'botcake', 'template.shipping', 'promo_sale');
         $this->templates['data'][1]['components'][0]['text'] = 'Sale ngayon!';
+        $this->templates['data'][1]['status'] = 'PAUSED';
 
         $res = $this->info()->assertOk();
         $this->assertSame(['Ibang flow', 'promo_sale', 'setting'], [$res->json('flow.name'), $res->json('template.name'), $res->json('template.source')]);
-        $this->assertCount(2, $res->json('check'));
+        $this->assertCount(3, $res->json('check'));
         $this->assertStringContainsString('CHATBLAST', $res->json('check.0'));
         $this->assertStringContainsString('{{1}}', $res->json('check.1'));
+        $this->assertStringContainsString('PAUSED', $res->json('check.2'));
+    }
+
+    public function test_a_missing_field_is_flagged_and_the_sample_comes_from_a_campaign_that_sends_to_the_page(): void
+    {
+        $this->fields = ['success' => true, 'data' => [['id' => 7700, 'name' => 'iba']]];
+        \App\Models\ChatblastCampaign::where('kind', 'in_transit')->update(['pages' => json_encode(['Ibang Page'])]);
+
+        $res = $this->info()->assertOk();
+        $this->assertSame(['Hindi nakita ang field.message sa Botcake: hindi lalabas ang mensahe.'], $res->json('check'));
+        $this->assertSame('Delivering', $res->json('sample.campaign'), 'ang In transit ay para sa ibang page');
     }
 
     public function test_a_botcake_error_is_shown_without_the_token_and_flagged(): void
