@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Support\BotcakeClock;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -21,9 +22,57 @@ class BotcakeClient
     private ?float $lastRequestAt = null;
     private int $retries = self::MAX_RETRIES;
     private int $timeout = 30;
+    private ?string $rateKey = null;
 
     public function __construct(private BotcakeClock $clock)
     {
+    }
+
+    /**
+     * Para sa mga job na tig-iisang mensahe (chatblast): ang 2 request kada segundo ay binabantayan sa cache para sa
+     * $rateKey (hal. hash ng token ng page), kaya hati ang lahat ng job ng parehong page; 15 s kada request.
+     */
+    public function shared(string $rateKey, int $timeout = 15): static
+    {
+        $client = clone $this;
+        $client->rateKey = $rateKey;
+        $client->timeout = $timeout;
+
+        return $client;
+    }
+
+    /**
+     * Isang GET o POST (JSON) na may parehong retry (429, 5xx, putol na koneksyon: 2, 4, 8 s) at rate. Hindi nagtatapon
+     * para sa HTTP na sagot: ibinabalik ang code (0 = walang koneksyon), ang body at ilang subok, para maitala ng tumawag.
+     * Ang 401/403 ay ibinabalik agad. Ang token ay nasa header lang.
+     * @return array{http:int, body:mixed, attempts:int}
+     */
+    public function call(string $method, string $path, array $data, string $token): array
+    {
+        for ($attempt = 0; ; $attempt++) {
+            $this->throttle();
+
+            try {
+                $req = Http::withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout);
+                $res = $method === 'GET' ? $req->get(self::BASE . $path, $data) : $req->post(self::BASE . $path, $data);
+                $status = $res->status();
+            } catch (ConnectionException $e) {
+                $res = null;
+                $status = 0;
+            }
+
+            $retryable = $status === 0 || $status === 429 || $status >= 500;
+            if (!$retryable || $attempt >= $this->retries) {
+                return ['http' => $status, 'body' => $res ? ($res->json() ?? $res->body()) : null, 'attempts' => $attempt + 1];
+            }
+
+            $wait = 2 ** ($attempt + 1); // 2, 4, 8
+            $after = $res?->header('Retry-After');
+            if (is_numeric($after) && (float) $after > $wait) {
+                $wait = min((float) $after, 60);
+            }
+            $this->clock->sleep((float) $wait);
+        }
     }
 
     /**
@@ -113,6 +162,17 @@ class BotcakeClient
 
     private function throttle(): void
     {
+        if ($this->rateKey !== null) {
+            $key  = 'botcake-rate:' . $this->rateKey;
+            $last = Cache::get($key);
+            if (is_numeric($last)) {
+                $wait = (float) $last + self::MIN_INTERVAL - $this->clock->now();
+                if ($wait > 0) $this->clock->sleep($wait);
+            }
+            Cache::put($key, $this->clock->now(), 60);
+            return;
+        }
+
         if ($this->lastRequestAt !== null) {
             $wait = $this->lastRequestAt + self::MIN_INTERVAL - $this->clock->now();
             if ($wait > 0) $this->clock->sleep($wait);
