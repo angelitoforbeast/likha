@@ -189,3 +189,51 @@ Not done. The app needs the server database (`.env`, not read), and this session
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories. The cases above come from its Tests list.
+
+## Amendment 1
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. Before `migrate` has run, a missing column means "not yet": no 500 on /page-settings or the poll, and a job in that window keeps the chain.
+2. `start()` waits briefly for an adoption in progress, so a press cannot start a second run next to the adopted one.
+3. An adopted old run that is still running is closed when the old cache key is gone and no job owns a page.
+
+Commit: `fix: before the migration the page, the poll and a press answer without error and a Sync lahat job waits instead of losing the chain, a press waits for an adoption in progress, and an adopted old run with no cache key and no job is closed (spec 045 amendment 1)`
+
+### What changed
+
+- **Before the migration.** The deploy is push, then migrate. `optimize:clear` and a php-fpm restart run between them, but the queue worker does not restart.
+  - **The poll and the grid:** `BotcakeSyncAll::panel()` turns a `QueryException` into "no panel" (null). Adoption catches it too and leaves the cache key for later. /page-settings and the poll answer 200, and the other grid reads did not need the new columns.
+  - **The Sync lahat press:** `start()` checks `ready()` (does `run_key` exist?) and answers `{status: not_ready}` without creating anything. The page then says "Hindi pa handa … Subukan ulit mamaya".
+  - **A Sync lahat job:** it checks `ready()` first. If the columns are missing, it queues itself again for the same page 60 s later. The chain is never lost, and the old cache state is not consumed. `failed()` does nothing before the migration.
+  - **`syncPage()`:** it writes `ad_filled` only when the column exists, so a row's Sync now running on a restarted worker before the migration still records its run.
+- **Press during an adoption.** `start()` now takes the adopt lock with a blocking wait (`block(10)`, `adoptWait`). If the wait times out, it answers `running` and starts nothing. Once the lock is free, the next press finds the adopted run.
+- **Orphaned adopted run.** This runs on every poll, and on a press. It applies when the newest Sync lahat row is an adopted old run that is still running, the old cache key is gone, and the `jobs` table has no queued or reserved job carrying its `run_key`. It is checked only on the database queue; on other drivers nothing changes.
+  - **On its last page:** closed as `done`, with `page_index` = total and `finished_at` set.
+  - **Earlier:** closed as `stopped` with the error "Naputol ang lumang run: walang job at walang state sa cache". This goes beyond the amendment: calling a run cut in the middle `done` would misreport it.
+  - **Paused:** its page is released, so Resume can queue it.
+  - A job of the old chain that is running or queued is still in `jobs`, so a live run is never closed.
+
+### Tests (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| New columns dropped, an old run in the cache: /page-settings 200; poll 200 with no panel; press answers `not_ready` and queues nothing; the old chain's job queues itself again for the same page with a delay, calls nothing, and leaves the cache key; a row Sync now still records its run | `SyncAllTest::test_before_the_migration_the_page_the_poll_the_press_and_the_jobs_do_not_fail` | pass |
+| A press while a poll holds the adopt lock answers `running` and creates no run; after the lock frees, a press adopts and still starts nothing new (one row, the old key) | `SyncAllTest::test_a_press_waits_for_an_adoption_in_progress_and_never_starts_a_second_run` | pass |
+| Adopted run on its last page, cache key gone: stays running while a job with its key is in `jobs`; closed as done (3 / 3, no current page, finished) once the job is gone; a run cut in the middle is closed as stopped; a press then starts a new run | `SyncAllTest::test_an_adopted_old_run_with_no_cache_key_and_no_job_is_closed` | pass |
+
+Red runs:
+- "Expected response status code [200] but received 500" (no columns).
+- "two strings are identical" (the press started a second run).
+- "tapos na ang huling page, walang job: isinara … two arrays are identical" (the row stayed running).
+
+Full suite after amendment 1: `Tests: 1386, Assertions: 16884, Errors: 1, Failures: 1, PHPUnit Deprecations: 6, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`. `php -l`, `node --check` and `artisan view:cache` pass.
+
+### Deploy, updated
+
+The order is push, migrate, `queue:restart`, and it is now safe at every step.
+- **Between push and migrate:** the page and the poll work, and Sync lahat answers "not ready". The worker still runs the old code. If it restarts early, a Sync lahat job waits for the migration.
+- **`optimize:clear`:** it removes the old cache key, but an old job in the middle of a page writes it back when it finishes, and its next job is adopted. If no old job was running or queued, the adopted row is closed as described above.
+- **Not covered:** an old job that was only waiting on the lock (delayed by 30 s) when the cache was cleared still meets an empty state under the old code, and that chain stops. This is the old code's behaviour. The page's next sync continues its window read as planned (044).
+
+`TODO.md`: the broken-chain item is updated. A broken old chain is now closed as stopped once its cache key expires.
