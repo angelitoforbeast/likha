@@ -445,3 +445,9 @@ Accepted, not fixed:
 - **~~The endpoint accepts any date range for up to 500 pages.~~** Fixed in amendment 2: at most 92 days, and each result is cached for 10 minutes under the /owner/private cache version.
 - **After a date change, an expand that is already loaded keeps its old numbers** (existing expand behaviour). The label shows the range those numbers came from.
 - **A delivery-only campaign row (orders but no spend in the window) shows "Off" and no ad sets.** Amendment 2 adds the note "walang spend sa range — orders lang, kaya walang ad set sa ilalim". It still shows "Off": its ad sets are not in the window's list, and its numbers are needed for the sum.
+
+## 044: the first sync of a page reads its whole window (2026-10-18)
+
+- **The 22-minute budget is checked between batches, so a run can still pass 1800 s in theory**: the check lands just under 22 min, one batch then takes its worst case (about 5 min: 4 tries × 30 s plus backoff and Retry-After), and matching follows. Reason: that needs every try of one batch to time out at the end of a long run. If the worker kills it, the next sync resumes from the saved batch, though the page lock stays held up to 2 h (see 042).
+- **The per-row Sync now job keeps `$timeout = 3600`, above `retry_after` (1900 s)** (from 040). Reason: a window read now stops itself at about 22 min, far below both.
+- **Missing tests (minor):** a `--full` that errored, followed by a sync on a page that never completed a window read; and the grid's "Huling sync" text for old runs with no kind (the script drops empty parts with `filter(Boolean)`). Reason: both follow from rules that are already tested.
