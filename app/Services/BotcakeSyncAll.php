@@ -102,11 +102,20 @@ class BotcakeSyncAll
         return BotcakePsidImportRun::where('source', self::SOURCE)->where('run_key', $runKey)->first();
     }
 
-    /** Ang page ng job ay hindi na nito (hal. naka-pause o stopped nang dumating ang job): bitawan. */
-    public function release(BotcakePsidImportRun $run, int $index): void
+    /**
+     * Ang job ay dumating habang naka-pause o stopped ang run: bitawan ang page, para ang Resume ang magpadala ulit.
+     * False = nabitawan. True = na-Resume na bago pa nabitawan (nakita ng Resume na may hawak pa, kaya wala itong
+     * ipinadala): ang job pa rin ang may hawak at itutuloy nito ang page, kaya walang naiipit na run.
+     */
+    public function release(BotcakePsidImportRun $run, int $index): bool
     {
-        BotcakePsidImportRun::whereKey($run->id)->where('page_index', $index)->update(['current_page' => null]);
+        $released = BotcakePsidImportRun::whereKey($run->id)->where('page_index', $index)->where('status', '<>', 'running')
+            ->update(['current_page' => null]);
         $this->setWaiting($run, false);
+        if ($released) return false;
+
+        $now = $run->fresh();
+        return $now->status === 'running' && (int) $now->page_index === $index && $now->current_page !== null;
     }
 
     public function setWaiting(BotcakePsidImportRun $run, bool $waiting): void
@@ -167,8 +176,26 @@ class BotcakeSyncAll
     private function adoptLegacy(bool $owner): void
     {
         $state = Cache::get(self::LEGACY_STATE);
-        if (!is_array($state) || ($state['finished_at'] ?? null) !== null || !isset($state['id'], $state['pages'])) return;
+        if (!is_array($state) || !isset($state['id'], $state['pages'])) return;
 
+        // Isang pag-ampon lang sabay (ang poll at ang job): walang dalawang row para sa iisang lumang run. Ang job ay
+        // naghihintay sa lock; ang poll ay lumalaktaw na lang.
+        $lock = Cache::lock(self::LEGACY_STATE . ':adopt', 10);
+        try {
+            if (!($owner ? $lock->block(10) : $lock->get())) return;
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            return;
+        }
+
+        try {
+            $this->adoptLegacyState($state, $owner);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function adoptLegacyState(array $state, bool $owner): void
+    {
         $pages = array_values((array) $state['pages']);
         $done  = (int) ($state['done'] ?? 0);
         $sync  = [
@@ -177,6 +204,20 @@ class BotcakeSyncAll
         ];
 
         $run = BotcakePsidImportRun::where('source', self::SOURCE)->where('run_key', (string) $state['id'])->first();
+
+        // Natapos ng lumang code ang run (hal. ang huling page ay tumatakbo pa nang inampon): isara rin ang row, kung hindi
+        // ay "tumatakbo" ito habambuhay. Ang tapos nang lumang run na hindi pa naampon ay hindi na idinadagdag.
+        if (($state['finished_at'] ?? null) !== null) {
+            if ($run && in_array($run->status, ['running', 'paused'], true)) {
+                BotcakePsidImportRun::whereKey($run->id)->update([
+                    'status' => 'done', 'page_index' => count($pages), 'current_page' => null, 'sync_state' => json_encode($sync),
+                    'finished_at' => Carbon::parse($state['finished_at']),
+                ]);
+            }
+            if ($owner) Cache::forget(self::LEGACY_STATE);
+            return;
+        }
+
         if (!$run) {
             $run = BotcakePsidImportRun::create([
                 'source' => self::SOURCE, 'status' => 'running', 'run_key' => (string) $state['id'], 'page_index' => $done,

@@ -41,9 +41,11 @@ class SyncAllBotcakeCustomersJob implements ShouldQueue
         }
         if ((int) $run->page_index !== $this->index) return; // luma o naulit na job: tapos na ang page na ito
 
+        // Naka-pause o stopped: binibitawan ang page (ang Resume ang magpapadala ulit), maliban kung na-Resume na habang
+        // binibitawan: kung gayon, ang job na ito ang tumutuloy.
         if ($run->status !== 'running') {
-            $all->release($run, $this->index); // naka-pause o stopped: walang ginagawa; ang Resume ang magpapadala ulit
-            return;
+            if (!$all->release($run, $this->index)) return;
+            $run = $run->fresh();
         }
 
         $page = $run->sync_state['pages'][$this->index] ?? null;

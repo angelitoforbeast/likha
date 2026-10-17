@@ -289,5 +289,59 @@ class SyncAllTest extends BotcakeApiTestCase
         foreach (['', '/pause', '/resume', '/stop'] as $path) $this->postJson('/page-settings/sync-all' . $path)->assertNotFound();
         $this->assertSame('running', BotcakePsidImportRun::where('source', BotcakeSyncAll::SOURCE)->value('status'));
         Queue::assertPushed(SyncAllBotcakeCustomersJob::class, 1);
+
+        $this->actingAs($this->user('Marketing - OIC', 'oic2@example.test'));
+        $this->postJson('/page-settings/sync-all/stop')->assertOk()->assertJsonPath('sync_all.status', 'stopped');
+    }
+
+    public function test_an_adopted_old_run_that_the_old_code_finishes_is_closed(): void
+    {
+        Queue::fake();
+        $this->legacy(2, 'Page Uno');
+        $this->assertSame(['running', 'Page Uno'], [$this->panel()['status'], $this->panel()['current']]);
+
+        // Natapos ng lumang code ang huling page: finished_at sa cache, at walang susunod na job.
+        Cache::put(BotcakeSyncAll::LEGACY_STATE, ['id' => 'legacy-run', 'pages' => ['Page Dos', 'Page Tres', 'Page Uno'], 'done' => 3, 'ok' => 3,
+            'failed' => 0, 'current' => 'Page Uno', 'waiting' => false, 'started_at' => now()->subHour()->toIso8601String(), 'finished_at' => now()->toIso8601String()], 3600);
+
+        $p = $this->panel();
+        $this->assertSame(['done', 3, 3, null], [$p['status'], $p['done'], $p['ok'], $p['current']]);
+        $this->press()->assertOk()->assertJsonPath('status', 'started');
+    }
+
+    public function test_a_job_that_arrives_while_paused_lets_resume_queue_the_page_again(): void
+    {
+        Queue::fake();
+        Http::fake(['botcake.io/*' => Http::response([])]);
+        $this->press()->assertOk();
+        $this->postJson('/page-settings/sync-all/pause')->assertOk();
+
+        $this->runJob($this->jobs()->sole());
+        Http::assertNothingSent();
+        $this->assertNull($this->panel()['current'], 'binitawan ng job ang page');
+
+        $this->postJson('/page-settings/sync-all/resume')->assertOk();
+        $this->assertCount(2, $this->jobs());
+        $this->assertSame(0, $this->jobs()->last()->index, 'ang parehong page, hindi pa ito natatapos');
+    }
+
+    public function test_stop_while_a_page_waits_on_the_lock_ends_the_run_without_syncing_it(): void
+    {
+        Queue::fake();
+        Http::fake(['botcake.io/*' => Http::response([])]);
+        $this->press()->assertOk();
+        $held = Cache::lock(BotcakeCustomerSync::LOCK, 60);
+        $held->get();
+        $this->runJob($this->jobs()->sole());
+        $this->assertTrue($this->panel()['waiting']);
+
+        $this->postJson('/page-settings/sync-all/stop')->assertOk();
+        $held->release();
+        $this->runJob($this->jobs()->last());
+
+        Http::assertNothingSent();
+        $p = $this->panel();
+        $this->assertSame(['stopped', null, false, 0], [$p['status'], $p['current'], $p['waiting'], $p['done']]);
+        $this->assertCount(2, $this->jobs());
     }
 }
