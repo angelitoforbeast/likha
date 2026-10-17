@@ -470,3 +470,31 @@ Full suite after amendment 2: `Tests: 1443, Assertions: 17200, Errors: 1, Failur
 - **Check the server's `CACHE_STORE`:** it must support locks (`database` with the `cache_locks` table, or redis). `file` works only with one server.
 - **Optional:** set `BOTCAKE_CHATBLAST_CUSTOMER_GAP` (default 20).
 - **One worker is enough:** a worker that meets a busy customer requeues and moves on to the next message, so numprocs 1 stays right.
+
+## Amendment 3
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. Remove amendment 2's rule "never two messages of the same kind to the same page+PSID in one Manila day", with its `skipped` reason and its test. The rule is per waybill: one message per waybill per kind per Manila day. A customer with two waybills gets one message for each, even of the same kind on the same day. The per page+PSID lock and the gap after send_flow stay, so the messages go one at a time and each carries its own text.
+
+Commits:
+- `fix: chatblast limits one message per waybill per kind a day, not per customer: two waybills of one customer both get their own message the same day, one after the other through the customer lock and gap (spec 046 amendment 3)`
+- `docs: result for spec 046 amendment 3`
+
+### What changed
+
+- **Removed from `Chatblast::blockedToday()`:** the per-customer check and its reason "may mensahe na ngayong araw sa customer na ito". The per-waybill check (amendment 1) is unchanged, as is its 10-minute limit on `sending` rows.
+- **Removed from the create migration:** the index `(page_name, psid, kind)`, which only served that check. The migration is still unreleased.
+- **Kept in `ChatblastSender`:** the per page+PSID lock (300 s) and the `:gap` (`BOTCAKE_CHATBLAST_CUSTOMER_GAP`, default 20 s). A second message to the same customer goes back to the queue and is sent after the gap, never skipped.
+- **Removed from `TODO.md`:** the amendment 2 entry about two same-customer rows both being skipped, which no longer applies.
+
+### Tests (amendment 3)
+
+| Case | Test | Result |
+|---|---|---|
+| Two waybills of one customer, same kind, same day: the first is sent, the second waits for the gap (back to queued) and is then sent. The field writes go in that order, each with its own text, in 6 requests | `ChatblastSafetyTest::test_two_waybills_of_one_customer_both_get_their_own_message_the_same_day_one_after_the_other` (replaces `test_a_customer_gets_one_message_of_a_kind_per_day_even_with_two_orders`) | pass |
+| A row of the same waybill left in `sending` for 2 hours does not block its next day | `…::test_a_row_of_the_waybill_stuck_in_sending_for_long_does_not_block_its_next_day` (was the per-customer version) | pass |
+
+- **Red run:** the new test failed first on "two arrays are identical": the second waybill was skipped.
+- **Full suite after amendment 3:** `Tests: 1443, Assertions: 17202, Errors: 1, Failures: 1, PHPUnit Deprecations: 9, Skipped: 3`. The only reds are the known `ExampleTest` and, in this fresh worktree, `ImportStartTest`.
+- **No separate review:** the change only removes a check, and the lock and gap it relies on were reviewed in amendment 2.
