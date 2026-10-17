@@ -45,6 +45,9 @@ TXT;
             'acct 4111 1111 1111 5003 100.00'   => 'acct ···· 5003 100.00',
             'statement_4111111111115003.pdf'    => 'statement_···· 5003.pdf',
             'FACEBK *34SCA52HS4 6,278.17'       => 'FACEBK *34SCA52HS4 6,278.17',
+            'FACEBK *AB12 4111 1111 1111 5003'  => 'FACEBK *AB12 ···· 5003',
+            '4111 1111 1111 5003 12 DUBLIN'     => '···· 5003 12 DUBLIN',
+            'amex 3782-822463-10005 x'          => 'amex ···· 0005 x',
             'ref 123456789012'                  => 'ref 123456789012',
         ] as $in => $want) {
             $this->assertSame($want, CardNumberMask::mask($in), $in);
