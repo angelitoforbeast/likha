@@ -83,6 +83,8 @@ return [
         'sync_max_age_days' => (int) env('BOTCAKE_SYNC_MAX_AGE_DAYS', 45),
         // /page-settings: rows = mga page na may order sa huling ilang araw (ts_date), saka ang mga may settings.
         'grid_order_days' => (int) env('BOTCAKE_GRID_ORDER_DAYS', 30),
+        // Sync lahat: nilalaktawan ang page na incremental lang ang kailangan at may matagumpay na sync sa huling ilang oras.
+        'sync_all_fresh_hours' => (float) env('BOTCAKE_SYNC_ALL_FRESH_HOURS', 6),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

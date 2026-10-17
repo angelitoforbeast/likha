@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Botcake customer list → botcake_psids (source api, status available; isang row kada page + psid), saka matching.
@@ -36,6 +37,9 @@ class BotcakeCustomerSync
     // (4 na subok × 30 s + backoff at Retry-After), saka ang matching: kasya pa rin sa 1800 s na --timeout ng worker.
     public const WINDOW_SECONDS = 22 * 60;
     public const RESUME_OVERLAP = 5;       // batch na inuulit kapag itinutuloy ang window read
+    private const DECIDING_STOPS = ['cap', 'time', 'age', 'end']; // ang mga run na nagpapasya sa plan(), kasama ang window read
+
+    private ?bool $hasAdFilled = null;
 
     public function __construct(
         private PageSettings $settings,
@@ -91,9 +95,51 @@ class BotcakeCustomerSync
         // rate limit). Ang ibang run sa pagitan (known_batch, failed na --full, error ng incremental) ay hindi binibilang,
         // para hindi maging incremental habambuhay ang page na may customer pa sa window na hindi nababasa.
         [$last, $before] = array_pad($this->runsOf($page)
-            ->where(fn ($w) => $w->whereIn('stop_reason', ['cap', 'time', 'age', 'end'])->orWhere('read_kind', 'window'))
+            ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhere('read_kind', 'window'))
             ->orderByDesc('id')->limit(2)->get()->all(), 2, null);
 
+        return $this->decide($last, $before);
+    }
+
+    /**
+     * Ang plano ng bawat page na may api run, sa isang query (ROW_NUMBER kada page: ang dalawang pinakabagong run na
+     * nagpapasya). Ang page na wala rito ay wala pang ganoong run: window read mula batch 1.
+     * @return array<string, array{0:string, 1:int}> pageKey => [incremental|window, unang batch]
+     */
+    public function plans(): array
+    {
+        $trim  = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $inner = DB::table('botcake_psid_import_runs')->where('source', 'api')->whereNotNull('page_name')
+            ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhere('read_kind', 'window'))
+            ->selectRaw("id, page_name, status, stop_reason, read_kind, start_batch, batches_read, ROW_NUMBER() OVER (PARTITION BY LOWER($trim(page_name)) ORDER BY id DESC) AS rn");
+        $byPage = DB::query()->fromSub($inner, 'r')->where('rn', '<=', 2)->orderByDesc('id')->get()
+            ->groupBy(fn ($r) => $this->settings->pageKey((string) $r->page_name));
+
+        return $byPage->map(fn ($runs) => $this->decide($runs->get(0), $runs->get(1)))->all();
+    }
+
+    /**
+     * Kailan natapos ang huling matagumpay (done) na api run ng bawat page, sa isang grouped query.
+     * @return array<string, Carbon> pageKey => oras
+     */
+    public function lastDoneAt(): array
+    {
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $out  = [];
+        BotcakePsidImportRun::where('source', 'api')->where('status', 'done')->whereNotNull('page_name')
+            ->selectRaw("LOWER($trim(page_name)) AS pk, MAX(updated_at) AS at")->groupByRaw("LOWER($trim(page_name))")->get()
+            ->each(function ($r) use (&$out) {
+                $pk = $this->settings->pageKey((string) $r->pk);
+                $at = Carbon::parse($r->at);
+                if (!isset($out[$pk]) || $at->gt($out[$pk])) $out[$pk] = $at;
+            });
+
+        return $out;
+    }
+
+    /** @return array{0:string, 1:int} mula sa nagpapasyang run at sa nauna rito (Eloquent o plain row) */
+    private function decide(?object $last, ?object $before): array
+    {
         if (!$last) return ['window', 1]; // hindi pa nakababasa ng buong window
         if (in_array($last->stop_reason, ['age', 'end'], true)) return ['incremental', 1];
         if ($last->read_kind !== 'window') return ['window', 1]; // cap ng incremental (o lumang run na walang kind)
@@ -202,7 +248,10 @@ class BotcakeCustomerSync
             'no_match'         => $m['no_match'],
             'last_message'     => sprintf('%s: %s, %d batch (%s), %d bago, %d na-update, %d inactive; match %d pangalan, %d phone, %d ambiguous, %d wala, %d ad id',
                 $page, self::kindLabel($kind, $start), $run->batches_read, $reason, $run->customers_new, $run->customers_updated, $inactive, $m['by_name'], $m['by_phone'], $m['ambiguous'], $m['no_match'], $m['ad_filled']),
-        ])->save();
+        ]);
+        // ad_filled: bago ang migrate ng spec 045 ay wala pa ang column; ang sync ay hindi dapat pumalya dahil dito.
+        if ($this->hasAdFilled ??= Schema::hasColumn('botcake_psid_import_runs', 'ad_filled')) $run->ad_filled = $m['ad_filled'];
+        $run->save();
 
         Log::info('BotcakeCustomerSync: ' . $run->last_message, ['run_id' => $run->id, 'error' => $error]);
 

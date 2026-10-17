@@ -61,8 +61,30 @@
         <button id="test-all" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">Test lahat ng token</button>
         <span id="test-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
         <button id="sync-all" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50">Sync lahat</button>
+        <button id="sync-all-pause" type="button" data-action="pause" class="sync-all-control hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">Pause</button>
+        <button id="sync-all-resume" type="button" data-action="resume" class="sync-all-control hidden bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">Resume</button>
+        <button id="sync-all-stop" type="button" data-action="stop" class="sync-all-control hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Stop</button>
         <span id="sync-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
     </div>
+
+    {{-- Ang kasalukuyan o huling Sync lahat run, at ang huling 10 run. Ina-update ng poll. --}}
+    <div id="sync-all-panel" class="hidden mb-3 px-4 py-2 rounded bg-blue-50 text-blue-950 text-xs">
+        <div id="sync-all-line" class="mb-1"></div>
+        <details>
+            <summary class="cursor-pointer text-blue-800">Huling 10 Sync lahat</summary>
+            <table class="mt-1 border-collapse">
+                <thead><tr class="text-left text-gray-600">
+                    <th class="pr-3">Sinimulan</th><th class="pr-3">Ni</th><th class="pr-3">Status</th><th class="pr-3">Page</th>
+                    <th class="pr-3">Failed</th><th class="pr-3">Laktaw</th><th class="pr-3">Bago</th><th class="pr-3">Na-match</th>
+                    <th class="pr-3">Ad id</th><th class="pr-3">Tagal</th>
+                </tr></thead>
+                <tbody id="sync-all-history"></tbody>
+            </table>
+        </details>
+    </div>
+
+    {{-- Ang plano ng Sync lahat, mula sa "Susunod na sync" ng bawat page. --}}
+    <p class="mb-3 text-xs text-gray-700">Plano ng Sync lahat: <span id="plan-summary">{{ $grid['plan_summary'] ?: 'wala' }}</span></p>
 
     {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
     <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
@@ -180,6 +202,7 @@
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: ORDERS_LABEL}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r', text: 'Customers'}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Huling sync'}),
+            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Susunod na sync'}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b', text: ''}),
         ]);
 
@@ -190,11 +213,12 @@
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'orders'}, String(r.info.orders || 0)),
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'customers'}, infoCustomers(r)),
             el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}, infoSync(r)),
+            el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'next'}, infoNext(r)),
             el('td', {class: 'px-3 py-1 border-b whitespace-nowrap', 'data-info': 'actions'}, actions(r)),
         ]));
 
         table.replaceChildren(el('thead', {}, head), el('tbody', {}, body.length ? body
-            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 5), text: 'Wala pang page. Gamitin ang + Page.'}))));
+            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 6), text: 'Wala pang page. Gamitin ang + Page.'}))));
     }
 
     function cellTd(row, col) {
@@ -236,8 +260,21 @@
     function infoSync(r) {
         const s = r.info.last_sync;
         if (!s) return 'wala pa';
-        // hal. "2026-10-18 09:00 · window, tuloy mula batch 20 · time"
-        return [s.at, s.kind, s.stop_reason || s.status].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
+        // hal. "2026-10-18 09:00 · window, tuloy mula batch 20 · time · +9,985 bago · 1,279 na-match"
+        const n = v => Number(v || 0).toLocaleString('en-US');
+        const counts = (s.new || s.matched) ? '+' + n(s.new) + ' bago · ' + n(s.matched) + ' na-match' : null;
+        return [s.at, s.kind, s.stop_reason || s.status, counts].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
+    }
+
+    function infoNext(r) { return r.info.next ? r.info.next.label : ''; }
+
+    // Kapareho ng BotcakeSyncAll::summary(): bilang kada uri ng susunod na sync.
+    const SUMMARY = {window: 'window', continue: 'tuloy', incremental: 'incremental', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
+    function refreshSummary() {
+        const count = {};
+        for (const r of rows.values()) if (r.info.next) count[r.info.next.kind] = (count[r.info.next.kind] || 0) + 1;
+        const text = Object.entries(SUMMARY).filter(([k]) => count[k]).map(([k, label]) => count[k] + ' ' + label).join(', ');
+        document.getElementById('plan-summary').textContent = text || 'wala';
     }
 
     function postForm(action, pageName, label, cls) {
@@ -274,6 +311,8 @@
         if (!tr || !r) return;
         tr.querySelector('[data-info="customers"]').textContent = infoCustomers(r);
         tr.querySelector('[data-info="sync"]').textContent = infoSync(r);
+        tr.querySelector('[data-info="next"]').textContent = infoNext(r);
+        refreshSummary();
     }
 
     // ---- editing ----
@@ -521,27 +560,64 @@
 
     // ---- Sync lahat: sa queue, isa-isang page; ang progreso ay mula sa poll ----
 
+    const fmt = v => Number(v || 0).toLocaleString('en-US');
+    const duration = s => s >= 3600 ? Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min' : Math.floor(s / 60) + ' min';
+    const STATUS = {running: 'tumatakbo', paused: 'naka-pause', stopped: 'itinigil', done: 'tapos'};
+
     function showSyncAll(p) {
-        const out = document.getElementById('sync-all-status'), btn = document.getElementById('sync-all');
-        const running = !!(p && !p.finished_at);
-        btn.disabled = running;
-        if (!p) { out.textContent = ''; return; }
-        out.textContent = running
-            ? 'Sync lahat: ' + p.done + ' / ' + p.total + (p.current ? ', ngayon: ' + p.current : '')
-                + (p.waiting ? ' (naghihintay matapos ang ibang sync)' : '')
-            : 'Sync lahat tapos (' + p.finished_at + '): ' + p.ok + ' ok, ' + p.failed + ' failed sa ' + p.total + ' page.';
+        const active = !!(p && (p.status === 'running' || p.status === 'paused'));
+        document.getElementById('sync-all').disabled = active;
+        document.getElementById('sync-all-pause').classList.toggle('hidden', !(p && p.status === 'running'));
+        document.getElementById('sync-all-resume').classList.toggle('hidden', !(p && p.status === 'paused'));
+        document.getElementById('sync-all-stop').classList.toggle('hidden', !active);
+        document.getElementById('sync-all-panel').classList.toggle('hidden', !p);
+        document.getElementById('sync-all-status').textContent = p && active ? 'Sync lahat: ' + p.done + ' / ' + p.total : '';
+        if (!p) return;
+
+        // hal. "Sync lahat · tumatakbo · 7 / 40 page · ngayon: Page X (window, 120 batch) · 1 failed · +9,985 bago · ..."
+        const current = p.current && active
+            ? 'ngayon: ' + p.current + (p.current_kind ? ' (' + p.current_kind + (p.current_batches != null ? ', ' + fmt(p.current_batches) + ' batch' : '') + ')' : '')
+                + (p.waiting ? ' (naghihintay matapos ang ibang sync)' : '') + (p.status === 'paused' ? ' (tatapusin muna)' : '')
+            : null;
+        document.getElementById('sync-all-line').textContent = ['Sync lahat', STATUS[p.status] || p.status, p.done + ' / ' + p.total + ' page',
+            current, p.failed ? p.failed + ' failed' : null, p.skipped ? p.skipped + ' laktaw (sariwa)' : null,
+            p.remaining && active ? p.remaining + ' natitira' : null,
+            '+' + fmt(p.totals.new) + ' bago', fmt(p.totals.updated) + ' na-update', fmt(p.totals.matched) + ' na-match', fmt(p.totals.ad_filled) + ' ad id',
+            duration(p.seconds), 'sinimulan' + (p.started_by ? ' ni ' + p.started_by : '') + ' ' + (p.started_at || ''),
+            p.finished_at ? 'natapos ' + p.finished_at : null].filter(Boolean).join(' · ');
+
+        put(document.getElementById('sync-all-history'), ...(p.history || []).map(h => el('tr', {}, [
+            h.started_at, h.started_by || '', STATUS[h.status] || h.status, h.done + ' / ' + h.total, String(h.failed), String(h.skipped),
+            fmt(h.totals.new), fmt(h.totals.matched), fmt(h.totals.ad_filled), duration(h.seconds),
+        ].map(v => el('td', {class: 'pr-3', text: v || ''})))));
+    }
+
+    for (const b of document.querySelectorAll('.sync-all-control')) {
+        b.addEventListener('click', async () => {
+            if (b.dataset.action === 'stop' && !confirm('Itigil ang Sync lahat? Tatapusin muna ang page na tumatakbo.')) return;
+            b.disabled = true;
+            try {
+                const res = await fetch(url.syncAllUrl + '/' + b.dataset.action, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) notice(data.message || 'Hindi nagawa.', 'text-red-600'); else showSyncAll(data.sync_all);
+            } catch (err) {
+                notice('Walang koneksyon.', 'text-red-600');
+            }
+            b.disabled = false;
+        });
     }
 
     document.getElementById('sync-all').addEventListener('click', async e => {
         const btn = e.currentTarget;
-        if (!confirm('I-sync ang lahat ng page na may Botcake ID at token (isa-isa, sa queue)?')) return;
+        if (!confirm('I-sync ang lahat ng page na may Botcake ID at token, isa-isa sa queue, ayon sa plano: ' + document.getElementById('plan-summary').textContent + '?')) return;
         btn.disabled = true;
         try {
             const res = await fetch(url.syncAllUrl, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
             const data = await res.json().catch(() => ({}));
             if (!res.ok) { notice(data.message || 'Hindi nasimulan ang Sync lahat.', 'text-red-600'); btn.disabled = false; return; }
             showSyncAll(data.sync_all);
-            if (data.status === 'running') notice('May tumatakbo nang Sync lahat; walang bagong sinimulan.', 'text-amber-700');
+            if (data.status === 'running') notice('May tumatakbo o naka-pause nang Sync lahat; walang bagong sinimulan (gamitin ang Resume o Stop).', 'text-amber-700');
+            if (data.status === 'not_ready') { notice('Hindi pa handa ang Sync lahat (inaayos pa ang database pagkatapos ng update). Subukan ulit mamaya.', 'text-amber-700'); btn.disabled = false; }
         } catch (err) {
             notice('Walang koneksyon: hindi nasimulan ang Sync lahat.', 'text-red-600');
             btn.disabled = false;

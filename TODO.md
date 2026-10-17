@@ -451,3 +451,11 @@ Accepted, not fixed:
 - **The 22-minute budget is checked between batches, so a run can still pass 1800 s in theory**: the check lands just under 22 min, one batch then takes its worst case (about 5 min: 4 tries × 30 s plus backoff and Retry-After), and matching follows. Reason: that needs every try of one batch to time out at the end of a long run. If the worker kills it, the next sync resumes from the saved batch, though the page lock stays held up to 2 h (see 042).
 - **The per-row Sync now job keeps `$timeout = 3600`, above `retry_after` (1900 s)** (from 040). Reason: a window read now stops itself at about 22 min, far below both.
 - **Missing tests (minor):** a `--full` that errored, followed by a sync on a page that never completed a window read; and the grid's "Huling sync" text for old runs with no kind (the script drops empty parts with `filter(Boolean)`). Reason: both follow from rules that are already tested.
+
+## 045: Sync lahat control (2026-10-18)
+
+- **An old cache run whose chain was already broken before the deploy is adopted as running until its cache key expires** (up to 2 h 10 min); it is then closed as stopped, because no job holds it (amendment 1). Reason: the old chain normally runs to its last page, and Stop clears it sooner.
+- **A job lost without `failed()` (the worker killed hard, the jobs table cleared) leaves its page claimed.** Resume then has nothing to send, and the run shows as running. Reason: Stop clears it, and a new press starts again from the plan of each page, which continues every unfinished window read.
+- **The poll reads the old cache key on every request (one cache query with the `database` store).** Reason: it is one indexed read. It can go in a later release, once no old run can be left.
+- **The rule "has a Botcake ID and token" appears three times** (`PageSettingsGrid::rowInfo`, the mini rows in `changes()`, the page's script), and the summary labels appear twice (`BotcakeSyncAll::SUMMARY` and the script). Reason: small; a shared helper is worth it on the next change there.
+- **A page killed by the 1800 s timeout leaves the Botcake lock held up to 2 h, so the next Sync lahat page re-queues itself every 30 s for that long** (from 042 and 044). Reason: rare, and it recovers on its own; Stop ends the run.

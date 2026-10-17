@@ -43,6 +43,18 @@ class BotcakePsidImportRun extends Model
         'stop_reason',
         'read_kind',
         'start_batch',
+        'ad_filled',
+        'run_key',
+        'sync_state',
+        'page_index',
+        'current_page',
+        'started_by',
+        'finished_at',
+    ];
+
+    protected $casts = [
+        'sync_state'  => 'array',
+        'finished_at' => 'datetime',
     ];
 
     public function events()

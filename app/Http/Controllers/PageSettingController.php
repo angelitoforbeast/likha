@@ -224,14 +224,24 @@ class PageSettingController extends Controller
         return redirect()->route('page-settings.index')->with('success', $page . ': naka-queue ang Botcake sync. I-refresh mamaya para sa bilang.');
     }
 
-    /** "Sync lahat": isang run lang sabay; ang pangalawang pindot habang tumatakbo ay walang sinisimulan. */
+    /** "Sync lahat": isang run lang sabay; ang pindot habang may tumatakbo o naka-pause na run ay walang sinisimulan. */
     public function syncAll(BotcakeSyncAll $all)
     {
         $this->checkAccess();
 
-        $started = $all->start();
+        return response()->json($all->start(Auth::id()));
+    }
 
-        return response()->json(['status' => $started ? 'started' : 'running', 'sync_all' => $started ?? $all->progress()]);
+    /** Pause / Resume / Stop ng Sync lahat: status lang ng run; ang job ang sumusunod bago kunin ang susunod na page. */
+    public function syncAllControl(string $action, BotcakeSyncAll $all)
+    {
+        $this->checkAccess();
+
+        return response()->json(['sync_all' => match ($action) {
+            'pause'  => $all->pause(),
+            'resume' => $all->resume(),
+            'stop'   => $all->stop(),
+        }]);
     }
 
     public function deactivate(int $id)
