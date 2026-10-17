@@ -231,6 +231,7 @@ class CardReconcilePageTest extends TestCase
             $match([$line->id => $bad + $edit])->assertSessionHasErrors();
         }
         $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{not json'])->assertSessionHasErrors('edits');
+        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD])->assertSessionHasErrors('edits'); // walang edits (hindi tumakbo ang JS) → tanggi, hindi tahimik na nawawala ang edit
         $this->assertSame(['preview', '432.10'], [$s->fresh()->status, $line->fresh()->amount], 'walang na-save sa maling edit');
 
         $match([$line->id => $edit, $foreign->id => ['amount' => '999.00'] + $edit])->assertSessionHasNoErrors()->assertRedirect("/ads_manager/payment/reconcile/{$s->id}");
@@ -265,7 +266,7 @@ class CardReconcilePageTest extends TestCase
         $this->assertStringContainsString('name="edits"', $preview);
         $this->assertStringNotContainsString('name="lines[', $preview, 'walang input bawat cell (max_input_vars)');
 
-        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD])->assertSessionHasNoErrors()->assertRedirect();
+        $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{}'])->assertSessionHasNoErrors()->assertRedirect();
 
         $html = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
         foreach (['Tugma 3', '₱6,478.17', 'Wala sa card 1', '₱765.43', 'Wala sa Meta 1', '₱432.10', '100-groups: 1 tally · 0 hindi', 'txn-alpha-01', 'act-' , 'txn-gamma-03', 'Not ads', 'data-status="none"', 'data-status="matched"'] as $want) {

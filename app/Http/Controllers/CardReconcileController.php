@@ -89,7 +89,7 @@ class CardReconcileController extends Controller
         $this->ceoOnly();
         // Ang mga edit ay dumarating bilang isang JSON field ("edits": {line id: {...}}), hindi isang input bawat
         // cell: ang mahabang statement ay lalampas sa max_input_vars ng PHP at tahimik na mapuputol.
-        $request->validate(['edits' => ['nullable', 'string', 'json', 'max:1000000']]);
+        $request->validate(['edits' => ['required', 'string', 'json', 'max:1000000']], ['edits.required' => 'Hindi naipadala ang mga linya (i-refresh ang page at subukan ulit).']);
         $edits = json_decode((string) $request->input('edits', ''), true) ?? [];
         $data = validator(['card_label' => $request->input('card_label'), 'lines' => $edits], [
             'card_label'          => ['required', 'string', Rule::in($this->reconcile->cards())],
