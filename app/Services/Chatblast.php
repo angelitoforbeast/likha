@@ -90,13 +90,13 @@ class Chatblast
                 $label = 'Araw ' . $n . ' · ' . self::label($j);
                 if (!is_string($text) || trim($text) === '') return $label . ': walang laman ang text.';
                 if (mb_strlen($text) > self::MAX_TEXT) return $label . ': hanggang ' . self::MAX_TEXT . ' na character lang.';
-                preg_match_all('/\{([a-z_]+)\}/', $text, $m);
+                preg_match_all('/\{([^{}]*)\}/', $text, $m); // anumang {…}: ang may maling baybay ay hindi lalabas nang ganoon sa customer
                 $unknown = array_diff($m[1], self::PLACEHOLDERS);
                 if ($unknown) return $label . ': hindi kilalang placeholder {' . reset($unknown) . '}.';
             }
         }
-        if (mb_strlen((string) json_encode($days, JSON_UNESCAPED_UNICODE)) > self::MAX_TOTAL) {
-            return 'Masyadong mahaba ang lahat ng text (hanggang ' . number_format(self::MAX_TOTAL) . ' na character).';
+        if (strlen((string) json_encode($days, JSON_UNESCAPED_UNICODE)) > self::MAX_TOTAL) { // bytes: ang TEXT ay 65,535 bytes
+            return 'Masyadong mahaba ang lahat ng text ng uri (hanggang ' . number_format(self::MAX_TOTAL) . ' bytes).';
         }
 
         return null;
@@ -317,7 +317,7 @@ class Chatblast
      * maaaring naipadala, unknown) o ipinapadala na ang ibang mensahe ng parehong waybill at uri ngayong araw (Manila),
      * o wala na ang araw nito sa mga araw ng uri.
      */
-    public function blockedToday(\App\Models\BotcakeMessage $m): ?string
+    public function blockedToday(BotcakeMessage $m): ?string
     {
         if ($m->day > count($this->sequence($m->kind))) return 'Wala nang Araw ' . $m->day . ' sa mga araw ng uri';
 

@@ -183,6 +183,15 @@ class ChatblastSequenceTest extends ChatblastTestCase
 
         $this->travelTo('2026-10-19 09:00:00');
         $this->assertSame(0, $this->build()['added'], 'ang Araw 2 ay mayroon na (ipadala ulit bukas)');
+
+        // Ang unknown ngayong araw at ang ipinapadala pa ay humaharang din.
+        foreach (['unknown', 'sending'] as $status) {
+            $this->rows()->firstWhere('day', 1)->update(['status' => $status]);
+            $day2->update(['status' => 'ready']);
+            app(ChatblastSender::class)->queue([$day2->id], 1);
+            $this->assertSame('skipped', $day2->fresh()->status, $status . ' ngayong araw');
+        }
+        Http::assertNothingSent();
     }
 
     public function test_a_waybill_with_a_later_jnt_row_is_no_longer_in_transit(): void
@@ -221,6 +230,9 @@ class ChatblastSequenceTest extends ChatblastTestCase
             '31 araw'               => array_fill(0, 31, ['A']),
             '11 bersyon'            => [array_fill(0, 11, 'A')],
             'maling placeholder'    => [['Hello {nmae}']],
+            'malaking titik'        => [['Hello {Name}']],
+            'may gitling'           => [['Tawag {rider-phone}']],
+            'bytes na lampas'       => array_fill(0, 30, array_fill(0, 3, str_repeat('₱', 760))),
             'masyadong malaki'      => array_fill(0, 30, array_fill(0, 10, str_repeat('x', 900))),
         ] as $case => $days) {
             $this->postJson('/chatblast/sequence', ['kind' => 'in_transit', 'days' => $days])->assertStatus(422);
