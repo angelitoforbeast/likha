@@ -112,3 +112,10 @@ Schedule::command('botcake:sync-customers --full')
     ->weeklyOn(0, '01:00')
     ->when(fn () => (bool) config('services.botcake.sync_enabled'))
     ->withoutOverlapping();
+
+// /chatblast auto mode: ang mga campaign na naka-auto ay binubuo at ipinapadala sa kanilang oras ng padala (Manila).
+// Kada 5 minuto; ang command ang nagpapasya kung oras na (isang beses kada oras kada araw, hanggang 3 oras pagkatapos).
+Schedule::command('chatblast:auto')
+    ->timezone('Asia/Manila')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(30);

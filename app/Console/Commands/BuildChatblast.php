@@ -8,14 +8,14 @@ use Illuminate\Console\Command;
 /** Kapareho ng "Kunin ang mga bago" ng /chatblast, para sa automation sa susunod. Hindi naka-schedule. */
 class BuildChatblast extends Command
 {
-    protected $signature   = 'chatblast:build {--kind= : Isang uri lang (delivering, in_transit); lahat kapag wala}';
-    protected $description = 'Add /chatblast rows for orders whose waybill is out for delivery (no message is sent)';
+    protected $signature   = 'chatblast:build {--kind= : Isang campaign lang (ang kind nito, hal. delivering, in_transit); lahat ng naka-on kapag wala}';
+    protected $description = 'Add /chatblast rows for the campaigns\' waybills (no message is sent)';
 
     public function handle(Chatblast $chatblast): int
     {
         $kind = (string) $this->option('kind');
-        if ($kind !== '' && !isset(Chatblast::KINDS[$kind])) {
-            $this->error('Hindi kilalang uri: ' . $kind);
+        if ($kind !== '' && !$chatblast->campaign($kind)) {
+            $this->error('Hindi kilalang campaign: ' . $kind);
             return self::FAILURE;
         }
 

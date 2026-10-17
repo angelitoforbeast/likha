@@ -50,6 +50,22 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->fakeJnt();
     }
 
+    public function test_a_new_campaign_that_requires_on_delivery_tracks_and_takes_only_on_delivery_with_the_rider(): void
+    {
+        \App\Models\ChatblastCampaign::where('kind', 'delivering')->update(['active' => false]);
+        \App\Models\ChatblastCampaign::create(['kind' => 'c-od', 'name' => 'Ibang delivering', 'statuses' => ['Delivering'], 'window_days' => 7,
+            'days' => [['Hi {name}, si {rider} ({rider_phone}) po']], 'requires_on_delivery' => true, 'mode' => 'manual', 'active' => true]);
+        $this->shipped('Page Uno', 'Ana Cruz', '700000000001', 'psid-a');
+        $this->shipped('Page Uno', 'Ben Reyes', '700000000002', 'psid-b');
+        $this->scans['700000000001'] = [$this->onDelivery()];
+        $this->scans['700000000002'] = [['scantype' => 'Problematic', 'scantime' => '2026-10-18 08:30:00', 'desc' => 'Problematic']];
+
+        app(Chatblast::class)->build('c-od', 1);
+        $this->assertSame([['700000000001', 'Hi Ana Cruz, si Juan D. Cruz (09171234567) po']],
+            BotcakeMessage::where('kind', 'c-od')->get()->map(fn ($r) => [$r->waybill, $r->text])->all());
+        $this->assertNotEmpty($this->calls, 'tinawag ang J&T');
+    }
+
     private function onDelivery(string $rider = 'OCW_Juan D. Cruz', string $phone = '639171234567'): array
     {
         return ['scantype' => 'On Delivery', 'scantime' => '2026-10-18 08:00:00', 'desc' => 'Your parcel is out for delivery by sprinter【' . $rider . ' : ' . $phone . '】'];

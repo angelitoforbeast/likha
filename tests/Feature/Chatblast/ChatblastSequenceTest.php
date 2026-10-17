@@ -26,6 +26,16 @@ class ChatblastSequenceTest extends ChatblastTestCase
         return app(Chatblast::class)->build($kind, 1);
     }
 
+    private function assertRefused(string $kind, mixed $days, string $case): void
+    {
+        try {
+            app(Chatblast::class)->setSequence($kind, $days);
+            $this->fail('tinanggap: ' . $case);
+        } catch (\InvalidArgumentException $e) {
+            $this->assertNotSame('', $e->getMessage());
+        }
+    }
+
     private function rows(string $kind = 'in_transit')
     {
         return BotcakeMessage::where('kind', $kind)->where('is_test', false)->orderBy('id')->get();
@@ -139,7 +149,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $ok = ['kind' => 'in_transit', 'days' => [['Araw isa A', 'Araw isa B'], ['Araw dalawa']]];
 
-        $this->postJson('/chatblast/sequence', $ok)->assertOk();
+        app(Chatblast::class)->setSequence($ok['kind'], $ok['days']);
         $this->assertSame($ok['days'], app(Chatblast::class)->sequence('in_transit'));
 
         foreach ([
@@ -150,7 +160,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
             'hindi listahan'       => ['kind' => 'in_transit', 'days' => 'x'],
             'hindi kilalang uri'   => ['kind' => 'iba', 'days' => [['A']]],
         ] as $case => $body) {
-            $this->postJson('/chatblast/sequence', $body)->assertStatus(422);
+            $this->assertRefused($body['kind'], $body['days'], $case);
         }
         $this->assertSame($ok['days'], app(Chatblast::class)->sequence('in_transit'), 'walang nabago sa maling input');
 
@@ -223,7 +233,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
 
     public function test_the_editor_refuses_bad_shapes_unknown_placeholders_and_huge_payloads(): void
     {
-        $this->actingAs($this->user());
+        $before = app(Chatblast::class)->sequence('in_transit');
         foreach ([
             'hindi string'          => [[123]],
             'nested'                => [[['A']]],
@@ -235,9 +245,9 @@ class ChatblastSequenceTest extends ChatblastTestCase
             'bytes na lampas'       => array_fill(0, 30, array_fill(0, 3, str_repeat('₱', 760))),
             'masyadong malaki'      => array_fill(0, 30, array_fill(0, 10, str_repeat('x', 900))),
         ] as $case => $days) {
-            $this->postJson('/chatblast/sequence', ['kind' => 'in_transit', 'days' => $days])->assertStatus(422);
+            $this->assertRefused('in_transit', $days, $case);
         }
-        $this->assertSame(Chatblast::KINDS['in_transit']['days'], app(Chatblast::class)->sequence('in_transit'));
+        $this->assertSame($before, app(Chatblast::class)->sequence('in_transit'));
     }
 
     public function test_a_removed_day_is_never_sent_and_queued_rows_keep_their_text(): void
