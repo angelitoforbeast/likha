@@ -48,6 +48,12 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         }]);
     }
 
+    /** Nakabasa na ang page ng buong window dati: ang susunod na sync ay incremental (hindi window read). */
+    private function windowDone(): void
+    {
+        BotcakePsidImportRun::create(['status' => 'done', 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => 'end', 'read_kind' => 'window', 'start_batch' => 1]);
+    }
+
     private function psids(string $prefix, int $from, int $count = 10): array
     {
         return array_map(fn ($i) => $prefix . $i, range($from, $from + $count - 1));
@@ -56,6 +62,7 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
     public function test_incremental_stops_at_the_first_batch_whose_psids_are_all_known(): void
     {
         // Naitala na ang page 2 mula sa naunang sync; ang page 1 ay bago.
+        $this->windowDone();
         foreach ($this->psids('p', 11) as $psid) {
             BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Name ' . $psid, 'psid' => $psid, 'status' => 'available', 'source' => 'api']);
         }
@@ -67,7 +74,7 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
 
         $this->assertSame([1, 2], $this->asked, 'hindi na binasa ang page 3');
         $this->assertSame(21, BotcakePsid::where('source', 'api')->count());
-        $run = BotcakePsidImportRun::where('source', 'api')->sole();
+        $run = BotcakePsidImportRun::where('source', 'api')->latest('id')->first();
         $this->assertSame(['done', 'Page Uno', 2, 10, 0, 'known_batch'], [$run->status, $run->page_name, $run->batches_read, $run->customers_new, $run->customers_updated, $run->stop_reason]);
         $this->assertSame('available', BotcakePsid::where('psid', 'p1')->value('status'));
         $this->assertStringEndsWith(', 1 ad id', $run->last_message, 'nakikita sa log ang napunang ad id');
@@ -137,21 +144,24 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertSame(0, BotcakePsid::count());
         $this->assertStringNotContainsString(self::TOKEN, implode("\n", $logged) . Artisan::output() . $run->last_error);
     }
-    public function test_an_incremental_run_stops_at_the_cap_of_300_batches_and_starts_from_page_1_next_run(): void
+    public function test_an_incremental_run_stops_at_the_cap_and_the_next_run_reads_the_whole_window_from_page_1(): void
     {
         $this->assertSame(300, (int) config('services.botcake.sync_max_batches'));
-        $this->fakeCustomers(fn (int $n) => $this->psids('n' . $n . '-', 1));
+        config(['services.botcake.sync_max_batches' => 5]);
+        $this->windowDone();
+        $this->fakeCustomers(fn (int $n) => $n > 8 ? [] : $this->psids('n' . $n . '-', 1));
 
         Artisan::call('botcake:sync-customers');
 
-        $run = BotcakePsidImportRun::where('source', 'api')->sole();
-        $this->assertSame(['done', 'cap', 300, 3000], [$run->status, $run->stop_reason, $run->batches_read, $run->customers_new]);
-        $this->assertSame(300, max($this->asked));
+        $run = BotcakePsidImportRun::where('source', 'api')->latest('id')->first();
+        $this->assertSame(['done', 'cap', 5, 50, 'incremental'], [$run->status, $run->stop_reason, $run->batches_read, $run->customers_new, $run->read_kind]);
+        $this->assertSame(5, max($this->asked));
 
         $this->asked = [];
         Artisan::call('botcake:sync-customers');
-        $this->assertSame([1], $this->asked, 'susunod na run: mula page 1, at hihinto sa kilalang batch');
-        $this->assertSame('known_batch', BotcakePsidImportRun::where('source', 'api')->latest('id')->value('stop_reason'));
+        $this->assertSame(range(1, 9), $this->asked, 'cap ang huli: window read mula page 1, lampas sa cap at sa kilalang batch');
+        $run = BotcakePsidImportRun::where('source', 'api')->latest('id')->first();
+        $this->assertSame(['end', 'window'], [$run->stop_reason, $run->read_kind]);
     }
 
     private function apiRow(string $psid, string $status, ?int $seenDaysAgo, ?int $subscribedDaysAgo = 20): BotcakePsid
@@ -182,6 +192,7 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
     public function test_an_errored_full_read_or_an_incremental_run_marks_nobody_inactive(): void
     {
         $stale = $this->apiRow('old-1', 'available', 31);
+        $this->windowDone(); // ang ikalawang sync ay incremental
 
         $this->fakeCustomers([1 => $this->psids('p', 1), 2 => $this->psids('p', 11)], [null, 500, 500, 500, 500]);
         Artisan::call('botcake:sync-customers', ['--full' => true]);
@@ -271,11 +282,12 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
     {
         $old = array_map(fn ($i) => $this->subscribed('p' . $i, 60), range(1, 10));
         foreach ($old as $c) $this->apiRow($c['psid'], 'available', 1, 60);
+        $this->windowDone();
         $this->fakeCustomers([1 => $old]);
 
         Artisan::call('botcake:sync-customers');
 
-        $this->assertSame('known_batch', BotcakePsidImportRun::where('source', 'api')->sole()->stop_reason);
+        $this->assertSame('known_batch', BotcakePsidImportRun::where('source', 'api')->latest('id')->value('stop_reason'));
     }
 
     public function test_a_windowed_full_read_marks_inactive_only_customers_subscribed_within_the_window(): void

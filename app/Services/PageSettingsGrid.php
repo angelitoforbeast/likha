@@ -240,6 +240,7 @@ class PageSettingsGrid
                 'at'          => $run->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
                 'status'      => $run->status,
                 'stop_reason' => $run->stop_reason,
+                'kind'        => BotcakeCustomerSync::kindLabel($run->read_kind, $run->start_batch),
                 'error'       => $run->last_error,
             ];
         }
