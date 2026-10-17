@@ -155,6 +155,8 @@ class CardMatcher
                 'difference_total' => self::money($cardTotal - $metaTotal),
                 'groups_tallied'   => count(array_filter($groups, fn ($g) => $g['tallied'])),
                 'groups_untallied' => count(array_filter($groups, fn ($g) => !$g['tallied'])),
+                'groups_untallied_card_total' => self::money(array_sum(array_map(fn ($g) => $g['tallied'] ? 0 : self::cents($g['card_total']), $groups))),
+                'groups_untallied_meta_total' => self::money(array_sum(array_map(fn ($g) => $g['tallied'] ? 0 : self::cents($g['meta_total']), $groups))),
             ],
         ];
     }

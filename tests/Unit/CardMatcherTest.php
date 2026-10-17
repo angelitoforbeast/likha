@@ -122,6 +122,13 @@ class CardMatcherTest extends TestCase
             'tallied' => $out['totals']['groups_tallied'], 'untallied' => $out['totals']['groups_untallied'],
         ]);
         $this->assertSame([4, '400.00'], [$out['totals']['matched_count'], $out['totals']['matched_total']], '3 (tallied) + 1 one-to-one; 1 sa 09-11');
+        $t = $out['totals'];
+        $this->assertSame(['450.00', '800.00'], [$t['groups_untallied_card_total'], $t['groups_untallied_meta_total']], '09-10: 200 vs 300; 09-12: 250 vs 500');
+        $this->assertSame(
+            (float) $t['difference_total'],
+            round((float) $t['no_meta_total'] - (float) $t['no_card_total'] + (float) $t['groups_untallied_card_total'] - (float) $t['groups_untallied_meta_total'], 2),
+            'ang chips ay sumasama sa kabuuang diperensya'
+        );
     }
 
     public function test_S_049_10_a_group_short_on_one_side_takes_the_same_amount_from_one_day_after_or_before(): void
@@ -171,7 +178,7 @@ class CardMatcherTest extends TestCase
         ], $out['days'], '09-11 ay labas sa period (09-09..09-10)');
         $this->assertSame(['credit', 'not_ads'], [$out['lines'][4]['match_kind'], $out['lines'][5]['match_kind']]);
         $this->assertSame(
-            ['ads_count' => 4, 'card_total' => '1360.50', 'meta_total' => '1250.50', 'matched_count' => 2, 'matched_total' => '1250.50', 'no_meta_count' => 2, 'no_meta_total' => '110.00', 'no_card_count' => 0, 'no_card_total' => '0.00', 'difference_total' => '110.00', 'groups_tallied' => 0, 'groups_untallied' => 0],
+            ['ads_count' => 4, 'card_total' => '1360.50', 'meta_total' => '1250.50', 'matched_count' => 2, 'matched_total' => '1250.50', 'no_meta_count' => 2, 'no_meta_total' => '110.00', 'no_card_count' => 0, 'no_card_total' => '0.00', 'difference_total' => '110.00', 'groups_tallied' => 0, 'groups_untallied' => 0, 'groups_untallied_card_total' => '0.00', 'groups_untallied_meta_total' => '0.00'],
             $out['totals']
         );
     }

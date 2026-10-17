@@ -309,7 +309,7 @@ class CardReconcilePageTest extends TestCase
         $this->post("/ads_manager/payment/reconcile/{$s->id}/match", ['card_label' => self::CARD, 'edits' => '{}'])->assertSessionHasNoErrors()->assertRedirect();
 
         $html = $this->get("/ads_manager/payment/reconcile/{$s->id}")->assertOk()->getContent();
-        foreach (['Tugma 3 · ₱6,478.17', 'Wala sa Meta 1 · ₱432.10', 'Wala sa card 1 · ₱765.43', 'Hindi tally na grupo 0', 'Diperensya -₱333.33', '?status=card_only', '?status=meta_only'] as $want) {
+        foreach (['Tugma 3 · ₱6,478.17', 'Wala sa Meta 1 · ₱432.10', 'Wala sa card 1 · ₱765.43', 'Hindi tally na grupo 0 · card ₱0.00 · Meta ₱0.00', 'Diperensya -₱333.33', '?status=card_only', '?status=meta_only'] as $want) {
             $this->assertStringContainsString($want, $html, $want);
         }
         // Side by side: card | marka | Meta sa iisang row kapag tugma; isang panig lang = may kulay.

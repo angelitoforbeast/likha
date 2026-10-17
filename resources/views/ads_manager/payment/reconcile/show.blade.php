@@ -42,10 +42,10 @@
       <a href="{{ $link(['status' => 'matched']) }}" class="px-3 py-1 rounded-full border border-green-300 {{ $status === 'matched' ? 'ring-2 ring-green-600' : '' }} bg-green-100 text-green-800">Tugma {{ $t['matched_count'] }} · {{ $peso($t['matched_total']) }}</a>
       <a href="{{ $link(['status' => 'card_only']) }}" class="px-3 py-1 rounded-full border border-red-300 {{ $status === 'card_only' ? 'ring-2 ring-red-600' : '' }} bg-red-100 text-red-800">Wala sa Meta {{ $t['no_meta_count'] }} · {{ $peso($t['no_meta_total']) }}</a>
       <a href="{{ $link(['status' => 'meta_only']) }}" class="px-3 py-1 rounded-full border border-amber-300 {{ $status === 'meta_only' ? 'ring-2 ring-amber-600' : '' }} bg-amber-100 text-amber-800">Wala sa card {{ $t['no_card_count'] }} · {{ $peso($t['no_card_total']) }}</a>
-      <a href="{{ $link(['status' => 'group_off']) }}" class="px-3 py-1 rounded-full border {{ $status === 'group_off' ? 'ring-2 ring-gray-600' : '' }} bg-white text-gray-800">Hindi tally na grupo {{ $t['groups_untallied'] }}</a>
+      <a href="{{ $link(['status' => 'group_off']) }}" class="px-3 py-1 rounded-full border {{ $status === 'group_off' ? 'ring-2 ring-gray-600' : '' }} bg-white text-gray-800">Hindi tally na grupo {{ $t['groups_untallied'] }} · card {{ $peso($t['groups_untallied_card_total']) }} · Meta {{ $peso($t['groups_untallied_meta_total']) }}</a>
       <span class="px-3 py-1 rounded-full bg-white border {{ (float) $t['difference_total'] != 0 ? 'text-red-700 font-semibold' : 'text-gray-700' }}">Card {{ $peso($t['card_total']) }} · Meta {{ $peso($t['meta_total']) }} · Diperensya {{ $peso($t['difference_total']) }}</span>
     </div>
-    <p class="text-xs text-gray-500 -mt-2 mb-3">Ang bilang sa chips ay ng card lines at Meta records; ang umuulit na amount sa isang araw ay isang row.</p>
+    <p class="text-xs text-gray-500 -mt-2 mb-3">Ang bilang sa chips ay ng card lines at Meta records; ang umuulit na amount sa isang araw ay isang row. Diperensya = Wala sa Meta − Wala sa card + (card − Meta ng mga hindi tally na grupo).</p>
 
     @php
       $vdays = $view['days'];
