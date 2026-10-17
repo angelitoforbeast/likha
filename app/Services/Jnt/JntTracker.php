@@ -113,7 +113,9 @@ class JntTracker
      * Para sa chatblast: i-track ang mga waybill (hanggang $budget segundo ng tawag) at isulat sa lahat ng from_jnts row
      * ng bawat isa ayon sa id. Itinatala bilang awtomatikong run sa jnt_track_sync_runs (walang date range).
      * @param  string[] $waybills
-     * @return array{tracked: array<int,string>, pending: array<int,string>, checked:int, updated:int, rider:int, errors:int}|null null kapag walang J&T config
+     * tracked = ang mga sinagot ng J&T lang; latest = waybill => pinakabagong scantype (kahit Problematic o di-kilala, na
+     * hindi isinusulat sa status ng from_jnts).
+     * @return array{tracked: array<int,string>, latest: array<string,string>, pending: array<int,string>, checked:int, updated:int, rider:int, errors:int}|null null kapag walang J&T config
      */
     public function refresh(array $waybills, float $budget, string $src = 'chatblast'): ?array
     {
@@ -121,7 +123,7 @@ class JntTracker
         if (!$waybills || !($client = $this->client())) return null;
 
         $started = $this->clock->now();
-        $out = ['tracked' => [], 'pending' => [], 'checked' => 0, 'updated' => 0, 'rider' => 0, 'errors' => 0];
+        $out = ['tracked' => [], 'latest' => [], 'pending' => [], 'checked' => 0, 'updated' => 0, 'rider' => 0, 'errors' => 0];
         $runId = DB::table('jnt_track_sync_runs')->insertGetId([
             'date_from' => null, 'date_to' => null, 'dry_run' => false, 'status' => 'running', 'total' => count($waybills),
             'started_at' => now('Asia/Manila'), 'created_at' => now('Asia/Manila'), 'updated_at' => now('Asia/Manila'),
@@ -142,8 +144,9 @@ class JntTracker
                     continue;
                 }
                 $out['checked']++;
+                if (empty($found[$wb])) { $out['errors']++; continue; } // walang sagot ang J&T: hindi "na-track"
                 $out['tracked'][] = $wb;
-                if (empty($found[$wb])) { $out['errors']++; continue; } // walang sagot ang J&T
+                $out['latest'][$wb] = trim((string) ($found[$wb][0]['scantype'] ?? ''));
                 $rider = false;
                 foreach ($rows[$wb] ?? [] as $row) {
                     $c = $this->changesFor($row, $found[$wb], $src, $runId);

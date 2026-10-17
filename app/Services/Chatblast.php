@@ -132,7 +132,7 @@ class Chatblast
     /** Ang pangalan ng rider para sa mensahe: walang code sa unahan ("OCW_Juan D. Cruz" → "Juan D. Cruz"). */
     public static function riderName(?string $raw): string
     {
-        return trim((string) preg_replace('/^[A-Z0-9]+_/', '', trim((string) $raw)));
+        return trim((string) preg_replace('/^[A-Z0-9_]+_/', '', trim((string) $raw))); // kapareho ng JntScanStatusMapper
     }
 
     /** Ang phone ng rider para sa mensahe: 09XXXXXXXXX (mula sa 639…, 9…), o walang laman kapag hindi PH mobile. */
@@ -159,19 +159,31 @@ class Chatblast
     /**
      * Bago ipadala ang delivering: i-track ulit ang waybill kapag luma na (o wala pa) ang rider data, saka buuin ulit ang
      * text gamit ang bagong rider (maaaring ibang bersyon na). Walang ginagawa kapag bago pa o walang J&T config.
-     * Ang status ay nasa from_jnts na rin, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel.
+     * Ang status ay nasa from_jnts na rin, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel; ang
+     * bigong subok (Problematic, Delivery Fail…) ay hindi isinusulat doon, kaya ibinabalik dito ang dahilan para laktawan.
      */
-    public function refreshRider(BotcakeMessage $m): void
+    public function refreshRider(BotcakeMessage $m): ?string
     {
         $at = $m->vars['tracked_at'] ?? null;
-        if ($at && Carbon::parse($at)->gt(now()->subSeconds(self::RIDER_MAX_AGE))) return;
-        if (!app(JntTracker::class)->refresh([$m->waybill], 20)) return;
+        if ($at && Carbon::parse($at)->gt(now()->subSeconds(self::RIDER_MAX_AGE))) return null;
+        $track = app(JntTracker::class)->refresh([$m->waybill], 20);
+        if (!$track || !isset($track['latest'][$m->waybill])) return null; // walang config o walang sagot: ang dating text
+
+        $scan = $track['latest'][$m->waybill];
+        if (!self::isOnDelivery($scan)) return 'Hindi na On Delivery ang huling scan ng J&T (' . ($scan ?: 'walang scantype') . ')';
 
         [$rider, $phone] = $this->riderOf($this->currentStatuses([$m->waybill])[$m->waybill] ?? []);
         $vars = array_merge((array) $m->vars, ['rider' => $rider, 'rider_phone' => $phone, 'tracked_at' => now()->toIso8601String()]);
         $days = $this->sequence($m->kind);
         $pick = $m->day <= count($days) ? $this->pick($days[$m->day - 1], $m->waybill, $vars) : null;
         $m->forceFill(['vars' => $vars] + ($pick ? ['version' => self::label($pick[0]), 'text' => $pick[1]] : []))->save();
+
+        return null;
+    }
+
+    private static function isOnDelivery(string $scantype): bool
+    {
+        return strtolower(trim($scantype)) === 'on delivery';
     }
 
     public static function label(int $index): string
@@ -245,7 +257,7 @@ class Chatblast
                 ->reorder()->distinct()->pluck('mo.waybill')->all());
         }
         $track = app(JntTracker::class)->refresh($waybills, self::TRACK_BUDGET);
-        $tracked = array_flip($track['tracked'] ?? []);
+        $tracked = $track['latest'] ?? []; // waybill => pinakabagong scan ng J&T (ang mga sinagot lang)
         $out['tracked'] = count($tracked);
         $out['rider_pending'] = count($track['pending'] ?? []);
 
@@ -279,6 +291,10 @@ class Chatblast
                 if ($day > count($days)) continue; // ubos na ang mga araw ng uri
 
                 $page = $this->settings->normPage((string) $o->page);
+                // Delivering: ang pinakabagong scan ay dapat On Delivery pa (hindi Problematic, Delivery Fail…): ang
+                // "Idedeliver po ngayon" ay hindi totoo pagkatapos ng bigong subok. Susubukan ulit sa susunod na kuha.
+                if ($kind === 'delivering' && isset($tracked[$waybill]) && !self::isOnDelivery($tracked[$waybill])) continue;
+
                 [$rider, $riderPhone] = $this->riderOf($jnt[$o->waybill] ?? []);
                 $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page,
                     'rider' => $rider, 'rider_phone' => $riderPhone, 'tracked_at' => isset($tracked[$waybill]) ? $now->toIso8601String() : null];

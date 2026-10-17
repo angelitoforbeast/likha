@@ -254,4 +254,51 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->assertStringContainsString('Huling awtomatikong track', $html);
         $this->assertStringContainsString('rider: 1', $html);
     }
+
+    public static function failedAttempts(): array
+    {
+        return [
+            'Problematic'   => ['Problematic'],
+            'Delivery Fail' => ['Delivery Fail'],
+        ];
+    }
+
+    /**
+     * Ang On Delivery na sinundan ng bigong subok (Problematic, Delivery Fail): "Idedeliver po ngayon" ay hindi na totoo.
+     * @dataProvider failedAttempts
+     */
+    public function test_a_failed_delivery_attempt_after_on_delivery_stops_the_delivering_message(string $scan): void
+    {
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        $this->shipped('Page Uno', 'Ben Reyes', 'JT0000000004', 'psid-b');
+        $this->scans['JT0000000002'] = [$this->onDelivery()];
+        $this->scans['JT0000000004'] = [['scantype' => $scan, 'scantime' => '2026-10-18 08:40:00'], $this->onDelivery()];
+
+        app(Chatblast::class)->build('delivering');
+
+        $this->assertSame(['JT0000000002'], BotcakeMessage::pluck('waybill')->all(), 'walang row ang bigong subok');
+
+        // Sa pagpapadala: ang bagong scan ay bigong subok na.
+        $this->travel(40)->minutes();
+        $this->scans['JT0000000002'] = [['scantype' => $scan, 'scantime' => '2026-10-18 09:35:00'], $this->onDelivery()];
+        app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
+
+        $row = BotcakeMessage::sole();
+        $this->assertSame('skipped', $row->status);
+        $this->assertStringContainsString($scan, $row->reason);
+        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains($r[0]->url(), 'botcake.io')), 'walang mensahe sa customer');
+    }
+
+    public function test_a_jnt_error_at_send_time_still_sends_with_the_fallback_and_is_not_stamped_as_tracked(): void
+    {
+        app(Chatblast::class)->setSequence('delivering', [['Rider {rider} {rider_phone}', 'Walang rider {name}']]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        // Walang sagot ang J&T para sa waybill (wala sa scans): hindi ito "na-track".
+        app(Chatblast::class)->build('delivering');
+        $this->assertNull(BotcakeMessage::sole()->vars['tracked_at']);
+
+        app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
+
+        $this->assertSame(['sent', 'Walang rider Ana Cruz'], [BotcakeMessage::sole()->status, BotcakeMessage::sole()->text]);
+    }
 }

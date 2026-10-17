@@ -171,8 +171,12 @@ class ChatblastSender
         if (!$m->is_test && isset(Chatblast::KINDS[$m->kind])) {
             // Delivering: kapag luma na (o wala) ang rider data, i-track ulit ang waybill (status at rider) at buuin ulit ang text.
             if ($m->kind === 'delivering') {
-                $this->chatblast->refreshRider($m);
+                $failed = $this->chatblast->refreshRider($m);
                 $m->refresh();
+                if ($failed !== null) {
+                    $this->finish($m, 'skipped', $failed, null, []);
+                    return;
+                }
             }
             $why = $this->chatblast->staleFor($m->kind, $m->waybill) ?? $this->chatblast->blockedToday($m);
             if ($why !== null) {
