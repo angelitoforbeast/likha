@@ -64,6 +64,9 @@
         <span id="sync-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
     </div>
 
+    {{-- Ang plano ng Sync lahat, mula sa "Susunod na sync" ng bawat page. --}}
+    <p class="mb-3 text-xs text-gray-700">Plano ng Sync lahat: <span id="plan-summary">{{ $grid['plan_summary'] ?: 'wala' }}</span></p>
+
     {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
     <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
         May tumatakbong Botcake sync mula <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Ang ibang sync ay lalaktaw hanggang matapos ito (o hanggang 2 oras kung naputol).
@@ -180,6 +183,7 @@
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: ORDERS_LABEL}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r', text: 'Customers'}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Huling sync'}),
+            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Susunod na sync'}),
             el('th', {class: 'bg-gray-100 px-3 py-2 border-b', text: ''}),
         ]);
 
@@ -190,11 +194,12 @@
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'orders'}, String(r.info.orders || 0)),
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'customers'}, infoCustomers(r)),
             el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}, infoSync(r)),
+            el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'next'}, infoNext(r)),
             el('td', {class: 'px-3 py-1 border-b whitespace-nowrap', 'data-info': 'actions'}, actions(r)),
         ]));
 
         table.replaceChildren(el('thead', {}, head), el('tbody', {}, body.length ? body
-            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 5), text: 'Wala pang page. Gamitin ang + Page.'}))));
+            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 6), text: 'Wala pang page. Gamitin ang + Page.'}))));
     }
 
     function cellTd(row, col) {
@@ -236,8 +241,21 @@
     function infoSync(r) {
         const s = r.info.last_sync;
         if (!s) return 'wala pa';
-        // hal. "2026-10-18 09:00 · window, tuloy mula batch 20 · time"
-        return [s.at, s.kind, s.stop_reason || s.status].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
+        // hal. "2026-10-18 09:00 · window, tuloy mula batch 20 · time · +9,985 bago · 1,279 na-match"
+        const n = v => Number(v || 0).toLocaleString('en-US');
+        const counts = (s.new || s.matched) ? '+' + n(s.new) + ' bago · ' + n(s.matched) + ' na-match' : null;
+        return [s.at, s.kind, s.stop_reason || s.status, counts].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
+    }
+
+    function infoNext(r) { return r.info.next ? r.info.next.label : ''; }
+
+    // Kapareho ng BotcakeSyncAll::summary(): bilang kada uri ng susunod na sync.
+    const SUMMARY = {window: 'window', continue: 'tuloy', incremental: 'incremental', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
+    function refreshSummary() {
+        const count = {};
+        for (const r of rows.values()) if (r.info.next) count[r.info.next.kind] = (count[r.info.next.kind] || 0) + 1;
+        const text = Object.entries(SUMMARY).filter(([k]) => count[k]).map(([k, label]) => count[k] + ' ' + label).join(', ');
+        document.getElementById('plan-summary').textContent = text || 'wala';
     }
 
     function postForm(action, pageName, label, cls) {
@@ -274,6 +292,8 @@
         if (!tr || !r) return;
         tr.querySelector('[data-info="customers"]').textContent = infoCustomers(r);
         tr.querySelector('[data-info="sync"]').textContent = infoSync(r);
+        tr.querySelector('[data-info="next"]').textContent = infoNext(r);
+        refreshSummary();
     }
 
     // ---- editing ----

@@ -67,11 +67,16 @@ class PageSettingsGrid
         }
         unset($row);
 
+        // "Susunod na sync" kada page at ang plano ng Sync lahat.
+        $next = $this->syncAll->next($rows);
+        foreach ($next as $pk => $n) $rows[$pk]['info']['next'] = $n;
+
         uasort($rows, fn ($a, $b) => ($b['info']['orders'] <=> $a['info']['orders']) ?: strnatcasecmp($a['name'], $b['name']));
 
         return [
             'columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now,
             'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->progress(), 'order_days' => $this->orderDays(),
+            'plan_summary' => BotcakeSyncAll::summary($next),
         ];
     }
 
@@ -135,8 +140,24 @@ class PageSettingsGrid
         $runPages = BotcakePsidImportRun::where('source', 'api')->where('updated_at', '>=', $since)->distinct()->pluck('page_name')
             ->filter()->map(fn ($p) => $this->settings->pageKey($p))->unique()->values()->all();
 
+        // Pagkatapos ng sync, nagbabago rin ang "Susunod na sync" ng page: kinukuha ulit para lang sa mga page na iyon.
+        $info = $runPages ? $this->info($runPages) : [];
+        if ($info) {
+            $mini = [];
+            $botcake = PageSetting::where('active', true)->where('provider', 'botcake')->whereIn('key', ['page_id', 'token', 'token_status'])->get();
+            foreach ($runPages as $pk) $mini[$pk] = ['key' => $pk, 'cells' => [], 'info' => []];
+            foreach ($botcake as $s) {
+                $pk = $this->settings->pageKey($s->page_name);
+                if (isset($mini[$pk])) $mini[$pk]['cells'][$s->fullKey()] = ['value' => $s->is_secret ? '' : $s->value];
+            }
+            foreach ($mini as $pk => $m) {
+                $mini[$pk]['info']['botcake'] = isset($m['cells']['botcake.page_id'], $m['cells']['botcake.token']);
+            }
+            foreach ($this->syncAll->next($mini) as $pk => $n) $info[$pk]['next'] = $n;
+        }
+
         return [
-            'cells' => array_values($cells), 'info' => $runPages ? $this->info($runPages) : [], 'now' => $now,
+            'cells' => array_values($cells), 'info' => $info, 'now' => $now,
             'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->progress(),
         ];
     }
@@ -241,6 +262,10 @@ class PageSettingsGrid
                 'status'      => $run->status,
                 'stop_reason' => $run->stop_reason,
                 'kind'        => BotcakeCustomerSync::kindLabel($run->read_kind, $run->start_batch),
+                'new'         => (int) $run->customers_new,
+                'updated'     => (int) $run->customers_updated,
+                'matched'     => (int) $run->matched_by_name + (int) $run->matched_by_phone,
+                'ad_filled'   => (int) $run->ad_filled,
                 'error'       => $run->last_error,
             ];
         }

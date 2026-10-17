@@ -289,7 +289,9 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $five = $count(5);
         $fifty = $count(60);
         $this->assertSame($five, $fifty);
-        $this->assertLessThanOrEqual(6, max($fifty), 'ilang query lang ang grid at ang poll');
+        // Grid 7: settings, user names, customers, huling run, orders, plano (ROW_NUMBER) at huling matagumpay na run. Poll na
+        // may nagbagong run: 8 (kasama ang Botcake settings ng mga page na iyon para sa "Susunod na sync").
+        $this->assertLessThanOrEqual(8, max($fifty), 'ilang query lang ang grid at ang poll');
         $this->assertCount(120, $this->grid()['rows']);
     }
 

@@ -92,6 +92,66 @@ class BotcakeSyncAll
         Cache::put(self::STATE, $state, self::STATE_TTL);
     }
 
+    public const SUMMARY = [
+        'window' => 'window', 'continue' => 'tuloy', 'incremental' => 'incremental',
+        'fresh' => 'laktaw (sariwa)', 'missing' => 'walang ID/token', 'invalid' => 'token invalid',
+    ];
+
+    /**
+     * Ano ang gagawin ng susunod na sync ng bawat row (grid row: key + cells + info.botcake), para sa Sync lahat: ang
+     * plan() ng spec 044 at, sa ibabaw, ang laktaw kapag incremental at may matagumpay na api run sa huling N oras
+     * (services.botcake.sync_all_fresh_hours). Ang window read at ang tuloy ay hindi nilalaktawan. Dalawang query lang.
+     * @param array<int|string, array> $rows
+     * @return array<string, array{kind:string, label:string}> pageKey => uri at label
+     */
+    public function next(array $rows): array
+    {
+        $plans = $fresh = null;
+        $hours = max(0, (float) config('services.botcake.sync_all_fresh_hours', 6));
+        $days  = max(1, (int) config('services.botcake.sync_max_age_days', 45));
+        $out   = [];
+
+        foreach ($rows as $row) {
+            $pk = $row['key'];
+            if (!($row['info']['botcake'] ?? false)) { $out[$pk] = ['kind' => 'missing', 'label' => 'walang ID/token']; continue; }
+            if (str_starts_with((string) ($row['cells']['botcake.token_status']['value'] ?? ''), 'invalid')) {
+                $out[$pk] = ['kind' => 'invalid', 'label' => 'token invalid'];
+                continue;
+            }
+
+            $plans ??= $this->sync->plans();
+            [$kind, $start] = $plans[$pk] ?? ['window', 1];
+            if ($kind === 'window') {
+                $out[$pk] = $start > 1 ? ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start]
+                    : ['kind' => 'window', 'label' => 'window (' . $days . ' araw, buo)'];
+                continue;
+            }
+
+            $fresh ??= $this->sync->lastDoneAt();
+            $at = $fresh[$pk] ?? null;
+            if ($at && $at->gt(now()->subMinutes((int) round($hours * 60)))) {
+                $mins = (int) $at->diffInMinutes(now(), true);
+                $out[$pk] = ['kind' => 'fresh', 'label' => 'laktaw (sariwa, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' oras') . ' na)'];
+                continue;
+            }
+            $out[$pk] = ['kind' => 'incremental', 'label' => 'incremental'];
+        }
+
+        return $out;
+    }
+
+    /** Ang isang linya ng plano ng Sync lahat, hal. "12 window, 3 tuloy, 20 incremental, 6 laktaw (sariwa)". */
+    public static function summary(array $next): string
+    {
+        $count = array_count_values(array_column($next, 'kind'));
+        $parts = [];
+        foreach (self::SUMMARY as $kind => $label) {
+            if (!empty($count[$kind])) $parts[] = $count[$kind] . ' ' . $label;
+        }
+
+        return implode(', ', $parts);
+    }
+
     /** @return array<int, string> ang mga page (baybay sa settings) sa ayos ng grid: may page_id at token, hindi invalid */
     private function pages(): array
     {
