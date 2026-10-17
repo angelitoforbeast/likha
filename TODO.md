@@ -473,3 +473,12 @@ Accepted, not fixed:
 - **(amendment 1) The editor's preview uses a fixed sample order** (no rider info), not a row from the list. Reason: rows in the list do not carry their order details to the page.
 - **(amendment 2) A Facebook name that itself contains a placeholder such as `{item}` makes the text refused for good** ("hindi buo ang text"). Reason: fails safe; such names are not expected.
 - **(amendment 2) The per-customer lock needs a cache store with locks** (`database` with `cache_locks`, as `.env.example`; also redis). Check the server's `CACHE_STORE` before release.
+
+## 047: J&T auto track for chatblast (2026-10-18)
+
+- **A delivering row tracked less than 30 minutes ago is sent without a new track**, so a failed attempt inside those 30 minutes is not seen (the brief's 30-minute rule). A later build in that window does catch it.
+- **`status_logs` is read and rewritten per row without a lock.** An hourly upload writing the same row at the same moment can lose one log entry (never the status). Rows can also flip between the report's and J&T's status, adding about two log entries an hour. Reason: bounded; changing how uploads write is out of scope.
+- **The text of a delivering row can change at send time** (new rider, other version) after the owner looked at it; "Send test" uses the text as it is. Reason: the brief wants the rider in the message; the side panel shows the text that was sent.
+- **The web build may run about 60 s of tracking plus the build** (`set_time_limit(180)`). The server's nginx `fastcgi_read_timeout` was not checked; `chatblast:build` has no such limit.
+- **The build's candidate list for tracking runs the candidates query with its subselects under DISTINCT.** Reason: correct, a little heavier than needed.
+- **Missing tests (minor):** the manual job's dry run and unmapped counters after the refactor; the flat single-item J&T answer shape (the parser already handles it); the build route returning `tracked` and `rider_pending`.
