@@ -486,7 +486,7 @@ Accepted, not fixed:
 
 ## 049: card counter-check of Meta ad payments (2026-10-18)
 
-- **"±2 days" is measured from the sale date only.** A charge with sale 09-09, post 09-12 and a Meta record on 09-13 is not matched. Reason: the brief orders the passes sale date, post date, ±2 days; measuring the near pass from the sale date keeps one meaning for `match_days`. Revisit if real statements show long sale-to-post gaps.
+- **"±2 days" is measured from the sale date only.** A charge with sale 09-09, post 09-12 and a Meta record on 09-13 is not matched, and a charge with only a post date is "Wala sa Meta" without being tried on its post date. Reason: the brief orders the passes sale date, post date, ±2 days; measuring the near pass from the sale date keeps one meaning for `match_days`. Revisit if real statements show long sale-to-post gaps.
 - **The statement list shows the totals saved at the last "Itugma"; the statement view recomputes against today's Meta records.** After a new Meta import the two can differ until "Itugma ulit". Reason: the view shows the current truth and the list stays cheap; the view says when it was last matched.
 - **Route model binding reads `card_statements` before the `Schema::hasTable` guard,** so the statement and match routes answer 500 (not the "migrate" note) before the migration runs. Reason: only until the migration is run by hand on deploy; the list page has the guard.
 - **smalot/pdfparser parses the uploaded PDF without its own memory or time cap.** Reason: only the CEO uploads, a bank's own statement; PHP's memory_limit and max_execution_time still apply.
