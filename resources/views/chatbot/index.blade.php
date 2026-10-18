@@ -186,7 +186,7 @@
         const td = el('td', {class: extra + ' border-b border-slate-100 px-3 py-2 align-top cursor-text', tabindex: '0', 'data-key': c.key});
         let show;
         if (c.kind === 'image' && isUrl(value)) {
-            show = el('span', {class: 'flex items-center gap-2'}, [el('img', {src: value, alt: '', loading: 'lazy', class: 'h-8 w-8 rounded object-cover'}), el('span', {class: 'max-w-[9rem] truncate text-xs', text: value})]);
+            show = el('span', {class: 'flex items-center gap-2'}, [el('img', {src: value, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'h-8 w-8 rounded object-cover'}), el('span', {class: 'max-w-[9rem] truncate text-xs', text: value})]);
         } else {
             show = el('span', {class: 'block max-w-[14rem] truncate ' + (value ? '' : 'text-slate-300'), text: value ? String(value).split('\n')[0] : (c.kind === 'image' ? '+ link' : '+ set')});
         }

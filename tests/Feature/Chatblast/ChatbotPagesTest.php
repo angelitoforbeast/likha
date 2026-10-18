@@ -59,7 +59,7 @@ class ChatbotPagesTest extends ChatblastTestCase
     {
         Http::fake();
         $this->travelTo('2026-10-19 15:00:00');
-        $this->settings()->set('Page Dos', 'chatbot', 'active', '0');
+        $this->settings()->set('Page Dos', 'chatbot', 'active', '0', false, null, true);
         $this->settings()->set('Page Uno', 'chatbot', 'flow', 'Main COD');
         BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => 'p1', 'message' => 'a', 'payload' => [], 'received_at' => '2026-10-18 09:00:00']);
         BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => 'p1', 'message' => 'b', 'payload' => [], 'received_at' => '2026-10-19 10:30:00']);
@@ -118,7 +118,7 @@ class ChatbotPagesTest extends ChatblastTestCase
     public function test_S_068_3_switching_on_writes_the_block_then_publishes_and_marks_the_page_on(): void
     {
         Http::fake(['botcake.io/*' => Http::response(['success' => true])]);
-        $this->settings()->set('Page Dos', 'chatbot', 'active', '0');
+        $this->settings()->set('Page Dos', 'chatbot', 'active', '0', false, null, true);
         $this->actingAs($this->user());
 
         $this->postJson('/chatbot/active', ['page_name' => 'Page Dos', 'on' => true])->assertOk()->assertJson(['active' => true, 'error' => null]);
@@ -197,6 +197,79 @@ class ChatbotPagesTest extends ChatblastTestCase
 
         $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'price', 'value' => ''])->assertOk()->assertJson(['status' => 'cleared']);
         $this->assertNull($this->settings()->get('Page Uno', 'chatbot', 'price'));
+    }
+
+    public function test_S_068_9_only_the_switch_changes_active_and_writes_need_chatblast_access(): void
+    {
+        Http::fake();
+        $this->actingAs($this->user()); // CEO: kahit siya ay hindi makakasulat ng ACTIVE sa Page settings
+        $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'chatbot', 'key' => 'active', 'value' => '0'])->assertStatus(422);
+        $this->assertNull($this->settings()->get('Page Uno', 'chatbot', 'active'));
+
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'price', 'value' => '1'])->assertForbidden();
+        $this->postJson('/chatbot/column', ['name' => 'Promo'])->assertForbidden();
+        $this->assertSame(0, PageSetting::where('provider', 'chatbot')->count());
+    }
+
+    public function test_S_068_10_a_page_cannot_take_a_botcake_id_another_page_uses_or_join_twice(): void
+    {
+        Http::fake(['botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
+        $this->actingAs($this->user());
+
+        $this->postJson('/chatbot/pages', ['page_name' => 'Page X', 'page_id' => '1001', 'token' => self::NEW_TOKEN])
+            ->assertStatus(422)->assertJson(['error' => 'Botcake ID 1001 is already used by Page Uno.']);
+        $this->postJson('/chatbot/pages', ['page_name' => 'page uno', 'page_id' => '7007', 'token' => self::NEW_TOKEN])->assertStatus(422);
+        $this->assertNull($this->settings()->get('Page X', 'botcake', 'page_id'));
+        $this->assertSame('1001', $this->settings()->get('Page Uno', 'botcake', 'page_id'));
+    }
+
+    public function test_S_068_11_on_that_fails_at_publish_keeps_the_new_key_and_says_so(): void
+    {
+        $calls = 0;
+        Http::fake(['botcake.io/*' => function () use (&$calls) {
+            return ++$calls === 1 ? Http::response(['success' => true]) : Http::response(['success' => false, 'message' => 'Busy']);
+        }]);
+        $this->actingAs($this->user());
+
+        $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => true])->assertOk()
+            ->assertJson(['active' => true, 'error' => 'Could not publish the Default Reply: Botcake said "Busy" (HTTP 200).']);
+        $this->assertGreaterThanOrEqual(32, strlen((string) $this->settings()->get('Page Uno', 'botcake', 'chat.key')), 'ang block sa Botcake ay may hawak na ng key');
+        $this->assertNull($this->settings()->get('Page Uno', 'chatbot', 'active'));
+    }
+
+    public function test_S_068_12_values_columns_and_names_have_limits_and_a_column_never_reads_botcake_settings(): void
+    {
+        Http::fake();
+        $this->actingAs($this->user());
+
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'prompt_2', 'value' => str_repeat('a', 10000)])->assertOk();
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'prompt_2', 'value' => str_repeat('a', 10001)])->assertStatus(422);
+
+        $this->postJson('/chatbot/column', ['name' => 'Token'])->assertOk()->assertJson(['key' => 'token']);
+        $uno = collect($this->getJson('/chatbot/data')->json('rows'))->firstWhere('page', 'Page Uno');
+        $this->assertArrayNotHasKey('token', (array) $uno['cells'], 'ang botcake.token ay hindi kailanman column');
+        $this->assertStringNotContainsString(self::TOKEN, json_encode($uno));
+
+        DB::table('app_settings')->where('key', 'chatbot.columns')->delete();
+        $many = [];
+        for ($i = 1; $i <= \App\Services\ChatbotFields::MAX_ADDED; $i++) $many['extra_' . $i] = 'Extra ' . $i;
+        DB::table('app_settings')->insert(['key' => 'chatbot.columns', 'value' => json_encode($many), 'created_at' => now(), 'updated_at' => now()]);
+        $this->postJson('/chatbot/column', ['name' => 'One too many'])->assertStatus(422);
+    }
+
+    public function test_S_068_13_setup_all_leaves_pages_that_are_switched_off(): void
+    {
+        Http::fake(['botcake.io/*' => Http::response(['success' => true])]);
+        $this->settings()->set('Page Dos', 'chatbot', 'active', '0', false, null, true);
+
+        Artisan::call('botcake:chat-setup', ['--all' => true, '--dry-run' => true]);
+        $this->assertStringContainsString('Page Dos (2002): bot is Off, skipped', Artisan::output());
+        Artisan::call('botcake:chat-setup', ['--all' => true, '--confirm' => true]);
+
+        $this->assertSame(['https://botcake.io/api/public_api/v1/pages/1001/default_reply/content', 'https://botcake.io/api/public_api/v1/pages/1001/default_reply'],
+            array_map(fn ($p) => $p[0]->url(), Http::recorded()->all()));
+        $this->assertSame('0', $this->settings()->get('Page Dos', 'chatbot', 'active'));
     }
 
     public function test_S_068_7_a_new_column_shows_for_every_page(): void

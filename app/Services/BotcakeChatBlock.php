@@ -52,7 +52,7 @@ class BotcakeChatBlock
         $r = $client->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply', ['update' => ['is_published' => true, 'unlimit_default_reply' => true]], $token);
         if (!$this->ok($r)) return ['ok' => false, 'key' => $plan, 'step' => 'publish', 'error' => $this->error('publish the Default Reply', $r)];
 
-        $this->settings->set($page, 'chatbot', 'active', '1');
+        $this->settings->set($page, 'chatbot', 'active', '1', false, null, true); // system: ang switch lang ang sumusulat
 
         return ['ok' => true, 'key' => $plan, 'step' => null, 'error' => null];
     }
@@ -69,7 +69,7 @@ class BotcakeChatBlock
         $r = app(BotcakeClient::class)->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply', ['update' => ['is_published' => false]], $token);
         if (!$this->ok($r)) return ['ok' => false, 'error' => $this->error('unpublish the Default Reply', $r)];
 
-        $this->settings->set($page, 'chatbot', 'active', '0');
+        $this->settings->set($page, 'chatbot', 'active', '0', false, null, true);
 
         return ['ok' => true, 'error' => null];
     }

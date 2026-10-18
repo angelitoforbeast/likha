@@ -51,6 +51,11 @@ class BotcakeChatSetup extends Command
 
         $failed = 0;
         foreach ($targets as $name => $pageId) {
+            // --all: ang page na in-Off ng CEO sa /chatbot ay hindi binubuhay ulit (ang isang page na tahasang pinangalanan ay oo).
+            if ($all && $settings->get($name, 'chatbot', 'active') === '0') {
+                $this->line("{$name} ({$pageId}): bot is Off, skipped");
+                continue;
+            }
             if ($dry) {
                 $this->line("{$name} ({$pageId}): would " . self::PLAN[$chatBlock->keyPlan($name, $rotate)] . ', write the Chat to site block and publish the Default Reply');
                 continue;

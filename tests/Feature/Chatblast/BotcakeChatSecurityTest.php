@@ -261,13 +261,13 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
     public function test_S_068_8_a_page_with_the_bot_off_keeps_no_chats_and_is_counted(): void
     {
         Http::fake();
-        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '0');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
 
         BotcakePsid::create(['page' => 'Page Dos', 'fb_name' => 'Ana Cruz', 'psid' => 'psid-known', 'status' => 'available', 'source' => 'api']);
 
         $this->send(['message' => 'while off'])->assertOk()->assertExactJson(['ok' => true]);
         $this->send(['message' => 'dos on', 'page_id' => '2002'], self::KEY_DOS)->assertOk(); // walang active na row: On
-        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '1');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '1', false, null, true);
         $this->send(['message' => 'back on'])->assertOk();
 
         $this->assertSame(['dos on', 'back on'], BotcakeChat::orderBy('id')->pluck('message')->all());

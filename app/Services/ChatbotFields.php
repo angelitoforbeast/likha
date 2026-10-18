@@ -17,6 +17,7 @@ class ChatbotFields
     public const RESERVED = ['active'];
     public const ADDED_SETTING = 'chatbot.columns'; // app_settings: JSON {key: label}
     public const MAX_VALUE = 10000;
+    public const MAX_ADDED = 200; // hanggang ilang column ang maidadagdag sa "+ Column" (walang tanggalan sa screen)
 
     /** @return array<string, string> key => label, sa ayos ng sheet */
     public static function defaults(): array
@@ -69,7 +70,7 @@ class ChatbotFields
 
     /**
      * Bagong column para sa lahat ng page. Ang dati nang column (default man o idinagdag) ay ibinabalik lang.
-     * @return array{key: string, label: string}|null null = walang magagamit na pangalan o nakalaan (ACTIVE)
+     * @return array{key: string, label: string}|null null = walang magagamit na pangalan, nakalaan (ACTIVE), o puno na (MAX_ADDED)
      */
     public function add(string $name): ?array
     {
@@ -80,10 +81,21 @@ class ChatbotFields
         $existing = collect($this->columns())->firstWhere('key', $key);
         if ($existing) return ['key' => $key, 'label' => $existing['label']];
 
-        $added = $this->added() + [$key => mb_substr($label, 0, 100)];
-        DB::table('app_settings')->updateOrInsert(['key' => self::ADDED_SETTING], ['value' => json_encode($added), 'updated_at' => now(), 'created_at' => now()]);
+        // Naka-lock ang row habang binabasa at isinusulat, para hindi mawala ang isa sa dalawang sabay na dagdag.
+        return DB::transaction(function () use ($key, $label) {
+            if (!DB::table('app_settings')->where('key', self::ADDED_SETTING)->exists()) {
+                DB::table('app_settings')->insertOrIgnore(['key' => self::ADDED_SETTING, 'value' => '{}', 'created_at' => now(), 'updated_at' => now()]);
+            }
+            DB::table('app_settings')->where('key', self::ADDED_SETTING)->lockForUpdate()->first();
+            $added = $this->added();
+            if (isset($added[$key])) return ['key' => $key, 'label' => $added[$key]];
+            if (count($added) >= self::MAX_ADDED) return null;
 
-        return ['key' => $key, 'label' => $added[$key]];
+            $added[$key] = mb_substr($label, 0, 100);
+            DB::table('app_settings')->where('key', self::ADDED_SETTING)->update(['value' => json_encode($added), 'updated_at' => now()]);
+
+            return ['key' => $key, 'label' => $added[$key]];
+        });
     }
 
     /** @return array<string, string> */

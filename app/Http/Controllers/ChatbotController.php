@@ -120,7 +120,7 @@ class ChatbotController extends Controller
     {
         $this->checkAccess();
         $col = $this->fields->add($this->str($request, 'name', 100));
-        if ($col === null) return response()->json(['error' => 'Use letters or numbers (ACTIVE is taken).'], 422);
+        if ($col === null) return response()->json(['error' => 'Use letters or numbers (ACTIVE is taken); at most ' . ChatbotFields::MAX_ADDED . ' added columns.'], 422);
 
         return response()->json($col + ['kind' => ChatbotFields::kind($col['key'])]);
     }
@@ -158,6 +158,10 @@ class ChatbotController extends Controller
         $hasToken = $token !== '' || trim((string) $this->settings->get($page, 'botcake', 'token')) !== '';
         if ($pageId === '' || !$hasToken) return response()->json(['error' => 'A Botcake ID and a token are needed.'], 422);
         if ($errors = $this->settings->validate($page, 'botcake', 'page_id', $pageId)) return response()->json(['error' => reset($errors)], 422);
+        // Isang Botcake ID, isang page: ang pangalawang page na may parehong ID ay aagaw sa mga chat ng una (mawawala).
+        $owner = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)->where('value', $pageId)
+            ->pluck('page_name')->first(fn ($p) => $this->settings->pageKey($p) !== $this->settings->pageKey($page));
+        if ($owner !== null) return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}."], 422);
 
         $this->settings->set($page, 'botcake', 'page_id', $pageId, false, Auth::id());
         if ($token !== '') $this->settings->set($page, 'botcake', 'token', $token, true, Auth::id());
