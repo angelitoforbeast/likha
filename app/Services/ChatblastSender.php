@@ -72,6 +72,24 @@ class ChatblastSender
         return $test->fresh();
     }
 
+    /**
+     * Send test ng page settings para sa page na wala pang mensahe: isang maikling text sa Test PSID ng page. Null kapag
+     * walang Test PSID.
+     */
+    public function sendTestText(string $page, string $text, ?int $userId): ?BotcakeMessage
+    {
+        $psid = trim((string) $this->settings->get($page, 'botcake', 'test_psid'));
+        if ($psid === '') return null;
+
+        $test = BotcakeMessage::create([
+            'page_name' => $this->settings->normPage($page), 'waybill' => 'TEST', 'kind' => 'test', 'psid' => $psid, 'text' => $text,
+            'status' => 'queued', 'is_test' => true, 'queued_at' => now(), 'created_by' => $userId, 'sent_by' => $userId,
+        ]);
+        SendChatblastMessage::dispatch($test->id);
+
+        return $test->fresh();
+    }
+
     public function paused(): bool
     {
         return AppSetting::get(self::PAUSED) === '1';
@@ -167,6 +185,12 @@ class ChatblastSender
         $missing = array_keys(array_filter($cfg, fn ($v) => $v === ''));
         if ($missing) {
             $this->finish($m, 'no_config', 'missing ' . implode(', ', $missing), null, []);
+            return;
+        }
+        // Ang page ay dapat Ready: may kumpirmadong padala (test o totoo) pagkatapos ng huling pagbabago ng setup. Ang test
+        // send mismo ang paraan para maging Ready, kaya hindi ito saklaw. Babalik sa ready sa unang pagkuha pagkatapos ng test.
+        if (!$m->is_test && !app(ChatblastReady::class)->tested($m->page_name)) {
+            $this->finish($m, 'no_config', ChatblastReady::NOT_TESTED, null, []);
             return;
         }
 
@@ -344,6 +368,8 @@ class ChatblastSender
         if (!$ok($f)) { $this->finish($m, 'failed', 'The flow was not sent (HTTP ' . $f['http'] . ')', $f['http'], $steps); return; }
 
         $this->finish($m, 'sent', null, $f['http'], $steps);
+        // Matagumpay na test (sulat, basa at flow: lahat 2xx): ang page ay Ready na (ChatblastReady).
+        if ($m->is_test) $this->settings->set($m->page_name, 'botcake', 'test_ok', now('Asia/Manila')->format('Y-m-d H:i:s'), false, null, true);
     }
 
     /** Ang laman ng field sa sagot ng GET customer_fields (listahan sa data, o listahan mismo), o null kapag wala. */

@@ -9,6 +9,10 @@ use App\Models\PageSetting;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakeFlowNames;
 use App\Services\BotcakePageSetup;
+use App\Models\BotcakeMessage;
+use App\Services\Chatblast;
+use App\Services\ChatblastReady;
+use App\Services\ChatblastSender;
 use App\Services\BotcakeSyncAll;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
@@ -251,6 +255,32 @@ class PageSettingController extends Controller
         }
 
         return response()->json($out);
+    }
+
+    /**
+     * "Send test" ng row: ang text ng pinakabagong mensahe ng page (o isang maikling sample) sa Test PSID ng page, sa
+     * queue. Kapag naging sent (sulat, basa at flow: lahat 2xx), ang page ay Ready (botcake.test_ok, ChatblastReady).
+     */
+    public function sendTest(Request $request, ChatblastSender $sender)
+    {
+        $this->checkAccess();
+
+        $page = $this->settings->normPage((string) $request->input('page_name', ''));
+        foreach (Chatblast::REQUIRED as $key) {
+            if (trim((string) $this->settings->get($page, 'botcake', $key)) === '') {
+                return response()->json(['error' => 'Complete the setup first (Botcake ID, token, Chatblast flow and message field).'], 422);
+            }
+        }
+        if (trim((string) $this->settings->get($page, 'botcake', 'test_psid')) === '') {
+            return response()->json(['error' => 'Set a Test PSID first'], 422);
+        }
+
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $latest = BotcakeMessage::where('is_test', false)->whereNotNull('text')->where('text', '<>', '')
+            ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])->orderByDesc('id')->first(['id']);
+        $test = $latest ? $sender->sendTest($latest->id, Auth::id()) : $sender->sendTestText($page, ChatblastReady::SAMPLE_TEXT, Auth::id());
+
+        return response()->json(['status' => $test->status, 'id' => $test->id]);
     }
 
     /** Incremental sync ng isang page, sa queue. */

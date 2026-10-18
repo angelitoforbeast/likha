@@ -62,13 +62,17 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
         ]]);
     }
 
-    /** Isang page na kumpleto ang Botcake settings para sa chatblast. */
-    protected function page(string $page, string $id = '1001', array $except = []): void
+    /**
+     * Isang page na kumpleto ang Botcake settings para sa chatblast. $tested: may matagumpay na test send pagkatapos ng
+     * settings (botcake.test_ok), kaya Ready ang page; false para sa page na kailangan pa ng test send.
+     */
+    protected function page(string $page, string $id = '1001', array $except = [], bool $tested = true): void
     {
         $s = app(PageSettings::class);
         foreach (['page_id' => $id, 'token' => self::TOKEN, 'flow.shipping' => '5501', 'field.message' => '7701'] as $key => $value) {
             if (!in_array($key, $except, true)) $s->set($page, 'botcake', $key, $value);
         }
+        if ($tested) $s->set($page, 'botcake', 'test_ok', now('Asia/Manila')->format('Y-m-d H:i:s'), false, null, true);
     }
 
     /** Isang order na may J&T status ng waybill nito. */

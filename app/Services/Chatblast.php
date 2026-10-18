@@ -39,6 +39,8 @@ class Chatblast
 
     /** Ang kailangan ng page para makapagpadala (page_id para sa bawat API path). */
     public const REQUIRED = ['page_id', 'token', 'flow.shipping', 'field.message'];
+    /** Sa missingByPage(): kumpleto ang setup pero kailangan pa ng test send (ChatblastReady). */
+    public const UNTESTED = '!test send';
 
     /** Ang mga status na hindi pa naipapadala: dito lang nagbabago ang text kapag binago ang mga araw. */
     public const UNSENT = ['ready', 'no_psid', 'no_config', 'failed', 'field_mismatch', 'skipped'];
@@ -591,6 +593,7 @@ class Chatblast
     /** @return array{0:string, 1:?string} [status, dahilan] */
     private function readiness(?string $psid, array $missingKeys): array
     {
+        if ($missingKeys === [self::UNTESTED]) return ['no_config', ChatblastReady::NOT_TESTED];
         if ($missingKeys) return ['no_config', 'missing ' . implode(', ', $missingKeys)];
         if (trim((string) $psid) === '') return ['no_psid', self::NO_PSID];
 
@@ -624,6 +627,17 @@ class Chatblast
                         ->update(['status' => $status, 'reason' => $reason, 'psid' => $psid]);
                 }
             });
+
+        // Ang ready ng page na kailangan pa ng test send: inilalabas sa To send (no_config); babalik ito sa ready sa itaas
+        // sa unang pagkuha pagkatapos ng test.
+        $untested = array_keys(array_filter($missing, fn ($keys) => $keys === [self::UNTESTED]));
+        if ($untested) {
+            BotcakeMessage::where('kind', $kind)->where('is_test', false)->where('status', 'ready')->select('id', 'page_name')
+                ->chunkById(500, function ($rows) use (&$changed, $untested) {
+                    $ids = $rows->filter(fn ($r) => in_array($this->settings->pageKey($r->page_name), $untested, true))->pluck('id')->all();
+                    if ($ids) $changed += BotcakeMessage::whereIn('id', $ids)->where('status', 'ready')->update(['status' => 'no_config', 'reason' => ChatblastReady::NOT_TESTED]);
+                });
+        }
 
         return $changed;
     }
@@ -834,7 +848,15 @@ class Chatblast
         PageSetting::where('active', true)->where('provider', 'botcake')->whereIn('key', self::REQUIRED)->get(['page_name', 'key'])
             ->each(function ($s) use (&$have) { $have[$this->settings->pageKey($s->page_name)][$s->key] = true; });
 
-        return array_map(fn ($keys) => array_values(array_filter(self::REQUIRED, fn ($k) => !isset($keys[$k]))), $have);
+        $missing = array_map(fn ($keys) => array_values(array_filter(self::REQUIRED, fn ($k) => !isset($keys[$k]))), $have);
+
+        // Kumpleto ang setup pero wala pang kumpirmadong padala pagkatapos nito: hindi pa Ready (UNTESTED).
+        $ready = app(ChatblastReady::class)->states();
+        foreach ($missing as $pk => $keys) {
+            if (!$keys && !($ready[$pk]['tested'] ?? false)) $missing[$pk] = [self::UNTESTED];
+        }
+
+        return $missing;
     }
 
     /**
