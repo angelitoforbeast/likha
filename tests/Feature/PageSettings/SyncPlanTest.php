@@ -46,9 +46,9 @@ class SyncPlanTest extends BotcakeApiTestCase
         $this->botcake('Page Tuloy');
         $this->apiRun('Page Tuloy', 'time', 'window', 8);             // putol na window: tuloy mula 20 - 5
         $this->botcake('Page Inc');
-        $this->apiRun('Page Inc', 'age', 'window', 8);                // tapos, 8 oras na: incremental
+        $this->apiRun('Page Inc', 'age', 'window', 8, ['subscribed_newest' => '2026-10-17']); // tapos, 8 oras na: by date
         $this->botcake('Page Fresh');
-        $this->apiRun('Page Fresh', 'end', 'window', 2);              // tapos, 2 oras pa lang: laktaw
+        $this->apiRun('Page Fresh', 'end', 'window', 2, ['subscribed_newest' => '2026-10-18']); // tapos, 2 oras pa lang: laktaw
         $this->botcake('Page Fresh Window');
         $this->apiRun('Page Fresh Window', 'time', 'window', 1);      // sariwa pero tuloy: hindi nilalaktawan
         $this->botcake('Page Bad', 'invalid 2026-10-18 08:00');
@@ -58,17 +58,17 @@ class SyncPlanTest extends BotcakeApiTestCase
 
         $this->assertSame(['kind' => 'window', 'label' => 'window (45 araw, buo)'], $next['Page Win']);
         $this->assertSame(['kind' => 'continue', 'label' => 'tuloy mula batch 15'], $next['Page Tuloy']);
-        $this->assertSame(['kind' => 'incremental', 'label' => 'incremental'], $next['Page Inc']);
+        $this->assertSame(['kind' => 'by_date', 'label' => 'by date, mula Okt 16'], $next['Page Inc']);
         $this->assertSame(['kind' => 'fresh', 'label' => 'laktaw (sariwa, 2 oras na)'], $next['Page Fresh']);
         $this->assertSame('continue', $next['Page Fresh Window']['kind']);
         $this->assertSame(['kind' => 'invalid', 'label' => 'token invalid'], $next['Page Bad']);
         $this->assertSame(['kind' => 'missing', 'label' => 'walang ID/token'], $next['Page Wala']);
 
         $grid = $this->get('/page-settings')->viewData('grid');
-        $this->assertSame('1 window, 2 tuloy, 1 incremental, 1 laktaw (sariwa), 1 walang ID/token, 1 token invalid', $grid['plan_summary']);
+        $this->assertSame('1 window, 2 tuloy, 1 by date, 1 laktaw (sariwa), 1 walang ID/token, 1 token invalid', $grid['plan_summary']);
 
         config(['services.botcake.sync_all_fresh_hours' => 1]);
-        $this->assertSame('incremental', $this->rows()['Page Fresh']['info']['next']['kind'], 'ang oras ay mula sa config');
+        $this->assertSame('by_date', $this->rows()['Page Fresh']['info']['next']['kind'], 'ang oras ay mula sa config');
     }
 
     public function test_the_last_sync_shows_its_counts(): void

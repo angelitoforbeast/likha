@@ -48,10 +48,10 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         }]);
     }
 
-    /** Nakabasa na ang page ng buong window dati: ang susunod na sync ay incremental (hindi window read). */
+    /** Nakabasa na ang page ng buong window dati (hanggang ngayon): ang susunod na sync ay by date (hindi window read). */
     private function windowDone(): void
     {
-        BotcakePsidImportRun::create(['status' => 'done', 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => 'end', 'read_kind' => 'window', 'start_batch' => 1]);
+        BotcakePsidImportRun::create(['status' => 'done', 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => 'end', 'read_kind' => 'window', 'start_batch' => 1, 'subscribed_newest' => now()->toDateString()]);
     }
 
     private function psids(string $prefix, int $from, int $count = 10): array
@@ -59,9 +59,9 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         return array_map(fn ($i) => $prefix . $i, range($from, $from + $count - 1));
     }
 
-    public function test_incremental_stops_at_the_first_batch_whose_psids_are_all_known(): void
+    public function test_a_by_date_read_of_customers_without_dates_reads_to_the_end(): void
     {
-        // Naitala na ang page 2 mula sa naunang sync; ang page 1 ay bago.
+        // Naitala na ang page 2 mula sa naunang sync; ang page 1 ay bago. Walang petsa: hindi alam kung luma, kaya tuloy.
         $this->windowDone();
         foreach ($this->psids('p', 11) as $psid) {
             BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Name ' . $psid, 'psid' => $psid, 'status' => 'available', 'source' => 'api']);
@@ -72,10 +72,10 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
 
         $this->assertSame(0, Artisan::call('botcake:sync-customers', ['--page' => 'page uno']));
 
-        $this->assertSame([1, 2], $this->asked, 'hindi na binasa ang page 3');
-        $this->assertSame(21, BotcakePsid::where('source', 'api')->count());
+        $this->assertSame([1, 2, 3, 4], $this->asked, 'hindi humihinto sa kilalang page 2');
+        $this->assertSame(31, BotcakePsid::where('source', 'api')->count());
         $run = BotcakePsidImportRun::where('source', 'api')->latest('id')->first();
-        $this->assertSame(['done', 'Page Uno', 2, 10, 0, 'known_batch'], [$run->status, $run->page_name, $run->batches_read, $run->customers_new, $run->customers_updated, $run->stop_reason]);
+        $this->assertSame(['done', 'Page Uno', 4, 20, 0, 'end', 'by_date'], [$run->status, $run->page_name, $run->batches_read, $run->customers_new, $run->customers_updated, $run->stop_reason, $run->read_kind]);
         $this->assertSame('available', BotcakePsid::where('psid', 'p1')->value('status'));
         $this->assertStringEndsWith(', 1 ad id', $run->last_message, 'nakikita sa log ang napunang ad id');
     }
@@ -144,26 +144,6 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertSame(0, BotcakePsid::count());
         $this->assertStringNotContainsString(self::TOKEN, implode("\n", $logged) . Artisan::output() . $run->last_error);
     }
-    public function test_an_incremental_run_stops_at_the_cap_and_the_next_run_reads_the_whole_window_from_page_1(): void
-    {
-        $this->assertSame(300, (int) config('services.botcake.sync_max_batches'));
-        config(['services.botcake.sync_max_batches' => 5]);
-        $this->windowDone();
-        $this->fakeCustomers(fn (int $n) => $n > 8 ? [] : $this->psids('n' . $n . '-', 1));
-
-        Artisan::call('botcake:sync-customers');
-
-        $run = BotcakePsidImportRun::where('source', 'api')->latest('id')->first();
-        $this->assertSame(['done', 'cap', 5, 50, 'incremental'], [$run->status, $run->stop_reason, $run->batches_read, $run->customers_new, $run->read_kind]);
-        $this->assertSame(5, max($this->asked));
-
-        $this->asked = [];
-        Artisan::call('botcake:sync-customers');
-        $this->assertSame(range(1, 9), $this->asked, 'cap ang huli: window read mula page 1, lampas sa cap at sa kilalang batch');
-        $run = BotcakePsidImportRun::where('source', 'api')->latest('id')->first();
-        $this->assertSame(['end', 'window'], [$run->stop_reason, $run->read_kind]);
-    }
-
     private function apiRow(string $psid, string $status, ?int $seenDaysAgo, ?int $subscribedDaysAgo = 20): BotcakePsid
     {
         return BotcakePsid::create([
@@ -189,10 +169,10 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertSame(12, BotcakePsid::where('source', 'api')->count(), 'walang binura: 3 dati + 9 bago');
     }
 
-    public function test_an_errored_full_read_or_an_incremental_run_marks_nobody_inactive(): void
+    public function test_an_errored_full_read_or_a_by_date_run_marks_nobody_inactive(): void
     {
         $stale = $this->apiRow('old-1', 'available', 31);
-        $this->windowDone(); // ang ikalawang sync ay incremental
+        $this->windowDone(); // ang ikalawang sync ay by date
 
         $this->fakeCustomers([1 => $this->psids('p', 1), 2 => $this->psids('p', 11)], [null, 500, 500, 500, 500]);
         Artisan::call('botcake:sync-customers', ['--full' => true]);
@@ -276,18 +256,6 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         $this->assertSame($asked, $this->asked);
         $this->assertSame($reason, BotcakePsidImportRun::where('source', 'api')->sole()->stop_reason);
         $this->assertTrue(BotcakePsid::where('psid', 'q-old')->exists(), 'ang batch na binasa ay naitatala buo');
-    }
-
-    public function test_the_all_known_batch_stop_comes_before_the_age_stop(): void
-    {
-        $old = array_map(fn ($i) => $this->subscribed('p' . $i, 60), range(1, 10));
-        foreach ($old as $c) $this->apiRow($c['psid'], 'available', 1, 60);
-        $this->windowDone();
-        $this->fakeCustomers([1 => $old]);
-
-        Artisan::call('botcake:sync-customers');
-
-        $this->assertSame('known_batch', BotcakePsidImportRun::where('source', 'api')->latest('id')->value('stop_reason'));
     }
 
     public function test_a_windowed_full_read_marks_inactive_only_customers_subscribed_within_the_window(): void

@@ -269,7 +269,7 @@
     function infoNext(r) { return r.info.next ? r.info.next.label : ''; }
 
     // Kapareho ng BotcakeSyncAll::summary(): bilang kada uri ng susunod na sync.
-    const SUMMARY = {window: 'window', continue: 'tuloy', incremental: 'incremental', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
+    const SUMMARY = {window: 'window', continue: 'tuloy', by_date: 'by date', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
     function refreshSummary() {
         const count = {};
         for (const r of rows.values()) if (r.info.next) count[r.info.next.kind] = (count[r.info.next.kind] || 0) + 1;

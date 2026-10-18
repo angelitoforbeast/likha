@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Queue;
 use Tests\Feature\Botcake\BotcakeApiTestCase;
 
 /**
- * "Sync lahat": isang sync kada page, isa-isa, sa ayos ng grid, ayon sa plano ng bawat page; ang sariwang incremental
+ * "Sync lahat": isang sync kada page, isa-isa, sa ayos ng grid, ayon sa plano ng bawat page; ang sariwang by date
  * ay nilalaktawan. Ang run ay nasa database (source sync_all): Pause, Resume at Stop; at ang lumang run sa cache ay inaampon.
  */
 class SyncAllTest extends BotcakeApiTestCase
@@ -68,10 +68,10 @@ class SyncAllTest extends BotcakeApiTestCase
         $job->handle(app(BotcakeCustomerSync::class), app(BotcakeSyncAll::class));
     }
 
-    /** Ang Page Uno ay may matagumpay na incremental-ready na run 2 oras na ang nakalipas: sariwa. */
+    /** Ang Page Uno ay may malinis na window read (hanggang ngayon) 2 oras na ang nakalipas: by date na, at sariwa. */
     private function freshUno(): void
     {
-        $run = BotcakePsidImportRun::create(['status' => 'done', 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => 'end', 'read_kind' => 'window', 'start_batch' => 1]);
+        $run = BotcakePsidImportRun::create(['status' => 'done', 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => 'end', 'read_kind' => 'window', 'start_batch' => 1, 'subscribed_newest' => now()->toDateString()]);
         DB::table('botcake_psid_import_runs')->where('id', $run->id)->update(['updated_at' => now()->subHours(2)]);
     }
 
@@ -101,6 +101,19 @@ class SyncAllTest extends BotcakeApiTestCase
         SyncBotcakeCustomersJob::dispatch('Page Uno');
 
         $this->assertSame(['1001'], $this->calledPages());
+        $this->assertSame('by_date', BotcakePsidImportRun::where('source', 'api')->latest('id')->value('read_kind'), 'ang row Sync ay by date');
+    }
+
+    public function test_sync_all_runs_a_by_date_read_for_a_page_that_finished_its_window(): void
+    {
+        $this->freshUno();
+        config(['services.botcake.sync_all_fresh_hours' => 1]); // 2 oras na: hindi na sariwa
+        Http::fake(['botcake.io/api/public_api/v1/pages/*' => Http::response([], 200)]);
+
+        $this->press()->assertOk();
+
+        $run = BotcakePsidImportRun::where('source', 'api')->where('page_name', 'Page Uno')->latest('id')->first();
+        $this->assertSame(['by_date', now()->subDay()->toDateString()], [$run->read_kind, $run->stop_date?->toDateString()]);
     }
 
     public function test_the_panel_sums_the_pages_and_keeps_the_last_10_runs(): void

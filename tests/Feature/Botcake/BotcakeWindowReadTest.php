@@ -50,11 +50,11 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         }]);
     }
 
-    private function pastRun(?string $stop, int $batches = 1, ?string $kind = null, ?int $start = null, string $status = 'done'): BotcakePsidImportRun
+    private function pastRun(?string $stop, int $batches = 1, ?string $kind = null, ?int $start = null, string $status = 'done', ?string $newest = null): BotcakePsidImportRun
     {
         return BotcakePsidImportRun::create([
             'status' => $status, 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => $stop,
-            'batches_read' => $batches, 'read_kind' => $kind, 'start_batch' => $start,
+            'batches_read' => $batches, 'read_kind' => $kind, 'start_batch' => $start, 'subscribed_newest' => $newest,
         ]);
     }
 
@@ -91,9 +91,9 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
             'cap'                        => [[['end', 2, 'window', 1], ['cap', 3, 'incremental', 1]], 1, 'window'],
             'time: tuloy, minus 5'       => [[['time', 20, 'window', 1]], 15, 'window'],
             'time ng tuloy na basa'      => [[['time', 20, 'window', 1], ['time', 30, 'window', 15]], 39, 'window'],
-            'age'                        => [[['age', 4, 'window', 1]], 1, 'incremental'],
-            'end'                        => [[['end', 2, 'incremental', 1]], 1, 'incremental'],
-            'known_batch pagkatapos ng age' => [[['age', 4, 'window', 1], ['known_batch', 1, 'incremental', 1]], 1, 'incremental'],
+            'age'                        => [[['age', 4, 'window', 1, 'done', '2026-10-01']], 1, 'by_date'],
+            'end ng incremental: hindi buong window' => [[['end', 2, 'incremental', 1]], 1, 'window'],
+            'known_batch pagkatapos ng age' => [[['age', 4, 'window', 1, 'done', '2026-10-01'], ['known_batch', 1, 'incremental', 1]], 1, 'by_date'],
             'known_batch lang, hindi pa buo' => [[['known_batch', 1, null, null]], 1, 'window'],
             'lumang run na walang kind'  => [[['cap', 300, null, null]], 1, 'window'],
             'rate limit sa gitna: tuloy' => [[['rate_limited', 12, 'window', 1, 'failed']], 7, 'window'],
@@ -104,7 +104,7 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
             'cap, saka known_batch'      => [[['end', 2, 'window', 1], ['cap', 3, 'incremental', 1], ['known_batch', 1, 'incremental', 1]], 1, 'window'],
             'putol na window, saka failed na full' => [[['time', 20, 'window', 1], ['error', 3, 'full', 1, 'failed']], 15, 'window'],
             'putol na window, saka pinatay na full' => [[['time', 20, 'window', 1], ['killed', 2, 'full', 1, 'failed']], 15, 'window'],
-            'age, saka 2 known_batch'    => [[['age', 4, 'window', 1], ['known_batch', 1, 'incremental', 1], ['known_batch', 1, 'incremental', 1]], 1, 'incremental'],
+            'age, saka 2 known_batch'    => [[['age', 4, 'window', 1, 'done', '2026-10-01'], ['known_batch', 1, 'incremental', 1], ['known_batch', 1, 'incremental', 1]], 1, 'by_date'],
         ];
     }
 
@@ -118,7 +118,6 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
 
         $this->assertSame($first, $this->asked[0]);
         $this->assertSame([$kind, $first], [$run->read_kind, $run->start_batch]);
-        if ($kind === 'incremental') $this->assertCount(3, $this->asked, 'incremental: may cap pa rin');
     }
 
     public function test_a_window_read_stops_after_22_minutes_and_the_next_one_continues_without_marking_inactive(): void
