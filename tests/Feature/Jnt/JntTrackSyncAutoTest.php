@@ -182,6 +182,27 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         $this->assertNotNull($run->finished_at);
     }
 
+    public function test_S_061_3_delivering_first_then_in_transit_not_checked_in_90_minutes_then_the_rest_each_newest_first(): void
+    {
+        $this->waybill('JT0000000001', 'In Transit', 1);    // hindi pa nasuri
+        $this->waybill('JT0000000002', 'In Transit', 2);    // nasuri 30 minuto na: sa huli
+        $this->waybill('JT0000000003', 'Problematic', 3);
+        $this->waybill('JT0000000004', 'Delivering', 4);
+        $this->waybill('JT0000000005', 'In Transit', 5);    // nasuri 91 minuto na
+        $this->waybill('JT0000000006', null, 6);
+        $this->waybill('JT0000000007', 'Delivering', 7);
+        DB::table('from_jnts')->insert(['waybill_number' => 'JT0000000008', 'status' => 'In Transit', 'submission_time' => now()->subMinutes(8)->format('Y-m-d H:i:s')]);
+        DB::table('from_jnts')->insert(['waybill_number' => 'JT0000000008', 'status' => 'Delivering', 'submission_time' => now()->subMinutes(9)->format('Y-m-d H:i:s')]); // may kopyang Delivering
+        $this->scans['JT0000000008'] = [$this->onDelivery()];
+        foreach (['JT0000000002' => 30, 'JT0000000005' => 91] as $wb => $ago) {
+            DB::table('jnt_latest_scans')->insert(['waybill' => $wb, 'scan_type' => 'Arrival', 'checked_at' => now()->subMinutes($ago)->format('Y-m-d H:i:s')]);
+        }
+
+        $this->sync();
+
+        $this->assertSame(['JT0000000004', 'JT0000000007', 'JT0000000008', 'JT0000000001', 'JT0000000005', 'JT0000000002', 'JT0000000003', 'JT0000000006'], $this->calls[0]);
+    }
+
     public function test_S_061_4_the_run_stops_at_40_minutes_and_the_next_run_starts_with_the_waybills_not_reached(): void
     {
         foreach (range(1, 60) as $i) $this->waybill(sprintf('JT%010d', $i), 'In Transit', 100 - $i); // ang 60 ang pinakabago

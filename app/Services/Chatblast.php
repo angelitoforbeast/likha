@@ -330,7 +330,8 @@ class Chatblast
 
     /**
      * Ang pinakabagong J&T scan ng mga waybill mula sa jnt_latest_scans, at ang rider para sa mensahe: ang nasa scan, kung
-     * wala ay ang nasa from_jnts ng waybill (ang pinakahuling row na may rider). type null = walang scan (rider lang).
+     * walang jnt_latest_scans row ang waybill ay ang nasa from_jnts (ang pinakahuling row na may rider). Ang scan na walang
+     * rider ay walang rider: ang from_jnts ay maaaring may rider pa ng ibang araw. type null = walang scan (rider lang).
      * @param  string[] $waybills
      * @return array<string, array{type:?string, time:?string, checked_at:?string, rider:string, rider_phone:string}>
      */
@@ -348,7 +349,7 @@ class Chatblast
             foreach ($chunk as $wb) {
                 $s = $rows[$wb] ?? null;
                 if (!$s && !isset($fallback[$wb])) continue;
-                [$rider, $phone] = trim((string) ($s->rider_name ?? '')) !== '' ? [$s->rider_name, $s->rider_phone] : ($fallback[$wb] ?? ['', '']);
+                [$rider, $phone] = $s ? [(string) $s->rider_name, (string) $s->rider_phone] : $fallback[$wb];
                 $out[$wb] = [
                     'type' => $s ? trim((string) $s->scan_type) : null, 'time' => $s->scan_time ?? null,
                     'checked_at' => $s && $s->checked_at ? Carbon::parse($s->checked_at)->toIso8601String() : null,
@@ -575,7 +576,7 @@ class Chatblast
                 $scan = $scans[$waybill] ?? null;
                 if ($c->requires_on_delivery && !self::deliveringToday($scan)) continue;
 
-                // Ang rider: mula sa jnt_latest_scans, kung wala ay sa from_jnts ng waybill (scans()).
+                // Ang rider: mula sa jnt_latest_scans; ang from_jnts lang kapag walang scan row ang waybill (scans()).
                 $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page,
                     'rider' => $scan['rider'] ?? '', 'rider_phone' => $scan['rider_phone'] ?? '', 'tracked_at' => $scan['checked_at'] ?? null];
                 if (!empty($scan['checked_at'])) $out['tracked']++;

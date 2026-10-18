@@ -164,26 +164,51 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->assertSame(0, $this->botcakeCalls());
     }
 
-    public function test_S_061_10_rider_placeholders_come_from_the_latest_scan_then_from_jnts(): void
+    public function test_S_061_10_rider_placeholders_come_from_the_latest_scan_and_from_jnts_only_without_a_scan_row(): void
     {
         app(Chatblast::class)->setSequence('delivering', [['Rider {rider} {rider_phone}', 'Walang rider {name}']]);
         $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
         $this->scan('JT0000000002', 'On Delivery', null, null, 'Juan D. Cruz', '639171234567');
         DB::table('from_jnts')->where('waybill_number', 'JT0000000002')->update(['rider_name' => 'Iba Pa', 'rider_phone' => '639170000001']);
-        $this->shipped('Page Uno', 'Ben Reyes', 'JT0000000004', 'psid-b'); // walang rider sa scan: from_jnts
-        DB::table('from_jnts')->where('waybill_number', 'JT0000000004')->update(['rider_name' => 'Maria Santos', 'rider_phone' => '9171112222']);
+        // May scan ngayon na walang rider: hindi ang rider sa from_jnts (maaaring kahapon pa).
+        $this->shipped('Page Uno', 'Ben Reyes', 'JT0000000004', 'psid-b');
+        DB::table('from_jnts')->where('waybill_number', 'JT0000000004')->update(['rider_name' => 'Rider Kahapon', 'rider_phone' => '9171112222']);
         $this->shipped('Page Uno', 'Cora Diaz', 'JT0000000006', 'psid-c'); // walang rider kahit saan
 
         app(Chatblast::class)->build('delivering');
 
-        $this->assertSame(['Rider Juan D. Cruz 09171234567', 'Rider Maria Santos 09171112222', 'Walang rider Cora Diaz'],
+        $this->assertSame(['Rider Juan D. Cruz 09171234567', 'Walang rider Ben Reyes', 'Walang rider Cora Diaz'],
             BotcakeMessage::orderBy('waybill')->pluck('text')->all());
+
+        // Walang jnt_latest_scans row: saka lang ang rider ng from_jnts (In Transit, walang On Delivery na kailangan).
+        app(Chatblast::class)->setSequence('in_transit', [['Rider {rider} {rider_phone}', 'Walang rider {name}']]);
+        $this->shipped('Page Uno', 'Dino Lim', 'JT0000000008', 'psid-d', 'In Transit');
+        DB::table('from_jnts')->where('waybill_number', 'JT0000000008')->update(['rider_name' => 'Maria Santos', 'rider_phone' => '9175550000']);
+        app(Chatblast::class)->build('in_transit');
+        $this->assertSame('Rider Maria Santos 09175550000', BotcakeMessage::where('waybill', 'JT0000000008')->value('text'));
 
         // Bago ipadala: ang bagong rider sa database ang ginagamit.
         $this->scan('JT0000000006', 'On Delivery', null, null, 'Pedro Reyes', '09175556666');
         $this->send();
         $this->assertSame('Rider Pedro Reyes 09175556666', BotcakeMessage::where('waybill', 'JT0000000006')->value('text'));
-        $this->assertSame(3, BotcakeMessage::where('status', 'sent')->count());
+    }
+
+    public function test_S_061_10_a_scan_without_a_rider_never_sends_an_earlier_days_rider(): void
+    {
+        app(Chatblast::class)->setSequence('delivering', [['Rider {rider} {rider_phone}']]); // lahat ng bersyon ay may rider
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        $this->scan('JT0000000002', 'On Delivery', null, null, 'Juan D. Cruz', '639171234567');
+        app(Chatblast::class)->build('delivering');
+        $this->assertSame('ready', BotcakeMessage::sole()->status);
+
+        // Bago ipadala: ang bagong On Delivery scan ay walang mabasang rider; ang from_jnts ay may rider pa kahapon.
+        $this->scan('JT0000000002', 'On Delivery');
+        DB::table('from_jnts')->where('waybill_number', 'JT0000000002')->update(['rider_name' => 'Juan D. Cruz', 'rider_phone' => '639171234567']);
+        $this->send();
+
+        $row = BotcakeMessage::sole();
+        $this->assertSame(['no_config', Chatblast::RIDER_REASON], [$row->status, $row->reason]);
+        $this->assertSame(0, $this->botcakeCalls(), 'walang mensahe na may lumang rider');
     }
 
     public function test_the_rider_name_and_phone_are_cleaned_for_the_message(): void

@@ -652,8 +652,6 @@ Accepted, not fixed:
 
 ## 061: hourly J&T track-sync, chatblast reads the database (2026-10-18)
 
-- **Rider fallback to from_jnts can name an earlier day's rider** (when today's On Delivery scan has no readable rider, the from_jnts rider columns still hold the last one ever parsed). Kept because the brief decided "falling back to from_jnts"; the safer rule is to fall back only when there is no scan row. Owner's call.
-- **At high volume the cap and the 90-minute window do not fit:** at 80k waybills a run may reach about 32k, so some Delivering waybills are checked every two hours and wait as "stale". Checking Delivering waybills first would fix it, but the brief says newest first. Owner's call.
 - **A crashed run stays "running" on /jnt/track-sync and drops its resume point** (the next run starts from the newest). Reason: rare; the hour claim already stops repeats. Mark leftover running rows failed at the next start if it shows up.
 - **The build-time skip of unsent requires-On-Delivery rows has no window limit** (two indexed queries per 500 unsent rows per build). Reason: the unsent set is small; limit it to the campaign window if it grows.
 - **"Delivered/Returned are final" is now in three places** (JntTracker, JntAutoTrackSync, the manual job). Reason: legacy minimal touches; share one constant when this area changes again.
