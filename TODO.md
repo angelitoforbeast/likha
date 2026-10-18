@@ -711,3 +711,21 @@ Accepted, not fixed:
 - **The helper in ChatbotController is called `role()`,** not the house `getNormalizedRole()`. Reason: cosmetic; same logic.
 - **The scratch app of the browser check left gitignored files** (two session files and a few cache files in this worktree's `storage/framework`, and `%TEMP%\cb068`). Reason: the project guard blocks deleting files from the session; they hold only scratch data and no real key or token.
 - **(re-check) The duplicate Botcake ID check in "+ Page" compares the stored text;** a `botcake.page_id` row someone marked secret in Page settings (encrypted) would slip past it. Reason: only trusted users can mark it secret, and page IDs are never secret in practice.
+
+## 069: chatbot flow builder (2026-10-19)
+
+- **The "chatbot" queue needs its own worker** (`php artisan queue:work --queue=chatbot`, under supervisor). Without it no customer gets a reply and the jobs wait in `jobs`; after 30 minutes a run gives up and its chat is passed over. Reason: production setup, done at deploy.
+- **With the replies switch off, runs still call OpenAI and still change real customer fields** (only sends and sheet rows are skipped). Reason: the brief's choice ("runs still happen"); flip the switch only after testing, or keep pages unlinked until then.
+- **A customer's first burst:** when the very first two chats of a customer arrive together and the second one's job runs first, the first chat is marked done without a run (there is no marker yet). Reason: only the first contact; later chats always run in order.
+- **Model names are free text** (a safe pattern, any model) and max tokens go up to 4000. Reason: staff with /chatblast access author flows; a model allowlist can come with cost tracking.
+- **The Test tab calls OpenAI for any role with /chatblast access** (30 a minute, the throttle). Reason: the brief asks for real AI in Test.
+- **The Google Sheet step can append to any spreadsheet the service account can edit,** and a column template without a variable can be a formula. Reason: flows are authored by staff; this is the TeleSMS rule the brief asked to port.
+- **A regex value may contain variables,** so customer text can become part of a pattern. Reason: PCRE's backtrack limit bounds it, and a failed match is "no match".
+- **Chatbot replies share each page's Botcake rate (2 a second) with chatblast,** and the throttle is not atomic across workers. Reason: the real limit is per token; a busy page plus a campaign backs up rather than failing at once.
+- **Per-run caching is light:** each stored chat costs a few page-settings lookups and a flow query in the trigger, the runner reads the flow per chat, and the outbox reads the page token per send. Reason: indexed lookups; measure at volume before adding caches.
+- **The Replies search is a LIKE over one day's rows.** Reason: date-bound as asked; at full volume it is slow but never a full scan.
+- **Editor autosave is last-write-wins** between two people editing the same flow. Reason: one owner edits flows today.
+- **Customer field keys are compared exactly in memory but by collation in MySQL** ("café" and "cafe" are one row there). Reason: field names are staff-authored.
+- **An append past 16,000 characters keeps the oldest text** (ALL USER INPUT stops growing). Reason: the TEXT column limit; the owner's loop clears it on exitloop.
+- **The second fix loop (FLOW dropdown shows the linked flow) got no reviewer re-check** (the 2-loop cap). Reason: pinned by S-069.H7.
+- **Engine slice 1 was written before its tests** (the tests came right after, in the same slice). Reason: noted in the result; slices 2–4 and both fix loops were test-first.

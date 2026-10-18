@@ -1367,3 +1367,58 @@ Spec 068. Tests are in `tests/Feature/Chatblast/ChatbotPagesTest.php` (S-068.8 i
 | S-068.11 | Given On fails at the publish step, then the error names publishing, ACTIVE is unchanged, and the new key is kept (the block on Botcake holds it) | `test_S_068_11…` | Passed · 2026-10-19 · auto |
 | S-068.12 | Given botfield values and columns, then 10,000 characters is the most a value takes, at most 200 columns can be added, and a column named "Token" never reads the Botcake token | `test_S_068_12…` | Passed · 2026-10-19 · auto |
 | S-068.13 | Given a page switched Off, when `botcake:chat-setup --all` runs (dry run or real), then that page is skipped and stays Off | `test_S_068_13…` | Passed · 2026-10-19 · auto |
+
+## S-069 Our own chatbot flow builder (replies through Botcake send_content)
+
+Spec 069. Tests are in `tests/Feature/Chatblast/Chatbot{Engine,Sending,Editor,Tabs,Hardening}Test.php`.
+
+### S-069E The engine
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.E1 | Given the owner's Main Flow rebuilt in nodes, when a customer chats "Hi", answers the form with a phone number, says "2 pcs", then "exitloop", then the image and texts go out, LOOP 1 waits for the form, the phone is thanked and extracted by AI, LOOP 2 asks the AI with Prompt 1, the order sends one sheet row, LOOP 3, and exitloop clears every field | `ChatbotEngineTest::test_S_069_E1…` | Passed · 2026-10-19 · auto |
+| S-069.E2 | Given a customer waiting in another flow or at a removed step, then the run starts from Start and the wait is dropped | `…E2…` | Passed · 2026-10-19 · auto |
+| S-069.E3 | Every Condition rule (is, is not, contains, contains any of by line or comma, not contains, starts with, regex incl. a bad pattern, is empty, is not empty, greater than, less than) | `…E3…` (17 data sets) | Passed · 2026-10-19 · auto |
+| S-069.E4 | The first matching row wins; no match exits on "no"; the variable name may be written with braces or any case | `…E4…` | Passed · 2026-10-19 · auto |
+| S-069.E5 | Every Set field operation (set, append with a separator, clear, clear all fields keeps only the run marker) | `…E5…` | Passed · 2026-10-19 · auto |
+| S-069.E6 | The AI step follows success (saves and sends the answer) or failed (HTTP error, no key) | `…E6…` | Passed · 2026-10-19 · auto |
+| S-069.E7 / H3 | A sheet cell built from a variable is always text (leading ' : no formula, no lost leading zero, no date); a template with no variable stays as written | `…E7…`, `ChatbotHardeningTest::…H3…` | Passed · 2026-10-19 · auto |
+| S-069.E8 | Variables ignore case, spaces and _; unknown ones are empty; botfields may hold variables (one level) | `…E8…` | Passed · 2026-10-19 · auto |
+| S-069.E9 | A loop stops after 100 steps | `…E9…` | Passed · 2026-10-19 · auto |
+| S-069.E10 | A failed send without a failed port stops the run | `…E10…` | Passed · 2026-10-19 · auto |
+| S-069.H4 | Customer text that contains {{…}} is never read as a variable, also through a botfield | `ChatbotHardeningTest::…H4…` | Passed · 2026-10-19 · auto |
+| S-069.H5 | The AI history holds only this customer's chats on this page and our sent replies | `…H5…` | Passed · 2026-10-19 · auto |
+| S-069.H6 | Config caps (10 messages, 20 rows, 50 columns, 2000/10000 characters, 4000 tokens, 20 history, safe model name), field values at most 16000 characters, at most 10 AI calls per run, OpenAI errors without detail | `…H6…` | Passed · 2026-10-19 · auto |
+
+### S-069S Sending and the runtime
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.S1 | Given replies on, then a Send message node calls send_content with the exact body and logs page, PSID, chat, flow, node, content and status | `ChatbotSendingTest::…S1…` | Passed · 2026-10-19 · auto |
+| S-069.S2 | Given replies off, then the run happens (fields change) but nothing is sent or written; both are logged "skipped" | `…S2…` | Passed · 2026-10-19 · auto |
+| S-069.S3 | A failed send is logged with Botcake's reason and stops the run; a live sheet row is written as text | `…S3…` | Passed · 2026-10-19 · auto |
+| S-069.S4 | A stored chat queues a run on the "chatbot" queue only for a page linked to a flow | `…S4…` | Passed · 2026-10-19 · auto |
+| S-069.S5 | A chat runs at most once (retries and earlier jobs do nothing) and one customer's chats run in order | `…S5…` | Passed · 2026-10-19 · auto |
+| S-069.S6 | A customer already running waits (lock); a page switched Off since does not run | `…S6…` | Passed · 2026-10-19 · auto |
+| S-069.H1 | A customer's first chat after a flow is linked runs once, not their older chats; a chat older than 30 minutes is not answered | `ChatbotHardeningTest::…H1…` | Passed · 2026-10-19 · auto |
+| S-069.H2 | A page runs only the flow picked in the dropdown (by id); leftover FLOW text never runs; rename and delete go by id | `…H2…` | Passed · 2026-10-19 · auto |
+
+### S-069D The editor
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.D1 | The graph saves cleaned and loads with the variables and rules for the forms | `ChatbotEditorTest::…D1…` | Passed · 2026-10-19 · auto |
+| S-069.D2 | A wire on a port the step does not have, a node of another flow, a self-loop, two wires on one port, two or no Starts, an unknown type, a bad id, more than 200 steps or 1000 wires: 422, and the saved graph stays | `…D2…` (12 data sets) | Passed · 2026-10-19 · auto |
+| S-069.D3 | Flows are created (unique names), renamed (linked pages follow), duplicated, and not deleted while a page uses them | `…D3…` | Passed · 2026-10-19 · auto |
+| S-069.D4 | The Flow pages need /chatblast access (302 / 403); the editor's script is not broken by Blade | `…D4…` | Passed · 2026-10-19 · auto + browser |
+| S-069.D5 | FLOW on the page list is a dropdown of flows; a name that is not a flow is refused | `…D5…` | Passed · 2026-10-19 · auto + browser |
+
+### S-069T The tabs
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.T1 | /chatbot has its own nav (Flow, Page settings, Chats, Replies, Test, Chatblast); Chatblast links back | `ChatbotTabsTest::…T1…` | Passed · 2026-10-19 · auto + browser |
+| S-069.T2 | Chats show under /chatbot; the customer view shows the customer's fields (no run state); the CEO edits or clears them; others only see them | `…T2…` | Passed · 2026-10-19 · auto |
+| S-069.T3 | Replies list one date with page, status and search filters, and a row's details | `…T3…` | Passed · 2026-10-19 · auto + browser |
+| S-069.T4 | Test runs the page's flow for a test customer: no Botcake, no sheet write (the row is shown), the AI step calls OpenAI, real customers untouched, the reply resumes, reset clears | `…T4…` | Passed · 2026-10-19 · auto + browser |
+| S-069.T5 | Every tab and write needs /chatblast access (302 / 403) | `…T5…` | Passed · 2026-10-19 · auto |
