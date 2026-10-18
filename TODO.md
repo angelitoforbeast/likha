@@ -524,3 +524,13 @@ Accepted, not fixed:
 - **(amendment 2) Two grouped card numbers side by side merge into one mask** ("4111 1111 1111 5003 4111 1111 1111 5004" → "···· 5004"), and a short number right after a card is masked with it ("… 5003 12" → "···· 0312"). Reason: nothing leaks; telling them apart from a 14–19 digit card is not possible from the digits.
 - **(amendment 2) A card number glued to cents ("…5003.50", "…5003,12") is read as an amount and not masked as a card.** Reason: the same guard keeps amounts whole; no statement layout prints a card number glued to cents.
 - **(amendment 2) The double-submit guard needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
+
+## 050: chatblast messages and sequences (2026-10-19)
+
+- **Adding a send time that has already passed stamps the auto run at that time,** which also skips an earlier time of today that was due but had not run yet. Reason: narrow (two times minutes apart, edited in between); the next time runs as usual.
+- **A message shared by two or more sequences is re-synced one sequence at a time after it is saved;** if the request dies during a long re-render, a later sequence keeps the old `days` until the next edit of that message or its steps. Reason: rare (shared messages, a killed request); the next edit corrects it.
+- **The message page's send counts credit every past send of a (sequence, step) to the message on that step now,** so after a message swap or a step move the counts mix both. Reason: the rows store the day and version, not the message; good enough as a guide.
+- **The new columns have no `hasColumn` guard,** so between the deploy and `php artisan migrate --force` the chatblast build, send jobs and `chatblast:auto` fail (rows end `failed`, safe to resend). Reason: migrations run right after the deploy (merge danger noted in the result).
+- **The campaign's own cap counts and then sends without a lock,** so two workers could pass it by one each. Reason: the `chatblast` worker runs with one process, as for the page cap (046).
+- **The step endpoints check what the page saw only when it sends `steps` and `expect`;** a hand-made request without them is not guarded, and `/step-times` does not compare the old times (last save wins). Reason: the page always sends them; times are visible on the page.
+- **Missing tests (minor):** the page cap still applies when the campaign cap is higher; another sequence's sends on the page don't count toward a campaign's cap; a step's own time on an excluded weekday or past the 3-hour limit.
