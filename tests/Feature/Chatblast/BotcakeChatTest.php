@@ -291,6 +291,10 @@ class BotcakeChatTest extends ChatblastTestCase
 
         $this->get('/chatblast/chats?page_id=2002')->assertOk()
             ->assertSee('{"page_id":"2002","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}');
+
+        // Ang page na may Botcake ID sa page settings pero wala pang chat ay napipili na (bago i-setup ang block nito).
+        $this->page('Page Tres', '3003');
+        $this->get('/chatblast/chats')->assertSee('<option value="3003"', false)->assertSee('Page Tres');
     }
 
     public function test_S_059_17_an_empty_message_from_a_customer_is_kept_and_labelled(): void

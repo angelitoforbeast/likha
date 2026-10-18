@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
+use App\Models\PageSetting;
 use App\Support\NavAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -64,8 +65,16 @@ class ChatblastChatController extends Controller
                 ->orderByDesc('received_at')->orderByDesc('id')
                 ->paginate(self::PER_PAGE, ['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'received_at'])
                 ->withQueryString();
-            $pages = BotcakeChat::query()->whereNotNull('page_id')->selectRaw('page_id, MAX(page_name) AS page_name')
-                ->groupBy('page_id')->get()->sortBy(fn ($p) => mb_strtolower($p->page_name ?? $p->page_id))->values();
+            // Ang mga page: may Botcake ID sa page settings (mapipili na bago pa dumating ang unang chat, para sa Setup
+            // box), at ang mga page_id na nasa chats na.
+            $byId = [];
+            foreach (PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)->orderBy('id')->get() as $s) {
+                $id = trim((string) $s->plainValue());
+                if ($id !== '') $byId[$id] = (object) ['page_id' => $id, 'page_name' => $s->page_name];
+            }
+            BotcakeChat::query()->whereNotNull('page_id')->selectRaw('page_id, MAX(page_name) AS page_name')->groupBy('page_id')->get()
+                ->each(function ($p) use (&$byId) { $byId[(string) $p->page_id] ??= (object) ['page_id' => (string) $p->page_id, 'page_name' => $p->page_name]; });
+            $pages = collect($byId)->sortBy(fn ($p) => mb_strtolower($p->page_name ?? $p->page_id))->values();
         }
 
         return view('chatblast.chats', [
