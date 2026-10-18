@@ -34,8 +34,9 @@
 
   // DB-driven nav — manage at /owner/nav-settings (CEO only).
   try {
+    // Iisang Chatblast link para sa Chatblast at Page Settings (ChatblastNav::mainLinks).
     $navLinks = $effectiveRole
-      ? \App\Models\NavLink::visibleFor($effectiveRole)
+      ? \App\Support\ChatblastNav::mainLinks(\App\Models\NavLink::visibleFor($effectiveRole))
       : collect();
   } catch (\Throwable $e) {
     $navLinks = collect();

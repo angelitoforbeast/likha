@@ -2,6 +2,10 @@
 
 namespace Tests\Feature\Chatblast;
 
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
 /**
  * Ang Chatblast bilang sariling app: iisang layout at nav para sa Dashboard, Messages, Sequences at Page settings, ang
  * /page-settings na lumipat sa /chatblast/page-settings, at ang iisang Chatblast link sa main nav ng Likha.
@@ -23,5 +27,57 @@ class ChatblastAppTest extends ChatblastTestCase
         $this->actingAs($this->user());
 
         $this->get($old)->assertStatus(301)->assertRedirect($new);
+    }
+
+    /** Isang nav link gaya ng sa /owner/nav-settings, naka-check para sa mga role na ibinigay. */
+    private function navLink(string $key, string $label, string $url, array $roles): void
+    {
+        if (!Schema::hasTable('nav_links')) {
+            Artisan::call('migrate', ['--path' => 'database/migrations/2026_05_18_140000_create_nav_links_and_visibility_tables.php', '--force' => true]);
+        }
+        $id = DB::table('nav_links')->insertGetId([
+            'key' => $key, 'label' => $label, 'route_url' => $url, 'icon' => 'fa-solid fa-link', 'active_pattern' => ltrim($url, '/') . '*',
+            'is_active' => true, 'sort_order' => DB::table('nav_links')->count() + 1, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        foreach ($roles as $role) {
+            DB::table('nav_link_role_visibility')->insert(['nav_link_id' => $id, 'role' => $role, 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
+        }
+    }
+
+    public function test_S_056_4_page_settings_access_follows_nav_settings_under_the_old_and_the_new_path(): void
+    {
+        $this->navLink('page_settings_new', 'Page Settings', '/chatblast/page-settings', ['Marketing']);
+
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->get('/chatblast/page-settings')->assertOk();
+        $this->get('/chatblast/page-settings/psid-coverage')->assertOk();
+        $this->getJson('/chatblast/page-settings/grid')->assertOk();
+        $this->get('/chatblast')->assertNotFound(); // hindi naka-check ang /chatblast
+
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->get('/chatblast/page-settings')->assertNotFound();
+        $this->getJson('/chatblast/page-settings/grid')->assertNotFound();
+    }
+
+    /** Ang mga href (walang ulit: desktop at mobile menu) ng main nav na papunta sa chatblast o page settings. */
+    private function mainNavChatblastLinks(string $role): array
+    {
+        $this->actingAs($this->user($role, uniqid('u') . '@example.test'));
+        $html = (string) $this->blade('<x-layout>body</x-layout>');
+        preg_match_all('#<a\s[^>]*href="([^"]*(?:chatblast|page-settings)[^"]*)"#', $html, $m);
+
+        return array_values(array_unique(array_map(fn ($u) => parse_url($u, PHP_URL_PATH), $m[1])));
+    }
+
+    public function test_S_056_6_the_main_nav_shows_one_chatblast_link(): void
+    {
+        $this->navLink('chatblast', 'Chatblast', '/chatblast', ['Marketing - OIC']);
+        $this->navLink('page_settings', 'Page Settings', '/page-settings', ['Marketing - OIC', 'Marketing']);
+
+        $this->assertSame(['/chatblast'], $this->mainNavChatblastLinks('Marketing - OIC'), 'parehong naka-check: iisang link');
+        $this->assertSame(['/chatblast/page-settings'], $this->mainNavChatblastLinks('Marketing'), 'page settings lang: doon ang link');
+        $this->assertStringContainsString('Chatblast', (string) $this->blade('<x-layout>body</x-layout>'));
+        $this->assertStringNotContainsString('Page Settings', (string) $this->blade('<x-layout>body</x-layout>'));
+        $this->assertSame([], $this->mainNavChatblastLinks('Data Encoder'), 'wala sa dalawa: walang link');
     }
 }
