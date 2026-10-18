@@ -5,8 +5,8 @@ namespace App\Support;
 use Illuminate\Support\Collection;
 
 /**
- * Ang nav ng Chatblast app (Dashboard, Messages, Sequences, Page settings) at ang iisang Chatblast link sa main nav ng
- * Likha. Ang access ay galing sa /owner/nav-settings (NavAccess): /chatblast para sa unang tatlo, at ang link ng page
+ * Ang nav ng Chatblast app (To send, History, Messages, Sequences, Page settings) at ang iisang Chatblast link sa main
+ * nav ng Likha. Ang access ay galing sa /owner/nav-settings (NavAccess): /chatblast para sa unang apat, at ang link ng page
  * settings sa luma o bagong path nito.
  */
 class ChatblastNav
@@ -28,7 +28,8 @@ class ChatblastNav
     {
         $items = [];
         if (NavAccess::allows($role, '/chatblast')) {
-            $items[] = ['label' => 'Dashboard', 'url' => '/chatblast', 'active' => request()->is('chatblast', 'chatblast/messages/*')];
+            $items[] = ['label' => 'To send', 'url' => '/chatblast', 'active' => request()->is('chatblast', 'chatblast/messages/*')];
+            $items[] = ['label' => 'History', 'url' => '/chatblast/history', 'active' => request()->is('chatblast/history')];
             $items[] = ['label' => 'Messages', 'url' => '/chatblast/campaigns', 'active' => request()->is('chatblast/campaigns*')];
             $items[] = ['label' => 'Sequences', 'url' => '/chatblast/sequence', 'active' => request()->is('chatblast/sequence*')];
         }

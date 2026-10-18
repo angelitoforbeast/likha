@@ -1,7 +1,9 @@
 @extends('layouts.chatblast')
 
-@section('title', 'Chatblast')
-@section('heading', 'Dashboard')
+{{-- Iisang page para sa "To send" ($view = send: ang ipapadala pa, anuman ang petsa) at "History" ($view = history: ang
+     naproseso na, may From/To para sa pagtingin lang). --}}
+@section('title', $view === 'send' ? 'Chatblast · To send' : 'Chatblast · History')
+@section('heading', $view === 'send' ? 'To send' : 'History')
 
 @push('styles')
     <style>
@@ -15,6 +17,7 @@
 
 @section('content')
 <div id="cb"
+     data-view="{{ $view }}"
      data-list-url="{{ route('chatblast.list') }}"
      data-show-url="{{ url('/chatblast/messages') }}"
      data-build-url="{{ route('chatblast.build') }}"
@@ -26,10 +29,12 @@
      data-test-url="{{ route('chatblast.test') }}"
      data-test-psid-url="{{ route('chatblast.test-psid.search') }}">
 
-    {{-- Mga filter --}}
+    {{-- Mga filter (pagtingin lang; ang "Send all ready" ay page at sequence lang ang sinusunod) --}}
     <form id="filters" class="flex flex-wrap items-end gap-3 mb-3 text-sm">
+        @if($view === 'history')
         <label class="flex flex-col text-xs text-gray-600">From<input type="date" name="from" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
         <label class="flex flex-col text-xs text-gray-600">To<input type="date" name="to" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
+        @endif
         <label class="flex flex-col text-xs text-gray-600">Page
             <select name="page" class="border rounded px-2 py-1 text-sm text-gray-900">
                 <option value="">All</option>
@@ -50,21 +55,30 @@
     {{-- Bilang kada status (pindutin para salain) at ang lagay ng pagpapadala --}}
     <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
         <div id="chips" class="flex flex-wrap gap-2" aria-label="Count per status"></div>
-        <span id="earlier" class="text-blue-800"></span>
     </div>
+    @if($view === 'send')
+    {{-- Ang ready kada sequence at kada page --}}
+    <div id="by-kind" class="text-xs text-gray-700 mb-1"></div>
+    <div id="by-page" class="text-xs text-gray-700 mb-2"></div>
+    @endif
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
         <span id="state" class="text-xs text-gray-700" aria-live="polite"></span>
         <span id="test-psid-owner" class="text-xs text-gray-700"></span>
+        @if($view === 'send')
         <button id="pause" type="button" class="hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">Pause</button>
         <button id="resume" type="button" class="hidden bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">Resume</button>
+        @endif
     </div>
 
-    {{-- Mga aksyon --}}
+    {{-- Mga aksyon: ang pagpapadala ay sa To send; ang Retry failed ay sa History --}}
     <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+        @if($view === 'send')
         <button id="build" type="button" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1 rounded disabled:opacity-50">Fetch new</button>
         <button id="send-selected" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50" disabled>Send selected (0)</button>
         <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send all ready</button>
+        @else
         <button id="retry" type="button" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Retry failed</button>
+        @endif
         <span id="notice" class="text-xs" aria-live="polite"></span>
     </div>
 
@@ -116,6 +130,8 @@
 <script>
 (function () {
     const box = document.getElementById('cb'), url = box.dataset;
+    // "send" (To send) o "history"; ang mga button na wala sa view ay wala sa page, kaya null-safe ang $id.
+    const VIEW = box.dataset.view, $id = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const LABEL = {ready: 'ready', no_psid: 'no PSID', no_config: 'no config', queued: 'queued', sending: 'sending', sent: 'sent',
         failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped', unknown: 'unsure'};
@@ -163,19 +179,21 @@
     // ---- listahan ----
 
     // Ang bilang kada status ay mabigat sa maraming row: kinukuha lang ito kada 30 s habang nagpo-poll, o sa bawat aksyon.
-    let countsAt = 0, counts = {}, total = 0, earlier = 0;
+    let countsAt = 0, counts = {}, total = 0, sendable = 0;
 
     async function load(light = false) {
-        const params = {...filters(), p: page};
+        const params = {...filters(), p: page, view: VIEW};
         if (light && Date.now() - countsAt < 30000) params.light = '1';
         const res = await fetch(url.listUrl + '?' + new URLSearchParams(params), {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the list (HTTP ' + res.status + ').', 'text-red-600'); schedule(); return; } // tuloy ang poll
         last = await res.json();
-        if (last.counts) { counts = last.counts; total = last.total; earlier = last.earlier_ready || 0; countsAt = Date.now(); }
+        if (last.counts) {
+            counts = last.counts; total = last.total; sendable = last.sendable || 0; countsAt = Date.now();
+            renderBreakdown('by-kind', 'Ready per sequence: ', last.by_kind, k => CAMPAIGNS[k] || k);
+            renderBreakdown('by-page', 'Ready per page: ', last.by_page, p => p);
+        }
         last.counts = counts;
         renderChips(counts);
-        // Sa default na "ngayong araw": kasama ang ready pa na nabuo noong mga naunang araw.
-        document.getElementById('earlier').textContent = earlier > 0 ? '+ ' + fmt(earlier) + ' ready from earlier days (included)' : '';
         renderState(last.state);
         renderTestPsid(last.test_psid);
         renderRows(last.rows);
@@ -186,24 +204,31 @@
         schedule();
     }
 
+    // Ang ready kada sequence o kada page (To send lang), hal. "Ready per page: Page Uno 12 · Page Dos 3".
+    function renderBreakdown(id, label, map, name) {
+        const box = $id(id);
+        if (!box) return;
+        const parts = Object.entries(map || {}).map(([k, n]) => name(k) + ' ' + fmt(n));
+        box.textContent = parts.length ? label + parts.join(' · ') : '';
+    }
+
     function renderChips(counts) {
         const current = document.querySelector('#filters [name=status]').value;
-        // Ang "all" ay walang skipped (gaya ng listahan); ang skipped ay may sariling chip.
-        const total = Object.entries(counts).reduce((a, [s, n]) => a + (s === 'skipped' ? 0 : n), 0);
+        const total = Object.values(counts).reduce((a, b) => a + b, 0);
         const chip = (status, label, n) => {
             const b = el('button', {type: 'button', class: 'chip px-2 py-1 rounded ' + (status ? COLOR[status] : 'bg-white border') + (current === status ? ' active' : ''), 'data-status': status},
                 [label + ' ', el('b', {text: fmt(n)})]);
             b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? '' : status; page = 1; load(); });
             return b;
         };
-        document.getElementById('chips').replaceChildren(chip('', 'all (no skipped)', total),...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
+        document.getElementById('chips').replaceChildren(chip('', 'all', total),...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
     }
 
     function renderState(s) {
         document.getElementById('state').textContent = 'Sending: ' + (s.paused ? 'paused' : 'running') + ' · in queue: ' + fmt(s.queued)
             + ' · sent in the last hour: ' + fmt(s.sent);
-        document.getElementById('pause').classList.toggle('hidden', s.paused);
-        document.getElementById('resume').classList.toggle('hidden', !s.paused);
+        $id('pause')?.classList.toggle('hidden', s.paused);
+        $id('resume')?.classList.toggle('hidden', !s.paused);
         renderBuild(s.build);
     }
 
@@ -215,7 +240,7 @@
     const PROGRESS = 'Fetching new messages in the background';
     const buildRunning = b => !!b && (b.status === 'queued' || b.status === 'running');
     function renderBuild(b) {
-        document.getElementById('build').disabled = buildRunning(b);
+        if ($id('build')) $id('build').disabled = buildRunning(b);
         const shown = document.getElementById('notice').textContent;
         if (buildRunning(b)) {
             if (watchBuild || shown === '' || shown.startsWith(PROGRESS)) {
@@ -262,12 +287,13 @@
             return tr;
         });
         document.getElementById('cb-rows').replaceChildren(...(body.length ? body
-            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: 'No messages in this filter. Press "Fetch new".'}))]));
+            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: VIEW === 'send' ? 'Nothing to send in this filter. Press "Fetch new".' : 'No processed messages in this filter.'}))]));
         document.getElementById('check-all').checked = rows.length > 0 && rows.every(r => selected.has(r.id));
     }
 
     function refreshSelected() {
-        const b = document.getElementById('send-selected');
+        const b = $id('send-selected');
+        if (!b) return; // History: walang Send selected
         b.textContent = 'Send selected (' + selected.size + ')';
         b.disabled = selected.size === 0;
     }
@@ -349,22 +375,24 @@
         } catch (e) { notice(e.message, 'text-red-600'); }
     }
 
-    document.getElementById('send-selected').addEventListener('click', () => sendIds([...selected], 'Send to ' + selected.size + ' customer(s)?'));
+    $id('send-selected')?.addEventListener('click', () => sendIds([...selected], 'Send to ' + selected.size + ' customer(s)?'));
 
-    document.getElementById('send-filtered').addEventListener('click', async () => {
-        const ready = (last && last.counts.ready) || 0;
-        if (!confirm('Send all ready messages in this filter (' + fmt(ready) + ')?')) return;
-        try { const d = await post(url.sendFilteredUrl, filters()); notice(fmt(d.queued) + ' queued.', 'text-green-700'); load(); }
+    $id('send-filtered')?.addEventListener('click', async () => {
+        // Ang lahat ng ready ng napiling page at sequence, anuman ang petsa (ang hanap ay pagtingin lang).
+        const f = filters(), scope = {page: f.page || '', kind: f.kind || ''};
+        const where = (scope.page || 'all pages') + ', ' + (scope.kind ? (CAMPAIGNS[scope.kind] || scope.kind) : 'all sequences');
+        if (!confirm('Send ' + fmt(sendable) + ' ready messages (' + where + ')?')) return;
+        try { const d = await post(url.sendFilteredUrl, scope); notice(fmt(d.queued) + ' queued.', 'text-green-700'); load(); }
         catch (e) { notice(e.message, 'text-red-600'); }
     });
 
-    document.getElementById('retry').addEventListener('click', async () => {
+    $id('retry')?.addEventListener('click', async () => {
         if (!confirm('Send the failed and field mismatch messages in this filter again?')) return;
         try { const d = await post(url.retryUrl, filters()); notice(fmt(d.queued) + ' queued again.', 'text-green-700'); load(); }
         catch (e) { notice(e.message, 'text-red-600'); }
     });
 
-    document.getElementById('build').addEventListener('click', async e => {
+    $id('build')?.addEventListener('click', async e => {
         const btn = e.currentTarget;
         btn.disabled = true;
         try {
@@ -376,7 +404,7 @@
     });
 
     for (const [id, u] of [['pause', url.pauseUrl], ['resume', url.resumeUrl]]) {
-        document.getElementById(id).addEventListener('click', async () => {
+        $id(id)?.addEventListener('click', async () => {
             try { renderState((await post(u)).state); load(); } catch (e) { notice(e.message, 'text-red-600'); }
         });
     }

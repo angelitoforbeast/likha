@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang Chatblast bilang sariling app: iisang layout at nav para sa Dashboard, Messages, Sequences at Page settings, ang
+ * Ang Chatblast bilang sariling app: iisang layout at nav para sa To send, History, Messages, Sequences at Page settings, ang
  * /page-settings na lumipat sa /chatblast/page-settings, at ang iisang Chatblast link sa main nav ng Likha.
  */
 class ChatblastAppTest extends ChatblastTestCase
@@ -88,7 +88,8 @@ class ChatblastAppTest extends ChatblastTestCase
     public static function pages(): array
     {
         return [
-            'dashboard'     => ['/chatblast', 'Dashboard'],
+            'to send'       => ['/chatblast', 'To send'],
+            'history'       => ['/chatblast/history', 'History'],
             'messages'      => ['/chatblast/campaigns', 'Messages'],
             'sequences'     => ['/chatblast/sequence', 'Sequences'],
             'page settings' => ['/chatblast/page-settings', 'Page settings'],
@@ -107,7 +108,7 @@ class ChatblastAppTest extends ChatblastTestCase
         $html = $this->get($url)->assertOk()->getContent();
 
         $this->assertStringContainsString('data-chatblast-app', $html);
-        foreach (['Dashboard', 'Messages', 'Sequences', 'Page settings'] as $item) {
+        foreach (['To send', 'History', 'Messages', 'Sequences', 'Page settings'] as $item) {
             $this->assertStringContainsString('data-cb-nav="' . $item . '"', $html);
         }
         preg_match_all('#data-cb-nav="([^"]+)"[^>]*aria-current="page"#', $html, $m);
@@ -126,7 +127,7 @@ class ChatblastAppTest extends ChatblastTestCase
         $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
 
         $this->assertStringContainsString('data-cb-nav="Page settings"', $html);
-        foreach (['Dashboard', 'Messages', 'Sequences'] as $item) {
+        foreach (['To send', 'History', 'Messages', 'Sequences'] as $item) {
             $this->assertStringNotContainsString('data-cb-nav="' . $item . '"', $html);
         }
         $this->get('/chatblast')->assertNotFound();

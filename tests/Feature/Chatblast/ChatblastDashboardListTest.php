@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Ang Dashboard list: nakatago ang skipped kapag walang napiling status, kasama sa default na "ngayong araw" ang mga
- * ready pa na nabuo noong mga naunang araw (sa loob ng window ng sequence), at ang "Fetch new" ay job sa queue.
+ * Ang "Fetch new" ng /chatblast bilang job sa queue (isa lang sabay, laging nabibitawan ang build lock). Ang mga
+ * listahan (To send at History) ay nasa ChatblastToSendTest.
  */
 class ChatblastDashboardListTest extends ChatblastTestCase
 {
@@ -23,77 +23,10 @@ class ChatblastDashboardListTest extends ChatblastTestCase
         $this->travelTo('2026-10-18 10:00:00');
     }
 
-    private function msg(string $status, array $extra = []): int
-    {
-        return DB::table('botcake_messages')->insertGetId($extra + [
-            'page_name' => 'Page Uno', 'waybill' => 'WB-' . uniqid(), 'kind' => 'delivering', 'fb_name' => 'Buyer', 'psid' => 'psid-123456',
-            'text' => 'Hello Buyer', 'status' => $status, 'attempts' => 0, 'is_test' => false, 'created_at' => now(), 'updated_at' => now(),
-        ]);
-    }
-
     private function list(array $query = [])
     {
         $today = now('Asia/Manila')->toDateString();
         return $this->getJson('/chatblast/list?' . http_build_query($query + ['from' => $today, 'to' => $today]))->assertOk();
-    }
-
-    public function test_S_056_8_skipped_rows_are_hidden_unless_the_skipped_chip_is_chosen(): void
-    {
-        $this->msg('ready');
-        $this->msg('sent', ['sent_at' => now()]);
-        $skipped = $this->msg('skipped', ['reason' => 'already sent today by another sequence']);
-
-        $res = $this->list();
-        $this->assertSame(['ready' => 1, 'sent' => 1, 'skipped' => 1], $res->json('counts'), 'ang bilang ay may skipped pa rin');
-        $this->assertSame(2, $res->json('total'));
-        $this->assertNotContains('skipped', array_column($res->json('rows'), 'status'));
-
-        $res = $this->list(['status' => 'skipped']);
-        $this->assertSame(1, $res->json('total'));
-        $this->assertSame([[$skipped, 'already sent today by another sequence']], array_map(fn ($r) => [$r['id'], $r['reason']], $res->json('rows')));
-    }
-
-    public function test_S_056_9_the_default_view_adds_ready_rows_built_on_earlier_days_within_the_window(): void
-    {
-        $today = $this->msg('ready');
-        $yesterday = $this->msg('ready', ['created_at' => now()->subDay()]);
-        $this->msg('ready', ['created_at' => now()->subDays(8)]);                          // labas sa 7 araw ng delivering
-        $transit = $this->msg('ready', ['kind' => 'in_transit', 'created_at' => now()->subDays(10)]); // nasa 14 araw ng in_transit
-        $this->msg('sent', ['created_at' => now()->subDay(), 'sent_at' => now()->subDay()]); // hindi ready
-
-        $res = $this->list();
-        $this->assertEqualsCanonicalizing([$today, $yesterday, $transit], array_column($res->json('rows'), 'id'));
-        $this->assertSame(['ready' => 3], $res->json('counts'));
-        $this->assertSame(2, $res->json('earlier_ready'));
-
-        $day = now('Asia/Manila')->subDay()->toDateString();
-        $res = $this->getJson('/chatblast/list?' . http_build_query(['from' => $day, 'to' => $day]))->assertOk();
-        $this->assertSame(['ready' => 1, 'sent' => 1], $res->json('counts'), 'ibang petsa: eksaktong petsa ng pagbuo');
-        $this->assertSame(0, $res->json('earlier_ready'));
-    }
-
-    public function test_S_056_10_send_all_ready_in_the_default_view_sends_the_earlier_ready_rows_too(): void
-    {
-        Queue::fake([SendChatblastMessage::class]);
-        $this->msg('ready');
-        $earlier = $this->msg('ready', ['created_at' => now()->subDays(2)]);
-        $today = now('Asia/Manila')->toDateString();
-
-        $this->postJson('/chatblast/send-filtered', ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 2);
-        $this->assertSame('queued', BotcakeMessage::find($earlier)->status);
-
-        $other = $this->msg('ready', ['created_at' => now()->subDays(3)]);
-        $day = now('Asia/Manila')->subDay()->toDateString();
-        $this->postJson('/chatblast/send-filtered', ['from' => $day, 'to' => $day])->assertOk()->assertJsonPath('queued', 0);
-        $this->assertSame('ready', BotcakeMessage::find($other)->status);
-
-        // Ang filter ng page, sequence at hanap ay sumasaklaw din sa ready mula sa naunang araw; ang test row ay hindi kasama.
-        $test = $this->msg('ready', ['created_at' => now()->subDays(2), 'is_test' => true]);
-        foreach ([['page' => 'Page Dos'], ['kind' => 'in_transit'], ['q' => 'Iba']] as $filter) {
-            $this->postJson('/chatblast/send-filtered', $filter + ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 0);
-        }
-        $this->assertSame(['ready', 'ready'], [BotcakeMessage::find($other)->status, BotcakeMessage::find($test)->status]);
-        $this->assertSame(1, $this->list()->json('earlier_ready'), 'ang test row ay hindi binibilang');
     }
 
     public function test_S_056_11_fetch_new_runs_as_a_queued_job_one_at_a_time_and_always_frees_the_lock(): void
@@ -151,14 +84,5 @@ class ChatblastDashboardListTest extends ChatblastTestCase
         $this->assertSame('busy', $this->list()->json('state.build.status'));
         $this->assertFalse(Cache::lock(Chatblast::BUILD_LOCK, 5)->get());
         $other->release();
-    }
-
-    public function test_S_056_12_the_dashboard_says_what_the_list_covers_and_shows_the_fetch_progress(): void
-    {
-        $html = $this->get('/chatblast')->assertOk()->getContent();
-
-        $this->assertStringContainsString("'all (no skipped)'", $html);
-        $this->assertStringContainsString('ready from earlier days', $html);
-        $this->assertStringContainsString('Fetching new messages in the background', $html);
     }
 }

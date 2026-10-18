@@ -25,9 +25,10 @@ class ChatblastEnglishTest extends ChatblastTestCase
 
     public function test_the_sending_page_is_in_english(): void
     {
+        $this->get('/chatblast/history')->assertOk()->assertSee('Retry failed')->assertSee('No processed messages in this filter');
         $this->get('/chatblast')->assertOk()
-            ->assertSee('Fetch new')->assertSee('Send all ready')->assertSee('Retry failed')->assertSee('Messages')->assertSee('Sequences')
-            ->assertSee('No messages in this filter')->assertSee('aria-label="Close"', false)
+            ->assertSee('Fetch new')->assertSee('Send all ready')->assertSee('Messages')->assertSee('Sequences')
+            ->assertSee('Nothing to send in this filter')->assertSee('aria-label="Close"', false)
             ->assertDontSee('Kunin ang mga bago')->assertDontSee('Mga mensahe')->assertDontSee('Hanapin')->assertDontSee('Ipadala');
     }
 
@@ -103,7 +104,7 @@ class ChatblastEnglishTest extends ChatblastTestCase
                 'text' => 'Kumusta po {name}', 'status' => 'skipped', 'reason' => $reason, 'attempts' => 0, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
         }
 
-        $rows = collect($this->getJson('/chatblast/list?status=skipped')->assertOk()->json('rows'))->pluck('reason', 'id'); // nakatago ang skipped sa default
+        $rows = collect($this->getJson('/chatblast/list?view=history')->assertOk()->json('rows'))->pluck('reason', 'id'); // ang skipped ay nasa History
         foreach ($old as $reason => $english) {
             $this->assertSame($english, $rows[$ids[$reason]], $reason);
             $this->assertSame($reason, BotcakeMessage::find($ids[$reason])->reason, 'ang row ay hindi isinulat');

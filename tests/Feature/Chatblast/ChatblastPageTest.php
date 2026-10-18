@@ -44,20 +44,23 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->msg('failed', ['last_http' => 500]);
         $this->msg('no_psid', ['psid' => null, 'reason' => 'walang PSID']);
         $this->msg('ready', ['page_name' => 'Page Dos']);
-        $this->msg('ready', ['created_at' => now()->subDays(2)]); // hindi ngayong araw, pero ready pa: kasama sa default
+        $this->msg('ready', ['created_at' => now()->subDays(2)]); // hindi ngayong araw, pero ready pa: nasa To send
         $this->msg('sent', ['created_at' => now()->subDays(2), 'sent_at' => now()->subDays(2)]); // hindi ngayong araw
 
+        // To send (default): ang ready, anuman ang petsa.
         $res = $this->list();
-        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'ready' => 105, 'sent' => 1], $res->json('counts'), 'default: ngayong araw at ang ready pa');
-        $this->assertSame([108, 100, 1], [$res->json('total'), count($res->json('rows')), $res->json('page')]);
+        $this->assertSame(['ready' => 105], $res->json('counts'));
+        $this->assertSame([105, 100, 1], [$res->json('total'), count($res->json('rows')), $res->json('page')]);
         $this->assertSame('Hello Buyer', $res->json('rows.0.first_line'));
         $this->assertSame('3456', $res->json('rows.0.psid_last4'));
         $this->assertArrayNotHasKey('psid', $res->json('rows.0'));
-        $this->assertCount(8, $this->list(['p' => 2])->json('rows'));
-
+        $this->assertCount(5, $this->list(['p' => 2])->json('rows'));
         $this->assertSame(['ready' => 1], $this->list(['page' => 'Page Dos'])->json('counts'));
-        $this->assertSame(1, $this->list(['status' => 'failed'])->json('total'));
-        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'ready' => 105, 'sent' => 2], $this->list(['from' => now()->subDays(3)->toDateString()])->json('counts'), 'ibang petsa: eksakto');
+
+        // History: ang naproseso, ayon sa From/To (default ngayong araw).
+        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'sent' => 1], $this->list(['view' => 'history'])->json('counts'));
+        $this->assertSame(1, $this->list(['view' => 'history', 'status' => 'failed'])->json('total'));
+        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'sent' => 2], $this->list(['view' => 'history', 'from' => now()->subDays(3)->toDateString()])->json('counts'));
         $this->assertSame(['paused' => false, 'queued' => 0, 'sent' => 1], array_intersect_key($this->list()->json('state'), array_flip(['sent', 'queued', 'paused'])));
     }
 

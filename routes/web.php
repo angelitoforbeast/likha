@@ -245,7 +245,8 @@ Route::get('/encoder/tools/ai/health', [AiController::class, 'health'])->middlew
 
 // /chatblast: order updates sa customer sa Botcake. Access ayon sa /owner/nav-settings (NavAccess, sa controller).
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('chatblast.')->group(function () {
-    Route::get('/', [ChatblastController::class, 'index'])->name('index');
+    Route::get('/', [ChatblastController::class, 'index'])->name('index');            // To send
+    Route::get('/history', [ChatblastController::class, 'history'])->name('history'); // History (naproseso na)
     Route::get('/list', [ChatblastController::class, 'list'])->name('list');
     Route::get('/messages/{id}', [ChatblastController::class, 'show'])->whereNumber('id')->name('show');
     Route::post('/build', [ChatblastController::class, 'build'])->middleware('throttle:10,1,chatblast-build')->name('build');

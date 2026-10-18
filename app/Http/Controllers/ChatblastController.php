@@ -28,10 +28,10 @@ class ChatblastController extends Controller
     public const PER_PAGE = 100;
     public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking ng "Fetch new" (ChatblastBuildJob), gaya ng dati sa web
     public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
+    // "To send": ang ipapadala pa, anuman ang petsa. "History": ang naproseso na, ayon sa From/To (pagtingin lang).
+    public const TO_SEND = ['ready', 'queued', 'sending'];
+    public const HISTORY = ['sent', 'failed', 'field_mismatch', 'skipped', 'no_psid', 'no_config', 'unknown'];
     private const MAX_DAYS = 92;
-
-    /** kind => window_days ng mga sequence (para sa ready mula sa naunang araw), kinukuha minsan kada request. */
-    private ?\Illuminate\Support\Collection $windows = null;
 
     public function __construct(private Chatblast $chatblast, private ChatblastSender $sender, private PageSettings $settings)
     {
@@ -56,11 +56,24 @@ class ChatblastController extends Controller
         return is_scalar($v) ? mb_substr(trim((string) $v), 0, $max) : '';
     }
 
+    /** "To send" (/chatblast). */
     public function index()
+    {
+        return $this->page('send');
+    }
+
+    /** "History" (/chatblast/history). */
+    public function history()
+    {
+        return $this->page('history');
+    }
+
+    private function page(string $view)
     {
         $this->checkAccess();
 
         return view('chatblast.index', [
+            'view'      => $view,
             'campaigns' => ChatblastCampaign::orderBy('id')->get(['kind', 'name', 'active']),
             'statuses'  => self::STATUSES,
             'pages'     => BotcakeMessage::query()->distinct()->orderBy('page_name')->pluck('page_name')->all(),
@@ -69,8 +82,10 @@ class ChatblastController extends Controller
     }
 
     /**
-     * Ang listahan (100 kada pahina, pinakabago muna), ang bilang kada status para sa filter, at ang lagay ng pagpapadala.
-     * Ilang query lang kahit ilang row: bilang (GROUP BY), mga row, J&T status ng 100 waybill, at ang lagay.
+     * Ang listahan ng "To send" (view=send, ang default) o ng "History" (view=history): 100 kada pahina, pinakabago muna,
+     * ang bilang kada status (at sa To send, kada sequence at kada page ng ready, at ilan ang ipapadala ng "Send all
+     * ready"), at ang lagay ng pagpapadala. Ilang query lang kahit ilang row: bilang (isang GROUP BY), mga row, J&T status
+     * ng 100 waybill, at ang lagay.
      */
     public function list(Request $request)
     {
@@ -79,14 +94,13 @@ class ChatblastController extends Controller
         // light=1: ang mabilis na poll (kada 4 s) ay hindi nagbibilang; ang bilang ay kinukuha kada 30 s o pagkatapos ng aksyon.
         $light  = $this->str($request, 'light', 1) === '1';
         $status = $this->str($request, 'status');
-        // Sa parehong GROUP BY: ilan ang nabuo bago ang simula ng petsa (sa default, ang mga ready mula sa naunang araw).
-        [$from] = $this->range($request);
+        $send   = $this->str($request, 'view', 10) !== 'history';
         $grouped = $light ? null : $this->filtered($request, false)
-            ->selectRaw('status, COUNT(*) AS n, SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END) AS earlier', [$from])->groupBy('status')->get();
-        $counts = $grouped?->pluck('n', 'status')->map(fn ($n) => (int) $n)->sortKeys()->all();
-        $earlier = $grouped === null ? null : (int) ($grouped->firstWhere('status', 'ready')?->earlier ?? 0);
-        // Walang napiling status: ang kabuuan ay walang skipped (gaya ng mga row).
-        $total  = $counts === null ? null : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts) - ($counts['skipped'] ?? 0));
+            ->selectRaw('status, kind, page_name, COUNT(*) AS n')->groupBy('status', 'kind', 'page_name')->get();
+        $sum = fn ($rows, string $key) => $rows->groupBy($key)->map(fn ($g) => (int) $g->sum('n'))->sortKeys()->all();
+        $counts = $grouped === null ? null : $sum($grouped, 'status');
+        $total  = $counts === null ? null : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts));
+        $readyRows = $grouped?->where('status', 'ready');
         $page   = max(1, (int) $this->str($request, 'p', 6));
 
         $rows = $this->filtered($request, true)->orderByDesc('id')->offset(($page - 1) * self::PER_PAGE)->limit(self::PER_PAGE)
@@ -100,7 +114,10 @@ class ChatblastController extends Controller
             'page'     => $page,
             'per_page' => self::PER_PAGE,
             'counts'   => $counts,
-            'earlier_ready' => $earlier,
+            'by_kind'  => $send && $readyRows ? $sum($readyRows, 'kind') : null,
+            'by_page'  => $send && $readyRows ? $sum($readyRows, 'page_name') : null,
+            // Ang ipapadala ng "Send all ready": page at sequence lang ang nagpapakitid (hindi ang hanap).
+            'sendable' => $send && !$light ? $this->sendable($request)->count() : null,
             'state'    => $this->state(),
             'test_psid' => $this->testPsidOf($this->str($request, 'page')),
         ]);
@@ -172,18 +189,18 @@ class ChatblastController extends Controller
         return response()->json(['queued' => $this->sender->queue(array_filter($ids, 'is_numeric'), Auth::id()), 'state' => $this->state()]);
     }
 
-    /** "Send lahat ng ready": ang ready sa kasalukuyang filter (anuman ang napiling status). */
+    /** "Send all ready" ng To send: ang ready ng napiling page at sequence, anuman ang petsa (sendable()). */
     public function sendFiltered(Request $request)
     {
         $this->checkAccess();
-        return response()->json(['queued' => $this->queueFiltered($request, ['ready']), 'state' => $this->state()]);
+        return response()->json(['queued' => $this->queueAll($this->sendable($request)), 'state' => $this->state()]);
     }
 
-    /** "Retry failed": failed at field_mismatch sa kasalukuyang filter. */
+    /** "Retry failed" ng History: failed at field_mismatch sa filter ng History (From/To, page, sequence, hanap). */
     public function retryFailed(Request $request)
     {
         $this->checkAccess();
-        return response()->json(['queued' => $this->queueFiltered($request, ['failed', 'field_mismatch']), 'state' => $this->state()]);
+        return response()->json(['queued' => $this->queueAll($this->filtered($request, false, 'history')->whereIn('status', ['failed', 'field_mismatch'])), 'state' => $this->state()]);
     }
 
     public function pause()
@@ -250,17 +267,25 @@ class ChatblastController extends Controller
         return BotcakePsid::where('source', 'api')->whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)]);
     }
 
-    /** @param array<int, string> $statuses */
-    private function queueFiltered(Request $request, array $statuses): int
+    private function queueAll($query): int
     {
         $queued = 0;
-        $this->filtered($request, false)->whereIn('status', $statuses)->select('id')
-            ->chunkById(500, function ($rows) use (&$queued) { $queued += $this->sender->queue($rows->pluck('id')->all(), Auth::id()); });
+        $query->select('id')->chunkById(500, function ($rows) use (&$queued) { $queued += $this->sender->queue($rows->pluck('id')->all(), Auth::id()); });
 
         return $queued;
     }
 
-    /** [from, to] ng filter (Manila; default ngayong araw, hanggang 92 araw) at kung ito ang default na "ngayong araw". */
+    /** Ang "Send all ready" ng To send: lahat ng ready (hindi test), pinakikitid lang ng page at sequence; walang petsa. */
+    private function sendable(Request $request)
+    {
+        $q = BotcakeMessage::where('status', 'ready')->where('is_test', false);
+        if (($page = $this->str($request, 'page')) !== '') $q->where('page_name', $page);
+        if (($kind = $this->str($request, 'kind', 30)) !== '') $q->where('kind', $kind);
+
+        return $q;
+    }
+
+    /** [from, to] ng History (Manila; default ngayong araw, hanggang 92 araw). */
     private function range(Request $request): array
     {
         $date = fn (string $key) => preg_match('/^\d{4}-\d{2}-\d{2}$/', $this->str($request, $key, 10)) ? Carbon::parse($this->str($request, $key, 10), 'Asia/Manila') : null;
@@ -268,34 +293,28 @@ class ChatblastController extends Controller
         $from = ($date('from') ?? $to->copy())->startOfDay();
         if ($from->gt($to)) $from = $to->copy()->startOfDay();
         if ($from->diffInDays($to) > self::MAX_DAYS) $from = $to->copy()->subDays(self::MAX_DAYS)->startOfDay();
-        $today = Carbon::now('Asia/Manila');
 
-        return [$from, $to, $from->isSameDay($today) && $to->isSameDay($today)];
+        return [$from, $to];
     }
 
     /**
-     * Ang query ng kasalukuyang filter: petsa ng pagbuo (created_at), page, uri, status (kapag $withStatus), at hanap
-     * (simula ng pangalan, o eksaktong waybill). Sa default na "ngayong araw", kasama rin ang ready pa na nabuo noong mga
-     * naunang araw sa loob ng window ng sequence nito (hindi pa naipapadala, kaya dapat makita at maipadala). Kapag walang
-     * napiling status, nakatago ang skipped (may sariling chip ito).
+     * Ang query ng listahan, para sa pagtingin: sa To send (default), ang ready, queued at sending na hindi test, anuman
+     * ang petsa; sa History (view=history), ang naproseso na ayon sa petsa ng pagbuo (From/To). Pareho: page, sequence,
+     * status (kapag $withStatus, sa loob ng view) at hanap (simula ng pangalan, o eksaktong waybill).
      */
-    private function filtered(Request $request, bool $withStatus)
+    private function filtered(Request $request, bool $withStatus, ?string $view = null)
     {
-        [$from, $to, $default] = $this->range($request);
-        $windows = $default ? ($this->windows ??= ChatblastCampaign::pluck('window_days', 'kind')) : collect(); // isang query kada request
-
-        $q = BotcakeMessage::query()->where(function ($w) use ($from, $to, $windows) {
-            $w->whereBetween('created_at', [$from, $to]);
-            foreach ($windows as $kind => $days) {
-                $w->orWhere(fn ($r) => $r->where('status', 'ready')->where('is_test', false)->where('kind', $kind)->where('created_at', '>=', now()->subDays((int) $days)));
-            }
-        });
+        $view ??= $this->str($request, 'view', 10) === 'history' ? 'history' : 'send';
+        if ($view === 'send') {
+            $q = BotcakeMessage::whereIn('status', self::TO_SEND)->where('is_test', false);
+        } else {
+            [$from, $to] = $this->range($request);
+            $q = BotcakeMessage::whereIn('status', self::HISTORY)->whereBetween('created_at', [$from, $to]);
+        }
 
         if (($page = $this->str($request, 'page')) !== '') $q->where('page_name', $page);
         if (($kind = $this->str($request, 'kind', 30)) !== '') $q->where('kind', $kind);
-        if ($withStatus) {
-            in_array($status = $this->str($request, 'status'), self::STATUSES, true) ? $q->where('status', $status) : $q->where('status', '!=', 'skipped');
-        }
+        if ($withStatus && in_array($status = $this->str($request, 'status'), self::STATUSES, true)) $q->where('status', $status);
         if (($s = $this->str($request, 'q', 100)) !== '') {
             $q->where(fn ($w) => $w->where('waybill', $s)->orWhere('fb_name', 'like', addcslashes($s, '%_\\') . '%'));
         }
