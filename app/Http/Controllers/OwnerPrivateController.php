@@ -2364,19 +2364,8 @@ class OwnerPrivateController extends Controller
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
             // alias-aware aggregation sa jntStatsMap builder above).
-            // Price-lenient (±1 cod): sinusuma ang mga bucket ng parehong page+item
-            // na nasa loob ng ₱1 — kapag bahagyang nag-drift ang end-date price
-            // (hal. 298 vs J&T 299), HINDI na blangko ang RTS / DEL / INT cell.
-            $jntPriceInt = (int)round($price);
-            $jntStats = null;
-            foreach ([$jntPriceInt - 1, $jntPriceInt, $jntPriceInt + 1] as $jntP) {
-                $b = $jntStatsMap[$pk.'||'.$dominantCanonKey.'||'.$jntP] ?? null;
-                if (!$b) continue;
-                $jntStats ??= ['total' => 0, 'rts_cnt' => 0, 'del_cnt' => 0];
-                $jntStats['total']   += $b['total'];
-                $jntStats['rts_cnt'] += $b['rts_cnt'];
-                $jntStats['del_cnt'] += $b['del_cnt'];
-            }
+            $jntKey   = $pk.'||'.$dominantCanonKey.'||'.(string)(int)round($price);
+            $jntStats = $jntStatsMap[$jntKey] ?? null;
             $jntRtsPct = $jntDelPct = $jntTransitPct = null;
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
             if ($jntStats && $jntStats['total'] > 0) {
