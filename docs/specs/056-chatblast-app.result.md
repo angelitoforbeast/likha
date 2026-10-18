@@ -339,3 +339,164 @@ were no blockers.
 - **Pages open from before the deploy** still expect the old build answer: a press shows a red script error in the
   notice line until the page is reloaded. The build itself is queued and runs.
 - **No migrations.**
+
+## Amendment 2: To send and History, no stuck rows, auto's backlog rule
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-2.md` (git-ignored, not
+committed). It is treated as part of the brief. It **replaces row 2 of amendment 1** (earlier ready rows under the date
+filter); rows 1 and 3 of amendment 1 stay. Plan: the "Amendment 2" section of `docs/plans/056-chatblast-app.md`.
+
+### What changed
+
+1. **No schema change.** The re-check stamp is `botcake_messages.updated_at`. Other code reads `updated_at` only on
+   `unknown` and `sending` rows, and the stamp touches only `ready` rows, so no existing rule changes. No migration.
+2. **No stuck rows** (`Chatblast::skipStale`). It runs on every fetch: the web Fetch new job, `chatblast:build` and
+   auto's own build. It re-checks **every** unsent row of each built sequence, whatever its build date:
+   - **page left the sequence:** the row is skipped, as before, and its key is released;
+   - **waybill left the sequence's statuses:** the row is skipped with the same reason as before, and now **also
+     releases its key**, so the waybill gets its own new row if it comes back;
+   - **order older than the sequence's window** (`macro_output.ts_date`, or the build date when there is no order; the
+     same bound as the build): the row is skipped with "The order is older than the sequence's N-day window" and its
+     key is released. This was added after the review;
+   - **still valid and ready:** the row is stamped (`updated_at = now`, one UPDATE per chunk of 500).
+   - **Day and text** need no refresh. While an unsent row holds its key, the waybill's next day is that same row. The
+     text follows the sequence through the existing re-render, and the On Delivery rider is refreshed at send as
+     before.
+3. **Auto's backlog rule** (`chatblast:auto`).
+   - **The new rule:** at each due time, auto queues ready rows of the due steps whose `created_at` **or** `updated_at`
+     is at or after the switch to auto (`mode_changed_at`; the start of today when unknown).
+   - **The old rule:** built today after the switch.
+   - **Effect:** auto's own fetch, just before, re-checks every row, so every still-valid ready row from before is
+     sent once. A row nobody re-checked since before the switch is not.
+   - **Unchanged:** every sender rule (one per waybill per status per day, stop rules, On Delivery re-track, pause,
+     off, caps).
+4. **Two views and two nav items.** The nav reads To send · History · Messages · Sequences · Page settings. One Blade
+   view serves both, with `$view`, and the route `/chatblast/history` is new.
+   - **To send** (`/chatblast`): every non-test row that is `ready`, `queued` or `sending`, of any date.
+     - It shows counts per status, plus ready per sequence and per page, from one GROUP BY.
+     - It has Fetch new, Send selected, Send all ready, Pause and Resume.
+     - It has no dates. Page, Sequence and Search narrow the view.
+   - **History** (`/chatblast/history`): `sent`, `failed`, `field_mismatch`, `skipped`, `no_psid`, `no_config`, `unknown`.
+     - It has From/To, view only. The date is **when the row was processed** (`sent_at` for sent, the last change for
+       the rest), not when it was built. This was changed after the review, so the backlog sent or failed at 07:30
+       shows under that day.
+     - It has status chips, Page, Sequence, Search and Retry failed.
+   - Amendment 1's earlier-ready OR, `earlier_ready` and the "all (no skipped)" label are gone: skipped rows live in
+     History.
+5. **Send all ready** sends every non-test `ready` row of the sequences that are on, narrowed only by the chosen page
+   and sequence; dates and the search are ignored. The list returns that count (`sendable`), and the confirm names the
+   count and the scope, e.g. "Send 100 ready messages (Sample Page 1, In transit)?". Send selected is unchanged.
+
+### Case table (amendment 2)
+
+Red runs, before the code:
+
+- **S-056.13:** `'WB-1' => 'ready'` (expected queued).
+- **S-056.14:** the key was still `WB-1|c-auto|1`.
+- **S-056.16:** `Failed asserting that 0 is identical to 2`.
+- **S-056.17:** the arrays differed.
+- **S-056.18:** the nav labels differed.
+- **S-056.19:** the 17-day-old row was **queued** by auto.
+- **S-056.20:** 1 of 3 rows.
+- **S-056.21:** 2 vs 1.
+
+S-056.15 and the S-056.14 additions (rebuild after the waybill comes back, the stamp on ready rows only) passed on the
+first run. They pin behaviour that was already right, and the review asked for them.
+
+| Case | Test | Result |
+|---|---|---|
+| S-056.13 | `ChatblastAutoTest::test_S_056_13_a_ready_row_from_before_the_switch_is_sent_once_auto_s_fetch_re_checks_it` | pass |
+| S-056.14 | `ChatblastAutoTest::test_S_056_14_a_ready_row_whose_waybill_moved_on_is_skipped_frees_its_key_and_the_next_sequence_builds` | pass |
+| S-056.15 | `ChatblastAutoTest::test_S_056_15_auto_does_not_send_a_row_nobody_re_checked_since_before_the_switch` | pass |
+| S-056.16 | `ChatblastToSendTest::test_S_056_16_send_all_ready_sends_every_ready_row_of_the_page_and_sequence_whatever_its_date` | pass |
+| S-056.17 | `ChatblastToSendTest::test_S_056_17_to_send_lists_what_is_still_to_send_and_history_what_was_processed` | pass |
+| S-056.18 | `ChatblastToSendTest::test_S_056_18_the_nav_and_the_two_pages_have_their_own_tools` and the browser check | pass |
+| S-056.19 | `ChatblastAutoTest::test_S_056_19_a_ready_row_whose_order_left_the_sequence_window_is_skipped_and_not_sent` | pass |
+| S-056.20 | `ChatblastToSendTest::test_S_056_20_history_dates_are_when_the_row_was_processed_not_when_it_was_built` | pass |
+| S-056.21 | `ChatblastToSendTest::test_S_056_21_send_all_ready_counts_only_sequences_that_are_on` | pass |
+
+These existing tests were changed to the new rules:
+
+- `ChatblastAutoTest::test_auto_never_sends_the_backlog_only_rows_built_today_after_the_switch` pinned the old backlog
+  rule. It is replaced by S-056.13.
+- `ChatblastPageTest`: the list test is split into To send and History, and the query-count bound goes from 7 to 8 for
+  the "sequences that are off" lookup. The count is still constant.
+- `ChatblastEnglishTest`: Retry failed and the empty text are checked on History, and the skipped reasons are read
+  from History.
+- `ChatblastAppTest`: the nav labels.
+- Amendment 1's S-056.8, .9, .10 and .12 tests are removed, because those cases are replaced.
+
+**Suite:**
+
+- `tests/Feature/Chatblast`: `OK, Tests: 164, Assertions: 1112`.
+- The full suite on `ae720131`: `Tests: 2 failed, 1482 warnings, 158 passed (18661 assertions)`, 264 s. The two
+  failures are the known `ExampleTest` and `NightRun\ImportStartTest`.
+
+### Browser check (amendment 2)
+
+The check ran on the same scratch app and data as amendment 1: one page, 8 ready rows today, 100 ready In transit rows
+built yesterday, 5 skipped and 3 sent. No worker was running and no external call was made. Evidence and screenshots
+are in the main checkout's `handoff/056-chatblast-app/screens/amendment-2/` (`to-send.png`, `history.png`,
+`evidence-amendment-2.txt`).
+
+- **To send:**
+  - The nav read "To send* · History · Messages · Sequences · Page settings".
+  - The chips read "all 108 · ready 108", with "Ready per sequence: Delivering 8 · In transit 100" and "Ready per page:
+    Sample Page 1 108".
+  - There were no dates. The buttons were Pause, Resume, Fetch new, Send selected and Send all ready, with no Retry
+    failed.
+  - The confirm read "Send 108 ready messages (all pages, all sequences)?".
+- **To send, filtered:** with page Sample Page 1, sequence In transit and search "Buyer 9", the view narrowed to 11
+  rows, and the confirm read "Send 100 ready messages (Sample Page 1, In transit)?": the search is view only.
+- **History:**
+  - It showed "all 8 · sent 3 · skipped 5", with From/To and only Retry failed.
+  - The skipped chip showed the 5 skipped rows.
+- **Width:** To send has no horizontal scroll at 1280 (1265 <= 1265).
+- **No JS errors.** This check ran before the review fix, which changed only server queries.
+
+### Review (amendment 2)
+
+One `skeptic-reviewer` pass at **adversarial** depth on `3d63e1d7..a0f6bd1a`, then a re-check of the fix (`ae720131`).
+It found no blockers and two majors, both fixed and closed in the re-check:
+
+1. **The re-check never applied the sequence's window,** so auto would send a stamped row for an order of any age. It
+   is now skipped with its key released (S-056.19). Before the fix, the test row was queued.
+2. **History dated rows by build date,** so the backlog sent or failed at 07:30 would not show under "today", and
+   Retry failed would queue nothing. It now dates by processing (S-056.20).
+
+Fixed minors:
+- the Send all ready count included sequences that are off (S-056.21);
+- there was no test of the same sequence rebuilding after the key release, and none that the stamp leaves non-ready
+  rows alone (both added to S-056.14);
+- the stories table (S-056.8, .9, .10 and .12 marked replaced; S-056.19 to .21 added).
+
+Accepted, with reasons in `TODO.md`:
+- the sender's own status-skip keeps its key;
+- the rider text for a Delivering sequence without "requires On Delivery";
+- Send selected accepts skipped rows;
+- the Send all ready count can be up to 30 s old;
+- History's `updated_at` moves rows when they are re-rendered;
+- History's OR may scan the table on MySQL;
+- the first fetch skips every out-of-window row;
+- the backlog rule cannot trigger in production.
+
+### Story changes (amendment 2)
+
+- **S-056.8, S-056.9, S-056.10 and S-056.12** are marked "Replaced by amendment 2". Their tests are removed. Skipped
+  rows now live in History, and Send all ready is no longer date-bound.
+- **S-056.13 to S-056.18** are new, from the amendment.
+- **S-056.19, S-056.20 and S-056.21** are new, from the review.
+
+### Merge danger (amendment 2): read before 07:30
+
+- **The first auto run sends the backlog.**
+  - At each sequence's first due time, auto's fetch re-checks all the old ready rows (about 661 per the amendment).
+  - It skips those whose status, page or order window no longer fits, and queues the rest, with every sender rule and
+    the daily caps applied.
+  - That is the amendment's intent: no stuck rows.
+- **The first fetch after deploy also skips every unsent row outside its window,** including old failed, no PSID and
+  no config rows. They all appear in that day's History as "The order is older than the sequence's N-day window".
+  Worth telling staff.
+- **No migration.**
+- **The default-queue worker** for Fetch new (amendment 1) still applies.
+- **Open tabs:** a To send tab opened before the deploy should be reloaded.
