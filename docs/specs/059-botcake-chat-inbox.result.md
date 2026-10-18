@@ -235,3 +235,47 @@ One `skeptic-reviewer` pass at adversarial depth on `7c12d3ba..9a2e60d1`.
 
 ### Merge danger (amendment 1)
 - Low. No migration. The plain `id` param now counts as the PSID when no `psid`, `user.id`, `user_id` or `fb_id` is sent.
+
+## Independent review fixes (two performance majors, five minors)
+
+Commit `4b7f2561`.
+
+### What changed
+1. **Page list (major):** the Chats page no longer runs a GROUP BY over `botcake_chats`. The list comes from `BotcakeChat::pageMap()`, the pages with an active `botcake.page_id` in page settings (cached 10 minutes). Page ids seen only in chats come from a cached (10 min) DISTINCT list and show as "Unknown page (ID …)".
+2. **Pagination and index (major):** `simplePaginate()` replaces `paginate()`, so there is no COUNT(*). The footer reads "Page N · X messages" with Newer and Older. The create-table migration (not yet run anywhere) gains a `(page_id, received_at)` index for the page filter ordered by time.
+3. **Prune:** it now deletes in batches of 5000, looping until done, with at most 40 batches (200,000 rows) per run.
+4. **Page map:** the page_id → page name map is cached for 10 minutes and used for every incoming chat (no query per message). `PageSettings::set` and `deactivate` clear it when a `botcake.page_id` changes, both at once and after the commit. The lookup by page name checks the map first, then falls back to page settings as before.
+5. **Body size:**
+   - A header key, when present, is checked first (401).
+   - Then a body over 64 KB, by Content-Length or raw length, gets 413 before it is read or decoded.
+   - A key sent as a param is checked after the size check, as before.
+6. **Setup box:** it says "Prefer POST + header; GET puts the key in server logs."
+7. **Payload:** the payload no longer repeats page_id, psid, name or message (whichever alias carried them, and any empty alias of them). Other params, `message_id`, `sent_at` and `page` stay in it.
+
+The rate limiter is unchanged, on the default cache.
+
+### Case table (review fixes)
+| Case | Test | Result |
+|---|---|---|
+| S-059.18 | `test_S_059_18_the_chats_page_never_counts_or_groups_the_whole_table_and_lists_pages_from_settings` | pass |
+| S-059.19 | `test_S_059_19_the_prune_deletes_in_batches_until_done` | pass |
+| S-059.20 | `test_S_059_20_the_page_name_map_is_cached_and_cleared_when_a_botcake_page_id_is_saved` | pass |
+| S-059.21 | `test_S_059_21_a_body_over_64_kb_gets_413_after_a_header_key_check` (header key, param key, wrong header) | pass ×3 |
+| S-059.3, S-059.13 (extended) | payload without the column fields | pass |
+| S-059.16 (extended) | the "Prefer POST + header" note | pass |
+
+**Red run:**
+- **S-059.3 and S-059.13:** `Page_ID` and `message` were still in the payload.
+- **S-059.16:** the note was missing.
+- **S-059.18:** `select count(*) as aggregate from "botcake_chats"` was still running.
+- **S-059.19 and S-059.20:** `PRUNE_BATCH` and `pageMap()` didn't exist yet.
+- **S-059.21:** the oversized body got 200 instead of 413.
+
+After the change, `BotcakeChatTest` passed 30 tests (178 assertions), and the Chatblast, PageSettings and Botcake folders passed with 2760 assertions.
+
+### Full suite (review fixes)
+`php artisan test` on `4b7f2561`: **2 failed, 158 passed, 1529 passed with warnings** (18942 assertions, 278 s). The only failures are the known `ExampleTest` and `ImportStartTest`.
+
+### Merge danger (review fixes)
+- **Migration:** the create-table migration was edited, not added to. This is safe only because it has not run on any server. If it has run anywhere, that server lacks the `(page_id, received_at)` index.
+- **Cache:** the page map lives in the app cache. A `botcake.page_id` changed outside `PageSettings` (by hand in the database) takes up to 10 minutes to apply.

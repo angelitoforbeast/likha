@@ -1131,3 +1131,14 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
 | S-059.16 | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
 | S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
+
+### S-059E Fixes from the independent review: fast at millions of rows (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.18 | Given chats and pages, when the Chats page opens (with or without a page filter), then no query counts or groups the whole chats table; the page list comes from page settings plus a cached (10 min) list of other page ids ("Unknown page (ID …)"); the table has a (page_id, received_at) index | `test_S_059_18…` | Passed · 2026-10-18 · auto |
+| S-059.19 | Given more old chats than one batch (5000), when the prune runs, then it deletes in batches until none are left (up to 40 batches a run) and keeps newer chats | `test_S_059_19…` | Passed · 2026-10-18 · auto |
+| S-059.20 | Given the cached page id → page map, when a page's botcake.page_id is saved, then the next chat with the new id gets the page name at once and the old id is gone from the map | `test_S_059_20…` | Passed · 2026-10-18 · auto |
+| S-059.21 | Given a body over 64 KB, then a wrong header key gets 401 (checked first) and otherwise it gets 413; nothing is stored | `test_S_059_21…` (3 data sets) | Passed · 2026-10-18 · auto |
+| S-059.3 / S-059.13 (extended) | The payload no longer repeats the fields that have their own column (page_id, psid, name, message, under whatever alias they came) | `test_S_059_3…`, `test_S_059_13…` | Passed · 2026-10-18 · auto |
+| S-059.16 (extended) | The Setup box says "Prefer POST + header; GET puts the key in server logs." | `test_S_059_16…` | Passed · 2026-10-18 · auto |

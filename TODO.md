@@ -631,3 +631,6 @@ Accepted, not fixed:
 - **The second fix loop (text/plain body key) got no reviewer re-check** (the 2-loop cap). Reason: a one-line move, pinned by the new S-059.2 data set.
 - **(amendment 1) A row whose page could not be found shows only "Unknown page";** the `page` text it was sent with stays in the payload but is not shown, so a misconfigured block is not named on the page. Reason: the amendment asks only for "Unknown page"; a later display tweak if it happens.
 - **(amendment 1) The review fix (filter lists page-settings pages) got no reviewer re-check.** Reason: small, pinned by S-059.16's new assertion, and within the amendment's 20-minute budget.
+- **(independent review) The prune stops after 40 batches (200,000 rows) a run;** the rest goes in the next run (the next day, or the next chatblast:auto day). Reason: keeps each run short; normal daily volume is far below that.
+- **(independent review) A page id first seen in chats appears in the Chats page filter up to 10 minutes late** (the distinct list is cached). Reason: asked for; its rows show in the unfiltered list at once.
+- **(independent review) The Chats list shows "Page N · X messages" instead of a total;** no COUNT over the table. Reason: asked for (simplePaginate).
