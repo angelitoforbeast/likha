@@ -5,6 +5,7 @@
 @section('description', 'The Botcake settings of every page: ID, token, flows, message field and template. Values save as you type.')
 
 @section('actions')
+    <button id="setup-help" type="button" class="text-blue-700 hover:underline">How to set up a new page</button>
     <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders without a PSID)</a>
 @endsection
 
@@ -110,6 +111,8 @@
          data-test-token-url="{{ route('page-settings.test-token') }}"
          data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
+         data-send-test-url="{{ route('page-settings.send-test') }}"
+         data-test-psid-picker-url="{{ route('chatblast.index') }}#test-psid"
          data-sync-all-url="{{ route('page-settings.sync-all') }}"
          data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}"
          data-customers-url="{{ route('page-settings.customers') }}">
@@ -125,6 +128,23 @@
             </div>
             <div id="history-current" class="mb-3"></div>
             <ul id="history-list" class="space-y-1 text-xs text-gray-700"></ul>
+        </div>
+    </div>
+
+    {{-- Ang gabay sa bagong page: modal sa gitna, hindi sticky. Isara: ✕, Escape, o pindot sa labas. --}}
+    <div id="setup-guide" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="setup-guide-title">
+        <div class="mx-auto w-full max-w-lg rounded-xl bg-white p-5 text-sm shadow-lg">
+            <div class="mb-3 flex items-center justify-between">
+                <div id="setup-guide-title" class="font-semibold">How to set up a new page</div>
+                <button id="setup-guide-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <ol class="list-decimal space-y-2 pl-5 text-slate-700">
+                <li><b>Botcake ID and token.</b> Add the page with + Page, then type its Botcake ID and its token (Botcake: page settings, API).</li>
+                <li><b>The automatic check.</b> When both are saved, the token is tested and the CHATBLAST flow, the "GPT Input" field and the approved template are filled in. If there are several, pick one from the list.</li>
+                <li><b>Copy the flow and field in Botcake if missing.</b> A red line says what is missing: copy "CHATBLAST - SHIPPING STATUS (post_order)" from another page, or create the "GPT Input" custom field, then press Test.</li>
+                <li><b>Send test to the Test PSID.</b> Set the page's Test PSID (your own account), then press Send test and check Messenger.</li>
+                <li><b>Ready.</b> When the test is sent, the row turns green: the page's messages are now in To send and auto.</li>
+            </ol>
         </div>
     </div>
 </div>
@@ -186,13 +206,27 @@
     const REQUIRED = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message', 'botcake.template.shipping'];
     const FLOW_NAME = /^botcake\.flow\.[a-z0-9_]+\.name$/;
 
+    // "Nasubukan": may test (botcake.test_ok) o totoong padala na hindi mas luma sa huling pagbabago ng setup, gaya ng
+    // ChatblastReady sa server. Ang mga oras ay buong timestamp (ts) ng cell at info.last_send.
+    const CONFIG_KEYS = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message'];
+    const TEST_OK_KEY = 'botcake.test_ok';
+    function tested(r) {
+        const changed = CONFIG_KEYS.map(k => r.cells[k]?.ts || '').sort().pop();
+        if (!changed) return false;
+        const test = r.cells[TEST_OK_KEY]?.ts || '';
+        return (test !== '' && test >= changed) || (!!r.info.last_send && r.info.last_send >= changed);
+    }
+    const complete = r => REQUIRED.every(k => r.cells[k]);
+
     function state(r) {
         const token = String(r.cells['botcake.token_status']?.value || '');
         return {
             invalid: token.startsWith('invalid'),
-            ok: token.startsWith('ok'),
+            ok: token.startsWith('ok') && tested(r),
             failed: !!(r.info.last_sync && r.info.last_sync.failed),
             incomplete: r.info.orders > 0 && REQUIRED.some(k => !r.cells[k]),
+            // Kumpleto pero wala pang kumpirmadong padala: hindi pa ipinapadala ng chatblast.
+            needsTest: complete(r) && !tested(r),
             // Pulang linya ng flow na may ID: wala sa Botcake o bura na.
             flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),
             // Hindi APPROVED ang template ng shipping flow: bigo ang pagpapadala.
@@ -205,10 +239,11 @@
         ['orders', 'With orders', r => r.info.orders > 0],
         ['invalid', 'Token invalid', (r, st) => st.invalid],
         ['incomplete', 'Setup incomplete', (r, st) => st.incomplete],
+        ['needs_test', 'Needs test', (r, st) => st.needsTest],
         ['flows', 'Flow problems', (r, st) => st.flows || st.template],
         ['failed', 'Last sync failed', (r, st) => st.failed],
     ];
-    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']];
+    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete or needs a test send'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']];
     let chip = null; // ang naka-pindot na chip; null = lahat
 
     function chipFilter(r) {
@@ -244,7 +279,7 @@
 
     function borderOf(r) {
         const st = state(r);
-        return !r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
+        return !r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete || st.needsTest ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
     }
 
     // Pagkatapos magbago ang cell o info ng isang page: ang kulay ng row at ang mga bilang lang, hindi ang buong table.
@@ -278,11 +313,11 @@
     const WIDTHS = ['12%', '22%', '29%', '7%', '20%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
     // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
     // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID.
-    const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid'];
+    const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid', 'botcake.test_ok'];
     const inGroup = group => columns.filter(c => c.group === group)
         .sort((a, b) => (LINE_ORDER.indexOf(a.key) + 1 || 99) - (LINE_ORDER.indexOf(b.key) + 1 || 99));
     const SHORT = {'botcake.page_id': 'ID', 'botcake.token': 'Token', 'botcake.token_status': 'Status', 'botcake.field.message': 'Message field',
-        'botcake.test_psid': 'Test PSID', 'botcake.flow.shipping': 'Flow ID', 'botcake.flow.on_delivery': 'Delivering',
+        'botcake.test_psid': 'Test PSID', 'botcake.test_ok': 'Test send', 'botcake.flow.shipping': 'Flow ID', 'botcake.flow.on_delivery': 'Delivering',
         'botcake.flow.in_transit': 'In transit', 'botcake.flow.broadcast': 'Broadcast', 'botcake.template.shipping': 'Template'};
 
     function render() {
@@ -325,14 +360,61 @@
         ]);
     }
 
-    // Isang linya sa loob ng cell: maliit na grey na label, saka ang value na nae-edit sa lugar (ang .cell).
+    // Isang linya sa loob ng cell: maliit na grey na label, saka ang value na nae-edit sa lugar (ang .cell). Ang flow at
+    // ang message field ay may dropdown, gabay at babala sa ilalim (pick-lines, katabi ng .cell para hindi mapalitan ng input).
     function line(row, col, labelWidth = 'w-20') {
-        return el('div', {class: 'flex items-baseline gap-1 min-w-0'}, [
+        const main = el('div', {class: 'flex items-baseline gap-1 min-w-0'}, [
             el('span', {class: labelWidth + ' shrink-0 truncate text-[11px] text-gray-400', title: col.label + (col.readonly ? ' (system)' : '') + ' · ' + col.key,
                 text: SHORT[col.key] || col.label}),
             cellEl(row, col),
         ]);
+        if (!PICK_KEYS.includes(col.key)) return main;
+        return el('div', {class: 'min-w-0'}, [main, el('div', {class: 'pick-lines', 'data-pk': row.key, 'data-key': col.key}, picks(row, col))]);
     }
+
+    // ---- kusang setup: ang mga kandidato mula sa Botcake (…options), ang dropdown, ang gabay at ang babala ----
+
+    const FIELD_KEY = 'botcake.field.message';
+    const PICK_KEYS = ['botcake.flow.shipping', FIELD_KEY];
+    const GUIDE = {
+        'botcake.flow.shipping': "No CHATBLAST flow in Botcake. In Botcake, copy 'CHATBLAST - SHIPPING STATUS (post_order)' from another page to this page, then press Test.",
+        [FIELD_KEY]: "No 'GPT Input' custom field in Botcake. Create it, then press Test.",
+    };
+    const NOT_CANDIDATE = {'botcake.flow.shipping': 'This flow is not a CHATBLAST flow in Botcake', [FIELD_KEY]: "This field is not a 'GPT Input' field in Botcake"};
+
+    // Ang mga kandidato ([{id, name}]) mula sa huling Test, o null kapag hindi pa nasusuri.
+    function optionsOf(row, key) {
+        const c = row.cells[key + '.options'];
+        if (!c) return null;
+        try { const v = JSON.parse(c.value); return Array.isArray(v) ? v : null; } catch (e) { return null; }
+    }
+
+    function picks(row, col) {
+        const opts = optionsOf(row, col.key);
+        if (opts === null) return [];
+        const value = String(row.cells[col.key]?.value || ''), known = opts.some(o => String(o.id) === value);
+        const out = [];
+        // Dropdown kapag marami, o kapag ang naka-save ay wala sa listahan; nananatili ring puwedeng i-type ang ID.
+        if (opts.length > 1 || (opts.length === 1 && value !== '' && !known)) {
+            out.push(el('select', {class: 'cb-pick mt-0.5 w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-xs', 'data-pk': row.key, 'data-key': col.key, title: 'Pick from Botcake'},
+                [el('option', {value: '', text: value === '' ? 'Pick one…' : 'Change…'}), ...opts.map(o => {
+                    const op = el('option', {value: String(o.id), text: o.name + ' · ' + o.id});
+                    op.selected = String(o.id) === value;
+                    return op;
+                })]));
+        }
+        if (!opts.length && value === '') out.push(el('div', {class: 'text-xs text-red-600', text: GUIDE[col.key]}));
+        if (value !== '' && !known) out.push(el('div', {class: 'text-xs text-red-600', text: NOT_CANDIDATE[col.key]}));
+        return out;
+    }
+
+    // Ang pinili sa dropdown ay sine-save gaya ng tinype na ID.
+    table.addEventListener('change', e => {
+        const s = e.target.closest('select.cb-pick');
+        if (!s || !s.value) return;
+        const row = rows.get(s.dataset.pk);
+        if (row) save({pk: s.dataset.pk, key: s.dataset.key, input: {value: s.value}, original: String(row.cells[s.dataset.key]?.value || ''), secret: false});
+    });
 
     function cellEl(row, col) {
         const td = el('div', {class: 'cell flex-1 min-w-0 rounded px-1' + (col.readonly ? ' readonly bg-gray-50 text-gray-600' : ''),
@@ -347,6 +429,13 @@
         const mark = marks.get(cellId(row.key, col.key));
         td.title = cell ? (cell.by + ' · ' + cell.at) : '';
         td.classList.toggle('bg-red-50', !!(mark && mark.cls === 'text-red-600'));
+        // Ang "Test send": kailan nasubukan, o amber na "Needs a test send" kapag kumpleto pero hindi pa nasubukan.
+        if (col.key === TEST_OK_KEY) {
+            put(td, tested(row) ? el('span', {class: 'text-xs text-green-700', text: cell ? 'Tested ' + cell.at : 'Tested by a real send'})
+                : complete(row) ? el('span', {class: 'text-xs font-medium text-amber-700', text: 'Needs a test send'})
+                : el('span', {class: 'text-xs text-gray-400', text: '—'}));
+            return;
+        }
         // Walang laman at nae-edit: maliit na "+ set" para makitang mapipindot (dashed outline sa hover).
         const empty = !col.readonly && !(cell && cell.value !== '');
         td.classList.toggle('empty', empty);
@@ -361,7 +450,8 @@
     // ---- pangalan ng flow at template: mula sa Botcake, isinusulat ng system, ipinapakita sa ilalim ng cell ----
 
     const FLOW_KEY = /^botcake\.flow\.[a-z0-9_]+$/;
-    const DETAIL_KEY = /^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$/;
+    // Hindi sariling column: ang pangalan ng flow, ang body ng template, at ang mga kandidato ng dropdown (…options).
+    const DETAIL_KEY = /^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/;
     const TEMPLATE_KEY = 'botcake.template.shipping', SHIPPING_KEY = 'botcake.flow.shipping';
     const TONE = {red: 'text-red-600', grey: 'text-gray-400'};
 
@@ -384,6 +474,8 @@
             const body = row.cells[TEMPLATE_KEY + '.text'];
             if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(...withToken(body.line));
             if (body && body.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: body.line}));
+            // Nasuri na ang Botcake (may listahan ng kandidato) pero walang napiling template: walang APPROVED na template.
+            if (!row.cells[TEMPLATE_KEY] && optionsOf(row, SHIPPING_KEY) !== null) out.push(el('div', {class: 'text-xs text-red-600', text: 'No approved post_order template in Botcake.'}));
         }
         return out;
     }
@@ -401,6 +493,9 @@
     // Ang mga cell na iginuguhit ulit kapag nagbago ang key (ang pangalan o body ay nasa cell ng flow o template).
     function paintedBy(key) {
         if (key === TEMPLATE_KEY || key === TEMPLATE_KEY + '.text') return [TEMPLATE_KEY, SHIPPING_KEY];
+        if (key.endsWith('.options')) return [key.slice(0, -'.options'.length)];
+        // Ang setup ay nagbabago ng "Test send" (kailangan ulit ng test); ang test_ok ay ang mismong linya.
+        if (CONFIG_KEYS.includes(key)) return [DETAIL_KEY.test(key) ? key.slice(0, -'.name'.length) : key, TEST_OK_KEY];
         return [DETAIL_KEY.test(key) ? key.slice(0, -'.name'.length) : key];
     }
 
@@ -424,6 +519,8 @@
         if (td && row && col) paint(td, row, col);
         const lines = table.querySelector(`.flow-lines[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`);
         if (lines && row && col) put(lines, ...flowLines(row, col));
+        const pickLines = table.querySelector(`.pick-lines[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`);
+        if (pickLines && row && col) put(pickLines, ...picks(row, col));
         refreshDetail(pk);
         paintState(pk);
     }
@@ -540,25 +637,51 @@
         document.getElementById('plan-summary').textContent = text || 'none';
     }
 
-    function postForm(action, pageName, label, title, cls) {
-        const f = el('form', {method: 'POST', action, class: 'inline'}, [
-            el('input', {type: 'hidden', name: '_token', value: csrf}),
-            el('input', {type: 'hidden', name: 'page_name', value: pageName}),
-            el('button', {class: cls, title, text: label}),
-        ]);
-        return f;
-    }
-
+    // Ang mga button ng row ay fetch (walang reload: hindi bumabalik sa itaas, nananatiling bukas ang ▸). Ang Cust. at
+    // Orders ay link sa ibang page.
     function actions(r) {
         const out = [];
+        const btn = (act, text, title) => el('button', {type: 'button', class: 'cb-btn cb-btn-sm', 'data-act': act, 'data-pk': r.key, title, text});
         if (r.info.botcake) {
-            out.push(postForm(url.testTokenUrl, r.name, 'Test', 'Test token', 'cb-btn cb-btn-sm'));
-            out.push(postForm(url.syncUrl, r.name, 'Sync', 'Sync now', 'cb-btn cb-btn-sm'));
+            out.push(btn('test', 'Test', 'Test token, then read the flow, field and template from Botcake'));
+            out.push(btn('sync', 'Sync', 'Sync now'));
+        }
+        if (complete(r)) {
+            out.push(r.cells['botcake.test_psid'] ? btn('send-test', 'Send test', 'Send a test message to the Test PSID')
+                : el('a', {class: 'text-xs text-amber-700 hover:underline', href: url.testPsidPickerUrl, title: 'Pick the Test PSID of the page on To send', text: 'Set a Test PSID first'}));
         }
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), title: 'Customers', text: 'Cust.'}));
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), title: 'Orders without a PSID', text: 'Orders'}));
         return [el('div', {class: 'flex flex-wrap items-center gap-1'}, out)];
     }
+
+    table.addEventListener('click', async e => {
+        const b = e.target.closest('button[data-act]');
+        const r = b && rows.get(b.dataset.pk);
+        if (!r) return;
+        b.disabled = true;
+        try {
+            if (b.dataset.act === 'test') {
+                notice('Testing ' + r.name + '…');
+                const {data} = await testOne(r);
+                const status = applyTest(r, data);
+                notice(r.name + ' · Token: ' + status + (data.error ? ' · ' + data.error : '') + (data.refresh_error ? ' · flow, field and template not checked: ' + data.refresh_error : ''),
+                    status === 'ok' ? 'text-green-700' : 'text-red-600');
+            } else if (b.dataset.act === 'sync') {
+                const res = await fetch(url.syncUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
+                const data = await res.json().catch(() => ({}));
+                notice(data.message || data.error || ('HTTP ' + res.status), res.ok ? 'text-green-700' : 'text-red-600');
+            } else if (b.dataset.act === 'send-test') {
+                const res = await fetch(url.sendTestUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
+                const data = await res.json().catch(() => ({}));
+                notice(res.ok ? r.name + ': test message ' + (data.status === 'sent' ? 'sent' : 'queued') + ' to the Test PSID. The row turns Ready when it is sent.'
+                    : (data.error || ('HTTP ' + res.status)), res.ok ? 'text-green-700' : 'text-red-600');
+            }
+        } catch (err) {
+            notice('No connection.', 'text-red-600');
+        }
+        b.disabled = false;
+    });
 
     // Kapag nagbago ang Botcake ID o token: ang mga button lang ng row ang binabago, hindi ang buong table
     // (ang pagbuo ulit ng table habang nagki-click ay nagpapawala ng click).
@@ -681,8 +804,14 @@
                 applyCells(row, data.cells);
                 if (ed.key === 'botcake.page_id' || ed.key === 'botcake.token') {
                     row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
-                    refreshActions(ed.pk);
                 }
+                // Kumpleto na ang ID at token: sinubukan na ng server ang token at kinuha ang flow, field at template.
+                if (data.token_test) {
+                    notice(row.name + ' · Token: ' + data.token_test + (data.token_test === 'ok'
+                        ? (data.refresh_error ? ' · flow, field and template not checked: ' + data.refresh_error : ' · flow, field and template checked') : ''),
+                        data.token_test === 'ok' ? 'text-green-700' : 'text-red-600');
+                }
+                refreshActions(ed.pk); // ang Send test ay lumalabas kapag kumpleto na ang setup
                 marks.set(id, {text: data.status === 'unchanged' ? '✓' : 'Saved', cls: 'text-green-600'});
                 setTimeout(() => { if (marks.get(id)?.cls === 'text-green-600') { marks.delete(id); repaint(ed.pk, ed.key); } }, 2500);
             }
@@ -778,6 +907,13 @@
         ])));
         if (!list.children.length) list.append(el('li', {class: 'text-gray-400', text: 'No earlier values.'}));
     }
+    // Ang gabay sa bagong page (modal).
+    const guide = document.getElementById('setup-guide');
+    document.getElementById('setup-help').addEventListener('click', () => guide.classList.remove('hidden'));
+    document.getElementById('setup-guide-close').addEventListener('click', () => guide.classList.add('hidden'));
+    guide.addEventListener('click', e => { if (e.target === guide) guide.classList.add('hidden'); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') guide.classList.add('hidden'); });
+
     const closeHistory = () => document.getElementById('history').classList.add('hidden');
     document.getElementById('history-close').addEventListener('click', closeHistory);
     document.getElementById('history').addEventListener('click', e => { if (e.target.id === 'history') closeHistory(); });
@@ -789,6 +925,23 @@
     const BETWEEN_MS = 500, RATE_WAIT_MS = 5000;
 
     // Isang page. Ang wait = ilang ms bago subukan ulit kapag rate limit (429 ng Likha o "rate_limited" ng Botcake).
+    // Ang sagot ng isang Test (row o Test lahat): ang token status, at kapag ok, ang flow, field at template (cells).
+    function applyTest(r, data) {
+        const id = cellId(r.key, 'botcake.token_status');
+        const status = ['ok', 'invalid', 'skipped'].includes(data.status) ? data.status : 'error';
+        if (data.cell) r.cells['botcake.token_status'] = data.cell;
+        if (status === 'error') marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || 'Not tested.'});
+        else marks.set(id, {text: status, cls: status === 'ok' ? 'text-green-600' : 'text-red-600'});
+        repaint(r.key, 'botcake.token_status');
+        applyCells(r, data.cells);
+        if (data.refresh_error) {
+            marks.set(id, {text: 'ok · flow, field and template not checked: ' + data.refresh_error, cls: 'text-gray-500'});
+            repaint(r.key, 'botcake.token_status');
+        }
+        refreshActions(r.key);
+        return status;
+    }
+
     async function testOne(r) {
         try {
             const res = await fetch(url.testTokenOneUrl, {
@@ -828,18 +981,7 @@
                 await sleep(wait);
                 ({data} = await testOne(r));
             }
-            const status = ['ok', 'invalid', 'skipped'].includes(data.status) ? data.status : 'error';
-            sum[status]++;
-            if (data.cell) r.cells['botcake.token_status'] = data.cell;
-            if (status === 'error') marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || 'Not tested.'});
-            else marks.set(id, {text: status, cls: status === 'ok' ? 'text-green-600' : 'text-red-600'});
-            repaint(r.key, 'botcake.token_status');
-            // Ok ang token: ang pangalan ng mga flow at ang template ay kinuha rin.
-            applyCells(r, data.cells);
-            if (data.refresh_error) {
-                marks.set(id, {text: 'ok · flows/template not checked: ' + data.refresh_error, cls: 'text-gray-500'});
-                repaint(r.key, 'botcake.token_status');
-            }
+            sum[applyTest(r, data)]++;
         }
 
         out.textContent = 'Test tokens done: ' + sum.ok + ' ok, ' + sum.invalid + ' invalid, ' + sum.error + ' error, '

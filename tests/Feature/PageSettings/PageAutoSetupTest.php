@@ -161,4 +161,54 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         // Ang options ay hindi naisusulat mula sa page.
         $this->cell('flow.shipping.options', '[]')->assertStatus(422);
     }
+
+    public function test_S_057_4_the_page_has_the_dropdown_the_guides_and_the_setup_checklist(): void
+    {
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+
+        foreach ([
+            "No CHATBLAST flow in Botcake. In Botcake, copy 'CHATBLAST - SHIPPING STATUS (post_order)' from another page to this page, then press Test.",
+            "No 'GPT Input' custom field in Botcake. Create it, then press Test.",
+            'No approved post_order template in Botcake.',
+            "el('select', {class: 'cb-pick",
+            "o.name + ' · ' + o.id",
+            'How to set up a new page',
+            'Send test to the Test PSID',
+        ] as $needle) {
+            $this->assertStringContainsString(htmlspecialchars_decode($needle, ENT_QUOTES), htmlspecialchars_decode($html, ENT_QUOTES), $needle);
+        }
+
+        // Ang pinili sa dropdown ay sine-save gaya ng tinype (parehong endpoint).
+        $s = $this->settings();
+        $s->set('Page Dos', 'botcake', 'page_id', '2002');
+        $this->cell('flow.shipping', '501')->assertOk()->assertJsonPath('cell.value', '501');
+        $this->assertSame('501', $this->get57('flow.shipping'));
+    }
+
+    public function test_S_057_8_an_untested_page_shows_needs_a_test_send_with_a_send_test_button_and_a_chip(): void
+    {
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+
+        foreach (["'Needs a test send'", "['needs_test', 'Needs test'", "btn('send-test', 'Send test'", "'Set a Test PSID first'",
+                  "const CONFIG_KEYS = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message'];"] as $needle) {
+            $this->assertStringContainsString($needle, $html, $needle);
+        }
+        $this->assertSame('Test send', collect($this->get('/chatblast/page-settings')->viewData('grid')['columns'])->firstWhere('key', 'botcake.test_ok')['label']);
+        $this->cell('test_ok', '2026-10-18 10:00:00')->assertStatus(422); // system lang ang sumusulat
+    }
+
+    public function test_S_057_9_row_actions_use_fetch_and_sync_answers_json(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('postForm(', $html, 'walang form post na nagre-reload ng page');
+        foreach (['fetch(url.syncUrl', 'fetch(url.sendTestUrl', 'await testOne(r)'] as $needle) $this->assertStringContainsString($needle, $html, $needle);
+
+        $s = $this->settings();
+        $s->set('Page Dos', 'botcake', 'page_id', '2002');
+        $s->set('Page Dos', 'botcake', 'token', self::TOKEN);
+        $this->postJson('/chatblast/page-settings/sync', ['page_name' => 'Page Dos'])->assertOk()->assertJsonPath('status', 'queued');
+        $this->postJson('/chatblast/page-settings/sync', ['page_name' => 'Page Wala'])->assertStatus(422);
+    }
 }

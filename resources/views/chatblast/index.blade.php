@@ -86,7 +86,8 @@
         </span>
     </div>
 
-    <details class="cb-card mb-4 px-4 py-2 text-sm">
+    {{-- Ang link na "Set a Test PSID first" ng page settings ay pumupunta rito (#test-psid) at binubuksan ito. --}}
+    <details id="test-psid" class="cb-card mb-4 px-4 py-2 text-sm">
         <summary class="cursor-pointer font-medium text-slate-700">Test PSID</summary>
         <div class="mt-2 grid gap-4 lg:grid-cols-3">
             <form id="test-psid-form">
@@ -474,6 +475,9 @@
         }));
         if (!(d.customers || []).length) document.getElementById('test-psid-results').append(el('li', {class: 'text-gray-500', text: 'No match (type at least 2 letters of the start of the name).'}));
     });
+
+    // Mula sa "Set a Test PSID first" ng page settings: bukas agad ang Test PSID.
+    if (location.hash === '#test-psid') document.getElementById('test-psid').open = true;
 
     load();
 })();

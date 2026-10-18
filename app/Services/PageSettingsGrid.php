@@ -30,6 +30,7 @@ class PageSettingsGrid
         'botcake.template.shipping' => 'Shipping template',
         'botcake.field.message'    => 'Message field ID',
         'botcake.test_psid'        => 'Test PSID',
+        'botcake.test_ok'          => 'Test send', // system: huling matagumpay na Send test (ChatblastReady)
         'botcake.token_status'     => 'Token status',
     ];
 
@@ -64,8 +65,10 @@ class PageSettingsGrid
         }
 
         $info = $this->info(array_keys($rows));
+        // Ang huling totoong padala kada page: ang page ay "nasubukan" kapag ito o ang Send test ay pagkatapos ng setup.
+        $ready = app(ChatblastReady::class)->states();
         foreach ($rows as $pk => &$row) {
-            $row['info'] = $this->rowInfo($row['cells'], $info, $pk) + ['orders' => $orders[$pk]['orders'] ?? 0];
+            $row['info'] = $this->rowInfo($row['cells'], $info, $pk) + ['orders' => $orders[$pk]['orders'] ?? 0, 'last_send' => $ready[$pk]['last_send'] ?? null];
         }
         unset($row);
 
@@ -191,6 +194,7 @@ class PageSettingsGrid
             'secret' => (bool) $s->is_secret,
             'by'     => $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system',
             'at'     => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
+            'ts'     => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i:s'), // para sa "nasubukan na" sa page
         ];
     }
 

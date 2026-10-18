@@ -6,6 +6,7 @@ use App\Models\BotcakeMessage;
 use App\Models\PageSetting;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Kung "nasubukan" na ang page para sa chatblast: may kumpirmadong padala pagkatapos ng huling pagbabago ng setup nito
@@ -44,7 +45,8 @@ class ChatblastReady
             });
         if (!$out) return [];
 
-        $sent = BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('sent_at')
+        // Wala pang botcake_messages (hal. bago ang migrate ng chatblast): walang totoong padala.
+        $sent = !Schema::hasTable('botcake_messages') ? collect() : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('sent_at')
             ->selectRaw('page_name, MAX(sent_at) AS last')->groupBy('page_name')->get();
         foreach ($sent as $row) {
             $pk = $this->settings->pageKey((string) $row->page_name);
@@ -71,7 +73,7 @@ class ChatblastReady
         if ($s['changed'] === null) return false;
 
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $last = BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('sent_at')
+        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('sent_at')
             ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])->max('sent_at');
         $s['last_send'] = $last ? Carbon::parse($last)->format('Y-m-d H:i:s') : null;
 

@@ -19,7 +19,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     private const KNOWN = [
         'botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.flow.on_delivery',
-        'botcake.flow.in_transit', 'botcake.flow.broadcast', 'botcake.template.shipping', 'botcake.field.message', 'botcake.test_psid',
+        'botcake.flow.in_transit', 'botcake.flow.broadcast', 'botcake.template.shipping', 'botcake.field.message', 'botcake.test_psid', 'botcake.test_ok',
         'botcake.token_status',
     ];
 
@@ -79,7 +79,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertSame([
             'botcake.page_id' => 'botcake', 'botcake.token' => 'botcake', 'botcake.flow.shipping' => 'flows',
             'botcake.flow.on_delivery' => 'flows', 'botcake.flow.in_transit' => 'flows', 'botcake.flow.broadcast' => 'flows',
-            'botcake.template.shipping' => 'template', 'botcake.field.message' => 'botcake', 'botcake.test_psid' => 'botcake',
+            'botcake.template.shipping' => 'template', 'botcake.field.message' => 'botcake', 'botcake.test_psid' => 'botcake', 'botcake.test_ok' => 'botcake',
             'botcake.token_status' => 'botcake', 'sms.sender' => 'other',
         ], $groups);
     }
@@ -93,7 +93,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
             ->assertSee("text: 'Orders / Customers'", false)
             ->assertSee("text: 'Sync', title: 'Last sync / Next sync'", false);
         // Ang bawat action ng row at ng page: maliit na button o link, may title.
-        foreach (["'Test', 'Test token'", "'Sync', 'Sync now'", "title: 'Customers'", "title: 'Orders without a PSID'", "title: 'History'",
+        foreach (["btn('test', 'Test'", "btn('sync', 'Sync', 'Sync now')", "title: 'Customers'", "title: 'Orders without a PSID'", "title: 'History'",
                   'id="test-all"', 'id="sync-all"', 'id="sync-all-pause"', 'id="sync-all-resume"', 'id="sync-all-stop"', 'id="add-page"', 'id="add-column"'] as $action) {
             $res->assertSee($action, false);
         }
@@ -182,8 +182,8 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     public function test_S_054_9_the_page_cell_border_shows_the_row_state_and_the_legend_explains_it(): void
     {
         $this->get('/chatblast/page-settings')->assertOk()
-            ->assertSee("!r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
-            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']", false);
+            ->assertSee("!r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete || st.needsTest ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
+            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete or needs a test send'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']", false);
     }
 
     public function test_S_054_10_each_flow_block_is_id_name_and_content_with_no_placeholder_and_the_lines_stay_outside_the_edited_value(): void
@@ -433,7 +433,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         // Grid 8: settings, user names, customers, huling run, orders, plano (ROW_NUMBER), huling matagumpay na run, at ang
         // mga Sync lahat run (panel). Poll na may nagbagong run: 9 (kasama ang Botcake settings ng mga page na iyon). May
         // Sync lahat run: hanggang 2 pa (pangalan ng nagsimula, api run ng kasalukuyang page).
-        $this->assertLessThanOrEqual(9, max($fifty), 'ilang query lang ang grid at ang poll');
+        $this->assertLessThanOrEqual(10, max($fifty), 'ilang query lang ang grid at ang poll (kasama ang huling totoong padala kada page)');
         $this->assertCount(120, $this->grid()['rows']);
     }
 
