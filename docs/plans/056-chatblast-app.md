@@ -78,3 +78,41 @@ The amendment itself stays in the main checkout's `handoff/056-chatblast-app/AME
 | 5 | List: skipped hidden by default, earlier ready rows in the default view, `earlier_ready` | S-056.8, S-056.9, S-056.10 | backend | medium |
 | 6 | Fetch new as a queued job with run state, slot and lock release | S-056.11 | backend | medium |
 | 7 | Dashboard script: "all (no skipped)", the earlier-ready note, build progress | S-056.12 | frontend | medium |
+
+## Amendment 2 (To send and History; no stuck rows; auto's backlog rule)
+
+It replaces row 2 of amendment 1 (earlier ready rows under the date filter); rows 1 and 3 of amendment 1 stay. The
+amendment itself stays in the main checkout's `handoff/056-chatblast-app/AMENDMENT-2.md` (not committed).
+
+1. **No schema change.** The re-check stamp is `botcake_messages.updated_at`. Other code reads `updated_at` only on
+   `unknown` and `sending` rows (the cross-sequence rule, the today block, the candidates' "today"), and the stamp only
+   touches `ready` rows, so it changes none of those rules.
+2. **Re-check on every fetch** (`Chatblast::skipStale`, which already runs on every build, web, `chatblast:build` and
+   auto, over every unsent row of each active sequence, whatever its build date):
+   - a row whose page left the sequence, or whose waybill left the sequence's statuses, becomes `skipped` with the
+     reason as today, and now **both** release the key (`dedupe_key = null`);
+   - every row that is still `ready` and passes is stamped (`updated_at = now`, one UPDATE per chunk of 500).
+   - Day and text need no refresh here: while an unsent row holds its key, the waybill's next day is that same row
+     (`sent_n` does not move), the text follows the sequence's days through the existing re-render, and the
+     Delivering rider is refreshed at send time as today.
+3. **Auto's backlog rule** (`chatblast:auto`): it queues `ready` rows of the due steps whose `created_at` **or**
+   `updated_at` is at or after the moment auto was switched on (`mode_changed_at`; the start of today when unknown).
+   Auto's own fetch runs just before, so every still-valid row it re-checked qualifies; a row nobody re-checked since
+   before auto was on does not. Everything the sender checks stays (one per waybill per status per day, stop rules,
+   On Delivery re-track, pause, off, caps).
+4. **Two views, one Blade view with a mode** (`chatblast.index`, `$view = 'send' | 'history'`):
+   - **To send** (`/chatblast`, nav "To send"): rows `ready`, `queued`, `sending`, any build date; counts per status, per
+     sequence and per page (one GROUP BY); Fetch new, Send selected, Send all ready, Pause and Resume; Page, Sequence
+     and Search filter the view; no dates.
+   - **History** (`/chatblast/history`, nav "History"): `sent`, `failed`, `field_mismatch`, `skipped`, `no_psid`,
+     `no_config`, `unknown`; From/To (build date, view only), Page, Sequence, Search, the status chips; Retry failed.
+   - Amendment 1's "earlier ready" OR and `earlier_ready` are removed (replaced).
+5. **Send all ready** sends every `ready` row narrowed only by the chosen page and sequence (not dates, not the
+   search). The list returns that count (`sendable`), and the confirm says e.g. "Send 112 ready messages (Page Uno,
+   all sequences)?".
+
+| # | Task | Cases | Side | Tier |
+|---|------|-------|------|------|
+| 8 | Re-check stamp and key release; auto's rule | S-056.13, S-056.14, S-056.15 | backend | high (sending) |
+| 9 | The two views' data, Send all ready scope, route | S-056.16, S-056.17 | backend | medium |
+| 10 | The two views' page and nav | S-056.18 | frontend | medium |
