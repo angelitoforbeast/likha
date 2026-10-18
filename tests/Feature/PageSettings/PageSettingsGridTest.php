@@ -191,7 +191,11 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         // Ang pangalan at content ay katabi ng .cell (hindi sa loob), kaya hindi napapalitan ng input habang nag-e-edit.
         $res->assertSee("el('div', {class: 'flow-lines', 'data-pk': row.key, 'data-key': col.key}, flowLines(row, col))", false)
             ->assertSee("if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));", false)
-            ->assertSee("if (body && body.tone === '') out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));", false);
+            ->assertSee("if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));", false)
+            // "(no name)" / "(no body)" ay hindi alam na pangalan o content: walang linya; ang content ay kasama lang ng shipping ID.
+            ->assertSee("const UNKNOWN = ['(no name)', '(no body)'];", false)
+            ->assertSee("else if (name && name.tone === '' && !UNKNOWN.includes(name.line))", false)
+            ->assertSee('if (col.key === SHIPPING_KEY && row.cells[SHIPPING_KEY]) {', false);
     }
 
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void

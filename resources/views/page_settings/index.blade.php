@@ -365,13 +365,14 @@
     }
 
     // Walang placeholder: ang hindi pa nasusuri o bigong pagsuri ay walang linya (ang dahilan ay nasa ▸); buong text, walang putol.
+    const UNKNOWN = ['(no name)', '(no body)'];
     function flowLines(row, col) {
         const out = [], name = row.cells[col.key + '.name'];
         if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));
-        else if (name && name.tone === '') out.push(el('div', {class: 'text-xs text-gray-600 break-words', text: name.line}));
-        if (col.key === SHIPPING_KEY) {
+        else if (name && name.tone === '' && !UNKNOWN.includes(name.line)) out.push(el('div', {class: 'text-xs text-gray-600 break-words', text: name.line}));
+        if (col.key === SHIPPING_KEY && row.cells[SHIPPING_KEY]) {
             const body = row.cells[TEMPLATE_KEY + '.text'];
-            if (body && body.tone === '') out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));
+            if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));
         }
         return out;
     }
