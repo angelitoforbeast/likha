@@ -92,4 +92,73 @@ Added section S-060 to `qa/stories.md`. The spec brought no stories. The three c
 ## Suggestions for the owner (not done)
 
 - If History must also fit at 1280 px without the inner sideways scroll, the Status badge could wrap, or the Sent column could show the time only. That is a table-style change, which this spec kept as it was.
-- The Page settings help paragraph is five lines and stays in the fixed part, which leaves about 310 px of grid at 1280 × 720. Folding it under a "How to use" toggle would give the grid more room.
+- The Page settings help paragraph is five lines and stays in the fixed part (unchanged by amendment 1, which lists Page settings' fixed part as it was), which leaves about 310 px of grid at 1280 × 720. Folding it under a "How to use" toggle would give the grid more room.
+
+## Amendment 1: a short fixed block, Test PSID in a modal, a Ready chip
+
+One more slice, medium risk, frontend (commit `b2a09a87`). Display only, apart from the new chip's filter, which runs in the browser on data the grid already has.
+
+### What shipped
+
+- **To send and History** (`resources/views/chatblast/index.blade.php`). The fixed part is now: top bar, title with its description, one filter row and one chip row. Only the table rows scroll.
+  - **Filter row:** From and To (History only), Page, Sequence, Search, Show. The action buttons sit at the right end of the same row: Send all ready, Send selected and Refresh now on To send; Retry failed on History. The old separate action row is gone.
+  - **Chip row** (`data-cb-chip-row`), left to right:
+    - the status chips;
+    - on To send, "Ready per sequence" and "Ready per page" as two small one-line texts that cut off with "…" and show the full text as a tooltip;
+    - at the right, in small text, the "Sending: running · in queue · sent in the last hour" status, the selected page's Test PSID owner, and Pause or Resume;
+    - a small "Test PSID" button at the right end.
+  - **Test PSID:** the disclosure is gone. The button opens a centred modal with the same picker (page, name search, current PSID, results; the same element ids, so the existing script is unchanged). The modal closes with ✕, Escape or a click outside, and the search box gets focus when it opens.
+  - **Under the table:** the action message (`#notice`, e.g. "12 queued." or the fetch progress) and To send's "Updated … · next refresh …" now sit on the pager row. They needed a place outside the two fixed rows, and the pager row was already there, so this adds no height.
+- **Layout** (`resources/views/layouts/chatblast.blade.php`): tighter page header on every Chatblast page. Main padding is `py-4` instead of `py-6`, the header block's bottom margin is `mb-3` instead of `mb-5`, and the description sits `mt-0.5` under the title instead of `mt-1`.
+- **Page settings** (`resources/views/page_settings/index.blade.php`), one line: `['ready', 'Ready', r => borderOf(r) === 'border-l-green-500']`, right after `Pages`.
+  - Ready is defined as "the row gets the green border", so the chip and the border can never disagree.
+  - Green means: has orders, token status ok, page ID, token, shipping flow, message field and template all present, template approved, and last sync not failed.
+  - It uses the existing chip logic: click to filter, click again to clear, and it combines with the name search.
+- **Messages and Sequences:** no change was needed. The header and filter row were already fixed and the cards already scroll.
+
+### How the fixed block measures (headless Chrome, scratch app)
+
+| Page | Width | Filter row | Chip row | Gaps title→description / filters→chips / chips→table | Table starts at |
+|---|---|---|---|---|---|
+| To send | 1366 and 1280 | 55 px, one line | 32 px (the two small Ready lines) | 2 / 12 / 12 px | 250 px (was 414 px) |
+| History | 1366 and 1280 | 56 px, one line | 22 px | 2 / 12 / 12 px | 241 px |
+
+- At 1366 × 768 that leaves 10 table rows fully visible on both pages, where before the fixed part took 414 px.
+- After scrolling the rows, the chip row and the column header stay put.
+- There is no page h-scroll at either width.
+
+### Case table (amendment 1)
+
+| Case | Test | Result |
+|---|---|---|
+| S-060.4 | `ChatblastAppTest::test_S_060_4_the_chip_row_holds_the_status_and_a_test_psid_button_that_opens_a_modal` (to send, history) | Pass |
+| S-060.5 | Browser check | Pass: on both pages at both widths, the modal opened with the search box focused and closed by ✕, by Escape and by a click outside. A search inside the modal called the endpoint and showed its answer. |
+| S-060.6 | `PageSettingsGridTest::test_S_060_6_a_ready_chip_right_after_pages_counts_the_pages_with_the_green_border` and the browser check | Pass: the scratch data had 6 pages (3 complete and ok, 1 with an invalid token, 1 without a template, 1 without orders). The chip read "Ready 3", and the 3 pages it showed were exactly the 3 with the green border. With "Page 2" in the name search, only Sample Page 2 showed. A second click brought back all 6. |
+
+Red run, before the change: S-060.4 failed in both data sets at "matches PCRE pattern #data-cb-chip-row.*id="chips".*id="state".*id="test-psid-open"#s". S-060.6 failed because the page had no `['ready', 'Ready', …]` chip line.
+
+Tests after the amendment (`php artisan test tests/Feature/Chatblast tests/Feature/PageSettings`): 305 tests, 2235 assertions, 0 failures. The warnings are the same doc-comment deprecation as before. `php -l` reports no syntax errors on the changed files.
+
+The original scroll check was run again after the amendment: every page at both widths still keeps the top bar, header and controls in place, scrolls only the data, has no page h-scroll, and the row modal opens and closes. No JS errors.
+
+Screenshots: main checkout `handoff/060-chatblast-sticky-header/screens/amendment-1/`.
+- `to-send-<width>.png`, `history-<width>.png` and their `-scrolled` versions.
+- `to-send-test-psid-modal.png`, `history-test-psid-modal.png` and `to-send-test-psid-search.png`.
+- `page-settings-ready.png` and `page-settings-ready-search.png`.
+- `messages-1366.png` and `sequences-1366.png`.
+- `evidence-a1.txt`.
+- `scroll-check/`, the rerun of the original check.
+
+### Story changes (amendment 1)
+
+Added section S-060A with S-060.4 (the fixed block on To send and History), S-060.5 (the Test PSID modal) and S-060.6 (the Ready chip).
+
+### Notes (amendment 1)
+
+- **Where the action buttons and the action message went.** The amendment names only the filter row and the chip row as the fixed block, and asks for no extra rows.
+  - The action buttons (Send all ready, Send selected, Refresh now, Retry failed) moved to the right end of the filter row.
+  - The action message and "Updated … · next refresh …" moved to the pager row under the table, which was already fixed.
+  - The action message is therefore shown below the table rather than beside the buttons. If the owner wants it next to the buttons, it can move into the filter row. Long messages, like the fetch progress, would then wrap that row.
+- **Ready per sequence / per page.** These stay visible but take one line each and cut off with "…", with the full text in a tooltip. With many pages, the per-page line used to wrap over several lines of the fixed block.
+- **Test PSID owner of the filtered page** stays visible in the chip row's right side. With a page selected, a long page name can push the chip row to a second line at 1280 px.
+- **Merge with feat/057:** this amendment adds one more line to `resources/views/page_settings/index.blade.php`, the Ready chip, inside the `CHIPS` list.
