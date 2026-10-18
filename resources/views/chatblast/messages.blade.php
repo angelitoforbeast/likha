@@ -8,7 +8,7 @@
 @endsection
 
 @section('content')
-<div id="cm"
+<div id="cm" class="cb-page"
      data-data-url="{{ route('chatblast.campaigns.data') }}"
      data-base-url="{{ url('/chatblast/messages') }}"
      data-flow-url="{{ route('chatblast.campaigns.flow') }}">
@@ -30,6 +30,8 @@
         @foreach($placeholders as $ph)<button type="button" class="chip ml-1 rounded-full bg-slate-100 px-2.5 py-0.5 font-mono hover:bg-slate-200" data-ph="{{ '{' . $ph . '}' }}">{{ '{' . $ph . '}' }}</button>@endforeach
     </div>
 
+    {{-- Ang mga card lang ang nag-i-scroll; nakapirmi ang filter at mga placeholder sa itaas --}}
+    <div class="cb-scroll">
     <details id="new-box" class="mb-3 cb-card px-4 py-2 text-sm">
         <summary class="cursor-pointer font-medium">+ New message</summary>
         <form id="new-form" class="grid md:grid-cols-3 gap-2 mt-2">
@@ -50,6 +52,7 @@
     </details>
 
     <div id="list" class="space-y-3"></div>
+    </div>
 </div>
 
 <script>
