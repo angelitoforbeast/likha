@@ -1096,6 +1096,6 @@ Spec 060. Test in `tests/Feature/Chatblast/ChatblastAppTest.php`; the scrolling 
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-060.1 | Given any of the five Chatblast pages, then the page is one full-height column whose data area is its only scroll container (one `cb-scroll`), with the top bar and page header outside it; on To send, History and Page settings that area holds the table, whose column header row sticks to its top | `test_S_060_1…` (5 data sets) | Not run yet |
-| S-060.2 | Given a table page, when the rows are scrolled at 1366 or 1280 px, then the top bar, the page header with its filters, chips and buttons, and the column header row stay in place, the page has no horizontal scroll, and a row still opens its details modal | browser check | Not run yet |
-| S-060.3 | Given Messages or Sequences (cards), when the cards are scrolled, then the top bar and the page header with its filters stay in place | browser check | Not run yet |
+| S-060.1 | Given any of the five Chatblast pages, then the page is one full-height column whose data area is its only scroll container (one `cb-scroll`), with the top bar and page header outside it; on To send, History and Page settings that area holds the table, whose column header row sticks to its top | `test_S_060_1…` (5 data sets) | Passed · 2026-10-18 · auto |
+| S-060.2 | Given a table page, when the rows are scrolled at 1366 or 1280 px, then the top bar, the page header with its filters, chips and buttons, and the column header row stay in place, the page has no horizontal scroll, and a row still opens its details modal | browser check | Passed · 2026-10-18 · headless browser |
+| S-060.3 | Given Messages or Sequences (cards), when the cards are scrolled, then the top bar and the page header with its filters stay in place | browser check | Passed · 2026-10-18 · headless browser |
