@@ -65,3 +65,38 @@ of the preview. The overlap warning stays on the list.
 
 Tasks 2–4 share `Chatblast*.php` and the controller: done in order. One adversarial review of the whole diff before the
 result.
+
+## Amendment 1: messages library and sequences (replaces the setup page and the list-as-cards)
+
+**Storage.** New table `chatblast_messages` (`name` unique, `versions` JSON, `log` JSON). `chatblast_campaigns` gets
+`step_messages` (JSON list of message ids, one per step). The campaign's `days` stays, as the resolved texts of its
+steps: it is rewritten in the same transaction whenever a step or one of its messages changes, so every build and send
+rule (046-048) keeps reading `days` unchanged. Migration `2026_10_19_100100`: for each live campaign, each day becomes a
+message "<campaign> · Day N" with exactly that day's versions, and `step_messages` points to them. `botcake_messages`
+rows are untouched (kind, day, version).
+
+**Service.** `Chatblast::editMessage()` (lock the message, validate its versions, save, re-resolve every campaign that
+uses it, re-render their unsent rows) and `Chatblast::editSteps()` (lock the campaign, change its message ids and own
+times together, resolve, validate, re-render). `setSequence()` (tests) writes through the step messages.
+
+**Pages.**
+- `/chatblast/campaigns` = **Mga mensahe**: every message with its versions edited in place (blur / Enter), placeholder
+  chips, a preview with the chosen page's template line, where it is used, send counts; add, rename, duplicate,
+  delete (refused while used); search by name, filter by sequence. The flow panel (048-1) stays here.
+- `/chatblast/sequence` = **Sequences**: one block per campaign ("Sequence for <name>"), all on one page: trigger
+  fields, the step chain (message picker with its text inline, own times, today's counts, add after / remove / move),
+  schedule (time chips, weekdays, manual/auto with the 048 confirmation, on/off, cap), summary, next run; "+ Bagong
+  sequence"; the overlap warning.
+
+**Routes.** Messages: `POST /chatblast/messages`, `POST|DELETE /chatblast/messages/{id}`, `/{id}/duplicate`,
+`/{id}/text`, `/{id}/version`, `/{id}/remove-version`, and `GET /chatblast/campaigns/data`. Sequences:
+`GET /chatblast/sequence`, `/data`, `POST /chatblast/sequence`, `POST|DELETE /chatblast/sequence/{id}`,
+`/{id}/step`, `/remove-step`, `/move`, `/step-message`, `/step-times`. The 048 text/day/version/remove routes go.
+
+| # | Task | Side | Tier |
+|---|------|------|------|
+| A1 | Messages table, step_messages, conversion migration | backend | medium |
+| A2 | editMessage / editSteps and the resolve of days | backend | high |
+| A3 | Message and sequence endpoints (048 tests moved to them) | backend | high |
+| A4 | Mga mensahe page | frontend | medium |
+| A5 | Sequences page | frontend | medium |
