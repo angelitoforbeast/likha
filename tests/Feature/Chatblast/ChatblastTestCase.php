@@ -38,12 +38,28 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
         if ($this->withCampaigns) $this->migrateCampaigns();
     }
 
+    /**
+     * Ang build at ang flow panel ay naglalagay ng set_time_limit(55) para sa web request; sa test, iisang proseso ang
+     * buong suite (at sa Windows ay oras ng orasan ito), kaya ibinabalik sa walang hangganan pagkatapos ng bawat test.
+     */
+    protected function tearDown(): void
+    {
+        @set_time_limit(0);
+        parent::tearDown();
+    }
+
     /** false: ang test ang magpapatakbo ng migration ng campaigns (hal. para may laman muna bago ito). */
     protected bool $withCampaigns = true;
 
     protected function migrateCampaigns(): void
     {
-        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php']]);
+        Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php',
+            'database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php',
+            'database/migrations/2026_10_19_100100_create_chatblast_messages_table.php',
+            'database/migrations/2026_10_19_100200_add_send_range_to_chatblast_campaigns.php',
+            'database/migrations/2026_10_19_100300_add_auto_runs_to_chatblast_campaigns.php',
+        ]]);
     }
 
     /** Isang page na kumpleto ang Botcake settings para sa chatblast. */

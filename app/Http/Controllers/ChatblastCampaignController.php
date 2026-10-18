@@ -6,6 +6,7 @@ use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
 use App\Services\ChatblastFlowInfo;
+use App\Services\ChatblastSchedule;
 use App\Services\ChatblastSender;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -18,8 +19,9 @@ use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 /**
- * /chatblast/campaigns: ang mga campaign ng chatblast at ang isang sheet ng lahat ng text (isang row kada campaign, araw
- * at bersyon). Access gaya ng /chatblast (NavAccess; CEO laging pasok, 404 sa iba).
+ * /chatblast/sequence: ang mga sequence ng chatblast (gaya ng sequence sa Botcake; ang table ay chatblast_campaigns),
+ * lahat sa isang page at ine-edit sa lugar: trigger, ang mga step (ang mensahe ng bawat isa mula sa /chatblast/campaigns,
+ * at ang sariling oras), at ang schedule. Access gaya ng /chatblast (NavAccess; CEO laging pasok, 404 sa iba).
  */
 class ChatblastCampaignController extends Controller
 {
@@ -27,10 +29,11 @@ class ChatblastCampaignController extends Controller
     private const MAX_STATUSES = 10;
     private const MAX_PAGES = 100;
     private const MAX_WINDOW = 60;
-    private const MAX_TIMES = 6;
-    private const STALE = 'Nabago na ang cell na ito (ibang tab o tao); i-reload ang page.';
+    private const MAX_CAP = 100000;
+    private const STALE = 'Nabago na ang mga step (ibang tab o tao); i-reload ang page.';
+    private const STALE_FIELD = 'Nabago na ito (ibang tab o tao, o naunang pag-save); i-reload ang page.';
 
-    public function __construct(private Chatblast $chatblast, private PageSettings $settings)
+    public function __construct(private Chatblast $chatblast, private PageSettings $settings, private ChatblastSchedule $schedule)
     {
     }
 
@@ -49,7 +52,7 @@ class ChatblastCampaignController extends Controller
     {
         $this->checkAccess();
 
-        return view('chatblast.campaigns', ['placeholders' => Chatblast::PLACEHOLDERS]);
+        return view('chatblast.sequence', ['placeholders' => Chatblast::PLACEHOLDERS]);
     }
 
     /** Ang mga campaign (kasama ang bilang ngayong araw), ang sheet, at ang mapagpipiliang status at page. */
@@ -62,29 +65,47 @@ class ChatblastCampaignController extends Controller
         $built  = $real()->where('created_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         $sent   = $real()->where('status', 'sent')->where('sent_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         $ready  = $real()->where('status', 'ready')->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind'); // para sa kumpirmasyon ng auto
-        $failed = $real()->whereIn('status', ['failed', 'field_mismatch'])->where('updated_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
-        $sends  = [];
-        $real()->where('status', 'sent')->selectRaw('kind, day, version, COUNT(*) AS n')->groupBy('kind', 'day', 'version')->get()
-            ->each(function ($r) use (&$sends) { $sends[$r->kind . '|' . $r->day . '|' . $r->version] = (int) $r->n; });
+        // Ang failed at nilaktawan ngayong araw ay hinahanap sa index na (status, created_at): ang row na nabuo sa loob ng
+        // pinakamahabang window lang (+2 araw), hindi lahat ng nilaktawan kailanman.
+        $recent = Carbon::now('Asia/Manila')->subDays(self::MAX_WINDOW + 2)->startOfDay()->timezone(config('app.timezone'));
+        $changedToday = fn (array $statuses) => $real()->whereIn('status', $statuses)->where('created_at', '>=', $recent)->where('updated_at', '>=', $start);
+        $failed = $changedToday(['failed', 'field_mismatch'])->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
+        $skipped = $changedToday(['skipped'])->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
+        // Ngayong araw kada step: nabuo, naipadala, failed, nilaktawan.
+        // Gaya ng bilang ng sequence: nabuo ayon sa created_at, naipadala ayon sa sent_at, failed at nilaktawan ayon sa updated_at.
+        $perStep = [];
+        $byStep = function (string $bucket, $query) use (&$perStep) {
+            $query->selectRaw('kind, day, COUNT(*) AS n')->groupBy('kind', 'day')->get()->each(function ($r) use (&$perStep, $bucket) {
+                $perStep[$r->kind . '|' . $r->day] ??= ['built' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0];
+                $perStep[$r->kind . '|' . $r->day][$bucket] += (int) $r->n;
+            });
+        };
+        $byStep('built', $real()->where('created_at', '>=', $start));
+        $byStep('sent', $real()->where('status', 'sent')->where('sent_at', '>=', $start));
+        $byStep('failed', $changedToday(['failed', 'field_mismatch']));
+        $byStep('skipped', $changedToday(['skipped']));
 
         $campaigns = ChatblastCampaign::orderBy('id')->get(ChatblastCampaign::COLUMNS);
-        $sheet = [];
-        foreach ($campaigns as $c) {
-            foreach ((array) $c->days as $d => $versions) {
-                foreach ((array) $versions as $v => $text) {
-                    $label = Chatblast::label($v);
-                    $sheet[] = ['campaign_id' => $c->id, 'name' => $c->name, 'day' => $d + 1, 'version' => $label, 'text' => $text,
-                        'sent' => $sends[$c->kind . '|' . ($d + 1) . '|' . $label] ?? 0];
-                }
-            }
-        }
+        $messages = \App\Models\ChatblastMessage::orderBy('name')->get(['id', 'name', 'versions']);
+        $names = $messages->pluck('name', 'id');
+        $now = Carbon::now('Asia/Manila');
 
         return response()->json([
-            'campaigns' => $campaigns->map(fn ($c) => $this->present($c) + ['today' => [
-                'built' => (int) ($built[$c->kind] ?? 0), 'sent' => (int) ($sent[$c->kind] ?? 0), 'failed' => (int) ($failed[$c->kind] ?? 0),
-            ], 'ready' => (int) ($ready[$c->kind] ?? 0)])->values()->all(),
+            'campaigns' => $campaigns->map(fn ($c) => $this->present($c) + [
+                'today' => ['built' => (int) ($built[$c->kind] ?? 0), 'sent' => (int) ($sent[$c->kind] ?? 0),
+                    'failed' => (int) ($failed[$c->kind] ?? 0), 'skipped' => (int) ($skipped[$c->kind] ?? 0)],
+                'ready' => (int) ($ready[$c->kind] ?? 0),
+                'summary' => $this->schedule->summary($c),
+                'next_run' => $this->schedule->nextRun($c, $now)?->format('Y-m-d H:i'),
+                'steps' => array_map(fn ($versions, $i) => [
+                    'day' => $i + 1, 'message_id' => ((array) $c->step_messages)[$i] ?? null,
+                    'message' => $names[((array) $c->step_messages)[$i] ?? 0] ?? null, 'versions' => $versions,
+                    'times' => ((array) ($c->step_times ?? []))[$i] ?? null,
+                    'today' => $perStep[$c->kind . '|' . ($i + 1)] ?? ['built' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0],
+                ], (array) $c->days, array_keys((array) $c->days)),
+            ])->values()->all(),
+            'messages' => $messages->map(fn ($m) => ['id' => $m->id, 'name' => $m->name, 'versions' => $m->versions])->values()->all(),
             'overlaps' => $this->overlaps($campaigns->where('active', true)->values()->all()),
-            'sheet'    => $sheet,
             'statuses' => $this->jntStatuses(),
             'pages'    => $this->settings->pagesWith('botcake', Chatblast::REQUIRED),
         ]);
@@ -106,17 +127,27 @@ class ChatblastCampaignController extends Controller
         return response()->json($info->forPage($match, $request->boolean('refresh')));
     }
 
-    /** Bagong campaign: manual at naka-on, may isang araw na may isang text. */
+    /**
+     * Bagong sequence: manual at naka-on, may isang step: ang napiling mensahe (message_id), o bagong mensahe
+     * "<pangalan> · Day 1" mula sa text.
+     */
     public function store(Request $request)
     {
         $this->checkAccess();
         [$data, $error] = $this->fields($request, null);
-        if ($error === null) $error = $this->chatblast->invalid([[$request->input('text')]]);
+        $message = $request->filled('message_id') ? \App\Models\ChatblastMessage::find((int) $request->input('message_id')) : null;
+        if ($error === null && $request->filled('message_id') && !$message) $error = 'Walang ganitong mensahe.';
+        if ($error === null && !$message) $error = $this->chatblast->invalid([[$request->input('text')]]);
         if ($error !== null) return response()->json(['error' => $error], 422);
 
-        $c = DB::transaction(function () use ($data, $request) {
+        $c = DB::transaction(function () use ($data, $request, $message) {
+            if (!$message) {
+                $message = new \App\Models\ChatblastMessage(['name' => $this->chatblast->freeName($data['name'] . ' · Day 1'), 'versions' => [trim((string) $request->input('text'))]]);
+                Chatblast::log($message, Auth::id(), ['what' => 'create']);
+                $message->save();
+            }
             $c = new ChatblastCampaign($data + ['kind' => 'tmp-' . bin2hex(random_bytes(8)), 'mode' => 'manual', 'active' => true,
-                'days' => [[trim((string) $request->input('text'))]]]);
+                'days' => [$message->versions], 'step_messages' => [$message->id]]);
             Chatblast::log($c, Auth::id(), ['what' => 'create']);
             $c->save();
             $c->kind = 'c' . $c->id; // ang susi sa botcake_messages.kind: hindi nagbabago kahit palitan ang pangalan
@@ -146,10 +177,42 @@ class ChatblastCampaignController extends Controller
         $active = $request->has('active') ? filter_var($request->input('active'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) : $c->active;
         if ($active === null) return response()->json(['error' => 'On/off: true o false lang.'], 422);
 
-        DB::transaction(function () use ($c, $data, $mode, $active) {
+        $old = is_array($request->input('old')) ? $request->input('old') : [];
+        try {
+            $this->updateLocked($c, $data, $mode, $active, $old);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['campaign' => $this->present($c->fresh())]);
+    }
+
+    /** Mga field na listahan: ang page ay nagpapadala ng buong listahan, kaya kasama ang nakita nito (old). */
+    private const LISTS = ['send_times', 'weekdays', 'statuses', 'pages', 'send_range'];
+
+    /** Ang listahan sa iisang anyo para maihambing (ayos, wala = lahat ng araw / lahat ng page, every = 1). */
+    private static function norm(string $key, mixed $v): mixed
+    {
+        if ($key === 'send_range') {
+            if (!is_array($v)) return null;
+            return ['start' => (string) ($v['start'] ?? ''), 'end' => (string) ($v['end'] ?? ''), 'every' => (int) ($v['every'] ?? 1) ?: 1];
+        }
+        $list = array_values(array_unique(array_map(fn ($x) => is_scalar($x) ? trim((string) $x) : '', (array) ($v ?? []))));
+        if ($key === 'weekdays' && !$list) $list = ['1', '2', '3', '4', '5', '6', '7'];
+        sort($list);
+
+        return $list;
+    }
+
+    private function updateLocked(ChatblastCampaign $c, array $data, string $mode, bool $active, array $old): void
+    {
+        DB::transaction(function () use ($c, $data, $mode, $active, $old) {
             $c = ChatblastCampaign::whereKey($c->id)->lockForUpdate()->first();
+            foreach (self::LISTS as $k) {
+                if (array_key_exists($k, $old) && self::norm($k, $old[$k]) !== self::norm($k, $c->{$k})) throw new InvalidArgumentException(self::STALE_FIELD);
+            }
             $changed = array_keys(array_filter($data, fn ($v, $k) => $c->{$k} !== $v, ARRAY_FILTER_USE_BOTH));
-            $original = $c->send_times;
+            $before = clone $c;
             $c->fill($data);
             if ($changed) Chatblast::log($c, Auth::id(), ['what' => 'settings', 'fields' => $changed]);
 
@@ -160,14 +223,9 @@ class ChatblastCampaignController extends Controller
                 // Mula ngayon lang: ang oras na lumipas na bago i-on ang auto ay hindi na hinahabol.
                 if ($mode === 'auto') $c->auto_ran_at = now();
             }
-            // Ang bagong idinagdag na oras ng padala na lumipas na ngayong araw ay hindi tatakbo; ang dating oras na
-            // hindi pa tumatakbo ay hindi naaapektuhan (kapag mas maaga ito sa bagong oras, ang bago ang huling oras).
-            if ($mode === 'auto' && isset($data['send_times'])) {
-                $now = Carbon::now('Asia/Manila');
-                $past = collect(array_diff($data['send_times'], (array) ($original ?? [])))
-                    ->map(fn ($t) => $now->copy()->setTimeFromTimeString($t))->filter(fn ($t) => $t->lte($now))->max();
-                if ($past && (!$c->auto_ran_at || $c->auto_ran_at->lt($past))) $c->auto_ran_at = $past->copy()->timezone(config('app.timezone'));
-            }
+            // Ang oras na dapat tumakbo ngayon sa bagong schedule pero hindi sa dati (bagong oras na lumipas na, o
+            // idinagdag ang araw na ito) ay hindi tatakbo; ang dating oras na hindi pa tumatakbo ay hindi naaapektuhan.
+            $this->schedule->stampNewPastTimes($before, $c);
             if ($active !== $c->active) {
                 Chatblast::log($c, Auth::id(), ['what' => 'active', 'old' => $c->active, 'new' => $active]);
                 $c->active = $active;
@@ -181,8 +239,6 @@ class ChatblastCampaignController extends Controller
             }
             $c->save();
         });
-
-        return response()->json(['campaign' => $this->present($c->fresh())]);
     }
 
     /** Alisin ang campaign na wala pang mensahe (ang may mensahe: i-off na lang, para buo ang talaan). */
@@ -198,93 +254,132 @@ class ChatblastCampaignController extends Controller
         return response()->json(['deleted' => true]);
     }
 
-    /** Isang cell ng sheet: ang text ng isang araw at bersyon. */
-    public function text(Request $request, int $id)
+    /** Bagong step pagkatapos ng Day N (after = 0: sa simula): ang napiling mensahe, o ang mensahe ng Day N. */
+    public function addStep(Request $request, int $id)
     {
         $this->checkAccess();
-        [$d, $v] = $this->cell($request);
-        $expect = $this->expected($request);
-        $text = $request->input('text');
-        if (!is_string($text)) return response()->json(['error' => 'Walang text.'], 422);
+        $after = $request->input('after');
+        $after = is_numeric($after) ? (int) $after : -1;
+        $message = $request->filled('message_id') ? (int) $request->input('message_id') : null;
 
-        return $this->edit($id, function (array $days) use ($d, $v, $text, $expect, &$old) {
-            if (!isset($days[$d][$v])) throw new InvalidArgumentException('Walang ganitong araw o bersyon.');
-            if ($expect !== null && $days[$d][$v] !== $expect) throw new InvalidArgumentException(self::STALE);
-            $old = $days[$d][$v];
-            $days[$d][$v] = $text;
-            return $days;
-        }, ['what' => 'text', 'day' => $d + 1, 'version' => Chatblast::label(max(0, $v)), 'old' => &$old, 'new' => trim($text)]);
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($after, $message, $seen) {
+            $seen($ids, $after - 1);
+            if ($after < 0 || $after > count($ids)) throw new InvalidArgumentException('Walang ganitong step.');
+            $pick = $message ?? $ids[max(0, $after - 1)];
+            array_splice($ids, $after, 0, [$pick]);
+            array_splice($times, $after, 0, [null]);
+            return [$ids, $times];
+        }, ['what' => 'add_step', 'after' => $after]);
     }
 
-    /** Bagong araw sa dulo: kopya ng bersyon A ng huling araw (para buo agad; palitan sa sheet). */
-    public function addDay(int $id)
+    /** Alisin ang Day N (kahit isang step ang natitira); ang mga kasunod ay umuusad. */
+    public function removeStep(Request $request, int $id)
     {
         $this->checkAccess();
+        $d = $this->day($request);
 
-        return $this->edit($id, function (array $days) {
-            $days[] = [$days[count($days) - 1][0]];
-            return $days;
-        }, ['what' => 'add_day']);
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $seen) {
+            $seen($ids, $d);
+            if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            array_splice($ids, $d, 1);
+            array_splice($times, $d, 1);
+            return [$ids, $times];
+        }, ['what' => 'remove_step', 'day' => $d + 1]);
     }
 
-    /** Bagong bersyon ng araw: kopya ng bersyon A nito. */
-    public function addVersion(Request $request, int $id)
+    /** Ilipat ang Day N pataas o pababa (kasama ang sariling oras nito). */
+    public function move(Request $request, int $id)
     {
         $this->checkAccess();
-        [$d] = $this->cell($request);
+        $d = $this->day($request);
+        $dir = $request->input('dir');
+        if (!in_array($dir, ['up', 'down'], true)) return response()->json(['error' => 'Direksyon: up o down.'], 422);
 
-        return $this->edit($id, function (array $days) use ($d) {
-            if (!isset($days[$d])) throw new InvalidArgumentException('Walang ganitong araw.');
-            $days[$d][] = $days[$d][0];
-            return $days;
-        }, ['what' => 'add_version', 'day' => $d + 1]);
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $dir, $seen) {
+            $seen($ids, $d);
+            $to = $dir === 'up' ? $d - 1 : $d + 1;
+            if (!isset($ids[$d]) || !isset($ids[$to])) throw new InvalidArgumentException('Hindi maililipat ang step na ito.');
+            [$ids[$d], $ids[$to]] = [$ids[$to], $ids[$d]];
+            [$times[$d], $times[$to]] = [$times[$to], $times[$d]];
+            return [$ids, $times];
+        }, ['what' => 'move', 'day' => $d + 1, 'dir' => $dir]);
     }
 
-    /** Alisin ang isang bersyon; ang huling bersyon ng araw ay inaalis ang araw (kahit isang araw ang natitira). */
-    public function remove(Request $request, int $id)
+    /** Ang mensahe ng Day N (mula sa /chatblast/campaigns). */
+    public function stepMessage(Request $request, int $id)
     {
         $this->checkAccess();
-        [$d, $v] = $this->cell($request);
-        $expect = $this->expected($request);
+        $d = $this->day($request);
+        $message = (int) $request->input('message_id');
 
-        return $this->edit($id, function (array $days) use ($d, $v, $expect, &$old) {
-            if (!isset($days[$d][$v])) throw new InvalidArgumentException('Walang ganitong araw o bersyon.');
-            if ($expect !== null && $days[$d][$v] !== $expect) throw new InvalidArgumentException(self::STALE);
-            $old = $days[$d][$v];
-            array_splice($days[$d], $v, 1);
-            if (!$days[$d]) array_splice($days, $d, 1);
-            return $days;
-        }, ['what' => 'remove', 'day' => $d + 1, 'version' => Chatblast::label(max(0, $v)), 'old' => &$old]);
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $message, $seen, &$old) {
+            $seen($ids, $d);
+            if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            $old = $ids[$d];
+            $ids[$d] = $message;
+            return [$ids, $times];
+        }, ['what' => 'step_message', 'day' => $d + 1, 'old' => &$old, 'new' => $message]);
     }
 
-    private function edit(int $id, callable $change, array $entry)
+    /** Ang sariling oras ng Day N (walang laman = ang mga oras ng sequence). */
+    public function stepTimes(Request $request, int $id)
+    {
+        $this->checkAccess();
+        $d = $this->day($request);
+        $new = $request->input('times') ?? [];
+        $old = $request->has('old') ? self::norm('send_times', $request->input('old')) : null;
+
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $new, $seen, $old) {
+            $seen($ids, $d);
+            if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            if ($old !== null && $old !== self::norm('send_times', $times[$d] ?? [])) throw new InvalidArgumentException(self::STALE);
+            $times[$d] = $new ?: null;
+            return [$ids, $times];
+        }, ['what' => 'step_times', 'day' => $d + 1, 'new' => $new]);
+    }
+
+    private function steps(int $id, callable $change, array $entry)
     {
         ChatblastCampaign::findOrFail($id);
         try {
-            $changed = $this->chatblast->editDays($id, $change, Auth::id(), $entry);
+            $changed = $this->chatblast->editSteps($id, $change, Auth::id(), $entry);
         } catch (InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
+        $c = ChatblastCampaign::findOrFail($id);
 
-        return response()->json(['changed' => $changed, 'days' => ChatblastCampaign::findOrFail($id)->days]);
+        return response()->json(['changed' => $changed, 'step_messages' => $c->step_messages, 'step_times' => $c->step_times]);
     }
 
-    /** Ang text na nakita ng user sa cell (old), para hindi mapalitan ang cell na nabago o nausog na; null kapag wala. */
-    private function expected(Request $request): ?string
+    /**
+     * Ang nakita ng user sa page: ilang step (steps) at ang mensahe ng step na binabago (expect). Kapag iba na (hal. may
+     * inalis na step sa ibang tab, kaya nausog ang mga araw), hindi itinutuloy ang pagbabago. Walang laman = walang bantay.
+     */
+    private function seen(Request $request): callable
     {
-        $old = $request->input('old');
-        return is_string($old) ? $old : null;
+        $count = is_numeric($request->input('steps')) ? (int) $request->input('steps') : null;
+        $expect = is_numeric($request->input('expect')) ? (int) $request->input('expect') : null;
+
+        return function (array $ids, int $index) use ($count, $expect) {
+            if ($count !== null && count($ids) !== $count) throw new InvalidArgumentException(self::STALE);
+            if ($expect !== null && $index >= 0 && (int) ($ids[$index] ?? 0) !== $expect) throw new InvalidArgumentException(self::STALE);
+        };
     }
 
-    /** @return array{0:int, 1:int} [index ng araw, index ng bersyon] mula sa day (1, 2, …) at version (A, B, …) */
-    private function cell(Request $request): array
+    private function day(Request $request): int
     {
         $day = $request->input('day');
-        $ver = $request->input('version');
-        $d = is_numeric($day) ? (int) $day - 1 : -1;
-        $v = is_string($ver) && preg_match('/^[A-Z]$/', $ver) ? ord($ver) - 65 : -1;
-
-        return [$d, $v];
+        return is_numeric($day) ? (int) $day - 1 : -1;
     }
 
     /**
@@ -325,13 +420,34 @@ class ChatblastCampaignController extends Controller
         }
         if ($c === null || $request->has('send_times')) {
             $times = $request->input('send_times') ?? ($c === null ? ['09:00'] : []);
-            if (!is_array($times) || count($times) > self::MAX_TIMES) return [[], 'Oras ng padala: hanggang ' . self::MAX_TIMES . '.'];
-            foreach ($times as $t) {
-                if (!is_string($t) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) return [[], 'Oras ng padala: HH:MM (00:00 hanggang 23:59).'];
-            }
+            if (($error = Chatblast::invalidTimes(is_array($times) ? array_values($times) : $times)) !== null) return [[], 'Oras ng padala: ' . $error];
             $times = array_values(array_unique($times));
             sort($times);
             $data['send_times'] = $times;
+        }
+        if ($request->has('send_range')) {
+            $range = $request->input('send_range');
+            if (is_array($range) && ($range['every'] ?? null) === null) $range['every'] = 1; // wala o null: bawat oras
+            if (is_array($range) && is_numeric($range['every']) && (int) $range['every'] == $range['every']) $range['every'] = (int) $range['every'];
+            if (($error = ChatblastSchedule::invalidRange($range)) !== null) return [[], 'Bawat oras: ' . $error];
+            $data['send_range'] = $range === null ? null : ['start' => $range['start'], 'end' => $range['end'], 'every' => $range['every']];
+        }
+        if ($request->has('weekdays')) {
+            $days = $request->input('weekdays');
+            if (!is_array($days) || !$days) return [[], 'Mga araw: pumili ng kahit isa (Lun hanggang Lin).'];
+            foreach ($days as $d) {
+                if (!is_int($d) && !(is_string($d) && ctype_digit($d)) || (int) $d < 1 || (int) $d > 7) return [[], 'Mga araw: 1 (Lun) hanggang 7 (Lin).'];
+            }
+            $days = array_values(array_unique(array_map('intval', $days)));
+            sort($days);
+            $data['weekdays'] = count($days) === 7 ? null : $days; // lahat = araw-araw
+        }
+        if ($request->has('daily_cap')) {
+            $cap = $request->input('daily_cap');
+            if ($cap !== null && $cap !== '' && (!is_numeric($cap) || (int) $cap != $cap || $cap < 1 || $cap > self::MAX_CAP)) {
+                return [[], 'Cap: 1 hanggang ' . number_format(self::MAX_CAP) . ' kada page kada araw, o walang laman.'];
+            }
+            $data['daily_cap'] = $cap === null || $cap === '' ? null : (int) $cap;
         }
         if ($c === null || $request->has('requires_on_delivery')) {
             $data['requires_on_delivery'] = $request->boolean('requires_on_delivery');
@@ -384,6 +500,7 @@ class ChatblastCampaignController extends Controller
             'id' => $c->id, 'kind' => $c->kind, 'name' => $c->name, 'statuses' => $c->statuses, 'pages' => $c->pages,
             'window_days' => $c->window_days, 'send_times' => $c->send_times ?? [], 'requires_on_delivery' => $c->requires_on_delivery,
             'mode' => $c->mode, 'active' => $c->active, 'days' => count((array) $c->days),
+            'weekdays' => $c->weekdays, 'step_times' => $c->step_times, 'daily_cap' => $c->daily_cap, 'send_range' => $c->send_range,
             'mode_changed_at' => $c->mode_changed_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
         ];
     }
