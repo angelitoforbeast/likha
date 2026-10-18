@@ -1040,3 +1040,14 @@ Amendment 2. It replaces S-056.9 and S-056.10 (amendment 1's earlier ready rows 
 | S-056.19 | Given a ready row whose order (ts_date) is older than its sequence's window while the waybill is still In Transit, when any fetch runs (also auto's), then the row is skipped with "The order is older than the sequence's N-day window", its key is released, and auto does not queue it | `ChatblastAutoTest::test_S_056_19…` | Passed · 2026-10-18 · auto |
 | S-056.20 | Given rows built days ago and sent or failed today, when History shows today, then they are listed (dates are when a row was processed: sent_at for sent, the last change for the rest), and Retry failed queues today's failures | `test_S_056_20…` | Passed · 2026-10-18 · auto |
 | S-056.21 | Given ready rows of a sequence that is off, then the "Send all ready" count leaves them out (the sender refuses them too) | `test_S_056_21…` | Passed · 2026-10-18 · auto |
+
+### S-056D Staff see what the customer saw, and open the customer in Botcake (P2)
+
+Amendment 3. Tests are in `tests/Feature/Chatblast/ChatblastCustomerSawTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.22 | Given a row and its page's stored shipping template body with {{1}}, when the panel opens, then it shows the body with {{1}} replaced by the row text; given no body, a marker ("!…") or no {{1}}, then the row text alone with "Template text unknown: run Test token on the page"; no Botcake call is made | `test_S_056_22…` (4 data sets) | Passed · 2026-10-18 · auto |
+| S-056.23 | Given a row with a PSID on a page with botcake.page_id, then the panel has "Open in Botcake" built from the one configured URL format; without a PSID or a page ID, no link | `test_S_056_23…` | Passed · 2026-10-18 · auto |
+| S-056.24 | Given History, then a sent row's first line is the first line of what the customer saw; other rows keep their own first line | `test_S_056_24…` | Passed · 2026-10-18 · auto |
+| S-056.25 | Given To send or History, then the panel has the chat bubble ("What the customer saw", or "will see" before sending) and the link opens in a new tab | `test_S_056_25…` and the browser check | Passed · 2026-10-18 · auto + headless browser |

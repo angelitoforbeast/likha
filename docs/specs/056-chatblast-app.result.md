@@ -500,3 +500,83 @@ Accepted, with reasons in `TODO.md`:
 - **No migration.**
 - **The default-queue worker** for Fetch new (amendment 1) still applies.
 - **Open tabs:** a To send tab opened before the deploy should be reloaded.
+
+## Amendment 3: what the customer saw, and Open in Botcake
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-3.md` (git-ignored, not
+committed). It is treated as part of the brief.
+
+### What changed
+
+1. **"What the customer saw"** in the row panel, on both To send and History (`ChatblastController::show`,
+   `customer_saw`).
+   - **The text:** the page's stored shipping template body (`botcake.template.shipping.text`, spec 052) with `{{1}}`
+     replaced by the row's text, shown as a grey chat bubble.
+   - **Unknown template:** when there is no body, the stored value is a marker (it starts with `!`: not checked, not
+     approved, not found, deleted) or the body has no `{{1}}`, the bubble shows the row text alone with "Template text
+     unknown: run Test token on the page".
+   - **Stored data only:** no Botcake call is made.
+   - **Unsent rows** read "What the customer will see:" (from the review).
+2. **"Open in Botcake ↗"** opens in a new tab (`rel="noopener noreferrer"`). It shows when the row has a PSID and the
+   page has `botcake.page_id`.
+   - The URL format lives in one place, `config('services.botcake.inbox_url')`, set by `BOTCAKE_INBOX_URL`. The default
+     is `https://botcake.io/pages/{page_id}/live_chat`, and `.env.example` documents it.
+   - `{psid}` is supported in the format.
+   - **The format is not confirmed.** Botcake's public docs and API directory show no live-chat or inbox URL, with or
+     without the customer. So the default is the page's inbox without the customer, and even that path is a best guess.
+     Someone logged in to Botcake should open one page's live chat, copy its address, and set `BOTCAKE_INBOX_URL`, with
+     `{psid}` if the address names the customer.
+3. **History lists sent rows with the first line of what the customer saw** (template plus text). Other rows keep the
+   first line of their own text.
+
+### Case table (amendment 3)
+
+Red runs, before the code:
+
+- **S-056.22:** `customer_saw` was null.
+- **S-056.23:** `botcake_url` was null.
+- **S-056.24:** the first line was not the template's.
+- **S-056.25:** the strings were not in the page.
+
+| Case | Test | Result |
+|---|---|---|
+| S-056.22 | `ChatblastCustomerSawTest::test_S_056_22_the_panel_shows_what_the_customer_saw_from_stored_data_only` (4 data sets: body, not checked, not approved, none; no HTTP sent) | pass |
+| S-056.23 | `ChatblastCustomerSawTest::test_S_056_23_open_in_botcake_needs_a_psid_and_the_page_id` | pass |
+| S-056.24 | `ChatblastCustomerSawTest::test_S_056_24_history_lists_sent_rows_with_the_first_line_the_customer_saw` | pass |
+| S-056.25 | `ChatblastCustomerSawTest::test_S_056_25_the_panel_has_the_chat_bubble_and_the_botcake_link_in_a_new_tab` and the browser check | pass |
+
+**Suite:**
+
+- `tests/Feature/Chatblast`: `Tests: 171, Assertions: 1138`, all passing.
+- The full suite on `f2311a32`: `Tests: 2 failed, 1489 warnings, 158 passed (18687 assertions)`. The two failures are
+  the known `ExampleTest` and `NightRun\ImportStartTest`.
+- The review fix (`d73daf8a`) changed only one label in the script. `ChatblastCustomerSawTest` passed again and the
+  script parses.
+
+### Browser check (amendment 3)
+
+The check ran on the scratch app, with a made-up template "Good day po!\n{{1}}\nSalamat po sa pag-order." and page ID
+100001 on the scratch page. Screenshots `panel-sent.png` and `panel-ready.png`, with `evidence-amendment-3.txt`, are in
+the main checkout's `handoff/056-chatblast-app/screens/amendment-3/`.
+
+- **History, sent row:** the list's first line was "Good day po!". The panel bubble read "Good day po! / Hello Buyer 2
+  / Salamat po sa pag-order.", and the link "Open in Botcake ↗" went to `https://botcake.io/pages/100001/live_chat`
+  with target `_blank` and rel `noopener noreferrer`.
+- **To send, ready row:** the bubble was composed the same way, with the same link.
+- **No JS errors.**
+
+### Review (amendment 3)
+
+One `skeptic-reviewer` pass at standard depth. It found no blockers and no majors. It confirmed:
+- no XSS: the bubble uses `textContent` and the link uses `setAttribute`, with the PSID URL-encoded;
+- no Botcake call;
+- the marker check matches `BotcakeFlowNames`.
+
+One minor was fixed: unsent rows now read "What the customer will see". The rest are accepted in `TODO.md`:
+- the panel uses the page's current template, not the one in use when the row was sent;
+- a real body starting with `!` would read as unknown;
+- S-056.25 checks strings only.
+
+### Story changes (amendment 3)
+
+- **S-056.22 to S-056.25** are new, from the amendment.
