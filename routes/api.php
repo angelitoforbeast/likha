@@ -4,8 +4,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AutomationController;
 use App\Http\Controllers\StaffFeedController;
+use App\Http\Controllers\BotcakeChatController;
 
 Route::post('/automation/macro-import', [AutomationController::class, 'macroImport']);
+
+// Mga mensahe ng customer mula sa JSON API block ng Botcake (shared key, walang session o CSRF). GET din, kung
+// naiwang GET ang block.
+Route::match(['get', 'post'], '/botcake/chat', [BotcakeChatController::class, 'receive'])->middleware('throttle:botcake-chat');
 
 // Read-only staff feed para sa assistant ng owner (header X-STAFF-FEED-KEY, sariling key).
 Route::middleware('throttle:30,1')->group(function () {

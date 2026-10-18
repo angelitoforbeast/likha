@@ -8,7 +8,7 @@
 @endsection
 
 @section('content')
-<div id="cs"
+<div id="cs" class="cb-page"
      data-data-url="{{ route('chatblast.sequence.data') }}"
      data-base-url="{{ url('/chatblast/sequence') }}"
      data-messages-url="{{ route('chatblast.campaigns.index') }}">
@@ -16,6 +16,8 @@
     <p id="notice" class="text-xs mb-2 min-h-[1rem]" aria-live="polite"></p>
     <div id="overlaps" class="hidden mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status"></div>
 
+    {{-- Ang mga card lang ang nag-i-scroll; nakapirmi ang header sa itaas --}}
+    <div class="cb-scroll">
     <details id="new-box" class="mb-4 cb-card px-4 py-2 text-sm">
         <summary class="cursor-pointer font-medium">+ New sequence</summary>
         <form id="new-form" class="grid md:grid-cols-2 gap-3 mt-2">
@@ -28,6 +30,7 @@
     </details>
 
     <div id="blocks" class="space-y-4"></div>
+    </div>
 </div>
 
 <script>

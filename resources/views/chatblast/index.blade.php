@@ -19,7 +19,7 @@
 @endpush
 
 @section('content')
-<div id="cb"
+<div id="cb" class="cb-page"
      data-view="{{ $view }}"
      data-list-url="{{ route('chatblast.list') }}"
      data-show-url="{{ url('/chatblast/messages') }}"
@@ -32,8 +32,9 @@
      data-test-url="{{ route('chatblast.test') }}"
      data-test-psid-url="{{ route('chatblast.test-psid.search') }}">
 
-    {{-- Mga filter, isang hanay (pagtingin lang; ang "Send all ready" ay page at sequence lang ang sinusunod) --}}
-    <form id="filters" class="cb-filters mb-4 flex flex-wrap items-end gap-3 text-sm">
+    {{-- Ang nakapirming bahagi ay maikli: isang hanay ng filter (kasama ang mga aksyon sa kanan) at isang hanay ng chip.
+         Ang filter ay pagtingin lang; ang "Send all ready" ay page at sequence lang ang sinusunod. Isang primary (asul) lang. --}}
+    <form id="filters" class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
         @if($view === 'history')
         <label class="flex flex-col gap-1 text-xs">From<input type="date" name="from" value="{{ $today }}" class="rounded-md border px-2 py-1.5 text-sm text-gray-900"></label>
         <label class="flex flex-col gap-1 text-xs">To<input type="date" name="to" value="{{ $today }}" class="rounded-md border px-2 py-1.5 text-sm text-gray-900"></label>
@@ -54,57 +55,43 @@
         {{-- History: ang naipadala ang default na chip --}}
         <input type="hidden" name="status" value="{{ $view === 'history' ? 'sent' : '' }}">
         <button class="cb-btn">Show</button>
+        {{-- Mga aksyon: ang pagpapadala ay sa To send; ang Retry failed ay sa History. --}}
+        <span class="ml-auto flex flex-wrap items-center gap-2">
+            @if($view === 'send')
+            <button id="send-filtered" type="button" class="cb-btn cb-btn-primary">Send all ready</button>
+            <button id="send-selected" type="button" class="cb-btn" disabled>Send selected (0)</button>
+            {{-- Kusang nagre-refresh ang listahan kada oras (:15); ang button ay para sa ngayon na --}}
+            <button id="build" type="button" class="cb-btn cb-btn-sm">Refresh now</button>
+            @else
+            <button id="retry" type="button" class="cb-btn cb-btn-primary hidden">Retry failed</button>
+            @endif
+        </span>
     </form>
 
-    {{-- Bilang kada status (pindutin para salain) --}}
-    <div id="chips" class="mb-2 flex flex-wrap gap-2 text-xs" aria-label="Count per status"></div>
-    @if($view === 'send')
-    {{-- Ang ready kada sequence at kada page --}}
-    <div id="by-kind" class="text-xs text-slate-500"></div>
-    <div id="by-page" class="mb-1 text-xs text-slate-500"></div>
-    @endif
-
-    {{-- Mga aksyon: ang pagpapadala ay sa To send; ang Retry failed ay sa History. Isang primary (asul) lang. --}}
-    <div class="my-4 flex flex-wrap items-center gap-2 text-sm">
-        @if($view === 'send')
-        <button id="send-filtered" type="button" class="cb-btn cb-btn-primary">Send all ready</button>
-        <button id="send-selected" type="button" class="cb-btn" disabled>Send selected (0)</button>
-        {{-- Kusang nagre-refresh ang listahan kada oras (:15); ang button ay para sa ngayon na --}}
-        <button id="build" type="button" class="cb-btn cb-btn-sm">Refresh now</button>
-        <span id="refreshed" class="text-xs text-slate-500"></span>
-        @else
-        <button id="retry" type="button" class="cb-btn cb-btn-primary hidden">Retry failed</button>
-        @endif
-        <span id="notice" class="text-xs" aria-live="polite"></span>
+    {{-- Ang hanay ng chip: bilang kada status (pindutin para salain), ang ready kada sequence at page (To send), at sa
+         kanan ang lagay ng pagpapadala at ang Test PSID. --}}
+    <div class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" data-cb-chip-row>
+        <div id="chips" class="flex flex-wrap gap-2" aria-label="Count per status"></div>
+        <div class="min-w-0 flex-1 basis-48 text-slate-500">
+            @if($view === 'send')
+            {{-- Isang linya bawat isa; ang buo ay nasa tooltip kapag mahaba --}}
+            <div id="by-kind" class="truncate"></div>
+            <div id="by-page" class="truncate"></div>
+            @endif
+        </div>
         <span class="ml-auto flex flex-wrap items-center gap-2">
-            <span id="state" class="text-xs text-slate-500" aria-live="polite"></span>
-            <span id="test-psid-owner" class="text-xs text-slate-500"></span>
+            <span id="state" class="text-slate-500" aria-live="polite"></span>
+            <span id="test-psid-owner" class="text-slate-500"></span>
             @if($view === 'send')
             <button id="pause" type="button" class="cb-btn cb-btn-sm hidden">Pause</button>
             <button id="resume" type="button" class="cb-btn cb-btn-sm hidden">Resume</button>
             @endif
+            <button id="test-psid-open" type="button" class="cb-btn cb-btn-sm" aria-haspopup="dialog">Test PSID</button>
         </span>
     </div>
 
-    {{-- Ang link na "Set a Test PSID first" ng page settings ay pumupunta rito (#test-psid) at binubuksan ito. --}}
-    <details id="test-psid" class="cb-card mb-4 px-4 py-2 text-sm">
-        <summary class="cursor-pointer font-medium text-slate-700">Test PSID</summary>
-        <div class="mt-2 grid gap-4 lg:grid-cols-3">
-            <form id="test-psid-form">
-                <p class="mb-1 text-xs text-slate-500">The page's Test PSID (your own account among the page's Botcake customers): every "Send test" goes here.</p>
-                <select name="page" class="mb-1 rounded-md border px-2 py-1.5 text-sm">
-                    @foreach($pages as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
-                </select>
-                <input name="q" placeholder="search a name" class="rounded-md border px-2 py-1.5 text-sm">
-                <button class="cb-btn">Search</button>
-                <div id="test-psid-current" class="mt-1 text-xs text-slate-500"></div>
-                <ul id="test-psid-results" class="mt-1 space-y-1 text-sm"></ul>
-            </form>
-        </div>
-    </details>
-
-    {{-- Ang table ay bahagi ng page (walang sariling scroll, walang sticky na header) --}}
-    <div class="cb-card overflow-x-auto">
+    {{-- Ang table lang ang nag-i-scroll; nakadikit ang header row nito sa taas --}}
+    <div class="cb-card cb-scroll">
         <table id="cb-table" class="cb-table">
             <thead>
             <tr>
@@ -117,10 +104,37 @@
             <tbody id="cb-rows"></tbody>
         </table>
     </div>
-    <div class="mt-3 flex items-center gap-3 text-sm">
+    {{-- Sa ilalim ng table: ang pager, ang mensahe ng huling aksyon, at kailan huling na-refresh ang listahan --}}
+    <div class="mt-2 flex items-center gap-3 text-sm">
         <button id="prev" type="button" class="cb-btn cb-btn-sm">‹</button>
         <span id="pager" class="text-xs text-slate-500"></span>
         <button id="next" type="button" class="cb-btn cb-btn-sm">›</button>
+        <span id="notice" class="text-xs" aria-live="polite"></span>
+        @if($view === 'send')
+        <span id="refreshed" class="ml-auto text-xs text-slate-500"></span>
+        @endif
+    </div>
+
+    {{-- Ang Test PSID ng page: modal sa gitna. Isara: ✕, Escape, o pindot sa labas. --}}
+    <div id="test-psid-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" aria-label="Test PSID" role="dialog" aria-modal="true">
+        <div class="mx-auto w-full max-w-lg rounded-xl bg-white p-5 text-sm shadow-lg">
+            <div class="mb-3 flex items-center justify-between">
+                <div class="font-semibold">Test PSID</div>
+                <button id="test-psid-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <form id="test-psid-form">
+                <p class="mb-2 text-xs text-slate-500">The page's Test PSID (your own account among the page's Botcake customers): every "Send test" goes here.</p>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select name="page" class="rounded-md border px-2 py-1.5 text-sm">
+                        @foreach($pages as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
+                    </select>
+                    <input name="q" placeholder="search a name" class="rounded-md border px-2 py-1.5 text-sm">
+                    <button class="cb-btn">Search</button>
+                </div>
+                <div id="test-psid-current" class="mt-2 text-xs text-slate-500"></div>
+                <ul id="test-psid-results" class="mt-1 space-y-1 text-sm"></ul>
+            </form>
+        </div>
     </div>
 
     {{-- Ang detalye ng isang mensahe: modal sa gitna (hindi side panel na tumatakip sa table). Isara: ✕, Escape, o
@@ -219,6 +233,7 @@
         if (!box) return;
         const parts = Object.entries(map || {}).map(([k, n]) => name(k) + ' ' + fmt(n));
         box.textContent = parts.length ? label + parts.join(' · ') : '';
+        box.title = box.textContent; // isang linya lang ang nakikita; ang buo ay nasa tooltip
     }
 
     function renderChips(counts) {
@@ -458,6 +473,14 @@
 
     // ---- Test PSID ----
 
+    // Ang modal ng Test PSID: binubuksan ng button sa hanay ng chip; isinasara ng ✕, Escape, o pindot sa labas.
+    const psidModal = $id('test-psid-modal');
+    const closePsid = () => psidModal.classList.add('hidden');
+    $id('test-psid-open').addEventListener('click', () => { psidModal.classList.remove('hidden'); psidModal.querySelector('[name=q]').focus(); });
+    $id('test-psid-close').addEventListener('click', closePsid);
+    psidModal.addEventListener('click', e => { if (e.target === psidModal) closePsid(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closePsid(); });
+
     const pf = document.getElementById('test-psid-form');
     pf.addEventListener('submit', async e => {
         e.preventDefault();
@@ -477,7 +500,7 @@
     });
 
     // Mula sa "Set a Test PSID first" ng page settings: bukas agad ang Test PSID.
-    if (location.hash === '#test-psid') document.getElementById('test-psid').open = true;
+    if (location.hash === '#test-psid') $id('test-psid-open').click();
 
     load();
 })();

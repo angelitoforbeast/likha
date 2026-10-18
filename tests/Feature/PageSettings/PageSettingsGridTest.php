@@ -179,6 +179,13 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         }
     }
 
+    public function test_S_060_6_a_ready_chip_right_after_pages_counts_the_pages_with_the_green_border(): void
+    {
+        // Ang Ready ay eksaktong ang mga page na may berdeng gilid; sumusunod sa chip at name filter gaya ng iba.
+        $this->get('/chatblast/page-settings')->assertOk()
+            ->assertSee("['all', 'Pages', () => true],\n        ['ready', 'Ready', r => borderOf(r) === 'border-l-green-500'],", false);
+    }
+
     public function test_S_054_9_the_page_cell_border_shows_the_row_state_and_the_legend_explains_it(): void
     {
         $this->get('/chatblast/page-settings')->assertOk()

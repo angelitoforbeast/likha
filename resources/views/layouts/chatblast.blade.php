@@ -3,7 +3,8 @@
   walang main nav ng Likha. Top bar at hindi sidebar, para buo ang lapad ng page settings grid (walang horizontal
   scroll). Ang bawat page: @section('title'), @section('heading'), @section('description') (isang linya sa ilalim ng
   title), @section('actions') (sariling links), @section('content'), at @push('styles') / @push('scripts').
-  Walang sticky o lumulutang habang nag-i-scroll: normal na dokumento ang bawat page (gusto ng owner).
+  Nakapirmi ang top bar, ang header ng page (title, filter, chip, button) at ang header row ng table; ang data lang ang
+  nag-i-scroll. Ang laman ng page ay isang .cb-page na column; ang isang .cb-scroll sa loob nito ang tanging may scroll.
 --}}
 @php
   $cbItems = \App\Support\ChatblastNav::items(Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '');
@@ -32,13 +33,21 @@
         .cb-table tbody tr:hover td { @apply bg-slate-50; }
         .cb-filters label { @apply text-slate-500; }
         .cb-filters input, .cb-filters select { @apply rounded-md border-slate-300; }
+        /* Buong taas na column: ang .cb-scroll lang ang nag-i-scroll (min 16rem; kapag maliit ang screen, ang main ang
+           nag-i-scroll). Ang header row ng table ay nakadikit sa taas nito: puti, isang manipis na linya, at magaan na
+           anino lang kapag na-scroll na ang mga row. Ang linya ay box-shadow kasi hindi sumasama ang border ng th sa sticky. */
+        .cb-page { @apply flex min-h-0 flex-1 flex-col; }
+        .cb-page > * { @apply shrink-0; }
+        .cb-page > .cb-scroll { @apply min-h-[16rem] flex-1 basis-0 overflow-auto; }
+        .cb-scroll thead th { @apply sticky top-0 z-10 border-b-0 bg-white; box-shadow: inset 0 -1px 0 #e2e8f0; }
+        .cb-scroll.is-scrolled thead th { box-shadow: inset 0 -1px 0 #e2e8f0, 0 2px 4px -2px rgb(15 23 42 / 0.08); }
         }
     </style>
     @stack('styles')
 </head>
-<body class="min-h-screen bg-slate-50 text-gray-900" data-chatblast-app>
+<body class="flex h-screen flex-col overflow-hidden bg-slate-50 text-gray-900" data-chatblast-app>
 
-<header class="border-b border-slate-200 bg-white">
+<header class="shrink-0 border-b border-slate-200 bg-white">
     <div class="flex h-14 items-center gap-6 px-4 sm:px-6">
         <a href="{{ url($cbItems[0]['url'] ?? '/') }}" class="flex shrink-0 items-center gap-2">
             <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 text-white">
@@ -65,12 +74,12 @@
     </div>
 </header>
 
-<main class="px-4 py-6 sm:px-6">
-    <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+<main class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6">
+    <div class="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
             <h1 class="text-2xl font-semibold">@yield('heading')</h1>
             @hasSection('description')
-                <p class="mt-1 max-w-5xl text-sm text-slate-500">@yield('description')</p>
+                <p class="mt-0.5 max-w-5xl text-sm text-slate-500">@yield('description')</p>
             @endif
         </div>
         <div class="flex flex-wrap items-center gap-4 pt-1 text-sm">@yield('actions')</div>
@@ -79,6 +88,12 @@
     @yield('content')
 </main>
 
+<script>
+    // Ang anino sa ilalim ng header row: lalabas lang kapag na-scroll na ang mga row.
+    for (const s of document.querySelectorAll('.cb-scroll')) {
+        s.addEventListener('scroll', () => s.classList.toggle('is-scrolled', s.scrollTop > 0), {passive: true});
+    }
+</script>
 @stack('scripts')
 </body>
 </html>
