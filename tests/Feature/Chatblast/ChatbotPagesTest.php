@@ -205,11 +205,16 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->actingAs($this->user()); // CEO: kahit siya ay hindi makakasulat ng ACTIVE sa Page settings
         $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'chatbot', 'key' => 'active', 'value' => '0'])->assertStatus(422);
         $this->assertNull($this->settings()->get('Page Uno', 'chatbot', 'active'));
+        // Ang pag-deactivate ng row sa Page settings ay hindi rin nagpapalit ng ACTIVE.
+        $this->settings()->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
+        $id = PageSetting::where('provider', 'chatbot')->where('key', 'active')->where('active', true)->value('id');
+        $this->post('/chatblast/page-settings/' . $id . '/deactivate');
+        $this->assertSame('0', $this->settings()->get('Page Uno', 'chatbot', 'active'));
 
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'price', 'value' => '1'])->assertForbidden();
         $this->postJson('/chatbot/column', ['name' => 'Promo'])->assertForbidden();
-        $this->assertSame(0, PageSetting::where('provider', 'chatbot')->count());
+        $this->assertSame(0, PageSetting::where('provider', 'chatbot')->where('key', '!=', 'active')->count());
     }
 
     public function test_S_068_10_a_page_cannot_take_a_botcake_id_another_page_uses_or_join_twice(): void

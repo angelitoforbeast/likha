@@ -363,6 +363,10 @@ class PageSettingController extends Controller
         $this->checkAccess();
 
         $setting = PageSetting::findOrFail($id);
+        // Ang ACTIVE ng chatbot ay sa On/Off ng /chatbot lang (CEO), hindi dito.
+        if ($setting->fullKey() === 'chatbot.active') {
+            return redirect()->route('page-settings.index')->withErrors(['value' => 'chatbot.active is changed with the On/Off switch on /chatbot.']);
+        }
         $this->settings->deactivate($setting, Auth::id());
 
         return redirect()->route('page-settings.index')->with('success', 'Deactivated: ' . $setting->page_name . ' · ' . $setting->fullKey());
