@@ -95,6 +95,7 @@
         I-click ang cell at mag-type: kusa itong nase-save (Enter, pag-alis sa cell, o ilang segundong walang type). Blangko = burahin ang setting.
         Token / secret: blangko = walang palit; ang laman ay hindi kailanman ipinapakita (huling 4 lang). Kada ilang segundo, kinukuha ang binago ng iba.
         ID ng Botcake, flow at field: numero lang.
+        Sa ilalim ng flow ID: ang pangalan nito sa Botcake (kinukuha pagka-save at sa Test token na ok). Shipping template: kusang pinipili kapag blangko; puwedeng palitan.
     </p>
 
     <div id="grid"
@@ -239,7 +240,53 @@
             mark ? el('span', {class: 'ml-1 text-xs ' + mark.cls, title: mark.title || '', text: mark.text}) : null,
             mark && mark.title ? el('div', {class: 'text-xs text-red-600', text: mark.title}) : null,
             col.readonly ? null : el('button', {class: 'hist ml-1 text-xs text-gray-400 hover:text-gray-700', type: 'button', title: 'History', text: '⋯'}),
+            ...detailLines(row, col),
         );
+    }
+
+    // ---- pangalan ng flow at template: mula sa Botcake, isinusulat ng system, ipinapakita sa ilalim ng cell ----
+
+    const FLOW_KEY = /^botcake\.flow\.[a-z0-9_]+$/;
+    const DETAIL_KEY = /^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$/;
+    const TEMPLATE_KEY = 'botcake.template.shipping', SHIPPING_KEY = 'botcake.flow.shipping';
+    const TONE = {red: 'text-red-600', grey: 'text-gray-400'};
+
+    // Isang linya, putol kapag mahaba; ang buong text ay nasa hover.
+    function detailLine(text, tone) {
+        return el('div', {class: 'text-xs truncate max-w-[18rem] ' + (TONE[tone] || 'text-gray-600'), title: text, text});
+    }
+
+    function detailOf(row, key) {
+        const d = row.cells[key];
+        return d ? detailLine(d.line, d.tone) : detailLine('hindi pa nasusuri', 'grey');
+    }
+
+    function detailLines(row, col) {
+        const cell = row.cells[col.key];
+        if (FLOW_KEY.test(col.key) && cell) {
+            const out = [detailOf(row, col.key + '.name')];
+            if (col.key === SHIPPING_KEY) {
+                const t = row.cells[TEMPLATE_KEY], d = row.cells[TEMPLATE_KEY + '.text'];
+                out.push(!t ? detailLine('Template: piliin ang template', 'grey')
+                    : detailLine('Template: ' + t.value + ' — ' + (d ? d.line : 'hindi pa nasusuri'), d ? d.tone : 'grey'));
+            }
+            return out;
+        }
+        if (col.key === TEMPLATE_KEY) return [cell ? detailOf(row, TEMPLATE_KEY + '.text') : detailLine('piliin ang template', 'grey')];
+        return [];
+    }
+
+    // Ang mga cell na iginuguhit ulit kapag nagbago ang key (ang pangalan o body ay nasa cell ng flow o template).
+    function paintedBy(key) {
+        if (key === TEMPLATE_KEY || key === TEMPLATE_KEY + '.text') return [TEMPLATE_KEY, SHIPPING_KEY];
+        return [DETAIL_KEY.test(key) ? key.slice(0, -'.name'.length) : key];
+    }
+
+    // Ang mga cell na isinulat ng system pagkatapos ng save o Test token (null = binura).
+    function applyCells(row, cells) {
+        const keys = Object.keys(cells || {});
+        for (const k of keys) { if (cells[k]) row.cells[k] = cells[k]; else delete row.cells[k]; }
+        new Set(keys.flatMap(paintedBy)).forEach(k => repaint(row.key, k));
     }
 
     function repaint(pk, key) {
@@ -406,6 +453,7 @@
             } else {
                 if (data.cell) row.cells[ed.key] = data.cell; else delete row.cells[ed.key];
                 delete ed.server; // mas bago ang naisave kaysa sa itinabing value mula sa poll
+                applyCells(row, data.cells);
                 if (ed.key === 'botcake.page_id' || ed.key === 'botcake.token') {
                     row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
                     refreshActions(ed.pk);
@@ -430,6 +478,11 @@
             let structure = false;
             for (const c of data.cells) {
                 structure = ensureRow(c.page, c.name) || structure;
+                if (DETAIL_KEY.test(c.key)) {
+                    // Hindi sariling column: iginuguhit sa loob ng cell ng flow o template.
+                    applyCells(rows.get(c.page), {[c.key]: c.cell});
+                    continue;
+                }
                 if (c.cell) structure = ensureColumn(c.key, c.cell.secret) || structure;
                 const row = rows.get(c.page);
                 if (editing && editing.pk === c.page && editing.key === c.key) {
@@ -551,6 +604,12 @@
             if (status === 'error') marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || 'Hindi nasubukan.'});
             else marks.set(id, {text: status, cls: status === 'ok' ? 'text-green-600' : 'text-red-600'});
             repaint(r.key, 'botcake.token_status');
+            // Ok ang token: ang pangalan ng mga flow at ang template ay kinuha rin.
+            applyCells(r, data.cells);
+            if (data.refresh_error) {
+                marks.set(id, {text: 'ok · hindi nasuri ang flows/template: ' + data.refresh_error, cls: 'text-gray-500'});
+                repaint(r.key, 'botcake.token_status');
+            }
         }
 
         out.textContent = 'Test token tapos: ' + sum.ok + ' ok, ' + sum.invalid + ' invalid, ' + sum.error + ' error, '
