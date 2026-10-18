@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Console\Commands\BotcakeChatSetup;
 use App\Models\BotcakeChat;
 use App\Models\PageSetting;
+use App\Services\BotcakeChatBlock;
 use App\Services\BotcakeChatGuard;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -126,7 +126,7 @@ class ChatblastChatController extends Controller
 
         return [
             'url'     => rtrim((string) config('app.url'), '/') . '/api/botcake/chat',
-            'body'    => json_encode(BotcakeChatSetup::BODY, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'body'    => json_encode(BotcakeChatBlock::BODY, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
             'pages'   => $pages,
             'refused' => $refused,
         ];
