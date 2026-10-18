@@ -53,7 +53,15 @@ class AutoChatblast extends Command
             if (!$due || !($steps = $schedule->stepsAt($c, array_keys($due)))) continue;
             $latest = max($due);
 
-            $r = $chatblast->build($c->kind, null, Chatblast::TRACK_BUDGET, $steps);
+            // Ang pumalyang pagkuha ng isang sequence ay hindi humaharang sa mga kasunod (gaya ng refresh sa itaas); ang
+            // oras nito ay hindi naitatala, kaya susubok ulit sa susunod na takbo habang may bisa pa ang oras.
+            try {
+                $r = $chatblast->build($c->kind, null, Chatblast::TRACK_BUDGET, $steps);
+            } catch (\Throwable $e) {
+                report($e);
+                $this->line($c->name . ': pumalya ang pagkuha; sa susunod na takbo.');
+                continue;
+            }
             if (!empty($r['busy'])) {
                 $this->line($c->name . ': may tumatakbong pagkuha; sa susunod na takbo.');
                 continue;

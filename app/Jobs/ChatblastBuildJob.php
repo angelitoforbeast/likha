@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 
 /**
  * Ang "Refresh now" (dating "Fetch new") ng /chatblast, sa queue: ang pagbuo sa lahat ng page ay maaaring lumampas sa 55 s ng web request, at
- * ang pinatay na request ay nag-iiwan ng build lock nang 300 s. Isang build lang ang naka-queue o tumatakbo (SLOT); ang
+ * ang pinatay na request ay nag-iiwan ng build lock. Isang build lang ang naka-queue o tumatakbo (SLOT); ang
  * lagay nito (RUN) ay nakikita sa list ng page. Ang lock ay laging nabibitawan: sa finally ng build, o sa failed() kapag
  * pinatay ng worker (timeout), at ang sarili lang nitong lock (token).
  */
@@ -26,7 +26,7 @@ class ChatblastBuildJob implements ShouldQueue
     public const RUN  = 'chatblast-build-run';
     private const SLOT_TTL = 600; // ang naka-queue na hindi kinuha ng worker sa loob nito ay itinuturing na tumigil
 
-    public int $timeout = 280; // mas maikli sa 300 s ng build lock
+    public int $timeout = 280; // mas maikli sa build lock (Chatblast::BUILD_LOCK_SECONDS)
     public int $tries = 1;
     public bool $failOnTimeout = true;
 

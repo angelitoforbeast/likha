@@ -688,3 +688,75 @@ re-check of the fix (`1509cf12`).
 - **Incepxion:** nothing to add. Its existing `chatblast:auto` cron runs the refresh, provided that cron runs at least
   every few minutes.
 - **No migration.**
+
+## Independent review (fb1c7283..9a352301): fixes
+
+The independent review found one major and two minors. Each is fixed with a regression test. The rest of that review
+was clean: no double send, nothing sent on a manual site, access, the 301, XSS and callers.
+
+### What changed
+
+1. **Major: overlapping hourly refreshes** (`Chatblast::refreshIfDue`, `Chatblast::build`).
+   - **The hour is claimed before the build.** It uses `Cache::add("chatblast-refresh-slot:Y-m-d H")`, which is
+     atomic. The next `chatblast:auto` in the same hour, including the one from Incepxion's plain cron with no overlap
+     guard, does not start a second refresh while the first is still running.
+   - **When the claim is released:** only when the build is busy (another fetch holds the lock) or throws, so it is
+     tried again on the next run.
+   - **The build lock** now lasts `BUILD_LOCK_SECONDS` = 1800 s instead of 300 s. That is longer than the worst case
+     (60 s of J&T plus the build over all pages), and the lock is still released in `finally`. So no second build can
+     run beside a long one.
+   - **If a process is killed outright,** the lock stays until it expires, at most 30 minutes. The Refresh now job still
+     releases its own lock in `failed()`.
+2. **Minor: Delivering rows when J&T can't be reached** (`Chatblast::refreshRider`, at send time).
+   - **Earlier-day rows:** when the J&T re-track gets no answer, a Delivering row built on an earlier day is **not
+     sent**. It goes back to `ready` with "J&T not reached; will retry at the next send time", and no message reaches
+     the customer.
+   - **Rows built today** keep the current behaviour: they are sent with the version without a rider, or become
+     `no_config` when every version needs `{rider}`.
+3. **Minor: auto's own build had no guard** (`chatblast:auto`). A sequence whose build throws is reported and skipped
+   for this run; its time is not recorded, so it is tried again on the next run while the time is still valid. The
+   later sequences still run.
+
+### Behaviour changed by the fix
+
+- **S-056.31:** a refresh that throws used to wait until the next hour. Now its claim is released and the next 5-minute
+  run tries again, as the review asked ("clear the claim only when the build is busy or errors out"). Auto's sends
+  still go out in that run.
+
+### Case table (independent review)
+
+Red runs, before the code:
+
+- **S-056.32:** the second refresh at 06:21 ran, and a second build got the lock after 300 s.
+- **S-056.33:** both data sets were `sent`.
+- **S-056.34:** `RuntimeException: database went away` stopped the run.
+- **S-056.31:** after the change, it expects 2 tries (got 1 before the code).
+
+| Case | Test | Result |
+|---|---|---|
+| S-056.32 | `ChatblastAutoTest::test_S_056_32_a_long_refresh_is_never_started_twice_and_no_other_build_runs_beside_it` | pass |
+| S-056.33 | `ChatblastTrackTest::test_S_056_33_an_earlier_days_delivering_row_is_not_sent_when_jnt_gives_no_answer_at_send_time` (2 data sets) | pass |
+| S-056.34 | `ChatblastAutoTest::test_S_056_34_a_sequence_whose_build_throws_never_stops_the_next_sequence` | pass |
+| S-056.31 | `ChatblastAutoTest::test_S_056_31_the_refresh_runs_until_23_15_and_a_failing_refresh_never_stops_auto` (now expects the retry) | pass |
+
+**Changed test:** `ChatblastTrackTest::test_yesterdays_rider_is_dropped_when_the_send_time_track_gets_no_answer`
+pinned the old behaviour (an earlier-day row sent without J&T). It is replaced by S-056.33. Today-built rows stay
+covered by `test_a_jnt_error_at_send_time_still_sends_with_the_fallback_and_is_not_stamped_as_tracked`.
+
+**Suite:**
+
+- `tests/Feature/Chatblast`: `Tests: 178, Assertions: 1176`, all passing.
+- The full suite: `Tests: 2 failed, 1496 warnings, 158 passed (18725 assertions)`. The two failures are the known
+  `ExampleTest` and `NightRun\ImportStartTest`.
+
+### Story changes (independent review)
+
+- **S-056.31:** a failing refresh is now retried on the next run, not the next hour.
+- **S-056.32, S-056.33 and S-056.34** are new.
+
+### Merge danger (independent review)
+
+- **Stuck lock after a hard kill:** a killed build process (not a job, which releases its own lock) leaves the build
+  lock for up to 30 minutes instead of 5. During that time Refresh now answers "A fetch is already running", and
+  refreshes and auto builds wait.
+- **No migration.**

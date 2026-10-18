@@ -441,18 +441,18 @@ class ChatblastTrackTest extends ChatblastTestCase
 
     public static function riderVersions(): array
     {
-        // [mga bersyon ng araw, inaasahang status, inaasahang text]
         return [
-            'may bersyong walang rider'  => [['Rider {rider} {rider_phone}', 'Walang rider {name}'], 'sent', 'Walang rider Ana Cruz'],
-            'lahat ay may rider'         => [['Rider {rider} {rider_phone}'], 'no_config', null],
+            'may bersyong walang rider' => [['Rider {rider} {rider_phone}', 'Walang rider {name}']],
+            'lahat ay may rider'        => [['Rider {rider} {rider_phone}']],
         ];
     }
 
     /**
-     * Ang rider ng kuha kahapon ay hindi ginagamit kapag walang sagot ang J&T bago ipadala ngayon.
+     * S-056.33: ang Delivering row na nabuo noong naunang araw ay hindi ipinapadala kapag walang sagot ang J&T bago ipadala
+     * (hindi alam kung On Delivery pa): ibinabalik sa ready para sa susunod na oras; walang mensahe sa customer.
      * @dataProvider riderVersions
      */
-    public function test_yesterdays_rider_is_dropped_when_the_send_time_track_gets_no_answer(array $versions, string $status, ?string $text): void
+    public function test_S_056_33_an_earlier_days_delivering_row_is_not_sent_when_jnt_gives_no_answer_at_send_time(array $versions): void
     {
         app(Chatblast::class)->setSequence('delivering', [$versions]);
         $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
@@ -465,9 +465,8 @@ class ChatblastTrackTest extends ChatblastTestCase
         app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
 
         $row = BotcakeMessage::sole();
-        $this->assertSame([$status, $text], [$row->status, $row->text]);
-        if ($status === 'no_config') $this->assertSame(Chatblast::RIDER_REASON, $row->reason);
-        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains((string) json_encode($r[0]->data()), 'Juan D. Cruz')), 'hindi naipadala ang rider kahapon');
+        $this->assertSame(['ready', 'J&T not reached; will retry at the next send time'], [$row->status, $row->reason]);
+        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains($r[0]->url(), 'botcake.io')), 'walang mensahe sa customer');
     }
 
     public function test_a_from_jnts_copy_with_no_status_is_updated_too(): void

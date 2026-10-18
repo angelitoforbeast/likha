@@ -48,8 +48,10 @@ class Chatblast
     public const TRACK_BUDGET = 60;        // segundo ng J&T tracking ng chatblast:build (ang web build: 20, tingnan ang controller)
     public const SEND_TRACK_BUDGET = 10;   // segundo ng J&T bago ipadala: isang tawag
     public const BUILD_LOCK = 'chatblast-build';
+    public const BUILD_LOCK_SECONDS = 1800;                 // ang build lock: higit sa pinakamatagal na pagkuha
+    public const JNT_NOT_REACHED = 'J&T not reached; will retry at the next send time';
     public const BUILT_AT = 'chatblast-built-at';           // oras (timestamp) ng huling buong pagkuha
-    public const REFRESH_SLOT = 'chatblast-refresh-slot';   // ang oras ("Y-m-d H", Manila) na nagawa na ang kusang refresh
+    public const REFRESH_SLOT = 'chatblast-refresh-slot';   // + ":Y-m-d H" (Manila): ang oras na kinuha na ng kusang refresh
     public const REFRESH_FIRST_HOUR = 6;                    // kusang refresh: 06:15 hanggang 23:15
     public const REFRESH_MINUTE = 15;
     public const RIDER_MAX_AGE = 30 * 60;  // bago ipadala ang delivering: i-track ulit kapag mas luma rito
@@ -306,6 +308,9 @@ class Chatblast
         $track = app(JntTracker::class)->refresh([$m->waybill], self::SEND_TRACK_BUDGET, 'chatblast', false);
 
         if (!$track || !isset($track['latest'][$m->waybill])) {
+            // Nabuo noong naunang araw at walang sagot ang J&T: hindi alam kung On Delivery pa (hal. Delivered na), kaya
+            // hindi ipinapadala; ready ulit para sa susunod na oras. Ang nabuo ngayong araw: gaya ng dati.
+            if ($m->created_at && $m->created_at->lt(Carbon::now('Asia/Manila')->startOfDay())) return ['ready', self::JNT_NOT_REACHED];
             if (trim((string) ($m->vars['rider'] ?? '')) === '' && trim((string) ($m->vars['rider_phone'] ?? '')) === '') return null; // walang rider na aalisin
             $vars = array_merge((array) $m->vars, ['rider' => '', 'rider_phone' => '']);
         } else {
@@ -398,7 +403,10 @@ class Chatblast
     {
         // Isang pagkuha lang sabay (button o command): ang pangalawa ay sinasabihang may tumatakbo. $lockOwner: para
         // mabitawan ng job ang sarili nitong lock kapag pinatay ito (timeout), at hindi ang lock ng iba.
-        $lock = Cache::lock(self::BUILD_LOCK, 300, $lockOwner);
+        // Mas mahaba sa pinakamatagal na pagkuha (60 s ng J&T at ang pagbuo sa lahat ng page), at laging binibitawan sa
+        // finally: walang pangalawang pagkuha na tatakbo kasabay nito, gaano man katagal. Ang pinatay na proseso ay
+        // nag-iiwan ng lock hanggang sa oras na ito (ang job ay bumibitaw sa sarili nitong lock sa failed()).
+        $lock = Cache::lock(self::BUILD_LOCK, self::BUILD_LOCK_SECONDS, $lockOwner);
         if (!$lock->get()) return ['busy' => true];
 
         try {
@@ -419,16 +427,19 @@ class Chatblast
     {
         $now = Carbon::now('Asia/Manila');
         if ($now->hour < self::REFRESH_FIRST_HOUR || $now->minute < self::REFRESH_MINUTE) return null;
-        $slot = $now->format('Y-m-d H');
-        if (Cache::get(self::REFRESH_SLOT) === $slot) return null;
+        // Kinukuha ang oras BAGO magsimula (atomic): ang susunod na chatblast:auto sa parehong oras, habang tumatakbo pa ang
+        // mahabang refresh (at sa Incepxion, cron na walang overlap guard), ay hindi nagsisimula ng pangalawa. Binibitawan
+        // lang kapag may ibang pagkuha (busy) o pumalya, para subukan ulit sa susunod na takbo.
+        $claim = self::REFRESH_SLOT . ':' . $now->format('Y-m-d H');
+        if (!Cache::add($claim, true, 7200)) return null;
 
         try {
             $r = $this->build(null, null, self::TRACK_BUDGET, null, null, true);
         } catch (\Throwable $e) {
-            Cache::put(self::REFRESH_SLOT, $slot, 7200); // isang subok kada oras: hindi inuulit ang pumapalyang pagkuha kada 5 minuto
+            Cache::forget($claim);
             throw $e;
         }
-        if (empty($r['busy'])) Cache::put(self::REFRESH_SLOT, $slot, 7200);
+        if (!empty($r['busy'])) Cache::forget($claim);
 
         return $r;
     }

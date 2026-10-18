@@ -1063,4 +1063,12 @@ Amendment 4. Tests are named per case.
 | S-056.28 | Given To send, then it shows "Updated HH:MM · next refresh HH:MM" (with the date when the last full fetch was not today) and a small "Refresh now" button; no "Fetch new" | `ChatblastToSendTest::test_S_056_28…` | Passed · 2026-10-18 · auto + headless browser |
 | S-056.29 | Given a row built as Delivering whose waybill is now Delivered, then the panel shows "J&T at build: Delivering" and "J&T now: Delivered" | `ChatblastToSendTest::test_S_056_29…` | Passed · 2026-10-18 · auto + headless browser |
 | S-056.30 | Given an auto sequence whose Day 2 has its own time (15:00), when the waybill becomes eligible after 15:00, then the hourly refresh does not build Day 2, so it is not sent at the next unrelated time; it goes out at 15:00 the next day | `ChatblastScheduleTest::test_S_056_30…` | Passed · 2026-10-18 · auto |
-| S-056.31 | Given the refresh, then 23:15 runs and 00:15 does not; when the full fetch throws, then auto's sends of that run still go out and the refresh is tried once per hour, not every 5 minutes | `ChatblastAutoTest::test_S_056_31…` | Passed · 2026-10-18 · auto |
+| S-056.31 | Given the refresh, then 23:15 runs and 00:15 does not; when the full fetch throws, then auto's sends of that run still go out and the refresh is tried again on the next run (the claim is released) | `ChatblastAutoTest::test_S_056_31…` | Passed · 2026-10-18 · auto |
+
+### S-056F Fixes from the independent review (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.32 | Given the 06:15 refresh still running past 300 s, when chatblast:auto runs again at 06:20 or another build starts, then no second refresh starts (the hour was claimed before building) and the build gets "busy" (the lock lasts longer than any build) | `ChatblastAutoTest::test_S_056_32…` | Passed · 2026-10-18 · auto |
+| S-056.33 | Given a Delivering row built on an earlier day, when J&T gives no answer at send time, then it is not sent: ready again with "J&T not reached; will retry at the next send time"; a row built today keeps the old behaviour | `ChatblastTrackTest::test_S_056_33…` (2 data sets) | Passed · 2026-10-18 · auto |
+| S-056.34 | Given two due auto sequences, when the first one's build throws, then it is reported and the next sequence still sends | `ChatblastAutoTest::test_S_056_34…` | Passed · 2026-10-18 · auto |

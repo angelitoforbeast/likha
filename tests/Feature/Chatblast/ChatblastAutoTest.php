@@ -250,7 +250,45 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->tick('2026-10-19 09:15:00');
         $this->assertSame('queued', $ready->fresh()->status, 'naipadala pa rin ang auto ng 09:00');
         $this->tick('2026-10-19 09:20:00');
-        $this->assertSame(1, $calls->n, 'isang subok lang kada oras');
+        $this->assertSame(2, $calls->n, 'pumalya: binibitawan ang claim ng oras, kaya sinusubok ulit sa susunod na takbo');
+    }
+
+    public function test_S_056_32_a_long_refresh_is_never_started_twice_and_no_other_build_runs_beside_it(): void
+    {
+        $this->travelTo('2026-10-18 06:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $seen = (object) ['tracks' => 0, 'refresh' => 'not run', 'build' => 'not run'];
+        // Habang tumatakbo pa ang unang refresh (lampas na sa 5 minuto), dumating ang susunod na chatblast:auto at isang build.
+        $this->mock(\App\Services\Jnt\JntTracker::class, fn ($m) => $m->shouldReceive('refresh')->andReturnUsing(function () use ($seen) {
+            if ($seen->tracks++ > 0) return null;
+            $this->travelTo('2026-10-18 06:21:00');
+            $seen->refresh = app(Chatblast::class)->refreshIfDue();
+            $seen->build = app(Chatblast::class)->build('c-auto', 1);
+            return null;
+        }));
+
+        $this->tick('2026-10-18 06:15:00');
+
+        $this->assertNull($seen->refresh, 'ang refresh ng 06:20 ay hindi nagsisimula: kinuha na ng 06:15 ang oras');
+        $this->assertSame(['busy' => true], $seen->build, 'hawak pa ng unang refresh ang build lock, kahit lampas 300 s');
+        $this->assertSame(1, $seen->tracks, 'iisang pagkuha lang ang tumakbo');
+    }
+
+    public function test_S_056_34_a_sequence_whose_build_throws_never_stops_the_next_sequence(): void
+    {
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->campaign(['kind' => 'c-bad', 'send_times' => ['09:00'], 'mode_changed_at' => now()->subHour()]);
+        $this->campaign(['kind' => 'c-good', 'send_times' => ['09:00'], 'mode_changed_at' => now()->subHour()]);
+        $ready = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'WB-9', 'kind' => 'c-good', 'day' => 1, 'psid' => 'psid-z',
+            'text' => 'Hi', 'status' => 'ready', 'attempts' => 0, 'is_test' => false]);
+        $this->partialMock(Chatblast::class, fn ($m) => $m->shouldReceive('build')->andReturnUsing(function ($kind = null) {
+            if ($kind === 'c-bad') throw new \RuntimeException('database went away');
+            return ['added' => 0];
+        }));
+
+        $this->tick('2026-10-18 09:00:00');
+
+        $this->assertSame('queued', $ready->fresh()->status, 'ang kasunod na sequence ay naipadala pa rin');
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void
