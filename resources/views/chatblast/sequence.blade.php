@@ -139,7 +139,7 @@
         const saveList = async (m, field, value) => {
             const old = c[field];
             c[field] = value;
-            if (!await saveField(m, base, {[field]: value, old: {[field]: old}})) { c[field] = old; setTimeout(load, 1500); }
+            if (!await saveField(m, base, {[field]: value, old: {[field]: old}})) c[field] = old; // ang marka ang nagsasabing i-reload
         };
         const row = (labelText, ...content) => el('div', {class: 'flex flex-wrap items-center gap-2 py-1'}, [el('span', {class: 'text-xs text-gray-500 w-36', text: labelText}), ...content]);
 
@@ -224,7 +224,7 @@
                     c.steps.length > 1 ? btn('alisin', () => { if (confirm('Alisin ang Day ' + s.day + '? Uusad ang mga kasunod.')) act('/remove-step', {day: s.day}, 'Naalis ang step.')(); }, 'text-red-600') : null,
                 ]),
                 el('div', {class: 'mt-1 space-y-0.5'}, s.versions.map((v, j) => el('p', {class: 'text-xs text-gray-700 whitespace-pre-wrap'}, [el('span', {class: 'font-medium mr-1', text: String.fromCharCode(65 + j) + ':'}), v]))),
-                el('div', {class: 'mt-1 text-xs text-gray-600' + greyed}, ['Sariling oras: ', chips(() => s.times || [], async v => { const old = s.times || []; s.times = v; if (!await saveField(sm, base + '/step-times', {day: s.day, times: v, old, expect: s.message_id, steps: c.steps.length})) { s.times = old; setTimeout(load, 1500); } }, 'ang oras ng sequence')]),
+                el('div', {class: 'mt-1 text-xs text-gray-600' + greyed}, ['Sariling oras: ', chips(() => s.times || [], async v => { const old = s.times || []; s.times = v; if (!await saveField(sm, base + '/step-times', {day: s.day, times: v, old, expect: s.message_id, steps: c.steps.length})) s.times = old; }, 'ang oras ng sequence')]),
             ]);
         });
 

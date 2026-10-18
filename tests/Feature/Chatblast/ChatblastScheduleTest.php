@@ -181,6 +181,23 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 queued'], $this->rows(), 'ang Day 2 (15:00 na) ay ipinadala sa susunod na oras ngayong araw');
     }
 
+    public function test_a_ready_row_of_a_step_is_never_sent_before_that_steps_own_time(): void
+    {
+        $c = $this->campaign(['send_times' => ['09:00'], 'step_times' => [null, ['15:00']], 'mode_changed_at' => Carbon::parse('2026-10-18 07:00:00', 'Asia/Manila')]);
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-1', 'kind' => 'c-auto', 'day' => 1, 'psid' => 'psid-a',
+            'text' => 'x', 'jnt_status' => 'In Transit', 'status' => 'sent', 'sent_at' => now()->subDay(), 'dedupe_key' => 'WB-1|c-auto|1',
+            'attempts' => 0, 'is_test' => false, 'created_at' => now()->subDay(), 'updated_at' => now()->subDay()]);
+        app(\App\Services\Chatblast::class)->build('c-auto', 1); // mano-manong kuha: may ready na Day 2 bago ang 15:00
+        $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 ready'], $this->rows());
+
+        $this->tick('2026-10-18 09:00:00');
+        $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 ready'], $this->rows(), 'ang 09:00 ay hindi oras ng Day 2');
+        $this->tick('2026-10-18 15:00:00');
+        $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 queued'], $this->rows());
+    }
+
     public function test_a_late_tick_inside_the_range_runs_once_for_the_hours_it_missed(): void
     {
         $c = $this->campaign(['days' => [['Una {name}']], 'send_times' => [], 'send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => 1],

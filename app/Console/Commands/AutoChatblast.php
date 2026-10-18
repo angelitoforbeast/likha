@@ -49,20 +49,20 @@ class AutoChatblast extends Command
 
             // Isang takbo lang kada oras: naka-lock ang sequence habang itinatala ang mga oras na kinukuha ng takbong ito
             // (ang dapat pa ring tumakbo lang; hindi kapag na-off o naging manual habang binubuo).
-            $claimed = DB::transaction(function () use ($c, $due, $now, $schedule, $latest) {
+            [$claimed, $fresh] = DB::transaction(function () use ($c, $due, $now, $schedule, $latest) {
                 $fresh = ChatblastCampaign::whereKey($c->id)->lockForUpdate()->first();
-                if (!$fresh || !$fresh->active || $fresh->mode !== 'auto') return [];
+                if (!$fresh || !$fresh->active || $fresh->mode !== 'auto') return [[], null];
                 $mine = array_keys(array_intersect_key($schedule->due($fresh, $now), $due));
-                if (!$mine) return [];
+                if (!$mine) return [[], null];
                 $schedule->markRan($fresh, $mine, $now);
                 if (!$fresh->auto_ran_at || $fresh->auto_ran_at->lt($latest)) $fresh->auto_ran_at = $latest->copy()->timezone(config('app.timezone'));
                 $fresh->save();
-                return $mine;
+                return [$mine, $fresh];
             });
             if (!$claimed) continue;
             // Ang mga step na dumating na ang oras ngayong araw: ang due ngayon, at ang row ng step na tapos na ang oras pero
             // naging ready lang pagkatapos (hal. natugma ang PSID). Hindi kailanman bago ang oras ng step.
-            $steps = array_values(array_unique(array_merge($steps, $schedule->stepsCome($c, $now))));
+            $steps = array_values(array_unique(array_merge($steps, $schedule->stepsCome($fresh, $now)))); // ang schedule ngayon, hindi bago ang build
 
             // Ang bago lang: nabuo ngayong araw (Manila) at pagkatapos i-auto ang campaign. Ang naipong ready (backlog)
             // ay hindi kailanman ipinapadala ng auto: sa /chatblast lang, kung gusto. Ang page na wala na sa campaign ay
