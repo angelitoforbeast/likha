@@ -216,7 +216,8 @@
         const test = r.cells[TEST_OK_KEY]?.ts || '';
         return (test !== '' && test >= changed) || (!!r.info.last_send && r.info.last_send >= changed);
     }
-    const complete = r => REQUIRED.every(k => r.cells[k]);
+    // Kumpleto para sa pagpapadala: ang 4 na key ng server (Chatblast::REQUIRED), hindi kasama ang template.
+    const complete = r => CONFIG_KEYS.every(k => r.cells[k]);
 
     function state(r) {
         const token = String(r.cells['botcake.token_status']?.value || '');

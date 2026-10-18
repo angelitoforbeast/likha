@@ -53,7 +53,7 @@ class ChatblastReadyTest extends ChatblastTestCase
         $this->page('Page Dos', '2002', [], false);
         $this->travel(1)->minutes();
         DB::table('botcake_messages')->insert(['page_name' => 'Page Dos', 'waybill' => 'WB-OLD', 'kind' => 'in_transit', 'day' => 1, 'psid' => 'psid-z',
-            'text' => 'x', 'status' => 'sent', 'sent_at' => now(), 'attempts' => 1, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
+            'text' => 'x', 'status' => 'sent', 'queued_at' => now(), 'sent_at' => now(), 'attempts' => 1, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
         $this->assertTrue(app(ChatblastReady::class)->tested('Page Dos'));
         $this->assertSame(['page uno' => true, 'page dos' => true], array_map(fn ($s) => $s['tested'], app(ChatblastReady::class)->states()));
     }
@@ -121,5 +121,80 @@ class ChatblastReadyTest extends ChatblastTestCase
 
         // Kulang ang setup: hindi pa puwede.
         $this->postJson('/chatblast/page-settings/send-test', ['page_name' => 'Page Wala'])->assertStatus(422);
+    }
+
+    /** Ang pekeng Botcake ng test send: $read = ano ang ibinabalik ng read-back; $flow = sagot ng send_flow. */
+    private function botcake(?string $read = null, int $flowHttp = 200, array $flowBody = ['success' => true], ?\Closure $onWrite = null): void
+    {
+        $written = null;
+        Http::fake(['botcake.io/api/public_api/v1/pages/1001/*' => function (Request $req) use (&$written, $read, $flowHttp, $flowBody, $onWrite) {
+            $path = parse_url($req->url(), PHP_URL_PATH);
+            if (str_ends_with($path, '/flows/send_flow')) return Http::response($flowBody, $flowHttp);
+            if ($req->method() === 'POST') { $written = $req->data()['data'][0]['value']; if ($onWrite) $onWrite(); return Http::response(['success' => true]); }
+            return Http::response(['success' => true, 'data' => [['custom_field_id' => 7701, 'value' => $read ?? $written]]]);
+        }]);
+    }
+
+    public static function failedTests(): array
+    {
+        return [
+            'failed (flow refused)' => [null, 200, ['success' => false], 'failed'],
+            'field mismatch'        => ['ibang text', 200, ['success' => true], 'field_mismatch'],
+            'unknown (HTTP 503)'    => [null, 503, ['message' => 'down'], 'unknown'],
+        ];
+    }
+
+    /** @dataProvider failedTests */
+    public function test_S_057_7_a_test_that_does_not_end_sent_never_marks_the_page_tested(?string $read, int $http, array $body, string $status): void
+    {
+        $this->page('Page Uno', '1001', [], false);
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'test_psid', 'psid-owner-7788');
+        $this->botcake($read, $http, $body);
+
+        $this->travel(1)->minutes();
+        $this->postJson('/chatblast/page-settings/send-test', ['page_name' => 'Page Uno'])->assertOk()->assertJsonPath('status', $status);
+
+        $this->assertNull(app(PageSettings::class)->get('Page Uno', 'botcake', 'test_ok'));
+        $this->assertFalse(app(ChatblastReady::class)->tested('Page Uno'));
+    }
+
+    public function test_S_057_6_a_send_in_flight_while_the_setup_changes_never_counts_for_the_new_setup(): void
+    {
+        $this->page('Page Uno', '1001', [], false);
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'test_psid', 'psid-owner-7788');
+
+        // Test send: habang isinusulat ang field, may nagpalit ng message field (hal. mula sa dropdown).
+        $this->travel(1)->minutes();
+        $this->botcake(null, 200, ['success' => true], function () {
+            $this->travel(1)->seconds();
+            app(PageSettings::class)->set('Page Uno', 'botcake', 'field.message', '7799', false, 1);
+            $this->travel(1)->seconds();
+        });
+        $this->postJson('/chatblast/page-settings/send-test', ['page_name' => 'Page Uno'])->assertOk()->assertJsonPath('status', 'sent');
+        $this->assertNull(app(PageSettings::class)->get('Page Uno', 'botcake', 'test_ok'), 'nasubukan ang lumang field, hindi ang bago');
+        $this->assertFalse(app(ChatblastReady::class)->tested('Page Uno'));
+
+        // Totoong padala na na-queue bago ang pagbabago ng setup, naipadala pagkatapos: hindi rin bilang.
+        $this->travel(1)->minutes();
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-OLD', 'kind' => 'in_transit', 'day' => 1, 'psid' => 'psid-z',
+            'text' => 'x', 'status' => 'sent', 'queued_at' => now()->subMinutes(5), 'sent_at' => now(), 'attempts' => 1, 'is_test' => false, 'created_at' => now()->subMinutes(5), 'updated_at' => now()]);
+        $this->assertFalse(app(ChatblastReady::class)->tested('Page Uno'), 'na-queue bago ang huling pagbabago');
+        $this->assertFalse(app(ChatblastReady::class)->states()['page uno']['tested']);
+
+        // Totoong padala na mas luma sa huling pagbabago (hal. pinalitan ang token pagkatapos): hindi bilang.
+        $this->travel(1)->minutes();
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'token', 'tok-rotated-0000');
+        DB::table('botcake_messages')->where('waybill', 'WB-OLD')->update(['queued_at' => now()->subMinutes(10)]);
+        $this->assertFalse(app(ChatblastReady::class)->tested('Page Uno'));
+    }
+
+    public function test_S_057_7_send_test_needs_page_settings_access(): void
+    {
+        $this->page('Page Uno');
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'test_psid', 'psid-owner-7788');
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+
+        $this->postJson('/chatblast/page-settings/send-test', ['page_name' => 'Page Uno'])->assertNotFound();
+        $this->assertSame(0, BotcakeMessage::where('is_test', true)->count());
     }
 }

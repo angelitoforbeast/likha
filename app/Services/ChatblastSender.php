@@ -368,8 +368,13 @@ class ChatblastSender
         if (!$ok($f)) { $this->finish($m, 'failed', 'The flow was not sent (HTTP ' . $f['http'] . ')', $f['http'], $steps); return; }
 
         $this->finish($m, 'sent', null, $f['http'], $steps);
-        // Matagumpay na test (sulat, basa at flow: lahat 2xx): ang page ay Ready na (ChatblastReady).
-        if ($m->is_test) $this->settings->set($m->page_name, 'botcake', 'test_ok', now('Asia/Manila')->format('Y-m-d H:i:s'), false, null, true);
+        // Matagumpay na test (sulat, basa at flow: lahat 2xx): ang page ay Ready na (ChatblastReady). Kapag nagbago ang setup
+        // habang ipinapadala (hal. ibang field mula sa dropdown), ang lumang setup ang nasubukan, hindi ang bago: walang tatak.
+        if ($m->is_test) {
+            $current = [];
+            foreach (Chatblast::REQUIRED as $key) $current[$key] = trim((string) $this->settings->get($m->page_name, 'botcake', $key));
+            if ($current === $cfg) $this->settings->set($m->page_name, 'botcake', 'test_ok', now('Asia/Manila')->format('Y-m-d H:i:s'), false, null, true);
+        }
     }
 
     /** Ang laman ng field sa sagot ng GET customer_fields (listahan sa data, o listahan mismo), o null kapag wala. */

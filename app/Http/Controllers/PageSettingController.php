@@ -129,9 +129,21 @@ class PageSettingController extends Controller
         // Bagong Botcake ID o token at kumpleto na ang dalawa: agad na Test (token, saka ang flow, field at template).
         // Naka-save na ang value; ang pagkabigo ng Botcake ay nasa refresh_error lang.
         if (in_array($provider . '.' . $key, ['botcake.page_id', 'botcake.token'], true) && $res['status'] !== 'unchanged') {
+            // Ibang Botcake page: ang mga kandidato ng dating page ay hindi na totoo (pinupunan ulit ng check kapag ok).
+            $cleared = [];
+            if ($key === 'page_id') {
+                foreach (['flow.shipping.options', 'field.message.options'] as $k) {
+                    $old = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', $k)->where('active', true)->get();
+                    $old->each(fn ($s) => $this->settings->deactivate($s));
+                    if ($old->isNotEmpty()) $cleared['botcake.' . $k] = null;
+                }
+            }
             $check = app(BotcakePageSetup::class)->check($page);
+            $cells = array_merge($cleared, $this->cells($check['written'], $grid));
             if ($check['status'] !== 'skipped') {
-                $out += ['token_test' => $check['status'], 'cells' => $this->cells($check['written'], $grid), 'refresh_error' => $check['error']];
+                $out += ['token_test' => $check['status'], 'cells' => $cells, 'refresh_error' => $check['error']];
+            } elseif ($cleared) {
+                $out += ['cells' => $cells];
             }
         }
 

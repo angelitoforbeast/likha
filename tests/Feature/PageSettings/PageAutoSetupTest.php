@@ -91,6 +91,12 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->assertSame(['custom_fields'], $this->calls);
         $this->assertSame('invalid', substr((string) $this->get57('token_status'), 0, 7));
 
+        // Ibang Botcake page: ang listahan ng dating page ay inaalis (hindi na ito ang mga flow at field ng page).
+        $this->assertNotNull($this->get57('flow.shipping.options'));
+        $res = $this->cell('page_id', '2003')->assertOk();
+        $this->assertSame([null, null], [$res->json('cells')['botcake.flow.shipping.options'], $res->json('cells')['botcake.field.message.options']]);
+        $this->assertSame([null, null], [$this->get57('flow.shipping.options'), $this->get57('field.message.options')]);
+
         // Hindi sumasagot ang Botcake: naka-save pa rin ang token, may refresh_error.
         $this->tokenAnswer = [200, null];
         Http::fake(fn () => Http::failedConnection());
@@ -190,7 +196,8 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
 
         foreach (["'Needs a test send'", "['needs_test', 'Needs test'", "btn('send-test', 'Send test'", "'Set a Test PSID first'",
-                  "const CONFIG_KEYS = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message'];"] as $needle) {
+                  "const CONFIG_KEYS = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message'];",
+                  'const complete = r => CONFIG_KEYS.every(k => r.cells[k]);'] as $needle) {
             $this->assertStringContainsString($needle, $html, $needle);
         }
         $this->assertSame('Test send', collect($this->get('/chatblast/page-settings')->viewData('grid')['columns'])->firstWhere('key', 'botcake.test_ok')['label']);

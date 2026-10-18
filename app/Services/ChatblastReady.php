@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\BotcakeMessage;
 use App\Models\PageSetting;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -45,9 +44,11 @@ class ChatblastReady
             });
         if (!$out) return [];
 
-        // Wala pang botcake_messages (hal. bago ang migrate ng chatblast): walang totoong padala.
-        $sent = !Schema::hasTable('botcake_messages') ? collect() : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('sent_at')
-            ->selectRaw('page_name, MAX(sent_at) AS last')->groupBy('page_name')->get();
+        // Wala pang botcake_messages (hal. bago ang migrate ng chatblast): walang totoong padala. Ang oras ng totoong padala
+        // ay ang pagka-queue nito (bago basahin ng sender ang setup), hindi ang pagkatapos: ang ipinadala habang nagbabago
+        // ang setup ay hindi bilang para sa bagong setup.
+        $sent = !Schema::hasTable('botcake_messages') ? collect() : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('queued_at')
+            ->selectRaw('page_name, MAX(queued_at) AS last')->groupBy('page_name')->get();
         foreach ($sent as $row) {
             $pk = $this->settings->pageKey((string) $row->page_name);
             if (!isset($out[$pk])) continue;
@@ -72,9 +73,9 @@ class ChatblastReady
         }
         if ($s['changed'] === null) return false;
 
-        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('sent_at')
-            ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])->max('sent_at');
+        // Ang eksaktong page_name ng row (gaya ng daily cap ng sender), para magamit ang index (page_name, …).
+        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('page_name', $page)->where('status', 'sent')->where('is_test', false)
+            ->whereNotNull('queued_at')->max('queued_at');
         $s['last_send'] = $last ? Carbon::parse($last)->format('Y-m-d H:i:s') : null;
 
         return self::isTested($s);
