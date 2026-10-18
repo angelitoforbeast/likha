@@ -39,7 +39,7 @@ class BotcakeFlowNames
     {
         if ($value === self::NOT_FOUND) return ['line' => 'Not in Botcake', 'tone' => 'red'];
         if ($value === self::REMOVED) return ['line' => 'Deleted in Botcake', 'tone' => 'red'];
-        if ($value === self::NOT_APPROVED) return ['line' => 'Not an APPROVED template of the page', 'tone' => 'red'];
+        if ($value === self::NOT_APPROVED) return ['line' => 'Template not approved in Botcake', 'tone' => 'red'];
         if (str_starts_with($value, self::UNCHECKED)) {
             $reason = substr($value, strlen(self::UNCHECKED));
             return ['line' => 'Check failed: ' . (self::OLD_TEXT[$reason] ?? $reason), 'tone' => 'grey'];

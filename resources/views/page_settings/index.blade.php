@@ -191,30 +191,33 @@
             ok: token.startsWith('ok'),
             failed: !!(r.info.last_sync && r.info.last_sync.failed),
             incomplete: r.info.orders > 0 && REQUIRED.some(k => !r.cells[k]),
-            // Pulang linya ng flow: wala sa Botcake o bura na.
-            flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red'),
+            // Pulang linya ng flow na may ID: wala sa Botcake o bura na.
+            flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),
+            // Hindi APPROVED ang template ng shipping flow: bigo ang pagpapadala.
+            template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),
         };
     }
 
     const CHIPS = [
         ['all', 'Pages', () => true],
         ['orders', 'With orders', r => r.info.orders > 0],
-        ['invalid', 'Token invalid', r => state(r).invalid],
-        ['incomplete', 'Setup incomplete', r => state(r).incomplete],
-        ['flows', 'Flow problems', r => state(r).flows],
-        ['failed', 'Last sync failed', r => state(r).failed],
+        ['invalid', 'Token invalid', (r, st) => st.invalid],
+        ['incomplete', 'Setup incomplete', (r, st) => st.incomplete],
+        ['flows', 'Flow problems', (r, st) => st.flows || st.template],
+        ['failed', 'Last sync failed', (r, st) => st.failed],
     ];
-    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid or last sync failed']];
+    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']];
     let chip = null; // ang naka-pindot na chip; null = lahat
 
     function chipFilter(r) {
         const c = CHIPS.find(([key]) => key === chip);
-        return !c || c[2](r);
+        return !c || c[2](r, state(r));
     }
 
     // Ang mga chip ay binubuo nang isang beses at ina-update lang, para hindi mawala ang keyboard focus sa poll o pindot.
     function summaryBar() {
         const bar = document.getElementById('summary-bar'), all = [...rows.values()];
+        const st = new Map(all.map(r => [r, state(r)]));
         if (!bar.children.length) {
             put(bar, ...CHIPS.map(([key]) => el('button', {type: 'button', 'data-chip': key})),
                 el('span', {class: 'ml-2 flex items-center gap-3 text-gray-500'}, LEGEND.map(([color, label]) =>
@@ -225,7 +228,7 @@
             b.setAttribute('aria-pressed', String(on));
             b.className = 'rounded-full border px-2 py-0.5 ' + (on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white hover:bg-gray-100 text-gray-700');
             b.title = key === 'all' ? 'Show every page' : on ? 'Click again to show every page' : 'Show only these pages';
-            b.textContent = label + ' ' + all.filter(test).length;
+            b.textContent = label + ' ' + all.filter(r => test(r, st.get(r))).length;
         }
     }
 
@@ -239,7 +242,7 @@
 
     function borderOf(r) {
         const st = state(r);
-        return st.invalid || st.failed ? 'border-l-red-500' : !r.info.orders ? 'border-l-transparent' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
+        return !r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
     }
 
     // Pagkatapos magbago ang cell o info ng isang page: ang kulay ng row at ang mga bilang lang, hindi ang buong table.
@@ -367,12 +370,13 @@
     // Walang placeholder: ang hindi pa nasusuri o bigong pagsuri ay walang linya (ang dahilan ay nasa ▸); buong text, walang putol.
     const UNKNOWN = ['(no name)', '(no body)'];
     function flowLines(row, col) {
-        const out = [], name = row.cells[col.key + '.name'];
+        const out = [], name = row.cells[col.key] ? row.cells[col.key + '.name'] : null;
         if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));
         else if (name && name.tone === '' && !UNKNOWN.includes(name.line)) out.push(el('div', {class: 'text-xs text-gray-600 break-words', text: name.line}));
         if (col.key === SHIPPING_KEY && row.cells[SHIPPING_KEY]) {
             const body = row.cells[TEMPLATE_KEY + '.text'];
             if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));
+            if (body && body.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: body.line}));
         }
         return out;
     }
@@ -701,7 +705,7 @@
             document.getElementById('sync-lock').classList.toggle('hidden', !data.sync_lock);
             document.getElementById('sync-lock-since').textContent = data.sync_lock || '';
             showSyncAll(data.sync_all);
-            if (structure) render();
+            if (structure || (chip && !editing)) render();
         } catch (err) { /* susubukan ulit sa susunod na poll */ }
     }
     setInterval(poll, POLL_MS);
@@ -735,6 +739,7 @@
             const data = await res.json().catch(() => ({}));
             if (!res.ok) { notice(data.error || 'Not cleared.', 'text-red-600'); return; }
             delete row.cells[key];
+            applyCells(row, data.cells);
             render();
             openHistory(pk, key);
         });

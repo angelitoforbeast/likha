@@ -279,7 +279,7 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         foreach (['wala_ito', 'luma_x'] as $name) {
             $text = $this->cell('template.shipping', $name)->assertOk()->json('cells')['botcake.template.shipping.text'];
-            $this->assertSame(['Not an APPROVED template of the page', 'red'], [$text['line'], $text['tone']], $name);
+            $this->assertSame(['Template not approved in Botcake', 'red'], [$text['line'], $text['tone']], $name);
         }
 
         // Kapag binura ng owner: pipili ulit ang system.

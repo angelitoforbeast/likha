@@ -163,9 +163,15 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     {
         $res = $this->get('/page-settings')->assertOk()->assertSee('id="summary-bar"', false);
 
-        foreach (["['all', 'Pages', () => true]", "['orders', 'With orders', r => r.info.orders > 0]", "['invalid', 'Token invalid', r => state(r).invalid]",
-                  "['incomplete', 'Setup incomplete', r => state(r).incomplete]", "['flows', 'Flow problems', r => state(r).flows]",
-                  "['failed', 'Last sync failed', r => state(r).failed]",
+        foreach (["['all', 'Pages', () => true]", "['orders', 'With orders', r => r.info.orders > 0]", "['invalid', 'Token invalid', (r, st) => st.invalid]",
+                  "['incomplete', 'Setup incomplete', (r, st) => st.incomplete]", "['flows', 'Flow problems', (r, st) => st.flows || st.template]",
+                  "['failed', 'Last sync failed', (r, st) => st.failed]",
+                  // Isang state() kada row sa bawat update ng bar; ang pangalan ng flow ay bilang lang kapag may ID ang flow.
+                  'const st = new Map(all.map(r => [r, state(r)]));',
+                  "flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),",
+                  "template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),",
+                  // Sa bawat poll, kapag may chip at walang ine-edit, sinasala ulit ang mga row.
+                  'if (structure || (chip && !editing)) render();',
                   "const REQUIRED = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message', 'botcake.template.shipping'];",
                   '.filter(r => (!q || r.name.toLowerCase().includes(q)) && chipFilter(r))',
                   'chip = chip === key ? null : key;'] as $code) {
@@ -176,8 +182,8 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     public function test_S_054_9_the_page_cell_border_shows_the_row_state_and_the_legend_explains_it(): void
     {
         $this->get('/page-settings')->assertOk()
-            ->assertSee("st.invalid || st.failed ? 'border-l-red-500' : !r.info.orders ? 'border-l-transparent' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
-            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid or last sync failed']", false);
+            ->assertSee("!r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
+            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']", false);
     }
 
     public function test_S_054_10_each_flow_block_is_id_name_and_content_with_no_placeholder_and_the_lines_stay_outside_the_edited_value(): void
@@ -190,6 +196,12 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         }
         // Ang pangalan at content ay katabi ng .cell (hindi sa loob), kaya hindi napapalitan ng input habang nag-e-edit.
         $res->assertSee("el('div', {class: 'flow-lines', 'data-pk': row.key, 'data-key': col.key}, flowLines(row, col))", false)
+            // Ang pangalan ay kasama lang ng ID ng flow; ang hindi APPROVED na template ay maikling pulang linya sa ilalim ng content.
+            ->assertSee("const out = [], name = row.cells[col.key] ? row.cells[col.key + '.name'] : null;", false)
+            ->assertSee("if (body && body.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: body.line}));", false)
+            // Ang "Clear the value" sa history: ang mga cell na binura ng server (hal. ang pangalan ng flow) ay nawawala agad.
+            ->assertSee('delete row.cells[key];
+            applyCells(row, data.cells);', false)
             ->assertSee("if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));", false)
             ->assertSee("if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));", false)
             // "(no name)" / "(no body)" ay hindi alam na pangalan o content: walang linya; ang content ay kasama lang ng shipping ID.
