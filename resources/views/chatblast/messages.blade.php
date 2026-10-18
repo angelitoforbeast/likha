@@ -187,13 +187,13 @@
             }) : null;
             return el('div', {class: 'grid md:grid-cols-2 gap-2 items-start'}, [
                 el('div', {}, [el('div', {class: 'text-xs text-gray-600 mb-0.5'}, [el('span', {class: 'font-medium', text: 'Bersyon ' + label(i)}),
-                    el('span', {class: 'ml-2', text: 'naipadala ' + fmt(m.sent[label(i)])}), rm, vm]), area]),
+                    el('span', {class: 'ml-2', text: 'naipadala (' + data.sent_days + ' araw) ' + fmt(m.sent[label(i)])}), rm, vm]), area]),
                 el('div', {}, [el('div', {class: 'text-xs text-gray-500 mb-0.5', text: 'Makikita ng customer'}), pv]),
             ]);
         });
 
         return el('div', {class: 'bg-white rounded shadow p-3'}, [
-            el('div', {class: 'flex flex-wrap items-center gap-2 mb-2'}, [name, nameMark, el('span', {class: 'text-xs text-gray-500', text: 'naipadala ' + fmt(m.sent_total)}), ...actions]),
+            el('div', {class: 'flex flex-wrap items-center gap-2 mb-2'}, [name, nameMark, el('span', {class: 'text-xs text-gray-500', text: 'naipadala (huling ' + data.sent_days + ' araw) ' + fmt(m.sent_total)}), ...actions]),
             el('div', {class: 'mb-2'}, [el('span', {class: 'text-xs text-gray-500 mr-1', text: 'Ginagamit sa:'}), ...used]),
             el('div', {class: 'space-y-2'}, versions),
         ]);

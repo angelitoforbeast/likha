@@ -29,6 +29,7 @@ class Chatblast
     private const RTS_EXCLUDED = ['In Transit', 'Delivering'];
     public const LOG_MAX = 200; // ilang pagbabago ang itinatago sa log ng campaign
     public const CROSS = 'may naipadala na ngayong araw sa ibang campaign';
+    public const CAMPAIGN_CAP = 'Naabot ang daily cap ng campaign sa page';
 
     /** Ang kailangan ng page para makapagpadala (page_id para sa bawat API path). */
     public const REQUIRED = ['page_id', 'token', 'flow.shipping', 'field.message'];
@@ -750,7 +751,7 @@ class Chatblast
                 ->where('m.is_test', false)
                 // Ang itinabi dahil nagbago ang PSID/page ay hindi bilang; ang nilaktawan dahil may naipadala na ang ibang
                 // campaign ngayong araw ay bilang (walang bagong row hanggang bukas).
-                ->where(fn ($k) => $k->whereNotNull('m.dedupe_key')->orWhere('m.reason', self::CROSS))
+                ->where(fn ($k) => $k->whereNotNull('m.dedupe_key')->orWhere('m.reason', self::CROSS)->orWhere('m.reason', 'like', self::CAMPAIGN_CAP . '%'))
                 ->where(fn ($t) => $t->where('m.created_at', '>=', $today)->orWhere('m.sent_at', '>=', $today)->orWhere('m.queued_at', '>=', $today)
                     ->orWhere(fn ($u) => $u->where('m.status', 'unknown')->where('m.updated_at', '>=', $today)))
                 ->selectRaw('1'))

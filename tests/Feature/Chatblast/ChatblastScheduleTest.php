@@ -144,6 +144,43 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $this->assertSame(['WB-1 D1 queued', 'WB-2 D1 queued', 'WB-3 D1 queued'], $this->rows(), 'ang 11:00 ang huli; walang 12:00');
     }
 
+    public function test_adding_a_past_time_does_not_cancel_an_earlier_time_that_is_still_due(): void
+    {
+        $this->actingAs($this->user());
+        $c = $this->campaign(['days' => [['Una {name}']], 'send_times' => ['09:00'], 'auto_ran_at' => Carbon::parse('2026-10-18 08:00:00', 'Asia/Manila')]);
+        $this->travelTo('2026-10-18 08:30:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+
+        $this->travelTo('2026-10-18 09:02:00'); // hindi pa tumatakbo ang cron para sa 09:00
+        $this->postJson('/chatblast/sequence/' . $c->id, ['send_times' => ['09:00', '09:01'], 'old' => ['send_times' => ['09:00']]])->assertOk();
+        $this->tick('2026-10-18 09:05:00');
+        $this->assertSame(['WB-1 D1 queued'], $this->rows(), 'tumakbo pa rin ang 09:00');
+
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-18 09:10:00');
+        $this->assertSame(['WB-1 D1 queued'], $this->rows(), 'ang idinagdag na 09:01 ay hindi tumatakbo nang huli');
+        $this->assertSame(['09:00', '09:01'], app(ChatblastSchedule::class)->ranToday($c->fresh(), now()));
+
+        $this->tick('2026-10-19 09:01:00');
+        $this->assertContains('WB-2 D1 queued', $this->rows(), 'kinabukasan: bagong araw ng talaan');
+    }
+
+    public function test_a_row_of_a_step_with_its_own_time_that_becomes_ready_later_is_sent_at_the_next_time(): void
+    {
+        $this->campaign(['send_times' => ['09:00', '18:00'], 'step_times' => [null, ['15:00']]]);
+        $this->travelTo('2026-10-18 08:00:00');
+        $order = $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', null, 'In Transit');
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-1', 'kind' => 'c-auto', 'day' => 1, 'psid' => 'psid-a',
+            'text' => 'x', 'jnt_status' => 'In Transit', 'status' => 'sent', 'sent_at' => now()->subDay(), 'dedupe_key' => 'WB-1|c-auto|1',
+            'attempts' => 0, 'is_test' => false, 'created_at' => now()->subDay(), 'updated_at' => now()->subDay()]);
+
+        $this->tick('2026-10-18 15:00:00');
+        $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 no_psid'], $this->rows());
+        $order->update(['botcake_psid' => 'psid-a']); // natugma pagkatapos ng 15:00
+        $this->tick('2026-10-18 18:00:00');
+        $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 queued'], $this->rows(), 'ang Day 2 (15:00 na) ay ipinadala sa susunod na oras ngayong araw');
+    }
+
     public function test_a_late_tick_inside_the_range_runs_once_for_the_hours_it_missed(): void
     {
         $c = $this->campaign(['days' => [['Una {name}']], 'send_times' => [], 'send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => 1],
@@ -201,7 +238,9 @@ class ChatblastScheduleTest extends ChatblastTestCase
             [$two->fresh()->status, $two->fresh()->reason, $two->fresh()->dedupe_key]);
         Http::assertNothingSent();
 
-        // Bukas: may bagong row ang waybill (hindi naiipit sa key ng nilaktawan).
+        // Ngayong araw: walang bagong row (ang cap ay hanggang bukas); bukas: may bagong row ang waybill.
+        app(\App\Services\Chatblast::class)->build('c-auto', 1);
+        $this->assertCount(1, BotcakeMessage::where('kind', 'c-auto')->where('waybill', 'WB-2')->get(), 'walang bagong row ngayong araw');
         $this->travel(1)->days();
         app(\App\Services\Chatblast::class)->build('c-auto', 1);
         $this->assertSame(['skipped', 'ready'], BotcakeMessage::where('kind', 'c-auto')->where('waybill', 'WB-2')->orderBy('id')->pluck('status')->all());

@@ -31,6 +31,7 @@ class ChatblastCampaignController extends Controller
     private const MAX_WINDOW = 60;
     private const MAX_CAP = 100000;
     private const STALE = 'Nabago na ang mga step (ibang tab o tao); i-reload ang page.';
+    private const STALE_FIELD = 'Nabago na ito (ibang tab o tao, o naunang pag-save); i-reload ang page.';
 
     public function __construct(private Chatblast $chatblast, private PageSettings $settings, private ChatblastSchedule $schedule)
     {
@@ -64,8 +65,12 @@ class ChatblastCampaignController extends Controller
         $built  = $real()->where('created_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         $sent   = $real()->where('status', 'sent')->where('sent_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         $ready  = $real()->where('status', 'ready')->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind'); // para sa kumpirmasyon ng auto
-        $failed = $real()->whereIn('status', ['failed', 'field_mismatch'])->where('updated_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
-        $skipped = $real()->where('status', 'skipped')->where('updated_at', '>=', $start)->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
+        // Ang failed at nilaktawan ngayong araw ay hinahanap sa index na (status, created_at): ang row na nabuo sa loob ng
+        // pinakamahabang window lang (+2 araw), hindi lahat ng nilaktawan kailanman.
+        $recent = Carbon::now('Asia/Manila')->subDays(self::MAX_WINDOW + 2)->startOfDay()->timezone(config('app.timezone'));
+        $changedToday = fn (array $statuses) => $real()->whereIn('status', $statuses)->where('created_at', '>=', $recent)->where('updated_at', '>=', $start);
+        $failed = $changedToday(['failed', 'field_mismatch'])->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
+        $skipped = $changedToday(['skipped'])->selectRaw('kind, COUNT(*) AS n')->groupBy('kind')->pluck('n', 'kind');
         // Ngayong araw kada step: nabuo, naipadala, failed, nilaktawan.
         // Gaya ng bilang ng sequence: nabuo ayon sa created_at, naipadala ayon sa sent_at, failed at nilaktawan ayon sa updated_at.
         $perStep = [];
@@ -77,8 +82,8 @@ class ChatblastCampaignController extends Controller
         };
         $byStep('built', $real()->where('created_at', '>=', $start));
         $byStep('sent', $real()->where('status', 'sent')->where('sent_at', '>=', $start));
-        $byStep('failed', $real()->whereIn('status', ['failed', 'field_mismatch'])->where('updated_at', '>=', $start));
-        $byStep('skipped', $real()->where('status', 'skipped')->where('updated_at', '>=', $start));
+        $byStep('failed', $changedToday(['failed', 'field_mismatch']));
+        $byStep('skipped', $changedToday(['skipped']));
 
         $campaigns = ChatblastCampaign::orderBy('id')->get(ChatblastCampaign::COLUMNS);
         $messages = \App\Models\ChatblastMessage::orderBy('name')->get(['id', 'name', 'versions']);
@@ -172,8 +177,40 @@ class ChatblastCampaignController extends Controller
         $active = $request->has('active') ? filter_var($request->input('active'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) : $c->active;
         if ($active === null) return response()->json(['error' => 'On/off: true o false lang.'], 422);
 
-        DB::transaction(function () use ($c, $data, $mode, $active) {
+        $old = is_array($request->input('old')) ? $request->input('old') : [];
+        try {
+            $this->updateLocked($c, $data, $mode, $active, $old);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['campaign' => $this->present($c->fresh())]);
+    }
+
+    /** Mga field na listahan: ang page ay nagpapadala ng buong listahan, kaya kasama ang nakita nito (old). */
+    private const LISTS = ['send_times', 'weekdays', 'statuses', 'pages', 'send_range'];
+
+    /** Ang listahan sa iisang anyo para maihambing (ayos, wala = lahat ng araw / lahat ng page, every = 1). */
+    private static function norm(string $key, mixed $v): mixed
+    {
+        if ($key === 'send_range') {
+            if (!is_array($v)) return null;
+            return ['start' => (string) ($v['start'] ?? ''), 'end' => (string) ($v['end'] ?? ''), 'every' => (int) ($v['every'] ?? 1) ?: 1];
+        }
+        $list = array_values(array_unique(array_map(fn ($x) => is_scalar($x) ? trim((string) $x) : '', (array) ($v ?? []))));
+        if ($key === 'weekdays' && !$list) $list = ['1', '2', '3', '4', '5', '6', '7'];
+        sort($list);
+
+        return $list;
+    }
+
+    private function updateLocked(ChatblastCampaign $c, array $data, string $mode, bool $active, array $old): void
+    {
+        DB::transaction(function () use ($c, $data, $mode, $active, $old) {
             $c = ChatblastCampaign::whereKey($c->id)->lockForUpdate()->first();
+            foreach (self::LISTS as $k) {
+                if (array_key_exists($k, $old) && self::norm($k, $old[$k]) !== self::norm($k, $c->{$k})) throw new InvalidArgumentException(self::STALE_FIELD);
+            }
             $changed = array_keys(array_filter($data, fn ($v, $k) => $c->{$k} !== $v, ARRAY_FILTER_USE_BOTH));
             $before = clone $c;
             $c->fill($data);
@@ -202,8 +239,6 @@ class ChatblastCampaignController extends Controller
             }
             $c->save();
         });
-
-        return response()->json(['campaign' => $this->present($c->fresh())]);
     }
 
     /** Alisin ang campaign na wala pang mensahe (ang may mensahe: i-off na lang, para buo ang talaan). */
@@ -300,12 +335,14 @@ class ChatblastCampaignController extends Controller
         $this->checkAccess();
         $d = $this->day($request);
         $new = $request->input('times') ?? [];
+        $old = $request->has('old') ? self::norm('send_times', $request->input('old')) : null;
 
         $seen = $this->seen($request);
 
-        return $this->steps($id, function (array $ids, array $times) use ($d, $new, $seen) {
+        return $this->steps($id, function (array $ids, array $times) use ($d, $new, $seen, $old) {
             $seen($ids, $d);
             if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            if ($old !== null && $old !== self::norm('send_times', $times[$d] ?? [])) throw new InvalidArgumentException(self::STALE);
             $times[$d] = $new ?: null;
             return [$ids, $times];
         }, ['what' => 'step_times', 'day' => $d + 1, 'new' => $new]);

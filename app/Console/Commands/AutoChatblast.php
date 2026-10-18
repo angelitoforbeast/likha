@@ -9,6 +9,7 @@ use App\Services\ChatblastSchedule;
 use App\Services\ChatblastSender;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
@@ -46,12 +47,22 @@ class AutoChatblast extends Command
                 continue;
             }
 
-            // Isang takbo lang kada oras: ang nakakuha ng update na ito ang magku-queue (at hindi kung na-off o naging
-            // manual habang binubuo).
-            $claimed = ChatblastCampaign::whereKey($c->id)->where('active', true)->where('mode', 'auto')
-                ->where(fn ($w) => $w->whereNull('auto_ran_at')->orWhere('auto_ran_at', '<', $latest->copy()->timezone(config('app.timezone'))))
-                ->update(['auto_ran_at' => $latest->copy()->timezone(config('app.timezone'))]); // ang oras na dumating habang binubuo ay tatakbo pa
+            // Isang takbo lang kada oras: naka-lock ang sequence habang itinatala ang mga oras na kinukuha ng takbong ito
+            // (ang dapat pa ring tumakbo lang; hindi kapag na-off o naging manual habang binubuo).
+            $claimed = DB::transaction(function () use ($c, $due, $now, $schedule, $latest) {
+                $fresh = ChatblastCampaign::whereKey($c->id)->lockForUpdate()->first();
+                if (!$fresh || !$fresh->active || $fresh->mode !== 'auto') return [];
+                $mine = array_keys(array_intersect_key($schedule->due($fresh, $now), $due));
+                if (!$mine) return [];
+                $schedule->markRan($fresh, $mine, $now);
+                if (!$fresh->auto_ran_at || $fresh->auto_ran_at->lt($latest)) $fresh->auto_ran_at = $latest->copy()->timezone(config('app.timezone'));
+                $fresh->save();
+                return $mine;
+            });
             if (!$claimed) continue;
+            // Ang mga step na dumating na ang oras ngayong araw: ang due ngayon, at ang row ng step na tapos na ang oras pero
+            // naging ready lang pagkatapos (hal. natugma ang PSID). Hindi kailanman bago ang oras ng step.
+            $steps = array_values(array_unique(array_merge($steps, $schedule->stepsCome($c, $now))));
 
             // Ang bago lang: nabuo ngayong araw (Manila) at pagkatapos i-auto ang campaign. Ang naipong ready (backlog)
             // ay hindi kailanman ipinapadala ng auto: sa /chatblast lang, kung gusto. Ang page na wala na sa campaign ay
@@ -63,7 +74,7 @@ class AutoChatblast extends Command
                 ->filter(fn ($m) => $chatblast->onPage($c, (string) $m->page_name))->pluck('id')->all();
             $queued = $sender->queue($ids, null);
 
-            $at = implode(', ', array_keys($due));
+            $at = implode(', ', $claimed);
             Log::info('chatblast: auto', ['campaign' => $c->id, 'times' => $at, 'steps' => $steps, 'added' => $r['added'], 'queued' => $queued]);
             $this->line(sprintf('%s (%s): %d bago, %d naka-queue', $c->name, $at, $r['added'], $queued));
         }

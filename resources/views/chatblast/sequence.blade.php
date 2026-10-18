@@ -103,17 +103,18 @@
         return box;
     }
 
-    function chips(times, onSave, emptyText) {
+    function chips(get, onSave, emptyText) {
+        const times = get();
         const box = el('span', {class: 'inline-flex flex-wrap items-center gap-1'});
         for (const t of times) {
             const x = el('button', {type: 'button', class: 'ml-1 text-gray-500 hover:text-red-600', 'aria-label': 'Alisin ang ' + t, text: '×'});
-            x.addEventListener('click', () => onSave(times.filter(y => y !== t)));
+            x.addEventListener('click', () => onSave(get().filter(y => y !== t)));
             box.append(el('span', {class: 'px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-xs'}, [clock(t), x]));
         }
         if (!times.length) box.append(el('span', {class: 'text-xs text-gray-400', text: emptyText}));
         const add = el('input', {type: 'time', class: 'border rounded px-1 py-0.5 text-xs', 'aria-label': 'Bagong oras'});
         const ok = el('button', {type: 'button', class: 'text-xs text-blue-700 hover:underline', text: '+ oras'});
-        ok.addEventListener('click', () => { if (add.value) onSave([...times, add.value]); });
+        ok.addEventListener('click', () => { if (add.value && !get().includes(add.value)) onSave([...get(), add.value]); });
         box.append(add, ok);
         return box;
     }
@@ -133,6 +134,13 @@
 
     function block(c) {
         const base = url.baseUrl + '/' + c.id;
+        // Ang listahang field (oras, araw, status, page, bawat oras): kasama ang nakita ng page (old); itinatala agad ang
+        // bago para ang susunod na pindot ay mula rito. Kapag tinanggihan (nabago na ng iba), ibinabalik at nire-reload.
+        const saveList = async (m, field, value) => {
+            const old = c[field];
+            c[field] = value;
+            if (!await saveField(m, base, {[field]: value, old: {[field]: old}})) { c[field] = old; setTimeout(load, 1500); }
+        };
         const row = (labelText, ...content) => el('div', {class: 'flex flex-wrap items-center gap-2 py-1'}, [el('span', {class: 'text-xs text-gray-500 w-36', text: labelText}), ...content]);
 
         // Pangalan
@@ -165,7 +173,7 @@
         // Trigger
         const stM = mark(), pgM = mark(), wM = mark(), odM = mark();
         const pageSearch = el('input', {placeholder: 'hanapin ang page', class: 'border rounded px-2 py-0.5 text-xs'});
-        const pages = checks(data.pages, c.pages || [], v => saveField(pgM, base, {pages: v}));
+        const pages = checks(data.pages, c.pages || [], v => saveList(pgM, 'pages', v));
         pageSearch.addEventListener('input', () => { for (const l of pages.children) l.classList.toggle('hidden', !l.textContent.toLowerCase().includes(pageSearch.value.toLowerCase())); });
         const win = el('input', {type: 'number', min: '1', max: '60', value: String(c.window_days), class: 'border rounded px-2 py-0.5 text-sm w-20', 'aria-label': 'Window'});
         win.addEventListener('change', () => saveField(wM, base, {window_days: win.value}));
@@ -182,13 +190,13 @@
         const rStart = el('input', {type: 'time', value: r.start, class: 'border rounded px-1 py-0.5 text-xs', 'aria-label': 'Simula'});
         const rEnd = el('input', {type: 'time', value: r.end, class: 'border rounded px-1 py-0.5 text-xs', 'aria-label': 'Dulo'});
         const rEvery = el('input', {type: 'number', min: '1', max: '12', value: String(r.every), class: 'border rounded px-1 py-0.5 text-xs w-14', 'aria-label': 'Bawat ilang oras'});
-        const saveRange = () => saveField(rM, base, {send_range: rOn.checked ? {start: rStart.value, end: rEnd.value, every: Number(rEvery.value)} : null});
+        const saveRange = () => saveList(rM, 'send_range', rOn.checked ? {start: rStart.value, end: rEnd.value, every: Number(rEvery.value)} : null);
         for (const i of [rOn, rStart, rEnd, rEvery]) i.addEventListener('change', saveRange);
         const range = el('span', {class: 'inline-flex flex-wrap items-center gap-1 text-xs'}, [el('label', {class: 'flex items-center gap-1'}, [rOn, 'Bawat']), rEvery, 'oras, mula', rStart, 'hanggang', rEnd]);
         const weekdays = el('span', {class: 'inline-flex gap-2 text-sm'}, DAYS.map(([n, lbl]) => {
             const i = el('input', {type: 'checkbox', value: String(n)});
             i.checked = !c.weekdays || c.weekdays.includes(n);
-            i.addEventListener('change', () => saveField(wdM, base, {weekdays: [...weekdays.querySelectorAll('input:checked')].map(x => Number(x.value))}));
+            i.addEventListener('change', () => saveList(wdM, 'weekdays', [...weekdays.querySelectorAll('input:checked')].map(x => Number(x.value))));
             return el('label', {class: 'flex items-center gap-1'}, [i, lbl]);
         }));
         const cap = el('input', {type: 'number', min: '1', value: c.daily_cap ?? '', placeholder: 'wala', class: 'border rounded px-2 py-0.5 text-sm w-24', 'aria-label': 'Cap kada page kada araw'});
@@ -216,7 +224,7 @@
                     c.steps.length > 1 ? btn('alisin', () => { if (confirm('Alisin ang Day ' + s.day + '? Uusad ang mga kasunod.')) act('/remove-step', {day: s.day}, 'Naalis ang step.')(); }, 'text-red-600') : null,
                 ]),
                 el('div', {class: 'mt-1 space-y-0.5'}, s.versions.map((v, j) => el('p', {class: 'text-xs text-gray-700 whitespace-pre-wrap'}, [el('span', {class: 'font-medium mr-1', text: String.fromCharCode(65 + j) + ':'}), v]))),
-                el('div', {class: 'mt-1 text-xs text-gray-600' + greyed}, ['Sariling oras: ', chips(s.times || [], v => saveField(sm, base + '/step-times', {day: s.day, times: v, expect: s.message_id, steps: c.steps.length}), 'ang oras ng sequence')]),
+                el('div', {class: 'mt-1 text-xs text-gray-600' + greyed}, ['Sariling oras: ', chips(() => s.times || [], async v => { const old = s.times || []; s.times = v; if (!await saveField(sm, base + '/step-times', {day: s.day, times: v, old, expect: s.message_id, steps: c.steps.length})) { s.times = old; setTimeout(load, 1500); } }, 'ang oras ng sequence')]),
             ]);
         });
 
@@ -228,13 +236,13 @@
             el('div', {class: 'grid lg:grid-cols-2 gap-4'}, [
                 el('div', {}, [
                     el('h3', {class: 'text-sm font-semibold mb-1', text: 'Trigger'}),
-                    row('J&T status', checks(data.statuses, c.statuses, v => saveField(stM, base, {statuses: v})), stM),
+                    row('J&T status', checks(data.statuses, c.statuses, v => saveList(stM, 'statuses', v)), stM),
                     row('Mga page (wala = lahat)', el('div', {}, [pageSearch, pages]), pgM),
                     row('Window (araw)', win, wM),
                     row('Requires On Delivery', od, el('span', {class: 'text-xs text-gray-500', text: 'i-track bago ipadala; On Delivery lang; Delivering lang ang trigger'}), odM),
                     el('h3', {class: 'text-sm font-semibold mt-3 mb-1', text: 'Schedule' + (c.mode === 'auto' ? '' : ' (manual: hindi sinusunod)')}),
                     el('div', {class: greyed}, [
-                        row('Oras ng padala', chips(c.send_times, v => saveField(tM, base, {send_times: v}), 'walang oras'), tM),
+                        row('Oras ng padala', chips(() => c.send_times, v => saveList(tM, 'send_times', v), 'walang oras'), tM),
                         row('Bawat oras', range, rM),
                         row('Mga araw', weekdays, wdM),
                         row('Cap kada page / araw', cap, capM),

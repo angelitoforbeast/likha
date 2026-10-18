@@ -9,7 +9,8 @@ use Carbon\Carbon;
  * Ang schedule ng campaign na naka-auto: ang mga oras ng padala (Manila) sa mga napiling araw ng linggo (wala = araw-
  * araw), at ang sariling oras ng isang step (ang mga row ng step na iyon ay sa oras nito lang ipinapadala). Ang isang oras
  * ay tumatakbo isang beses kada araw, hanggang 3 oras pagkatapos nito, at hindi kailanman bago ang huling takbo
- * (auto_ran_at: itinatala rin kapag in-auto, in-on ulit, o nagdagdag ng oras na lumipas na).
+ * (auto_ran_at: itinatala rin kapag in-auto o in-on ulit). Ang mga oras na tapos na ngayong araw ay nasa auto_runs, kaya
+ * bawat oras ay sa sarili nito: ang bagong oras na lumipas na ay itinatalang tapos nang hindi ginagalaw ang iba.
  */
 class ChatblastSchedule
 {
@@ -103,10 +104,45 @@ class ChatblastSchedule
             $at = $now->copy()->setTimeFromTimeString($t);
             if ($at->gt($now) || $now->gte($at->copy()->addHours(self::LATE_LIMIT_HOURS))) continue;
             if ($c->auto_ran_at && $c->auto_ran_at->gte($at)) continue;
+            if (in_array($t, $this->ranToday($c, $now), true)) continue; // tumakbo na ngayong araw
             $due[$t] = $at;
         }
 
         return $due;
+    }
+
+    /** Ang mga oras na tapos na (o itinalang tapos) ngayong araw, Manila. @return string[] */
+    public function ranToday(ChatblastCampaign $c, Carbon $now): array
+    {
+        $runs = (array) ($c->auto_runs ?? []);
+        return ($runs['date'] ?? null) === $now->copy()->timezone('Asia/Manila')->toDateString() ? array_values((array) ($runs['times'] ?? [])) : [];
+    }
+
+    /** Itala ang mga oras na ito bilang tapos ngayong araw (hindi sine-save). @param string[] $times */
+    public function markRan(ChatblastCampaign $c, array $times, Carbon $now): void
+    {
+        $all = array_values(array_unique(array_merge($this->ranToday($c, $now), $times)));
+        sort($all);
+        $c->auto_runs = ['date' => $now->copy()->timezone('Asia/Manila')->toDateString(), 'times' => $all];
+    }
+
+    /**
+     * Ang mga step (1 = Day 1) na dumating na ang oras ngayong araw (kasama ang araw ng linggo): ang mga row nila na
+     * nabuo ngayong araw at naging ready lang pagkatapos ay ipinapadala sa susunod na takbo (hindi bago ang oras nila).
+     * @return int[]
+     */
+    public function stepsCome(ChatblastCampaign $c, Carbon $now): array
+    {
+        $now = $now->copy()->timezone('Asia/Manila');
+        if (!$this->onWeekday($c, $now)) return [];
+        $steps = [];
+        foreach (array_keys((array) $c->days) as $i) {
+            foreach ($this->timesFor($c, $i) as $t) {
+                if ($now->copy()->setTimeFromTimeString($t)->lte($now)) { $steps[] = $i + 1; break; }
+            }
+        }
+
+        return $steps;
     }
 
     /** Ang mga step (1 = Day 1) na may isa sa mga oras na ito. @param string[] $times @return int[] */
@@ -173,9 +209,7 @@ class ChatblastSchedule
         if ($after->mode !== 'auto' || $before->mode !== 'auto') return; // ang paglipat sa auto ay may sariling tatak
         $now = Carbon::now('Asia/Manila');
         $added = array_diff_key($this->due($after, $now), $this->due($before, $now));
-        if (!$added) return;
-        $latest = max($added);
-        if (!$after->auto_ran_at || $after->auto_ran_at->lt($latest)) $after->auto_ran_at = $latest->copy()->timezone(config('app.timezone'));
+        if ($added) $this->markRan($after, array_keys($added), $now); // ang mga bago lang; ang dating oras ay tatakbo pa
     }
 
     /** "15:00" → "3:00 PM". */

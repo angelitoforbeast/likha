@@ -110,11 +110,12 @@ class ChatblastMessageTest extends ChatblastTestCase
         $this->row(['status' => 'sent', 'sent_at' => now(), 'version' => 'B']);
         $this->row(['status' => 'sent', 'sent_at' => now(), 'is_test' => true]);
         $this->row(['status' => 'sent', 'sent_at' => now(), 'day' => 2]); // ibang step: ibang mensahe
+        $this->row(['status' => 'sent', 'sent_at' => now()->subDays(31), 'created_at' => now()->subDays(31)]); // lampas sa 30 araw: hindi bilang
 
         $d = $this->getJson('/chatblast/campaigns/data')->assertOk()->json();
         $mine = collect($d['messages'])->firstWhere('id', $this->m->id);
         $this->assertSame([['campaign_id' => $this->c->id, 'name' => 'In transit', 'day' => 1]], $mine['used']);
-        $this->assertSame([['A' => 1, 'B' => 2], 3], [$mine['sent'], $mine['sent_total']]);
+        $this->assertSame([['A' => 1, 'B' => 2], 3, 30], [$mine['sent'], $mine['sent_total'], $d['sent_days']]);
         $this->assertSame(['In transit', 'Delivering'], array_column($d['campaigns'], 'name'));
         $this->get('/chatblast/campaigns')->assertOk()->assertSee('Mga mensahe');
     }

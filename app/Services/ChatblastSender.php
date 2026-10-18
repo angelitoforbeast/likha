@@ -249,7 +249,7 @@ class ChatblastSender
                 $mine = fn (string $status, string $column) => BotcakeMessage::where('page_name', $m->page_name)->where('kind', $m->kind)
                     ->where('status', $status)->where($column, '>=', $start)->where('is_test', false)->count();
                 if ($mine('sent', 'sent_at') + $mine('unknown', 'updated_at') >= $own) {
-                    $this->finish($m, 'skipped', 'Naabot ang daily cap ng campaign sa page (' . $own . ' ngayong araw); ipadala ulit bukas', null, []);
+                    $this->finish($m, 'skipped', Chatblast::CAMPAIGN_CAP . ' (' . $own . ' ngayong araw); ipadala ulit bukas', null, []);
                     // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill.
                     BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                     return;

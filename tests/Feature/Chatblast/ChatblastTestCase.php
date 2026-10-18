@@ -58,6 +58,7 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
             'database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php',
             'database/migrations/2026_10_19_100100_create_chatblast_messages_table.php',
             'database/migrations/2026_10_19_100200_add_send_range_to_chatblast_campaigns.php',
+            'database/migrations/2026_10_19_100300_add_auto_runs_to_chatblast_campaigns.php',
         ]]);
     }
 

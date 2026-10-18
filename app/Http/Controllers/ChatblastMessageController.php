@@ -21,6 +21,7 @@ use InvalidArgumentException;
 class ChatblastMessageController extends Controller
 {
     private const MAX_NAME = 140;
+    public const SENT_DAYS = 30; // ang bilang ng naipadala sa page ay sa huling 30 araw lang
     private const STALE = 'Nabago na ang bersyong ito (ibang tab o tao); i-reload ang page.';
 
     public function __construct(private Chatblast $chatblast, private PageSettings $settings)
@@ -57,7 +58,8 @@ class ChatblastMessageController extends Controller
         }
         // Ang naipadala ng bawat (sequence, step, bersyon) ay bilang ng mensaheng nasa step na iyon ngayon.
         $sent = [];
-        BotcakeMessage::where('is_test', false)->where('status', 'sent')->selectRaw('kind, day, version, COUNT(*) AS n')->groupBy('kind', 'day', 'version')->get()
+        BotcakeMessage::where('sent_at', '>=', now()->subDays(self::SENT_DAYS))->where('is_test', false)->where('status', 'sent')
+            ->selectRaw('kind, day, version, COUNT(*) AS n')->groupBy('kind', 'day', 'version')->get()
             ->each(function ($r) use (&$sent) { $sent[$r->kind . '|' . $r->day][(string) $r->version] = (int) $r->n; });
 
         $messages = ChatblastMessage::orderBy('name')->get(['id', 'name', 'versions'])->map(function ($m) use ($used, $sent) {
@@ -73,6 +75,7 @@ class ChatblastMessageController extends Controller
             'messages'  => $messages,
             'campaigns' => $campaigns->map(fn ($c) => ['id' => $c->id, 'name' => $c->name])->all(),
             'pages'     => $this->settings->pagesWith('botcake', Chatblast::REQUIRED),
+            'sent_days' => self::SENT_DAYS,
         ]);
     }
 

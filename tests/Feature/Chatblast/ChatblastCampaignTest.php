@@ -122,9 +122,9 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->postJson('/chatblast/sequence/' . $c->id, ['mode' => 'auto', 'confirm' => true])->assertOk();
         $this->travel(3)->hours();
         $this->postJson('/chatblast/sequence/' . $c->id, ['send_times' => ['08:00', '12:00']])->assertOk();
-        $this->assertTrue($c->fresh()->auto_ran_at->eq(now()->setTime(12, 0)), 'ang bagong oras na lumipas na ay hindi tatakbo');
+        $this->assertSame(['12:00'], app(\App\Services\ChatblastSchedule::class)->ranToday($c->fresh(), now()), 'ang bagong oras na lumipas na ay hindi tatakbo (ang 08:00 ay lampas na sa 3 oras)');
         $this->postJson('/chatblast/sequence/' . $c->id, ['send_times' => ['08:00', '12:00', '18:00']])->assertOk();
-        $this->assertTrue($c->fresh()->auto_ran_at->eq(now()->setTime(12, 0)), 'ang oras na darating pa ay walang epekto');
+        $this->assertSame(['12:00'], app(\App\Services\ChatblastSchedule::class)->ranToday($c->fresh(), now()), 'ang oras na darating pa ay walang epekto');
 
         DB::table('from_jnts')->insert(['waybill_number' => 'WB-X3', 'status' => 'In Transit']);
         $this->assertSame([], $this->getJson('/chatblast/sequence/data')->json('overlaps'));

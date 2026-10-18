@@ -81,10 +81,12 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
         $this->assertSame([], \App\Services\ChatblastSchedule::rangeTimes(['start' => '09:00', 'end' => '21:00', 'every' => null]), 'ang naka-save na walang every ay hindi umiikot nang walang hanggan');
 
         // In-auto at idinagdag ang bawat oras nang 14:10: ang 14:00 ay hindi tatakbo; ang 15:00 ay tatakbo.
-        $this->c->update(['mode' => 'auto', 'send_times' => [], 'send_range' => null, 'auto_ran_at' => now()->setTime(8, 0)]);
+        $this->c->refresh()->update(['mode' => 'auto', 'send_times' => [], 'send_range' => null, 'auto_ran_at' => now()->setTime(8, 0)]);
         $this->travelTo('2026-10-18 14:10:00');
         $this->postJson($this->url(), ['send_range' => ['start' => '09:00', 'end' => '21:00']])->assertOk();
-        $this->assertTrue($this->c->fresh()->auto_ran_at->eq(now()->setTime(14, 0)));
+        $this->assertSame(['12:00', '13:00', '14:00'], app(\App\Services\ChatblastSchedule::class)->ranToday($this->c->fresh(), now()),
+            'ang mga bagong oras na lumipas na (sa loob ng 3 oras) ay hindi tatakbo');
+        $this->assertTrue($this->c->fresh()->auto_ran_at->eq(now()->setTime(8, 0)), 'hindi ginagalaw ang huling takbo');
         $this->assertSame('2026-10-18 15:00', app(\App\Services\ChatblastSchedule::class)->nextRun($this->c->fresh(), now())?->format('Y-m-d H:i'));
 
         $this->postJson($this->url(), ['send_range' => null])->assertOk();
@@ -124,6 +126,38 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
             collect($this->c->fresh()->log)->pluck('what')->intersect(['add_step', 'move', 'remove_step', 'step_message', 'step_times'])->unique()->sort()->values()->all());
     }
 
+    public function test_a_list_field_saved_from_a_stale_page_is_refused(): void
+    {
+        DB::table('from_jnts')->insert([['waybill_number' => 'WB-S1', 'status' => 'In Transit'], ['waybill_number' => 'WB-S2', 'status' => 'Delivering']]);
+        $this->c->update(['send_times' => ['09:00', '15:00']]);
+        // Dalawang mabilis na pag-alis ng oras: ang ikalawa ay mula sa lumang listahan.
+        $this->postJson($this->url(), ['send_times' => ['15:00'], 'old' => ['send_times' => ['09:00', '15:00']]])->assertOk();
+        $this->postJson($this->url(), ['send_times' => ['09:00'], 'old' => ['send_times' => ['09:00', '15:00']]])->assertStatus(422);
+        $this->assertSame(['15:00'], $this->c->fresh()->send_times, 'hindi bumalik ang inalis na 09:00');
+        $this->postJson($this->url(), ['send_times' => [], 'old' => ['send_times' => ['15:00']]])->assertOk();
+
+        $stale = [
+            ['weekdays' => [1, 2], 'old' => ['weekdays' => [1]]],
+            ['statuses' => ['Delivering'], 'old' => ['statuses' => ['Delivering']]],
+            ['pages' => ['Page Uno'], 'old' => ['pages' => ['Page Dos']]],
+            ['send_range' => ['start' => '09:00', 'end' => '12:00'], 'old' => ['send_range' => ['start' => '08:00', 'end' => '12:00', 'every' => 1]]],
+        ];
+        foreach ($stale as $body) {
+            $this->assertStringContainsString('i-reload', $this->postJson($this->url(), $body)->assertStatus(422)->json('error'));
+        }
+        // Ang nakita ay tama (wala = lahat ng araw / lahat ng page; ayos ng listahan ay hindi mahalaga).
+        $this->postJson($this->url(), ['weekdays' => [1, 2], 'old' => ['weekdays' => [1, 2, 3, 4, 5, 6, 7]]])->assertOk();
+        $this->postJson($this->url(), ['statuses' => ['Delivering', 'In Transit'], 'old' => ['statuses' => ['In Transit']]])->assertOk();
+        $this->postJson($this->url(), ['pages' => ['Page Uno'], 'old' => ['pages' => []]])->assertOk();
+        $this->postJson($this->url(), ['send_range' => ['start' => '09:00', 'end' => '12:00'], 'old' => ['send_range' => null]])->assertOk();
+        $this->assertSame([[1, 2], ['Delivering', 'In Transit'], ['Page Uno'], ['start' => '09:00', 'end' => '12:00', 'every' => 1]],
+            [$this->c->fresh()->weekdays, $this->c->fresh()->statuses, $this->c->fresh()->pages, $this->c->fresh()->send_range]);
+
+        $this->postJson($this->url('/step-times'), ['day' => 1, 'times' => ['10:00'], 'old' => []])->assertOk();
+        $this->postJson($this->url('/step-times'), ['day' => 1, 'times' => ['11:00'], 'old' => []])->assertStatus(422);
+        $this->assertSame(['10:00'], $this->c->fresh()->step_times[0]);
+    }
+
     public function test_a_step_change_from_a_stale_page_is_refused(): void
     {
         [$una, $dalawa, $tatlo] = $this->ids;
@@ -150,9 +184,9 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
 
         $this->c->update(['mode' => 'auto', 'send_times' => ['15:00'], 'auto_ran_at' => now()->setTime(8, 0)]);
         $this->postJson($this->url('/step-times'), ['day' => 1, 'times' => ['09:00']])->assertOk();
-        $this->assertTrue($this->c->fresh()->auto_ran_at->eq(now()->setTime(9, 0)), 'ang 09:00 na lumipas na ay hindi tatakbo');
+        $this->assertSame(['09:00'], app(\App\Services\ChatblastSchedule::class)->ranToday($this->c->fresh(), now()), 'ang 09:00 na lumipas na ay hindi tatakbo');
         $this->postJson($this->url(), ['weekdays' => [1]])->assertOk(); // walang bagong oras ngayong Linggo
-        $this->assertTrue($this->c->fresh()->auto_ran_at->eq(now()->setTime(9, 0)));
+        $this->assertSame(['09:00'], app(\App\Services\ChatblastSchedule::class)->ranToday($this->c->fresh(), now()));
     }
 
     public function test_the_data_gives_each_sequence_its_steps_summary_next_run_and_the_message_list(): void
