@@ -629,3 +629,5 @@ Accepted, not fixed:
 - **No test pins the exact-text duplicate check ("ok" then "OK").** Reason: sqlite's `=` is already case-sensitive, so such a test would pass without the fix; the comparison is in PHP (`===`), which behaves the same on MySQL.
 - **`mb_scrub` keeps NUL bytes;** a value with `%00` would make PostgreSQL reject the insert (500). Reason: only a caller with the key can send it, and production runs MySQL.
 - **The second fix loop (text/plain body key) got no reviewer re-check** (the 2-loop cap). Reason: a one-line move, pinned by the new S-059.2 data set.
+- **(amendment 1) A row whose page could not be found shows only "Unknown page";** the `page` text it was sent with stays in the payload but is not shown, so a misconfigured block is not named on the page. Reason: the amendment asks only for "Unknown page"; a later display tweak if it happens.
+- **(amendment 1) The review fix (filter lists page-settings pages) got no reviewer re-check.** Reason: small, pinned by S-059.16's new assertion, and within the amendment's 20-minute budget.

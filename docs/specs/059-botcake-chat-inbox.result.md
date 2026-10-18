@@ -182,3 +182,56 @@ Skipped, for time (the brief's budget was about 1.5 hours). The pages are server
   2. Set `BOTCAKE_CHAT_KEY`.
   3. Paste the setup values into Botcake.
 - **Until the key is set,** the endpoint refuses everything (401). That is safe, but Botcake's test Send will show 401.
+
+## Amendment 1: Botcake's own variable names, pages without a page variable
+
+Commits `9a2e60d1` (amendment) and `795f3c66` (review fix: the filter lists page-settings pages).
+
+### What changed
+- **Aliases:**
+  - psid: `user.id`, `user_id`, `fb_id`, `id`;
+  - name: `full_name`, `user.full_name`, `user_full_name`;
+  - message: `last_text_input` (second only to `message`).
+  - In GET and form bodies PHP turns the dot into `_`, so `user.id` arrives as `user_id` and `user.full_name` as `user_full_name`. Both spellings are accepted.
+- **Page:** Botcake has no page variable, so each page's block identifies itself with `page_id` (its Botcake ID, typed as fixed text) or `page` (its name as in page settings, trimmed and case-insensitive). A match by name stores that page's name and its `botcake.page_id`. With no match, page_name stays empty and the Chats page shows "Unknown page" (the filter shows "Unknown page (ID …)").
+- **No text:** a message with no text (a sticker or photo) is kept when it has a PSID, with an empty message, and shows "no text (sticker or photo?)" in the list and the customer view. A request with neither a PSID nor a message is still answered `{"ok":true}` and not stored (S-059.7).
+- **Setup box:**
+  - (a) **Recommended: POST with a JSON body.** The URL, the `X-Chat-Key` header, and the body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` with a Copy button.
+  - (b) **GET with Params rows:** `key` (masked; Copy key for CEO only), `page_id`, `psid`, `name`, `message`, each with a Copy button.
+  - With a page selected in the Chats filter, its Botcake ID replaces the placeholder in both forms.
+
+### Case table (amendment 1)
+All 24 tests in `BotcakeChatTest` passed (144 assertions); the whole `tests/Feature/Chatblast` folder passed too (1350 assertions; warnings only, from the missing env file).
+
+| Case | Test | Result |
+|---|---|---|
+| S-059.3 (extended) | `test_S_059_3_aliases_and_any_case_fill_the_fields_and_extra_params_are_kept_without_the_key` | pass |
+| S-059.15 | `test_S_059_15_the_page_is_found_by_its_name_when_there_is_no_page_id_and_unknown_pages_are_labelled` | pass |
+| S-059.16 | `test_S_059_16_the_setup_box_gives_the_json_body_and_the_get_params_with_the_selected_page_id_filled_in` | pass |
+| S-059.17 | `test_S_059_17_an_empty_message_from_a_customer_is_kept_and_labelled` | pass |
+
+**Red run:** before the code, S-059.3 failed (no psid for `user.id`), S-059.15 failed (page_id and page_name null for a page named by `page`), S-059.16 failed (no JSON body in the page) and S-059.17 failed (no label).
+
+### Review (amendment 1)
+One `skeptic-reviewer` pass at adversarial depth on `7c12d3ba..9a2e60d1`.
+
+- **Correctness and security:** no blockers or majors.
+  - The aliases prefer `psid` and `user.id` before the generic `id`.
+  - The page-name lookup uses bound parameters and is capped at 255 characters.
+  - The `{{user.id}}` style values print as escaped literal text.
+  - The selected page_id reaches the body only JSON-encoded and Blade-escaped.
+  - The full key still appears for CEO only.
+- **One spec major, fixed in `795f3c66`:** the page filter, and so the pre-fill, listed only pages that already had chats. Before the first chat, the setup box could never fill in a page's ID.
+  - The filter now also lists every page with an active `botcake.page_id` in page settings.
+  - S-059.16 gained an assertion for a page with a Botcake ID and no chats. It was red first (option missing).
+  - All of `tests/Feature/Chatblast` then passed (1352 assertions).
+  - This fix got no reviewer re-check; recorded in `TODO.md`.
+- **One minor, accepted in `TODO.md`:** "Unknown page" does not show the `page` text the block sent.
+- **The reviewer also asked about the earlier text/plain key major:** it was fixed in `d79e1aad`, pinned by S-059.2's fifth data set.
+
+### Story changes (amendment 1)
+- S-059.3 extended with Botcake's variable names; S-059.15 to S-059.17 added.
+- S-059.7 is unchanged: "empty messages are kept" applies to a customer message with no text (it has a PSID); a request with no PSID and no message still stores nothing.
+
+### Merge danger (amendment 1)
+- Low. No migration. The plain `id` param now counts as the PSID when no `psid`, `user.id`, `user_id` or `fb_id` is sent.

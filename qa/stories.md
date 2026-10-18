@@ -1122,3 +1122,12 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-059.12 | Given chats older and newer than 90 days, when the prune runs (its command, or chatblast:auto once a day), then only the older ones are deleted | `test_S_059_12…` | Passed · 2026-10-18 · auto |
+
+### S-059D Amendment 1: Botcake's own variable names and pages without a page variable (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.3 (extended) | Given Botcake's variables `user.id` (or `id`), `user.full_name` and `last_text_input`, in JSON (with the dot) or GET (PHP turns the dot into `_`), then they fill psid, name and message | `test_S_059_3…` | Passed · 2026-10-18 · auto |
+| S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
+| S-059.16 | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+| S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
