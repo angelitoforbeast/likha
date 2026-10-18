@@ -1207,7 +1207,7 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 |---|---|---|---|
 | S-059.3 (extended) | Given Botcake's variables `user.id` (or `id`), `user.full_name` and `last_text_input`, in JSON (with the dot) or GET (PHP turns the dot into `_`), then they fill psid, name and message | `test_S_059_3…` | Passed · 2026-10-18 · auto |
 | S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
-| S-059.16 | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+| S-059.16 (replaced by S-065.1) | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
 | S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
 
 ### S-059E Fixes from the independent review: fast at millions of rows (P1)
@@ -1316,3 +1316,12 @@ Test in `tests/Feature/PageSettings/FieldNameTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-064.1 | Given a saved Message field ID, then its line shows "ID · name" from the stored `botcake.field.message.options`; an ID not in the list shows "ID · (not in Botcake list)" in amber; with no list stored, the ID plus a grey "press Test for the name". No Botcake call; editing, saves, history and Ready unchanged | `test_S_064_1…` (3 data sets) and the browser check | Passed · 2026-10-19 · auto + headless browser |
+
+## S-065 The Chats setup box gives the Botcake variables that work
+
+Spec 065. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-065.1 | Given /chatblast/chats with or without a page selected, when the Botcake setup box opens, then it shows one body `{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}"}`, the GET Params rows with the same four values, and "The same block works on any page"; it never shows `user.id`, `user.full_name` or the selected page's ID; the filter still lists pages from page settings | `test_S_065_1…` | Passed · 2026-10-19 · auto |
+| S-065.2 | Given a block that sends `user_full_name`, then it is stored as the name | `test_S_065_2…` | Passed · 2026-10-19 · auto |
