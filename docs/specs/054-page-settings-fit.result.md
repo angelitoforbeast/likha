@@ -21,7 +21,9 @@ Where the amendments changed the first layout, this result describes the final p
 | `3b546392` | docs: result, stories and `TODO.md` for amendment 1 |
 | `aad19bcc` | feat (amendment 2): flow blocks with ID, name and full content and no placeholders; the template name moves to the ▸ row |
 | `2862e786` | fix (amendment 2 review): unknown names or content ("(no name)", "(no body)") show nothing; the content shows only with a shipping flow ID |
-| (the docs commit after it) | docs: this result, `TODO.md` and the stories for amendment 2 |
+| `47bf87ef` | docs: result, stories and `TODO.md` for amendment 2 |
+| `0bf4dba3` | fix (independent review): a not-APPROVED template in red, no border on rows without orders, names only with a flow ID, chips re-filter on poll, one `state()` per row |
+| (the docs commit after it) | docs: this result, `TODO.md` and the stories for the independent review |
 
 ## Payload
 
@@ -58,7 +60,7 @@ Unchanged: the poll, the name filter, the sort (most orders first), Test all tok
 ▸ opens a `tr.detail` under the page row. One cell spans the table, with:
 
 - **Flows:** each ID with its full name, wrapped and in its colour. This is the only place a failed check's reason shows ("Check failed: <reason>").
-- **Shipping template:** the template name, editable in place (it overrides the auto-pick), then its full body. A template that is not APPROVED shows "Not an APPROVED template of the page" in red, and a failed check shows its reason.
+- **Shipping template:** the template name, editable in place (it overrides the auto-pick), then its full body. A template that is not APPROVED shows "Template not approved in Botcake" in red, and a failed check shows its reason.
 - **Sync:** the dates, kind, time, stop reason or status; the counts (+new · updated · matched · ad id); the error; the full "Next sync" label; orders and customers. All of it is red when the last run failed.
 - **Other keys:** every non-KNOWN key as a labelled, editable `.cell`, with the same edit behaviour.
 - **History:** a link for every editable key of the page. Each link opens the existing history panel.
@@ -70,7 +72,7 @@ The open pages are held in a `Set` outside `render()`, so a poll, a structure re
 ### All /page-settings text is English
 
 - **The page and its script:** title, headers, cell labels, buttons ("Test all tokens", "Sync all"), the help text, notices, errors, confirms, empty states ("No pages yet. Use + Page.", "No pages match the filter."), tooltips, the sync cell, the plan line ("Sync all plan: …"), the run panel ("Last 10 Sync all runs", Started / By / Skipped / New / Matched / Duration; running / paused / stopped / done), the history panel, + Page and + Column messages.
-- **052 flow and template lines** (`BotcakeFlowNames::line()`): "Not in Botcake", "Deleted in Botcake", "Not an APPROVED template of the page", "Check failed: <reason>", "(sequence message)". New reasons are English ("Botcake: no answer", "Botcake: not a list", "Botcake: refused (success:false)", "out of time", "no botcake.page_id or token", "(no body)", "(no name)"). The stored markers (`!wala`, `!bura`, `!hindi approved`, `!hindi nasuri: `) are data and stay as they are.
+- **052 flow and template lines** (`BotcakeFlowNames::line()`): "Not in Botcake", "Deleted in Botcake", "Template not approved in Botcake", "Check failed: <reason>", "(sequence message)". New reasons are English ("Botcake: no answer", "Botcake: not a list", "Botcake: refused (success:false)", "out of time", "no botcake.page_id or token", "(no body)", "(no name)"). The stored markers (`!wala`, `!bura`, `!hindi approved`, `!hindi nasuri: `) are data and stay as they are.
 - **053 sync labels** (`BotcakeSyncAll::next()` / `SUMMARY`, `BotcakeCustomerSync::kindLabel()` / `shortDate()`): "by date, from Oct 16", "resume from batch 15", "window (45 days, full)", "skipped (fresh, 2 h ago)", "no ID/token"; "by date, resumed from batch N"; English month names ("Oct 17").
 - **Errors the page shows:** `PageSettings::validate` messages, `PageSettingController` JSON errors and flash messages, the two `last_error` texts the sync writes, the Sync all orphan error, and `BotcakeClient`'s exception text ("Botcake: token refused (success:false)", "Botcake: HTTP 500 after 3 retries", …). `BotcakeClient` is shared, so its text is English on the other pages too; the chatblast tests stay green.
 - **Old stored text:** Tagalog written before the change is shown in English on read, without rewriting rows. Flow and template lines go through `BotcakeFlowNames::OLD_TEXT`, run errors through `PageSettingsGrid::OLD_ERRORS`, plus a pattern for "… pagkatapos ng N retry".
@@ -91,12 +93,12 @@ The open pages are held in a `Set` outside `render()`, so a poll, a structure re
 
 A 4 px left border on the Page cell:
 
-- **Red** when the token is invalid or the last sync failed, on any row.
+- **Red** when the token is invalid, the last sync failed, or the shipping template is not APPROVED.
 - **Amber** when a page with orders is incomplete.
 - **Green** when a page with orders is complete and its token is ok.
 - **None** otherwise.
 
-Rows without orders keep their grey text. The legend (Ready, Setup incomplete, Token invalid or last sync failed) sits in the summary bar.
+These colours apply to rows with orders only. Rows without orders stay grey with no coloured border at all, also when their token is invalid or their last sync failed; the chips still count them. The legend (Ready, Setup incomplete, Token invalid, last sync failed or template not approved) sits in the summary bar.
 
 ## Amendment 054-2: what changed
 
@@ -237,10 +239,35 @@ An earlier full run overlapped my edits and showed S_054_4 red. That was a race;
 - The S-054.1 story text now matches the `template` group, S-054.10 is added, and this result describes the final page.
 
 Accepted, with reasons in `TODO.md`:
-- **Template not APPROVED:** it shows nothing in the Flows cell and does not count as a flow problem (to confirm, below).
+- **Template not APPROVED:** decided after this review (see "Independent review" below).
 - **Edit behaviour:** it is proven by the browser check only (no JS harness).
 
 Also accepted from the first review: the view tests pin strings of the page's script, a + Column key shows only in the detail row, the leftover shipping-flow repaint, and the ⋯ button stays mouse-only.
+
+**Independent review (98e1ea66..47bf87ef):** no majors. Its decisions and fixes, in commit `0bf4dba3`:
+
+1. **Template not APPROVED (decided):** it shows in the Flows cell as one short red line under the content, "Template not approved in Botcake". The server text changed to that wording, so the ▸ row says the same. It counts in "Flow problems" and turns the row red, because sending with it fails. It counts only when the shipping flow has an ID, matching what the cell shows.
+2. **Rows without orders (decided):** they stay grey with no coloured border at all, also for an invalid token or a failed sync. The chips still count them.
+3. **Names need an ID:** a flow's name shows only when that flow has an ID, and `state().flows` requires the ID too. "Clear the value" in the history panel now applies the cells the server cleared (`applyCells(row, data.cells)`), so a flow's name goes as soon as its ID is cleared.
+4. **Chips follow polls:** with a chip on, every poll ends with `render()` when nothing is being edited, so the rows are filtered again.
+5. **One `state()` per row:** the summary bar computes `state()` once per row per update (a `Map`), and the chip tests take that state.
+
+Regression tests:
+- S-054.8 pins the chip tests, the single `state()` map, the ID check, the template flag and the poll re-render.
+- S-054.9 pins the new border rule and legend.
+- S-054.10 pins the name-needs-ID rule, the red template line and the history `applyCells`.
+- `FlowNamesTest` S-052.5 expects "Template not approved in Botcake".
+- Red first: 4 failures, then green.
+
+Browser check on the scratch app with the fake Botcake:
+- **Not approved:** with the template set to an unknown name, Gamma's shipping block read "Shipping update (ship_v1) | Template not approved in Botcake". Its border turned red and "Flow problems" went from 1 to 2.
+- **Chip on poll:** with "Flow problems" on, fixing the template left Gamma listed until the next poll, which dropped it.
+- **No orders:** a page with no orders and an invalid token had no border, and "Token invalid" listed it.
+- **Clear the value:** clearing the Delivering ID from the history panel removed its name within 250 ms.
+- **Width:** no horizontal scroll at 1366 and 1280 px.
+- **Evidence:** `handoff/054-page-settings-fit/screens/review-3/`.
+
+**Full suite after these fixes:** 1609 tests, 18367 assertions, 1 error and 1 failure (the known `ImportStartTest` and `ExampleTest`), 3 skipped. `tests/Feature/PageSettings`: 116 tests, all green.
 
 ## Story changes
 
@@ -254,9 +281,7 @@ Also accepted from the first review: the view tests pin strings of the page's sc
 
 ## Notes and what the brief got wrong
 
-- **To confirm, a template that is not APPROVED:** amendment 2 keeps only "Not in Botcake" and "Deleted in Botcake" in the Flows cell. So a template name that Botcake does not list as APPROVED now shows nothing there; the red "Not an APPROVED template of the page" is in the ▸ row only. It also does not count in "Flow problems" or the row colour. If it should show in red in the cell (and count), it is one line in `flowLines()` plus the chip test.
 - **Amendment 2 clean-ups:** the "Template: …" line under the shipping flow, already dropped in the first layout, stays gone, and the ▸ row lost its "Pick a template" text too.
-- **To confirm, red border on rows without orders:** a page without orders gets the red border when its token is invalid or its last sync failed. The amendment says "Rows without orders stay grey". I read that as their grey text staying, with red still marking a real problem. If those rows should have no border at all, it is a one-word change in `borderOf()`.
 - **Bulk actions:** the brief lists "bulk actions" among the things to keep. The grid has none besides Test all and Sync all (and its controls), and all of them are kept.
 - **Shipping-flow template line:** the 052 "Template: …" line under the shipping flow is gone, because the template is now the next line in the same Flows cell.
 - **Outside the page:** the run `last_message` and the Sync all run message stay Tagalog (the grid does not show them), as do the other pages (`ChatblastFlowInfo`, customers, PSID coverage). `BotcakeClient`'s exception text became English everywhere, because it is shared.
