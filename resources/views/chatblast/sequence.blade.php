@@ -191,9 +191,10 @@
             const pick = el('select', {class: 'border rounded px-2 py-0.5 text-sm max-w-xs', 'aria-label': 'Mensahe ng Day ' + s.day},
                 data.messages.map(m => el('option', {value: String(m.id), text: m.name})));
             if (s.message_id) pick.value = String(s.message_id); else pick.prepend(el('option', {value: '', text: '(walang mensahe)', selected: 'selected'}));
-            pick.addEventListener('change', () => saveField(sm, base + '/step-message', {day: s.day, message_id: Number(pick.value)}));
+            pick.addEventListener('change', () => saveField(sm, base + '/step-message', {day: s.day, message_id: Number(pick.value), expect: s.message_id, steps: c.steps.length}));
             const btn = (text, fn, cls = 'text-blue-700') => { const b = el('button', {type: 'button', class: 'text-xs hover:underline ml-2 ' + cls, text}); b.addEventListener('click', fn); return b; };
-            const act = (path, body, ok) => async () => { try { await post(base + path, body); notice(ok, 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load(); };
+            const seen = {expect: s.message_id, steps: c.steps.length}; // para hindi mabago ang maling step kapag luma na ang page
+            const act = (path, body, ok) => async () => { try { await post(base + path, {...body, ...seen}); notice(ok, 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load(); };
             const t = s.today;
             return el('div', {class: 'border-l-4 border-blue-300 bg-gray-50 rounded px-3 py-2'}, [
                 el('div', {class: 'flex flex-wrap items-center gap-2'}, [
@@ -205,7 +206,7 @@
                     c.steps.length > 1 ? btn('alisin', () => { if (confirm('Alisin ang Day ' + s.day + '? Uusad ang mga kasunod.')) act('/remove-step', {day: s.day}, 'Naalis ang step.')(); }, 'text-red-600') : null,
                 ]),
                 el('div', {class: 'mt-1 space-y-0.5'}, s.versions.map((v, j) => el('p', {class: 'text-xs text-gray-700 whitespace-pre-wrap'}, [el('span', {class: 'font-medium mr-1', text: String.fromCharCode(65 + j) + ':'}), v]))),
-                el('div', {class: 'mt-1 text-xs text-gray-600' + greyed}, ['Sariling oras: ', chips(s.times || [], v => saveField(sm, base + '/step-times', {day: s.day, times: v}), 'ang oras ng sequence')]),
+                el('div', {class: 'mt-1 text-xs text-gray-600' + greyed}, ['Sariling oras: ', chips(s.times || [], v => saveField(sm, base + '/step-times', {day: s.day, times: v, expect: s.message_id, steps: c.steps.length}), 'ang oras ng sequence')]),
             ]);
         });
 

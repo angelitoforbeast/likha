@@ -94,6 +94,22 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
             collect($this->c->fresh()->log)->pluck('what')->intersect(['add_step', 'move', 'remove_step', 'step_message', 'step_times'])->unique()->sort()->values()->all());
     }
 
+    public function test_a_step_change_from_a_stale_page_is_refused(): void
+    {
+        [$una, $dalawa, $tatlo] = $this->ids;
+        // Ang ibang tab ay nag-alis ng Day 1: ang Day 3 na nakikita rito ay Day 2 na ngayon.
+        $this->postJson($this->url('/remove-step'), ['day' => 1, 'expect' => $una, 'steps' => 3])->assertOk();
+        foreach ([['/remove-step', ['day' => 3, 'expect' => $tatlo, 'steps' => 3]], ['/move', ['day' => 2, 'dir' => 'up', 'expect' => $dalawa, 'steps' => 3]],
+            ['/step-message', ['day' => 2, 'message_id' => $una, 'expect' => $dalawa, 'steps' => 3]], ['/step-times', ['day' => 2, 'times' => ['10:00'], 'expect' => $dalawa, 'steps' => 3]],
+            ['/step', ['after' => 2, 'expect' => $dalawa, 'steps' => 3]], ['/remove-step', ['day' => 1, 'expect' => $tatlo, 'steps' => 2]]] as [$path, $body]) {
+            $this->assertSame('Nabago na ang mga step (ibang tab o tao); i-reload ang page.', $this->postJson($this->url($path), $body)->assertStatus(422)->json('error'), $path);
+        }
+        $this->assertSame([$dalawa, $tatlo], $this->c->fresh()->step_messages);
+        $this->assertNull($this->c->fresh()->step_times);
+        $this->postJson($this->url('/remove-step'), ['day' => 2, 'expect' => $tatlo, 'steps' => 2])->assertOk();
+        $this->assertSame([$dalawa], $this->c->fresh()->step_messages);
+    }
+
     public function test_moving_a_step_rewrites_the_unsent_rows_and_a_new_past_time_does_not_fire(): void
     {
         $unsent = $this->row(['day' => 2]);

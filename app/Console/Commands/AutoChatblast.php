@@ -50,7 +50,7 @@ class AutoChatblast extends Command
             // manual habang binubuo).
             $claimed = ChatblastCampaign::whereKey($c->id)->where('active', true)->where('mode', 'auto')
                 ->where(fn ($w) => $w->whereNull('auto_ran_at')->orWhere('auto_ran_at', '<', $latest->copy()->timezone(config('app.timezone'))))
-                ->update(['auto_ran_at' => now()]);
+                ->update(['auto_ran_at' => $latest->copy()->timezone(config('app.timezone'))]); // ang oras na dumating habang binubuo ay tatakbo pa
             if (!$claimed) continue;
 
             // Ang bago lang: nabuo ngayong araw (Manila) at pagkatapos i-auto ang campaign. Ang naipong ready (backlog)

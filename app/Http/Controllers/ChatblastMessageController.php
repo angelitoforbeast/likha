@@ -87,7 +87,7 @@ class ChatblastMessageController extends Controller
 
         $m = new ChatblastMessage(['name' => $name, 'versions' => [trim((string) $request->input('text'))]]);
         Chatblast::log($m, Auth::id(), ['what' => 'create']);
-        $m->save();
+        if (!$this->saved($m)) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
 
         return response()->json(['message' => ['id' => $m->id, 'name' => $m->name, 'versions' => $m->versions]], 201);
     }
@@ -103,7 +103,7 @@ class ChatblastMessageController extends Controller
 
         Chatblast::log($m, Auth::id(), ['what' => 'rename', 'old' => $m->name, 'new' => $name]);
         $m->name = $name;
-        $m->save();
+        if (!$this->saved($m)) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
 
         return response()->json(['name' => $m->name]);
     }
@@ -115,7 +115,7 @@ class ChatblastMessageController extends Controller
         $src = ChatblastMessage::findOrFail($id);
         $m = new ChatblastMessage(['name' => $this->chatblast->freeName($src->name . ' (kopya)'), 'versions' => $src->versions]);
         Chatblast::log($m, Auth::id(), ['what' => 'duplicate', 'of' => $src->id]);
-        $m->save();
+        if (!$this->saved($m)) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
 
         return response()->json(['message' => ['id' => $m->id, 'name' => $m->name, 'versions' => $m->versions]], 201);
     }
@@ -192,6 +192,17 @@ class ChatblastMessageController extends Controller
         }
 
         return response()->json(['changed' => $changed, 'versions' => ChatblastMessage::findOrFail($id)->versions]);
+    }
+
+    /** I-save; false kapag naunahan ng ibang request ang parehong pangalan (unique). */
+    private function saved(ChatblastMessage $m): bool
+    {
+        try {
+            $m->save();
+            return true;
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            return false;
+        }
     }
 
     private function name(mixed $name): ?string

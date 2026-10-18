@@ -29,8 +29,8 @@ class ChatblastCampaignController extends Controller
     private const MAX_STATUSES = 10;
     private const MAX_PAGES = 100;
     private const MAX_WINDOW = 60;
-    private const MAX_TIMES = 6;
     private const MAX_CAP = 100000;
+    private const STALE = 'Nabago na ang mga step (ibang tab o tao); i-reload ang page.';
 
     public function __construct(private Chatblast $chatblast, private PageSettings $settings, private ChatblastSchedule $schedule)
     {
@@ -227,7 +227,10 @@ class ChatblastCampaignController extends Controller
         $after = is_numeric($after) ? (int) $after : -1;
         $message = $request->filled('message_id') ? (int) $request->input('message_id') : null;
 
-        return $this->steps($id, function (array $ids, array $times) use ($after, $message) {
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($after, $message, $seen) {
+            $seen($ids, $after - 1);
             if ($after < 0 || $after > count($ids)) throw new InvalidArgumentException('Walang ganitong step.');
             $pick = $message ?? $ids[max(0, $after - 1)];
             array_splice($ids, $after, 0, [$pick]);
@@ -242,7 +245,10 @@ class ChatblastCampaignController extends Controller
         $this->checkAccess();
         $d = $this->day($request);
 
-        return $this->steps($id, function (array $ids, array $times) use ($d) {
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $seen) {
+            $seen($ids, $d);
             if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
             array_splice($ids, $d, 1);
             array_splice($times, $d, 1);
@@ -258,7 +264,10 @@ class ChatblastCampaignController extends Controller
         $dir = $request->input('dir');
         if (!in_array($dir, ['up', 'down'], true)) return response()->json(['error' => 'Direksyon: up o down.'], 422);
 
-        return $this->steps($id, function (array $ids, array $times) use ($d, $dir) {
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $dir, $seen) {
+            $seen($ids, $d);
             $to = $dir === 'up' ? $d - 1 : $d + 1;
             if (!isset($ids[$d]) || !isset($ids[$to])) throw new InvalidArgumentException('Hindi maililipat ang step na ito.');
             [$ids[$d], $ids[$to]] = [$ids[$to], $ids[$d]];
@@ -274,7 +283,10 @@ class ChatblastCampaignController extends Controller
         $d = $this->day($request);
         $message = (int) $request->input('message_id');
 
-        return $this->steps($id, function (array $ids, array $times) use ($d, $message, &$old) {
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $message, $seen, &$old) {
+            $seen($ids, $d);
             if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
             $old = $ids[$d];
             $ids[$d] = $message;
@@ -289,7 +301,10 @@ class ChatblastCampaignController extends Controller
         $d = $this->day($request);
         $new = $request->input('times') ?? [];
 
-        return $this->steps($id, function (array $ids, array $times) use ($d, $new) {
+        $seen = $this->seen($request);
+
+        return $this->steps($id, function (array $ids, array $times) use ($d, $new, $seen) {
+            $seen($ids, $d);
             if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
             $times[$d] = $new ?: null;
             return [$ids, $times];
@@ -307,6 +322,21 @@ class ChatblastCampaignController extends Controller
         $c = ChatblastCampaign::findOrFail($id);
 
         return response()->json(['changed' => $changed, 'step_messages' => $c->step_messages, 'step_times' => $c->step_times]);
+    }
+
+    /**
+     * Ang nakita ng user sa page: ilang step (steps) at ang mensahe ng step na binabago (expect). Kapag iba na (hal. may
+     * inalis na step sa ibang tab, kaya nausog ang mga araw), hindi itinutuloy ang pagbabago. Walang laman = walang bantay.
+     */
+    private function seen(Request $request): callable
+    {
+        $count = is_numeric($request->input('steps')) ? (int) $request->input('steps') : null;
+        $expect = is_numeric($request->input('expect')) ? (int) $request->input('expect') : null;
+
+        return function (array $ids, int $index) use ($count, $expect) {
+            if ($count !== null && count($ids) !== $count) throw new InvalidArgumentException(self::STALE);
+            if ($expect !== null && $index >= 0 && (int) ($ids[$index] ?? 0) !== $expect) throw new InvalidArgumentException(self::STALE);
+        };
     }
 
     private function day(Request $request): int
@@ -353,10 +383,7 @@ class ChatblastCampaignController extends Controller
         }
         if ($c === null || $request->has('send_times')) {
             $times = $request->input('send_times') ?? ($c === null ? ['09:00'] : []);
-            if (!is_array($times) || count($times) > self::MAX_TIMES) return [[], 'Oras ng padala: hanggang ' . self::MAX_TIMES . '.'];
-            foreach ($times as $t) {
-                if (!is_string($t) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) return [[], 'Oras ng padala: HH:MM (00:00 hanggang 23:59).'];
-            }
+            if (($error = Chatblast::invalidTimes(is_array($times) ? array_values($times) : $times)) !== null) return [[], 'Oras ng padala: ' . $error];
             $times = array_values(array_unique($times));
             sort($times);
             $data['send_times'] = $times;

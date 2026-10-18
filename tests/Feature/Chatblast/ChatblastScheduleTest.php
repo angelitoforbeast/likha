@@ -112,7 +112,13 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $two->update(['status' => 'queued']);
 
         app(ChatblastSender::class)->process($two->id);
-        $this->assertSame(['skipped', 'Naabot ang daily cap ng campaign sa page (1 ngayong araw); ipadala ulit bukas'], [$two->fresh()->status, $two->fresh()->reason]);
+        $this->assertSame(['skipped', 'Naabot ang daily cap ng campaign sa page (1 ngayong araw); ipadala ulit bukas', null],
+            [$two->fresh()->status, $two->fresh()->reason, $two->fresh()->dedupe_key]);
         Http::assertNothingSent();
+
+        // Bukas: may bagong row ang waybill (hindi naiipit sa key ng nilaktawan).
+        $this->travel(1)->days();
+        app(\App\Services\Chatblast::class)->build('c-auto', 1);
+        $this->assertSame(['skipped', 'ready'], BotcakeMessage::where('kind', 'c-auto')->where('waybill', 'WB-2')->orderBy('id')->pluck('status')->all());
     }
 }

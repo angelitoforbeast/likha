@@ -170,9 +170,11 @@ class Chatblast
      * Ang mga araw ng mga step: ang mga bersyon ng mensahe ng bawat step ($override: mensahe => bersyon na hindi pa
      * naka-save). InvalidArgumentException kapag wala ang mensahe.
      */
-    public function resolve(array $messageIds, array $override = []): array
+    public function resolve(array $messageIds, array $override = [], bool $lock = false): array
     {
-        $found = ChatblastMessage::whereIn('id', $messageIds)->get(['id', 'versions'])->keyBy('id');
+        $q = ChatblastMessage::whereIn('id', $messageIds);
+        if ($lock) $q->lockForUpdate(); // hindi mababago o maaalis habang binubuo ang days ng sequence
+        $found = $q->get(['id', 'versions'])->keyBy('id');
         return array_map(function ($id) use ($found, $override) {
             if (array_key_exists((int) $id, $override)) return $override[(int) $id];
             if (!isset($found[(int) $id])) throw new InvalidArgumentException('Walang ganitong mensahe (#' . (int) $id . ').');
@@ -210,7 +212,7 @@ class Chatblast
             $ids = array_map('intval', array_values((array) $ids));
             if (!$ids) throw new InvalidArgumentException('Kahit isang step.');
             if (count($ids) > self::MAX_DAYS) throw new InvalidArgumentException('Hanggang ' . self::MAX_DAYS . ' na step lang.');
-            $days = $this->resolve($ids);
+            $days = $this->resolve($ids, [], true);
             if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
             $times = array_pad(array_slice(array_values((array) $times), 0, count($ids)), count($ids), null);
             foreach ($times as $i => $t) {

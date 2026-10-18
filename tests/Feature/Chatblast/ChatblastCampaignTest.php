@@ -144,7 +144,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertSame([true, false], [ChatblastCampaign::whereKey($used->id)->exists(), ChatblastCampaign::whereKey($empty->id)->exists()]);
     }
 
-    public function test_the_data_shows_todays_counts_per_campaign_and_one_sheet_row_per_day_and_version_with_its_sends(): void
+    public function test_the_data_shows_todays_counts_per_sequence_and_per_step(): void
     {
         $c = $this->create();
         $this->msg($c);

@@ -31,6 +31,11 @@ return new class extends Migration {
             });
         }
 
+        DB::transaction(fn () => $this->convert()); // buo o wala: ang ulit ay hindi gumagawa ng doble
+    }
+
+    private function convert(): void
+    {
         foreach (DB::table('chatblast_campaigns')->whereNull('step_messages')->orderBy('id')->get(['id', 'name', 'days']) as $c) {
             $days = json_decode((string) $c->days, true);
             if (!is_array($days)) continue;
