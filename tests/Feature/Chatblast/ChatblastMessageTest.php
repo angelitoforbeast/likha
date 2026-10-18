@@ -95,7 +95,7 @@ class ChatblastMessageTest extends ChatblastTestCase
         $this->postJson('/chatblast/messages/' . $id, ['name' => 'Bayad paalala'])->assertOk();
         $this->postJson('/chatblast/messages/' . $id, ['name' => $this->m->name])->assertStatus(422);
         $copy = $this->postJson('/chatblast/messages/' . $id . '/duplicate')->assertCreated()->json('message');
-        $this->assertSame(['Bayad paalala (kopya)', ['Bayad {cod}']], [$copy['name'], $copy['versions']]);
+        $this->assertSame(['Bayad paalala (copy)', ['Bayad {cod}']], [$copy['name'], $copy['versions']]);
 
         $this->deleteJson('/chatblast/messages/' . $copy['id'])->assertOk();
         $this->assertFalse(ChatblastMessage::whereKey($copy['id'])->exists());
@@ -117,7 +117,7 @@ class ChatblastMessageTest extends ChatblastTestCase
         $this->assertSame([['campaign_id' => $this->c->id, 'name' => 'In transit', 'day' => 1]], $mine['used']);
         $this->assertSame([['A' => 1, 'B' => 2], 3, 30], [$mine['sent'], $mine['sent_total'], $d['sent_days']]);
         $this->assertSame(['In transit', 'Delivering'], array_column($d['campaigns'], 'name'));
-        $this->get('/chatblast/campaigns')->assertOk()->assertSee('Mga mensahe');
+        $this->get('/chatblast/campaigns')->assertOk()->assertSee('Messages');
     }
 
     public function test_another_role_cannot_see_or_change_the_messages(): void

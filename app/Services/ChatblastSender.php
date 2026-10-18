@@ -25,8 +25,8 @@ class ChatblastSender
     /** Ang mga status na maaaring ipadala (o ipadala ulit). */
     public const SENDABLE = ['ready', 'failed', 'field_mismatch', 'skipped'];
     public const QUEUE = 'chatblast';
-    public const OFF = 'Naka-off ang campaign';
-    public const NO_CAMPAIGN = 'Walang campaign ang mensaheng ito';
+    public const OFF = 'The sequence is off';
+    public const NO_CAMPAIGN = 'This message has no sequence';
     private const PAUSED = 'chatblast.paused';
     private const BODY_MAX = 1500;
 
@@ -120,7 +120,7 @@ class ChatblastSender
         }
     }
 
-    private const UNSURE = 'Hindi tiyak kung naipadala (tinawag na ang send_flow)';
+    private const UNSURE = 'Not sure it was sent (send_flow was called)';
 
     /**
      * Ang lock ng isang customer (page + PSID). Iisang custom field at flow ang gamit ng lahat ng mensahe ng page, kaya
@@ -151,8 +151,8 @@ class ChatblastSender
 
         $unsure = $this->flowCalled((array) ($m->steps ?? []));
         BotcakeMessage::whereKey($id)->where('status', 'sending')->update($unsure
-            ? ['status' => 'unknown', 'reason' => self::UNSURE . '; pinatay ang job. Tingnan sa Botcake bago magpadala ulit']
-            : ['status' => 'failed', 'reason' => 'Pinatay ang job bago tinawag ang send_flow (hal. timeout); ligtas ipadala ulit']);
+            ? ['status' => 'unknown', 'reason' => self::UNSURE . '; the job was killed. Check Botcake before sending again']
+            : ['status' => 'failed', 'reason' => 'The job was killed before send_flow was called (e.g. a timeout); safe to send again']);
     }
 
     private function flowCalled(array $steps): bool
@@ -166,7 +166,7 @@ class ChatblastSender
         foreach (Chatblast::REQUIRED as $key) $cfg[$key] = trim((string) $this->settings->get($m->page_name, 'botcake', $key));
         $missing = array_keys(array_filter($cfg, fn ($v) => $v === ''));
         if ($missing) {
-            $this->finish($m, 'no_config', 'walang ' . implode(', ', $missing), null, []);
+            $this->finish($m, 'no_config', 'missing ' . implode(', ', $missing), null, []);
             return;
         }
 
@@ -212,11 +212,11 @@ class ChatblastSender
 
         // Walang blangko o kulang na text: "Hello Ma'am/Sir , …" o may {placeholder} pang hindi napalitan.
         if (trim((string) $m->text) === '') {
-            $this->finish($m, 'no_config', 'hindi buo ang text: walang laman', null, []);
+            $this->finish($m, 'no_config', 'incomplete text: empty', null, []);
             return;
         }
         if (preg_match('/\{(' . implode('|', Chatblast::PLACEHOLDERS) . ')\}/', (string) $m->text, $left)) {
-            $this->finish($m, 'no_config', 'hindi buo ang text: may ' . $left[0] . ' pa', null, []);
+            $this->finish($m, 'no_config', 'incomplete text: ' . $left[0] . ' is still in it', null, []);
             return;
         }
 
@@ -226,7 +226,7 @@ class ChatblastSender
             $samePsid = $order && trim((string) $order->botcake_psid) !== '' && trim((string) $order->botcake_psid) === (string) $m->psid;
             $samePage = $order && trim((string) $order->PAGE) !== '' && $this->settings->pageKey((string) $order->PAGE) === $this->settings->pageKey($m->page_name);
             if (!$samePsid || !$samePage) {
-                $this->finish($m, 'skipped', 'nagbago ang PSID/page', null, []);
+                $this->finish($m, 'skipped', 'the PSID/page changed', null, []);
                 BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]); // ang susunod na kuha ay gagawa ng bagong row
                 return;
             }
@@ -240,7 +240,7 @@ class ChatblastSender
                 ->where($column, '>=', $start)->where('is_test', false)->count();
             $today = $count('sent', 'sent_at') + $count('unknown', 'updated_at');
             if ($today >= $cap) {
-                $this->finish($m, 'skipped', 'Naabot ang daily cap ng page (' . $cap . ' ngayong araw); ipadala ulit bukas', null, []);
+                $this->finish($m, 'skipped', 'Page daily cap reached (' . $cap . ' today); send again tomorrow', null, []);
                 return;
             }
             // Ang cap ng campaign sa page (kung mayroon): ang sa campaign na ito lang ang bilang; hindi nito tinataasan ang
@@ -249,7 +249,7 @@ class ChatblastSender
                 $mine = fn (string $status, string $column) => BotcakeMessage::where('page_name', $m->page_name)->where('kind', $m->kind)
                     ->where('status', $status)->where($column, '>=', $start)->where('is_test', false)->count();
                 if ($mine('sent', 'sent_at') + $mine('unknown', 'updated_at') >= $own) {
-                    $this->finish($m, 'skipped', Chatblast::CAMPAIGN_CAP . ' (' . $own . ' ngayong araw); ipadala ulit bukas', null, []);
+                    $this->finish($m, 'skipped', Chatblast::CAMPAIGN_CAP . ' (' . $own . ' today); send again tomorrow', null, []);
                     // Para sa araw na ito lang: bukas ay may sariling row ulit ang waybill.
                     BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                     return;
@@ -259,7 +259,7 @@ class ChatblastSender
 
         // Invalid na ang token (hal. 401 sa naunang mensahe): hindi na tinatawagan ang Botcake hangga't hindi naaayos.
         if (str_starts_with((string) $this->settings->get($m->page_name, 'botcake', 'token_status'), 'invalid')) {
-            $this->finish($m, 'failed', 'Token invalid: ayusin sa /page-settings (Test token) bago magpadala', null, []);
+            $this->finish($m, 'failed', 'Token invalid: fix it on /page-settings (Test token) before sending', null, []);
             return;
         }
 
@@ -320,15 +320,15 @@ class ChatblastSender
         // 1. Isulat ang custom field.
         $w = $step('write', 'POST', $field, ['data' => [['id' => $cfg['field.message'], 'value' => (string) $m->text]]]);
         if ($authFail($w)) { $this->tokenInvalid($m, $w['http'], $steps); return; }
-        if (!$ok($w)) { $this->finish($m, 'failed', 'Hindi naisulat ang custom field (HTTP ' . $w['http'] . ')', $w['http'], $steps); return; }
+        if (!$ok($w)) { $this->finish($m, 'failed', 'The custom field was not written (HTTP ' . $w['http'] . ')', $w['http'], $steps); return; }
 
         // 2. Basahin ulit: dapat eksaktong ang text ang laman, kung hindi ay walang padala.
         $r = $step('read', 'GET', $field, []);
         if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
         $value = $this->fieldValue($r['body'], $cfg['field.message']);
         if (!$ok($r) || $value !== (string) $m->text) {
-            $why = !$ok($r) ? 'Hindi nabasa ang custom field (HTTP ' . $r['http'] . ')' : ($value === null ? 'Wala ang field ' . $cfg['field.message'] . ' sa nabasa' : 'Iba ang laman ng field sa nabasa');
-            $this->finish($m, 'field_mismatch', $why . '; hindi ipinadala', $r['http'], $steps);
+            $why = !$ok($r) ? 'The custom field could not be read (HTTP ' . $r['http'] . ')' : ($value === null ? 'Field ' . $cfg['field.message'] . ' is missing in the read-back' : 'The field holds a different text in the read-back');
+            $this->finish($m, 'field_mismatch', $why . '; not sent', $r['http'], $steps);
             return;
         }
 
@@ -338,10 +338,10 @@ class ChatblastSender
         // Hindi tiyak: walang sagot, 408, 5xx, o 2xx na walang malinaw na success. Ang success:false lang ang tiyak na "hindi".
         $refused = is_array($f['body']) && array_key_exists('success', $f['body']) && $f['body']['success'] === false;
         if ($f['http'] === 0 || $f['http'] === 408 || $f['http'] >= 500 || ($f['http'] >= 200 && $f['http'] < 300 && !$ok($f) && !$refused)) {
-            $this->finish($m, 'unknown', self::UNSURE . ' (HTTP ' . $f['http'] . '); tingnan sa Botcake bago magpadala ulit', $f['http'], $steps);
+            $this->finish($m, 'unknown', self::UNSURE . ' (HTTP ' . $f['http'] . '); check Botcake before sending again', $f['http'], $steps);
             return;
         }
-        if (!$ok($f)) { $this->finish($m, 'failed', 'Hindi na-send ang flow (HTTP ' . $f['http'] . ')', $f['http'], $steps); return; }
+        if (!$ok($f)) { $this->finish($m, 'failed', 'The flow was not sent (HTTP ' . $f['http'] . ')', $f['http'], $steps); return; }
 
         $this->finish($m, 'sent', null, $f['http'], $steps);
     }
@@ -365,9 +365,9 @@ class ChatblastSender
     private function tokenInvalid(BotcakeMessage $m, int $http, array $steps): void
     {
         $this->sync->tokenStatus($m->page_name, 'invalid');
-        $this->finish($m, 'failed', 'Token invalid (HTTP ' . $http . '); ayusin ang token sa /page-settings', $http, $steps);
+        $this->finish($m, 'failed', 'Token invalid (HTTP ' . $http . '); fix the token on /page-settings', $http, $steps);
         BotcakeMessage::where('page_name', $m->page_name)->where('status', 'queued')->where('id', '<>', $m->id)
-            ->update(['status' => 'ready', 'reason' => 'Huminto: token invalid']);
+            ->update(['status' => 'ready', 'reason' => 'Stopped: token invalid']);
     }
 
     private function saveSteps(BotcakeMessage $m, array $steps): void

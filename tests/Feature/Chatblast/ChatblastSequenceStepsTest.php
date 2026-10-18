@@ -143,7 +143,7 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
             ['send_range' => ['start' => '09:00', 'end' => '12:00'], 'old' => ['send_range' => ['start' => '08:00', 'end' => '12:00', 'every' => 1]]],
         ];
         foreach ($stale as $body) {
-            $this->assertStringContainsString('i-reload', $this->postJson($this->url(), $body)->assertStatus(422)->json('error'));
+            $this->assertStringContainsString('Reload the page', $this->postJson($this->url(), $body)->assertStatus(422)->json('error'));
         }
         // Ang nakita ay tama (wala = lahat ng araw / lahat ng page; ayos ng listahan ay hindi mahalaga).
         $this->postJson($this->url(), ['weekdays' => [1, 2], 'old' => ['weekdays' => [1, 2, 3, 4, 5, 6, 7]]])->assertOk();
@@ -166,7 +166,7 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
         foreach ([['/remove-step', ['day' => 3, 'expect' => $tatlo, 'steps' => 3]], ['/move', ['day' => 2, 'dir' => 'up', 'expect' => $dalawa, 'steps' => 3]],
             ['/step-message', ['day' => 2, 'message_id' => $una, 'expect' => $dalawa, 'steps' => 3]], ['/step-times', ['day' => 2, 'times' => ['10:00'], 'expect' => $dalawa, 'steps' => 3]],
             ['/step', ['after' => 2, 'expect' => $dalawa, 'steps' => 3]], ['/remove-step', ['day' => 1, 'expect' => $tatlo, 'steps' => 2]]] as [$path, $body]) {
-            $this->assertSame('Nabago na ang mga step (ibang tab o tao); i-reload ang page.', $this->postJson($this->url($path), $body)->assertStatus(422)->json('error'), $path);
+            $this->assertSame('Reload the page: the steps changed in another tab.', $this->postJson($this->url($path), $body)->assertStatus(422)->json('error'), $path);
         }
         $this->assertSame([$dalawa, $tatlo], $this->c->fresh()->step_messages);
         $this->assertNull($this->c->fresh()->step_times);
@@ -197,7 +197,7 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
 
         $d = $this->getJson('/chatblast/sequence/data')->assertOk()->json();
         $mine = collect($d['campaigns'])->firstWhere('id', $this->c->id);
-        $this->assertSame('Araw-araw, 9:15 AM at 3:00 PM; Day 1 tuwing 10:00 AM', $mine['summary']);
+        $this->assertSame('Every day, 9:15 AM and 3:00 PM; Day 1 at 10:00 AM', $mine['summary']);
         $this->assertSame('2026-10-18 10:00', $mine['next_run']);
         $this->assertSame([[1, 'Una', ['10:00'], 1, 0], [2, 'Dalawa', null, 0, 1]],
             array_map(fn ($s) => [$s['day'], $s['message'], $s['times'], $s['today']['sent'], $s['today']['skipped']], array_slice($mine['steps'], 0, 2)));

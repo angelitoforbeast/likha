@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Chatblast · Mga mensahe</title>
+    <title>Chatblast · Messages</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -14,51 +14,51 @@
      data-flow-url="{{ route('chatblast.campaigns.flow') }}">
 
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h1 class="text-2xl font-semibold">Mga mensahe</h1>
+        <h1 class="text-2xl font-semibold">Messages</h1>
         <div class="flex gap-4 text-sm">
-            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Mga sequence ›</a>
-            <a href="{{ route('chatblast.index') }}" class="text-blue-700 hover:underline">Chatblast (pagpapadala)</a>
+            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Sequences ›</a>
+            <a href="{{ route('chatblast.index') }}" class="text-blue-700 hover:underline">Chatblast (sending)</a>
             <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
         </div>
     </div>
     <p class="text-xs text-gray-500 mb-3 max-w-4xl">
-        Gaya ng mga flow sa Botcake: bawat mensahe ay may pangalan at mga bersyon (A, B, …) na iniikot sa mga customer. Ang
-        <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">sequence</a> ang pumipili kung aling mensahe ang ipapadala sa bawat araw.
-        Nase-save ang text pag-alis sa kahon o pag-Enter (Shift+Enter: bagong linya), at binabago rin ang text ng mga hindi pa naipapadala.
+        Like flows in Botcake: each message has a name and versions (A, B, …) that rotate across customers. The
+        <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">sequence</a> picks which message is sent on each day.
+        A text saves when you leave the box or press Enter (Shift+Enter: new line), and it also updates the text of messages not sent yet.
     </p>
 
     <p id="notice" class="text-xs mb-2 min-h-[1rem]" aria-live="polite"></p>
 
     <div class="flex flex-wrap items-end gap-3 mb-3 text-sm">
-        <label class="flex flex-col text-xs text-gray-600">Hanapin<input id="q" placeholder="pangalan o text" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
+        <label class="flex flex-col text-xs text-gray-600">Search<input id="q" placeholder="name or text" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
         <label class="flex flex-col text-xs text-gray-600">Sequence
-            <select id="seq" class="border rounded px-2 py-1 text-sm text-gray-900"><option value="">Lahat</option><option value="none">Hindi ginagamit</option></select>
+            <select id="seq" class="border rounded px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="none">Not used</option></select>
         </label>
-        <label class="flex flex-col text-xs text-gray-600">Preview sa page (template line)
-            <select id="preview-page" class="border rounded px-2 py-1 text-sm text-gray-900"><option value="">(walang template line)</option></select>
+        <label class="flex flex-col text-xs text-gray-600">Preview on page (template line)
+            <select id="preview-page" class="border rounded px-2 py-1 text-sm text-gray-900"><option value="">(no template line)</option></select>
         </label>
         <span id="template-line" class="text-xs text-gray-500 max-w-md"></span>
     </div>
 
-    <div class="text-xs text-gray-600 mb-3">Mga placeholder (pindutin para ilagay sa huling kahon):
+    <div class="text-xs text-gray-600 mb-3">Placeholders (click to insert into the last text box):
         @foreach($placeholders as $ph)<button type="button" class="chip ml-1 px-2 py-0.5 rounded bg-gray-200 hover:bg-gray-300 font-mono" data-ph="{{ '{' . $ph . '}' }}">{{ '{' . $ph . '}' }}</button>@endforeach
     </div>
 
     <details id="new-box" class="mb-3 bg-white rounded shadow px-4 py-2 text-sm">
-        <summary class="cursor-pointer font-medium">+ Bagong mensahe</summary>
+        <summary class="cursor-pointer font-medium">+ New message</summary>
         <form id="new-form" class="grid md:grid-cols-3 gap-2 mt-2">
-            <label class="flex flex-col text-xs text-gray-600">Pangalan<input name="name" maxlength="140" placeholder="hal. In transit · Day 3 · bayad" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
-            <label class="flex flex-col text-xs text-gray-600 md:col-span-2">Text ng bersyon A<textarea name="text" rows="2" maxlength="1000" class="border rounded px-2 py-1 text-sm font-mono text-gray-900"></textarea></label>
-            <div><button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Gumawa</button></div>
+            <label class="flex flex-col text-xs text-gray-600">Name<input name="name" maxlength="140" placeholder="e.g. In transit · Day 3 · payment" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
+            <label class="flex flex-col text-xs text-gray-600 md:col-span-2">Version A text<textarea name="text" rows="2" maxlength="1000" class="border rounded px-2 py-1 text-sm font-mono text-gray-900"></textarea></label>
+            <div><button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Create</button></div>
         </form>
     </details>
 
     <details id="flow-box" class="mb-4 bg-white rounded shadow px-4 py-2 text-sm">
-        <summary class="cursor-pointer font-medium">Flow at template (kada page)</summary>
+        <summary class="cursor-pointer font-medium">Flow and template (per page)</summary>
         <p class="text-xs text-gray-500 mt-1">
-            Ang flow ay ang <code>flow.shipping</code> ng page; ang mensahe ay isinusulat sa <code>field.message</code> at lumalabas sa @{{1}} ng template.
-            Ang Botcake API ay nagbibigay lang ng pangalan ng flow, hindi ng laman ng mga hakbang nito: ang template ay ayon sa page setting na
-            <code>botcake template.shipping</code>, o sa pangalan ng flow. Naka-cache nang 10 minuto; "Refresh" para kunin ulit.
+            The flow is the page's <code>flow.shipping</code>; the message is written to <code>field.message</code> and appears in the template's @{{1}}.
+            Botcake's API only returns the flow's name, not its inner steps: the template comes from the page setting
+            <code>botcake template.shipping</code>, or from the flow's name. Cached for 10 minutes; "Refresh" fetches it again.
         </p>
         <div id="flow-cards" class="grid lg:grid-cols-2 gap-3 mt-2"></div>
     </details>
@@ -105,14 +105,14 @@
         try {
             data = await (await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}})).json();
             const seq = document.getElementById('seq'), keep = seq.value;
-            seq.replaceChildren(el('option', {value: '', text: 'Lahat'}), el('option', {value: 'none', text: 'Hindi ginagamit'}),
+            seq.replaceChildren(el('option', {value: '', text: 'All'}), el('option', {value: 'none', text: 'Not used'}),
                 ...data.campaigns.map(c => el('option', {value: String(c.id), text: c.name})));
             seq.value = keep;
             const pp = document.getElementById('preview-page'), keepP = pp.value;
-            pp.replaceChildren(el('option', {value: '', text: '(walang template line)'}), ...data.pages.map(p => el('option', {value: p, text: p})));
+            pp.replaceChildren(el('option', {value: '', text: '(no template line)'}), ...data.pages.map(p => el('option', {value: p, text: p})));
             pp.value = keepP;
             draw();
-        } catch (e) { notice('Hindi ma-load: ' + e.message, 'text-red-600'); }
+        } catch (e) { notice('Could not load: ' + e.message, 'text-red-600'); }
     }
 
     // Ang marka ng isang field: Saving… / Saved / ang error.
@@ -123,12 +123,12 @@
         const q = document.getElementById('q').value.trim().toLowerCase(), seq = document.getElementById('seq').value;
         const list = data.messages.filter(m => (!q || m.name.toLowerCase().includes(q) || m.versions.some(v => v.toLowerCase().includes(q)))
             && (!seq || (seq === 'none' ? !m.used.length : m.used.some(u => String(u.campaign_id) === seq))));
-        document.getElementById('list').replaceChildren(...(list.length ? list.map(card) : [el('p', {class: 'text-sm text-gray-500', text: 'Walang mensahe sa filter na ito.'})]));
+        document.getElementById('list').replaceChildren(...(list.length ? list.map(card) : [el('p', {class: 'text-sm text-gray-500', text: 'No messages in this filter.'})]));
     }
 
     function card(m) {
         const base = url.baseUrl + '/' + m.id;
-        const name = el('input', {value: m.name, maxlength: '140', class: 'font-medium border rounded px-2 py-1 text-sm w-80', 'aria-label': 'Pangalan ng mensahe'});
+        const name = el('input', {value: m.name, maxlength: '140', class: 'font-medium border rounded px-2 py-1 text-sm w-80', 'aria-label': 'Message name'});
         const nameMark = mark();
         let savedName = m.name;
         const saveName = async () => {
@@ -141,23 +141,23 @@
         name.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveName(); } });
 
         const used = m.used.length ? m.used.map(u => el('span', {class: 'text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800 mr-1', text: u.name + ' Day ' + u.day}))
-            : [el('span', {class: 'text-xs text-gray-400', text: 'hindi ginagamit'})];
+            : [el('span', {class: 'text-xs text-gray-400', text: 'not used'})];
         const btn = (text, cls, fn) => { const b = el('button', {type: 'button', class: 'text-xs hover:underline ml-3 ' + cls, text}); b.addEventListener('click', fn); return b; };
         const actions = [
-            btn('+ bersyon', 'text-blue-700', async () => { try { await post(base + '/version'); notice('Nadagdagan ng bersyon (kopya ng A).', 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load(); }),
-            btn('kopyahin', 'text-blue-700', async () => { try { const d = await post(base + '/duplicate'); notice('Nakopya: ' + d.message.name, 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load(); }),
-            btn('alisin', 'text-red-600', async () => {
-                if (!confirm('Alisin ang mensaheng "' + m.name + '"?')) return;
-                try { await call('DELETE', base); notice('Naalis.', 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load();
+            btn('+ version', 'text-blue-700', async () => { try { await post(base + '/version'); notice('Version added (a copy of A).', 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load(); }),
+            btn('duplicate', 'text-blue-700', async () => { try { const d = await post(base + '/duplicate'); notice('Duplicated: ' + d.message.name, 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load(); }),
+            btn('remove', 'text-red-600', async () => {
+                if (!confirm('Remove the message "' + m.name + '"?')) return;
+                try { await call('DELETE', base); notice('Removed.', 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); } load();
             }),
         ];
 
         const versions = m.versions.map((text, i) => {
-            const area = el('textarea', {rows: '2', maxlength: '1000', class: 'w-full border rounded px-2 py-1 font-mono text-sm', 'aria-label': m.name + ' bersyon ' + label(i)});
+            const area = el('textarea', {rows: '2', maxlength: '1000', class: 'w-full border rounded px-2 py-1 font-mono text-sm', 'aria-label': m.name + ' version ' + label(i)});
             area.value = text;
             const vm = mark();
             const pv = el('div', {class: 'text-xs text-gray-700 bg-gray-50 rounded px-2 py-1 whitespace-pre-wrap'});
-            const show = () => { pv.textContent = preview(area.value) || '(walang laman)'; };
+            const show = () => { pv.textContent = preview(area.value) || '(empty)'; };
             show();
             let saved = text, busy = false, again = false;
             const commit = async () => {
@@ -171,30 +171,30 @@
                     const d = await post(base + '/text', {version: label(i), text: sending, old: saved});
                     saved = m.versions[i] = d.versions[i];
                     if (area.value === sending) { area.value = saved; show(); }
-                    setMark(vm, 'ok', 'Saved' + (d.changed ? ' (' + fmt(d.changed) + ' mensahe ang nabago)' : ''));
+                    setMark(vm, 'ok', 'Saved' + (d.changed ? ' (' + fmt(d.changed) + ' unsent message(s) updated)' : ''));
                 } catch (e) { setMark(vm, 'err', e.message); }
                 busy = false;
                 if (again) { again = false; commit(); }
             };
             area.addEventListener('focus', () => { lastArea = area; });
-            area.addEventListener('input', () => { show(); setMark(vm, 'dirty', area.value === saved ? '' : 'hindi pa naka-save'); });
+            area.addEventListener('input', () => { show(); setMark(vm, 'dirty', area.value === saved ? '' : 'not saved yet'); });
             area.addEventListener('blur', commit);
             area.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); } });
-            const rm = m.versions.length > 1 ? btn('alisin', 'text-red-600', async () => {
-                if (!confirm('Alisin ang bersyon ' + label(i) + ' ng "' + m.name + '"?')) return;
-                try { await post(base + '/remove-version', {version: label(i), old: saved}); notice('Naalis ang bersyon.', 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); }
+            const rm = m.versions.length > 1 ? btn('remove', 'text-red-600', async () => {
+                if (!confirm('Remove version ' + label(i) + ' of "' + m.name + '"?')) return;
+                try { await post(base + '/remove-version', {version: label(i), old: saved}); notice('Version removed.', 'text-green-700'); } catch (e) { notice(e.message, 'text-red-600'); }
                 load();
             }) : null;
             return el('div', {class: 'grid md:grid-cols-2 gap-2 items-start'}, [
-                el('div', {}, [el('div', {class: 'text-xs text-gray-600 mb-0.5'}, [el('span', {class: 'font-medium', text: 'Bersyon ' + label(i)}),
-                    el('span', {class: 'ml-2', text: 'naipadala (' + data.sent_days + ' araw) ' + fmt(m.sent[label(i)])}), rm, vm]), area]),
-                el('div', {}, [el('div', {class: 'text-xs text-gray-500 mb-0.5', text: 'Makikita ng customer'}), pv]),
+                el('div', {}, [el('div', {class: 'text-xs text-gray-600 mb-0.5'}, [el('span', {class: 'font-medium', text: 'Version ' + label(i)}),
+                    el('span', {class: 'ml-2', text: 'sent (last ' + data.sent_days + ' days) ' + fmt(m.sent[label(i)])}), rm, vm]), area]),
+                el('div', {}, [el('div', {class: 'text-xs text-gray-500 mb-0.5', text: 'What the customer sees'}), pv]),
             ]);
         });
 
         return el('div', {class: 'bg-white rounded shadow p-3'}, [
-            el('div', {class: 'flex flex-wrap items-center gap-2 mb-2'}, [name, nameMark, el('span', {class: 'text-xs text-gray-500', text: 'naipadala (huling ' + data.sent_days + ' araw) ' + fmt(m.sent_total)}), ...actions]),
-            el('div', {class: 'mb-2'}, [el('span', {class: 'text-xs text-gray-500 mr-1', text: 'Ginagamit sa:'}), ...used]),
+            el('div', {class: 'flex flex-wrap items-center gap-2 mb-2'}, [name, nameMark, el('span', {class: 'text-xs text-gray-500', text: 'sent (last ' + data.sent_days + ' days) ' + fmt(m.sent_total)}), ...actions]),
+            el('div', {class: 'mb-2'}, [el('span', {class: 'text-xs text-gray-500 mr-1', text: 'Used in:'}), ...used]),
             el('div', {class: 'space-y-2'}, versions),
         ]);
     }
@@ -203,7 +203,7 @@
     document.getElementById('seq').addEventListener('change', draw);
     for (const chip of document.querySelectorAll('.chip')) {
         chip.addEventListener('click', () => {
-            if (!lastArea) { notice('Pumili muna ng kahon ng text.', 'text-gray-600'); return; }
+            if (!lastArea) { notice('Click into a text box first.', 'text-gray-600'); return; }
             const [s, e] = [lastArea.selectionStart, lastArea.selectionEnd];
             lastArea.value = lastArea.value.slice(0, s) + chip.dataset.ph + lastArea.value.slice(e);
             lastArea.focus();
@@ -222,7 +222,7 @@
                 const d = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
                 template = d.template;
-                line.textContent = template ? 'Template: ' + template.name + (d.check.length ? ' (suriin: ' + d.check.join(' ') + ')' : '') : 'Hindi matukoy ang template ng page.';
+                line.textContent = template ? 'Template: ' + template.name + (d.check.length ? ' (check: ' + d.check.join(' ') + ')' : '') : 'The page\'s template could not be identified.';
             } catch (err) { line.textContent = err.message; }
         }
         draw();
@@ -231,7 +231,7 @@
     document.getElementById('new-form').addEventListener('submit', async e => {
         e.preventDefault();
         const f = e.target;
-        try { const d = await post(url.baseUrl, {name: f.name.value, text: f.text.value}); notice('Nagawa: ' + d.message.name, 'text-green-700'); f.reset(); document.getElementById('new-box').open = false; }
+        try { const d = await post(url.baseUrl, {name: f.name.value, text: f.text.value}); notice('Created: ' + d.message.name, 'text-green-700'); f.reset(); document.getElementById('new-box').open = false; }
         catch (err) { notice(err.message, 'text-red-600'); }
         load();
     });
@@ -242,7 +242,7 @@
         if (!e.target.open || flowsLoaded) return;
         flowsLoaded = true;
         const box = document.getElementById('flow-cards');
-        if (!data.pages.length) { box.replaceChildren(el('p', {class: 'text-gray-500', text: 'Walang page na may kumpletong Botcake settings.'})); return; }
+        if (!data.pages.length) { box.replaceChildren(el('p', {class: 'text-gray-500', text: 'No page has complete Botcake settings.'})); return; }
         const cards = data.pages.map(p => [p, el('div', {class: 'border rounded p-2'}, el('p', {class: 'font-medium', text: p + ' …'}))]);
         box.replaceChildren(...cards.map(([, c]) => c));
         for (const [p, c] of cards) await flowCard(p, c, false);
@@ -257,7 +257,7 @@
         } catch (e) { card.replaceChildren(el('p', {class: 'font-medium', text: page}), el('p', {class: 'text-red-600 text-xs', text: e.message})); return; }
         const refreshBtn = el('button', {type: 'button', class: 'text-xs text-blue-700 hover:underline ml-2', text: 'Refresh'});
         refreshBtn.addEventListener('click', () => flowCard(page, card, true));
-        const chip = d.check.length ? el('span', {class: 'ml-2 px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800', text: 'suriin'})
+        const chip = d.check.length ? el('span', {class: 'ml-2 px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800', text: 'check'})
             : el('span', {class: 'ml-2 px-2 py-0.5 rounded text-xs bg-green-100 text-green-800', text: 'OK'});
         const line = (lbl, value, error) => el('p', {class: 'text-xs'}, [el('span', {class: 'text-gray-500', text: lbl + ': '}), value, error ? el('span', {class: 'text-red-600 ml-1', text: '(' + error + ')'}) : null]);
         const t = d.template;
@@ -265,10 +265,10 @@
             el('p', {class: 'font-medium'}, [page, chip, refreshBtn, el('span', {class: 'text-xs text-gray-400 ml-2', text: d.fetched_at})]),
             d.check.length ? el('ul', {class: 'text-xs text-amber-800 list-disc ml-4'}, d.check.map(x => el('li', {text: x}))) : null,
             line('Flow', (d.flow.name || '?') + ' (' + d.flow.id + ')', d.flow.error),
-            line('Template', t ? t.name + ' · ' + t.status + ' · ' + t.category + ' (ayon sa ' + t.source + ')' : 'hindi matukoy', d.template_error),
+            line('Template', t ? t.name + ' · ' + t.status + ' · ' + t.category + ' (by ' + t.source + ')' : 'not identified', d.template_error),
             line('Field', (d.field.name || '?') + ' (' + d.field.id + ')', d.field.error),
-            el('p', {class: 'text-xs text-gray-500 mt-1', text: 'Makikita ng customer' + (d.sample.campaign ? ' (halimbawa: ' + d.sample.campaign + ', Day 1 · A)' : '') + ':'}),
-            el('div', {class: 'text-xs bg-gray-50 rounded px-2 py-1 whitespace-pre-wrap', text: d.preview || '(walang template: ang mensahe lang) ' + d.sample.text}),
+            el('p', {class: 'text-xs text-gray-500 mt-1', text: 'What the customer sees' + (d.sample.campaign ? ' (example: ' + d.sample.campaign + ', Day 1 · A)' : '') + ':'}),
+            el('div', {class: 'text-xs bg-gray-50 rounded px-2 py-1 whitespace-pre-wrap', text: d.preview || '(no template: the message only) ' + d.sample.text}),
         );
     }
 

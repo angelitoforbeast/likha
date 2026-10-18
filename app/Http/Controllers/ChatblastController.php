@@ -10,6 +10,7 @@ use App\Services\BotcakeCustomerMatcher;
 use App\Services\Chatblast;
 use App\Services\ChatblastSender;
 use App\Services\PageSettings;
+use App\Support\ChatblastReason;
 use App\Support\NavAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -105,7 +106,7 @@ class ChatblastController extends Controller
         if ($psid === '') return null;
 
         return [
-            'name' => $this->pageCustomers($page)->where('psid', $psid)->value('fb_name') ?? '(wala sa Botcake customers ng page)',
+            'name' => $this->pageCustomers($page)->where('psid', $psid)->value('fb_name') ?? '(not among the page\'s Botcake customers)',
             'psid_last4' => mb_substr($psid, -4),
         ];
     }
@@ -123,7 +124,7 @@ class ChatblastController extends Controller
             'id' => $m->id, 'page' => $m->page_name, 'kind' => $m->kind, 'day' => $m->day, 'version' => $m->version,
             'step' => self::step($m), 'waybill' => $m->waybill, 'customer' => $m->fb_name,
             'psid' => $m->psid, 'text' => $m->text, 'vars' => $m->vars, 'jnt_status' => $m->jnt_status, 'status' => $m->status,
-            'reason' => $m->reason, 'attempts' => $m->attempts, 'last_http' => $m->last_http, 'steps' => $m->steps ?? [],
+            'reason' => ChatblastReason::display($m->reason), 'attempts' => $m->attempts, 'last_http' => $m->last_http, 'steps' => $m->steps ?? [],
             'is_test' => $m->is_test, 'test_of' => $m->test_of, 'macro_output_id' => $m->macro_output_id,
             'created_at' => $at($m->created_at), 'queued_at' => $at($m->queued_at), 'sent_at' => $at($m->sent_at), 'updated_at' => $at($m->updated_at),
             'created_by' => $m->created_by ? ($names[$m->created_by] ?? 'user #' . $m->created_by) : 'system',
@@ -136,13 +137,13 @@ class ChatblastController extends Controller
     {
         $this->checkAccess();
         $kind = $this->str($request, 'kind', 30);
-        if ($kind !== '' && !($c = $this->chatblast->campaign($kind))) return response()->json(['error' => 'Hindi kilalang campaign.'], 422);
-        if ($kind !== '' && !$c->active) return response()->json(['error' => 'Naka-off ang campaign na ito; i-on muna sa Campaigns.'], 422);
+        if ($kind !== '' && !($c = $this->chatblast->campaign($kind))) return response()->json(['error' => 'Unknown sequence.'], 422);
+        if ($kind !== '' && !$c->active) return response()->json(['error' => 'This sequence is off; turn it on in Sequences first.'], 422);
         @set_time_limit(55); // ang nginx ay naghihintay nang 60 s: 20 s ng J&T at ang pagbuo ay kasya rito
 
         // 20 s ng J&T (kasama ang tawag na tumatakbo pa); ang chatblast:build ay may 60 s.
         $result = $this->chatblast->build($kind ?: null, Auth::id(), self::WEB_TRACK_BUDGET);
-        if (!empty($result['busy'])) return response()->json(['error' => 'May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito.'], 409);
+        if (!empty($result['busy'])) return response()->json(['error' => 'A fetch is already running; try again after it.'], 409);
 
         return response()->json(['result' => $result]);
     }
@@ -152,7 +153,7 @@ class ChatblastController extends Controller
     {
         $this->checkAccess();
         $ids = $request->input('ids');
-        if (!is_array($ids) || !$ids || count($ids) > 1000) return response()->json(['error' => 'Pumili ng 1 hanggang 1000 row.'], 422);
+        if (!is_array($ids) || !$ids || count($ids) > 1000) return response()->json(['error' => 'Select 1 to 1000 rows.'], 422);
 
         return response()->json(['queued' => $this->sender->queue(array_filter($ids, 'is_numeric'), Auth::id()), 'state' => $this->state()]);
     }
@@ -192,10 +193,10 @@ class ChatblastController extends Controller
     {
         $this->checkAccess();
         $id = (int) $this->str($request, 'id', 20);
-        if (!BotcakeMessage::whereKey($id)->exists()) return response()->json(['error' => 'Walang ganitong row.'], 422);
+        if (!BotcakeMessage::whereKey($id)->exists()) return response()->json(['error' => 'No such row.'], 422);
 
         $test = $this->sender->sendTest($id, Auth::id());
-        if (!$test) return response()->json(['error' => 'Walang Test PSID ang page na ito. Pumili muna sa "Test PSID".'], 422);
+        if (!$test) return response()->json(['error' => 'This page has no Test PSID. Pick one under "Test PSID" first.'], 422);
 
         return response()->json(['id' => $test->id, 'status' => $test->status]);
     }
@@ -222,7 +223,7 @@ class ChatblastController extends Controller
         $this->checkAccess();
         $page = $this->str($request, 'page');
         $customer = $page === '' ? null : $this->pageCustomers($page)->whereKey((int) $this->str($request, 'customer_id', 20))->first();
-        if (!$customer) return response()->json(['error' => 'Walang ganitong customer sa page na ito.'], 422);
+        if (!$customer) return response()->json(['error' => 'No such customer on this page.'], 422);
 
         $this->settings->set($page, 'botcake', 'test_psid', (string) $customer->psid, false, Auth::id());
 
@@ -282,7 +283,7 @@ class ChatblastController extends Controller
     /** Hal. "Araw 3 · B" (o "Araw 3" kapag walang bersyon, hal. kulang sa rider info). */
     private static function step(BotcakeMessage $m): string
     {
-        return 'Araw ' . $m->day . ($m->version ? ' · ' . $m->version : '');
+        return 'Day ' . $m->day . ($m->version ? ' · ' . $m->version : '');
     }
 
     private function row(BotcakeMessage $m, ?string $jnt): array
@@ -292,7 +293,7 @@ class ChatblastController extends Controller
             'day' => $m->day, 'version' => $m->version, 'step' => self::step($m),
             'customer' => $m->fb_name, 'waybill' => $m->waybill, 'jnt' => $jnt ?? $m->jnt_status,
             'psid_last4' => $m->psid ? mb_substr($m->psid, -4) : null, 'first_line' => strtok((string) $m->text, "\n") ?: '',
-            'text' => $m->text, 'status' => $m->status, 'reason' => $m->reason, 'attempts' => $m->attempts, 'http' => $m->last_http,
+            'text' => $m->text, 'status' => $m->status, 'reason' => ChatblastReason::display($m->reason), 'attempts' => $m->attempts, 'http' => $m->last_http,
             'sent_at' => $m->sent_at?->timezone('Asia/Manila')->format('m-d H:i'), 'is_test' => $m->is_test,
         ];
     }
