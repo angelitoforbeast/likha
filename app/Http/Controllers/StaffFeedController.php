@@ -89,8 +89,9 @@ class StaffFeedController extends Controller
 
         $dueRows = ChecklistDueToday::rows($ids, $day);
         $dueOpen = $this->checklistDueNotSubmitted($dueRows);
-        $late = $this->checklistLate($dueRows, $day);
-        $today = $this->checklistToday($dueRows);
+        $submitters = $this->submitterNames($dueRows);
+        $late = $this->checklistLate($dueRows, $day, $submitters);
+        $today = $this->checklistToday($dueRows, $submitters);
         $bots = $this->botUserIds();
         $checker = $this->checkerCounts($day, $next);
         $approved = $this->checklistApproved($ids, $day);
@@ -293,12 +294,28 @@ class StaffFeedController extends Controller
     }
 
     /**
+     * user_id => pangalan ng bawat nagsumite ng binibilang na submission (parehong pangalan ng tao sa feed:
+     * employee profile, kung wala ang user). Kasama ang wala na sa listahan ng staff, hal. nag-resign na.
+     */
+    private function submitterNames(array $dueRows): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(fn ($r) => $r['submission']['user_id'] ?? null, $dueRows))));
+
+        return $ids ? DB::table('users as u')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->whereIn('u.id', $ids)
+            ->get(['u.id', 'u.name as user_name', 'ep.name'])
+            ->mapWithKeys(fn ($r) => [(int) $r->id => $r->name ?: $r->user_name])
+            ->all() : [];
+    }
+
+    /**
      * user_id => [task na lampas na sa deadline sa araw na iyon]: id, title, deadline, kung naisumite na at
-     * kailan, ang pinakahuling verdict, ilang approval check (rechecks = lampas sa una) at kung na-override (sino,
-     * kailan). Walang notes, file, dahilan o AI text. Para sa
+     * kailan, ang pinakahuling verdict, ilang approval check (rechecks = lampas sa una), kung na-override (sino,
+     * kailan), group o individual at kung sino ang nagsumite. Walang notes, file, dahilan o AI text. Para sa
      * nakaraang araw, lampas na ang lahat ng deadline bago maghatinggabi; sa darating na araw, wala pa.
      */
-    private function checklistLate(array $dueRows, Carbon $day): array
+    private function checklistLate(array $dueRows, Carbon $day, array $submitters): array
     {
         $now = Carbon::now(self::TZ);
         $late = array_filter($dueRows, fn ($r) => ChecklistDueToday::isLate($r['deadline'], $day, $now));
@@ -318,6 +335,8 @@ class StaffFeedController extends Controller
                 'overridden'      => ($r['submission']['overridden_at'] ?? null) !== null,
                 'overridden_by'   => $r['submission']['overridden_by'] ?? null,
                 'overridden_at'   => $r['submission']['overridden_at'] ?? null,
+                'submission_type' => $r['submission_type'],
+                'submitted_by'    => $submitters[$r['submission']['user_id'] ?? 0] ?? null,
             ];
         }
 
@@ -327,9 +346,9 @@ class StaffFeedController extends Controller
     /**
      * user_id => [lahat ng checklist task na due sa tao sa araw na iyon]: ang pinakamaagang oras muna (ang walang
      * oras sa dulo), tapos task id; kung naisumite na at kailan, ang verdict at rechecks (parehong kahulugan ng
-     * checklist_late_today). Walang notes, file o AI text.
+     * checklist_late_today), group o individual at kung sino ang nagsumite. Walang notes, file o AI text.
      */
-    private function checklistToday(array $dueRows): array
+    private function checklistToday(array $dueRows, array $submitters): array
     {
         usort($dueRows, fn ($a, $b) => [$a['scheduled'] ?? PHP_INT_MAX, $a['task_id']] <=> [$b['scheduled'] ?? PHP_INT_MAX, $b['task_id']]);
 
@@ -344,6 +363,8 @@ class StaffFeedController extends Controller
                 'submitted_at'   => $r['submission']['submitted_at'] ?? null,
                 'verdict'        => $r['submission']['verdict'] ?? null,
                 'rechecks'       => max(0, ($r['submission']['approval_checks'] ?? 0) - 1),
+                'submission_type' => $r['submission_type'],
+                'submitted_by'   => $submitters[$r['submission']['user_id'] ?? 0] ?? null,
             ];
         }
 

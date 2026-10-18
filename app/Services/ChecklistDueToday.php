@@ -73,11 +73,11 @@ class ChecklistDueToday
 
     /**
      * Bawat (user, task) na due sa $day, sa ayos ng sort_order at id ng task:
-     * user_id, task_id, title, deadline (minuto o null), submitted, at ang submission na binibilang
-     * (group: ang unang nagsumite sa araw na iyon; individual: ang sa user) na may submitted_at
+     * user_id, task_id, title, submission_type (group o individual), deadline (minuto o null), submitted, at ang submission na binibilang
+     * (group: ang unang nagsumite sa araw na iyon; individual: ang sa user) na may user_id ng nagsumite, submitted_at
      * (oras na naka-store), verdict (pinakahuling approval, pati override), approval_checks at ang huling override (overridden_by, overridden_at).
      *
-     * @return list<array{user_id:int, task_id:int, title:string, deadline:?int, submitted:bool, submission:?array}>
+     * @return list<array{user_id:int, task_id:int, title:string, submission_type:string, deadline:?int, submitted:bool, submission:?array}>
      */
     public static function rows(array $userIds, Carbon $day): array
     {
@@ -121,6 +121,7 @@ class ChecklistDueToday
         $byUser = [];
         foreach ($subsQuery->get() as $s) {
             $sub = [
+                'user_id'         => (int) $s->user_id,
                 'submitted_at'    => $s->created_at ? Carbon::parse($s->created_at, self::TZ)->format('H:i') : null,
                 'verdict'         => in_array($s->verdict ?? null, ['approved', 'not_approved'], true) ? $s->verdict : null,
                 'approval_checks' => (int) ($s->approval_checks ?? 0),
@@ -154,13 +155,16 @@ class ChecklistDueToday
             if (!$due) {
                 continue;
             }
-            $submission = ($t->submission_type ?? 'group') === 'individual'
+            // 'individual' lang ang hiwalay; blangko, null o ibang value ay group
+            $type = ($t->submission_type ?? 'group') === 'individual' ? 'individual' : 'group';
+            $submission = $type === 'individual'
                 ? ($byUser[$tid][$uid] ?? null)
                 : ($firstByTask[$tid] ?? null);
             $out[] = [
                 'user_id'    => $uid,
                 'task_id'    => $tid,
                 'title'      => $t->title,
+                'submission_type' => $type,
                 'scheduled'  => self::minutes($t->scheduled_time ?? null),
                 'deadline'   => self::deadlineMinutes($t->scheduled_time ?? null, $t->deadline_time ?? null),
                 'submitted'  => $submission !== null,
