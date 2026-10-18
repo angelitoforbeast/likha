@@ -6,6 +6,7 @@ use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Ang dalawang dating uri (in_transit, delivering) ay nagiging dalawang campaign: ang naka-save na text (o ang default),
@@ -14,6 +15,26 @@ use App\Services\Chatblast;
 class ChatblastCampaignMigrationTest extends ChatblastTestCase
 {
     protected bool $withCampaigns = false;
+
+    public function test_the_schedule_columns_keep_the_live_campaigns_exactly_and_default_to_every_day(): void
+    {
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php']]);
+        $days = fn (string $w, int $n) => array_map(fn ($d) => [$w . ' araw ' . $d . ' A {name}', $w . ' araw ' . $d . ' B {waybill}'], range(1, $n));
+        DB::table('chatblast_campaigns')->where('kind', 'in_transit')->update(['days' => json_encode($days('Biyahe', 10)), 'pages' => json_encode(['Page Uno'])]);
+        DB::table('chatblast_campaigns')->where('kind', 'delivering')->update(['days' => json_encode($days('Deliver', 5)), 'send_times' => json_encode(['09:15', '15:00'])]);
+        $before = DB::table('chatblast_campaigns')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
+
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php']]);
+
+        $after = DB::table('chatblast_campaigns')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
+        foreach ($before as $i => $row) {
+            $this->assertSame($row, array_intersect_key($after[$i], $row), 'walang nabago sa dating column');
+            $this->assertSame([null, null, null], [$after[$i]['weekdays'], $after[$i]['step_times'], $after[$i]['daily_cap']]);
+        }
+        $it = ChatblastCampaign::where('kind', 'in_transit')->sole();
+        $this->assertCount(10, $it->days);
+        $this->assertSame('Biyahe araw 10 B {waybill}', $it->days[9][1]);
+    }
 
     public function test_the_two_kinds_become_two_manual_campaigns_with_their_texts_and_their_rows(): void
     {
