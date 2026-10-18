@@ -1187,3 +1187,21 @@ Amendment 2. Test in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-060.7 | Given History > Sent, when a row built earlier was sent later than another, then it is listed first (sent_at descending, then id descending; a row without sent_at goes last); on the other chips the order is the time the row was processed (updated_at) descending, then id descending; To send keeps its order | `test_S_060_7…` (sent, failed) | Passed · 2026-10-18 · auto |
+
+## Slice 061 – One J&T source: the hourly track-sync, chatblast reads the database
+
+### S-061 The latest J&T scan of every open waybill is in the database every hour, and chatblast uses only that (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-061.1 | Given the setting on, when it is 02:20 or 06:20–23:20 Manila (or later in that hour), then one run starts per hour: the Likha scheduler runs `jnt:track-sync-auto` at :20 of 2 and 6–23, and `chatblast:auto` starts it in the background; whichever comes second in the same hour does nothing (the claim); before :20, at 03–05 and with the setting off nothing runs | `test_S_061_1…` | |
+| S-061.2 | Given a run in progress (the lock), when another start comes, then it does not track (no overlap) | `test_S_061_2…` | |
+| S-061.3 | Given non-final waybills with submission_time in the last 60 days, then they are tracked newest first, 20 per call, at most 2 calls per second; Delivered/Returned rows and older ones are not; the run is recorded with kind auto | `test_S_061_3…` | |
+| S-061.4 | Given more waybills than fit in 40 minutes, then the run stops calling J&T at the cap and records where it stopped; the next run starts with the waybills not reached, then the newest | `test_S_061_4…` | |
+| S-061.5 | Given a Problematic latest scan, then jnt_latest_scans has scan_type Problematic, its time and place, and from_jnts.status is unchanged; a mapped scan (e.g. Delivered) changes the status with a status log | `test_S_061_5…` | |
+| S-061.6 | Given an On Delivery scan with a rider, then jnt_latest_scans and every non-final from_jnts row of the waybill get the rider name and phone; a J&T failure leaves the old scan row as it was | `test_S_061_6…` | |
+| S-061.7 | Given a Delivering campaign that requires On Delivery, when the list is built, then only waybills whose stored scan is On Delivery with a scan time today (Manila) get a row; no scan, an older On Delivery or another scan type gets none; an unsent row whose scan is no longer On Delivery today is skipped | `test_S_061_7…` | |
+| S-061.8 | Given any build, refresh or send, then no HTTP call goes to J&T | `test_S_061_8…` | |
+| S-061.9 | Given a ready Delivering row whose scan was checked more than 90 minutes ago (or has no scan row), when it is sent, then it is not sent and stays ready with "J&T data is stale; waiting for the next track-sync" | `test_S_061_9…` | |
+| S-061.10 | Given a rider in jnt_latest_scans, then {rider} and {rider_phone} come from it (cleaned); without one there, from the waybill's from_jnts rider columns | `test_S_061_10…` | |
+| S-061.11 | Given /jnt/track-sync, then it shows the automatic runs (kind, start, done, counts, errors), the next run time and On/Off; the CEO can switch it on or off (stored in app_settings, overriding the env default); Marketing gets 403 on the toggle and sees no button; other roles 404 | `test_S_061_11…` | |
