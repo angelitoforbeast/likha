@@ -524,3 +524,13 @@ Accepted, not fixed:
 - **(amendment 2) Two grouped card numbers side by side merge into one mask** ("4111 1111 1111 5003 4111 1111 1111 5004" → "···· 5004"), and a short number right after a card is masked with it ("… 5003 12" → "···· 0312"). Reason: nothing leaks; telling them apart from a 14–19 digit card is not possible from the digits.
 - **(amendment 2) A card number glued to cents ("…5003.50", "…5003,12") is read as an amount and not masked as a card.** Reason: the same guard keeps amounts whole; no statement layout prints a card number glued to cents.
 - **(amendment 2) The double-submit guard needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
+
+## 052: flow names and shipping template on /page-settings (2026-10-18)
+
+- **A flow name that itself begins with a marker** (`!wala`, `!bura`, `!hindi approved`, `!hindi nasuri: `) is shown as that marker. Reason: unrealistic Botcake answer; the worst case is a wrong grey or red line, no data lost.
+- **The flow-key and detail-key patterns live in PHP (`PageSettings::DETAIL_PATTERN`, `BotcakeFlowNames::watches`, the `refreshFlows` filter) and in the grid JS (`FLOW_KEY`, `DETAIL_KEY`).** Reason: the browser needs them without a round trip; they change together, and the tests cover the PHP side.
+- **`POST /page-settings` (`store`, no UI) changes a flow ID without a refresh.** Reason: the grid saves through `/page-settings/cell`; the next Test token or cell save fills the name.
+- **The 30 s Test lahat cap can be passed by about 0.5 s** (the 2-per-second throttle may wait before a call). Reason: well inside a 60 s web timeout.
+- **The re-check of a flow ID before its name is written is not under a lock.** Reason: it narrows a 20 s window to milliseconds; the next save or Test token rewrites the line.
+- **The flows read makes at least two calls** (it stops at an empty page or a page with no new IDs). Reason: the spec asks for every page and the page size is unknown; two short calls fit the budget.
+- **No JS test for the grid's second lines.** Reason: the project has no JS test harness (adding one is a new dependency); S-052.10 is an owner check by hand.

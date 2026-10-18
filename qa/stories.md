@@ -15,6 +15,7 @@ No JavaScript test exists for the order page, so these are checked by hand on th
 - [ ] S-09.7 (slice 016): on a phone, tap a night's "N for a person" count on the AI checker logs page. Checker 1 should open in the same tab with that night's rows.
 - [ ] S-22.5 (slice 019): open your usual Old view link (`/item?...&layout=old`). It should show the table with suppliers, and nothing you use should be missing; "Original table" in the toolbar opens the table as it was.
 - [ ] S-38.11 (slice 020; replaces S-13.7, S-17.7 and S-19.8 of slice 017): on your own laptop, open your usual item table (`/item?...&layout=old`). The whole table should fit the screen with no sideways scroll and read well: one column per supplier numbered like your Finance → Supply list, "+N columns" for the columns one step away, "Sourcing" and "Sales" one tap apart, and nothing you use missing.
+- [ ] S-052.10 (slice 052): open /page-settings. Under each flow ID you should see its Botcake name (or red "Wala sa Botcake" / "Bura na sa Botcake", grey "hindi pa nasusuri"); under the shipping flow also "Template: <name> — <body>", with the whole body on hover; under Shipping template its body, or grey "piliin ang template". Save a flow ID, and press Test lahat: the lines should change without a reload.
 
 ## Slice 015 – row runner error message
 
@@ -957,19 +958,21 @@ non-CEO render pass without being edited.
 
 ## Slice 052 – What each Botcake flow ID is, on /page-settings
 
+Slice 052: 9 passed, 0 failed, 0 blocked, 0 skipped, 1 not run (owner check)
+
 ### S-052 The owner sees the name of each flow ID and the template the shipping flow sends (P1)
 
 Tests are in `tests/Feature/PageSettings/FlowNamesTest.php`.
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-052.1 | Given a page with id and token, when the owner saves a flow ID that Botcake lists, then the save is ok, one flows call is made and the cell's second line is the flow name; when the ID is not listed, the line is red "Wala sa Botcake"; when is_removed, red "Bura na sa Botcake"; when Botcake answers 500, success:false or not at all, the save is still ok and the line is "hindi nasuri: (reason)" | `test_S_052_1…` | not run |
-| S-052.2 | Given flows on three pages of the list, then all pages are read until an empty page; a list that ignores the page number stops after one repeat; the read stops at 10 pages | `test_S_052_2…` | not run |
-| S-052.3 | Given Test token (row) or Test lahat, when the token is ok, then one flows call and one templates call refresh the names and template, and Test lahat returns them in its cells; when the token is invalid or errors, no flows or templates call is made; Test lahat skips the refresh when its time budget is spent | `test_S_052_3…` | not run |
-| S-052.4 | Given an empty template key, then the pick is (1) the name in parentheses at the end of the shipping flow name when APPROVED; (2) else the single APPROVED template with {{1}} and example "Custom Field"; (3) else none and "piliin ang template"; a pending template or a second candidate does not count | `test_S_052_4…` | not run |
-| S-052.5 | Given a template name typed by the owner, then a refresh keeps it; when it is an APPROVED template its body shows with {{1}} as "(mensahe ng sequence)"; when it is not, the line is red | `test_S_052_5…` | not run |
-| S-052.6 | Given a post of botcake.flow.shipping.name or botcake.template.shipping.text from the page (cell or form), then 422 and nothing is written; botcake.template.shipping itself is editable free text | `test_S_052_6…` | not run |
-| S-052.7 | Given name and text rows, then they are not grid columns, the template column is, and the rows sit in their page's cells; a refresh with the same names writes no new row | `test_S_052_7…` | not run |
-| S-052.8 | Given any refresh, then the token is in no response, log line or stored value, and only names and body text are stored | `test_S_052_8…` | not run |
-| S-052.9 | Given a non-CEO role without the page in nav settings, then saving a cell and Test lahat are 404 and no Botcake call is made | `test_S_052_9…` | not run |
+| S-052.1 | Given a page with id and token, when the owner saves a flow ID that Botcake lists, then the save is ok, one flows read (every page of the list, no templates call, no retry) is made and the cell's second line is the flow name; when the ID is not listed, the line is red "Wala sa Botcake"; when is_removed, red "Bura na sa Botcake"; when Botcake answers 500, success:false, not a list or not at all, the save is still ok and the line is "hindi nasuri: (reason)"; the other flow keys of the page get their names too, a failure marks only the saved key; a read that finishes after another save changed the ID writes nothing; clearing a flow ID clears its name | `test_S_052_1…` (3, 7 data sets) | Passed · 2026-10-18 · auto |
+| S-052.2 | Given flows on three pages of the list, then all pages are read until an empty page; a list that ignores the page number stops after one repeat; data null past the last page is the end; the read stops at 10 pages, or when the time budget runs out (then the saved key says "hindi natapos basahin ang listahan ng flows") | `test_S_052_2…` | Passed · 2026-10-18 · auto |
+| S-052.3 | Given Test token (row) or Test lahat, when the token is ok, then the flows read and one templates call refresh the names and template, and Test lahat returns them in its cells; when the token is invalid or errors, no flows or templates call is made; Test lahat skips the refresh with "kulang sa oras" when its 30 s budget is spent | `test_S_052_3…` (3) | Passed · 2026-10-18 · auto |
+| S-052.4 | Given an empty template key, then the pick is (1) the name in parentheses at the end of the shipping flow name when APPROVED; (2) else the single APPROVED template with {{1}} and example "Custom Field"; (3) else none and "piliin ang template"; a pending template, a second candidate or a blank name does not count | `test_S_052_4…` (6 data sets) | Passed · 2026-10-18 · auto |
+| S-052.5 | Given a template name typed by the owner, then a refresh keeps it; when it is an APPROVED template its body shows with {{1}} as "(mensahe ng sequence)"; when it is unknown or not APPROVED, the line is red; when the owner clears it, the system picks again | `test_S_052_5…` | Passed · 2026-10-18 · auto |
+| S-052.6 | Given a post of botcake.flow.<x>.name or botcake.template.shipping.text from the page (cell or form), then 422 and nothing is written; botcake.template.shipping itself is editable free text | `test_S_052_6…` | Passed · 2026-10-18 · auto |
+| S-052.7 | Given name and text rows, then they are not grid columns, the template column is (after the four flows), and the rows sit in their page's cells with their line and tone; a refresh with the same answers writes no new row | `test_S_052_7…` (2) | Passed · 2026-10-18 · auto |
+| S-052.8 | Given any refresh, then the full token is in no response, its last 4 in no log line or stored value, and only names and body text are stored | `test_S_052_8…` | Passed · 2026-10-18 · auto |
+| S-052.9 | Given a non-CEO role without the page in nav settings, then saving a cell, Test token and Test lahat are 404 and no Botcake call is made | `test_S_052_9…` | Passed · 2026-10-18 · auto |
 | S-052.10 | (by hand) On /page-settings, each flow cell shows its name line, the shipping flow also the template line with the full body on hover, and the template column its body line; saving a flow ID or Test lahat updates the lines without a reload | Owner check | not run |
