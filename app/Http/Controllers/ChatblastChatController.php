@@ -75,7 +75,7 @@ class ChatblastChatController extends Controller
 
         return view('chatblast.chats', [
             'ready' => $ready, 'chats' => $chats, 'pages' => $pages, 'filters' => compact('page', 'date', 'q'),
-            'setup' => $this->setup($page),
+            'setup' => $this->setup(),
         ]);
     }
 
@@ -98,17 +98,17 @@ class ChatblastChatController extends Controller
     }
 
     /**
-     * Ang mga value para sa JSON API block ng Botcake: POST na may JSON body (inirerekomenda) o GET na may Params. Ang
-     * page_id ay ang napiling page sa filter, kung mayroon. Ang buong key ay para sa CEO lang (copy button).
+     * Ang mga value para sa JSON API block ng Botcake: POST na may JSON body (inirerekomenda) o GET na may Params. Iisa
+     * para sa lahat ng page. Ang buong key ay para sa CEO lang (copy button).
      */
-    private function setup(string $pageId): array
+    private function setup(): array
     {
         $key = (string) config('services.botcake.chat_key');
-        // Mga system variable ng Botcake; walang variable para sa page, kaya fixed text ang page_id kada page.
+        // Mga variable na pinupunan ng Botcake (subok sa live na page), pati ang page: iisang block sa bawat page.
         $values = [
-            'page_id' => $pageId !== '' ? $pageId : "<this page's Botcake ID>",
-            'psid'    => '{{user.id}}',
-            'name'    => '{{user.full_name}}',
+            'page_id' => '{{page_id}}',
+            'psid'    => '{{psid}}',
+            'name'    => '{{user_full_name}}',
             'message' => '{{last_text_input}}',
         ];
 
