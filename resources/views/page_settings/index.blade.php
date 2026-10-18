@@ -95,7 +95,7 @@
         Click a value and type: it saves by itself (Enter, leaving the field, or a few seconds without typing). Blank = delete the setting.
         Token / secret: blank = no change; the value is never shown (last 4 only). Every few seconds, changes made by others are loaded.
         Botcake, flow and field IDs: digits only.
-        Under a flow ID: its name in Botcake (read after a save and after an ok Test token). Shipping template: picked automatically when blank; you can change it.
+        Each flow shows its ID, its name in Botcake (read after a save and after an ok Test token) and, for the shipping flow, the template content. The shipping template name is under ▸: picked automatically when blank; you can change it.
         ▸ next to a page: the full flow names, the full template, the sync details, the other keys and the history.
     </p>
 
@@ -296,7 +296,7 @@
         const body = sortedRows().flatMap(r => {
             const tr = el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
                 pageTd(r),
-                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'}, inGroup(group).map(c => line(r, c)))),
+                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'}, inGroup(group).map(c => group === 'flows' ? flowBlock(r, c) : line(r, c)))),
                 el('td', {class: 'px-2 py-1 border-b border-r align-top text-right text-xs', 'data-info': 'oc', title: ORDERS_LABEL + ' / Customers'}, infoOc(r)),
                 paintSync(el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'sync'}), r),
                 el('td', {class: 'px-2 py-1 border-b align-top', 'data-info': 'actions'}, actions(r)),
@@ -345,7 +345,6 @@
             mark ? el('span', {class: 'ml-1 text-xs ' + mark.cls, title: mark.title || '', text: mark.text}) : null,
             mark && mark.title ? el('div', {class: 'text-xs text-red-600', text: mark.title}) : null,
             col.readonly ? null : el('button', {class: 'hist ml-1 text-xs text-gray-400 hover:text-gray-700', type: 'button', title: 'History', text: '⋯'}),
-            ...detailLines(row, col),
         );
     }
 
@@ -356,22 +355,25 @@
     const TEMPLATE_KEY = 'botcake.template.shipping', SHIPPING_KEY = 'botcake.flow.shipping';
     const TONE = {red: 'text-red-600', grey: 'text-gray-400'};
 
-    // Isang linya, putol kapag mahaba; ang buong text ay nasa hover.
-    function detailLine(text, tone) {
-        return el('div', {class: 'text-xs truncate ' + (TONE[tone] || 'text-gray-600'), title: text, text});
+    // Isang block kada flow: ang ID (nae-edit), ang pangalan nito sa Botcake, at sa shipping flow ang buong content ng
+    // template. Ang pangalan at content ay katabi ng .cell, hindi nasa loob, kaya nakikita pa rin habang ine-edit ang ID.
+    function flowBlock(row, col) {
+        return el('div', {class: 'mb-1.5 min-w-0'}, [
+            line(row, col),
+            el('div', {class: 'flow-lines', 'data-pk': row.key, 'data-key': col.key}, flowLines(row, col)),
+        ]);
     }
 
-    function detailOf(row, key) {
-        const d = row.cells[key];
-        return d ? detailLine(d.line, d.tone) : detailLine('Not checked yet', 'grey');
-    }
-
-    function detailLines(row, col) {
-        const cell = row.cells[col.key];
-        // Ang template ay nasa susunod na linya ng parehong cell, kaya wala na itong linya sa ilalim ng shipping flow.
-        if (FLOW_KEY.test(col.key) && cell) return [detailOf(row, col.key + '.name')];
-        if (col.key === TEMPLATE_KEY) return [cell ? detailOf(row, TEMPLATE_KEY + '.text') : detailLine('Pick a template', 'grey')];
-        return [];
+    // Walang placeholder: ang hindi pa nasusuri o bigong pagsuri ay walang linya (ang dahilan ay nasa ▸); buong text, walang putol.
+    function flowLines(row, col) {
+        const out = [], name = row.cells[col.key + '.name'];
+        if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));
+        else if (name && name.tone === '') out.push(el('div', {class: 'text-xs text-gray-600 break-words', text: name.line}));
+        if (col.key === SHIPPING_KEY) {
+            const body = row.cells[TEMPLATE_KEY + '.text'];
+            if (body && body.tone === '') out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));
+        }
+        return out;
     }
 
     // Ang mga cell na iginuguhit ulit kapag nagbago ang key (ang pangalan o body ay nasa cell ng flow o template).
@@ -398,6 +400,8 @@
         const td = table.querySelector(`.cell[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`);
         const row = rows.get(pk), col = columns.find(c => c.key === key);
         if (td && row && col) paint(td, row, col);
+        const lines = table.querySelector(`.flow-lines[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`);
+        if (lines && row && col) put(lines, ...flowLines(row, col));
         refreshDetail(pk);
         paintState(pk);
     }
@@ -431,7 +435,12 @@
     function detailTr(r) {
         const other = inGroup('other');
         return el('tr', {class: 'detail bg-gray-50', 'data-detail': r.key}, el('td', {class: 'px-4 py-2 border-b text-xs', colspan: String(WIDTHS.length)}, [
-            el('div', {class: 'grid grid-cols-3 gap-4', 'data-detail-info': ''}, detailInfo(r)),
+            el('div', {class: 'grid grid-cols-3 gap-4'}, [
+                el('div', {'data-detail-flows': ''}, detailFlows(r)),
+                el('div', {}, [heading('Shipping template'), ...columns.filter(c => c.group === 'template').map(c => line(r, c)),
+                    el('div', {'data-detail-template': ''}, detailTemplate(r))]),
+                el('div', {'data-detail-sync': ''}, detailSync(r)),
+            ]),
             el('div', {class: 'mt-2'}, [
                 el('div', {class: 'font-semibold text-gray-600', text: 'Other keys'}),
                 other.length ? el('div', {class: 'grid grid-cols-2 gap-x-4'}, other.map(c => line(r, c, 'w-40')))
@@ -446,23 +455,26 @@
 
     const heading = text => el('div', {class: 'font-semibold text-gray-600', text});
 
-    // Buong text, walang putol: ang pangalan ng flows, ang body ng template at ang sync.
-    function detailInfo(r) {
+    // Buong text, walang putol. Dito lang ang dahilan ng bigong pagsuri ("Check failed: …"); walang placeholder.
+    function detailFlows(r) {
+        return [heading('Flows'), ...columns.filter(c => FLOW_KEY.test(c.key)).map(c => {
+            const id = r.cells[c.key], name = r.cells[c.key + '.name'];
+            return el('div', {class: 'break-words'}, [
+                el('span', {class: 'text-gray-500', text: (SHORT[c.key] || c.label) + ': '}),
+                el('span', {class: 'font-mono', text: id ? id.value : '—'}),
+                id && name ? el('span', {class: TONE[name.tone] || 'text-gray-700', text: ' — ' + name.line}) : null,
+            ]);
+        })];
+    }
+
+    function detailTemplate(r) {
+        const body = r.cells[TEMPLATE_KEY + '.text'];
+        return body ? [el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body.tone] || 'text-gray-700'), text: body.line})] : [];
+    }
+
+    function detailSync(r) {
         const s = r.info.last_sync;
-        const t = r.cells[TEMPLATE_KEY], body = r.cells[TEMPLATE_KEY + '.text'];
         return [
-            el('div', {}, [heading('Flows'), ...columns.filter(c => FLOW_KEY.test(c.key)).map(c => {
-                const id = r.cells[c.key], name = r.cells[c.key + '.name'];
-                return el('div', {class: 'break-words'}, [
-                    el('span', {class: 'text-gray-500', text: (SHORT[c.key] || c.label) + ': '}),
-                    el('span', {class: 'font-mono', text: id ? id.value : '—'}),
-                    id ? el('span', {class: TONE[name ? name.tone : 'grey'] || 'text-gray-700', text: ' — ' + (name ? name.line : 'Not checked yet')}) : null,
-                ]);
-            })]),
-            el('div', {}, [heading('Shipping template'),
-                el('div', {class: 'font-mono break-all', text: t ? t.value : 'Pick a template'}),
-                t ? el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body ? body.tone : 'grey'] || 'text-gray-700'), text: body ? body.line : 'Not checked yet'}) : null,
-            ]),
             el('div', {class: s && s.failed ? 'text-red-600' : ''}, [heading('Sync'), ...[
                 'Last sync: ' + (s ? [s.dates, s.kind, s.at, s.stop_reason || s.status].filter(Boolean).join(' · ') : 'none yet'),
                 s ? '+' + fmt(s.new) + ' new · ' + fmt(s.updated) + ' updated · ' + fmt(s.matched) + ' matched · ' + fmt(s.ad_filled) + ' ad id' : null,
@@ -473,11 +485,14 @@
         ];
     }
 
-    // Ang bahaging hindi nae-edit lang ang binubuo ulit, para hindi mawala ang ine-edit na ibang key.
+    // Ang mga bahaging hindi nae-edit lang ang binubuo ulit, para hindi mawala ang ine-edit na template o ibang key.
     function refreshDetail(pk) {
-        const box = table.querySelector(`tr[data-detail="${CSS.escape(pk)}"] [data-detail-info]`);
+        const tr = table.querySelector(`tr[data-detail="${CSS.escape(pk)}"]`);
         const r = rows.get(pk);
-        if (box && r) put(box, ...detailInfo(r));
+        if (!tr || !r) return;
+        put(tr.querySelector('[data-detail-flows]'), ...detailFlows(r));
+        put(tr.querySelector('[data-detail-template]'), ...detailTemplate(r));
+        put(tr.querySelector('[data-detail-sync]'), ...detailSync(r));
     }
 
     function toggle(pk) {

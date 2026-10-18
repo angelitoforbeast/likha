@@ -233,13 +233,15 @@ class PageSettingsGrid
     }
 
     /**
-     * Kung saang cell ng row nakalagay ang column, para walang horizontal scroll: "flows" (ang 4 na flow at ang template),
-     * "botcake" (ang ibang kilalang key) o "other" (ibang key, nasa nabubuksang row).
+     * Kung saang cell ng row nakalagay ang column, para walang horizontal scroll: "flows" (ang 4 na flow), "template" (ang
+     * pangalan ng shipping template, nasa nabubuksang row; ang body ay nasa Flows cell), "botcake" (ang ibang kilalang key)
+     * o "other" (ibang key, nasa nabubuksang row).
      */
     private static function group(string $key): string
     {
         if (!isset(self::KNOWN[$key])) return 'other';
-        return str_starts_with($key, 'botcake.flow.') || $key === 'botcake.template.shipping' ? 'flows' : 'botcake';
+        if ($key === 'botcake.template.shipping') return 'template';
+        return str_starts_with($key, 'botcake.flow.') ? 'flows' : 'botcake';
     }
 
     /** @return Collection<int, string> user id => pangalan, sa isang query */

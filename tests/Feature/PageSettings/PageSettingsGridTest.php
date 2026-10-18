@@ -79,7 +79,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertSame([
             'botcake.page_id' => 'botcake', 'botcake.token' => 'botcake', 'botcake.flow.shipping' => 'flows',
             'botcake.flow.on_delivery' => 'flows', 'botcake.flow.in_transit' => 'flows', 'botcake.flow.broadcast' => 'flows',
-            'botcake.template.shipping' => 'flows', 'botcake.field.message' => 'botcake', 'botcake.test_psid' => 'botcake',
+            'botcake.template.shipping' => 'template', 'botcake.field.message' => 'botcake', 'botcake.test_psid' => 'botcake',
             'botcake.token_status' => 'botcake', 'sms.sender' => 'other',
         ], $groups);
     }
@@ -147,7 +147,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->settings()->set('Page Uno', 'botcake', 'page_id', '1001');
         $res = $this->get('/page-settings')->assertOk();
 
-        foreach (['Search pages', "'Not checked yet'", "'Pick a template'", "'No pages yet. Use + Page.'", 'Test all tokens', 'Sync all'] as $text) {
+        foreach (['Search pages', "'No pages yet. Use + Page.'", 'Test all tokens', 'Sync all'] as $text) {
             $res->assertSee($text, false);
         }
         // Mga salitang Tagalog na dating nasa page; ang mga comment sa code ay hindi kasama (// at /* */ ay tinatanggal muna).
@@ -178,6 +178,20 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->get('/page-settings')->assertOk()
             ->assertSee("st.invalid || st.failed ? 'border-l-red-500' : !r.info.orders ? 'border-l-transparent' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
             ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid or last sync failed']", false);
+    }
+
+    public function test_S_054_10_each_flow_block_is_id_name_and_content_with_no_placeholder_and_the_lines_stay_outside_the_edited_value(): void
+    {
+        $res = $this->get('/page-settings')->assertOk();
+        $html = preg_replace(['#/\*.*?\*/#s', '#{{--.*?--}}#s', '#^\s*//.*$#m', '#\s//\s.*$#m'], '', $res->getContent());
+
+        foreach (['Not checked yet', 'Pick a template', 'Template: ', 'hindi pa nasusuri', 'piliin ang template'] as $placeholder) {
+            $this->assertStringNotContainsString($placeholder, $html, $placeholder);
+        }
+        // Ang pangalan at content ay katabi ng .cell (hindi sa loob), kaya hindi napapalitan ng input habang nag-e-edit.
+        $res->assertSee("el('div', {class: 'flow-lines', 'data-pk': row.key, 'data-key': col.key}, flowLines(row, col))", false)
+            ->assertSee("if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));", false)
+            ->assertSee("if (body && body.tone === '') out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));", false);
     }
 
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void
