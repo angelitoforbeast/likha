@@ -1089,3 +1089,14 @@ Amendment 7. Test in `tests/Feature/PageSettings/PageSettingsGridTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-056.37 | Given /chatblast/page-settings, then the column reads "Chatblast flow" with one block (shipping flow ID, name, content); other flow slots with a value show under ▸ as "Other flow IDs (not used by chatblast)", editable; the content's {{1}} shows as "[message for the customer]" with "Filled per customer, see To send / History"; every empty editable value shows "+ set" with a dashed outline on hover | `test_S_056_37…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-058 The item row's RTS / DEL / INT cell on /owner/private finds its J&T stats within ₱1 (P1)
+
+Tests in `tests/Feature/OwnerPrivate/ItemJntStatsToleranceTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-058.1 | Given a row whose end-date price is ₱298 and J&T shipments only at ₱299 (RTS 405, DEL 237, INT 126), when /owner/private/item-summary loads, then the cell shows RTS 52.7% (405), DEL 30.9% (237), INT 16.4% (126) of 768 | `test_S_058_1…` | Passed · 2026-10-18 · auto |
+| S-058.2 | Given a ₱298 row and buckets at ₱297, ₱298 and ₱299, then the counts of all three are summed and the percentages come from the sums | `test_S_058_2…` | Passed · 2026-10-18 · auto |
+| S-058.3 | Given a ₱298 row and a bucket only at ₱300 (₱2 away), then the cell stays empty | `test_S_058_3…` | Passed · 2026-10-18 · auto |
+| S-058.4 | Given a ₱299 row with a ₱299 bucket and a ₱301 bucket, then only the exact bucket counts, as before | `test_S_058_4…` | Passed · 2026-10-18 · auto |
