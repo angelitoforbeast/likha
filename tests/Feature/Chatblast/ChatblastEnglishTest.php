@@ -83,6 +83,35 @@ class ChatblastEnglishTest extends ChatblastTestCase
         $this->assertSame('missing field.message', BotcakeMessage::find($b)->reason);
     }
 
+    public function test_old_tagalog_reasons_come_out_english_in_the_list_and_the_panel_without_rewriting_the_rows(): void
+    {
+        $old = [
+            'walang page_id, token, flow.shipping, field.message' => 'missing page_id, token, flow.shipping, field.message',
+            'walang PSID ang order (hindi pa tugma sa Botcake customer)' => 'the order has no PSID (not matched to a Botcake customer yet)',
+            'walang rider info' => 'no rider info',
+            'walang {cod}' => 'missing {cod}',
+            'Hindi na In Transit ang waybill (ngayon: Delivered)' => 'The waybill is no longer In Transit (now: Delivered)',
+            'Wala na ang page na Page Dos sa campaign' => 'Page "Page Dos" is no longer in the sequence',
+            'may naipadala na ngayong araw sa ibang campaign' => 'already sent today by another sequence',
+            'Naabot ang daily cap ng campaign sa page (5 ngayong araw); ipadala ulit bukas' => 'Sequence daily cap reached for the page (5 today); send again tomorrow',
+            'Hindi tiyak kung naipadala (tinawag na ang send_flow) (HTTP 503); tingnan sa Botcake bago magpadala ulit' => 'Not sure it was sent (send_flow was called) (HTTP 503); check Botcake before sending again',
+            'Error: hindi kilala' => 'Error: hindi kilala', // hindi kilalang anyo: ganoon pa rin
+        ];
+        $ids = [];
+        foreach (array_keys($old) as $i => $reason) {
+            $ids[$reason] = DB::table('botcake_messages')->insertGetId(['page_name' => 'Page Uno', 'waybill' => 'WB-' . $i, 'kind' => 'in_transit', 'day' => 1,
+                'text' => 'Kumusta po {name}', 'status' => 'skipped', 'reason' => $reason, 'attempts' => 0, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
+        }
+
+        $rows = collect($this->getJson('/chatblast/list')->assertOk()->json('rows'))->pluck('reason', 'id');
+        foreach ($old as $reason => $english) {
+            $this->assertSame($english, $rows[$ids[$reason]], $reason);
+            $this->assertSame($reason, BotcakeMessage::find($ids[$reason])->reason, 'ang row ay hindi isinulat');
+        }
+        $panel = $this->getJson('/chatblast/messages/' . $ids['walang rider info'])->assertOk();
+        $this->assertSame(['no rider info', 'Kumusta po {name}'], [$panel->json('reason'), $panel->json('text')], 'ang text ng customer ay ganoon pa rin');
+    }
+
     public function test_rows_with_the_old_reasons_still_behave_the_same(): void
     {
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
