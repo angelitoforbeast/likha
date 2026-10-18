@@ -1,0 +1,268 @@
+<?php
+
+namespace App\Services\Chatbot;
+
+use App\Models\BotcakeChat;
+use App\Models\ChatbotReply;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+/**
+ * Ang takbo ng isang flow para sa isang chat. Kapag naghihintay ang customer sa "wait for reply" ng parehong flow,
+ * doon nagpapatuloy (ang sagot ay sine-save sa field, saka ang port na reply); kung hindi, mula sa Start. Hanggang
+ * 100 node kada takbo. Ang node na pumalya ay sumusunod sa port na failed kapag mayroon, kung hindi ay humihinto ang
+ * takbo (itinatala). Ang mga padala at sheet row ay dumadaan sa Outbox (live o Test).
+ */
+class FlowEngine
+{
+    public const MAX_STEPS = 100;
+
+    public function __construct(private ChatbotAi $ai)
+    {
+    }
+
+    public function run(FlowRun $run, Outbox $outbox): FlowRun
+    {
+        $nodes = [];
+        foreach ($run->graph['nodes'] ?? [] as $n) $nodes[$n['id']] = $n;
+        $edges = [];
+        foreach ($run->graph['edges'] ?? [] as $e) $edges[$e['from'] . ':' . $e['port']] = $e['to'];
+
+        $current = $this->resumePoint($run, $nodes, $edges);
+        if ($current === false) {
+            $start = collect($nodes)->firstWhere('type', 'start');
+            $current = $start['id'] ?? null;
+        }
+
+        for ($steps = 0; $current !== null; $steps++) {
+            if ($steps >= self::MAX_STEPS) {
+                $run->stopped = 'Stopped after ' . self::MAX_STEPS . ' steps (a loop in the flow?).';
+                Log::warning('chatbot: step limit', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId]);
+                break;
+            }
+            $node = $nodes[$current] ?? null;
+            if ($node === null) break;
+
+            try {
+                $r = $this->execute($node, $run, $outbox);
+            } catch (Throwable $e) {
+                report($e);
+                $r = ['port' => 'failed', 'note' => 'Error: ' . mb_substr($e->getMessage(), 0, 200)];
+            }
+
+            $ports = FlowGraph::ports($node);
+            $port = $r['port'] ?? null;
+            if ($port === 'failed' && !in_array('failed', $ports, true)) {
+                // Walang failed port ang node na ito: hihinto ang takbo.
+                $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => null, 'note' => $r['note'] ?? null];
+                $run->stopped = $r['note'] ?? 'The step failed.';
+                Log::warning('chatbot: step failed', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId, 'node' => $node['id'], 'note' => $run->stopped]);
+                break;
+            }
+            $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => $port, 'note' => $r['note'] ?? null];
+            if (!empty($r['suspend']) || $port === null) break;
+
+            $current = $edges[$node['id'] . ':' . $port] ?? null;
+        }
+
+        return $run;
+    }
+
+    /**
+     * Ang susunod na node kapag nagpapatuloy mula sa "wait for reply" (null = walang kasunod, tapos na), o false kapag
+     * walang hinihintay sa flow na ito (mula sa Start). Ang hinihintay sa ibang flow o sa nawalang node ay binubura.
+     */
+    private function resumePoint(FlowRun $run, array $nodes, array $edges): string|null|false
+    {
+        $wait = (string) $run->fields->get(CustomerFields::WAIT);
+        if ($wait === '') return false;
+        [$flowId, $nodeId] = array_pad(explode(':', $wait, 2), 2, '');
+        $node = $nodes[$nodeId] ?? null;
+        $run->fields->clear(CustomerFields::WAIT);
+        if ((int) $flowId !== $run->flowId || !$node || $node['type'] !== 'send' || empty($node['config']['wait'])) return false;
+
+        if (($node['config']['save_to'] ?? '') !== '') $run->fields->set($node['config']['save_to'], $run->input);
+        $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => 'reply', 'note' => 'Reply received'];
+
+        return $edges[$nodeId . ':reply'] ?? null;
+    }
+
+    /** @return array{port: ?string, note?: ?string, suspend?: bool} */
+    private function execute(array $node, FlowRun $run, Outbox $outbox): array
+    {
+        $c = (array) ($node['config'] ?? []);
+
+        return match ($node['type']) {
+            'start' => ['port' => 'next'],
+            'end' => ['port' => null],
+            'condition' => $this->condition($c, $run),
+            'send' => $this->send($node, $c, $run, $outbox),
+            'set' => $this->set($c, $run),
+            'ai' => $this->ai($node, $c, $run, $outbox),
+            'sheet' => $this->sheet($node, $c, $run, $outbox),
+            default => ['port' => null],
+        };
+    }
+
+    private function condition(array $c, FlowRun $run): array
+    {
+        $vars = $run->vars();
+        foreach (array_values((array) ($c['rows'] ?? [])) as $i => $row) {
+            $name = ChatbotVars::norm(trim((string) ($row['variable'] ?? ''), "{} \t"));
+            $subject = trim((string) ($vars[$name] ?? ''));
+            $target = trim($run->text((string) ($row['value'] ?? '')));
+            if (self::matches((string) ($row['rule'] ?? 'is'), $subject, $target)) {
+                return ['port' => 'row_' . ($i + 1), 'note' => "Row " . ($i + 1) . ": {$name} " . (FlowGraph::RULES[$row['rule']] ?? $row['rule'])];
+            }
+        }
+
+        return ['port' => 'no', 'note' => 'No row matched'];
+    }
+
+    /** Ang mga patakaran ng Condition; hindi case-sensitive ang text. */
+    public static function matches(string $rule, string $subject, string $target): bool
+    {
+        $s = mb_strtolower($subject);
+        $t = mb_strtolower($target);
+        $num = fn (string $v) => preg_replace('/[^\d.\-]/', '', $v);
+
+        return match ($rule) {
+            'is' => $s === $t,
+            'is_not' => $s !== $t,
+            'contains' => $t !== '' && str_contains($s, $t),
+            'contains_any' => collect(preg_split('/[\r\n,]+/', $t))->map(fn ($v) => trim($v))->filter(fn ($v) => $v !== '')
+                ->contains(fn ($v) => str_contains($s, $v)),
+            'not_contains' => $t === '' || !str_contains($s, $t),
+            'starts_with' => $t !== '' && str_starts_with($s, $t),
+            'regex' => $target !== '' && @preg_match('~' . str_replace('~', '\~', $target) . '~iu', $subject) === 1,
+            'is_empty' => $subject === '',
+            'is_not_empty' => $subject !== '',
+            'gt' => is_numeric($num($subject)) && is_numeric($num($target)) && (float) $num($subject) > (float) $num($target),
+            'lt' => is_numeric($num($subject)) && is_numeric($num($target)) && (float) $num($subject) < (float) $num($target),
+            default => false,
+        };
+    }
+
+    private function send(array $node, array $c, FlowRun $run, Outbox $outbox): array
+    {
+        $messages = [];
+        foreach ((array) ($c['items'] ?? []) as $item) {
+            $v = trim($run->text((string) ($item['value'] ?? '')));
+            if ($v === '') continue;
+            if (($item['type'] ?? 'text') === 'image') {
+                if (self::isUrl($v)) $messages[] = ['type' => 'image', 'url' => $v];
+            } else {
+                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)];
+            }
+        }
+
+        $note = 'Nothing to send';
+        if ($messages) {
+            $res = $outbox->send($run, $node['id'], $messages);
+            $run->sends[] = ['node' => $node['id'], 'messages' => $messages, 'status' => $res['status'], 'error' => $res['error']];
+            if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Send failed: ' . $res['error']];
+            $note = count($messages) . ' message' . (count($messages) === 1 ? '' : 's') . ' ' . $res['status'];
+        }
+
+        if (!empty($c['wait'])) {
+            $run->fields->set(CustomerFields::WAIT, $run->flowId . ':' . $node['id']);
+            return ['port' => 'reply', 'note' => $note . '; waiting for the reply', 'suspend' => true];
+        }
+
+        return ['port' => 'continue', 'note' => $note];
+    }
+
+    private function set(array $c, FlowRun $run): array
+    {
+        $done = [];
+        foreach ((array) ($c['ops'] ?? []) as $op) {
+            $field = (string) ($op['field'] ?? '');
+            switch ($op['op'] ?? 'set') {
+                case 'clear_all':
+                    $run->fields->clearAll();
+                    $done[] = 'cleared all fields';
+                    break;
+                case 'clear':
+                    if ($field !== '') $run->fields->clear($field);
+                    $done[] = "cleared {$field}";
+                    break;
+                case 'append':
+                    if ($field === '') break;
+                    $v = $run->text((string) ($op['value'] ?? ''));
+                    $old = (string) $run->fields->get($field);
+                    $run->fields->set($field, $old === '' ? $v : $old . (string) ($op['separator'] ?? ', ') . $v);
+                    $done[] = "appended to {$field}";
+                    break;
+                default:
+                    if ($field === '') break;
+                    $run->fields->set($field, $run->text((string) ($op['value'] ?? '')));
+                    $done[] = "set {$field}";
+            }
+        }
+
+        return ['port' => 'next', 'note' => $done ? implode(', ', $done) : 'No change'];
+    }
+
+    private function ai(array $node, array $c, FlowRun $run, Outbox $outbox): array
+    {
+        $messages = [];
+        $system = trim($run->text((string) ($c['system'] ?? '')));
+        if ($system !== '') $messages[] = ['role' => 'system', 'content' => $system];
+        foreach ($this->history($run, (int) ($c['history'] ?? 0)) as $m) $messages[] = $m;
+        $messages[] = ['role' => 'user', 'content' => $run->text((string) ($c['user'] ?? '{{last_input}}'))];
+
+        $res = $this->ai->complete((string) ($c['model'] ?? 'gpt-4o-mini'), $messages, (int) ($c['max_tokens'] ?? 250));
+        if (!$res['ok']) return ['port' => 'failed', 'note' => 'AI failed: ' . $res['error']];
+
+        if (($c['save_to'] ?? '') !== '') $run->fields->set($c['save_to'], $res['text']);
+        if (!empty($c['send'])) {
+            $msg = [['type' => 'text', 'text' => mb_substr($res['text'], 0, 2000)]];
+            $sent = $outbox->send($run, $node['id'], $msg);
+            $run->sends[] = ['node' => $node['id'], 'messages' => $msg, 'status' => $sent['status'], 'error' => $sent['error']];
+        }
+
+        return ['port' => 'success', 'note' => 'AI answered' . (($c['save_to'] ?? '') !== '' ? ' into ' . $c['save_to'] : '')];
+    }
+
+    /**
+     * Ang huling N mensahe ng customer (botcake_chats, bago ang chat na ito) at ng ating mga naipadalang sagot, sa
+     * ayos ng oras. Wala sa Test (walang totoong usapan ang test customer).
+     * @return array<int, array{role: string, content: string}>
+     */
+    private function history(FlowRun $run, int $n): array
+    {
+        if ($n <= 0 || $run->test) return [];
+        $psid = (string) $run->fields->psid;
+
+        $in = BotcakeChat::where('page_id', $run->pageId)->where('psid', $psid)
+            ->when($run->chatId, fn ($q) => $q->where('id', '<', $run->chatId))
+            ->orderByDesc('id')->limit($n)->get(['message', 'received_at'])
+            ->map(fn ($c) => ['at' => (string) $c->received_at, 'role' => 'user', 'content' => (string) $c->message]);
+        $out = ChatbotReply::where('psid', (int) $psid)->where('page_id', (int) $run->pageId)->where('kind', 'send')->where('status', 'sent')
+            ->orderByDesc('id')->limit($n)->get(['content', 'sent_at'])
+            ->map(fn ($r) => ['at' => (string) $r->sent_at, 'role' => 'assistant', 'content' => implode("\n", array_filter(array_map(fn ($m) => $m['text'] ?? '', (array) $r->content)))]);
+
+        return $in->merge($out)->filter(fn ($m) => trim($m['content']) !== '')->sortBy('at')->values()->take(-$n)
+            ->map(fn ($m) => ['role' => $m['role'], 'content' => $m['content']])->all();
+    }
+
+    private function sheet(array $node, array $c, FlowRun $run, Outbox $outbox): array
+    {
+        $id = FlowGraph::spreadsheetId((string) ($c['sheet'] ?? ''));
+        if ($id === null) return ['port' => 'failed', 'note' => 'No spreadsheet link or ID'];
+        $tab = trim((string) ($c['tab'] ?? '')) ?: 'Sheet1';
+
+        $vars = $run->vars();
+        $row = array_map(fn ($t) => ChatbotVars::sheetCell((string) $t, $vars), (array) ($c['columns'] ?? []));
+        $res = $outbox->appendRow($run, $node['id'], $id, $tab, $row);
+        $run->sheetRows[] = ['node' => $node['id'], 'sheet' => $id, 'tab' => $tab, 'row' => $row, 'status' => $res['status'], 'error' => $res['error']];
+        if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Sheet failed: ' . $res['error']];
+
+        return ['port' => 'next', 'note' => 'Row ' . $res['status']];
+    }
+
+    public static function isUrl(string $v): bool
+    {
+        return (bool) filter_var($v, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($v, PHP_URL_SCHEME)), ['http', 'https'], true);
+    }
+}
