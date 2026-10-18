@@ -248,8 +248,8 @@ class ChatbotPagesTest extends ChatblastTestCase
         Http::fake();
         $this->actingAs($this->user());
 
-        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'prompt_2', 'value' => str_repeat('a', 10000)])->assertOk();
-        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'prompt_2', 'value' => str_repeat('a', 10001)])->assertStatus(422);
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'prompt_2', 'value' => str_repeat('a', 50000)])->assertOk();
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'prompt_2', 'value' => str_repeat('a', 50001)])->assertStatus(422);
 
         $this->postJson('/chatbot/column', ['name' => 'Token'])->assertOk()->assertJson(['key' => 'token']);
         $uno = collect($this->getJson('/chatbot/data')->json('rows'))->firstWhere('page', 'Page Uno');

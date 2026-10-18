@@ -109,6 +109,9 @@ class ChatbotController extends Controller
         if (in_array($key, ChatbotFields::RESERVED, true)) return response()->json(['error' => 'ACTIVE is changed with the On/Off switch.'], 422);
         if (!$this->fields->isColumn($key)) return response()->json(['error' => 'Unknown column.'], 422);
         if (mb_strlen($value) > ChatbotFields::MAX_VALUE) return response()->json(['error' => 'At most ' . ChatbotFields::MAX_VALUE . ' characters.'], 422);
+        if (strlen($value) > ChatbotFields::MAX_BYTES) {
+            return response()->json(['error' => 'Too long: at most ' . ChatbotFields::MAX_BYTES . ' bytes. Accented letters and emoji take 2 to 4 bytes each.'], 422);
+        }
         if ($value !== '' && $key === 'flow' && !in_array($value, $this->flowNames(), true)) {
             return response()->json(['error' => 'Pick a flow from the list.'], 422);
         }

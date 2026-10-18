@@ -16,7 +16,8 @@ class ChatbotFields
     public const PROVIDER = 'chatbot';
     public const RESERVED = ['active', 'flow_id']; // flow_id: ang flow na pinili sa dropdown (id), system lang
     public const ADDED_SETTING = 'chatbot.columns'; // app_settings: JSON {key: label}
-    public const MAX_VALUE = 10000;
+    public const MAX_VALUE = 50000; // letra: ang mahahabang AI prompt (hal. 14,113)
+    public const MAX_BYTES = 60000; // ang TEXT ng MySQL ay 65,535 bytes: ang ñ at emoji ay 2-4 bytes, kaya may sariling check (hindi pinuputol)
     public const MAX_ADDED = 200; // hanggang ilang column ang maidadagdag sa "+ Column" (walang tanggalan sa screen)
 
     /** @return array<string, string> key => label, sa ayos ng sheet */

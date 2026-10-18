@@ -1365,7 +1365,7 @@ Spec 068. Tests are in `tests/Feature/Chatblast/ChatbotPagesTest.php` (S-068.8 i
 | S-068.9 | Given anyone, including the CEO, when `chatbot.active` is written through Page settings, then 422 (only the switch writes it); a role without /chatblast access gets 403 on /chatbot/cell and /chatbot/column | `test_S_068_9…` | Passed · 2026-10-19 · auto |
 | S-068.10 | Given "+ Page" with a Botcake ID another page already uses, or a page already on the list, then 422 and nothing is written | `test_S_068_10…` | Passed · 2026-10-19 · auto |
 | S-068.11 | Given On fails at the publish step, then the error names publishing, ACTIVE is unchanged, and the new key is kept (the block on Botcake holds it) | `test_S_068_11…` | Passed · 2026-10-19 · auto |
-| S-068.12 | Given botfield values and columns, then 10,000 characters is the most a value takes, at most 200 columns can be added, and a column named "Token" never reads the Botcake token | `test_S_068_12…` | Passed · 2026-10-19 · auto |
+| S-068.12 | Given botfield values and columns, then 50,000 characters (and 60,000 bytes, S-073.3) is the most a value takes, at most 200 columns can be added, and a column named "Token" never reads the Botcake token | `test_S_068_12…` | Passed · 2026-10-19 · auto |
 | S-068.13 | Given a page switched Off, when `botcake:chat-setup --all` runs (dry run or real), then that page is skipped and stays Off | `test_S_068_13…` | Passed · 2026-10-19 · auto |
 
 ## S-069 Our own chatbot flow builder (replies through Botcake send_content)
@@ -1447,3 +1447,13 @@ Tests are in `tests/Feature/Chatblast/ChatbotAmendmentOneTest.php`.
 | S-069.A3 | Given a message that is only a link on fbcdn.net, then the Like sticker (two file names, four sticker ids) is stored as 👍 with no link, any other one as [Photo] with the link in payload.image_url; other hosts, look-alike hosts, text with a link and plain text are kept as sent | `test_S_069_A3…` (8 data sets) | Passed · 2026-10-19 · auto |
 | S-069.A4 | The flow's {{last_input}} sees 👍 / [Photo]; Chats and the customer view show [Photo] with a small "open" link | `test_S_069_A4…` | Passed · 2026-10-19 · auto |
 | S-069.A5 | `botcake:chats-normalize` counts like / photo / untouched without changing anything; --apply needs --expect equal to the count; it changes the rows once (photo link kept in payload.image_url), and a second run finds nothing | `test_S_069_A5…` | Passed · 2026-10-19 · auto |
+
+## S-073 Botfields hold long AI prompts
+
+Spec 073. Tests are in `tests/Feature/Chatblast/ChatbotLongPromptTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-073.1 | Given a 14,113-character prompt with line breaks, ñ and emoji, when it is saved in a botfield cell, then page settings and /chatbot/data give it back unchanged; 50,000 plain characters are accepted | `test_S_073_1…` | Passed · 2026-10-19 · auto |
+| S-073.2 | Given that prompt in Prompt 2 and an AI step whose system prompt is `{{Prompt 2}}` plus more text, then the OpenAI request's system message is the whole expanded text, uncut | `test_S_073_2…` | Passed · 2026-10-19 · auto |
+| S-073.3 | Given a value over 50,000 characters, or within 50,000 characters but over 60,000 bytes, then 422 with a clear message and the old value stays; exactly 60,000 bytes is accepted | `test_S_073_3…` (2 data sets) | Passed · 2026-10-19 · auto |
