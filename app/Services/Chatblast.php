@@ -262,20 +262,21 @@ class Chatblast
      * ang hindi pa naipapadala na wala na sa mga status ng campaign. Ang naka-off na campaign ay walang binubuo.
      * @return array{added:int, ready:int, no_psid:int, no_config:int, updated:int, skipped:int}
      */
-    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET): array
+    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET, ?array $steps = null): array
     {
         // Isang pagkuha lang sabay (button o command): ang pangalawa ay sinasabihang may tumatakbo.
         $lock = Cache::lock(self::BUILD_LOCK, 300);
         if (!$lock->get()) return ['busy' => true];
 
         try {
-            return $this->buildLocked($kind, $userId, $trackBudget);
+            return $this->buildLocked($kind, $userId, $trackBudget, $steps);
         } finally {
             $lock->release();
         }
     }
 
-    private function buildLocked(?string $kind, ?int $userId, float $trackBudget): array
+    /** $steps: ang mga step (1 = Day 1) lang na bubuuin (auto: ang may oras ngayon); null = lahat. */
+    private function buildLocked(?string $kind, ?int $userId, float $trackBudget, ?array $steps = null): array
     {
         $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0];
         $missing = $this->missingByPage();
@@ -323,14 +324,14 @@ class Chatblast
 
         foreach ($campaigns as $c) {
             $out['skipped'] += $this->skipStale($c);
-            foreach ($this->buildKind($c, $userId, $missing, $tracked, $riders) as $key => $n) $out[$key] += $n;
+            foreach ($this->buildKind($c, $userId, $missing, $tracked, $riders, $steps) as $key => $n) $out[$key] += $n;
             $out['updated'] += $this->recheck($c->kind, $missing);
         }
 
         return $out;
     }
 
-    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, array $tracked = [], array $riders = []): array
+    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, array $tracked = [], array $riders = [], ?array $steps = null): array
     {
         $out   = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0];
         $kind  = $c->kind;
@@ -338,7 +339,7 @@ class Chatblast
         $now   = now();
         $seen  = [];
 
-        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $tracked, $riders) {
+        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $tracked, $riders, $steps) {
             $rows = [];
             $jnt  = $this->currentStatuses($orders->pluck('waybill')->unique()->values()->all());
             foreach ($orders as $o) {
@@ -349,6 +350,7 @@ class Chatblast
 
                 $day = (int) $o->sent_n + 1;
                 if ($day > count($days)) continue; // ubos na ang mga araw ng uri
+                if ($steps !== null && !in_array($day, $steps, true)) continue; // ang step na ito ay may ibang oras
 
                 $page = $this->settings->normPage((string) $o->page);
                 if (!$this->onPage($c, $page)) continue; // hindi kasama ang page sa campaign

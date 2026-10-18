@@ -243,6 +243,16 @@ class ChatblastSender
                 $this->finish($m, 'skipped', 'Naabot ang daily cap ng page (' . $cap . ' ngayong araw); ipadala ulit bukas', null, []);
                 return;
             }
+            // Ang cap ng campaign sa page (kung mayroon): ang sa campaign na ito lang ang bilang; hindi nito tinataasan ang
+            // cap ng page sa itaas.
+            if (($own = (int) ($c->daily_cap ?? 0)) > 0) {
+                $mine = fn (string $status, string $column) => BotcakeMessage::where('page_name', $m->page_name)->where('kind', $m->kind)
+                    ->where('status', $status)->where($column, '>=', $start)->where('is_test', false)->count();
+                if ($mine('sent', 'sent_at') + $mine('unknown', 'updated_at') >= $own) {
+                    $this->finish($m, 'skipped', 'Naabot ang daily cap ng campaign sa page (' . $own . ' ngayong araw); ipadala ulit bukas', null, []);
+                    return;
+                }
+            }
         }
 
         // Invalid na ang token (hal. 401 sa naunang mensahe): hindi na tinatawagan ang Botcake hangga't hindi naaayos.
