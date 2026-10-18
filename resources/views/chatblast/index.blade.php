@@ -48,7 +48,10 @@
     </form>
 
     {{-- Bilang kada status (pindutin para salain) at ang lagay ng pagpapadala --}}
-    <div id="chips" class="flex flex-wrap gap-2 mb-2 text-xs" aria-label="Count per status"></div>
+    <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
+        <div id="chips" class="flex flex-wrap gap-2" aria-label="Count per status"></div>
+        <span id="earlier" class="text-blue-800"></span>
+    </div>
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
         <span id="state" class="text-xs text-gray-700" aria-live="polite"></span>
         <span id="test-psid-owner" class="text-xs text-gray-700"></span>
@@ -160,7 +163,7 @@
     // ---- listahan ----
 
     // Ang bilang kada status ay mabigat sa maraming row: kinukuha lang ito kada 30 s habang nagpo-poll, o sa bawat aksyon.
-    let countsAt = 0, counts = {}, total = 0;
+    let countsAt = 0, counts = {}, total = 0, earlier = 0;
 
     async function load(light = false) {
         const params = {...filters(), p: page};
@@ -168,9 +171,11 @@
         const res = await fetch(url.listUrl + '?' + new URLSearchParams(params), {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the list (HTTP ' + res.status + ').', 'text-red-600'); return; }
         last = await res.json();
-        if (last.counts) { counts = last.counts; total = last.total; countsAt = Date.now(); }
+        if (last.counts) { counts = last.counts; total = last.total; earlier = last.earlier_ready || 0; countsAt = Date.now(); }
         last.counts = counts;
         renderChips(counts);
+        // Sa default na "ngayong araw": kasama ang ready pa na nabuo noong mga naunang araw.
+        document.getElementById('earlier').textContent = earlier > 0 ? '+ ' + fmt(earlier) + ' ready from earlier days (included)' : '';
         renderState(last.state);
         renderTestPsid(last.test_psid);
         renderRows(last.rows);
@@ -183,14 +188,15 @@
 
     function renderChips(counts) {
         const current = document.querySelector('#filters [name=status]').value;
-        const total = Object.values(counts).reduce((a, b) => a + b, 0);
+        // Ang "all" ay walang skipped (gaya ng listahan); ang skipped ay may sariling chip.
+        const total = Object.entries(counts).reduce((a, [s, n]) => a + (s === 'skipped' ? 0 : n), 0);
         const chip = (status, label, n) => {
             const b = el('button', {type: 'button', class: 'chip px-2 py-1 rounded ' + (status ? COLOR[status] : 'bg-white border') + (current === status ? ' active' : ''), 'data-status': status},
                 [label + ' ', el('b', {text: fmt(n)})]);
             b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? '' : status; page = 1; load(); });
             return b;
         };
-        document.getElementById('chips').replaceChildren(chip('', 'all', total), ...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
+        document.getElementById('chips').replaceChildren(chip('', 'all (no skipped)', total),...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
     }
 
     function renderState(s) {
@@ -198,6 +204,31 @@
             + ' · sent in the last hour: ' + fmt(s.sent);
         document.getElementById('pause').classList.toggle('hidden', s.paused);
         document.getElementById('resume').classList.toggle('hidden', !s.paused);
+        renderBuild(s.build);
+    }
+
+    // "Fetch new" ay tumatakbo sa queue: ipinapakita ang lagay habang naghihintay o tumatakbo, at ang resulta kapag tapos
+    // (para sa pindot sa tab na ito). Habang tumatakbo, naka-disable ang button (kahit ibang tab o user ang pumindot).
+    let watchBuild = false;
+    const buildRunning = b => !!b && (b.status === 'queued' || b.status === 'running');
+    function renderBuild(b) {
+        document.getElementById('build').disabled = buildRunning(b);
+        if (buildRunning(b)) {
+            notice('Fetching new messages in the background: ' + (b.status === 'queued' ? 'waiting for the worker' : 'running')
+                + ' · ' + fmt(b.seconds) + ' s. The list updates when it is done.');
+            return;
+        }
+        if (!watchBuild || !b) return;
+        watchBuild = false;
+        if (b.status === 'done') {
+            const r = b.result;
+            notice(fmt(r.added) + ' new (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' no PSID, ' + fmt(r.no_config) + ' no config); ' + fmt(r.updated) + ' updated; J&T: '
+                + fmt(r.tracked) + ' tracked' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (next fetch or before sending)' : '') + '.', 'text-green-700');
+            countsAt = 0;
+            load();
+        } else {
+            notice(b.error || 'The fetch stopped before it finished; press Fetch new again.', 'text-red-600');
+        }
     }
 
     function renderRows(rows) {
@@ -237,7 +268,7 @@
     // Habang may naka-queue o ipinapadala: kunin ulit kada ilang segundo.
     function schedule() {
         clearTimeout(timer);
-        const active = last && (last.state.queued > 0 || last.rows.some(r => r.status === 'queued' || r.status === 'sending'));
+        const active = last && (last.state.queued > 0 || buildRunning(last.state.build) || last.rows.some(r => r.status === 'queued' || r.status === 'sending'));
         if (active && !document.hidden) timer = setTimeout(() => { load(true); if (openId) openPanel(openId, true); }, 4000);
     }
 
@@ -330,12 +361,11 @@
         const btn = e.currentTarget;
         btn.disabled = true;
         try {
-            const r = (await post(url.buildUrl, {kind: filters().kind})).result;
-            notice(fmt(r.added) + ' new (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' no PSID, ' + fmt(r.no_config) + ' no config); ' + fmt(r.updated) + ' updated; J&T: '
-                + fmt(r.tracked) + ' tracked' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (next fetch or before sending)' : '') + '.', 'text-green-700');
-            load();
-        } catch (err) { notice(err.message, 'text-red-600'); }
-        btn.disabled = false;
+            watchBuild = true;
+            const run = (await post(url.buildUrl, {kind: filters().kind})).run;
+            renderBuild(run);
+            if (buildRunning(run)) load(true); // sinisimulan ang poll hanggang matapos
+        } catch (err) { watchBuild = false; notice(err.message, 'text-red-600'); btn.disabled = false; }
     });
 
     for (const [id, u] of [['pause', url.pauseUrl], ['resume', url.resumeUrl]]) {
