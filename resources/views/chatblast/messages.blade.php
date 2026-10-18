@@ -1,26 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Chatblast · Messages</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
-<div class="p-4 sm:p-6" id="cm"
+@extends('layouts.chatblast')
+
+@section('title', 'Chatblast · Messages')
+@section('heading', 'Messages')
+
+@section('content')
+<div id="cm"
      data-data-url="{{ route('chatblast.campaigns.data') }}"
      data-base-url="{{ url('/chatblast/messages') }}"
      data-flow-url="{{ route('chatblast.campaigns.flow') }}">
-
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h1 class="text-2xl font-semibold">Messages</h1>
-        <div class="flex gap-4 text-sm">
-            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Sequences ›</a>
-            <a href="{{ route('chatblast.index') }}" class="text-blue-700 hover:underline">Chatblast (sending)</a>
-            <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
-        </div>
-    </div>
     <p class="text-xs text-gray-500 mb-3 max-w-4xl">
         Like flows in Botcake: each message has a name and versions (A, B, …) that rotate across customers. The
         <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">sequence</a> picks which message is sent on each day.
@@ -275,5 +262,4 @@
     load();
 })();
 </script>
-</body>
-</html>
+@endsection

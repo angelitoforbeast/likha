@@ -80,4 +80,51 @@ class ChatblastAppTest extends ChatblastTestCase
         $this->assertStringNotContainsString('Page Settings', (string) $this->blade('<x-layout>body</x-layout>'));
         $this->assertSame([], $this->mainNavChatblastLinks('Data Encoder'), 'wala sa dalawa: walang link');
     }
+
+    public static function pages(): array
+    {
+        return [
+            'dashboard'     => ['/chatblast', 'Dashboard'],
+            'messages'      => ['/chatblast/campaigns', 'Messages'],
+            'sequences'     => ['/chatblast/sequence', 'Sequences'],
+            'page settings' => ['/chatblast/page-settings', 'Page settings'],
+            'customers'     => ['/chatblast/page-settings/customers?page=Page%20Uno', 'Page settings'],
+            'psid coverage' => ['/chatblast/page-settings/psid-coverage', 'Page settings'],
+            'orders'        => ['/chatblast/page-settings/psid-coverage/orders?page_name=Page%20Uno', 'Page settings'],
+        ];
+    }
+
+    /** @dataProvider pages */
+    public function test_S_056_1_each_page_has_the_chatblast_layout_and_nav_and_no_main_likha_nav(string $url, string $active): void
+    {
+        $this->navLink('main_only', 'Main Likha Link', '/ads_manager/report', ['CEO']);
+        $this->actingAs($this->user());
+
+        $html = $this->get($url)->assertOk()->getContent();
+
+        $this->assertStringContainsString('data-chatblast-app', $html);
+        foreach (['Dashboard', 'Messages', 'Sequences', 'Page settings'] as $item) {
+            $this->assertStringContainsString('data-cb-nav="' . $item . '"', $html);
+        }
+        preg_match_all('#data-cb-nav="([^"]+)"[^>]*aria-current="page"#', $html, $m);
+        $this->assertSame([$active], $m[1], 'iisa ang naka-highlight');
+        $this->assertStringContainsString('← Likha', $html);
+        $this->assertStringContainsString('Log out', $html);
+        $this->assertStringContainsString('CEO User', $html);
+        $this->assertStringNotContainsString('Main Likha Link', $html);
+    }
+
+    public function test_S_056_5_the_chatblast_nav_shows_only_what_the_role_may_open(): void
+    {
+        $this->navLink('page_settings', 'Page Settings', '/page-settings', ['Marketing']);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+
+        $this->assertStringContainsString('data-cb-nav="Page settings"', $html);
+        foreach (['Dashboard', 'Messages', 'Sequences'] as $item) {
+            $this->assertStringNotContainsString('data-cb-nav="' . $item . '"', $html);
+        }
+        $this->get('/chatblast')->assertNotFound();
+    }
 }

@@ -1,11 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Page Settings</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+@extends('layouts.chatblast')
+
+@section('title', 'Page Settings')
+@section('heading', 'Page Settings')
+
+@section('actions')
+    <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders without a PSID)</a>
+@endsection
+
+@push('styles')
     <style>
         #grid-table th.sticky-col, #grid-table td.sticky-col { position: sticky; left: 0; z-index: 2; }
         #grid-table thead th { position: sticky; top: 0; z-index: 3; }
@@ -15,17 +17,10 @@
         #grid-table .cell:hover .hist { visibility: visible; }
         #grid-table .hist { visibility: hidden; }
     </style>
-</head>
-<body class="bg-gray-50 text-gray-900">
+@endpush
 
-<div class="p-4 sm:p-6">
-    <div class="flex items-center justify-between mb-3">
-        <h1 class="text-2xl font-semibold">Page Settings</h1>
-        <div class="flex gap-4 text-sm">
-            <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders without a PSID)</a>
-            <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
-        </div>
-    </div>
+@section('content')
+<div>
 
     @if(session('success'))
         <div class="mb-3 px-4 py-2 rounded bg-green-100 text-green-800 text-sm">{{ session('success') }}</div>
@@ -925,5 +920,4 @@
     render();
 })();
 </script>
-</body>
-</html>
+@endsection

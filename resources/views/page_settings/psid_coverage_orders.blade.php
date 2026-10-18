@@ -1,21 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orders · {{ $pageName }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
+@extends('layouts.chatblast')
 
-<div class="p-4 sm:p-6">
-    <div class="flex items-center justify-between mb-4">
-        <h1 class="text-xl font-semibold">Orders · {{ $pageName }}</h1>
-        <div class="flex gap-4 text-sm">
-            <a href="{{ route('page-settings.customers', ['page' => $pageName]) }}" class="text-blue-700 hover:underline">Botcake customers</a>
-            <a href="{{ route('page-settings.psid-coverage', ['from' => $from, 'to' => $to]) }}" class="text-blue-700 hover:underline">Lahat ng page</a>
-        </div>
-    </div>
+@section('title', 'Orders · ' . $pageName)
+@section('heading', 'Orders · ' . $pageName)
+
+@section('actions')
+    <a href="{{ route('page-settings.customers', ['page' => $pageName]) }}" class="text-blue-700 hover:underline">Botcake customers</a>
+    <a href="{{ route('page-settings.psid-coverage', ['from' => $from, 'to' => $to]) }}" class="text-blue-700 hover:underline">Lahat ng page</a>
+@endsection
+
+@section('content')
+<div>
 
     <form method="GET" action="{{ route('page-settings.psid-coverage.orders') }}" class="flex flex-wrap items-center gap-2 mb-4 text-sm">
         <input type="hidden" name="page_name" value="{{ $pageName }}">
@@ -81,5 +75,4 @@
         @if($orders->nextPageUrl())<a class="text-blue-700 hover:underline" href="{{ $orders->nextPageUrl() }}">Susunod →</a>@endif
     </div>
 </div>
-</body>
-</html>
+@endsection

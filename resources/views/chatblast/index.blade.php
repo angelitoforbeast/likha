@@ -1,11 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Chatblast</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+@extends('layouts.chatblast')
+
+@section('title', 'Chatblast')
+@section('heading', 'Dashboard')
+
+@push('styles')
     <style>
         #cb-table thead th { position: sticky; top: 0; z-index: 2; }
         #cb-table tbody tr { cursor: pointer; }
@@ -13,10 +11,10 @@
         .chip.active { outline: 2px solid #1d4ed8; }
         pre.cb { white-space: pre-wrap; word-break: break-word; }
     </style>
-</head>
-<body class="bg-gray-50 text-gray-900">
-<div class="p-4 sm:p-6"
-     id="cb"
+@endpush
+
+@section('content')
+<div id="cb"
      data-list-url="{{ route('chatblast.list') }}"
      data-show-url="{{ url('/chatblast/messages') }}"
      data-build-url="{{ route('chatblast.build') }}"
@@ -27,16 +25,6 @@
      data-resume-url="{{ route('chatblast.resume') }}"
      data-test-url="{{ route('chatblast.test') }}"
      data-test-psid-url="{{ route('chatblast.test-psid.search') }}">
-
-    <div class="flex items-center justify-between mb-3">
-        <h1 class="text-2xl font-semibold">Chatblast</h1>
-        <div class="flex gap-4 text-sm">
-            <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Messages</a>
-            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Sequences</a>
-            <a href="{{ route('page-settings.index') }}" class="text-blue-700 hover:underline">Page Settings</a>
-            <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
-        </div>
-    </div>
 
     {{-- Mga filter --}}
     <form id="filters" class="flex flex-wrap items-end gap-3 mb-3 text-sm">
@@ -389,5 +377,4 @@
     load();
 })();
 </script>
-</body>
-</html>
+@endsection

@@ -1,18 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PSID coverage</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
+@extends('layouts.chatblast')
 
-<div class="max-w-6xl mx-auto p-4 sm:p-6">
-    <div class="flex items-center justify-between mb-4">
-        <h1 class="text-2xl font-semibold">PSID coverage</h1>
-        <a href="{{ route('page-settings.index') }}" class="text-sm text-blue-700 hover:underline">Page Settings</a>
-    </div>
+@section('title', 'PSID coverage')
+@section('heading', 'PSID coverage')
+
+@section('actions')
+    <a href="{{ route('page-settings.index') }}" class="text-sm text-blue-700 hover:underline">Page Settings</a>
+@endsection
+
+@section('content')
+<div class="max-w-6xl">
 
     <form method="GET" action="{{ route('page-settings.psid-coverage') }}" class="flex flex-wrap items-center gap-2 mb-2 text-sm">
         <label>Mula <input type="date" name="from" value="{{ $from }}" class="border rounded px-2 py-1"></label>
@@ -53,5 +49,4 @@
         </table>
     </div>
 </div>
-</body>
-</html>
+@endsection

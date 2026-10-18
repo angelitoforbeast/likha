@@ -1,26 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Chatblast · Sequences</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
-<div class="p-4 sm:p-6" id="cs"
+@extends('layouts.chatblast')
+
+@section('title', 'Chatblast · Sequences')
+@section('heading', 'Sequences')
+
+@section('content')
+<div id="cs"
      data-data-url="{{ route('chatblast.sequence.data') }}"
      data-base-url="{{ url('/chatblast/sequence') }}"
      data-messages-url="{{ route('chatblast.campaigns.index') }}">
-
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h1 class="text-2xl font-semibold">Sequences</h1>
-        <div class="flex gap-4 text-sm">
-            <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">‹ Messages</a>
-            <a href="{{ route('chatblast.index') }}" class="text-blue-700 hover:underline">Chatblast (sending)</a>
-            <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
-        </div>
-    </div>
     <p class="text-xs text-gray-500 mb-3 max-w-4xl">
         Like sequences in Botcake: each sequence has a trigger (J&T status, pages, window), steps (Day 1 → Day 2 → …; each step's message
         comes from <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Messages</a>), and a schedule. One message per
@@ -265,5 +252,4 @@
     load();
 })();
 </script>
-</body>
-</html>
+@endsection
