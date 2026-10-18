@@ -3,11 +3,8 @@
 namespace Tests\Feature\Chatblast;
 
 use App\Jobs\ChatblastBuildJob;
-use App\Jobs\SendChatblastMessage;
-use App\Models\BotcakeMessage;
 use App\Services\Chatblast;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 /**
