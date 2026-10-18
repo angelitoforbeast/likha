@@ -64,7 +64,7 @@ class BotcakeChatTest extends ChatblastTestCase
 
     public static function transports(): array
     {
-        return ['json' => ['json'], 'form' => ['form'], 'get' => ['get'], 'json as text/plain' => ['text']];
+        return ['json' => ['json'], 'form' => ['form'], 'get' => ['get'], 'json as text/plain' => ['text'], 'json as text/plain, key in the body' => ['text-key']];
     }
 
     /** @dataProvider transports */
@@ -76,6 +76,7 @@ class BotcakeChatTest extends ChatblastTestCase
             'form' => $this->post('/api/botcake/chat', $data + ['key' => self::KEY]),
             'get'  => $this->get('/api/botcake/chat?' . http_build_query($data + ['key' => self::KEY])),
             'text' => $this->call('POST', '/api/botcake/chat', [], [], [], ['CONTENT_TYPE' => 'text/plain', 'HTTP_X_CHAT_KEY' => self::KEY], json_encode($data)),
+            'text-key' => $this->call('POST', '/api/botcake/chat', [], [], [], ['CONTENT_TYPE' => 'text/plain'], json_encode($data + ['key' => self::KEY])),
         };
 
         $res->assertOk()->assertExactJson(['ok' => true]);

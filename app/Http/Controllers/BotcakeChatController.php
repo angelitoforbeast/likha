@@ -35,8 +35,11 @@ class BotcakeChatController extends Controller
     public function receive(Request $request): JsonResponse
     {
         $data = $request->all();
-        // Ang key muna (header, o param na "key" anuman ang laki ng titik), bago basahin ang iba ng body.
         $given = (string) $request->header('X-Chat-Key');
+        // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin; maaaring nandito ang key.
+        if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
+
+        // Ang key muna (header, o param na "key" anuman ang laki ng titik), bago ang iba ng body.
         if ($given === '') {
             foreach ($data as $k => $v) {
                 if (mb_strtolower(trim((string) $k)) === 'key' && is_string($v)) {
@@ -47,9 +50,6 @@ class BotcakeChatController extends Controller
         }
         $expected = (string) config('services.botcake.chat_key');
         if ($expected === '' || $given === '' || !hash_equals($expected, $given)) return response()->json(['ok' => false], 401);
-
-        // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin.
-        if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
 
         $payload = [];
         $byName = [];
