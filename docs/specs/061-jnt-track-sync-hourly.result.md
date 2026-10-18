@@ -17,7 +17,9 @@ Spec: `docs/specs/061-jnt-track-sync-hourly.md`. Plan: `docs/plans/061-jnt-track
 | `9b5730aa` | feat: /jnt/track-sync lists the automatic runs, the next run, a CEO-only on/off switch; English text |
 | `842b13de` | fix (review): Marketing-OIC 403 tested, strict scan time, failed chunk stays pending, no run before the migration, 70-minute lock, background start asserted |
 | `8b9e3d43`, `86e1a601` | docs: result, stories, TODO |
-| (this commit) | fix: the two decisions on the open points (rider fallback, run order), with regression tests; result, stories, TODO |
+| `62db1694` | fix: the two decisions on the open points (rider fallback, run order), with regression tests; result, stories, TODO |
+| `48170c3f`, `332cce6a` | merge of `main` (`9f10632b`), and its note in the result |
+| (this commit) | fix (independent review): Delivering keeps the upload rule while the track-sync does not run here, runs from 04:20, a J&T throttle shared by all processes, a busy run gives the hour back, a 45-minute lock, a 55-minute order window; result, stories, TODO |
 
 ## The migration
 
@@ -30,17 +32,18 @@ One migration, `2026_10_21_100000_create_jnt_latest_scans_table.php`. Nothing to
 
 ## The schedule on each site
 
-Runs at :20 Manila in the hours 02 and 06–23. Late in the hour also counts (e.g. 09:45).
+Runs at :20 Manila in the hours 02 and 04–23 (04:20 and 05:20 so that the 05:00 and 06:00 Delivering sends have a scan checked within 90 minutes; those runs use the same Delivering-first order). Late in the hour also counts (e.g. 09:45).
 
 | Site | How it starts |
 |---|---|
-| Likha | Scheduler entry `jnt:track-sync-auto`, `cron('20 2,6-23 * * *')`, Manila, `runInBackground`, `withoutOverlapping(60)`. |
+| Likha | Scheduler entry `jnt:track-sync-auto`, `cron('20 2,4-23 * * *')`, Manila, `runInBackground`, `withoutOverlapping(60)`. |
 | Incepxion (no scheduler) | `chatblast:auto` (cron every 5 minutes) starts `php artisan jnt:track-sync-auto > /dev/null 2>&1 &` in the background once the hour is due and not yet claimed. Its sends are never held up by the run. |
 
 The same `chatblast:auto` start also happens on Likha, because the scheduler runs `chatblast:auto`.
 
 - **No double run:** the command claims the hour atomically (`Cache::add('jnt-auto-track-slot:Y-m-d H')`, spec 056 pattern), so the second start in the same hour does nothing.
-- **No overlap:** a `Cache::lock` of 70 minutes.
+- **No overlap:** a `Cache::lock` of 45 minutes (above the 40-minute cap).
+- **A run that finds the lock busy gives the hour back** (`Cache::forget` of the slot), so a later `chatblast:auto` tick in the same hour retries once the previous run is done.
 - **A failed run keeps the hour claimed,** so it is not retried within the hour.
 - **On or off:** the CEO switch (`app_settings.jnt_track_sync_auto`) wins once it has been used; otherwise `services.jnt.track_sync_auto` (`JNT_TRACK_SYNC_AUTO`, default false).
 
@@ -49,13 +52,13 @@ The same `chatblast:auto` start also happens on Likha, because the scheduler run
 **The list:** distinct waybills of `from_jnts` rows that are not final (status NULL or not Delivered/Returned) with `submission_time` in the last 60 days. Each run checks them in this order, each group newest first (by `submission_time`, then `id`):
 
 1. **Delivering:** waybills with an open `from_jnts` row that is Delivering (a Delivering copy decides, even if a newer copy says In Transit).
-2. **In Transit not checked in the last 90 minutes:** no `jnt_latest_scans` row, or `checked_at` older than 90 minutes.
-3. **Everything else that is open:** In Transit checked within 90 minutes, NULL status, For Return, Problematic and other statuses. This group runs until the 40-minute cap.
+2. **In Transit not checked in the last 55 minutes:** no `jnt_latest_scans` row, or `checked_at` older than 55 minutes (under an hour, so everything checked by the last run is due again; 90 minutes stays only for the send-time stale check).
+3. **Everything else that is open:** In Transit checked within 55 minutes, NULL status, For Return, Problematic and other statuses. This group runs until the 40-minute cap.
 
 A waybill's place in its group is its newest open row.
 
 **`JntTracker::refresh`**, the shared engine, now used only by this run:
-- 20 per call, dropped ones retried singly, at most 2 calls per second.
+- 20 per call, dropped ones retried singly, at most 2 calls per second. The limit is held in the cache (`jnt-track-next-call`, reserved under a cache lock), so it is shared by every process: a manual run and the automatic run together stay at 2 per second.
 - Per waybill:
   - `from_jnts` gets the status and `status_logs` (src `auto_track`) when a mapped scan changes it, plus `signingtime`, and the rider when it is present and different. This goes on every open row of the waybill; Delivered/Returned copies are never touched.
   - `jnt_latest_scans` gets an upsert per call:
@@ -76,7 +79,7 @@ A waybill's place in its group is its newest open row.
 - `capped`: true;
 - `resume`: the `(submission_time, id)` of the first waybill not reached, only when that waybill is in group 3.
 
-**The next run** always starts with groups 1 and 2: the Delivering ones, and the In Transit ones not reached last time (they were not checked within 90 minutes, so they are in group 2). Group 3 then starts at the first waybill at or below the saved position: the rest of the last run, still newest first. Then it wraps to the newest ones, until the cap again.
+**The next run** always starts with groups 1 and 2: the Delivering ones, and the In Transit ones not reached last time (they were not checked within 55 minutes, so they are in group 2). Group 3 then starts at the first waybill at or below the saved position: the rest of the last run, still newest first. Then it wraps to the newest ones, until the cap again.
 
 **Edge cases:**
 - If the stop waybill has since become final, the run starts at the next older one.
@@ -89,7 +92,9 @@ Chatblast makes no J&T calls any more: not in the build, not in the hourly refre
 
 **In Transit:** `from_jnts.status`, unchanged.
 
-**Requires On Delivery** (the default "delivering" campaign, and any campaign with the flag):
+**Two modes for Delivering.** The database-only rules below apply only while the auto track-sync runs on this site: it is switched on (env or CEO switch), the migration has run, and the site has a J&T client (`JNT_*` credentials). Otherwise (switched off, not migrated, or no J&T client, as on Incepxion) chatblast keeps the pre-061 rule: Delivering is built and sent from `from_jnts.status` = Delivering, and a stored scan in `jnt_latest_scans` that is not On Delivery still stops the row; there is no "today" and no stale check. /chatblast To send then shows "J&T track-sync is off: Delivering uses the J&T upload status only".
+
+**Requires On Delivery while the track-sync runs** (the default "delivering" campaign, and any campaign with the flag):
 
 | When | Rule |
 |---|---|
@@ -116,14 +121,14 @@ Per call: at least 0.5 s (2 per second), or the J&T latency if longer. Plus abou
 | 20k | 1,000 | about 8 min (0.5 s per call) to 25 min (1.5 s per call) | 1 |
 | 80k | 4,000 | about 35 to 100 min | Usually 2 (about 2 hours); at 1.5 s per call a run reaches about 32k |
 
-**With the run order** (Delivering, then In Transit not checked in 90 minutes, then the rest), counted from the start of the run. The Delivering and In Transit counts are assumptions, not measured on the servers. 1,000 waybills take about 25 s at 0.5 s per call, and about 75 s at 1.5 s per call.
+**With the run order** (Delivering, then In Transit not checked in 55 minutes, then the rest), counted from the start of the run. The Delivering and In Transit counts are assumptions, not measured on the servers. 1,000 waybills take about 25 s at 0.5 s per call, and about 75 s at 1.5 s per call.
 
 | Open waybills | Assumed Delivering | Delivering done after | Assumed In Transit due | In Transit done after | The rest |
 |---|---|---|---|---|---|
 | 20k | 2k | 1 to 3 min | up to 12k | 6 to 18 min | done in the same run (8 to 25 min in all) |
 | 80k | 8k | 4 to 10 min | up to 48k | 24 to 70 min | reached when time is left; continued in the next run |
 
-So the Delivering waybills are checked within the first 10 minutes of every run, and never pass the 90-minute stale limit while the runs are working. At 80k with slow J&T, the In Transit waybills not reached in one run come first in the next (by then they are over 90 minutes old), so each is checked at least every two hours. Group 3 waits longest. Real J&T latency was not measured here.
+So the Delivering waybills are checked within the first 10 minutes of every run, and never pass the 90-minute stale limit while the runs are working. At 80k with slow J&T, the In Transit waybills not reached in one run come first in the next (by then they are over 55 minutes old), so each is checked at least every two hours. Group 3 waits longest. Real J&T latency was not measured here.
 
 ## Case table
 
@@ -135,13 +140,14 @@ Red runs, before the code:
 
 | Case | Test | Result |
 |---|---|---|
-| S-061.1 | `test_S_061_1_the_likha_scheduler_runs_it_at_20_past_2_and_6_to_23_manila_in_the_background`, `test_S_061_1_one_run_per_due_hour_from_20_past` (06:19, 06:20, 23:55, 02:20, 03:20, 05:40), `test_S_061_1_off_by_the_setting_nothing_runs`, `test_S_061_1_chatblast_auto_starts_it_in_the_background_once_per_due_hour` | Passed |
-| S-061.2 | `test_S_061_2_a_run_still_going_holds_the_lock_and_the_next_start_does_not_track` | Passed |
-| S-061.3 | `test_S_061_3_open_waybills_of_the_last_60_days_newest_first_20_per_call_2_per_second_recorded_as_auto` (also dropped ones retried singly), `test_S_061_3_delivering_first_then_in_transit_not_checked_in_90_minutes_then_the_rest_each_newest_first` (regression for the run order) | Passed |
+| S-061.1 | `test_S_061_1_the_likha_scheduler_runs_it_at_20_past_2_and_4_to_23_manila_in_the_background`, `test_S_061_1_one_run_per_due_hour_from_20_past` (06:19, 06:20, 23:55, 02:20, 03:20, 04:19, 04:20, 05:40), `test_S_061_1_off_by_the_setting_nothing_runs`, `test_S_061_1_chatblast_auto_starts_it_in_the_background_once_per_due_hour` | Passed |
+| S-061.2 | `test_S_061_2_a_run_still_going_holds_the_lock_and_the_next_start_gives_the_hour_back` | Passed |
+| S-061.3 | `test_S_061_3_open_waybills_of_the_last_60_days_newest_first_20_per_call_2_per_second_recorded_as_auto` (also dropped ones retried singly), `test_S_061_3_delivering_first_then_in_transit_not_checked_in_55_minutes_then_the_rest_each_newest_first` (regression for the run order and the 55-minute window), `test_S_061_3_two_processes_share_the_limit_of_2_calls_per_second` | Passed |
 | S-061.4 | `test_S_061_4_the_run_stops_at_40_minutes_and_the_next_run_starts_with_the_waybills_not_reached` | Passed |
 | S-061.5 | `test_S_061_5_a_problematic_scan_is_stored_as_the_latest_scan_but_does_not_change_the_status` (also an impossible scan time is stored as null) | Passed |
 | S-061.6 | `test_S_061_6_the_rider_is_written_to_the_latest_scan_and_every_open_row_and_a_failed_answer_keeps_the_old_scan` (also: the NULL-status copy is updated, the Returned copy is not) | Passed |
 | S-061.7 | `test_S_061_7_a_delivering_row_is_built_only_with_an_on_delivery_scan_from_today` (6 scans), `test_S_061_7_an_unsent_delivering_row_whose_scan_is_no_longer_on_delivery_today_is_skipped_and_freed` | Passed |
+| S-061.12 | `test_without_a_running_track_sync_delivering_follows_the_upload_status_and_any_stored_scan` (switched off by env, by the CEO switch, no J&T client), `test_with_a_running_track_sync_the_to_send_page_has_no_off_notice` | Passed |
 | S-061.8 | `test_S_061_8_build_refresh_and_send_never_call_jnt` | Passed |
 | S-061.9 | `test_S_061_9_a_delivering_row_whose_scan_was_checked_over_90_minutes_ago_waits_for_the_next_track_sync` (91 and 89 min), `test_S_061_9_a_delivering_row_without_a_scan_row_is_not_sent` | Passed |
 | S-061.10 | `test_S_061_10_rider_placeholders_come_from_the_latest_scan_and_from_jnts_only_without_a_scan_row`, `test_S_061_10_a_scan_without_a_rider_never_sends_an_earlier_days_rider` (regression for the rider fallback) | Passed |
@@ -157,7 +163,9 @@ Red runs, before the code:
 
 **Red runs for the two decisions:** the rider tests failed with "Rider Rider Kahapon 09171112222" in the text, and with the row `sent` instead of `no_config` "no rider info". The order test failed because the list was still pure newest first.
 
-**Suite** (`php artisan test`, 2026-10-18, after the decisions, before the merge of `main`): `Tests: 2 failed, 1577 warnings, 158 passed (19226 assertions)`. `tests/Feature/Chatblast`: 223 tests, all passing.
+**Red runs for the independent review:** the schedule test failed on `20 2,6-23 * * *`, 04:20 and 05:40 did not run, the busy run kept the hour, the 60-minute In Transit stayed last, the second process did not wait (no sleep), and all three "track-sync not running" cases built nothing and showed no notice.
+
+**Suite** (`php artisan test`, 2026-10-18, final tree after the independent review): `Tests: 2 failed, 1621 warnings, 175 passed (19491 assertions)`. The 2 failed are the known `ExampleTest` and `ImportStartTest`. `tests/Feature/Chatblast`: 227 tests, all passing; with `tests/Feature/Jnt`: 262.
 - The 2 failed are the known `Tests\Feature\ExampleTest` and `Tests\Feature\NightRun\ImportStartTest` ("macro job final write applies only while the run is still active").
 - The warnings are the `file_get_contents` noise every test file shows on this machine (passing tests counted as warnings).
 - Affected folders: `tests/Feature/Jnt` and `tests/Feature/Chatblast`, 253 tests, all passing.
@@ -190,10 +198,25 @@ Skipped. The UI change is one server-rendered card with a button, and its conten
   - `cursor()` memory at 80k (about 40–50 MB, on the `submission_time` index, no filesort);
   - the Process string on Linux.
 
+## Independent review (9f10632b..332cce6a)
+
+Two majors and three minors; all fixed as decided, each with a regression test.
+
+- **Major: Delivering went silent when the track-sync is off** (env and switch off, not migrated, or no J&T client). Fixed: the pre-061 Delivering rule while the track-sync does not run here, plus the notice on To send.
+- **Major: the 05:00 and 06:00 Delivering sends could never pass the 90-minute rule.** Fixed: runs from 04:20 (cron `20 2,4-23 * * *`), Delivering first like the others.
+- **Minor: the J&T rate limit was per process.** Fixed: a cache-shared throttle key.
+- **Minor: a busy run kept the hour.** Fixed: the slot is released, and the lock is 45 minutes.
+- **Minor: the ordering window.** Fixed: 55 minutes for the order; 90 minutes only for the send-time stale check.
+- **Test note:** in S-061.4 the first run's checks are now stamped 09:50 (as during a real 09:20–10:00 run), because with a 55-minute window every check stamped 09:20 is due again at 10:20.
+- **Other chatblast tests** now run in the "track-sync not running" mode (the env default is off); the database-only rules are tested in `ChatblastTrackTest`, which switches it on.
+
 ## Story changes
 
 - **S-061.11:** Marketing-OIC added beside Marketing (403). Reason: the review; the controller already treated them alike.
-- **S-061.3:** the order is now Delivering, then In Transit not checked in 90 minutes, then the rest. Reason: the decision on the cap and the stale rule.
+- **S-061.1:** runs from 04:20. Reason: the independent review (the 05:00 and 06:00 sends).
+- **S-061.2:** a busy start gives the hour back. Reason: the independent review.
+- **S-061.3:** the order is now Delivering, then In Transit not checked in 55 minutes, then the rest; the 2-per-second limit is shared by all processes. Reason: the decision on the cap and the stale rule, and the independent review.
+- **S-061.12 (new):** without a running track-sync, Delivering follows the upload status, with the notice on To send. Reason: the independent review.
 - **S-061.10:** the `from_jnts` rider is used only without a scan row; a scan without a rider leaves the placeholders empty. Reason: the decision on the rider fallback.
 - No other case changed. The stories were written in the main session from the brief's test list (no story-writer run) and go to the reviewer with this result.
 
@@ -206,7 +229,7 @@ Skipped. The UI change is one server-rendered card with a button, and its conten
    - Now a scan without a rider leaves the placeholders empty, and the existing "no rider info" handling applies.
 2. **"Older than 90 minutes" is measured on `checked_at`**, when the track-sync last got an answer, not on `scan_time`. An On Delivery scan from 08:00 stays the latest all day while the rider is out, so measuring `scan_time` would make every delivering row stale.
 3. **The Delivering rule applies only to campaigns with "requires On Delivery"** (the default delivering campaign has it, and the flag forces statuses = Delivering). A Delivering campaign without the flag keeps its old rule. Reason: "keep every other chatblast rule unchanged".
-4. **The cap and the 90-minute window did not fit at high volume** with pure newest first. **Decided and fixed:** each run checks the Delivering waybills first, then the In Transit ones not checked in 90 minutes, then the rest (see the run time estimate).
+4. **The cap and the 90-minute window did not fit at high volume** with pure newest first. **Decided and fixed:** each run checks the Delivering waybills first, then the In Transit ones not checked in 55 minutes, then the rest (see the run time estimate).
 5. **"Recorded with a kind of auto" needs a column the table did not have.** The one migration also adds `kind` to the small `jnt_track_sync_runs`. `from_jnts` is untouched.
 6. **Where the place comes from is not documented by J&T here.** The place is taken as `city, state` from the scan. If J&T PH uses other keys, `scan_place` stays null (it is nullable); check one real answer after release.
 7. **Running from the scheduler and from `chatblast:auto` on both sites:** a 40-minute run cannot sit inside `chatblast:auto` (Likha guards it with `withoutOverlapping(30)`, and the sends would wait). So `chatblast:auto` starts it as a background process, and the hour claim stops doubles. The server needs `proc_open` (the Laravel scheduler already uses it on Likha).

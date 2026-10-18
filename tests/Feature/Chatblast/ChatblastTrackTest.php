@@ -23,6 +23,7 @@ class ChatblastTrackTest extends ChatblastTestCase
         config([
             'jnt.base_url' => 'https://jnt.test',
             'jnt.credentials' => ['eccompanyid' => 'EC-TEST', 'customerid' => 'CU-TEST', 'secret' => 'secret-test', 'api_key' => null],
+            'services.jnt.track_sync_auto' => true, // ang DB-only na patakaran: naka-on ang track-sync at may J&T client
         ]);
         $written = [];
         Http::fake([
@@ -209,6 +210,44 @@ class ChatblastTrackTest extends ChatblastTestCase
         $row = BotcakeMessage::sole();
         $this->assertSame(['no_config', Chatblast::RIDER_REASON], [$row->status, $row->reason]);
         $this->assertSame(0, $this->botcakeCalls(), 'walang mensahe na may lumang rider');
+    }
+
+    public static function lenientSites(): array
+    {
+        return [
+            'naka-off ang track-sync (env)'    => [fn () => config(['services.jnt.track_sync_auto' => false])],
+            'naka-off ang toggle ng CEO'       => [fn () => \App\Models\AppSetting::set(\App\Services\Jnt\JntAutoTrackSync::SETTING, '0')],
+            'walang J&T client (Incepxion)'    => [fn () => config(['jnt.credentials' => ['eccompanyid' => null, 'customerid' => null, 'secret' => null]])],
+        ];
+    }
+
+    #[DataProvider('lenientSites')]
+    public function test_without_a_running_track_sync_delivering_follows_the_upload_status_and_any_stored_scan(\Closure $site): void
+    {
+        $site();
+        $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
+        DB::table('jnt_latest_scans')->delete();                               // walang scan: ang status ng upload lang
+        $this->shipped('Page Uno', 'Ben Reyes', 'JT0000000004', 'psid-b');
+        $this->scan('JT0000000004', 'On Delivery', '2026-10-17 15:00:00', '2026-10-17 15:20:00'); // kahapon, luma
+        $this->shipped('Page Uno', 'Cora Diaz', 'JT0000000006', 'psid-c');
+        $this->scan('JT0000000006', 'Problematic');                           // may scan na hindi On Delivery
+
+        app(Chatblast::class)->build('delivering');
+        $this->assertSame(['JT0000000002', 'JT0000000004'], BotcakeMessage::orderBy('waybill')->pluck('waybill')->all());
+
+        $this->travel(3)->hours(); // walang stale na patakaran
+        $this->send();
+        $this->assertSame(2, BotcakeMessage::where('status', 'sent')->count());
+        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains($r[0]->url(), 'jnt.test')), 'walang tawag sa J&T');
+
+        $this->actingAs($this->user());
+        $this->assertStringContainsString('J&amp;T track-sync is off: Delivering uses the J&amp;T upload status only', $this->get('/chatblast')->assertOk()->getContent());
+    }
+
+    public function test_with_a_running_track_sync_the_to_send_page_has_no_off_notice(): void
+    {
+        $this->actingAs($this->user());
+        $this->assertStringNotContainsString('J&amp;T track-sync is off', $this->get('/chatblast')->assertOk()->getContent());
     }
 
     public function test_the_rider_name_and_phone_are_cleaned_for_the_message(): void

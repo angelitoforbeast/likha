@@ -91,6 +91,8 @@ class ChatblastController extends Controller
             'statuses'  => self::STATUSES,
             'pages'     => BotcakeMessage::query()->distinct()->orderBy('page_name')->pluck('page_name')->all(),
             'today'     => Carbon::now('Asia/Manila')->toDateString(),
+            // Walang tumatakbong J&T track-sync dito: ang Delivering ay ayon sa status ng upload (paalala sa To send).
+            'jntOff'    => $view === 'send' && !\App\Services\Jnt\JntAutoTrackSync::active(),
         ]);
     }
 

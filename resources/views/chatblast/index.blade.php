@@ -90,6 +90,10 @@
         </span>
     </div>
 
+    @if($jntOff)
+    <p class="mb-2 text-xs text-amber-700">J&amp;T track-sync is off: Delivering uses the J&amp;T upload status only</p>
+    @endif
+
     {{-- Ang table lang ang nag-i-scroll; nakadikit ang header row nito sa taas --}}
     <div class="cb-card cb-scroll">
         <table id="cb-table" class="cb-table">

@@ -79,13 +79,13 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         return app(JntAutoTrackSync::class)->runIfDue();
     }
 
-    public function test_S_061_1_the_likha_scheduler_runs_it_at_20_past_2_and_6_to_23_manila_in_the_background(): void
+    public function test_S_061_1_the_likha_scheduler_runs_it_at_20_past_2_and_4_to_23_manila_in_the_background(): void
     {
         Artisan::call('schedule:list'); // nilo-load ang routes/console.php
         $event = collect(app(Schedule::class)->events())->first(fn ($e) => str_contains((string) $e->command, 'jnt:track-sync-auto'));
 
         $this->assertNotNull($event);
-        $this->assertSame('20 2,6-23 * * *', $event->expression);
+        $this->assertSame('20 2,4-23 * * *', $event->expression);
         $this->assertSame('Asia/Manila', $event->timezone);
         $this->assertTrue($event->runInBackground, 'hindi hinaharangan ang ibang naka-schedule');
         $this->assertTrue($event->withoutOverlapping);
@@ -100,7 +100,9 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
             '23:55 (huli sa oras)'      => ['2026-10-18 23:55:00', true],
             '02:20'                     => ['2026-10-18 02:20:00', true],
             '03:20 (walang takbo)'      => ['2026-10-18 03:20:00', false],
-            '05:40 (walang takbo)'      => ['2026-10-18 05:40:00', false],
+            '04:19 (bago ang :20)'      => ['2026-10-18 04:19:00', false],
+            '04:20'                     => ['2026-10-18 04:20:00', true],
+            '05:40'                     => ['2026-10-18 05:40:00', true],
         ];
     }
 
@@ -147,7 +149,7 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         Process::assertRanTimes(fn ($p) => true, 1);
     }
 
-    public function test_S_061_2_a_run_still_going_holds_the_lock_and_the_next_start_does_not_track(): void
+    public function test_S_061_2_a_run_still_going_holds_the_lock_and_the_next_start_gives_the_hour_back(): void
     {
         $this->waybill('JT0000000001');
         $lock = Cache::lock(JntAutoTrackSync::LOCK, 60);
@@ -155,7 +157,12 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
 
         $this->assertSame(['busy' => true], $this->sync());
         $this->assertSame([], $this->calls);
+        $this->assertTrue(JntAutoTrackSync::wanted(), 'binitawan ang oras: ang susunod na chatblast:auto sa oras na ito ay susubok ulit');
         $lock->release();
+
+        $this->travelTo('2026-10-18 09:25:00');
+        $this->assertNotNull($this->sync());
+        $this->assertCount(1, $this->calls);
     }
 
     public function test_S_061_3_open_waybills_of_the_last_60_days_newest_first_20_per_call_2_per_second_recorded_as_auto(): void
@@ -182,7 +189,7 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         $this->assertNotNull($run->finished_at);
     }
 
-    public function test_S_061_3_delivering_first_then_in_transit_not_checked_in_90_minutes_then_the_rest_each_newest_first(): void
+    public function test_S_061_3_delivering_first_then_in_transit_not_checked_in_55_minutes_then_the_rest_each_newest_first(): void
     {
         $this->waybill('JT0000000001', 'In Transit', 1);    // hindi pa nasuri
         $this->waybill('JT0000000002', 'In Transit', 2);    // nasuri 30 minuto na: sa huli
@@ -194,13 +201,27 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         DB::table('from_jnts')->insert(['waybill_number' => 'JT0000000008', 'status' => 'In Transit', 'submission_time' => now()->subMinutes(8)->format('Y-m-d H:i:s')]);
         DB::table('from_jnts')->insert(['waybill_number' => 'JT0000000008', 'status' => 'Delivering', 'submission_time' => now()->subMinutes(9)->format('Y-m-d H:i:s')]); // may kopyang Delivering
         $this->scans['JT0000000008'] = [$this->onDelivery()];
-        foreach (['JT0000000002' => 30, 'JT0000000005' => 91] as $wb => $ago) {
+        $this->waybill('JT0000000009', 'In Transit', 10);   // nasuri 60 minuto na: lampas sa 55
+        foreach (['JT0000000002' => 30, 'JT0000000005' => 91, 'JT0000000009' => 60] as $wb => $ago) {
             DB::table('jnt_latest_scans')->insert(['waybill' => $wb, 'scan_type' => 'Arrival', 'checked_at' => now()->subMinutes($ago)->format('Y-m-d H:i:s')]);
         }
 
         $this->sync();
 
-        $this->assertSame(['JT0000000004', 'JT0000000007', 'JT0000000008', 'JT0000000001', 'JT0000000005', 'JT0000000002', 'JT0000000003', 'JT0000000006'], $this->calls[0]);
+        $this->assertSame(['JT0000000004', 'JT0000000007', 'JT0000000008', 'JT0000000001', 'JT0000000005', 'JT0000000009', 'JT0000000002', 'JT0000000003', 'JT0000000006'], $this->calls[0]);
+    }
+
+    public function test_S_061_3_two_processes_share_the_limit_of_2_calls_per_second(): void
+    {
+        $client = \App\Services\Jnt\JntClient::fromConfig();
+        $manual = new \App\Services\Jnt\JntTracker($this->clock); // hal. ang manual na run
+        $auto   = new \App\Services\Jnt\JntTracker($this->clock); // at ang kusang run, sa ibang proseso
+
+        $manual->trackSet($client, ['JT0000000001']);
+        $auto->trackSet($client, ['JT0000000002']);
+        $manual->trackSet($client, ['JT0000000003']);
+
+        $this->assertSame([0.5, 0.5], array_map(fn ($s) => round($s, 3), $this->clock->sleeps), 'hindi lalampas sa 2 kada segundo kahit dalawang proseso');
     }
 
     public function test_S_061_4_the_run_stops_at_40_minutes_and_the_next_run_starts_with_the_waybills_not_reached(): void
@@ -218,6 +239,7 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         $this->assertTrue($sample['capped']);
 
         $this->calls = [];
+        DB::table('jnt_latest_scans')->update(['checked_at' => '2026-10-18 09:50:00']); // nasuri habang tumatakbo (09:20–10:00)
         $this->travelTo('2026-10-18 10:20:00');
         $this->sync();
 

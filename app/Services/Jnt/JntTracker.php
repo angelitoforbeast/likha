@@ -25,8 +25,8 @@ class JntTracker
     private const FINAL = ['Delivered', 'Returned']; // tapos na: hindi na ginagalaw (gaya ng manual na tool at ng upload)
     private const MIN_INTERVAL = 0.5; // segundo sa pagitan ng mga tawag = max 2 kada segundo
     private const PROGRESS_EVERY = 25; // ilang tawag (ng 20) bago isulat ang progreso ng run
-
-    private ?float $lastCallAt = null;
+    // Ang susunod na puwedeng oras ng tawag, sa cache: iisang hangganan para sa lahat ng proseso (manual at kusang run).
+    private const THROTTLE_KEY = 'jnt-track-next-call';
 
     public function __construct(private BotcakeClock $clock)
     {
@@ -77,11 +77,14 @@ class JntTracker
 
     private function call(JntClient $client, string $billcodes): array
     {
-        if ($this->lastCallAt !== null) {
-            $wait = $this->lastCallAt + self::MIN_INTERVAL - $this->clock->now();
-            if ($wait > 0) $this->clock->sleep($wait);
-        }
-        $this->lastCallAt = $this->clock->now();
+        // Kinukuha ang puwesto sa ilalim ng lock (atomic sa lahat ng proseso), saka naghihintay hanggang sa oras nito.
+        $at = Cache::lock(self::THROTTLE_KEY . ':lock', 5)->block(5, function () {
+            $at = max($this->clock->now(), (float) Cache::get(self::THROTTLE_KEY, 0));
+            Cache::put(self::THROTTLE_KEY, $at + self::MIN_INTERVAL, 60);
+            return $at;
+        });
+        $wait = $at - $this->clock->now();
+        if ($wait > 0) $this->clock->sleep($wait);
 
         return $client->trackForJson($billcodes, 'en');
     }

@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
- * Ang kusang J&T track-sync: kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload), 06:20–23:20 at
+ * Ang kusang J&T track-sync: kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload), 04:20–23:20 at
  * 02:20. Lahat ng bukas na from_jnts waybill (hindi Delivered/Returned) na may submission_time sa huling 60 araw: ang
  * Delivering muna, saka ang In Transit na hindi nasuri sa huling 90 minuto, saka ang iba (pinakabago muna sa bawat isa), sa
  * JntTracker (20 kada tawag, 2 tawag kada segundo): ang status at rider sa from_jnts, ang pinakabagong scan sa
@@ -26,11 +26,12 @@ class JntAutoTrackSync
     public const KIND = 'auto';
     public const SRC = 'auto_track';                // src ng status_logs
     public const MINUTE = 20;
-    public const HOURS = [2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
+    // Mula 04:20: ang Delivering ng 05:00 at 06:00 ay may scan na nasuri sa loob ng 90 minuto bago ipadala.
+    public const HOURS = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
     public const CAP = 40 * 60;                     // segundo kada takbo
     public const DAYS = 60;
-    public const STALE_MINUTES = 90;               // gaya ng chatblast: ang In Transit na nasuri sa loob nito ay sa huli na
-    private const LOCK_SECONDS = 70 * 60;           // higit sa isang oras: walang dalawang takbo kahit lumampas ang isa
+    public const ORDER_MINUTES = 55;               // ang In Transit na nasuri sa loob nito ay sa huli na (mas maikli sa isang oras)
+    private const LOCK_SECONDS = 45 * 60;           // higit sa CAP: ang patay na proseso ay hindi humaharang sa susunod na oras
     private const FINAL = ['Delivered', 'Returned'];
 
     public function __construct(private JntTracker $tracker)
@@ -56,6 +57,22 @@ class JntAutoTrackSync
         if ($now->minute < self::MINUTE || !in_array($now->hour, self::HOURS, true)) return null;
 
         return self::SLOT . ':' . $now->format('Y-m-d H');
+    }
+
+    /**
+     * Para sa chatblast: tumatakbo ba talaga ang track-sync dito (naka-on, na-migrate, at may J&T client ang server). Kung
+     * hindi, walang sariwang scan na darating, kaya ang Delivering ay ayon sa status ng J&T upload (ang dating patakaran).
+     */
+    public static function active(): bool
+    {
+        if (!self::enabled() || !Schema::hasTable('jnt_latest_scans')) return false;
+        try {
+            JntClient::fromConfig();
+        } catch (Throwable $e) {
+            return false; // walang JNT_* credentials (hal. Incepxion)
+        }
+
+        return true;
     }
 
     /** Para sa chatblast:auto: naka-on, oras na, at wala pang kumuha ng oras na ito. */
@@ -88,7 +105,10 @@ class JntAutoTrackSync
         if (!Cache::add($slot, true, 7200)) return null;
 
         $lock = Cache::lock(self::LOCK, self::LOCK_SECONDS);
-        if (!$lock->get()) return ['busy' => true];
+        if (!$lock->get()) {
+            Cache::forget($slot); // tumatakbo pa ang nauna: ang susunod na chatblast:auto sa oras na ito ay susubok ulit
+            return ['busy' => true];
+        }
 
         try {
             return $this->run();
@@ -132,7 +152,7 @@ class JntAutoTrackSync
     /**
      * Ang mga waybill, isang beses bawat isa, sa ayos na ito (bawat grupo ay pinakabago muna: submission_time, saka id):
      *  1. Delivering (may bukas na from_jnts row na Delivering): ang kailangan ng chatblast, hindi dapat maluma;
-     *  2. In Transit na hindi nasuri sa huling STALE_MINUTES (o hindi pa kailanman);
+     *  2. In Transit na hindi nasuri sa huling ORDER_MINUTES (o hindi pa kailanman);
      *  3. lahat ng iba pang bukas, hanggang sa cap. Kapag naputol ng cap ang grupong ito sa huling takbo, nagsisimula ito
      *     sa unang hindi naabot (ang mga sumunod pa) at saka ang pinakabago hanggang doon.
      * @return array{0: array<int,string>, 1: array<string, array{0:string, 1:int}>, 2: array<string,bool>} [waybills, waybill => [submission_time, id], ang nasa grupo 3]
@@ -154,9 +174,9 @@ class JntAutoTrackSync
             $pos[$wb] ??= [(string) $r->submission_time, (int) $r->id]; // ang pinakabagong bukas na row ang puwesto
         }
 
-        // In Transit na nasuri na sa huling STALE_MINUTES: sa grupo 3.
+        // In Transit na nasuri na sa huling ORDER_MINUTES: sa grupo 3.
         $transit = array_keys(array_filter($group, fn ($g) => $g === 2));
-        $fresh = now()->subMinutes(self::STALE_MINUTES)->format('Y-m-d H:i:s');
+        $fresh = now()->subMinutes(self::ORDER_MINUTES)->format('Y-m-d H:i:s');
         foreach (array_chunk($transit, 1000) as $chunk) {
             foreach (DB::table('jnt_latest_scans')->whereIn('waybill', $chunk)->where('checked_at', '>=', $fresh)->pluck('waybill') as $wb) $group[$wb] = 3;
         }

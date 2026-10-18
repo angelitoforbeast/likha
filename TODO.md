@@ -666,8 +666,7 @@ Accepted, not fixed:
 - **A crashed run stays "running" on /jnt/track-sync and drops its resume point** (the next run starts from the newest). Reason: rare; the hour claim already stops repeats. Mark leftover running rows failed at the next start if it shows up.
 - **The build-time skip of unsent requires-On-Delivery rows has no window limit** (two indexed queries per 500 unsent rows per build). Reason: the unsent set is small; limit it to the campaign window if it grows.
 - **"Delivered/Returned are final" is now in three places** (JntTracker, JntAutoTrackSync, the manual job). Reason: legacy minimal touches; share one constant when this area changes again.
-- **The manual run and the automatic run each throttle to 2 calls a second;** both at once make 4. Reason: existed before for the manual run beside chatblast; avoid starting a manual run at :20.
-- **Missing small tests:** the stop waybill of a capped run became final (the code handles it), a stale row sent at the next due time once fresh, the Off state of the page, a guest POST to the toggle, the claim used up when the lock is busy. Reason: each path is a one-line branch next to a covered one.
+- **Missing small tests:** the stop waybill of a capped run became final (the code handles it), a stale row sent at the next due time once fresh, the Off state of the page, a guest POST to the toggle. Reason: each path is a one-line branch next to a covered one.
 - **The background start uses its own command string** instead of Laravel's `Application::formatCommandString()`. Reason: works on Linux; the test asserts the trailing `&`.
 - **jnt_latest_scans has no timestamps** (the plan said it would); `checked_at` is the only time needed.
 

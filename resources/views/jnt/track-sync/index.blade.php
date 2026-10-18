@@ -37,7 +37,7 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <b>Automatic track-sync</b>
         <span class="ts-badge {{ $autoOn ? 'b-done' : 'b-queued' }}">{{ $autoOn ? 'On' : 'Off' }}</span>
-        <span class="ts-muted">Every hour at :20 (06:20–23:20 and 02:20, Manila), open waybills of the last 60 days, up to 40 minutes a run · Next run {{ $autoNext->format('H:i') }}{{ $autoOn ? '' : ' (when switched on)' }}</span>
+        <span class="ts-muted">Every hour at :20 (04:20–23:20 and 02:20, Manila), open waybills of the last 60 days, up to 40 minutes a run · Next run {{ $autoNext->format('H:i') }}{{ $autoOn ? '' : ' (when switched on)' }}</span>
         @if($isCeo)
           <button id="auto-toggle" type="button" class="ts-btn {{ $autoOn ? 'preview' : 'apply' }}" data-on="{{ $autoOn ? '0' : '1' }}"
                   data-url="{{ route('jnt.track-sync.auto') }}">{{ $autoOn ? 'Switch off' : 'Switch on' }}</button>

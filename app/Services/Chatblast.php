@@ -6,6 +6,7 @@ use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Models\ChatblastMessage;
 use App\Models\PageSetting;
+use App\Services\Jnt\JntAutoTrackSync;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -66,6 +67,9 @@ class Chatblast
      * pinakamalayo ang totoo: ang kopyang "In Transit" pa rin ay hindi nagpapanatili sa waybill sa In Transit.
      */
     private const PROGRESS = ['In Transit' => 1, 'Delivering' => 2, 'Delivered' => 3, 'For Return' => 3, 'Returned' => 3];
+
+    /** Sa isang pagkuha: tumatakbo ba ang kusang track-sync dito (JntAutoTrackSync::active()). */
+    private bool $strictScan = true;
 
     public function __construct(private PageSettings $settings)
     {
@@ -300,21 +304,29 @@ class Chatblast
      * alam kung On Delivery pa). Hindi On Delivery (hal. Problematic, Delivery Fail) o hindi ngayong araw: skipped. Ang
      * status ay nasa from_jnts, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel. Kapag walang
      * bersyong magagamit, no_config.
+     * Walang tumatakbong track-sync dito (naka-off, o walang J&T client ang server): ang dating patakaran, walang stale at
+     * walang "ngayong araw"; ang scan na nakatala na hindi On Delivery lang ang humaharang.
      * @return array{0:string, 1:string}|null [status, dahilan] kapag hindi dapat ipadala; null kapag puwede
      */
     public function refreshRider(BotcakeMessage $m): ?array
     {
         $scan = $this->scans([$m->waybill])[$m->waybill] ?? null;
-        if (!$scan || $scan['type'] === null || !$scan['checked_at'] || Carbon::parse($scan['checked_at'])->lt(now()->subSeconds(self::SCAN_MAX_AGE))) {
-            return ['ready', self::STALE_SCAN];
+        if (JntAutoTrackSync::active()) {
+            if (!$scan || $scan['type'] === null || !$scan['checked_at'] || Carbon::parse($scan['checked_at'])->lt(now()->subSeconds(self::SCAN_MAX_AGE))) {
+                return ['ready', self::STALE_SCAN];
+            }
+            if (!self::isOnDelivery($scan['type'])) return ['skipped', self::notOnDelivery($scan['type'])];
+            if (!self::scannedToday($scan)) return ['skipped', self::NOT_TODAY];
+        } elseif ($scan && $scan['type'] !== null && !self::isOnDelivery($scan['type'])) {
+            return ['skipped', self::notOnDelivery($scan['type'])];
         }
-        if (!self::isOnDelivery($scan['type'])) return ['skipped', 'The latest J&T scan is no longer On Delivery (' . ($scan['type'] ?: 'no scantype') . ')'];
-        if (!self::scannedToday($scan)) return ['skipped', self::NOT_TODAY];
 
         // Pareho pa ang rider: walang binabago (ang text ay ang nabuo; ang tinanggihang text ay hindi binubuo ulit dito).
         $old = (array) $m->vars;
-        if ($scan['rider'] === trim((string) ($old['rider'] ?? '')) && $scan['rider_phone'] === trim((string) ($old['rider_phone'] ?? ''))) return null;
-        $vars = array_merge($old, ['rider' => $scan['rider'], 'rider_phone' => $scan['rider_phone'], 'tracked_at' => $scan['checked_at']]);
+        $rider = $scan['rider'] ?? '';
+        $phone = $scan['rider_phone'] ?? '';
+        if ($rider === trim((string) ($old['rider'] ?? '')) && $phone === trim((string) ($old['rider_phone'] ?? ''))) return null;
+        $vars = array_merge($old, ['rider' => $rider, 'rider_phone' => $phone, 'tracked_at' => $scan['checked_at'] ?? null]);
         $days = $this->sequence($m->kind);
         if ($m->day > count($days)) return ['skipped', 'Day ' . $m->day . ' no longer exists in the sequence'];
         $pick = $this->pick($days[$m->day - 1], $m->waybill, $vars);
@@ -371,6 +383,22 @@ class Chatblast
     private static function deliveringToday(?array $scan): bool
     {
         return $scan !== null && $scan['type'] !== null && self::isOnDelivery($scan['type']) && self::scannedToday($scan);
+    }
+
+    /**
+     * Requires On Delivery, ayon sa takbo ng track-sync: $strict (tumatakbo ito dito) = On Delivery ngayong araw;
+     * kung hindi = ang dating patakaran (ang status ng upload), maliban kung may nakatalang scan na hindi On Delivery.
+     */
+    private static function deliveringOk(?array $scan, bool $strict): bool
+    {
+        if ($strict) return self::deliveringToday($scan);
+
+        return $scan === null || $scan['type'] === null || self::isOnDelivery($scan['type']);
+    }
+
+    private static function notOnDelivery(string $scantype): string
+    {
+        return 'The latest J&T scan is no longer On Delivery (' . ($scantype ?: 'no scantype') . ')';
     }
 
     private static function isOnDelivery(string $scantype): bool
@@ -513,6 +541,8 @@ class Chatblast
         // Ang hindi pa naipapadala ng campaign na "requires On Delivery" na ang pinakabagong scan sa database ay hindi na
         // On Delivery ngayong araw (hal. Problematic, Delivery Fail, o kahapon pa): nilalaktawan at binibitawan ang key,
         // para may sariling row ang susunod na subok. Ang walang scan ay hindi ginagalaw (naghihintay ng track-sync).
+        // Walang tumatakbong track-sync dito: ang scan na hindi On Delivery lang (hindi ang "hindi ngayong araw").
+        $this->strictScan = JntAutoTrackSync::active();
         $onDelivery = $all->where('requires_on_delivery', true)->pluck('kind')->all();
         if ($onDelivery) {
             BotcakeMessage::whereIn('kind', $onDelivery)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
@@ -520,9 +550,8 @@ class Chatblast
                     $scans = $this->scans($rows->pluck('waybill')->all());
                     foreach ($rows as $row) {
                         $scan = $scans[$row->waybill] ?? null;
-                        if ($scan === null || $scan['type'] === null || self::deliveringToday($scan)) continue;
-                        $reason = self::isOnDelivery($scan['type']) ? self::NOT_TODAY
-                            : 'The latest J&T scan is no longer On Delivery (' . ($scan['type'] ?: 'no scantype') . ')';
+                        if ($scan === null || $scan['type'] === null || self::deliveringOk($scan, $this->strictScan)) continue;
+                        $reason = self::isOnDelivery($scan['type']) ? self::NOT_TODAY : self::notOnDelivery($scan['type']);
                         $out['skipped'] += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
                             ->update(['status' => 'skipped', 'dedupe_key' => null, 'reason' => $reason]);
                     }
@@ -574,7 +603,7 @@ class Chatblast
                 // Problematic, Delivery Fail…, at hindi ang kahapon): ang "Idedeliver po ngayon" ay hindi totoo kung hindi.
                 // Susubukan ulit sa susunod na kuha, pagkatapos ng susunod na track-sync.
                 $scan = $scans[$waybill] ?? null;
-                if ($c->requires_on_delivery && !self::deliveringToday($scan)) continue;
+                if ($c->requires_on_delivery && !self::deliveringOk($scan, $this->strictScan)) continue; // walang track-sync: ang upload
 
                 // Ang rider: mula sa jnt_latest_scans; ang from_jnts lang kapag walang scan row ang waybill (scans()).
                 $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page,
