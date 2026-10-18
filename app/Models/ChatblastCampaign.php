@@ -10,12 +10,12 @@ class ChatblastCampaign extends Model
     /** Lahat maliban sa log (na maaaring malaki): para sa pagbuo, pagpapadala at listahan. */
     public const COLUMNS = [
         'id', 'kind', 'name', 'statuses', 'pages', 'window_days', 'days', 'requires_on_delivery', 'mode', 'send_times', 'active',
-        'auto_ran_at', 'mode_changed_by', 'mode_changed_at', 'weekdays', 'step_times', 'daily_cap', 'created_at', 'updated_at',
+        'auto_ran_at', 'mode_changed_by', 'mode_changed_at', 'weekdays', 'step_times', 'daily_cap', 'step_messages', 'created_at', 'updated_at',
     ];
 
     protected $fillable = [
         'kind', 'name', 'statuses', 'pages', 'window_days', 'days', 'requires_on_delivery', 'mode', 'send_times', 'active',
-        'auto_ran_at', 'mode_changed_by', 'mode_changed_at', 'log', 'weekdays', 'step_times', 'daily_cap',
+        'auto_ran_at', 'mode_changed_by', 'mode_changed_at', 'log', 'weekdays', 'step_times', 'daily_cap', 'step_messages',
     ];
 
     protected $casts = [
@@ -32,5 +32,6 @@ class ChatblastCampaign extends Model
         'weekdays'             => 'array',
         'step_times'           => 'array',
         'daily_cap'            => 'integer',
+        'step_messages'        => 'array',
     ];
 }

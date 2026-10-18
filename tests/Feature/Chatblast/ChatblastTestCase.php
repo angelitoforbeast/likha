@@ -46,6 +46,7 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php',
             'database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php',
+            'database/migrations/2026_10_19_100100_create_chatblast_messages_table.php',
         ]]);
     }
 
