@@ -14,7 +14,12 @@ Spec: `docs/specs/056-chatblast-app.md`. Plan: `docs/plans/056-chatblast-app.md`
 | `cf8736f3` | feat: one Chatblast layout with its own top bar and nav, used by the chatblast and page settings pages |
 | `6db4dddb` | fix (review): the redirect keeps the raw encoded path; the brand text shows at every width |
 | `d06fef1c` | docs: accepted review findings in `TODO.md` |
-| (this commit) | docs: this result |
+| `bed7fad3` | docs: this result (first version) |
+| `e8009be7` | docs (amendment 1): plan section and stories S-056.8 to S-056.12 |
+| `4d245aa9` | feat (amendment 1): list hides skipped by default, earlier ready rows in the today view, Fetch new as a queued job |
+| `14c966eb` | feat (amendment 1): the dashboard's "all (no skipped)" chip, the earlier-ready note, the fetch progress |
+| `b71f6667` | fix (amendment 1, review): earlier ready leaves out test rows, a long wait shows why it stopped, the progress line no longer hides other notices |
+| (this commit) | docs: result, stories and TODO for amendment 1 |
 
 ## Layout
 
@@ -207,3 +212,130 @@ Also recorded:
 - **The page settings nav link** in production keeps route_url `/page-settings`, and access keeps working. Optionally,
   the owner can change it to `/chatblast/page-settings` in /owner/nav-settings; access follows either one.
 - **Route cache:** the new redirect is a closure, like other routes in `web.php`.
+
+## Amendment 1: the Dashboard list and Fetch new
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-1.md` (git-ignored, not
+committed). It is treated as part of the brief. Plan: the "Amendment 1" section of `docs/plans/056-chatblast-app.md`.
+
+### What changed
+
+1. **Skipped rows are hidden by default** (`ChatblastController::filtered` and `list`).
+   - With no status chosen, the rows and the total leave out `skipped`. The counts still include it, so the "skipped"
+     chip keeps its number.
+   - Clicking that chip shows the skipped rows with their reasons; clicking it again returns to the default.
+   - The first chip reads **"all (no skipped) N"**.
+   - Sending is unchanged: Send all ready only takes `ready`, and Retry failed only `failed` / `field_mismatch`.
+2. **Ready rows from earlier days show in the default view.**
+   - When From = To = today (Manila), the build-date condition becomes "built today, OR still `ready` (not a test row)
+     and built within its sequence's window". The window is `chatblast_campaigns.window_days` per kind, the same
+     window the build re-tracks ready rows in.
+   - The page, sequence and search filters still apply to those rows.
+   - The list returns `earlier_ready`, computed in the same GROUP BY as the counts, so there is no extra query. The
+     page shows **"+ N ready from earlier days (included)"**.
+   - Send all ready uses the same filter, so in the default view it sends those rows too.
+   - Any other date range is an exact build-date filter, as before.
+3. **Fetch new runs as a queued job** (`App\Jobs\ChatblastBuildJob`, default queue, like page settings' Sync now).
+   This was the amendment's preferred option.
+   - **The endpoint** checks that the build lock is free, takes a one-build slot (`Cache::add`, 10 minutes), records
+     the run and dispatches the job.
+   - **A second press** while a build waits or runs, or while `chatblast:auto` holds the lock, gets the same 409 "A
+     fetch is already running".
+   - **The job** runs `Chatblast::build` with the same 20 s J&T budget the web build had. It has no web time limit and
+     passes its own token as the lock owner; `Chatblast::build` gained an optional `lockOwner` argument.
+   - **The lock is always released:**
+     - the build's `finally` releases it;
+     - on a failure or a worker timeout, `failed()` releases it, but only if this job still owns it. The job's
+       `$timeout` is 280 s, below the 300 s lock, with `failOnTimeout`;
+     - if the process is killed outright, the lock's own 300 s expiry and the slot's 10 minutes still free it.
+   - **The job also** frees its slot in `finally`, and refreshes the slot when it starts, so a long wait in the queue
+     does not show it as stopped while it runs.
+   - **Progress on the page:** the run (queued, running, done, failed, busy or stopped, with seconds and the result)
+     comes in the list's `state.build`.
+     - While it waits or runs, the page shows "Fetching new messages in the background: waiting for the worker /
+       running · N s", keeps polling and disables the button, also in other tabs.
+     - When the run is done, the page shows the same result line as before and reloads the counts.
+     - A run that waited more than 10 minutes for a worker shows "The fetch waited too long for the worker; press
+       Fetch new again."
+   - **Existing tests:** three were updated to the new behaviour:
+     - `ChatblastPageTest` default list: a 2-day-old ready row is now included, and an exact range still excludes it.
+     - `ChatblastPageTest` buttons: the build now answers with `run`.
+     - `ChatblastEnglishTest`: it reads its skipped rows with `status=skipped`.
+
+### Case table (amendment 1)
+
+Red runs, before the code:
+
+- **S-056.8:** `Failed asserting that 3 is identical to 2` (the total included skipped).
+- **S-056.9:** the earlier rows were missing from the list.
+- **S-056.10:** `Failed asserting that 1 is identical to 2`.
+- **S-056.11:** `Failed asserting that null is identical to 'queued'`.
+- **S-056.12:** the strings were not in the page.
+- **Review fix:** the test row was counted (`2` vs `1`), and the stopped run had no error text.
+
+| Case | Test | Result |
+|---|---|---|
+| S-056.8 | `ChatblastDashboardListTest::test_S_056_8_skipped_rows_are_hidden_unless_the_skipped_chip_is_chosen` | pass |
+| S-056.9 | `ChatblastDashboardListTest::test_S_056_9_the_default_view_adds_ready_rows_built_on_earlier_days_within_the_window` | pass |
+| S-056.10 | `ChatblastDashboardListTest::test_S_056_10_send_all_ready_in_the_default_view_sends_the_earlier_ready_rows_too` | pass |
+| S-056.11 | `ChatblastDashboardListTest::test_S_056_11_fetch_new_runs_as_a_queued_job_one_at_a_time_and_always_frees_the_lock` | pass |
+| S-056.12 | `ChatblastDashboardListTest::test_S_056_12_the_dashboard_says_what_the_list_covers_and_shows_the_fetch_progress` and the browser check | pass |
+
+`tests/Feature/Chatblast`: `OK, Tests: 159, Assertions: 1069`. The full suite on `b71f6667`: `Tests: 2 failed, 1477
+warnings, 158 passed (18618 assertions)`, 247 s. The two failures are the known `ExampleTest` and
+`NightRun\ImportStartTest`.
+
+### Browser check (amendment 1)
+
+The browser check ran on the scratch app with made-up rows on one page: 8 ready today, 100 ready In transit built
+yesterday, 5 skipped and 3 sent today. The queue was the database queue with **no worker**, so no build ran and no J&T
+call was made. The "done" state was written into the cache by hand. Evidence and screenshots are in the main
+checkout's `handoff/056-chatblast-app/screens/amendment-1/`: `dash-default`, `dash-skipped`, `dash-fetch-queued`,
+`dash-fetch-done` and `evidence-amendment-1.txt`.
+
+- **Default:** the chips read "all (no skipped) 111 · ready 108 · sent 3 · skipped 5", with "+ 100 ready from earlier
+  days (included)"; 111 rows over 2 pages, and no skipped row.
+- **The skipped chip:** shows 5 skipped rows; clicking it again returns to 111.
+- **From = To = yesterday:** "all (no skipped) 100 · ready 100", with no note.
+- **Fetch new:** "Fetching new messages in the background: waiting for the worker · 0 s", then 8 s, with the button
+  disabled. After the run was marked done, the page showed "12 new (9 ready, 3 no PSID, 0 no config); 1 updated; J&T:
+  40 tracked." and the button was enabled again.
+- **No JS errors** were logged. The check was re-run after the review fix, with the same results.
+
+### Review (amendment 1)
+
+One `skeptic-reviewer` pass at standard depth on `e8009be7..14c966eb`, then a re-check of the fix (`b71f6667`). There
+were no blockers.
+
+- **The major:** there was no test that Send all ready keeps the page, sequence and search filters on earlier ready
+  rows. The code was right, but nothing pinned the OR group inside its closure. It is fixed with the S-056.10
+  filtered sends, and the re-check closed it.
+- **Fixed minors:**
+  - earlier test rows were included;
+  - a run waiting behind a long default-queue job could show "stopped" while it ran;
+  - there were no stopped or busy tests;
+  - the progress line overwrote other notices and stayed in other tabs;
+  - a failed poll stopped polling;
+  - the disabled Fetch new button looked enabled, so it got `disabled:opacity-50`.
+- **Accepted, with reasons in `TODO.md`:**
+  - the J&T budget constant is read from the controller;
+  - the window rule is written twice;
+  - S-056.12 checks strings only;
+  - the OR condition's index use is not measured;
+  - a network error while polling stops the poll;
+  - Fetch new needs a default-queue worker.
+
+### Story changes (amendment 1)
+
+- **S-056.10** gained the filtered sends and the test-row exclusion, from the review.
+- **S-056.11** gained the stopped and busy states, from the review.
+
+### Merge danger (amendment 1)
+
+- **Fetch new needs a worker on the default queue.** Page settings' Sync now already uses that queue, so one should be
+  running. If none is, the page says so after 10 minutes, and nothing else is affected.
+- **The cache store must be shared by the web and the worker,** which the build lock already needs. It defaults to the
+  database store.
+- **Pages open from before the deploy** still expect the old build answer: a press shows a blank result line until
+  the page is reloaded. The build itself runs.
+- **No migrations.**
