@@ -6,6 +6,7 @@ use App\Jobs\RunChatbotFlow;
 use App\Models\BotcakeChat;
 use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -140,6 +141,13 @@ class BotcakeChatController extends Controller
             if (isset($used[$name]) || count($payload) >= self::PAYLOAD_KEYS) continue;
             if (in_array($name, self::FILLED_ONLY, true) && $this->filled($s) === null) continue;
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
+        }
+
+        // Ang Like (link ng sticker) ay "👍" at ang larawan mula sa Facebook ay "[Photo]" (ang link ay nasa payload).
+        if ($f['message'] !== null) {
+            $clean = ChatMessageCleaner::clean($f['message']);
+            $f['message'] = $clean['message'];
+            if ($clean['image_url'] !== null) $payload['image_url'] = $clean['image_url'];
         }
 
         if (!$this->isDuplicate($f)) {

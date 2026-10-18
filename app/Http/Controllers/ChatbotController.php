@@ -52,7 +52,7 @@ class ChatbotController extends Controller
         $others = PageSetting::where('active', true)->distinct()->orderBy('page_name')->pluck('page_name')
             ->unique(fn ($p) => $this->settings->pageKey($p))->reject(fn ($p) => in_array($this->settings->pageKey($p), $listed, true))->values();
 
-        return view('chatbot.index', ['isCeo' => $this->role() === 'CEO', 'otherPages' => $others]);
+        return view('chatbot.index', ['isCeo' => $this->role() === 'CEO', 'otherPages' => $others, 'repliesOn' => \App\Services\Chatbot\BotcakeOutbox::enabled()]);
     }
 
     /** Ang mga column at row (isang query ng settings, at ang chats ngayong araw at ang huli kada page). */

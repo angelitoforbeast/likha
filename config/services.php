@@ -117,10 +117,10 @@ return [
         'track_sync_auto' => (bool) env('JNT_TRACK_SYNC_AUTO', false),
     ],
 
-    // Sariling chatbot (/chatbot): false = tumatakbo ang mga flow pero walang padala sa Botcake at walang sheet row
-    // (itinatala bilang skipped). Ang owner ang nagbubukas nito pagkatapos ng Test.
+    // Sariling chatbot (/chatbot): ang On/Off ng bawat page (kasama ang flow) ang nagpapasya kung sumasagot. Ito ay emergency stop
+    // lang: false = tumatakbo ang mga flow pero walang padala sa Botcake at walang sheet row (itinatala bilang skipped).
     'chatbot' => [
-        'replies_enabled' => (bool) env('CHATBOT_REPLIES_ENABLED', false),
+        'replies_enabled' => (bool) env('CHATBOT_REPLIES_ENABLED', true),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

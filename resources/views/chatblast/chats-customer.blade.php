@@ -83,7 +83,7 @@
         @foreach($chats as $c)
             <li class="px-4 py-3 text-sm">
                 <div class="text-xs text-slate-500">{{ $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i:s') }}</div>
-                <div class="mt-1 whitespace-pre-line break-words">@if((string) $c->message !== ""){{ $c->message }}@else<span class="italic text-slate-400">no text (sticker or photo?)</span>@endif</div>
+                <div class="mt-1 whitespace-pre-line break-words">@include('chatblast.partials.message', ['c' => $c])</div>
             </li>
         @endforeach
     </ol>

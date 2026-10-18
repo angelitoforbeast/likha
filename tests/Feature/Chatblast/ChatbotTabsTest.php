@@ -108,7 +108,7 @@ class ChatbotTabsTest extends ChatblastTestCase
         $this->reply(['page_id' => 2002, 'content' => [['type' => 'text', 'text' => 'Other page']], 'status' => 'failed', 'error' => 'Botcake said "x" (HTTP 400)', 'sent_at' => '2026-10-19 11:00:00']);
         $this->actingAs($this->user());
 
-        $this->get('/chatbot/replies')->assertOk()->assertSee('Replies are switched off');
+        $this->get('/chatbot/replies')->assertOk()->assertSee('On + a flow = the bot answers.');
         $rows = fn (string $q) => array_column($this->getJson('/chatbot/replies/data?' . $q)->assertOk()->json('rows'), 'summary');
 
         $this->assertSame(['Other page', '[image] https://img.example.test/a.jpg', 'Price is 499'], $rows('date=2026-10-19'));

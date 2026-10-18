@@ -71,7 +71,7 @@ class ChatblastChatController extends Controller
                 })
                 ->orderByDesc('received_at')->orderByDesc('id')
                 // Walang COUNT(*) sa buong table: Newer/Older lang.
-                ->simplePaginate(self::PER_PAGE, ['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'received_at'])
+                ->simplePaginate(self::PER_PAGE, ['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'payload', 'received_at'])
                 ->withQueryString();
             // Ang mga page: may Botcake ID sa page settings (mapipili na bago pa dumating ang unang chat, para sa Setup
             // box), at ang ibang page_id na nasa chats na (Unknown page). Parehong naka-cache.
@@ -105,7 +105,7 @@ class ChatblastChatController extends Controller
             ->when($pageId !== '', fn ($w) => $w->where('page_id', $pageId), fn ($w) => $w->whereNull('page_id'))
             ->where('psid', $psid)
             ->orderByDesc('received_at')->orderByDesc('id')->limit(self::CUSTOMER_MAX)
-            ->get(['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'received_at'])
+            ->get(['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'payload', 'received_at'])
             ->reverse()->values();
 
         // Ang customer fields ng chatbot (walang run state na "__"); ang CEO ang nakakapagbago (ChatbotTabsController).

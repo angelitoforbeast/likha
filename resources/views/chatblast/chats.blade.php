@@ -61,7 +61,7 @@
                         @endif
                         <div class="text-xs text-slate-500 sm:hidden">{{ $c->page_name ?? 'Unknown page' }}</div>
                     </td>
-                    <td class="whitespace-pre-line break-words">@if((string) $c->message !== ""){{ $c->message }}@else<span class="italic text-slate-400">no text (sticker or photo?)</span>@endif</td>
+                    <td class="whitespace-pre-line break-words">@include('chatblast.partials.message', ['c' => $c])</td>
                 </tr>
             @endforeach
             </tbody>

@@ -23,6 +23,7 @@
 @endpush
 
 @section('content')
+@include('chatbot.partials.switch', ['repliesOn' => $repliesOn])
 <div id="cbot"
      data-data-url="{{ route('chatbot.data') }}"
      data-cell-url="{{ route('chatbot.cell') }}"
