@@ -390,10 +390,11 @@ class Chatblast
      * ang hindi pa naipapadala na wala na sa mga status ng campaign. Ang naka-off na campaign ay walang binubuo.
      * @return array{added:int, ready:int, no_psid:int, no_config:int, updated:int, skipped:int}
      */
-    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET, ?array $steps = null): array
+    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET, ?array $steps = null, ?string $lockOwner = null): array
     {
-        // Isang pagkuha lang sabay (button o command): ang pangalawa ay sinasabihang may tumatakbo.
-        $lock = Cache::lock(self::BUILD_LOCK, 300);
+        // Isang pagkuha lang sabay (button o command): ang pangalawa ay sinasabihang may tumatakbo. $lockOwner: para
+        // mabitawan ng job ang sarili nitong lock kapag pinatay ito (timeout), at hindi ang lock ng iba.
+        $lock = Cache::lock(self::BUILD_LOCK, 300, $lockOwner);
         if (!$lock->get()) return ['busy' => true];
 
         try {

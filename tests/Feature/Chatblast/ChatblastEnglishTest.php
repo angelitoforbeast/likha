@@ -103,7 +103,7 @@ class ChatblastEnglishTest extends ChatblastTestCase
                 'text' => 'Kumusta po {name}', 'status' => 'skipped', 'reason' => $reason, 'attempts' => 0, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
         }
 
-        $rows = collect($this->getJson('/chatblast/list')->assertOk()->json('rows'))->pluck('reason', 'id');
+        $rows = collect($this->getJson('/chatblast/list?status=skipped')->assertOk()->json('rows'))->pluck('reason', 'id'); // nakatago ang skipped sa default
         foreach ($old as $reason => $english) {
             $this->assertSame($english, $rows[$ids[$reason]], $reason);
             $this->assertSame($reason, BotcakeMessage::find($ids[$reason])->reason, 'ang row ay hindi isinulat');

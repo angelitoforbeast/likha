@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ChatblastBuildJob;
 use App\Models\BotcakeMessage;
 use App\Models\BotcakePsid;
 use App\Models\ChatblastCampaign;
@@ -15,6 +16,7 @@ use App\Support\NavAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -24,9 +26,12 @@ use Illuminate\Support\Facades\DB;
 class ChatblastController extends Controller
 {
     public const PER_PAGE = 100;
-    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking sa web build (nginx: 60 s)
+    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking ng "Fetch new" (ChatblastBuildJob), gaya ng dati sa web
     public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
     private const MAX_DAYS = 92;
+
+    /** kind => window_days ng mga sequence (para sa ready mula sa naunang araw), kinukuha minsan kada request. */
+    private ?\Illuminate\Support\Collection $windows = null;
 
     public function __construct(private Chatblast $chatblast, private ChatblastSender $sender, private PageSettings $settings)
     {
@@ -74,9 +79,14 @@ class ChatblastController extends Controller
         // light=1: ang mabilis na poll (kada 4 s) ay hindi nagbibilang; ang bilang ay kinukuha kada 30 s o pagkatapos ng aksyon.
         $light  = $this->str($request, 'light', 1) === '1';
         $status = $this->str($request, 'status');
-        $counts = $light ? null : $this->filtered($request, false)->selectRaw('status, COUNT(*) AS n')->groupBy('status')->pluck('n', 'status')
-            ->map(fn ($n) => (int) $n)->sortKeys()->all();
-        $total  = $counts === null ? null : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts));
+        // Sa parehong GROUP BY: ilan ang nabuo bago ang simula ng petsa (sa default, ang mga ready mula sa naunang araw).
+        [$from] = $this->range($request);
+        $grouped = $light ? null : $this->filtered($request, false)
+            ->selectRaw('status, COUNT(*) AS n, SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END) AS earlier', [$from])->groupBy('status')->get();
+        $counts = $grouped?->pluck('n', 'status')->map(fn ($n) => (int) $n)->sortKeys()->all();
+        $earlier = $grouped === null ? null : (int) ($grouped->firstWhere('status', 'ready')?->earlier ?? 0);
+        // Walang napiling status: ang kabuuan ay walang skipped (gaya ng mga row).
+        $total  = $counts === null ? null : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts) - ($counts['skipped'] ?? 0));
         $page   = max(1, (int) $this->str($request, 'p', 6));
 
         $rows = $this->filtered($request, true)->orderByDesc('id')->offset(($page - 1) * self::PER_PAGE)->limit(self::PER_PAGE)
@@ -90,6 +100,7 @@ class ChatblastController extends Controller
             'page'     => $page,
             'per_page' => self::PER_PAGE,
             'counts'   => $counts,
+            'earlier_ready' => $earlier,
             'state'    => $this->state(),
             'test_psid' => $this->testPsidOf($this->str($request, 'page')),
         ]);
@@ -139,13 +150,16 @@ class ChatblastController extends Controller
         $kind = $this->str($request, 'kind', 30);
         if ($kind !== '' && !($c = $this->chatblast->campaign($kind))) return response()->json(['error' => 'Unknown sequence.'], 422);
         if ($kind !== '' && !$c->active) return response()->json(['error' => 'This sequence is off; turn it on in Sequences first.'], 422);
-        @set_time_limit(55); // ang nginx ay naghihintay nang 60 s: 20 s ng J&T at ang pagbuo ay kasya rito
 
-        // 20 s ng J&T (kasama ang tawag na tumatakbo pa); ang chatblast:build ay may 60 s.
-        $result = $this->chatblast->build($kind ?: null, Auth::id(), self::WEB_TRACK_BUDGET);
-        if (!empty($result['busy'])) return response()->json(['error' => 'A fetch is already running; try again after it.'], 409);
+        // Sa queue (ChatblastBuildJob): ang pagbuo sa lahat ng page ay lumalampas sa oras ng web request. Ang lagay at
+        // ang resulta ay nasa state.build ng list. May tumatakbo nang build (button o chatblast:auto): 409.
+        $busy = response()->json(['error' => 'A fetch is already running; try again after it.'], 409);
+        $probe = Cache::lock(Chatblast::BUILD_LOCK, 5);
+        if (!$probe->get()) return $busy;
+        $probe->release();
+        $run = ChatblastBuildJob::start($kind ?: null, Auth::id());
 
-        return response()->json(['result' => $result]);
+        return $run === null ? $busy : response()->json(['run' => $run]);
     }
 
     /** "Send" / "Send selected": ang mga napiling row na maaaring ipadala. */
@@ -246,23 +260,42 @@ class ChatblastController extends Controller
         return $queued;
     }
 
-    /**
-     * Ang query ng kasalukuyang filter: petsa (created_at, Manila; default ngayong araw, hanggang 92 araw), page, uri,
-     * status (kapag $withStatus), at hanap (simula ng pangalan, o eksaktong waybill).
-     */
-    private function filtered(Request $request, bool $withStatus)
+    /** [from, to] ng filter (Manila; default ngayong araw, hanggang 92 araw) at kung ito ang default na "ngayong araw". */
+    private function range(Request $request): array
     {
         $date = fn (string $key) => preg_match('/^\d{4}-\d{2}-\d{2}$/', $this->str($request, $key, 10)) ? Carbon::parse($this->str($request, $key, 10), 'Asia/Manila') : null;
         $to   = ($date('to') ?? Carbon::now('Asia/Manila'))->endOfDay();
         $from = ($date('from') ?? $to->copy())->startOfDay();
         if ($from->gt($to)) $from = $to->copy()->startOfDay();
         if ($from->diffInDays($to) > self::MAX_DAYS) $from = $to->copy()->subDays(self::MAX_DAYS)->startOfDay();
+        $today = Carbon::now('Asia/Manila');
 
-        $q = BotcakeMessage::query()->whereBetween('created_at', [$from, $to]);
+        return [$from, $to, $from->isSameDay($today) && $to->isSameDay($today)];
+    }
+
+    /**
+     * Ang query ng kasalukuyang filter: petsa ng pagbuo (created_at), page, uri, status (kapag $withStatus), at hanap
+     * (simula ng pangalan, o eksaktong waybill). Sa default na "ngayong araw", kasama rin ang ready pa na nabuo noong mga
+     * naunang araw sa loob ng window ng sequence nito (hindi pa naipapadala, kaya dapat makita at maipadala). Kapag walang
+     * napiling status, nakatago ang skipped (may sariling chip ito).
+     */
+    private function filtered(Request $request, bool $withStatus)
+    {
+        [$from, $to, $default] = $this->range($request);
+        $windows = $default ? ($this->windows ??= ChatblastCampaign::pluck('window_days', 'kind')) : collect(); // isang query kada request
+
+        $q = BotcakeMessage::query()->where(function ($w) use ($from, $to, $windows) {
+            $w->whereBetween('created_at', [$from, $to]);
+            foreach ($windows as $kind => $days) {
+                $w->orWhere(fn ($r) => $r->where('status', 'ready')->where('kind', $kind)->where('created_at', '>=', now()->subDays((int) $days)));
+            }
+        });
 
         if (($page = $this->str($request, 'page')) !== '') $q->where('page_name', $page);
         if (($kind = $this->str($request, 'kind', 30)) !== '') $q->where('kind', $kind);
-        if ($withStatus && in_array($status = $this->str($request, 'status'), self::STATUSES, true)) $q->where('status', $status);
+        if ($withStatus) {
+            in_array($status = $this->str($request, 'status'), self::STATUSES, true) ? $q->where('status', $status) : $q->where('status', '!=', 'skipped');
+        }
         if (($s = $this->str($request, 'q', 100)) !== '') {
             $q->where(fn ($w) => $w->where('waybill', $s)->orWhere('fb_name', 'like', addcslashes($s, '%_\\') . '%'));
         }
@@ -277,6 +310,7 @@ class ChatblastController extends Controller
             'paused' => $this->sender->paused(),
             'queued' => BotcakeMessage::whereIn('status', ['queued', 'sending'])->count(),
             'sent'   => BotcakeMessage::where('status', 'sent')->where('sent_at', '>=', now()->subHour())->count(),
+            'build'  => ChatblastBuildJob::run(), // ang huling "Fetch new" (queued, running, done, failed, busy, stopped)
         ];
     }
 
