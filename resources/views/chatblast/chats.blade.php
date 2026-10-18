@@ -68,7 +68,7 @@
         </table>
     </div>
     <div class="mt-3 flex items-center gap-3 text-sm text-slate-600">
-        <span>{{ number_format($chats->total()) }} message{{ $chats->total() === 1 ? '' : 's' }} · page {{ $chats->currentPage() }} of {{ $chats->lastPage() }}</span>
+        <span>Page {{ $chats->currentPage() }} · {{ $chats->count() }} message{{ $chats->count() === 1 ? "" : "s" }}</span>
         @if($chats->previousPageUrl())<a href="{{ $chats->previousPageUrl() }}" class="cb-btn cb-btn-sm">‹ Newer</a>@endif
         @if($chats->nextPageUrl())<a href="{{ $chats->nextPageUrl() }}" class="cb-btn cb-btn-sm">Older ›</a>@endif
     </div>
@@ -84,7 +84,8 @@
         </div>
         <p class="mb-3 text-slate-600">In Botcake, add a JSON API block to the page's Default reply flow and fill in "Edit Group Request". Botcake has no variable for the page, so type each page's own Botcake ID{{ $filters['page'] !== '' ? ' (filled in below for the selected page)' : ' (pick a page in the filter to fill it in)' }}.</p>
 
-        <h3 class="mb-2 font-medium">(a) Recommended: POST with a JSON body</h3>
+        <h3 class="mb-1 font-medium">(a) Recommended: POST with a JSON body</h3>
+        <p class="mb-2 text-xs text-amber-800">Prefer POST + header; GET puts the key in server logs.</p>
         <dl class="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-2">
             <dt class="text-slate-500">Method</dt>
             <dd class="font-mono">POST</dd>

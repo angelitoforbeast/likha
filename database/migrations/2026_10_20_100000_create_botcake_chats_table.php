@@ -26,6 +26,7 @@ return new class extends Migration {
             $table->timestamp('received_at')->nullable();
 
             $table->index(['page_id', 'psid', 'received_at']);
+            $table->index(['page_id', 'received_at']); // Chats page: filter ng page, pinakabago muna
             $table->index('received_at');
         });
     }

@@ -105,7 +105,7 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->assertSame(['psid-b', 'Ben Reyes', 'Order po', 'm-1'], [$rows[0]->psid, $rows[0]->name, $rows[0]->message, $rows[0]->message_id]);
         $this->assertSame('09170000000', $rows[0]->payload['Phone']);
         $this->assertSame('2026-10-18 10:00', $rows[0]->payload['sent_at']);
-        $this->assertArrayNotHasKey('KEY', $rows[0]->payload);
+        foreach (['KEY', 'Page_ID', 'FB_ID', 'Full_Name', 'Last_User_Input'] as $used) $this->assertArrayNotHasKey($used, $rows[0]->payload, 'ang key at ang mga kilalang field ay hindi inuulit sa payload');
         $this->assertStringNotContainsString(self::KEY, json_encode($rows[0]->payload));
         $this->assertSame(['psid-c', 'Hi'], [$rows[1]->psid, $rows[1]->message]);
         $this->assertSame(['psid-d', 'Yes'], [$rows[2]->psid, $rows[2]->message]);
@@ -117,13 +117,14 @@ class BotcakeChatTest extends ChatblastTestCase
         for ($i = 1; $i <= 60; $i++) $extra['extra_' . $i] = 'v' . $i;
         $this->post('/api/botcake/chat', [
             'key' => self::KEY, 'page_id' => '1001', 'psid' => str_repeat('p', 100), 'name' => str_repeat('n', 300),
-            'message' => str_repeat('m', 6000), 'nested' => ['a' => ['b' => 'c']], 'bad' => "ok\xFF",
+            'message' => str_repeat('m', 6000), 'nested' => ['a' => ['b' => 'c']], 'bad' => "ok\xFF", 'long' => str_repeat('l', 3000),
         ] + $extra)->assertOk()->assertExactJson(['ok' => true]);
 
         $row = BotcakeChat::sole();
         $this->assertSame([64, 255, 5000], [mb_strlen($row->psid), mb_strlen($row->name), mb_strlen($row->message)]);
         $this->assertSame('{"a":{"b":"c"}}', $row->payload['nested']);
-        $this->assertSame(2000, mb_strlen($row->payload['message']));
+        $this->assertArrayNotHasKey('message', $row->payload);
+        $this->assertSame(2000, mb_strlen($row->payload['long'] ?? ''));
         $this->assertTrue(mb_check_encoding($row->payload['bad'], 'UTF-8'));
         $this->assertCount(50, $row->payload);
     }
@@ -286,7 +287,7 @@ class BotcakeChatTest extends ChatblastTestCase
 
         $this->get('/chatblast/chats')->assertOk()
             ->assertSee('{"page_id":"<this page\'s Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}')
-            ->assertSee('Recommended')->assertSee('GET')
+            ->assertSee('Recommended')->assertSee('GET')->assertSee('Prefer POST + header; GET puts the key in server logs')
             ->assertSeeInOrder(['key', 'page_id', 'psid', '{{user.id}}', 'name', '{{user.full_name}}', 'message', '{{last_text_input}}']);
 
         $this->get('/chatblast/chats?page_id=2002')->assertOk()
@@ -305,6 +306,70 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $this->get('/chatblast/chats')->assertSee('no text (sticker or photo?)');
         $this->get('/chatblast/chats/customer?page_id=1001&psid=psid-a')->assertSee('no text (sticker or photo?)');
+    }
+
+    public function test_S_059_18_the_chats_page_never_counts_or_groups_the_whole_table_and_lists_pages_from_settings(): void
+    {
+        $this->page('Page Dos', '2002');
+        $this->stored(['page_id' => '7007', 'page_name' => null, 'message' => 'From an unknown page']);
+        $this->actingAs($this->user());
+
+        DB::enableQueryLog();
+        $this->get('/chatblast/chats')->assertOk()
+            ->assertSee('<option value="2002"', false)->assertSee('Page Dos')
+            ->assertSee('<option value="7007"', false)->assertSee('Unknown page (ID 7007)');
+        $this->get('/chatblast/chats?page_id=7007')->assertOk()->assertSee('From an unknown page');
+        $chatQueries = array_filter(array_column(DB::getQueryLog(), 'query'), fn ($q) => str_contains($q, 'botcake_chats'));
+        foreach ($chatQueries as $q) {
+            $this->assertDoesNotMatchRegularExpression('/count\(|group by/i', $q, 'walang COUNT o GROUP BY sa buong botcake_chats');
+        }
+        $this->assertSame(1, count(array_filter($chatQueries, fn ($q) => stripos($q, 'distinct') !== false)), 'ang listahan ng page_id ay naka-cache');
+
+        $indexes = array_map(fn ($i) => $i['columns'], Schema::getIndexes('botcake_chats'));
+        $this->assertContains(['page_id', 'received_at'], $indexes);
+    }
+
+    public function test_S_059_19_the_prune_deletes_in_batches_until_done(): void
+    {
+        $this->travelTo('2026-10-18 03:00:00');
+        $old = now()->subDays(100)->format('Y-m-d H:i:s');
+        foreach (array_chunk(range(1, BotcakeChat::PRUNE_BATCH + 1), 500) as $chunk) {
+            DB::table('botcake_chats')->insert(array_map(fn ($i) => ['psid' => 'p' . $i, 'message' => 'old', 'received_at' => $old], $chunk));
+        }
+        $this->stored(['message' => 'kept'], now()->subDays(1));
+
+        $this->assertSame(BotcakeChat::PRUNE_BATCH + 1, BotcakeChat::prune());
+        $this->assertSame(['kept'], BotcakeChat::pluck('message')->all());
+    }
+
+    public function test_S_059_20_the_page_name_map_is_cached_and_cleared_when_a_botcake_page_id_is_saved(): void
+    {
+        $this->page('Page Dos', '2002');
+        $this->chat(['page_id' => '2002', 'message' => 'one'])->assertOk();
+
+        app(\App\Services\PageSettings::class)->set('Page Dos', 'botcake', 'page_id', '2009');
+        $this->chat(['page_id' => '2009', 'message' => 'two'])->assertOk();
+
+        $this->assertSame(['Page Dos', 'Page Dos'], BotcakeChat::orderBy('id')->pluck('page_name')->all());
+        $this->assertSame(['2009' => 'Page Dos'], BotcakeChat::pageMap(), 'ang lumang ID (napalitan) ay wala na sa mapa');
+    }
+
+    public static function bigBodies(): array
+    {
+        return [
+            'header key, big JSON'  => [['X-Chat-Key' => self::KEY], false, 413],
+            'param key, big JSON'   => [[], true, 413],
+            'wrong header, big body' => [['X-Chat-Key' => 'nope'], false, 401],
+        ];
+    }
+
+    /** @dataProvider bigBodies */
+    public function test_S_059_21_a_body_over_64_kb_gets_413_after_a_header_key_check(array $headers, bool $keyInBody, int $status): void
+    {
+        $body = ['page_id' => '1001', 'psid' => 'psid-a', 'message' => str_repeat('x', 70 * 1024)] + ($keyInBody ? ['key' => self::KEY] : []);
+
+        $this->postJson('/api/botcake/chat', $body, $headers)->assertStatus($status);
+        $this->assertSame(0, BotcakeChat::count());
     }
 
     public function test_S_059_12_the_prune_deletes_chats_older_than_90_days_from_its_command_and_from_chatblast_auto(): void

@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
-use App\Models\PageSetting;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,14 +32,30 @@ class BotcakeChatController extends Controller
     /** Gaano katagal (segundo) itinuturing na ulit ang parehong page + PSID + mensahe. */
     private const DUP_SECONDS = 10;
 
+    /** Pinakamalaking body na binabasa (bytes); ang lampas ay 413. */
+    private const MAX_BODY = 65536;
+
+    /** Ang mga field na may sariling column at hindi inuulit sa payload. */
+    private const COLUMN_FIELDS = ['page_id', 'psid', 'name', 'message'];
+
     public function receive(Request $request): JsonResponse
     {
-        $data = $request->all();
+        $expected = (string) config('services.botcake.chat_key');
+        $refuse = fn () => response()->json(['ok' => false], 401);
+        // Ang header key muna, bago basahin ang body.
         $given = (string) $request->header('X-Chat-Key');
+        if ($given !== '' && ($expected === '' || !hash_equals($expected, $given))) return $refuse();
+
+        // Ang body na lampas 64 KB ay hindi binabasa (ang isang mensahe ng customer ay mas maliit nang malayo).
+        if ((int) $request->server('CONTENT_LENGTH') > self::MAX_BODY || strlen((string) $request->getContent()) > self::MAX_BODY) {
+            return response()->json(['ok' => false], 413);
+        }
+
+        $data = $request->all();
         // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin; maaaring nandito ang key.
         if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
 
-        // Ang key muna (header, o param na "key" anuman ang laki ng titik), bago ang iba ng body.
+        // Walang header: ang param na "key" (anuman ang laki ng titik).
         if ($given === '') {
             foreach ($data as $k => $v) {
                 if (mb_strtolower(trim((string) $k)) === 'key' && is_string($v)) {
@@ -48,24 +63,30 @@ class BotcakeChatController extends Controller
                     break;
                 }
             }
+            if ($expected === '' || $given === '' || !hash_equals($expected, $given)) return $refuse();
         }
-        $expected = (string) config('services.botcake.chat_key');
-        if ($expected === '' || $given === '' || !hash_equals($expected, $given)) return response()->json(['ok' => false], 401);
 
-        $payload = [];
+        $values = [];
         $byName = [];
         foreach ($data as $k => $v) {
             $name = mb_strtolower(trim((string) $k));
             if ($name === 'key') continue; // ang key ay hindi kailanman iniimbak
             $s = $this->text($v);
             $byName[$name] ??= $s;
-            if (count($payload) < self::PAYLOAD_KEYS) $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
+            $values[] = [$k, $name, $s];
         }
 
-        $f = $this->fields($byName);
+        $f = $this->fields($byName, $used);
         // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak. Ang mensahe
         // na walang text (sticker o larawan) pero may PSID ay iniimbak.
         if ($f['psid'] === null && $f['message'] === null) return response()->json(['ok' => true]);
+
+        // Ang payload: ang ibang param lang; ang page_id, psid, name at message ay nasa sariling column na (hindi inuulit).
+        $payload = [];
+        foreach ($values as [$k, $name, $s]) {
+            if (isset($used[$name]) || count($payload) >= self::PAYLOAD_KEYS) continue;
+            $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
+        }
 
         // Walang page-id na variable ang Botcake: ang block ng bawat page ay may page_id (fixed text) o page (pangalan).
         [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
@@ -88,19 +109,22 @@ class BotcakeChatController extends Controller
 
     /**
      * @param array<string, ?string> $byName lowercase na pangalan => value
+     * @param array<string, true>|null $used ang mga pangalan (lowercase) ng COLUMN_FIELDS na nasa column na: ang
+     *        ginamit, at ang alias na walang laman
      * @return array<string, ?string> ang mga kilalang field (may alias), pinaikli ayon sa column
      */
-    private function fields(array $byName): array
+    private function fields(array $byName, ?array &$used = null): array
     {
         $out = [];
+        $used = [];
         foreach (self::FIELDS as $field => $names) {
             $out[$field] = null;
+            $column = in_array($field, self::COLUMN_FIELDS, true);
             foreach ($names as $name) {
-                $v = trim((string) ($byName[$name] ?? ''));
-                if ($v !== '') {
-                    $out[$field] = mb_substr($v, 0, self::MAX[$field]);
-                    break;
-                }
+                if (!array_key_exists($name, $byName)) continue;
+                $v = trim((string) $byName[$name]);
+                if ($column && ($v === '' || $out[$field] === null)) $used[$name] = true;
+                if ($v !== '' && $out[$field] === null) $out[$field] = mb_substr($v, 0, self::MAX[$field]);
             }
         }
 
@@ -124,13 +148,16 @@ class BotcakeChatController extends Controller
      */
     private function page(?string $pageId, string $page): array
     {
-        if ($pageId !== null && ($name = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)
-                ->where('value', $pageId)->orderByDesc('id')->value('page_name')) !== null) {
-            return [$pageId, $name];
-        }
+        $map = BotcakeChat::pageMap(); // naka-cache: walang query kada mensahe
+        if ($pageId !== null && isset($map[$pageId])) return [$pageId, $map[$pageId]];
         if ($page === '') return [$pageId, null];
 
         $settings = app(PageSettings::class);
+        $key = $settings->pageKey($page);
+        foreach ($map as $id => $name) {
+            if ($settings->pageKey($name) === $key) return [mb_substr((string) $id, 0, self::MAX['page_id']), $name];
+        }
+        // Ang page na nasa page_settings pero walang botcake.page_id.
         $name = $settings->pageQuery(mb_substr($page, 0, 255))->where('active', true)->orderByDesc('id')->value('page_name');
         if ($name === null) return [$pageId, null];
         $id = trim((string) $settings->get($name, 'botcake', 'page_id'));
