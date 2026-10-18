@@ -114,7 +114,7 @@ class ChatblastAppTest extends ChatblastTestCase
         preg_match_all('#data-cb-nav="([^"]+)"[^>]*aria-current="page"#', $html, $m);
         $this->assertSame([$active], $m[1], 'iisa ang naka-highlight');
         $this->assertStringContainsString('← Likha', $html);
-        $this->assertStringContainsString('Log out', $html);
+        $this->assertStringNotContainsString('Log out', $html, 'walang Log out sa Chatblast');
         $this->assertStringContainsString('CEO User', $html);
         $this->assertStringNotContainsString('Main Likha Link', $html);
     }

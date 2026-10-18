@@ -3,28 +3,27 @@
 @section('title', 'Chatblast · Sequences')
 @section('heading', 'Sequences')
 
+@section('description')
+    A trigger (J&T status, pages, window), steps with a message from <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Messages</a>, and a schedule. One message per waybill per day; fields save at once.
+@endsection
+
 @section('content')
 <div id="cs"
      data-data-url="{{ route('chatblast.sequence.data') }}"
      data-base-url="{{ url('/chatblast/sequence') }}"
      data-messages-url="{{ route('chatblast.campaigns.index') }}">
-    <p class="text-xs text-gray-500 mb-3 max-w-4xl">
-        Like sequences in Botcake: each sequence has a trigger (J&T status, pages, window), steps (Day 1 → Day 2 → …; each step's message
-        comes from <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Messages</a>), and a schedule. One message per
-        waybill per day. Every field saves at once (when you leave the box, press Enter, or pick an option).
-    </p>
 
     <p id="notice" class="text-xs mb-2 min-h-[1rem]" aria-live="polite"></p>
     <div id="overlaps" class="hidden mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status"></div>
 
-    <details id="new-box" class="mb-4 bg-white rounded shadow px-4 py-2 text-sm">
+    <details id="new-box" class="mb-4 cb-card px-4 py-2 text-sm">
         <summary class="cursor-pointer font-medium">+ New sequence</summary>
         <form id="new-form" class="grid md:grid-cols-2 gap-3 mt-2">
             <label class="flex flex-col text-xs text-gray-600">Name<input name="name" maxlength="100" placeholder="e.g. Problematic" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
             <label class="flex flex-col text-xs text-gray-600">Window (how many days back the order is)<input name="window_days" type="number" min="1" max="60" value="7" class="border rounded px-2 py-1 text-sm text-gray-900 w-28"></label>
             <fieldset class="text-xs text-gray-600"><legend>Trigger: J&T status (at least one)</legend><div id="new-statuses" class="flex flex-wrap gap-3 mt-1 text-sm text-gray-900"></div></fieldset>
             <label class="flex flex-col text-xs text-gray-600">Day 1 message<select name="message_id" class="border rounded px-2 py-1 text-sm text-gray-900"></select></label>
-            <div class="md:col-span-2"><button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Create (manual, on)</button></div>
+            <div class="md:col-span-2"><button class="cb-btn cb-btn-primary">Create (manual, on)</button></div>
         </form>
     </details>
 
@@ -215,7 +214,7 @@
             ]);
         });
 
-        return el('section', {class: 'bg-white rounded shadow p-4' + (c.active ? '' : ' opacity-75')}, [
+        return el('section', {class: 'cb-card p-4' + (c.active ? '' : ' opacity-75')}, [
             el('div', {class: 'flex flex-wrap items-center gap-2 mb-1'}, [el('span', {class: 'text-gray-500', text: 'Sequence for'}), name, nm,
                 el('label', {class: 'flex items-center gap-1 text-sm ml-2'}, [on, 'on', onM]), el('label', {class: 'flex items-center gap-1 text-sm'}, ['mode', mode, modeM]), del]),
             el('p', {class: 'text-sm text-gray-700 mb-1' + greyed, text: c.summary + (c.next_run ? ' · next run: ' + c.next_run : (c.mode === 'auto' && c.active ? '' : ' · manual'))}),

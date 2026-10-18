@@ -826,3 +826,74 @@ The check ran on the scratch app (3 sent and 5 skipped today). Evidence is in th
 - **S-056.35 and S-056.36** are new.
 - **S-056.17** now reads History's processed states through their chips. Its Then ("History lists the rest within
   From/To, with status chips") now means sent by default and the rest on their chips.
+
+## Amendment 6: no Log out, no sticky, one clean look
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-6.md` (git-ignored, not
+committed). It is treated as part of the brief.
+
+### What changed
+
+1. **No Log out** in the Chatblast top bar. "← Likha" and the user's name stay.
+2. **Nothing sticks or floats while scrolling.** Every page scrolls as a normal document.
+   - **Gone:** the sticky table header on To send and History, the sticky header row and sticky Page column of the
+     page settings grid, and the table's own scroll boxes (`max-h-[70vh]`, `max-h-[75vh]`). The top bar was already
+     not sticky.
+   - **Page settings grid:** it keeps no sticky header at all, the "prefer no sticky" option. Its header row has no
+     band (transparent, light bottom line) and no right borders.
+   - **The row detail panel** on To send and History is now a **centred modal** instead of a fixed side panel against
+     the table. It closes with ✕, Escape or a click outside. All its content and buttons are unchanged.
+   - **The page settings value history drawer** became the same kind of modal.
+3. **One look across the five pages.** Shared styles live in the layout (`cb-btn`, `cb-btn-primary`, `cb-card`,
+   `cb-table`, in Tailwind's components layer so utilities such as `hidden` still win).
+   - **Page header:** the title, then a one-line description:
+     - To send: "Everything still to send, whatever its build date. The list refreshes itself every hour."
+     - History: "What was sent, by send date. Failed, skipped and the other outcomes are on their own chips."
+     - Messages and Sequences: their help line, shortened.
+     - Page settings: "The Botcake settings of every page: ID, token, flows, message field and template. Values save as
+       you type."
+   - **Filters:** one tidy row with rounded inputs.
+   - **Buttons:** one primary blue per page; everything else is a neutral white button with a border.
+     - Primaries: Send all ready (To send), Retry failed (History, Failed chip), Create (Messages and Sequences), Sync
+       all (Page settings), and Send in the row modal.
+     - Pause, Resume, Stop, Refresh now, Send selected, Show, the pager and the grid's Test and Sync now are neutral.
+   - **Chips:** small rounded pills.
+   - **Tables:** light row dividers (slate-100), comfortable row height, small uppercase grey headers with no band, and
+     no heavy borders.
+   - **Ellipsis:** Page and Customer cells clip with an ellipsis and show the full text as a tooltip, as the Message
+     cell already did.
+   - **Cards:** a thin border instead of a shadow.
+4. **Every function stays.** Same element ids, same scripts and endpoints. All UI text is English.
+
+### Browser check (amendment 6)
+
+Before and after screenshots at 1366 px (full page, plus the To send row panel) are in the main checkout's
+`handoff/056-chatblast-app/screens/amendment-6/` (`before-*.png`, `after-*.png`, `evidence-before.txt`,
+`evidence-after.txt`).
+
+| Page | Sticky or fixed elements on screen, before → after | Log out | 1366 / 1280 px (`scrollWidth <= clientWidth`) |
+|---|---|---|---|
+| To send | every table header cell → none | gone | 1351 ≤ 1351 / 1265 ≤ 1265 |
+| History | every table header cell → none | gone | 1366 ≤ 1366 / 1280 ≤ 1280 |
+| Messages | none → none | gone | 1351 ≤ 1351 / 1265 ≤ 1265 |
+| Sequences | none → none | gone | 1351 ≤ 1351 / 1265 ≤ 1265 |
+| Page settings | the Page column and header cells → none | gone | 1366 ≤ 1366 / 1280 ≤ 1280 |
+
+- **Visibility after the change:**
+  - To send: Pause shows and Resume is hidden while sending runs.
+  - History: Retry failed is hidden on Sent and shows on the Failed chip.
+  - Page settings: the Sync all Pause, Resume and Stop and the history modal stay hidden until needed.
+  - The row modal is hidden until a row is clicked.
+- **A bug caught here:** in the first "after" run, the shared button style overrode `hidden`, and Pause and Resume both
+  showed. Moving the shared styles into the components layer fixed it, and the run was repeated.
+- **No JS errors.**
+
+### Tests (amendment 6)
+
+- **Changed:** `ChatblastAppTest::test_S_056_1…` now asserts that "Log out" is **not** in the Chatblast pages. All other
+  tests are unchanged: the element ids, the `h1` and the texts they check stayed.
+- `tests/Feature/Chatblast` and `tests/Feature/PageSettings`: `Tests: 296, Assertions: 2182`, all passing.
+
+### Story changes (amendment 6)
+
+- **S-056.1:** "Log out" is removed from the Then; the top bar shows "← Likha" and the user's name.

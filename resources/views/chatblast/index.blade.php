@@ -5,12 +5,15 @@
 @section('title', $view === 'send' ? 'Chatblast · To send' : 'Chatblast · History')
 @section('heading', $view === 'send' ? 'To send' : 'History')
 
+@section('description', $view === 'send'
+    ? 'Everything still to send, whatever its build date. The list refreshes itself every hour.'
+    : 'What was sent, by send date. Failed, skipped and the other outcomes are on their own chips.')
+
 @push('styles')
     <style>
-        #cb-table thead th { position: sticky; top: 0; z-index: 2; }
         #cb-table tbody tr { cursor: pointer; }
-        #cb-table tbody tr.selected-row { background: #eff6ff; }
-        .chip.active { outline: 2px solid #1d4ed8; }
+        #cb-table tbody tr.selected-row td { background: #eff6ff; }
+        .chip.active { box-shadow: 0 0 0 2px #2563eb; }
         pre.cb { white-space: pre-wrap; word-break: break-word; }
     </style>
 @endpush
@@ -29,105 +32,107 @@
      data-test-url="{{ route('chatblast.test') }}"
      data-test-psid-url="{{ route('chatblast.test-psid.search') }}">
 
-    {{-- Mga filter (pagtingin lang; ang "Send all ready" ay page at sequence lang ang sinusunod) --}}
-    <form id="filters" class="flex flex-wrap items-end gap-3 mb-3 text-sm">
+    {{-- Mga filter, isang hanay (pagtingin lang; ang "Send all ready" ay page at sequence lang ang sinusunod) --}}
+    <form id="filters" class="cb-filters mb-4 flex flex-wrap items-end gap-3 text-sm">
         @if($view === 'history')
-        <label class="flex flex-col text-xs text-gray-600">From<input type="date" name="from" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
-        <label class="flex flex-col text-xs text-gray-600">To<input type="date" name="to" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
+        <label class="flex flex-col gap-1 text-xs">From<input type="date" name="from" value="{{ $today }}" class="rounded-md border px-2 py-1.5 text-sm text-gray-900"></label>
+        <label class="flex flex-col gap-1 text-xs">To<input type="date" name="to" value="{{ $today }}" class="rounded-md border px-2 py-1.5 text-sm text-gray-900"></label>
         @endif
-        <label class="flex flex-col text-xs text-gray-600">Page
-            <select name="page" class="border rounded px-2 py-1 text-sm text-gray-900">
+        <label class="flex flex-col gap-1 text-xs">Page
+            <select name="page" class="w-48 rounded-md border px-2 py-1.5 text-sm text-gray-900">
                 <option value="">All</option>
                 @foreach($pages as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
             </select>
         </label>
-        <label class="flex flex-col text-xs text-gray-600">Sequence
-            <select name="kind" class="border rounded px-2 py-1 text-sm text-gray-900">
+        <label class="flex flex-col gap-1 text-xs">Sequence
+            <select name="kind" class="w-44 rounded-md border px-2 py-1.5 text-sm text-gray-900">
                 <option value="">All</option>
                 @foreach($campaigns as $c)<option value="{{ $c->kind }}">{{ $c->name }}{{ $c->active ? '' : ' (off)' }}</option>@endforeach
             </select>
         </label>
-        <label class="flex flex-col text-xs text-gray-600">Search<input name="q" placeholder="name or waybill" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
+        <label class="flex flex-col gap-1 text-xs">Search<input name="q" placeholder="name or waybill" class="w-56 rounded-md border px-2 py-1.5 text-sm text-gray-900"></label>
         {{-- History: ang naipadala ang default na chip --}}
         <input type="hidden" name="status" value="{{ $view === 'history' ? 'sent' : '' }}">
-        <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Show</button>
+        <button class="cb-btn">Show</button>
     </form>
 
-    {{-- Bilang kada status (pindutin para salain) at ang lagay ng pagpapadala --}}
-    <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
-        <div id="chips" class="flex flex-wrap gap-2" aria-label="Count per status"></div>
-    </div>
+    {{-- Bilang kada status (pindutin para salain) --}}
+    <div id="chips" class="mb-2 flex flex-wrap gap-2 text-xs" aria-label="Count per status"></div>
     @if($view === 'send')
     {{-- Ang ready kada sequence at kada page --}}
-    <div id="by-kind" class="text-xs text-gray-700 mb-1"></div>
-    <div id="by-page" class="text-xs text-gray-700 mb-2"></div>
+    <div id="by-kind" class="text-xs text-slate-500"></div>
+    <div id="by-page" class="mb-1 text-xs text-slate-500"></div>
     @endif
-    <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
-        <span id="state" class="text-xs text-gray-700" aria-live="polite"></span>
-        <span id="test-psid-owner" class="text-xs text-gray-700"></span>
-        @if($view === 'send')
-        <button id="pause" type="button" class="hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">Pause</button>
-        <button id="resume" type="button" class="hidden bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">Resume</button>
-        @endif
-    </div>
 
-    {{-- Mga aksyon: ang pagpapadala ay sa To send; ang Retry failed ay sa History --}}
-    <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+    {{-- Mga aksyon: ang pagpapadala ay sa To send; ang Retry failed ay sa History. Isang primary (asul) lang. --}}
+    <div class="my-4 flex flex-wrap items-center gap-2 text-sm">
         @if($view === 'send')
+        <button id="send-filtered" type="button" class="cb-btn cb-btn-primary">Send all ready</button>
+        <button id="send-selected" type="button" class="cb-btn" disabled>Send selected (0)</button>
         {{-- Kusang nagre-refresh ang listahan kada oras (:15); ang button ay para sa ngayon na --}}
-        <button id="build" type="button" class="border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs px-2 py-1 rounded disabled:opacity-50">Refresh now</button>
-        <span id="refreshed" class="text-xs text-gray-500"></span>
-        <button id="send-selected" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50" disabled>Send selected (0)</button>
-        <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send all ready</button>
+        <button id="build" type="button" class="cb-btn cb-btn-sm">Refresh now</button>
+        <span id="refreshed" class="text-xs text-slate-500"></span>
         @else
-        <button id="retry" type="button" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Retry failed</button>
+        <button id="retry" type="button" class="cb-btn cb-btn-primary hidden">Retry failed</button>
         @endif
         <span id="notice" class="text-xs" aria-live="polite"></span>
+        <span class="ml-auto flex flex-wrap items-center gap-2">
+            <span id="state" class="text-xs text-slate-500" aria-live="polite"></span>
+            <span id="test-psid-owner" class="text-xs text-slate-500"></span>
+            @if($view === 'send')
+            <button id="pause" type="button" class="cb-btn cb-btn-sm hidden">Pause</button>
+            <button id="resume" type="button" class="cb-btn cb-btn-sm hidden">Resume</button>
+            @endif
+        </span>
     </div>
 
-    <details class="mb-3 bg-white rounded shadow px-4 py-2 text-sm">
-        <summary class="cursor-pointer font-medium">Test PSID</summary>
-        <div class="grid lg:grid-cols-3 gap-4 mt-2">
+    <details class="cb-card mb-4 px-4 py-2 text-sm">
+        <summary class="cursor-pointer font-medium text-slate-700">Test PSID</summary>
+        <div class="mt-2 grid gap-4 lg:grid-cols-3">
             <form id="test-psid-form">
-                <p class="text-xs text-gray-600 mb-1">The page's Test PSID (your own account among the page's Botcake customers): every "Send test" goes here.</p>
-                <select name="page" class="border rounded px-2 py-1 text-sm mb-1">
+                <p class="mb-1 text-xs text-slate-500">The page's Test PSID (your own account among the page's Botcake customers): every "Send test" goes here.</p>
+                <select name="page" class="mb-1 rounded-md border px-2 py-1.5 text-sm">
                     @foreach($pages as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
                 </select>
-                <input name="q" placeholder="search a name" class="border rounded px-2 py-1 text-sm">
-                <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Search</button>
-                <div id="test-psid-current" class="text-xs text-gray-600 mt-1"></div>
-                <ul id="test-psid-results" class="text-sm mt-1 space-y-1"></ul>
+                <input name="q" placeholder="search a name" class="rounded-md border px-2 py-1.5 text-sm">
+                <button class="cb-btn">Search</button>
+                <div id="test-psid-current" class="mt-1 text-xs text-slate-500"></div>
+                <ul id="test-psid-results" class="mt-1 space-y-1 text-sm"></ul>
             </form>
         </div>
     </details>
 
-    <div class="bg-white rounded shadow overflow-auto max-h-[70vh]">
-        <table id="cb-table" class="text-sm border-collapse min-w-full">
+    {{-- Ang table ay bahagi ng page (walang sariling scroll, walang sticky na header) --}}
+    <div class="cb-card overflow-x-auto">
+        <table id="cb-table" class="cb-table">
             <thead>
-            <tr class="bg-gray-100 text-left text-xs text-gray-600">
-                <th class="bg-gray-100 px-2 py-2 border-b"><input type="checkbox" id="check-all" aria-label="Select all"></th>
+            <tr>
+                <th class="w-8"><input type="checkbox" id="check-all" aria-label="Select all"></th>
                 @foreach(['Time', 'Page', 'Customer', 'Waybill', 'J&T', 'PSID', 'Message', 'Status', 'Tries', 'HTTP', 'Sent'] as $h)
-                    <th class="bg-gray-100 px-2 py-2 border-b whitespace-nowrap">{{ $h }}</th>
+                    <th class="whitespace-nowrap">{{ $h }}</th>
                 @endforeach
             </tr>
             </thead>
             <tbody id="cb-rows"></tbody>
         </table>
     </div>
-    <div class="flex items-center gap-3 mt-2 text-sm">
-        <button id="prev" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">‹</button>
-        <span id="pager" class="text-xs text-gray-600"></span>
-        <button id="next" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">›</button>
+    <div class="mt-3 flex items-center gap-3 text-sm">
+        <button id="prev" type="button" class="cb-btn cb-btn-sm">‹</button>
+        <span id="pager" class="text-xs text-slate-500"></span>
+        <button id="next" type="button" class="cb-btn cb-btn-sm">›</button>
     </div>
 
-    {{-- Side panel: lahat ng kailangan sa debug ng isang mensahe --}}
-    <aside id="panel" class="hidden fixed right-0 top-0 h-full w-[34rem] max-w-full bg-white shadow-xl border-l p-4 overflow-auto text-sm z-50" aria-label="Message details">
-        <div class="flex justify-between items-center mb-2">
-            <div id="panel-title" class="font-semibold"></div>
-            <button id="panel-close" type="button" class="text-gray-500 hover:text-gray-800 px-2" aria-label="Close">✕</button>
+    {{-- Ang detalye ng isang mensahe: modal sa gitna (hindi side panel na tumatakip sa table). Isara: ✕, Escape, o
+         pindot sa labas. --}}
+    <div id="panel" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" aria-label="Message details" role="dialog" aria-modal="true">
+        <div class="mx-auto w-full max-w-2xl rounded-xl bg-white p-5 text-sm shadow-lg">
+            <div class="mb-3 flex items-center justify-between">
+                <div id="panel-title" class="font-semibold"></div>
+                <button id="panel-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <div id="panel-body"></div>
         </div>
-        <div id="panel-body"></div>
-    </aside>
+    </div>
 </div>
 
 <script>
@@ -219,7 +224,7 @@
         const current = document.querySelector('#filters [name=status]').value;
         const total = Object.values(counts).reduce((a, b) => a + b, 0);
         const chip = (status, label, n) => {
-            const b = el('button', {type: 'button', class: 'chip px-2 py-1 rounded ' + (status ? COLOR[status] : 'bg-white border') + (current === status ? ' active' : ''), 'data-status': status},
+            const b = el('button', {type: 'button', class: 'chip rounded-full px-2.5 py-0.5 ' + (status ? COLOR[status] : 'bg-white border') + (current === status ? ' active' : ''), 'data-status': status},
                 [label + ' ', el('b', {text: fmt(n)})]);
             b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? '' : status; page = 1; load(); });
             return b;
@@ -231,7 +236,7 @@
             const HISTORY_CHIPS = [['sent', 'Sent', ['sent', 'unknown']], ['failed', 'Failed', ['failed', 'field_mismatch']],
                 ['skipped', 'Skipped', ['skipped']], ['no_psid', 'No PSID', ['no_psid']], ['no_config', 'No config', ['no_config']]];
             document.getElementById('chips').replaceChildren(...HISTORY_CHIPS.map(([status, label, list]) => {
-                const b = el('button', {type: 'button', class: 'chip px-2 py-1 rounded ' + COLOR[status] + (current === status ? ' active' : ''), 'data-status': status},
+                const b = el('button', {type: 'button', class: 'chip rounded-full px-2.5 py-0.5 ' + COLOR[status] + (current === status ? ' active' : ''), 'data-status': status},
                     [label + ' ', el('b', {text: fmt(sum(list))})]);
                 b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? 'sent' : status; page = 1; load(); });
                 return b;
@@ -292,8 +297,8 @@
             const tr = el('tr', {class: 'border-b hover:bg-gray-50' + (r.id === openId ? ' selected-row' : ''), tabindex: '0', 'data-id': r.id}, [
                 el('td', {class: 'px-2 py-1'}, check),
                 el('td', {class: 'px-2 py-1 whitespace-nowrap text-xs text-gray-600', text: r.at}),
-                el('td', {class: 'px-2 py-1 whitespace-nowrap', text: r.page}),
-                el('td', {class: 'px-2 py-1 whitespace-nowrap', text: (r.customer || '') + (r.is_test ? ' (test)' : '')}),
+                el('td', {class: 'max-w-[11rem] truncate whitespace-nowrap', title: r.page, text: r.page}),
+                el('td', {class: 'max-w-[11rem] truncate whitespace-nowrap', title: r.customer || '', text: (r.customer || '') + (r.is_test ? ' (test)' : '')}),
                 el('td', {class: 'px-2 py-1 font-mono text-xs whitespace-nowrap', text: r.waybill}),
                 el('td', {class: 'px-2 py-1 whitespace-nowrap text-xs', text: r.jnt || ''}),
                 el('td', {class: 'px-2 py-1 font-mono text-xs', text: r.psid_last4 ? '…' + r.psid_last4 : '—'}),
@@ -354,12 +359,12 @@
         ]));
         const actions = el('div', {class: 'flex gap-2 my-2'});
         if (['ready', 'failed', 'field_mismatch', 'skipped'].includes(m.status) && m.psid) {
-            const send = el('button', {type: 'button', class: 'bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded', text: 'Send'});
+            const send = el('button', {type: 'button', class: 'cb-btn cb-btn-primary', text: 'Send'});
             send.addEventListener('click', () => sendIds([m.id], 'Send this message to the customer?'));
             actions.append(send);
         }
         if (!m.is_test) {
-            const test = el('button', {type: 'button', class: 'bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded', text: 'Send test'});
+            const test = el('button', {type: 'button', class: 'cb-btn', text: 'Send test'});
             test.addEventListener('click', async () => {
                 try { await post(url.testUrl, {id: m.id}); notice('The test is queued to the page\'s Test PSID.', 'text-green-700'); load(); }
                 catch (e) { notice(e.message, 'text-red-600'); }
@@ -386,7 +391,11 @@
         document.getElementById('panel').classList.remove('hidden');
         for (const tr of document.querySelectorAll('#cb-rows tr')) tr.classList.toggle('selected-row', Number(tr.dataset.id) === id);
     }
-    document.getElementById('panel-close').addEventListener('click', () => { openId = null; document.getElementById('panel').classList.add('hidden'); });
+    // Ang modal: isinasara ng ✕, ng Escape, o ng pindot sa labas ng kahon.
+    const closePanel = () => { openId = null; document.getElementById('panel').classList.add('hidden'); };
+    document.getElementById('panel-close').addEventListener('click', closePanel);
+    document.getElementById('panel').addEventListener('click', e => { if (e.target.id === 'panel') closePanel(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId) closePanel(); });
 
     // ---- aksyon ----
 

@@ -3,20 +3,19 @@
 @section('title', 'Chatblast · Messages')
 @section('heading', 'Messages')
 
+@section('description')
+    Each message has versions (A, B, …) that rotate across customers; a <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">sequence</a> picks it for each day. Texts save as you leave the box.
+@endsection
+
 @section('content')
 <div id="cm"
      data-data-url="{{ route('chatblast.campaigns.data') }}"
      data-base-url="{{ url('/chatblast/messages') }}"
      data-flow-url="{{ route('chatblast.campaigns.flow') }}">
-    <p class="text-xs text-gray-500 mb-3 max-w-4xl">
-        Like flows in Botcake: each message has a name and versions (A, B, …) that rotate across customers. The
-        <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">sequence</a> picks which message is sent on each day.
-        A text saves when you leave the box or press Enter (Shift+Enter: new line), and it also updates the text of messages not sent yet.
-    </p>
 
     <p id="notice" class="text-xs mb-2 min-h-[1rem]" aria-live="polite"></p>
 
-    <div class="flex flex-wrap items-end gap-3 mb-3 text-sm">
+    <div class="cb-filters flex flex-wrap items-end gap-3 mb-3 text-sm">
         <label class="flex flex-col text-xs text-gray-600">Search<input id="q" placeholder="name or text" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
         <label class="flex flex-col text-xs text-gray-600">Sequence
             <select id="seq" class="border rounded px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="none">Not used</option></select>
@@ -28,19 +27,19 @@
     </div>
 
     <div class="text-xs text-gray-600 mb-3">Placeholders (click to insert into the last text box):
-        @foreach($placeholders as $ph)<button type="button" class="chip ml-1 px-2 py-0.5 rounded bg-gray-200 hover:bg-gray-300 font-mono" data-ph="{{ '{' . $ph . '}' }}">{{ '{' . $ph . '}' }}</button>@endforeach
+        @foreach($placeholders as $ph)<button type="button" class="chip ml-1 rounded-full bg-slate-100 px-2.5 py-0.5 font-mono hover:bg-slate-200" data-ph="{{ '{' . $ph . '}' }}">{{ '{' . $ph . '}' }}</button>@endforeach
     </div>
 
-    <details id="new-box" class="mb-3 bg-white rounded shadow px-4 py-2 text-sm">
+    <details id="new-box" class="mb-3 cb-card px-4 py-2 text-sm">
         <summary class="cursor-pointer font-medium">+ New message</summary>
         <form id="new-form" class="grid md:grid-cols-3 gap-2 mt-2">
             <label class="flex flex-col text-xs text-gray-600">Name<input name="name" maxlength="140" placeholder="e.g. In transit · Day 3 · payment" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
             <label class="flex flex-col text-xs text-gray-600 md:col-span-2">Version A text<textarea name="text" rows="2" maxlength="1000" class="border rounded px-2 py-1 text-sm font-mono text-gray-900"></textarea></label>
-            <div><button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded">Create</button></div>
+            <div><button class="cb-btn cb-btn-primary">Create</button></div>
         </form>
     </details>
 
-    <details id="flow-box" class="mb-4 bg-white rounded shadow px-4 py-2 text-sm">
+    <details id="flow-box" class="mb-4 cb-card px-4 py-2 text-sm">
         <summary class="cursor-pointer font-medium">Flow and template (per page)</summary>
         <p class="text-xs text-gray-500 mt-1">
             The flow is the page's <code>flow.shipping</code>; the message is written to <code>field.message</code> and appears in the template's @{{1}}.
@@ -179,7 +178,7 @@
             ]);
         });
 
-        return el('div', {class: 'bg-white rounded shadow p-3'}, [
+        return el('div', {class: 'cb-card p-3'}, [
             el('div', {class: 'flex flex-wrap items-center gap-2 mb-2'}, [name, nameMark, el('span', {class: 'text-xs text-gray-500', text: 'sent (last ' + data.sent_days + ' days) ' + fmt(m.sent_total)}), ...actions]),
             el('div', {class: 'mb-2'}, [el('span', {class: 'text-xs text-gray-500 mr-1', text: 'Used in:'}), ...used]),
             el('div', {class: 'space-y-2'}, versions),

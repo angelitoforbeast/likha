@@ -2,6 +2,7 @@
 
 @section('title', 'Page Settings')
 @section('heading', 'Page Settings')
+@section('description', 'The Botcake settings of every page: ID, token, flows, message field and template. Values save as you type.')
 
 @section('actions')
     <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders without a PSID)</a>
@@ -9,9 +10,11 @@
 
 @push('styles')
     <style>
-        #grid-table th.sticky-col, #grid-table td.sticky-col { position: sticky; left: 0; z-index: 2; }
-        #grid-table thead th { position: sticky; top: 0; z-index: 3; }
-        #grid-table thead th.sticky-col { z-index: 4; }
+        /* Walang sticky na header o Page column: normal na dokumento ang grid. Magaan na hati ng row, walang band sa header. */
+        #grid-table thead tr, #grid-table thead th { background: transparent; }
+        #grid-table thead th { border-bottom: 1px solid #e2e8f0; color: #64748b; }
+        #grid-table th, #grid-table td { border-right-color: transparent; }
+        #grid-table tbody td { border-bottom-color: #f1f5f9; }
         #grid-table .cell { cursor: text; }
         #grid-table .cell.readonly { cursor: default; }
         #grid-table .cell:hover .hist { visibility: visible; }
@@ -34,31 +37,31 @@
         </div>
     @endif
 
-    <div class="flex flex-wrap items-end gap-4 mb-3 text-sm">
+    <div class="cb-filters flex flex-wrap items-end gap-4 mb-3 text-sm">
         <input id="filter" placeholder="Search pages" class="border rounded px-2 py-1">
 
         <form id="add-page" class="flex items-center gap-1">
             <input name="page_name" placeholder="Page name (as PAGE in orders)" class="border rounded px-2 py-1 w-72" required>
-            <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">+ Page</button>
+            <button class="cb-btn">+ Page</button>
         </form>
 
         <form id="add-column" class="flex items-center gap-1">
             <input name="provider" value="botcake" placeholder="provider" class="border rounded px-2 py-1 w-24" required>
             <input name="key" placeholder="key (e.g. flow.reminder)" class="border rounded px-2 py-1 w-44" required>
             <label class="flex items-center gap-1"><input type="checkbox" name="is_secret" value="1"> secret</label>
-            <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">+ Column</button>
+            <button class="cb-btn">+ Column</button>
         </form>
 
         <span id="notice" class="text-xs"></span>
     </div>
 
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
-        <button id="test-all" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">Test all tokens</button>
+        <button id="test-all" type="button" class="cb-btn">Test all tokens</button>
         <span id="test-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
-        <button id="sync-all" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50">Sync all</button>
-        <button id="sync-all-pause" type="button" data-action="pause" class="sync-all-control hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">Pause</button>
-        <button id="sync-all-resume" type="button" data-action="resume" class="sync-all-control hidden bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">Resume</button>
-        <button id="sync-all-stop" type="button" data-action="stop" class="sync-all-control hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Stop</button>
+        <button id="sync-all" type="button" class="cb-btn cb-btn-primary">Sync all</button>
+        <button id="sync-all-pause" type="button" data-action="pause" class="sync-all-control cb-btn hidden">Pause</button>
+        <button id="sync-all-resume" type="button" data-action="resume" class="sync-all-control cb-btn hidden">Resume</button>
+        <button id="sync-all-stop" type="button" data-action="stop" class="sync-all-control cb-btn hidden">Stop</button>
         <span id="sync-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
     </div>
 
@@ -98,7 +101,7 @@
     <div id="summary-bar" class="flex flex-wrap items-center gap-2 mb-2 text-xs"></div>
 
     <div id="grid"
-         class="bg-white rounded shadow overflow-auto max-h-[75vh]"
+         class="cb-card overflow-x-auto"
          data-grid-url="{{ route('page-settings.grid') }}"
          data-cell-url="{{ route('page-settings.cell') }}"
          data-history-url="{{ route('page-settings.history') }}"
@@ -112,13 +115,16 @@
         <table id="grid-table" class="text-sm border-collapse w-full table-fixed"></table>
     </div>
 
-    <div id="history" class="hidden fixed right-0 top-0 h-full w-96 max-w-full bg-white shadow-xl border-l p-4 overflow-auto text-sm z-50">
-        <div class="flex justify-between items-center mb-2">
-            <div id="history-title" class="font-semibold break-all"></div>
-            <button id="history-close" class="text-gray-500 hover:text-gray-800 px-2">✕</button>
+    {{-- Ang history ng isang value: modal sa gitna (hindi side panel na tumatakip sa grid). Isara: ✕, Escape, o pindot sa labas. --}}
+    <div id="history" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true">
+        <div class="mx-auto w-full max-w-lg rounded-xl bg-white p-5 text-sm shadow-lg">
+            <div class="mb-3 flex items-center justify-between">
+                <div id="history-title" class="break-all font-semibold"></div>
+                <button id="history-close" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <div id="history-current" class="mb-3"></div>
+            <ul id="history-list" class="space-y-1 text-xs text-gray-700"></ul>
         </div>
-        <div id="history-current" class="mb-3"></div>
-        <ul id="history-list" class="space-y-1 text-xs text-gray-700"></ul>
     </div>
 </div>
 
@@ -522,8 +528,8 @@
     function actions(r) {
         const out = [];
         if (r.info.botcake) {
-            out.push(postForm(url.testTokenUrl, r.name, 'Test', 'Test token', 'bg-gray-200 hover:bg-gray-300 px-1.5 py-0.5 rounded text-xs'));
-            out.push(postForm(url.syncUrl, r.name, 'Sync', 'Sync now', 'bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded text-xs'));
+            out.push(postForm(url.testTokenUrl, r.name, 'Test', 'Test token', 'cb-btn cb-btn-sm'));
+            out.push(postForm(url.syncUrl, r.name, 'Sync', 'Sync now', 'cb-btn cb-btn-sm'));
         }
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), title: 'Customers', text: 'Cust.'}));
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), title: 'Orders without a PSID', text: 'Orders'}));
@@ -748,7 +754,10 @@
         ])));
         if (!list.children.length) list.append(el('li', {class: 'text-gray-400', text: 'No earlier values.'}));
     }
-    document.getElementById('history-close').addEventListener('click', () => document.getElementById('history').classList.add('hidden'));
+    const closeHistory = () => document.getElementById('history').classList.add('hidden');
+    document.getElementById('history-close').addEventListener('click', closeHistory);
+    document.getElementById('history').addEventListener('click', e => { if (e.target.id === 'history') closeHistory(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !document.getElementById('history').classList.contains('hidden')) closeHistory(); });
 
     // ---- Test lahat ng token: isang page kada request, isa-isa, sa ayos ng grid ----
 
