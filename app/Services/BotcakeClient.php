@@ -111,6 +111,19 @@ class BotcakeClient
         return $body;
     }
 
+    /**
+     * Ang sagot ng chatbot sa customer (send_content, sa loob ng 24 oras ng Messenger, walang message tag). Ang 429 lang
+     * ang inuulit: ang 5xx o walang sagot ay maaaring natanggap na, kaya hindi inuulit (walang dobleng sagot).
+     * @param array<int, array{type: string, text?: string, url?: string}> $messages
+     * @return array{http: int, body: mixed, attempts: int}
+     */
+    public function sendContent(string $pageId, string $psid, array $messages, string $token): array
+    {
+        return $this->call('POST', '/pages/' . rawurlencode($pageId) . '/flows/send_content', [
+            'psid' => $psid, 'data' => ['version' => 'v2', 'content' => ['messages' => $messages]],
+        ], $token, true);
+    }
+
     /** Ang sagot ng Botcake kapag wala ang PSID sa page. */
     public const NOT_ON_PAGE = ['not found customer', 'psid wrong format'];
 

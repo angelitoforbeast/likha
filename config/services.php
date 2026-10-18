@@ -117,6 +117,12 @@ return [
         'track_sync_auto' => (bool) env('JNT_TRACK_SYNC_AUTO', false),
     ],
 
+    // Sariling chatbot (/chatbot): false = tumatakbo ang mga flow pero walang padala sa Botcake at walang sheet row
+    // (itinatala bilang skipped). Ang owner ang nagbubukas nito pagkatapos ng Test.
+    'chatbot' => [
+        'replies_enabled' => (bool) env('CHATBOT_REPLIES_ENABLED', false),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),

@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunChatbotFlow;
 use App\Models\BotcakeChat;
 use App\Services\BotcakeChatGuard;
+use App\Services\Chatbot\ChatbotPage;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -134,7 +136,14 @@ class BotcakeChatController extends Controller
         }
 
         if (!$this->isDuplicate($f)) {
-            BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
+            $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
+            // Ang sariling chatbot: kapag may flow ang page (at naka-On), ang takbo ay sa queue na "chatbot". Ang
+            // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.
+            try {
+                if (app(ChatbotPage::class)->flow($pageName)) RunChatbotFlow::dispatch($chat->id);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return response()->json(['ok' => true]);
