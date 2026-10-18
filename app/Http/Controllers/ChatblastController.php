@@ -10,6 +10,7 @@ use App\Services\BotcakeCustomerMatcher;
 use App\Services\Chatblast;
 use App\Services\ChatblastSender;
 use App\Services\PageSettings;
+use App\Support\ChatblastReason;
 use App\Support\NavAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -123,7 +124,7 @@ class ChatblastController extends Controller
             'id' => $m->id, 'page' => $m->page_name, 'kind' => $m->kind, 'day' => $m->day, 'version' => $m->version,
             'step' => self::step($m), 'waybill' => $m->waybill, 'customer' => $m->fb_name,
             'psid' => $m->psid, 'text' => $m->text, 'vars' => $m->vars, 'jnt_status' => $m->jnt_status, 'status' => $m->status,
-            'reason' => $m->reason, 'attempts' => $m->attempts, 'last_http' => $m->last_http, 'steps' => $m->steps ?? [],
+            'reason' => ChatblastReason::display($m->reason), 'attempts' => $m->attempts, 'last_http' => $m->last_http, 'steps' => $m->steps ?? [],
             'is_test' => $m->is_test, 'test_of' => $m->test_of, 'macro_output_id' => $m->macro_output_id,
             'created_at' => $at($m->created_at), 'queued_at' => $at($m->queued_at), 'sent_at' => $at($m->sent_at), 'updated_at' => $at($m->updated_at),
             'created_by' => $m->created_by ? ($names[$m->created_by] ?? 'user #' . $m->created_by) : 'system',
@@ -292,7 +293,7 @@ class ChatblastController extends Controller
             'day' => $m->day, 'version' => $m->version, 'step' => self::step($m),
             'customer' => $m->fb_name, 'waybill' => $m->waybill, 'jnt' => $jnt ?? $m->jnt_status,
             'psid_last4' => $m->psid ? mb_substr($m->psid, -4) : null, 'first_line' => strtok((string) $m->text, "\n") ?: '',
-            'text' => $m->text, 'status' => $m->status, 'reason' => $m->reason, 'attempts' => $m->attempts, 'http' => $m->last_http,
+            'text' => $m->text, 'status' => $m->status, 'reason' => ChatblastReason::display($m->reason), 'attempts' => $m->attempts, 'http' => $m->last_http,
             'sent_at' => $m->sent_at?->timezone('Asia/Manila')->format('m-d H:i'), 'is_test' => $m->is_test,
         ];
     }
