@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\BotcakeChat;
 use App\Models\PageSetting;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -135,6 +136,9 @@ class PageSettings
                 'page' => $name, 'key' => $provider . '.' . $key, 'setting_id' => $setting->id, 'by' => $userId,
             ]);
 
+            // Ang mapa ng page_id => page ng /api/botcake/chat ay naka-cache: binubura ngayon at pagkatapos ng commit.
+            if ($provider === 'botcake' && $key === 'page_id') $this->forgetChatPageMap();
+
             return ['status' => $status, 'setting' => $setting];
         });
         // Pagkatapos ng commit: ang Ready ng page (ChatblastReady) ay kinukuwenta ulit sa susunod na tanong.
@@ -143,12 +147,19 @@ class PageSettings
         return $res;
     }
 
+    private function forgetChatPageMap(): void
+    {
+        BotcakeChat::forgetPageMap();
+        DB::afterCommit(fn () => BotcakeChat::forgetPageMap());
+    }
+
     public function deactivate(PageSetting $setting, ?int $userId = null): void
     {
         if (!$setting->active) return;
 
         $setting->update(['active' => false, 'replaced_at' => now()]);
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
+        if ($setting->provider === 'botcake' && $setting->key === 'page_id') $this->forgetChatPageMap();
         Log::info('PageSettings: deactivated', [
             'page' => $setting->page_name, 'key' => $setting->fullKey(), 'setting_id' => $setting->id, 'by' => $userId,
         ]);

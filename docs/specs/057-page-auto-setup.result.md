@@ -258,3 +258,31 @@ The independent review of `5e916162..96395740` found no majors. Each minor below
 - the Mark as tested button and its confirm.
 
 The view tests find their strings only.
+
+## Merge of `main` (059, 060, 058 revert)
+
+**Conflicts:**
+- **`PageSettings.php`:** keeps both. `set()` and `deactivate()` clear the Ready cache (057) and, for `botcake.page_id`, the chat page map (059). The `SYSTEM_KEYS` additions are kept.
+- **`chatblast/index.blade.php`:** 060's layout is kept: the fixed header block, the scrolling table, and the Test PSID modal button and status on the chip row. 057's `#test-psid` details anchor is gone. The "Set a Test PSID first" link (`/chatblast#test-psid`) now opens 060's modal.
+- **`TODO.md` and `qa/stories.md`:** both sides kept.
+
+**Page settings (auto-merged):**
+- 057's grid sits inside 060's `.cb-page` / `#grid.cb-scroll`: dropdowns, guides, Test send line, Needs test chip and Mark as tested.
+- **Ready and Needs test agree.** 060's Ready chip counts the green border, and green needs a confirmed test or real send (`needsTest` gives amber), so no row can be in both.
+- **Scroll position.** 057's row actions never relied on `window.scrollY`: they don't reload or re-render the table, so the grid's own `scrollTop` is what has to hold.
+- **One fix:** in 060's fixed header, a long notice (e.g. after Sync) wrapped the filter row and pushed the grid down 32 px. The notice is now one line, with the full text in the tooltip (test in S-057.9).
+
+**Browser check** (headless Chrome, 1366 × 768, scratch app with fake Botcake, 42 pages):
+- Test, Sync and Send test on a row near the bottom of the grid kept `#grid.scrollTop` at 5242. The grid's top stayed at 369 px; window and `main` stayed at 0.
+- No navigation, no JS error, no horizontal scroll at 1366 or 1280.
+- Chips: Ready 27, Needs test 13, no row in both.
+- 13 Mark as tested buttons for 13 rows that need a test (CEO).
+- `/chatblast#test-psid` opens the Test PSID modal.
+
+**Suite:**
+- **Full run on the merged tree** (before the notice fix): `Tests: 3 failed, 158 passed (19179 assertions)`.
+  - The two known failures are `ExampleTest` and `NightRun\ImportStartTest`.
+  - The third, `NightRun\AstraAddressRulesTest` S-26.18, failed its timing limit (25.35 s against 25 s) while the browser check ran at the same time. It passes when run alone.
+- **After the notice fix:** `tests/Feature/Chatblast` and `tests/Feature/PageSettings` give `Tests: 365`, `2608 assertions`, all passing.
+
+**Owner's rule:** 060's fixed header and sticky table header go against the earlier "no sticky or floating UI" rule. They are kept because 060 is on `main` and live.

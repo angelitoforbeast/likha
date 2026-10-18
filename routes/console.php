@@ -85,6 +85,12 @@ Schedule::command('staff-events:prune')
     ->dailyAt('04:20')
     ->withoutOverlapping();
 
+// Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
+Schedule::command('botcake:prune-chats')
+    ->timezone('Asia/Manila')
+    ->dailyAt('04:25')
+    ->withoutOverlapping();
+
 // Botcake PSID import: kusa kada oras (lahat ng settings, walang cutoff), maliban sa 03:00.
 // 03:00 Manila: binubura muna sa sheet ang mga row na naitala na sa botcake_psids, saka ang import (tahimik na oras,
 // tuloy-tuloy ang dagdag ng Botcake). Naka-queue ang trabaho; ang lock sa job ang pumipigil sa dalawang sabay, kasama ang button.

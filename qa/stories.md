@@ -1107,3 +1107,83 @@ Amendment 7. Test in `tests/Feature/PageSettings/PageSettingsGridTest.php`.
 | S-057.9 | Given the row actions Test and Sync, then they run with fetch (no reload); Sync answers JSON for fetch | `test_S_057_9…` | Passed · 2026-10-18 · auto |
 | S-057.10 | (browser) Add a page with a fake Botcake: it fills itself, a dropdown choice saves, Send test turns it Ready, and the scroll position stays | Browser check | Passed · 2026-10-18 · headless browser, fake Botcake |
 | S-057.11 | Given a complete untested page, when the CEO presses "Mark as tested" and confirms, then botcake.test_ok is written now with the CEO's user id and the page is Ready, with nothing sent; another role with Page settings access gets 403 and no button; an incomplete page gets 422 | `test_S_057_11…` | Passed · 2026-10-18 · auto |
+
+## S-059 Customer chats from Botcake's JSON API block
+
+Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
+
+### S-059A Botcake sends each customer message to the website (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.1 | Given the chat key is set, when a request has no key, a wrong key, or the key is not set on the server, then it gets 401 with no detail and nothing is stored | `test_S_059_1…` (4 data sets) | Passed · 2026-10-18 · auto |
+| S-059.2 | Given the right key in the `X-Chat-Key` header or the `key` param, when Botcake sends JSON, a form, GET query params, or JSON as text/plain (key in the header or in the body), then it gets `{"ok":true}` and one row is stored with page id, PSID, name and message | `test_S_059_2…` (5 data sets) | Passed · 2026-10-18 · auto |
+| S-059.3 | Given params named in any case or with an alias (`user_id`/`fb_id`, `text`/`last_input`/`last_user_input`, `full_name`) and unknown extra params, then the known fields are filled and the full payload is kept, without the key | `test_S_059_3…` | Passed · 2026-10-18 · auto |
+| S-059.4 | Given a stored message, when the same message_id comes again, or the same page + PSID + message within 10 seconds, then it is not stored again (still `{"ok":true}`); after 10 seconds the same text is stored | `test_S_059_4…` | Passed · 2026-10-18 · auto |
+| S-059.5 | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | Passed · 2026-10-18 · auto |
+| S-059.6 | Given the per-IP limit, when one IP sends more than the limit in a minute, then it gets 429 | `test_S_059_6…` | Passed · 2026-10-18 · auto |
+| S-059.7 | Given a request with neither PSID nor message (e.g. an empty test Send), then it gets `{"ok":true}` and nothing is stored | `test_S_059_7…` | Passed · 2026-10-18 · auto |
+| S-059.13 | Given a message over 5000 characters, a name over 255, a PSID over 64, a nested param, 60 params and invalid UTF-8, then it gets `{"ok":true}` and is stored cut to the column sizes (payload: at most 50 params, 2000 characters each, arrays as JSON, bytes made valid) | `test_S_059_13…` | Passed · 2026-10-18 · auto |
+
+### S-059B The Chats page (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.8 | Given a role with /chatblast access, then /chatblast/chats lists the latest messages (time, page, customer, message) newest first and the Chatblast nav has "Chats"; a role without access gets 404 | `test_S_059_8…` | Passed · 2026-10-18 · auto |
+| S-059.9 | Given messages on two pages and two days, when filtering by page, by date, or searching a name or a word of the text, then only the matching messages show | `test_S_059_9…` | Passed · 2026-10-18 · auto |
+| S-059.10 | Given a customer, when their name is clicked, then their messages show oldest first, and no other customer's | `test_S_059_10…` | Passed · 2026-10-18 · auto |
+| S-059.11 | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | Passed · 2026-10-18 · auto |
+| S-059.14 | Given a stored name and message with HTML, then the Chats list and the customer view show it as text | `test_S_059_14…` | Passed · 2026-10-18 · auto |
+
+### S-059C Retention (P2)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.12 | Given chats older and newer than 90 days, when the prune runs (its command, or chatblast:auto once a day), then only the older ones are deleted | `test_S_059_12…` | Passed · 2026-10-18 · auto |
+
+### S-059D Amendment 1: Botcake's own variable names and pages without a page variable (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.3 (extended) | Given Botcake's variables `user.id` (or `id`), `user.full_name` and `last_text_input`, in JSON (with the dot) or GET (PHP turns the dot into `_`), then they fill psid, name and message | `test_S_059_3…` | Passed · 2026-10-18 · auto |
+| S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
+| S-059.16 | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+| S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
+
+### S-059E Fixes from the independent review: fast at millions of rows (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.18 | Given chats and pages, when the Chats page opens (with or without a page filter), then no query counts or groups the whole chats table; the page list comes from page settings plus a cached (10 min) list of other page ids ("Unknown page (ID …)"); the table has a (page_id, received_at) index | `test_S_059_18…` | Passed · 2026-10-18 · auto |
+| S-059.19 | Given more old chats than one batch (5000), when the prune runs, then it deletes in batches until none are left (up to 40 batches a run) and keeps newer chats | `test_S_059_19…` | Passed · 2026-10-18 · auto |
+| S-059.20 | Given the cached page id → page map, when a page's botcake.page_id is saved, then the next chat with the new id gets the page name at once and the old id is gone from the map | `test_S_059_20…` | Passed · 2026-10-18 · auto |
+| S-059.21 | Given a body over 64 KB, then a wrong header key gets 401 (checked first) and otherwise it gets 413; nothing is stored | `test_S_059_21…` (3 data sets) | Passed · 2026-10-18 · auto |
+| S-059.3 / S-059.13 (extended) | The payload no longer repeats the fields that have their own column (page_id, psid, name, message, under whatever alias they came) | `test_S_059_3…`, `test_S_059_13…` | Passed · 2026-10-18 · auto |
+| S-059.16 (extended) | The Setup box says "Prefer POST + header; GET puts the key in server logs." | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+### S-060 Chatblast pages keep the header fixed and scroll only the data (P1)
+
+Spec 060. Test in `tests/Feature/Chatblast/ChatblastAppTest.php`; the scrolling itself is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.1 | Given any of the five Chatblast pages, then the page is one full-height column whose data area is its only scroll container (one `cb-scroll`), with the top bar and page header outside it; on To send, History and Page settings that area holds the table, whose column header row sticks to its top | `test_S_060_1…` (5 data sets) | Passed · 2026-10-18 · auto |
+| S-060.2 | Given a table page, when the rows are scrolled at 1366 or 1280 px, then the top bar, the page header with its filters, chips and buttons, and the column header row stay in place, the page has no horizontal scroll, and a row still opens its details modal | browser check | Passed · 2026-10-18 · headless browser |
+| S-060.3 | Given Messages or Sequences (cards), when the cards are scrolled, then the top bar and the page header with its filters stay in place | browser check | Passed · 2026-10-18 · headless browser |
+
+### S-060A A short fixed block, and a Ready chip on Page settings (P1)
+
+Amendment 1. Tests in `tests/Feature/Chatblast/ChatblastAppTest.php` and `tests/Feature/PageSettings/PageSettingsGridTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.4 | Given To send or History, then the fixed block is the title with its description, one filter row and one chip row; the chip row holds the chips, the "Sending: …" status at the right in small text and a "Test PSID" button at its right end; there is no Test PSID disclosure | `test_S_060_4…` (2 data sets) | Passed · 2026-10-18 · auto |
+| S-060.5 | Given To send, when "Test PSID" is clicked, then the picker opens in a modal (search, pick, current PSID) and closes with ✕, Escape or a click outside | browser check | Passed · 2026-10-18 · headless browser |
+| S-060.6 | Given Page settings, then a "Ready N" chip comes right after "Pages N" and counts the pages with the green row border; clicking it shows only those pages, clicking it again shows every page, and it combines with the name search | `test_S_060_6…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-060B History lists the latest processed first (P1)
+
+Amendment 2. Test in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.7 | Given History > Sent, when a row built earlier was sent later than another, then it is listed first (sent_at descending, then id descending; a row without sent_at goes last); on the other chips the order is the time the row was processed (updated_at) descending, then id descending; To send keeps its order | `test_S_060_7…` (sent, failed) | Passed · 2026-10-18 · auto |

@@ -216,6 +216,9 @@ class PageAutoSetupTest extends BotcakeApiTestCase
 
         $this->assertStringNotContainsString('postForm(', $html, 'walang form post na nagre-reload ng page');
         foreach (['fetch(url.syncUrl', 'fetch(url.sendTestUrl', 'await testOne(r)'] as $needle) $this->assertStringContainsString($needle, $html, $needle);
+        // Ang notice ay nasa nakapirming header: isang linya lang (buo sa tooltip), para hindi maitulak pababa ang grid.
+        $this->assertStringContainsString("n.className = 'min-w-0 flex-1 basis-0 truncate text-xs ' + cls;", $html);
+        $this->assertStringContainsString('n.title = text;', $html);
 
         $s = $this->settings();
         $s->set('Page Dos', 'botcake', 'page_id', '2002');

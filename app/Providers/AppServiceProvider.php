@@ -78,6 +78,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // /api/botcake/chat: kada IP, ayon sa services.botcake.chat_rate (binabasa kada request).
+        \Illuminate\Support\Facades\RateLimiter::for('botcake-chat', fn (\Illuminate\Http\Request $request) =>
+            \Illuminate\Cache\RateLimiting\Limit::perMinute(max(1, (int) config('services.botcake.chat_rate')))->by($request->ip()));
+
         // Force HTTPS in production
         if (env('APP_ENV') === 'production') {
             URL::forceScheme('https');
