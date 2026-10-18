@@ -12,7 +12,7 @@
         #grid-table thead th.sticky-col { z-index: 4; }
         #grid-table .cell { cursor: text; }
         #grid-table .cell.readonly { cursor: default; }
-        #grid-table .cell:hover .hist, #grid-table .cell:focus .hist { visibility: visible; }
+        #grid-table .cell:hover .hist { visibility: visible; }
         #grid-table .hist { visibility: hidden; }
     </style>
 </head>
@@ -197,6 +197,10 @@
     const GROUPS = [['botcake', 'Botcake'], ['flows', 'Flows']];
     const WIDTHS = ['13%', '23%', '31%', '8%', '15%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
     // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
+    // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID.
+    const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid'];
+    const inGroup = group => columns.filter(c => c.group === group)
+        .sort((a, b) => (LINE_ORDER.indexOf(a.key) + 1 || 99) - (LINE_ORDER.indexOf(b.key) + 1 || 99));
     const SHORT = {'botcake.page_id': 'ID', 'botcake.token': 'Token', 'botcake.token_status': 'Status', 'botcake.field.message': 'Message field',
         'botcake.test_psid': 'Test PSID', 'botcake.flow.shipping': 'Shipping', 'botcake.flow.on_delivery': 'Delivering',
         'botcake.flow.in_transit': 'In transit', 'botcake.flow.broadcast': 'Broadcast', 'botcake.template.shipping': 'Template'};
@@ -218,7 +222,7 @@
         const body = sortedRows().flatMap(r => {
             const tr = el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
                 pageTd(r),
-                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'}, columns.filter(c => c.group === group).map(c => line(r, c)))),
+                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'}, inGroup(group).map(c => line(r, c)))),
                 el('td', {class: 'px-2 py-1 border-b border-r align-top text-right text-xs', 'data-info': 'oc', title: ORDERS_LABEL + ' / Customers'}, infoOc(r)),
                 paintSync(el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'sync'}), r),
                 el('td', {class: 'px-2 py-1 border-b align-top', 'data-info': 'actions'}, actions(r)),
@@ -349,17 +353,17 @@
     // ---- ang detalye ng row (▸): ang hindi kasya sa mga cell ----
 
     function detailTr(r) {
-        const other = columns.filter(c => c.group === 'other');
+        const other = inGroup('other');
         return el('tr', {class: 'detail bg-gray-50', 'data-detail': r.key}, el('td', {class: 'px-4 py-2 border-b text-xs', colspan: String(WIDTHS.length)}, [
             el('div', {class: 'grid grid-cols-3 gap-4', 'data-detail-info': ''}, detailInfo(r)),
             el('div', {class: 'mt-2'}, [
                 el('div', {class: 'font-semibold text-gray-600', text: 'Ibang key'}),
-                other.length ? el('div', {class: 'grid grid-cols-2 gap-x-4'}, columns.filter(c => c.group === 'other').map(c => line(r, c, 'w-40')))
+                other.length ? el('div', {class: 'grid grid-cols-2 gap-x-4'}, other.map(c => line(r, c, 'w-40')))
                     : el('div', {class: 'text-gray-400', text: 'Wala (gamitin ang + Column).'}),
             ]),
             el('div', {class: 'mt-2 flex flex-wrap items-baseline gap-x-3'}, [
                 el('span', {class: 'font-semibold text-gray-600', text: 'History:'}),
-                ...columns.map(c => el('button', {class: 'hist-link text-blue-700 hover:underline', type: 'button', 'data-pk': r.key, 'data-key': c.key, title: c.key, text: c.label})),
+                ...columns.filter(c => !c.readonly).map(c => el('button', {class: 'hist-link text-blue-700 hover:underline', type: 'button', 'data-pk': r.key, 'data-key': c.key, title: c.key, text: c.label})),
             ]),
         ]));
     }
@@ -368,7 +372,6 @@
 
     // Buong text, walang putol: ang pangalan ng flows, ang body ng template at ang sync.
     function detailInfo(r) {
-        const n = v => Number(v || 0).toLocaleString('en-US');
         const s = r.info.last_sync;
         const t = r.cells[TEMPLATE_KEY], body = r.cells[TEMPLATE_KEY + '.text'];
         return [
@@ -386,10 +389,10 @@
             ]),
             el('div', {class: s && s.failed ? 'text-red-600' : ''}, [heading('Sync'), ...[
                 'Huling sync: ' + (s ? [s.dates, s.kind, s.at, s.stop_reason || s.status].filter(Boolean).join(' · ') : 'wala pa'),
-                s ? '+' + n(s.new) + ' bago · ' + n(s.updated) + ' na-update · ' + n(s.matched) + ' na-match · ' + n(s.ad_filled) + ' ad id' : null,
+                s ? '+' + fmt(s.new) + ' bago · ' + fmt(s.updated) + ' na-update · ' + fmt(s.matched) + ' na-match · ' + fmt(s.ad_filled) + ' ad id' : null,
                 s && s.error ? 'Error: ' + s.error : null,
                 'Susunod na sync: ' + (r.info.next ? r.info.next.label : '—'),
-                ORDERS_LABEL + ': ' + n(r.info.orders) + ' · Customers: ' + n(r.info.customers),
+                ORDERS_LABEL + ': ' + fmt(r.info.orders) + ' · Customers: ' + fmt(r.info.customers),
             ].filter(Boolean).map(text => el('div', {class: 'break-words', text}))]),
         ];
     }
@@ -811,7 +814,7 @@
         if (!/^[a-z0-9_]{1,50}$/.test(provider)) { notice('Provider: maliliit na letra, numero at _ lang.', 'text-red-600'); return; }
         if (!/^[a-z0-9_]+(\.[a-z0-9_]+)*$/.test(key) || key.length > 100) { notice('Key: maliliit na letra, numero, _ at . lang (hal. flow.reminder).', 'text-red-600'); return; }
         const added = ensureColumn(provider + '.' + key, f.is_secret.checked);
-        notice(added ? 'Naidagdag ang column ' + provider + '.' + key + ' (mase-save kapag may nilagay na value).' : 'Nasa grid na ang column na iyan.', 'text-green-700');
+        notice(added ? 'Naidagdag ang column ' + provider + '.' + key + ' (nasa ▸ ng bawat page; mase-save kapag may nilagay na value).' : 'Nasa grid na ang column na iyan.', 'text-green-700');
         f.key.value = '';
         f.is_secret.checked = false;
         render();

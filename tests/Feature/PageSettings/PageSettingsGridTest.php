@@ -111,7 +111,8 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->get('/page-settings')
             ->assertSee('const open = new Set();', false)
             ->assertSee('return open.has(r.key) ? [tr, detailTr(r)] : [tr];', false)
-            ->assertSee("columns.filter(c => c.group === 'other').map(c => line(r, c, 'w-40'))", false)
+            ->assertSee("const other = inGroup('other');", false)
+            ->assertSee("other.map(c => line(r, c, 'w-40'))", false)
             ->assertSee("class: 'hist-link", false);
     }
 
