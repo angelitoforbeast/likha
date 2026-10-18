@@ -1051,3 +1051,16 @@ Amendment 3. Tests are in `tests/Feature/Chatblast/ChatblastCustomerSawTest.php`
 | S-056.23 | Given a row with a PSID on a page with botcake.page_id, then the panel has "Open in Botcake" built from the one configured URL format; without a PSID or a page ID, no link | `test_S_056_23…` | Passed · 2026-10-18 · auto |
 | S-056.24 | Given History, then a sent row's first line is the first line of what the customer saw; other rows keep their own first line | `test_S_056_24…` | Passed · 2026-10-18 · auto |
 | S-056.25 | Given To send or History, then the panel has the chat bubble ("What the customer saw", or "will see" before sending) and the link opens in a new tab | `test_S_056_25…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-056E To send is always current without a refresh button (P1)
+
+Amendment 4. Tests are named per case.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.26 | Given chatblast:auto every 5 minutes, then from 06:15 to 23:15 Manila, once per hour at the first run at or after :15, a full fetch builds and re-checks To send; it never sends (also while paused); it is skipped while another fetch runs and retried in the same hour | `ChatblastAutoTest::test_S_056_26…` | Passed · 2026-10-18 · auto |
+| S-056.27 | Given more Delivering candidates than the J&T budget reaches, then the newest orders are tracked first and the oldest are left pending | `ChatblastTrackTest::test_the_build_tracks_for_at_most_60_seconds…` | Passed · 2026-10-18 · auto |
+| S-056.28 | Given To send, then it shows "Updated HH:MM · next refresh HH:MM" (with the date when the last full fetch was not today) and a small "Refresh now" button; no "Fetch new" | `ChatblastToSendTest::test_S_056_28…` | Passed · 2026-10-18 · auto + headless browser |
+| S-056.29 | Given a row built as Delivering whose waybill is now Delivered, then the panel shows "J&T at build: Delivering" and "J&T now: Delivered" | `ChatblastToSendTest::test_S_056_29…` | Passed · 2026-10-18 · auto + headless browser |
+| S-056.30 | Given an auto sequence whose Day 2 has its own time (15:00), when the waybill becomes eligible after 15:00, then the hourly refresh does not build Day 2, so it is not sent at the next unrelated time; it goes out at 15:00 the next day | `ChatblastScheduleTest::test_S_056_30…` | Passed · 2026-10-18 · auto |
+| S-056.31 | Given the refresh, then 23:15 runs and 00:15 does not; when the full fetch throws, then auto's sends of that run still go out and the refresh is tried once per hour, not every 5 minutes | `ChatblastAutoTest::test_S_056_31…` | Passed · 2026-10-18 · auto |

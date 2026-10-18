@@ -580,3 +580,111 @@ One minor was fixed: unsent rows now read "What the customer will see". The rest
 ### Story changes (amendment 3)
 
 - **S-056.22 to S-056.25** are new, from the amendment.
+
+## Amendment 4: To send refreshes itself; Refresh now; J&T at build and now
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-4.md` (git-ignored, not
+committed). It is treated as part of the brief.
+
+### What changed
+
+1. **The To send list refreshes itself** (`Chatblast::refreshIfDue()`, called at the top of `chatblast:auto`).
+   - **When:** `chatblast:auto` already runs every 5 minutes on Likha (the scheduler) and on Incepxion (its cron). Once
+     per hour, at the first run at or after :15 (06:15 to 23:15 Manila, about 10 minutes after the hourly J&T upload),
+     it runs one full fetch: build plus re-check, with the 60 s J&T budget.
+   - **Never sends.** It also runs while sending is paused.
+   - **Uses the existing build lock.** When a fetch is already running, it is skipped and tried again on the next
+     5-minute run in the same hour.
+   - **A failing refresh** is reported, is not retried until the next hour, and never stops auto's sends in that run.
+   - **Incepxion needs no new cron line:** this is the amendment's preferred option, because `chatblast:auto` itself
+     runs the hourly refresh.
+   - **Steps with their own time are not built by the refresh** in auto sequences. Auto builds them at their own
+     time, as before. Otherwise a row built after a step's time would go out at the next unrelated send time, hours
+     late; the review found this.
+   - **Trade-off:** in auto sequences, those steps appear in To send only once their time has come.
+2. **J&T check at fetch time** (Delivering, "requires On Delivery").
+   - The build already tracked these waybills with J&T within the budget. It already left out candidates whose latest
+     scan is not On Delivery, and skipped (moved to History) unsent rows whose new scan is not On Delivery.
+   - **New:** the tracking order puts the **newest orders first** (`orderByDesc('mo.id')`). When the budget runs out,
+     the oldest are the ones not reached; they are checked on the next hourly refresh or right before sending, as
+     before.
+3. **"Fetch new" is now "Refresh now"**, a small secondary button. Beside it: "Updated HH:MM · next refresh HH:MM".
+   - "Updated" is the last full fetch (the hourly refresh, or Refresh now with no sequence chosen).
+   - It shows the date (e.g. "Oct 18 14:15") when that was not today, so a stopped scheduler is visible.
+   - "next refresh" is the next :15 slot, or 06:15 the next morning.
+4. **The row panel shows "J&T at build"** (the stored `jnt_status`) **and "J&T now"** (`from_jnts`, the furthest
+   status).
+
+### Case table (amendment 4)
+
+Red runs, before the code:
+
+- **S-056.26:** `['WB-1' => 'ready']` expected at 09:15, got `[]`.
+- **S-056.27:** the first J&T call did not start with the newest waybill.
+- **S-056.28:** `state.refresh` was null.
+- **S-056.29:** `jnt_now` was missing.
+- **S-056.30:** 'WB-1 D2 queued' at 18:00. It still fails that way with the service change set aside.
+- **S-056.31:** the RuntimeException stopped the command.
+
+| Case | Test | Result |
+|---|---|---|
+| S-056.26 | `ChatblastAutoTest::test_S_056_26_the_to_send_list_refreshes_itself_at_quarter_past_each_hour_and_never_sends` | pass |
+| S-056.27 | `ChatblastTrackTest::test_the_build_tracks_for_at_most_60_seconds_and_leaves_the_rest_pending` (newest first, oldest 20 left pending) | pass |
+| S-056.28 | `ChatblastToSendTest::test_S_056_28_to_send_shows_when_it_was_updated_and_offers_refresh_now_instead_of_fetch_new` | pass |
+| S-056.29 | `ChatblastToSendTest::test_S_056_29_the_panel_shows_the_j_and_t_status_at_build_and_now` | pass |
+| S-056.30 | `ChatblastScheduleTest::test_S_056_30_the_hourly_refresh_never_builds_a_step_with_its_own_time_so_it_is_not_sent_late` | pass |
+| S-056.31 | `ChatblastAutoTest::test_S_056_31_the_refresh_runs_until_23_15_and_a_failing_refresh_never_stops_auto` | pass |
+
+These existing tests were changed:
+
+- `ChatblastAutoTest::test_an_auto_campaign_builds_and_queues_at_each_send_time_once_a_day` and
+  `ChatblastScheduleTest::test_auto_fires_hourly_inside_the_range_only_and_once_per_hour` now expect rows built as
+  `ready` by the refresh at 08:59 and 09:30. Auto still queues them only at their time.
+- `ChatblastEnglishTest` expects "Refresh now".
+- `ChatblastDashboardListTest` expects the "press Refresh now again" error text.
+
+**Suite:**
+
+- `tests/Feature/Chatblast`: `Tests: 176, Assertions: 1173`, all passing.
+- The full suite on `1509cf12`: `Tests: 2 failed, 1494 warnings, 158 passed (18722 assertions)`. The two failures are
+  the known `ExampleTest` and `NightRun\ImportStartTest`.
+
+### Browser check (amendment 4)
+
+The check ran on the scratch app. Evidence is in the main checkout's `handoff/056-chatblast-app/screens/amendment-4/`
+(`a4-to-send.png`, `evidence-amendment-4.txt`).
+
+- **Refresh now:** a small grey bordered button, with "Updated 18:01 · next refresh 19:15" at 18:21.
+- **Panel:** for a row built as Delivering whose waybill is now Delivered, it showed "J&T at build: Delivering" and
+  "J&T now: Delivered".
+- **No JS errors.** This ran before the review fix, which changed only the server.
+
+### Review (amendment 4)
+
+One `skeptic-reviewer` pass (standard depth, with anything that can change what is sent judged as high), then a
+re-check of the fix (`1509cf12`).
+
+- **One major, fixed and closed:** the refresh built steps with their own time after that time, and auto then sent
+  them hours late (S-056.30).
+- **Fixed minors:**
+  - a throwing refresh stopped auto's sends and retried every 5 minutes (S-056.31);
+  - "Updated" had no date;
+  - there were no tests for the 23:15 and 00:15 slots or for a build that throws.
+- **Accepted, with reasons in `TODO.md`:**
+  - newest first applies to new candidates only;
+  - Refresh now and a manual-to-auto switch can still build a timed step late;
+  - a race between the lock release and the slot write;
+  - rider-missing `no_config` rows from budget-limited builds.
+
+### Story changes (amendment 4)
+
+- **S-056.26 to S-056.29** are new, from the amendment.
+- **S-056.30 and S-056.31** are new, from the review.
+
+### Merge danger (amendment 4)
+
+- **Load:** the first `chatblast:auto` run at or after :15 each hour, 06:15 to 23:15, now runs a full fetch, with up to
+  60 s of J&T and a build over all sequences. `withoutOverlapping(30)` only skips 5-minute runs while it works.
+- **Incepxion:** nothing to add. Its existing `chatblast:auto` cron runs the refresh, provided that cron runs at least
+  every few minutes.
+- **No migration.**
