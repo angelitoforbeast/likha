@@ -94,12 +94,17 @@ class BotcakeChatAdTest extends ChatblastTestCase
         $this->send(['psid' => 'psid-new', 'ad_id' => '120200000000000777'])->assertOk();
         $this->send(['psid' => 'psid-known', 'ad_id' => '120200000000000888'])->assertOk();
         $this->send(['psid' => 'psid-has-ad', 'ad_id' => '120200000000000999'])->assertOk();
+        BotcakePsid::create(['page' => 'Page Dos', 'fb_name' => 'Ana Cruz', 'psid' => 'psid-known', 'status' => 'available', 'source' => 'api']);
+        BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Cy Lim', 'psid' => 'psid-text-ad', 'status' => 'available', 'source' => 'api']);
+        $this->send(['psid' => 'psid-text-ad', 'ad_id' => 'not-an-ad 12'])->assertOk();
 
         $new = BotcakePsid::where('psid', 'psid-new')->sole();
         $this->assertSame(['chat_verify', '120200000000000777'], [$new->source, $new->ad_id]);
-        $this->assertSame('120200000000000888', BotcakePsid::where('psid', 'psid-known')->sole()->ad_id);
+        $this->assertSame('120200000000000888', BotcakePsid::where('psid', 'psid-known')->where('page', 'Page Uno')->sole()->ad_id);
+        $this->assertNull(BotcakePsid::where('psid', 'psid-known')->where('page', 'Page Dos')->sole()->ad_id, 'ibang page: hindi ginagalaw');
+        $this->assertNull(BotcakePsid::where('psid', 'psid-text-ad')->sole()->ad_id, 'hindi numero: hindi itinatala');
         $this->assertSame('120200000000000001', BotcakePsid::where('psid', 'psid-has-ad')->sole()->ad_id);
-        $this->assertSame(['120200000000000777', '120200000000000888', '120200000000000999'],
+        $this->assertSame(['120200000000000777', '120200000000000888', '120200000000000999', 'not-an-ad 12'],
             BotcakeChat::orderBy('id')->get()->map(fn ($c) => $c->payload['ad_id'] ?? null)->all());
     }
 
@@ -149,12 +154,19 @@ class BotcakeChatAdTest extends ChatblastTestCase
         $this->assertSame(['update' => ['is_published' => true, 'unlimit_default_reply' => true]], $sent[1]->data());
         $this->assertSame('1', $this->settings()->get('Page Cuatro', 'chatbot', 'active'));
         $this->assertTrue(collect($this->getJson('/chatbot/data')->json('rows'))->firstWhere('page', 'Page Cuatro')['active']);
+
+        // Ang page na nasa page settings na, kulang ng token: ang token lang ang ibinibigay, at naka-On din.
+        $this->settings()->set('Page Tres', 'botcake', 'page_id', '3003');
+        $this->postJson('/chatbot/pages', ['page_name' => 'page tres', 'token' => self::NEW_TOKEN])->assertOk()->assertJson(['page' => 'Page Tres', 'active' => true]);
+        Http::assertSent(fn ($r) => $r->url() === 'https://botcake.io/api/public_api/v1/pages/3003/default_reply/content');
+        $this->assertSame('1', $this->settings()->get('Page Tres', 'chatbot', 'active'));
     }
 
     public static function addFails(): array
     {
         return [
             'the block write' => [['botcake.io/*/default_reply/content', ['success' => false, 'message' => 'Something wrong']], 'ok', 'Could not write the block'],
+            'the publish' => [['botcake.io/*/pages/4004/default_reply', ['success' => false, 'message' => 'Not allowed']], 'ok', 'Could not publish the Default Reply'],
             'the token test' => [['botcake.io/*/custom_fields*', ['success' => false]], 'invalid', 'The token test failed'],
         ];
     }

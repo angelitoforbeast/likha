@@ -123,8 +123,9 @@ class BotcakeChatController extends Controller
 
         // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
         // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
+        // Ang ad ID ng Facebook ay numero lang: ang iba ay hindi itinatala sa botcake_psids (nasa payload pa rin).
         $adId = $this->filled($byName['ad_id'] ?? null);
-        $adId = $adId === null ? null : mb_substr($adId, 0, 64);
+        $adId = $adId !== null && preg_match('/^\d{1,64}$/', $adId) ? $adId : null;
         $check = $f['psid'] === null ? 'unchecked' : $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name'], $adId);
         if ($check === 'not_on_page' || $check === 'unchecked') {
             $guard->count($check === 'not_on_page' ? 'psid_not_found' : 'psid_unchecked');

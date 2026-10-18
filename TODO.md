@@ -711,3 +711,11 @@ Accepted, not fixed:
 - **The helper in ChatbotController is called `role()`,** not the house `getNormalizedRole()`. Reason: cosmetic; same logic.
 - **The scratch app of the browser check left gitignored files** (two session files and a few cache files in this worktree's `storage/framework`, and `%TEMP%\cb068`). Reason: the project guard blocks deleting files from the session; they hold only scratch data and no real key or token.
 - **(re-check) The duplicate Botcake ID check in "+ Page" compares the stored text;** a `botcake.page_id` row someone marked secret in Page settings (encrypted) would slip past it. Reason: only trusted users can mark it secret, and page IDs are never secret in practice.
+
+### Spec 072 (accepted review minors)
+
+- **"+ Page" marks a page Off when the publish step fails,** although the block is already written and an earlier published Default Reply may still be live (chats are then dropped as "Bot off" until the switch is turned On). Reason: the spec asks for "saved but Off" on any Botcake failure; switching On fixes it, and the row shows the error.
+- **A non-fatal token-test note (e.g. the flow list) shows in red on a row that is On.** Reason: it is the same text the notice showed before; cosmetic.
+- **The path where `turnOn` throws during "+ Page" has no test.** Reason: same fixed message as the token test's catch; `BotcakeClient` returns errors as arrays, so a throw is a bug path only.
+- **Two "+ Page" requests at once could each create a key.** Reason: CEO-only, the button is disabled while sending, and the On switch has the same race today; the next On fixes it.
+- **The chat's `ad_id` on a `source=api` row can be replaced by the customer sync** (`BotcakeCustomerSync::store` rewrites `ad_id` from the API, to null when the API has none). Reason: outside this change; whether a chat's `ad_id` should win over the sync is an owner decision.
