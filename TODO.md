@@ -563,3 +563,9 @@ Accepted, not fixed:
 - **The clean end of a resumed chain counts as "fresh" for the Sync lahat skip,** though that run started deep in the list and the top was last read when the chain began (up to a day earlier). Reason: the freshness rule counts clean runs and clean chain ends; the next nightly by date read covers the top from the chain's date minus 1 day.
 - **A chain that began before the migration has no newest date on its first run,** so its resumed end records its own newest from older batches and gives an older stop date once. Reason: the next read covers more, never less; it happens at most once per page.
 - **Missing tests (minor):** a failed `--full` between a by date run and its resume (the window case is covered), and a resume next to a run of another chain.
+
+## 055: chatblast pages in English (2026-10-19)
+
+- **The artisan console output of `chatblast:build` and `chatblast:auto` is still Tagalog** (`BuildChatblast.php`, `AutoChatblast.php`). Reason: it is not on a page (it lands in the cron log); the brief covers the three chatblast pages.
+- **Rows written before the release keep their Tagalog reasons** (data) until their state really changes; recheck treats the Tagalog form of the same reason as unchanged (fixed after the independent review). Reason: no data rewrite for the language; the list becomes English as rows change.
+- **Flow panel results cached just before the release show "pangalan" as the template source for at most 10 minutes.** Reason: the cache expires on its own.

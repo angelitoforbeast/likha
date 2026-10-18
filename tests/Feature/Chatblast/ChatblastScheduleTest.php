@@ -87,14 +87,14 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $now = Carbon::parse('2026-10-18 09:30:00', 'Asia/Manila'); // Linggo
         $c = $this->campaign(['send_times' => ['09:15', '15:00'], 'step_times' => [['10:00'], null]]);
 
-        $this->assertSame('Araw-araw, 9:15 AM at 3:00 PM; Day 1 tuwing 10:00 AM', $s->summary($c));
+        $this->assertSame('Every day, 9:15 AM and 3:00 PM; Day 1 at 10:00 AM', $s->summary($c));
         $this->assertSame('2026-10-18 10:00', $s->nextRun($c, $now)?->format('Y-m-d H:i'));
         $c->weekdays = [1, 3];
-        $this->assertSame('Lun, Miy, 9:15 AM at 3:00 PM; Day 1 tuwing 10:00 AM', $s->summary($c));
+        $this->assertSame('Mon, Wed, 9:15 AM and 3:00 PM; Day 1 at 10:00 AM', $s->summary($c));
         $this->assertSame('2026-10-19 09:15', $s->nextRun($c, $now)?->format('Y-m-d H:i'));
         $c->mode = 'manual';
         $this->assertNull($s->nextRun($c, $now));
-        $this->assertStringStartsWith('Mano-mano', $s->summary($c));
+        $this->assertStringStartsWith('Manual (times are not followed)', $s->summary($c));
         $c->mode = 'auto';
         $c->active = false;
         $this->assertNull($s->nextRun($c, $now));
@@ -105,16 +105,16 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $s = app(ChatblastSchedule::class);
         $c = $this->campaign(['send_times' => [], 'send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => 1]]);
         $this->assertSame(['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'], $s->allTimes($c));
-        $this->assertSame('Araw-araw, Bawat oras, 9 AM-9 PM', $s->summary($c));
+        $this->assertSame('Every day, every hour, 9 AM–9 PM', $s->summary($c));
 
         $c->send_range = ['start' => '05:00', 'end' => '16:00', 'every' => 2];
         $this->assertSame(['05:00', '07:00', '09:00', '11:00', '13:00', '15:00'], $s->allTimes($c), 'ang dulo ay kasama kapag tumapat lang');
-        $this->assertSame('Araw-araw, Bawat 2 oras, 5 AM-3 PM', $s->summary($c), 'ang huling totoong oras');
+        $this->assertSame('Every day, every 2 hours, 5 AM–3 PM', $s->summary($c), 'ang huling totoong oras');
 
         $c->send_range = ['start' => '09:30', 'end' => '11:30', 'every' => 1];
         $c->send_times = ['08:00', '10:30'];
         $this->assertSame(['08:00', '09:30', '10:30', '11:30'], $s->allTimes($c), 'kasama ang listahan, walang doble');
-        $this->assertSame('Araw-araw, 8:00 AM at 10:30 AM; Bawat oras, 9:30 AM-11:30 AM', $s->summary($c));
+        $this->assertSame('Every day, 8:00 AM and 10:30 AM; every hour, 9:30 AM–11:30 AM', $s->summary($c));
     }
 
     public function test_auto_fires_hourly_inside_the_range_only_and_once_per_hour(): void
@@ -251,7 +251,7 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $two->update(['status' => 'queued']);
 
         app(ChatblastSender::class)->process($two->id);
-        $this->assertSame(['skipped', 'Naabot ang daily cap ng campaign sa page (1 ngayong araw); ipadala ulit bukas', null],
+        $this->assertSame(['skipped', 'Sequence daily cap reached for the page (1 today); send again tomorrow', null],
             [$two->fresh()->status, $two->fresh()->reason, $two->fresh()->dedupe_key]);
         Http::assertNothingSent();
 

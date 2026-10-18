@@ -130,7 +130,7 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertSame([], $this->getJson('/chatblast/sequence/data')->json('overlaps'));
         $this->create(['name' => 'Biyahe rin', 'statuses' => ['In Transit'], 'pages' => ['Page Uno']]);
         $this->create(['name' => 'Ibang page', 'statuses' => ['In Transit'], 'pages' => ['Page Dos']]);
-        $this->assertSame(['"In transit" at "Biyahe rin": In Transit sa Page Uno', '"In transit" at "Ibang page": In Transit sa Page Dos'],
+        $this->assertSame(['"In transit" and "Biyahe rin": In Transit on Page Uno', '"In transit" and "Ibang page": In Transit on Page Dos'],
             $this->getJson('/chatblast/sequence/data')->json('overlaps'));
     }
 
@@ -162,8 +162,8 @@ class ChatblastCampaignTest extends ChatblastTestCase
         $this->assertContains('Problematic', $d['statuses']);
         $this->assertContains('In transit', array_column($d['campaigns'], 'name'), 'ang mga dating uri ay campaign din');
 
-        $this->get('/chatblast/sequence')->assertOk()->assertSee('Mga sequence')->assertSee(route('chatblast.campaigns.index'), false);
-        $this->get('/chatblast/campaigns')->assertOk()->assertSee('Mga mensahe')->assertSee('Flow at template')->assertSee(route('chatblast.sequence.index'), false);
+        $this->get('/chatblast/sequence')->assertOk()->assertSee('Sequences')->assertSee(route('chatblast.campaigns.index'), false);
+        $this->get('/chatblast/campaigns')->assertOk()->assertSee('Messages')->assertSee('Flow and template')->assertSee(route('chatblast.sequence.index'), false);
     }
 
     public function test_only_the_ceo_and_a_checked_role_reach_the_campaigns(): void

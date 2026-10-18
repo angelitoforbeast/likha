@@ -30,8 +30,8 @@ class ChatblastCampaignController extends Controller
     private const MAX_PAGES = 100;
     private const MAX_WINDOW = 60;
     private const MAX_CAP = 100000;
-    private const STALE = 'Nabago na ang mga step (ibang tab o tao); i-reload ang page.';
-    private const STALE_FIELD = 'Nabago na ito (ibang tab o tao, o naunang pag-save); i-reload ang page.';
+    private const STALE = 'Reload the page: the steps changed in another tab.';
+    private const STALE_FIELD = 'Reload the page: this changed in another tab.';
 
     public function __construct(private Chatblast $chatblast, private PageSettings $settings, private ChatblastSchedule $schedule)
     {
@@ -121,7 +121,7 @@ class ChatblastCampaignController extends Controller
         $page = $request->input('page');
         $pages = $this->settings->pagesWith('botcake', Chatblast::REQUIRED);
         $match = is_string($page) ? collect($pages)->first(fn ($p) => $this->settings->pageKey($p) === $this->settings->pageKey($page)) : null;
-        if ($match === null) return response()->json(['error' => 'Walang chatblast settings ang page na ito.'], 422);
+        if ($match === null) return response()->json(['error' => 'This page has no chatblast settings.'], 422);
         @set_time_limit(55); // tatlong tawag sa Botcake, tig-10 s
 
         return response()->json($info->forPage($match, $request->boolean('refresh')));
@@ -136,7 +136,7 @@ class ChatblastCampaignController extends Controller
         $this->checkAccess();
         [$data, $error] = $this->fields($request, null);
         $message = $request->filled('message_id') ? \App\Models\ChatblastMessage::find((int) $request->input('message_id')) : null;
-        if ($error === null && $request->filled('message_id') && !$message) $error = 'Walang ganitong mensahe.';
+        if ($error === null && $request->filled('message_id') && !$message) $error = 'No such message.';
         if ($error === null && !$message) $error = $this->chatblast->invalid([[$request->input('text')]]);
         if ($error !== null) return response()->json(['error' => $error], 422);
 
@@ -170,12 +170,12 @@ class ChatblastCampaignController extends Controller
         if ($error !== null) return response()->json(['error' => $error], 422);
 
         $mode = $request->has('mode') ? $request->input('mode') : $c->mode;
-        if (!in_array($mode, ['manual', 'auto'], true)) return response()->json(['error' => 'Mode: manual o auto lang.'], 422);
+        if (!in_array($mode, ['manual', 'auto'], true)) return response()->json(['error' => 'Mode: manual or auto only.'], 422);
         if ($mode === 'auto' && $c->mode !== 'auto' && !$request->boolean('confirm')) {
-            return response()->json(['error' => 'Kumpirmahin muna: ang auto ay kusang nagpapadala sa mga oras ng campaign.'], 422);
+            return response()->json(['error' => 'Confirm first: auto sends by itself at the sequence times.'], 422);
         }
         $active = $request->has('active') ? filter_var($request->input('active'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) : $c->active;
-        if ($active === null) return response()->json(['error' => 'On/off: true o false lang.'], 422);
+        if ($active === null) return response()->json(['error' => 'On/Off: true or false only.'], 422);
 
         $old = is_array($request->input('old')) ? $request->input('old') : [];
         try {
@@ -247,7 +247,7 @@ class ChatblastCampaignController extends Controller
         $this->checkAccess();
         $c = ChatblastCampaign::findOrFail($id);
         if (BotcakeMessage::where('kind', $c->kind)->exists()) {
-            return response()->json(['error' => 'May mga mensahe na ang campaign na ito; i-off na lang.'], 422);
+            return response()->json(['error' => 'This sequence already has messages; turn it off instead.'], 422);
         }
         $c->delete();
 
@@ -266,7 +266,7 @@ class ChatblastCampaignController extends Controller
 
         return $this->steps($id, function (array $ids, array $times) use ($after, $message, $seen) {
             $seen($ids, $after - 1);
-            if ($after < 0 || $after > count($ids)) throw new InvalidArgumentException('Walang ganitong step.');
+            if ($after < 0 || $after > count($ids)) throw new InvalidArgumentException('No such step.');
             $pick = $message ?? $ids[max(0, $after - 1)];
             array_splice($ids, $after, 0, [$pick]);
             array_splice($times, $after, 0, [null]);
@@ -284,7 +284,7 @@ class ChatblastCampaignController extends Controller
 
         return $this->steps($id, function (array $ids, array $times) use ($d, $seen) {
             $seen($ids, $d);
-            if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            if (!isset($ids[$d])) throw new InvalidArgumentException('No such step.');
             array_splice($ids, $d, 1);
             array_splice($times, $d, 1);
             return [$ids, $times];
@@ -297,14 +297,14 @@ class ChatblastCampaignController extends Controller
         $this->checkAccess();
         $d = $this->day($request);
         $dir = $request->input('dir');
-        if (!in_array($dir, ['up', 'down'], true)) return response()->json(['error' => 'Direksyon: up o down.'], 422);
+        if (!in_array($dir, ['up', 'down'], true)) return response()->json(['error' => 'Direction: up or down.'], 422);
 
         $seen = $this->seen($request);
 
         return $this->steps($id, function (array $ids, array $times) use ($d, $dir, $seen) {
             $seen($ids, $d);
             $to = $dir === 'up' ? $d - 1 : $d + 1;
-            if (!isset($ids[$d]) || !isset($ids[$to])) throw new InvalidArgumentException('Hindi maililipat ang step na ito.');
+            if (!isset($ids[$d]) || !isset($ids[$to])) throw new InvalidArgumentException('This step cannot be moved.');
             [$ids[$d], $ids[$to]] = [$ids[$to], $ids[$d]];
             [$times[$d], $times[$to]] = [$times[$to], $times[$d]];
             return [$ids, $times];
@@ -322,7 +322,7 @@ class ChatblastCampaignController extends Controller
 
         return $this->steps($id, function (array $ids, array $times) use ($d, $message, $seen, &$old) {
             $seen($ids, $d);
-            if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            if (!isset($ids[$d])) throw new InvalidArgumentException('No such step.');
             $old = $ids[$d];
             $ids[$d] = $message;
             return [$ids, $times];
@@ -341,7 +341,7 @@ class ChatblastCampaignController extends Controller
 
         return $this->steps($id, function (array $ids, array $times) use ($d, $new, $seen, $old) {
             $seen($ids, $d);
-            if (!isset($ids[$d])) throw new InvalidArgumentException('Walang ganitong step.');
+            if (!isset($ids[$d])) throw new InvalidArgumentException('No such step.');
             if ($old !== null && $old !== self::norm('send_times', $times[$d] ?? [])) throw new InvalidArgumentException(self::STALE);
             $times[$d] = $new ?: null;
             return [$ids, $times];
@@ -393,34 +393,34 @@ class ChatblastCampaignController extends Controller
 
         if ($has('name')) {
             $name = $request->input('name');
-            if (!is_string($name) || trim($name) === '' || mb_strlen(trim($name)) > self::MAX_NAME) return [[], 'Pangalan: 1 hanggang ' . self::MAX_NAME . ' na character.'];
+            if (!is_string($name) || trim($name) === '' || mb_strlen(trim($name)) > self::MAX_NAME) return [[], 'Name: 1 to ' . self::MAX_NAME . ' characters.'];
             $data['name'] = trim($name);
         }
         if ($has('statuses')) {
             $statuses = $request->input('statuses');
             $allowed = array_unique(array_merge($this->jntStatuses(), (array) ($c?->statuses ?? [])));
-            if (!is_array($statuses) || !$statuses || count($statuses) > self::MAX_STATUSES) return [[], 'Pumili ng 1 hanggang ' . self::MAX_STATUSES . ' na J&T status.'];
+            if (!is_array($statuses) || !$statuses || count($statuses) > self::MAX_STATUSES) return [[], 'Pick 1 to ' . self::MAX_STATUSES . ' J&T statuses.'];
             foreach ($statuses as $s) {
-                if (!is_string($s) || !in_array($s, $allowed, true)) return [[], 'Hindi kilalang J&T status.'];
+                if (!is_string($s) || !in_array($s, $allowed, true)) return [[], 'Unknown J&T status.'];
             }
             $data['statuses'] = array_values(array_unique($statuses));
         }
         if ($has('pages')) {
             $pages = $request->input('pages') ?? [];
-            if (!is_array($pages) || count($pages) > self::MAX_PAGES) return [[], 'Mga page: listahan (walang laman = lahat).'];
+            if (!is_array($pages) || count($pages) > self::MAX_PAGES) return [[], 'Pages: a list (empty = all).'];
             foreach ($pages as $p) {
-                if (!is_string($p) || trim($p) === '' || mb_strlen($p) > 255) return [[], 'Mga page: pangalan ng page lang.'];
+                if (!is_string($p) || trim($p) === '' || mb_strlen($p) > 255) return [[], 'Pages: page names only.'];
             }
             $data['pages'] = $pages ? array_values(array_unique(array_map('trim', $pages))) : null;
         }
         if ($has('window_days')) {
             $w = $request->input('window_days');
-            if (!is_numeric($w) || (int) $w != $w || $w < 1 || $w > self::MAX_WINDOW) return [[], 'Window: 1 hanggang ' . self::MAX_WINDOW . ' na araw.'];
+            if (!is_numeric($w) || (int) $w != $w || $w < 1 || $w > self::MAX_WINDOW) return [[], 'Window: 1 to ' . self::MAX_WINDOW . ' days.'];
             $data['window_days'] = (int) $w;
         }
         if ($c === null || $request->has('send_times')) {
             $times = $request->input('send_times') ?? ($c === null ? ['09:00'] : []);
-            if (($error = Chatblast::invalidTimes(is_array($times) ? array_values($times) : $times)) !== null) return [[], 'Oras ng padala: ' . $error];
+            if (($error = Chatblast::invalidTimes(is_array($times) ? array_values($times) : $times)) !== null) return [[], 'Send times: ' . $error];
             $times = array_values(array_unique($times));
             sort($times);
             $data['send_times'] = $times;
@@ -429,14 +429,14 @@ class ChatblastCampaignController extends Controller
             $range = $request->input('send_range');
             if (is_array($range) && ($range['every'] ?? null) === null) $range['every'] = 1; // wala o null: bawat oras
             if (is_array($range) && is_numeric($range['every']) && (int) $range['every'] == $range['every']) $range['every'] = (int) $range['every'];
-            if (($error = ChatblastSchedule::invalidRange($range)) !== null) return [[], 'Bawat oras: ' . $error];
+            if (($error = ChatblastSchedule::invalidRange($range)) !== null) return [[], 'Every N hours: ' . $error];
             $data['send_range'] = $range === null ? null : ['start' => $range['start'], 'end' => $range['end'], 'every' => $range['every']];
         }
         if ($request->has('weekdays')) {
             $days = $request->input('weekdays');
-            if (!is_array($days) || !$days) return [[], 'Mga araw: pumili ng kahit isa (Lun hanggang Lin).'];
+            if (!is_array($days) || !$days) return [[], 'Days: pick at least one (Mon to Sun).'];
             foreach ($days as $d) {
-                if (!is_int($d) && !(is_string($d) && ctype_digit($d)) || (int) $d < 1 || (int) $d > 7) return [[], 'Mga araw: 1 (Lun) hanggang 7 (Lin).'];
+                if (!is_int($d) && !(is_string($d) && ctype_digit($d)) || (int) $d < 1 || (int) $d > 7) return [[], 'Days: 1 (Mon) to 7 (Sun).'];
             }
             $days = array_values(array_unique(array_map('intval', $days)));
             sort($days);
@@ -445,7 +445,7 @@ class ChatblastCampaignController extends Controller
         if ($request->has('daily_cap')) {
             $cap = $request->input('daily_cap');
             if ($cap !== null && $cap !== '' && (!is_numeric($cap) || (int) $cap != $cap || $cap < 1 || $cap > self::MAX_CAP)) {
-                return [[], 'Cap: 1 hanggang ' . number_format(self::MAX_CAP) . ' kada page kada araw, o walang laman.'];
+                return [[], 'Cap: 1 to ' . number_format(self::MAX_CAP) . ' per page per day, or empty.'];
             }
             $data['daily_cap'] = $cap === null || $cap === '' ? null : (int) $cap;
         }
@@ -455,7 +455,7 @@ class ChatblastCampaignController extends Controller
 
         $statuses = $data['statuses'] ?? (array) ($c?->statuses ?? []);
         if (($data['requires_on_delivery'] ?? $c?->requires_on_delivery) && $statuses !== ['Delivering']) {
-            return [[], 'Ang "Requires On Delivery" ay para lang sa trigger na Delivering.'];
+            return [[], '"Requires On Delivery" is only for a Delivering trigger.'];
         }
 
         return [$data, null];
@@ -474,13 +474,13 @@ class ChatblastCampaignController extends Controller
             foreach (array_slice($campaigns, $i + 1) as $b) {
                 $statuses = array_values(array_intersect((array) $a->statuses, (array) $b->statuses));
                 if (!$statuses) continue;
-                if (!$a->pages && !$b->pages) $pages = ['lahat ng page'];
+                if (!$a->pages && !$b->pages) $pages = ['all pages'];
                 elseif (!$a->pages || !$b->pages) $pages = (array) ($a->pages ?: $b->pages);
                 else {
                     $keys = array_map(fn ($p) => $this->settings->pageKey((string) $p), $a->pages);
                     $pages = array_values(array_filter($b->pages, fn ($p) => in_array($this->settings->pageKey((string) $p), $keys, true)));
                 }
-                if ($pages) $out[] = '"' . $a->name . '" at "' . $b->name . '": ' . implode(', ', $statuses) . ' sa ' . implode(', ', $pages);
+                if ($pages) $out[] = '"' . $a->name . '" and "' . $b->name . '": ' . implode(', ', $statuses) . ' on ' . implode(', ', $pages);
             }
         }
 
