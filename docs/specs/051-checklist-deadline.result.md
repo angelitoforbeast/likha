@@ -75,11 +75,23 @@ Both run down and up (twice) on the test database: `ChecklistDeadlineFieldTest::
 ### Amendment 1 as built (changes in neutral words)
 
 - Re-check limits move into scope: the decision row "No re-check limit in this spec" and the out-of-scope line are replaced by the rules below.
-- `approvalCheck` refuses with 403 "Naka-2 check na; OIC o CEO na lang ang pwedeng mag-check o mag-override." when the submission already has 2 approval-log rows (any author, the automatic check at submit and overrides included), unless the user is the CEO or an OIC whose department key equals the submitter's department key, or who is OIC of the task's department.
+- `approvalCheck` refuses with 403 when the submission already has the limit of approval checks (amended below to 3, overrides not counted; any author, the automatic check at submit included), unless the user is the CEO or an OIC whose department key equals the submitter's department key, or who is OIC of the task's department.
 - For limited users a per-submission cache lock (`checklist-approval:{id}`, 60 s) is held while the check runs; a concurrent second check gets 409 "May approval check pang tumatakbo dito; hintayin munang matapos." with no AI call.
 - `POST /checklist/submission/{id}/approval-override` (`checklist.approval-override`): CEO or department OIC only (403 otherwise); `verdict` approved/not_approved and `reason` (required, max 500) validated (422); writes an approval row with `is_override = true`, the user, the time, the verdict and the reason as its text; no AI call. It becomes the latest verdict.
 - Approval logs JSON has `is_override` per row. The report page shows the limit text under the approval result and, for the CEO and the department OIC, an "Override" form (verdict, reason). When a submission is locked, the Analyze button reads "↻ Analysis lang" and runs only the analysis.
 - The feed items gain `rechecks` and `overridden` (with `overridden_by`, `overridden_at`).
+
+### Amendment 2 as built (changes in neutral words), commit 2d8dfefd
+
+- The limit is 3 approval checks in all per submission: the automatic check at submit plus 2 re-checks. The 4th and later checks are allowed only for the CEO or the department OIC (rule unchanged from amendment 1).
+- Override rows no longer count toward the limit (`ChecklistController::CHECK_LIMIT = 3`, counted on approval rows with `is_override = false`).
+- The refusal text is now "Naka-3 check na; OIC o CEO na lang ang pwedeng mag-check o mag-override."
+- The report page counts checks without overrides (`approval_checks_count`) for its lock text, the `data-check-locked` marker and the "↻ Analysis lang" label, with the limit passed from the controller.
+- The concurrent-check lock (409) is unchanged.
+- `ChecklistExtractFieldsTest` is back to its original form, since a staff member's 3rd check is allowed again.
+- Tests: S-051.24 (2nd and 3rd run after the automatic one, the 4th refused on the server and marked on the page), S-051.25 (CEO's 4th and 10th), S-051.26–27 now start from 3 checks, and the new S-051.30 (an override does not count).
+- Spec-area run: `tests/Feature/Checklist tests/Feature/StaffActivity tests/Unit/ChecklistDeadlineTest.php` → `OK (277 tests, 980 assertions)`.
+- Full suite on 2d8dfefd: `Tests: 1571, Assertions: 17968, Errors: 1, Failures: 1` — only `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` and `ExampleTest::test_the_application_returns_a_successful_response`, the two known failures; no new failures.
 
 ## Case table
 
@@ -107,9 +119,10 @@ Both run down and up (twice) on the test database: `ChecklistDeadlineFieldTest::
 | S-051.23 | `ChecklistBadgeTest::test_S_051_23_two_page_loads_within_60_seconds_run_the_badge_queries_once` | pass |
 | — | `ChecklistBadgeTest::test_a_failing_badge_query_hides_the_badge_logs_the_class_and_keeps_the_page` | pass |
 | S-051.24 (A1.1) | `ChecklistRecheckLimitTest::test_S_051_24_…`, `…test_a_limited_check_is_refused_while_another_check_of_the_same_submission_runs` | pass |
-| S-051.25 (A1.2) | `ChecklistRecheckLimitTest::test_S_051_25_the_ceos_3rd_and_10th_checks_run` | pass (passed before the change: there was no limit) |
+| S-051.25 (A1.2) | `ChecklistRecheckLimitTest::test_S_051_25_the_ceos_4th_and_10th_checks_run` | pass (passed before the change: there was no limit) |
 | S-051.26 (A1.3) | `ChecklistRecheckLimitTest::test_S_051_26_…` | pass |
 | S-051.27 (A1.4) | `ChecklistRecheckLimitTest::test_S_051_27_…` | pass |
+| S-051.30 (A2) | `ChecklistRecheckLimitTest::test_S_051_30_an_override_does_not_count_toward_the_3_checks` | pass |
 | S-051.28 (A1.5) | `ChecklistRecheckLimitTest::test_S_051_28_…` | pass |
 | S-051.29 (A1.6) | `StaffFeedApiTest::test_S_051_29_the_late_list_shows_rechecks_and_an_override_with_who_and_when` | pass |
 
@@ -147,7 +160,7 @@ Baseline on 835d89ea in this worktree: `Tests: 1522, Assertions: 17778, Errors: 
 4. **"Keep every existing field unchanged"**: two existing tests asserted the exact key lists of a staff row and of the top level; they now list the new keys `checklist_late_today` and `checklist_late_not_submitted`. No existing value changed.
 5. **The badge's own tasks are assigned tasks only.** `/checklist` also shows tasks with nobody assigned to everyone; the feed has always counted assigned tasks only, so the badge follows the feed.
 6. **"Parse both the same way the app already parses scheduled_time"**: the app's `explode(':')` turns text that is not a time into 00:00; here such a value counts as not set, so it can't make a task late all day.
-7. **No Checklist nav link in the migrations**: it lives in `nav_links` from nav settings, so the layout finds it by URL `/checklist`. If a role has no such link, it sees no badge.
+8. **Amendment 1, "the first 2 run"**: submitting runs an approval check automatically, and every approval row counted, so a staff member had one manual check left; `ChecklistExtractFieldsTest::test_a_rerun_of_the_approval_check…` was changed so the CEO ran its 3rd check. Amendment 2 settled it (3 checks in all, the automatic one included), and that test is back to its original form.
 8. **Amendment 1, "the first 2 run"**: submitting runs an approval check automatically, and the amendment counts every approval row, so after a submission a staff member has one manual check left. `ChecklistExtractFieldsTest::test_a_rerun_of_the_approval_check…` ran a staff member's 3rd check; its 3rd run is now the CEO's (the test is about the extracted values, not who runs it).
 9. **Amendment 1, `rechecks`**: built as checks after the first (`approval_checks` − 1); `approval_checks` counts AI checks only, not overrides.
 

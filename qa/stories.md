@@ -1003,13 +1003,14 @@ Tests: `ChecklistDeadlineFieldTest`, `ChecklistBadgeTest`, `ChecklistRecheckLimi
 | S-051.23 | Two page loads within 60 s run the badge queries once; after 60 s again | `ChecklistBadgeTest::test_S_051_23…` | Passed · 2026-10-18 · auto |
 | — | A failing badge query → no badge, the class logged, the page still renders | `ChecklistBadgeTest::test_a_failing_badge_query…` | Passed · 2026-10-18 · auto |
 
-### S-051e Two approval checks, then the OIC or CEO (amendment 1, P1)
+### S-051e Three approval checks, then the OIC or CEO (amendments 1 and 2, P1)
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-051.24 | A Marketing user's first 2 checks run, the 3rd is refused (403 with the message, no AI call; the page marks it locked); a concurrent limited check gets 409 | `ChecklistRecheckLimitTest::test_S_051_24…`, `…test_a_limited_check_is_refused_while…` | Passed · 2026-10-18 · auto |
-| S-051.25 | The CEO's 3rd and 10th checks run | `ChecklistRecheckLimitTest::test_S_051_25…` | Passed · 2026-10-18 · auto |
-| S-051.26 | The department's OIC runs a 3rd check and overrides with a reason; no reason or a bad verdict is refused | `ChecklistRecheckLimitTest::test_S_051_26…` | Passed · 2026-10-18 · auto |
+| S-051.24 | After the automatic check at submit, a Marketing user's 2nd and 3rd checks run, the 4th is refused (403 with the message, no AI call; the page marks it locked); a concurrent limited check gets 409 | `ChecklistRecheckLimitTest::test_S_051_24…`, `…test_a_limited_check_is_refused_while…` | Passed · 2026-10-18 · auto |
+| S-051.25 | The CEO's 4th and 10th checks run | `ChecklistRecheckLimitTest::test_S_051_25…` | Passed · 2026-10-18 · auto |
+| S-051.26 | The department's OIC runs a 4th check and overrides with a reason; no reason or a bad verdict is refused | `ChecklistRecheckLimitTest::test_S_051_26…` | Passed · 2026-10-18 · auto |
 | S-051.27 | An OIC of another department, or a staff member, cannot override | `ChecklistRecheckLimitTest::test_S_051_27…` | Passed · 2026-10-18 · auto |
 | S-051.28 | The override row is in the approval logs (is_override, who, reason) and the latest verdict follows it | `ChecklistRecheckLimitTest::test_S_051_28…` | Passed · 2026-10-18 · auto |
 | S-051.29 | The feed item shows rechecks and overridden (by, at), without the reason | `StaffFeedApiTest::test_S_051_29…` | Passed · 2026-10-18 · auto |
+| S-051.30 | (amendment 2) Two checks plus an override, then the limited user's check runs (overrides are not counted) and the next is refused | `ChecklistRecheckLimitTest::test_S_051_30…` | Passed · 2026-10-18 · auto |
