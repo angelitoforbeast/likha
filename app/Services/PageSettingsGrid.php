@@ -288,11 +288,25 @@ class PageSettingsGrid
                 'updated'     => (int) $run->customers_updated,
                 'matched'     => (int) $run->matched_by_name + (int) $run->matched_by_phone,
                 'ad_filled'   => (int) $run->ad_filled,
-                'error'       => $run->last_error,
+                'error'       => self::englishError($run->last_error),
             ];
         }
 
         return $out;
+    }
+
+    /** Ang Tagalog na error ng run na naitala bago naging English ang page: ipinapakita sa English (hindi binabago ang row). */
+    private const OLD_ERRORS = [
+        'Pinatay ang sync bago natapos (hal. timeout ng worker)' => 'The sync was killed before it finished (e.g. a worker timeout)',
+        'Botcake: tinanggihan ang token (success:false)'         => 'Botcake: token refused (success:false)',
+        'Walang botcake.page_id o botcake.token ang page'        => 'The page has no botcake.page_id or botcake.token',
+        'Botcake: hindi listahan ang sagot ng customer list'     => 'Botcake: the customer list answer is not a list',
+    ];
+
+    private static function englishError(?string $error): ?string
+    {
+        if ($error === null) return null;
+        return self::OLD_ERRORS[$error] ?? preg_replace('/ pagkatapos ng (\d+) retry$/', ' after $1 retries', $error);
     }
 
     private function rowInfo(array $cells, array $info, string $pk): array

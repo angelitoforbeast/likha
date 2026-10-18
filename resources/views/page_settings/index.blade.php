@@ -212,16 +212,21 @@
         return !c || c[2](r);
     }
 
+    // Ang mga chip ay binubuo nang isang beses at ina-update lang, para hindi mawala ang keyboard focus sa poll o pindot.
     function summaryBar() {
-        const all = [...rows.values()];
-        put(document.getElementById('summary-bar'),
-            ...CHIPS.map(([key, label, test]) => el('button', {type: 'button', 'data-chip': key, 'aria-pressed': String(chip === key),
-                class: 'rounded-full border px-2 py-0.5 ' + (chip === key ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white hover:bg-gray-100 text-gray-700'),
-                title: chip === key ? 'Click again to show every page' : 'Show only these pages',
-                text: label + ' ' + all.filter(test).length})),
-            el('span', {class: 'ml-2 flex items-center gap-3 text-gray-500'}, LEGEND.map(([color, label]) =>
-                el('span', {class: 'flex items-center gap-1'}, [el('span', {class: 'inline-block w-1 h-3 ' + color}), label]))),
-        );
+        const bar = document.getElementById('summary-bar'), all = [...rows.values()];
+        if (!bar.children.length) {
+            put(bar, ...CHIPS.map(([key]) => el('button', {type: 'button', 'data-chip': key})),
+                el('span', {class: 'ml-2 flex items-center gap-3 text-gray-500'}, LEGEND.map(([color, label]) =>
+                    el('span', {class: 'flex items-center gap-1'}, [el('span', {class: 'inline-block w-1 h-3 ' + color}), label]))));
+        }
+        for (const [key, label, test] of CHIPS) {
+            const b = bar.querySelector(`[data-chip="${key}"]`), on = (chip ?? 'all') === key;
+            b.setAttribute('aria-pressed', String(on));
+            b.className = 'rounded-full border px-2 py-0.5 ' + (on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white hover:bg-gray-100 text-gray-700');
+            b.title = key === 'all' ? 'Show every page' : on ? 'Click again to show every page' : 'Show only these pages';
+            b.textContent = label + ' ' + all.filter(test).length;
+        }
     }
 
     document.getElementById('summary-bar').addEventListener('click', e => {
@@ -791,6 +796,7 @@
         out.textContent = 'Test tokens done: ' + sum.ok + ' ok, ' + sum.invalid + ' invalid, ' + sum.error + ' error, '
             + sum.skipped + ' without a Botcake ID or token (skipped).';
         btn.disabled = false;
+        if (chip) render(); // ang chip filter ay sumusunod sa bagong token status (hindi habang may ine-edit)
     });
 
     // ---- Sync lahat: sa queue, isa-isang page; ang progreso ay mula sa poll ----

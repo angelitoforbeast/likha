@@ -102,4 +102,24 @@ class SyncPlanTest extends BotcakeApiTestCase
         $this->get('/page-settings')->assertSee("' · next: ' + (r.info.next.from ? 'from ' + r.info.next.from : r.info.next.label)", false)
             ->assertSee("'text-red-600', !!(s && s.failed)", false);
     }
+
+    public function test_S_054_6_run_errors_stored_in_tagalog_before_the_change_are_shown_in_english(): void
+    {
+        $errors = [
+            'Page A' => ['Pinatay ang sync bago natapos (hal. timeout ng worker)', 'The sync was killed before it finished (e.g. a worker timeout)'],
+            'Page B' => ['Botcake: tinanggihan ang token (success:false)', 'Botcake: token refused (success:false)'],
+            'Page C' => ['Walang botcake.page_id o botcake.token ang page', 'The page has no botcake.page_id or botcake.token'],
+            'Page D' => ['Botcake: HTTP 500 pagkatapos ng 3 retry', 'Botcake: HTTP 500 after 3 retries'],
+            'Page E' => ['Botcake: hindi listahan ang sagot ng customer list', 'Botcake: the customer list answer is not a list'],
+            'Page F' => ['Botcake: HTTP 502 after 2 retries', 'Botcake: HTTP 502 after 2 retries'],
+        ];
+        foreach ($errors as $page => [$stored]) {
+            $this->botcake($page);
+            $this->apiRun($page, 'error', 'by_date', 1, ['status' => 'failed', 'last_error' => $stored]);
+        }
+
+        $rows = $this->rows();
+
+        foreach ($errors as $page => [, $shown]) $this->assertSame($shown, $rows[$page]['info']['last_sync']['error'], $page);
+    }
 }

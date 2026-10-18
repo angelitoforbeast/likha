@@ -127,13 +127,19 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $s->set('Page Uno', 'botcake', 'flow.in_transit.name', '(walang pangalan)', system: true);
         $s->set('Page Uno', 'botcake', 'template.shipping', 'ship_v1');
         $s->set('Page Uno', 'botcake', 'template.shipping.text', '(walang body)', system: true);
+        foreach (['on_delivery' => 'Botcake: hindi listahan ang sagot', 'extra_a' => 'Botcake: tinanggihan (success:false)', 'extra_b' => 'walang botcake.page_id o token'] as $k => $reason) {
+            $s->set('Page Uno', 'botcake', 'flow.' . $k, '7010');
+            $s->set('Page Uno', 'botcake', 'flow.' . $k . '.name', '!hindi nasuri: ' . $reason, system: true);
+        }
 
         $cells = collect($this->grid()['rows'])->firstWhere('name', 'Page Uno')['cells'];
 
         $this->assertSame([
             ['Check failed: Botcake: no answer', 'grey'], ['Check failed: out of time', 'grey'], ['(no name)', ''], ['(no body)', ''],
+            ['Check failed: Botcake: not a list', 'grey'], ['Check failed: Botcake: refused (success:false)', 'grey'], ['Check failed: no botcake.page_id or token', 'grey'],
         ], array_map(fn ($k) => [$cells[$k]['line'], $cells[$k]['tone']],
-            ['botcake.flow.shipping.name', 'botcake.flow.broadcast.name', 'botcake.flow.in_transit.name', 'botcake.template.shipping.text']));
+            ['botcake.flow.shipping.name', 'botcake.flow.broadcast.name', 'botcake.flow.in_transit.name', 'botcake.template.shipping.text',
+             'botcake.flow.on_delivery.name', 'botcake.flow.extra_a.name', 'botcake.flow.extra_b.name']));
     }
 
     public function test_S_054_7_the_page_text_is_english(): void
