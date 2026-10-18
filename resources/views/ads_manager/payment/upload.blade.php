@@ -95,6 +95,9 @@
               @else
                 <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700">{{ $log->status }}</span>
               @endif
+              @if($log->error_message)
+                <div class="mt-1 text-xs text-red-600">{{ $log->error_message }}</div>
+              @endif
             </td>
             <td class="px-3 py-2 border text-right">{{ number_format($log->total_rows ?? 0) }}</td>
             <td class="px-3 py-2 border text-right">{{ number_format($log->processed_rows ?? 0) }}</td>

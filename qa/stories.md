@@ -1279,3 +1279,20 @@ Tests are in `tests/Feature/PageSettings/FlowFieldDropdownTest.php`.
 | S-062.2 | Given a pick in the dropdown, then its ID is saved through the cell save, with the same history and Ready reset as a typed ID; a typed ID that is not in the list still saves | `test_S_062_2…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
 | S-062.3 | Given an edit of the Flow ID or Message field, then a dropdown opens ("name · id", "(recommended)", a saved ID not in the list as "(not in Botcake list)"), ending with "Type an ID…" which switches to the text input; with no stored list it shows "No list yet: press Test" and "Type an ID…" | `test_S_062_3…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
 | S-062.4 | Given the page and the grid poll, then no Botcake call is made; the lists come from the stored keys | `test_S_062_4…` | Passed · 2026-10-18 · auto |
+
+## Slice 063 – Meta payment import reads dates correctly, and the swapped rows get fixed
+
+### S-063 The payment import decides the date order once per file and never guesses (P1)
+
+Tests are in `tests/Feature/PaymentActivity/PaymentDateOrderTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-063.1 | Given a number above 12 in the billing line or in any data row, when the file is imported, then that decides the order for every row (first place > 12 = D/M, second place > 12 = M/D), over the filename and the header wording | `test_S_063_1…` | Passed · 2026-10-18 · auto |
+| S-063.2 | Given every number 12 or less and an ISO range in the filename (`2026-10-02--2026-10-10` or single dash), then the order whose billing-line dates equal that range is used | `test_S_063_2…` | Passed · 2026-10-18 · auto |
+| S-063.3 | Given no number above 12 and no filename range, then "Billing Report:" (capital R) means M/D and "Billing report:" (lowercase r) means D/M | `test_S_063_3…` | Passed · 2026-10-18 · auto |
+| S-063.4 | Given a file whose order can't be told (no billing line, or rows that contradict each other), then nothing is written and the upload log is failed with "Cannot tell the date order of this file" | `test_S_063_4…` | Passed · 2026-10-18 · auto |
+| S-063.5 | Given a row that is not a real date in the file's order (2/30/2026), then it is refused and counted in error_rows, never rolled over into another date | `test_S_063_5…` | Passed · 2026-10-18 · auto |
+| S-063.6 | Given a row dated more than one day outside the filename's ISO range, or more than one day after the upload date (from the stored name), then it is refused and counted in error_rows with a message; rows inside are imported | `test_S_063_6…` | Passed · 2026-10-18 · auto |
+| S-063.7 | Given a stored row with the correct date, when an ambiguous capital-R file with it is imported again, then its date stays correct | `test_S_063_7…` | Passed · 2026-10-18 · auto |
+| S-063.8 | Given a failed or partly refused file, then the upload page shows its error message under the status | `test_S_063_8…` | Passed · 2026-10-18 · auto |

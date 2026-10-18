@@ -33,8 +33,20 @@ class ProcessPaymentActivityUpload implements ShouldQueue
     private int $rowsUpdated  = 0;
     private int $batches      = 0;
 
-    /** Detected date format from Billing report line (e.g., 'd/m/Y' or 'm/d/Y') */
-    private ?string $detectedDateFormat = null;
+    private int $rowsRefused  = 0;
+
+    public const UNDECIDABLE_ORDER = 'Cannot tell the date order of this file';
+
+    /** Ang buong "Billing report:" / "Billing Report:" cell (unang nakita sa preamble). */
+    private ?string $billingLine = null;
+
+    /** 'm/d' o 'd/m': isang beses lang dine-decide bawat file. */
+    private ?string $dateOrder = null;
+
+    /** Para sa range guard: upload date at ISO range galing sa filename. */
+    private ?Carbon $uploadDate = null;
+    private ?Carbon $rangeStart = null;
+    private ?Carbon $rangeEnd   = null;
 
     public function __construct(
         public string $storedPath,
@@ -91,7 +103,10 @@ class ProcessPaymentActivityUpload implements ShouldQueue
 
             $reader->open($fullPath);
 
-            $buffer = [];
+            $this->readFileDates();
+
+            // First pass: basahin lahat ng rows bago mag-parse, para isang date order lang bawat file.
+            $pending = [];
 
             foreach ($reader->getSheetIterator() as $sheet) {
                 $headerNorm = null;
@@ -106,7 +121,7 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                             $headerNorm = $this->normalizeHeader($cells);
                         } else {
                             $this->scanContext($cells, $context);
-                            $this->detectDateFormatFromBillingReport($cells);
+                            $this->captureBillingLine($cells);
                         }
                         continue;
                     }
@@ -115,17 +130,37 @@ class ProcessPaymentActivityUpload implements ShouldQueue
 
                     $this->rowsRead++;
 
-                    $assoc  = $this->rowToAssoc($headerNorm, $cells);
-                    $mapped = $this->mapRow($assoc, $context);
-                    if (!$mapped) continue;
+                    $pending[] = [$this->rowToAssoc($headerNorm, $cells), $context];
+                }
+            }
 
-                    $this->rowsMapped++;
-                    $buffer[] = $mapped;
+            $this->dateOrder = $this->decideDateOrder(array_map(fn ($p) => $p[0]['date'] ?? null, $pending));
 
-                    if (count($buffer) >= self::CHUNK_SIZE) {
-                        $this->writeBatch($buffer);
-                        $buffer = [];
-                    }
+            if ($this->dateOrder === null && $this->hasSlashDate($pending)) {
+                Log::warning('[PAYMENT] ' . self::UNDECIDABLE_ORDER, ['file' => $this->originalName]);
+                if ($uploadLog) {
+                    $uploadLog->update([
+                        'status'        => 'failed',
+                        'total_rows'    => $this->rowsRead,
+                        'error_message' => self::UNDECIDABLE_ORDER,
+                        'finished_at'   => now(),
+                    ]);
+                }
+                return;
+            }
+
+            $buffer = [];
+
+            foreach ($pending as [$assoc, $context]) {
+                $mapped = $this->mapRow($assoc, $context);
+                if (!$mapped) continue;
+
+                $this->rowsMapped++;
+                $buffer[] = $mapped;
+
+                if (count($buffer) >= self::CHUNK_SIZE) {
+                    $this->writeBatch($buffer);
+                    $buffer = [];
                 }
             }
 
@@ -138,6 +173,8 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                 'mapped'   => $this->rowsMapped,
                 'inserted' => $this->rowsInserted,
                 'updated'  => $this->rowsUpdated,
+                'refused'  => $this->rowsRefused,
+                'order'    => $this->dateOrder,
                 'batches'  => $this->batches,
                 'stored'   => $this->storedPath,
                 'disk'     => $disk,
@@ -153,6 +190,10 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                     'inserted'       => $this->rowsInserted,
                     'updated'        => $this->rowsUpdated,
                     'skipped'        => max(0, $this->rowsMapped - $this->rowsInserted - $this->rowsUpdated),
+                    'error_rows'     => $this->rowsRefused,
+                    'error_message'  => $this->rowsRefused > 0
+                        ? "{$this->rowsRefused} row(s) refused: invalid date, outside the file's date range, or after the upload date"
+                        : null,
                     'finished_at'    => now(),
                 ]);
             }
@@ -336,6 +377,14 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         $txn  = trim((string)$txn);
         $acct = (string)($ctx['ad_account'] ?? '');
 
+        // May laman ang date pero hindi totoong petsa, o labas sa range ng file: tanggihan, huwag hulaan.
+        $hasDate = $dateStr instanceof \DateTimeInterface || trim((string) $dateStr) !== '';
+        if (($hasDate && !$date) || ($date && !$this->inFileRange($date))) {
+            $this->rowsRefused++;
+            Log::warning('[PAYMENT] Row refused: bad or out-of-range date', ['file' => $this->originalName, 'txn' => $txn]);
+            return null;
+        }
+
         if (!$date || $txn === '' || $amt === null) {
             return null;
         }
@@ -357,45 +406,145 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         ];
     }
 
-    /**
-     * Detect date format from "Billing report: dd/mm/yyyy - dd/mm/yyyy" line.
-     * Uses the end date to determine format: if first segment > 12, it must be day (dd/mm/yyyy).
-     */
-    private function detectDateFormatFromBillingReport(array $cells): void
+    /** Itabi ang "Billing report:" cell; ang order ay dine-decide pagkatapos mabasa lahat ng rows. */
+    private function captureBillingLine(array $cells): void
     {
-        if ($this->detectedDateFormat !== null) return; // already detected
+        if ($this->billingLine !== null) return;
 
         foreach ($cells as $cellRaw) {
             $cell = trim((string) $cellRaw);
-            if ($cell === '') continue;
-
-            // Match "Billing report: 01/03/2026 - 15/03/2026"
-            if (preg_match('/Billing\s+report:\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s*-\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i', $cell, $m)) {
-                $startFirst  = (int) $m[1];
-                $startSecond = (int) $m[2];
-                $endFirst    = (int) $m[4];
-                $endSecond   = (int) $m[5];
-
-                // If any first-segment > 12, it MUST be a day → dd/mm/yyyy
-                if ($startFirst > 12 || $endFirst > 12) {
-                    $this->detectedDateFormat = 'd/m/Y';
-                    Log::info('[PAYMENT] Date format detected from Billing report: d/m/Y');
-                    return;
-                }
-
-                // If any second-segment > 12, it MUST be a day → mm/dd/yyyy
-                if ($startSecond > 12 || $endSecond > 12) {
-                    $this->detectedDateFormat = 'm/d/Y';
-                    Log::info('[PAYMENT] Date format detected from Billing report: m/d/Y');
-                    return;
-                }
-
-                // Both ambiguous — Meta CSVs use dd/mm/yyyy by default
-                $this->detectedDateFormat = 'd/m/Y';
-                Log::info('[PAYMENT] Date format ambiguous in Billing report, defaulting to d/m/Y (Meta standard)');
+            if (preg_match('/Billing\s+report:/i', $cell)) {
+                $this->billingLine = $cell;
                 return;
             }
         }
+    }
+
+    /**
+     * Upload date mula sa stored name ("20261009_100215__..."), at ISO range mula sa filename
+     * ("2026-10-02--2026-10-10" o "2026-10-02-2026-10-10").
+     */
+    private function readFileDates(): void
+    {
+        $this->uploadDate = preg_match('/^(\d{8})_\d{6}__/', basename($this->storedPath), $m)
+            ? $this->strictDate('!Ymd', $m[1])
+            : null;
+        $this->uploadDate ??= Carbon::today('Asia/Manila');
+
+        foreach ([$this->originalName, basename($this->storedPath)] as $name) {
+            if (preg_match('/(\d{4}-\d{2}-\d{2})-{1,2}(\d{4}-\d{2}-\d{2})/', $name, $m)) {
+                $start = $this->strictDate('!Y-m-d', $m[1]);
+                $end   = $this->strictDate('!Y-m-d', $m[2]);
+                if ($start && $end && $start->lte($end)) {
+                    $this->rangeStart = $start;
+                    $this->rangeEnd   = $end;
+                    return;
+                }
+            }
+        }
+    }
+
+    /** Isang araw na palugit sa magkabilang dulo (timezone ng Meta vs Manila). */
+    private function inFileRange(Carbon $date): bool
+    {
+        $d = $date->copy()->startOfDay();
+
+        if ($this->uploadDate && $d->gt($this->uploadDate->copy()->addDay())) return false;
+        if ($this->rangeStart && $d->lt($this->rangeStart->copy()->subDay())) return false;
+        if ($this->rangeEnd && $d->gt($this->rangeEnd->copy()->addDay())) return false;
+
+        return true;
+    }
+
+    /** [una, pangalawa, taon] ng "10/3/2026", "03-10-2026", "3.10.26"; null kung iba ang anyo. */
+    private function slashParts($v): ?array
+    {
+        if ($v instanceof \DateTimeInterface) return null;
+
+        return preg_match('/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4}|\d{2})$/', trim((string) $v), $m)
+            ? [(int) $m[1], (int) $m[2], $m[3]]
+            : null;
+    }
+
+    private function hasSlashDate(array $pending): bool
+    {
+        foreach ($pending as [$assoc]) {
+            if ($this->slashParts($assoc['date'] ?? null)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Isang date order ('m/d' o 'd/m') para sa buong file, sa ganitong pagkakasunod:
+     *  1) may numerong lampas 12 sa billing line o sa kahit anong row;
+     *  2) ang billing line ay tugma sa ISO range sa filename;
+     *  3) ang wording ng header: "Billing Report" = M/D, "Billing report" = D/M;
+     *  4) wala: null (tatanggihan ang file kung may slash date).
+     * Walang default: dati d/m ang hula kapag ambiguous, kaya nabaligtad ang mga "Billing Report" file.
+     */
+    private function decideDateOrder(array $rowDates): ?string
+    {
+        $billing = [];
+        if ($this->billingLine !== null
+            && preg_match('/(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})\s*-\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/', $this->billingLine, $m)) {
+            $billing = [$m[1], $m[2]];
+        }
+
+        // 1) Numerong lampas 12
+        $dm = false;
+        $md = false;
+        foreach (array_merge($billing, $rowDates) as $v) {
+            $p = $this->slashParts($v);
+            if (!$p) continue;
+            if ($p[0] > 12) $dm = true;
+            if ($p[1] > 12) $md = true;
+        }
+        if ($dm && $md) return null; // magkasalungat: hindi mapagkakatiwalaan ang file
+        if ($dm) return 'd/m';
+        if ($md) return 'm/d';
+
+        // 2) Billing line vs ISO range sa filename
+        if ($billing && $this->rangeStart && $this->rangeEnd) {
+            $matches = [];
+            foreach (['m/d', 'd/m'] as $order) {
+                $s = $this->parseSlashDate($billing[0], $order);
+                $e = $this->parseSlashDate($billing[1], $order);
+                if ($s && $e && $s->isSameDay($this->rangeStart) && $e->isSameDay($this->rangeEnd)) {
+                    $matches[] = $order;
+                }
+            }
+            if (count($matches) === 1) return $matches[0];
+        }
+
+        // 3) Wording ng header (case-sensitive)
+        if ($this->billingLine !== null) {
+            if (preg_match('/Billing\s+Report:/', $this->billingLine)) return 'm/d';
+            if (preg_match('/Billing\s+report:/', $this->billingLine)) return 'd/m';
+        }
+
+        return null;
+    }
+
+    /** Strict: "!"-format, at anumang warning (hal. 2/30 → Mar 2, 5/31 bilang d/m → 2028) ay failure. */
+    private function strictDate(string $format, string $s): ?Carbon
+    {
+        $d   = \DateTimeImmutable::createFromFormat($format, $s, new \DateTimeZone('Asia/Manila'));
+        $err = \DateTimeImmutable::getLastErrors();
+        if (!$d || ($err && ($err['warning_count'] > 0 || $err['error_count'] > 0))) {
+            return null;
+        }
+        return Carbon::instance($d);
+    }
+
+    private function parseSlashDate($v, string $order): ?Carbon
+    {
+        $p = $this->slashParts($v);
+        if (!$p) return null;
+
+        [$month, $day] = $order === 'm/d' ? [$p[0], $p[1]] : [$p[1], $p[0]];
+        $yearFmt = strlen($p[2]) === 4 ? 'Y' : 'y';
+
+        return $this->strictDate("!n/j/{$yearFmt}", "{$month}/{$day}/{$p[2]}");
     }
 
     private function parseDate($v): ?Carbon
@@ -413,16 +562,13 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         $s = trim((string)$v);
         if ($s === '') return null;
 
-        // If we detected the format from Billing report line, use it first
-        if ($this->detectedDateFormat) {
-            try {
-                return Carbon::createFromFormat($this->detectedDateFormat, $s, 'Asia/Manila');
-            } catch (\Throwable $e) {}
+        // Slash dates: ang order ng file lang, walang hulaan
+        if ($this->slashParts($s)) {
+            return $this->dateOrder ? $this->parseSlashDate($s, $this->dateOrder) : null;
         }
 
-        // Fallback: try multiple formats (d/m/Y before m/d/Y to prefer dd/mm/yyyy)
-        foreach (['Y-m-d','d/m/Y','m/d/Y','n/j/Y','d/m/y','m/d/y'] as $f) {
-            try { return Carbon::createFromFormat($f, $s, 'Asia/Manila'); } catch (\Throwable $e) {}
+        if (preg_match('/^\d{4}-\d{1,2}-\d{1,2}$/', $s)) {
+            return $this->strictDate('!Y-m-d', $s);
         }
 
         try { return Carbon::parse($s, 'Asia/Manila'); } catch (\Throwable $e) { return null; }
