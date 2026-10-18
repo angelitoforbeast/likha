@@ -102,10 +102,10 @@ class BotcakeClient
         $body = $this->get('/pages/' . rawurlencode($pageId) . '/customer', ['page' => $page], $token)->json();
 
         if (is_array($body) && array_key_exists('success', $body) && $body['success'] === false) {
-            throw new BotcakeException('Botcake: tinanggihan ang token (success:false)', true);
+            throw new BotcakeException('Botcake: token refused (success:false)', true);
         }
         if (!is_array($body) || !array_is_list($body)) {
-            throw new BotcakeException('Botcake: hindi listahan ang sagot ng customer list');
+            throw new BotcakeException('Botcake: the customer list answer is not a list');
         }
 
         return $body;
@@ -153,7 +153,7 @@ class BotcakeClient
                 throw new BotcakeException('Botcake: HTTP ' . $status);
             }
             if ($attempt >= $this->retries) {
-                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ($attempt ? ' pagkatapos ng ' . $attempt . ' retry' : ''), false, $status === 429 ? 'rate_limited' : 'error');
+                throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ($attempt ? ' after ' . $attempt . ' retries' : ''), false, $status === 429 ? 'rate_limited' : 'error');
             }
 
             $wait = 2 ** ($attempt + 1); // 2, 4, 8

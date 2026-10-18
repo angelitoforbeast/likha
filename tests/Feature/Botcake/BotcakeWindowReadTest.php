@@ -136,10 +136,10 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         $this->assertSame(17, $this->asked[0], 'mula sa batch 22, minus 5 na overlap');
         $this->assertSame(['end', 'window', 17], [$second->stop_reason, $second->read_kind, $second->start_batch]);
         $this->assertSame('available', $stale->fresh()->status, 'itinuloy na basa (hindi mula batch 1): walang inactive');
-        $this->assertStringContainsString('tuloy mula batch 17', $second->last_message);
+        $this->assertStringContainsString('resumed from batch 17', $second->last_message);
 
         $row = collect(app(\App\Services\PageSettingsGrid::class)->build()['rows'])->firstWhere('name', 'Page Uno');
-        $this->assertSame('window, tuloy mula batch 17', $row['info']['last_sync']['kind']);
+        $this->assertSame('window, resumed from batch 17', $row['info']['last_sync']['kind']);
         $this->assertSame('end', $row['info']['last_sync']['stop_reason']);
     }
 

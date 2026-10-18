@@ -107,12 +107,12 @@ class FlowNamesTest extends BotcakeApiTestCase
     {
         return [
             'listed'        => ['7001', null, 'CHATBLAST - SHIPPING STATUS (post_order)', ''],
-            'not listed'    => ['7999', null, 'Wala sa Botcake', 'red'],
-            'removed'       => ['7003', null, 'Bura na sa Botcake', 'red'],
-            '500'           => ['7001', fn () => Http::response(['message' => 'down'], 500), 'hindi nasuri: Botcake: HTTP 500', 'grey'],
-            'success:false' => ['7001', fn () => Http::response(['success' => false]), 'hindi nasuri: Botcake: tinanggihan (success:false)', 'grey'],
-            'no answer'     => ['7001', fn () => Http::failedConnection(), 'hindi nasuri: Botcake: walang sagot', 'grey'],
-            'not a list'    => ['7001', fn () => Http::response(['data' => 'x', 'success' => true]), 'hindi nasuri: Botcake: hindi listahan ang sagot', 'grey'],
+            'not listed'    => ['7999', null, 'Not in Botcake', 'red'],
+            'removed'       => ['7003', null, 'Deleted in Botcake', 'red'],
+            '500'           => ['7001', fn () => Http::response(['message' => 'down'], 500), 'Check failed: Botcake: HTTP 500', 'grey'],
+            'success:false' => ['7001', fn () => Http::response(['success' => false]), 'Check failed: Botcake: refused (success:false)', 'grey'],
+            'no answer'     => ['7001', fn () => Http::failedConnection(), 'Check failed: Botcake: no answer', 'grey'],
+            'not a list'    => ['7001', fn () => Http::response(['data' => 'x', 'success' => true]), 'Check failed: Botcake: not a list', 'grey'],
         ];
     }
 
@@ -178,7 +178,7 @@ class FlowNamesTest extends BotcakeApiTestCase
         foreach ([['data' => ['folders' => []], 'success' => true], ['data' => null, 'success' => true]] as $body) {
             $this->flowAnswer = fn () => Http::response($body);
             $this->cell('flow.shipping', '7001')->assertOk();
-            $this->assertSame('!hindi nasuri: Botcake: hindi listahan ang sagot', $this->get52('flow.shipping.name'));
+            $this->assertSame('!hindi nasuri: Botcake: not a list', $this->get52('flow.shipping.name'));
         }
         $this->assertSame(3, $this->calls['flows']);
     }
@@ -196,7 +196,7 @@ class FlowNamesTest extends BotcakeApiTestCase
         $this->assertSame('CHATBLAST - SHIPPING STATUS (post_order)', $cells['botcake.flow.shipping.name']['line']);
         $this->assertSame('post_order', $cells['botcake.template.shipping']['value']);
         $this->assertSame('system', $cells['botcake.template.shipping']['by']);
-        $this->assertSame("May update na po sa order nyo po❤️\n\n(mensahe ng sequence)", $cells['botcake.template.shipping.text']['line']);
+        $this->assertSame("May update na po sa order nyo po❤️\n\n(sequence message)", $cells['botcake.template.shipping.text']['line']);
 
         foreach (['invalid' => [200, ['success' => false]], 'error' => [500, []]] as $status => $answer) {
             $this->calls = ['flows' => 0, 'message_templates' => 0, 'custom_fields' => 0];
@@ -212,7 +212,7 @@ class FlowNamesTest extends BotcakeApiTestCase
         $this->tokenSeconds = 24; // mabagal ang token check: sa 25 s na budget, kulang na ang oras para sa flows at templates
 
         $this->testAll()->assertOk()->assertJsonPath('status', 'ok')
-            ->assertJsonPath('refresh_error', 'kulang sa oras');
+            ->assertJsonPath('refresh_error', 'out of time');
 
         $this->assertSame(0, $this->calls['flows'] + $this->calls['message_templates']);
         $this->assertNull($this->get52('flow.shipping.name'), 'walang isinulat: naiiwan ang dating linya');
@@ -272,14 +272,14 @@ class FlowNamesTest extends BotcakeApiTestCase
         $res = $this->cell('template.shipping', 'chatblast')->assertOk();
         $this->assertSame(1, $this->calls['message_templates']);
         $this->assertSame(0, $this->calls['flows'], 'templates lang ang tinatawag kapag template ang na-save');
-        $this->assertSame('Follow up ko lang po yung sa order❤️ (mensahe ng sequence)', $res->json('cells')['botcake.template.shipping.text']['line']);
+        $this->assertSame('Follow up ko lang po yung sa order❤️ (sequence message)', $res->json('cells')['botcake.template.shipping.text']['line']);
 
         $this->testAll()->assertOk();
         $this->assertSame('chatblast', $this->get52('template.shipping'), 'hindi pinapalitan ng auto-pick ang itinype ng owner');
 
         foreach (['wala_ito', 'luma_x'] as $name) {
             $text = $this->cell('template.shipping', $name)->assertOk()->json('cells')['botcake.template.shipping.text'];
-            $this->assertSame(['Hindi APPROVED na template ng page', 'red'], [$text['line'], $text['tone']], $name);
+            $this->assertSame(['Not an APPROVED template of the page', 'red'], [$text['line'], $text['tone']], $name);
         }
 
         // Kapag binura ng owner: pipili ulit ang system.
@@ -292,7 +292,7 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         $this->assertSame(['flows' => 1, 'message_templates' => 1, 'custom_fields' => 0], $this->calls);
         $this->assertSame('post_order', $res->json('cells')['botcake.template.shipping']['value']);
-        $this->assertSame("May update na po sa order nyo po❤️\n\n(mensahe ng sequence)", $res->json('cells')['botcake.template.shipping.text']['line']);
+        $this->assertSame("May update na po sa order nyo po❤️\n\n(sequence message)", $res->json('cells')['botcake.template.shipping.text']['line']);
 
         // Ibang flow, o may template na: flows lang.
         $this->cell('flow.on_delivery', '7002')->assertOk();
@@ -393,8 +393,8 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         $uno = collect($grid['rows'])->firstWhere('name', 'Page Uno');
         $this->assertSame('SHIPPING STATUS', $uno['cells']['botcake.flow.shipping.name']['line']);
-        $this->assertSame(['Wala sa Botcake', 'red'], [$uno['cells']['botcake.flow.custom_x.name']['line'], $uno['cells']['botcake.flow.custom_x.name']['tone']]);
-        $this->assertSame('Follow up po (mensahe ng sequence)', $uno['cells']['botcake.template.shipping.text']['line']);
+        $this->assertSame(['Not in Botcake', 'red'], [$uno['cells']['botcake.flow.custom_x.name']['line'], $uno['cells']['botcake.flow.custom_x.name']['tone']]);
+        $this->assertSame('Follow up po (sequence message)', $uno['cells']['botcake.template.shipping.text']['line']);
         $this->assertSame('Follow up po {{1}}', $uno['cells']['botcake.template.shipping.text']['value'], 'buo ang body para sa hover');
     }
 }

@@ -21,7 +21,7 @@ class BotcakeFlowNames
     public const UNCHECKED    = '!hindi nasuri: ';
 
     /** Ang ipinapakita kapalit ng {{1}}: doon pumapasok ang mensahe ng chatblast sequence. */
-    public const SLOT = '(mensahe ng sequence)';
+    public const SLOT = '(sequence message)';
 
     private const CALL_TIMEOUT = 8;
     private const MIN_SECONDS = 2; // mas kaunti pa rito ang natitira: hindi na tatawag
@@ -37,13 +37,31 @@ class BotcakeFlowNames
      */
     public static function line(string $value): array
     {
-        if ($value === self::NOT_FOUND) return ['line' => 'Wala sa Botcake', 'tone' => 'red'];
-        if ($value === self::REMOVED) return ['line' => 'Bura na sa Botcake', 'tone' => 'red'];
-        if ($value === self::NOT_APPROVED) return ['line' => 'Hindi APPROVED na template ng page', 'tone' => 'red'];
-        if (str_starts_with($value, self::UNCHECKED)) return ['line' => substr($value, 1), 'tone' => 'grey'];
+        if ($value === self::NOT_FOUND) return ['line' => 'Not in Botcake', 'tone' => 'red'];
+        if ($value === self::REMOVED) return ['line' => 'Deleted in Botcake', 'tone' => 'red'];
+        if ($value === self::NOT_APPROVED) return ['line' => 'Not an APPROVED template of the page', 'tone' => 'red'];
+        if (str_starts_with($value, self::UNCHECKED)) {
+            $reason = substr($value, strlen(self::UNCHECKED));
+            return ['line' => 'Check failed: ' . (self::OLD_TEXT[$reason] ?? $reason), 'tone' => 'grey'];
+        }
+        if (isset(self::OLD_TEXT[$value])) return ['line' => self::OLD_TEXT[$value], 'tone' => ''];
 
         return ['line' => str_replace('{{1}}', self::SLOT, $value), 'tone' => ''];
     }
+
+    /**
+     * Ang Tagalog na dahilan at placeholder na naitala bago naging English ang page: ipinapakita sa English hanggang
+     * mapalitan ng susunod na save o Test token. Ang mga marker (!wala, !bura, …) ay data, hindi text, kaya hindi binabago.
+     */
+    private const OLD_TEXT = [
+        'Botcake: hindi listahan ang sagot'    => 'Botcake: not a list',
+        'Botcake: walang sagot'                => 'Botcake: no answer',
+        'Botcake: tinanggihan (success:false)' => 'Botcake: refused (success:false)',
+        'walang botcake.page_id o token'       => 'no botcake.page_id or token',
+        'kulang sa oras'                       => 'out of time',
+        '(walang body)'                        => '(no body)',
+        '(walang pangalan)'                    => '(no name)',
+    ];
 
     /** Ang key na sinusuri pagkatapos i-save: botcake.flow.<x> (isang bahagi lang) o botcake.template.shipping. */
     public static function watches(string $full): bool
@@ -157,7 +175,7 @@ class BotcakeFlowNames
 
         $t = $this->approved($templates, $name);
         $written['botcake.template.shipping.text'] = $this->write($page, 'template.shipping.text',
-            $t === null ? self::NOT_APPROVED : ($t['body'] !== '' ? $t['body'] : '(walang body)'));
+            $t === null ? self::NOT_APPROVED : ($t['body'] !== '' ? $t['body'] : '(no body)'));
 
         return null;
     }
@@ -197,13 +215,13 @@ class BotcakeFlowNames
         if ($error !== null) return [null, $error];
 
         $list = $body['data']['flows'] ?? null;
-        if (!is_array($list) || !array_is_list($list)) return [null, 'Botcake: hindi listahan ang sagot'];
+        if (!is_array($list) || !array_is_list($list)) return [null, 'Botcake: not a list'];
 
         $flows = [];
         foreach ($list as $f) {
             if (!is_array($f) || !isset($f['id']) || !is_scalar($f['id'])) continue;
             $name = is_string($f['name'] ?? null) ? trim($f['name']) : '';
-            $flows[(string) $f['id']] = ['name' => mb_substr($name !== '' ? $name : '(walang pangalan)', 0, 255), 'removed' => !empty($f['is_removed'])];
+            $flows[(string) $f['id']] = ['name' => mb_substr($name !== '' ? $name : '(no name)', 0, 255), 'removed' => !empty($f['is_removed'])];
         }
 
         return [$flows, null];
@@ -219,7 +237,7 @@ class BotcakeFlowNames
         if ($error !== null || $body === null) return [null, $error];
 
         $list = $body['data'] ?? null;
-        if (!is_array($list) || !array_is_list($list)) return [null, 'Botcake: hindi listahan ang sagot'];
+        if (!is_array($list) || !array_is_list($list)) return [null, 'Botcake: not a list'];
 
         $out = [];
         foreach ($list as $t) {
@@ -258,20 +276,20 @@ class BotcakeFlowNames
     {
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $token  = trim((string) $this->settings->get($page, 'botcake', 'token'));
-        if ($pageId === '' || $token === '') return [null, 'walang botcake.page_id o token'];
+        if ($pageId === '' || $token === '') return [null, 'no botcake.page_id or token'];
 
         // Kasama sa oras ang posibleng paghihintay ng rate limit (hanggang MIN_INTERVAL) bago ang request.
         $left = $deadline - $this->clock->now() - BotcakeClient::MIN_INTERVAL;
-        if ($left < self::MIN_SECONDS) return [null, 'kulang sa oras'];
+        if ($left < self::MIN_SECONDS) return [null, 'out of time'];
         $timeout = (int) min(self::CALL_TIMEOUT, floor($left));
 
         $r = $this->client->shared(sha1($token), $timeout)->once($timeout)
             ->call('GET', '/pages/' . rawurlencode($pageId) . $path, $query, $token);
 
-        if ($r['http'] === 0) return [null, 'Botcake: walang sagot'];
+        if ($r['http'] === 0) return [null, 'Botcake: no answer'];
         if ($r['http'] < 200 || $r['http'] >= 300) return [null, 'Botcake: HTTP ' . $r['http']];
-        if (!is_array($r['body'])) return [null, 'Botcake: hindi listahan ang sagot'];
-        if (($r['body']['success'] ?? true) === false) return [null, 'Botcake: tinanggihan (success:false)'];
+        if (!is_array($r['body'])) return [null, 'Botcake: not a list'];
+        if (($r['body']['success'] ?? true) === false) return [null, 'Botcake: refused (success:false)'];
 
         return [$r['body'], null];
     }

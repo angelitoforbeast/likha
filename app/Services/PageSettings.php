@@ -63,24 +63,24 @@ class PageSettings
         $value    = trim((string) $value);
         $full     = $provider . '.' . $key;
 
-        if ($this->normPage($page) === '') return ['page_name' => 'Kailangan ang page.'];
-        if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: hanggang 255 na character lang.'];
-        if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: maliliit na letra, numero at _ lang.'];
+        if ($this->normPage($page) === '') return ['page_name' => 'The page is required.'];
+        if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: 255 characters at most.'];
+        if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: lowercase letters, digits and _ only.'];
         if (strlen($key) > 100 || !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key)) {
-            return ['key' => 'Key: maliliit na letra, numero, _ at . lang (hal. flow.on_delivery).'];
+            return ['key' => 'Key: lowercase letters, digits, _ and . only (e.g. flow.on_delivery).'];
         }
 
         if (!$system && self::isSystemKey($full)) {
-            return ['value' => 'Ang ' . $full . ' ay isinusulat ng system (Test token / sync), hindi dito.'];
+            return ['value' => $full . ' is written by the system (Test token / sync), not here.'];
         }
 
         $digits = $full === 'botcake.page_id'
             || preg_match('/^botcake\.(flow|field)\.[a-z0-9_]+$/', $full);
 
         if ($digits && !preg_match('/^\d+$/', $value)) {
-            return ['value' => 'Ang ' . $full . ' ay numero lang (walang espasyo, slash o letra).'];
+            return ['value' => $full . ' takes digits only (no spaces, slashes or letters).'];
         }
-        if ($value === '') return ['value' => 'Kailangan ang value.'];
+        if ($value === '') return ['value' => 'The value is required.'];
 
         return null;
     }

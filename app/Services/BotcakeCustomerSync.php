@@ -236,15 +236,15 @@ class BotcakeCustomerSync
     public function markKilled(string $page): void
     {
         $this->runsOf($page)->where('status', 'running')->update([
-            'status' => 'failed', 'stop_reason' => 'killed', 'last_error' => 'Pinatay ang sync bago natapos (hal. timeout ng worker)',
+            'status' => 'failed', 'stop_reason' => 'killed', 'last_error' => 'The sync was killed before it finished (e.g. a worker timeout)',
         ]);
     }
 
     /** Para sa run message at sa "Huling sync" ng grid: by date / window / window, tuloy mula batch N / full. */
     public static function kindLabel(?string $kind, ?int $start): ?string
     {
-        if ($kind === 'by_date') return $start > 1 ? 'by date, tuloy mula batch ' . $start : 'by date';
-        if ($kind === 'window' && $start > 1) return 'window, tuloy mula batch ' . $start;
+        if ($kind === 'by_date') return $start > 1 ? 'by date, resumed from batch ' . $start : 'by date';
+        if ($kind === 'window' && $start > 1) return 'window, resumed from batch ' . $start;
         return $kind;
     }
 
@@ -253,7 +253,7 @@ class BotcakeCustomerSync
     {
         if (!$date) return null;
         $d = Carbon::parse(substr((string) $date, 0, 10));
-        return ['Ene', 'Peb', 'Mar', 'Abr', 'May', 'Hun', 'Hul', 'Ago', 'Set', 'Okt', 'Nob', 'Dis'][$d->month - 1] . ' ' . $d->day;
+        return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][$d->month - 1] . ' ' . $d->day;
     }
 
     public function syncPage(string $page, bool $full = false): BotcakePsidImportRun
@@ -274,7 +274,7 @@ class BotcakeCustomerSync
         $oldest = now()->subDays(max(1, (int) config('services.botcake.sync_max_age_days', 45)));
 
         if (!$pageId || !$token) {
-            $error = 'Walang botcake.page_id o botcake.token ang page';
+            $error = 'The page has no botcake.page_id or botcake.token';
             $reason = 'error';
         } else {
             $client = app(BotcakeClient::class); // bago kada page: sariling rate at retry

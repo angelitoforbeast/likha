@@ -240,7 +240,7 @@ class BotcakeSyncAll
 
         return (bool) BotcakePsidImportRun::whereKey($run->id)->where('status', 'running')->update($last
             ? ['status' => 'done', 'page_index' => $total, 'current_page' => null, 'finished_at' => now()]
-            : ['status' => 'stopped', 'current_page' => null, 'finished_at' => now(), 'last_error' => 'Naputol ang lumang run: walang job at walang state sa cache']);
+            : ['status' => 'stopped', 'current_page' => null, 'finished_at' => now(), 'last_error' => 'Old run cut off: no job and no state in the cache']);
     }
 
     /** May naka-queue o tumatakbong job ba ang run (database queue lang). True kapag hindi masabi. */
@@ -359,8 +359,8 @@ class BotcakeSyncAll
     }
 
     public const SUMMARY = [
-        'window' => 'window', 'continue' => 'tuloy', 'by_date' => 'by date',
-        'fresh' => 'laktaw (sariwa)', 'missing' => 'walang ID/token', 'invalid' => 'token invalid',
+        'window' => 'window', 'continue' => 'resume', 'by_date' => 'by date',
+        'fresh' => 'skipped (fresh)', 'missing' => 'no ID/token', 'invalid' => 'token invalid',
     ];
 
     /**
@@ -380,7 +380,7 @@ class BotcakeSyncAll
 
         foreach ($rows as $row) {
             $pk = $row['key'];
-            if (!($row['info']['botcake'] ?? false)) { $out[$pk] = ['kind' => 'missing', 'label' => 'walang ID/token']; continue; }
+            if (!($row['info']['botcake'] ?? false)) { $out[$pk] = ['kind' => 'missing', 'label' => 'no ID/token']; continue; }
             if (str_starts_with((string) ($row['cells']['botcake.token_status']['value'] ?? ''), 'invalid')) {
                 $out[$pk] = ['kind' => 'invalid', 'label' => 'token invalid'];
                 continue;
@@ -390,12 +390,12 @@ class BotcakeSyncAll
             [$kind, $start, $stop] = ($plans[$pk] ?? ['window', 1]) + [2 => null];
             $from = BotcakeCustomerSync::shortDate($stop); // stop date ng by date, para sa "susunod: mula …"
             if ($start > 1) {
-                $out[$pk] = $kind === 'by_date' ? ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start . ' (by date, mula ' . $from . ')', 'from' => $from]
-                    : ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start];
+                $out[$pk] = $kind === 'by_date' ? ['kind' => 'continue', 'label' => 'resume from batch ' . $start . ' (by date, from ' . $from . ')', 'from' => $from]
+                    : ['kind' => 'continue', 'label' => 'resume from batch ' . $start];
                 continue;
             }
             if ($kind === 'window') {
-                $out[$pk] = ['kind' => 'window', 'label' => 'window (' . $days . ' araw, buo)'];
+                $out[$pk] = ['kind' => 'window', 'label' => 'window (' . $days . ' days, full)'];
                 continue;
             }
 
@@ -403,10 +403,10 @@ class BotcakeSyncAll
             $at = $fresh[$pk] ?? null;
             if ($at && $at->gt(now()->subMinutes((int) round($hours * 60)))) {
                 $mins = (int) $at->diffInMinutes(now(), true);
-                $out[$pk] = ['kind' => 'fresh', 'label' => 'laktaw (sariwa, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' oras') . ' na)', 'from' => $from];
+                $out[$pk] = ['kind' => 'fresh', 'label' => 'skipped (fresh, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' h') . ' ago)', 'from' => $from];
                 continue;
             }
-            $out[$pk] = ['kind' => 'by_date', 'label' => 'by date, mula ' . $from, 'from' => $from];
+            $out[$pk] = ['kind' => 'by_date', 'label' => 'by date, from ' . $from, 'from' => $from];
         }
 
         return $out;

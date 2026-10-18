@@ -91,9 +91,9 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $res->assertSee('table-fixed', false)
             ->assertSee("[['botcake', 'Botcake'], ['flows', 'Flows']]", false)
             ->assertSee("text: 'Orders / Customers'", false)
-            ->assertSee("text: 'Sync', title: 'Huling sync / Susunod na sync'", false);
+            ->assertSee("text: 'Sync', title: 'Last sync / Next sync'", false);
         // Ang bawat action ng row at ng page: maliit na button o link, may title.
-        foreach (["'Test', 'Test token'", "'Sync', 'Sync now'", "title: 'Customers'", "title: 'Orders na walang PSID'", "title: 'History'",
+        foreach (["'Test', 'Test token'", "'Sync', 'Sync now'", "title: 'Customers'", "title: 'Orders without a PSID'", "title: 'History'",
                   'id="test-all"', 'id="sync-all"', 'id="sync-all-pause"', 'id="sync-all-resume"', 'id="sync-all-stop"', 'id="add-page"', 'id="add-column"'] as $action) {
             $res->assertSee($action, false);
         }
@@ -103,7 +103,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     {
         $this->get('/page-settings')
             ->assertSee("s.dates ? s.dates + ' · ' + (s.at || '').slice(11) : (s.at || s.status)", false)
-            ->assertSee("'susunod: ' + (nx.from ? 'mula ' + nx.from : nx.label)", false);
+            ->assertSee("'next: ' + (nx.from ? 'from ' + nx.from : nx.label)", false);
     }
 
     public function test_S_054_4_open_detail_rows_live_outside_the_render_and_hold_the_other_keys_and_history(): void
@@ -114,6 +114,43 @@ class PageSettingsGridTest extends BotcakeApiTestCase
             ->assertSee("const other = inGroup('other');", false)
             ->assertSee("other.map(c => line(r, c, 'w-40'))", false)
             ->assertSee("class: 'hist-link", false);
+    }
+
+    public function test_S_054_6_lines_stored_in_tagalog_before_the_change_are_shown_in_english(): void
+    {
+        $s = $this->settings();
+        $s->set('Page Uno', 'botcake', 'flow.shipping', '7001');
+        $s->set('Page Uno', 'botcake', 'flow.shipping.name', '!hindi nasuri: Botcake: walang sagot', system: true);
+        $s->set('Page Uno', 'botcake', 'flow.broadcast', '7004');
+        $s->set('Page Uno', 'botcake', 'flow.broadcast.name', '!hindi nasuri: kulang sa oras', system: true);
+        $s->set('Page Uno', 'botcake', 'flow.in_transit', '7003');
+        $s->set('Page Uno', 'botcake', 'flow.in_transit.name', '(walang pangalan)', system: true);
+        $s->set('Page Uno', 'botcake', 'template.shipping', 'ship_v1');
+        $s->set('Page Uno', 'botcake', 'template.shipping.text', '(walang body)', system: true);
+
+        $cells = collect($this->grid()['rows'])->firstWhere('name', 'Page Uno')['cells'];
+
+        $this->assertSame([
+            ['Check failed: Botcake: no answer', 'grey'], ['Check failed: out of time', 'grey'], ['(no name)', ''], ['(no body)', ''],
+        ], array_map(fn ($k) => [$cells[$k]['line'], $cells[$k]['tone']],
+            ['botcake.flow.shipping.name', 'botcake.flow.broadcast.name', 'botcake.flow.in_transit.name', 'botcake.template.shipping.text']));
+    }
+
+    public function test_S_054_7_the_page_text_is_english(): void
+    {
+        $this->settings()->set('Page Uno', 'botcake', 'page_id', '1001');
+        $res = $this->get('/page-settings')->assertOk();
+
+        foreach (['Search pages', "'Not checked yet'", "'Pick a template'", "'No pages yet. Use + Page.'", 'Test all tokens', 'Sync all'] as $text) {
+            $res->assertSee($text, false);
+        }
+        // Mga salitang Tagalog na dating nasa page; ang mga comment sa code ay hindi kasama (// at /* */ ay tinatanggal muna).
+        $html = preg_replace(['#/\*.*?\*/#s', '#{{--.*?--}}#s', '#^\s*//.*$#m', '#\s//\s.*$#m'], '', $res->getContent());
+        foreach (['Hanapin', 'Pangalan ng page', 'lahat ng token', 'Sync lahat', 'Plano ng', 'tumatakbong', 'I-click', 'hindi pa nasusuri',
+                  'piliin ang template', 'Wala pang page', 'susunod', 'Walang koneksyon', 'Hindi nai-save', 'Naidagdag', 'Burahin', 'Kinukuha',
+                  'naka-pause', 'itinigil', 'tapos', 'na-match', 'Ibang key', 'Buksan ang detalye', 'Isara', 'araw'] as $tagalog) {
+            $this->assertStringNotContainsString($tagalog, $html, $tagalog);
+        }
     }
 
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void
@@ -134,7 +171,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertSame([false, true], PageSetting::orderBy('id')->pluck('active')->map(fn ($v) => (bool) $v)->all());
 
         $this->cell(['page_name' => 'Page Uno', 'key' => 'page_id', 'value' => '442139078/'])
-            ->assertStatus(422)->assertJsonPath('error', 'Ang botcake.page_id ay numero lang (walang espasyo, slash o letra).');
+            ->assertStatus(422)->assertJsonPath('error', 'botcake.page_id takes digits only (no spaces, slashes or letters).');
         $this->cell(['page_name' => 'Page Uno', 'key' => 'token_status', 'value' => 'ok'])->assertStatus(422);
         $this->assertSame(2, PageSetting::count());
 
@@ -300,7 +337,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
             $this->travelTo('2026-10-17 08:45:00');
             $this->assertSame('2026-10-17 08:30', $this->grid()['sync_lock']);
             $this->assertSame('2026-10-17 08:30', $this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
-            $this->assertStringContainsString('May tumatakbong Botcake sync', $this->get('/page-settings')->getContent());
+            $this->assertStringContainsString('A Botcake sync has been running since', $this->get('/page-settings')->getContent());
         });
         $this->assertNull($this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
     }

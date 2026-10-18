@@ -64,7 +64,7 @@ class PageSettingController extends Controller
         if ($since === '') return response()->json($grid->build());
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $since)) {
-            return response()->json(['error' => 'Mali ang since (YYYY-MM-DD HH:MM:SS).'], 422);
+            return response()->json(['error' => 'Bad since (YYYY-MM-DD HH:MM:SS).'], 422);
         }
 
         return response()->json($grid->changes(Carbon::parse($since)));
@@ -98,7 +98,7 @@ class PageSettingController extends Controller
         if ($request->boolean('clear') || ($value === '' && !$secret)) {
             if (!$current) return response()->json(['status' => 'unchanged', 'cell' => null]);
             if (PageSettings::isSystemKey($provider . '.' . $key)) {
-                return response()->json(['error' => 'Ang ' . $provider . '.' . $key . ' ay isinusulat ng system.'], 422);
+                return response()->json(['error' => $provider . '.' . $key . ' is written by the system.'], 422);
             }
             foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());
             // Ang binurang template ay pinipili ulit ng system (kapag may iisang malinaw na template).
@@ -169,7 +169,7 @@ class PageSettingController extends Controller
         $this->checkAccess();
 
         $name = $this->settings->normPage((string) $request->query('page_name', ''));
-        if ($name === '') return response()->json(['error' => 'Kailangan ang page.'], 422);
+        if ($name === '') return response()->json(['error' => 'The page is required.'], 422);
 
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         $col  = DB::getDriverName() === 'pgsql' ? '"PAGE"' : '`PAGE`';
@@ -198,7 +198,7 @@ class PageSettingController extends Controller
 
         $res = $this->settings->set($page, $provider, $key, $value, $request->boolean('is_secret'), Auth::id());
 
-        $label = ['created' => 'Naidagdag', 'replaced' => 'Napalitan', 'unchanged' => 'Walang binago (parehong value)'][$res['status']];
+        $label = ['created' => 'Added', 'replaced' => 'Replaced', 'unchanged' => 'No change (same value)'][$res['status']];
         return redirect()->route('page-settings.index')->with('success', $label . ': ' . $res['setting']->page_name . ' · ' . $res['setting']->fullKey());
     }
 
@@ -215,14 +215,14 @@ class PageSettingController extends Controller
         $pageId = $this->settings->get($page, 'botcake', 'page_id');
         $token  = $this->settings->get($page, 'botcake', 'token');
         if (!$pageId || !$token) {
-            return redirect()->route('page-settings.index')->with('error', 'Kailangan muna ang botcake.page_id at botcake.token ng page.');
+            return redirect()->route('page-settings.index')->with('error', 'The page needs botcake.page_id and botcake.token first.');
         }
 
         try {
             // Parehong rate key ng flows at templates na susunod: 2 request kada segundo kada page, kasama ang token check.
             $status = $client->shared(sha1($token), 30)->testToken($pageId, $token) ? 'ok' : 'invalid';
         } catch (BotcakeException $e) {
-            return redirect()->route('page-settings.index')->with('error', 'Hindi nasubukan ang token: ' . $e->getMessage());
+            return redirect()->route('page-settings.index')->with('error', 'Could not test the token: ' . $e->getMessage());
         }
 
         $sync->tokenStatus($page, $status, true);
@@ -230,7 +230,7 @@ class PageSettingController extends Controller
         $note = '';
         if ($status === 'ok') {
             $res = app(BotcakeFlowNames::class)->afterTokenOk($page, $start + self::TEST_BUDGET);
-            $note = $res['error'] === null ? ' · na-refresh ang flows at template' : ' · hindi na-refresh ang flows at template: ' . $res['error'];
+            $note = $res['error'] === null ? ' · flows and template refreshed' : ' · flows and template not refreshed: ' . $res['error'];
         }
 
         return redirect()->route('page-settings.index')->with($status === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $status . $note);
@@ -280,12 +280,12 @@ class PageSettingController extends Controller
         $key  = $this->settings->pageKey((string) $request->input('page_name', ''));
         $page = collect($sync->pages())->first(fn ($p) => $this->settings->pageKey($p) === $key);
         if (!$page) {
-            return redirect()->route('page-settings.index')->with('error', 'Kailangan muna ang botcake.page_id at botcake.token ng page.');
+            return redirect()->route('page-settings.index')->with('error', 'The page needs botcake.page_id and botcake.token first.');
         }
 
         SyncBotcakeCustomersJob::dispatch($page);
 
-        return redirect()->route('page-settings.index')->with('success', $page . ': naka-queue ang Botcake sync. I-refresh mamaya para sa bilang.');
+        return redirect()->route('page-settings.index')->with('success', $page . ': Botcake sync queued. Refresh later for the counts.');
     }
 
     /** "Sync lahat": isang run lang sabay; ang pindot habang may tumatakbo o naka-pause na run ay walang sinisimulan. */
@@ -315,6 +315,6 @@ class PageSettingController extends Controller
         $setting = PageSetting::findOrFail($id);
         $this->settings->deactivate($setting, Auth::id());
 
-        return redirect()->route('page-settings.index')->with('success', 'Na-deactivate: ' . $setting->page_name . ' · ' . $setting->fullKey());
+        return redirect()->route('page-settings.index')->with('success', 'Deactivated: ' . $setting->page_name . ' · ' . $setting->fullKey());
     }
 }

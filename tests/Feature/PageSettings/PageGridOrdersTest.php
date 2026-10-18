@@ -55,7 +55,7 @@ class PageGridOrdersTest extends BotcakeApiTestCase
         $this->assertSame([], $big['cells'], 'walang settings: walang laman na mga cell, gaya ng "+ Page"');
         $this->assertFalse($big['info']['botcake']);
 
-        $this->assertStringContainsString('Orders (30 araw)', $this->get('/page-settings')->getContent());
+        $this->assertStringContainsString('Orders (30 days)', $this->get('/page-settings')->getContent());
     }
 
     public function test_the_window_follows_the_config(): void

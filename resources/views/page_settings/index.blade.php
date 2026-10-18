@@ -22,7 +22,7 @@
     <div class="flex items-center justify-between mb-3">
         <h1 class="text-2xl font-semibold">Page Settings</h1>
         <div class="flex gap-4 text-sm">
-            <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders na walang PSID)</a>
+            <a href="{{ route('page-settings.psid-coverage') }}" class="text-blue-700 hover:underline">PSID coverage (orders without a PSID)</a>
             <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
         </div>
     </div>
@@ -40,16 +40,16 @@
     @endif
 
     <div class="flex flex-wrap items-end gap-4 mb-3 text-sm">
-        <input id="filter" placeholder="Hanapin ang page" class="border rounded px-2 py-1">
+        <input id="filter" placeholder="Search pages" class="border rounded px-2 py-1">
 
         <form id="add-page" class="flex items-center gap-1">
-            <input name="page_name" placeholder="Pangalan ng page (gaya ng PAGE sa orders)" class="border rounded px-2 py-1 w-72" required>
+            <input name="page_name" placeholder="Page name (as PAGE in orders)" class="border rounded px-2 py-1 w-72" required>
             <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">+ Page</button>
         </form>
 
         <form id="add-column" class="flex items-center gap-1">
             <input name="provider" value="botcake" placeholder="provider" class="border rounded px-2 py-1 w-24" required>
-            <input name="key" placeholder="key (hal. flow.reminder)" class="border rounded px-2 py-1 w-44" required>
+            <input name="key" placeholder="key (e.g. flow.reminder)" class="border rounded px-2 py-1 w-44" required>
             <label class="flex items-center gap-1"><input type="checkbox" name="is_secret" value="1"> secret</label>
             <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">+ Column</button>
         </form>
@@ -58,9 +58,9 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
-        <button id="test-all" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">Test lahat ng token</button>
+        <button id="test-all" type="button" class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded disabled:opacity-50">Test all tokens</button>
         <span id="test-all-status" class="text-xs text-gray-600" aria-live="polite"></span>
-        <button id="sync-all" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50">Sync lahat</button>
+        <button id="sync-all" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50">Sync all</button>
         <button id="sync-all-pause" type="button" data-action="pause" class="sync-all-control hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded">Pause</button>
         <button id="sync-all-resume" type="button" data-action="resume" class="sync-all-control hidden bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">Resume</button>
         <button id="sync-all-stop" type="button" data-action="stop" class="sync-all-control hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Stop</button>
@@ -71,12 +71,12 @@
     <div id="sync-all-panel" class="hidden mb-3 px-4 py-2 rounded bg-blue-50 text-blue-950 text-xs">
         <div id="sync-all-line" class="mb-1"></div>
         <details>
-            <summary class="cursor-pointer text-blue-800">Huling 10 Sync lahat</summary>
+            <summary class="cursor-pointer text-blue-800">Last 10 Sync all runs</summary>
             <table class="mt-1 border-collapse">
                 <thead><tr class="text-left text-gray-600">
-                    <th class="pr-3">Sinimulan</th><th class="pr-3">Ni</th><th class="pr-3">Status</th><th class="pr-3">Page</th>
-                    <th class="pr-3">Failed</th><th class="pr-3">Laktaw</th><th class="pr-3">Bago</th><th class="pr-3">Na-match</th>
-                    <th class="pr-3">Ad id</th><th class="pr-3">Tagal</th>
+                    <th class="pr-3">Started</th><th class="pr-3">By</th><th class="pr-3">Status</th><th class="pr-3">Page</th>
+                    <th class="pr-3">Failed</th><th class="pr-3">Skipped</th><th class="pr-3">New</th><th class="pr-3">Matched</th>
+                    <th class="pr-3">Ad id</th><th class="pr-3">Duration</th>
                 </tr></thead>
                 <tbody id="sync-all-history"></tbody>
             </table>
@@ -84,19 +84,19 @@
     </div>
 
     {{-- Ang plano ng Sync lahat, mula sa "Susunod na sync" ng bawat page. --}}
-    <p class="mb-3 text-xs text-gray-700">Plano ng Sync lahat: <span id="plan-summary">{{ $grid['plan_summary'] ?: 'wala' }}</span></p>
+    <p class="mb-3 text-xs text-gray-700">Sync all plan: <span id="plan-summary">{{ $grid['plan_summary'] ?: 'none' }}</span></p>
 
     {{-- Ang lock ng Botcake sync: habang hawak, "Skipped" ang ibang sync (schedule, button, command). --}}
     <div id="sync-lock" class="mb-3 px-4 py-2 rounded bg-amber-100 text-amber-900 text-sm {{ $grid['sync_lock'] ? '' : 'hidden' }}">
-        May tumatakbong Botcake sync mula <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Ang ibang sync ay lalaktaw hanggang matapos ito (o hanggang 2 oras kung naputol).
+        A Botcake sync has been running since <span id="sync-lock-since">{{ $grid['sync_lock'] }}</span>. Other syncs skip until it ends (or for up to 2 hours if it was cut off).
     </div>
 
     <p class="mb-2 text-xs text-gray-500">
-        I-click ang cell at mag-type: kusa itong nase-save (Enter, pag-alis sa cell, o ilang segundong walang type). Blangko = burahin ang setting.
-        Token / secret: blangko = walang palit; ang laman ay hindi kailanman ipinapakita (huling 4 lang). Kada ilang segundo, kinukuha ang binago ng iba.
-        ID ng Botcake, flow at field: numero lang.
-        Sa ilalim ng flow ID: ang pangalan nito sa Botcake (kinukuha pagka-save at sa Test token na ok). Shipping template: kusang pinipili kapag blangko; puwedeng palitan.
-        ▸ sa tabi ng page: ang buong pangalan ng flows, ang buong template, ang detalye ng sync, ang ibang key at ang history.
+        Click a value and type: it saves by itself (Enter, leaving the field, or a few seconds without typing). Blank = delete the setting.
+        Token / secret: blank = no change; the value is never shown (last 4 only). Every few seconds, changes made by others are loaded.
+        Botcake, flow and field IDs: digits only.
+        Under a flow ID: its name in Botcake (read after a save and after an ok Test token). Shipping template: picked automatically when blank; you can change it.
+        ▸ next to a page: the full flow names, the full template, the sync details, the other keys and the history.
     </p>
 
     <div id="grid"
@@ -132,7 +132,7 @@
     const url = box.dataset;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const POLL_MS = 5000, PAUSE_MS = 1500;
-    const ORDERS_LABEL = @json('Orders (' . $grid['order_days'] . ' araw)');
+    const ORDERS_LABEL = @json('Orders (' . $grid['order_days'] . ' days)');
 
     let columns = initial.columns;
     const rows = new Map(initial.rows.map(r => [r.key, r]));
@@ -195,7 +195,7 @@
 
     // Ang mga cell ng bawat row, para walang horizontal scroll: ang mga column ay pinagsama ayon sa group (mula sa server).
     const GROUPS = [['botcake', 'Botcake'], ['flows', 'Flows']];
-    const WIDTHS = ['13%', '23%', '31%', '8%', '15%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
+    const WIDTHS = ['12%', '22%', '29%', '7%', '20%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
     // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
     // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID.
     const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid'];
@@ -214,7 +214,7 @@
             el('th', {class: 'sticky-col ' + th, text: 'Page'}),
             ...GROUPS.map(([, label]) => el('th', {class: th, text: label})),
             el('th', {class: th, text: 'Orders / Customers', title: ORDERS_LABEL + ' / Customers'}),
-            el('th', {class: th, text: 'Sync', title: 'Huling sync / Susunod na sync'}),
+            el('th', {class: th, text: 'Sync', title: 'Last sync / Next sync'}),
             el('th', {class: 'bg-gray-100 px-2 py-2 border-b', text: ''}),
         ]);
 
@@ -231,14 +231,14 @@
         });
 
         table.replaceChildren(el('colgroup', {}, WIDTHS.map(w => el('col', {style: 'width: ' + w}))), el('thead', {}, head), el('tbody', {}, body.length ? body
-            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(WIDTHS.length), text: 'Wala pang page. Gamitin ang + Page.'}))));
+            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(WIDTHS.length), text: 'No pages yet. Use + Page.'}))));
     }
 
     function pageTd(r) {
         const isOpen = open.has(r.key);
         return el('td', {class: 'sticky-col ' + (r.info.orders ? 'bg-white' : 'bg-gray-50') + ' px-2 py-1 border-b border-r align-top font-medium break-words'}, [
             el('button', {type: 'button', class: 'toggle mr-1 text-gray-500 hover:text-gray-900', 'data-pk': r.key, 'aria-expanded': String(isOpen),
-                title: isOpen ? 'Isara ang detalye' : 'Buksan ang detalye', text: isOpen ? '▾' : '▸'}),
+                title: isOpen ? 'Hide details' : 'Show details', text: isOpen ? '▾' : '▸'}),
             r.name,
         ]);
     }
@@ -288,14 +288,14 @@
 
     function detailOf(row, key) {
         const d = row.cells[key];
-        return d ? detailLine(d.line, d.tone) : detailLine('hindi pa nasusuri', 'grey');
+        return d ? detailLine(d.line, d.tone) : detailLine('Not checked yet', 'grey');
     }
 
     function detailLines(row, col) {
         const cell = row.cells[col.key];
         // Ang template ay nasa susunod na linya ng parehong cell, kaya wala na itong linya sa ilalim ng shipping flow.
         if (FLOW_KEY.test(col.key) && cell) return [detailOf(row, col.key + '.name')];
-        if (col.key === TEMPLATE_KEY) return [cell ? detailOf(row, TEMPLATE_KEY + '.text') : detailLine('piliin ang template', 'grey')];
+        if (col.key === TEMPLATE_KEY) return [cell ? detailOf(row, TEMPLATE_KEY + '.text') : detailLine('Pick a template', 'grey')];
         return [];
     }
 
@@ -330,21 +330,21 @@
 
     function infoSync(r) {
         const s = r.info.last_sync;
-        if (!s) return 'wala pa';
+        if (!s) return 'none yet';
         // hal. "Okt 17 → Okt 18 · by date · 2026-10-18 01:04 · date · +9,985 bago · 1,279 na-match"
         const n = v => Number(v || 0).toLocaleString('en-US');
-        const counts = (s.new || s.matched) ? '+' + n(s.new) + ' bago · ' + n(s.matched) + ' na-match' : null;
+        const counts = (s.new || s.matched) ? '+' + n(s.new) + ' new · ' + n(s.matched) + ' matched' : null;
         return [s.dates, s.kind, s.at, s.stop_reason || s.status, counts].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '')
-            + (s.failed && r.info.next ? ' · susunod: ' + (r.info.next.from ? 'mula ' + r.info.next.from : r.info.next.label) : '');
+            + (s.failed && r.info.next ? ' · next: ' + (r.info.next.from ? 'from ' + r.info.next.from : r.info.next.label) : '');
     }
 
     // Ang sync cell: "Okt 17 → Okt 18 · 01:04" at "susunod: mula Okt 17"; ang buong detalye ay nasa hover at sa detalye ng row.
     // Pula kapag failed ang huling run.
     function paintSync(td, r) {
         const s = r.info.last_sync, nx = r.info.next;
-        const last = s ? (s.dates ? s.dates + ' · ' + (s.at || '').slice(11) : (s.at || s.status)) : 'wala pa';
-        const next = nx ? 'susunod: ' + (nx.from ? 'mula ' + nx.from : nx.label) : null;
-        td.title = infoSync(r) + (nx ? '\nSusunod na sync: ' + nx.label : '');
+        const last = 'Last sync: ' + (s ? (s.dates ? s.dates + ' · ' + (s.at || '').slice(11) : (s.at || s.status)) : 'none yet');
+        const next = nx ? 'next: ' + (nx.from ? 'from ' + nx.from : nx.label) : null;
+        td.title = infoSync(r) + (nx ? '\nNext sync: ' + nx.label : '');
         put(td, el('div', {class: 'truncate', text: last}), next ? el('div', {class: 'truncate', text: next}) : null);
         td.classList.toggle('text-red-600', !!(s && s.failed));
         return td;
@@ -357,9 +357,9 @@
         return el('tr', {class: 'detail bg-gray-50', 'data-detail': r.key}, el('td', {class: 'px-4 py-2 border-b text-xs', colspan: String(WIDTHS.length)}, [
             el('div', {class: 'grid grid-cols-3 gap-4', 'data-detail-info': ''}, detailInfo(r)),
             el('div', {class: 'mt-2'}, [
-                el('div', {class: 'font-semibold text-gray-600', text: 'Ibang key'}),
+                el('div', {class: 'font-semibold text-gray-600', text: 'Other keys'}),
                 other.length ? el('div', {class: 'grid grid-cols-2 gap-x-4'}, other.map(c => line(r, c, 'w-40')))
-                    : el('div', {class: 'text-gray-400', text: 'Wala (gamitin ang + Column).'}),
+                    : el('div', {class: 'text-gray-400', text: 'None (use + Column).'}),
             ]),
             el('div', {class: 'mt-2 flex flex-wrap items-baseline gap-x-3'}, [
                 el('span', {class: 'font-semibold text-gray-600', text: 'History:'}),
@@ -380,18 +380,18 @@
                 return el('div', {class: 'break-words'}, [
                     el('span', {class: 'text-gray-500', text: (SHORT[c.key] || c.label) + ': '}),
                     el('span', {class: 'font-mono', text: id ? id.value : '—'}),
-                    id ? el('span', {class: TONE[name ? name.tone : 'grey'] || 'text-gray-700', text: ' — ' + (name ? name.line : 'hindi pa nasusuri')}) : null,
+                    id ? el('span', {class: TONE[name ? name.tone : 'grey'] || 'text-gray-700', text: ' — ' + (name ? name.line : 'Not checked yet')}) : null,
                 ]);
             })]),
             el('div', {}, [heading('Shipping template'),
-                el('div', {class: 'font-mono break-all', text: t ? t.value : 'piliin ang template'}),
-                t ? el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body ? body.tone : 'grey'] || 'text-gray-700'), text: body ? body.line : 'hindi pa nasusuri'}) : null,
+                el('div', {class: 'font-mono break-all', text: t ? t.value : 'Pick a template'}),
+                t ? el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body ? body.tone : 'grey'] || 'text-gray-700'), text: body ? body.line : 'Not checked yet'}) : null,
             ]),
             el('div', {class: s && s.failed ? 'text-red-600' : ''}, [heading('Sync'), ...[
-                'Huling sync: ' + (s ? [s.dates, s.kind, s.at, s.stop_reason || s.status].filter(Boolean).join(' · ') : 'wala pa'),
-                s ? '+' + fmt(s.new) + ' bago · ' + fmt(s.updated) + ' na-update · ' + fmt(s.matched) + ' na-match · ' + fmt(s.ad_filled) + ' ad id' : null,
+                'Last sync: ' + (s ? [s.dates, s.kind, s.at, s.stop_reason || s.status].filter(Boolean).join(' · ') : 'none yet'),
+                s ? '+' + fmt(s.new) + ' new · ' + fmt(s.updated) + ' updated · ' + fmt(s.matched) + ' matched · ' + fmt(s.ad_filled) + ' ad id' : null,
                 s && s.error ? 'Error: ' + s.error : null,
-                'Susunod na sync: ' + (r.info.next ? r.info.next.label : '—'),
+                'Next sync: ' + (r.info.next ? r.info.next.label : '—'),
                 ORDERS_LABEL + ': ' + fmt(r.info.orders) + ' · Customers: ' + fmt(r.info.customers),
             ].filter(Boolean).map(text => el('div', {class: 'break-words', text}))]),
         ];
@@ -411,12 +411,12 @@
     }
 
     // Kapareho ng BotcakeSyncAll::summary(): bilang kada uri ng susunod na sync.
-    const SUMMARY = {window: 'window', continue: 'tuloy', by_date: 'by date', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
+    const SUMMARY = {window: 'window', continue: 'resume', by_date: 'by date', fresh: 'skipped (fresh)', missing: 'no ID/token', invalid: 'token invalid'};
     function refreshSummary() {
         const count = {};
         for (const r of rows.values()) if (r.info.next) count[r.info.next.kind] = (count[r.info.next.kind] || 0) + 1;
         const text = Object.entries(SUMMARY).filter(([k]) => count[k]).map(([k, label]) => count[k] + ' ' + label).join(', ');
-        document.getElementById('plan-summary').textContent = text || 'wala';
+        document.getElementById('plan-summary').textContent = text || 'none';
     }
 
     function postForm(action, pageName, label, title, cls) {
@@ -435,7 +435,7 @@
             out.push(postForm(url.syncUrl, r.name, 'Sync', 'Sync now', 'bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded text-xs'));
         }
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), title: 'Customers', text: 'Cust.'}));
-        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), title: 'Orders na walang PSID', text: 'Orders'}));
+        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), title: 'Orders without a PSID', text: 'Orders'}));
         return [el('div', {class: 'flex flex-wrap items-center gap-1'}, out)];
     }
 
@@ -492,7 +492,7 @@
         const secret = col.secret || !!(cell && cell.secret);
         const original = secret ? '' : (cell ? cell.value : '');
         const input = el('input', {class: 'w-full border border-blue-500 rounded px-1 font-mono', autocomplete: 'off',
-            placeholder: secret ? 'bagong value (blangko = walang palit)' : ''});
+            placeholder: secret ? 'new value (blank = no change)' : ''});
         input.value = original;
         const mark = el('span', {class: 'block text-xs'});
         put(td, input, mark);
@@ -552,7 +552,7 @@
             // Huling dumating ang sagot ng mas lumang save (hal. mabagal na Botcake): ang mas bagong save ang masusunod.
             if (saveSeq.get(id) !== seq) return;
             if (!res.ok) {
-                marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || data.message || ('Hindi nai-save (' + res.status + ')')});
+                marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || data.message || ('Not saved (' + res.status + ')')});
             } else {
                 if (data.cell) row.cells[ed.key] = data.cell; else delete row.cells[ed.key];
                 delete ed.server; // mas bago ang naisave kaysa sa itinabing value mula sa poll
@@ -566,7 +566,7 @@
             }
         } catch (err) {
             if (saveSeq.get(id) !== seq) return;
-            marks.set(id, {text: '!', cls: 'text-red-600', title: 'Walang koneksyon: hindi nai-save.'});
+            marks.set(id, {text: '!', cls: 'text-red-600', title: 'No connection: not saved.'});
         }
         if (needsRender && !editing) render(); else paintedBy(ed.key).forEach(k => repaint(ed.pk, k));
     }
@@ -622,25 +622,25 @@
         const cur = row.cells[key];
         const current = document.getElementById('history-current');
         put(current,
-            el('div', {class: 'text-xs text-gray-500', text: 'Ngayon'}),
-            el('div', {class: 'font-mono break-all', text: cur ? cur.value : '(walang laman)'}),
+            el('div', {class: 'text-xs text-gray-500', text: 'Now'}),
+            el('div', {class: 'font-mono break-all', text: cur ? cur.value : '(empty)'}),
             cur ? el('div', {class: 'text-xs text-gray-500', text: cur.by + ' · ' + cur.at}) : null,
-            cur ? el('button', {class: 'mt-1 text-xs text-red-600 hover:underline', type: 'button', id: 'history-clear', text: 'Burahin ang value'}) : null,
+            cur ? el('button', {class: 'mt-1 text-xs text-red-600 hover:underline', type: 'button', id: 'history-clear', text: 'Clear the value'}) : null,
         );
         const list = document.getElementById('history-list');
-        list.replaceChildren(el('li', {class: 'text-gray-400', text: 'Kinukuha…'}));
+        list.replaceChildren(el('li', {class: 'text-gray-400', text: 'Loading…'}));
         panel.classList.remove('hidden');
 
         const clear = document.getElementById('history-clear');
         if (clear) clear.addEventListener('click', async () => {
-            if (!confirm('Burahin ang ' + col.key + ' ng ' + row.name + '?')) return;
+            if (!confirm('Clear ' + col.key + ' of ' + row.name + '?')) return;
             const res = await fetch(url.cellUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf},
                 body: JSON.stringify({page_name: row.name, provider: col.provider, key: col.name, clear: true}),
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) { notice(data.error || 'Hindi nabura.', 'text-red-600'); return; }
+            if (!res.ok) { notice(data.error || 'Not cleared.', 'text-red-600'); return; }
             delete row.cells[key];
             render();
             openHistory(pk, key);
@@ -653,7 +653,7 @@
             el('span', {class: 'font-mono break-all', text: h.value}),
             el('div', {class: 'text-gray-500', text: h.by + ' · ' + h.at + ' → ' + (h.replaced_at || '')}),
         ])));
-        if (!list.children.length) list.append(el('li', {class: 'text-gray-400', text: 'Walang dating value.'}));
+        if (!list.children.length) list.append(el('li', {class: 'text-gray-400', text: 'No earlier values.'}));
     }
     document.getElementById('history-close').addEventListener('click', () => document.getElementById('history').classList.add('hidden'));
 
@@ -678,7 +678,7 @@
             if (!res.ok) return {data: {status: 'error', error: data.error || data.message || ('HTTP ' + res.status)}};
             return {data, wait: data.reason === 'rate_limited' ? RATE_WAIT_MS : 0};
         } catch (err) {
-            return {data: {status: 'error', error: 'Walang koneksyon.'}};
+            return {data: {status: 'error', error: 'No connection.'}};
         }
     }
 
@@ -698,26 +698,26 @@
             let {data, wait} = await testOne(r);
             if (wait) {
                 // Isang ulit lang ang parehong page, pagkatapos maghintay; kapag rate limit pa rin, error.
-                out.textContent = 'Test token: ' + (i + 1) + ' / ' + targets.length + ' · ' + r.name + ' (rate limit, maghihintay ' + Math.ceil(wait / 1000) + ' s)';
+                out.textContent = 'Test token: ' + (i + 1) + ' / ' + targets.length + ' · ' + r.name + ' (rate limit, waiting ' + Math.ceil(wait / 1000) + ' s)';
                 await sleep(wait);
                 ({data} = await testOne(r));
             }
             const status = ['ok', 'invalid', 'skipped'].includes(data.status) ? data.status : 'error';
             sum[status]++;
             if (data.cell) r.cells['botcake.token_status'] = data.cell;
-            if (status === 'error') marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || 'Hindi nasubukan.'});
+            if (status === 'error') marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || 'Not tested.'});
             else marks.set(id, {text: status, cls: status === 'ok' ? 'text-green-600' : 'text-red-600'});
             repaint(r.key, 'botcake.token_status');
             // Ok ang token: ang pangalan ng mga flow at ang template ay kinuha rin.
             applyCells(r, data.cells);
             if (data.refresh_error) {
-                marks.set(id, {text: 'ok · hindi nasuri ang flows/template: ' + data.refresh_error, cls: 'text-gray-500'});
+                marks.set(id, {text: 'ok · flows/template not checked: ' + data.refresh_error, cls: 'text-gray-500'});
                 repaint(r.key, 'botcake.token_status');
             }
         }
 
-        out.textContent = 'Test token tapos: ' + sum.ok + ' ok, ' + sum.invalid + ' invalid, ' + sum.error + ' error, '
-            + sum.skipped + ' walang Botcake ID o token (nilaktawan).';
+        out.textContent = 'Test tokens done: ' + sum.ok + ' ok, ' + sum.invalid + ' invalid, ' + sum.error + ' error, '
+            + sum.skipped + ' without a Botcake ID or token (skipped).';
         btn.disabled = false;
     });
 
@@ -725,7 +725,7 @@
 
     const fmt = v => Number(v || 0).toLocaleString('en-US');
     const duration = s => s >= 3600 ? Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min' : Math.floor(s / 60) + ' min';
-    const STATUS = {running: 'tumatakbo', paused: 'naka-pause', stopped: 'itinigil', done: 'tapos'};
+    const STATUS = {running: 'running', paused: 'paused', stopped: 'stopped', done: 'done'};
 
     function showSyncAll(p) {
         const active = !!(p && (p.status === 'running' || p.status === 'paused'));
@@ -734,20 +734,20 @@
         document.getElementById('sync-all-resume').classList.toggle('hidden', !(p && p.status === 'paused'));
         document.getElementById('sync-all-stop').classList.toggle('hidden', !active);
         document.getElementById('sync-all-panel').classList.toggle('hidden', !p);
-        document.getElementById('sync-all-status').textContent = p && active ? 'Sync lahat: ' + p.done + ' / ' + p.total : '';
+        document.getElementById('sync-all-status').textContent = p && active ? 'Sync all: ' + p.done + ' / ' + p.total : '';
         if (!p) return;
 
         // hal. "Sync lahat · tumatakbo · 7 / 40 page · ngayon: Page X (window, 120 batch) · 1 failed · +9,985 bago · ..."
         const current = p.current && active
-            ? 'ngayon: ' + p.current + (p.current_kind ? ' (' + p.current_kind + (p.current_batches != null ? ', ' + fmt(p.current_batches) + ' batch' : '') + ')' : '')
-                + (p.waiting ? ' (naghihintay matapos ang ibang sync)' : '') + (p.status === 'paused' ? ' (tatapusin muna)' : '')
+            ? 'now: ' + p.current + (p.current_kind ? ' (' + p.current_kind + (p.current_batches != null ? ', ' + fmt(p.current_batches) + ' batch' : '') + ')' : '')
+                + (p.waiting ? ' (waiting for another sync to finish)' : '') + (p.status === 'paused' ? ' (finishing this page first)' : '')
             : null;
-        document.getElementById('sync-all-line').textContent = ['Sync lahat', STATUS[p.status] || p.status, p.done + ' / ' + p.total + ' page',
-            current, p.failed ? p.failed + ' failed' : null, p.skipped ? p.skipped + ' laktaw (sariwa)' : null,
-            p.remaining && active ? p.remaining + ' natitira' : null,
-            '+' + fmt(p.totals.new) + ' bago', fmt(p.totals.updated) + ' na-update', fmt(p.totals.matched) + ' na-match', fmt(p.totals.ad_filled) + ' ad id',
-            duration(p.seconds), 'sinimulan' + (p.started_by ? ' ni ' + p.started_by : '') + ' ' + (p.started_at || ''),
-            p.finished_at ? 'natapos ' + p.finished_at : null].filter(Boolean).join(' · ');
+        document.getElementById('sync-all-line').textContent = ['Sync all', STATUS[p.status] || p.status, p.done + ' / ' + p.total + ' page',
+            current, p.failed ? p.failed + ' failed' : null, p.skipped ? p.skipped + ' skipped (fresh)' : null,
+            p.remaining && active ? p.remaining + ' left' : null,
+            '+' + fmt(p.totals.new) + ' new', fmt(p.totals.updated) + ' updated', fmt(p.totals.matched) + ' matched', fmt(p.totals.ad_filled) + ' ad id',
+            duration(p.seconds), 'started' + (p.started_by ? ' by ' + p.started_by : '') + ' ' + (p.started_at || ''),
+            p.finished_at ? 'finished ' + p.finished_at : null].filter(Boolean).join(' · ');
 
         put(document.getElementById('sync-all-history'), ...(p.history || []).map(h => el('tr', {}, [
             h.started_at, h.started_by || '', STATUS[h.status] || h.status, h.done + ' / ' + h.total, String(h.failed), String(h.skipped),
@@ -757,14 +757,14 @@
 
     for (const b of document.querySelectorAll('.sync-all-control')) {
         b.addEventListener('click', async () => {
-            if (b.dataset.action === 'stop' && !confirm('Itigil ang Sync lahat? Tatapusin muna ang page na tumatakbo.')) return;
+            if (b.dataset.action === 'stop' && !confirm('Stop Sync all? The page that is running finishes first.')) return;
             b.disabled = true;
             try {
                 const res = await fetch(url.syncAllUrl + '/' + b.dataset.action, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) notice(data.message || 'Hindi nagawa.', 'text-red-600'); else showSyncAll(data.sync_all);
+                if (!res.ok) notice(data.message || 'Not done.', 'text-red-600'); else showSyncAll(data.sync_all);
             } catch (err) {
-                notice('Walang koneksyon.', 'text-red-600');
+                notice('No connection.', 'text-red-600');
             }
             b.disabled = false;
         });
@@ -772,17 +772,17 @@
 
     document.getElementById('sync-all').addEventListener('click', async e => {
         const btn = e.currentTarget;
-        if (!confirm('I-sync ang lahat ng page na may Botcake ID at token, isa-isa sa queue, ayon sa plano: ' + document.getElementById('plan-summary').textContent + '?')) return;
+        if (!confirm('Sync every page with a Botcake ID and token, one at a time in the queue, per the plan: ' + document.getElementById('plan-summary').textContent + '?')) return;
         btn.disabled = true;
         try {
             const res = await fetch(url.syncAllUrl, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) { notice(data.message || 'Hindi nasimulan ang Sync lahat.', 'text-red-600'); btn.disabled = false; return; }
+            if (!res.ok) { notice(data.message || 'Sync all did not start.', 'text-red-600'); btn.disabled = false; return; }
             showSyncAll(data.sync_all);
-            if (data.status === 'running') notice('May tumatakbo o naka-pause nang Sync lahat; walang bagong sinimulan (gamitin ang Resume o Stop).', 'text-amber-700');
-            if (data.status === 'not_ready') { notice('Hindi pa handa ang Sync lahat (inaayos pa ang database pagkatapos ng update). Subukan ulit mamaya.', 'text-amber-700'); btn.disabled = false; }
+            if (data.status === 'running') notice('A Sync all run is already running or paused; nothing new started (use Resume or Stop).', 'text-amber-700');
+            if (data.status === 'not_ready') { notice('Sync all is not ready yet (the database is still being updated). Try again later.', 'text-amber-700'); btn.disabled = false; }
         } catch (err) {
-            notice('Walang koneksyon: hindi nasimulan ang Sync lahat.', 'text-red-600');
+            notice('No connection: Sync all did not start.', 'text-red-600');
             btn.disabled = false;
         }
     });
@@ -794,13 +794,13 @@
         const input = e.target.page_name;
         const res = await fetch(url.pageCheckUrl + '?' + new URLSearchParams({page_name: input.value}), {headers: {'Accept': 'application/json'}});
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) { notice(data.error || 'Hindi naidagdag.', 'text-red-600'); return; }
+        if (!res.ok) { notice(data.error || 'Not added.', 'text-red-600'); return; }
         const pk = data.key;
         const added = ensureRow(pk, data.name);
         input.value = '';
         notice(
-            (added ? 'Naidagdag ang row na "' + data.name + '" (mase-save kapag may nilagay na value).' : 'Nasa grid na ang "' + data.name + '".')
-            + (data.in_orders ? '' : ' Babala: walang order na may PAGE na ganito — tama ba ang baybay?'),
+            (added ? 'Added the row "' + data.name + '" (it is saved once a value is entered).' : '"' + data.name + '" is already in the grid.')
+            + (data.in_orders ? '' : ' Warning: no order has this PAGE. Is the spelling right?'),
             data.in_orders ? 'text-green-700' : 'text-amber-700'
         );
         render();
@@ -811,10 +811,10 @@
         e.preventDefault();
         const f = e.target;
         const provider = f.provider.value.trim().toLowerCase(), key = f.key.value.trim().toLowerCase();
-        if (!/^[a-z0-9_]{1,50}$/.test(provider)) { notice('Provider: maliliit na letra, numero at _ lang.', 'text-red-600'); return; }
-        if (!/^[a-z0-9_]+(\.[a-z0-9_]+)*$/.test(key) || key.length > 100) { notice('Key: maliliit na letra, numero, _ at . lang (hal. flow.reminder).', 'text-red-600'); return; }
+        if (!/^[a-z0-9_]{1,50}$/.test(provider)) { notice('Provider: lowercase letters, digits and _ only.', 'text-red-600'); return; }
+        if (!/^[a-z0-9_]+(\.[a-z0-9_]+)*$/.test(key) || key.length > 100) { notice('Key: lowercase letters, digits, _ and . only (e.g. flow.reminder).', 'text-red-600'); return; }
         const added = ensureColumn(provider + '.' + key, f.is_secret.checked);
-        notice(added ? 'Naidagdag ang column ' + provider + '.' + key + ' (nasa ▸ ng bawat page; mase-save kapag may nilagay na value).' : 'Nasa grid na ang column na iyan.', 'text-green-700');
+        notice(added ? 'Added the column ' + provider + '.' + key + ' (under ▸ of each page; it is saved once a value is entered).' : 'That column is already in the grid.', 'text-green-700');
         f.key.value = '';
         f.is_secret.checked = false;
         render();
