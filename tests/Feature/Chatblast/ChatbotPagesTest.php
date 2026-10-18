@@ -81,7 +81,7 @@ class ChatbotPagesTest extends ChatblastTestCase
 
         $this->assertSame(['Page Dos', 'Page Uno'], array_column($data['rows'], 'page'));
         $uno = $this->row($data, 'Page Uno');
-        $this->assertSame([true, 'Main COD', '2026-10-19 11:45', 2], [$uno['active'], $uno['cells']['flow'] ?? null, $uno['last_chat'], $uno['today']]);
+        $this->assertSame([true, 'Main COD', '2026-10-19 11:45', 2], [$uno['active'], $uno['flow_text'], $uno['last_chat'], $uno['today']]);
         $dos = $this->row($data, 'Page Dos');
         $this->assertSame([false, null, 0], [$dos['active'], $dos['last_chat'], $dos['today']]);
         $this->assertSame(['flow', 'price', 'quantity', 'item_name_in_jnt_dashboard', 'main_flow', 'main_flow_2', 'fill_up_form', 'loop_3_form', 'prompt_1'],

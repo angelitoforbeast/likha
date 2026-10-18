@@ -99,6 +99,19 @@ class ChatbotHardeningTest extends ChatblastTestCase
         $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'chatbot', 'key' => 'flow_id', 'value' => (string) $flow->id])->assertStatus(422);
     }
 
+    public function test_S_069_H7_the_page_list_shows_the_linked_flow_and_marks_old_flow_text_as_not_linked(): void
+    {
+        $this->greetingFlow('Main Flow');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'flow', 'Main Flow'); // FLOW text mula pa sa 068
+        $this->actingAs($this->user());
+        $row = fn () => collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Uno');
+
+        $this->assertSame([null, 'Main Flow'], [$row()['cells']['flow'] ?? null, $row()['flow_text']]);
+
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'flow', 'value' => 'Main Flow'])->assertOk();
+        $this->assertSame(['Main Flow', null], [$row()['cells']['flow'] ?? null, $row()['flow_text']]);
+    }
+
     public static function cells(): array
     {
         return [

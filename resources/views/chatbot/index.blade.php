@@ -186,11 +186,16 @@
         // FLOW: dropdown ng mga flow (/chatbot); ang luma na text na wala sa listahan ay ipinapakita pa rin.
         if (c.kind === 'flow') {
             const td = el('td', {class: extra + ' border-b border-slate-100 px-3 py-2 align-top', 'data-key': c.key});
-            const names = value && !flows.includes(value) ? [value, ...flows] : flows;
-            const sel = el('select', {class: 'w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-sm', 'aria-label': 'Flow for ' + r.page},
-                [el('option', {value: '', text: '— none —'}), ...names.map(n => el('option', {value: n, text: n}))]);
-            sel.value = value;
-            sel.addEventListener('change', () => save(r, c, sel.value));
+            // Ang lumang FLOW text na hindi nakatali sa flow ay "Not linked", para ang pagpili ng flow ay totoong pagbabago.
+            const UNLINKED = '\u0000unlinked';
+            const sel = el('select', {class: 'w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-sm', 'aria-label': 'Flow for ' + r.page}, [
+                el('option', {value: '', text: '— none —'}),
+                r.flow_text ? el('option', {value: UNLINKED, text: 'Not linked: ' + r.flow_text}) : null,
+                ...flows.map(n => el('option', {value: n, text: n})),
+            ]);
+            sel.value = value || (r.flow_text ? UNLINKED : '');
+            if (!value && r.flow_text) sel.classList.add('border-amber-500', 'text-amber-800');
+            sel.addEventListener('change', () => { if (sel.value === UNLINKED) return; r.flow_text = null; save(r, c, sel.value); });
             td.append(sel);
             if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
             return td;

@@ -63,25 +63,34 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', 'active'], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id'], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
+        $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
 
         $rows = [];
         foreach ($pages as $page) {
             $cells = [];
             $pageId = null;
             $active = true;
+            $flowId = null;
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
                     continue;
                 }
                 if ($s->key === 'active') $active = $s->plainValue() !== '0';
+                elseif ($s->key === 'flow_id') $flowId = (int) $s->plainValue();
                 else $cells[$s->key] = $s->plainValue();
             }
+            // FLOW: ang flow na talagang nakatali (ayon sa id). Ang lumang text na hindi nakatali ay hiwalay, para
+            // makita na hindi ito tumatakbo at mapili ang flow.
+            $text = $cells['flow'] ?? null;
+            $linked = $flowId ? ($flowNames[$flowId] ?? null) : null;
+            if ($linked !== null) $cells['flow'] = $linked; else unset($cells['flow']);
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'cells' => (object) $cells,
+                'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
             ];
         }
