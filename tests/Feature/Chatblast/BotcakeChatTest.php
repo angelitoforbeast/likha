@@ -104,6 +104,34 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->assertSame(['psid-d', 'Yes'], [$rows[2]->psid, $rows[2]->message]);
     }
 
+    public function test_S_059_13_oversized_nested_or_invalid_values_are_cut_and_stored_without_an_error(): void
+    {
+        $extra = [];
+        for ($i = 1; $i <= 60; $i++) $extra['extra_' . $i] = 'v' . $i;
+        $this->post('/api/botcake/chat', [
+            'key' => self::KEY, 'page_id' => '1001', 'psid' => str_repeat('p', 100), 'name' => str_repeat('n', 300),
+            'message' => str_repeat('m', 6000), 'nested' => ['a' => ['b' => 'c']], 'bad' => "ok\xFF",
+        ] + $extra)->assertOk()->assertExactJson(['ok' => true]);
+
+        $row = BotcakeChat::sole();
+        $this->assertSame([64, 255, 5000], [mb_strlen($row->psid), mb_strlen($row->name), mb_strlen($row->message)]);
+        $this->assertSame('{"a":{"b":"c"}}', $row->payload['nested']);
+        $this->assertSame(2000, mb_strlen($row->payload['message']));
+        $this->assertTrue(mb_check_encoding($row->payload['bad'], 'UTF-8'));
+        $this->assertCount(50, $row->payload);
+    }
+
+    public function test_S_059_14_stored_name_and_text_show_as_text_not_html(): void
+    {
+        $this->stored(['name' => '<b>Bold</b> Name', 'message' => '<script>alert(1)</script>']);
+        $this->actingAs($this->user());
+
+        foreach (['/chatblast/chats', '/chatblast/chats/customer?page_id=1001&psid=psid-a'] as $url) {
+            $this->get($url)->assertOk()->assertSee('&lt;script&gt;alert(1)&lt;/script&gt;', false)
+                ->assertDontSee('<script>alert(1)</script>', false)->assertDontSee('<b>Bold</b>', false);
+        }
+    }
+
     public function test_S_059_4_duplicates_are_not_stored_twice(): void
     {
         $this->travelTo('2026-10-18 10:00:00');

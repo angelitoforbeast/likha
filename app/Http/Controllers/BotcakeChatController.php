@@ -35,23 +35,33 @@ class BotcakeChatController extends Controller
     public function receive(Request $request): JsonResponse
     {
         $data = $request->all();
-        // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin.
-        if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
-
+        // Ang key muna (header, o param na "key" anuman ang laki ng titik), bago basahin ang iba ng body.
         $given = (string) $request->header('X-Chat-Key');
-        $payload = [];
-        foreach ($data as $k => $v) {
-            if (mb_strtolower(trim((string) $k)) === 'key') {
-                if ($given === '' && is_string($v)) $given = $v;
-                continue; // ang key ay hindi kailanman iniimbak
+        if ($given === '') {
+            foreach ($data as $k => $v) {
+                if (mb_strtolower(trim((string) $k)) === 'key' && is_string($v)) {
+                    $given = $v;
+                    break;
+                }
             }
-            if (count($payload) < self::PAYLOAD_KEYS) $payload[mb_substr((string) $k, 0, 100)] = $this->payloadValue($v);
         }
-
         $expected = (string) config('services.botcake.chat_key');
         if ($expected === '' || $given === '' || !hash_equals($expected, $given)) return response()->json(['ok' => false], 401);
 
-        $f = $this->fields($payload);
+        // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin.
+        if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
+
+        $payload = [];
+        $byName = [];
+        foreach ($data as $k => $v) {
+            $name = mb_strtolower(trim((string) $k));
+            if ($name === 'key') continue; // ang key ay hindi kailanman iniimbak
+            $s = $this->text($v);
+            $byName[$name] ??= $s;
+            if (count($payload) < self::PAYLOAD_KEYS) $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
+        }
+
+        $f = $this->fields($byName);
         // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak.
         if ($f['psid'] === null && $f['message'] === null) return response()->json(['ok' => true]);
 
@@ -62,21 +72,21 @@ class BotcakeChatController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    /** Ang value sa payload: ang scalar bilang string (pinaikli), ang array bilang JSON (pinaikli). */
-    private function payloadValue(mixed $v): ?string
+    /** Ang value bilang wastong UTF-8 na string: ang array ay JSON; ang sirang byte ay pinapalitan (hindi 500 sa pag-imbak). */
+    private function text(mixed $v): ?string
     {
         if ($v === null) return null;
-        $s = is_scalar($v) ? (string) $v : (string) json_encode($v, JSON_UNESCAPED_UNICODE);
+        $s = is_scalar($v) ? (string) $v : (string) json_encode($v, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
 
-        return mb_substr($s, 0, self::PAYLOAD_VALUE);
+        return mb_scrub($s, 'UTF-8');
     }
 
-    /** @return array<string, ?string> ang mga kilalang field mula sa payload (case-insensitive, may alias). */
-    private function fields(array $payload): array
+    /**
+     * @param array<string, ?string> $byName lowercase na pangalan => value
+     * @return array<string, ?string> ang mga kilalang field (may alias), pinaikli ayon sa column
+     */
+    private function fields(array $byName): array
     {
-        $byName = [];
-        foreach ($payload as $k => $v) $byName[mb_strtolower(trim((string) $k))] ??= $v;
-
         $out = [];
         foreach (self::FIELDS as $field => $names) {
             $out[$field] = null;
@@ -96,8 +106,10 @@ class BotcakeChatController extends Controller
     {
         if ($f['message_id'] !== null && BotcakeChat::where('message_id', $f['message_id'])->exists()) return true;
 
-        return BotcakeChat::where('page_id', $f['page_id'])->where('psid', $f['psid'])->where('message', $f['message'])
-            ->where('received_at', '>=', now()->subSeconds(self::DUP_SECONDS))->exists();
+        // Eksaktong text, sa PHP: sa MySQL ay case-insensitive ang "=" (ang "ok" at "OK" ay magkaibang mensahe).
+        return BotcakeChat::where('page_id', $f['page_id'])->where('psid', $f['psid'])
+            ->where('received_at', '>=', now()->subSeconds(self::DUP_SECONDS))->pluck('message')
+            ->contains(fn ($m) => $m === $f['message']);
     }
 
     /** Ang page na may botcake.page_id na ito sa page_settings (null kapag wala). */
