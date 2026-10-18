@@ -377,9 +377,11 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         $txn  = trim((string)$txn);
         $acct = (string)($ctx['ad_account'] ?? '');
 
-        // May laman ang date pero hindi totoong petsa, o labas sa range ng file: tanggihan, huwag hulaan.
-        $hasDate = $dateStr instanceof \DateTimeInterface || trim((string) $dateStr) !== '';
-        if (($hasDate && !$date) || ($date && !$this->inFileRange($date))) {
+        // Payment row (may txn o amount) na hindi totoong petsa, o labas sa range ng file: tanggihan, huwag hulaan.
+        // Ang footer ng Meta ("VAT Rate: 0%", "VAT Amount: 0.00") ay walang txn at amount, kaya hindi kasama.
+        $isPayment = $txn !== '' || $amt !== null;
+        $hasDate   = $dateStr instanceof \DateTimeInterface || trim((string) $dateStr) !== '';
+        if ($isPayment && (($hasDate && !$date) || ($date && !$this->inFileRange($date)))) {
             $this->rowsRefused++;
             Log::warning('[PAYMENT] Row refused: bad or out-of-range date', ['file' => $this->originalName, 'txn' => $txn]);
             return null;

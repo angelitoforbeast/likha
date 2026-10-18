@@ -24,6 +24,7 @@ class FixSwappedDatesTest extends TestCase
         [9006, '2025-12-11', '2025-12-12 10:00:00', 500.00,    '2025-12-11'], // ambiguous, kept
         [9007, '2026-02-03', '2026-03-04 10:00:00', 600.00,    '2026-03-02'], // ambiguous, swapped
         [9008, '2026-10-15', '2026-10-16 10:00:00', 700.00,    '2026-10-15'], // day above 12, kept
+        [9009, '2027-04-12', '2026-01-05 10:00:00', 800.00,    '2025-12-28'], // rollover from the year before created_at
     ];
 
     protected function setUp(): void
@@ -56,7 +57,7 @@ class FixSwappedDatesTest extends TestCase
 
         $this->assertSame(0, Artisan::call('payments:fix-swapped-dates'));
         $out = Artisan::output();
-        foreach (['6 row(s)', '344,969.22', '#9002  2026-03-10 → 2026-10-03  340,669.22  card 0000'] as $text) {
+        foreach (['7 row(s)', '345,769.22', '#9002  2026-03-10 → 2026-10-03  340,669.22  card 0000'] as $text) {
             $this->assertStringContainsString($text, $out);
         }
 
@@ -66,7 +67,8 @@ class FixSwappedDatesTest extends TestCase
         $files = Storage::disk('local')->files('payment_date_fixes');
         $this->assertCount(1, $files);
         $csv = array_map('str_getcsv', array_filter(explode("\n", Storage::disk('local')->get($files[0]))));
-        $this->assertCount(7, $csv); // header + 6
+        $this->assertCount(8, $csv); // header + 7
+        $this->assertSame(['id', 'stored', 'corrected', 'amount', 'card_last4', 'created_at', 'source_filename'], $csv[0]);
         $changed = array_column(array_slice($csv, 1), 2, 0);
         $expected = [];
         foreach (self::ROWS as [$id, $date, , , $want]) {
@@ -79,7 +81,7 @@ class FixSwappedDatesTest extends TestCase
     {
         $before = DB::table('payment_activity_ads_manager')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
 
-        $this->artisan('payments:fix-swapped-dates', ['--apply' => true, '--expect' => 6])->assertSuccessful();
+        $this->artisan('payments:fix-swapped-dates', ['--apply' => true, '--expect' => 7])->assertSuccessful();
 
         $this->assertTrue(Schema::hasTable(self::BACKUP));
         $this->assertSame(
@@ -98,8 +100,8 @@ class FixSwappedDatesTest extends TestCase
     {
         $before = $this->dates();
 
-        $this->artisan('payments:fix-swapped-dates', ['--apply' => true, '--expect' => 5])
-            ->expectsOutputToContain('expected 5')
+        $this->artisan('payments:fix-swapped-dates', ['--apply' => true, '--expect' => 6])
+            ->expectsOutputToContain('expected 6')
             ->assertFailed();
 
         $this->assertSame($before, $this->dates());

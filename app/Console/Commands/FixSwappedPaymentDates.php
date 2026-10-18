@@ -94,13 +94,13 @@ class FixSwappedPaymentDates extends Command
         return self::SUCCESS;
     }
 
-    /** @return array<int, array{id:int, stored:string, corrected:string, amount:float, card_last4:string, created_at:string}> */
+    /** @return array<int, array{id:int, stored:string, corrected:string, amount:float, card_last4:string, created_at:string, source_filename:string}> */
     private function findFixes(): array
     {
         $fixes = [];
 
         $rows = DB::table(self::TABLE)
-            ->select(['id', 'date', 'amount', 'payment_method', 'created_at'])
+            ->select(['id', 'date', 'amount', 'payment_method', 'created_at', 'source_filename'])
             ->whereNotNull('date')
             ->whereNotNull('created_at')
             ->orderBy('id')
@@ -117,6 +117,7 @@ class FixSwappedPaymentDates extends Command
                 'amount'     => (float) $r->amount,
                 'card_last4' => preg_match('/(\d{4})\s*$/', (string) $r->payment_method, $m) ? $m[1] : '',
                 'created_at' => (string) $r->created_at,
+                'source_filename' => (string) $r->source_filename,
             ];
         }
 
@@ -165,9 +166,9 @@ class FixSwappedPaymentDates extends Command
         $path = 'payment_date_fixes/fix-swapped-dates_' . now()->format('Ymd_His') . '.csv';
 
         $out = fopen('php://temp', 'w+');
-        fputcsv($out, ['id', 'stored', 'corrected', 'amount', 'card_last4', 'created_at'], ',', '"', '\\');
+        fputcsv($out, ['id', 'stored', 'corrected', 'amount', 'card_last4', 'created_at', 'source_filename'], ',', '"', '\\');
         foreach ($fixes as $f) {
-            fputcsv($out, [$f['id'], $f['stored'], $f['corrected'], number_format($f['amount'], 2, '.', ''), $f['card_last4'], $f['created_at']], ',', '"', '\\');
+            fputcsv($out, [$f['id'], $f['stored'], $f['corrected'], number_format($f['amount'], 2, '.', ''), $f['card_last4'], $f['created_at'], $f['source_filename']], ',', '"', '\\');
         }
         rewind($out);
         Storage::disk('local')->put($path, stream_get_contents($out));

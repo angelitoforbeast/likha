@@ -65,6 +65,8 @@ class PaymentDateOrderTest extends TestCase
         foreach ($rows as [$date, $txn, $amount]) {
             $lines[] = "{$date},{$txn},{$amount},PHP";
         }
+        // Footer gaya ng totoong Meta export (hindi payment rows)
+        array_push($lines, ',Total Amount Billed,"1.00",PHP', '', 'VAT Rate: 0%', 'VAT Amount: 0.00');
 
         $path = 'uploads/payment_activity/' . $stamp . '__' . $originalName;
         Storage::disk('local')->put($path, implode("\n", $lines) . "\n");
@@ -181,6 +183,7 @@ class PaymentDateOrderTest extends TestCase
         ]);
 
         $this->assertSame('done', $log->status);
+        $this->assertSame(0, (int) $log->error_rows); // the VAT footer is not a refused row
         $this->assertSame('2026-10-03', $this->dateOf('t-7a'));
         $this->assertSame('2026-10-04', $this->dateOf('t-7b'));
     }
