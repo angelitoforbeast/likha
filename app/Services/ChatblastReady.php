@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BotcakeMessage;
 use App\Models\PageSetting;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -73,9 +74,11 @@ class ChatblastReady
         }
         if ($s['changed'] === null) return false;
 
-        // Ang eksaktong page_name ng row (gaya ng daily cap ng sender), para magamit ang index (page_name, …).
-        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('page_name', $page)->where('status', 'sent')->where('is_test', false)
-            ->whereNotNull('queued_at')->max('queued_at');
+        // Ayon sa pageKey (gaya ng states() at ng build): ang page_name ng row ay ang baybay ng PAGE sa order, na maaaring
+        // iba-iba (hal. "Page Uno" at "PAGE UNO"); ang eksaktong tugma ay magpapaikot sa row (ready → tinanggihan → ready).
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $last = !Schema::hasTable('botcake_messages') ? null : BotcakeMessage::where('status', 'sent')->where('is_test', false)->whereNotNull('queued_at')
+            ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])->max('queued_at');
         $s['last_send'] = $last ? Carbon::parse($last)->format('Y-m-d H:i:s') : null;
 
         return self::isTested($s);

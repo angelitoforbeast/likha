@@ -56,6 +56,8 @@ class ChatblastReadyTest extends ChatblastTestCase
             'text' => 'x', 'status' => 'sent', 'queued_at' => now(), 'sent_at' => now(), 'attempts' => 1, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
         $this->assertTrue(app(ChatblastReady::class)->tested('Page Dos'));
         $this->assertSame(['page uno' => true, 'page dos' => true], array_map(fn ($s) => $s['tested'], app(ChatblastReady::class)->states()));
+        // Iba ang baybay ng PAGE sa order (hal. "PAGE  DOS"): iisang page pa rin, gaya ng states() at ng build.
+        $this->assertTrue(app(ChatblastReady::class)->tested('PAGE  DOS'));
     }
 
     public function test_S_057_6_changing_the_flow_field_token_or_page_id_needs_a_test_again_and_the_sender_refuses_meanwhile(): void
