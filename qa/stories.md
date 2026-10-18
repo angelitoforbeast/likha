@@ -1089,3 +1089,13 @@ Amendment 7. Test in `tests/Feature/PageSettings/PageSettingsGridTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-056.37 | Given /chatblast/page-settings, then the column reads "Chatblast flow" with one block (shipping flow ID, name, content); other flow slots with a value show under ▸ as "Other flow IDs (not used by chatblast)", editable; the content's {{1}} shows as "[message for the customer]" with "Filled per customer, see To send / History"; every empty editable value shows "+ set" with a dashed outline on hover | `test_S_056_37…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-060 Chatblast pages keep the header fixed and scroll only the data (P1)
+
+Spec 060. Test in `tests/Feature/Chatblast/ChatblastAppTest.php`; the scrolling itself is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.1 | Given any of the five Chatblast pages, then the page is one full-height column whose data area is its only scroll container (one `cb-scroll`), with the top bar and page header outside it; on To send, History and Page settings that area holds the table, whose column header row sticks to its top | `test_S_060_1…` (5 data sets) | Not run yet |
+| S-060.2 | Given a table page, when the rows are scrolled at 1366 or 1280 px, then the top bar, the page header with its filters, chips and buttons, and the column header row stay in place, the page has no horizontal scroll, and a row still opens its details modal | browser check | Not run yet |
+| S-060.3 | Given Messages or Sequences (cards), when the cards are scrolled, then the top bar and the page header with its filters stay in place | browser check | Not run yet |

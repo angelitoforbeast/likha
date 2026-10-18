@@ -10,9 +10,9 @@
 
 @push('styles')
     <style>
-        /* Walang sticky na header o Page column: normal na dokumento ang grid. Magaan na hati ng row, walang band sa header. */
-        #grid-table thead tr, #grid-table thead th { background: transparent; }
-        #grid-table thead th { border-bottom: 1px solid #e2e8f0; color: #64748b; }
+        /* Ang grid lang ang nag-i-scroll; nakadikit ang header row (puti, isang linya mula sa layout). Magaan na hati ng row. */
+        #grid-table thead tr, #grid-table thead th { background: #fff; }
+        #grid-table thead th { border-bottom: 0; color: #64748b; }
         #grid-table th, #grid-table td { border-right-color: transparent; }
         #grid-table tbody td { border-bottom-color: #f1f5f9; }
         #grid-table .cell { cursor: text; }
@@ -24,7 +24,7 @@
 @endpush
 
 @section('content')
-<div>
+<div class="cb-page">
 
     @if(session('success'))
         <div class="mb-3 px-4 py-2 rounded bg-green-100 text-green-800 text-sm">{{ session('success') }}</div>
@@ -102,7 +102,7 @@
     <div id="summary-bar" class="flex flex-wrap items-center gap-2 mb-2 text-xs"></div>
 
     <div id="grid"
-         class="cb-card overflow-x-auto"
+         class="cb-card cb-scroll"
          data-grid-url="{{ route('page-settings.grid') }}"
          data-cell-url="{{ route('page-settings.cell') }}"
          data-history-url="{{ route('page-settings.history') }}"

@@ -19,7 +19,7 @@
 @endpush
 
 @section('content')
-<div id="cb"
+<div id="cb" class="cb-page"
      data-view="{{ $view }}"
      data-list-url="{{ route('chatblast.list') }}"
      data-show-url="{{ url('/chatblast/messages') }}"
@@ -102,8 +102,8 @@
         </div>
     </details>
 
-    {{-- Ang table ay bahagi ng page (walang sariling scroll, walang sticky na header) --}}
-    <div class="cb-card overflow-x-auto">
+    {{-- Ang table lang ang nag-i-scroll; nakadikit ang header row nito sa taas --}}
+    <div class="cb-card cb-scroll">
         <table id="cb-table" class="cb-table">
             <thead>
             <tr>

@@ -119,6 +119,34 @@ class ChatblastAppTest extends ChatblastTestCase
         $this->assertStringNotContainsString('Main Likha Link', $html);
     }
 
+    public static function scrollPages(): array
+    {
+        return [
+            'to send'       => ['/chatblast', true],
+            'history'       => ['/chatblast/history', true],
+            'messages'      => ['/chatblast/campaigns', false],
+            'sequences'     => ['/chatblast/sequence', false],
+            'page settings' => ['/chatblast/page-settings', true],
+        ];
+    }
+
+    /** @dataProvider scrollPages */
+    public function test_S_060_1_the_data_area_is_the_only_scroll_container_under_a_fixed_header(string $url, bool $table): void
+    {
+        $this->actingAs($this->user());
+
+        $html = $this->get($url)->assertOk()->getContent();
+
+        // Buong taas ang page at hindi ito ang nag-i-scroll; ang data lang (iisang cb-scroll) ang may sariling scroll.
+        $this->assertMatchesRegularExpression('#<body class="[^"]*\bh-screen\b[^"]*\boverflow-hidden\b#', $html);
+        $this->assertMatchesRegularExpression('#class="[^"]*\bcb-page\b#', $html);
+        $this->assertSame(1, preg_match_all('#class="[^"]*\bcb-scroll\b#', $html), 'iisang scroll container');
+        $this->assertStringContainsString('.cb-scroll thead th { @apply sticky top-0', $html);
+        if ($table) {
+            $this->assertMatchesRegularExpression('#class="[^"]*\bcb-scroll\b[^"]*"[^>]*>\s*<table#', $html, 'ang table ang laman ng scroll container');
+        }
+    }
+
     public function test_S_056_5_the_chatblast_nav_shows_only_what_the_role_may_open(): void
     {
         $this->navLink('page_settings', 'Page Settings', '/page-settings', ['Marketing']);
