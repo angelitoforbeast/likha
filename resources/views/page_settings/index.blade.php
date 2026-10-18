@@ -264,7 +264,7 @@
         const n = v => Number(v || 0).toLocaleString('en-US');
         const counts = (s.new || s.matched) ? '+' + n(s.new) + ' bago · ' + n(s.matched) + ' na-match' : null;
         return [s.dates, s.kind, s.at, s.stop_reason || s.status, counts].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '')
-            + (s.failed && r.info.next ? ' · susunod: ' + r.info.next.label : '');
+            + (s.failed && r.info.next ? ' · susunod: ' + (r.info.next.from ? 'mula ' + r.info.next.from : r.info.next.label) : '');
     }
 
     // Pula ang "Huling sync" kapag failed ang huling run.

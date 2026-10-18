@@ -152,7 +152,7 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         $row = $this->pastRun(null, 12, 'window', 1, 'running');
         (new SyncBotcakeCustomersJob('page uno'))->failed(new \RuntimeException('timeout'));
         $this->assertSame(['failed', 'killed'], [$row->fresh()->status, $row->fresh()->stop_reason]);
-        $this->assertSame(['window', 7], app(BotcakeCustomerSync::class)->plan('Page Uno'));
+        $this->assertSame(['window', 7, null, null], app(BotcakeCustomerSync::class)->plan('Page Uno')); // tuloy: walang stop date, walang petsa ang chain
 
         // Sync lahat: ang page ng job ay mula sa state ng run.
         app(\App\Services\BotcakeSyncAll::class)->start();
@@ -160,7 +160,7 @@ class BotcakeWindowReadTest extends BotcakeApiTestCase
         $all = $this->pastRun(null, 30, 'window', 7, 'running');
         $job->failed(new \RuntimeException('timeout'));
         $this->assertSame(['failed', 'killed'], [$all->fresh()->status, $all->fresh()->stop_reason]);
-        $this->assertSame(['window', 31], app(BotcakeCustomerSync::class)->plan('Page Uno'));
+        $this->assertSame(['window', 31, null, null], app(BotcakeCustomerSync::class)->plan('Page Uno'));
         $this->assertSame('killed', $row->fresh()->stop_reason, 'ang tapos nang run ay hindi ginagalaw');
     }
 

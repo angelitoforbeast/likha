@@ -29,7 +29,10 @@ use Illuminate\Support\Facades\Schema;
  * date_subscribed_at, at sa loob ng isang petsa ay ayon sa huling chat ang ayos, kaya inuulit ang huling araw. Hindi ito
  * humihinto sa batch na kilala na lahat: sa ilalim nito ay maaaring may bagong subscriber. Hindi lalampas sa window.
  * Walang malinis na run na may petsa: window read. Ang failed na run ay hindi gumagalaw sa stop date (catch-up).
- * Humihinto rin ito pagkatapos ng WINDOW_SECONDS (time, hindi malinis): ang susunod ay mula batch 1 ulit, parehong stop date.
+ * Humihinto rin ito pagkatapos ng WINDOW_SECONDS (time) at itinutuloy gaya ng window read, may parehong stop date.
+ * Chain: ang mga run mula batch 1 hanggang sa huling tuloy. Bawat tuloy ay may dalang pinakabagong petsa ng unang run, kaya
+ * ang chain na natapos nang malinis (date / age / end) ay malinis, at iyon ang petsa nito. Ang lumang run (bago naitala ang
+ * petsa) na malinis na window o full mula batch 1: ang petsa ng created_at nito (Manila) ang ginagamit; hindi ito isinusulat.
  * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason, read_kind, start_batch at mga petsa.
  */
 class BotcakeCustomerSync
@@ -90,21 +93,22 @@ class BotcakeCustomerSync
 
     /**
      * Anong basa ang susunod na sync ng page, mula saang batch, at ang stop date ng by date. Mula sa mga naunang api run.
-     * @return array{0:string, 1:int, 2?:string} [by_date|window|full, unang batch, stop date (Y-m-d) ng by_date]
+     * @return array{0:string, 1:int, 2?:?string, 3?:?string} [by_date|window|full, unang batch, stop date (Y-m-d) ng by_date,
+     *   pinakabagong petsa ng chain kapag tuloy]
      */
     public function plan(string $page, bool $full = false): array
     {
         if ($full) return ['full', 1];
 
-        // Ang nagpapasya: ang pinakabagong run na cap / time / age / end, o window read na hindi natapos (failed, pinatay,
-        // rate limit). Ang ibang run sa pagitan (known_batch, failed na --full, error ng incremental) ay hindi binibilang,
-        // para hindi maging incremental habambuhay ang page na may customer pa sa window na hindi nababasa.
+        // Ang nagpapasya: ang pinakabagong run na cap / time / age / end / date, o window / by date read na hindi natapos
+        // (failed, pinatay, rate limit). Ang ibang run sa pagitan (known_batch, failed na --full) ay hindi binibilang,
+        // para hindi maging by date habambuhay ang page na may customer pa sa window na hindi nababasa.
         [$last, $before] = array_pad($this->runsOf($page)
-            ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhere('read_kind', 'window'))
+            ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhereIn('read_kind', ['window', 'by_date']))
             ->orderByDesc('id')->limit(2)->get()->all(), 2, null);
 
         return $this->byDate($this->decide($last, $before),
-            $this->runsOf($page)->where(fn ($w) => $this->clean($w))->orderByDesc('id')->value('subscribed_newest'));
+            $this->cleanDate($this->runsOf($page)->where(fn ($w) => $this->clean($w))->orderByDesc('id')->first(['subscribed_newest', 'created_at'])));
     }
 
     /**
@@ -117,29 +121,30 @@ class BotcakeCustomerSync
     {
         $trim  = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         $inner = DB::table('botcake_psid_import_runs')->where('source', 'api')->whereNotNull('page_name')
-            ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhere('read_kind', 'window'))
-            ->selectRaw("id, page_name, status, stop_reason, read_kind, start_batch, batches_read, ROW_NUMBER() OVER (PARTITION BY LOWER($trim(page_name)) ORDER BY id DESC) AS rn");
+            ->where(fn ($w) => $w->whereIn('stop_reason', self::DECIDING_STOPS)->orWhereIn('read_kind', ['window', 'by_date']))
+            ->selectRaw("id, page_name, status, stop_reason, read_kind, start_batch, batches_read, stop_date, subscribed_newest, ROW_NUMBER() OVER (PARTITION BY LOWER($trim(page_name)) ORDER BY id DESC) AS rn");
         $byPage = DB::query()->fromSub($inner, 'r')->where('rn', '<=', 2)->orderByDesc('id')->get()
             ->groupBy(fn ($r) => $this->settings->pageKey((string) $r->page_name));
 
         $cleanInner = DB::table('botcake_psid_import_runs')->where('source', 'api')->whereNotNull('page_name')
             ->where(fn ($w) => $this->clean($w))
-            ->selectRaw("page_name, subscribed_newest, ROW_NUMBER() OVER (PARTITION BY LOWER($trim(page_name)) ORDER BY id DESC) AS rn");
+            ->selectRaw("page_name, subscribed_newest, created_at, ROW_NUMBER() OVER (PARTITION BY LOWER($trim(page_name)) ORDER BY id DESC) AS rn");
         $clean = DB::query()->fromSub($cleanInner, 'c')->where('rn', 1)->get()
-            ->mapWithKeys(fn ($r) => [$this->settings->pageKey((string) $r->page_name) => $r->subscribed_newest]);
+            ->mapWithKeys(fn ($r) => [$this->settings->pageKey((string) $r->page_name) => $this->cleanDate($r)]);
 
         return $byPage->map(fn ($runs, $pk) => $this->byDate($this->decide($runs->get(0), $runs->get(1)), $clean[$pk] ?? null))->all();
     }
 
     /**
-     * Kailan natapos ang huling matagumpay (done) na api run ng bawat page, sa isang grouped query.
+     * Kailan natapos ang huling malinis na api run (o dulo ng malinis na chain) ng bawat page, sa isang grouped query.
+     * Ang done na putol (time, cap, known_batch) ay hindi binibilang: hindi pa nito nababasa ang lahat hanggang stop date.
      * @return array<string, Carbon> pageKey => oras
      */
     public function lastDoneAt(): array
     {
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         $out  = [];
-        BotcakePsidImportRun::where('source', 'api')->where('status', 'done')->whereNotNull('page_name')
+        BotcakePsidImportRun::where('source', 'api')->where(fn ($w) => $this->clean($w))->whereNotNull('page_name')
             ->selectRaw("LOWER($trim(page_name)) AS pk, MAX(updated_at) AS at")->groupByRaw("LOWER($trim(page_name))")->get()
             ->each(function ($r) use (&$out) {
                 $pk = $this->settings->pageKey((string) $r->pk);
@@ -150,30 +155,56 @@ class BotcakeCustomerSync
         return $out;
     }
 
-    /** @return array{0:string, 1:int} mula sa nagpapasyang run at sa nauna rito (Eloquent o plain row) */
+    /**
+     * Mula sa nagpapasyang run at sa nauna rito (Eloquent o plain row). Ang tuloy ay may dalang stop date (by date) at ang
+     * pinakabagong petsa ng chain.
+     * @return array{0:string, 1:int, 2?:?string, 3?:?string}
+     */
     private function decide(?object $last, ?object $before): array
     {
         if (!$last) return ['window', 1]; // hindi pa nakababasa ng buong window
         if (in_array($last->stop_reason, ['age', 'end', 'date'], true)) return ['incremental', 1]; // byDate() ang nagpapasya
-        if ($last->read_kind === 'by_date') return ['incremental', 1]; // putol na by date (time): by date ulit, walang tuloy
-        if ($last->read_kind !== 'window') return ['window', 1]; // cap ng incremental (o lumang run na walang kind)
+        $kind = $last->read_kind;
+        if (!in_array($kind, ['window', 'by_date'], true)) return ['window', 1]; // cap ng incremental (o lumang run na walang kind)
 
-        // Hindi natapos na window read: ituloy mula sa naabot nito, minus ang overlap.
+        // Hindi natapos na window / by date read: ituloy mula sa naabot nito, minus ang overlap.
         $start = (int) ($last->start_batch ?: 1);
-        if ((int) $last->batches_read > 0) return ['window', max(1, $start + (int) $last->batches_read - 1 - self::RESUME_OVERLAP)];
+        if ((int) $last->batches_read > 0) {
+            $next = max(1, $start + (int) $last->batches_read - 1 - self::RESUME_OVERLAP);
+        } else {
+            // Walang nabasa: parehong simula ulit. Dalawang sunod na walang nabasa mula sa parehong simula: mula batch 1, para
+            // hindi maipit sa batch na laging pumapalya.
+            $stuck = $before && $before->read_kind === $kind && (int) $before->batches_read === 0
+                && (int) ($before->start_batch ?: 1) === $start && $start > 1;
+            $next = $stuck ? 1 : $start;
+        }
 
-        // Walang nabasa: parehong simula ulit. Dalawang sunod na walang nabasa mula sa parehong simula: mula batch 1, para
-        // hindi maipit sa batch na laging pumapalya.
-        $stuck = $before && $before->read_kind === 'window' && (int) $before->batches_read === 0
-            && (int) ($before->start_batch ?: 1) === $start && $start > 1;
-        return ['window', $stuck ? 1 : $start];
+        // Mula batch 1: bagong chain (ang by date ay may bagong stop date mula sa byDate()).
+        if ($next === 1) return [$kind === 'by_date' ? 'incremental' : 'window', 1];
+        return [$kind, $next, $kind === 'by_date' ? $this->ymd($last->stop_date) : null, $this->ymd($last->subscribed_newest)];
     }
 
-    /** Malinis na run mula batch 1 na may petsa: natapos hanggang sa stop date nito (date / age / end), walang error. */
+    /**
+     * Malinis: natapos hanggang sa stop date nito (date / age / end), walang error, may petsa (dala ng chain kapag tuloy).
+     * Ang lumang malinis na window o full mula batch 1 na walang petsa ay kasama rin (tingnan ang cleanDate()).
+     */
     private function clean($q)
     {
-        return $q->where('status', 'done')->whereIn('stop_reason', ['date', 'age', 'end'])->where('start_batch', 1)
-            ->whereIn('read_kind', ['by_date', 'window', 'full'])->whereNotNull('subscribed_newest');
+        return $q->where('status', 'done')->whereIn('stop_reason', ['date', 'age', 'end'])->whereIn('read_kind', ['by_date', 'window', 'full'])
+            ->where(fn ($w) => $w->whereNotNull('subscribed_newest')
+                ->orWhere(fn ($old) => $old->where('start_batch', 1)->whereIn('stop_reason', ['age', 'end'])->whereIn('read_kind', ['window', 'full'])));
+    }
+
+    /** Huling malinis na petsa mula sa malinis na run: ang naitalang petsa, o (lumang run) ang petsa ng created_at sa Manila. */
+    private function cleanDate(?object $run): ?string
+    {
+        if (!$run) return null;
+        return $this->ymd($run->subscribed_newest) ?? Carbon::parse($run->created_at)->timezone('Asia/Manila')->toDateString();
+    }
+
+    private function ymd(mixed $date): ?string
+    {
+        return $date ? substr((string) $date, 0, 10) : null;
     }
 
     /**
@@ -212,7 +243,7 @@ class BotcakeCustomerSync
     /** Para sa run message at sa "Huling sync" ng grid: by date / window / window, tuloy mula batch N / full. */
     public static function kindLabel(?string $kind, ?int $start): ?string
     {
-        if ($kind === 'by_date') return 'by date';
+        if ($kind === 'by_date') return $start > 1 ? 'by date, tuloy mula batch ' . $start : 'by date';
         if ($kind === 'window' && $start > 1) return 'window, tuloy mula batch ' . $start;
         return $kind;
     }
@@ -228,10 +259,10 @@ class BotcakeCustomerSync
     public function syncPage(string $page, bool $full = false): BotcakePsidImportRun
     {
         $started = $this->clock->now();
-        [$kind, $start, $stopDate] = $this->plan($page, $full) + [2 => null];
+        [$kind, $start, $stopDate, $chainNewest] = $this->plan($page, $full) + [2 => null, 3 => null];
         $run = BotcakePsidImportRun::create([
             'status' => 'running', 'source' => 'api', 'page_name' => $page, 'read_kind' => $kind, 'start_batch' => $start,
-            'stop_date' => $stopDate,
+            'stop_date' => $stopDate, 'subscribed_newest' => $chainNewest, // tuloy: dala ang pinakabagong petsa ng chain
             'last_message' => ucfirst(self::kindLabel($kind, $start)) . ' sync',
         ]);
 

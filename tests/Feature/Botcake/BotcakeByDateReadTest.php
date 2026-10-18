@@ -54,11 +54,11 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
         return array_map(fn ($i) => [$prefix . $i, $date], range(1, $count));
     }
 
-    private function pastRun(string $kind, ?string $stop, ?string $newest, string $status = 'done', int $start = 1): BotcakePsidImportRun
+    private function pastRun(string $kind, ?string $stop, ?string $newest, string $status = 'done', int $start = 1, ?string $stopDate = null, int $batches = 3): BotcakePsidImportRun
     {
         return BotcakePsidImportRun::create([
-            'status' => $status, 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => $stop, 'batches_read' => 3,
-            'read_kind' => $kind, 'start_batch' => $start, 'subscribed_newest' => $newest,
+            'status' => $status, 'source' => 'api', 'page_name' => 'Page Uno', 'stop_reason' => $stop, 'batches_read' => $batches,
+            'read_kind' => $kind, 'start_batch' => $start, 'subscribed_newest' => $newest, 'stop_date' => $stopDate,
         ]);
     }
 
@@ -101,9 +101,11 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
             'failed pagkatapos: hindi gumagalaw'  => [[['by_date', 'date', '2026-10-18'], ['by_date', 'rate_limited', '2026-10-19', 'failed']], 'by_date', '2026-10-17'],
             'catch-up pagkatapos ng ilang failed' => [[['by_date', 'date', '2026-10-10'], ['by_date', 'error', null, 'failed'], ['by_date', 'error', null, 'failed'], ['by_date', 'killed', '2026-10-19', 'failed']], 'by_date', '2026-10-09'],
             'hanggang 45 araw lang'               => [[['window', 'age', '2026-08-01']], 'by_date', '2026-09-05'],
-            'tuloy na window: hindi mula batch 1' => [[['by_date', 'date', '2026-10-12'], ['window', 'time', '2026-10-15', 'done', 1], ['window', 'age', '2026-10-19', 'done', 15]], 'by_date', '2026-10-11'],
+            'natapos na tuloy na window: malinis ang chain' => [[['by_date', 'date', '2026-10-12'], ['window', 'time', '2026-10-19', 'done', 1], ['window', 'age', '2026-10-19', 'done', 15]], 'by_date', '2026-10-18'],
             'walang malinis na run'               => [[['by_date', 'error', '2026-10-19', 'failed']], 'window', null],
-            'lumang run na walang petsa'          => [[['window', 'age', null]], 'window', null],
+            'lumang window na walang petsa: petsa ng run' => [[['window', 'age', null]], 'by_date', '2026-10-19'],
+            'lumang full na walang petsa: petsa ng run'   => [[['full', 'end', null]], 'by_date', '2026-10-19'],
+            'lumang tuloy na window na walang petsa'      => [[['window', 'age', null, 'done', 15]], 'window', null],
             'wala pang run'                       => [[], 'window', null],
         ];
     }
@@ -119,6 +121,31 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
 
         $this->assertSame([$kind, 1, $stop], [$run->read_kind, $run->start_batch, $run->stop_date?->toDateString()]);
         $this->assertSame($stop === null ? ['window', 1] : ['by_date', 1, $stop], $plans['page uno'] ?? ['window', 1], 'plans() ng grid: pareho');
+        $this->assertSame(0, BotcakePsidImportRun::where('id', '<', $run->id)->whereNotNull('subscribed_newest')->count() - collect($runs)->filter(fn ($r) => $r[2] !== null)->count(), 'walang lumang row na sinusulatan');
+    }
+
+    public static function byDateResumes(): array
+    {
+        // [mga naunang run: [kind, stop, newest, status, start, stopDate, batches], unang batch, stop date]
+        return [
+            'time: tuloy, minus 5'          => [[['by_date', 'time', '2026-10-19', 'done', 1, '2026-10-09', 22]], 17, '2026-10-09'],
+            'rate limit sa gitna: tuloy'    => [[['by_date', 'rate_limited', '2026-10-19', 'failed', 1, '2026-10-09', 12]], 7, '2026-10-09'],
+            'pinatay sa tuloy: tuloy ulit'  => [[['by_date', 'killed', '2026-10-19', 'failed', 17, '2026-10-09', 10]], 21, '2026-10-09'],
+            '0 batch: parehong simula'      => [[['by_date', 'rate_limited', '2026-10-19', 'failed', 15, '2026-10-09', 0]], 15, '2026-10-09'],
+            '2 sunod na 0 batch, parehong simula: mula 1, bagong stop date' => [[['by_date', 'date', '2026-10-12'], ['by_date', 'rate_limited', '2026-10-19', 'failed', 15, '2026-10-09', 0], ['by_date', 'rate_limited', '2026-10-19', 'failed', 15, '2026-10-09', 0]], 1, '2026-10-11'],
+        ];
+    }
+
+    /** @dataProvider byDateResumes */
+    public function test_an_unfinished_by_date_read_is_continued_like_a_window_read_with_the_same_stop_date(array $runs, int $first, string $stop): void
+    {
+        foreach ($runs as $r) $this->pastRun(...$r);
+        $this->fake([]);
+
+        $run = $this->sync();
+
+        $this->assertSame($first, $this->asked[0]);
+        $this->assertSame(['by_date', $first, $stop], [$run->read_kind, $run->start_batch, $run->stop_date?->toDateString()]);
     }
 
     public function test_a_by_date_read_stops_at_the_45_day_limit_before_the_stop_date(): void
@@ -136,10 +163,10 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
         $this->assertSame(['age', '2026-09-05'], [$run->stop_reason, $run->stop_date?->toDateString()]);
     }
 
-    public function test_a_long_by_date_read_stops_after_22_minutes_and_the_next_one_reads_again_to_the_same_stop_date(): void
+    public function test_a_long_by_date_read_stops_after_22_minutes_and_the_next_one_continues_the_chain_to_a_clean_end(): void
     {
         $this->pastRun('by_date', 'date', '2026-10-10');
-        $this->fake(array_fill(1, 40, $this->batch('a', '2026-10-15')), secondsPerBatch: 60);
+        $this->fake(array_fill(1, 30, $this->batch('a', '2026-10-15')) + [31 => $this->batch('z', '2026-10-08')], secondsPerBatch: 60);
 
         $first = $this->sync();
 
@@ -148,8 +175,25 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
         $this->asked = [];
         $second = $this->sync();
 
-        $this->assertSame(1, $this->asked[0], 'walang tuloy: mula batch 1 ulit');
-        $this->assertSame(['by_date', '2026-10-09'], [$second->read_kind, $second->stop_date?->toDateString()], 'ang putol na basa ay hindi malinis: pareho ang stop date');
+        $this->assertSame(17, $this->asked[0], 'tuloy mula batch 22, minus 5');
+        $this->assertSame(['by_date', 17, '2026-10-09', 'date', '2026-10-15'],
+            [$second->read_kind, $second->start_batch, $second->stop_date?->toDateString(), $second->stop_reason, $second->subscribed_newest?->toDateString()],
+            'parehong stop date; dala ang pinakabagong petsa ng unang run ng chain');
+        $this->assertSame(['by_date', 1, '2026-10-14'], app(BotcakeCustomerSync::class)->plans()['page uno'], 'malinis ang chain: gumagalaw ang stop date');
+    }
+
+    public function test_a_window_chain_that_ends_cleanly_counts_as_clean_with_the_newest_date_of_its_first_run(): void
+    {
+        $this->fake([1 => $this->batch('a', '2026-10-20')] + array_fill(2, 29, $this->batch('b', '2026-10-10')), secondsPerBatch: 60);
+
+        $first = $this->sync();
+        $this->asked = [];
+        $second = $this->sync();
+
+        $this->assertSame(['window', 'time', '2026-10-20'], [$first->read_kind, $first->stop_reason, $first->subscribed_newest?->toDateString()]);
+        $this->assertSame(['window', 17, 'end', '2026-10-20', '2026-10-10'],
+            [$second->read_kind, $second->start_batch, $second->stop_reason, $second->subscribed_newest?->toDateString(), $second->subscribed_oldest?->toDateString()]);
+        $this->assertSame(['by_date', 1, '2026-10-19'], app(BotcakeCustomerSync::class)->plans()['page uno']);
     }
 
     public function test_a_failed_run_still_records_the_dates_it_read(): void

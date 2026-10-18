@@ -106,14 +106,14 @@ Schedule::command('botcake:sync-customers')
     ->timezone('Asia/Manila')
     ->cron('0 1 * * 1-6')
     ->when(fn () => (bool) config('services.botcake.sync_enabled'))
-    ->withoutOverlapping()
+    ->withoutOverlapping(720) // 12 oras: ang mutex ng patay na proseso ay hindi haharang sa susunod na gabi
     ->runInBackground();
 
 Schedule::command('botcake:sync-customers --full')
     ->timezone('Asia/Manila')
     ->weeklyOn(0, '01:00')
     ->when(fn () => (bool) config('services.botcake.sync_enabled'))
-    ->withoutOverlapping()
+    ->withoutOverlapping(720) // 12 oras: ang mutex ng patay na proseso ay hindi haharang sa susunod na gabi
     ->runInBackground();
 
 // /chatblast auto mode: ang mga campaign na naka-auto ay binubuo at ipinapadala sa kanilang oras ng padala (Manila).

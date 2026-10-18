@@ -300,8 +300,14 @@ class BotcakeCustomerSyncTest extends BotcakeApiTestCase
         Cache::lock(BotcakeCustomerSync::LOCK, BotcakeCustomerSync::LOCK_TTL)->get();
         Cache::put(BotcakeCustomerSync::LOCK . ':since', now()->toIso8601String(), BotcakeCustomerSync::LOCK_TTL);
 
+        app(PageSettings::class)->set('Page Dos', 'botcake', 'page_id', '2002');
+        app(PageSettings::class)->set('Page Dos', 'botcake', 'token', 'tok-sync-test-dos');
+
         Artisan::call('botcake:sync-customers');
-        $this->assertStringContainsString('Skipped: may tumatakbo pang Botcake customer sync (mula 2026-10-17 08:30).', Artisan::output());
+        $out = Artisan::output();
+        $this->assertStringContainsString('Skipped: may tumatakbo pang Botcake customer sync (mula 2026-10-17 08:30).', $out);
+        $this->assertStringContainsString('Laktaw ang Page Uno', $out);
+        $this->assertStringContainsString('Laktaw ang Page Dos', $out, 'hindi tumitigil sa unang abalang page: tuloy sa susunod');
 
         $sync->forceRelease();
         $this->assertNull($sync->lockedSince());

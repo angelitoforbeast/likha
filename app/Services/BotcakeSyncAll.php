@@ -367,8 +367,9 @@ class BotcakeSyncAll
      * Ano ang gagawin ng susunod na sync ng bawat row (grid row: key + cells + info.botcake), para sa Sync lahat: ang
      * plan() ng sync at, sa ibabaw, ang laktaw kapag by date at may matagumpay na api run sa huling N oras
      * (services.botcake.sync_all_fresh_hours). Ang window read at ang tuloy ay hindi nilalaktawan. Dalawang query lang.
+     * from = stop date ng by date ("Okt 17"), kahit "laktaw" ang label.
      * @param array<int|string, array> $rows
-     * @return array<string, array{kind:string, label:string}> pageKey => uri at label
+     * @return array<string, array{kind:string, label:string, from?:?string}> pageKey => uri, label at stop date
      */
     public function next(array $rows): array
     {
@@ -387,9 +388,14 @@ class BotcakeSyncAll
 
             $plans ??= $this->sync->plans();
             [$kind, $start, $stop] = ($plans[$pk] ?? ['window', 1]) + [2 => null];
+            $from = BotcakeCustomerSync::shortDate($stop); // stop date ng by date, para sa "susunod: mula …"
+            if ($start > 1) {
+                $out[$pk] = $kind === 'by_date' ? ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start . ' (by date, mula ' . $from . ')', 'from' => $from]
+                    : ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start];
+                continue;
+            }
             if ($kind === 'window') {
-                $out[$pk] = $start > 1 ? ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start]
-                    : ['kind' => 'window', 'label' => 'window (' . $days . ' araw, buo)'];
+                $out[$pk] = ['kind' => 'window', 'label' => 'window (' . $days . ' araw, buo)'];
                 continue;
             }
 
@@ -397,10 +403,10 @@ class BotcakeSyncAll
             $at = $fresh[$pk] ?? null;
             if ($at && $at->gt(now()->subMinutes((int) round($hours * 60)))) {
                 $mins = (int) $at->diffInMinutes(now(), true);
-                $out[$pk] = ['kind' => 'fresh', 'label' => 'laktaw (sariwa, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' oras') . ' na)'];
+                $out[$pk] = ['kind' => 'fresh', 'label' => 'laktaw (sariwa, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' oras') . ' na)', 'from' => $from];
                 continue;
             }
-            $out[$pk] = ['kind' => 'by_date', 'label' => 'by date, mula ' . BotcakeCustomerSync::shortDate($stop)];
+            $out[$pk] = ['kind' => 'by_date', 'label' => 'by date, mula ' . $from, 'from' => $from];
         }
 
         return $out;

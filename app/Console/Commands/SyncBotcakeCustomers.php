@@ -60,10 +60,11 @@ class SyncBotcakeCustomers extends Command
                 }
             });
 
+            // Abala ang lock (hal. Sync lahat o ang row Sync): ang page lang na ito ang nilalaktawan, tuloy sa susunod.
             if ($run === null) {
                 $since = $sync->lockedSince();
-                $this->line('Skipped: may tumatakbo pang Botcake customer sync' . ($since ? ' (mula ' . $since->copy()->timezone('Asia/Manila')->format('Y-m-d H:i') . ')' : '') . '.');
-                break;
+                $this->line('Skipped: may tumatakbo pang Botcake customer sync' . ($since ? ' (mula ' . $since->copy()->timezone('Asia/Manila')->format('Y-m-d H:i') . ')' : '') . '. Laktaw ang ' . $page . '; tuloy sa susunod na page.');
+                continue;
             }
             $this->line(($run->status === 'done' ? 'OK ' : 'FAILED ') . $run->last_message . ($run->last_error ? ' | ' . $run->last_error : ''));
         }

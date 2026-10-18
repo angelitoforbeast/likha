@@ -31,6 +31,7 @@ class BotcakeSyncScheduleTest extends BotcakeApiTestCase
             $this->assertSame('Asia/Manila', $event->timezone);
             $this->assertTrue($event->withoutOverlapping);
             $this->assertTrue($event->runInBackground);
+            $this->assertSame(720, $event->expiresAt, 'ang mutex ng patay na proseso ay hindi haharang sa susunod na gabi');
 
             config(['services.botcake.sync_enabled' => false]);
             $this->assertFalse($event->filtersPass($this->app), 'naka-off ang flag: walang tatakbo');
