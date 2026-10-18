@@ -1435,3 +1435,15 @@ Spec 072 and its amendment 1. Tests are in `tests/Feature/Chatblast/BotcakeChatA
 | S-072.4 | Given a chat whose `ad_id` and `page_name` are unfilled (`{{ad_id}}`), empty or blank, then neither is in the payload, no `ad_id` is written to botcake_psids, and the chat is still kept | `test_S_072_4…` (3 data sets) | Passed · 2026-10-19 · auto |
 | S-072.5 | Given the CEO, when "+ Page" has no page name, then 422 and nothing is sent or saved; when it has the name, Botcake ID and token and the token test passes, then a key is created, the exact block is written and published, and the row shows On; a page already in page settings completed with only its token is switched On too | `test_S_072_5…` | Passed · 2026-10-19 · auto |
 | S-072.6 | Given "+ Page" where Botcake refuses the block write or the token test fails, then the page is saved, ACTIVE is Off, the answer carries the error for the row (no token), and after a failed token test nothing is written to the Default Reply | `test_S_072_6…` (3 data sets: block write, publish, token test) | Passed · 2026-10-19 · auto |
+
+### S-069A Amendment 1: the page switch answers, and Likes and photos are cleaned
+
+Tests are in `tests/Feature/Chatblast/ChatbotAmendmentOneTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.A1 | Given CHATBOT_REPLIES_ENABLED not set (true), then a page On without a flow only receives chats, On + a flow answers, Off keeps nothing; with the emergency stop (false) the reply is logged "skipped" | `test_S_069_A1…` | Passed · 2026-10-19 · auto |
+| S-069.A2 | The page list says "On + a flow = the bot answers. On without a flow = chats are only received."; Flow and Replies say the same, or "Emergency stop is on" when the setting is false | `test_S_069_A2…` | Passed · 2026-10-19 · auto + browser |
+| S-069.A3 | Given a message that is only a link on fbcdn.net, then the Like sticker (two file names, four sticker ids) is stored as 👍 with no link, any other one as [Photo] with the link in payload.image_url; other hosts, look-alike hosts, text with a link and plain text are kept as sent | `test_S_069_A3…` (8 data sets) | Passed · 2026-10-19 · auto |
+| S-069.A4 | The flow's {{last_input}} sees 👍 / [Photo]; Chats and the customer view show [Photo] with a small "open" link | `test_S_069_A4…` | Passed · 2026-10-19 · auto |
+| S-069.A5 | `botcake:chats-normalize` counts like / photo / untouched without changing anything; --apply needs --expect equal to the count; it changes the rows once (photo link kept in payload.image_url), and a second run finds nothing | `test_S_069_A5…` | Passed · 2026-10-19 · auto |

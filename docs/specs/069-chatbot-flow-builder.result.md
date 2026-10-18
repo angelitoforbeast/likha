@@ -258,3 +258,107 @@ The scratch server was stopped. Its files (`%TEMP%\cb069`, and gitignored sessio
 - **`/chatbot` changes from the page list to the Flow tab.** The list moved to `/chatbot/pages`; its JSON/POST routes are unchanged.
 - **New system keys:** `chatbot.flow_id`, and `chatbot.active` from 068.
 - **Nothing replies until** a page is linked and the switch is on.
+
+## Amendment 1: merge 071 and 072, the page switch is the reply switch, clean Likes and photos
+
+### Commits
+
+| Commit | What |
+|---|---|
+| `4e35c565` | docs: the amendment, verbatim |
+| `cb358cd4` | **merge** `main` (f953c93f, spec 071: the sliding ACTIVE switch). No conflicts. |
+| `9a4ae515` | **merge** `feat/072-chat-ad-id-page-name` (158be8e1). Conflicts in `TODO.md` and `qa/stories.md` only. |
+| `17078273` | feat: the page's On/Off is the reply switch; Likes and photos are cleaned before they are stored; `botcake:chats-normalize` |
+| (this commit) | The note is not repeated on the page list itself; docs: result, stories, screenshots |
+
+### Conflicts and how they were resolved
+
+- **`TODO.md` and `qa/stories.md`:** both branches appended a section at the end (069's and 072's). Both were kept, 069 first, then 072. Only the marker lines were removed.
+- **Code:** git merged everything else on its own: `BotcakeChatController`, `ChatbotController`, `BotcakeChatGuard`, `BotcakeChatBlock`, the page-list view and the 067/068 tests.
+  - The merged chat endpoint keeps 067's checks, 068's "bot off", 072's `ad_id` (to `checkPsid` and the payload, numeric only) and 069's flow trigger after `BotcakeChat::create`.
+  - "+ Page" (072: name, Botcake ID and token, then `turnOn`) lives on `/chatbot/pages`. The 071 switch drives the same `/chatbot/active` route.
+  - `BotcakeChatBlock::BODY` is 072's, with `ad_id` and `page_name`; the Chats setup box shows it.
+  - All of `tests/Feature/Chatblast` passed straight after the merge.
+
+### What changed
+
+- **The page switch answers.**
+  - A page answers customers when it is On **and** linked to a flow (the FLOW dropdown, `chatbot.flow_id`).
+  - On without a flow only receives chats; Off keeps nothing ("bot off", from 068).
+  - `CHATBOT_REPLIES_ENABLED` is only an emergency stop and **defaults to true** (`config/services.php`, `.env.example`). When it is false, sends and sheet rows are logged as "skipped", as before.
+  - The page list shows: "On + a flow = the bot answers. On without a flow = chats are only received. Off = chats are not kept." Flow, the editor and Replies add a link to Page settings.
+  - With the stop on, all three show "Emergency stop is on: …".
+- **Cleaning before storing** (`App\Services\Chatbot\ChatMessageCleaner`, called in `/api/botcake/chat` just before the duplicate check and the save). Only a message that is a single http(s) link whose host is `fbcdn.net` or ends with `.fbcdn.net` is touched:
+  - **Like sticker → `👍`, no link kept.** It is recognised by the two file names and by the four Like sticker ids anywhere in the URL.
+  - **Any other fbcdn link → `[Photo]`,** with the link in `payload.image_url` (up to 2000 characters).
+  - Other hosts, look-alike hosts (`fbcdn.net.evil…`), text containing a link, and plain text are stored as sent.
+  - The flow's `{{last_input}}` is the stored message, so it sees `👍` or `[Photo]`.
+  - Chats and the customer view show `[Photo]` followed by a small "open" link (`target="_blank"`, `rel="noopener noreferrer"`, http(s) only), from one shared partial.
+- **`php artisan botcake:chats-normalize`:**
+  - The default is a dry run: it prints `like: N, photo: N, untouched: N`.
+  - `--apply --expect=N` changes the rows in one transaction. It refuses (exit 1) without `--expect` or when N differs from the count to change.
+  - It applies the same rule, keeps the existing payload, and adds `image_url` for photos.
+  - It runs once in effect: changed rows are no longer links.
+
+### Dry run on test data
+
+The scratch database had 300 plain chats plus 48 Like rows (the three Like forms) and 2 photo rows, matching the live 48 + 2:
+
+```
+$ php artisan botcake:chats-normalize
+like: 48, photo: 2, untouched: 300
+Dry run: nothing changed. Run with --apply --expect=50 to change these rows.
+
+$ php artisan botcake:chats-normalize --apply --expect=49
+like: 48, photo: 2, untouched: 300
+Refused: --expect must equal the number of rows to change (50).          (exit 1)
+
+$ php artisan botcake:chats-normalize --apply --expect=50
+like: 48, photo: 2, untouched: 300
+changed 50
+
+$ php artisan botcake:chats-normalize
+like: 0, photo: 0, untouched: 350
+```
+
+On live (48 + 2 of 81), the dry run should print `like: 48, photo: 2, untouched: 31`, then `--apply --expect=50`.
+
+### Case table (amendment 1)
+
+`tests/Feature/Chatblast/ChatbotAmendmentOneTest.php`. Every case passed on 2026-10-19.
+
+| Case | Test | Result |
+|---|---|---|
+| S-069.A1 | `test_S_069_A1_a_page_answers_when_it_is_on_and_linked_and_the_emergency_stop_is_on_by_default` | pass |
+| S-069.A2 | `test_S_069_A2_the_page_list_and_flow_pages_say_how_the_switch_works` | pass |
+| S-069.A3 | `test_S_069_A3_likes_and_facebook_photos_are_cleaned_before_they_are_stored` (8 data sets) | pass ×8 |
+| S-069.A4 | `test_S_069_A4_the_flow_sees_the_cleaned_message_and_chats_show_photo_with_an_open_link` | pass |
+| S-069.A5 | `test_S_069_A5_the_normalize_command_counts_then_fixes_old_rows_once` | pass |
+
+**Red run:** A1, A2, A3 (the four fbcdn data sets), A4 and A5 failed first: config false, missing text, links stored as sent, no command. The four "keep as sent" data sets passed at once and pin the rule's limits.
+
+**Story changes:** S-069.D4 and S-069.T3 looked for "Replies are switched off" on Flow and Replies. With the stop on by default, they now look for "On + a flow = the bot answers."
+
+`php artisan test tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake`: every test passes (3688 assertions).
+
+**Full suite** on `17078273`: **2 failed, 175 passed, 1757 passed with warnings** (20233 assertions, 307 s). The only failures are the known `ExampleTest` and `NightRun\ImportStartTest`. After it, only the page-list note changed (it no longer links to the page it is on); the three test files that read that text passed again.
+
+### Browser check (amendment 1)
+
+The scratch app with headless Chrome over CDP, on `/chatbot/pages`. It was read-only: no switch was flipped and "+ Page" was not submitted, so nothing reached Botcake.
+
+| Check | 1366 × 768 | 390 × 844 |
+|---|---|---|
+| No page-level horizontal scroll | 1366 ≤ 1366 ✔ | 390 ≤ 390 ✔ |
+| Note | "On + a flow = the bot answers. On without a flow = chats are only received. Off = chats are not kept." ✔ | same ✔ |
+| 071 switch | 12 `role="switch"`, `aria-checked`, "Switch off Alpha Store" ✔ | ✔ |
+| FLOW dropdown | Linked flow shown; the 11 pages with 068 text show "Not linked: …" ✔ | ✔ |
+| 072 "+ Page" | Opens; page name (required), Botcake ID, token (password), with 072's help text that it replaces the Default Reply ✔ | ✔ |
+
+Screenshots are in `docs/specs/069-chatbot-flow-builder/amendment-1/`: `pages-desktop.png`, `pages-phone.png`, `pages-add-desktop.png`, `pages-add-phone.png`.
+
+### Merge danger (amendment 1)
+
+- **`CHATBOT_REPLIES_ENABLED` now defaults to true.** On release, any page that is On **and** linked to a flow starts answering customers. No page is linked yet.
+- **The chatbot queue worker:** the `chatbot` worker must run before the first page is linked (see the 069 release steps).
+- **Run the normalize command after the deploy:** dry run first, then `--apply --expect=50`, if the counts match.
