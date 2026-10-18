@@ -7,21 +7,24 @@ use App\Support\JntScanStatusMapper;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use Throwable;
 
 /**
- * J&T TRACKQUERY para sa from_jnts: ginagamit ng /jnt/track-sync (job) at ng chatblast (kapag kumukuha ng listahan at
- * bago ipadala ang delivering). 20 waybill kada tawag (ang lampas ay tahimik na nilalaglag ng J&T: ang hindi bumalik ay
+ * J&T TRACKQUERY para sa from_jnts: ginagamit ng manual na /jnt/track-sync (job) at ng kusang track-sync kada oras
+ * (JntAutoTrackSync). 20 waybill kada tawag (ang lampas ay tahimik na nilalaglag ng J&T: ang hindi bumalik ay
  * isa-isang sinusubukan), hanggang 2 tawag kada segundo. Ang sagot ay isinusulat sa bawat from_jnts row ng waybill ayon
- * sa id: status at status_logs (kapag nagbago), signingtime, rider_name at rider_phone. Walang bagong column.
+ * sa id: status at status_logs (kapag nagbago), signingtime, rider_name at rider_phone; ang kusang track-sync ay
+ * isinusulat din ang pinakabagong scan sa jnt_latest_scans.
  */
 class JntTracker
 {
     public const CHUNK = 20;
-    public const CALL_TIMEOUT = 10;   // segundo ng HTTP kada tawag ng chatblast (build at bago ipadala)
+    public const CALL_TIMEOUT = 10;   // segundo ng HTTP kada tawag ng kusang track-sync
     private const FINAL = ['Delivered', 'Returned']; // tapos na: hindi na ginagalaw (gaya ng manual na tool at ng upload)
     private const MIN_INTERVAL = 0.5; // segundo sa pagitan ng mga tawag = max 2 kada segundo
+    private const PROGRESS_EVERY = 25; // ilang tawag (ng 20) bago isulat ang progreso ng run
 
     private ?float $lastCallAt = null;
 
@@ -114,16 +117,16 @@ class JntTracker
     }
 
     /**
-     * Para sa chatblast: i-track ang mga waybill at isulat sa bawat from_jnts row nila ayon sa id (hindi ang tapos na:
-     * Delivered, Returned). Walang bagong tawag kapag lampas na sa ($budget − CALL_TIMEOUT) segundo, kaya ang tawag na
-     * tumatakbo pa ay natatapos sa loob ng $budget. $record: itinatala bilang awtomatikong run (ang build; hindi ang bawat
-     * padala). Ang error sa gitna ay itinatala sa run (failed, last_error) at ibinabalik ang naabot.
+     * Para sa kusang track-sync (JntAutoTrackSync): i-track ang mga waybill ayon sa ayos nila at isulat sa bawat from_jnts
+     * row nila ayon sa id (hindi ang tapos na: Delivered, Returned), at ang pinakabagong scan sa jnt_latest_scans (kahit
+     * Problematic o di-kilala). Walang bagong tawag kapag lampas na sa ($budget − CALL_TIMEOUT) segundo, kaya ang tawag na
+     * tumatakbo pa ay natatapos sa loob ng $budget. Ang progreso ay isinusulat sa run na $runId kada PROGRESS_EVERY na tawag.
+     * Ang error sa gitna ay ibinabalik (error) kasama ang naabot.
+     * pending = ang hindi naabot dahil ubos ang oras, ayon sa ayos ng $waybills.
      * @param  string[] $waybills
-     * tracked = ang mga sinagot ng J&T; latest = waybill => pinakabagong scantype (kahit Problematic o di-kilala);
-     * riders = waybill => [pangalan, phone] mula sa sagot na ito lang (walang laman kapag hindi mabasa).
-     * @return array{tracked: array<int,string>, latest: array<string,string>, riders: array<string,array{0:string,1:string}>, pending: array<int,string>, checked:int, updated:int, rider:int, errors:int}|null null kapag walang J&T config
+     * @return array{pending: array<int,string>, checked:int, updated:int, unchanged:int, unmapped:int, rider:int, errors:int, error:?string}|null null kapag walang J&T config
      */
-    public function refresh(array $waybills, float $budget, string $src = 'chatblast', bool $record = true): ?array
+    public function refresh(array $waybills, float $budget, string $src, ?int $runId = null): ?array
     {
         $waybills = array_values(array_unique(array_filter(array_map(fn ($w) => trim((string) $w), $waybills))));
         if (!$waybills || !($client = $this->client())) return null;
@@ -131,23 +134,20 @@ class JntTracker
 
         $started = $this->clock->now();
         $cutoff  = $started + max(0, $budget - self::CALL_TIMEOUT); // walang bagong tawag pagkalipas nito
-        $out = ['tracked' => [], 'latest' => [], 'riders' => [], 'pending' => [], 'checked' => 0, 'updated' => 0, 'rider' => 0, 'errors' => 0];
-        $runId = !$record ? null : DB::table('jnt_track_sync_runs')->insertGetId([
-            'date_from' => null, 'date_to' => null, 'dry_run' => false, 'status' => 'running', 'total' => count($waybills),
-            'started_at' => now('Asia/Manila'), 'created_at' => now('Asia/Manila'), 'updated_at' => now('Asia/Manila'),
-        ]);
-        $error = null;
+        $out = ['pending' => [], 'checked' => 0, 'updated' => 0, 'unchanged' => 0, 'unmapped' => 0, 'rider' => 0, 'errors' => 0, 'error' => null];
+        $scans = Schema::hasTable('jnt_latest_scans'); // hindi pa na-migrate: status at rider lang
 
         try {
             foreach (array_chunk($waybills, self::CHUNK) as $i => $chunk) {
                 if ($i > 0 && $this->clock->now() >= $cutoff) {
-                    array_push($out['pending'], ...$chunk); // susunod na kuha o bago ipadala
+                    array_push($out['pending'], ...$chunk); // sa susunod na takbo
                     continue;
                 }
                 $found = $this->trackSet($client, $chunk, $cutoff);
                 $rows  = DB::table('from_jnts')->whereIn('waybill_number', $chunk)
                     ->where(fn ($w) => $w->whereNull('status')->orWhereNotIn('status', self::FINAL)) // ang NULL ay hindi tapos
                     ->get(['id', 'waybill_number', 'status', 'status_logs', 'rider_name', 'rider_phone'])->groupBy('waybill_number');
+                $latest = [];
 
                 foreach ($chunk as $wb) {
                     if (empty($found[$wb]) && count($chunk) > 1 && $this->clock->now() >= $cutoff) {
@@ -155,35 +155,62 @@ class JntTracker
                         continue;
                     }
                     $out['checked']++;
-                    if (empty($found[$wb])) { $out['errors']++; continue; } // walang sagot ang J&T: hindi "na-track"
+                    if (empty($found[$wb])) { $out['errors']++; continue; } // walang sagot: ang lumang scan ay hindi ginagalaw
                     $info = JntScanStatusMapper::fromDetails($found[$wb]);
-                    $out['tracked'][] = $wb;
-                    $out['latest'][$wb] = trim((string) ($found[$wb][0]['scantype'] ?? ''));
-                    $out['riders'][$wb] = [(string) ($info['rider_name'] ?? ''), (string) ($info['rider_phone'] ?? '')];
                     if (!empty($info['rider_name'])) $out['rider']++;
+                    $latest[] = $this->latestScan($wb, $found[$wb], $info);
+
+                    $changed = false;
                     foreach ($rows[$wb] ?? [] as $row) {
                         $c = $this->changesFor($row, $found[$wb], $src, $runId);
                         if ($c['update']) {
                             DB::table('from_jnts')->where('id', $row->id)->update($c['update'] + ['updated_at' => now('Asia/Manila')]);
                         }
-                        if ($c['changed']) $out['updated']++;
+                        $changed = $changed || $c['changed'];
                     }
+                    $out[$info['unmapped'] ? 'unmapped' : ($changed ? 'updated' : 'unchanged')]++;
                 }
+
+                if ($scans && $latest) {
+                    DB::table('jnt_latest_scans')->upsert($latest, ['waybill'], ['scan_type', 'scan_time', 'scan_place', 'rider_name', 'rider_phone', 'checked_at']);
+                }
+                if ($runId && ($i + 1) % self::PROGRESS_EVERY === 0) $this->progress($runId, $out);
             }
         } catch (Throwable $e) {
             report($e);
-            $error = mb_substr($e->getMessage(), 0, 500);
-        }
-
-        if ($runId) {
-            DB::table('jnt_track_sync_runs')->where('id', $runId)->update([
-                'status' => $error ? 'failed' : 'done', 'last_error' => $error,
-                'processed' => $out['checked'], 'updated' => $out['updated'], 'skipped' => $out['errors'],
-                'result_sample' => json_encode(['source' => $src, 'rider_found' => $out['rider'], 'pending' => count($out['pending'])]),
-                'finished_at' => now('Asia/Manila'), 'updated_at' => now('Asia/Manila'),
-            ]);
+            $out['error'] = mb_substr($e->getMessage(), 0, 500);
         }
 
         return $out;
+    }
+
+    /** Ang bilang ng run habang tumatakbo (para sa /jnt/track-sync). */
+    public function progress(int $runId, array $out): void
+    {
+        DB::table('jnt_track_sync_runs')->where('id', $runId)->update([
+            'processed' => $out['checked'], 'updated' => $out['updated'], 'unchanged' => $out['unchanged'],
+            'unmapped' => $out['unmapped'], 'skipped' => $out['errors'], 'updated_at' => now('Asia/Manila'),
+        ]);
+    }
+
+    /**
+     * Ang row ng jnt_latest_scans: ang pinakabagong scan ng sagot (details[0]) at ang rider ng pinakabagong On Delivery
+     * scan nito (null kapag wala sa sagot na ito: hindi iniiwan ang rider ng ibang araw).
+     */
+    private function latestScan(string $waybill, array $details, array $info): array
+    {
+        $top  = (array) ($details[0] ?? []);
+        $time = trim((string) ($top['scantime'] ?? ''));
+        $place = implode(', ', array_filter([trim((string) ($top['city'] ?? '')), trim((string) ($top['state'] ?? ''))], fn ($p) => $p !== ''));
+
+        return [
+            'waybill'     => $waybill,
+            'scan_type'   => mb_substr(trim((string) ($top['scantype'] ?? '')), 0, 64) ?: null,
+            'scan_time'   => preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/', $time) ? $time : null,
+            'scan_place'  => mb_substr($place, 0, 191) ?: null,
+            'rider_name'  => $info['rider_name'] ? mb_substr($info['rider_name'], 0, 191) : null,
+            'rider_phone' => $info['rider_phone'] ?: null,
+            'checked_at'  => now(),
+        ];
     }
 }

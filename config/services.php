@@ -105,6 +105,11 @@ return [
         'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
     ],
 
+    // Kusang J&T track-sync kada oras (jnt:track-sync-auto). Ang toggle ng CEO sa /jnt/track-sync ang nananaig kapag ginamit.
+    'jnt' => [
+        'track_sync_auto' => (bool) env('JNT_TRACK_SYNC_AUTO', false),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),

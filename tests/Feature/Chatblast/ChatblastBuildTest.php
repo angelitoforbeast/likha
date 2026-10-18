@@ -32,7 +32,7 @@ class ChatblastBuildTest extends ChatblastTestCase
         $this->assertSame('missing page_id, token, flow.shipping, field.message', $rows['WB-004']->reason);
         $this->assertSame('psid-a', $rows['WB-001']->psid);
         $this->assertSame(['delivering', 'Delivering', false, 1], [$rows['WB-001']->kind, $rows['WB-001']->jnt_status, $rows['WB-001']->is_test, $rows['WB-001']->created_by]);
-        $this->assertSame(['added' => 4, 'ready' => 1, 'no_psid' => 1, 'no_config' => 2, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0], $first);
+        $this->assertSame(['added' => 4, 'ready' => 1, 'no_psid' => 1, 'no_config' => 2, 'updated' => 0, 'skipped' => 0, 'tracked' => 4], $first);
 
         $this->assertSame(0, app(Chatblast::class)->build('delivering')['added'], 'walang doble sa ikalawang kuha');
         $this->assertSame(4, BotcakeMessage::count());

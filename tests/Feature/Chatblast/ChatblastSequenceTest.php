@@ -89,6 +89,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
 
         DB::table('from_jnts')->update(['status' => 'Delivering']);
         $this->travel(1)->days();
+        foreach (['WB-001', 'WB-002'] as $wb) $this->scan($wb); // ang On Delivery scan ng track-sync
 
         $this->assertSame(0, $this->build()['added'], 'Delivering na: walang Araw 2');
         $unsent = $this->rows()->firstWhere('waybill', 'WB-002');

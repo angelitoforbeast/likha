@@ -6,10 +6,10 @@ use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Models\ChatblastMessage;
 use App\Models\PageSetting;
-use App\Services\Jnt\JntTracker;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
 /**
@@ -47,16 +47,15 @@ class Chatblast
 
     public const PLACEHOLDERS = ['name', 'item', 'cod', 'waybill', 'page', 'rider', 'rider_phone'];
     public const RIDER_REASON = 'no rider info';
-    public const TRACK_BUDGET = 60;        // segundo ng J&T tracking ng chatblast:build (ang web build: 20, tingnan ang controller)
-    public const SEND_TRACK_BUDGET = 10;   // segundo ng J&T bago ipadala: isang tawag
     public const BUILD_LOCK = 'chatblast-build';
     public const BUILD_LOCK_SECONDS = 1800;                 // ang build lock: higit sa pinakamatagal na pagkuha
-    public const JNT_NOT_REACHED = 'J&T not reached; will retry at the next send time';
+    public const STALE_SCAN = 'J&T data is stale; waiting for the next track-sync';
+    public const NOT_TODAY = 'The latest J&T On Delivery scan is not from today';
+    public const SCAN_MAX_AGE = 90 * 60;   // bago ipadala ang delivering: ang scan na nasuri nang mas maaga rito ay luma
     public const BUILT_AT = 'chatblast-built-at';           // oras (timestamp) ng huling buong pagkuha
     public const REFRESH_SLOT = 'chatblast-refresh-slot';   // + ":Y-m-d H" (Manila): ang oras na kinuha na ng kusang refresh
     public const REFRESH_FIRST_HOUR = 6;                    // kusang refresh: 06:15 hanggang 23:15
     public const REFRESH_MINUTE = 15;
-    public const RIDER_MAX_AGE = 30 * 60;  // bago ipadala ang delivering: i-track ulit kapag mas luma rito
     public const MAX_TEXT = 1000;
     public const MAX_DAYS = 30;
     public const MAX_VERSIONS = 10;
@@ -295,33 +294,27 @@ class Chatblast
 
 
     /**
-     * Bago ipadala ang delivering: i-track ulit ang waybill kapag luma na (o wala pa) ang rider data, saka buuin ulit ang
-     * text gamit ang bagong rider (maaaring ibang bersyon na). Walang ginagawa kapag bago pa o walang J&T config.
-     * Ang status ay nasa from_jnts na rin, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel; ang
-     * bigong subok (Problematic, Delivery Fail…) ay hindi isinusulat doon, kaya ibinabalik dito ang dahilan para laktawan.
-     * Ang rider ay mula lang sa sagot na ito: kapag walang sagot o hindi mabasa ang rider, walang rider (hindi kailanman ang
-     * rider ng mas lumang kuha, na maaaring ibang araw). Kapag walang bersyong magagamit, no_config.
+     * Bago ipadala ang delivering: ang pinakabagong scan at rider mula sa database (ang kusang J&T track-sync kada oras ang
+     * sumusulat; walang tawag sa J&T dito), saka buuin ulit ang text gamit ang rider (maaaring ibang bersyon na).
+     * Walang scan o nasuri nang lampas sa SCAN_MAX_AGE: hindi ipinapadala, ready pa rin para sa susunod na oras (hindi
+     * alam kung On Delivery pa). Hindi On Delivery (hal. Problematic, Delivery Fail) o hindi ngayong araw: skipped. Ang
+     * status ay nasa from_jnts, kaya ang kasunod na staleFor() ang nagsasabi kung lumipat na ang parcel. Kapag walang
+     * bersyong magagamit, no_config.
      * @return array{0:string, 1:string}|null [status, dahilan] kapag hindi dapat ipadala; null kapag puwede
      */
     public function refreshRider(BotcakeMessage $m): ?array
     {
-        $at = $m->vars['tracked_at'] ?? null;
-        if ($at && Carbon::parse($at)->gt(now()->subSeconds(self::RIDER_MAX_AGE))) return null;
-        $track = app(JntTracker::class)->refresh([$m->waybill], self::SEND_TRACK_BUDGET, 'chatblast', false);
-
-        if (!$track || !isset($track['latest'][$m->waybill])) {
-            // Nabuo noong naunang araw at walang sagot ang J&T: hindi alam kung On Delivery pa (hal. Delivered na), kaya
-            // hindi ipinapadala; ready ulit para sa susunod na oras. Ang nabuo ngayong araw: gaya ng dati.
-            if ($m->created_at && $m->created_at->lt(Carbon::now('Asia/Manila')->startOfDay())) return ['ready', self::JNT_NOT_REACHED];
-            if (trim((string) ($m->vars['rider'] ?? '')) === '' && trim((string) ($m->vars['rider_phone'] ?? '')) === '') return null; // walang rider na aalisin
-            $vars = array_merge((array) $m->vars, ['rider' => '', 'rider_phone' => '']);
-        } else {
-            $scan = $track['latest'][$m->waybill];
-            if (!self::isOnDelivery($scan)) return ['skipped', 'The latest J&T scan is no longer On Delivery (' . ($scan ?: 'no scantype') . ')'];
-            [$rider, $phone] = $track['riders'][$m->waybill] ?? ['', ''];
-            $vars = array_merge((array) $m->vars, ['rider' => self::riderName($rider), 'rider_phone' => self::riderPhone($phone), 'tracked_at' => now()->toIso8601String()]);
+        $scan = $this->scans([$m->waybill])[$m->waybill] ?? null;
+        if (!$scan || $scan['type'] === null || !$scan['checked_at'] || Carbon::parse($scan['checked_at'])->lt(now()->subSeconds(self::SCAN_MAX_AGE))) {
+            return ['ready', self::STALE_SCAN];
         }
+        if (!self::isOnDelivery($scan['type'])) return ['skipped', 'The latest J&T scan is no longer On Delivery (' . ($scan['type'] ?: 'no scantype') . ')'];
+        if (!self::scannedToday($scan)) return ['skipped', self::NOT_TODAY];
 
+        // Pareho pa ang rider: walang binabago (ang text ay ang nabuo; ang tinanggihang text ay hindi binubuo ulit dito).
+        $old = (array) $m->vars;
+        if ($scan['rider'] === trim((string) ($old['rider'] ?? '')) && $scan['rider_phone'] === trim((string) ($old['rider_phone'] ?? ''))) return null;
+        $vars = array_merge($old, ['rider' => $scan['rider'], 'rider_phone' => $scan['rider_phone'], 'tracked_at' => $scan['checked_at']]);
         $days = $this->sequence($m->kind);
         if ($m->day > count($days)) return ['skipped', 'Day ' . $m->day . ' no longer exists in the sequence'];
         $pick = $this->pick($days[$m->day - 1], $m->waybill, $vars);
@@ -333,6 +326,50 @@ class Chatblast
         $m->forceFill(['vars' => $vars, 'version' => self::label($pick[0]), 'text' => $pick[1]])->save();
 
         return null;
+    }
+
+    /**
+     * Ang pinakabagong J&T scan ng mga waybill mula sa jnt_latest_scans, at ang rider para sa mensahe: ang nasa scan, kung
+     * wala ay ang nasa from_jnts ng waybill (ang pinakahuling row na may rider). type null = walang scan (rider lang).
+     * @param  string[] $waybills
+     * @return array<string, array{type:?string, time:?string, checked_at:?string, rider:string, rider_phone:string}>
+     */
+    private function scans(array $waybills): array
+    {
+        $out = [];
+        $waybills = array_values(array_unique(array_filter(array_map(fn ($w) => trim((string) $w), $waybills))));
+        $table = Schema::hasTable('jnt_latest_scans'); // hindi pa na-migrate: walang scan (ang delivering ay naghihintay)
+        foreach (array_chunk($waybills, 500) as $chunk) {
+            $fallback = [];
+            DB::table('from_jnts')->whereIn('waybill_number', $chunk)->whereNotNull('rider_name')->where('rider_name', '<>', '')
+                ->orderBy('id')->get(['waybill_number', 'rider_name', 'rider_phone'])
+                ->each(function ($r) use (&$fallback) { $fallback[$r->waybill_number] = [(string) $r->rider_name, (string) $r->rider_phone]; });
+            $rows = $table ? DB::table('jnt_latest_scans')->whereIn('waybill', $chunk)->get()->keyBy('waybill') : collect();
+            foreach ($chunk as $wb) {
+                $s = $rows[$wb] ?? null;
+                if (!$s && !isset($fallback[$wb])) continue;
+                [$rider, $phone] = trim((string) ($s->rider_name ?? '')) !== '' ? [$s->rider_name, $s->rider_phone] : ($fallback[$wb] ?? ['', '']);
+                $out[$wb] = [
+                    'type' => $s ? trim((string) $s->scan_type) : null, 'time' => $s->scan_time ?? null,
+                    'checked_at' => $s && $s->checked_at ? Carbon::parse($s->checked_at)->toIso8601String() : null,
+                    'rider' => self::riderName($rider), 'rider_phone' => self::riderPhone($phone),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /** Ang scan ay mula ngayong araw (Manila; ang oras ng J&T ay oras sa Pilipinas). */
+    private static function scannedToday(array $scan): bool
+    {
+        return substr((string) $scan['time'], 0, 10) === Carbon::now('Asia/Manila')->toDateString();
+    }
+
+    /** Requires On Delivery: ang pinakabagong scan ay On Delivery at mula ngayong araw. */
+    private static function deliveringToday(?array $scan): bool
+    {
+        return $scan !== null && $scan['type'] !== null && self::isOnDelivery($scan['type']) && self::scannedToday($scan);
     }
 
     private static function isOnDelivery(string $scantype): bool
@@ -401,18 +438,18 @@ class Chatblast
      * ang hindi pa naipapadala na wala na sa mga status ng campaign. Ang naka-off na campaign ay walang binubuo.
      * @return array{added:int, ready:int, no_psid:int, no_config:int, updated:int, skipped:int}
      */
-    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET, ?array $steps = null, ?string $lockOwner = null, bool $refresh = false): array
+    public function build(?string $kind = null, ?int $userId = null, ?array $steps = null, ?string $lockOwner = null, bool $refresh = false): array
     {
         // Isang pagkuha lang sabay (button o command): ang pangalawa ay sinasabihang may tumatakbo. $lockOwner: para
         // mabitawan ng job ang sarili nitong lock kapag pinatay ito (timeout), at hindi ang lock ng iba.
-        // Mas mahaba sa pinakamatagal na pagkuha (60 s ng J&T at ang pagbuo sa lahat ng page), at laging binibitawan sa
+        // Mas mahaba sa pinakamatagal na pagkuha (ang pagbuo sa lahat ng page), at laging binibitawan sa
         // finally: walang pangalawang pagkuha na tatakbo kasabay nito, gaano man katagal. Ang pinatay na proseso ay
         // nag-iiwan ng lock hanggang sa oras na ito (ang job ay bumibitaw sa sarili nitong lock sa failed()).
         $lock = Cache::lock(self::BUILD_LOCK, self::BUILD_LOCK_SECONDS, $lockOwner);
         if (!$lock->get()) return ['busy' => true];
 
         try {
-            $out = $this->buildLocked($kind, $userId, $trackBudget, $steps, $refresh);
+            $out = $this->buildLocked($kind, $userId, $steps, $refresh);
             if ($kind === null) Cache::forever(self::BUILT_AT, now()->timestamp); // buong pagkuha: "Updated HH:MM" ng To send
             return $out;
         } finally {
@@ -436,7 +473,7 @@ class Chatblast
         if (!Cache::add($claim, true, 7200)) return null;
 
         try {
-            $r = $this->build(null, null, self::TRACK_BUDGET, null, null, true);
+            $r = $this->build(null, null, null, null, true);
         } catch (\Throwable $e) {
             Cache::forget($claim);
             throw $e;
@@ -464,79 +501,61 @@ class Chatblast
     }
 
     /** $steps: ang mga step (1 = Day 1) lang na bubuuin (auto: ang may oras ngayon); null = lahat. */
-    private function buildLocked(?string $kind, ?int $userId, float $trackBudget, ?array $steps = null, bool $refresh = false): array
+    private function buildLocked(?string $kind, ?int $userId, ?array $steps = null, bool $refresh = false): array
     {
-        $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0];
+        $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0, 'tracked' => 0];
         $missing = $this->missingByPage();
-        // Ang may "requires On Delivery" muna (ang tracking nila ang pinakamahalaga), saka ayon sa id.
         $all = ChatblastCampaign::where('active', true)->orderByDesc('requires_on_delivery')->orderBy('id')->get(ChatblastCampaign::COLUMNS);
         $campaigns = $kind === null ? $all : $all->where('kind', $kind)->values();
         if ($campaigns->isEmpty()) return $out; // walang ganoon o naka-off: walang binubuo
 
-        // J&T: ang status at rider ng mga waybill na bubuuin at ng hindi pa naipapadala ng campaign na "requires On
-        // Delivery", hanggang $trackBudget segundo. Ayos: ang mga campaign na iyon muna; sa bawat campaign, ang
-        // pinakamatagal nang hindi na-track muna (ang bago ay hindi pa kailanman), kaya naaabot ang lahat sa ilang pindot.
-        // Ang walang PSID, kulang ang settings o ibang page ay hindi tinatawagan. Ang hindi naabot ay "rider pending".
-        $waybills = [];
-        foreach ($campaigns as $c) {
-            $order = [];
-            // Ang pinakabagong order muna (stable ang asort sa ibaba): kapag ubos ang oras, ang pinakaluma ang hindi naabot.
-            foreach ($this->candidates($c)->reorder()->orderByDesc('mo.id')->get(['mo.waybill', 'mo.botcake_psid', 'mo.PAGE as page']) as $o) {
-                if (trim((string) $o->botcake_psid) !== '' && $this->onPage($c, (string) $o->page) && !isset($order[$o->waybill])) $order[$o->waybill] = '';
-            }
-            BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', ['ready', 'failed', 'field_mismatch'])
-                ->where('created_at', '>=', now()->subDays($c->window_days))->get(['waybill', 'vars'])
-                ->each(function ($m) use (&$order) { $order[$m->waybill] ??= (string) ($m->vars['tracked_at'] ?? ''); });
-            asort($order); // '' (hindi pa na-track) muna, saka ang pinakaluma
-            $waybills = array_merge($waybills, array_keys($order));
-        }
-        $track = app(JntTracker::class)->refresh($waybills, $trackBudget);
-        $tracked = $track['latest'] ?? []; // waybill => pinakabagong scan ng J&T (ang mga sinagot lang)
-        $riders  = $track['riders'] ?? [];
-        $out['tracked'] = count($tracked);
-        $out['rider_pending'] = count($track['pending'] ?? []);
-
-        // Ang hindi pa naipapadala ng campaign na "requires On Delivery" na ang bagong sagot ng J&T ay hindi na On Delivery
-        // (hal. Problematic, Delivery Fail): nilalaktawan at binibitawan ang key, para may sariling row ang susunod na subok.
-        $failed = array_keys(array_filter($tracked, fn ($scan) => !self::isOnDelivery($scan)));
+        // Ang hindi pa naipapadala ng campaign na "requires On Delivery" na ang pinakabagong scan sa database ay hindi na
+        // On Delivery ngayong araw (hal. Problematic, Delivery Fail, o kahapon pa): nilalaktawan at binibitawan ang key,
+        // para may sariling row ang susunod na subok. Ang walang scan ay hindi ginagalaw (naghihintay ng track-sync).
         $onDelivery = $all->where('requires_on_delivery', true)->pluck('kind')->all();
-        foreach ($onDelivery ? array_chunk($failed, 500) : [] as $chunk) {
-            BotcakeMessage::whereIn('kind', $onDelivery)->where('is_test', false)->whereIn('waybill', $chunk)
-                ->whereIn('status', array_diff(self::UNSENT, ['skipped']))->get(['id', 'waybill'])
-                ->each(function ($row) use ($tracked, &$out) {
-                    $out['skipped'] += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)->update([
-                        'status' => 'skipped', 'dedupe_key' => null,
-                        'reason' => 'The latest J&T scan is no longer On Delivery (' . ($tracked[$row->waybill] ?: 'no scantype') . ')',
-                    ]);
+        if ($onDelivery) {
+            BotcakeMessage::whereIn('kind', $onDelivery)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
+                ->select('id', 'waybill')->chunkById(500, function ($rows) use (&$out) {
+                    $scans = $this->scans($rows->pluck('waybill')->all());
+                    foreach ($rows as $row) {
+                        $scan = $scans[$row->waybill] ?? null;
+                        if ($scan === null || $scan['type'] === null || self::deliveringToday($scan)) continue;
+                        $reason = self::isOnDelivery($scan['type']) ? self::NOT_TODAY
+                            : 'The latest J&T scan is no longer On Delivery (' . ($scan['type'] ?: 'no scantype') . ')';
+                        $out['skipped'] += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
+                            ->update(['status' => 'skipped', 'dedupe_key' => null, 'reason' => $reason]);
+                    }
                 });
         }
 
         foreach ($campaigns as $c) {
             $out['skipped'] += $this->skipStale($c);
-            foreach ($this->buildKind($c, $userId, $missing, $tracked, $riders, $steps, $refresh) as $key => $n) $out[$key] += $n;
+            foreach ($this->buildKind($c, $userId, $missing, $steps, $refresh) as $key => $n) $out[$key] += $n;
             $out['updated'] += $this->recheck($c->kind, $missing);
         }
 
         return $out;
     }
 
+
     /**
      * $refresh (ang kusang refresh kada oras): hindi binubuo ang step na may sariling oras sa naka-auto na campaign; ang
      * auto ang bumubuo nito sa oras nito. Kung hindi, ang row na nabuo pagkalipas ng oras ng step ay ipapadala ng auto sa
      * susunod na ibang oras (huli nang ilang oras).
      */
-    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, array $tracked = [], array $riders = [], ?array $steps = null, bool $refresh = false): array
+    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, ?array $steps = null, bool $refresh = false): array
     {
-        $out   = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0];
+        $out   = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'tracked' => 0];
         $kind  = $c->kind;
         $days  = $this->invalid($c->days) === null ? $c->days : [];
         $now   = now();
         $seen  = [];
 
         $ownTime = fn (int $day) => $refresh && $c->mode === 'auto' && !empty(((array) ($c->step_times ?? []))[$day - 1] ?? null);
-        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $tracked, $riders, $steps, $ownTime) {
+        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $steps, $ownTime) {
             $rows = [];
             $jnt  = $this->currentStatuses($orders->pluck('waybill')->unique()->values()->all());
+            $scans = $this->scans($orders->pluck('waybill')->all()); // ang J&T scan at rider mula sa database
             foreach ($orders as $o) {
                 $waybill = trim((string) $o->waybill);
                 if ($waybill === '' || isset($seen[$waybill])) continue; // isang row kada waybill (kahit may kopya ang order)
@@ -550,16 +569,16 @@ class Chatblast
 
                 $page = $this->settings->normPage((string) $o->page);
                 if (!$this->onPage($c, $page)) continue; // hindi kasama ang page sa campaign
-                // Requires On Delivery: ang pinakabagong scan ay dapat On Delivery pa (hindi Problematic, Delivery Fail…):
-                // ang "Idedeliver po ngayon" ay hindi totoo pagkatapos ng bigong subok. Susubukan ulit sa susunod na kuha.
-                if ($c->requires_on_delivery && isset($tracked[$waybill]) && !self::isOnDelivery($tracked[$waybill])) continue;
+                // Requires On Delivery: ang pinakabagong scan sa database ay dapat On Delivery at mula ngayong araw (hindi
+                // Problematic, Delivery Fail…, at hindi ang kahapon): ang "Idedeliver po ngayon" ay hindi totoo kung hindi.
+                // Susubukan ulit sa susunod na kuha, pagkatapos ng susunod na track-sync.
+                $scan = $scans[$waybill] ?? null;
+                if ($c->requires_on_delivery && !self::deliveringToday($scan)) continue;
 
-                // Ang rider ay mula lang sa sagot ng J&T sa kuhang ito (hindi ang nakatala noon, na maaaring ibang araw).
-                [$rider, $riderPhone] = $riders[$waybill] ?? ['', ''];
-                $rider = self::riderName($rider);
-                $riderPhone = self::riderPhone($riderPhone);
+                // Ang rider: mula sa jnt_latest_scans, kung wala ay sa from_jnts ng waybill (scans()).
                 $vars = ['name' => trim((string) $o->fb_name) ?: trim((string) $o->receiver), 'item' => $o->item, 'cod' => $o->cod, 'waybill' => $waybill, 'page' => $page,
-                    'rider' => $rider, 'rider_phone' => $riderPhone, 'tracked_at' => isset($tracked[$waybill]) ? $now->toIso8601String() : null];
+                    'rider' => $scan['rider'] ?? '', 'rider_phone' => $scan['rider_phone'] ?? '', 'tracked_at' => $scan['checked_at'] ?? null];
+                if (!empty($scan['checked_at'])) $out['tracked']++;
                 $pick = $this->pick($days[$day - 1], $waybill, $vars);
                 [$status, $reason] = $pick === null ? ['no_config', $this->missingReason($days[$day - 1], $vars)]
                     : $this->readiness($o->botcake_psid, $missing[$this->settings->pageKey($page)] ?? self::REQUIRED);

@@ -128,3 +128,13 @@ Schedule::command('chatblast:auto')
     ->timezone('Asia/Manila')
     ->everyFiveMinutes()
     ->withoutOverlapping(30);
+
+// Kusang J&T track-sync (JntAutoTrackSync): kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload),
+// 06:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
+// kumukuha ng oras, kaya ang simula mula sa chatblast:auto sa parehong oras ay walang ginagawa. JNT_TRACK_SYNC_AUTO o
+// ang toggle sa /jnt/track-sync ang nag-o-on.
+Schedule::command('jnt:track-sync-auto')
+    ->timezone('Asia/Manila')
+    ->cron('20 2,6-23 * * *')
+    ->withoutOverlapping(60)
+    ->runInBackground();

@@ -26,7 +26,6 @@ use Illuminate\Support\Facades\DB;
 class ChatblastController extends Controller
 {
     public const PER_PAGE = 100;
-    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking ng "Refresh now" (ChatblastBuildJob), gaya ng dati sa web
     public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
     // "To send": ang ipapadala pa, anuman ang petsa. "History": ang naproseso na, ayon sa From/To (pagtingin lang).
     public const TO_SEND = ['ready', 'queued', 'sending'];

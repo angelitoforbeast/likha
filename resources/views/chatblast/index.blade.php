@@ -297,7 +297,7 @@
         if (b.status === 'done') {
             const r = b.result;
             notice(fmt(r.added) + ' new (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' no PSID, ' + fmt(r.no_config) + ' no config); ' + fmt(r.updated) + ' updated; J&T: '
-                + fmt(r.tracked) + ' tracked' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (next fetch or before sending)' : '') + '.', 'text-green-700');
+                + fmt(r.tracked) + ' with a scan from the track-sync.', 'text-green-700');
             countsAt = 0;
             load();
         } else {

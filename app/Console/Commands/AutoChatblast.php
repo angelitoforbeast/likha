@@ -8,10 +8,12 @@ use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
 use App\Services\ChatblastSchedule;
 use App\Services\ChatblastSender;
+use App\Services\Jnt\JntAutoTrackSync;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -31,6 +33,17 @@ class AutoChatblast extends Command
         // Ang 90 araw ng botcake_chats, isang beses kada araw: may server (Incepxion) na chatblast:auto lang ang nasa cron.
         try {
             BotcakeChat::pruneDaily();
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        // Ang kusang J&T track-sync: may server (Incepxion) na chatblast:auto lang ang nasa cron. Sinisimulan sa background
+        // (hanggang 40 minuto ito, hindi dapat maantala ang padala); ang command ang kumukuha ng oras, kaya ang kasabay na
+        // simula ng scheduler (Likha) ay walang ginagawa.
+        try {
+            if (JntAutoTrackSync::wanted()) {
+                Process::path(base_path())->run(escapeshellarg(PHP_BINARY) . ' artisan jnt:track-sync-auto > /dev/null 2>&1 &');
+            }
         } catch (\Throwable $e) {
             report($e);
         }
@@ -64,7 +77,7 @@ class AutoChatblast extends Command
             // Ang pumalyang pagkuha ng isang sequence ay hindi humaharang sa mga kasunod (gaya ng refresh sa itaas); ang
             // oras nito ay hindi naitatala, kaya susubok ulit sa susunod na takbo habang may bisa pa ang oras.
             try {
-                $r = $chatblast->build($c->kind, null, Chatblast::TRACK_BUDGET, $steps);
+                $r = $chatblast->build($c->kind, null, $steps);
             } catch (\Throwable $e) {
                 report($e);
                 $this->line($c->name . ': pumalya ang pagkuha; sa susunod na takbo.');
