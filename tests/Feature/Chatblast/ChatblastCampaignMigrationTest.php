@@ -24,12 +24,16 @@ class ChatblastCampaignMigrationTest extends ChatblastTestCase
         DB::table('chatblast_campaigns')->where('kind', 'delivering')->update(['days' => json_encode($days('Deliver', 5)), 'send_times' => json_encode(['09:15', '15:00'])]);
         $before = DB::table('chatblast_campaigns')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
 
-        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php']]);
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php',
+            'database/migrations/2026_10_19_100200_add_send_range_to_chatblast_campaigns.php',
+        ]]);
 
         $after = DB::table('chatblast_campaigns')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
         foreach ($before as $i => $row) {
             $this->assertSame($row, array_intersect_key($after[$i], $row), 'walang nabago sa dating column');
-            $this->assertSame([null, null, null], [$after[$i]['weekdays'], $after[$i]['step_times'], $after[$i]['daily_cap']]);
+            $this->assertSame([null, null, null, null], [$after[$i]['weekdays'], $after[$i]['step_times'], $after[$i]['daily_cap'], $after[$i]['send_range']],
+                'walang bagong oras; ang send_times ay pareho (sa itaas)');
         }
         $it = ChatblastCampaign::where('kind', 'in_transit')->sole();
         $this->assertCount(10, $it->days);
