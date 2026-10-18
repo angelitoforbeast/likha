@@ -536,6 +536,20 @@ class StaffFeedApiTest extends StaffActivityTestCase
         }
     }
 
+    public function test_an_individual_task_submitted_only_by_another_person_is_not_submitted_for_this_person(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $id = $this->checklistTask('Individual: sariling ulat', [$a, $b], ['scheduled_time' => '10:00', 'submission_type' => 'individual']);
+        $this->submittedAt($id, $b->id, '2026-10-16 10:30:00', ['approved']);
+
+        $staff = collect($this->lateAt('2026-10-16 11:00:00')->json('staff'))->keyBy('user_id');
+        $pick = fn ($u) => array_map(fn ($e) => [$e['submitted'], $e['submitted_at'], $e['verdict']], $staff[$u->id]['checklist_late_today']);
+
+        $this->assertSame([[false, null, null]], $pick($a));
+        $this->assertSame([[true, '10:30', 'approved']], $pick($b));
+    }
+
     public function test_S_051_14_no_note_photo_path_prompt_or_ai_text_anywhere_in_the_feed(): void
     {
         $a = $this->staff();

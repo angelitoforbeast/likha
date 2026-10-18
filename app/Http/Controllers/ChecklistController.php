@@ -14,6 +14,7 @@ use App\Services\ChecklistBadge;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -1127,10 +1128,30 @@ class ChecklistController extends Controller
     public function approvalCheck(Request $request, ChecklistSubmission $submission)
     {
         $this->authorizeReviewSubmission($submission);
-        if (!$this->canBypassCheckLimit($submission) && $submission->approvalLogs()->count() >= self::CHECK_LIMIT) {
-            $this->refuse(self::CHECK_LIMIT_MESSAGE, true);
+
+        // May limit: isang check lang kada submission ang tumatakbo, para hindi malampasan ng sabay-sabay na
+        // request ang bilang habang naghihintay pa sa AI ang nauna.
+        $lock = null;
+        if (!$this->canBypassCheckLimit($submission)) {
+            $lock = Cache::lock('checklist-approval:' . $submission->id, 60);
+            if (!$lock->get()) {
+                throw new HttpResponseException(response()->json(['ok' => false, 'message' => 'May approval check pang tumatakbo dito; hintayin munang matapos.'], 409));
+            }
+            if ($submission->approvalLogs()->count() >= self::CHECK_LIMIT) {
+                $lock->release();
+                $this->refuse(self::CHECK_LIMIT_MESSAGE, true);
+            }
         }
 
+        try {
+            return $this->runApprovalCheck($submission);
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    private function runApprovalCheck(ChecklistSubmission $submission)
+    {
         $submission->load(['task', 'files']);
         $task     = $submission->task;
         $imgFiles = $submission->files->filter(fn($f) => $f->isImage());

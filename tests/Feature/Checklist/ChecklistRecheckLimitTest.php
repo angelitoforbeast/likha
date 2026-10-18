@@ -61,8 +61,23 @@ class ChecklistRecheckLimitTest extends ChecklistTestCase
         Http::assertSentCount(2);
         $this->actingAs($this->mkt)->get(route('checklist.report', ['date' => '2026-10-16']))->assertOk()
             ->assertSee('canBypassChecks: false', false)
+            ->assertSee('data-check-locked', false)
             ->assertSee(self::LOCKED)
             ->assertDontSee('approval-override', false);
+    }
+
+    public function test_a_limited_check_is_refused_while_another_check_of_the_same_submission_runs(): void
+    {
+        $this->checks(1);
+        $running = \Illuminate\Support\Facades\Cache::lock('checklist-approval:' . $this->sub->id, 60);
+        $this->assertTrue($running->get());
+
+        $this->check($this->mkt)->assertStatus(409)->assertJson(['ok' => false]);
+        Http::assertNothingSent();
+
+        $running->release();
+        $this->check($this->mkt)->assertOk();
+        $this->assertSame(2, $this->approvalRows());
     }
 
     public function test_S_051_25_the_ceos_3rd_and_10th_checks_run(): void
@@ -93,6 +108,7 @@ class ChecklistRecheckLimitTest extends ChecklistTestCase
         Http::assertSentCount(1);
         $this->actingAs($oic)->get(route('checklist.report', ['date' => '2026-10-16']))->assertOk()
             ->assertSee('canBypassChecks: true', false)
+            ->assertDontSee('data-check-locked', false)
             ->assertSee('approval-override', false);
     }
 

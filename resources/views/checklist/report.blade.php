@@ -657,7 +657,7 @@
                         <div x-show="!approving && approvalError" class="flex items-center gap-1 text-xs text-red-500">
                           <span>⚠</span><span x-text="approvalError"></span>
                         </div>
-                        @include('checklist.partials.approval-limit')
+                        @include('checklist.partials.approval-limit', ['lockedNow' => !$canBypass && $approvalCount >= 2])
                         {{-- Empty --}}
                         <span x-show="!approving && !approval && !approvalError" class="text-gray-200 text-xs">—</span>
                       @endif
@@ -671,7 +671,7 @@
                                 :class="(analyzing || approving) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'"
                                 class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white transition font-medium whitespace-nowrap">
                           <span x-show="!analyzing && !approving"
-                                x-text="(analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze'"></span>
+                                x-text="(!canBypassChecks && approvalCount >= 2) ? '↻ Analysis lang' : ((analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze')"></span>
                           <span x-show="analyzing || approving" class="flex items-center gap-1">
                             <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
                               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
@@ -994,7 +994,7 @@
                           </div>
                         </div>
                         <div x-show="!approving && approvalError" class="flex items-center gap-1 text-xs text-red-500"><span>⚠</span><span x-text="approvalError"></span></div>
-                        @include('checklist.partials.approval-limit')
+                        @include('checklist.partials.approval-limit', ['lockedNow' => !$canBypass && $userApprovalCount >= 2])
                         <span x-show="!approving && !approval && !approvalError" class="text-gray-200 text-xs">—</span>
                       </td>
                       {{-- Analyze button --}}
@@ -1003,7 +1003,7 @@
                                 :disabled="analyzing || approving"
                                 :class="(analyzing || approving) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'"
                                 class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white transition font-medium whitespace-nowrap">
-                          <span x-show="!analyzing && !approving" x-text="(analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze'"></span>
+                          <span x-show="!analyzing && !approving" x-text="(!canBypassChecks && approvalCount >= 2) ? '↻ Analysis lang' : ((analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze')"></span>
                           <span x-show="analyzing || approving" class="flex items-center gap-1">
                             <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
                             Analyzing…
