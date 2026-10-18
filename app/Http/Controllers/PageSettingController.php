@@ -102,6 +102,12 @@ class PageSettingController extends Controller
             if ($provider . '.' . $key === 'botcake.template.shipping') {
                 return response()->json($this->refreshAfterSave($page, 'botcake.template.shipping', $grid) + ['status' => 'cleared', 'cell' => null]);
             }
+            // Binurang flow ID: kasama ang pangalan nito, para hindi ito magamit sa pagpili ng template.
+            if (BotcakeFlowNames::watches($provider . '.' . $key)) {
+                $names = $this->settings->pageQuery($page)->where('provider', $provider)->where('key', $key . '.name')->where('active', true)->get();
+                foreach ($names as $s) $this->settings->deactivate($s);
+                return response()->json(['status' => 'cleared', 'cell' => null, 'cells' => [$provider . '.' . $key . '.name' => null]]);
+            }
             return response()->json(['status' => 'cleared', 'cell' => null]);
         }
 

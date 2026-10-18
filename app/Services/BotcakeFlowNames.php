@@ -112,7 +112,9 @@ class BotcakeFlowNames
             } else {
                 $value = $key === $saved ? self::UNCHECKED . 'hindi natapos basahin ang listahan ng flows' : null;
             }
-            if ($value !== null) $written['botcake.' . $key . '.name'] = $this->write($page, $key . '.name', $value);
+            // Habang hinihintay ang Botcake, maaaring napalitan na ang ID ng ibang save: ang mas bagong request ang magsusulat.
+            if ($value === null || trim((string) $this->settings->get($page, 'botcake', $key)) !== $id) continue;
+            $written['botcake.' . $key . '.name'] = $this->write($page, $key . '.name', $value);
         }
 
         return $error;
@@ -193,6 +195,7 @@ class BotcakeFlowNames
                 return $n === 1 || $error !== 'kulang sa oras' ? [[], false, $error] : [$flows, false, null];
             }
             $list = $body['data']['flows'] ?? null;
+            if ($list === null && $n > 1) return [$flows, true, null]; // lampas sa huling page: data null
             if (!is_array($list) || !array_is_list($list)) return [[], false, 'Botcake: hindi listahan ang sagot'];
 
             $new = 0;
@@ -224,7 +227,7 @@ class BotcakeFlowNames
 
         $out = [];
         foreach ($list as $t) {
-            if (!is_array($t) || !is_string($t['name'] ?? null)) continue;
+            if (!is_array($t) || !is_string($t['name'] ?? null) || trim($t['name']) === '') continue;
             $text = '';
             $custom = false;
             foreach ((array) ($t['components'] ?? []) as $c) {
@@ -232,7 +235,7 @@ class BotcakeFlowNames
                 $text = is_string($c['text'] ?? null) ? $c['text'] : '';
                 $custom = self::hasCustomField($c['example'] ?? null);
             }
-            $out[] = ['name' => $t['name'], 'approved' => strtoupper((string) ($t['status'] ?? '')) === 'APPROVED',
+            $out[] = ['name' => trim($t['name']), 'approved' => strtoupper((string) ($t['status'] ?? '')) === 'APPROVED',
                 'body' => mb_substr(trim($text), 0, 2000), 'custom_field' => $custom];
         }
 

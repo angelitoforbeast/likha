@@ -464,7 +464,7 @@
         } catch (err) {
             marks.set(id, {text: '!', cls: 'text-red-600', title: 'Walang koneksyon: hindi nai-save.'});
         }
-        if (needsRender && !editing) render(); else repaint(ed.pk, ed.key);
+        if (needsRender && !editing) render(); else paintedBy(ed.key).forEach(k => repaint(ed.pk, k));
     }
 
     // ---- polling: ang binago ng iba, maliban sa cell na ine-edit ----
@@ -492,7 +492,7 @@
                 }
                 if (c.cell) row.cells[c.key] = c.cell; else delete row.cells[c.key];
                 row.info.botcake = !!(row.cells['botcake.page_id'] && row.cells['botcake.token']);
-                if (!structure) { repaint(c.page, c.key); refreshActions(c.page); }
+                if (!structure) { paintedBy(c.key).forEach(k => repaint(c.page, k)); refreshActions(c.page); }
             }
             for (const [pk, info] of Object.entries(data.info || {})) {
                 const row = rows.get(pk);
