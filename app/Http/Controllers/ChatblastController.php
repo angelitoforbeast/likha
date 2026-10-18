@@ -33,6 +33,9 @@ class ChatblastController extends Controller
     public const HISTORY = ['sent', 'failed', 'field_mismatch', 'skipped', 'no_psid', 'no_config', 'unknown'];
     private const MAX_DAYS = 92;
 
+    /** page => body ng shipping template, kinukuha minsan kada page kada request. */
+    private array $templates = [];
+
     public function __construct(private Chatblast $chatblast, private ChatblastSender $sender, private PageSettings $settings)
     {
     }
@@ -157,7 +160,34 @@ class ChatblastController extends Controller
             'created_at' => $at($m->created_at), 'queued_at' => $at($m->queued_at), 'sent_at' => $at($m->sent_at), 'updated_at' => $at($m->updated_at),
             'created_by' => $m->created_by ? ($names[$m->created_by] ?? 'user #' . $m->created_by) : 'system',
             'sent_by' => $m->sent_by ? ($names[$m->sent_by] ?? 'user #' . $m->sent_by) : null,
+            'customer_saw' => $this->customerSaw($m->page_name, (string) $m->text),
+            'botcake_url' => $this->botcakeUrl($m->page_name, $m->psid),
         ]);
+    }
+
+    /**
+     * Ang nakita ng customer sa Messenger: ang body ng shipping template ng page (botcake.template.shipping.text, mula sa
+     * Test token o sa pag-save ng flow) na ang {{1}} ay ang text ng row. Nakatala lang, walang tawag sa Botcake. Ang
+     * marker (nagsisimula sa "!": hindi nasuri, hindi approved) o walang body: ang text lang, may paalala.
+     * @return array{text: string, note: ?string}
+     */
+    private function customerSaw(string $page, string $text): array
+    {
+        $body = $this->templates[$page] ??= (string) $this->settings->get($page, 'botcake', 'template.shipping.text');
+        if (trim($body) === '' || str_starts_with($body, '!') || !str_contains($body, '{{1}}')) {
+            return ['text' => $text, 'note' => 'Template text unknown: run Test token on the page'];
+        }
+
+        return ['text' => str_replace('{{1}}', $text, $body), 'note' => null];
+    }
+
+    /** Ang "Open in Botcake" (services.botcake.inbox_url): kapag may PSID ang row at may botcake.page_id ang page. */
+    private function botcakeUrl(string $page, ?string $psid): ?string
+    {
+        $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
+        if (trim((string) $psid) === '' || $pageId === '') return null;
+
+        return strtr((string) config('services.botcake.inbox_url'), ['{page_id}' => rawurlencode($pageId), '{psid}' => rawurlencode((string) $psid)]);
     }
 
     /** "Kunin ang mga bago": para sa campaign ng filter, o lahat ng naka-on na campaign kapag walang napili. */
@@ -352,7 +382,9 @@ class ChatblastController extends Controller
             'id' => $m->id, 'at' => $m->created_at?->timezone('Asia/Manila')->format('m-d H:i'), 'page' => $m->page_name, 'kind' => $m->kind,
             'day' => $m->day, 'version' => $m->version, 'step' => self::step($m),
             'customer' => $m->fb_name, 'waybill' => $m->waybill, 'jnt' => $jnt ?? $m->jnt_status,
-            'psid_last4' => $m->psid ? mb_substr($m->psid, -4) : null, 'first_line' => strtok((string) $m->text, "\n") ?: '',
+            // Ang naipadala: ang unang linya ng nakita ng customer (template + text); ang iba: ang text ng row.
+            'psid_last4' => $m->psid ? mb_substr($m->psid, -4) : null,
+            'first_line' => strtok($m->status === 'sent' ? $this->customerSaw($m->page_name, (string) $m->text)['text'] : (string) $m->text, "\n") ?: '',
             'text' => $m->text, 'status' => $m->status, 'reason' => ChatblastReason::display($m->reason), 'attempts' => $m->attempts, 'http' => $m->last_http,
             'sent_at' => $m->sent_at?->timezone('Asia/Manila')->format('m-d H:i'), 'is_test' => $m->is_test,
         ];

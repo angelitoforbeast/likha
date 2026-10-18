@@ -96,6 +96,9 @@ return [
         'chatblast_daily_cap' => (int) env('BOTCAKE_CHATBLAST_DAILY_CAP', 3000),
         // /chatblast: ilang segundo pagkatapos ng send_flow bago ang susunod na mensahe sa parehong customer (page + PSID).
         'chatblast_customer_gap' => (int) env('BOTCAKE_CHATBLAST_CUSTOMER_GAP', 20),
+        // /chatblast "Open in Botcake": ang live chat ng page sa Botcake. {page_id} = botcake.page_id; {psid} = ang
+        // customer (kapag may kumpirmadong anyo ng URL na may customer). Hindi pa kumpirmado ang path: ayusin dito.
+        'inbox_url' => env('BOTCAKE_INBOX_URL', 'https://botcake.io/pages/{page_id}/live_chat'),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

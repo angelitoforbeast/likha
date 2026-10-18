@@ -347,6 +347,11 @@
         document.getElementById('panel-body').replaceChildren(
             m.reason ? el('div', {class: 'mb-2 px-2 py-1 rounded bg-amber-50 text-amber-900', text: m.reason}) : '',
             actions,
+            // Ang nakita ng customer sa Messenger (template + text), parang chat bubble; mula sa nakatala lang.
+            el('div', {class: 'text-xs text-gray-500', text: 'What the customer saw:'}),
+            el('div', {class: 'mb-1 flex'}, el('pre', {class: 'cb max-w-[90%] rounded-2xl rounded-bl-sm bg-gray-100 px-3 py-2 text-sm text-gray-900 font-sans', text: m.customer_saw.text})),
+            m.customer_saw.note ? el('div', {class: 'mb-1 text-xs text-amber-800', text: m.customer_saw.note}) : '',
+            m.botcake_url ? el('a', {href: m.botcake_url, target: '_blank', rel: 'noopener noreferrer', class: 'mb-2 inline-block text-xs text-blue-700 hover:underline', text: 'Open in Botcake ↗'}) : '',
             el('div', {class: 'text-xs text-gray-500', text: 'Full text:'}),
             el('pre', {class: 'cb bg-gray-50 border rounded p-2 mb-2', text: m.text || ''}),
             kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Sequence', CAMPAIGNS[m.kind] || m.kind), kv('Step', m.step), kv('J&T', m.jnt_status),
