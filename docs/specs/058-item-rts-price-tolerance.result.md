@@ -4,7 +4,7 @@
 
 One slice, medium risk, backend.
 
-- `app/Http/Controllers/OwnerPrivateController.php`, `itemSummary()`, at the J&T lookup (lines 2364-2378). The exact `$jntStatsMap[page||item||price]` read now sums the buckets at price − 1, price and price + 1 of the same page and canonical item (total, RTS and DEL). The rest is unchanged: transit is still the remainder (total − RTS − DEL), and the percentages come from the sums. When there is no bucket, the cell is still empty.
+- `app/Http/Controllers/OwnerPrivateController.php`, `itemSummary()`, at the J&T lookup (lines 2367-2379). The exact `$jntStatsMap[page||item||price]` read now sums the buckets at price − 1, price and price + 1 of the same page and canonical item (total, RTS and DEL). The rest is unchanged: transit is still the remainder (total − RTS − DEL), and the percentages come from the sums. When there is no bucket, the cell is still empty.
 - That lookup is the only place in `itemSummary()` that reads `$jntStatsMap`. All of the cell's and tooltip's `jnt_*` fields come from it.
 - The `$jntStatsMap` near line 4892 belongs to another endpoint, with its own cache. It does not feed this cell, so it was left alone.
 - The 60-day window and the campaign/expand numbers are unchanged.
