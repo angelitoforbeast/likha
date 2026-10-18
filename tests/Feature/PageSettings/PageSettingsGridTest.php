@@ -153,6 +153,27 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         }
     }
 
+    public function test_S_054_8_the_summary_bar_counts_from_the_loaded_grid_and_each_chip_filters_with_the_name_filter(): void
+    {
+        $res = $this->get('/page-settings')->assertOk()->assertSee('id="summary-bar"', false);
+
+        foreach (["['all', 'Pages', () => true]", "['orders', 'With orders', r => r.info.orders > 0]", "['invalid', 'Token invalid', r => state(r).invalid]",
+                  "['incomplete', 'Setup incomplete', r => state(r).incomplete]", "['flows', 'Flow problems', r => state(r).flows]",
+                  "['failed', 'Last sync failed', r => state(r).failed]",
+                  "const REQUIRED = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message', 'botcake.template.shipping'];",
+                  '.filter(r => (!q || r.name.toLowerCase().includes(q)) && chipFilter(r))',
+                  'chip = chip === key ? null : key;'] as $code) {
+            $res->assertSee($code, false);
+        }
+    }
+
+    public function test_S_054_9_the_page_cell_border_shows_the_row_state_and_the_legend_explains_it(): void
+    {
+        $this->get('/page-settings')->assertOk()
+            ->assertSee("st.invalid || st.failed ? 'border-l-red-500' : !r.info.orders ? 'border-l-transparent' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
+            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid or last sync failed']", false);
+    }
+
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void
     {
         $html = $this->get('/page-settings')->assertOk()->getContent();

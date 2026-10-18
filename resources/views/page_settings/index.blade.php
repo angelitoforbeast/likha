@@ -99,6 +99,9 @@
         ▸ next to a page: the full flow names, the full template, the sync details, the other keys and the history.
     </p>
 
+    {{-- Buod ng grid: bilang mula sa grid na nasa browser na (walang bagong query); bawat chip ay filter. --}}
+    <div id="summary-bar" class="flex flex-wrap items-center gap-2 mb-2 text-xs"></div>
+
     <div id="grid"
          class="bg-white rounded shadow overflow-auto max-h-[75vh]"
          data-grid-url="{{ route('page-settings.grid') }}"
@@ -171,8 +174,74 @@
     function sortedRows() {
         const q = document.getElementById('filter').value.trim().toLowerCase();
         return [...rows.values()]
-            .filter(r => !q || r.name.toLowerCase().includes(q))
+            .filter(r => (!q || r.name.toLowerCase().includes(q)) && chipFilter(r))
             .sort(gridOrder);
+    }
+
+    // ---- kalagayan ng row: ang summary bar at ang kulay sa gilid ng Page cell ----
+
+    // Kulang ang setup ng page na may order kapag wala ang isa sa mga ito.
+    const REQUIRED = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message', 'botcake.template.shipping'];
+    const FLOW_NAME = /^botcake\.flow\.[a-z0-9_]+\.name$/;
+
+    function state(r) {
+        const token = String(r.cells['botcake.token_status']?.value || '');
+        return {
+            invalid: token.startsWith('invalid'),
+            ok: token.startsWith('ok'),
+            failed: !!(r.info.last_sync && r.info.last_sync.failed),
+            incomplete: r.info.orders > 0 && REQUIRED.some(k => !r.cells[k]),
+            // Pulang linya ng flow: wala sa Botcake o bura na.
+            flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red'),
+        };
+    }
+
+    const CHIPS = [
+        ['all', 'Pages', () => true],
+        ['orders', 'With orders', r => r.info.orders > 0],
+        ['invalid', 'Token invalid', r => state(r).invalid],
+        ['incomplete', 'Setup incomplete', r => state(r).incomplete],
+        ['flows', 'Flow problems', r => state(r).flows],
+        ['failed', 'Last sync failed', r => state(r).failed],
+    ];
+    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid or last sync failed']];
+    let chip = null; // ang naka-pindot na chip; null = lahat
+
+    function chipFilter(r) {
+        const c = CHIPS.find(([key]) => key === chip);
+        return !c || c[2](r);
+    }
+
+    function summaryBar() {
+        const all = [...rows.values()];
+        put(document.getElementById('summary-bar'),
+            ...CHIPS.map(([key, label, test]) => el('button', {type: 'button', 'data-chip': key, 'aria-pressed': String(chip === key),
+                class: 'rounded-full border px-2 py-0.5 ' + (chip === key ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white hover:bg-gray-100 text-gray-700'),
+                title: chip === key ? 'Click again to show every page' : 'Show only these pages',
+                text: label + ' ' + all.filter(test).length})),
+            el('span', {class: 'ml-2 flex items-center gap-3 text-gray-500'}, LEGEND.map(([color, label]) =>
+                el('span', {class: 'flex items-center gap-1'}, [el('span', {class: 'inline-block w-1 h-3 ' + color}), label]))),
+        );
+    }
+
+    document.getElementById('summary-bar').addEventListener('click', e => {
+        const b = e.target.closest('[data-chip]');
+        if (!b) return;
+        const key = b.dataset.chip === 'all' ? null : b.dataset.chip;
+        chip = chip === key ? null : key;
+        render();
+    });
+
+    function borderOf(r) {
+        const st = state(r);
+        return st.invalid || st.failed ? 'border-l-red-500' : !r.info.orders ? 'border-l-transparent' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
+    }
+
+    // Pagkatapos magbago ang cell o info ng isang page: ang kulay ng row at ang mga bilang lang, hindi ang buong table.
+    function paintState(pk) {
+        const td = table.querySelector(`tr[data-pk="${CSS.escape(pk)}"] td.sticky-col`), r = rows.get(pk);
+        if (td && r) td.className = td.className.replace(/\bborder-l-(?:red-500|amber-400|green-500|transparent)\b/, borderOf(r));
+        summaryBar();
     }
 
     function ensureColumn(key, secret) {
@@ -231,12 +300,13 @@
         });
 
         table.replaceChildren(el('colgroup', {}, WIDTHS.map(w => el('col', {style: 'width: ' + w}))), el('thead', {}, head), el('tbody', {}, body.length ? body
-            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(WIDTHS.length), text: 'No pages yet. Use + Page.'}))));
+            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(WIDTHS.length), text: rows.size ? 'No pages match the filter.' : 'No pages yet. Use + Page.'}))));
+        summaryBar();
     }
 
     function pageTd(r) {
         const isOpen = open.has(r.key);
-        return el('td', {class: 'sticky-col ' + (r.info.orders ? 'bg-white' : 'bg-gray-50') + ' px-2 py-1 border-b border-r align-top font-medium break-words'}, [
+        return el('td', {class: 'sticky-col ' + (r.info.orders ? 'bg-white' : 'bg-gray-50') + ' px-2 py-1 border-b border-r border-l-4 ' + borderOf(r) + ' align-top font-medium break-words'}, [
             el('button', {type: 'button', class: 'toggle mr-1 text-gray-500 hover:text-gray-900', 'data-pk': r.key, 'aria-expanded': String(isOpen),
                 title: isOpen ? 'Hide details' : 'Show details', text: isOpen ? '▾' : '▸'}),
             r.name,
@@ -324,6 +394,7 @@
         const row = rows.get(pk), col = columns.find(c => c.key === key);
         if (td && row && col) paint(td, row, col);
         refreshDetail(pk);
+        paintState(pk);
     }
 
     function infoOc(r) { return String(r.info.orders || 0) + ' / ' + String(r.info.customers ?? 0); }
@@ -454,6 +525,7 @@
         tr.querySelector('[data-info="oc"]').textContent = infoOc(r);
         paintSync(tr.querySelector('[data-info="sync"]'), r);
         refreshDetail(pk);
+        paintState(pk);
         refreshSummary();
     }
 
