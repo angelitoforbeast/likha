@@ -86,7 +86,7 @@
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const cv = $('cv'), world = $('world'), svg = $('wires');
     const W = 220, NS = 'http://www.w3.org/2000/svg';
-    const OPEN = '{{', CLOSE = '}}'; // hindi isinusulat nang buo: may sariling echo ang Blade
+    const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
     const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], rules = {};
@@ -173,7 +173,7 @@
             p.addEventListener('pointerdown', ev => { ev.stopPropagation(); selWire = i; $('del-wire').classList.remove('hidden'); drawWires(); });
             svg.append(p);
         });
-        if (temp) { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', curve(temp.a, temp.b)); p.setAttribute('stroke-dasharray', '5 4'); svg.append(p); }
+        if (temp) { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', curve(temp.a, temp.b)); p.setAttribute('stroke-dasharray', '5 4'); p.style.pointerEvents = 'none'; svg.append(p); /* hindi sasaluhin ang pagbitaw */ }
     }
 
     // ---- pointer: pan, drag a step, wire from a port ----

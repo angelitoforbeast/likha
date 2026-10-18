@@ -151,7 +151,10 @@ class ChatbotEditorTest extends ChatblastTestCase
         $this->navLink('/chatblast', ['Marketing']);
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
         $this->get('/chatbot')->assertOk()->assertSee('Main')->assertSee('Replies are switched off');
-        $this->get("/chatbot/flows/{$flow->id}")->assertOk();
+        // Ang JS ng editor ay hindi nasisira ng sariling echo ng Blade (nangyari ito: naging walang laman ang OPEN at CLOSE).
+        $html = $this->get("/chatbot/flows/{$flow->id}")->assertOk()->getContent();
+        $this->assertStringContainsString("const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125);", $html);
+        $this->assertDoesNotMatchRegularExpression("/const OPEN = .,/", $html);
         $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $this->graph()])->assertOk();
     }
 
