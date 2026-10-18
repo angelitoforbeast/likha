@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\BotcakeChat;
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
@@ -27,6 +28,13 @@ class AutoChatblast extends Command
 
     public function handle(Chatblast $chatblast, ChatblastSender $sender, ChatblastSchedule $schedule): int
     {
+        // Ang 90 araw ng botcake_chats, isang beses kada araw: may server (Incepxion) na chatblast:auto lang ang nasa cron.
+        try {
+            BotcakeChat::pruneDaily();
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
         if (!Schema::hasTable('chatblast_campaigns')) return self::SUCCESS; // hindi pa na-migrate (mano-mano pagkatapos ng deploy)
 
         // Ang kusang refresh ng To send (kada oras sa :15): pagkuha lang, walang padala, kaya tumatakbo kahit naka-pause.

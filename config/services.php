@@ -99,6 +99,10 @@ return [
         // /chatblast "Open in Botcake": ang live chat ng page sa Botcake. {page_id} = botcake.page_id; {psid} = ang
         // customer (kapag may kumpirmadong anyo ng URL na may customer). Hindi pa kumpirmado ang path: ayusin dito.
         'inbox_url' => env('BOTCAKE_INBOX_URL', 'https://botcake.io/pages/{page_id}/live_chat'),
+        // /api/botcake/chat (JSON API block ng Botcake): ang shared key (header X-Chat-Key o param key); walang laman = 401
+        // sa lahat. chat_rate: ilang request kada minuto kada IP (iilang IP ng Botcake para sa ~170 page).
+        'chat_key'  => env('BOTCAKE_CHAT_KEY'),
+        'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

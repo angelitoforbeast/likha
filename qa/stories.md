@@ -1089,3 +1089,34 @@ Amendment 7. Test in `tests/Feature/PageSettings/PageSettingsGridTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-056.37 | Given /chatblast/page-settings, then the column reads "Chatblast flow" with one block (shipping flow ID, name, content); other flow slots with a value show under ▸ as "Other flow IDs (not used by chatblast)", editable; the content's {{1}} shows as "[message for the customer]" with "Filled per customer, see To send / History"; every empty editable value shows "+ set" with a dashed outline on hover | `test_S_056_37…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+## S-059 Customer chats from Botcake's JSON API block
+
+Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
+
+### S-059A Botcake sends each customer message to the website (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.1 | Given the chat key is set, when a request has no key, a wrong key, or the key is not set on the server, then it gets 401 with no detail and nothing is stored | `test_S_059_1…` (4 data sets) | |
+| S-059.2 | Given the right key in the `X-Chat-Key` header or the `key` param, when Botcake sends JSON, a form or GET query params, then it gets `{"ok":true}` and one row is stored with page id, PSID, name and message | `test_S_059_2…` (3 data sets) | |
+| S-059.3 | Given params named in any case or with an alias (`user_id`/`fb_id`, `text`/`last_input`/`last_user_input`, `full_name`) and unknown extra params, then the known fields are filled and the full payload is kept, without the key | `test_S_059_3…` | |
+| S-059.4 | Given a stored message, when the same message_id comes again, or the same page + PSID + message within 10 seconds, then it is not stored again (still `{"ok":true}`); after 10 seconds the same text is stored | `test_S_059_4…` | |
+| S-059.5 | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | |
+| S-059.6 | Given the per-IP limit, when one IP sends more than the limit in a minute, then it gets 429 | `test_S_059_6…` | |
+| S-059.7 | Given a request with neither PSID nor message (e.g. an empty test Send), then it gets `{"ok":true}` and nothing is stored | `test_S_059_7…` | |
+
+### S-059B The Chats page (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.8 | Given a role with /chatblast access, then /chatblast/chats lists the latest messages (time, page, customer, message) newest first and the Chatblast nav has "Chats"; a role without access gets 404 | `test_S_059_8…` | |
+| S-059.9 | Given messages on two pages and two days, when filtering by page, by date, or searching a name or a word of the text, then only the matching messages show | `test_S_059_9…` | |
+| S-059.10 | Given a customer, when their name is clicked, then their messages show oldest first, and no other customer's | `test_S_059_10…` | |
+| S-059.11 | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | |
+
+### S-059C Retention (P2)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.12 | Given chats older and newer than 90 days, when the prune runs (its command, or chatblast:auto once a day), then only the older ones are deleted | `test_S_059_12…` | |

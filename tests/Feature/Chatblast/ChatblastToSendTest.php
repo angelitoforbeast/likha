@@ -176,7 +176,7 @@ class ChatblastToSendTest extends ChatblastTestCase
     {
         $send = $this->get('/chatblast')->assertOk()->getContent();
         preg_match_all('#data-cb-nav="([^"]+)"#', $send, $m);
-        $this->assertSame(['To send', 'History', 'Messages', 'Sequences', 'Page settings'], $m[1]);
+        $this->assertSame(['To send', 'History', 'Messages', 'Sequences', 'Chats', 'Page settings'], $m[1]);
         $this->assertStringContainsString('data-cb-nav="To send" aria-current="page"', preg_replace('/\s+/', ' ', $send));
         foreach (['id="build"', 'id="send-selected"', 'id="send-filtered"', 'id="pause"', 'id="resume"', 'id="by-kind"'] as $tool) $this->assertStringContainsString($tool, $send);
         foreach (['name="from"', 'id="retry"'] as $tool) $this->assertStringNotContainsString($tool, $send);

@@ -57,6 +57,7 @@ use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
 use App\Http\Controllers\ChatblastCampaignController;
+use App\Http\Controllers\ChatblastChatController;
 use App\Http\Controllers\ChatblastController;
 use App\Http\Controllers\ChatblastMessageController;
 use App\Http\Controllers\BotcakeCustomersController;
@@ -249,6 +250,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::get('/history', [ChatblastController::class, 'history'])->name('history'); // History (naproseso na)
     Route::get('/list', [ChatblastController::class, 'list'])->name('list');
     Route::get('/messages/{id}', [ChatblastController::class, 'show'])->whereNumber('id')->name('show');
+    Route::get('/chats', [ChatblastChatController::class, 'index'])->name('chats');                     // Chats (mula sa Botcake)
+    Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');
     Route::post('/build', [ChatblastController::class, 'build'])->middleware('throttle:10,1,chatblast-build')->name('build');
     Route::post('/send', [ChatblastController::class, 'send'])->middleware('throttle:60,1,chatblast-send')->name('send');
     Route::post('/send-filtered', [ChatblastController::class, 'sendFiltered'])->middleware('throttle:10,1,chatblast-send-filtered')->name('send-filtered');

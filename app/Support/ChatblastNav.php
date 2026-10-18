@@ -5,8 +5,8 @@ namespace App\Support;
 use Illuminate\Support\Collection;
 
 /**
- * Ang nav ng Chatblast app (To send, History, Messages, Sequences, Page settings) at ang iisang Chatblast link sa main
- * nav ng Likha. Ang access ay galing sa /owner/nav-settings (NavAccess): /chatblast para sa unang apat, at ang link ng page
+ * Ang nav ng Chatblast app (To send, History, Messages, Sequences, Chats, Page settings) at ang iisang Chatblast link sa main
+ * nav ng Likha. Ang access ay galing sa /owner/nav-settings (NavAccess): /chatblast para sa unang lima, at ang link ng page
  * settings sa luma o bagong path nito.
  */
 class ChatblastNav
@@ -32,6 +32,7 @@ class ChatblastNav
             $items[] = ['label' => 'History', 'url' => '/chatblast/history', 'active' => request()->is('chatblast/history')];
             $items[] = ['label' => 'Messages', 'url' => '/chatblast/campaigns', 'active' => request()->is('chatblast/campaigns*')];
             $items[] = ['label' => 'Sequences', 'url' => '/chatblast/sequence', 'active' => request()->is('chatblast/sequence*')];
+            $items[] = ['label' => 'Chats', 'url' => '/chatblast/chats', 'active' => request()->is('chatblast/chats*')];
         }
         if (self::allowsPageSettings($role)) {
             $items[] = ['label' => 'Page settings', 'url' => '/chatblast/page-settings', 'active' => request()->is('chatblast/page-settings*')];
