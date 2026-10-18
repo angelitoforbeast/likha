@@ -34,6 +34,8 @@ class Chatblast
     public const LEGACY_CROSS = 'may naipadala na ngayong araw sa ibang campaign';
     public const LEGACY_CAMPAIGN_CAP = 'Naabot ang daily cap ng campaign sa page';
     public const LEGACY_RIDER_REASON = 'walang rider info';
+    public const LEGACY_NO_PSID = 'walang PSID ang order (hindi pa tugma sa Botcake customer)';
+    public const NO_PSID = 'the order has no PSID (not matched to a Botcake customer yet)';
 
     /** Ang kailangan ng page para makapagpadala (page_id para sa bawat API path). */
     public const REQUIRED = ['page_id', 'token', 'flow.shipping', 'field.message'];
@@ -524,9 +526,18 @@ class Chatblast
     private function readiness(?string $psid, array $missingKeys): array
     {
         if ($missingKeys) return ['no_config', 'missing ' . implode(', ', $missingKeys)];
-        if (trim((string) $psid) === '') return ['no_psid', 'the order has no PSID (not matched to a Botcake customer yet)'];
+        if (trim((string) $psid) === '') return ['no_psid', self::NO_PSID];
 
         return ['ready', null];
+    }
+
+    /** Ang dahilan ng readiness() sa dating anyo nito (Tagalog, bago ang English), o null kapag walang dating anyo. */
+    private static function legacyReadiness(?string $reason): ?string
+    {
+        if ($reason === self::NO_PSID) return self::LEGACY_NO_PSID;
+        if (str_starts_with((string) $reason, 'missing ') && !str_starts_with((string) $reason, 'missing {')) return 'walang ' . substr($reason, 8);
+
+        return null;
     }
 
     /** Ang mga no_psid / no_config na maaaring ready na (hindi ang kulang sa rider info: ang pagbago ng araw ang bahala). */
@@ -540,7 +551,9 @@ class Chatblast
                     if (self::isTextReason($row->reason)) continue; // ang pagbago ng mga araw ang bahala rito
                     $psid = trim((string) ($psids[$row->macro_output_id] ?? $row->psid)) ?: null;
                     [$status, $reason] = $this->readiness($psid, $missing[$this->settings->pageKey($row->page_name)] ?? self::REQUIRED);
-                    if ($status === $row->status && $reason === $row->reason && $psid === $row->psid) continue;
+                    // Ang dating (Tagalog) na anyo ng parehong dahilan ay hindi pagbabago: hindi isinusulat ulit, hindi bilang.
+                    $sameReason = $reason === $row->reason || self::legacyReadiness($reason) === $row->reason;
+                    if ($status === $row->status && $sameReason && $psid === $row->psid) continue;
                     $changed += BotcakeMessage::whereKey($row->id)->whereIn('status', ['no_psid', 'no_config'])
                         ->update(['status' => $status, 'reason' => $reason, 'psid' => $psid]);
                 }

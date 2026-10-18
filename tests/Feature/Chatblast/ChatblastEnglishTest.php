@@ -59,6 +59,30 @@ class ChatblastEnglishTest extends ChatblastTestCase
         $this->assertSame('Confirm first: auto sends by itself at the sequence times.', $err(['mode' => 'auto']));
     }
 
+    public function test_old_no_config_and_no_psid_rows_with_the_same_reason_in_tagalog_are_not_rewritten_or_counted(): void
+    {
+        $this->page('Page Dos', '1002', ['flow.shipping', 'field.message']);
+        $noPsid = $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', null, 'In Transit');
+        $noConfig = $this->shipped('Page Dos', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $yesterday = now()->subDay();
+        $row = fn ($order, string $page, string $status, ?string $psid, string $reason) => DB::table('botcake_messages')->insertGetId([
+            'page_name' => $page, 'macro_output_id' => $order->id, 'waybill' => $order->waybill, 'kind' => 'in_transit', 'day' => 1, 'psid' => $psid,
+            'text' => 'x', 'jnt_status' => 'In Transit', 'status' => $status, 'reason' => $reason, 'attempts' => 0, 'is_test' => false,
+            'dedupe_key' => $order->waybill . '|in_transit|1', 'created_at' => $yesterday, 'updated_at' => $yesterday]);
+        $a = $row($noPsid, 'Page Uno', 'no_psid', null, 'walang PSID ang order (hindi pa tugma sa Botcake customer)');
+        $b = $row($noConfig, 'Page Dos', 'no_config', 'psid-b', 'walang flow.shipping, field.message');
+
+        $this->assertSame(0, app(Chatblast::class)->build('in_transit', 1)['updated'], 'parehong dahilan: hindi bilang');
+        $this->assertSame(['walang PSID ang order (hindi pa tugma sa Botcake customer)', 'walang flow.shipping, field.message'],
+            [BotcakeMessage::find($a)->reason, BotcakeMessage::find($b)->reason], 'hindi isinulat ulit');
+        $this->assertTrue(BotcakeMessage::find($a)->updated_at->eq($yesterday) && BotcakeMessage::find($b)->updated_at->eq($yesterday));
+
+        // Ibang dahilan na (hal. kulang na lang ang field.message): isinusulat, sa English.
+        app(\App\Services\PageSettings::class)->set('Page Dos', 'botcake', 'flow.shipping', '5501');
+        $this->assertSame(1, app(Chatblast::class)->build('in_transit', 1)['updated']);
+        $this->assertSame('missing field.message', BotcakeMessage::find($b)->reason);
+    }
+
     public function test_rows_with_the_old_reasons_still_behave_the_same(): void
     {
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
