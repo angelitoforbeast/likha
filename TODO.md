@@ -563,3 +563,9 @@ Accepted, not fixed:
 - **The clean end of a resumed chain counts as "fresh" for the Sync lahat skip,** though that run started deep in the list and the top was last read when the chain began (up to a day earlier). Reason: the freshness rule counts clean runs and clean chain ends; the next nightly by date read covers the top from the chain's date minus 1 day.
 - **A chain that began before the migration has no newest date on its first run,** so its resumed end records its own newest from older batches and gives an older stop date once. Reason: the next read covers more, never less; it happens at most once per page.
 - **Missing tests (minor):** a failed `--full` between a by date run and its resume (the window case is covered), and a resume next to a run of another chain.
+## 054: /page-settings fits the screen (2026-10-18)
+
+- **The view tests S-054.2 to S-054.4 pin strings of the page's script, not behaviour** (the open detail row through a poll, a re-render and the filter; editing an other key in it). Reason: the project has no JS test harness (adding one is a new dependency); the headless browser check in the result covers these cases.
+- **A key added with "+ Column" shows only in the ▸ detail rows,** which are closed by default; the notice now says so. Reason: the owner's layout puts every non-known key in the detail row.
+- **The "Template: …" line under the shipping flow is gone;** the template is the next line of the same Flows cell. `paintedBy()` still repaints the shipping flow cell when the template changes. Reason: harmless extra repaint; left to keep the change small.
+- **The ⋯ history button of a cell is still mouse-only (shown on hover);** keyboard users reach history through the History links in the ▸ detail row. Reason: same as before this change; showing it on focus was dropped in review because it was not asked for.
