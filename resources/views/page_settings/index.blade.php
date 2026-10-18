@@ -202,6 +202,7 @@
 
     const CHIPS = [
         ['all', 'Pages', () => true],
+        ['ready', 'Ready', r => borderOf(r) === 'border-l-green-500'],
         ['orders', 'With orders', r => r.info.orders > 0],
         ['invalid', 'Token invalid', (r, st) => st.invalid],
         ['incomplete', 'Setup incomplete', (r, st) => st.incomplete],

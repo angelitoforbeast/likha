@@ -1099,3 +1099,13 @@ Spec 060. Test in `tests/Feature/Chatblast/ChatblastAppTest.php`; the scrolling 
 | S-060.1 | Given any of the five Chatblast pages, then the page is one full-height column whose data area is its only scroll container (one `cb-scroll`), with the top bar and page header outside it; on To send, History and Page settings that area holds the table, whose column header row sticks to its top | `test_S_060_1…` (5 data sets) | Passed · 2026-10-18 · auto |
 | S-060.2 | Given a table page, when the rows are scrolled at 1366 or 1280 px, then the top bar, the page header with its filters, chips and buttons, and the column header row stay in place, the page has no horizontal scroll, and a row still opens its details modal | browser check | Passed · 2026-10-18 · headless browser |
 | S-060.3 | Given Messages or Sequences (cards), when the cards are scrolled, then the top bar and the page header with its filters stay in place | browser check | Passed · 2026-10-18 · headless browser |
+
+### S-060A A short fixed block, and a Ready chip on Page settings (P1)
+
+Amendment 1. Tests in `tests/Feature/Chatblast/ChatblastAppTest.php` and `tests/Feature/PageSettings/PageSettingsGridTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.4 | Given To send or History, then the fixed block is the title with its description, one filter row and one chip row; the chip row holds the chips, the "Sending: …" status at the right in small text and a "Test PSID" button at its right end; there is no Test PSID disclosure | `test_S_060_4…` (2 data sets) | Passed · 2026-10-18 · auto |
+| S-060.5 | Given To send, when "Test PSID" is clicked, then the picker opens in a modal (search, pick, current PSID) and closes with ✕, Escape or a click outside | browser check | Passed · 2026-10-18 · headless browser |
+| S-060.6 | Given Page settings, then a "Ready N" chip comes right after "Pages N" and counts the pages with the green row border; clicking it shows only those pages, clicking it again shows every page, and it combines with the name search | `test_S_060_6…` and the browser check | Passed · 2026-10-18 · auto + headless browser |

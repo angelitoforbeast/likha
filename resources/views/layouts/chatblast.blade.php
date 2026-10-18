@@ -74,12 +74,12 @@
     </div>
 </header>
 
-<main class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
-    <div class="mb-5 flex shrink-0 flex-wrap items-start justify-between gap-3">
+<main class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6">
+    <div class="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
             <h1 class="text-2xl font-semibold">@yield('heading')</h1>
             @hasSection('description')
-                <p class="mt-1 max-w-5xl text-sm text-slate-500">@yield('description')</p>
+                <p class="mt-0.5 max-w-5xl text-sm text-slate-500">@yield('description')</p>
             @endif
         </div>
         <div class="flex flex-wrap items-center gap-4 pt-1 text-sm">@yield('actions')</div>

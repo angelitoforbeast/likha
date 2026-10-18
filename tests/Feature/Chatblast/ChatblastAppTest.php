@@ -147,6 +147,29 @@ class ChatblastAppTest extends ChatblastTestCase
         }
     }
 
+    /** @dataProvider listPages */
+    public function test_S_060_4_the_chip_row_holds_the_status_and_a_test_psid_button_that_opens_a_modal(string $url): void
+    {
+        $this->actingAs($this->user());
+
+        $html = $this->get($url)->assertOk()->getContent();
+
+        // Iisang hanay: ang mga chip, ang "Sending: …" sa kanan, at ang Test PSID na button sa dulo.
+        $this->assertMatchesRegularExpression('#data-cb-chip-row.*id="chips".*id="state".*id="test-psid-open"#s', $html);
+        $this->assertSame(1, substr_count($html, 'data-cb-chip-row'));
+        $chipRow = substr($html, strpos($html, 'data-cb-chip-row'), strpos($html, 'id="test-psid-open"') - strpos($html, 'data-cb-chip-row'));
+        $this->assertStringNotContainsString('<table', $chipRow);
+        // Ang picker ay nasa modal; wala nang disclosure na nagpapahaba sa itaas.
+        $this->assertMatchesRegularExpression('#id="test-psid-modal"[^>]*role="dialog"#', $html);
+        $this->assertStringContainsString('id="test-psid-form"', $html);
+        $this->assertStringNotContainsString('<details', $html);
+    }
+
+    public static function listPages(): array
+    {
+        return ['to send' => ['/chatblast'], 'history' => ['/chatblast/history']];
+    }
+
     public function test_S_056_5_the_chatblast_nav_shows_only_what_the_role_may_open(): void
     {
         $this->navLink('page_settings', 'Page Settings', '/page-settings', ['Marketing']);
