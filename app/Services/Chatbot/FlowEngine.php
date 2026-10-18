@@ -16,6 +16,7 @@ use Throwable;
 class FlowEngine
 {
     public const MAX_STEPS = 100;
+    public const MAX_AI_CALLS = 10;
 
     public function __construct(private ChatbotAi $ai)
     {
@@ -60,6 +61,11 @@ class FlowEngine
                 break;
             }
             $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => $port, 'note' => $r['note'] ?? null];
+            if (!empty($r['stop'])) {
+                $run->stopped = $r['note'] ?? 'Stopped.';
+                Log::warning('chatbot: run stopped', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId, 'node' => $node['id'], 'note' => $run->stopped]);
+                break;
+            }
             if (!empty($r['suspend']) || $port === null) break;
 
             $current = $edges[$node['id'] . ':' . $port] ?? null;
@@ -205,6 +211,9 @@ class FlowEngine
 
     private function ai(array $node, array $c, FlowRun $run, Outbox $outbox): array
     {
+        // Hangganan ng gastos: ang loop na may AI ay hihinto pagkatapos ng ilang tawag sa isang takbo.
+        if ($run->aiCalls >= self::MAX_AI_CALLS) return ['port' => null, 'stop' => true, 'note' => 'Stopped: more than ' . self::MAX_AI_CALLS . ' AI calls in one run.'];
+        $run->aiCalls++;
         $messages = [];
         $system = trim($run->text((string) ($c['system'] ?? '')));
         if ($system !== '') $messages[] = ['role' => 'system', 'content' => $system];

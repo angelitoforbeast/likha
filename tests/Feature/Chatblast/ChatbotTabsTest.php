@@ -137,7 +137,7 @@ class ChatbotTabsTest extends ChatblastTestCase
             ['from' => 'n1', 'port' => 'next', 'to' => 'n2'], ['from' => 'n2', 'port' => 'next', 'to' => 'n3'],
             ['from' => 'n3', 'port' => 'success', 'to' => 'n4'], ['from' => 'n4', 'port' => 'next', 'to' => 'n5'],
         ]])]);
-        app(PageSettings::class)->set('Page Uno', 'chatbot', 'flow', 'Main COD');
+        app(\App\Services\Chatbot\ChatbotPage::class)->link('Page Uno', $flow);
         (new CustomerFields(1001, 7001))->set('CHAT STATUS', 'REAL CUSTOMER');
         $this->actingAs($this->user());
 
@@ -147,7 +147,7 @@ class ChatbotTabsTest extends ChatblastTestCase
         $this->assertSame('Main COD', $res['flow']);
         $this->assertSame(['n1', 'n2', 'n3', 'n4', 'n5'], array_column($res['path'], 'node'));
         $this->assertSame([[['type' => 'text', 'text' => 'AI says hi']], [['type' => 'text', 'text' => 'Status LOOP 1']]], array_column($res['sends'], 'messages'));
-        $this->assertSame([['TEST', 'AI says hi']], array_column($res['sheet_rows'], 'row'));
+        $this->assertSame([["'TEST", "'AI says hi"]], array_column($res['sheet_rows'], 'row'));
         $this->assertSame(['chat status' => 'LOOP 1', 'gpt input' => 'AI says hi'], $res['fields']);
         Http::assertSentCount(1);
         Http::assertSent(fn (HttpRequest $r) => str_contains($r->url(), 'api.openai.com'));

@@ -33,7 +33,7 @@ class ChatbotAi
 
         $text = trim((string) $res->json('choices.0.message.content', ''));
         if (!$res->successful()) {
-            return ['ok' => false, 'text' => '', 'error' => 'OpenAI refused (HTTP ' . $res->status() . '): ' . mb_substr((string) $res->json('error.message', ''), 0, 150)];
+            return ['ok' => false, 'text' => '', 'error' => 'OpenAI refused (HTTP ' . $res->status() . ').']; // walang mensahe ng OpenAI: maaaring may bahagi ng key
         }
         if ($text === '') return ['ok' => false, 'text' => '', 'error' => 'OpenAI gave an empty answer.'];
 

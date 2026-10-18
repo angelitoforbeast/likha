@@ -310,7 +310,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');
     Route::post('/customer-fields', [\App\Http\Controllers\ChatbotTabsController::class, 'customerFields'])->middleware('throttle:60,1,chatbot-customer-fields')->name('customer-fields');
     Route::get('/replies', [\App\Http\Controllers\ChatbotTabsController::class, 'replies'])->name('replies');
-    Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->name('replies.data');
+    Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->middleware('throttle:60,1,chatbot-replies')->name('replies.data');
     Route::get('/replies/{id}', [\App\Http\Controllers\ChatbotTabsController::class, 'reply'])->whereNumber('id')->name('replies.show');
     Route::get('/test', [\App\Http\Controllers\ChatbotTabsController::class, 'test'])->name('test');
     Route::post('/test/send', [\App\Http\Controllers\ChatbotTabsController::class, 'testSend'])->middleware('throttle:30,1,chatbot-test')->name('test.send');

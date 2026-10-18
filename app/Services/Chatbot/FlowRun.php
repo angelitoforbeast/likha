@@ -15,6 +15,7 @@ class FlowRun
     /** @var array<int, array{node: string, sheet: string, tab: string, row: array, status: string, error: ?string}> */
     public array $sheetRows = [];
     public ?string $stopped = null; // bakit huminto nang maaga (hal. limit, error)
+    public int $aiCalls = 0;
 
     public function __construct(
         public readonly int $flowId,

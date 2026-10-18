@@ -119,7 +119,7 @@ class ChatbotEditorTest extends ChatblastTestCase
         $this->postJson('/chatbot/flows', ['name' => 'main flow'])->assertStatus(422); // ulit ang pangalan
         $this->postJson('/chatbot/flows', ['name' => ''])->assertStatus(422);
 
-        app(PageSettings::class)->set('Page Uno', 'chatbot', 'flow', 'Main Flow');
+        $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'flow', 'value' => 'Main Flow'])->assertOk();
         $this->postJson("/chatbot/flows/{$id}/rename", ['name' => 'Main COD'])->assertOk();
         $this->assertSame('Main COD', ChatbotFlow::find($id)->name);
         $this->assertSame('Main COD', app(PageSettings::class)->get('Page Uno', 'chatbot', 'flow'), 'ang mga page na gumagamit ay sumusunod sa bagong pangalan');

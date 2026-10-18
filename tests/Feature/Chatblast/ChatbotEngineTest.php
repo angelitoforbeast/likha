@@ -144,7 +144,7 @@ class ChatbotEngineTest extends ChatblastTestCase
         $r = $this->go($flow, '2 pcs', 13);
         $this->assertSame(['n1', 'n3', 'n2', 'n12', 'n13', 'n14', 'n15', 'n16', 'n99'], array_column($r->path, 'node'));
         $this->assertSame([['node' => 'n15', 'sheet' => '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'tab' => 'Orders',
-            'row' => ['2026-10-19', 'Page Uno', 'Ana Cruz', '09171234567', 'Hi, Juan, 09171234567, Manila, 2 pcs', 'Hello! This is our product.', 'Manila, 2, 998', '499'],
+            'row' => ["'2026-10-19", "'Page Uno", "'Ana Cruz", "'09171234567", "'Hi, Juan, 09171234567, Manila, 2 pcs", "'Hello! This is our product.", "'Manila, 2, 998", "'499"],
             'status' => 'test', 'error' => null]], $r->sheetRows);
         $this->assertSame('LOOP 3', $this->fields()['chat status']);
 
@@ -258,7 +258,7 @@ class ChatbotEngineTest extends ChatblastTestCase
             'variable that looks like a formula' => ['{{last_input}}', '=IMPORTXML("x")', "'=IMPORTXML(\"x\")"],
             'plus, minus, at'                    => ['{{last_input}}', '-5+cmd', "'-5+cmd"],
             'text before the variable'           => ['={{last_input}}', '1+1', "'=1+1"],
-            'variable that is plain text'        => ['Order: {{last_input}}', '=x', 'Order: =x'],
+            'variable that is plain text'        => ['Order: {{last_input}}', '=x', "'Order: =x"],
             'no variable: kept as the author typed' => ['=TODAY()', 'ignored', '=TODAY()'],
         ];
     }

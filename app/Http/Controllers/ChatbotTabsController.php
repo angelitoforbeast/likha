@@ -131,7 +131,9 @@ class ChatbotTabsController extends Controller
     public function test()
     {
         $this->checkAccess();
-        $flows = DB::table('page_settings')->where('provider', 'chatbot')->where('key', 'flow')->where('active', true)->pluck('value', 'page_name');
+        $names = ChatbotFlow::pluck('name', 'id');
+        $flows = DB::table('page_settings')->where('provider', 'chatbot')->where('key', 'flow_id')->where('active', true)->pluck('value', 'page_name')
+            ->map(fn ($id) => $names[(int) $id] ?? null)->filter();
 
         return view('chatbot.test', [
             'pages' => $this->pages(), 'flows' => ChatbotFlow::orderBy('name')->pluck('name', 'id'), 'pageFlows' => $flows,
@@ -189,9 +191,10 @@ class ChatbotTabsController extends Controller
 
     private function pageFlow(string $page): ?ChatbotFlow
     {
-        $name = trim((string) $this->settings->get($page, 'chatbot', 'flow'));
+        // Ang flow na nakatali sa page (dropdown), kahit naka-Off ang bot: ang Test ay para subukan bago i-On.
+        $id = trim((string) $this->settings->get($page, 'chatbot', 'flow_id'));
 
-        return $name === '' ? null : ChatbotFlow::where('name', $name)->first();
+        return ctype_digit($id) ? ChatbotFlow::find((int) $id) : null;
     }
 
     // ---- Customer fields ----

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Cache;
 class ChatbotRunner
 {
     public const LOCK_SECONDS = 300; // mas mahaba sa pinakamahabang takbo (hanggang 100 hakbang, ilang AI)
+    public const STALE_MINUTES = 30;  // kapareho ng retryUntil ng RunChatbotFlow
 
     public function __construct(private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox)
     {
@@ -34,12 +35,18 @@ class ChatbotRunner
             $fields = new CustomerFields((int) $chat->page_id, (int) $chat->psid);
             $last = (int) $fields->get(CustomerFields::LAST_CHAT);
             if ($chatId <= $last) return 'done';
+            // Unang takbo para sa customer na ito: ang chat na ito lang. Ang mga naunang chat (bago naitali ang flow, o
+            // habang walang flow) ay hindi na sinasagot.
+            if ($last === 0) $last = $chatId - 1;
 
             $pending = BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)
                 ->where('id', '>', $last)->where('id', '<=', $chatId)->orderBy('id')->get();
             $botfields = null;
+            $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {
                 $fields->set(CustomerFields::LAST_CHAT, (string) $c->id);
+                // Ang chat na naghintay nang matagal (hal. patay ang worker) ay hindi na sinasagot: luma na ang usapan.
+                if ($c->received_at && $c->received_at->lt($staleBefore)) continue;
                 $flow = $this->page->flow((string) $c->page_name);
                 if (!$flow || !is_array($flow->graph)) continue;
                 $botfields ??= $this->page->botfields((string) $c->page_name);

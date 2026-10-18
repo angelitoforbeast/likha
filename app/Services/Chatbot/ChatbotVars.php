@@ -25,16 +25,17 @@ class ChatbotVars
     }
 
     /**
-     * Isang cell ng sheet row: gaya ng interpolate(), pero kapag may variable ang template at ang nabuo ay nagsisimula
-     * na parang formula (= + - @), may apostrophe sa unahan: ang laman ng customer o ng AI ay hindi kailanman formula.
-     * Ang template na walang variable ay iniiwan gaya ng isinulat ng gumawa ng flow (hal. =TODAY()).
+     * Isang cell ng sheet row: gaya ng interpolate(), at kapag may variable ang template, laging may apostrophe sa
+     * unahan (USER_ENTERED): ang laman ng customer o ng AI ay hindi kailanman formula, at hindi rin ginagawang numero o
+     * petsa ng Google (hal. 09171234567 ay nananatiling may 0). Ang template na walang variable ay iniiwan gaya ng
+     * isinulat ng gumawa ng flow (hal. =TODAY()).
      */
     public static function sheetCell(string $template, array $vars): string
     {
         $cell = (string) preg_replace_callback(self::PATTERN, fn ($m) => (string) ($vars[self::norm($m[1])] ?? ''), $template, -1, $count);
         if ($count === 0) return $cell;
 
-        return preg_match('/^\s*[=+\-@]/u', $cell) ? "'" . $cell : $cell;
+        return "'" . $cell;
     }
 
     /**

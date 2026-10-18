@@ -36,7 +36,7 @@ class ChatbotFlowController extends Controller
     public function index()
     {
         $this->checkAccess();
-        $usedBy = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', 'flow')->where('active', true)->get(['page_name', 'value'])
+        $usedBy = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', 'flow_id')->where('active', true)->get(['page_name', 'value', 'is_secret'])
             ->groupBy(fn ($s) => (string) $s->plainValue())->map(fn ($g) => $g->pluck('page_name')->sort()->values()->all());
 
         return view('chatbot.flows', [
@@ -67,7 +67,7 @@ class ChatbotFlowController extends Controller
         if ($error = $this->nameError($name, $flow->id)) return response()->json(['error' => $error], 422);
 
         DB::transaction(function () use ($flow, $name) {
-            foreach ($this->pagesUsing($flow->name) as $page) $this->settings->set($page, ChatbotFields::PROVIDER, 'flow', $name, false, Auth::id());
+            foreach ($this->pagesUsing($flow->id) as $page) $this->settings->set($page, ChatbotFields::PROVIDER, 'flow', $name, false, Auth::id());
             $flow->update(['name' => $name, 'updated_by' => Auth::id()]);
         });
 
@@ -92,7 +92,7 @@ class ChatbotFlowController extends Controller
     {
         $this->checkAccess();
         $flow = ChatbotFlow::findOrFail($id);
-        $pages = $this->pagesUsing($flow->name);
+        $pages = $this->pagesUsing($flow->id);
         if ($pages) {
             return response()->json(['error' => implode(', ', $pages) . ' ' . (count($pages) === 1 ? 'uses' : 'use') . ' this flow. Pick another flow for ' . (count($pages) === 1 ? 'it' : 'them') . ' first.'], 422);
         }
@@ -153,11 +153,10 @@ class ChatbotFlowController extends Controller
         return array_values(array_unique(array_merge(self::RUN_VARS, array_column($this->fields->columns(), 'label'), $customer)));
     }
 
-    /** @return array<int, string> ang mga page na ang FLOW ay ang pangalang ito */
-    private function pagesUsing(string $name): array
+    /** @return array<int, string> ang mga page na nakatali sa flow na ito (ayon sa id, gaya ng takbo) */
+    private function pagesUsing(int $id): array
     {
-        return PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', 'flow')->where('active', true)->get(['page_name', 'value'])
-            ->filter(fn ($s) => (string) $s->plainValue() === $name)->pluck('page_name')->unique()->sort()->values()->all();
+        return app(\App\Services\Chatbot\ChatbotPage::class)->pagesUsing($id);
     }
 
     private function name(Request $request): string

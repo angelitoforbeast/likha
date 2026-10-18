@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Schema;
 class ChatbotFields
 {
     public const PROVIDER = 'chatbot';
-    public const RESERVED = ['active'];
+    public const RESERVED = ['active', 'flow_id']; // flow_id: ang flow na pinili sa dropdown (id), system lang
     public const ADDED_SETTING = 'chatbot.columns'; // app_settings: JSON {key: label}
     public const MAX_VALUE = 10000;
     public const MAX_ADDED = 200; // hanggang ilang column ang maidadagdag sa "+ Column" (walang tanggalan sa screen)

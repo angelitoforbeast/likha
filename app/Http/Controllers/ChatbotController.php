@@ -107,6 +107,16 @@ class ChatbotController extends Controller
             return response()->json(['error' => 'Use an image link that starts with http:// or https://.'], 422);
         }
 
+        // FLOW: ang pinili sa dropdown ay itinatali ayon sa id (chatbot.flow_id), para ang FLOW text lang ay hindi tumakbo.
+        if ($key === 'flow') {
+            $had = $this->settings->get($page, ChatbotFields::PROVIDER, 'flow');
+            $flow = $value === '' ? null : \App\Models\ChatbotFlow::where('name', $value)->first();
+            app(\App\Services\Chatbot\ChatbotPage::class)->link($page, $flow, Auth::id());
+            $status = $flow ? ($had === $flow->name ? 'linked' : 'created') : ($had === null ? 'unchanged' : 'cleared');
+
+            return response()->json(['status' => $status, 'value' => $flow?->name]);
+        }
+
         if ($value === '') {
             $actives = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key)->where('active', true)->get();
             foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());

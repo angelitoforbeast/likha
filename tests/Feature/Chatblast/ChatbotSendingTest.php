@@ -7,6 +7,7 @@ use App\Models\BotcakeChat;
 use App\Models\BotcakePsid;
 use App\Models\ChatbotFlow;
 use App\Models\ChatbotReply;
+use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotRunner;
 use App\Services\Chatbot\ChatbotSheet;
 use App\Services\Chatbot\CustomerFields;
@@ -56,7 +57,7 @@ class ChatbotSendingTest extends ChatblastTestCase
     private function flow(array $nodes, array $edges, string $name = 'Main'): ChatbotFlow
     {
         $flow = ChatbotFlow::create(['name' => $name, 'graph' => FlowGraph::clean(['nodes' => $nodes, 'edges' => $edges])]);
-        app(PageSettings::class)->set('Page Uno', 'chatbot', 'flow', $name);
+        app(ChatbotPage::class)->link('Page Uno', $flow);
 
         return $flow;
     }
@@ -111,7 +112,7 @@ class ChatbotSendingTest extends ChatblastTestCase
         $this->assertSame([], $this->rows);
         $this->assertSame([['send', 'skipped', 'Replies are switched off'], ['sheet', 'skipped', 'Replies are switched off']],
             ChatbotReply::orderBy('id')->get()->map(fn ($r) => [$r->kind, $r->status, $r->error])->all());
-        $this->assertSame(['sheet' => '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'tab' => 'Orders', 'row' => ['Hello']], ChatbotReply::where('kind', 'sheet')->sole()->content);
+        $this->assertSame(['sheet' => '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'tab' => 'Orders', 'row' => ["'Hello"]], ChatbotReply::where('kind', 'sheet')->sole()->content);
         $this->assertSame('LOOP 1', (new CustomerFields(1001, 7001))->get('status'), 'ang takbo ay nangyayari pa rin');
     }
 
@@ -128,7 +129,7 @@ class ChatbotSendingTest extends ChatblastTestCase
 
         app(ChatbotRunner::class)->handle($this->chat('=HYPERLINK("x")')->id);
 
-        $this->assertSame([['1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'Orders', ['Ana Cruz', "'=HYPERLINK(\"x\")"]]], $this->rows);
+        $this->assertSame([['1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'Orders', ["'Ana Cruz", "'=HYPERLINK(\"x\")"]]], $this->rows);
         $this->assertSame([['sheet', 'sent', null], ['send', 'sent', null], ['send', 'failed', 'Botcake said "Outside the 24h window" (HTTP 200)']],
             ChatbotReply::orderBy('id')->get()->map(fn ($r) => [$r->kind, $r->status, $r->error])->all());
         $this->assertNull((new CustomerFields(1001, 7001))->get('after'), 'huminto ang takbo sa pumalyang padala');
@@ -150,7 +151,8 @@ class ChatbotSendingTest extends ChatblastTestCase
         $post('with a flow');
         Queue::assertPushedOn('chatbot', RunChatbotFlow::class, fn ($job) => $job->chatId === BotcakeChat::where('message', 'with a flow')->value('id'));
 
-        $s->set('Page Uno', 'chatbot', 'flow', 'No Such Flow');
+        app(ChatbotPage::class)->link('Page Uno', null);
+        $s->set('Page Uno', 'chatbot', 'flow', 'No Such Flow'); // FLOW text lang, walang flow_id: walang takbo
         $post('flow name unknown');
         Queue::assertPushed(RunChatbotFlow::class, 1);
     }
@@ -159,6 +161,7 @@ class ChatbotSendingTest extends ChatblastTestCase
     {
         Http::fake([self::SEND => Http::response(['success' => true])]);
         $this->greeting();
+        app(ChatbotRunner::class)->handle($this->chat('hello')->id); // nakausap na ng bot ang customer (may marker na)
         $first = $this->chat('first');
         $second = $this->chat('second');
         $other = $this->chat('other customer', '7002');
@@ -169,7 +172,7 @@ class ChatbotSendingTest extends ChatblastTestCase
         (new RunChatbotFlow($other->id))->handle(app(ChatbotRunner::class));
 
         $texts = ChatbotReply::orderBy('id')->get()->map(fn ($r) => [$r->psid, $r->content[1]['text']])->all();
-        $this->assertSame([[7001, 'You said: first'], [7001, 'You said: second'], [7002, 'You said: other customer']], $texts);
+        $this->assertSame([[7001, 'You said: hello'], [7001, 'You said: first'], [7001, 'You said: second'], [7002, 'You said: other customer']], $texts);
         $this->assertSame((string) $second->id, (new CustomerFields(1001, 7001))->get(CustomerFields::LAST_CHAT));
     }
 
