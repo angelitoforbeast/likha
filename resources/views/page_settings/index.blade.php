@@ -406,9 +406,20 @@
         const out = [];
         if (!opts.some(isCandidate) && value === '') out.push(el('div', {class: 'text-xs text-red-600', text: GUIDE[col.key]}));
         // Ang flow na wala sa Botcake ay may sariling pulang linya na ("Not in Botcake", mula sa pangalan nito).
-        if (value !== '' && !item && !(row.cells[col.key + '.name']?.tone === 'red')) out.push(el('div', {class: 'text-xs text-red-600', text: '(not in Botcake list)'}));
+        // Ang message field ay may sariling "· (not in Botcake list)" sa linya ng ID (fieldName).
+        if (value !== '' && !item && col.key !== FIELD_KEY && !(row.cells[col.key + '.name']?.tone === 'red')) out.push(el('div', {class: 'text-xs text-red-600', text: '(not in Botcake list)'}));
         if (item && !isCandidate(item)) out.push(el('div', {class: 'text-xs text-red-600', text: NOT_CANDIDATE[col.key]}));
         return out;
+    }
+
+    // Ang pangalan ng message field sa tabi ng ID, mula sa naitalang listahan (walang tawag sa Botcake): amber kapag wala
+    // sa listahan, grey na paalala kapag wala pang listahan.
+    function fieldName(row, value) {
+        const opts = optionsOf(row, FIELD_KEY);
+        if (opts === null) return el('span', {class: 'ml-1 text-xs text-gray-400', text: 'press Test for the name'});
+        const item = opts.find(o => String(o.id) === value);
+        return item ? el('span', {class: 'break-words text-gray-600', text: ' · ' + item.name})
+            : el('span', {class: 'text-amber-700', text: ' · (not in Botcake list)'});
     }
 
     // Ang pag-edit ng flow ID at message field: dropdown ng listahan mula sa Botcake (pangalan · ID, may "(recommended)");
@@ -471,6 +482,7 @@
         td.classList.toggle('empty', empty);
         put(td,
             empty ? el('span', {class: 'text-xs text-gray-400', text: '+ set'}) : el('span', {class: 'font-mono break-all', text: cell ? cell.value : ''}),
+            !empty && col.key === FIELD_KEY ? fieldName(row, String(cell.value)) : null,
             mark ? el('span', {class: 'ml-1 text-xs ' + mark.cls, title: mark.title || '', text: mark.text}) : null,
             mark && mark.title ? el('div', {class: 'text-xs text-red-600', text: mark.title}) : null,
             col.readonly ? null : el('button', {class: 'hist ml-1 text-xs text-gray-400 hover:text-gray-700', type: 'button', title: 'History', text: '⋯'}),
