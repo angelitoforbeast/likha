@@ -28,7 +28,7 @@ class JntAutoTrackSync
     public const HOURS = [2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
     public const CAP = 40 * 60;                     // segundo kada takbo
     public const DAYS = 60;
-    private const LOCK_SECONDS = 50 * 60;           // higit sa CAP: ang patay na proseso ay hindi humaharang nang matagal
+    private const LOCK_SECONDS = 70 * 60;           // higit sa isang oras: walang dalawang takbo kahit lumampas ang isa
     private const FINAL = ['Delivered', 'Returned'];
 
     public function __construct(private JntTracker $tracker)
@@ -81,6 +81,8 @@ class JntAutoTrackSync
     public function runIfDue(): ?array
     {
         if (!self::enabled() || !($slot = self::dueSlot())) return null;
+        // Hindi pa na-migrate (mano-mano pagkatapos ng deploy): walang takbo, walang kinukuhang oras.
+        if (!Schema::hasTable('jnt_latest_scans') || !Schema::hasColumn('jnt_track_sync_runs', 'kind')) return null;
         if (!Cache::add($slot, true, 7200)) return null;
 
         $lock = Cache::lock(self::LOCK, self::LOCK_SECONDS);

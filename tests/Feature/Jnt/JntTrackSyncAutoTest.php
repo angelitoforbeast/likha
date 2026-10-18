@@ -130,7 +130,7 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         Process::fake();
 
         Artisan::call('chatblast:auto');
-        Process::assertRan(fn ($p) => str_contains((string) (is_array($p->command) ? implode(' ', $p->command) : $p->command), 'jnt:track-sync-auto'));
+        Process::assertRan(fn ($p) => is_string($p->command) && str_contains($p->command, 'artisan jnt:track-sync-auto') && str_ends_with($p->command, '&')); // sa background: hindi naghihintay
         Process::assertRanTimes(fn ($p) => true, 1);
 
         $this->sync(); // ang nagsimulang proseso ang kumuha ng oras
@@ -211,6 +211,8 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         $this->scans['JT0000000001'] = [['scantype' => 'Problematic', 'scantime' => '2026-10-18 08:30:00', 'city' => 'Pasig', 'state' => 'Metro Manila']];
         $this->waybill('JT0000000002', 'Delivering');
         $this->scans['JT0000000002'] = [['scantype' => 'Delivered', 'scantime' => '2026-10-18 08:45:00'], $this->onDelivery()];
+        $this->waybill('JT0000000003', 'In Transit');
+        $this->scans['JT0000000003'] = [['scantype' => 'Arrival', 'scantime' => '2026-13-45 10:00:00']]; // imposibleng oras mula sa J&T
 
         $this->sync();
 
@@ -225,8 +227,9 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         $this->assertSame('Delivered', DB::table('jnt_latest_scans')->where('waybill', 'JT0000000002')->value('scan_type'));
         $this->assertNull(DB::table('jnt_latest_scans')->where('waybill', 'JT0000000002')->value('scan_place'), 'walang lugar sa sagot');
 
+        $this->assertNull(DB::table('jnt_latest_scans')->where('waybill', 'JT0000000003')->value('scan_time'), 'ang imposibleng oras ay hindi isinusulat');
         $run = DB::table('jnt_track_sync_runs')->sole();
-        $this->assertSame([1, 1], [(int) $run->unmapped, (int) $run->updated]);
+        $this->assertSame([1, 1, 'done'], [(int) $run->unmapped, (int) $run->updated, $run->status]);
     }
 
     public function test_S_061_6_the_rider_is_written_to_the_latest_scan_and_every_open_row_and_a_failed_answer_keeps_the_old_scan(): void
@@ -280,6 +283,10 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
     public function test_S_061_11_only_the_ceo_switches_it_and_the_stored_setting_overrides_the_env(): void
     {
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->postJson('/jnt/track-sync/auto', ['on' => false])->assertForbidden();
+        $this->assertTrue(JntAutoTrackSync::enabled());
+
+        $this->actingAs($this->user('Marketing – OIC', 'moic@example.test'));
         $this->postJson('/jnt/track-sync/auto', ['on' => false])->assertForbidden();
         $this->assertTrue(JntAutoTrackSync::enabled());
 

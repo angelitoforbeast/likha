@@ -138,7 +138,9 @@ class JntTracker
         $scans = Schema::hasTable('jnt_latest_scans'); // hindi pa na-migrate: status at rider lang
 
         try {
-            foreach (array_chunk($waybills, self::CHUNK) as $i => $chunk) {
+            $chunks = array_chunk($waybills, self::CHUNK);
+            foreach ($chunks as $i => $chunk) {
+                $at = $i;
                 if ($i > 0 && $this->clock->now() >= $cutoff) {
                     array_push($out['pending'], ...$chunk); // sa susunod na takbo
                     continue;
@@ -179,6 +181,9 @@ class JntTracker
         } catch (Throwable $e) {
             report($e);
             $out['error'] = mb_substr($e->getMessage(), 0, 500);
+            // Ang chunk na pumalya at ang mga kasunod: pending, para ang susunod na takbo ay magsimula roon.
+            foreach (array_slice($chunks ?? [], $at ?? 0) as $rest) array_push($out['pending'], ...$rest);
+            $out['pending'] = array_values(array_unique($out['pending']));
         }
 
         return $out;
@@ -191,6 +196,17 @@ class JntTracker
             'processed' => $out['checked'], 'updated' => $out['updated'], 'unchanged' => $out['unchanged'],
             'unmapped' => $out['unmapped'], 'skipped' => $out['errors'], 'updated_at' => now('Asia/Manila'),
         ]);
+    }
+
+    /** Ang oras ng J&T kapag totoong petsa at oras (Y-m-d H:i[:s]); kung hindi, null (hindi tinatanggihan ng MySQL ang row). */
+    private static function validTime(string $time): ?string
+    {
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i'] as $format) {
+            $d = \DateTime::createFromFormat('!' . $format, $time);
+            if ($d && $d->format($format) === $time) return $d->format('Y-m-d H:i:s');
+        }
+
+        return null;
     }
 
     /**
@@ -206,7 +222,7 @@ class JntTracker
         return [
             'waybill'     => $waybill,
             'scan_type'   => mb_substr(trim((string) ($top['scantype'] ?? '')), 0, 64) ?: null,
-            'scan_time'   => preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/', $time) ? $time : null,
+            'scan_time'   => self::validTime($time),
             'scan_place'  => mb_substr($place, 0, 191) ?: null,
             'rider_name'  => $info['rider_name'] ? mb_substr($info['rider_name'], 0, 191) : null,
             'rider_phone' => $info['rider_phone'] ?: null,
