@@ -80,4 +80,20 @@ class SyncPlanTest extends BotcakeApiTestCase
 
         $this->assertSame([9985, 12, 1279, 40], [$last['new'], $last['updated'], $last['matched'], $last['ad_filled']]);
     }
+
+    public function test_the_last_sync_shows_the_dates_it_read_and_a_failed_run_in_red_with_the_next_stop_date(): void
+    {
+        $this->botcake('Page Uno');
+        $this->apiRun('Page Uno', 'date', 'by_date', 30, ['subscribed_newest' => '2026-10-17', 'subscribed_oldest' => '2026-10-16']);
+        $this->botcake('Page Dos');
+        $this->apiRun('Page Dos', 'date', 'by_date', 30, ['subscribed_newest' => '2026-10-16', 'subscribed_oldest' => '2026-10-15']);
+        $this->apiRun('Page Dos', 'rate_limited', 'by_date', 3, ['status' => 'failed', 'last_error' => 'Rate limit', 'subscribed_newest' => '2026-10-18', 'subscribed_oldest' => '2026-10-18']);
+
+        $rows = $this->rows();
+
+        $this->assertSame(['Okt 16 → Okt 17', 'by date', false], [$rows['Page Uno']['info']['last_sync']['dates'], $rows['Page Uno']['info']['last_sync']['kind'], $rows['Page Uno']['info']['last_sync']['failed']]);
+        $this->assertSame(['Okt 18', true], [$rows['Page Dos']['info']['last_sync']['dates'], $rows['Page Dos']['info']['last_sync']['failed']]);
+        $this->assertSame('by date, mula Okt 15', $rows['Page Dos']['info']['next']['label'], 'ang failed na run ay hindi gumagalaw sa stop date');
+        $this->get('/page-settings')->assertSee("' · susunod: '", false)->assertSee("'text-red-600', !!(s && s.failed)", false);
+    }
 }
