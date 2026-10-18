@@ -618,3 +618,14 @@ Accepted, not fixed:
 - **(independent review) A hard-killed build process leaves the build lock for up to 30 minutes** (`BUILD_LOCK_SECONDS`, up from 300 s so no second build can run beside a long one). Reason: the job path releases its own lock in failed(); a cron process killed mid-build is rare. Suggestion: a heartbeat that renews a shorter lock.
 - **(independent review) A refresh that keeps throwing is retried every 5 minutes** for the rest of the hour (the claim is released on error, as asked). Reason: as decided in the review; it never blocks auto's sends.
 - **(amendment 7) The "Flow problems" chip still counts a red line on a hidden flow slot** (Delivering, In transit, Broadcast) that has an ID; the line is shown under ▸. Reason: the setup and problem rules were asked to stay as they are.
+
+## 059: Botcake chat inbox (2026-10-18)
+
+- **The per-IP limit uses `$request->ip()`, and `trustProxies(at: '*')` trusts `X-Forwarded-For`.** If the front server passes a client's own header through, a caller can rotate IPs past the 429, or use up Botcake's IP allowance for a minute. Reason: the proxy setting is app-wide and older than this work; whether it is exploitable depends on the server setup. The key still guards storage. Suggestion: trust only the real proxy IPs.
+- **Two identical requests arriving at the same moment can store two rows** (the duplicate check reads before it inserts; no unique constraint). Reason: the only effect is an extra row on a view-only list; a unique key would need a hash column.
+- **`pruneDaily` marks the day as done before the prune runs,** so a prune that throws is retried the next day (or by the 04:25 scheduler on Likha). Reason: a one-day delay on a 90-day retention is harmless.
+- **Accepted missing tests (trusted paths or display only):** `chatblast:auto` still running when the prune throws (the call sits in try/catch); the customer view with an empty psid (404) or no page_id; `q[]=x` and `date=garbage` on the Chats page; the Setup box with no key set; the key sent as a GET param or inside a JSON body being left out of the payload (the same code path as the form case that is tested).
+- **The mask `'••••' . last 4` now exists twice** (Chats setup box and `PageSetting::displayValue`, with different length thresholds). Reason: the second copy, not the third (DRY rule).
+- **No test pins the exact-text duplicate check ("ok" then "OK").** Reason: sqlite's `=` is already case-sensitive, so such a test would pass without the fix; the comparison is in PHP (`===`), which behaves the same on MySQL.
+- **`mb_scrub` keeps NUL bytes;** a value with `%00` would make PostgreSQL reject the insert (500). Reason: only a caller with the key can send it, and production runs MySQL.
+- **The second fix loop (text/plain body key) got no reviewer re-check** (the 2-loop cap). Reason: a one-line move, pinned by the new S-059.2 data set.
