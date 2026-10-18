@@ -1347,3 +1347,23 @@ Spec 067. Tests are in `tests/Feature/Chatblast/BotcakeChatSecurityTest.php`.
 | S-067.13 | Given more new PSIDs on one page in a minute than BOTCAKE_CHAT_VERIFY_PER_MINUTE, then the extra ones make no Botcake call and are not kept (counted); known PSIDs are not affected | `test_S_067_13…` | Passed · 2026-10-19 · auto |
 | S-067.14 | Given enforce mode, when a request comes from an IP off the list with `X-Forwarded-For` set to the Botcake IP, then 403: the connecting address is checked | `test_S_067_14…` | Passed · 2026-10-19 · auto |
 | S-067.15 | Given a page key that was rotated by the command or deactivated, then the old key gets 401 at once and the new key works | `test_S_067_15…` | Passed · 2026-10-19 · auto |
+
+## S-068 /chatbot: the page list for our own chatbot
+
+Spec 068. Tests are in `tests/Feature/Chatblast/ChatbotPagesTest.php` (S-068.8 in `BotcakeChatSecurityTest.php`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-068.1 | Given pages with a Botcake ID and token, then /chatbot lists them (not a page without a token) with ACTIVE (no row = On), FLOW, the default botfield columns in the sheet's order, today's chats and the last chat time; signed out → 302, no /chatblast access → 403, a role with /chatblast access → 200; no token in the page or the data | `test_S_068_1…` | Passed · 2026-10-19 · auto |
+| S-068.2 | Given the CEO, when a page is added with a name, Botcake ID and token, or a page already in page settings is completed with what it lacks, then both are saved as page settings saves them (token secret) and the page joins the list; a bad ID or a missing token → 422; a non-CEO → 403 | `test_S_068_2…` | Passed · 2026-10-19 · auto |
+| S-068.3 | Given a page that is Off, when the CEO switches it On, then the exact "Chat to site" block is written (content), then published (settings, unlimit_default_reply), a key is created, and ACTIVE becomes On; a non-CEO → 403 | `test_S_068_3…` | Passed · 2026-10-19 · auto |
+| S-068.4 | Given a page that is On, when the CEO switches it Off, then only the settings update with is_published:false is sent; the key is kept and ACTIVE becomes Off | `test_S_068_4…` | Passed · 2026-10-19 · auto |
+| S-068.5 | Given Botcake refuses, when On or Off is switched, then the answer carries the error in plain English for the row, and no key, ACTIVE or other row changes | `test_S_068_5…` | Passed · 2026-10-19 · auto |
+| S-068.6 | Given a botfield cell, when a value is typed, then one page_settings row (provider chatbot) is written and the same value again changes nothing; long text keeps its lines; an image column takes only http(s) links; ACTIVE, an unknown column or a page not on the list → 422; blank clears the value | `test_S_068_6…` | Passed · 2026-10-19 · auto |
+| S-068.7 | Given "+ Column", when a name is added, then its key appears as a column for every page (no duplicate; ACTIVE or no letters → 422); a key already used under provider chatbot is a column too | `test_S_068_7…` | Passed · 2026-10-19 · auto |
+| S-068.8 | Given a page whose bot is Off, then its chats are answered but not kept and counted as "Bot off"; a page with no ACTIVE row and a page switched back On keep their chats | `BotcakeChatSecurityTest::test_S_068_8…` | Passed · 2026-10-19 · auto |
+| S-068.9 | Given anyone, including the CEO, when `chatbot.active` is written through Page settings, then 422 (only the switch writes it); a role without /chatblast access gets 403 on /chatbot/cell and /chatbot/column | `test_S_068_9…` | Passed · 2026-10-19 · auto |
+| S-068.10 | Given "+ Page" with a Botcake ID another page already uses, or a page already on the list, then 422 and nothing is written | `test_S_068_10…` | Passed · 2026-10-19 · auto |
+| S-068.11 | Given On fails at the publish step, then the error names publishing, ACTIVE is unchanged, and the new key is kept (the block on Botcake holds it) | `test_S_068_11…` | Passed · 2026-10-19 · auto |
+| S-068.12 | Given botfield values and columns, then 10,000 characters is the most a value takes, at most 200 columns can be added, and a column named "Token" never reads the Botcake token | `test_S_068_12…` | Passed · 2026-10-19 · auto |
+| S-068.13 | Given a page switched Off, when `botcake:chat-setup --all` runs (dry run or real), then that page is skipped and stays Off | `test_S_068_13…` | Passed · 2026-10-19 · auto |

@@ -698,3 +698,16 @@ Accepted, not fixed:
 - **(re-check) Failing closed can drop real chats:** a page whose token expired keeps no chats from new customers, and a page above the per-minute cap drops the extra new-customer chats. Reason: the trade-off for not letting an attacker force the accept path; both show as "PSID could not be checked" in the Setup box, and the cap is in config.
 - **(re-check) In enforce mode, `bad_ip` and `bad_key` refusals still write a database cache counter** for requests that never showed a valid key. Reason: counting refusals is asked for; the per-IP limiter bounds it.
 - **(re-check) A crafted PSID that made Botcake answer 5xx would count as "down" and be kept** (not verified to happen). Reason: unproven; the fix (refuse PSIDs that are not digits before calling Botcake) would change many test fixtures. Suggestion for a later small change.
+
+## 068: /chatbot page list (2026-10-19)
+
+- **At phone width the page scrolls vertically a little,** so the filters can scroll out of view: the table box keeps a minimum height of 18rem under a taller header. Reason: nothing scrolls sideways and the table header and PAGE column stay sticky inside the box; the brief's "only the data scrolls" holds on desktop.
+- **"+ Column" has no way to remove or rename a column on screen.** Reason: not asked; the list is one `app_settings` row (`chatbot.columns`) the owner can edit, capped at 200.
+- **Auto-save writes a history row at every typing pause** (up to 10,000 characters for long text). Reason: same behaviour as page settings; the history is how page settings keeps old values.
+- **Image previews load the URL in the viewer's browser** (with no referrer). Reason: the owner's own links; any role with access can set them, but only http(s) is accepted and nothing is rendered as HTML.
+- **The "Chats today" count reads today's rows of botcake_chats on a cache miss (once a minute).** Reason: fine at today's volume; the 1M-a-day storage work is out of scope.
+- **The ACTIVE column's sticky offsets assume a fixed width;** a long Botcake error under the switch wraps inside 12rem. Reason: checked in the browser at 1366 px with no overlap; an unusually long single word could still overlap.
+- **Two tabs, or the command and the switch at the same moment,** can leave ACTIVE and the Botcake publish state out of step. Reason: CEO-only actions behind a confirm; the next switch fixes it.
+- **The helper in ChatbotController is called `role()`,** not the house `getNormalizedRole()`. Reason: cosmetic; same logic.
+- **The scratch app of the browser check left gitignored files** (two session files and a few cache files in this worktree's `storage/framework`, and `%TEMP%\cb068`). Reason: the project guard blocks deleting files from the session; they hold only scratch data and no real key or token.
+- **(re-check) The duplicate Botcake ID check in "+ Page" compares the stored text;** a `botcake.page_id` row someone marked secret in Page settings (encrypted) would slip past it. Reason: only trusted users can mark it secret, and page IDs are never secret in practice.
