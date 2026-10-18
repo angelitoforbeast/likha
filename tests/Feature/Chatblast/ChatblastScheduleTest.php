@@ -181,6 +181,26 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 queued'], $this->rows(), 'ang Day 2 (15:00 na) ay ipinadala sa susunod na oras ngayong araw');
     }
 
+    public function test_S_056_30_the_hourly_refresh_never_builds_a_step_with_its_own_time_so_it_is_not_sent_late(): void
+    {
+        $this->campaign(['send_times' => ['09:00', '18:00'], 'step_times' => [null, ['15:00']]]);
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'Picked Up'); // wala pa sa In Transit nang 15:00
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-1', 'kind' => 'c-auto', 'day' => 1, 'psid' => 'psid-a',
+            'text' => 'x', 'jnt_status' => 'In Transit', 'status' => 'sent', 'sent_at' => now()->subDay(), 'dedupe_key' => 'WB-1|c-auto|1',
+            'attempts' => 0, 'is_test' => false, 'created_at' => now()->subDay(), 'updated_at' => now()->subDay()]);
+
+        $this->tick('2026-10-18 15:00:00'); // ang takbo ng Day 2 sa oras nito: wala pang dapat buuin
+        $this->travelTo('2026-10-18 16:05:00');
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'In Transit']); // ang upload ng 16:05
+        $this->tick('2026-10-18 16:15:00'); // ang kusang refresh, pagkatapos ng 15:00 ng Day 2
+        $this->tick('2026-10-18 18:00:00');
+        $this->assertSame(['WB-1 D1 sent'], $this->rows(), 'ang Day 2 ay hindi binuo ng refresh, kaya hindi naipadala nang 18:00');
+
+        $this->tick('2026-10-19 15:00:00');
+        $this->assertSame(['WB-1 D1 sent', 'WB-1 D2 queued'], $this->rows(), 'sa sariling oras nito');
+    }
+
     public function test_a_ready_row_of_a_step_is_never_sent_before_that_steps_own_time(): void
     {
         $c = $this->campaign(['send_times' => ['09:00'], 'step_times' => [null, ['15:00']], 'mode_changed_at' => Carbon::parse('2026-10-18 07:00:00', 'Asia/Manila')]);

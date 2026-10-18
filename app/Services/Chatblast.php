@@ -394,7 +394,7 @@ class Chatblast
      * ang hindi pa naipapadala na wala na sa mga status ng campaign. Ang naka-off na campaign ay walang binubuo.
      * @return array{added:int, ready:int, no_psid:int, no_config:int, updated:int, skipped:int}
      */
-    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET, ?array $steps = null, ?string $lockOwner = null): array
+    public function build(?string $kind = null, ?int $userId = null, float $trackBudget = self::TRACK_BUDGET, ?array $steps = null, ?string $lockOwner = null, bool $refresh = false): array
     {
         // Isang pagkuha lang sabay (button o command): ang pangalawa ay sinasabihang may tumatakbo. $lockOwner: para
         // mabitawan ng job ang sarili nitong lock kapag pinatay ito (timeout), at hindi ang lock ng iba.
@@ -402,7 +402,7 @@ class Chatblast
         if (!$lock->get()) return ['busy' => true];
 
         try {
-            $out = $this->buildLocked($kind, $userId, $trackBudget, $steps);
+            $out = $this->buildLocked($kind, $userId, $trackBudget, $steps, $refresh);
             if ($kind === null) Cache::forever(self::BUILT_AT, now()->timestamp); // buong pagkuha: "Updated HH:MM" ng To send
             return $out;
         } finally {
@@ -422,7 +422,12 @@ class Chatblast
         $slot = $now->format('Y-m-d H');
         if (Cache::get(self::REFRESH_SLOT) === $slot) return null;
 
-        $r = $this->build(null, null, self::TRACK_BUDGET);
+        try {
+            $r = $this->build(null, null, self::TRACK_BUDGET, null, null, true);
+        } catch (\Throwable $e) {
+            Cache::put(self::REFRESH_SLOT, $slot, 7200); // isang subok kada oras: hindi inuulit ang pumapalyang pagkuha kada 5 minuto
+            throw $e;
+        }
         if (empty($r['busy'])) Cache::put(self::REFRESH_SLOT, $slot, 7200);
 
         return $r;
@@ -439,11 +444,14 @@ class Chatblast
         }
         $at = Cache::get(self::BUILT_AT);
 
-        return ['updated' => $at ? Carbon::createFromTimestamp($at, 'Asia/Manila')->format('H:i') : null, 'next' => $next->format('H:i')];
+        // Hindi ngayong araw (hal. patay ang scheduler): may petsa, para hindi magmukhang bago.
+        $at = $at ? Carbon::createFromTimestamp($at, 'Asia/Manila') : null;
+
+        return ['updated' => $at?->format($at->isSameDay($now) ? 'H:i' : 'M j H:i'), 'next' => $next->format('H:i')];
     }
 
     /** $steps: ang mga step (1 = Day 1) lang na bubuuin (auto: ang may oras ngayon); null = lahat. */
-    private function buildLocked(?string $kind, ?int $userId, float $trackBudget, ?array $steps = null): array
+    private function buildLocked(?string $kind, ?int $userId, float $trackBudget, ?array $steps = null, bool $refresh = false): array
     {
         $out = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0];
         $missing = $this->missingByPage();
@@ -492,14 +500,19 @@ class Chatblast
 
         foreach ($campaigns as $c) {
             $out['skipped'] += $this->skipStale($c);
-            foreach ($this->buildKind($c, $userId, $missing, $tracked, $riders, $steps) as $key => $n) $out[$key] += $n;
+            foreach ($this->buildKind($c, $userId, $missing, $tracked, $riders, $steps, $refresh) as $key => $n) $out[$key] += $n;
             $out['updated'] += $this->recheck($c->kind, $missing);
         }
 
         return $out;
     }
 
-    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, array $tracked = [], array $riders = [], ?array $steps = null): array
+    /**
+     * $refresh (ang kusang refresh kada oras): hindi binubuo ang step na may sariling oras sa naka-auto na campaign; ang
+     * auto ang bumubuo nito sa oras nito. Kung hindi, ang row na nabuo pagkalipas ng oras ng step ay ipapadala ng auto sa
+     * susunod na ibang oras (huli nang ilang oras).
+     */
+    private function buildKind(ChatblastCampaign $c, ?int $userId, array $missing, array $tracked = [], array $riders = [], ?array $steps = null, bool $refresh = false): array
     {
         $out   = ['added' => 0, 'ready' => 0, 'no_psid' => 0, 'no_config' => 0];
         $kind  = $c->kind;
@@ -507,7 +520,8 @@ class Chatblast
         $now   = now();
         $seen  = [];
 
-        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $tracked, $riders, $steps) {
+        $ownTime = fn (int $day) => $refresh && $c->mode === 'auto' && !empty(((array) ($c->step_times ?? []))[$day - 1] ?? null);
+        $this->candidates($c)->chunkById(500, function ($orders) use (&$out, &$seen, $days, $missing, $c, $kind, $userId, $now, $tracked, $riders, $steps, $ownTime) {
             $rows = [];
             $jnt  = $this->currentStatuses($orders->pluck('waybill')->unique()->values()->all());
             foreach ($orders as $o) {
@@ -519,6 +533,7 @@ class Chatblast
                 $day = (int) $o->sent_n + 1;
                 if ($day > count($days)) continue; // ubos na ang mga araw ng uri
                 if ($steps !== null && !in_array($day, $steps, true)) continue; // ang step na ito ay may ibang oras
+                if ($ownTime($day)) continue; // refresh: ang step na may sariling oras ay sa oras nito lang
 
                 $page = $this->settings->normPage((string) $o->page);
                 if (!$this->onPage($c, $page)) continue; // hindi kasama ang page sa campaign

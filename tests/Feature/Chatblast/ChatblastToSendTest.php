@@ -100,6 +100,9 @@ class ChatblastToSendTest extends ChatblastTestCase
         $this->assertSame(['updated' => null, 'next' => '10:15'], $this->list(['view' => 'send'])->json('state.refresh'));
         app(\App\Services\Chatblast::class)->build(); // isang buong pagkuha (lahat ng sequence)
         $this->assertSame(['updated' => '10:00', 'next' => '10:15'], $this->list(['view' => 'send'])->json('state.refresh'));
+        $this->travelTo('2026-10-19 07:00:00');
+        $this->assertSame('Oct 18 10:00', $this->list(['view' => 'send'])->json('state.refresh.updated'), 'hindi ngayong araw: may petsa');
+        $this->travelTo('2026-10-18 10:00:00');
 
         $html = $this->get('/chatblast')->assertOk()->getContent();
         $this->assertStringContainsString('>Refresh now</button>', $html);

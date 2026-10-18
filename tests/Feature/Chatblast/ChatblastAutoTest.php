@@ -7,6 +7,7 @@ use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
 use App\Services\ChatblastSender;
+use Carbon\Carbon;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -223,6 +224,33 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->assertSame(['updated' => '06:15', 'next' => '07:15'], app(Chatblast::class)->refreshState());
         $this->travelTo('2026-10-19 23:40:00');
         $this->assertSame('06:15', app(Chatblast::class)->refreshState()['next'], 'pagkatapos ng 23:15: bukas');
+    }
+
+    public function test_S_056_31_the_refresh_runs_until_23_15_and_a_failing_refresh_never_stops_auto(): void
+    {
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        $this->tick('2026-10-18 23:15:00');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses(), '23:15 ang huling refresh');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-19 00:15:00');
+        $this->assertArrayNotHasKey('WB-2', $this->statuses(), 'walang refresh ng 00:15');
+
+        // Pumalya ang buong pagkuha ng refresh: tuloy pa rin ang auto, at hindi ito inuulit nang kada 5 minuto sa oras na iyon.
+        $this->campaign(['kind' => 'c-auto2', 'send_times' => ['09:00'], 'mode_changed_at' => Carbon::parse('2026-10-19 06:00:00', 'Asia/Manila')]);
+        $this->travelTo('2026-10-19 08:30:00');
+        $ready = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'WB-9', 'kind' => 'c-auto2', 'day' => 1, 'psid' => 'psid-z',
+            'text' => 'Hi', 'status' => 'ready', 'attempts' => 0, 'is_test' => false]);
+        $calls = (object) ['n' => 0]; // objekto: ang fn () ay kumukopya ng variable
+        $this->partialMock(Chatblast::class, fn ($m) => $m->shouldReceive('build')->andReturnUsing(function ($kind = null) use ($calls) {
+            if ($kind === null) { $calls->n++; throw new \RuntimeException('database went away'); }
+            return ['added' => 0];
+        }));
+        $this->tick('2026-10-19 09:15:00');
+        $this->assertSame('queued', $ready->fresh()->status, 'naipadala pa rin ang auto ng 09:00');
+        $this->tick('2026-10-19 09:20:00');
+        $this->assertSame(1, $calls->n, 'isang subok lang kada oras');
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void

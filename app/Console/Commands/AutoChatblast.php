@@ -30,9 +30,15 @@ class AutoChatblast extends Command
         if (!Schema::hasTable('chatblast_campaigns')) return self::SUCCESS; // hindi pa na-migrate (mano-mano pagkatapos ng deploy)
 
         // Ang kusang refresh ng To send (kada oras sa :15): pagkuha lang, walang padala, kaya tumatakbo kahit naka-pause.
-        if (($r = $chatblast->refreshIfDue()) !== null) {
-            Log::info('chatblast: refresh', array_intersect_key($r, array_flip(['busy', 'added', 'skipped', 'tracked'])));
-            $this->line(!empty($r['busy']) ? 'Refresh: may tumatakbong pagkuha; sa susunod na takbo.' : sprintf('Refresh: %d bago, %d skipped', $r['added'], $r['skipped']));
+        // Ang pumalyang refresh ay hindi humaharang sa padala ng auto sa takbong ito.
+        try {
+            if (($r = $chatblast->refreshIfDue()) !== null) {
+                Log::info('chatblast: refresh', array_intersect_key($r, array_flip(['busy', 'added', 'skipped', 'tracked'])));
+                $this->line(!empty($r['busy']) ? 'Refresh: may tumatakbong pagkuha; sa susunod na takbo.' : sprintf('Refresh: %d bago, %d skipped', $r['added'] ?? 0, $r['skipped'] ?? 0));
+            }
+        } catch (\Throwable $e) {
+            report($e);
+            $this->line('Refresh: pumalya; susubok ulit sa susunod na oras.');
         }
 
         if ($sender->paused()) {
