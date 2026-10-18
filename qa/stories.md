@@ -1081,3 +1081,11 @@ Amendment 5. Tests are in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
 |---|---|---|---|
 | S-056.35 | Given sent, unsure, failed, field mismatch, skipped, no PSID and no config rows, when History opens, then only sent and "Sent (unconfirmed)" rows show, the total counts them, and the counts of every chip are there; the Failed chip shows failed and field mismatch, and Skipped, No PSID and No config each show their own state | `test_S_056_35…` | Passed · 2026-10-18 · auto |
 | S-056.36 | Given History, then there is no "all" chip, Sent is first and selected, the other chips are not, Retry failed shows only with Failed, and an empty Sent view says "Nothing sent in this range yet." | `test_S_056_36…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-056H Page settings shows the one flow chatblast uses, and where to click (P1)
+
+Amendment 7. Test in `tests/Feature/PageSettings/PageSettingsGridTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.37 | Given /chatblast/page-settings, then the column reads "Chatblast flow" with one block (shipping flow ID, name, content); other flow slots with a value show under ▸ as "Other flow IDs (not used by chatblast)", editable; the content's {{1}} shows as "[message for the customer]" with "Filled per customer, see To send / History"; every empty editable value shows "+ set" with a dashed outline on hover | `test_S_056_37…` and the browser check | Passed · 2026-10-18 · auto + headless browser |

@@ -16,6 +16,7 @@
         #grid-table th, #grid-table td { border-right-color: transparent; }
         #grid-table tbody td { border-bottom-color: #f1f5f9; }
         #grid-table .cell { cursor: text; }
+        #grid-table .cell.empty:hover { outline: 1px dashed #94a3b8; }
         #grid-table .cell.readonly { cursor: default; }
         #grid-table .cell:hover .hist { visibility: visible; }
         #grid-table .hist { visibility: hidden; }
@@ -93,7 +94,7 @@
         Click a value and type: it saves by itself (Enter, leaving the field, or a few seconds without typing). Blank = delete the setting.
         Token / secret: blank = no change; the value is never shown (last 4 only). Every few seconds, changes made by others are loaded.
         Botcake, flow and field IDs: digits only.
-        Each flow shows its ID, its name in Botcake (read after a save and after an ok Test token) and, for the shipping flow, the template content. The shipping template name is under ▸: picked automatically when blank; you can change it.
+        The Chatblast flow (the one every sequence sends through) shows its ID, its name in Botcake (read after a save and after an ok Test token) and the template content, where [message for the customer] is each customer's message. The template name is under ▸: picked automatically when blank; you can change it. "+ set": no value yet, click to set it.
         ▸ next to a page: the full flow names, the full template, the sync details, the other keys and the history.
     </p>
 
@@ -272,7 +273,8 @@
     // ---- render ----
 
     // Ang mga cell ng bawat row, para walang horizontal scroll: ang mga column ay pinagsama ayon sa group (mula sa server).
-    const GROUPS = [['botcake', 'Botcake'], ['flows', 'Flows']];
+    // Ang "Chatblast flow" ay ang shipping flow lang: dito dumadaan ang bawat sequence. Ang ibang flow slot ay nasa ▸.
+    const GROUPS = [['botcake', 'Botcake'], ['flows', 'Chatblast flow']];
     const WIDTHS = ['12%', '22%', '29%', '7%', '20%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
     // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
     // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID.
@@ -280,7 +282,7 @@
     const inGroup = group => columns.filter(c => c.group === group)
         .sort((a, b) => (LINE_ORDER.indexOf(a.key) + 1 || 99) - (LINE_ORDER.indexOf(b.key) + 1 || 99));
     const SHORT = {'botcake.page_id': 'ID', 'botcake.token': 'Token', 'botcake.token_status': 'Status', 'botcake.field.message': 'Message field',
-        'botcake.test_psid': 'Test PSID', 'botcake.flow.shipping': 'Shipping', 'botcake.flow.on_delivery': 'Delivering',
+        'botcake.test_psid': 'Test PSID', 'botcake.flow.shipping': 'Flow ID', 'botcake.flow.on_delivery': 'Delivering',
         'botcake.flow.in_transit': 'In transit', 'botcake.flow.broadcast': 'Broadcast', 'botcake.template.shipping': 'Template'};
 
     function render() {
@@ -300,7 +302,8 @@
         const body = sortedRows().flatMap(r => {
             const tr = el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
                 pageTd(r),
-                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'}, inGroup(group).map(c => group === 'flows' ? flowBlock(r, c) : line(r, c)))),
+                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'},
+                    group === 'flows' ? inGroup(group).filter(c => c.key === SHIPPING_KEY).map(c => flowBlock(r, c)) : inGroup(group).map(c => line(r, c)))),
                 el('td', {class: 'px-2 py-1 border-b border-r align-top text-right text-xs', 'data-info': 'oc', title: ORDERS_LABEL + ' / Customers'}, infoOc(r)),
                 paintSync(el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'sync'}), r),
                 el('td', {class: 'px-2 py-1 border-b align-top', 'data-info': 'actions'}, actions(r)),
@@ -344,8 +347,11 @@
         const mark = marks.get(cellId(row.key, col.key));
         td.title = cell ? (cell.by + ' · ' + cell.at) : '';
         td.classList.toggle('bg-red-50', !!(mark && mark.cls === 'text-red-600'));
+        // Walang laman at nae-edit: maliit na "+ set" para makitang mapipindot (dashed outline sa hover).
+        const empty = !col.readonly && !(cell && cell.value !== '');
+        td.classList.toggle('empty', empty);
         put(td,
-            el('span', {class: 'font-mono break-all', text: cell ? cell.value : ''}),
+            empty ? el('span', {class: 'text-xs text-gray-400', text: '+ set'}) : el('span', {class: 'font-mono break-all', text: cell ? cell.value : ''}),
             mark ? el('span', {class: 'ml-1 text-xs ' + mark.cls, title: mark.title || '', text: mark.text}) : null,
             mark && mark.title ? el('div', {class: 'text-xs text-red-600', text: mark.title}) : null,
             col.readonly ? null : el('button', {class: 'hist ml-1 text-xs text-gray-400 hover:text-gray-700', type: 'button', title: 'History', text: '⋯'}),
@@ -376,10 +382,20 @@
         else if (name && name.tone === '' && !UNKNOWN.includes(name.line)) out.push(el('div', {class: 'text-xs text-gray-600 break-words', text: name.line}));
         if (col.key === SHIPPING_KEY && row.cells[SHIPPING_KEY]) {
             const body = row.cells[TEMPLATE_KEY + '.text'];
-            if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));
+            if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(...withToken(body.line));
             if (body && body.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: body.line}));
         }
         return out;
+    }
+
+    // Ang content ng template: ang {{1}} (ang custom field na pinupuno ng chatblast) ay malinaw na token, may paalala.
+    const SLOT = @json(\App\Services\BotcakeFlowNames::SLOT);
+    const TOKEN = '[message for the customer]', TOKEN_HINT = 'Filled per customer, see To send / History';
+    function withToken(text) {
+        const parts = text.split(SLOT);
+        const body = el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words'}, parts.flatMap((p, i) => i === 0 ? [p]
+            : [el('span', {class: 'rounded bg-violet-100 px-1 font-medium text-violet-800', text: TOKEN}), p]));
+        return parts.length > 1 ? [body, el('div', {class: 'text-[11px] text-gray-400', text: TOKEN_HINT})] : [body];
     }
 
     // Ang mga cell na iginuguhit ulit kapag nagbago ang key (ang pangalan o body ay nasa cell ng flow o template).
@@ -442,7 +458,7 @@
         const other = inGroup('other');
         return el('tr', {class: 'detail bg-gray-50', 'data-detail': r.key}, el('td', {class: 'px-4 py-2 border-b text-xs', colspan: String(WIDTHS.length)}, [
             el('div', {class: 'grid grid-cols-3 gap-4'}, [
-                el('div', {'data-detail-flows': ''}, detailFlows(r)),
+                el('div', {}, [el('div', {'data-detail-flows': ''}, detailFlows(r)), ...otherFlows(r)]),
                 el('div', {}, [heading('Shipping template'), ...columns.filter(c => c.group === 'template').map(c => line(r, c)),
                     el('div', {'data-detail-template': ''}, detailTemplate(r))]),
                 el('div', {'data-detail-sync': ''}, detailSync(r)),
@@ -462,20 +478,28 @@
     const heading = text => el('div', {class: 'font-semibold text-gray-600', text});
 
     // Buong text, walang putol. Dito lang ang dahilan ng bigong pagsuri ("Check failed: …"); walang placeholder.
+    // Ang Chatblast flow (shipping): ang ID, ang buong pangalan at ang dahilan ng bigong pagsuri (iginuguhit ulit).
     function detailFlows(r) {
-        return [heading('Flows'), ...columns.filter(c => FLOW_KEY.test(c.key)).map(c => {
+        return [heading('Chatblast flow'), ...columns.filter(c => c.key === SHIPPING_KEY).map(c => {
             const id = r.cells[c.key], name = r.cells[c.key + '.name'];
             return el('div', {class: 'break-words'}, [
-                el('span', {class: 'text-gray-500', text: (SHORT[c.key] || c.label) + ': '}),
                 el('span', {class: 'font-mono', text: id ? id.value : '—'}),
                 id && name ? el('span', {class: TONE[name.tone] || 'text-gray-700', text: ' — ' + name.line}) : null,
             ]);
         })];
     }
 
+    // Ang ibang flow slot na may laman sa page (hindi ginagamit ng chatblast), nae-edit pa rin; walang binubura. Nasa labas
+    // ng [data-detail-flows] (gaya ng template line), kaya hindi nabubura ng refreshDetail ang input habang nag-e-edit.
+    function otherFlows(r) {
+        const others = columns.filter(c => FLOW_KEY.test(c.key) && c.key !== SHIPPING_KEY && r.cells[c.key]);
+        return others.length ? [el('div', {class: 'mt-2'}, heading('Other flow IDs (not used by chatblast)')), ...others.map(c => line(r, c))] : [];
+    }
+
     function detailTemplate(r) {
         const body = r.cells[TEMPLATE_KEY + '.text'];
-        return body ? [el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body.tone] || 'text-gray-700'), text: body.line})] : [];
+        if (!body) return [];
+        return body.tone === '' ? withToken(body.line) : [el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body.tone] || 'text-gray-700'), text: body.line})];
     }
 
     function detailSync(r) {

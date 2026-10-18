@@ -89,7 +89,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $res = $this->get('/chatblast/page-settings')->assertOk();
 
         $res->assertSee('table-fixed', false)
-            ->assertSee("[['botcake', 'Botcake'], ['flows', 'Flows']]", false)
+            ->assertSee("[['botcake', 'Botcake'], ['flows', 'Chatblast flow']]", false)
             ->assertSee("text: 'Orders / Customers'", false)
             ->assertSee("text: 'Sync', title: 'Last sync / Next sync'", false);
         // Ang bawat action ng row at ng page: maliit na button o link, may title.
@@ -203,7 +203,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
             ->assertSee('delete row.cells[key];
             applyCells(row, data.cells);', false)
             ->assertSee("if (name && name.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: name.line}));", false)
-            ->assertSee("if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(el('div', {class: 'text-xs text-gray-700 whitespace-pre-wrap break-words', text: body.line}));", false)
+            ->assertSee("if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(...withToken(body.line));", false)
             // "(no name)" / "(no body)" ay hindi alam na pangalan o content: walang linya; ang content ay kasama lang ng shipping ID.
             ->assertSee("const UNKNOWN = ['(no name)', '(no body)'];", false)
             ->assertSee("else if (name && name.tone === '' && !UNKNOWN.includes(name.line))", false)
@@ -448,5 +448,27 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->getJson('/chatblast/page-settings/page-check?page_name=Page%20Uno')->assertNotFound();
         $this->cell(['page_name' => 'Page Uno', 'key' => 'page_id', 'value' => '2002'])->assertNotFound();
         $this->assertSame('1001', $this->settings()->get('Page Uno', 'botcake', 'page_id'));
+    }
+
+    /**
+     * S-056.37: ang Flows cell ay iisang "Chatblast flow" (ang shipping); ang ibang flow slot na may laman ay nasa ▸ at
+     * nae-edit pa rin; ang {{1}} ng content ay malinaw na token na may paalala; ang walang lamang nae-edit ay "+ set".
+     */
+    public function test_S_056_37_one_chatblast_flow_a_clear_customer_token_and_empty_values_that_look_clickable(): void
+    {
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+
+        foreach ([
+            "[['botcake', 'Botcake'], ['flows', 'Chatblast flow']]",
+            "group === 'flows' ? inGroup(group).filter(c => c.key === SHIPPING_KEY).map(c => flowBlock(r, c))",
+            "'Other flow IDs (not used by chatblast)'",
+            "columns.filter(c => FLOW_KEY.test(c.key) && c.key !== SHIPPING_KEY && r.cells[c.key])",
+            "const TOKEN = '[message for the customer]', TOKEN_HINT = 'Filled per customer, see To send / History';",
+            'const SLOT = ' . json_encode(\App\Services\BotcakeFlowNames::SLOT) . ';',
+            "text: '+ set'",
+            '#grid-table .cell.empty:hover { outline: 1px dashed #94a3b8; }',
+        ] as $needle) {
+            $this->assertStringContainsString($needle, $html, $needle);
+        }
     }
 }

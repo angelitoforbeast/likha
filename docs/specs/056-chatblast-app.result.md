@@ -897,3 +897,67 @@ Before and after screenshots at 1366 px (full page, plus the To send row panel) 
 ### Story changes (amendment 6)
 
 - **S-056.1:** "Log out" is removed from the Then; the top bar shows "← Likha" and the user's name.
+
+## Amendment 7: one Chatblast flow on page settings
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-7.md` (git-ignored, not
+committed). It is treated as part of the brief. All changes are in `resources/views/page_settings/index.blade.php`:
+display only, with no data, endpoint or server change.
+
+### What changed
+
+1. **The Flows column is now "Chatblast flow"** and shows one block, `botcake.flow.shipping`:
+   - the ID (editable, labelled "Flow ID");
+   - the flow name in Botcake;
+   - the template content.
+
+   The Delivering, In transit and Broadcast slots are no longer shown in the cell.
+2. **Other flow slots under ▸.** When a page has a value in any of those slots, it shows under ▸ as **"Other flow IDs (not
+   used by chatblast)"**, one editable line each. No data is deleted.
+   - The ▸ "Chatblast flow" line keeps the full name and the check reason.
+   - The editable lines sit outside the block that is redrawn on each poll, as the template line already does, so an
+     open input is never wiped mid-edit.
+3. **The customer token.** In the content, both in the cell and under ▸, the `{{1}}` custom field shows as a highlighted
+   violet token, **`[message for the customer]`**, with the hint **"Filled per customer, see To send / History"** under
+   it.
+   - This replaces the plain "(sequence message)" on screen.
+   - The server's line still uses `BotcakeFlowNames::SLOT`, and the page swaps it for the token, so the stored data and
+     the JSON are unchanged.
+4. **Empty values look clickable.** Every editable value in the Botcake and Chatblast flow cells, and the editable lines
+   under ▸, shows a small grey **"+ set"** when it has no value, with a dashed outline on hover. Clicking it opens the
+   input with an empty value, as before; the editor reads the stored value, never the "+ set" text.
+5. **"Setup incomplete" is unchanged:** ID, token, the shipping flow, the message field and the template.
+6. **The help paragraph** above the grid now describes the single Chatblast flow, the token and "+ set".
+
+### Browser check (amendment 7)
+
+The check ran on the scratch page with flow ID 5501, a flow name, a template with `{{1}}` and an old "Delivering" slot
+value 6601. Evidence is in the main checkout's `handoff/056-chatblast-app/screens/amendment-7/`
+(`page-settings.png`, `page-settings-detail.png`, `evidence.txt`).
+
+- **Header:** "Page · Botcake · Chatblast flow · Orders / Customers · Sync".
+- **The cell:** "Flow ID 5501 / Shipping update (order_update) / Good day po! / [message for the customer] / Salamat po
+  sa pag-order. / Filled per customer, see To send / History".
+- **"+ set"** on the empty Token, Message field and Test PSID. Clicking one opened an empty input.
+- **▸:** "Chatblast flow: 5501 — Shipping update (order_update)", then "Other flow IDs (not used by chatblast): Delivering
+  6601".
+- **No horizontal scroll** at 1366 or 1280. No JS errors.
+
+### Tests (amendment 7)
+
+- **New:** `PageSettingsGridTest::test_S_056_37_one_chatblast_flow_a_clear_customer_token_and_empty_values_that_look_clickable`.
+  It failed first, on the missing strings in the page.
+- **Changed:** S-054.2 now expects the header "Chatblast flow". S-054.10 now expects the content drawn with the token
+  (`withToken`).
+- `tests/Feature/PageSettings`: `Tests: 117, Assertions: 985`, all passing.
+
+### Story changes (amendment 7)
+
+- **S-056.37** is new.
+- **S-054.10:** its "one block per flow" is now one block for the Chatblast flow, with the other slots under ▸.
+
+### Accepted
+
+- **"Flow problems" can count a hidden slot.** The chip still counts a red line on any flow slot with an ID, including
+  the hidden ones; that line shows under ▸. Reason: the "Setup incomplete" and problem rules were asked to stay as they
+  are.
