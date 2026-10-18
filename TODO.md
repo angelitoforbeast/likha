@@ -649,3 +649,15 @@ Accepted, not fixed:
 - **(independent review) The prune stops after 40 batches (200,000 rows) a run;** the rest goes in the next run (the next day, or the next chatblast:auto day). Reason: keeps each run short; normal daily volume is far below that.
 - **(independent review) A page id first seen in chats appears in the Chats page filter up to 10 minutes late** (the distinct list is cached). Reason: asked for; its rows show in the unfiltered list at once.
 - **(independent review) The Chats list shows "Page N · X messages" instead of a total;** no COUNT over the table. Reason: asked for (simplePaginate).
+
+## 061: hourly J&T track-sync, chatblast reads the database (2026-10-18)
+
+- **Rider fallback to from_jnts can name an earlier day's rider** (when today's On Delivery scan has no readable rider, the from_jnts rider columns still hold the last one ever parsed). Kept because the brief decided "falling back to from_jnts"; the safer rule is to fall back only when there is no scan row. Owner's call.
+- **At high volume the cap and the 90-minute window do not fit:** at 80k waybills a run may reach about 32k, so some Delivering waybills are checked every two hours and wait as "stale". Checking Delivering waybills first would fix it, but the brief says newest first. Owner's call.
+- **A crashed run stays "running" on /jnt/track-sync and drops its resume point** (the next run starts from the newest). Reason: rare; the hour claim already stops repeats. Mark leftover running rows failed at the next start if it shows up.
+- **The build-time skip of unsent requires-On-Delivery rows has no window limit** (two indexed queries per 500 unsent rows per build). Reason: the unsent set is small; limit it to the campaign window if it grows.
+- **"Delivered/Returned are final" is now in three places** (JntTracker, JntAutoTrackSync, the manual job). Reason: legacy minimal touches; share one constant when this area changes again.
+- **The manual run and the automatic run each throttle to 2 calls a second;** both at once make 4. Reason: existed before for the manual run beside chatblast; avoid starting a manual run at :20.
+- **Missing small tests:** the stop waybill of a capped run became final (the code handles it), a stale row sent at the next due time once fresh, the Off state of the page, a guest POST to the toggle, the claim used up when the lock is busy. Reason: each path is a one-line branch next to a covered one.
+- **The background start uses its own command string** instead of Laravel's `Application::formatCommandString()`. Reason: works on Linux; the test asserts the trailing `&`.
+- **jnt_latest_scans has no timestamps** (the plan said it would); `checked_at` is the only time needed.
