@@ -6,6 +6,7 @@ use App\Models\BotcakeChat;
 use App\Models\BotcakePsid;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
@@ -18,6 +19,7 @@ class BotcakeChatGuard
     /** Dahilan => label sa Setup box. */
     public const REASONS = [
         'bad_ip' => 'IP not on the list', 'bad_key' => 'Bad key', 'unknown_page' => 'Unknown page', 'psid_not_found' => 'PSID not on the page',
+        'psid_unchecked' => 'PSID could not be checked',
     ];
     public const VERIFY_TIMEOUT = 5;      // segundo: naghihintay ang Botcake sa sagot
     public const NOT_ON_PAGE_SECONDS = 3600;
@@ -84,9 +86,11 @@ class BotcakeChatGuard
     }
 
     /**
-     * Nasa page ba ang PSID? 'ok' (nasa botcake_psids, o pinatunayan ngayon ng Botcake at itinala bilang chat_verify),
-     * 'not_on_page' (sinabi ng Botcake na wala; naaalala nang 1 oras), o 'unverified' (hindi sumagot ang Botcake o walang
-     * token: tinatanggap, itinatala sa log, at susubukan ulit sa susunod na chat).
+     * Nasa page ba ang PSID? 'ok' (nasa botcake_psids, o pinatunayan ngayon ng Botcake at itinala bilang chat_verify);
+     * 'not_on_page' (sinabi ng Botcake na wala; naaalala nang 1 oras); 'unverified' (walang koneksyon, timeout o 5xx:
+     * tinatanggap, itinatala sa log, susubukan ulit sa susunod na chat); 'unchecked' (walang token, lampas sa cap ng
+     * pagsuri kada page, o ibang sagot ng Botcake gaya ng token o 429: hindi iniimbak, para hindi mapilit ng umaatake
+     * ang pagtanggap).
      */
     public function checkPsid(string $page, string $pageId, string $psid, ?string $name): string
     {
@@ -99,16 +103,27 @@ class BotcakeChatGuard
         if (Cache::has($notOnPage)) return 'not_on_page';
 
         $token = trim((string) $this->settings->get($page, 'botcake', 'token'));
-        $found = $token === '' ? null : app(BotcakeClient::class)->shared(sha1($token), self::VERIFY_TIMEOUT)->once(self::VERIFY_TIMEOUT)
-            ->customerInfo($pageId, $psid, $token);
+        if ($token === '') {
+            Log::warning('botcake chat: PSID not checked, chat not kept', ['page' => $page, 'reason' => 'no token']);
+            return 'unchecked';
+        }
+        // Ang bawat bagong PSID ay isang tawag gamit ang token ng page (kahati ng chatblast sa 2 kada segundo): may cap kada page.
+        if (!RateLimiter::attempt('botcake-chat-verify:' . $pageId, max(1, (int) config('services.botcake.chat_verify_per_minute')), fn () => true, 60)) {
+            return 'unchecked';
+        }
 
-        if ($found === false) {
+        $answer = app(BotcakeClient::class)->shared(sha1($token), self::VERIFY_TIMEOUT)->once(self::VERIFY_TIMEOUT)->customerInfo($pageId, $psid, $token);
+        if ($answer === 'not_found') {
             Cache::put($notOnPage, true, self::NOT_ON_PAGE_SECONDS);
             return 'not_on_page';
         }
-        if ($found === null) {
-            Log::warning('botcake chat: PSID not verified, chat kept', ['page' => $page, 'reason' => $token === '' ? 'no token' : 'Botcake did not answer']);
+        if ($answer === 'down') {
+            Log::warning('botcake chat: PSID not verified, chat kept', ['page' => $page, 'reason' => 'Botcake did not answer']);
             return 'unverified';
+        }
+        if ($answer !== 'found') {
+            Log::warning('botcake chat: PSID not checked, chat not kept', ['page' => $page, 'reason' => 'Botcake refused the check']);
+            return 'unchecked';
         }
 
         BotcakePsid::create([

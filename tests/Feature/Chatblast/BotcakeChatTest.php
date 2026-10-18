@@ -20,12 +20,11 @@ class BotcakeChatTest extends ChatblastTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Http::fake();
+        Http::fake(['botcake.io/*' => Http::response(['success' => true])]); // pinatutunayan ng fake na Botcake ang bawat PSID
         Queue::fake();
         Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_20_100000_create_botcake_chats_table.php']]);
         config(['services.botcake.chat_key' => self::KEY, 'app.url' => 'https://app.example.test']);
-        // Atin lang na page ang tinatanggap, at ang PSID ay sinusuri: ang psid-a ay kilala na; ang iba ay hindi masuri
-        // (walang laman ang fake na sagot ng Botcake), kaya tinatanggap gaya ng kapag hindi sumasagot ang Botcake.
+        // Atin lang na page ang tinatanggap, at ang PSID ay sinusuri: ang psid-a ay kilala na; ang iba ay pinatutunayan ng fake.
         $this->page('Page Uno', '1001');
         \App\Models\BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ana Cruz', 'psid' => 'psid-a', 'status' => 'available', 'source' => 'api']);
     }

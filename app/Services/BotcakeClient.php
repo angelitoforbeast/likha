@@ -115,17 +115,19 @@ class BotcakeClient
     public const NOT_ON_PAGE = ['not found customer', 'psid wrong format'];
 
     /**
-     * Nasa page ba ang PSID (customer info)? true = oo; false = "Not found customer" o "psid wrong format"; null = hindi
-     * nalaman (walang koneksyon, timeout, 5xx, token, o ibang sagot). Gamitin kasama ang shared() at once() para sa web.
+     * Nasa page ba ang PSID (customer info)? 'found'; 'not_found' ("Not found customer" o "psid wrong format"); 'down'
+     * (walang koneksyon, timeout o 5xx: hindi nalaman); 'refused' (anumang ibang sagot: token, 429, 404, iba). Gamitin
+     * kasama ang shared() at once() para sa web.
      */
-    public function customerInfo(string $pageId, string $psid, string $token): ?bool
+    public function customerInfo(string $pageId, string $psid, string $token): string
     {
         $r = $this->call('GET', '/pages/' . rawurlencode($pageId) . '/customer/' . rawurlencode($psid) . '/info', [], $token);
         $body = is_array($r['body']) ? $r['body'] : [];
-        if ($r['http'] === 200 && ($body['success'] ?? null) === true) return true;
-        if (($body['success'] ?? null) === false && in_array(mb_strtolower(trim((string) ($body['message'] ?? ''))), self::NOT_ON_PAGE, true)) return false;
+        if ($r['http'] === 200 && ($body['success'] ?? null) === true) return 'found';
+        if (($body['success'] ?? null) === false && in_array(mb_strtolower(trim((string) ($body['message'] ?? ''))), self::NOT_ON_PAGE, true)) return 'not_found';
+        if ($r['http'] === 0 || $r['http'] >= 500) return 'down';
 
-        return null;
+        return 'refused';
     }
 
     /** Isang mababang tawag (custom_fields) para subukan ang token. False = invalid. */

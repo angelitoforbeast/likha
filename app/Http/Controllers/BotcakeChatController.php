@@ -42,10 +42,11 @@ class BotcakeChatController extends Controller
     private const COLUMN_FIELDS = ['page_id', 'psid', 'name', 'message'];
 
     /**
-     * Ang pagkakasunod: (1) IP ng Botcake (log: itinatala at binibilang; enforce: 403); (2) ang header key ay kilala (ang
+     * Ang pagkakasunod: (1) IP ng Botcake, ang REMOTE_ADDR (enforce: 403; log: itinatala at binibilang pagkatapos ng (4)); (2) ang header key ay kilala (ang
      * chat.key ng isang page, o ang shared habang naka-on), bago basahin ang body; (3) body hanggang 64 KB (413); (4) ang
      * key mula sa param kung walang header; (5) ang page ay atin (page_id o pangalan), kung hindi 401; (6) ang key ay sa
-     * page na iyon (hash_equals), kung hindi 401; (7) ang PSID ay nasa page (botcake_psids o Botcake), kung hindi:
+     * page na iyon (hash_equals), kung hindi 401; (7) ang PSID ay nasa page (botcake_psids o Botcake; tinatanggap din kapag
+     * hindi sumagot ang Botcake), kung hindi (wala sa page, walang token, lampas sa cap, ibang sagot):
      * {"ok":true} at walang iniimbak. Ang bawat pagtanggi ay binibilang (BotcakeChatGuard).
      */
     public function receive(Request $request, BotcakeChatGuard $guard): JsonResponse
@@ -55,13 +56,12 @@ class BotcakeChatController extends Controller
             return response()->json(['ok' => false], $status);
         };
 
-        // (1) Ang IP: ip() (ayon sa trusted proxies) at ang REMOTE_ADDR, para makita sa log kung alin ang totoo.
-        $ip = (string) $request->ip();
-        if (!$guard->ipListed($ip)) {
-            Log::warning('botcake chat: IP not on the list', ['ip' => $ip, 'remote_addr' => (string) $request->server('REMOTE_ADDR'), 'mode' => $guard->enforcesIp() ? 'enforce' : 'log']);
-            if ($guard->enforcesIp()) return $refuse('bad_ip', 403);
-            $guard->count('bad_ip');
-        }
+        // (1) Ang IP: ang kumokonektang address (REMOTE_ADDR), hindi ang X-Forwarded-For na kayang isulat ng kliyente
+        // (pinagkakatiwalaan ng app ang lahat ng proxy). Enforce: 403 agad. Log: itinatala pagkatapos ng key (sa ibaba),
+        // para ang log ay ang mga IP ng totoong may key lang.
+        $ip = (string) $request->server('REMOTE_ADDR');
+        $listed = $guard->ipListed($ip);
+        if (!$listed && $guard->enforcesIp()) return $refuse('bad_ip', 403);
 
         // (2) Ang header key muna, bago basahin ang body.
         $given = (string) $request->header('X-Chat-Key');
@@ -86,6 +86,10 @@ class BotcakeChatController extends Controller
             }
             if (!$guard->knownKey($given)) return $refuse('bad_key');
         }
+        if (!$listed) {
+            Log::warning('botcake chat: IP not on the list', ['ip' => $ip, 'forwarded_ip' => (string) $request->ip(), 'mode' => 'log']);
+            $guard->count('bad_ip');
+        }
 
         $values = [];
         $byName = [];
@@ -109,8 +113,10 @@ class BotcakeChatController extends Controller
         if (!$guard->keyFitsPage($pageName, $given)) return $refuse('bad_key');
 
         // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
-        if ($f['psid'] === null || $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name']) === 'not_on_page') {
-            $guard->count('psid_not_found');
+        // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
+        $check = $f['psid'] === null ? 'unchecked' : $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name']);
+        if ($check === 'not_on_page' || $check === 'unchecked') {
+            $guard->count($check === 'not_on_page' ? 'psid_not_found' : 'psid_unchecked');
             return response()->json(['ok' => true]);
         }
 

@@ -107,6 +107,8 @@ return [
         // Mga IP/CIDR ng Botcake (kuwit ang hati). log = tinatanggap pero itinatala at binibilang ang iba; enforce = 403.
         'chat_ips'     => array_values(array_filter(array_map('trim', explode(',', (string) env('BOTCAKE_CHAT_IPS', '203.171.22.6'))))),
         'chat_ip_mode' => env('BOTCAKE_CHAT_IP_MODE', 'log'),
+        // Hanggang ilang bagong PSID kada minuto kada page ang sinusuri sa Botcake (token ng page, kahati ng chatblast).
+        'chat_verify_per_minute' => (int) env('BOTCAKE_CHAT_VERIFY_PER_MINUTE', 60),
         'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
     ],
 

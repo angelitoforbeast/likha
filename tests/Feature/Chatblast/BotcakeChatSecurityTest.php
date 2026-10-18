@@ -30,7 +30,10 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
     {
         parent::setUp();
         Queue::fake();
-        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_20_100000_create_botcake_chats_table.php']]);
+        Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_20_100000_create_botcake_chats_table.php',
+            'database/migrations/2026_10_22_100000_widen_source_on_botcake_psids.php',
+        ]]);
         config([
             'services.botcake.chat_key' => self::SHARED, 'services.botcake.chat_shared_key_ok' => true,
             'services.botcake.chat_ips' => [self::BOTCAKE_IP], 'services.botcake.chat_ip_mode' => 'log',
@@ -83,8 +86,9 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
         $this->send([], 'not-a-key-of-any-page-0000000000')->assertStatus(401);
         $this->send(['page_id' => '9999'], self::KEY_UNO)->assertStatus(401);     // walang ganitong page
         $this->send([], null)->assertStatus(401);
+        $this->send(['page_id' => '', 'page' => 'Page Dos'], self::KEY_UNO)->assertStatus(401); // ang pangalan ng ibang page
         $this->assertSame(0, BotcakeChat::count());
-        $this->assertSame(['bad_key' => 3, 'unknown_page' => 1], $this->counts());
+        $this->assertSame(['bad_key' => 4, 'unknown_page' => 1], $this->counts());
 
         $this->send([], self::KEY_UNO)->assertOk();
         $this->assertSame(['Page Uno'], BotcakeChat::pluck('page_name')->all());
@@ -93,13 +97,17 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
     public function test_S_067_3_the_shared_key_works_only_while_the_flag_is_on(): void
     {
         Http::fake();
+        $this->page('Page Tres', '3003'); // walang sariling key
+        BotcakePsid::create(['page' => 'Page Tres', 'fb_name' => 'Ben Reyes', 'psid' => 'psid-tres', 'status' => 'available', 'source' => 'api']);
 
         $this->send(['message' => 'shared on'], self::SHARED)->assertOk();
+        $this->send(['message' => 'tres shared on', 'page_id' => '3003', 'psid' => 'psid-tres'], self::SHARED)->assertOk();
         config(['services.botcake.chat_shared_key_ok' => false]);
         $this->send(['message' => 'shared off'], self::SHARED)->assertStatus(401);
+        $this->send(['message' => 'tres shared off', 'page_id' => '3003', 'psid' => 'psid-tres'], self::SHARED)->assertStatus(401);
         $this->send(['message' => 'page key'], self::KEY_UNO)->assertOk();
 
-        $this->assertSame(['shared on', 'page key'], BotcakeChat::orderBy('id')->pluck('message')->all());
+        $this->assertSame(['shared on', 'tres shared on', 'page key'], BotcakeChat::orderBy('id')->pluck('message')->all());
     }
 
     public function test_S_067_4_a_psid_already_in_botcake_psids_needs_no_api_call(): void
@@ -156,8 +164,79 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
         return [
             'timeout'    => [fn () => throw new ConnectionException('timed out')],
             'HTTP 500'   => [fn () => Http::response('oops', 500)],
-            'token gone' => [fn () => Http::response(['success' => false, 'message' => 'Invalid access token'], 401)],
         ];
+    }
+
+    public static function botcakeRefuses(): array
+    {
+        return [
+            'token refused'  => [fn () => Http::response(['success' => false, 'message' => 'Invalid access token'], 401)],
+            'rate limited'   => [fn () => Http::response(['success' => false], 429)],
+            'unknown answer' => [fn () => Http::response(['success' => false, 'message' => 'Something else'])],
+            'no token'       => [null],
+        ];
+    }
+
+    /** @dataProvider botcakeRefuses */
+    public function test_S_067_12_any_other_answer_or_no_token_keeps_nothing_and_is_counted(?\Closure $answer): void
+    {
+        Http::fake([self::INFO => $answer ?? fn () => Http::response(['success' => true])]);
+        if ($answer === null) {
+            $token = \App\Models\PageSetting::where('provider', 'botcake')->where('key', 'token')->whereRaw('LOWER(page_name) = ?', ['page uno'])->sole();
+            app(PageSettings::class)->deactivate($token);
+        }
+        Log::spy();
+
+        $this->send(['psid' => 'psid-new'])->assertOk()->assertExactJson(['ok' => true]);
+
+        $this->assertSame(0, BotcakeChat::count());
+        $this->assertSame(0, BotcakePsid::where('psid', 'psid-new')->count());
+        $this->assertSame(['psid_unchecked' => 1], $this->counts());
+        Log::shouldHaveReceived('warning')->withArgs(fn ($msg, $ctx = []) => str_contains($msg, 'not checked')
+            && !str_contains(json_encode($ctx), self::TOKEN) && !str_contains(json_encode($ctx), self::KEY_UNO))->once();
+    }
+
+    public function test_S_067_13_psid_checks_per_page_are_capped_per_minute(): void
+    {
+        config(['services.botcake.chat_verify_per_minute' => 2]);
+        Http::fake([self::INFO => Http::response(['success' => true])]);
+
+        foreach (['psid-n1', 'psid-n2', 'psid-n3'] as $psid) $this->send(['psid' => $psid])->assertOk();
+        $this->send(['psid' => 'psid-known'])->assertOk(); // kilala na: walang tawag, hindi apektado ng cap
+
+        Http::assertSentCount(2);
+        $this->assertSame(['psid-n1', 'psid-n2', 'psid-known'], BotcakeChat::orderBy('id')->pluck('psid')->all());
+        $this->assertSame(['psid_unchecked' => 1], $this->counts());
+    }
+
+    public function test_S_067_14_the_ip_check_uses_the_connecting_address_not_a_forwarded_header(): void
+    {
+        Http::fake();
+        config(['services.botcake.chat_ip_mode' => 'enforce']);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.7'])
+            ->postJson('/api/botcake/chat', ['page_id' => '1001', 'psid' => 'psid-known', 'message' => 'forged'], ['X-Chat-Key' => self::KEY_UNO, 'X-Forwarded-For' => self::BOTCAKE_IP])
+            ->assertStatus(403);
+
+        $this->assertSame(0, BotcakeChat::count());
+        $this->assertSame(['bad_ip' => 1], $this->counts());
+    }
+
+    public function test_S_067_15_after_rotation_or_deactivation_the_old_key_is_refused(): void
+    {
+        Http::fake(['botcake.io/*' => Http::response(['success' => true])]);
+        $this->send([], self::KEY_UNO)->assertOk(); // naka-cache ang mga hash ng key
+
+        Artisan::call('botcake:chat-setup', ['page' => 'Page Uno', '--rotate' => true]);
+        $this->send(['message' => 'old key'], self::KEY_UNO)->assertStatus(401);
+        $new = app(PageSettings::class)->get('Page Uno', 'botcake', 'chat.key');
+        $this->send(['message' => 'new key'], $new)->assertOk();
+
+        $setting = \App\Models\PageSetting::where('key', 'chat.key')->where('active', true)->whereRaw('LOWER(page_name) = ?', ['page uno'])->sole();
+        app(PageSettings::class)->deactivate($setting);
+        $this->send(['message' => 'deactivated'], $new)->assertStatus(401);
+
+        $this->assertSame(['Hello po', 'new key'], BotcakeChat::orderBy('id')->pluck('message')->all());
     }
 
     /** @dataProvider botcakeDown */
