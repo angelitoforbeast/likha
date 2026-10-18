@@ -41,12 +41,18 @@ class BulkTokenTestTest extends BotcakeApiTestCase
     /** @dataProvider answers */
     public function test_one_page_is_tested_with_one_call_and_recorded_like_the_row_button(int $status, array $body, string $expected): void
     {
-        Http::fake(['botcake.io/api/public_api/v1/pages/1001/custom_fields*' => Http::response($body, $status)]);
+        Http::fake([
+            'botcake.io/api/public_api/v1/pages/1001/custom_fields*' => Http::response($body, $status),
+            'botcake.io/api/public_api/v1/pages/1001/flows*' => Http::response(['data' => ['flows' => []], 'success' => true]),
+        ]);
 
         $res = $this->test(' page  UNO ')->assertOk()->assertJsonPath('status', $expected);
 
-        Http::assertSentCount(1); // walang retry: ang isang request ay hindi lalampas nang ~30 segundo
-        $this->assertSame([], $this->clock->sleeps);
+        // Walang retry (ang isang request ay hindi lalampas nang ~30 segundo). Kapag ok: binabasa rin ang mga flow, para sa
+        // kusang setup ng flow (walang ibang flow sa fake, kaya walang templates call).
+        Http::assertSentCount($expected === 'ok' ? 2 : 1);
+        // Walang retry na paghihintay (2, 4, 8 s); ang pagitan lang ng rate limit (0.5 s) bago ang flows call.
+        $this->assertSame([], array_filter($this->clock->sleeps, fn ($s) => $s > \App\Services\BotcakeClient::MIN_INTERVAL));
         $recorded = app(PageSettings::class)->get('Page Uno', 'botcake', 'token_status');
         if ($expected === 'error') {
             $this->assertNull($recorded, 'ang error ay hindi itinatala, gaya ng row button');

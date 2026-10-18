@@ -20,8 +20,11 @@ class PageSettings
      */
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text'];
 
-    /** Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID o template), hindi bilang sariling column. */
-    public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$/';
+    /**
+     * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
+     * column: ang pangalan ng flow, ang body ng template, at ang mga kandidato para sa dropdown (JSON na [{id, name}]).
+     */
+    public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/';
 
     /** Mga key na laging secret. */
     public const SECRET_KEYS = ['botcake.token'];

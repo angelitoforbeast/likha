@@ -3,14 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SyncBotcakeCustomersJob;
-use App\Support\BotcakeClock;
 use App\Support\ChatblastNav;
 use App\Models\MacroOutput;
 use App\Models\PageSetting;
-use App\Services\BotcakeClient;
 use App\Services\BotcakeCustomerSync;
-use App\Services\BotcakeException;
 use App\Services\BotcakeFlowNames;
+use App\Services\BotcakePageSetup;
 use App\Services\BotcakeSyncAll;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
@@ -25,11 +23,6 @@ use Illuminate\Support\Facades\DB;
  */
 class PageSettingController extends Controller
 {
-    /**
-     * Hanggang ilang segundo mula sa simula ng Test token ang lahat ng tawag sa Botcake: ang token check (hanggang 20 s),
-     * ang flows at templates, at ang paghihintay ng rate limit sa pagitan nila.
-     */
-    private const TEST_BUDGET = 25;
 
     public function __construct(private PageSettings $settings)
     {
@@ -129,6 +122,15 @@ class PageSettingController extends Controller
             $out = $this->refreshAfterSave($page, $provider . '.' . $key, $grid) + $out;
         }
 
+        // Bagong Botcake ID o token at kumpleto na ang dalawa: agad na Test (token, saka ang flow, field at template).
+        // Naka-save na ang value; ang pagkabigo ng Botcake ay nasa refresh_error lang.
+        if (in_array($provider . '.' . $key, ['botcake.page_id', 'botcake.token'], true) && $res['status'] !== 'unchanged') {
+            $check = app(BotcakePageSetup::class)->check($page);
+            if ($check['status'] !== 'skipped') {
+                $out += ['token_test' => $check['status'], 'cells' => $this->cells($check['written'], $grid), 'refresh_error' => $check['error']];
+            }
+        }
+
         return response()->json($out);
     }
 
@@ -206,66 +208,45 @@ class PageSettingController extends Controller
      * Isang custom_fields call: ok o invalid, itinatala sa botcake.token_status. Kapag ok: ang pangalan ng mga flow at
      * ang template (isang flows read at isang templates call).
      */
-    public function testToken(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, BotcakeClock $clock)
+    public function testToken(Request $request)
     {
         $this->checkAccess();
-        $start = $clock->now();
 
-        $page   = (string) $request->input('page_name', '');
-        $pageId = $this->settings->get($page, 'botcake', 'page_id');
-        $token  = $this->settings->get($page, 'botcake', 'token');
-        if (!$pageId || !$token) {
+        $page = (string) $request->input('page_name', '');
+        $res  = app(BotcakePageSetup::class)->check($page);
+        if ($res['status'] === 'skipped') {
             return redirect()->route('page-settings.index')->with('error', 'The page needs botcake.page_id and botcake.token first.');
         }
-
-        try {
-            // Parehong rate key ng flows at templates na susunod: 2 request kada segundo kada page, kasama ang token check.
-            $status = $client->shared(sha1($token), 30)->testToken($pageId, $token) ? 'ok' : 'invalid';
-        } catch (BotcakeException $e) {
-            return redirect()->route('page-settings.index')->with('error', 'Could not test the token: ' . $e->getMessage());
+        if ($res['status'] === 'error') {
+            return redirect()->route('page-settings.index')->with('error', 'Could not test the token: ' . $res['error']);
         }
 
-        $sync->tokenStatus($page, $status, true);
+        $note = $res['status'] !== 'ok' ? '' : ($res['error'] === null ? ' · flow, field and template checked' : ' · flow, field and template not checked: ' . $res['error']);
 
-        $note = '';
-        if ($status === 'ok') {
-            $res = app(BotcakeFlowNames::class)->afterTokenOk($page, $start + self::TEST_BUDGET);
-            $note = $res['error'] === null ? ' · flows and template refreshed' : ' · flows and template not refreshed: ' . $res['error'];
-        }
-
-        return redirect()->route('page-settings.index')->with($status === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $status . $note);
+        return redirect()->route('page-settings.index')->with($res['status'] === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $res['status'] . $note);
     }
 
     /**
      * "Test lahat ng token": isang page kada request (isa-isang tinatawag ng browser), isang token check na walang
      * retry (hanggang 20 s). Itinatala gaya ng row button; ang error ay hindi itinatala. Kapag ok: ang pangalan ng mga
-     * flow at ang template; ang buong request ay hindi lalampas nang ~TEST_BUDGET (25) segundo, kasama ang token check
+     * flow at ang template; ang buong request ay hindi lalampas nang ~BotcakePageSetup::TEST_BUDGET (25) segundo, kasama ang token check
      * at ang paghihintay ng rate limit. Ang mga cell na isinulat ay ibinabalik (cells) para ma-update ang row nang walang reload.
      */
-    public function testTokenJson(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, PageSettingsGrid $grid, BotcakeClock $clock)
+    public function testTokenJson(Request $request, PageSettingsGrid $grid)
     {
         $this->checkAccess();
-        $start = $clock->now();
 
-        $page   = (string) $request->input('page_name', '');
-        $pageId = $this->settings->get($page, 'botcake', 'page_id');
-        $token  = $this->settings->get($page, 'botcake', 'token');
-        if (!$pageId || !$token) return response()->json(['status' => 'skipped', 'cell' => null]);
-
-        try {
-            $status = $client->shared(sha1($token), 20)->once(20)->testToken($pageId, $token) ? 'ok' : 'invalid';
-        } catch (BotcakeException $e) {
-            return response()->json(['status' => 'error', 'error' => $e->getMessage(), 'reason' => $e->reason, 'cell' => null]);
+        $page = (string) $request->input('page_name', '');
+        $res  = app(BotcakePageSetup::class)->check($page);
+        if ($res['status'] === 'skipped') return response()->json(['status' => 'skipped', 'cell' => null]);
+        if ($res['status'] === 'error') {
+            return response()->json(['status' => 'error', 'error' => $res['error'], 'reason' => $res['reason'], 'cell' => null]);
         }
 
-        $sync->tokenStatus($page, $status, true);
-        $row = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'token_status')
-            ->where('active', true)->orderByDesc('id')->first();
-
-        $out = ['status' => $status, 'cell' => $row ? $grid->cell($row) : null, 'cells' => null];
-        if ($status === 'ok') {
-            $res = app(BotcakeFlowNames::class)->afterTokenOk($page, $start + self::TEST_BUDGET);
-            $out['cells'] = $this->cells($res['written'], $grid);
+        $row = $res['written']['botcake.token_status'] ?? null;
+        $out = ['status' => $res['status'], 'cell' => $row ? $grid->cell($row) : null, 'cells' => null];
+        if ($res['status'] === 'ok') {
+            $out['cells'] = $this->cells(array_diff_key($res['written'], ['botcake.token_status' => true]), $grid);
             $out['refresh_error'] = $res['error'];
         }
 
@@ -279,13 +260,17 @@ class PageSettingController extends Controller
 
         $key  = $this->settings->pageKey((string) $request->input('page_name', ''));
         $page = collect($sync->pages())->first(fn ($p) => $this->settings->pageKey($p) === $key);
+        // Ang row button ay fetch (JSON, walang reload); ang form post ay redirect gaya ng dati.
+        $json = $request->expectsJson();
         if (!$page) {
-            return redirect()->route('page-settings.index')->with('error', 'The page needs botcake.page_id and botcake.token first.');
+            $error = 'The page needs botcake.page_id and botcake.token first.';
+            return $json ? response()->json(['error' => $error], 422) : redirect()->route('page-settings.index')->with('error', $error);
         }
 
         SyncBotcakeCustomersJob::dispatch($page);
 
-        return redirect()->route('page-settings.index')->with('success', $page . ': Botcake sync queued. Refresh later for the counts.');
+        $message = $page . ': Botcake sync queued. The counts update by themselves.';
+        return $json ? response()->json(['status' => 'queued', 'message' => $message]) : redirect()->route('page-settings.index')->with('success', $message);
     }
 
     /** "Sync lahat": isang run lang sabay; ang pindot habang may tumatakbo o naka-pause na run ay walang sinisimulan. */

@@ -114,16 +114,24 @@ class BotcakeFlowNames
         return ['written' => $written, 'error' => $error ?? $error2];
     }
 
-    /** $saved = ang flow key na kase-save lang (hal. flow.shipping), o null sa Test token. Ibinabalik ang error. */
+    /**
+     * $saved = ang flow key na kase-save lang (hal. flow.shipping), o null sa Test token. Ibinabalik ang error.
+     * Binabasa ang listahan kahit wala pang flow ID ang page (bagong page): doon kinukuha ang mga CHATBLAST flow.
+     */
     private function refreshFlows(string $page, float $deadline, array &$written, ?string $saved): ?string
     {
+        // Ang mga ID bago ang tawag: ang napalitan habang naghihintay ay hindi binibigyan ng pangalan ng luma (tingnan sa ibaba).
         $ids = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('active', true)
             ->where('key', 'like', 'flow.%')->orderBy('id')->get()
             ->filter(fn ($s) => preg_match('/^flow\.[a-z0-9_]+$/', $s->key))
             ->mapWithKeys(fn ($s) => [$s->key => trim((string) $s->value)])->all();
-        if (!$ids) return null;
 
         [$flows, $error] = $this->readFlows($page, $deadline);
+        if ($flows !== null) {
+            $this->detectFlow($page, $flows, $written);
+            if (isset($written['botcake.flow.shipping'])) $ids['flow.shipping'] = trim((string) $written['botcake.flow.shipping']->value);
+        }
+        if (!$ids) return $error;
 
         foreach ($ids as $key => $id) {
             if ($error !== null) {
@@ -139,6 +147,29 @@ class BotcakeFlowNames
         }
 
         return $error;
+    }
+
+    /**
+     * Ang mga kandidato ng Chatblast flow: ang hindi burang flow na may "CHATBLAST" sa pangalan (kahit anong laki ng
+     * titik), itinatabi sa botcake.flow.shipping.options para sa dropdown. Kapag blangko ang botcake.flow.shipping:
+     * ang iisang may "(post_order)", o ang iisang kandidato; kung hindi malinaw, walang pinupunan. Hindi kailanman
+     * pinapalitan ang value na naitala na (ng tao o ng system).
+     * @param array<string, array{name:string, removed:bool}> $flows
+     */
+    private function detectFlow(string $page, array $flows, array &$written): void
+    {
+        $candidates = [];
+        foreach ($flows as $id => $f) {
+            if (!$f['removed'] && stripos($f['name'], 'CHATBLAST') !== false) $candidates[] = ['id' => (string) $id, 'name' => $f['name']];
+        }
+        $written['botcake.flow.shipping.options'] = $this->write($page, 'flow.shipping.options', json_encode($candidates, JSON_UNESCAPED_UNICODE));
+
+        if (trim((string) $this->settings->get($page, 'botcake', 'flow.shipping')) !== '') return;
+        $postOrder = array_values(array_filter($candidates, fn ($c) => stripos($c['name'], '(post_order)') !== false));
+        $pick = count($postOrder) === 1 ? $postOrder[0] : (count($candidates) === 1 ? $candidates[0] : null);
+        if ($pick !== null && ctype_digit($pick['id'])) {
+            $written['botcake.flow.shipping'] = $this->settings->set($page, 'botcake', 'flow.shipping', $pick['id'])['setting'];
+        }
     }
 
     /**

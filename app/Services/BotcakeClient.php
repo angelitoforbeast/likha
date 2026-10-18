@@ -114,14 +114,34 @@ class BotcakeClient
     /** Isang mababang tawag (custom_fields) para subukan ang token. False = invalid. */
     public function testToken(string $pageId, string $token): bool
     {
+        return $this->tokenAndFields($pageId, $token)['ok'];
+    }
+
+    /**
+     * Ang parehong tawag ng testToken, kasama ang mga custom field ng page (id at pangalan), para sa auto-detect ng
+     * message field nang walang dagdag na tawag. fields = null kapag invalid o hindi listahan ang sagot.
+     * @return array{ok: bool, fields: ?array<int, array{id: string, name: string}>}
+     */
+    public function tokenAndFields(string $pageId, string $token): array
+    {
         try {
             $body = $this->get('/pages/' . rawurlencode($pageId) . '/custom_fields', ['page' => 1], $token)->json();
         } catch (BotcakeException $e) {
-            if ($e->auth) return false;
+            if ($e->auth) return ['ok' => false, 'fields' => null];
             throw $e;
         }
 
-        return is_array($body) && ($body['success'] ?? null) === true;
+        $ok = is_array($body) && ($body['success'] ?? null) === true;
+        $list = $ok ? ($body['data'] ?? null) : null;
+        if (!is_array($list) || !array_is_list($list)) return ['ok' => $ok, 'fields' => null];
+
+        $fields = [];
+        foreach ($list as $f) {
+            if (!is_array($f) || !isset($f['id']) || !is_scalar($f['id']) || !is_string($f['name'] ?? null)) continue;
+            $fields[] = ['id' => (string) $f['id'], 'name' => mb_substr(trim($f['name']), 0, 255)];
+        }
+
+        return ['ok' => true, 'fields' => $fields];
     }
 
     protected function get(string $path, array $query, string $token): Response
