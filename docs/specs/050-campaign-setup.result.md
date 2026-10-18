@@ -84,10 +84,10 @@ Two migrations, both additive and guarded (`hasTable` / `hasColumn`):
 - **A time `t` is due** when:
   - today is one of the chosen weekdays (none chosen = every day);
   - `t ≤ now < t + 3 h`;
-  - `t` is later than the last auto run (`auto_ran_at`).
-  - `auto_ran_at` is also stamped on switching to auto, on turning the sequence back on, and when an edit adds a time or weekday that already passed today, so those never fire late.
+  - `t` is later than the floor `auto_ran_at` (stamped on switching to auto and on turning the sequence back on, then moved to the latest claimed time);
+  - `t` has not run today (`auto_runs`: the Manila date and the times done that day; changed by the review below). An edit that adds a time or weekday that already passed today marks only those new times as done, so they never fire late and an earlier time still due keeps its run.
 - **Which steps are due:** a step whose own times (or else the sequence's times) contain a due time.
-- **The run** builds rows for the due steps only, then claims the slot. The claim stamps `auto_ran_at` with the latest due time, so a time that comes due during the build still runs. It then queues the ready rows of the due steps that were built today after the switch to auto.
+- **The run** builds rows for the due steps only, then claims the due times under the sequence's row lock (marking them in `auto_runs`), so a time that comes due during the build still runs and two runs never claim the same time. It then queues the ready rows, built today after the switch to auto, of the due steps and of any step whose own time already came today (a row that became ready after its step's run; never before the step's time).
   - A step with its own time is therefore built and sent at that time only, and each time runs once per day.
 - **Unchanged from 048:**
   - pause, off and manual mean nothing runs;
@@ -254,3 +254,43 @@ Full suite on the final tree: `Tests: 1541, Assertions: 17971, Errors: 1, Failur
   - In transit: "Bawat 1 oras, mula 09:00 hanggang 21:00".
   - Remove the old 09:00 from the list if it is no longer wanted.
   - Then switch to auto (the confirmation shows the ready count; the backlog is not sent).
+
+## Review findings (835d89ea..e7289908)
+
+The changes asked for, and what was done:
+
+| Item | Fix | Test |
+|---|---|---|
+| **1 (major).** Adding a send time that already passed stamped the auto run at that time and cancelled an earlier time still due (09:00 due, 09:01 added at 09:02, nothing at 09:05) | Each time runs once per day on its own. New column `auto_runs` (`{"date":"2026-10-18","times":["09:00", …]}`, migration `2026_10_19_100300`). `due()` skips the times done today. An edit marks only the newly due past times as done and leaves `auto_ran_at` alone. The auto run claims under the sequence's row lock and marks the times it claims. The floor `auto_ran_at` still moves on switch-to-auto and on-again. | `ChatblastScheduleTest::test_adding_a_past_time_does_not_cancel_an_earlier_time_that_is_still_due` (09:00 still runs at 09:05; the added 09:01 never fires; the next day starts fresh). The three 048/050 tests that asserted the old stamp now check `ranToday()`. |
+| **2.** A campaign cap skip freed the key and the waybill got a new row the same day, rebuilt at every send time | The build's candidate query counts today's rows of the sequence skipped by its cap ("Naabot ang daily cap ng campaign sa page…") as taken, as it does for the across-campaigns skip; the next day builds again | `…::test_the_campaign_cap_per_page_skips_the_rest_of_the_day` (no new row the same day, a new one the next) |
+| **3.** Time chips built the new list from the last page load, so two quick removals brought one back | Chips read the current list at click time. The page updates its local copy as soon as it saves, and sends the list it saw (`old`). The server refuses a mismatch with "Nabago na ito … i-reload". | `ChatblastSequenceStepsTest::test_a_list_field_saved_from_a_stale_page_is_refused` (the second removal is refused and 09:00 stays removed) |
+| **4.** The same for weekdays, statuses, pages and the hourly range, and a step's own times | `old` is compared with the stored value, normalised (order ignored; no weekdays = every day; no pages = all; `every` defaults to 1). `/step-times` compares the step's own times. A refusal keeps its mark on screen, without an automatic reload over it. | the same test (a table of stale bodies refused, correct ones accepted, step times) |
+| **5.** Today's failed and skipped counts filtered `status` + `updated_at` with no index, scanning every skipped row | Bounded to rows built in the last 62 days (the longest window plus 2), so the existing `(status, created_at)` index applies; no new index or migration | the count tests still pass. A row older than 62 days that fails today is not counted (accepted in `TODO.md`, display only) |
+| **6.** The messages page grouped every sent row ever made | Send counts cover the last 30 days (`sent_at` index), shown on screen as "naipadala (huling 30 araw)" | `ChatblastMessageTest::test_the_data_shows_where_each_message_is_used_and_its_sends_per_version` (a 31-day-old send is not counted; `sent_days` is 30) |
+| **7.** A row built at a step's time that became ready later that day was never auto-sent | At each due time the run also queues the ready rows of any step whose own time already came today. They must have been built today after the switch to auto: never before the step's time, never backlog. | `ChatblastScheduleTest::test_a_row_of_a_step_with_its_own_time_that_becomes_ready_later_is_sent_at_the_next_time`, and `…::test_a_ready_row_of_a_step_is_never_sent_before_that_steps_own_time` (a mutation that drops the time check makes it fail) |
+
+Kept as built, as decided: the campaign cap only lowers the page cap; counts by step position.
+
+Red runs: the five new or extended tests for items 1, 2, 3/4, 6 and 7 failed first:
+- item 1: no row queued at 09:05;
+- item 2: a second row the same day;
+- items 3/4: the stale list was accepted;
+- item 6: `sent_days` missing;
+- item 7: the Day 2 row stayed `no_psid`/ready.
+
+The "never before its own time" test was green when written. It pins the time check and fails under the mutation. **Test mistake, corrected:** a stale model instance hid that an earlier range was still stored.
+
+**Review of the fix:** one standard `skeptic-reviewer` pass on `2cb44c46`, no blocker.
+- **Its one major** (the missing "never before its own time" test) is added.
+- **Minors fixed:**
+  - the run takes the steps whose time has come from the locked, current sequence;
+  - a stale-page error stays on screen.
+- **Accepted in `TODO.md`:**
+  - the 62-day bound on today's counts;
+  - no `hasColumn` guard for `auto_runs`;
+  - a failed optimistic save can undo a newer one on screen (never on the server);
+  - no test for two overlapping runs (the lock and `queue()` already prevent a double queue).
+
+Full suite on the final tree: `Tests: 1545, Assertions: 18003, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3`. The only reds are the known `ExampleTest` and `ImportStartTest`. The Chatblast folder alone: 131 tests, all pass.
+
+**After release, updated:** the migrations are now four (`2026_10_19_100000`, `100100`, `100200`, `100300`), all additive. Run `php artisan migrate --force` right after the deploy on both sites. Until the new columns exist, the sequences page, the build, sends and `chatblast:auto` fail; failed rows are safe to resend. No index is added to `botcake_messages`.
