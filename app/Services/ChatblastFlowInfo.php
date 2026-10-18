@@ -57,7 +57,7 @@ class ChatblastFlowInfo
             $ok = $r['http'] >= 200 && $r['http'] < 300 && is_array($r['body']) && ($r['body']['success'] ?? true) !== false;
             if ($ok) return [$r['body'], null];
             $refused = $r['http'] >= 200 && $r['http'] < 300;
-            return [null, $refused ? 'Botcake: refused (success:false)' : 'Botcake: HTTP ' . ($r['http'] ?: 'no answer')];
+            return [null, $refused ? 'Botcake: refused (success:false)' : ($r['http'] ? 'Botcake: HTTP ' . $r['http'] : 'Botcake: no answer')];
         };
 
         [$flows, $flowError] = $call($base . '/flows');

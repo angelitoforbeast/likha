@@ -116,7 +116,7 @@ class ChatblastMessageController extends Controller
     {
         $this->checkAccess();
         $src = ChatblastMessage::findOrFail($id);
-        $m = new ChatblastMessage(['name' => $this->chatblast->freeName($src->name . ' (kopya)'), 'versions' => $src->versions]);
+        $m = new ChatblastMessage(['name' => $this->chatblast->freeName($src->name . ' (copy)'), 'versions' => $src->versions]);
         Chatblast::log($m, Auth::id(), ['what' => 'duplicate', 'of' => $src->id]);
         if (!$this->saved($m)) return response()->json(['error' => 'A message with this name already exists.'], 422);
 

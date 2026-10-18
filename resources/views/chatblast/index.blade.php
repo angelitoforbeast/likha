@@ -116,7 +116,7 @@
     <aside id="panel" class="hidden fixed right-0 top-0 h-full w-[34rem] max-w-full bg-white shadow-xl border-l p-4 overflow-auto text-sm z-50" aria-label="Message details">
         <div class="flex justify-between items-center mb-2">
             <div id="panel-title" class="font-semibold"></div>
-            <button id="panel-close" type="button" class="text-gray-500 hover:text-gray-800 px-2" aria-label="Isara">✕</button>
+            <button id="panel-close" type="button" class="text-gray-500 hover:text-gray-800 px-2" aria-label="Close">✕</button>
         </div>
         <div id="panel-body"></div>
     </aside>
@@ -202,7 +202,7 @@
             b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? '' : status; page = 1; load(); });
             return b;
         };
-        document.getElementById('chips').replaceChildren(chip('', 'lahat', total), ...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
+        document.getElementById('chips').replaceChildren(chip('', 'all', total), ...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
     }
 
     function renderState(s) {
@@ -272,7 +272,7 @@
         const kv = (k, v) => el('div', {class: 'flex gap-2'}, [el('span', {class: 'text-gray-500 w-28 shrink-0', text: k}), el('span', {class: 'break-all', text: v == null || v === '' ? '—' : String(v)})]);
         const steps = (m.steps || []).map(s => el('div', {class: 'border rounded p-2 mb-2'}, [
             el('div', {class: 'font-medium', text: s.step + ' · ' + s.method + ' ' + s.path}),
-            el('div', {class: 'text-xs text-gray-600', text: 'HTTP ' + s.http + ' · ' + s.attempts + ' subok · ' + s.at}),
+            el('div', {class: 'text-xs text-gray-600', text: 'HTTP ' + s.http + ' · ' + s.attempts + ' tries · ' + s.at}),
             el('div', {class: 'text-xs text-gray-500 mt-1', text: 'Request (no token):'}),
             el('pre', {class: 'cb text-xs bg-gray-50 p-1 rounded', text: JSON.stringify(s.request, null, 1)}),
             el('div', {class: 'text-xs text-gray-500 mt-1', text: 'Response:'}),

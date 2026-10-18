@@ -27,7 +27,7 @@ class ChatblastEnglishTest extends ChatblastTestCase
     {
         $this->get('/chatblast')->assertOk()
             ->assertSee('Fetch new')->assertSee('Send all ready')->assertSee('Retry failed')->assertSee('Messages')->assertSee('Sequences')
-            ->assertSee('No messages in this filter')
+            ->assertSee('No messages in this filter')->assertSee('aria-label="Close"', false)
             ->assertDontSee('Kunin ang mga bago')->assertDontSee('Mga mensahe')->assertDontSee('Hanapin')->assertDontSee('Ipadala');
     }
 
@@ -74,6 +74,8 @@ class ChatblastEnglishTest extends ChatblastTestCase
         $this->assertTrue(Chatblast::isTextReason('walang {cod}'));
         $this->assertTrue(Chatblast::isTextReason('hindi buo ang text: walang laman'));
         $this->assertTrue(Chatblast::isTextReason('missing {cod}'));
+        $this->assertTrue(Chatblast::isTextReason('incomplete text: empty'));
+        $this->assertTrue(Chatblast::isTextReason(Chatblast::RIDER_REASON));
         $this->assertFalse(Chatblast::isTextReason('the order has no PSID (not matched to a Botcake customer yet)'));
         $this->assertSame(2, BotcakeMessage::where('kind', 'in_transit')->count());
     }

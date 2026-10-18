@@ -95,7 +95,7 @@ class ChatblastMessageTest extends ChatblastTestCase
         $this->postJson('/chatblast/messages/' . $id, ['name' => 'Bayad paalala'])->assertOk();
         $this->postJson('/chatblast/messages/' . $id, ['name' => $this->m->name])->assertStatus(422);
         $copy = $this->postJson('/chatblast/messages/' . $id . '/duplicate')->assertCreated()->json('message');
-        $this->assertSame(['Bayad paalala (kopya)', ['Bayad {cod}']], [$copy['name'], $copy['versions']]);
+        $this->assertSame(['Bayad paalala (copy)', ['Bayad {cod}']], [$copy['name'], $copy['versions']]);
 
         $this->deleteJson('/chatblast/messages/' . $copy['id'])->assertOk();
         $this->assertFalse(ChatblastMessage::whereKey($copy['id'])->exists());
