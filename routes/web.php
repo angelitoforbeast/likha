@@ -294,10 +294,19 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     });
 });
 
-// /chatbot: ang listahan ng page ng sariling chatbot (On/Off, FLOW, botfields). Access gaya ng /chatblast (403 sa iba);
-// ang On/Off at ang pagdagdag ng page ay CEO lang (sa controller).
+// /chatbot: ang sariling chatbot. Flow (/chatbot, ang editor), Page settings (/chatbot/pages: On/Off, FLOW, botfields),
+// Chats, Replies at Test. Access gaya ng /chatblast (403 sa iba); ang On/Off at ang pagdagdag ng page ay CEO lang.
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatbot.')->group(function () {
-    Route::get('/', [\App\Http\Controllers\ChatbotController::class, 'index'])->name('index');
+    Route::get('/', [\App\Http\Controllers\ChatbotFlowController::class, 'index'])->name('index');
+    Route::post('/flows', [\App\Http\Controllers\ChatbotFlowController::class, 'store'])->middleware('throttle:30,1,chatbot-flows')->name('flows.store');
+    Route::get('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'edit'])->whereNumber('id')->name('flows.edit');
+    Route::get('/flows/{id}/graph', [\App\Http\Controllers\ChatbotFlowController::class, 'graph'])->whereNumber('id')->name('flows.graph');
+    Route::put('/flows/{id}/graph', [\App\Http\Controllers\ChatbotFlowController::class, 'saveGraph'])->whereNumber('id')->middleware('throttle:120,1,chatbot-graph')->name('flows.save');
+    Route::post('/flows/{id}/rename', [\App\Http\Controllers\ChatbotFlowController::class, 'rename'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.rename');
+    Route::post('/flows/{id}/duplicate', [\App\Http\Controllers\ChatbotFlowController::class, 'duplicate'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.duplicate');
+    Route::delete('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'destroy'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.destroy');
+
+    Route::get('/pages', [\App\Http\Controllers\ChatbotController::class, 'index'])->name('pages.index');
     Route::get('/data', [\App\Http\Controllers\ChatbotController::class, 'data'])->name('data');
     Route::post('/cell', [\App\Http\Controllers\ChatbotController::class, 'cell'])->middleware('throttle:120,1,chatbot-cell')->name('cell');
     Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');

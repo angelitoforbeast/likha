@@ -86,7 +86,7 @@ class ChatbotController extends Controller
             ];
         }
 
-        return response()->json(['columns' => $columns, 'rows' => $rows]);
+        return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames()]);
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */
@@ -100,6 +100,9 @@ class ChatbotController extends Controller
         if (in_array($key, ChatbotFields::RESERVED, true)) return response()->json(['error' => 'ACTIVE is changed with the On/Off switch.'], 422);
         if (!$this->fields->isColumn($key)) return response()->json(['error' => 'Unknown column.'], 422);
         if (mb_strlen($value) > ChatbotFields::MAX_VALUE) return response()->json(['error' => 'At most ' . ChatbotFields::MAX_VALUE . ' characters.'], 422);
+        if ($value !== '' && $key === 'flow' && !in_array($value, $this->flowNames(), true)) {
+            return response()->json(['error' => 'Pick a flow from the list.'], 422);
+        }
         if ($value !== '' && ChatbotFields::kind($key) === 'image' && !$this->isImageUrl($value)) {
             return response()->json(['error' => 'Use an image link that starts with http:// or https://.'], 422);
         }
@@ -214,6 +217,12 @@ class ChatbotController extends Controller
             }
             return ['today' => $today, 'last' => $last];
         });
+    }
+
+    /** @return array<int, string> ang mga flow (para sa FLOW na dropdown) */
+    private function flowNames(): array
+    {
+        return Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::orderBy('name')->pluck('name')->all() : [];
     }
 
     private function isImageUrl(string $value): bool

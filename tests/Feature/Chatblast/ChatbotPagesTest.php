@@ -65,17 +65,17 @@ class ChatbotPagesTest extends ChatblastTestCase
         BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => 'p1', 'message' => 'b', 'payload' => [], 'received_at' => '2026-10-19 10:30:00']);
         BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => 'p2', 'message' => 'c', 'payload' => [], 'received_at' => '2026-10-19 11:45:00']);
 
-        $this->get('/chatbot')->assertRedirect();
+        $this->get('/chatbot/pages')->assertRedirect();
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
-        $this->get('/chatbot')->assertForbidden();
+        $this->get('/chatbot/pages')->assertForbidden();
         $this->getJson('/chatbot/data')->assertForbidden();
 
         $this->navLink('/chatblast', ['Marketing']);
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $this->get('/chatbot')->assertOk();
+        $this->get('/chatbot/pages')->assertOk();
 
         $this->actingAs($this->user());
-        $html = $this->get('/chatbot')->assertOk()->assertSee('Chatbot')->getContent();
+        $html = $this->get('/chatbot/pages')->assertOk()->assertSee('Chatbot')->getContent();
         $this->assertStringNotContainsString(self::TOKEN, $html);
         $data = $this->getJson('/chatbot/data')->assertOk()->json();
 

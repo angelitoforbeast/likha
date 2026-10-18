@@ -36,6 +36,7 @@ class ChatbotFields
     /** 'image' (URL na may preview), 'long' (modal na editor), o 'text'. */
     public static function kind(string $key): string
     {
+        if ($key === 'flow') return 'flow'; // dropdown ng mga flow (/chatbot)
         if ($key === 'picture' || preg_match('/^seq_img_\d+$/', $key)) return 'image';
         if (preg_match('/^(prompt|seq)_\d+$/', $key)) return 'long';
 
