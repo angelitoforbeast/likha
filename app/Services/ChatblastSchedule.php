@@ -42,10 +42,12 @@ class ChatblastSchedule
      */
     public static function rangeTimes(mixed $range): array
     {
-        if (self::invalidRange($range) !== null || $range === null) return [];
+        if ($range === null || self::invalidRange($range) !== null) return [];
         [$from, $to] = [self::minutes($range['start']), self::minutes($range['end'])];
+        $step = 60 * (int) $range['every'];
+        if ($step < 60) return []; // hindi kailanman umiikot nang walang hanggan
         $out = [];
-        for ($m = $from; $m <= $to; $m += 60 * (int) $range['every']) $out[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+        for ($m = $from; $m <= $to; $m += $step) $out[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
 
         return $out;
     }
@@ -59,7 +61,7 @@ class ChatblastSchedule
             if (!is_string($range[$k]) || !preg_match(self::TIME, $range[$k])) return 'ang oras ay HH:MM (00:00 hanggang 23:59).';
         }
         if (self::minutes($range['end']) <= self::minutes($range['start'])) return 'ang dulo ay dapat pagkatapos ng simula (sa parehong araw).';
-        $every = $range['every'] ?? 1;
+        $every = $range['every'] ?? null; // walang default dito: ang controller ang naglalagay ng 1
         if (!is_int($every) || $every < 1 || $every > 12) return 'bawat 1 hanggang 12 oras.';
 
         return null;
@@ -147,7 +149,8 @@ class ChatblastSchedule
         if (self::rangeTimes($c->send_range)) {
             $r = $c->send_range;
             $every = (int) ($r['every'] ?? 1);
-            $parts[] = ($every === 1 ? 'Bawat oras' : 'Bawat ' . $every . ' oras') . ', ' . self::hour($r['start']) . '-' . self::hour($r['end']);
+            $all = self::rangeTimes($r); // ang huling totoong oras (hal. bawat 2 oras, 5 AM hanggang 4 PM: 3 PM ang huli)
+            $parts[] = ($every === 1 ? 'Bawat oras' : 'Bawat ' . $every . ' oras') . ', ' . self::hour($all[0]) . '-' . self::hour(end($all));
         }
         $text = $when . ', ' . ($parts ? implode('; ', $parts) : 'walang oras');
 

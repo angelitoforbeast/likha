@@ -69,10 +69,23 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
         $this->assertSame(['09:00'], $this->c->fresh()->send_times, 'hindi ginagalaw ang listahan');
 
         foreach ([['start' => '21:00', 'end' => '09:00'], ['start' => '09:00', 'end' => '09:00'], ['start' => '09:00', 'end' => '21:00', 'every' => 0],
-            ['start' => '09:00', 'end' => '21:00', 'every' => 1.5], ['start' => '9am', 'end' => '21:00'], ['start' => '09:00'], 'bawat oras'] as $bad) {
+            ['start' => '09:00', 'end' => '21:00', 'every' => 1.5], ['start' => '09:00', 'end' => '21:00', 'every' => 13], ['start' => '09:00', 'end' => '21:00', 'every' => 'x'],
+            ['start' => '9am', 'end' => '21:00'], ['start' => '09:00'], 'bawat oras'] as $bad) {
             $this->postJson($this->url(), ['send_range' => $bad])->assertStatus(422);
         }
         $this->assertSame(['start' => '09:00', 'end' => '21:00', 'every' => 1], $this->c->fresh()->send_range);
+        $this->postJson($this->url(), ['send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => null]])->assertOk();
+        $this->assertSame(['start' => '09:00', 'end' => '21:00', 'every' => 1], $this->c->fresh()->send_range, 'walang every = bawat 1 oras');
+        $this->postJson($this->url(), ['send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => '2']])->assertOk();
+        $this->assertSame(2, $this->c->fresh()->send_range['every']);
+        $this->assertSame([], \App\Services\ChatblastSchedule::rangeTimes(['start' => '09:00', 'end' => '21:00', 'every' => null]), 'ang naka-save na walang every ay hindi umiikot nang walang hanggan');
+
+        // In-auto at idinagdag ang bawat oras nang 14:10: ang 14:00 ay hindi tatakbo; ang 15:00 ay tatakbo.
+        $this->c->update(['mode' => 'auto', 'send_times' => [], 'send_range' => null, 'auto_ran_at' => now()->setTime(8, 0)]);
+        $this->travelTo('2026-10-18 14:10:00');
+        $this->postJson($this->url(), ['send_range' => ['start' => '09:00', 'end' => '21:00']])->assertOk();
+        $this->assertTrue($this->c->fresh()->auto_ran_at->eq(now()->setTime(14, 0)));
+        $this->assertSame('2026-10-18 15:00', app(\App\Services\ChatblastSchedule::class)->nextRun($this->c->fresh(), now())?->format('Y-m-d H:i'));
 
         $this->postJson($this->url(), ['send_range' => null])->assertOk();
         $this->assertNull($this->c->fresh()->send_range);

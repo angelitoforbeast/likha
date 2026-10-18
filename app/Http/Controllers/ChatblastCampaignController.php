@@ -390,7 +390,7 @@ class ChatblastCampaignController extends Controller
         }
         if ($request->has('send_range')) {
             $range = $request->input('send_range');
-            if (is_array($range) && !array_key_exists('every', $range)) $range['every'] = 1; // bawat oras ang default
+            if (is_array($range) && ($range['every'] ?? null) === null) $range['every'] = 1; // wala o null: bawat oras
             if (is_array($range) && is_numeric($range['every']) && (int) $range['every'] == $range['every']) $range['every'] = (int) $range['every'];
             if (($error = ChatblastSchedule::invalidRange($range)) !== null) return [[], 'Bawat oras: ' . $error];
             $data['send_range'] = $range === null ? null : ['start' => $range['start'], 'end' => $range['end'], 'every' => $range['every']];

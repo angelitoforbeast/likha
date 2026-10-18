@@ -109,7 +109,7 @@ class ChatblastScheduleTest extends ChatblastTestCase
 
         $c->send_range = ['start' => '05:00', 'end' => '16:00', 'every' => 2];
         $this->assertSame(['05:00', '07:00', '09:00', '11:00', '13:00', '15:00'], $s->allTimes($c), 'ang dulo ay kasama kapag tumapat lang');
-        $this->assertSame('Araw-araw, Bawat 2 oras, 5 AM-4 PM', $s->summary($c));
+        $this->assertSame('Araw-araw, Bawat 2 oras, 5 AM-3 PM', $s->summary($c), 'ang huling totoong oras');
 
         $c->send_range = ['start' => '09:30', 'end' => '11:30', 'every' => 1];
         $c->send_times = ['08:00', '10:30'];
@@ -142,6 +142,21 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $this->tick('2026-10-18 12:00:00');
         $this->tick('2026-10-18 13:00:00');
         $this->assertSame(['WB-1 D1 queued', 'WB-2 D1 queued', 'WB-3 D1 queued'], $this->rows(), 'ang 11:00 ang huli; walang 12:00');
+    }
+
+    public function test_a_late_tick_inside_the_range_runs_once_for_the_hours_it_missed(): void
+    {
+        $c = $this->campaign(['days' => [['Una {name}']], 'send_times' => [], 'send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => 1],
+            'auto_ran_at' => Carbon::parse('2026-10-18 11:00:00', 'Asia/Manila')]);
+        $this->travelTo('2026-10-18 10:00:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+
+        $this->tick('2026-10-18 14:30:00'); // walang takbo nang 12:00 at 13:00
+        $this->assertSame(['WB-1 D1 queued'], $this->rows());
+        $this->assertTrue($c->fresh()->auto_ran_at->eq(Carbon::parse('2026-10-18 14:00:00', 'Asia/Manila')), 'isang takbo, tatak ng pinakahuling oras');
+        Queue::assertPushed(\App\Jobs\SendChatblastMessage::class, 1);
+        $this->tick('2026-10-18 14:35:00');
+        Queue::assertPushed(\App\Jobs\SendChatblastMessage::class, 1);
     }
 
     public function test_a_waybill_messaged_in_transit_can_get_the_delivering_message_the_same_day_but_nothing_more(): void
