@@ -954,3 +954,62 @@ non-CEO render pass without being edited.
 | S-049.18 | (amendment 1) Given a status filter, then only rows of that status show and the day totals stay the full day's; given 1,200 lines, then a page holds whole days until 150 rows, the pages cover every day, and a page past the end is empty | `CardSideBySideTest::test_S_049_18…` | Passed · 2026-10-18 · auto |
 | S-049.19 | (amendment 1) Given the statement view, then the summary bar has matched, card-only, Meta-only (count and amount), untallied groups and the overall difference, each chip a filter link; card-only rows are tinted red and Meta-only amber; the Meta side shows date, transaction id (shortened, full on hover), ad account and amount; a 1,200-line statement renders one page of days with a pager, and the edit form 200 lines a page; a bad status or page in the URL still shows the page | `CardReconcilePageTest::test_S_049_16…`, `CardReconcilePageTest::test_S_049_19…` | Passed · 2026-10-18 · auto |
 | S-049.20 | (amendment 2) Given a screenshot read that times out (5 s connect, 45 s answer, inside nginx's 60 s), then "Hindi natapos basahin ang screenshot…" and nothing is saved; given the same file from the same user again within 10 minutes, then the earlier statement opens with no new read; after 10 minutes it is a new statement; only the file's sha256 is kept | `CardReconcilePageTest::test_S_049_20…` | Passed · 2026-10-18 · auto |
+
+## Slice 051 – Checklist deadlines, late tasks in the staff feed, Checklist badge, re-check limit
+
+Tests: `ChecklistDeadlineFieldTest`, `ChecklistBadgeTest`, `ChecklistRecheckLimitTest` (tests/Feature/Checklist), `ChecklistDeadlineTest` (tests/Unit), `StaffFeedApiTest` (tests/Feature/StaffActivity).
+
+### S-051a A task has a deadline (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.1 | Given a CEO, when they set a task's deadline to 10:30 in manage, then it is saved, shown ("⏰ 10:30 AM", the edit field) and one checklist_task_changes row records null → 10:30 | `ChecklistDeadlineFieldTest::test_S_051_1…` | Passed · 2026-10-18 · auto |
+| S-051.2 | Given a Marketing user without edit rights on the task, when they send a deadline, then 403 and nothing changes | `ChecklistDeadlineFieldTest::test_S_051_2…` | Passed · 2026-10-18 · auto |
+| S-051.3 | Given a deadline, when it is cleared, then null is saved and logged | `ChecklistDeadlineFieldTest::test_S_051_3…` | Passed · 2026-10-18 · auto |
+| S-051.4 | Given "25:00", "bukas" or other text, then the form refuses it with "Ang Deadline ay dapat oras, hal. 10:30." (edit and add) | `ChecklistDeadlineFieldTest::test_S_051_4…` | Passed · 2026-10-18 · auto |
+
+### S-051b The effective deadline (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.5 | Scheduled 10:00, no deadline → 10:15 | `ChecklistDeadlineTest` (data sets S-051.5) | Passed · 2026-10-18 · auto |
+| S-051.6 | Deadline 10:45 → 10:45 | `ChecklistDeadlineTest` (S-051.6) | Passed · 2026-10-18 · auto |
+| S-051.7 | Neither → no deadline, never late | `ChecklistDeadlineTest` (S-051.7) | Passed · 2026-10-18 · auto |
+| S-051.8 | Scheduled 11:50 PM → 12:05 AM the next day: never late on the task's day | `ChecklistDeadlineTest` (S-051.8) | Passed · 2026-10-18 · auto |
+
+### S-051c The monitor sees late tasks in the staff feed (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.9 | At 10:16, a task due today with deadline 10:15 and no submission is in each assigned person's checklist_late_today with submitted false | `StaffFeedApiTest::test_S_051_9…` | Passed · 2026-10-18 · auto |
+| S-051.10 | At 10:14 it is not there | `StaffFeedApiTest::test_S_051_10…` | Passed · 2026-10-18 · auto |
+| S-051.11 | Submitted at 10:20, 3 checks, latest not_approved → submitted true, submitted_at 10:20, verdict not_approved, approval_checks 3 | `StaffFeedApiTest::test_S_051_11…` | Passed · 2026-10-18 · auto |
+| S-051.12 | An inactive, deleted, other-weekday or done once-task never appears | `StaffFeedApiTest::test_S_051_12…` | Passed · 2026-10-18 · auto |
+| S-051.13 | A group task submitted by one person is submitted for everyone assigned (an individual task only for the one who submitted) | `StaffFeedApiTest::test_S_051_13…`, `…test_an_individual_task_submitted_only_by_another_person…` | Passed · 2026-10-18 · auto |
+| S-051.14 | No note, photo path, prompt, reason or AI text anywhere in the response | `StaffFeedApiTest::test_S_051_14…`, `…test_S_051_29…` | Passed · 2026-10-18 · auto |
+| S-051.15 | The existing fields keep their values and meaning next to the late list | `StaffFeedApiTest::test_S_051_15…`, `…test_status_has_exactly_the_documented_keys…` | Passed · 2026-10-18 · auto |
+
+### S-051d Everyone sees what they still have to do on the Checklist link (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.16 | One late task and one due in 20 minutes → 2, red, "1 late, 1 due soon" | `ChecklistBadgeTest::test_S_051_16…` | Passed · 2026-10-18 · auto |
+| S-051.17 | Only one due in 20 minutes → 1, neutral | `ChecklistBadgeTest::test_S_051_17…` | Passed · 2026-10-18 · auto |
+| S-051.18 | One not_approved submission today → 1 | `ChecklistBadgeTest::test_S_051_18…` | Passed · 2026-10-18 · auto |
+| S-051.19 | Nothing open → no badge | `ChecklistBadgeTest::test_S_051_19…` | Passed · 2026-10-18 · auto |
+| S-051.20 | Shown on /checklist and on a page that is not a checklist page, desktop and mobile nav | `ChecklistBadgeTest::test_S_051_20…` | Passed · 2026-10-18 · auto |
+| S-051.21 | A Marketing - OIC sees a second number for their department's late tasks (profile department, else role); a Marketing user does not | `ChecklistBadgeTest::test_S_051_21…` | Passed · 2026-10-18 · auto |
+| S-051.22 | The CEO's second number covers all active staff | `ChecklistBadgeTest::test_S_051_22…` | Passed · 2026-10-18 · auto |
+| S-051.23 | Two page loads within 60 s run the badge queries once; after 60 s again | `ChecklistBadgeTest::test_S_051_23…` | Passed · 2026-10-18 · auto |
+| — | A failing badge query → no badge, the class logged, the page still renders | `ChecklistBadgeTest::test_a_failing_badge_query…` | Passed · 2026-10-18 · auto |
+
+### S-051e Two approval checks, then the OIC or CEO (amendment 1, P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.24 | A Marketing user's first 2 checks run, the 3rd is refused (403 with the message, no AI call; the page marks it locked); a concurrent limited check gets 409 | `ChecklistRecheckLimitTest::test_S_051_24…`, `…test_a_limited_check_is_refused_while…` | Passed · 2026-10-18 · auto |
+| S-051.25 | The CEO's 3rd and 10th checks run | `ChecklistRecheckLimitTest::test_S_051_25…` | Passed · 2026-10-18 · auto |
+| S-051.26 | The department's OIC runs a 3rd check and overrides with a reason; no reason or a bad verdict is refused | `ChecklistRecheckLimitTest::test_S_051_26…` | Passed · 2026-10-18 · auto |
+| S-051.27 | An OIC of another department, or a staff member, cannot override | `ChecklistRecheckLimitTest::test_S_051_27…` | Passed · 2026-10-18 · auto |
+| S-051.28 | The override row is in the approval logs (is_override, who, reason) and the latest verdict follows it | `ChecklistRecheckLimitTest::test_S_051_28…` | Passed · 2026-10-18 · auto |
+| S-051.29 | The feed item shows rechecks and overridden (by, at), without the reason | `StaffFeedApiTest::test_S_051_29…` | Passed · 2026-10-18 · auto |

@@ -524,3 +524,14 @@ Accepted, not fixed:
 - **(amendment 2) Two grouped card numbers side by side merge into one mask** ("4111 1111 1111 5003 4111 1111 1111 5004" → "···· 5004"), and a short number right after a card is masked with it ("… 5003 12" → "···· 0312"). Reason: nothing leaks; telling them apart from a 14–19 digit card is not possible from the digits.
 - **(amendment 2) A card number glued to cents ("…5003.50", "…5003,12") is read as an amount and not masked as a card.** Reason: the same guard keeps amounts whole; no statement layout prints a card number glued to cents.
 - **(amendment 2) The double-submit guard needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
+
+## 051: checklist deadlines, late tasks in the staff feed, Checklist badge (2026-10-18)
+
+- **An OIC can override their own submission** when their department key matches their own (a Marketing - OIC's own Marketing task). Reason: the amendment names the department OIC as the override without an exception; ask the owner whether the submitter should be left out.
+- **The department rule exists twice:** `ChecklistController::oicDepartment` (OICs only) and `ChecklistBadge::departmentKey` (any user: profile department, else the role without "- OIC"). Reason: legacy rule, no refactor of the existing method; they agree for every OIC role.
+- **A deadline set earlier than the scheduled time is taken as is** (scheduled 23:50, deadline 00:05 → late from 00:05 the same day). Reason: only task editors set it, and the field means "late after this time"; a warning in the form would be a separate change.
+- **The two-check limit lock needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
+- **The automatic approval check at submit counts as check 1** (the amendment counts every approval row, whoever ran it), so a staff member gets one manual re-check. The automatic check itself is not limited. Reason: as written; the owner may prefer to count manual checks only.
+- **Untested here:** the `selectSub` override join and both migrations on MySQL (sqlite only), the badge and the override form in a browser. Reason: no MySQL or browser in this session.
+- **When a submission is locked, the Analyze button stays enabled** (relabelled "↻ Analysis lang", runs the analysis only, the limit text shows under it). Reason: the one button runs both the analysis and the approval check; the analysis has no limit.
+- **The race test holds the lock itself** instead of running two real requests at once, so it proves the 409 path, not the order of lock and count. Reason: PHPUnit runs requests one at a time; the order is read in review.
