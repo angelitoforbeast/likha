@@ -70,6 +70,20 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertSame('system', $uno['cells']['sms.sender']['by'], 'walang user = isinulat ng system o command');
     }
 
+    public function test_S_054_1_every_column_carries_its_cell_group_and_other_keys_go_to_the_detail_row(): void
+    {
+        $this->settings()->set('Page Uno', 'sms', 'sender', 'UNO');
+
+        $groups = array_column($this->grid()['columns'], 'group', 'key');
+
+        $this->assertSame([
+            'botcake.page_id' => 'botcake', 'botcake.token' => 'botcake', 'botcake.flow.shipping' => 'flows',
+            'botcake.flow.on_delivery' => 'flows', 'botcake.flow.in_transit' => 'flows', 'botcake.flow.broadcast' => 'flows',
+            'botcake.template.shipping' => 'flows', 'botcake.field.message' => 'botcake', 'botcake.test_psid' => 'botcake',
+            'botcake.token_status' => 'botcake', 'sms.sender' => 'other',
+        ], $groups);
+    }
+
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void
     {
         $html = $this->get('/page-settings')->assertOk()->getContent();

@@ -220,6 +220,7 @@ class PageSettingsGrid
             'label'    => $label ?? $key,
             'secret'   => in_array($key, PageSettings::SECRET_KEYS, true) || isset($secret[$key]),
             'readonly' => PageSettings::isSystemKey($key),
+            'group'    => self::group($key),
         ];
 
         $other = $active->map(fn ($s) => $s->fullKey())->unique()
@@ -229,6 +230,16 @@ class PageSettingsGrid
             array_map($col, array_keys(self::KNOWN), array_values(self::KNOWN)),
             $other->map(fn ($k) => $col($k, null))->all()
         );
+    }
+
+    /**
+     * Kung saang cell ng row nakalagay ang column, para walang horizontal scroll: "flows" (ang 4 na flow at ang template),
+     * "botcake" (ang ibang kilalang key) o "other" (ibang key, nasa nabubuksang row).
+     */
+    private static function group(string $key): string
+    {
+        if (!isset(self::KNOWN[$key])) return 'other';
+        return str_starts_with($key, 'botcake.flow.') || $key === 'botcake.template.shipping' ? 'flows' : 'botcake';
     }
 
     /** @return Collection<int, string> user id => pangalan, sa isang query */
