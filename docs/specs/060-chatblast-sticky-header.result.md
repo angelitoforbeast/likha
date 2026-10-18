@@ -162,3 +162,39 @@ Added section S-060A with S-060.4 (the fixed block on To send and History), S-06
 - **Ready per sequence / per page.** These stay visible but take one line each and cut off with "…", with the full text in a tooltip. With many pages, the per-page line used to wrap over several lines of the fixed block.
 - **Test PSID owner of the filtered page** stays visible in the chip row's right side. With a page selected, a long page name can push the chip row to a second line at 1280 px.
 - **Merge with feat/057:** this amendment adds one more line to `resources/views/page_settings/index.blade.php`, the Ready chip, inside the `CHIPS` list.
+
+## Amendment 2: History lists the latest processed first
+
+One slice, medium risk, backend (commit `fix: history lists the latest processed first (spec 060)`).
+
+### What shipped
+
+- `app/Http/Controllers/ChatblastController.php`: `list()` now sorts through a new private `ordered()`.
+  - **To send:** unchanged, `id` descending.
+  - **History > Sent** (sent and "Sent (unconfirmed)"): `sent_at` descending, then `id` descending. Rows without `sent_at` go last. MySQL and SQLite already sort NULL last in a descending order; pgsql gets `sent_at DESC NULLS LAST`, following the project's mysql/pgsql branching for raw SQL.
+  - **History > Failed, Skipped, No PSID, No config:** `updated_at` descending (when the row was processed), then `id` descending.
+  - The counts, the date range filter and Retry failed are unchanged.
+
+### Indexes (no migration added)
+
+- **Sent:** the existing single-column `sent_at` index matches the order. On InnoDB a secondary index also holds the primary key, so a backward scan of `sent_at` gives `sent_at DESC, id DESC` without a sort.
+  - There is no `(status, sent_at)` index. The status and date filter is checked on the rows the scan reads.
+  - I did not run EXPLAIN against MySQL, so whether the optimizer picks this index on production data is not verified.
+- **Other chips:** no index fits `updated_at DESC` across pages. The only index with `updated_at` is `(page_name, status, updated_at)`, which helps only when a page is filtered.
+  - Without a page filter these chips sort their filtered rows in memory. That is the day's (or the From–To range's) failed, skipped, no PSID or no config rows, normally a small set.
+  - As the amendment asks, no index was added.
+
+### Case table (amendment 2)
+
+| Case | Test | Result |
+|---|---|---|
+| S-060.7 | `ChatblastToSendTest::test_S_060_7_history_lists_the_latest_processed_first` (sent, failed) | Pass |
+
+- **Sent data set:** a row built 3 days ago and sent at 09:30 is listed before a row built 1 day ago and sent at 08:00. Of two rows sent at 09:30, the higher id comes first. An unconfirmed row without `sent_at` comes last.
+- **Failed data set:** rows are ordered by `updated_at` descending, then `id` descending.
+- **Red run:** both data sets failed with "Failed asserting that two arrays are identical." (the list was in `id` order).
+- **Chatblast tests** (`php artisan test tests/Feature/Chatblast`): 189 tests, 1252 assertions, 0 failures. The warnings are the same doc-comment deprecation as before. `php -l` reports no syntax errors on the controller.
+
+### Story changes (amendment 2)
+
+Added section S-060B with S-060.7.
