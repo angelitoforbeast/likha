@@ -55,7 +55,7 @@
                     <path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>
                 </svg>
             </span>
-            <span class="text-base font-semibold tracking-tight text-slate-900">Chatblast</span>
+            <span class="text-base font-semibold tracking-tight text-slate-900">{{ request()->is('chatbot', 'chatbot/*') ? 'Chatbot' : 'Chatblast' }}</span>
         </a>
 
         <nav class="flex min-w-0 items-center gap-1 overflow-x-auto text-sm" aria-label="Chatblast">

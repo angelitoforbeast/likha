@@ -306,6 +306,16 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/flows/{id}/duplicate', [\App\Http\Controllers\ChatbotFlowController::class, 'duplicate'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.duplicate');
     Route::delete('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'destroy'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.destroy');
 
+    Route::get('/chats', [ChatblastChatController::class, 'index'])->name('chats');
+    Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');
+    Route::post('/customer-fields', [\App\Http\Controllers\ChatbotTabsController::class, 'customerFields'])->middleware('throttle:60,1,chatbot-customer-fields')->name('customer-fields');
+    Route::get('/replies', [\App\Http\Controllers\ChatbotTabsController::class, 'replies'])->name('replies');
+    Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->name('replies.data');
+    Route::get('/replies/{id}', [\App\Http\Controllers\ChatbotTabsController::class, 'reply'])->whereNumber('id')->name('replies.show');
+    Route::get('/test', [\App\Http\Controllers\ChatbotTabsController::class, 'test'])->name('test');
+    Route::post('/test/send', [\App\Http\Controllers\ChatbotTabsController::class, 'testSend'])->middleware('throttle:30,1,chatbot-test')->name('test.send');
+    Route::post('/test/reset', [\App\Http\Controllers\ChatbotTabsController::class, 'testReset'])->middleware('throttle:30,1,chatbot-test')->name('test.reset');
+
     Route::get('/pages', [\App\Http\Controllers\ChatbotController::class, 'index'])->name('pages.index');
     Route::get('/data', [\App\Http\Controllers\ChatbotController::class, 'data'])->name('data');
     Route::post('/cell', [\App\Http\Controllers\ChatbotController::class, 'cell'])->middleware('throttle:120,1,chatbot-cell')->name('cell');

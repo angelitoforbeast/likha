@@ -26,6 +26,8 @@ class ChatblastNav
      */
     public static function items(?string $role): array
     {
+        if (request()->is('chatbot', 'chatbot/*')) return self::chatbotItems($role);
+
         $items = [];
         if (NavAccess::allows($role, '/chatblast')) {
             $items[] = ['label' => 'To send', 'url' => '/chatblast', 'active' => request()->is('chatblast', 'chatblast/messages/*')];
@@ -40,6 +42,25 @@ class ChatblastNav
         }
 
         return $items;
+    }
+
+    /**
+     * Ang nav ng /chatbot (Flow, Page settings, Chats, Replies, Test) at ang link pabalik sa Chatblast. Access gaya ng
+     * /chatblast.
+     * @return array<int, array{label: string, url: string, active: bool}>
+     */
+    public static function chatbotItems(?string $role): array
+    {
+        if (!NavAccess::allows($role, '/chatblast')) return [];
+
+        return [
+            ['label' => 'Flow', 'url' => '/chatbot', 'active' => request()->is('chatbot', 'chatbot/flows*')],
+            ['label' => 'Page settings', 'url' => '/chatbot/pages', 'active' => request()->is('chatbot/pages*')],
+            ['label' => 'Chats', 'url' => '/chatbot/chats', 'active' => request()->is('chatbot/chats*')],
+            ['label' => 'Replies', 'url' => '/chatbot/replies', 'active' => request()->is('chatbot/replies*')],
+            ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
+            ['label' => 'Chatblast', 'url' => '/chatblast', 'active' => false],
+        ];
     }
 
     /**

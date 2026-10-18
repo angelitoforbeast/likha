@@ -12,7 +12,7 @@
 @endsection
 
 @section('content')
-<form method="GET" action="{{ route('chatblast.chats') }}" class="cb-filters mb-4 flex flex-wrap items-end gap-3 text-sm">
+<form method="GET" action="{{ route($chatsRoute) }}" class="cb-filters mb-4 flex flex-wrap items-end gap-3 text-sm">
     <label class="flex flex-col text-xs">Page
         <select name="page_id" class="border px-2 py-1 text-sm text-gray-900 max-w-full">
             <option value="">All pages</option>
@@ -29,7 +29,7 @@
     </label>
     <button class="cb-btn cb-btn-primary">Show</button>
     @if($filters['page'] !== '' || $filters['date'] !== '' || $filters['q'] !== '')
-        <a href="{{ route('chatblast.chats') }}" class="text-sm text-blue-700 hover:underline">Clear</a>
+        <a href="{{ route($chatsRoute) }}" class="text-sm text-blue-700 hover:underline">Clear</a>
     @endif
 </form>
 
@@ -55,7 +55,7 @@
                     <td class="hidden break-words sm:table-cell">{{ $c->page_name ?? 'Unknown page' }}</td>
                     <td class="break-words">
                         @if($c->psid)
-                            <a href="{{ route('chatblast.chats.customer', array_filter(['page_id' => $c->page_id, 'psid' => $c->psid], fn ($v) => $v !== null)) }}" class="text-blue-700 hover:underline">{{ $c->name ?: 'PSID …' . mb_substr($c->psid, -4) }}</a>
+                            <a href="{{ route($chatsRoute . '.customer', array_filter(['page_id' => $c->page_id, 'psid' => $c->psid], fn ($v) => $v !== null)) }}" class="text-blue-700 hover:underline">{{ $c->name ?: 'PSID …' . mb_substr($c->psid, -4) }}</a>
                         @else
                             {{ $c->name ?: '—' }}
                         @endif

@@ -35,7 +35,7 @@ class ChatblastChatController extends Controller
 
     private function checkAccess(): void
     {
-        if (!NavAccess::allows($this->getNormalizedRole(), '/chatblast')) abort(404);
+        if (!NavAccess::allows($this->getNormalizedRole(), '/chatblast')) abort(request()->is('chatbot', 'chatbot/*') ? 403 : 404); // /chatbot: 403, gaya ng ibang tab nito
     }
 
     /** Ang query param bilang string ('' kapag wala o hindi string). */
@@ -83,8 +83,14 @@ class ChatblastChatController extends Controller
 
         return view('chatblast.chats', [
             'ready' => $ready, 'chats' => $chats, 'pages' => $pages, 'filters' => compact('page', 'date', 'q'),
-            'setup' => $this->setup(),
+            'setup' => $this->setup(), 'chatsRoute' => $this->chatsRoute(),
         ]);
+    }
+
+    /** Ang Chats ay nasa /chatblast at /chatbot: ang mga link ay nananatili sa seksyong binuksan. */
+    private function chatsRoute(): string
+    {
+        return request()->is('chatbot', 'chatbot/*') ? 'chatbot.chats' : 'chatblast.chats';
     }
 
     /** Ang mga mensahe ng isang customer (page + PSID), pinakaluma muna. */
@@ -102,7 +108,13 @@ class ChatblastChatController extends Controller
             ->get(['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'received_at'])
             ->reverse()->values();
 
-        return view('chatblast.chats-customer', ['chats' => $chats, 'psid' => $psid, 'pageId' => $pageId, 'max' => self::CUSTOMER_MAX]);
+        // Ang customer fields ng chatbot (walang run state na "__"); ang CEO ang nakakapagbago (ChatbotTabsController).
+        $fields = ctype_digit($pageId) && ctype_digit($psid) && Schema::hasTable('chatbot_customer_values')
+            ? (new \App\Services\Chatbot\CustomerFields((int) $pageId, (int) $psid))->fields() : null;
+        if ($fields !== null) ksort($fields);
+
+        return view('chatblast.chats-customer', ['chats' => $chats, 'psid' => $psid, 'pageId' => $pageId, 'max' => self::CUSTOMER_MAX,
+            'chatsRoute' => $this->chatsRoute(), 'fields' => $fields, 'canEditFields' => $this->getNormalizedRole() === 'CEO']);
     }
 
     /**
