@@ -161,6 +161,7 @@ class ChecklistDueToday
                 'user_id'    => $uid,
                 'task_id'    => $tid,
                 'title'      => $t->title,
+                'scheduled'  => self::minutes($t->scheduled_time ?? null),
                 'deadline'   => self::deadlineMinutes($t->scheduled_time ?? null, $t->deadline_time ?? null),
                 'submitted'  => $submission !== null,
                 'submission' => $submission,

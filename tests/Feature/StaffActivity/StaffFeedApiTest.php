@@ -18,7 +18,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
     private const STAFF_KEYS = [
         'user_id', 'name', 'role', 'department', 'last_seen_at', 'last_seen_path', 'last_login_at',
         'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot', 'checker', 'checklist_approved_today',
-        'checklist_late_today',
+        'checklist_late_today', 'checklist_today',
     ];
 
     private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'source', 'method', 'status', 'ref', 'created_at', 'is_bot'];
@@ -422,9 +422,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
             $staff[$idle->id]['checklist_approved_today'],
         ]);
         $this->assertSame(4, $response->json('totals.checklist_approved_today'));
-        foreach (['Group na gawain', 'Sariling gawain', 'not_approved'] as $private) {
-            $this->assertStringNotContainsString($private, $response->getContent());
-        }
+        // Ang title at verdict ay nasa checklist_today na; ang notes at AI text ay hindi kailanman
         $this->assertStringNotContainsString('Lihim na tala', $response->getContent());
         $this->assertStringNotContainsString('Paliwanag', $response->getContent());
     }
@@ -599,6 +597,40 @@ class StaffFeedApiTest extends StaffActivityTestCase
             'overridden_by' => $lead->name, 'overridden_at' => '10:45'],
             array_intersect_key($entry, array_flip(['verdict', 'approval_checks', 'rechecks', 'overridden', 'overridden_by', 'overridden_at'])));
         $this->assertStringNotContainsString('Dahilan ng override', $response->getContent());
+    }
+
+    public function test_S_051_31_checklist_today_lists_every_task_due_to_the_person_earliest_first_with_its_state(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $approved = $this->checklistTask('Approved na', [$a], ['scheduled_time' => '09:00', 'submission_type' => 'individual']);
+        $this->submittedAt($approved, $a->id, '2026-10-16 09:05:00', ['approved']);
+        $rejected = $this->checklistTask('Hindi na-approve', [$a], ['scheduled_time' => '08:00', 'deadline_time' => '08:45', 'submission_type' => 'individual']);
+        $this->submittedAt($rejected, $a->id, '2026-10-16 08:10:00', ['not_approved', 'not_approved']);
+        $open = $this->checklistTask('Wala pa', [$a], ['scheduled_time' => '12:00']);
+        $group = $this->checklistTask('Group: iba ang nagsumite', [$a, $b], ['scheduled_time' => '10:00']);
+        $this->submittedAt($group, $b->id, '2026-10-16 10:03:00');
+        $untimed = $this->checklistTask('Walang oras', [$a]);
+        $this->checklistTask('Hindi aktibo', [$a], ['scheduled_time' => '07:00', 'is_active' => false]);
+        $this->checklistTask('Lunes lang', [$a], ['scheduled_time' => '07:00', 'frequency' => 'weekly', 'frequency_day' => 1]);
+
+        $response = $this->lateAt('2026-10-16 11:00:00');
+        $today = collect($response->json('staff'))->firstWhere('user_id', $a->id)['checklist_today'];
+
+        $item = fn ($id, $title, $time, $deadline, $submitted, $at, $verdict, $rechecks) => [
+            'task_id' => $id, 'title' => $title, 'scheduled_time' => $time, 'deadline' => $deadline,
+            'submitted' => $submitted, 'submitted_at' => $at, 'verdict' => $verdict, 'rechecks' => $rechecks,
+        ];
+        $this->assertSame([
+            $item($rejected, 'Hindi na-approve', '08:00', '08:45', true, '08:10', 'not_approved', 1),
+            $item($approved, 'Approved na', '09:00', '09:15', true, '09:05', 'approved', 0),
+            $item($group, 'Group: iba ang nagsumite', '10:00', '10:15', true, '10:03', null, 0),
+            $item($open, 'Wala pa', '12:00', '12:15', false, null, null, 0),
+            $item($untimed, 'Walang oras', null, null, false, null, null, 0),
+        ], $today);
+        foreach (['Lihim na tala', 'Paliwanag', 'notes', 'file_path', 'prompt', 'analysis'] as $private) {
+            $this->assertStringNotContainsString($private, $response->getContent());
+        }
     }
 
     public function test_a_past_date_lists_every_due_task_with_a_deadline_and_a_future_date_none(): void

@@ -90,11 +90,12 @@ class StaffFeedController extends Controller
         $dueRows = ChecklistDueToday::rows($ids, $day);
         $dueOpen = $this->checklistDueNotSubmitted($dueRows);
         $late = $this->checklistLate($dueRows, $day);
+        $today = $this->checklistToday($dueRows);
         $bots = $this->botUserIds();
         $checker = $this->checkerCounts($day, $next);
         $approved = $this->checklistApproved($ids, $day);
 
-        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved, $late) {
+        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved, $late, $today) {
             $id = (int) $s->id;
             $last = $lastEvents->get($id);
 
@@ -114,6 +115,7 @@ class StaffFeedController extends Controller
                 'checker'        => $checker[$id] ?? self::CHECKER_ZERO,
                 'checklist_approved_today' => $approved[$id] ?? 0,
                 'checklist_late_today' => $late[$id] ?? [],
+                'checklist_today' => $today[$id] ?? [],
             ];
         })->values();
 
@@ -316,6 +318,32 @@ class StaffFeedController extends Controller
                 'overridden'      => ($r['submission']['overridden_at'] ?? null) !== null,
                 'overridden_by'   => $r['submission']['overridden_by'] ?? null,
                 'overridden_at'   => $r['submission']['overridden_at'] ?? null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * user_id => [lahat ng checklist task na due sa tao sa araw na iyon]: ang pinakamaagang oras muna (ang walang
+     * oras sa dulo), tapos task id; kung naisumite na at kailan, ang verdict at rechecks (parehong kahulugan ng
+     * checklist_late_today). Walang notes, file o AI text.
+     */
+    private function checklistToday(array $dueRows): array
+    {
+        usort($dueRows, fn ($a, $b) => [$a['scheduled'] ?? PHP_INT_MAX, $a['task_id']] <=> [$b['scheduled'] ?? PHP_INT_MAX, $b['task_id']]);
+
+        $out = [];
+        foreach ($dueRows as $r) {
+            $out[$r['user_id']][] = [
+                'task_id'        => $r['task_id'],
+                'title'          => $r['title'],
+                'scheduled_time' => $r['scheduled'] === null ? null : ChecklistDueToday::hhmm($r['scheduled']),
+                'deadline'       => $r['deadline'] === null ? null : ChecklistDueToday::hhmm($r['deadline']),
+                'submitted'      => $r['submitted'],
+                'submitted_at'   => $r['submission']['submitted_at'] ?? null,
+                'verdict'        => $r['submission']['verdict'] ?? null,
+                'rechecks'       => max(0, ($r['submission']['approval_checks'] ?? 0) - 1),
             ];
         }
 
