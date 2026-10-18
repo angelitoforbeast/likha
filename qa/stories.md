@@ -954,3 +954,22 @@ non-CEO render pass without being edited.
 | S-049.18 | (amendment 1) Given a status filter, then only rows of that status show and the day totals stay the full day's; given 1,200 lines, then a page holds whole days until 150 rows, the pages cover every day, and a page past the end is empty | `CardSideBySideTest::test_S_049_18…` | Passed · 2026-10-18 · auto |
 | S-049.19 | (amendment 1) Given the statement view, then the summary bar has matched, card-only, Meta-only (count and amount), untallied groups and the overall difference, each chip a filter link; card-only rows are tinted red and Meta-only amber; the Meta side shows date, transaction id (shortened, full on hover), ad account and amount; a 1,200-line statement renders one page of days with a pager, and the edit form 200 lines a page; a bad status or page in the URL still shows the page | `CardReconcilePageTest::test_S_049_16…`, `CardReconcilePageTest::test_S_049_19…` | Passed · 2026-10-18 · auto |
 | S-049.20 | (amendment 2) Given a screenshot read that times out (5 s connect, 45 s answer, inside nginx's 60 s), then "Hindi natapos basahin ang screenshot…" and nothing is saved; given the same file from the same user again within 10 minutes, then the earlier statement opens with no new read; after 10 minutes it is a new statement; only the file's sha256 is kept | `CardReconcilePageTest::test_S_049_20…` | Passed · 2026-10-18 · auto |
+
+## Slice 052 – What each Botcake flow ID is, on /page-settings
+
+### S-052 The owner sees the name of each flow ID and the template the shipping flow sends (P1)
+
+Tests are in `tests/Feature/PageSettings/FlowNamesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-052.1 | Given a page with id and token, when the owner saves a flow ID that Botcake lists, then the save is ok, one flows call is made and the cell's second line is the flow name; when the ID is not listed, the line is red "Wala sa Botcake"; when is_removed, red "Bura na sa Botcake"; when Botcake answers 500, success:false or not at all, the save is still ok and the line is "hindi nasuri: (reason)" | `test_S_052_1…` | not run |
+| S-052.2 | Given flows on three pages of the list, then all pages are read until an empty page; a list that ignores the page number stops after one repeat; the read stops at 10 pages | `test_S_052_2…` | not run |
+| S-052.3 | Given Test token (row) or Test lahat, when the token is ok, then one flows call and one templates call refresh the names and template, and Test lahat returns them in its cells; when the token is invalid or errors, no flows or templates call is made; Test lahat skips the refresh when its time budget is spent | `test_S_052_3…` | not run |
+| S-052.4 | Given an empty template key, then the pick is (1) the name in parentheses at the end of the shipping flow name when APPROVED; (2) else the single APPROVED template with {{1}} and example "Custom Field"; (3) else none and "piliin ang template"; a pending template or a second candidate does not count | `test_S_052_4…` | not run |
+| S-052.5 | Given a template name typed by the owner, then a refresh keeps it; when it is an APPROVED template its body shows with {{1}} as "(mensahe ng sequence)"; when it is not, the line is red | `test_S_052_5…` | not run |
+| S-052.6 | Given a post of botcake.flow.shipping.name or botcake.template.shipping.text from the page (cell or form), then 422 and nothing is written; botcake.template.shipping itself is editable free text | `test_S_052_6…` | not run |
+| S-052.7 | Given name and text rows, then they are not grid columns, the template column is, and the rows sit in their page's cells; a refresh with the same names writes no new row | `test_S_052_7…` | not run |
+| S-052.8 | Given any refresh, then the token is in no response, log line or stored value, and only names and body text are stored | `test_S_052_8…` | not run |
+| S-052.9 | Given a non-CEO role without the page in nav settings, then saving a cell and Test lahat are 404 and no Botcake call is made | `test_S_052_9…` | not run |
+| S-052.10 | (by hand) On /page-settings, each flow cell shows its name line, the shipping flow also the template line with the full body on hover, and the template column its body line; saving a flow ID or Test lahat updates the lines without a reload | Owner check | not run |
