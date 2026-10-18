@@ -201,6 +201,14 @@ class FlowNamesTest extends BotcakeApiTestCase
         $n = 0;
         $this->cell('flow.shipping', '7999')->assertOk();
         $this->assertSame('!wala', $this->get52('flow.shipping.name'));
+
+        // Walang data sa ikalawang page: hindi dulo, kaya hindi masasabing "Wala sa Botcake".
+        $this->flowAnswer = function () use (&$n) {
+            return ++$n === 1 ? Http::response(['data' => ['flows' => self::FLOWS], 'success' => true]) : Http::response(['success' => true]);
+        };
+        $n = 0;
+        $this->cell('flow.shipping', '7998')->assertOk();
+        $this->assertSame('!hindi nasuri: Botcake: hindi listahan ang sagot', $this->get52('flow.shipping.name'));
     }
 
     public function test_S_052_3_test_lahat_refreshes_names_and_template_only_when_the_token_is_ok_and_returns_the_cells(): void

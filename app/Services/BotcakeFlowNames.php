@@ -195,7 +195,8 @@ class BotcakeFlowNames
                 return $n === 1 || $error !== 'kulang sa oras' ? [[], false, $error] : [$flows, false, null];
             }
             $list = $body['data']['flows'] ?? null;
-            if ($list === null && $n > 1) return [$flows, true, null]; // lampas sa huling page: data null
+            // Lampas sa huling page: data null. Ang ibang kakaibang sagot ay hindi itinuturing na dulo.
+            if ($n > 1 && array_key_exists('data', $body) && $body['data'] === null) return [$flows, true, null];
             if (!is_array($list) || !array_is_list($list)) return [[], false, 'Botcake: hindi listahan ang sagot'];
 
             $new = 0;
