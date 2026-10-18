@@ -336,6 +336,6 @@ were no blockers.
   running. If none is, the page says so after 10 minutes, and nothing else is affected.
 - **The cache store must be shared by the web and the worker,** which the build lock already needs. It defaults to the
   database store.
-- **Pages open from before the deploy** still expect the old build answer: a press shows a blank result line until
-  the page is reloaded. The build itself runs.
+- **Pages open from before the deploy** still expect the old build answer: a press shows a red script error in the
+  notice line until the page is reloaded. The build itself is queued and runs.
 - **No migrations.**
