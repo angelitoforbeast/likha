@@ -74,59 +74,48 @@
     </div>
 @endif
 
-{{-- Ang Setup box: modal sa gitna (hindi sticky). Isara: ✕, Escape, o pindot sa labas. Ang buong key ay nasa page para
-     sa CEO lang (sa copy button). --}}
+{{-- Ang Setup box: modal sa gitna (hindi sticky). Isara: ✕, Escape, o pindot sa labas. Walang key na ipinapakita: ang
+     block ay isinusulat ng botcake:chat-setup; dito ay kung may key ang page (oo/hindi) at ang mga tinanggihan ngayon. --}}
 <div id="setup" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" aria-labelledby="setup-title" role="dialog" aria-modal="true">
     <div class="mx-auto w-full max-w-2xl rounded-xl bg-white p-5 text-sm shadow-lg">
         <div class="mb-3 flex items-center justify-between">
-            <div id="setup-title" class="font-semibold">Botcake setup: JSON API block</div>
+            <div id="setup-title" class="font-semibold">Botcake setup: Chat to site block</div>
             <button id="setup-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
         </div>
-        <p class="mb-3 text-slate-600">In Botcake, add a JSON API block to the page's Default reply flow and fill in "Edit Group Request". The same block works on any page: Botcake fills in the page, the customer and the text itself, so the values below can be pasted unchanged.</p>
+        <p class="mb-3 text-slate-600">Each page's Default Reply gets a "Chat to site" JSON API block with the page's own key. The block is written by the server command <span class="font-mono">php artisan botcake:chat-setup "Page name"</span> (or <span class="font-mono">--all --dry-run</span> first, then <span class="font-mono">--all --confirm</span>); keys are never shown here. Chats are kept only from our pages' own customers.</p>
 
-        <h3 class="mb-1 font-medium">(a) Recommended: POST with a JSON body</h3>
-        <p class="mb-2 text-xs text-amber-800">Prefer POST + header; GET puts the key in server logs.</p>
         <dl class="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-2">
             <dt class="text-slate-500">Method</dt>
             <dd class="font-mono">POST</dd>
-
             <dt class="text-slate-500">URL</dt>
-            <dd class="flex flex-wrap items-center gap-2"><span class="break-all font-mono">{{ $setup['url'] }}</span>
-                <button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $setup['url'] }}">Copy</button></dd>
-
+            <dd class="break-all font-mono">{{ $setup['url'] }}</dd>
             <dt class="text-slate-500">Header</dt>
-            <dd class="flex flex-wrap items-center gap-2">
-                <span class="font-mono">X-Chat-Key</span> =
-                @if($setup['masked'])
-                    <span class="font-mono">{{ $setup['masked'] }}</span>
-                    @if($setup['key'])<button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $setup['key'] }}">Copy key</button>@endif
-                @else
-                    <span class="text-amber-700">Not set on the server yet (BOTCAKE_CHAT_KEY).</span>
-                @endif
-            </dd>
-
+            <dd><span class="font-mono">X-Chat-Key</span> = the page's own key</dd>
             <dt class="text-slate-500">Body (JSON)</dt>
-            <dd class="flex flex-wrap items-start gap-2"><code class="break-all font-mono text-xs">{{ $setup['body'] }}</code>
-                <button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $setup['body'] }}">Copy</button></dd>
+            <dd><code class="break-all font-mono text-xs">{{ $setup['body'] }}</code></dd>
         </dl>
 
-        <h3 class="mb-2 mt-4 font-medium">(b) GET with Params rows, if POST is not wanted</h3>
-        <p class="mb-2 text-xs text-slate-500">Method GET, the same URL, no header. One Params row each:</p>
+        <h3 class="mb-2 mt-4 font-medium">Page keys</h3>
+        @if($setup['pages'])
+            <table class="cb-table table-fixed">
+                <thead><tr><th>Page</th><th class="w-32">Botcake ID</th><th class="w-24">Own key</th></tr></thead>
+                <tbody>
+                @foreach($setup['pages'] as $p)
+                    <tr><td class="break-words">{{ $p['name'] }}</td><td class="break-all font-mono text-xs">{{ $p['page_id'] }}</td><td>{{ $p['has_key'] ? 'yes' : 'no' }}</td></tr>
+                @endforeach
+                </tbody>
+            </table>
+        @else
+            <p class="text-slate-500">No page has a Botcake ID yet.</p>
+        @endif
+
+        <h3 class="mb-2 mt-4 font-medium">Refused today</h3>
         <ul class="space-y-1">
-            <li class="flex flex-wrap items-center gap-2"><span class="font-mono">key</span> =
-                @if($setup['masked'])
-                    <span class="font-mono">{{ $setup['masked'] }}</span>
-                    @if($setup['key'])<button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $setup['key'] }}">Copy key</button>@endif
-                @else
-                    <span class="text-amber-700">not set yet</span>
-                @endif
-            </li>
-            @foreach($setup['params'] as $param => $value)
-                <li class="flex flex-wrap items-center gap-2"><span class="font-mono">{{ $param }}</span> = <span class="break-all font-mono">{{ $value }}</span>
-                    <button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $value }}">Copy</button></li>
+            @foreach($setup['refused'] as $label => $n)
+                <li class="flex justify-between gap-3"><span>{{ $label }}</span><span class="font-mono">{{ $n }}</span></li>
             @endforeach
         </ul>
-        <p class="mt-3 text-xs text-slate-500">The {{ '{{' }}…}} values are Botcake variables (pick them with the {} button in the block). Other params are kept too. A message with no text (a sticker or photo) is kept with a label. The site answers <span class="font-mono">{"ok":true}</span> and never replies to the customer.</p>
+        <p class="mt-3 text-xs text-slate-500">"PSID not on the page" chats are answered but not kept. The site answers <span class="font-mono">{"ok":true}</span> and never replies to the customer.</p>
         <p id="setup-note" class="mt-2 min-h-[1rem] text-xs text-green-700" aria-live="polite"></p>
     </div>
 </div>

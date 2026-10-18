@@ -24,6 +24,10 @@ class BotcakeChatTest extends ChatblastTestCase
         Queue::fake();
         Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_20_100000_create_botcake_chats_table.php']]);
         config(['services.botcake.chat_key' => self::KEY, 'app.url' => 'https://app.example.test']);
+        // Atin lang na page ang tinatanggap, at ang PSID ay sinusuri: ang psid-a ay kilala na; ang iba ay hindi masuri
+        // (walang laman ang fake na sagot ng Botcake), kaya tinatanggap gaya ng kapag hindi sumasagot ang Botcake.
+        $this->page('Page Uno', '1001');
+        \App\Models\BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ana Cruz', 'psid' => 'psid-a', 'status' => 'available', 'source' => 'api']);
     }
 
     private function chat(array $params = [], array $headers = ['X-Chat-Key' => self::KEY])
@@ -158,15 +162,14 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->assertSame(4, BotcakeChat::count(), 'ibang customer, at lampas 10 segundo');
     }
 
-    public function test_S_059_5_the_page_name_comes_from_the_page_settings_page_id(): void
+    public function test_S_059_5_the_page_name_comes_from_the_page_settings_page_id_and_an_unknown_page_is_refused(): void
     {
-        $this->page('Page Uno', '1001');
         $this->page('Page Dos', '2002');
 
         $this->chat(['page_id' => '2002'])->assertOk();
-        $this->chat(['page_id' => '9999'])->assertOk();
+        $this->chat(['page_id' => '9999'])->assertStatus(401);
 
-        $this->assertSame(['Page Dos', null], BotcakeChat::orderBy('id')->pluck('page_name')->all());
+        $this->assertSame(['Page Dos'], BotcakeChat::orderBy('id')->pluck('page_name')->all());
     }
 
     public function test_S_059_6_one_ip_over_the_limit_gets_429(): void
@@ -248,57 +251,20 @@ class BotcakeChatTest extends ChatblastTestCase
             ->assertSeeInOrder(['Ana Cruz', 'First', 'Second'])->assertDontSee('Someone else');
     }
 
-    public function test_S_059_11_the_setup_box_shows_the_values_with_the_key_masked_and_the_full_key_for_ceo_only(): void
-    {
-        $this->navLink('/chatblast', ['Marketing']);
-
-        $this->actingAs($this->user());
-        $this->get('/chatblast/chats')->assertOk()
-            ->assertSee('POST')->assertSee('https://app.example.test/api/botcake/chat')->assertSee('X-Chat-Key')
-            ->assertSee('••••' . substr(self::KEY, -4))
-            ->assertSeeInOrder(['page_id', 'psid', 'name', 'message'])
-            ->assertSee('Botcake variable')
-            ->assertSee(self::KEY);
-
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $this->get('/chatblast/chats')->assertOk()->assertSee('••••' . substr(self::KEY, -4))->assertDontSee(self::KEY);
-    }
-
-    public function test_S_059_15_the_page_is_found_by_its_name_when_there_is_no_page_id_and_unknown_pages_are_labelled(): void
+    public function test_S_059_15_the_page_is_found_by_its_name_when_there_is_no_page_id_and_an_unknown_name_is_refused(): void
     {
         $this->page('Page Dos', '2002');
 
         $this->chat(['page_id' => '', 'page' => '  page dos ', 'message' => 'By name'])->assertOk();
-        $this->chat(['page_id' => '', 'page' => 'No Such Page', 'message' => 'Unknown one'])->assertOk();
+        $this->chat(['page_id' => '', 'page' => 'No Such Page', 'message' => 'Unknown one'])->assertStatus(401);
 
-        $rows = BotcakeChat::orderBy('id')->get();
-        $this->assertSame(['2002', 'Page Dos'], [$rows[0]->page_id, $rows[0]->page_name]);
-        $this->assertSame([null, null], [$rows[1]->page_id, $rows[1]->page_name]);
-        $this->assertSame('No Such Page', $rows[1]->payload['page']);
+        $row = BotcakeChat::sole();
+        $this->assertSame(['2002', 'Page Dos'], [$row->page_id, $row->page_name]);
 
+        // Ang lumang row na walang page (bago ang mga harang) ay "Unknown page" pa rin sa listahan.
+        $this->stored(['page_id' => null, 'page_name' => null, 'message' => 'Old unknown one']);
         $this->actingAs($this->user());
-        $this->get('/chatblast/chats')->assertOk()->assertSeeInOrder(['Unknown page', 'Unknown one']);
-    }
-
-    public function test_S_065_1_the_setup_box_gives_one_body_with_botcake_variables_for_every_page(): void
-    {
-        $this->stored(['page_id' => '2002', 'page_name' => 'Page Dos']);
-        $this->actingAs($this->user());
-        $body = '{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}"}';
-
-        foreach (['/chatblast/chats', '/chatblast/chats?page_id=2002'] as $url) {
-            $html = $this->get($url)->assertOk()
-                ->assertSee($body)
-                ->assertSee('Recommended')->assertSee('GET')->assertSee('Prefer POST + header; GET puts the key in server logs')
-                ->assertSee('The same block works on any page')
-                ->assertSeeInOrder(['key', 'page_id', '{{page_id}}', 'psid', '{{psid}}', 'name', '{{user_full_name}}', 'message', '{{last_text_input}}'])
-                ->assertDontSee("Botcake ID</", false)->getContent();
-            $this->assertDoesNotMatchRegularExpression('/user\.id|user\.full_name|"page_id":"2002"/', $html);
-        }
-
-        // Ang page na may Botcake ID sa page settings pero wala pang chat ay napipili pa rin sa filter.
-        $this->page('Page Tres', '3003');
-        $this->get('/chatblast/chats')->assertSee('<option value="3003"', false)->assertSee('Page Tres');
+        $this->get('/chatblast/chats')->assertOk()->assertSeeInOrder(['Unknown page', 'Old unknown one']);
     }
 
     public function test_S_065_2_user_full_name_is_stored_as_the_name(): void
@@ -361,7 +327,8 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->chat(['page_id' => '2009', 'message' => 'two'])->assertOk();
 
         $this->assertSame(['Page Dos', 'Page Dos'], BotcakeChat::orderBy('id')->pluck('page_name')->all());
-        $this->assertSame(['2009' => 'Page Dos'], BotcakeChat::pageMap(), 'ang lumang ID (napalitan) ay wala na sa mapa');
+        $this->assertSame('Page Dos', BotcakeChat::pageMap()['2009'] ?? null);
+        $this->assertArrayNotHasKey('2002', BotcakeChat::pageMap(), 'ang lumang ID (napalitan) ay wala na sa mapa');
     }
 
     public static function bigBodies(): array

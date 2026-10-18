@@ -111,6 +111,23 @@ class BotcakeClient
         return $body;
     }
 
+    /** Ang sagot ng Botcake kapag wala ang PSID sa page. */
+    public const NOT_ON_PAGE = ['not found customer', 'psid wrong format'];
+
+    /**
+     * Nasa page ba ang PSID (customer info)? true = oo; false = "Not found customer" o "psid wrong format"; null = hindi
+     * nalaman (walang koneksyon, timeout, 5xx, token, o ibang sagot). Gamitin kasama ang shared() at once() para sa web.
+     */
+    public function customerInfo(string $pageId, string $psid, string $token): ?bool
+    {
+        $r = $this->call('GET', '/pages/' . rawurlencode($pageId) . '/customer/' . rawurlencode($psid) . '/info', [], $token);
+        $body = is_array($r['body']) ? $r['body'] : [];
+        if ($r['http'] === 200 && ($body['success'] ?? null) === true) return true;
+        if (($body['success'] ?? null) === false && in_array(mb_strtolower(trim((string) ($body['message'] ?? ''))), self::NOT_ON_PAGE, true)) return false;
+
+        return null;
+    }
+
     /** Isang mababang tawag (custom_fields) para subukan ang token. False = invalid. */
     public function testToken(string $pageId, string $token): bool
     {

@@ -20,7 +20,7 @@ class PageSettings
      * DETAIL_PATTERN: ang pangalan ng bawat flow (botcake.flow.<x>.name) at ang body ng shipping template.
      */
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
-        'botcake.flow.shipping.options', 'botcake.field.message.options'];
+        'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -29,7 +29,7 @@ class PageSettings
     public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/';
 
     /** Mga key na laging secret. */
-    public const SECRET_KEYS = ['botcake.token'];
+    public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key'];
 
     public static function isSystemKey(string $full): bool
     {
@@ -136,8 +136,8 @@ class PageSettings
                 'page' => $name, 'key' => $provider . '.' . $key, 'setting_id' => $setting->id, 'by' => $userId,
             ]);
 
-            // Ang mapa ng page_id => page ng /api/botcake/chat ay naka-cache: binubura ngayon at pagkatapos ng commit.
-            if ($provider === 'botcake' && $key === 'page_id') $this->forgetChatPageMap();
+            // Ang naka-cache ng /api/botcake/chat (page_id => page, mga hash ng chat.key): binubura ngayon at pagkatapos ng commit.
+            if ($provider === 'botcake' && in_array($key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
 
             return ['status' => $status, 'setting' => $setting];
         });
@@ -159,7 +159,7 @@ class PageSettings
 
         $setting->update(['active' => false, 'replaced_at' => now()]);
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
-        if ($setting->provider === 'botcake' && $setting->key === 'page_id') $this->forgetChatPageMap();
+        if ($setting->provider === 'botcake' && in_array($setting->key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
         Log::info('PageSettings: deactivated', [
             'page' => $setting->page_name, 'key' => $setting->fullKey(), 'setting_id' => $setting->id, 'by' => $userId,
         ]);

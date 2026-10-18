@@ -14,6 +14,7 @@ class BotcakeChat extends Model
     public const PRUNE_MAX_BATCHES = 40;  // hanggang 200k row kada takbo; ang sobra ay sa susunod na takbo
     public const PAGE_MAP_CACHE = 'botcake-chats:page-map';
     public const PAGE_IDS_CACHE = 'botcake-chats:page-ids';
+    public const KEY_HASHES_CACHE = 'botcake-chats:key-hashes';
     public const CACHE_SECONDS = 600;
 
     public $timestamps = false;
@@ -42,9 +43,28 @@ class BotcakeChat extends Model
         });
     }
 
+    /**
+     * sha256 ng chat.key => pangalan ng page, para sa mabilis na pagtanggi bago basahin ang body (naka-cache 10 minuto;
+     * hash lang ang nasa cache, hindi ang key).
+     * @return array<string, string>
+     */
+    public static function keyHashes(): array
+    {
+        return Cache::remember(self::KEY_HASHES_CACHE, self::CACHE_SECONDS, function () {
+            $map = [];
+            foreach (PageSetting::where('provider', 'botcake')->where('key', 'chat.key')->where('active', true)->orderBy('id')->get() as $s) {
+                $key = (string) $s->plainValue();
+                if ($key !== '') $map[hash('sha256', $key)] = $s->page_name;
+            }
+            return $map;
+        });
+    }
+
+    /** Binubura ang naka-cache na mapa ng page at ng mga hash ng chat.key (kapag may nagbagong botcake.page_id o chat.key). */
     public static function forgetPageMap(): void
     {
         Cache::forget(self::PAGE_MAP_CACHE);
+        Cache::forget(self::KEY_HASHES_CACHE);
     }
 
     /** Ang mga page_id na nasa chats (naka-cache 10 minuto): para sa page na wala sa page_settings. */

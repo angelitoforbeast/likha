@@ -102,6 +102,11 @@ return [
         // /api/botcake/chat (JSON API block ng Botcake): ang shared key (header X-Chat-Key o param key); walang laman = 401
         // sa lahat. chat_rate: ilang request kada minuto kada IP (iilang IP ng Botcake para sa ~170 page).
         'chat_key'  => env('BOTCAKE_CHAT_KEY'),
+        // Ang lumang shared key ay tinatanggap lang habang true (habang wala pang sariling botcake.chat.key ang lahat ng page).
+        'chat_shared_key_ok' => (bool) env('BOTCAKE_CHAT_SHARED_KEY_OK', true),
+        // Mga IP/CIDR ng Botcake (kuwit ang hati). log = tinatanggap pero itinatala at binibilang ang iba; enforce = 403.
+        'chat_ips'     => array_values(array_filter(array_map('trim', explode(',', (string) env('BOTCAKE_CHAT_IPS', '203.171.22.6'))))),
+        'chat_ip_mode' => env('BOTCAKE_CHAT_IP_MODE', 'log'),
         'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
     ],
 

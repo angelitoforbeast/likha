@@ -3,14 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
+use App\Services\BotcakeChatGuard;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * /api/botcake/chat: ang JSON API block ng Botcake (sa Default reply flow ng page) ay nagpapasa ng mensahe ng customer.
- * JSON, form o query params; ang pangalan ng param ay case-insensitive at may mga alias, dahil hindi pa tiyak ang mga
- * variable ng Botcake. Iniimbak lang: walang tawag sa Botcake o J&T, at walang ipinapadala pabalik sa customer.
+ * JSON, form o query params; ang pangalan ng param ay case-insensitive at may mga alias (para sa lumang block). Ang
+ * harang ay sa BotcakeChatGuard (IP, key kada page, PSID); ang tanging tawag sa Botcake ay ang isang beses na pagsuri ng
+ * bagong PSID (5 s). Walang ipinapadala pabalik sa customer.
  */
 class BotcakeChatController extends Controller
 {
@@ -38,15 +41,33 @@ class BotcakeChatController extends Controller
     /** Ang mga field na may sariling column at hindi inuulit sa payload. */
     private const COLUMN_FIELDS = ['page_id', 'psid', 'name', 'message'];
 
-    public function receive(Request $request): JsonResponse
+    /**
+     * Ang pagkakasunod: (1) IP ng Botcake (log: itinatala at binibilang; enforce: 403); (2) ang header key ay kilala (ang
+     * chat.key ng isang page, o ang shared habang naka-on), bago basahin ang body; (3) body hanggang 64 KB (413); (4) ang
+     * key mula sa param kung walang header; (5) ang page ay atin (page_id o pangalan), kung hindi 401; (6) ang key ay sa
+     * page na iyon (hash_equals), kung hindi 401; (7) ang PSID ay nasa page (botcake_psids o Botcake), kung hindi:
+     * {"ok":true} at walang iniimbak. Ang bawat pagtanggi ay binibilang (BotcakeChatGuard).
+     */
+    public function receive(Request $request, BotcakeChatGuard $guard): JsonResponse
     {
-        $expected = (string) config('services.botcake.chat_key');
-        $refuse = fn () => response()->json(['ok' => false], 401);
-        // Ang header key muna, bago basahin ang body.
-        $given = (string) $request->header('X-Chat-Key');
-        if ($given !== '' && ($expected === '' || !hash_equals($expected, $given))) return $refuse();
+        $refuse = function (string $reason, int $status = 401) use ($guard) {
+            $guard->count($reason);
+            return response()->json(['ok' => false], $status);
+        };
 
-        // Ang body na lampas 64 KB ay hindi binabasa (ang isang mensahe ng customer ay mas maliit nang malayo).
+        // (1) Ang IP: ip() (ayon sa trusted proxies) at ang REMOTE_ADDR, para makita sa log kung alin ang totoo.
+        $ip = (string) $request->ip();
+        if (!$guard->ipListed($ip)) {
+            Log::warning('botcake chat: IP not on the list', ['ip' => $ip, 'remote_addr' => (string) $request->server('REMOTE_ADDR'), 'mode' => $guard->enforcesIp() ? 'enforce' : 'log']);
+            if ($guard->enforcesIp()) return $refuse('bad_ip', 403);
+            $guard->count('bad_ip');
+        }
+
+        // (2) Ang header key muna, bago basahin ang body.
+        $given = (string) $request->header('X-Chat-Key');
+        if ($given !== '' && !$guard->knownKey($given)) return $refuse('bad_key');
+
+        // (3) Ang body na lampas 64 KB ay hindi binabasa (ang isang mensahe ng customer ay mas maliit nang malayo).
         if ((int) $request->server('CONTENT_LENGTH') > self::MAX_BODY || strlen((string) $request->getContent()) > self::MAX_BODY) {
             return response()->json(['ok' => false], 413);
         }
@@ -55,7 +76,7 @@ class BotcakeChatController extends Controller
         // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin; maaaring nandito ang key.
         if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
 
-        // Walang header: ang param na "key" (anuman ang laki ng titik).
+        // (4) Walang header: ang param na "key" (anuman ang laki ng titik), para sa lumang GET block.
         if ($given === '') {
             foreach ($data as $k => $v) {
                 if (mb_strtolower(trim((string) $k)) === 'key' && is_string($v)) {
@@ -63,7 +84,7 @@ class BotcakeChatController extends Controller
                     break;
                 }
             }
-            if ($expected === '' || $given === '' || !hash_equals($expected, $given)) return $refuse();
+            if (!$guard->knownKey($given)) return $refuse('bad_key');
         }
 
         $values = [];
@@ -77,9 +98,21 @@ class BotcakeChatController extends Controller
         }
 
         $f = $this->fields($byName, $used);
-        // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak. Ang mensahe
-        // na walang text (sticker o larawan) pero may PSID ay iniimbak.
+        // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak.
         if ($f['psid'] === null && $f['message'] === null) return response()->json(['ok' => true]);
+
+        // (5) Ang page: page_id ({{page_id}} ng Botcake, o fixed text sa lumang block) o page (pangalan). Atin lang.
+        [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
+        if ($pageName === null || $f['page_id'] === null) return $refuse('unknown_page');
+
+        // (6) Ang key ay dapat sa page na ito.
+        if (!$guard->keyFitsPage($pageName, $given)) return $refuse('bad_key');
+
+        // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
+        if ($f['psid'] === null || $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name']) === 'not_on_page') {
+            $guard->count('psid_not_found');
+            return response()->json(['ok' => true]);
+        }
 
         // Ang payload: ang ibang param lang; ang page_id, psid, name at message ay nasa sariling column na (hindi inuulit).
         $payload = [];
@@ -87,9 +120,6 @@ class BotcakeChatController extends Controller
             if (isset($used[$name]) || count($payload) >= self::PAYLOAD_KEYS) continue;
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
         }
-
-        // Ang page: page_id ({{page_id}} ng Botcake, o fixed text sa lumang block) o page (pangalan).
-        [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
 
         if (!$this->isDuplicate($f)) {
             BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
