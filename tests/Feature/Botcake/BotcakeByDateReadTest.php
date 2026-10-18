@@ -31,13 +31,17 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
         $this->travelTo(Carbon::parse('2026-10-20 01:00', 'Asia/Manila')); // Martes
     }
 
-    /** $batches = batch => [[psid, petsa], ...]; lampas sa huli = []. $failAt: 500 mula sa batch na ito. */
-    private function fake(array $batches, ?int $failAt = null): void
+    /**
+     * $batches = batch => [[psid, petsa], ...]; lampas sa huli = []. $failAt: 500 mula sa batch na ito.
+     * $secondsPerBatch: sinusulong ang orasan sa bawat request (para sa time budget).
+     */
+    private function fake(array $batches, ?int $failAt = null, int $secondsPerBatch = 0): void
     {
-        Http::fake(['botcake.io/api/public_api/v1/pages/1001/customer*' => function (Request $req) use ($batches, $failAt) {
+        Http::fake(['botcake.io/api/public_api/v1/pages/1001/customer*' => function (Request $req) use ($batches, $failAt, $secondsPerBatch) {
             parse_str((string) parse_url($req->url(), PHP_URL_QUERY), $q);
             $n = (int) $q['page'];
             $this->asked[] = $n;
+            $this->clock->time += $secondsPerBatch;
             if ($failAt !== null && $n >= $failAt) return Http::response(['message' => 'err'], 500);
 
             return Http::response(array_map(fn ($c) => $this->customer($c[0], 'Name ' . $c[0]) + ['date_subscribed_at' => $c[1]], $batches[$n] ?? []));
@@ -115,6 +119,37 @@ class BotcakeByDateReadTest extends BotcakeApiTestCase
 
         $this->assertSame([$kind, 1, $stop], [$run->read_kind, $run->start_batch, $run->stop_date?->toDateString()]);
         $this->assertSame($stop === null ? ['window', 1] : ['by_date', 1, $stop], $plans['page uno'] ?? ['window', 1], 'plans() ng grid: pareho');
+    }
+
+    public function test_a_by_date_read_stops_at_the_45_day_limit_before_the_stop_date(): void
+    {
+        $this->pastRun('window', 'age', '2026-08-01'); // stop date Ago 31, pero hanggang Set 5 lang (45 araw)
+        $this->fake([
+            1 => $this->batch('a', '2026-10-20'),
+            2 => array_merge($this->batch('b', '2026-09-06', 9), [['b-old', '2026-09-04']]),
+            3 => $this->batch('c', '2026-09-03'),
+        ]);
+
+        $run = $this->sync();
+
+        $this->assertSame([1, 2], $this->asked);
+        $this->assertSame(['age', '2026-09-05'], [$run->stop_reason, $run->stop_date?->toDateString()]);
+    }
+
+    public function test_a_long_by_date_read_stops_after_22_minutes_and_the_next_one_reads_again_to_the_same_stop_date(): void
+    {
+        $this->pastRun('by_date', 'date', '2026-10-10');
+        $this->fake(array_fill(1, 40, $this->batch('a', '2026-10-15')), secondsPerBatch: 60);
+
+        $first = $this->sync();
+
+        $this->assertSame(['done', 'time', 22], [$first->status, $first->stop_reason, $first->batches_read], 'kasya sa timeout ng worker');
+
+        $this->asked = [];
+        $second = $this->sync();
+
+        $this->assertSame(1, $this->asked[0], 'walang tuloy: mula batch 1 ulit');
+        $this->assertSame(['by_date', '2026-10-09'], [$second->read_kind, $second->stop_date?->toDateString()], 'ang putol na basa ay hindi malinis: pareho ang stop date');
     }
 
     public function test_a_failed_run_still_records_the_dates_it_read(): void

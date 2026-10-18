@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Schema;
  * date_subscribed_at, at sa loob ng isang petsa ay ayon sa huling chat ang ayos, kaya inuulit ang huling araw. Hindi ito
  * humihinto sa batch na kilala na lahat: sa ilalim nito ay maaaring may bagong subscriber. Hindi lalampas sa window.
  * Walang malinis na run na may petsa: window read. Ang failed na run ay hindi gumagalaw sa stop date (catch-up).
+ * Humihinto rin ito pagkatapos ng WINDOW_SECONDS (time, hindi malinis): ang susunod ay mula batch 1 ulit, parehong stop date.
  * Isang page sa isang pagkakataon; bawat sync ay isang run na may stop_reason, read_kind, start_batch at mga petsa.
  */
 class BotcakeCustomerSync
@@ -154,6 +155,7 @@ class BotcakeCustomerSync
     {
         if (!$last) return ['window', 1]; // hindi pa nakababasa ng buong window
         if (in_array($last->stop_reason, ['age', 'end', 'date'], true)) return ['incremental', 1]; // byDate() ang nagpapasya
+        if ($last->read_kind === 'by_date') return ['incremental', 1]; // putol na by date (time): by date ulit, walang tuloy
         if ($last->read_kind !== 'window') return ['window', 1]; // cap ng incremental (o lumang run na walang kind)
 
         // Hindi natapos na window read: ituloy mula sa naabot nito, minus ang overlap.
@@ -258,7 +260,7 @@ class BotcakeCustomerSync
                     $run->save();
                     if ($this->reachesBefore($batch, $oldest)) $reason = 'age';
                     elseif ($kind === 'by_date' && $this->allBefore($batch, $stopDate)) $reason = 'date';
-                    elseif ($kind === 'window' && $this->clock->now() - $started >= self::WINDOW_SECONDS) $reason = 'time';
+                    elseif (in_array($kind, ['window', 'by_date'], true) && $this->clock->now() - $started >= self::WINDOW_SECONDS) $reason = 'time';
                     elseif ($run->batches_read >= self::MAX_BATCHES) $reason = 'cap';
                 }
                 $this->tokenStatus($page, 'ok');
