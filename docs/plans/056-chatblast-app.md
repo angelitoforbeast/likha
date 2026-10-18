@@ -48,3 +48,33 @@ Spec: `docs/specs/056-chatblast-app.md`. No migration, no behaviour change in th
 
 Tasks share `routes/web.php` and the views, so they run one after another in this session; one review (skeptic-reviewer,
 standard depth) on the whole diff before the result.
+
+## Amendment 1 (Dashboard list and Fetch new)
+
+The amendment itself stays in the main checkout's `handoff/056-chatblast-app/AMENDMENT-1.md` (not committed).
+
+1. **Skipped hidden by default** (`ChatblastController::filtered`): when no status is chosen, the rows and the total
+   leave out `skipped`; the counts still include it, so the "skipped" chip keeps its number and shows those rows (with
+   their reasons) when clicked. The "all" chip reads "all (no skipped) N".
+2. **Ready rows from earlier days** in the default view: when From = To = today (Manila), the date condition becomes
+   "built today, OR ready and built within its sequence's window" (`chatblast_campaigns.window_days` per kind, the
+   same window the build uses). The list returns `earlier_ready` (how many of those were built before today) and the
+   page shows "+ N ready from earlier days". "Send all ready" uses the same filter, so it sends them too. Any other
+   range is an exact build-date filter, as before.
+3. **Fetch new as a queued job** (`App\Jobs\ChatblastBuildJob`, default queue, like the page settings Sync now job):
+   - the button posts, the server takes a one-build slot (`Cache::add`, 10 minutes) and dispatches the job; a second
+     press while a build is queued or running, or while the build lock is held (e.g. `chatblast:auto`), gets the same
+     409 "A fetch is already running";
+   - the job runs `Chatblast::build` with the same 20 s J&T budget and its own lock owner token
+     (`build(..., lockOwner)`), so there is no web time limit; `finally` frees the slot; `failed()` (also called on a
+     worker timeout, `$timeout` 280 < the 300 s lock) releases the build lock only if this job still owns it;
+   - progress: the run (queued / running / done / failed / busy, times, result) is kept in the cache and sent in the
+     list's `state.build`; the page shows "Fetching new messages… running 35 s", keeps polling, disables the button
+     while it runs, and shows the same result line as before when it is done. A run whose slot is gone while it still
+     says queued or running shows as stopped.
+
+| # | Task | Cases | Side | Tier |
+|---|------|-------|------|------|
+| 5 | List: skipped hidden by default, earlier ready rows in the default view, `earlier_ready` | S-056.8, S-056.9, S-056.10 | backend | medium |
+| 6 | Fetch new as a queued job with run state, slot and lock release | S-056.11 | backend | medium |
+| 7 | Dashboard script: "all (no skipped)", the earlier-ready note, build progress | S-056.12 | frontend | medium |

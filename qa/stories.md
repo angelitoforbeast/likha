@@ -1011,3 +1011,15 @@ Tests are in `tests/Feature/Chatblast/ChatblastAppTest.php` unless named; the br
 | S-056.5 | Given a role with page settings access but not /chatblast, when it opens page settings, then the Chatblast nav shows only Page settings, and /chatblast stays 404 | `test_S_056_5…` | Passed · 2026-10-18 · auto |
 | S-056.6 | Given the main Likha nav, when the role sees both the Chatblast and Page Settings links, then one "Chatblast" link to /chatblast shows; when it sees only Page Settings, then one "Chatblast" link to /chatblast/page-settings; when it sees neither, then none | `test_S_056_6…` | Passed · 2026-10-18 · auto |
 | S-056.7 | (browser) At 1366 and 1280 px, /chatblast/page-settings has no horizontal scroll (page and grid); the four nav items open their pages | Browser check | Passed · 2026-10-18 · headless browser |
+
+### S-056B The Dashboard list shows what still needs sending, and Fetch new never hangs (P1)
+
+Amendment 1. Tests are in `tests/Feature/Chatblast/ChatblastDashboardListTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.8 | Given ready, sent and skipped rows today, when the list loads with no status chosen, then the rows and the total leave out skipped, the counts still include skipped; when status = skipped, then only skipped rows show, with their reasons | `test_S_056_8…` | |
+| S-056.9 | Given a ready row built yesterday and one built outside its sequence's window, a sent row built yesterday, when the default view (From = To = today) loads, then the ready row from yesterday is in the rows and the ready count, `earlier_ready` is 1, the others are not; given From = To = yesterday, then exactly yesterday's rows show and `earlier_ready` is 0 | `test_S_056_9…` | |
+| S-056.10 | Given the default view with a ready row from yesterday, when "Send all ready" is pressed, then that row is queued too; with an exact range that leaves it out, it is not | `test_S_056_10…` | |
+| S-056.11 | Given Fetch new, then a build job is queued and the list's state shows it queued; a second press while it waits, or while the build lock is held, gets 409 "A fetch is already running"; when the job runs, the state shows done with the result and the lock and slot are free; when the job fails or times out, its own lock is released and the state shows failed, while a lock held by another build is left alone | `test_S_056_11…` | |
+| S-056.12 | Given the Dashboard, then the "all" chip says "all (no skipped)", the page shows "+ N ready from earlier days" when there are some, and Fetch new shows the progress of the background fetch | `test_S_056_12…` and the browser check | |
