@@ -82,7 +82,7 @@
             <div id="setup-title" class="font-semibold">Botcake setup: JSON API block</div>
             <button id="setup-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
         </div>
-        <p class="mb-3 text-slate-600">In Botcake, add a JSON API block to the page's Default reply flow and fill in "Edit Group Request". Botcake has no variable for the page, so type each page's own Botcake ID{{ $filters['page'] !== '' ? ' (filled in below for the selected page)' : ' (pick a page in the filter to fill it in)' }}.</p>
+        <p class="mb-3 text-slate-600">In Botcake, add a JSON API block to the page's Default reply flow and fill in "Edit Group Request". The same block works on any page: Botcake fills in the page, the customer and the text itself, so the values below can be pasted unchanged.</p>
 
         <h3 class="mb-1 font-medium">(a) Recommended: POST with a JSON body</h3>
         <p class="mb-2 text-xs text-amber-800">Prefer POST + header; GET puts the key in server logs.</p>

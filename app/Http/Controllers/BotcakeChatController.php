@@ -88,7 +88,7 @@ class BotcakeChatController extends Controller
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
         }
 
-        // Walang page-id na variable ang Botcake: ang block ng bawat page ay may page_id (fixed text) o page (pangalan).
+        // Ang page: page_id ({{page_id}} ng Botcake, o fixed text sa lumang block) o page (pangalan).
         [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
 
         if (!$this->isDuplicate($f)) {

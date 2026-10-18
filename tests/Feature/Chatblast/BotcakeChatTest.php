@@ -94,7 +94,7 @@ class BotcakeChatTest extends ChatblastTestCase
         ])->assertOk();
         $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'user_id' => 'psid-c', 'text' => 'Hi'], ['X-Chat-Key' => self::KEY])->assertOk();
         $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'psid' => 'psid-d', 'last_input' => 'Yes'], ['X-Chat-Key' => self::KEY])->assertOk();
-        // Ang mga variable ng Botcake: {{user.id}}, {{user.full_name}}, {{last_text_input}} (JSON: may tuldok ang pangalan).
+        // Mga lumang alias na tinatanggap pa rin (user.id at user.full_name ay hindi variable ng Botcake; may tuldok sa JSON).
         $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'user.id' => 'psid-e', 'user.full_name' => 'Eva Santos', 'last_text_input' => 'a'], ['X-Chat-Key' => self::KEY])->assertOk();
         // Sa GET/form ay ginagawang _ ng PHP ang tuldok: user_full_name.
         $this->get('/api/botcake/chat?' . http_build_query(['key' => self::KEY, 'page_id' => '1001', 'id' => 'psid-f', 'user.full_name' => 'Fe Lim', 'last_text_input' => 'b']))->assertOk();
@@ -280,22 +280,32 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->get('/chatblast/chats')->assertOk()->assertSeeInOrder(['Unknown page', 'Unknown one']);
     }
 
-    public function test_S_059_16_the_setup_box_gives_the_json_body_and_the_get_params_with_the_selected_page_id_filled_in(): void
+    public function test_S_065_1_the_setup_box_gives_one_body_with_botcake_variables_for_every_page(): void
     {
         $this->stored(['page_id' => '2002', 'page_name' => 'Page Dos']);
         $this->actingAs($this->user());
+        $body = '{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}"}';
 
-        $this->get('/chatblast/chats')->assertOk()
-            ->assertSee('{"page_id":"<this page\'s Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}')
-            ->assertSee('Recommended')->assertSee('GET')->assertSee('Prefer POST + header; GET puts the key in server logs')
-            ->assertSeeInOrder(['key', 'page_id', 'psid', '{{user.id}}', 'name', '{{user.full_name}}', 'message', '{{last_text_input}}']);
+        foreach (['/chatblast/chats', '/chatblast/chats?page_id=2002'] as $url) {
+            $html = $this->get($url)->assertOk()
+                ->assertSee($body)
+                ->assertSee('Recommended')->assertSee('GET')->assertSee('Prefer POST + header; GET puts the key in server logs')
+                ->assertSee('The same block works on any page')
+                ->assertSeeInOrder(['key', 'page_id', '{{page_id}}', 'psid', '{{psid}}', 'name', '{{user_full_name}}', 'message', '{{last_text_input}}'])
+                ->assertDontSee("Botcake ID</", false)->getContent();
+            $this->assertDoesNotMatchRegularExpression('/user\.id|user\.full_name|"page_id":"2002"/', $html);
+        }
 
-        $this->get('/chatblast/chats?page_id=2002')->assertOk()
-            ->assertSee('{"page_id":"2002","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}');
-
-        // Ang page na may Botcake ID sa page settings pero wala pang chat ay napipili na (bago i-setup ang block nito).
+        // Ang page na may Botcake ID sa page settings pero wala pang chat ay napipili pa rin sa filter.
         $this->page('Page Tres', '3003');
         $this->get('/chatblast/chats')->assertSee('<option value="3003"', false)->assertSee('Page Tres');
+    }
+
+    public function test_S_065_2_user_full_name_is_stored_as_the_name(): void
+    {
+        $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'psid' => 'psid-g', 'user_full_name' => 'Gina Ramos', 'last_text_input' => 'hi'], ['X-Chat-Key' => self::KEY])->assertOk();
+
+        $this->assertSame(['psid-g', 'Gina Ramos', 'hi'], [BotcakeChat::sole()->psid, BotcakeChat::sole()->name, BotcakeChat::sole()->message]);
     }
 
     public function test_S_059_17_an_empty_message_from_a_customer_is_kept_and_labelled(): void
