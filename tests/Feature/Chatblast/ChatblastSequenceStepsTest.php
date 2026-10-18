@@ -62,6 +62,23 @@ class ChatblastSequenceStepsTest extends ChatblastTestCase
         $this->assertSame(['weekdays', 'daily_cap'], $fields);
     }
 
+    public function test_the_hourly_range_saves_validated_and_clears(): void
+    {
+        $this->postJson($this->url(), ['send_range' => ['start' => '09:00', 'end' => '21:00']])->assertOk();
+        $this->assertSame(['start' => '09:00', 'end' => '21:00', 'every' => 1], $this->c->fresh()->send_range, 'bawat 1 oras ang default');
+        $this->assertSame(['09:00'], $this->c->fresh()->send_times, 'hindi ginagalaw ang listahan');
+
+        foreach ([['start' => '21:00', 'end' => '09:00'], ['start' => '09:00', 'end' => '09:00'], ['start' => '09:00', 'end' => '21:00', 'every' => 0],
+            ['start' => '09:00', 'end' => '21:00', 'every' => 1.5], ['start' => '9am', 'end' => '21:00'], ['start' => '09:00'], 'bawat oras'] as $bad) {
+            $this->postJson($this->url(), ['send_range' => $bad])->assertStatus(422);
+        }
+        $this->assertSame(['start' => '09:00', 'end' => '21:00', 'every' => 1], $this->c->fresh()->send_range);
+
+        $this->postJson($this->url(), ['send_range' => null])->assertOk();
+        $this->assertNull($this->c->fresh()->send_range);
+        $this->assertContains('send_range', collect($this->c->fresh()->log)->where('what', 'settings')->pluck('fields')->flatten()->all());
+    }
+
     public function test_steps_are_picked_added_removed_and_moved_with_their_own_times(): void
     {
         [$una, $dalawa, $tatlo] = $this->ids;

@@ -174,7 +174,17 @@
         od.addEventListener('change', () => saveField(odM, base, {requires_on_delivery: od.checked}));
 
         // Schedule
-        const tM = mark(), wdM = mark(), capM = mark();
+        const tM = mark(), wdM = mark(), capM = mark(), rM = mark();
+        // Bawat oras: simula, dulo (kasama kapag tumapat) at bawat N oras; naka-save bilang range, hindi isa-isang oras.
+        const r = c.send_range || {start: '09:00', end: '21:00', every: 1};
+        const rOn = el('input', {type: 'checkbox', 'aria-label': 'Bawat oras'});
+        rOn.checked = !!c.send_range;
+        const rStart = el('input', {type: 'time', value: r.start, class: 'border rounded px-1 py-0.5 text-xs', 'aria-label': 'Simula'});
+        const rEnd = el('input', {type: 'time', value: r.end, class: 'border rounded px-1 py-0.5 text-xs', 'aria-label': 'Dulo'});
+        const rEvery = el('input', {type: 'number', min: '1', max: '12', value: String(r.every), class: 'border rounded px-1 py-0.5 text-xs w-14', 'aria-label': 'Bawat ilang oras'});
+        const saveRange = () => saveField(rM, base, {send_range: rOn.checked ? {start: rStart.value, end: rEnd.value, every: Number(rEvery.value)} : null});
+        for (const i of [rOn, rStart, rEnd, rEvery]) i.addEventListener('change', saveRange);
+        const range = el('span', {class: 'inline-flex flex-wrap items-center gap-1 text-xs'}, [el('label', {class: 'flex items-center gap-1'}, [rOn, 'Bawat']), rEvery, 'oras, mula', rStart, 'hanggang', rEnd]);
         const weekdays = el('span', {class: 'inline-flex gap-2 text-sm'}, DAYS.map(([n, lbl]) => {
             const i = el('input', {type: 'checkbox', value: String(n)});
             i.checked = !c.weekdays || c.weekdays.includes(n);
@@ -225,6 +235,7 @@
                     el('h3', {class: 'text-sm font-semibold mt-3 mb-1', text: 'Schedule' + (c.mode === 'auto' ? '' : ' (manual: hindi sinusunod)')}),
                     el('div', {class: greyed}, [
                         row('Oras ng padala', chips(c.send_times, v => saveField(tM, base, {send_times: v}), 'walang oras'), tM),
+                        row('Bawat oras', range, rM),
                         row('Mga araw', weekdays, wdM),
                         row('Cap kada page / araw', cap, capM),
                     ]),

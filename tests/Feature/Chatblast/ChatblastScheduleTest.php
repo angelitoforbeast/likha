@@ -100,6 +100,76 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $this->assertNull($s->nextRun($c, $now));
     }
 
+    public function test_an_hourly_range_expands_with_an_inclusive_end_and_reads_as_bawat_oras(): void
+    {
+        $s = app(ChatblastSchedule::class);
+        $c = $this->campaign(['send_times' => [], 'send_range' => ['start' => '09:00', 'end' => '21:00', 'every' => 1]]);
+        $this->assertSame(['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'], $s->allTimes($c));
+        $this->assertSame('Araw-araw, Bawat oras, 9 AM-9 PM', $s->summary($c));
+
+        $c->send_range = ['start' => '05:00', 'end' => '16:00', 'every' => 2];
+        $this->assertSame(['05:00', '07:00', '09:00', '11:00', '13:00', '15:00'], $s->allTimes($c), 'ang dulo ay kasama kapag tumapat lang');
+        $this->assertSame('Araw-araw, Bawat 2 oras, 5 AM-4 PM', $s->summary($c));
+
+        $c->send_range = ['start' => '09:30', 'end' => '11:30', 'every' => 1];
+        $c->send_times = ['08:00', '10:30'];
+        $this->assertSame(['08:00', '09:30', '10:30', '11:30'], $s->allTimes($c), 'kasama ang listahan, walang doble');
+        $this->assertSame('Araw-araw, 8:00 AM at 10:30 AM; Bawat oras, 9:30 AM-11:30 AM', $s->summary($c));
+    }
+
+    public function test_auto_fires_hourly_inside_the_range_only_and_once_per_hour(): void
+    {
+        $this->campaign(['days' => [['Una {name}']], 'send_times' => [], 'send_range' => ['start' => '09:00', 'end' => '11:00', 'every' => 1]]);
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+
+        $this->tick('2026-10-18 08:59:00');
+        $this->assertSame([], $this->rows());
+        $this->tick('2026-10-18 09:00:00');
+        $this->assertSame(['WB-1 D1 queued'], $this->rows());
+
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-18 09:30:00');
+        $this->assertSame(['WB-1 D1 queued'], $this->rows(), 'wala pang 10:00');
+        $this->tick('2026-10-18 10:00:00');
+        $this->tick('2026-10-18 10:05:00');
+        $this->assertSame(['WB-1 D1 queued', 'WB-2 D1 queued'], $this->rows());
+        Queue::assertPushed(\App\Jobs\SendChatblastMessage::class, 2);
+
+        $this->shipped('Page Uno', 'Cora Diaz', 'WB-3', 'psid-c', 'In Transit');
+        $this->tick('2026-10-18 11:00:00');
+        $this->shipped('Page Uno', 'Dan Lim', 'WB-4', 'psid-d', 'In Transit');
+        $this->tick('2026-10-18 12:00:00');
+        $this->tick('2026-10-18 13:00:00');
+        $this->assertSame(['WB-1 D1 queued', 'WB-2 D1 queued', 'WB-3 D1 queued'], $this->rows(), 'ang 11:00 ang huli; walang 12:00');
+    }
+
+    public function test_a_waybill_messaged_in_transit_can_get_the_delivering_message_the_same_day_but_nothing_more(): void
+    {
+        $this->travelTo('2026-10-18 09:00:00');
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(\App\Services\Chatblast::class)->build('in_transit', 1);
+        BotcakeMessage::where('kind', 'in_transit')->update(['status' => 'sent', 'sent_at' => now()]);
+
+        $this->travelTo('2026-10-18 14:00:00');
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'Delivering']);
+        $this->campaign(['kind' => 'c-dlv2', 'statuses' => ['Delivering'], 'mode' => 'manual']); // isa pang sequence ng Delivering
+        app(\App\Services\Chatblast::class)->build(null, 1);
+        $delivering = BotcakeMessage::where('kind', 'delivering')->sole();
+        $other = BotcakeMessage::where('kind', 'c-dlv2')->sole();
+
+        BotcakeMessage::whereKey($delivering->id)->update(['status' => 'queued']);
+        app(ChatblastSender::class)->process($delivering->id);
+        $this->assertNotSame(\App\Services\Chatblast::CROSS, $delivering->fresh()->reason, 'ibang status: puwede ngayong araw');
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'botcake.io'));
+
+        $delivering->fresh()->update(['status' => 'sent', 'sent_at' => now()]);
+        $this->travel(30)->seconds();
+        BotcakeMessage::whereKey($other->id)->update(['status' => 'queued']);
+        app(ChatblastSender::class)->process($other->id);
+        $this->assertSame(['skipped', \App\Services\Chatblast::CROSS], [$other->fresh()->status, $other->fresh()->reason], 'parehong Delivering: wala nang iba ngayong araw');
+    }
+
     public function test_the_campaign_cap_per_page_skips_the_rest_of_the_day(): void
     {
         $this->campaign(['mode' => 'manual', 'daily_cap' => 1]);

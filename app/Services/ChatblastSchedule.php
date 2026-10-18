@@ -21,9 +21,53 @@ class ChatblastSchedule
     public function timesFor(ChatblastCampaign $c, int $step): array
     {
         $own = ((array) ($c->step_times ?? []))[$step] ?? null;
-        $times = is_array($own) && $own ? $own : (array) ($c->send_times ?? []);
+        $times = is_array($own) && $own ? $own : $this->campaignTimes($c);
 
         return array_values(array_filter($times, fn ($t) => is_string($t) && preg_match(self::TIME, $t)));
+    }
+
+    /** Ang mga oras ng campaign: ang listahan at ang "bawat oras" nito, magkakasunod at walang doble. @return string[] */
+    public function campaignTimes(ChatblastCampaign $c): array
+    {
+        $times = array_merge((array) ($c->send_times ?? []), self::rangeTimes($c->send_range));
+        $times = array_values(array_unique(array_filter($times, fn ($t) => is_string($t) && preg_match(self::TIME, $t))));
+        sort($times);
+
+        return $times;
+    }
+
+    /**
+     * Ang mga oras ng "bawat oras": mula start, bawat N oras, hanggang end (kasama kapag tumapat), sa loob ng isang
+     * araw. Walang laman kapag wala o mali ang range. @return string[]
+     */
+    public static function rangeTimes(mixed $range): array
+    {
+        if (self::invalidRange($range) !== null || $range === null) return [];
+        [$from, $to] = [self::minutes($range['start']), self::minutes($range['end'])];
+        $out = [];
+        for ($m = $from; $m <= $to; $m += 60 * (int) $range['every']) $out[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+
+        return $out;
+    }
+
+    /** Ang mali sa range, o null kapag tama (o wala): start at end na "HH:MM", end pagkatapos ng start, every 1–12 oras. */
+    public static function invalidRange(mixed $range): ?string
+    {
+        if ($range === null) return null;
+        if (!is_array($range) || !isset($range['start'], $range['end'])) return 'kailangan ang simula at dulo.';
+        foreach (['start', 'end'] as $k) {
+            if (!is_string($range[$k]) || !preg_match(self::TIME, $range[$k])) return 'ang oras ay HH:MM (00:00 hanggang 23:59).';
+        }
+        if (self::minutes($range['end']) <= self::minutes($range['start'])) return 'ang dulo ay dapat pagkatapos ng simula (sa parehong araw).';
+        $every = $range['every'] ?? 1;
+        if (!is_int($every) || $every < 1 || $every > 12) return 'bawat 1 hanggang 12 oras.';
+
+        return null;
+    }
+
+    private static function minutes(string $t): int
+    {
+        return (int) substr($t, 0, 2) * 60 + (int) substr($t, 3, 2);
     }
 
     /** Lahat ng oras ng campaign at ng mga step nito, magkakasunod. @return string[] */
@@ -98,7 +142,14 @@ class ChatblastSchedule
         sort($days);
         $when = !$days || count($days) === 7 ? 'Araw-araw' : implode(', ', array_map(fn ($d) => self::DAY_NAMES[$d] ?? '?', $days));
         $times = (array) ($c->send_times ?? []);
-        $text = $when . ', ' . ($times ? self::join(array_map([self::class, 'clock'], $times)) : 'walang oras');
+        $parts = [];
+        if ($times) $parts[] = self::join(array_map([self::class, 'clock'], $times));
+        if (self::rangeTimes($c->send_range)) {
+            $r = $c->send_range;
+            $every = (int) ($r['every'] ?? 1);
+            $parts[] = ($every === 1 ? 'Bawat oras' : 'Bawat ' . $every . ' oras') . ', ' . self::hour($r['start']) . '-' . self::hour($r['end']);
+        }
+        $text = $when . ', ' . ($parts ? implode('; ', $parts) : 'walang oras');
 
         foreach ((array) ($c->step_times ?? []) as $i => $own) {
             if (is_array($own) && $own) $text .= '; Day ' . ($i + 1) . ' tuwing ' . self::join(array_map([self::class, 'clock'], $own));
@@ -128,6 +179,12 @@ class ChatblastSchedule
     public static function clock(string $t): string
     {
         return Carbon::createFromFormat('H:i', $t)->format('g:i A');
+    }
+
+    /** "09:00" → "9 AM", "09:30" → "9:30 AM" (para sa bawat oras). */
+    private static function hour(string $t): string
+    {
+        return Carbon::createFromFormat('H:i', $t)->format(str_ends_with($t, ':00') ? 'g A' : 'g:i A');
     }
 
     private static function join(array $parts): string

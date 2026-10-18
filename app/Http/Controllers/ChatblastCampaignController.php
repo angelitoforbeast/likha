@@ -388,6 +388,13 @@ class ChatblastCampaignController extends Controller
             sort($times);
             $data['send_times'] = $times;
         }
+        if ($request->has('send_range')) {
+            $range = $request->input('send_range');
+            if (is_array($range) && !array_key_exists('every', $range)) $range['every'] = 1; // bawat oras ang default
+            if (is_array($range) && is_numeric($range['every']) && (int) $range['every'] == $range['every']) $range['every'] = (int) $range['every'];
+            if (($error = ChatblastSchedule::invalidRange($range)) !== null) return [[], 'Bawat oras: ' . $error];
+            $data['send_range'] = $range === null ? null : ['start' => $range['start'], 'end' => $range['end'], 'every' => $range['every']];
+        }
         if ($request->has('weekdays')) {
             $days = $request->input('weekdays');
             if (!is_array($days) || !$days) return [[], 'Mga araw: pumili ng kahit isa (Lun hanggang Lin).'];
@@ -456,7 +463,7 @@ class ChatblastCampaignController extends Controller
             'id' => $c->id, 'kind' => $c->kind, 'name' => $c->name, 'statuses' => $c->statuses, 'pages' => $c->pages,
             'window_days' => $c->window_days, 'send_times' => $c->send_times ?? [], 'requires_on_delivery' => $c->requires_on_delivery,
             'mode' => $c->mode, 'active' => $c->active, 'days' => count((array) $c->days),
-            'weekdays' => $c->weekdays, 'step_times' => $c->step_times, 'daily_cap' => $c->daily_cap,
+            'weekdays' => $c->weekdays, 'step_times' => $c->step_times, 'daily_cap' => $c->daily_cap, 'send_range' => $c->send_range,
             'mode_changed_at' => $c->mode_changed_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
         ];
     }
