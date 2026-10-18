@@ -805,6 +805,7 @@ class ChecklistController extends Controller
             'description'     => 'nullable|string|max:1000',
             'type'            => 'required|in:photo,note,any,both',
             'scheduled_time'  => 'nullable|string|max:20',
+            'deadline_time'   => self::DEADLINE_RULE,
             'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
@@ -857,6 +858,7 @@ class ChecklistController extends Controller
             'type'            => 'required|in:photo,note,any,both',
             'is_active'       => 'boolean',
             'scheduled_time'  => 'nullable|string|max:20',
+            'deadline_time'   => self::DEADLINE_RULE,
             'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
@@ -917,6 +919,7 @@ class ChecklistController extends Controller
                 'description'     => $task->description,
                 'type'            => $task->type,
                 'scheduled_time'  => $task->scheduled_time,
+                'deadline_time'   => $task->deadline_time,
                 'submission_type' => $task->submission_type,
                 'ai_prompt'       => $task->ai_prompt,
                 'approval_prompt' => $task->approval_prompt,
@@ -1363,7 +1366,7 @@ class ChecklistController extends Controller
 
     /** Ang mga field ng task na sinusulat sa checklist_task_changes kapag nagbago. */
     private const LOGGED_TASK_FIELDS = [
-        'title', 'description', 'type', 'is_active', 'scheduled_time', 'submission_type', 'ai_prompt',
+        'title', 'description', 'type', 'is_active', 'scheduled_time', 'deadline_time', 'submission_type', 'ai_prompt',
         'approval_prompt', 'required_photos', 'frequency', 'frequency_day', 'department', 'extract_fields',
     ];
 
@@ -1389,7 +1392,7 @@ class ChecklistController extends Controller
             $before = $task->getOriginal($field);
             $after  = $task->getAttribute($field);
             // "08:00" at "08:00:00" ay iisang oras (time input vs TIME column)
-            if ($field === 'scheduled_time' && substr((string) $before, 0, 5) === substr((string) $after, 0, 5)) {
+            if (in_array($field, ['scheduled_time', 'deadline_time'], true) && substr((string) $before, 0, 5) === substr((string) $after, 0, 5)) {
                 continue;
             }
             // Iba ang ayos ng keys na ibinabalik ng JSON column ng MySQL; ang laman ang ikinukumpara
@@ -1437,7 +1440,11 @@ class ChecklistController extends Controller
         'extract_fields.*.key.regex'    => 'Ang key ng field ay snake_case lang (a-z, 0-9, _), hal. total_sticker.',
         'extract_fields.*.key.distinct' => 'Dalawang field ang may parehong key; dapat iba-iba.',
         'extract_fields.*.type.in'      => 'Ang type ng field ay number, money, percent, text, date o yes_no lang.',
+        'deadline_time.date_format'     => 'Ang Deadline ay dapat oras, hal. 10:30.',
     ];
+
+    /** Oras mula sa <input type="time">: "10:30", o "10:30:00" kapag may segundo. */
+    private const DEADLINE_RULE = 'nullable|date_format:H:i,H:i:s';
 
     private function extractFieldRules(): array
     {
