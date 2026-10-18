@@ -1296,3 +1296,13 @@ Tests are in `tests/Feature/PaymentActivity/PaymentDateOrderTest.php`.
 | S-063.6 | Given a row dated more than one day outside the filename's ISO range, or more than one day after the upload date (from the stored name), then it is refused and counted in error_rows with a message; rows inside are imported | `test_S_063_6…` | Passed · 2026-10-18 · auto |
 | S-063.7 | Given a stored row with the correct date, when an ambiguous capital-R file with it is imported again, then its date stays correct | `test_S_063_7…` | Passed · 2026-10-18 · auto |
 | S-063.8 | Given a failed or partly refused file, then the upload page shows its error message under the status | `test_S_063_8…` | Passed · 2026-10-18 · auto |
+
+### S-063A `payments:fix-swapped-dates` fixes the swapped rows, with a backup first (P1)
+
+Tests are in `tests/Feature/PaymentActivity/FixSwappedDatesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-063.9 | Given rows stored Jan 10 / Mar 10 / Apr 10 (created Oct 9), 2028-07-05 (created 2026-06-05), 2027-01-02 (created 2026-02-20), 2025-12-11 (created 2025-12-12), 2026-02-03 (created 2026-03-04) and a day-above-12 row, when it runs without options, then it prints 6 rows, their total and examples (id, stored → corrected, amount, card last 4), writes a CSV of every change to `storage/app/private/payment_date_fixes/`, and changes nothing; the Dec 11 and day-above-12 rows are kept | `test_S_063_9…` | Passed · 2026-10-18 · auto |
+| S-063.10 | Given the same rows, when it runs with `--apply`, then `payment_activity_ads_manager_bak_YYYYMMDD_HHMM` holds a copy of every row first, and only `date` changes on the 6 rows (Oct 1/3/4, 2026-05-31, 2026-02-13, 2026-03-02) | `test_S_063_10…` | Passed · 2026-10-18 · auto |
+| S-063.11 | Given `--expect=N` that differs from the count found, then it refuses: no backup, nothing changed, a failed exit | `test_S_063_11…` | Passed · 2026-10-18 · auto |
