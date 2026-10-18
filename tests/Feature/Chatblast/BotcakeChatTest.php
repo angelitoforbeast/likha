@@ -94,8 +94,14 @@ class BotcakeChatTest extends ChatblastTestCase
         ])->assertOk();
         $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'user_id' => 'psid-c', 'text' => 'Hi'], ['X-Chat-Key' => self::KEY])->assertOk();
         $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'psid' => 'psid-d', 'last_input' => 'Yes'], ['X-Chat-Key' => self::KEY])->assertOk();
+        // Ang mga variable ng Botcake: {{user.id}}, {{user.full_name}}, {{last_text_input}} (JSON: may tuldok ang pangalan).
+        $this->postJson('/api/botcake/chat', ['page_id' => '1001', 'user.id' => 'psid-e', 'user.full_name' => 'Eva Santos', 'last_text_input' => 'a'], ['X-Chat-Key' => self::KEY])->assertOk();
+        // Sa GET/form ay ginagawang _ ng PHP ang tuldok: user_full_name.
+        $this->get('/api/botcake/chat?' . http_build_query(['key' => self::KEY, 'page_id' => '1001', 'id' => 'psid-f', 'user.full_name' => 'Fe Lim', 'last_text_input' => 'b']))->assertOk();
 
         $rows = BotcakeChat::orderBy('id')->get();
+        $this->assertSame(['psid-e', 'Eva Santos', 'a'], [$rows[3]->psid, $rows[3]->name, $rows[3]->message]);
+        $this->assertSame(['psid-f', 'Fe Lim', 'b'], [$rows[4]->psid, $rows[4]->name, $rows[4]->message]);
         $this->assertSame(['psid-b', 'Ben Reyes', 'Order po', 'm-1'], [$rows[0]->psid, $rows[0]->name, $rows[0]->message, $rows[0]->message_id]);
         $this->assertSame('09170000000', $rows[0]->payload['Phone']);
         $this->assertSame('2026-10-18 10:00', $rows[0]->payload['sent_at']);
@@ -255,6 +261,46 @@ class BotcakeChatTest extends ChatblastTestCase
 
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
         $this->get('/chatblast/chats')->assertOk()->assertSee('••••' . substr(self::KEY, -4))->assertDontSee(self::KEY);
+    }
+
+    public function test_S_059_15_the_page_is_found_by_its_name_when_there_is_no_page_id_and_unknown_pages_are_labelled(): void
+    {
+        $this->page('Page Dos', '2002');
+
+        $this->chat(['page_id' => '', 'page' => '  page dos ', 'message' => 'By name'])->assertOk();
+        $this->chat(['page_id' => '', 'page' => 'No Such Page', 'message' => 'Unknown one'])->assertOk();
+
+        $rows = BotcakeChat::orderBy('id')->get();
+        $this->assertSame(['2002', 'Page Dos'], [$rows[0]->page_id, $rows[0]->page_name]);
+        $this->assertSame([null, null], [$rows[1]->page_id, $rows[1]->page_name]);
+        $this->assertSame('No Such Page', $rows[1]->payload['page']);
+
+        $this->actingAs($this->user());
+        $this->get('/chatblast/chats')->assertOk()->assertSeeInOrder(['Unknown page', 'Unknown one']);
+    }
+
+    public function test_S_059_16_the_setup_box_gives_the_json_body_and_the_get_params_with_the_selected_page_id_filled_in(): void
+    {
+        $this->stored(['page_id' => '2002', 'page_name' => 'Page Dos']);
+        $this->actingAs($this->user());
+
+        $this->get('/chatblast/chats')->assertOk()
+            ->assertSee('{"page_id":"<this page\'s Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}')
+            ->assertSee('Recommended')->assertSee('GET')
+            ->assertSeeInOrder(['key', 'page_id', 'psid', '{{user.id}}', 'name', '{{user.full_name}}', 'message', '{{last_text_input}}']);
+
+        $this->get('/chatblast/chats?page_id=2002')->assertOk()
+            ->assertSee('{"page_id":"2002","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}');
+    }
+
+    public function test_S_059_17_an_empty_message_from_a_customer_is_kept_and_labelled(): void
+    {
+        $this->chat(['message' => ''])->assertOk()->assertExactJson(['ok' => true]);
+
+        $this->assertNull(BotcakeChat::sole()->message);
+        $this->actingAs($this->user());
+        $this->get('/chatblast/chats')->assertSee('no text (sticker or photo?)');
+        $this->get('/chatblast/chats/customer?page_id=1001&psid=psid-a')->assertSee('no text (sticker or photo?)');
     }
 
     public function test_S_059_12_the_prune_deletes_chats_older_than_90_days_from_its_command_and_from_chatblast_auto(): void

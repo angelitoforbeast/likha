@@ -3,7 +3,7 @@
 @php
     $first = $chats->last();
     $who = $first?->name ?: 'PSID …' . mb_substr($psid, -4);
-    $page = $first?->page_name ?? ($pageId !== '' ? 'Page ' . $pageId : null);
+    $page = $first?->page_name ?? 'Unknown page';
 @endphp
 
 @section('title', 'Chatblast · Chats · ' . $who)
@@ -25,7 +25,7 @@
         @foreach($chats as $c)
             <li class="px-4 py-3 text-sm">
                 <div class="text-xs text-slate-500">{{ $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i:s') }}</div>
-                <div class="mt-1 whitespace-pre-line break-words">{{ $c->message }}</div>
+                <div class="mt-1 whitespace-pre-line break-words">@if((string) $c->message !== ""){{ $c->message }}@else<span class="italic text-slate-400">no text (sticker or photo?)</span>@endif</div>
             </li>
         @endforeach
     </ol>

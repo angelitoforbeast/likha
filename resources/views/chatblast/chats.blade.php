@@ -17,7 +17,7 @@
         <select name="page_id" class="border px-2 py-1 text-sm text-gray-900 max-w-full">
             <option value="">All pages</option>
             @foreach($pages as $p)
-                <option value="{{ $p->page_id }}" @selected($filters['page'] === (string) $p->page_id)>{{ $p->page_name ?? 'Page ' . $p->page_id }}</option>
+                <option value="{{ $p->page_id }}" @selected($filters['page'] === (string) $p->page_id)>{{ $p->page_name ?? 'Unknown page (ID ' . $p->page_id . ')' }}</option>
             @endforeach
         </select>
     </label>
@@ -52,16 +52,16 @@
             @foreach($chats as $c)
                 <tr>
                     <td class="text-xs text-slate-500">{{ $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') }}</td>
-                    <td class="hidden break-words sm:table-cell">{{ $c->page_name ?? ($c->page_id ? 'Page ' . $c->page_id : '—') }}</td>
+                    <td class="hidden break-words sm:table-cell">{{ $c->page_name ?? 'Unknown page' }}</td>
                     <td class="break-words">
                         @if($c->psid)
                             <a href="{{ route('chatblast.chats.customer', array_filter(['page_id' => $c->page_id, 'psid' => $c->psid], fn ($v) => $v !== null)) }}" class="text-blue-700 hover:underline">{{ $c->name ?: 'PSID …' . mb_substr($c->psid, -4) }}</a>
                         @else
                             {{ $c->name ?: '—' }}
                         @endif
-                        <div class="text-xs text-slate-500 sm:hidden">{{ $c->page_name ?? ($c->page_id ? 'Page ' . $c->page_id : '') }}</div>
+                        <div class="text-xs text-slate-500 sm:hidden">{{ $c->page_name ?? 'Unknown page' }}</div>
                     </td>
-                    <td class="whitespace-pre-line break-words">{{ $c->message }}</td>
+                    <td class="whitespace-pre-line break-words">@if((string) $c->message !== ""){{ $c->message }}@else<span class="italic text-slate-400">no text (sticker or photo?)</span>@endif</td>
                 </tr>
             @endforeach
             </tbody>
@@ -82,8 +82,10 @@
             <div id="setup-title" class="font-semibold">Botcake setup: JSON API block</div>
             <button id="setup-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
         </div>
-        <p class="mb-3 text-slate-600">In Botcake, add a JSON API block to the page's Default reply flow and fill in "Edit Group Request" with these values.</p>
-        <dl class="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2">
+        <p class="mb-3 text-slate-600">In Botcake, add a JSON API block to the page's Default reply flow and fill in "Edit Group Request". Botcake has no variable for the page, so type each page's own Botcake ID{{ $filters['page'] !== '' ? ' (filled in below for the selected page)' : ' (pick a page in the filter to fill it in)' }}.</p>
+
+        <h3 class="mb-2 font-medium">(a) Recommended: POST with a JSON body</h3>
+        <dl class="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-2">
             <dt class="text-slate-500">Method</dt>
             <dd class="font-mono">POST</dd>
 
@@ -102,16 +104,28 @@
                 @endif
             </dd>
 
-            <dt class="text-slate-500">Params</dt>
-            <dd>
-                <ul class="space-y-1">
-                    @foreach($setup['params'] as $param)
-                        <li><span class="font-mono">{{ $param }}</span> = <span class="text-slate-500">the Botcake variable for {{ str_replace('_', ' ', $param) }}</span></li>
-                    @endforeach
-                </ul>
-            </dd>
+            <dt class="text-slate-500">Body (JSON)</dt>
+            <dd class="flex flex-wrap items-start gap-2"><code class="break-all font-mono text-xs">{{ $setup['body'] }}</code>
+                <button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $setup['body'] }}">Copy</button></dd>
         </dl>
-        <p class="mt-3 text-xs text-slate-500">The param values are Botcake variables (pick them in the block), not fixed text. Other params are kept too. The site answers <span class="font-mono">{"ok":true}</span> and never replies to the customer.</p>
+
+        <h3 class="mb-2 mt-4 font-medium">(b) GET with Params rows, if POST is not wanted</h3>
+        <p class="mb-2 text-xs text-slate-500">Method GET, the same URL, no header. One Params row each:</p>
+        <ul class="space-y-1">
+            <li class="flex flex-wrap items-center gap-2"><span class="font-mono">key</span> =
+                @if($setup['masked'])
+                    <span class="font-mono">{{ $setup['masked'] }}</span>
+                    @if($setup['key'])<button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $setup['key'] }}">Copy key</button>@endif
+                @else
+                    <span class="text-amber-700">not set yet</span>
+                @endif
+            </li>
+            @foreach($setup['params'] as $param => $value)
+                <li class="flex flex-wrap items-center gap-2"><span class="font-mono">{{ $param }}</span> = <span class="break-all font-mono">{{ $value }}</span>
+                    <button type="button" class="cb-btn cb-btn-sm" data-copy="{{ $value }}">Copy</button></li>
+            @endforeach
+        </ul>
+        <p class="mt-3 text-xs text-slate-500">The {{ '{{' }}…}} values are Botcake variables (pick them with the {} button in the block). Other params are kept too. A message with no text (a sticker or photo) is kept with a label. The site answers <span class="font-mono">{"ok":true}</span> and never replies to the customer.</p>
         <p id="setup-note" class="mt-2 min-h-[1rem] text-xs text-green-700" aria-live="polite"></p>
     </div>
 </div>

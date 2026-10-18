@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
 use App\Models\PageSetting;
+use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,9 +18,9 @@ class BotcakeChatController extends Controller
     /** Ang field => ang mga pangalang tinatanggap (lowercase), una ang pangunahin. */
     private const FIELDS = [
         'page_id'    => ['page_id'],
-        'psid'       => ['psid', 'user_id', 'fb_id'],
-        'name'       => ['name', 'full_name'],
-        'message'    => ['message', 'text', 'last_input', 'last_user_input'],
+        'psid'       => ['psid', 'user.id', 'user_id', 'fb_id', 'id'], // sa GET/form ay user_id ang user.id (PHP)
+        'name'       => ['name', 'full_name', 'user.full_name', 'user_full_name'],
+        'message'    => ['message', 'last_text_input', 'text', 'last_input', 'last_user_input'],
         'message_id' => ['message_id'],
     ];
 
@@ -62,11 +63,15 @@ class BotcakeChatController extends Controller
         }
 
         $f = $this->fields($byName);
-        // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak.
+        // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak. Ang mensahe
+        // na walang text (sticker o larawan) pero may PSID ay iniimbak.
         if ($f['psid'] === null && $f['message'] === null) return response()->json(['ok' => true]);
 
+        // Walang page-id na variable ang Botcake: ang block ng bawat page ay may page_id (fixed text) o page (pangalan).
+        [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
+
         if (!$this->isDuplicate($f)) {
-            BotcakeChat::create($f + ['page_name' => $this->pageName($f['page_id']), 'payload' => $payload, 'received_at' => now()]);
+            BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
         }
 
         return response()->json(['ok' => true]);
@@ -112,12 +117,24 @@ class BotcakeChatController extends Controller
             ->contains(fn ($m) => $m === $f['message']);
     }
 
-    /** Ang page na may botcake.page_id na ito sa page_settings (null kapag wala). */
-    private function pageName(?string $pageId): ?string
+    /**
+     * Ang page: ayon sa botcake.page_id sa page_settings, at kung hindi tugma, ayon sa pangalan ng page (trim at
+     * case-insensitive, gaya ng page_settings), saka kinukuha ang botcake.page_id nito. Walang tugma: [ang page_id, null].
+     * @return array{0: ?string, 1: ?string} [page_id, page_name]
+     */
+    private function page(?string $pageId, string $page): array
     {
-        if ($pageId === null) return null;
+        if ($pageId !== null && ($name = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)
+                ->where('value', $pageId)->orderByDesc('id')->value('page_name')) !== null) {
+            return [$pageId, $name];
+        }
+        if ($page === '') return [$pageId, null];
 
-        return PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)
-            ->where('value', $pageId)->orderByDesc('id')->value('page_name');
+        $settings = app(PageSettings::class);
+        $name = $settings->pageQuery(mb_substr($page, 0, 255))->where('active', true)->orderByDesc('id')->value('page_name');
+        if ($name === null) return [$pageId, null];
+        $id = trim((string) $settings->get($name, 'botcake', 'page_id'));
+
+        return [$id !== '' ? mb_substr($id, 0, self::MAX['page_id']) : $pageId, $name];
     }
 }

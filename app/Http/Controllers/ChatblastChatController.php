@@ -70,7 +70,7 @@ class ChatblastChatController extends Controller
 
         return view('chatblast.chats', [
             'ready' => $ready, 'chats' => $chats, 'pages' => $pages, 'filters' => compact('page', 'date', 'q'),
-            'setup' => $this->setup(),
+            'setup' => $this->setup($page),
         ]);
     }
 
@@ -92,16 +92,27 @@ class ChatblastChatController extends Controller
         return view('chatblast.chats-customer', ['chats' => $chats, 'psid' => $psid, 'pageId' => $pageId, 'max' => self::CUSTOMER_MAX]);
     }
 
-    /** Ang mga value para sa JSON API block ng Botcake. Ang buong key ay para sa CEO lang (copy button). */
-    private function setup(): array
+    /**
+     * Ang mga value para sa JSON API block ng Botcake: POST na may JSON body (inirerekomenda) o GET na may Params. Ang
+     * page_id ay ang napiling page sa filter, kung mayroon. Ang buong key ay para sa CEO lang (copy button).
+     */
+    private function setup(string $pageId): array
     {
         $key = (string) config('services.botcake.chat_key');
+        // Mga system variable ng Botcake; walang variable para sa page, kaya fixed text ang page_id kada page.
+        $values = [
+            'page_id' => $pageId !== '' ? $pageId : "<this page's Botcake ID>",
+            'psid'    => '{{user.id}}',
+            'name'    => '{{user.full_name}}',
+            'message' => '{{last_text_input}}',
+        ];
 
         return [
             'url'    => rtrim((string) config('app.url'), '/') . '/api/botcake/chat',
             'masked' => $key === '' ? null : '••••' . (mb_strlen($key) > 8 ? mb_substr($key, -4) : ''),
             'key'    => $key !== '' && $this->getNormalizedRole() === 'CEO' ? $key : null,
-            'params' => ['page_id', 'psid', 'name', 'message'],
+            'body'   => json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'params' => $values,
         ];
     }
 }
