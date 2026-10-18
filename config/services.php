@@ -84,13 +84,13 @@ return [
     // Botcake customer sync (botcake:sync-customers sa schedule). Naka-off kapag walang laman.
     'botcake' => [
         'sync_enabled' => (bool) env('BOTCAKE_SYNC_ENABLED', false),
-        // Max na batch (10 customer bawat isa) kada incremental run ng isang page; walang cap ang --full.
+        // Max na batch ng lumang incremental read; hindi na ginagamit mula nang palitan ito ng by date read (stop date ang hangganan).
         'sync_max_batches' => (int) env('BOTCAKE_SYNC_MAX_BATCHES', 300),
         // Hanggang ilang araw pabalik ang binabasa (date_subscribed_at); humihinto ang sync sa unang mas lumang customer.
         'sync_max_age_days' => (int) env('BOTCAKE_SYNC_MAX_AGE_DAYS', 45),
         // /page-settings: rows = mga page na may order sa huling ilang araw (ts_date), saka ang mga may settings.
         'grid_order_days' => (int) env('BOTCAKE_GRID_ORDER_DAYS', 30),
-        // Sync lahat: nilalaktawan ang page na incremental lang ang kailangan at may matagumpay na sync sa huling ilang oras.
+        // Sync lahat: nilalaktawan ang page na by date lang ang kailangan at may matagumpay na sync sa huling ilang oras.
         'sync_all_fresh_hours' => (float) env('BOTCAKE_SYNC_ALL_FRESH_HOURS', 6),
         // /chatblast: hanggang ilang totoong mensahe kada page kada araw (Manila).
         'chatblast_daily_cap' => (int) env('BOTCAKE_CHATBLAST_DAILY_CAP', 3000),

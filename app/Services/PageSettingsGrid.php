@@ -264,7 +264,11 @@ class PageSettingsGrid
         foreach ($runs as $run) {
             $pk = $this->settings->pageKey((string) $run->page_name);
             if (!isset($out[$pk])) continue;
+            // Mga petsang nabasa ng run, pinakaluma → pinakabago (hal. "Okt 17 → Okt 18"); iisa kapag pareho.
+            $dates = array_unique(array_filter([BotcakeCustomerSync::shortDate($run->subscribed_oldest), BotcakeCustomerSync::shortDate($run->subscribed_newest)]));
             $out[$pk]['last_sync'] = [
+                'dates'       => $dates ? implode(' → ', $dates) : null,
+                'failed'      => $run->status === 'failed',
                 'at'          => $run->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
                 'status'      => $run->status,
                 'stop_reason' => $run->stop_reason,

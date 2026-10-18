@@ -214,7 +214,7 @@
             ...columns.map(c => cellTd(r, c)),
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'orders'}, String(r.info.orders || 0)),
             el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'customers'}, infoCustomers(r)),
-            el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}, infoSync(r)),
+            paintSync(el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}), r),
             el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'next'}, infoNext(r)),
             el('td', {class: 'px-3 py-1 border-b whitespace-nowrap', 'data-info': 'actions'}, actions(r)),
         ]));
@@ -308,16 +308,25 @@
     function infoSync(r) {
         const s = r.info.last_sync;
         if (!s) return 'wala pa';
-        // hal. "2026-10-18 09:00 · window, tuloy mula batch 20 · time · +9,985 bago · 1,279 na-match"
+        // hal. "Okt 17 → Okt 18 · by date · 2026-10-18 01:04 · date · +9,985 bago · 1,279 na-match"
         const n = v => Number(v || 0).toLocaleString('en-US');
         const counts = (s.new || s.matched) ? '+' + n(s.new) + ' bago · ' + n(s.matched) + ' na-match' : null;
-        return [s.at, s.kind, s.stop_reason || s.status, counts].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '');
+        return [s.dates, s.kind, s.at, s.stop_reason || s.status, counts].filter(Boolean).join(' · ') + (s.error ? ' · ' + s.error : '')
+            + (s.failed && r.info.next ? ' · susunod: ' + (r.info.next.from ? 'mula ' + r.info.next.from : r.info.next.label) : '');
+    }
+
+    // Pula ang "Huling sync" kapag failed ang huling run.
+    function paintSync(td, r) {
+        const s = r.info.last_sync;
+        td.textContent = infoSync(r);
+        td.classList.toggle('text-red-600', !!(s && s.failed));
+        return td;
     }
 
     function infoNext(r) { return r.info.next ? r.info.next.label : ''; }
 
     // Kapareho ng BotcakeSyncAll::summary(): bilang kada uri ng susunod na sync.
-    const SUMMARY = {window: 'window', continue: 'tuloy', incremental: 'incremental', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
+    const SUMMARY = {window: 'window', continue: 'tuloy', by_date: 'by date', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
     function refreshSummary() {
         const count = {};
         for (const r of rows.values()) if (r.info.next) count[r.info.next.kind] = (count[r.info.next.kind] || 0) + 1;
@@ -358,7 +367,7 @@
         const r = rows.get(pk);
         if (!tr || !r) return;
         tr.querySelector('[data-info="customers"]').textContent = infoCustomers(r);
-        tr.querySelector('[data-info="sync"]').textContent = infoSync(r);
+        paintSync(tr.querySelector('[data-info="sync"]'), r);
         tr.querySelector('[data-info="next"]').textContent = infoNext(r);
         refreshSummary();
     }

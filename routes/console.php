@@ -99,19 +99,22 @@ Schedule::command('botcake:psid-import --clean-sheet')
     ->withoutOverlapping();
 
 // Botcake customers mula sa API (mga page na may botcake.page_id at token), saka matching ng orders.
-// Kada oras sa :15 (pagkatapos ng :00 na sheet import) ang incremental; Linggo 01:00 Manila ang buong basa.
-// Tatakbo lang kapag BOTCAKE_SYNC_ENABLED=true (naka-off sa release; bubuksan pagkatapos ng one-page test).
+// 01:00 Manila: Lunes hanggang Sabado ang by date (mula sa huling malinis na petsa ng bawat page), Linggo ang 45 araw
+// (--full); iisang basa kada gabi. Sa background, para hindi maantala ng mahabang basa ang ibang naka-schedule.
+// Tatakbo lang kapag BOTCAKE_SYNC_ENABLED=true. Ang server na walang schedule:run ay gumagamit ng --nightly sa cron.
 Schedule::command('botcake:sync-customers')
     ->timezone('Asia/Manila')
-    ->hourlyAt(15)
+    ->cron('0 1 * * 1-6')
     ->when(fn () => (bool) config('services.botcake.sync_enabled'))
-    ->withoutOverlapping();
+    ->withoutOverlapping(720) // 12 oras: ang mutex ng patay na proseso ay hindi haharang sa susunod na gabi
+    ->runInBackground();
 
 Schedule::command('botcake:sync-customers --full')
     ->timezone('Asia/Manila')
     ->weeklyOn(0, '01:00')
     ->when(fn () => (bool) config('services.botcake.sync_enabled'))
-    ->withoutOverlapping();
+    ->withoutOverlapping(720) // 12 oras: ang mutex ng patay na proseso ay hindi haharang sa susunod na gabi
+    ->runInBackground();
 
 // /chatblast auto mode: ang mga campaign na naka-auto ay binubuo at ipinapadala sa kanilang oras ng padala (Manila).
 // Kada 5 minuto; ang command ang nagpapasya kung oras na (isang beses kada oras kada araw, hanggang 3 oras pagkatapos).
