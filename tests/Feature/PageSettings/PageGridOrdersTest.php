@@ -19,7 +19,7 @@ class PageGridOrdersTest extends BotcakeApiTestCase
 
     private function grid(): array
     {
-        return $this->get('/page-settings')->assertOk()->viewData('grid');
+        return $this->get('/chatblast/page-settings')->assertOk()->viewData('grid');
     }
 
     private function orders(string $page, int $n, int $daysAgo = 0): void
@@ -55,7 +55,7 @@ class PageGridOrdersTest extends BotcakeApiTestCase
         $this->assertSame([], $big['cells'], 'walang settings: walang laman na mga cell, gaya ng "+ Page"');
         $this->assertFalse($big['info']['botcake']);
 
-        $this->assertStringContainsString('Orders (30 days)', $this->get('/page-settings')->getContent());
+        $this->assertStringContainsString('Orders (30 days)', $this->get('/chatblast/page-settings')->getContent());
     }
 
     public function test_the_window_follows_the_config(): void
@@ -73,7 +73,7 @@ class PageGridOrdersTest extends BotcakeApiTestCase
     public function test_the_order_counts_are_one_query_cached_for_10_minutes_and_never_run_by_the_poll(): void
     {
         $this->orders('Page Big', 2);
-        $this->get('/page-settings')->assertOk(); // auth at profile; pinupuno rin ang cache
+        $this->get('/chatblast/page-settings')->assertOk(); // auth at profile; pinupuno rin ang cache
         Cache::flush();
 
         $macro = function (string $url): int {
@@ -85,11 +85,11 @@ class PageGridOrdersTest extends BotcakeApiTestCase
             return $n;
         };
 
-        $this->assertSame(1, $macro('/page-settings/grid'));
+        $this->assertSame(1, $macro('/chatblast/page-settings/grid'));
         $this->orders('Page Big', 3);
-        $this->assertSame(0, $macro('/page-settings'), 'mula sa cache');
+        $this->assertSame(0, $macro('/chatblast/page-settings'), 'mula sa cache');
         $this->assertSame(2, $this->grid()['rows'][0]['info']['orders'], 'ang cache ay 10 minuto');
-        $this->assertSame(0, $macro('/page-settings/grid?since=' . urlencode('2026-10-17 09:00:00')));
+        $this->assertSame(0, $macro('/chatblast/page-settings/grid?since=' . urlencode('2026-10-17 09:00:00')));
 
         $this->travel(11)->minutes();
         $this->assertSame(5, $this->grid()['rows'][0]['info']['orders']);

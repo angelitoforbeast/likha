@@ -29,7 +29,7 @@ class PsidCoverageTest extends BotcakeApiTestCase
 
     private function list(string $query)
     {
-        return $this->get('/page-settings/psid-coverage/orders?page_name=Page%20Uno' . $query)->assertOk();
+        return $this->get('/chatblast/page-settings/psid-coverage/orders?page_name=Page%20Uno' . $query)->assertOk();
     }
 
     public function test_the_summary_counts_each_page_in_one_grouped_query(): void
@@ -44,7 +44,7 @@ class PsidCoverageTest extends BotcakeApiTestCase
 
         $queries = 0;
         DB::listen(function ($q) use (&$queries) { if (str_contains($q->sql, 'macro_output')) $queries++; });
-        $rows = collect($this->get('/page-settings/psid-coverage')->assertOk()->viewData('summary'))->keyBy('page_key');
+        $rows = collect($this->get('/chatblast/page-settings/psid-coverage')->assertOk()->viewData('summary'))->keyBy('page_key');
 
         $this->assertSame(1, $queries, 'isang grouped query para sa lahat ng page');
         $this->assertSame(['orders' => 4, 'with_psid' => 2, 'without_psid' => 2, 'pct' => 50.0],
@@ -56,7 +56,7 @@ class PsidCoverageTest extends BotcakeApiTestCase
     {
         $this->actingAs($this->user());
 
-        $res = $this->get('/page-settings/psid-coverage?from=2026-01-01&to=2026-10-17')->assertOk();
+        $res = $this->get('/chatblast/page-settings/psid-coverage?from=2026-01-01&to=2026-10-17')->assertOk();
 
         $this->assertSame(['2026-09-17', '2026-10-17'], [$res->viewData('from'), $res->viewData('to')]);
     }
@@ -199,11 +199,11 @@ class PsidCoverageTest extends BotcakeApiTestCase
     public function test_only_the_ceo_reaches_it_and_page_settings_links_to_it(): void
     {
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $this->get('/page-settings/psid-coverage')->assertNotFound();
-        $this->get('/page-settings/psid-coverage/orders?page_name=Page%20Uno')->assertNotFound();
+        $this->get('/chatblast/page-settings/psid-coverage')->assertNotFound();
+        $this->get('/chatblast/page-settings/psid-coverage/orders?page_name=Page%20Uno')->assertNotFound();
 
         $this->actingAs($this->user());
-        $this->get('/page-settings')->assertSee('/page-settings/psid-coverage', false);
+        $this->get('/chatblast/page-settings')->assertSee('/chatblast/page-settings/psid-coverage', false);
     }
 
     public function test_the_queries_use_the_ts_date_page_index_and_the_customer_key_indexes(): void

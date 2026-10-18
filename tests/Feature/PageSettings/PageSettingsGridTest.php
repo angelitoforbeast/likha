@@ -36,12 +36,12 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     private function grid(): array
     {
-        return $this->get('/page-settings')->assertOk()->viewData('grid');
+        return $this->get('/chatblast/page-settings')->assertOk()->viewData('grid');
     }
 
     private function cell(array $input)
     {
-        return $this->postJson('/page-settings/cell', $input + ['provider' => 'botcake']);
+        return $this->postJson('/chatblast/page-settings/cell', $input + ['provider' => 'botcake']);
     }
 
     public function test_the_grid_has_one_row_per_page_and_the_known_columns_in_order_then_other_keys_by_name(): void
@@ -86,7 +86,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     public function test_S_054_2_the_grid_has_five_cells_per_row_in_a_fixed_table_and_keeps_every_action(): void
     {
-        $res = $this->get('/page-settings')->assertOk();
+        $res = $this->get('/chatblast/page-settings')->assertOk();
 
         $res->assertSee('table-fixed', false)
             ->assertSee("[['botcake', 'Botcake'], ['flows', 'Flows']]", false)
@@ -101,14 +101,14 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     public function test_S_054_3_the_sync_cell_shows_the_dates_and_time_then_the_next_stop_date(): void
     {
-        $this->get('/page-settings')
+        $this->get('/chatblast/page-settings')
             ->assertSee("s.dates ? s.dates + ' · ' + (s.at || '').slice(11) : (s.at || s.status)", false)
             ->assertSee("'next: ' + (nx.from ? 'from ' + nx.from : nx.label)", false);
     }
 
     public function test_S_054_4_open_detail_rows_live_outside_the_render_and_hold_the_other_keys_and_history(): void
     {
-        $this->get('/page-settings')
+        $this->get('/chatblast/page-settings')
             ->assertSee('const open = new Set();', false)
             ->assertSee('return open.has(r.key) ? [tr, detailTr(r)] : [tr];', false)
             ->assertSee("const other = inGroup('other');", false)
@@ -145,7 +145,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     public function test_S_054_7_the_page_text_is_english(): void
     {
         $this->settings()->set('Page Uno', 'botcake', 'page_id', '1001');
-        $res = $this->get('/page-settings')->assertOk();
+        $res = $this->get('/chatblast/page-settings')->assertOk();
 
         foreach (['Search pages', "'No pages yet. Use + Page.'", 'Test all tokens', 'Sync all'] as $text) {
             $res->assertSee($text, false);
@@ -161,7 +161,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     public function test_S_054_8_the_summary_bar_counts_from_the_loaded_grid_and_each_chip_filters_with_the_name_filter(): void
     {
-        $res = $this->get('/page-settings')->assertOk()->assertSee('id="summary-bar"', false);
+        $res = $this->get('/chatblast/page-settings')->assertOk()->assertSee('id="summary-bar"', false);
 
         foreach (["['all', 'Pages', () => true]", "['orders', 'With orders', r => r.info.orders > 0]", "['invalid', 'Token invalid', (r, st) => st.invalid]",
                   "['incomplete', 'Setup incomplete', (r, st) => st.incomplete]", "['flows', 'Flow problems', (r, st) => st.flows || st.template]",
@@ -181,14 +181,14 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     public function test_S_054_9_the_page_cell_border_shows_the_row_state_and_the_legend_explains_it(): void
     {
-        $this->get('/page-settings')->assertOk()
+        $this->get('/chatblast/page-settings')->assertOk()
             ->assertSee("!r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
             ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']", false);
     }
 
     public function test_S_054_10_each_flow_block_is_id_name_and_content_with_no_placeholder_and_the_lines_stay_outside_the_edited_value(): void
     {
-        $res = $this->get('/page-settings')->assertOk();
+        $res = $this->get('/chatblast/page-settings')->assertOk();
         $html = preg_replace(['#/\*.*?\*/#s', '#{{--.*?--}}#s', '#^\s*//.*$#m', '#\s//\s.*$#m'], '', $res->getContent());
 
         foreach (['Not checked yet', 'Pick a template', 'Template: ', 'hindi pa nasusuri', 'piliin ang template'] as $placeholder) {
@@ -212,7 +212,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void
     {
-        $html = $this->get('/page-settings')->assertOk()->getContent();
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
 
         $this->assertSame(self::KNOWN, array_column($this->grid()['columns'], 'key'));
         $this->assertStringContainsString('Shipping flow ID', $html);
@@ -260,11 +260,11 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $since = now()->subMinute()->format('Y-m-d H:i:s');
         $bodies = [
             $res->getContent(),
-            $this->get('/page-settings')->getContent(),
-            $this->getJson('/page-settings/grid')->getContent(),
-            $this->getJson('/page-settings/grid?since=' . urlencode($since))->getContent(),
-            $this->getJson('/page-settings/history?page_name=Page%20Uno&provider=botcake&key=token')->assertOk()->getContent(),
-            $this->getJson('/page-settings/history?page_name=Page%20Uno&provider=sms&key=api_key')->assertOk()->getContent(),
+            $this->get('/chatblast/page-settings')->getContent(),
+            $this->getJson('/chatblast/page-settings/grid')->getContent(),
+            $this->getJson('/chatblast/page-settings/grid?since=' . urlencode($since))->getContent(),
+            $this->getJson('/chatblast/page-settings/history?page_name=Page%20Uno&provider=botcake&key=token')->assertOk()->getContent(),
+            $this->getJson('/chatblast/page-settings/history?page_name=Page%20Uno&provider=sms&key=api_key')->assertOk()->getContent(),
         ];
         foreach ($bodies as $body) {
             foreach ([self::TOKEN, 'tok-grid', 'tok-old-value', 'sms-secret'] as $secret) {
@@ -284,7 +284,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
         $this->assertNull($this->settings()->get('Page Uno', 'botcake', 'flow.on_delivery'));
         $this->assertNotNull(PageSetting::sole()->replaced_at);
-        $this->assertSame('5501', $this->getJson('/page-settings/history?page_name=page%20uno&provider=botcake&key=flow.on_delivery')
+        $this->assertSame('5501', $this->getJson('/chatblast/page-settings/history?page_name=page%20uno&provider=botcake&key=flow.on_delivery')
             ->assertOk()->json('history.0.value'));
 
         // Blangko kung wala namang laman: walang nangyayari.
@@ -307,11 +307,11 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     {
         $this->order('Page Uno', 'Ana Cruz');
 
-        $this->getJson('/page-settings/page-check?page_name=' . urlencode('  page   uno '))
+        $this->getJson('/chatblast/page-settings/page-check?page_name=' . urlencode('  page   uno '))
             ->assertOk()->assertJson(['name' => 'page uno', 'key' => 'page uno', 'in_orders' => true]);
-        $this->getJson('/page-settings/page-check?page_name=Page%20Wala')
+        $this->getJson('/chatblast/page-settings/page-check?page_name=Page%20Wala')
             ->assertOk()->assertJson(['name' => 'Page Wala', 'in_orders' => false]);
-        $this->getJson('/page-settings/page-check?page_name=%20')->assertStatus(422);
+        $this->getJson('/chatblast/page-settings/page-check?page_name=%20')->assertStatus(422);
         $this->assertSame(0, PageSetting::count(), 'walang naisusulat hangga\'t walang value');
 
         $this->cell(['page_name' => 'Page Wala', 'provider' => 'viber', 'key' => 'bot_uri', 'value' => 'likha-bot', 'is_secret' => false])
@@ -334,7 +334,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $s->set('Page Dos', 'botcake', 'page_id', '2002');
 
         Carbon::setTestNow('2026-10-17 09:05:00');
-        $since = $this->getJson('/page-settings/grid')->assertOk()->json('now');
+        $since = $this->getJson('/chatblast/page-settings/grid')->assertOk()->json('now');
         $this->assertSame('2026-10-17 09:04:58', $since, 'may 2 segundong overlap para walang makalusot na save');
 
         Carbon::setTestNow('2026-10-17 09:06:00');
@@ -343,7 +343,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $s->set('Page Tres', 'botcake', 'token', self::TOKEN);
 
         Carbon::setTestNow('2026-10-17 09:07:00');
-        $res = $this->getJson('/page-settings/grid?since=' . urlencode($since))->assertOk();
+        $res = $this->getJson('/chatblast/page-settings/grid?since=' . urlencode($since))->assertOk();
 
         $cells = collect($res->json('cells'))->keyBy(fn ($c) => $c['page'] . '|' . $c['key']);
         $this->assertEqualsCanonicalizing(
@@ -358,8 +358,8 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertSame('2026-10-17 09:06:58', $res->json('now'));
         $this->assertStringNotContainsString(self::TOKEN, $res->getContent());
 
-        $this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 09:07:00'))->assertOk()->assertJsonPath('cells', []);
-        $this->getJson('/page-settings/grid?since=hindi-oras')->assertStatus(422);
+        $this->getJson('/chatblast/page-settings/grid?since=' . urlencode('2026-10-17 09:07:00'))->assertOk()->assertJsonPath('cells', []);
+        $this->getJson('/chatblast/page-settings/grid?since=hindi-oras')->assertStatus(422);
     }
 
     public function test_the_info_columns_show_available_customers_the_last_sync_and_the_actions(): void
@@ -378,10 +378,10 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->assertSame('known_batch', $uno['info']['last_sync']['stop_reason']);
         $this->assertTrue($uno['info']['botcake']);
 
-        $html = $this->get('/page-settings')->getContent();
+        $html = $this->get('/chatblast/page-settings')->getContent();
         $this->assertStringContainsString(route('page-settings.test-token'), $html);
         $this->assertStringContainsString(route('page-settings.sync'), $html);
-        $this->assertStringContainsString('/page-settings/psid-coverage/orders', $html);
+        $this->assertStringContainsString('/chatblast/page-settings/psid-coverage/orders', $html);
     }
 
     public function test_the_grid_and_the_poll_show_since_when_a_sync_holds_the_lock(): void
@@ -393,10 +393,10 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $sync->withLock(function () {
             $this->travelTo('2026-10-17 08:45:00');
             $this->assertSame('2026-10-17 08:30', $this->grid()['sync_lock']);
-            $this->assertSame('2026-10-17 08:30', $this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
-            $this->assertStringContainsString('A Botcake sync has been running since', $this->get('/page-settings')->getContent());
+            $this->assertSame('2026-10-17 08:30', $this->getJson('/chatblast/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
+            $this->assertStringContainsString('A Botcake sync has been running since', $this->get('/chatblast/page-settings')->getContent());
         });
-        $this->assertNull($this->getJson('/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
+        $this->assertNull($this->getJson('/chatblast/page-settings/grid?since=' . urlencode('2026-10-17 08:00:00'))->json('sync_lock'));
     }
 
     public function test_the_query_count_stays_flat_from_5_to_60_pages(): void
@@ -414,9 +414,9 @@ class PageSettingsGridTest extends BotcakeApiTestCase
                 $this->order('Page O' . $i, 'Buyer ' . $i); // may order, walang settings
             }
 
-            $this->get('/page-settings')->assertOk(); // unang request: auth at profile, hindi bahagi ng grid
+            $this->get('/chatblast/page-settings')->assertOk(); // unang request: auth at profile, hindi bahagi ng grid
             $n = [];
-            foreach (['/page-settings', '/page-settings/grid', '/page-settings/grid?since=' . urlencode('2000-01-01 00:00:00')] as $url) {
+            foreach (['/chatblast/page-settings', '/chatblast/page-settings/grid', '/chatblast/page-settings/grid?since=' . urlencode('2000-01-01 00:00:00')] as $url) {
                 Cache::forget('page-settings-grid:orders:30'); // kasama sa bilang ang query ng orders (walang cache)
                 DB::flushQueryLog();
                 DB::enableQueryLog();
@@ -442,10 +442,10 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         $this->settings()->set('Page Uno', 'botcake', 'page_id', '1001');
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
 
-        $this->get('/page-settings')->assertNotFound();
-        $this->getJson('/page-settings/grid')->assertNotFound();
-        $this->getJson('/page-settings/history?page_name=Page%20Uno&provider=botcake&key=page_id')->assertNotFound();
-        $this->getJson('/page-settings/page-check?page_name=Page%20Uno')->assertNotFound();
+        $this->get('/chatblast/page-settings')->assertNotFound();
+        $this->getJson('/chatblast/page-settings/grid')->assertNotFound();
+        $this->getJson('/chatblast/page-settings/history?page_name=Page%20Uno&provider=botcake&key=page_id')->assertNotFound();
+        $this->getJson('/chatblast/page-settings/page-check?page_name=Page%20Uno')->assertNotFound();
         $this->cell(['page_name' => 'Page Uno', 'key' => 'page_id', 'value' => '2002'])->assertNotFound();
         $this->assertSame('1001', $this->settings()->get('Page Uno', 'botcake', 'page_id'));
     }

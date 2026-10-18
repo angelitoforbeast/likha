@@ -24,7 +24,7 @@ class BulkTokenTestTest extends BotcakeApiTestCase
 
     private function test(string $page)
     {
-        return $this->postJson('/page-settings/test-token/one', ['page_name' => $page]);
+        return $this->postJson('/chatblast/page-settings/test-token/one', ['page_name' => $page]);
     }
 
     public static function answers(): array
@@ -80,7 +80,7 @@ class BulkTokenTestTest extends BotcakeApiTestCase
 
         for ($i = 0; $i < 45; $i++) $this->test('Page Wala ' . $i)->assertOk();
 
-        $this->postJson('/page-settings/sync-all')->assertOk();
+        $this->postJson('/chatblast/page-settings/sync-all')->assertOk();
     }
 
     public function test_only_the_ceo_reaches_it(): void

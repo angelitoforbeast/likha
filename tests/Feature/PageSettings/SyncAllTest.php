@@ -44,12 +44,12 @@ class SyncAllTest extends BotcakeApiTestCase
 
     private function press()
     {
-        return $this->postJson('/page-settings/sync-all');
+        return $this->postJson('/chatblast/page-settings/sync-all');
     }
 
     private function panel(): ?array
     {
-        return $this->getJson('/page-settings/grid?since=' . urlencode(now()->subMinute()->format('Y-m-d H:i:s')))->assertOk()->json('sync_all');
+        return $this->getJson('/chatblast/page-settings/grid?since=' . urlencode(now()->subMinute()->format('Y-m-d H:i:s')))->assertOk()->json('sync_all');
     }
 
     /** @return array<int, string> ang page id ng bawat Botcake request, sa ayos ng pagpapadala */
@@ -176,7 +176,7 @@ class SyncAllTest extends BotcakeApiTestCase
         Queue::fake();
         // Pinindot ang Pause habang binabasa ang Page Dos.
         Http::fake(['botcake.io/api/public_api/v1/pages/*' => function (Request $req) {
-            if (str_contains($req->url(), '/2002/')) $this->postJson('/page-settings/sync-all/pause')->assertOk()->assertJsonPath('sync_all.status', 'paused');
+            if (str_contains($req->url(), '/2002/')) $this->postJson('/chatblast/page-settings/sync-all/pause')->assertOk()->assertJsonPath('sync_all.status', 'paused');
             return Http::response([]);
         }]);
         $this->press()->assertOk();
@@ -190,7 +190,7 @@ class SyncAllTest extends BotcakeApiTestCase
         $this->press()->assertOk()->assertJsonPath('status', 'running'); // naka-pause pa rin: walang bagong run
         $this->assertSame('paused', $this->panel()['status']);
 
-        $this->postJson('/page-settings/sync-all/resume')->assertOk()->assertJsonPath('sync_all.status', 'running');
+        $this->postJson('/chatblast/page-settings/sync-all/resume')->assertOk()->assertJsonPath('sync_all.status', 'running');
         $this->assertSame(1, $this->jobs()->last()->index, 'tuloy sa Page Tres, hindi mula sa simula');
 
         // Isang lumang job ng parehong run (hal. naulit) ay walang ginagawa.
@@ -205,7 +205,7 @@ class SyncAllTest extends BotcakeApiTestCase
         $this->press()->assertOk();
         $job = $this->jobs()->sole();
 
-        $this->postJson('/page-settings/sync-all/stop')->assertOk()->assertJsonPath('sync_all.status', 'stopped');
+        $this->postJson('/chatblast/page-settings/sync-all/stop')->assertOk()->assertJsonPath('sync_all.status', 'stopped');
         $this->runJob($job);
 
         Http::assertNothingSent();
@@ -246,7 +246,7 @@ class SyncAllTest extends BotcakeApiTestCase
         Queue::assertNothingPushed(); // hindi nagsisimula ng ikalawang run, hindi nagpapadala ng job habang may tumatakbo
         $p = $this->panel();
         $this->assertSame(['legacy-run', 'running', 3, 1, 'Page Tres'], [$p['key'], $p['status'], $p['total'], $p['done'], $p['current']]);
-        $this->postJson('/page-settings/sync-all/resume')->assertOk();
+        $this->postJson('/chatblast/page-settings/sync-all/resume')->assertOk();
         Queue::assertNothingPushed();
 
         // Natapos ng lumang code ang Page Tres at nagpadala ng job para sa index 2 (tatakbo sa bagong code).
@@ -276,12 +276,12 @@ class SyncAllTest extends BotcakeApiTestCase
         Http::fake(['botcake.io/*' => Http::response(['success' => true, 'data' => []])]);
 
         for ($i = 0; $i < 25; $i++) {
-            $this->postJson('/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'sms', 'key' => 'sender', 'value' => 'S' . $i])->assertOk();
+            $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'sms', 'key' => 'sender', 'value' => 'S' . $i])->assertOk();
         }
 
         $this->press()->assertOk();
-        $this->post('/page-settings/sync', ['page_name' => 'Page Uno'])->assertRedirect();
-        $this->post('/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect();
+        $this->post('/chatblast/page-settings/sync', ['page_name' => 'Page Uno'])->assertRedirect();
+        $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect();
     }
 
     public function test_the_ceo_and_a_role_checked_in_nav_settings_may_use_the_controls_others_get_404_and_no_token_is_sent(): void
@@ -295,16 +295,16 @@ class SyncAllTest extends BotcakeApiTestCase
         $this->assertStringNotContainsString('tok-sync-all', $body);
 
         $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
-        $this->postJson('/page-settings/sync-all/pause')->assertOk()->assertJsonPath('sync_all.status', 'paused');
-        $this->postJson('/page-settings/sync-all/resume')->assertOk();
+        $this->postJson('/chatblast/page-settings/sync-all/pause')->assertOk()->assertJsonPath('sync_all.status', 'paused');
+        $this->postJson('/chatblast/page-settings/sync-all/resume')->assertOk();
 
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
-        foreach (['', '/pause', '/resume', '/stop'] as $path) $this->postJson('/page-settings/sync-all' . $path)->assertNotFound();
+        foreach (['', '/pause', '/resume', '/stop'] as $path) $this->postJson('/chatblast/page-settings/sync-all' . $path)->assertNotFound();
         $this->assertSame('running', BotcakePsidImportRun::where('source', BotcakeSyncAll::SOURCE)->value('status'));
         Queue::assertPushed(SyncAllBotcakeCustomersJob::class, 1);
 
         $this->actingAs($this->user('Marketing - OIC', 'oic2@example.test'));
-        $this->postJson('/page-settings/sync-all/stop')->assertOk()->assertJsonPath('sync_all.status', 'stopped');
+        $this->postJson('/chatblast/page-settings/sync-all/stop')->assertOk()->assertJsonPath('sync_all.status', 'stopped');
     }
 
     public function test_an_adopted_old_run_that_the_old_code_finishes_is_closed(): void
@@ -327,13 +327,13 @@ class SyncAllTest extends BotcakeApiTestCase
         Queue::fake();
         Http::fake(['botcake.io/*' => Http::response([])]);
         $this->press()->assertOk();
-        $this->postJson('/page-settings/sync-all/pause')->assertOk();
+        $this->postJson('/chatblast/page-settings/sync-all/pause')->assertOk();
 
         $this->runJob($this->jobs()->sole());
         Http::assertNothingSent();
         $this->assertNull($this->panel()['current'], 'binitawan ng job ang page');
 
-        $this->postJson('/page-settings/sync-all/resume')->assertOk();
+        $this->postJson('/chatblast/page-settings/sync-all/resume')->assertOk();
         $this->assertCount(2, $this->jobs());
         $this->assertSame(0, $this->jobs()->last()->index, 'ang parehong page, hindi pa ito natatapos');
     }
@@ -348,7 +348,7 @@ class SyncAllTest extends BotcakeApiTestCase
         $this->runJob($this->jobs()->sole());
         $this->assertTrue($this->panel()['waiting']);
 
-        $this->postJson('/page-settings/sync-all/stop')->assertOk();
+        $this->postJson('/chatblast/page-settings/sync-all/stop')->assertOk();
         $held->release();
         $this->runJob($this->jobs()->last());
 
@@ -369,7 +369,7 @@ class SyncAllTest extends BotcakeApiTestCase
         Http::fake(['botcake.io/*' => Http::response([])]);
         $this->legacy(1, 'Page Tres');
 
-        $this->get('/page-settings')->assertOk();
+        $this->get('/chatblast/page-settings')->assertOk();
         $this->assertNull($this->panel());
         $this->press()->assertOk()->assertJsonPath('status', 'not_ready');
         Queue::assertNothingPushed();

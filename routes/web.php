@@ -289,8 +289,9 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     });
 });
 
-// Settings kada page (Page | Provider | Key | Value). CEO lang: ang controller ang nagbabalik ng 404 sa iba.
-Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name('page-settings.')->group(function () {
+// Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings
+// (NavAccess, sa controller): 404 sa iba.
+Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-settings')->name('page-settings.')->group(function () {
     Route::get('/', [PageSettingController::class, 'index'])->name('index');
     Route::post('/', [PageSettingController::class, 'store'])->name('store');
     Route::get('/grid', [PageSettingController::class, 'grid'])->name('grid');
@@ -307,6 +308,13 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('page-settings')->name(
     Route::get('/psid-coverage', [PsidCoverageController::class, 'index'])->name('psid-coverage');
     Route::get('/psid-coverage/orders', [PsidCoverageController::class, 'orders'])->name('psid-coverage.orders');
 });
+
+// Ang lumang /page-settings (bookmarks, links ng staff): 301 sa parehong path sa ilalim ng /chatblast, kasama ang query.
+// GET lang; ang mga POST at JSON ay lumipat kasama ng mga tumatawag (route() lahat).
+Route::get('/page-settings/{rest?}', function (\Illuminate\Http\Request $request, ?string $rest = null) {
+    $query = $request->getQueryString();
+    return redirect('/chatblast/page-settings' . ($rest !== null ? '/' . $rest : '') . ($query ? '?' . $query : ''), 301);
+})->where('rest', '.*')->name('page-settings.legacy');
 
 Route::prefix('botcake/psid')->group(function () {
 

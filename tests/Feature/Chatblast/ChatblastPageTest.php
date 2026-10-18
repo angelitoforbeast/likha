@@ -169,7 +169,7 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->assertSame(['psid-owner-7788', 'queued'], [BotcakeMessage::where('is_test', true)->value('psid'), BotcakeMessage::where('is_test', true)->value('status')]);
         $this->assertSame('ready', BotcakeMessage::where('is_test', false)->value('status'));
 
-        $grid = $this->get('/page-settings')->assertOk()->viewData('grid');
+        $grid = $this->get('/chatblast/page-settings')->assertOk()->viewData('grid');
         $this->assertContains('botcake.test_psid', array_column($grid['columns'], 'key'));
         $this->assertSame('Test PSID', collect($grid['columns'])->firstWhere('key', 'botcake.test_psid')['label']);
     }

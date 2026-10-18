@@ -37,7 +37,7 @@ class SyncPlanTest extends BotcakeApiTestCase
 
     private function rows(): array
     {
-        return collect($this->get('/page-settings')->assertOk()->viewData('grid')['rows'])->keyBy('name')->all();
+        return collect($this->get('/chatblast/page-settings')->assertOk()->viewData('grid')['rows'])->keyBy('name')->all();
     }
 
     public function test_each_page_shows_what_its_next_sync_would_do_and_the_summary_counts_them(): void
@@ -68,7 +68,7 @@ class SyncPlanTest extends BotcakeApiTestCase
         $this->assertSame(['kind' => 'invalid', 'label' => 'token invalid'], $next['Page Bad']);
         $this->assertSame(['kind' => 'missing', 'label' => 'no ID/token'], $next['Page Wala']);
 
-        $grid = $this->get('/page-settings')->viewData('grid');
+        $grid = $this->get('/chatblast/page-settings')->viewData('grid');
         $this->assertSame('1 window, 2 resume, 2 by date, 1 skipped (fresh), 1 no ID/token, 1 token invalid', $grid['plan_summary']);
 
         config(['services.botcake.sync_all_fresh_hours' => 1]);
@@ -99,7 +99,7 @@ class SyncPlanTest extends BotcakeApiTestCase
         $this->assertSame(['Oct 16 → Oct 17', 'by date', false], [$rows['Page Uno']['info']['last_sync']['dates'], $rows['Page Uno']['info']['last_sync']['kind'], $rows['Page Uno']['info']['last_sync']['failed']]);
         $this->assertSame(['Oct 18', true], [$rows['Page Dos']['info']['last_sync']['dates'], $rows['Page Dos']['info']['last_sync']['failed']]);
         $this->assertSame(['fresh', 'Oct 15'], [$rows['Page Dos']['info']['next']['kind'], $rows['Page Dos']['info']['next']['from']], 'ang failed na run ay hindi gumagalaw sa stop date');
-        $this->get('/page-settings')->assertSee("' · next: ' + (r.info.next.from ? 'from ' + r.info.next.from : r.info.next.label)", false)
+        $this->get('/chatblast/page-settings')->assertSee("' · next: ' + (r.info.next.from ? 'from ' + r.info.next.from : r.info.next.label)", false)
             ->assertSee("'text-red-600', !!(s && s.failed)", false);
     }
 

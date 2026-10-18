@@ -85,17 +85,17 @@ class FlowNamesTest extends BotcakeApiTestCase
 
     private function cell(string $key, string $value)
     {
-        return $this->postJson('/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'botcake', 'key' => $key, 'value' => $value]);
+        return $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Uno', 'provider' => 'botcake', 'key' => $key, 'value' => $value]);
     }
 
     private function testAll()
     {
-        return $this->postJson('/page-settings/test-token/one', ['page_name' => 'Page Uno']);
+        return $this->postJson('/chatblast/page-settings/test-token/one', ['page_name' => 'Page Uno']);
     }
 
     private function grid(): array
     {
-        return $this->get('/page-settings')->assertOk()->viewData('grid');
+        return $this->get('/chatblast/page-settings')->assertOk()->viewData('grid');
     }
 
     private function get52(string $key): ?string
@@ -223,11 +223,11 @@ class FlowNamesTest extends BotcakeApiTestCase
         $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '7001');
 
         $this->tokenAnswer = [401, []];
-        $this->post('/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect();
+        $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect();
         $this->assertSame(0, $this->calls['flows'] + $this->calls['message_templates']);
 
         $this->tokenAnswer = [200, ['success' => true]];
-        $this->post('/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect()->assertSessionHas('success');
+        $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect()->assertSessionHas('success');
         $this->assertSame('CHATBLAST - SHIPPING STATUS (post_order)', $this->get52('flow.shipping.name'));
         $this->assertSame('post_order', $this->get52('template.shipping'));
     }
@@ -337,8 +337,8 @@ class FlowNamesTest extends BotcakeApiTestCase
         $bodies = [$this->cell('flow.shipping', '7001')->getContent()];
         $this->flowAnswer = null;
         $bodies[] = $this->testAll()->getContent();
-        $bodies[] = $this->get('/page-settings')->getContent();
-        $bodies[] = $this->getJson('/page-settings/grid?since=2000-01-01%2000:00:00')->getContent();
+        $bodies[] = $this->get('/chatblast/page-settings')->getContent();
+        $bodies[] = $this->getJson('/chatblast/page-settings/grid?since=2000-01-01%2000:00:00')->getContent();
 
         // Ang huling 4 ng token ay sadyang nakikita sa grid (••••8w2j); ang buong token ay hindi kailanman.
         foreach ($bodies as $text) $this->assertStringNotContainsString(self::TOKEN, $text);
@@ -355,7 +355,7 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         $this->cell('flow.shipping', '7001')->assertNotFound();
         $this->testAll()->assertNotFound();
-        $this->post('/page-settings/test-token', ['page_name' => 'Page Uno'])->assertNotFound();
+        $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertNotFound();
 
         $this->assertSame(['flows' => 0, 'message_templates' => 0, 'custom_fields' => 0], $this->calls);
         $this->assertNull($this->get52('flow.shipping'));
@@ -365,7 +365,7 @@ class FlowNamesTest extends BotcakeApiTestCase
     {
         foreach (['flow.shipping.name', 'flow.on_delivery.name', 'flow.custom_x.name', 'template.shipping.text'] as $key) {
             $this->cell($key, 'Kahit ano')->assertStatus(422);
-            $this->post('/page-settings', ['page_name' => 'Page Uno', 'provider' => 'botcake', 'key' => $key, 'value' => 'Kahit ano'])
+            $this->post('/chatblast/page-settings', ['page_name' => 'Page Uno', 'provider' => 'botcake', 'key' => $key, 'value' => 'Kahit ano'])
                 ->assertSessionHasErrors('value');
         }
         $this->assertSame(0, PageSetting::where('key', 'like', '%.name')->orWhere('key', 'like', '%.text')->count());
