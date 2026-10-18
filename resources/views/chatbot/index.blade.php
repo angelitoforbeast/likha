@@ -157,21 +157,32 @@
 
     function activeCell(r) {
         const td = el('td', {class: 'stick-2 border-b border-slate-100 px-3 py-2 align-top'});
-        const chip = el('span', {class: 'rounded-full px-2 py-0.5 text-xs font-medium ' + (r.active ? 'bg-green-100 text-green-800' : 'bg-slate-200 text-slate-700'), text: r.active ? 'On' : 'Off'});
-        if (url.activeUrl) {
-            const b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', title: r.active ? 'Switch the bot off' : 'Switch the bot on', 'aria-label': (r.active ? 'Switch off ' : 'Switch on ') + r.page}, chip);
-            b.addEventListener('click', () => toggle(r, b));
-            td.append(b);
-        } else td.append(chip);
+        const b = el('button', {type: 'button', role: 'switch', class: 'inline-flex items-center gap-2 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed', title: r.active ? 'Switch the bot off' : 'Switch the bot on', 'aria-label': (r.active ? 'Switch off ' : 'Switch on ') + r.page}, [
+            el('span', {class: 'relative h-[22px] w-10 shrink-0 rounded-full transition-colors duration-200'}, el('span', {class: 'absolute left-[2px] top-[2px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform duration-200'})),
+            el('span', {class: 'w-6 text-left text-xs font-medium'}),
+        ]);
+        paintSwitch(b, r.active);
+        if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
+        td.append(b);
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
         return td;
     }
 
+    function paintSwitch(b, on) {
+        const [track, label] = b.children;
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+        track.classList.toggle('bg-green-500', on); track.classList.toggle('bg-slate-300', !on);
+        track.firstChild.classList.toggle('translate-x-[18px]', on);
+        label.textContent = on ? 'On' : 'Off';
+        label.classList.toggle('text-green-700', on); label.classList.toggle('text-slate-600', !on);
+    }
+
     async function toggle(r, b) {
         const on = !r.active;
         if (!confirm((on ? 'Switch the bot On for ' : 'Switch the bot Off for ') + r.page + '? This changes the live Botcake page.')) return;
-        b.disabled = true; b.textContent = 'Working…';
+        // Lilipat agad ang knob habang naghihintay; ang render() pagkatapos ay sagot ng server (babalik kapag pumalya ang Botcake).
+        b.disabled = true; b.setAttribute('aria-busy', 'true'); b.classList.add('opacity-50'); paintSwitch(b, on);
         try {
             const {ok, data} = await post(url.activeUrl, {page_name: r.page, on});
             if (!ok) errors.set(r.page, data.error || data.message || 'Not changed.');
