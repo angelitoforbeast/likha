@@ -75,7 +75,7 @@ class ChecklistDueToday
      * Bawat (user, task) na due sa $day, sa ayos ng sort_order at id ng task:
      * user_id, task_id, title, deadline (minuto o null), submitted, at ang submission na binibilang
      * (group: ang unang nagsumite sa araw na iyon; individual: ang sa user) na may submitted_at
-     * (oras na naka-store), verdict (pinakahuling approval) at approval_checks.
+     * (oras na naka-store), verdict (pinakahuling approval, pati override), approval_checks at ang huling override (overridden_by, overridden_at).
      *
      * @return list<array{user_id:int, task_id:int, title:string, deadline:?int, submitted:bool, submission:?array}>
      */
@@ -124,6 +124,8 @@ class ChecklistDueToday
                 'submitted_at'    => $s->created_at ? Carbon::parse($s->created_at, self::TZ)->format('H:i') : null,
                 'verdict'         => in_array($s->verdict ?? null, ['approved', 'not_approved'], true) ? $s->verdict : null,
                 'approval_checks' => (int) ($s->approval_checks ?? 0),
+                'overridden_by'   => ($s->overridden_at ?? null) ? ($s->overridden_by ?? null) : null,
+                'overridden_at'   => ($s->overridden_at ?? null) ? Carbon::parse($s->overridden_at, self::TZ)->format('H:i') : null,
             ];
             $firstByTask[(int) $s->checklist_task_id] ??= $sub;
             $byUser[(int) $s->checklist_task_id][(int) $s->user_id] ??= $sub;
@@ -172,9 +174,9 @@ class ChecklistDueToday
      * Mga table at column na kailangan, isang beses kada request (nasa app container, kaya bago ulit
      * sa susunod na request): tasks = may checklist_tasks, checklist_task_users at checklist_submissions;
      * time_cols = ang mga oras na column na nandoon na (hal. bago ang migration ng deadline);
-     * approval = may checklist_analysis_logs na may verdict.
+     * approval = may checklist_analysis_logs na may verdict; override = may is_override na rin.
      *
-     * @return array{tasks:bool, time_cols:list<string>, approval:bool}
+     * @return array{tasks:bool, time_cols:list<string>, approval:bool, override:bool}
      */
     public static function schema(): array
     {
@@ -185,7 +187,8 @@ class ChecklistDueToday
             app()->instance($key, [
                 'tasks'     => $tasks,
                 'time_cols' => $tasks ? array_values(array_intersect(['scheduled_time', 'deadline_time'], Schema::getColumnListing('checklist_tasks'))) : [],
-                'approval'  => $tasks && Schema::hasTable('checklist_analysis_logs') && Schema::hasColumn('checklist_analysis_logs', 'verdict'),
+                'approval'  => $approval = $tasks && Schema::hasTable('checklist_analysis_logs') && Schema::hasColumn('checklist_analysis_logs', 'verdict'),
+                'override'  => $approval && Schema::hasColumn('checklist_analysis_logs', 'is_override'),
             ]);
         }
 
@@ -194,7 +197,7 @@ class ChecklistDueToday
 
     /**
      * Dagdag sa query ng submissions (alias s): verdict = pinakahuling approval verdict,
-     * approval_checks = ilang approval check na. Wala kapag wala pang approval logs.
+     * approval_checks = ilang approval check na (hindi kasama ang override), overridden_at at overridden_by ng huling override. Wala kapag wala pang approval logs.
      */
     public static function withApproval($query): void
     {
@@ -208,9 +211,29 @@ class ChecklistDueToday
             ->orderByDesc('l.created_at')
             ->orderByDesc('l.id')
             ->limit(1), 'verdict');
-        $query->selectSub(DB::table('checklist_analysis_logs as l')
+        $checks = DB::table('checklist_analysis_logs as l')
             ->selectRaw('COUNT(*)')
             ->whereColumn('l.submission_id', 's.id')
-            ->where('l.log_type', 'approval'), 'approval_checks');
+            ->where('l.log_type', 'approval');
+        if (!self::schema()['override']) {
+            $query->selectSub($checks, 'approval_checks');
+
+            return;
+        }
+        // Ang override ay hindi check; ang huling override (sino, kailan) ay hiwalay
+        $query->selectSub($checks->where('l.is_override', false), 'approval_checks');
+        $lastOverride = fn (string $col) => DB::table('checklist_analysis_logs as o')
+            ->whereColumn('o.submission_id', 's.id')
+            ->where('o.log_type', 'approval')
+            ->where('o.is_override', true)
+            ->orderByDesc('o.created_at')
+            ->orderByDesc('o.id')
+            ->limit(1)
+            ->select($col);
+        $query->selectSub($lastOverride('o.created_at'), 'overridden_at');
+        $query->selectSub(
+            $lastOverride('u.name')->leftJoin('users as u', 'u.id', '=', 'o.user_id'),
+            'overridden_by'
+        );
     }
 }

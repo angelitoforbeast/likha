@@ -71,6 +71,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
             $t->foreignId('user_id')->nullable();
             $t->text('analysis_result');
             $t->string('verdict')->nullable();
+            $t->boolean('is_override')->default(false);
             $t->timestamps();
         });
     }
@@ -475,7 +476,8 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $staff = collect($response->json('staff'))->keyBy('user_id');
 
         $entry = ['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:15', 'submitted' => false,
-            'submitted_at' => null, 'verdict' => null, 'approval_checks' => 0];
+            'submitted_at' => null, 'verdict' => null, 'approval_checks' => 0,
+            'rechecks' => 0, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null];
         $this->assertSame([$entry], $staff[$a->id]['checklist_late_today']);
         $this->assertSame([$entry], $staff[$b->id]['checklist_late_today']);
         $this->assertSame(2, $response->json('checklist_late_not_submitted'));
@@ -501,7 +503,8 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $response = $this->lateAt('2026-10-16 10:40:00');
 
         $this->assertSame([['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:15', 'submitted' => true,
-            'submitted_at' => '10:20', 'verdict' => 'not_approved', 'approval_checks' => 3]],
+            'submitted_at' => '10:20', 'verdict' => 'not_approved', 'approval_checks' => 3,
+            'rechecks' => 2, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null]],
             $response->json('staff.0.checklist_late_today'));
         $this->assertSame(0, $response->json('checklist_late_not_submitted'));
     }
@@ -561,6 +564,27 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $this->assertSame(1, $row['checklist_approved_today']);
         $this->assertSame(['checklist_approved_today' => 1, 'status_changes' => 0, 'edited_orders' => 0], $response->json('totals'));
         $this->assertSame(['Late at wala pa', 'Late pero naisumite'], array_column($row['checklist_late_today'], 'title'));
+    }
+
+    public function test_S_051_29_the_late_list_shows_rechecks_and_an_override_with_who_and_when(): void
+    {
+        $a = $this->staff();
+        $lead = $this->staff('Marketing - OIC', 'Lead');
+        $id = $this->checklistTask('Bilangin ang stock', [$a], ['scheduled_time' => '10:00']);
+        $this->submittedAt($id, $a->id, '2026-10-16 10:20:00', ['not_approved', 'not_approved']);
+        DB::table('checklist_analysis_logs')->insert([
+            'log_type' => 'approval', 'submission_id' => DB::table('checklist_submissions')->value('id'), 'user_id' => $lead->id,
+            'analysis_result' => 'Dahilan ng override', 'verdict' => 'approved', 'is_override' => true,
+            'created_at' => '2026-10-16 10:45:00',
+        ]);
+
+        $response = $this->lateAt('2026-10-16 11:00:00');
+        $entry = collect($response->json('staff'))->firstWhere('user_id', $a->id)['checklist_late_today'][0];
+
+        $this->assertSame(['verdict' => 'approved', 'approval_checks' => 2, 'rechecks' => 1, 'overridden' => true,
+            'overridden_by' => $lead->name, 'overridden_at' => '10:45'],
+            array_intersect_key($entry, array_flip(['verdict', 'approval_checks', 'rechecks', 'overridden', 'overridden_by', 'overridden_at'])));
+        $this->assertStringNotContainsString('Dahilan ng override', $response->getContent());
     }
 
     public function test_a_past_date_lists_every_due_task_with_a_deadline_and_a_future_date_none(): void

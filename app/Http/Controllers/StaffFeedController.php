@@ -292,7 +292,8 @@ class StaffFeedController extends Controller
 
     /**
      * user_id => [task na lampas na sa deadline sa araw na iyon]: id, title, deadline, kung naisumite na at
-     * kailan, ang pinakahuling verdict at ilang approval check. Walang notes, file o AI text. Para sa
+     * kailan, ang pinakahuling verdict, ilang approval check (rechecks = lampas sa una) at kung na-override (sino,
+     * kailan). Walang notes, file, dahilan o AI text. Para sa
      * nakaraang araw, lampas na ang lahat ng deadline bago maghatinggabi; sa darating na araw, wala pa.
      */
     private function checklistLate(array $dueRows, Carbon $day): array
@@ -310,7 +311,11 @@ class StaffFeedController extends Controller
                 'submitted'       => $r['submitted'],
                 'submitted_at'    => $r['submission']['submitted_at'] ?? null,
                 'verdict'         => $r['submission']['verdict'] ?? null,
-                'approval_checks' => $r['submission']['approval_checks'] ?? 0,
+                'approval_checks' => $checks = $r['submission']['approval_checks'] ?? 0,
+                'rechecks'        => max(0, $checks - 1),
+                'overridden'      => ($r['submission']['overridden_at'] ?? null) !== null,
+                'overridden_by'   => $r['submission']['overridden_by'] ?? null,
+                'overridden_at'   => $r['submission']['overridden_at'] ?? null,
             ];
         }
 

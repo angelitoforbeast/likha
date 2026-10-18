@@ -87,6 +87,22 @@ class ChecklistDeadlineFieldTest extends ChecklistTestCase
         $this->assertSame([], $this->changes($task));
     }
 
+    public function test_the_deadline_and_override_migrations_run_down_and_up_again(): void
+    {
+        $columns = [
+            '2026_10_18_510000_add_deadline_time_to_checklist_tasks.php'         => ['checklist_tasks', 'deadline_time'],
+            '2026_10_18_510100_add_is_override_to_checklist_analysis_logs.php' => ['checklist_analysis_logs', 'is_override'],
+        ];
+        foreach ($columns as $file => [$table, $column]) {
+            $migration = require database_path("migrations/$file");
+            $migration->down();
+            $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn($table, $column), "$file down");
+            $migration->up();
+            $migration->up();   // ikalawang up: walang error
+            $this->assertTrue(\Illuminate\Support\Facades\Schema::hasColumn($table, $column), "$file up");
+        }
+    }
+
     public function test_a_new_task_and_its_copy_keep_the_deadline(): void
     {
         $ceo = $this->user('CEO');
