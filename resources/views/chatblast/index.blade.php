@@ -499,7 +499,7 @@
         if (!(d.customers || []).length) document.getElementById('test-psid-results').append(el('li', {class: 'text-gray-500', text: 'No match (type at least 2 letters of the start of the name).'}));
     });
 
-    // Mula sa "Set a Test PSID first" ng page settings: bukas agad ang Test PSID.
+    // Mula sa "Set a Test PSID first" ng page settings (#test-psid): bukas agad ang modal ng Test PSID.
     if (location.hash === '#test-psid') $id('test-psid-open').click();
 
     load();

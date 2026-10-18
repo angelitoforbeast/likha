@@ -525,6 +525,17 @@ Accepted, not fixed:
 - **(amendment 2) A card number glued to cents ("…5003.50", "…5003,12") is read as an amount and not masked as a card.** Reason: the same guard keeps amounts whole; no statement layout prints a card number glued to cents.
 - **(amendment 2) The double-submit guard needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
 
+## 051: checklist deadlines, late tasks in the staff feed, Checklist badge (2026-10-18)
+
+- **An OIC can override their own submission** when their department key matches their own (a Marketing - OIC's own Marketing task). Reason: the amendment names the department OIC as the override without an exception; ask the owner whether the submitter should be left out.
+- **The department rule exists twice:** `ChecklistController::oicDepartment` (OICs only) and `ChecklistBadge::departmentKey` (any user: profile department, else the role without "- OIC"). Reason: legacy rule, no refactor of the existing method; they agree for every OIC role.
+- **A deadline set earlier than the scheduled time is taken as is** (scheduled 23:50, deadline 00:05 → late from 00:05 the same day). Reason: only task editors set it, and the field means "late after this time"; a warning in the form would be a separate change.
+- **The check-limit lock needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
+- **The automatic approval check at submit counts as check 1 of 3** (amendment 2), so a staff member gets two manual re-checks. The automatic check itself is not limited. Reason: as decided.
+- **Untested here:** the `selectSub` override join and both migrations on MySQL (sqlite only), the badge and the override form in a browser. Reason: no MySQL or browser in this session.
+- **When a submission is locked, the Analyze button stays enabled** (relabelled "↻ Analysis lang", runs the analysis only, the limit text shows under it). Reason: the one button runs both the analysis and the approval check; the analysis has no limit.
+- **The race test holds the lock itself** instead of running two real requests at once, so it proves the 409 path, not the order of lock and count. Reason: PHPUnit runs requests one at a time; the order is read in review.
+- **A single-process PHPUnit run can stop at a 55 s time limit on Windows:** controllers call `set_time_limit` (e.g. `ChatblastCampaignController` 55 s), and on Windows the limit counts wall-clock time for the whole process. Reason: not this spec's code; the suite was run one folder per process. Suggestion for the owner: skip or reset the limit when running tests.
 ## 050: chatblast messages and sequences (2026-10-19)
 
 - **Adding a send time that has already passed stamps the auto run at that time,** which also skips an earlier time of today that was due but had not run yet. Reason: narrow (two times minutes apart, edited in between); the next time runs as usual.
@@ -659,3 +670,8 @@ Accepted, not fixed:
 - **Missing small tests:** the stop waybill of a capped run became final (the code handles it), a stale row sent at the next due time once fresh, the Off state of the page, a guest POST to the toggle, the claim used up when the lock is busy. Reason: each path is a one-line branch next to a covered one.
 - **The background start uses its own command string** instead of Laravel's `Application::formatCommandString()`. Reason: works on Linux; the test asserts the trailing `&`.
 - **jnt_latest_scans has no timestamps** (the plan said it would); `checked_at` is the only time needed.
+
+## 062: Flow ID and Message field dropdowns (2026-10-18)
+
+- **The page-script tests for the edit dropdown find literals only;** the browser check proves the behaviour. Reason: no JS test harness.
+- **A list stored before 062 holds the CHATBLAST / "GPT Input" candidates only** until the page's next Test or Botcake ID / token save, so its dropdown lists only those. Reason: the next Test refreshes it; "Test all tokens" refreshes every page at once.

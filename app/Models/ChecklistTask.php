@@ -12,7 +12,7 @@ class ChecklistTask extends Model
 
     protected $fillable = [
         'title', 'description', 'type', 'is_active', 'sort_order',
-        'scheduled_time', 'submission_type', 'ai_prompt', 'approval_prompt',
+        'scheduled_time', 'deadline_time', 'submission_type', 'ai_prompt', 'approval_prompt',
         'required_photos', 'frequency', 'frequency_day', 'department', 'created_by', 'extract_fields',
     ];
 

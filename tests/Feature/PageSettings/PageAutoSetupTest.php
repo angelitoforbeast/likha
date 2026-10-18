@@ -124,8 +124,10 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->cell('token', self::TOKEN)->assertOk();
 
         $this->assertSame($picked, $this->get57('flow.shipping'));
-        $expected = array_values(array_map(fn ($f) => ['id' => (string) $f[0], 'name' => $f[1]], array_filter($flows, fn ($f) => stripos($f[1], 'chatblast') !== false)));
-        $this->assertSame($expected, json_decode((string) $this->get57('flow.shipping.options'), true));
+        $expected = array_values(array_map(fn ($f) => (string) $f[0], array_filter($flows, fn ($f) => stripos($f[1], 'chatblast') !== false)));
+        $list = json_decode((string) $this->get57('flow.shipping.options'), true);
+        $this->assertEqualsCanonicalizing($expected, array_column(array_filter($list, fn ($f) => $f['candidate']), 'id'));
+        $this->assertCount(count($flows), $list, 'ang buong listahan ng flow (spec 062)');
     }
 
     public static function fieldCases(): array
@@ -147,7 +149,9 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->cell('token', self::TOKEN)->assertOk();
 
         $this->assertSame($picked, $this->get57('field.message'));
-        $this->assertCount($options, (array) json_decode((string) $this->get57('field.message.options'), true));
+        $list = (array) json_decode((string) $this->get57('field.message.options'), true);
+        $this->assertCount($options, array_filter($list, fn ($f) => $f['candidate']));
+        $this->assertCount(count($fields), $list, 'ang buong listahan ng field (spec 062)');
     }
 
     public function test_S_057_3_a_value_a_person_saved_is_never_overwritten_and_stays_even_when_it_is_not_a_candidate(): void
@@ -160,7 +164,7 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->cell('token', self::TOKEN)->assertOk();
 
         $this->assertSame(['999', '777'], [$this->get57('flow.shipping'), $this->get57('field.message')]);
-        $this->assertSame(['501', '502'], array_column(json_decode((string) $this->get57('flow.shipping.options'), true), 'id'));
+        $this->assertSame(['502', '501'], array_column(array_filter(json_decode((string) $this->get57('flow.shipping.options'), true), fn ($f) => $f['candidate']), 'id'));
         // Ang babala ay sa page: ang value ay wala sa options.
         $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
         $this->assertStringContainsString('This flow is not a CHATBLAST flow in Botcake', $html);
@@ -181,7 +185,7 @@ class PageAutoSetupTest extends BotcakeApiTestCase
             "No CHATBLAST flow in Botcake. In Botcake, copy 'CHATBLAST - SHIPPING STATUS (post_order)' from another page to this page, then press Test.",
             "No 'GPT Input' custom field in Botcake. Create it, then press Test.",
             'Template check failed: ',
-            "el('select', {class: 'cb-pick",
+            "function startPick(td, row, col, original)",
             "o.name + ' · ' + o.id",
             'How to set up a new page',
             'Send test to the Test PSID',
@@ -216,6 +220,9 @@ class PageAutoSetupTest extends BotcakeApiTestCase
 
         $this->assertStringNotContainsString('postForm(', $html, 'walang form post na nagre-reload ng page');
         foreach (['fetch(url.syncUrl', 'fetch(url.sendTestUrl', 'await testOne(r)'] as $needle) $this->assertStringContainsString($needle, $html, $needle);
+        // Ang notice ay nasa nakapirming header: isang linya lang (buo sa tooltip), para hindi maitulak pababa ang grid.
+        $this->assertStringContainsString("n.className = 'min-w-0 flex-1 basis-0 truncate text-xs ' + cls;", $html);
+        $this->assertStringContainsString('n.title = text;', $html);
 
         $s = $this->settings();
         $s->set('Page Dos', 'botcake', 'page_id', '2002');

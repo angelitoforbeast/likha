@@ -157,9 +157,12 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input type="text" name="description" placeholder="Description (optional)..."
                    class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
-            <div class="grid grid-cols-2 gap-2">
+            <div class="grid grid-cols-3 gap-2">
               <input type="time" name="scheduled_time"
                      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
+              <input type="time" name="deadline_time" aria-label="Deadline"
+                     title="Deadline: late na pag lumampas. Blangko = oras + 15 minuto."
+                     class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-rose-400">
               <select name="submission_type"
                       class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
                 <option value="group">👥 Group</option>
@@ -440,6 +443,9 @@
                   @else
                     <span class="text-gray-300 text-xs">—</span>
                   @endif
+                  @if($t->deadline_time)
+                    <span class="block text-xs text-rose-600" title="Deadline">⏰ {{ date('g:i A', strtotime($t->deadline_time)) }}</span>
+                  @endif
                 </td>
 
                 {{-- Frequency --}}
@@ -569,12 +575,15 @@
                         <option value="both"  {{ $t->type === 'both'  ? 'selected' : '' }}>📸📝 Photo + Note</option>
                       </select>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
                       <input type="text" name="description" value="{{ $t->description }}"
                              placeholder="Description (optional)..."
                              class="sm:col-span-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
                       <input type="time" name="scheduled_time" value="{{ $t->scheduled_time }}"
                              class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
+                      <input type="time" name="deadline_time" value="{{ $t->deadline_time }}" aria-label="Deadline"
+                             title="Deadline: late na pag lumampas. Blangko = oras + 15 minuto."
+                             class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-rose-400">
                       <select name="submission_type"
                               class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
                         <option value="group"      {{ ($t->submission_type ?? 'group') === 'group'      ? 'selected' : '' }}>👥 Group</option>

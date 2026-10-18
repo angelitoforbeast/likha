@@ -18,6 +18,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
     private const STAFF_KEYS = [
         'user_id', 'name', 'role', 'department', 'last_seen_at', 'last_seen_path', 'last_login_at',
         'online', 'last_event', 'counts', 'checklist_due_not_submitted', 'is_bot', 'checker', 'checklist_approved_today',
+        'checklist_late_today', 'checklist_today',
     ];
 
     private const EVENT_KEYS = ['user_id', 'name', 'role', 'kind', 'source', 'method', 'status', 'ref', 'created_at', 'is_bot'];
@@ -44,6 +45,8 @@ class StaffFeedApiTest extends StaffActivityTestCase
             $t->boolean('is_active')->default(true);
             $t->integer('sort_order')->default(0);
             $t->string('submission_type')->default('group');
+            $t->string('scheduled_time')->nullable();
+            $t->string('deadline_time')->nullable();
             $t->timestamps();
             $t->softDeletes();
         });
@@ -68,6 +71,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
             $t->foreignId('user_id')->nullable();
             $t->text('analysis_result');
             $t->string('verdict')->nullable();
+            $t->boolean('is_override')->default(false);
             $t->timestamps();
         });
     }
@@ -140,7 +144,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
         $response = $this->feed('/api/staff-status')->assertOk();
 
-        $this->assertSame(['date', 'generated_at', 'staff', 'totals'], array_keys($response->json()));
+        $this->assertSame(['date', 'generated_at', 'staff', 'totals', 'checklist_late_not_submitted'], array_keys($response->json()));
         $this->assertSame('2026-10-16', $response->json('date'));
         $this->assertCount(1, $response->json('staff'));
         $row = $response->json('staff.0');
@@ -418,9 +422,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
             $staff[$idle->id]['checklist_approved_today'],
         ]);
         $this->assertSame(4, $response->json('totals.checklist_approved_today'));
-        foreach (['Group na gawain', 'Sariling gawain', 'not_approved'] as $private) {
-            $this->assertStringNotContainsString($private, $response->getContent());
-        }
+        // Ang title at verdict ay nasa checklist_today na; ang notes at AI text ay hindi kailanman
         $this->assertStringNotContainsString('Lihim na tala', $response->getContent());
         $this->assertStringNotContainsString('Paliwanag', $response->getContent());
     }
@@ -436,5 +438,211 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $totals = $this->feed('/api/staff-status')->assertOk()->json('totals');
 
         $this->assertSame(['checklist_approved_today' => 0, 'status_changes' => 2, 'edited_orders' => 3], $totals);
+    }
+
+    // ── checklist_late_today (task na lampas na sa deadline ngayong araw) ──────────────────────
+
+    /** Submission na may oras ng pagsumite at mga approval verdict ayon sa pagkakasunod. */
+    private function submittedAt(int $taskId, int $userId, string $at, array $verdicts = []): void
+    {
+        $id = DB::table('checklist_submissions')->insertGetId([
+            'checklist_task_id' => $taskId, 'user_id' => $userId, 'date' => substr($at, 0, 10),
+            'notes' => 'Lihim na tala', 'created_at' => $at, 'updated_at' => $at,
+        ]);
+        foreach ($verdicts as $i => $verdict) {
+            DB::table('checklist_analysis_logs')->insert([
+                'log_type' => 'approval', 'submission_id' => $id, 'analysis_result' => 'Paliwanag ng AI',
+                'verdict' => $verdict, 'created_at' => "2026-10-16 10:2{$i}:30",
+            ]);
+        }
+    }
+
+    private function lateAt(string $now, string $uri = '/api/staff-status')
+    {
+        Carbon::setTestNow($now);
+
+        return $this->feed($uri)->assertOk();
+    }
+
+    public function test_S_051_9_a_task_past_its_deadline_and_not_submitted_is_late_for_each_assigned_person(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $id = $this->checklistTask('Bilangin ang stock', [$a, $b], ['scheduled_time' => '10:00']);
+
+        $response = $this->lateAt('2026-10-16 10:16:00');
+        $staff = collect($response->json('staff'))->keyBy('user_id');
+
+        $entry = ['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:15', 'submitted' => false,
+            'submitted_at' => null, 'verdict' => null, 'approval_checks' => 0,
+            'rechecks' => 0, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null];
+        $this->assertSame([$entry], $staff[$a->id]['checklist_late_today']);
+        $this->assertSame([$entry], $staff[$b->id]['checklist_late_today']);
+        $this->assertSame(2, $response->json('checklist_late_not_submitted'));
+    }
+
+    public function test_S_051_10_before_the_deadline_the_task_is_not_late(): void
+    {
+        $a = $this->staff();
+        $this->checklistTask('Bilangin ang stock', [$a], ['scheduled_time' => '10:00']);
+
+        $response = $this->lateAt('2026-10-16 10:14:00');
+
+        $this->assertSame([], $response->json('staff.0.checklist_late_today'));
+        $this->assertSame(0, $response->json('checklist_late_not_submitted'));
+    }
+
+    public function test_S_051_11_a_late_task_submitted_later_shows_when_and_its_latest_verdict_and_check_count(): void
+    {
+        $a = $this->staff();
+        $id = $this->checklistTask('Bilangin ang stock', [$a], ['scheduled_time' => '09:00', 'deadline_time' => '10:15']);
+        $this->submittedAt($id, $a->id, '2026-10-16 10:20:00', ['approved', 'not_approved', 'not_approved']);
+
+        $response = $this->lateAt('2026-10-16 10:40:00');
+
+        $this->assertSame([['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:15', 'submitted' => true,
+            'submitted_at' => '10:20', 'verdict' => 'not_approved', 'approval_checks' => 3,
+            'rechecks' => 2, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null]],
+            $response->json('staff.0.checklist_late_today'));
+        $this->assertSame(0, $response->json('checklist_late_not_submitted'));
+    }
+
+    public function test_S_051_12_an_inactive_task_or_one_not_due_today_never_appears(): void
+    {
+        $a = $this->staff();
+        $this->checklistTask('Hindi aktibo', [$a], ['scheduled_time' => '08:00', 'is_active' => false]);
+        $this->checklistTask('Lunes lang', [$a], ['scheduled_time' => '08:00', 'frequency' => 'weekly', 'frequency_day' => 1]);
+        $this->checklistTask('Binura na', [$a], ['scheduled_time' => '08:00', 'deleted_at' => '2026-10-15 12:00:00']);
+        $onceId = $this->checklistTask('Isang beses, tapos na', [$a], ['scheduled_time' => '08:00', 'frequency' => 'once']);
+        DB::table('checklist_submissions')->insert(['checklist_task_id' => $onceId, 'user_id' => $a->id, 'date' => '2026-10-10']);
+
+        $this->assertSame([], $this->lateAt('2026-10-16 23:00:00')->json('staff.0.checklist_late_today'));
+    }
+
+    public function test_S_051_13_a_group_task_submitted_by_one_person_is_submitted_for_everyone_assigned(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $id = $this->checklistTask('Group: linisin ang bodega', [$a, $b], ['scheduled_time' => '10:00']);
+        $this->submittedAt($id, $b->id, '2026-10-16 10:30:00');
+
+        $staff = collect($this->lateAt('2026-10-16 11:00:00')->json('staff'))->keyBy('user_id');
+
+        foreach ([$a, $b] as $u) {
+            $late = $staff[$u->id]['checklist_late_today'];
+            $this->assertSame([[true, '10:30']], array_map(fn ($e) => [$e['submitted'], $e['submitted_at']], $late));
+        }
+    }
+
+    public function test_an_individual_task_submitted_only_by_another_person_is_not_submitted_for_this_person(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $id = $this->checklistTask('Individual: sariling ulat', [$a, $b], ['scheduled_time' => '10:00', 'submission_type' => 'individual']);
+        $this->submittedAt($id, $b->id, '2026-10-16 10:30:00', ['approved']);
+
+        $staff = collect($this->lateAt('2026-10-16 11:00:00')->json('staff'))->keyBy('user_id');
+        $pick = fn ($u) => array_map(fn ($e) => [$e['submitted'], $e['submitted_at'], $e['verdict']], $staff[$u->id]['checklist_late_today']);
+
+        $this->assertSame([[false, null, null]], $pick($a));
+        $this->assertSame([[true, '10:30', 'approved']], $pick($b));
+    }
+
+    public function test_S_051_14_no_note_photo_path_prompt_or_ai_text_anywhere_in_the_feed(): void
+    {
+        $a = $this->staff();
+        $id = $this->checklistTask('Bilangin ang stock', [$a], ['scheduled_time' => '10:00']);
+        $this->submittedAt($id, $a->id, '2026-10-16 10:20:00', ['not_approved']);
+
+        $body = $this->lateAt('2026-10-16 10:40:00')->getContent();
+
+        foreach (['Lihim na tala', 'Paliwanag', 'notes', 'file_path', 'prompt', 'analysis'] as $private) {
+            $this->assertStringNotContainsString($private, $body);
+        }
+    }
+
+    public function test_S_051_15_the_existing_checklist_fields_keep_their_meaning_next_to_the_late_list(): void
+    {
+        $a = $this->staff();
+        $this->checklistTask('Late at wala pa', [$a], ['scheduled_time' => '08:00']);
+        $done = $this->checklistTask('Late pero naisumite', [$a], ['scheduled_time' => '08:00']);
+        $this->submittedAt($done, $a->id, '2026-10-16 09:00:00', ['approved']);
+        $this->checklistTask('Wala pang oras', [$a]);
+
+        $response = $this->lateAt('2026-10-16 10:40:00');
+        $row = $response->json('staff.0');
+
+        $this->assertSame(['Late at wala pa', 'Wala pang oras'], $row['checklist_due_not_submitted']);
+        $this->assertSame(1, $row['checklist_approved_today']);
+        $this->assertSame(['checklist_approved_today' => 1, 'status_changes' => 0, 'edited_orders' => 0], $response->json('totals'));
+        $this->assertSame(['Late at wala pa', 'Late pero naisumite'], array_column($row['checklist_late_today'], 'title'));
+    }
+
+    public function test_S_051_29_the_late_list_shows_rechecks_and_an_override_with_who_and_when(): void
+    {
+        $a = $this->staff();
+        $lead = $this->staff('Marketing - OIC', 'Lead');
+        $id = $this->checklistTask('Bilangin ang stock', [$a], ['scheduled_time' => '10:00']);
+        $this->submittedAt($id, $a->id, '2026-10-16 10:20:00', ['not_approved', 'not_approved']);
+        DB::table('checklist_analysis_logs')->insert([
+            'log_type' => 'approval', 'submission_id' => DB::table('checklist_submissions')->value('id'), 'user_id' => $lead->id,
+            'analysis_result' => 'Dahilan ng override', 'verdict' => 'approved', 'is_override' => true,
+            'created_at' => '2026-10-16 10:45:00',
+        ]);
+
+        $response = $this->lateAt('2026-10-16 11:00:00');
+        $entry = collect($response->json('staff'))->firstWhere('user_id', $a->id)['checklist_late_today'][0];
+
+        $this->assertSame(['verdict' => 'approved', 'approval_checks' => 2, 'rechecks' => 1, 'overridden' => true,
+            'overridden_by' => $lead->name, 'overridden_at' => '10:45'],
+            array_intersect_key($entry, array_flip(['verdict', 'approval_checks', 'rechecks', 'overridden', 'overridden_by', 'overridden_at'])));
+        $this->assertStringNotContainsString('Dahilan ng override', $response->getContent());
+    }
+
+    public function test_S_051_31_checklist_today_lists_every_task_due_to_the_person_earliest_first_with_its_state(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $approved = $this->checklistTask('Approved na', [$a], ['scheduled_time' => '09:00', 'submission_type' => 'individual']);
+        $this->submittedAt($approved, $a->id, '2026-10-16 09:05:00', ['approved']);
+        $rejected = $this->checklistTask('Hindi na-approve', [$a], ['scheduled_time' => '08:00', 'deadline_time' => '08:45', 'submission_type' => 'individual']);
+        $this->submittedAt($rejected, $a->id, '2026-10-16 08:10:00', ['not_approved', 'not_approved']);
+        $open = $this->checklistTask('Wala pa', [$a], ['scheduled_time' => '12:00']);
+        $group = $this->checklistTask('Group: iba ang nagsumite', [$a, $b], ['scheduled_time' => '10:00']);
+        $this->submittedAt($group, $b->id, '2026-10-16 10:03:00');
+        $untimed = $this->checklistTask('Walang oras', [$a]);
+        $this->checklistTask('Hindi aktibo', [$a], ['scheduled_time' => '07:00', 'is_active' => false]);
+        $this->checklistTask('Lunes lang', [$a], ['scheduled_time' => '07:00', 'frequency' => 'weekly', 'frequency_day' => 1]);
+
+        $response = $this->lateAt('2026-10-16 11:00:00');
+        $today = collect($response->json('staff'))->firstWhere('user_id', $a->id)['checklist_today'];
+
+        $item = fn ($id, $title, $time, $deadline, $submitted, $at, $verdict, $rechecks) => [
+            'task_id' => $id, 'title' => $title, 'scheduled_time' => $time, 'deadline' => $deadline,
+            'submitted' => $submitted, 'submitted_at' => $at, 'verdict' => $verdict, 'rechecks' => $rechecks,
+        ];
+        $this->assertSame([
+            $item($rejected, 'Hindi na-approve', '08:00', '08:45', true, '08:10', 'not_approved', 1),
+            $item($approved, 'Approved na', '09:00', '09:15', true, '09:05', 'approved', 0),
+            $item($group, 'Group: iba ang nagsumite', '10:00', '10:15', true, '10:03', null, 0),
+            $item($open, 'Wala pa', '12:00', '12:15', false, null, null, 0),
+            $item($untimed, 'Walang oras', null, null, false, null, null, 0),
+        ], $today);
+        foreach (['Lihim na tala', 'Paliwanag', 'notes', 'file_path', 'prompt', 'analysis'] as $private) {
+            $this->assertStringNotContainsString($private, $response->getContent());
+        }
+    }
+
+    public function test_a_past_date_lists_every_due_task_with_a_deadline_and_a_future_date_none(): void
+    {
+        $a = $this->staff();
+        $this->checklistTask('Gabi na', [$a], ['scheduled_time' => '23:30']);
+        $this->checklistTask('Lampas hatinggabi', [$a], ['scheduled_time' => '23:50']);
+
+        $past = $this->feed('/api/staff-status?date=2026-10-15')->assertOk();
+        $future = $this->feed('/api/staff-status?date=2026-10-17')->assertOk();
+
+        $this->assertSame(['Gabi na'], array_column($past->json('staff.0.checklist_late_today'), 'title'));
+        $this->assertSame([], $future->json('staff.0.checklist_late_today'));
     }
 }

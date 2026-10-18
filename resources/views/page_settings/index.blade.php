@@ -54,7 +54,7 @@
             <button class="cb-btn">+ Column</button>
         </form>
 
-        <span id="notice" class="text-xs"></span>
+        <span id="notice" class="min-w-0 flex-1 basis-0 truncate text-xs"></span>
     </div>
 
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
@@ -185,10 +185,13 @@
         node.replaceChildren(...kids.filter(k => k != null));
     }
 
+    // Isang linya lang (ang buo ay nasa tooltip): nasa nakapirming header ito, kaya ang mahabang mensahe ay hindi dapat
+    // magdagdag ng linya na nagtutulak pababa sa grid.
     function notice(text, cls = 'text-gray-600') {
         const n = document.getElementById('notice');
-        n.className = 'text-xs ' + cls;
+        n.className = 'min-w-0 flex-1 basis-0 truncate text-xs ' + cls;
         n.textContent = text;
+        n.title = text;
     }
 
     // Pinakamaraming order muna; ang walang order sa window ay nasa ibaba, ayon sa pangalan.
@@ -375,7 +378,7 @@
         return el('div', {class: 'min-w-0'}, [main, el('div', {class: 'pick-lines', 'data-pk': row.key, 'data-key': col.key}, picks(row, col))]);
     }
 
-    // ---- kusang setup: ang mga kandidato mula sa Botcake (…options), ang dropdown, ang gabay at ang babala ----
+    // ---- kusang setup: ang listahan mula sa Botcake (…options), ang dropdown sa pag-edit, ang gabay at ang babala ----
 
     const FIELD_KEY = 'botcake.field.message';
     const PICK_KEYS = ['botcake.flow.shipping', FIELD_KEY];
@@ -385,39 +388,63 @@
     };
     const NOT_CANDIDATE = {'botcake.flow.shipping': 'This flow is not a CHATBLAST flow in Botcake', [FIELD_KEY]: "This field is not a 'GPT Input' field in Botcake"};
 
-    // Ang mga kandidato ([{id, name}]) mula sa huling Test, o null kapag hindi pa nasusuri.
+    // Ang listahan ([{id, name, candidate, recommended}], nakaayos na) mula sa huling Test, o null kapag hindi pa nasusuri.
+    // Ang listahang naitala bago nagkaroon ng candidate ay mga kandidato lang, kaya ang walang candidate ay kandidato.
+    const isCandidate = o => o.candidate !== false;
     function optionsOf(row, key) {
         const c = row.cells[key + '.options'];
         if (!c) return null;
         try { const v = JSON.parse(c.value); return Array.isArray(v) ? v : null; } catch (e) { return null; }
     }
 
+    // Sa ilalim ng ID (hindi nag-e-edit): ang gabay kapag walang kandidato, at ang babala kapag ang naka-save ay wala sa
+    // listahan o hindi kandidato. Ang dropdown ay nasa pag-edit ng cell (startPick).
     function picks(row, col) {
         const opts = optionsOf(row, col.key);
         if (opts === null) return [];
-        const value = String(row.cells[col.key]?.value || ''), known = opts.some(o => String(o.id) === value);
+        const value = String(row.cells[col.key]?.value || ''), item = opts.find(o => String(o.id) === value);
         const out = [];
-        // Dropdown kapag marami, o kapag ang naka-save ay wala sa listahan; nananatili ring puwedeng i-type ang ID.
-        if (opts.length > 1 || (opts.length === 1 && value !== '' && !known)) {
-            out.push(el('select', {class: 'cb-pick mt-0.5 w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-xs', 'data-pk': row.key, 'data-key': col.key, title: 'Pick from Botcake'},
-                [el('option', {value: '', text: value === '' ? 'Pick one…' : 'Change…'}), ...opts.map(o => {
-                    const op = el('option', {value: String(o.id), text: o.name + ' · ' + o.id});
-                    op.selected = String(o.id) === value;
-                    return op;
-                })]));
-        }
-        if (!opts.length && value === '') out.push(el('div', {class: 'text-xs text-red-600', text: GUIDE[col.key]}));
-        if (value !== '' && !known) out.push(el('div', {class: 'text-xs text-red-600', text: NOT_CANDIDATE[col.key]}));
+        if (!opts.some(isCandidate) && value === '') out.push(el('div', {class: 'text-xs text-red-600', text: GUIDE[col.key]}));
+        // Ang flow na wala sa Botcake ay may sariling pulang linya na ("Not in Botcake", mula sa pangalan nito).
+        if (value !== '' && !item && !(row.cells[col.key + '.name']?.tone === 'red')) out.push(el('div', {class: 'text-xs text-red-600', text: '(not in Botcake list)'}));
+        if (item && !isCandidate(item)) out.push(el('div', {class: 'text-xs text-red-600', text: NOT_CANDIDATE[col.key]}));
         return out;
     }
 
-    // Ang pinili sa dropdown ay sine-save gaya ng tinype na ID.
-    table.addEventListener('change', e => {
-        const s = e.target.closest('select.cb-pick');
-        if (!s || !s.value) return;
-        const row = rows.get(s.dataset.pk);
-        if (row) save({pk: s.dataset.pk, key: s.dataset.key, input: {value: s.value}, original: String(row.cells[s.dataset.key]?.value || ''), secret: false});
-    });
+    // Ang pag-edit ng flow ID at message field: dropdown ng listahan mula sa Botcake (pangalan · ID, may "(recommended)");
+    // ang huli ay "Type an ID…" (ang dating text input). Ang pinili ay sine-save gaya ng tinype na ID (save()).
+    const TYPE_ID = '__type__';
+    function startPick(td, row, col, original) {
+        const opts = optionsOf(row, col.key);
+        const option = (value, text, disabled = false) => { const o = el('option', {value, text}); o.disabled = disabled; return o; };
+        const items = [];
+        if (opts === null) {
+            items.push(option('', 'No list yet: press Test', true));
+            if (original !== '') items.push(option(original, original));
+        } else {
+            if (original === '') items.push(option('', 'Pick one…'));
+            else if (!opts.some(o => String(o.id) === original)) items.push(option(original, original + ' (not in Botcake list)'));
+            items.push(...opts.map(o => option(String(o.id), o.name + ' · ' + o.id + (o.recommended ? ' (recommended)' : ''))));
+        }
+        items.push(el('option', {value: TYPE_ID, text: 'Type an ID…'}));
+        const select = el('select', {class: 'w-full rounded border border-blue-500 bg-white px-1 py-0.5 text-xs', 'aria-label': col.label}, items);
+        select.value = original;
+        const mark = el('span', {class: 'block text-xs'});
+        put(td, select, mark);
+        select.focus();
+        editing = {pk: row.key, key: col.key, td, input: select, mark, original, secret: false, timer: null};
+
+        select.addEventListener('change', () => {
+            if (select.value !== TYPE_ID) { finishEdit(true); refocus(row.key, col.key); return; }
+            finishEdit(false);
+            startEdit(table.querySelector(`.cell[data-pk="${CSS.escape(row.key)}"][data-key="${CSS.escape(col.key)}"]`) || td, row, col, true);
+        });
+        select.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter') { ev.preventDefault(); finishEdit(true); refocus(row.key, col.key); }
+            if (ev.key === 'Escape') { ev.preventDefault(); finishEdit(false); refocus(row.key, col.key); }
+        });
+        select.addEventListener('blur', () => { if (editing && editing.input === select) finishEdit(true); });
+    }
 
     function cellEl(row, col) {
         const td = el('div', {class: 'cell flex-1 min-w-0 rounded px-1' + (col.readonly ? ' readonly bg-gray-50 text-gray-600' : ''),
@@ -740,7 +767,8 @@
         if (!col.readonly) startEdit(td, rows.get(td.dataset.pk), col);
     });
 
-    function startEdit(td, row, col) {
+    // typing: ang text input kahit flow ID o message field ("Type an ID…").
+    function startEdit(td, row, col, typing = false) {
         if (editing) {
             finishEdit(true);
             // Kung nabuo ulit ang table, ang bagong td ng parehong cell ang gagamitin.
@@ -749,6 +777,7 @@
         const cell = row.cells[col.key];
         const secret = col.secret || !!(cell && cell.secret);
         const original = secret ? '' : (cell ? cell.value : '');
+        if (PICK_KEYS.includes(col.key) && !secret && !typing) return startPick(td, row, col, original);
         const input = el('input', {class: 'w-full border border-blue-500 rounded px-1 font-mono', autocomplete: 'off',
             placeholder: secret ? 'new value (blank = no change)' : ''});
         input.value = original;

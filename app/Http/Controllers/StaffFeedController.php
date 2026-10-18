@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ChecklistDueToday;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -86,12 +87,15 @@ class StaffFeedController extends Controller
                 ->keyBy(fn ($r) => (int) $r->user_id);
         }
 
-        $dueOpen = $this->checklistDueNotSubmitted($ids, $day);
+        $dueRows = ChecklistDueToday::rows($ids, $day);
+        $dueOpen = $this->checklistDueNotSubmitted($dueRows);
+        $late = $this->checklistLate($dueRows, $day);
+        $today = $this->checklistToday($dueRows);
         $bots = $this->botUserIds();
         $checker = $this->checkerCounts($day, $next);
         $approved = $this->checklistApproved($ids, $day);
 
-        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved) {
+        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved, $late, $today) {
             $id = (int) $s->id;
             $last = $lastEvents->get($id);
 
@@ -110,6 +114,8 @@ class StaffFeedController extends Controller
                 'is_bot'         => isset($bots[$id]),
                 'checker'        => $checker[$id] ?? self::CHECKER_ZERO,
                 'checklist_approved_today' => $approved[$id] ?? 0,
+                'checklist_late_today' => $late[$id] ?? [],
+                'checklist_today' => $today[$id] ?? [],
             ];
         })->values();
 
@@ -123,6 +129,8 @@ class StaffFeedController extends Controller
                 'status_changes'           => $rows->sum('checker.status_changes'),
                 'edited_orders'            => $rows->sum('checker.edited_orders'),
             ],
+            // ilang (tao, task) sa checklist_late_today ang wala pang submission
+            'checklist_late_not_submitted' => $rows->sum(fn ($r) => count(array_filter($r['checklist_late_today'], fn ($e) => !$e['submitted']))),
         ]);
     }
 
@@ -269,78 +277,74 @@ class StaffFeedController extends Controller
     }
 
     /**
-     * user_id => [titles]: aktibong checklist task na naka-assign sa user, due sa araw na iyon (parehong rules ng
-     * checklist page: frequency, frequency_day, 'once' hanggang sa unang submission, umiiral na at hindi pa
-     * binura noon), at walang submission sa araw na iyon. Group task: sapat ang submission ng kahit sinong
-     * naka-assign; individual: ang sariling submission lang ng user.
+     * user_id => [titles]: due na checklist task ng user sa araw na iyon na wala pang submission
+     * (ang rules ay nasa ChecklistDueToday).
      */
-    private function checklistDueNotSubmitted(array $ids, Carbon $day): array
+    private function checklistDueNotSubmitted(array $dueRows): array
     {
-        if (!$ids || !Schema::hasTable('checklist_tasks') || !Schema::hasTable('checklist_task_users')
-            || !Schema::hasTable('checklist_submissions')) {
-            return [];
-        }
-        $dayStr = $day->toDateString();
-        $nextStr = $day->copy()->addDay()->toDateString();
-
-        $assigned = DB::table('checklist_tasks as t')
-            ->join('checklist_task_users as tu', 'tu.checklist_task_id', '=', 't.id')
-            ->whereIn('tu.user_id', $ids)
-            ->where('t.is_active', true)
-            ->where('t.created_at', '<', $nextStr)
-            ->where(function ($q) use ($nextStr) {
-                $q->whereNull('t.deleted_at')->orWhere('t.deleted_at', '>=', $nextStr);
-            })
-            ->orderBy('t.sort_order')
-            ->orderBy('t.id')
-            ->get(['t.id', 't.title', 't.frequency', 't.frequency_day', 't.submission_type', 'tu.user_id']);
-        if ($assigned->isEmpty()) {
-            return [];
-        }
-        $taskIds = $assigned->pluck('id')->unique()->values()->all();
-
-        // < kinabukasan: tama rin kahit may oras ang naka-store na date
-        $subsToday = DB::table('checklist_submissions')
-            ->whereIn('checklist_task_id', $taskIds)
-            ->where('date', '>=', $dayStr)
-            ->where('date', '<', $nextStr)
-            ->get(['checklist_task_id', 'user_id']);
-        $doneByTask = [];
-        $doneByUser = [];
-        foreach ($subsToday as $s) {
-            $doneByTask[(int) $s->checklist_task_id] = true;
-            $doneByUser[(int) $s->checklist_task_id][(int) $s->user_id] = true;
+        $out = [];
+        foreach ($dueRows as $r) {
+            if (!$r['submitted']) {
+                $out[$r['user_id']][] = $r['title'];
+            }
         }
 
-        // 'once': due hanggang sa araw ng unang submission (kasama), hindi na pagkatapos
-        $onceIds = $assigned->where('frequency', 'once')->pluck('id')->unique()->values()->all();
-        $onceDoneBefore = $onceIds ? DB::table('checklist_submissions')
-            ->whereIn('checklist_task_id', $onceIds)
-            ->where('date', '<', $dayStr)
-            ->distinct()
-            ->pluck('checklist_task_id')
-            ->mapWithKeys(fn ($id) => [(int) $id => true])
-            ->all() : [];
+        return $out;
+    }
+
+    /**
+     * user_id => [task na lampas na sa deadline sa araw na iyon]: id, title, deadline, kung naisumite na at
+     * kailan, ang pinakahuling verdict, ilang approval check (rechecks = lampas sa una) at kung na-override (sino,
+     * kailan). Walang notes, file, dahilan o AI text. Para sa
+     * nakaraang araw, lampas na ang lahat ng deadline bago maghatinggabi; sa darating na araw, wala pa.
+     */
+    private function checklistLate(array $dueRows, Carbon $day): array
+    {
+        $now = Carbon::now(self::TZ);
+        $late = array_filter($dueRows, fn ($r) => ChecklistDueToday::isLate($r['deadline'], $day, $now));
+        usort($late, fn ($a, $b) => [$a['deadline'], $a['task_id']] <=> [$b['deadline'], $b['task_id']]);
 
         $out = [];
-        foreach ($assigned as $t) {
-            $tid = (int) $t->id;
-            $uid = (int) $t->user_id;
-            $due = match ($t->frequency ?? 'daily') {
-                'weekly'  => (int) $day->dayOfWeek === (int) $t->frequency_day,
-                'monthly' => (int) $day->day === (int) $t->frequency_day,
-                'once'    => !isset($onceDoneBefore[$tid]),
-                default   => true,
-            };
-            if (!$due) {
-                continue;
-            }
-            $submitted = ($t->submission_type ?? 'group') === 'individual'
-                ? isset($doneByUser[$tid][$uid])
-                : isset($doneByTask[$tid]);
-            if (!$submitted) {
-                $out[$uid][] = $t->title;
-            }
+        foreach ($late as $r) {
+            $out[$r['user_id']][] = [
+                'task_id'         => $r['task_id'],
+                'title'           => $r['title'],
+                'deadline'        => ChecklistDueToday::hhmm($r['deadline']),
+                'submitted'       => $r['submitted'],
+                'submitted_at'    => $r['submission']['submitted_at'] ?? null,
+                'verdict'         => $r['submission']['verdict'] ?? null,
+                'approval_checks' => $checks = $r['submission']['approval_checks'] ?? 0,
+                'rechecks'        => max(0, $checks - 1),
+                'overridden'      => ($r['submission']['overridden_at'] ?? null) !== null,
+                'overridden_by'   => $r['submission']['overridden_by'] ?? null,
+                'overridden_at'   => $r['submission']['overridden_at'] ?? null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * user_id => [lahat ng checklist task na due sa tao sa araw na iyon]: ang pinakamaagang oras muna (ang walang
+     * oras sa dulo), tapos task id; kung naisumite na at kailan, ang verdict at rechecks (parehong kahulugan ng
+     * checklist_late_today). Walang notes, file o AI text.
+     */
+    private function checklistToday(array $dueRows): array
+    {
+        usort($dueRows, fn ($a, $b) => [$a['scheduled'] ?? PHP_INT_MAX, $a['task_id']] <=> [$b['scheduled'] ?? PHP_INT_MAX, $b['task_id']]);
+
+        $out = [];
+        foreach ($dueRows as $r) {
+            $out[$r['user_id']][] = [
+                'task_id'        => $r['task_id'],
+                'title'          => $r['title'],
+                'scheduled_time' => $r['scheduled'] === null ? null : ChecklistDueToday::hhmm($r['scheduled']),
+                'deadline'       => $r['deadline'] === null ? null : ChecklistDueToday::hhmm($r['deadline']),
+                'submitted'      => $r['submitted'],
+                'submitted_at'   => $r['submission']['submitted_at'] ?? null,
+                'verdict'        => $r['submission']['verdict'] ?? null,
+                'rechecks'       => max(0, ($r['submission']['approval_checks'] ?? 0) - 1),
+            ];
         }
 
         return $out;
