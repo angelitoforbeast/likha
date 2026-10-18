@@ -58,6 +58,7 @@ use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\PageSettingController;
 use App\Http\Controllers\ChatblastCampaignController;
 use App\Http\Controllers\ChatblastController;
+use App\Http\Controllers\ChatblastMessageController;
 use App\Http\Controllers\BotcakeCustomersController;
 use App\Http\Controllers\PsidCoverageController;
 use App\Http\Controllers\JntStatusController;
@@ -257,18 +258,34 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     Route::get('/test-psid', [ChatblastController::class, 'searchTestPsid'])->middleware('throttle:60,1,chatblast-test-psid')->name('test-psid.search');
     Route::post('/test-psid', [ChatblastController::class, 'saveTestPsid'])->middleware('throttle:20,1,chatblast-test-psid-save')->name('test-psid.save');
 
-    // Ang mga campaign at ang sheet ng lahat ng text (Araw 1, Araw 2, …).
+    // Mga mensahe (gaya ng flow sa Botcake): /chatblast/campaigns.
     Route::prefix('campaigns')->name('campaigns.')->group(function () {
+        Route::get('/', [ChatblastMessageController::class, 'index'])->name('index');
+        Route::get('/data', [ChatblastMessageController::class, 'data'])->name('data');
+        Route::get('/flow', [ChatblastCampaignController::class, 'flow'])->middleware('throttle:30,1,chatblast-campaign-flow')->name('flow');
+    });
+    Route::prefix('messages')->name('messages.')->group(function () {
+        Route::post('/', [ChatblastMessageController::class, 'store'])->middleware('throttle:30,1,chatblast-message-create')->name('store');
+        Route::post('/{id}', [ChatblastMessageController::class, 'rename'])->whereNumber('id')->middleware('throttle:60,1,chatblast-message-update')->name('rename');
+        Route::delete('/{id}', [ChatblastMessageController::class, 'destroy'])->whereNumber('id')->middleware('throttle:20,1,chatblast-message-delete')->name('destroy');
+        Route::post('/{id}/duplicate', [ChatblastMessageController::class, 'duplicate'])->whereNumber('id')->middleware('throttle:30,1,chatblast-message-create')->name('duplicate');
+        Route::post('/{id}/text', [ChatblastMessageController::class, 'text'])->whereNumber('id')->middleware('throttle:120,1,chatblast-message-text')->name('text');
+        Route::post('/{id}/version', [ChatblastMessageController::class, 'addVersion'])->whereNumber('id')->middleware('throttle:60,1,chatblast-message-rows')->name('version');
+        Route::post('/{id}/remove-version', [ChatblastMessageController::class, 'removeVersion'])->whereNumber('id')->middleware('throttle:60,1,chatblast-message-rows')->name('remove-version');
+    });
+
+    // Mga sequence (gaya ng sequence sa Botcake): /chatblast/sequence.
+    Route::prefix('sequence')->name('sequence.')->group(function () {
         Route::get('/', [ChatblastCampaignController::class, 'index'])->name('index');
         Route::get('/data', [ChatblastCampaignController::class, 'data'])->name('data');
-        Route::get('/flow', [ChatblastCampaignController::class, 'flow'])->middleware('throttle:30,1,chatblast-campaign-flow')->name('flow');
         Route::post('/', [ChatblastCampaignController::class, 'store'])->middleware('throttle:20,1,chatblast-campaign-create')->name('store');
         Route::post('/{id}', [ChatblastCampaignController::class, 'update'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-update')->name('update');
         Route::delete('/{id}', [ChatblastCampaignController::class, 'destroy'])->whereNumber('id')->middleware('throttle:20,1,chatblast-campaign-delete')->name('destroy');
-        Route::post('/{id}/text', [ChatblastCampaignController::class, 'text'])->whereNumber('id')->middleware('throttle:120,1,chatblast-campaign-text')->name('text');
-        Route::post('/{id}/day', [ChatblastCampaignController::class, 'addDay'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-rows')->name('day');
-        Route::post('/{id}/version', [ChatblastCampaignController::class, 'addVersion'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-rows')->name('version');
-        Route::post('/{id}/remove', [ChatblastCampaignController::class, 'remove'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-rows')->name('remove');
+        Route::post('/{id}/step', [ChatblastCampaignController::class, 'addStep'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-steps')->name('step');
+        Route::post('/{id}/remove-step', [ChatblastCampaignController::class, 'removeStep'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-steps')->name('remove-step');
+        Route::post('/{id}/move', [ChatblastCampaignController::class, 'move'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-steps')->name('move');
+        Route::post('/{id}/step-message', [ChatblastCampaignController::class, 'stepMessage'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-steps')->name('step-message');
+        Route::post('/{id}/step-times', [ChatblastCampaignController::class, 'stepTimes'])->whereNumber('id')->middleware('throttle:60,1,chatblast-campaign-steps')->name('step-times');
     });
 });
 

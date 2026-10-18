@@ -109,6 +109,21 @@ class ChatblastSchedule
         return $text;
     }
 
+    /**
+     * Pagkatapos baguhin ang schedule ng campaign na auto: ang oras na dapat tumakbo ngayon sa bago pero hindi sa dati
+     * (hal. bagong oras na lumipas na, o idinagdag ang araw na ito) ay itinatala bilang tumakbo na, kaya hindi ito
+     * tatakbo; ang dating oras na hindi pa tumatakbo ay hindi naaapektuhan kapag mas huli ito. Hindi sine-save.
+     */
+    public function stampNewPastTimes(ChatblastCampaign $before, ChatblastCampaign $after): void
+    {
+        if ($after->mode !== 'auto' || $before->mode !== 'auto') return; // ang paglipat sa auto ay may sariling tatak
+        $now = Carbon::now('Asia/Manila');
+        $added = array_diff_key($this->due($after, $now), $this->due($before, $now));
+        if (!$added) return;
+        $latest = max($added);
+        if (!$after->auto_ran_at || $after->auto_ran_at->lt($latest)) $after->auto_ran_at = $latest->copy()->timezone(config('app.timezone'));
+    }
+
     /** "15:00" → "3:00 PM". */
     public static function clock(string $t): string
     {

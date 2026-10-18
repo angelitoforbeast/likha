@@ -31,7 +31,8 @@
     <div class="flex items-center justify-between mb-3">
         <h1 class="text-2xl font-semibold">Chatblast</h1>
         <div class="flex gap-4 text-sm">
-            <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Campaigns at mga mensahe (Araw 1, Araw 2, …)</a>
+            <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Mga mensahe</a>
+            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Mga sequence</a>
             <a href="{{ route('page-settings.index') }}" class="text-blue-700 hover:underline">Page Settings</a>
             <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
         </div>

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
+use App\Models\ChatblastMessage;
 use App\Models\PageSetting;
 use App\Services\Jnt\JntTracker;
 use Carbon\Carbon;
@@ -95,31 +96,134 @@ class Chatblast
         return null;
     }
 
-    /** Bagong mga araw ng campaign (buo). @return int bilang ng nabagong row */
+    /**
+     * Bagong mga araw ng campaign (buo), sa mga mensahe ng mga step nito: ang mensahe ng step N ay pinapalitan ang mga
+     * bersyon (o bagong mensahe "<campaign> · Day N" kapag wala pa), at ang ibang sequence na gumagamit nito ay binubuo
+     * ulit. Para sa mga patakaran ng araw at bersyon (ang page ay nag-e-edit kada mensahe). @return int nabagong row
+     */
     public function setSequence(string $kind, mixed $days, ?int $userId = null): int
     {
         $c = $this->campaign($kind);
         if (!$c) throw new InvalidArgumentException('Hindi kilalang campaign.');
+        if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
 
-        return $this->editDays($c->id, fn () => $days, $userId, ['what' => 'days']);
+        $ids = DB::transaction(function () use ($c, $days, $userId) {
+            $ids = [];
+            foreach ($days as $i => $versions) {
+                $m = isset(($c->step_messages ?? [])[$i]) ? ChatblastMessage::whereKey($c->step_messages[$i])->lockForUpdate()->first() : null;
+                $m ??= new ChatblastMessage(['name' => $this->freeName($c->name . ' · Day ' . ($i + 1))]);
+                $m->versions = array_map('trim', $versions);
+                self::log($m, $userId, ['what' => 'versions']);
+                $m->save();
+                $ids[] = $m->id;
+            }
+            return $ids;
+        });
+        $changed = $this->editSteps($c->id, fn () => [$ids, []], $userId, ['what' => 'days']);
+
+        return $changed + $this->resync($ids, $c->id);
+    }
+
+    /** Isang pangalan ng mensahe na wala pa ("X", o "X (2)", …). */
+    public function freeName(string $base): string
+    {
+        $name = mb_substr(trim($base), 0, 140);
+        for ($n = 2; ChatblastMessage::where('name', $name)->exists(); $n++) $name = mb_substr(trim($base), 0, 140) . ' (' . $n . ')';
+
+        return $name;
     }
 
     /**
-     * Baguhin ang mga araw ng campaign: $change(lumang mga araw) → bagong mga araw (InvalidArgumentException kapag
-     * hindi puwede). Naka-lock ang row habang binabago, kaya ang dalawang sabay na cell ay parehong naiiwan. Tinatanggal
-     * ang espasyo sa dulo ng bawat text, itinatala sa log, at binubuo ulit ang text ng mga hindi pa naipapadala (parehong
-     * araw at parehong pagpili ng bersyon). @return int bilang ng nabagong row
+     * Baguhin ang mga bersyon ng isang mensahe: $change(lumang bersyon) → bagong bersyon (InvalidArgumentException kapag
+     * hindi puwede). Naka-lock ang mensahe habang binabago; tinatanggal ang espasyo sa dulo; itinatala sa log. Pagkatapos,
+     * ang bawat sequence na gumagamit nito ay binubuo ulit (ang days nito at ang text ng hindi pa naipapadala).
+     * @return int bilang ng nabagong row
      */
-    public function editDays(int $campaignId, callable $change, ?int $userId, array $entry): int
+    public function editMessage(int $messageId, callable $change, ?int $userId, array $entry): int
     {
-        $c = DB::transaction(function () use ($campaignId, $change, $userId, $entry) {
-            $c = ChatblastCampaign::whereKey($campaignId)->lockForUpdate()->first();
-            if (!$c) throw new InvalidArgumentException('Walang ganitong campaign.');
-            $days = $change($c->days);
-            if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
+        DB::transaction(function () use ($messageId, $change, $userId, $entry) {
+            $m = ChatblastMessage::whereKey($messageId)->lockForUpdate()->first();
+            if (!$m) throw new InvalidArgumentException('Walang ganitong mensahe.');
+            $versions = $change((array) $m->versions);
+            if (($error = $this->invalid([$versions])) !== null) throw new InvalidArgumentException(str_replace('Araw 1', 'Mensahe', $error));
+            // Ang bawat sequence na gagamit nito ay dapat kasya pa rin (hal. ang laki ng lahat ng text).
+            foreach ($this->usersOf([$messageId]) as $c) {
+                $days = $this->resolve((array) $c->step_messages, [$messageId => array_map('trim', $versions)]);
+                if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($c->name . ': ' . $error);
+            }
+            $m->versions = array_map('trim', $versions);
+            self::log($m, $userId, $entry);
+            $m->save();
+        });
 
-            $c->days = array_map(fn ($versions) => array_map('trim', $versions), $days);
-            self::log($c, $userId, $entry);
+        return $this->resync([$messageId]);
+    }
+
+    /** Ang mga sequence na gumagamit ng alinman sa mga mensaheng ito (maliit ang table: sinasala dito). */
+    public function usersOf(array $messageIds): \Illuminate\Support\Collection
+    {
+        return ChatblastCampaign::whereNotNull('step_messages')->orderBy('id')->get(ChatblastCampaign::COLUMNS)
+            ->filter(fn ($c) => array_intersect(array_map('intval', (array) $c->step_messages), array_map('intval', $messageIds)))->values();
+    }
+
+    /**
+     * Ang mga araw ng mga step: ang mga bersyon ng mensahe ng bawat step ($override: mensahe => bersyon na hindi pa
+     * naka-save). InvalidArgumentException kapag wala ang mensahe.
+     */
+    public function resolve(array $messageIds, array $override = []): array
+    {
+        $found = ChatblastMessage::whereIn('id', $messageIds)->get(['id', 'versions'])->keyBy('id');
+        return array_map(function ($id) use ($found, $override) {
+            if (array_key_exists((int) $id, $override)) return $override[(int) $id];
+            if (!isset($found[(int) $id])) throw new InvalidArgumentException('Walang ganitong mensahe (#' . (int) $id . ').');
+            return (array) $found[(int) $id]->versions;
+        }, array_values($messageIds));
+    }
+
+    /** Buuin ulit ang days ng mga sequence na gumagamit ng mga mensaheng ito, at ang text ng hindi pa naipapadala. */
+    private function resync(array $messageIds, ?int $exceptCampaign = null): int
+    {
+        $changed = 0;
+        foreach ($this->usersOf($messageIds) as $c) {
+            if ($c->id === $exceptCampaign) continue;
+            $changed += $this->editSteps($c->id, fn (array $ids, array $times) => [$ids, $times], null, ['what' => 'message_changed', 'messages' => array_values($messageIds)], false);
+        }
+
+        return $changed;
+    }
+
+    /**
+     * Baguhin ang mga step ng sequence: $change(mga id ng mensahe, mga sariling oras) → [bagong mga id, bagong oras]; ang
+     * oras ay listahan na kasinghaba ng mga step, bawat isa null (ang oras ng sequence) o mga "HH:MM". Naka-lock ang
+     * sequence; ang days ay binubuo mula sa mga mensahe; ang text ng hindi pa naipapadala ay binubuo ulit. Kapag auto at
+     * may bagong oras na lumipas na ngayong araw, itinatala itong tumakbo na (hindi ito tatakbo). @return int nabagong row
+     */
+    public function editSteps(int $campaignId, callable $change, ?int $userId, array $entry, bool $log = true): int
+    {
+        $c = DB::transaction(function () use ($campaignId, $change, $userId, $entry, $log) {
+            $c = ChatblastCampaign::whereKey($campaignId)->lockForUpdate()->first();
+            if (!$c) throw new InvalidArgumentException('Walang ganitong sequence.');
+            $before = clone $c;
+            $ids = array_values((array) ($c->step_messages ?? []));
+            $times = array_pad(array_slice((array) ($c->step_times ?? []), 0, count($ids)), count($ids), null);
+            [$ids, $times] = $change($ids, $times);
+            $ids = array_map('intval', array_values((array) $ids));
+            if (!$ids) throw new InvalidArgumentException('Kahit isang step.');
+            if (count($ids) > self::MAX_DAYS) throw new InvalidArgumentException('Hanggang ' . self::MAX_DAYS . ' na step lang.');
+            $days = $this->resolve($ids);
+            if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
+            $times = array_pad(array_slice(array_values((array) $times), 0, count($ids)), count($ids), null);
+            foreach ($times as $i => $t) {
+                if (($error = self::invalidTimes($t)) !== null) throw new InvalidArgumentException('Day ' . ($i + 1) . ': ' . $error);
+                if (is_array($t)) { $t = array_values(array_unique($t)); sort($t); }
+                $times[$i] = $t ?: null;
+            }
+
+            $c->step_messages = $ids;
+            $c->days = $days;
+            $c->step_times = array_filter($times) ? $times : null;
+            app(ChatblastSchedule::class)->stampNewPastTimes($before, $c);
+            if ($log) self::log($c, $userId, $entry);
             $c->save();
 
             return $c;
@@ -128,8 +232,19 @@ class Chatblast
         return $this->rerender($c->kind, $c->days);
     }
 
-    /** Itala ang pagbabago sa log ng campaign (hindi pa sine-save): sino, kailan, ano; ang huling LOG_MAX lang. */
-    public static function log(ChatblastCampaign $c, ?int $userId, array $entry): void
+    /** Ang mali sa listahan ng oras (null = wala, ang oras ng campaign), o null kapag tama: hanggang 6, "HH:MM". */
+    public static function invalidTimes(mixed $times): ?string
+    {
+        if ($times === null) return null;
+        if (!is_array($times) || !array_is_list($times) || count($times) > 6) return 'hanggang 6 na oras.';
+        foreach ($times as $t) {
+            if (!is_string($t) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) return 'oras ay HH:MM (00:00 hanggang 23:59).';
+        }
+        return null;
+    }
+
+    /** Itala ang pagbabago sa log ng sequence o mensahe (hindi pa sine-save): sino, kailan, ano; ang huling LOG_MAX lang. */
+    public static function log(\Illuminate\Database\Eloquent\Model $c, ?int $userId, array $entry): void
     {
         $log = (array) ($c->log ?? []);
         $log[] = ['at' => now()->toIso8601String(), 'by' => $userId] + $entry;
