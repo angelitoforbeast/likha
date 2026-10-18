@@ -1,7 +1,7 @@
-{{-- Limit ng approval check at ang override ng CEO / OIC. Kailangan sa x-data: approvalCount,
-     canBypassChecks, overrideUrl, overrideOpen, overrideVerdict, overrideReason, overrideSaving, saveOverride().
+{{-- Limit ng approval check at ang override ng CEO / OIC. Kailangan sa x-data: checkCount (mga check,
+     hindi kasama ang override), canBypassChecks, overrideUrl, overrideOpen, overrideVerdict, overrideReason, overrideSaving, saveOverride().
      $lockedNow = naka-limit na noong binuksan ang page (ang Alpine ang nagpapakita kapag naabot habang bukas). --}}
-<p x-show="!canBypassChecks && approvalCount >= 2" class="mt-1 text-xs text-amber-700" @if($lockedNow ?? false) data-check-locked @endif>
+<p x-show="!canBypassChecks && checkCount >= {{ $checkLimit }}" class="mt-1 text-xs text-amber-700" @if($lockedNow ?? false) data-check-locked @endif>
   {{ \App\Http\Controllers\ChecklistController::CHECK_LIMIT_MESSAGE }}
 </p>
 @if($canBypass)

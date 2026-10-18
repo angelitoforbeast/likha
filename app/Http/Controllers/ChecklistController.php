@@ -222,6 +222,8 @@ class ChecklistController extends Controller
         // Submissions for this date — load all that the user is allowed to see.
         $subQuery = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user', 'values'])
             ->withCount(['analysisLogs', 'approvalLogs'])
+            // Para sa limit ng approval check sa page: ang override ay hindi check
+            ->withCount(['approvalLogs as approval_checks_count' => fn ($q) => \App\Services\ChecklistDueToday::schema()['override'] ? $q->where('is_override', false) : $q])
             ->where('date', $dateObj->toDateString());
 
         if (!$isCEO && $userId) {
@@ -263,11 +265,12 @@ class ChecklistController extends Controller
         $nextDate = $dateObj->copy()->addDay()->toDateString();
         // Kung puwede kang lumampas sa limit ng approval check (at mag-override) sa isang submission
         $canBypassChecks = fn (ChecklistSubmission $s) => $this->canBypassCheckLimit($s);
+        $checkLimit      = self::CHECK_LIMIT;
 
         return view('checklist.report', compact(
             'tasks', 'submissionsByTask', 'submissionsGroupedByTask',
             'doneCount', 'totalTasks',
-            'dateObj', 'prevDate', 'nextDate', 'isToday', 'canBypassChecks'
+            'dateObj', 'prevDate', 'nextDate', 'isToday', 'canBypassChecks', 'checkLimit'
         ));
     }
 
@@ -1137,7 +1140,7 @@ class ChecklistController extends Controller
             if (!$lock->get()) {
                 throw new HttpResponseException(response()->json(['ok' => false, 'message' => 'May approval check pang tumatakbo dito; hintayin munang matapos.'], 409));
             }
-            if ($submission->approvalLogs()->count() >= self::CHECK_LIMIT) {
+            if ($this->approvalCheckCount($submission) >= self::CHECK_LIMIT) {
                 $lock->release();
                 $this->refuse(self::CHECK_LIMIT_MESSAGE, true);
             }
@@ -1415,10 +1418,24 @@ class ChecklistController extends Controller
         }
     }
 
-    /** Ilang approval row (kahit sino ang nagpatakbo, pati ang awtomatiko) bago kailangan ang CEO o OIC. */
-    private const CHECK_LIMIT = 2;
+    /**
+     * Ilang approval check (kahit sino ang nagpatakbo, pati ang awtomatiko sa pagsumite; hindi bilang ang
+     * override) bago kailangan ang CEO o OIC: ang awtomatiko at 2 re-check.
+     */
+    public const CHECK_LIMIT = 3;
 
-    public const CHECK_LIMIT_MESSAGE = 'Naka-2 check na; OIC o CEO na lang ang pwedeng mag-check o mag-override.';
+    public const CHECK_LIMIT_MESSAGE = 'Naka-3 check na; OIC o CEO na lang ang pwedeng mag-check o mag-override.';
+
+    /** Bilang ng approval check ng submission, hindi kasama ang override. */
+    private function approvalCheckCount(ChecklistSubmission $submission): int
+    {
+        $query = $submission->approvalLogs();
+        if (\App\Services\ChecklistDueToday::schema()['override']) {
+            $query->where('is_override', false);
+        }
+
+        return $query->count();
+    }
 
     /**
      * Lampas sa CHECK_LIMIT at override: CEO, o OIC na ang department ay ang department ng nagsumite

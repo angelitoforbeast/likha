@@ -225,8 +225,7 @@ class ChecklistExtractFieldsTest extends ChecklistTestCase
         $this->assertNull($v['bank_balance']->value_number);   // wala sa bagong sagot
 
         $this->aiAnswer = "APPROVED\n\nOk.\nEXTRACTED_VALUES: {oops";
-        // Ikatlong check na ito (kasama ang awtomatiko sa pagsumite), kaya CEO ang nagpapatakbo
-        $this->actingAs($this->user('CEO'))->postJson(route('checklist.approval-check', $submission))
+        $this->actingAs($staff)->postJson(route('checklist.approval-check', $submission))
             ->assertOk()->assertJson(['verdict' => 'approved']);
         $this->assertSame(1700.0, ChecklistSubmissionValue::where('field_key', 'total_sticker')->sole()->value_number);
     }
