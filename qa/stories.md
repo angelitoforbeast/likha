@@ -1306,3 +1306,13 @@ Tests are in `tests/Feature/PaymentActivity/FixSwappedDatesTest.php`.
 | S-063.9 | Given rows stored Jan 10 / Mar 10 / Apr 10 (created Oct 9), 2028-07-05 (created 2026-06-05), 2027-01-02 (created 2026-02-20), 2027-04-12 (created 2026-01-05, the year-before rollover → 2025-12-28), 2025-12-11 (created 2025-12-12), 2026-02-03 (created 2026-03-04) and a day-above-12 row, when it runs without options, then it prints 7 rows, their total and examples (id, stored → corrected, amount, card last 4), writes a CSV of every change (with source_filename) to `storage/app/private/payment_date_fixes/`, and changes nothing; the Dec 11 and day-above-12 rows are kept | `test_S_063_9…` | Passed · 2026-10-18 · auto |
 | S-063.10 | Given the same rows, when it runs with `--apply`, then `payment_activity_ads_manager_bak_YYYYMMDD_HHMM` holds a copy of every row first, and only `date` changes on the 7 rows (Oct 1/3/4, 2026-05-31, 2026-02-13, 2025-12-28, 2026-03-02) | `test_S_063_10…` | Passed · 2026-10-18 · auto |
 | S-063.11 | Given `--expect=N` that differs from the count found, then it refuses: no backup, nothing changed, a failed exit | `test_S_063_11…` | Passed · 2026-10-18 · auto |
+
+## Slice 064 – The Message field shows its custom field name
+
+### S-064 Staff see which Botcake custom field the Message field ID is (P2)
+
+Test in `tests/Feature/PageSettings/FieldNameTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-064.1 | Given a saved Message field ID, then its line shows "ID · name" from the stored `botcake.field.message.options`; an ID not in the list shows "ID · (not in Botcake list)" in amber; with no list stored, the ID plus a grey "press Test for the name". No Botcake call; editing, saves, history and Ready unchanged | `test_S_064_1…` (3 data sets) and the browser check | Passed · 2026-10-19 · auto + headless browser |
