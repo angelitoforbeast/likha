@@ -93,6 +93,17 @@ Both run down and up (twice) on the test database: `ChecklistDeadlineFieldTest::
 - Spec-area run: `tests/Feature/Checklist tests/Feature/StaffActivity tests/Unit/ChecklistDeadlineTest.php` → `OK (277 tests, 980 assertions)`.
 - Full suite on 2d8dfefd: `Tests: 1571, Assertions: 17968, Errors: 1, Failures: 1` — only `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` and `ExampleTest::test_the_application_returns_a_successful_response`, the two known failures; no new failures.
 
+### Amendment 3 as built (changes in neutral words), commit 60d9b9f0
+
+- `/api/staff-status` gets a new field per person, `checklist_today`. It lists every checklist task due to that person that day, from the same due-today source as `checklist_late_today` and the badge.
+- Each item: `{task_id, title, scheduled_time "HH:MM"|null, deadline "HH:MM"|null (effective), submitted, submitted_at "HH:MM"|null, verdict "approved"|"not_approved"|null, rechecks}`.
+- Order: earliest scheduled time first, tasks without a time last, then task id.
+- Group tasks use the first submission of the day by anyone. `verdict` and `rechecks` mean the same as in `checklist_late_today`: overrides set the verdict and are not counted as checks.
+- No photos, notes, prompts or AI text. Inactive tasks and tasks not due that day are left out. Every existing field is unchanged.
+- **Conflict with an earlier test:** `StaffFeedApiTest::test_checklist_approved_today_counts…` (from the count-only design of `checklist_approved_today`) asserted that task titles and the word `not_approved` never appear in the feed. The amendment puts both into `checklist_today`, so that assertion now covers only notes and AI text. The staff-row key list also gains `checklist_today`.
+- Spec-area run: `tests/Feature/Checklist tests/Feature/StaffActivity tests/Unit/ChecklistDeadlineTest.php` → `OK (278 tests, 985 assertions)`.
+- Full suite on 60d9b9f0: a single `phpunit` process stopped twice with "Maximum execution time of 55 seconds exceeded" (at about test 800 of 1572). On Windows, `set_time_limit` counts wall-clock time for the whole process; `@set_time_limit(55)` in `ChatblastCampaignController` (and similar calls in other controllers), reached by an earlier test, then caps every later test in the same process. This branch does not touch that code. The suite was run instead in one process per folder (`tests/Unit` and each `tests/Feature/*`): 1572 tests in all, every folder OK or with skips and deprecations only, except `ExampleTest::test_the_application_returns_a_successful_response` (1 failure) and `NightRunImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` (1 error). These are the two known failures; no new failures. Suggestion for the owner: reset or skip the time limit when running tests.
+
 ## Case table
 
 | Case | Test | Result |
@@ -123,6 +134,7 @@ Both run down and up (twice) on the test database: `ChecklistDeadlineFieldTest::
 | S-051.26 (A1.3) | `ChecklistRecheckLimitTest::test_S_051_26_…` | pass |
 | S-051.27 (A1.4) | `ChecklistRecheckLimitTest::test_S_051_27_…` | pass |
 | S-051.30 (A2) | `ChecklistRecheckLimitTest::test_S_051_30_an_override_does_not_count_toward_the_3_checks` | pass |
+| S-051.31 (A3) | `StaffFeedApiTest::test_S_051_31_checklist_today_lists_every_task_due_to_the_person_earliest_first_with_its_state` | pass |
 | S-051.28 (A1.5) | `ChecklistRecheckLimitTest::test_S_051_28_…` | pass |
 | S-051.29 (A1.6) | `StaffFeedApiTest::test_S_051_29_the_late_list_shows_rechecks_and_an_override_with_who_and_when` | pass |
 
