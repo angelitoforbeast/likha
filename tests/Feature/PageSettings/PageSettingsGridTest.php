@@ -19,7 +19,8 @@ class PageSettingsGridTest extends BotcakeApiTestCase
 
     private const KNOWN = [
         'botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.flow.on_delivery',
-        'botcake.flow.in_transit', 'botcake.flow.broadcast', 'botcake.field.message', 'botcake.test_psid', 'botcake.token_status',
+        'botcake.flow.in_transit', 'botcake.flow.broadcast', 'botcake.template.shipping', 'botcake.field.message', 'botcake.test_psid',
+        'botcake.token_status',
     ];
 
     protected function setUp(): void

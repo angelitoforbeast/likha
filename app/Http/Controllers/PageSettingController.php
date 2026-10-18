@@ -89,7 +89,7 @@ class PageSettingController extends Controller
 
         if ($request->boolean('clear') || ($value === '' && !$secret)) {
             if (!$current) return response()->json(['status' => 'unchanged', 'cell' => null]);
-            if (in_array($provider . '.' . $key, PageSettings::SYSTEM_KEYS, true)) {
+            if (PageSettings::isSystemKey($provider . '.' . $key)) {
                 return response()->json(['error' => 'Ang ' . $provider . '.' . $key . ' ay isinusulat ng system.'], 422);
             }
             foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());

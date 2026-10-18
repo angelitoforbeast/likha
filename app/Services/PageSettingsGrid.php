@@ -27,6 +27,7 @@ class PageSettingsGrid
         'botcake.flow.on_delivery' => 'Delivering flow ID',
         'botcake.flow.in_transit'  => 'In transit flow ID',
         'botcake.flow.broadcast'   => 'Broadcast flow ID',
+        'botcake.template.shipping' => 'Shipping template',
         'botcake.field.message'    => 'Message field ID',
         'botcake.test_psid'        => 'Test PSID',
         'botcake.token_status'     => 'Token status',
@@ -175,12 +176,16 @@ class PageSettingsGrid
         ])->all();
     }
 
-    /** Ang ipinapadala sa browser para sa isang setting: hindi kailanman ang secret mismo. */
+    /**
+     * Ang ipinapadala sa browser para sa isang setting: hindi kailanman ang secret mismo. Ang pangalan ng flow at ang
+     * body ng template ay may line (ang ipinapakita sa ilalim ng cell) at tone (red, grey o blangko).
+     */
     public function cell(PageSetting $s, ?Collection $names = null): array
     {
         $names ??= $this->userNames(collect([$s]));
+        $line = PageSettings::isDetailKey($s->fullKey()) ? BotcakeFlowNames::line((string) $s->value) : [];
 
-        return [
+        return $line + [
             'id'     => $s->id,
             'value'  => $s->displayValue(),
             'secret' => (bool) $s->is_secret,
@@ -214,10 +219,11 @@ class PageSettingsGrid
             'name'     => substr(strstr($key, '.'), 1),
             'label'    => $label ?? $key,
             'secret'   => in_array($key, PageSettings::SECRET_KEYS, true) || isset($secret[$key]),
-            'readonly' => in_array($key, PageSettings::SYSTEM_KEYS, true),
+            'readonly' => PageSettings::isSystemKey($key),
         ];
 
-        $other = $active->map(fn ($s) => $s->fullKey())->unique()->reject(fn ($k) => isset(self::KNOWN[$k]))->sort()->values();
+        $other = $active->map(fn ($s) => $s->fullKey())->unique()
+            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k))->sort()->values();
 
         return array_merge(
             array_map($col, array_keys(self::KNOWN), array_values(self::KNOWN)),
