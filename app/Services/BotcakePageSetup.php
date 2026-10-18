@@ -67,15 +67,21 @@ class BotcakePageSetup
 
     /**
      * Ang mga kandidato ng message field: ang pangalang, kapag maliliit na titik at walang espasyo o gitling, ay
-     * "gptinput" o "message"; itinatabi sa botcake.field.message.options. Kapag blangko ang field at iisa ang kandidato,
+     * "gptinput" o "message". Ang listahan ng dropdown (botcake.field.message.options) ay lahat ng custom field: ang mga
+     * kandidato muna (recommended), saka ang iba, bawat grupo ayon sa pangalan. Kapag blangko ang field at iisa ang kandidato,
      * iyon ang pinupunan. Hindi kailanman pinapalitan ang naitala na.
      * @param array<int, array{id: string, name: string}> $fields
      */
     private function detectField(string $page, array $fields, array &$written): void
     {
-        $candidates = array_values(array_filter($fields, fn ($f) => in_array(self::norm($f['name']), ['gptinput', 'message'], true)));
+        $list = array_map(function ($f) {
+            $candidate = in_array(self::norm($f['name']), ['gptinput', 'message'], true);
+            return ['id' => $f['id'], 'name' => $f['name'], 'candidate' => $candidate, 'recommended' => $candidate];
+        }, $fields);
+        usort($list, fn ($a, $b) => [!$a['candidate'], mb_strtolower($a['name']), $a['id']] <=> [!$b['candidate'], mb_strtolower($b['name']), $b['id']]);
         $written['botcake.field.message.options'] = $this->settings->set($page, 'botcake', 'field.message.options',
-            json_encode($candidates, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
+            json_encode($list, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
+        $candidates = array_values(array_filter($list, fn ($f) => $f['candidate']));
 
         if (trim((string) $this->settings->get($page, 'botcake', 'field.message')) !== '') return;
         if (count($candidates) === 1 && ctype_digit($candidates[0]['id'])) {

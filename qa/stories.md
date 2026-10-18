@@ -1247,3 +1247,16 @@ Amendment 2. Test in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-060.7 | Given History > Sent, when a row built earlier was sent later than another, then it is listed first (sent_at descending, then id descending; a row without sent_at goes last); on the other chips the order is the time the row was processed (updated_at) descending, then id descending; To send keeps its order | `test_S_060_7…` (sent, failed) | Passed · 2026-10-18 · auto |
+
+## Slice 062 – Flow ID and Message field are picked from a dropdown
+
+### S-062 Staff pick the Chatblast flow and the message field from Botcake's lists (P1)
+
+Tests are in `tests/Feature/PageSettings/FlowFieldDropdownTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-062.1 | Given a Test or a Botcake ID or token save with an ok token, then `…options` holds every non-removed flow and every custom field. The order is: CHATBLAST flows first, the "(post_order)" one marked recommended; "GPT Input" and "message" fields first, marked recommended; then the rest by name. Auto-fill still picks from the candidates only | `test_S_062_1…` | Passed · 2026-10-18 · auto |
+| S-062.2 | Given a pick in the dropdown, then its ID is saved through the cell save, with the same history and Ready reset as a typed ID; a typed ID that is not in the list still saves | `test_S_062_2…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+| S-062.3 | Given an edit of the Flow ID or Message field, then a dropdown opens ("name · id", "(recommended)", a saved ID not in the list as "(not in Botcake list)"), ending with "Type an ID…" which switches to the text input; with no stored list it shows "No list yet: press Test" and "Type an ID…" | `test_S_062_3…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+| S-062.4 | Given the page and the grid poll, then no Botcake call is made; the lists come from the stored keys | `test_S_062_4…` | Passed · 2026-10-18 · auto |

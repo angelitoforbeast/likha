@@ -155,19 +155,25 @@ class BotcakeFlowNames
     }
 
     /**
-     * Ang mga kandidato ng Chatblast flow: ang hindi burang flow na may "CHATBLAST" sa pangalan (kahit anong laki ng
-     * titik), itinatabi sa botcake.flow.shipping.options para sa dropdown. Kapag blangko ang botcake.flow.shipping:
+     * Ang listahan ng dropdown ng Chatblast flow (botcake.flow.shipping.options): lahat ng hindi burang flow, bawat isa
+     * may candidate (may "CHATBLAST" sa pangalan, kahit anong laki ng titik) at recommended (kandidatong may
+     * "(post_order)"). Ang ayos: ang recommended, ang ibang kandidato, saka ang iba, bawat grupo ayon sa pangalan.
+     * Kapag blangko ang botcake.flow.shipping:
      * ang iisang may "(post_order)", o ang iisang kandidato; kung hindi malinaw, walang pinupunan. Hindi kailanman
      * pinapalitan ang value na naitala na (ng tao o ng system).
      * @param array<string, array{name:string, removed:bool}> $flows
      */
     private function detectFlow(string $page, array $flows, array &$written): void
     {
-        $candidates = [];
+        $list = [];
         foreach ($flows as $id => $f) {
-            if (!$f['removed'] && stripos($f['name'], 'CHATBLAST') !== false) $candidates[] = ['id' => (string) $id, 'name' => $f['name']];
+            if ($f['removed']) continue;
+            $candidate = stripos($f['name'], 'CHATBLAST') !== false;
+            $list[] = ['id' => (string) $id, 'name' => $f['name'], 'candidate' => $candidate, 'recommended' => $candidate && stripos($f['name'], '(post_order)') !== false];
         }
-        $written['botcake.flow.shipping.options'] = $this->write($page, 'flow.shipping.options', json_encode($candidates, JSON_UNESCAPED_UNICODE));
+        usort($list, fn ($a, $b) => [!$a['candidate'], !$a['recommended'], mb_strtolower($a['name']), $a['id']] <=> [!$b['candidate'], !$b['recommended'], mb_strtolower($b['name']), $b['id']]);
+        $written['botcake.flow.shipping.options'] = $this->write($page, 'flow.shipping.options', json_encode($list, JSON_UNESCAPED_UNICODE));
+        $candidates = array_values(array_filter($list, fn ($f) => $f['candidate']));
 
         if (trim((string) $this->settings->get($page, 'botcake', 'flow.shipping')) !== '') return;
         $postOrder = array_values(array_filter($candidates, fn ($c) => stripos($c['name'], '(post_order)') !== false));
