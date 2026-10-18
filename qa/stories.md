@@ -1180,7 +1180,7 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | S-059.2 | Given the right key in the `X-Chat-Key` header or the `key` param, when Botcake sends JSON, a form, GET query params, or JSON as text/plain (key in the header or in the body), then it gets `{"ok":true}` and one row is stored with page id, PSID, name and message | `test_S_059_2…` (5 data sets) | Passed · 2026-10-18 · auto |
 | S-059.3 | Given params named in any case or with an alias (`user_id`/`fb_id`, `text`/`last_input`/`last_user_input`, `full_name`) and unknown extra params, then the known fields are filled and the full payload is kept, without the key | `test_S_059_3…` | Passed · 2026-10-18 · auto |
 | S-059.4 | Given a stored message, when the same message_id comes again, or the same page + PSID + message within 10 seconds, then it is not stored again (still `{"ok":true}`); after 10 seconds the same text is stored | `test_S_059_4…` | Passed · 2026-10-18 · auto |
-| S-059.5 | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | Passed · 2026-10-18 · auto |
+| S-059.5 (changed by S-067: an unknown page id is refused with 401) | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | Passed · 2026-10-18 · auto |
 | S-059.6 | Given the per-IP limit, when one IP sends more than the limit in a minute, then it gets 429 | `test_S_059_6…` | Passed · 2026-10-18 · auto |
 | S-059.7 | Given a request with neither PSID nor message (e.g. an empty test Send), then it gets `{"ok":true}` and nothing is stored | `test_S_059_7…` | Passed · 2026-10-18 · auto |
 | S-059.13 | Given a message over 5000 characters, a name over 255, a PSID over 64, a nested param, 60 params and invalid UTF-8, then it gets `{"ok":true}` and is stored cut to the column sizes (payload: at most 50 params, 2000 characters each, arrays as JSON, bytes made valid) | `test_S_059_13…` | Passed · 2026-10-18 · auto |
@@ -1192,7 +1192,7 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | S-059.8 | Given a role with /chatblast access, then /chatblast/chats lists the latest messages (time, page, customer, message) newest first and the Chatblast nav has "Chats"; a role without access gets 404 | `test_S_059_8…` | Passed · 2026-10-18 · auto |
 | S-059.9 | Given messages on two pages and two days, when filtering by page, by date, or searching a name or a word of the text, then only the matching messages show | `test_S_059_9…` | Passed · 2026-10-18 · auto |
 | S-059.10 | Given a customer, when their name is clicked, then their messages show oldest first, and no other customer's | `test_S_059_10…` | Passed · 2026-10-18 · auto |
-| S-059.11 | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | Passed · 2026-10-18 · auto |
+| S-059.11 (replaced by S-067.11) | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | Passed · 2026-10-18 · auto |
 | S-059.14 | Given a stored name and message with HTML, then the Chats list and the customer view show it as text | `test_S_059_14…` | Passed · 2026-10-18 · auto |
 
 ### S-059C Retention (P2)
@@ -1206,7 +1206,7 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-059.3 (extended) | Given Botcake's variables `user.id` (or `id`), `user.full_name` and `last_text_input`, in JSON (with the dot) or GET (PHP turns the dot into `_`), then they fill psid, name and message | `test_S_059_3…` | Passed · 2026-10-18 · auto |
-| S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
+| S-059.15 (changed by S-067: an unknown page name is refused with 401; old rows still show "Unknown page") | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
 | S-059.16 (replaced by S-065.1) | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
 | S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
 
@@ -1323,5 +1323,27 @@ Spec 065. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-065.1 | Given /chatblast/chats with or without a page selected, when the Botcake setup box opens, then it shows one body `{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}"}`, the GET Params rows with the same four values, and "The same block works on any page"; it never shows `user.id`, `user.full_name` or the selected page's ID; the filter still lists pages from page settings | `test_S_065_1…` | Passed · 2026-10-19 · auto |
+| S-065.1 (replaced by S-067.11) | Given /chatblast/chats with or without a page selected, when the Botcake setup box opens, then it shows one body `{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}"}`, the GET Params rows with the same four values, and "The same block works on any page"; it never shows `user.id`, `user.full_name` or the selected page's ID; the filter still lists pages from page settings | `test_S_065_1…` | Passed · 2026-10-19 · auto |
 | S-065.2 | Given a block that sends `user_full_name`, then it is stored as the name | `test_S_065_2…` | Passed · 2026-10-19 · auto |
+
+## S-067 The chat endpoint only accepts real chats from our own pages
+
+Spec 067. Tests are in `tests/Feature/Chatblast/BotcakeChatSecurityTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-067.1 | Given the IP allowlist (IPs or CIDRs), when a request comes from an IP off the list, then in log mode it is accepted, logged (IP, no key) and counted; in enforce mode it gets 403 and nothing is stored | `test_S_067_1…` | Passed · 2026-10-19 · auto |
+| S-067.2 | Given pages with their own keys, when a key is used with another page's page_id or page name, a key of no page is sent, the page_id is not ours, or no key is sent, then 401, nothing stored, counted as bad key or unknown page | `test_S_067_2…` | Passed · 2026-10-19 · auto |
+| S-067.3 | Given the shared key, then it is accepted while BOTCAKE_CHAT_SHARED_KEY_OK is on and refused when it is off, also for a page with no own key | `test_S_067_3…` | Passed · 2026-10-19 · auto |
+| S-067.4 | Given a PSID already in botcake_psids for that page, then the chat is stored with no call to Botcake | `test_S_067_4…` | Passed · 2026-10-19 · auto |
+| S-067.5 | Given a PSID not in botcake_psids, then one customer-info call with the page token; on success a chat_verify row is inserted and the next chat makes no call | `test_S_067_5…` | Passed · 2026-10-19 · auto |
+| S-067.6 | Given Botcake answers "Not found customer" or "psid wrong format", then the chat is not stored, answered {"ok":true}, counted, and no call is made again for an hour | `test_S_067_6…` (2 data sets) | Passed · 2026-10-19 · auto |
+| S-067.7 | Given Botcake times out or answers 5xx, then one try only, the chat is stored, nothing is remembered, and a warning is logged without key or token | `test_S_067_7…` (2 data sets) | Passed · 2026-10-19 · auto |
+| S-067.8 | Given `botcake:chat-setup --all --dry-run`, then nothing is written or sent and no key is printed; `--all` without `--confirm` is refused | `test_S_067_8…` | Passed · 2026-10-19 · auto |
+| S-067.9 | Given `botcake:chat-setup "page"`, then a key of 32+ characters is created, the exact block is posted to default_reply/content with that key, the settings update publishes it unlimited, the output names the page but not the key; a rerun keeps the key and --rotate changes it | `test_S_067_9…` | Passed · 2026-10-19 · auto |
+| S-067.10 | Given Botcake refuses the block write during --rotate, then the old key is kept and the command reports the failure | `test_S_067_10…` | Passed · 2026-10-19 · auto |
+| S-067.11 | Given the Chats Setup box, then it shows the block body, the command, each page with "yes"/"no" for its own key, and today's refusals per reason; no key (shared, page, or masked) appears | `test_S_067_11…` | Passed · 2026-10-19 · auto |
+| S-067.12 | Given Botcake refuses the check (token, 429, any other answer) or the page has no token, then the chat is not kept, answered {"ok":true}, counted as "PSID could not be checked", and logged without key or token | `test_S_067_12…` (4 data sets) | Passed · 2026-10-19 · auto |
+| S-067.13 | Given more new PSIDs on one page in a minute than BOTCAKE_CHAT_VERIFY_PER_MINUTE, then the extra ones make no Botcake call and are not kept (counted); known PSIDs are not affected | `test_S_067_13…` | Passed · 2026-10-19 · auto |
+| S-067.14 | Given enforce mode, when a request comes from an IP off the list with `X-Forwarded-For` set to the Botcake IP, then 403: the connecting address is checked | `test_S_067_14…` | Passed · 2026-10-19 · auto |
+| S-067.15 | Given a page key that was rotated by the command or deactivated, then the old key gets 401 at once and the new key works | `test_S_067_15…` | Passed · 2026-10-19 · auto |

@@ -683,3 +683,18 @@ Accepted, not fixed:
 - **Two small additions beyond the brief:** `.` is accepted as a date separator, and the command refuses `--dry-run` together with `--apply`. Reason: harmless, kept.
 - **The backfill can flag a correct row** when its day is 12 or less and above its month, and it was first imported about a month or more after the payment (the swapped reading is then closer to `created_at`). Reason: the rule is decided in the spec; none of the stored sample files is that late. The owner can check the dry-run CSV: rows whose `source_filename` was a "Billing report" (lowercase) file should not appear.
 - **A row with a transaction id or amount but an empty date cell is skipped without being counted as refused.** Reason: already true before; Meta exports have no such rows.
+
+## 067: chat endpoint security (2026-10-19)
+
+- **The IP allowlist checks REMOTE_ADDR.** If the site sits behind a proxy or CDN, REMOTE_ADDR is the proxy's address and enforce mode would refuse every chat. Reason: the forwarded header is client-written while the app trusts every proxy. Check the `ip` / `forwarded_ip` pair in the log (log mode) before switching to enforce.
+- **The per-IP rate limit (`throttle:botcake-chat`) still keys on `ip()`,** which a forged `X-Forwarded-For` can change. Reason: the limiter was asked to stay as it is; the key, the per-page PSID-check cap and the PSID check carry the protection.
+- **Command: a block write that times out after Botcake applied it** reports "key unchanged", while Botcake now holds a key that was never saved; that page's chats get 401 until the command is run again. Reason: owner-run (trusted) and fixed by a rerun.
+- **Command: if saving the key throws after the block was written,** the loop stops with a block whose key is unsaved. Reason: trusted path; rerun fixes it.
+- **Command tests not written:** publish failing after the write (key saved, exit 1), `--all --confirm` with one page failing, choosing a page by its Botcake ID. Reason: trusted, owner-run paths.
+- **Two first chats of the same new PSID at the same moment insert two `chat_verify` rows** (no unique index on page + psid). Reason: harmless duplicates; the lookup only checks existence.
+- **A page in page settings without a `botcake.page_id` keeps the page_id the request sent** (name lookup fallback from 059). Reason: such a page has no token for the PSID check either, so its chats are not kept now ("PSID could not be checked").
+- **The active `chat.key` query is written twice** (`BotcakeChat::keyHashes` and the Chats setup box). Reason: second copy, not the third (DRY rule).
+- **The PSID-check cap drops real new customers above 60 a minute on one page.** Reason: a key holder must not be able to drain the page's Botcake budget; the count shows it, and `BOTCAKE_CHAT_VERIFY_PER_MINUTE` can be raised.
+- **(re-check) Failing closed can drop real chats:** a page whose token expired keeps no chats from new customers, and a page above the per-minute cap drops the extra new-customer chats. Reason: the trade-off for not letting an attacker force the accept path; both show as "PSID could not be checked" in the Setup box, and the cap is in config.
+- **(re-check) In enforce mode, `bad_ip` and `bad_key` refusals still write a database cache counter** for requests that never showed a valid key. Reason: counting refusals is asked for; the per-IP limiter bounds it.
+- **(re-check) A crafted PSID that made Botcake answer 5xx would count as "down" and be kept** (not verified to happen). Reason: unproven; the fix (refuse PSIDs that are not digits before calling Botcake) would change many test fixtures. Suggestion for a later small change.
