@@ -177,6 +177,10 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->assertCount(2, $this->jntCalls(), 'tumigil pagkalipas ng 60 s');
         $this->assertSame(60, BotcakeMessage::count(), 'nabuo pa rin ang lahat');
         $this->assertSame(20, BotcakeMessage::get()->filter(fn ($m) => empty($m->vars['tracked_at']))->count(), 'ang 20 na hindi naabot: rider pending');
+        // S-056.27: ang pinakabagong order muna; ang hindi naabot ay ang pinakaluma.
+        $this->assertSame(sprintf('JT%010d', 60), $this->jntCalls()[0][0]);
+        $this->assertEqualsCanonicalizing(array_map(fn ($i) => sprintf('JT%010d', $i), range(1, 20)),
+            BotcakeMessage::get()->filter(fn ($m) => empty($m->vars['tracked_at']))->pluck('waybill')->all());
         $this->assertSame(20, json_decode(DB::table('jnt_track_sync_runs')->whereNull('date_from')->value('result_sample'), true)['pending']);
     }
 

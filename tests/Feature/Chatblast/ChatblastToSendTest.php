@@ -95,6 +95,32 @@ class ChatblastToSendTest extends ChatblastTestCase
         $this->postJson('/chatblast/retry-failed', ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 1);
     }
 
+    public function test_S_056_28_to_send_shows_when_it_was_updated_and_offers_refresh_now_instead_of_fetch_new(): void
+    {
+        $this->assertSame(['updated' => null, 'next' => '10:15'], $this->list(['view' => 'send'])->json('state.refresh'));
+        app(\App\Services\Chatblast::class)->build(); // isang buong pagkuha (lahat ng sequence)
+        $this->assertSame(['updated' => '10:00', 'next' => '10:15'], $this->list(['view' => 'send'])->json('state.refresh'));
+
+        $html = $this->get('/chatblast')->assertOk()->getContent();
+        $this->assertStringContainsString('>Refresh now</button>', $html);
+        $this->assertStringNotContainsString('Fetch new', $html);
+        $this->assertStringContainsString("'Updated '", $html);
+        $this->assertStringContainsString("' · next refresh '", $html);
+    }
+
+    public function test_S_056_29_the_panel_shows_the_j_and_t_status_at_build_and_now(): void
+    {
+        $id = $this->msg('ready', ['waybill' => 'WB-77', 'jnt_status' => 'Delivering']);
+        DB::table('from_jnts')->insert(['waybill_number' => 'WB-77', 'status' => 'Delivered']);
+
+        $panel = $this->getJson('/chatblast/messages/' . $id)->assertOk();
+        $this->assertSame(['Delivering', 'Delivered'], [$panel->json('jnt_status'), $panel->json('jnt_now')]);
+
+        $html = $this->get('/chatblast')->getContent();
+        $this->assertStringContainsString("kv('J&T at build'", $html);
+        $this->assertStringContainsString("kv('J&T now'", $html);
+    }
+
     public function test_S_056_21_send_all_ready_counts_only_sequences_that_are_on(): void
     {
         $this->msg('ready');

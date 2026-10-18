@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\DB;
 class ChatblastController extends Controller
 {
     public const PER_PAGE = 100;
-    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking ng "Fetch new" (ChatblastBuildJob), gaya ng dati sa web
+    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking ng "Refresh now" (ChatblastBuildJob), gaya ng dati sa web
     public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
     // "To send": ang ipapadala pa, anuman ang petsa. "History": ang naproseso na, ayon sa From/To (pagtingin lang).
     public const TO_SEND = ['ready', 'queued', 'sending'];
@@ -160,6 +160,8 @@ class ChatblastController extends Controller
             'created_at' => $at($m->created_at), 'queued_at' => $at($m->queued_at), 'sent_at' => $at($m->sent_at), 'updated_at' => $at($m->updated_at),
             'created_by' => $m->created_by ? ($names[$m->created_by] ?? 'user #' . $m->created_by) : 'system',
             'sent_by' => $m->sent_by ? ($names[$m->sent_by] ?? 'user #' . $m->sent_by) : null,
+            // jnt_status: ang J&T noong binuo ang row; jnt_now: ang kasalukuyang from_jnts (hal. Delivered na).
+            'jnt_now' => $this->chatblast->currentStatus($m->waybill),
             'customer_saw' => $this->customerSaw($m->page_name, (string) $m->text),
             'botcake_url' => $this->botcakeUrl($m->page_name, $m->psid),
         ]);
@@ -366,7 +368,8 @@ class ChatblastController extends Controller
             'paused' => $this->sender->paused(),
             'queued' => BotcakeMessage::whereIn('status', ['queued', 'sending'])->count(),
             'sent'   => BotcakeMessage::where('status', 'sent')->where('sent_at', '>=', now()->subHour())->count(),
-            'build'  => ChatblastBuildJob::run(), // ang huling "Fetch new" (queued, running, done, failed, busy, stopped)
+            'build'  => ChatblastBuildJob::run(), // ang huling "Refresh now" (queued, running, done, failed, busy, stopped)
+            'refresh' => $this->chatblast->refreshState(), // "Updated HH:MM · next refresh HH:MM"
         ];
     }
 

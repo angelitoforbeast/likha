@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Ang "Fetch new" ng /chatblast bilang job sa queue (isa lang sabay, laging nabibitawan ang build lock). Ang mga
+ * Ang "Refresh now" ng /chatblast bilang job sa queue (isa lang sabay, laging nabibitawan ang build lock). Ang mga
  * listahan (To send at History) ay nasa ChatblastToSendTest.
  */
 class ChatblastDashboardListTest extends ChatblastTestCase
@@ -70,7 +70,7 @@ class ChatblastDashboardListTest extends ChatblastTestCase
         // Nawala ang slot habang naghihintay pa (hal. walang worker nang 10 minuto): "stopped", at puwede nang pindutin ulit.
         Cache::forget(ChatblastBuildJob::SLOT);
         $build = $this->list()->json('state.build');
-        $this->assertSame(['stopped', 'The fetch waited too long for the worker; press Fetch new again.'], [$build['status'], $build['error']]);
+        $this->assertSame(['stopped', 'The fetch waited too long for the worker; press Refresh now again.'], [$build['status'], $build['error']]);
 
         // Kinuha ng ibang build ang lock bago tumakbo ang job: busy, at ang lock ng iba ay hindi ginagalaw.
         $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertOk();

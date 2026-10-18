@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 /**
- * Ang "Fetch new" ng /chatblast, sa queue: ang pagbuo sa lahat ng page ay maaaring lumampas sa 55 s ng web request, at
+ * Ang "Refresh now" (dating "Fetch new") ng /chatblast, sa queue: ang pagbuo sa lahat ng page ay maaaring lumampas sa 55 s ng web request, at
  * ang pinatay na request ay nag-iiwan ng build lock nang 300 s. Isang build lang ang naka-queue o tumatakbo (SLOT); ang
  * lagay nito (RUN) ay nakikita sa list ng page. Ang lock ay laging nabibitawan: sa finally ng build, o sa failed() kapag
  * pinatay ng worker (timeout), at ang sarili lang nitong lock (token).
@@ -52,8 +52,8 @@ class ChatblastBuildJob implements ShouldQueue
         $run = Cache::get(self::RUN);
         if (!is_array($run)) return null;
         if (in_array($run['status'], ['queued', 'running'], true) && Cache::get(self::SLOT) !== $run['token']) {
-            $run['error'] = $run['status'] === 'queued' ? 'The fetch waited too long for the worker; press Fetch new again.'
-                : 'The fetch stopped before it finished; press Fetch new again.';
+            $run['error'] = $run['status'] === 'queued' ? 'The fetch waited too long for the worker; press Refresh now again.'
+                : 'The fetch stopped before it finished; press Refresh now again.';
             $run['status'] = 'stopped';
         }
         $since = $run['started_at'] ?? $run['queued_at'];
@@ -85,7 +85,7 @@ class ChatblastBuildJob implements ShouldQueue
     public function failed(?\Throwable $e): void
     {
         Cache::restoreLock(Chatblast::BUILD_LOCK, $this->token)->release();
-        $this->update(['status' => 'failed', 'error' => 'The fetch stopped before it finished; press Fetch new again.', 'finished_at' => time()]);
+        $this->update(['status' => 'failed', 'error' => 'The fetch stopped before it finished; press Refresh now again.', 'finished_at' => time()]);
         $this->freeSlot();
     }
 

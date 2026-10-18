@@ -27,12 +27,18 @@ class AutoChatblast extends Command
 
     public function handle(Chatblast $chatblast, ChatblastSender $sender, ChatblastSchedule $schedule): int
     {
+        if (!Schema::hasTable('chatblast_campaigns')) return self::SUCCESS; // hindi pa na-migrate (mano-mano pagkatapos ng deploy)
+
+        // Ang kusang refresh ng To send (kada oras sa :15): pagkuha lang, walang padala, kaya tumatakbo kahit naka-pause.
+        if (($r = $chatblast->refreshIfDue()) !== null) {
+            Log::info('chatblast: refresh', array_intersect_key($r, array_flip(['busy', 'added', 'skipped', 'tracked'])));
+            $this->line(!empty($r['busy']) ? 'Refresh: may tumatakbong pagkuha; sa susunod na takbo.' : sprintf('Refresh: %d bago, %d skipped', $r['added'], $r['skipped']));
+        }
+
         if ($sender->paused()) {
             $this->line('Naka-pause ang chatblast; walang auto.');
             return self::SUCCESS;
         }
-
-        if (!Schema::hasTable('chatblast_campaigns')) return self::SUCCESS; // hindi pa na-migrate (mano-mano pagkatapos ng deploy)
 
         $now = Carbon::now('Asia/Manila');
         foreach (ChatblastCampaign::where('active', true)->where('mode', 'auto')->orderBy('id')->get(ChatblastCampaign::COLUMNS) as $c) {

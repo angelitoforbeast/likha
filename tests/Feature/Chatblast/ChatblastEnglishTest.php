@@ -27,7 +27,7 @@ class ChatblastEnglishTest extends ChatblastTestCase
     {
         $this->get('/chatblast/history')->assertOk()->assertSee('Retry failed')->assertSee('No processed messages in this filter');
         $this->get('/chatblast')->assertOk()
-            ->assertSee('Fetch new')->assertSee('Send all ready')->assertSee('Messages')->assertSee('Sequences')
+            ->assertSee('Refresh now')->assertSee('Send all ready')->assertSee('Messages')->assertSee('Sequences')
             ->assertSee('Nothing to send in this filter')->assertSee('aria-label="Close"', false)
             ->assertDontSee('Kunin ang mga bago')->assertDontSee('Mga mensahe')->assertDontSee('Hanapin')->assertDontSee('Ipadala');
     }

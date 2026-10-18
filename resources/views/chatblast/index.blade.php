@@ -73,7 +73,9 @@
     {{-- Mga aksyon: ang pagpapadala ay sa To send; ang Retry failed ay sa History --}}
     <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
         @if($view === 'send')
-        <button id="build" type="button" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1 rounded disabled:opacity-50">Fetch new</button>
+        {{-- Kusang nagre-refresh ang listahan kada oras (:15); ang button ay para sa ngayon na --}}
+        <button id="build" type="button" class="border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs px-2 py-1 rounded disabled:opacity-50">Refresh now</button>
+        <span id="refreshed" class="text-xs text-gray-500"></span>
         <button id="send-selected" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50" disabled>Send selected (0)</button>
         <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send all ready</button>
         @else
@@ -230,9 +232,12 @@
         $id('pause')?.classList.toggle('hidden', s.paused);
         $id('resume')?.classList.toggle('hidden', !s.paused);
         renderBuild(s.build);
+        // Kailan huling na-refresh ang listahan, at ang susunod na kusang refresh (kada oras sa :15).
+        const r = $id('refreshed');
+        if (r && s.refresh) r.textContent = 'Updated ' + (s.refresh.updated || '—') + ' · next refresh ' + s.refresh.next;
     }
 
-    // "Fetch new" ay tumatakbo sa queue: ipinapakita ang lagay habang naghihintay o tumatakbo, at ang resulta kapag tapos
+    // "Refresh now" ay tumatakbo sa queue: ipinapakita ang lagay habang naghihintay o tumatakbo, at ang resulta kapag tapos
     // (para sa pindot sa tab na ito). Habang tumatakbo, naka-disable ang button (kahit ibang tab o user ang pumindot).
     // Ang progress ay isinusulat lang kapag walang ibang mensahe (o progress na rin ang nakasulat), para hindi matakpan
     // ang "N queued" o ang error ng ibang button; ang naiwang progress ay binubura kapag tapos na.
@@ -259,7 +264,7 @@
             countsAt = 0;
             load();
         } else {
-            notice(b.error || 'The fetch stopped before it finished; press Fetch new again.', 'text-red-600');
+            notice(b.error || 'The fetch stopped before it finished; press Refresh now again.', 'text-red-600');
         }
     }
 
@@ -287,7 +292,7 @@
             return tr;
         });
         document.getElementById('cb-rows').replaceChildren(...(body.length ? body
-            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: VIEW === 'send' ? 'Nothing to send in this filter. Press "Fetch new".' : 'No processed messages in this filter.'}))]));
+            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: VIEW === 'send' ? 'Nothing to send in this filter.' : 'No processed messages in this filter.'}))]));
         document.getElementById('check-all').checked = rows.length > 0 && rows.every(r => selected.has(r.id));
     }
 
@@ -354,7 +359,7 @@
             m.botcake_url ? el('a', {href: m.botcake_url, target: '_blank', rel: 'noopener noreferrer', class: 'mb-2 inline-block text-xs text-blue-700 hover:underline', text: 'Open in Botcake ↗'}) : '',
             el('div', {class: 'text-xs text-gray-500', text: 'Full text:'}),
             el('pre', {class: 'cb bg-gray-50 border rounded p-2 mb-2', text: m.text || ''}),
-            kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Sequence', CAMPAIGNS[m.kind] || m.kind), kv('Step', m.step), kv('J&T', m.jnt_status),
+            kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Sequence', CAMPAIGNS[m.kind] || m.kind), kv('Step', m.step), kv('J&T at build', m.jnt_status), kv('J&T now', m.jnt_now),
             kv('Tries', m.attempts), kv('Last HTTP', m.last_http), kv('Created', m.created_at + ' · ' + m.created_by),
             kv('Queued', m.queued_at), kv('Sent', m.sent_at ? m.sent_at + ' · ' + (m.sent_by || '') : null),
             kv('Test of', m.test_of), kv('Order id', m.macro_output_id),

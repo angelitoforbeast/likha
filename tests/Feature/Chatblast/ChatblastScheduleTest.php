@@ -124,13 +124,13 @@ class ChatblastScheduleTest extends ChatblastTestCase
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
 
         $this->tick('2026-10-18 08:59:00');
-        $this->assertSame([], $this->rows());
+        $this->assertSame(['WB-1 D1 ready'], $this->rows(), 'ang kusang refresh ay bumubuo lang, hindi nagpapadala');
         $this->tick('2026-10-18 09:00:00');
         $this->assertSame(['WB-1 D1 queued'], $this->rows());
 
         $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
         $this->tick('2026-10-18 09:30:00');
-        $this->assertSame(['WB-1 D1 queued'], $this->rows(), 'wala pang 10:00');
+        $this->assertSame(['WB-1 D1 queued', 'WB-2 D1 ready'], $this->rows(), 'wala pang 10:00');
         $this->tick('2026-10-18 10:00:00');
         $this->tick('2026-10-18 10:05:00');
         $this->assertSame(['WB-1 D1 queued', 'WB-2 D1 queued'], $this->rows());

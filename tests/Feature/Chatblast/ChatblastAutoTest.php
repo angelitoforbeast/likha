@@ -55,7 +55,7 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
 
         $this->tick('2026-10-18 08:59:00');
-        $this->assertSame([], $this->statuses(), 'hindi pa oras');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses(), 'hindi pa oras: nasa To send (kusang refresh), hindi pa naipadala');
         app(Chatblast::class)->build('in_transit', 1); // ready na row ng ibang (manual) campaign ngayong araw
 
         $this->tick('2026-10-18 09:00:00');
@@ -185,6 +185,44 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->tick('2026-10-18 09:00:00');
 
         $this->assertSame(['WB-1' => 'ready', 'WB-2' => 'queued'], $this->statuses());
+    }
+
+    public function test_S_056_26_the_to_send_list_refreshes_itself_at_quarter_past_each_hour_and_never_sends(): void
+    {
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+
+        $this->tick('2026-10-18 09:10:00');
+        $this->assertSame([], $this->statuses(), 'bago mag-:15');
+        $this->tick('2026-10-18 09:15:00');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses(), 'ang refresh ng 09:15');
+        Queue::assertNothingPushed();
+        $this->assertSame('09:15', app(Chatblast::class)->refreshState()['updated']);
+
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-18 09:40:00');
+        $this->assertArrayNotHasKey('WB-2', $this->statuses(), 'isang refresh lang kada oras');
+
+        $this->travelTo('2026-10-18 10:15:00');
+        $lock = Cache::lock(Chatblast::BUILD_LOCK, 300); // pagkatapos ng travel: ang lock ng array cache ay may oras
+        $lock->get();
+        Artisan::call('chatblast:auto');
+        $this->assertArrayNotHasKey('WB-2', $this->statuses(), 'may tumatakbong pagkuha: laktaw');
+        $lock->release();
+        $this->tick('2026-10-18 10:20:00');
+        $this->assertSame('ready', $this->statuses()['WB-2'], 'sa susunod na takbo sa parehong oras');
+
+        $this->shipped('Page Uno', 'Cora Diaz', 'WB-3', 'psid-c', 'In Transit');
+        app(ChatblastSender::class)->pause();
+        $this->tick('2026-10-19 05:20:00');
+        $this->assertArrayNotHasKey('WB-3', $this->statuses(), 'labas sa 06:15–23:15');
+        $this->tick('2026-10-19 06:15:00');
+        $this->assertSame('ready', $this->statuses()['WB-3'], 'kahit naka-pause: hindi ito nagpapadala');
+        Queue::assertNothingPushed();
+        $this->assertSame(['updated' => '06:15', 'next' => '07:15'], app(Chatblast::class)->refreshState());
+        $this->travelTo('2026-10-19 23:40:00');
+        $this->assertSame('06:15', app(Chatblast::class)->refreshState()['next'], 'pagkatapos ng 23:15: bukas');
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void

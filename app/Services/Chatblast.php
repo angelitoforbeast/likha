@@ -48,6 +48,10 @@ class Chatblast
     public const TRACK_BUDGET = 60;        // segundo ng J&T tracking ng chatblast:build (ang web build: 20, tingnan ang controller)
     public const SEND_TRACK_BUDGET = 10;   // segundo ng J&T bago ipadala: isang tawag
     public const BUILD_LOCK = 'chatblast-build';
+    public const BUILT_AT = 'chatblast-built-at';           // oras (timestamp) ng huling buong pagkuha
+    public const REFRESH_SLOT = 'chatblast-refresh-slot';   // ang oras ("Y-m-d H", Manila) na nagawa na ang kusang refresh
+    public const REFRESH_FIRST_HOUR = 6;                    // kusang refresh: 06:15 hanggang 23:15
+    public const REFRESH_MINUTE = 15;
     public const RIDER_MAX_AGE = 30 * 60;  // bago ipadala ang delivering: i-track ulit kapag mas luma rito
     public const MAX_TEXT = 1000;
     public const MAX_DAYS = 30;
@@ -398,10 +402,44 @@ class Chatblast
         if (!$lock->get()) return ['busy' => true];
 
         try {
-            return $this->buildLocked($kind, $userId, $trackBudget, $steps);
+            $out = $this->buildLocked($kind, $userId, $trackBudget, $steps);
+            if ($kind === null) Cache::forever(self::BUILT_AT, now()->timestamp); // buong pagkuha: "Updated HH:MM" ng To send
+            return $out;
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * Ang kusang refresh ng To send (tinatawag ng chatblast:auto kada 5 minuto, Likha at Incepxion): isang buong pagkuha
+     * kada oras sa :15 (mga 10 minuto pagkatapos ng hourly J&T upload), 06:15–23:15 Manila. Hindi nagpapadala. May
+     * tumatakbong pagkuha: laktaw, at susubok ulit sa susunod na takbo sa parehong oras. Null kapag hindi pa oras.
+     */
+    public function refreshIfDue(): ?array
+    {
+        $now = Carbon::now('Asia/Manila');
+        if ($now->hour < self::REFRESH_FIRST_HOUR || $now->minute < self::REFRESH_MINUTE) return null;
+        $slot = $now->format('Y-m-d H');
+        if (Cache::get(self::REFRESH_SLOT) === $slot) return null;
+
+        $r = $this->build(null, null, self::TRACK_BUDGET);
+        if (empty($r['busy'])) Cache::put(self::REFRESH_SLOT, $slot, 7200);
+
+        return $r;
+    }
+
+    /** Para sa To send: kailan ang huling buong pagkuha at ang susunod na kusang refresh (HH:MM, Manila). */
+    public function refreshState(): array
+    {
+        $now  = Carbon::now('Asia/Manila');
+        $next = $now->copy()->setTime($now->hour, self::REFRESH_MINUTE);
+        if ($now->minute >= self::REFRESH_MINUTE) $next->addHour();
+        if ($next->hour < self::REFRESH_FIRST_HOUR || !$next->isSameDay($now)) {
+            $next = ($next->isSameDay($now) ? $next : $next->startOfDay())->setTime(self::REFRESH_FIRST_HOUR, self::REFRESH_MINUTE);
+        }
+        $at = Cache::get(self::BUILT_AT);
+
+        return ['updated' => $at ? Carbon::createFromTimestamp($at, 'Asia/Manila')->format('H:i') : null, 'next' => $next->format('H:i')];
     }
 
     /** $steps: ang mga step (1 = Day 1) lang na bubuuin (auto: ang may oras ngayon); null = lahat. */
@@ -421,7 +459,8 @@ class Chatblast
         $waybills = [];
         foreach ($campaigns as $c) {
             $order = [];
-            foreach ($this->candidates($c)->reorder()->get(['mo.waybill', 'mo.botcake_psid', 'mo.PAGE as page']) as $o) {
+            // Ang pinakabagong order muna (stable ang asort sa ibaba): kapag ubos ang oras, ang pinakaluma ang hindi naabot.
+            foreach ($this->candidates($c)->reorder()->orderByDesc('mo.id')->get(['mo.waybill', 'mo.botcake_psid', 'mo.PAGE as page']) as $o) {
                 if (trim((string) $o->botcake_psid) !== '' && $this->onPage($c, (string) $o->page) && !isset($order[$o->waybill])) $order[$o->waybill] = '';
             }
             BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', ['ready', 'failed', 'field_mismatch'])
