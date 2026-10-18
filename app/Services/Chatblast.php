@@ -563,13 +563,20 @@ class Chatblast
         return $changed;
     }
 
-    /** Ang hindi pa naipapadala na wala na sa mga status ng campaign (hal. In Transit → Delivered): skipped. @return int */
+    /**
+     * Sinusuri ulit sa bawat pagkuha ang LAHAT ng hindi pa naipapadala ng campaign, anuman ang petsa ng pagbuo: ang wala
+     * na sa page o sa mga status ng campaign (hal. In Transit → Delivered) ay skipped at binibitawan ang key; ang ready na
+     * pasado pa ay tinatatakan (updated_at = ngayon) bilang nasuri. Ang auto ay nagpapadala lang ng nabuo o nasuri
+     * pagkatapos i-auto (ang updated_at ay binabasa lang ng ibang patakaran sa unknown at sending, hindi sa ready).
+     * @return int ilan ang na-skip
+     */
     private function skipStale(ChatblastCampaign $c): int
     {
         $skipped = 0;
         BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
-            ->select('id', 'waybill', 'page_name')->chunkById(500, function ($rows) use (&$skipped, $c) {
+            ->select('id', 'waybill', 'page_name', 'status')->chunkById(500, function ($rows) use (&$skipped, $c) {
                 $now = $this->currentStatuses($rows->pluck('waybill')->unique()->values()->all());
+                $valid = [];
                 foreach ($rows as $row) {
                     if (!$this->onPage($c, (string) $row->page_name)) {
                         // Maaaring ibalik ang page sa campaign: binibitawan ang key para may bagong row noon.
@@ -577,10 +584,15 @@ class Chatblast
                             ->update(['status' => 'skipped', 'reason' => self::pageReason($row->page_name), 'dedupe_key' => null]);
                         continue;
                     }
-                    if ($this->matches($c, $now[$row->waybill] ?? [])) continue;
+                    if ($this->matches($c, $now[$row->waybill] ?? [])) {
+                        if ($row->status === 'ready') $valid[] = $row->id;
+                        continue;
+                    }
+                    // Binibitawan din ang key: kapag bumalik ang waybill sa status, may sariling bagong row ito.
                     $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
-                        ->update(['status' => 'skipped', 'reason' => $this->staleReason($c, $now[$row->waybill] ?? [])]);
+                        ->update(['status' => 'skipped', 'reason' => $this->staleReason($c, $now[$row->waybill] ?? []), 'dedupe_key' => null]);
                 }
+                if ($valid) DB::table('botcake_messages')->whereIn('id', $valid)->where('status', 'ready')->update(['updated_at' => now()]);
             });
 
         return $skipped;

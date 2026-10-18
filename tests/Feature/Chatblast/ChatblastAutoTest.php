@@ -10,6 +10,7 @@ use App\Services\ChatblastSender;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
@@ -103,23 +104,61 @@ class ChatblastAutoTest extends ChatblastTestCase
         foreach (['c-off', 'c-manual', 'c-late', 'c-new'] as $kind) $this->assertSame([], $this->statuses($kind), $kind);
     }
 
-    public function test_auto_never_sends_the_backlog_only_rows_built_today_after_the_switch(): void
+    public function test_S_056_13_a_ready_row_from_before_the_switch_is_sent_once_auto_s_fetch_re_checks_it(): void
     {
         $this->travelTo('2026-10-17 08:00:00');
         $this->campaign(['send_times' => ['09:00', '15:00'], 'mode' => 'manual']);
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
         app(Chatblast::class)->build('c-auto', 1); // kahapon: ready, hindi naipadala
-
-        $this->travelTo('2026-10-18 09:30:00');
-        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
-        app(Chatblast::class)->build('c-auto', 1); // ngayong araw pero bago i-auto
-        $this->travelTo('2026-10-18 10:00:00');
+        $this->travelTo('2026-10-17 20:00:00');
         ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
 
-        $this->travelTo('2026-10-18 12:00:00');
-        $this->shipped('Page Uno', 'Cora Diaz', 'WB-3', 'psid-c', 'In Transit');
-        $this->tick('2026-10-18 15:00:00');
-        $this->assertSame(['WB-1' => 'ready', 'WB-2' => 'ready', 'WB-3' => 'queued'], $this->statuses(), 'ang bago lang mula ngayong araw, pagkatapos i-auto');
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-18 09:00:00');
+
+        // In Transit pa ang WB-1: nasuri ulit ng fetch ng auto bago magpadala, kaya ipinadala kasama ng bago.
+        $this->assertSame(['WB-1' => 'queued', 'WB-2' => 'queued'], $this->statuses());
+        $this->assertSame('2026-10-17', BotcakeMessage::where('waybill', 'WB-1')->sole()->created_at->toDateString(), 'ang dating row, hindi bagong row');
+    }
+
+    public function test_S_056_14_a_ready_row_whose_waybill_moved_on_is_skipped_frees_its_key_and_the_next_sequence_builds(): void
+    {
+        $this->travelTo('2026-10-17 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->campaign(['kind' => 'c-deliv', 'name' => 'Deliv', 'statuses' => ['Delivering'], 'mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1);
+
+        $this->travelTo('2026-10-18 08:00:00');
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'Delivering']);
+        app(Chatblast::class)->build('c-auto', 1);
+        app(Chatblast::class)->build('c-deliv', 1);
+
+        $old = BotcakeMessage::where('kind', 'c-auto')->sole();
+        $this->assertSame(['skipped', 'The waybill is no longer In Transit (now: Delivering)', null], [$old->status, $old->reason, $old->dedupe_key]);
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses('c-deliv'));
+    }
+
+    public function test_S_056_15_auto_does_not_send_a_row_nobody_re_checked_since_before_the_switch(): void
+    {
+        $this->travelTo('2026-10-17 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1); // kahapon, at hindi na nasuri ulit
+        $this->travelTo('2026-10-17 20:00:00');
+        ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
+
+        $this->travelTo('2026-10-18 08:30:00');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-2', 'kind' => 'c-auto', 'day' => 1, 'psid' => 'psid-b',
+            'text' => 'Hi Ben', 'status' => 'ready', 'attempts' => 0, 'is_test' => false, 'dedupe_key' => 'WB-2|c-auto|1', 'created_at' => now(), 'updated_at' => now()]);
+
+        // Ang fetch ng auto ay hindi nakasuri (hal. walang naabot): ang hindi nasuri mula bago i-auto ay hindi ipinapadala.
+        $this->partialMock(Chatblast::class, fn ($m) => $m->shouldReceive('build')->andReturn(['added' => 0]));
+        $this->tick('2026-10-18 09:00:00');
+
+        $this->assertSame(['WB-1' => 'ready', 'WB-2' => 'queued'], $this->statuses());
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void

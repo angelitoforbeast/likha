@@ -64,13 +64,13 @@ class AutoChatblast extends Command
             // naging ready lang pagkatapos (hal. natugma ang PSID). Hindi kailanman bago ang oras ng step.
             $steps = array_values(array_unique(array_merge($steps, $schedule->stepsCome($fresh, $now)))); // ang schedule ngayon, hindi bago ang build
 
-            // Ang bago lang: nabuo ngayong araw (Manila) at pagkatapos i-auto ang campaign. Ang naipong ready (backlog)
-            // ay hindi kailanman ipinapadala ng auto: sa /chatblast lang, kung gusto. Ang page na wala na sa campaign ay
-            // hindi rin (nilalaktawan din ito ng build at ng sender). Ang step na may ibang oras ay sa oras nito.
-            $from = $now->copy()->startOfDay();
-            if ($c->mode_changed_at && $c->mode_changed_at->gt($from)) $from = $c->mode_changed_at->copy();
+            // Ang ready na nabuo O nasuri ulit ng isang pagkuha pagkatapos i-auto ang campaign (kasama ang pagkuha sa itaas,
+            // na sumusuri sa lahat ng hindi pa naipapadala at tumatatak sa updated_at). Ang hindi nasuri mula bago i-auto ay
+            // hindi ipinapadala ng auto. Ang page na wala na sa campaign ay hindi rin (nilalaktawan din ito ng build at ng
+            // sender). Ang step na may ibang oras ay sa oras nito.
+            $from = ($c->mode_changed_at ?? $now->copy()->startOfDay())->copy()->timezone(config('app.timezone'));
             $ids = BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->where('status', 'ready')->whereIn('day', $steps)
-                ->where('created_at', '>=', $from->timezone(config('app.timezone')))->get(['id', 'page_name'])
+                ->where(fn ($w) => $w->where('created_at', '>=', $from)->orWhere('updated_at', '>=', $from))->get(['id', 'page_name'])
                 ->filter(fn ($m) => $chatblast->onPage($c, (string) $m->page_name))->pluck('id')->all();
             $queued = $sender->queue($ids, null);
 
