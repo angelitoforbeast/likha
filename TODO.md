@@ -649,3 +649,8 @@ Accepted, not fixed:
 - **(independent review) The prune stops after 40 batches (200,000 rows) a run;** the rest goes in the next run (the next day, or the next chatblast:auto day). Reason: keeps each run short; normal daily volume is far below that.
 - **(independent review) A page id first seen in chats appears in the Chats page filter up to 10 minutes late** (the distinct list is cached). Reason: asked for; its rows show in the unfiltered list at once.
 - **(independent review) The Chats list shows "Page N · X messages" instead of a total;** no COUNT over the table. Reason: asked for (simplePaginate).
+
+## 062: Flow ID and Message field dropdowns (2026-10-18)
+
+- **The page-script tests for the edit dropdown find literals only;** the browser check proves the behaviour. Reason: no JS test harness.
+- **A list stored before 062 holds the CHATBLAST / "GPT Input" candidates only** until the page's next Test or Botcake ID / token save, so its dropdown lists only those. Reason: the next Test refreshes it; "Test all tokens" refreshes every page at once.
