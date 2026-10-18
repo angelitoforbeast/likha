@@ -976,3 +976,17 @@ Tests are in `tests/Feature/PageSettings/FlowNamesTest.php`.
 | S-052.8 | Given any refresh, then the full token is in no response, its last 4 in no log line or stored value, and only names and body text are stored | `test_S_052_8…` | Passed · 2026-10-18 · auto |
 | S-052.9 | Given a non-CEO role without the page in nav settings, then saving a cell, Test token and Test lahat are 404 and no Botcake call is made | `test_S_052_9…` | Passed · 2026-10-18 · auto |
 | S-052.10 | (by hand) On /page-settings, each flow cell shows its name line, the shipping flow also the template line with the full body on hover, and the template column its body line; saving a flow ID or Test lahat updates the lines without a reload | Owner check | not run |
+
+## Slice 054 – /page-settings fits the screen, with no horizontal scroll
+
+### S-054 The owner sees and edits every page setting without scrolling sideways (P1)
+
+Tests are in `tests/Feature/PageSettings/PageSettingsGridTest.php`; the browser cases are in the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-054.1 | Given known and other keys, when the grid is built, then every column carries its group: ID, token, token status, message field and test PSID in `botcake`; the 4 flows and the shipping template in `flows`; every other key in `other`; the known keys still come first, in order | `test_S_054_1…` | not run |
+| S-054.2 | Given the page, then the table header is Page, Botcake, Flows, Orders / Customers, Sync and the actions, and every action is still there: Test token, Sync now, Customers, Orders, History, Test lahat, Sync lahat with pause, resume and stop, + Page, + Column | `test_S_054_2…` | not run |
+| S-054.3 | Given a last sync and a next sync, then the sync cell shows "dates · time" and "susunod: mula …", red when the last run failed | `test_S_054_3…` (SyncPlanTest) | not run |
+| S-054.4 | Given an open detail row, when a poll, a re-render or the filter runs, then it stays open; the detail row holds the full flow names, the template body, the sync details, the other keys (editable) and a History button per key | `test_S_054_4…` | not run |
+| S-054.5 | (browser) At 1366 and 1280 px, `scrollWidth <= clientWidth` for the page and the grid; a value in the Botcake cell and one in the Flows cell save in place; the detail row stays open through a poll; an other key saves from the detail row | Browser check | not run |
