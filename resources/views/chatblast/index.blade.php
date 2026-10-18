@@ -48,7 +48,8 @@
             </select>
         </label>
         <label class="flex flex-col text-xs text-gray-600">Search<input name="q" placeholder="name or waybill" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
-        <input type="hidden" name="status" value="">
+        {{-- History: ang naipadala ang default na chip --}}
+        <input type="hidden" name="status" value="{{ $view === 'history' ? 'sent' : '' }}">
         <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Show</button>
     </form>
 
@@ -79,7 +80,7 @@
         <button id="send-selected" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50" disabled>Send selected (0)</button>
         <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send all ready</button>
         @else
-        <button id="retry" type="button" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Retry failed</button>
+        <button id="retry" type="button" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Retry failed</button>
         @endif
         <span id="notice" class="text-xs" aria-live="polite"></span>
     </div>
@@ -136,7 +137,7 @@
     const VIEW = box.dataset.view, $id = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const LABEL = {ready: 'ready', no_psid: 'no PSID', no_config: 'no config', queued: 'queued', sending: 'sending', sent: 'sent',
-        failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped', unknown: 'unsure'};
+        failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped', unknown: 'Sent (unconfirmed)'};
     const COLOR = {ready: 'bg-blue-100 text-blue-800', no_psid: 'bg-gray-200 text-gray-700', no_config: 'bg-gray-200 text-gray-700',
         queued: 'bg-indigo-100 text-indigo-800', sending: 'bg-indigo-200 text-indigo-900', sent: 'bg-green-100 text-green-800',
         failed: 'bg-red-100 text-red-800', field_mismatch: 'bg-orange-100 text-orange-800', skipped: 'bg-yellow-100 text-yellow-800',
@@ -223,6 +224,21 @@
             b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? '' : status; page = 1; load(); });
             return b;
         };
+        if (VIEW === 'history') {
+            // History: walang "all"; ang Sent (kasama ang unconfirmed) ang default. Ang ibang chip ay isang lagay lang;
+            // ang pindot ulit sa napiling chip ay bumabalik sa Sent. Ang Retry failed ay nasa Failed lang.
+            const sum = list => list.reduce((a, s) => a + (counts[s] || 0), 0);
+            const HISTORY_CHIPS = [['sent', 'Sent', ['sent', 'unknown']], ['failed', 'Failed', ['failed', 'field_mismatch']],
+                ['skipped', 'Skipped', ['skipped']], ['no_psid', 'No PSID', ['no_psid']], ['no_config', 'No config', ['no_config']]];
+            document.getElementById('chips').replaceChildren(...HISTORY_CHIPS.map(([status, label, list]) => {
+                const b = el('button', {type: 'button', class: 'chip px-2 py-1 rounded ' + COLOR[status] + (current === status ? ' active' : ''), 'data-status': status},
+                    [label + ' ', el('b', {text: fmt(sum(list))})]);
+                b.addEventListener('click', () => { document.querySelector('#filters [name=status]').value = current === status ? 'sent' : status; page = 1; load(); });
+                return b;
+            }));
+            $id('retry')?.classList.toggle('hidden', current !== 'failed');
+            return;
+        }
         document.getElementById('chips').replaceChildren(chip('', 'all', total),...ORDER.filter(s => counts[s]).map(s => chip(s, LABEL[s], counts[s])));
     }
 
@@ -292,7 +308,8 @@
             return tr;
         });
         document.getElementById('cb-rows').replaceChildren(...(body.length ? body
-            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: VIEW === 'send' ? 'Nothing to send in this filter.' : 'No processed messages in this filter.'}))]));
+            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: VIEW === 'send' ? 'Nothing to send in this filter.'
+                : (document.querySelector('#filters [name=status]').value === 'sent' ? 'Nothing sent in this range yet.' : 'No processed messages in this filter.')}))]));
         document.getElementById('check-all').checked = rows.length > 0 && rows.every(r => selected.has(r.id));
     }
 

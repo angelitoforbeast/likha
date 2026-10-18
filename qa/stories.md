@@ -1072,3 +1072,12 @@ Amendment 4. Tests are named per case.
 | S-056.32 | Given the 06:15 refresh still running past 300 s, when chatblast:auto runs again at 06:20 or another build starts, then no second refresh starts (the hour was claimed before building) and the build gets "busy" (the lock lasts longer than any build) | `ChatblastAutoTest::test_S_056_32…` | Passed · 2026-10-18 · auto |
 | S-056.33 | Given a Delivering row built on an earlier day, when J&T gives no answer at send time, then it is not sent: ready again with "J&T not reached; will retry at the next send time"; a row built today keeps the old behaviour | `ChatblastTrackTest::test_S_056_33…` (2 data sets) | Passed · 2026-10-18 · auto |
 | S-056.34 | Given two due auto sequences, when the first one's build throws, then it is reported and the next sequence still sends | `ChatblastAutoTest::test_S_056_34…` | Passed · 2026-10-18 · auto |
+
+### S-056G History is what was actually sent (P1)
+
+Amendment 5. Tests are in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.35 | Given sent, unsure, failed, field mismatch, skipped, no PSID and no config rows, when History opens, then only sent and "Sent (unconfirmed)" rows show, the total counts them, and the counts of every chip are there; the Failed chip shows failed and field mismatch, and Skipped, No PSID and No config each show their own state | `test_S_056_35…` | Passed · 2026-10-18 · auto |
+| S-056.36 | Given History, then there is no "all" chip, Sent is first and selected, the other chips are not, Retry failed shows only with Failed, and an empty Sent view says "Nothing sent in this range yet." | `test_S_056_36…` and the browser check | Passed · 2026-10-18 · auto + headless browser |

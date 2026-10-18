@@ -760,3 +760,69 @@ covered by `test_a_jnt_error_at_send_time_still_sends_with_the_fallback_and_is_n
   lock for up to 30 minutes instead of 5. During that time Refresh now answers "A fetch is already running", and
   refreshes and auto builds wait.
 - **No migration.**
+
+## Amendment 5: History shows what was sent
+
+The amendment was saved verbatim to the main checkout's `handoff/056-chatblast-app/AMENDMENT-5.md` (git-ignored, not
+committed). It is treated as part of the brief.
+
+### What changed
+
+1. **History shows only sent rows by default.** That is status `sent`, plus `unknown` (send_flow was called but the
+   answer was unclear), which is labelled **"Sent (unconfirmed)"**.
+   - The "all" chip is gone.
+   - The first chip is **Sent N** (sent + unconfirmed), selected by default; the hidden `status` starts at `sent` on
+     History.
+   - The server treats a missing or unknown chip as `sent` (`ChatblastController::HISTORY_CHIPS`). The total follows
+     the chosen chip.
+2. **The other processed states are chips, not selected by default:**
+   - **Failed N** (failed + field mismatch);
+   - **Skipped N**;
+   - **No PSID N**;
+   - **No config N**.
+
+   Clicking a chip shows only that state, and clicking it again or clicking Sent goes back to Sent. **Retry failed**
+   shows only while the Failed chip is selected; it still retries failed and field mismatch rows in the History
+   filter.
+3. **An empty Sent view** says "Nothing sent in this range yet." Other chips say "No processed messages in this
+   filter."
+
+To send is unchanged.
+
+### Case table (amendment 5)
+
+Red runs, before the code:
+
+- **S-056.35:** the default list held all 7 rows instead of the sent 2.
+- **S-056.36:** the History chip strings were not in the page.
+
+| Case | Test | Result |
+|---|---|---|
+| S-056.35 | `ChatblastToSendTest::test_S_056_35_history_shows_only_what_was_sent_by_default_and_each_other_state_on_its_chip` | pass |
+| S-056.36 | `ChatblastToSendTest::test_S_056_36_the_history_page_has_sent_first_no_all_chip_and_retry_only_on_failed` and the browser check | pass |
+
+These existing tests now pick the chip they read:
+- S-056.17 and S-056.20: the default is sent only, and the other states are read through their chips;
+- S-056.24: the sent and failed chips;
+- `ChatblastEnglishTest`: the Skipped chip for the old reasons.
+
+`tests/Feature/Chatblast`: `Tests: 180, Assertions: 1206`, all passing.
+
+### Browser check (amendment 5)
+
+The check ran on the scratch app (3 sent and 5 skipped today). Evidence is in the main checkout's
+`handoff/056-chatblast-app/screens/amendment-5/` (`a5-history.png`, `evidence-amendment-5.txt`).
+
+- **Default:** the chips read "Sent 3* · Failed 0 · Skipped 5 · No PSID 0 · No config 0", only sent rows showed, and
+  Retry failed was hidden.
+- **Skipped:** only the 5 skipped rows.
+- **Failed:** an empty list with Retry failed shown.
+- **Sent:** back to the default.
+- **An empty date range:** "Nothing sent in this range yet."
+- **No JS errors.**
+
+### Story changes (amendment 5)
+
+- **S-056.35 and S-056.36** are new.
+- **S-056.17** now reads History's processed states through their chips. Its Then ("History lists the rest within
+  From/To, with status chips") now means sent by default and the rest on their chips.

@@ -31,6 +31,17 @@ class ChatblastController extends Controller
     // "To send": ang ipapadala pa, anuman ang petsa. "History": ang naproseso na, ayon sa From/To (pagtingin lang).
     public const TO_SEND = ['ready', 'queued', 'sending'];
     public const HISTORY = ['sent', 'failed', 'field_mismatch', 'skipped', 'no_psid', 'no_config', 'unknown'];
+    // Ang mga chip ng History. Ang default ay "sent" (kasama ang unknown: "Sent (unconfirmed)"): ang talagang naipadala.
+    public const HISTORY_CHIPS = [
+        'sent' => ['sent', 'unknown'], 'failed' => ['failed', 'field_mismatch'], 'skipped' => ['skipped'],
+        'no_psid' => ['no_psid'], 'no_config' => ['no_config'],
+    ];
+
+    /** Ang mga status ng napiling chip ng History (default: sent). */
+    private function historyChip(Request $request): array
+    {
+        return self::HISTORY_CHIPS[$this->str($request, 'status', 30)] ?? self::HISTORY_CHIPS['sent'];
+    }
     private const MAX_DAYS = 92;
 
     /** page => body ng shipping template, kinukuha minsan kada page kada request. */
@@ -102,7 +113,8 @@ class ChatblastController extends Controller
             ->selectRaw('status, kind, page_name, COUNT(*) AS n')->groupBy('status', 'kind', 'page_name')->get();
         $sum = fn ($rows, string $key) => $rows->groupBy($key)->map(fn ($g) => (int) $g->sum('n'))->sortKeys()->all();
         $counts = $grouped === null ? null : $sum($grouped, 'status');
-        $total  = $counts === null ? null : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts));
+        $total  = $counts === null ? null : (!$send ? array_sum(array_intersect_key($counts, array_flip($this->historyChip($request))))
+            : (in_array($status, self::STATUSES, true) ? ($counts[$status] ?? 0) : array_sum($counts)));
         $readyRows = $grouped?->where('status', 'ready');
         $page   = max(1, (int) $this->str($request, 'p', 6));
 
@@ -353,7 +365,8 @@ class ChatblastController extends Controller
 
         if (($page = $this->str($request, 'page')) !== '') $q->where('page_name', $page);
         if (($kind = $this->str($request, 'kind', 30)) !== '') $q->where('kind', $kind);
-        if ($withStatus && in_array($status = $this->str($request, 'status'), self::STATUSES, true)) $q->where('status', $status);
+        if ($withStatus && $view === 'history') $q->whereIn('status', $this->historyChip($request));
+        elseif ($withStatus && in_array($status = $this->str($request, 'status'), self::STATUSES, true)) $q->where('status', $status);
         if (($s = $this->str($request, 'q', 100)) !== '') {
             $q->where(fn ($w) => $w->where('waybill', $s)->orWhere('fb_name', 'like', addcslashes($s, '%_\\') . '%'));
         }

@@ -75,10 +75,10 @@ class ChatblastCustomerSawTest extends ChatblastTestCase
         $sent = $this->msg('sent');
         $failed = $this->msg('failed');
 
-        $rows = collect($this->getJson('/chatblast/list?view=history')->assertOk()->json('rows'))->keyBy('id');
+        $rows = fn (string $chip) => collect($this->getJson('/chatblast/list?view=history&status=' . $chip)->assertOk()->json('rows'))->keyBy('id');
 
-        $this->assertSame('Good day!', $rows[$sent]['first_line']);
-        $this->assertSame('Hi Buyer', $rows[$failed]['first_line'], 'ang hindi naipadala: ang text ng row');
+        $this->assertSame('Good day!', $rows('sent')[$sent]['first_line']);
+        $this->assertSame('Hi Buyer', $rows('failed')[$failed]['first_line'], 'ang hindi naipadala: ang text ng row');
     }
 
     public function test_S_056_25_the_panel_has_the_chat_bubble_and_the_botcake_link_in_a_new_tab(): void

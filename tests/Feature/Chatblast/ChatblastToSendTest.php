@@ -72,9 +72,11 @@ class ChatblastToSendTest extends ChatblastTestCase
 
         $today = now('Asia/Manila')->toDateString();
         $history = $this->list(['view' => 'history', 'from' => $today, 'to' => $today]);
-        $this->assertEqualsCanonicalizing([$sent, $failed, $skipped, $noPsid], array_column($history->json('rows'), 'id'));
+        $this->assertSame([$sent], array_column($history->json('rows'), 'id'), 'default: ang naipadala lang');
         $this->assertSame(['failed' => 1, 'no_psid' => 1, 'sent' => 1, 'skipped' => 1], $history->json('counts'));
-        $this->assertSame(4, $history->json('total'));
+        $this->assertSame(1, $history->json('total'));
+        $this->assertSame([$failed], array_column($this->list(['view' => 'history', 'from' => $today, 'to' => $today, 'status' => 'failed'])->json('rows'), 'id'));
+        $this->assertSame([$noPsid], array_column($this->list(['view' => 'history', 'from' => $today, 'to' => $today, 'status' => 'no_psid'])->json('rows'), 'id'));
         $this->assertSame([[$skipped, 'already sent today by another sequence']],
             array_map(fn ($r) => [$r['id'], $r['reason']], $this->list(['view' => 'history', 'from' => $today, 'to' => $today, 'status' => 'skipped'])->json('rows')));
         $from = now('Asia/Manila')->subDays(7)->toDateString();
@@ -88,8 +90,8 @@ class ChatblastToSendTest extends ChatblastTestCase
         $this->msg('sent', ['created_at' => now(), 'sent_at' => now()->subDays(2), 'updated_at' => now()]); // hindi ngayon naipadala
 
         $today = now('Asia/Manila')->toDateString();
-        $res = $this->list(['view' => 'history', 'from' => $today, 'to' => $today]);
-        $this->assertEqualsCanonicalizing([$sentToday, $failedToday], array_column($res->json('rows'), 'id'));
+        $this->assertSame([$sentToday], array_column($this->list(['view' => 'history', 'from' => $today, 'to' => $today])->json('rows'), 'id'));
+        $this->assertSame([$failedToday], array_column($this->list(['view' => 'history', 'from' => $today, 'to' => $today, 'status' => 'failed'])->json('rows'), 'id'));
 
         Queue::fake([SendChatblastMessage::class]);
         $this->postJson('/chatblast/retry-failed', ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 1);
@@ -122,6 +124,43 @@ class ChatblastToSendTest extends ChatblastTestCase
         $html = $this->get('/chatblast')->getContent();
         $this->assertStringContainsString("kv('J&T at build'", $html);
         $this->assertStringContainsString("kv('J&T now'", $html);
+    }
+
+    public function test_S_056_35_history_shows_only_what_was_sent_by_default_and_each_other_state_on_its_chip(): void
+    {
+        $sent = $this->msg('sent', ['sent_at' => now()]);
+        $unsure = $this->msg('unknown');
+        $failed = $this->msg('failed');
+        $mismatch = $this->msg('field_mismatch');
+        $skipped = $this->msg('skipped');
+        $noPsid = $this->msg('no_psid', ['psid' => null]);
+        $noConfig = $this->msg('no_config');
+        $ids = fn (array $q) => array_column($this->list($q + ['view' => 'history'])->json('rows'), 'id');
+
+        $res = $this->list(['view' => 'history']);
+        $this->assertEqualsCanonicalizing([$sent, $unsure], array_column($res->json('rows'), 'id'), 'default: ang naipadala lang');
+        $this->assertSame(2, $res->json('total'));
+        $this->assertSame(['failed' => 1, 'field_mismatch' => 1, 'no_config' => 1, 'no_psid' => 1, 'sent' => 1, 'skipped' => 1, 'unknown' => 1], $res->json('counts'), 'ang bilang ng bawat chip');
+
+        $this->assertEqualsCanonicalizing([$failed, $mismatch], $ids(['status' => 'failed']));
+        $this->assertSame([$skipped], $ids(['status' => 'skipped']));
+        $this->assertSame([$noPsid], $ids(['status' => 'no_psid']));
+        $this->assertSame([$noConfig], $ids(['status' => 'no_config']));
+        $this->assertEqualsCanonicalizing([$sent, $unsure], $ids(['status' => 'sent']));
+    }
+
+    public function test_S_056_36_the_history_page_has_sent_first_no_all_chip_and_retry_only_on_failed(): void
+    {
+        $html = $this->get('/chatblast/history')->assertOk()->getContent();
+
+        $this->assertStringContainsString("[['sent', 'Sent', ['sent', 'unknown']]", $html, 'Sent ang una, walang "all"');
+        $this->assertStringContainsString("['failed', 'Failed', ['failed', 'field_mismatch']]", $html);
+        $this->assertStringContainsString("['no_config', 'No config', ['no_config']]", $html);
+        $this->assertStringContainsString("unknown: 'Sent (unconfirmed)'", $html);
+        $this->assertStringContainsString('Nothing sent in this range yet.', $html);
+        $this->assertStringContainsString("\$id('retry')?.classList.toggle('hidden', current !== 'failed')", $html);
+        $this->assertStringContainsString('<input type="hidden" name="status" value="sent">', $html);
+        $this->assertStringContainsString('<input type="hidden" name="status" value="">', $this->get('/chatblast')->getContent(), 'To send: walang default na status');
     }
 
     public function test_S_056_21_send_all_ready_counts_only_sequences_that_are_on(): void
