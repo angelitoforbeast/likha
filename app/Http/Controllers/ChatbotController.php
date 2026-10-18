@@ -143,7 +143,8 @@ class ChatbotController extends Controller
 
     /**
      * "+ Page": bago (pangalan, Botcake ID at token) o mula sa page na nasa page settings na (ang kulang lang ang
-     * kailangan). Isinusulat gaya ng page settings (PageSettings::set; ang token ay secret), saka ang Test token nito.
+     * kailangan). Isinusulat gaya ng page settings (PageSettings::set; ang token ay secret), saka ang Test token nito, at
+     * kapag pumasa, ang On (BotcakeChatBlock::turnOn). Pumalya ang test o ang On: naka-save ang page pero Off.
      */
     public function addPage(Request $request)
     {
@@ -174,7 +175,25 @@ class ChatbotController extends Controller
             $check = ['status' => 'error', 'error' => 'Botcake: no answer'];
         }
 
-        return response()->json(['page' => $this->listedPage($page), 'token_test' => $check['status'], 'error' => $check['error'] ?? null]);
+        // Pumasa ang token: ise-setup agad gaya ng On (key, block, publish). Pumalya: naka-save pa rin pero Off.
+        $listed = $this->listedPage($page) ?? $page;
+        $error = $check['error'] ?? null;
+        $on = false;
+        if ($check['status'] === 'ok') {
+            try {
+                $r = app(BotcakeChatBlock::class)->turnOn($listed);
+            } catch (Throwable $e) {
+                report($e);
+                $r = ['ok' => false, 'error' => 'Could not set up the page: Botcake did not answer.'];
+            }
+            $on = $r['ok'];
+            if (!$on) $error = $r['error'] . ' The bot stays Off.';
+        } else {
+            $error = 'The token test failed' . ($error ? ' (' . $error . ')' : '') . ', so the bot was not set up and stays Off.';
+        }
+        if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, null, true);
+
+        return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
     }
 
     /** @return array<int, string> ang mga page na may Botcake ID at token, ayon sa pangalan */

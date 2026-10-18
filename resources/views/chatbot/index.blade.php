@@ -78,7 +78,7 @@
     <div id="page-box" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="page-title">
         <form id="page-form" class="mx-auto w-full max-w-md rounded-xl bg-white p-5 text-sm shadow-lg" autocomplete="off">
             <div id="page-title" class="mb-3 font-semibold">Add a page</div>
-            <label class="flex flex-col text-xs text-slate-600">Page name (as PAGE in orders), or pick one from page settings
+            <label class="flex flex-col text-xs text-slate-600">Page name, exactly as PAGE in orders, or pick one from page settings
                 <input name="page_name" list="other-pages" maxlength="255" required class="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900">
             </label>
             <datalist id="other-pages">@foreach($otherPages as $p)<option value="{{ $p }}"></option>@endforeach</datalist>
@@ -88,7 +88,7 @@
             <label class="mt-2 flex flex-col text-xs text-slate-600">Botcake token (leave blank if page settings has it)
                 <input name="token" type="password" maxlength="1000" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
             </label>
-            <p class="mt-2 text-xs text-slate-500">Saved to page settings, then the token is tested. The bot stays as it is until you switch it On.</p>
+            <p class="mt-2 text-xs text-slate-500">Saved to page settings, then the token is tested and the bot is set up and switched On. If Botcake fails, the page is saved and stays Off.</p>
             <p id="page-error" class="mt-1 min-h-[1rem] text-xs text-red-600"></p>
             <div class="mt-2 flex gap-2"><button class="cb-btn cb-btn-primary">Add page</button><button type="button" data-close class="cb-btn">Cancel</button></div>
         </form>
@@ -306,7 +306,8 @@
                 const {ok, data} = await post(url.pagesUrl, {page_name: f.get('page_name'), page_id: f.get('page_id'), token: f.get('token')});
                 if (!ok) { $('page-error').textContent = data.error || data.message || 'Not added.'; return; }
                 modal('page-box', false);
-                notice(data.page + ' added · token test: ' + data.token_test + (data.error ? ' · ' + data.error : ''), data.token_test === 'ok' ? 'text-green-700' : 'text-amber-700');
+                notice(data.page + ' added · token test: ' + data.token_test + ' · ' + (data.active ? 'On' : 'Off'), data.active ? 'text-green-700' : 'text-amber-700');
+                if (data.error) errors.set(data.page, data.error); // sa row ng page, gaya ng error ng switch
                 await load();
             } finally { btn.disabled = false; }
         });

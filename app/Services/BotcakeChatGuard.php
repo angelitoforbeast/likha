@@ -96,14 +96,20 @@ class BotcakeChatGuard
      * 'not_on_page' (sinabi ng Botcake na wala; naaalala nang 1 oras); 'unverified' (walang koneksyon, timeout o 5xx:
      * tinatanggap, itinatala sa log, susubukan ulit sa susunod na chat); 'unchecked' (walang token, lampas sa cap ng
      * pagsuri kada page, o ibang sagot ng Botcake gaya ng token o 429: hindi iniimbak, para hindi mapilit ng umaatake
-     * ang pagtanggap).
+     * ang pagtanggap). Ang ad_id ng chat ay itinatala sa row ng PSID: sa bagong chat_verify, at sa row na wala pang
+     * ad_id (hindi pinapalitan ang mayroon na).
      */
-    public function checkPsid(string $page, string $pageId, string $psid, ?string $name): string
+    public function checkPsid(string $page, string $pageId, string $psid, ?string $name, ?string $adId = null): string
     {
         $pageKey = $this->settings->pageKey($page);
         // Ang psid ay naka-index; iilan lang ang row ng isang PSID, kaya ang page ay inihahambing dito (trim, case).
-        $pages = BotcakePsid::where('psid', $psid)->pluck('page');
-        if ($pages->contains(fn ($p) => $this->settings->pageKey((string) $p) === $pageKey)) return 'ok';
+        $rows = BotcakePsid::where('psid', $psid)->get(['id', 'page', 'ad_id'])
+            ->filter(fn ($r) => $this->settings->pageKey((string) $r->page) === $pageKey);
+        if ($rows->isNotEmpty()) {
+            $empty = $rows->filter(fn ($r) => trim((string) $r->ad_id) === '')->pluck('id');
+            if ($adId !== null && $empty->isNotEmpty()) BotcakePsid::whereIn('id', $empty)->update(['ad_id' => $adId]);
+            return 'ok';
+        }
 
         $notOnPage = 'botcake-chat:not-on-page:' . sha1($pageId . '|' . $psid);
         if (Cache::has($notOnPage)) return 'not_on_page';
@@ -134,7 +140,7 @@ class BotcakeChatGuard
 
         BotcakePsid::create([
             'page' => $page, 'psid' => $psid, 'fb_name' => mb_substr((string) $name, 0, 255), 'status' => 'verified',
-            'source' => 'chat_verify', 'first_seen_at' => now(),
+            'source' => 'chat_verify', 'first_seen_at' => now(), 'ad_id' => $adId,
         ]);
 
         return 'ok';

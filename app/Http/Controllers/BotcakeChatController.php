@@ -41,6 +41,9 @@ class BotcakeChatController extends Controller
     /** Ang mga field na may sariling column at hindi inuulit sa payload. */
     private const COLUMN_FIELDS = ['page_id', 'psid', 'name', 'message'];
 
+    /** Mga field na nasa payload lang kapag may laman (hindi blangko at hindi ang {{variable}} na hindi napunan). */
+    private const FILLED_ONLY = ['ad_id', 'page_name'];
+
     /**
      * Ang pagkakasunod: (1) IP ng Botcake, ang REMOTE_ADDR (enforce: 403; log: itinatala at binibilang pagkatapos ng (4)); (2) ang header key ay kilala (ang
      * chat.key ng isang page, o ang shared habang naka-on), bago basahin ang body; (3) body hanggang 64 KB (413); (4) ang
@@ -120,7 +123,9 @@ class BotcakeChatController extends Controller
 
         // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
         // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
-        $check = $f['psid'] === null ? 'unchecked' : $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name']);
+        $adId = $this->filled($byName['ad_id'] ?? null);
+        $adId = $adId === null ? null : mb_substr($adId, 0, 64);
+        $check = $f['psid'] === null ? 'unchecked' : $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name'], $adId);
         if ($check === 'not_on_page' || $check === 'unchecked') {
             $guard->count($check === 'not_on_page' ? 'psid_not_found' : 'psid_unchecked');
             return response()->json(['ok' => true]);
@@ -130,6 +135,7 @@ class BotcakeChatController extends Controller
         $payload = [];
         foreach ($values as [$k, $name, $s]) {
             if (isset($used[$name]) || count($payload) >= self::PAYLOAD_KEYS) continue;
+            if (in_array($name, self::FILLED_ONLY, true) && $this->filled($s) === null) continue;
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
         }
 
@@ -138,6 +144,14 @@ class BotcakeChatController extends Controller
         }
 
         return response()->json(['ok' => true]);
+    }
+
+    /** Ang value kapag may laman: null kapag blangko o ang {{variable}} na hindi pinunan ng Botcake. */
+    private function filled(?string $v): ?string
+    {
+        $v = trim((string) $v);
+
+        return $v === '' || preg_match('/^\{\{.*\}\}$/s', $v) ? null : $v;
     }
 
     /** Ang value bilang wastong UTF-8 na string: ang array ay JSON; ang sirang byte ay pinapalitan (hindi 500 sa pag-imbak). */

@@ -15,8 +15,9 @@ use Illuminate\Support\Str;
  */
 class BotcakeChatBlock
 {
-    /** Ang body na pinupunan ng Botcake (iisa sa bawat page). */
-    public const BODY = ['page_id' => '{{page_id}}', 'psid' => '{{psid}}', 'name' => '{{user_full_name}}', 'message' => '{{last_text_input}}', 'source' => 'default_reply'];
+    /** Ang body na pinupunan ng Botcake (iisa sa bawat page). Ang ad_id at page_name ay nasa payload ng chat lang. */
+    public const BODY = ['page_id' => '{{page_id}}', 'psid' => '{{psid}}', 'name' => '{{user_full_name}}', 'message' => '{{last_text_input}}', 'source' => 'default_reply',
+        'ad_id' => '{{ad_id}}', 'page_name' => '{{page_name}}'];
 
     public function __construct(private PageSettings $settings)
     {
