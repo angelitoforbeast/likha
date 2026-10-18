@@ -89,11 +89,12 @@ class StaffFeedController extends Controller
 
         $dueRows = ChecklistDueToday::rows($ids, $day);
         $dueOpen = $this->checklistDueNotSubmitted($dueRows);
+        $late = $this->checklistLate($dueRows, $day);
         $bots = $this->botUserIds();
         $checker = $this->checkerCounts($day, $next);
         $approved = $this->checklistApproved($ids, $day);
 
-        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved) {
+        $rows = $staff->map(function ($s) use ($online, $counts, $lastEvents, $dueOpen, $bots, $checker, $approved, $late) {
             $id = (int) $s->id;
             $last = $lastEvents->get($id);
 
@@ -112,6 +113,7 @@ class StaffFeedController extends Controller
                 'is_bot'         => isset($bots[$id]),
                 'checker'        => $checker[$id] ?? self::CHECKER_ZERO,
                 'checklist_approved_today' => $approved[$id] ?? 0,
+                'checklist_late_today' => $late[$id] ?? [],
             ];
         })->values();
 
@@ -125,6 +127,8 @@ class StaffFeedController extends Controller
                 'status_changes'           => $rows->sum('checker.status_changes'),
                 'edited_orders'            => $rows->sum('checker.edited_orders'),
             ],
+            // ilang (tao, task) sa checklist_late_today ang wala pang submission
+            'checklist_late_not_submitted' => $rows->sum(fn ($r) => count(array_filter($r['checklist_late_today'], fn ($e) => !$e['submitted']))),
         ]);
     }
 
@@ -281,6 +285,33 @@ class StaffFeedController extends Controller
             if (!$r['submitted']) {
                 $out[$r['user_id']][] = $r['title'];
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * user_id => [task na lampas na sa deadline sa araw na iyon]: id, title, deadline, kung naisumite na at
+     * kailan, ang pinakahuling verdict at ilang approval check. Walang notes, file o AI text. Para sa
+     * nakaraang araw, lampas na ang lahat ng deadline bago maghatinggabi; sa darating na araw, wala pa.
+     */
+    private function checklistLate(array $dueRows, Carbon $day): array
+    {
+        $now = Carbon::now(self::TZ);
+        $late = array_filter($dueRows, fn ($r) => ChecklistDueToday::isLate($r['deadline'], $day, $now));
+        usort($late, fn ($a, $b) => [$a['deadline'], $a['task_id']] <=> [$b['deadline'], $b['task_id']]);
+
+        $out = [];
+        foreach ($late as $r) {
+            $out[$r['user_id']][] = [
+                'task_id'         => $r['task_id'],
+                'title'           => $r['title'],
+                'deadline'        => ChecklistDueToday::hhmm($r['deadline']),
+                'submitted'       => $r['submitted'],
+                'submitted_at'    => $r['submission']['submitted_at'] ?? null,
+                'verdict'         => $r['submission']['verdict'] ?? null,
+                'approval_checks' => $r['submission']['approval_checks'] ?? 0,
+            ];
         }
 
         return $out;
