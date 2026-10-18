@@ -129,7 +129,7 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->assertCount(2, $sent);
         $this->assertSame('https://botcake.io/api/public_api/v1/pages/2002/default_reply/content', $sent[0][0]->url());
         $this->assertSame(['name' => 'Default reply', 'blocks' => [app(BotcakeChatBlock::class)->block($key)]], $sent[0][0]->data());
-        $this->assertSame('{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply"}',
+        $this->assertSame('{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply","ad_id":"{{ad_id}}","page_name":"{{page_name}}"}',
             $sent[0][0]->data()['blocks'][0]['cards'][0]['body']);
         $this->assertSame('https://botcake.io/api/public_api/v1/pages/2002/default_reply', $sent[1][0]->url());
         $this->assertSame(['update' => ['is_published' => true, 'unlimit_default_reply' => true]], $sent[1][0]->data());

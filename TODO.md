@@ -729,3 +729,11 @@ Accepted, not fixed:
 - **An append past 16,000 characters keeps the oldest text** (ALL USER INPUT stops growing). Reason: the TEXT column limit; the owner's loop clears it on exitloop.
 - **The second fix loop (FLOW dropdown shows the linked flow) got no reviewer re-check** (the 2-loop cap). Reason: pinned by S-069.H7.
 - **Engine slice 1 was written before its tests** (the tests came right after, in the same slice). Reason: noted in the result; slices 2–4 and both fix loops were test-first.
+
+### Spec 072 (accepted review minors)
+
+- **"+ Page" marks a page Off when the publish step fails,** although the block is already written and an earlier published Default Reply may still be live (chats are then dropped as "Bot off" until the switch is turned On). Reason: the spec asks for "saved but Off" on any Botcake failure; switching On fixes it, and the row shows the error.
+- **A non-fatal token-test note (e.g. the flow list) shows in red on a row that is On.** Reason: it is the same text the notice showed before; cosmetic.
+- **The path where `turnOn` throws during "+ Page" has no test.** Reason: same fixed message as the token test's catch; `BotcakeClient` returns errors as arrays, so a throw is a bug path only.
+- **Two "+ Page" requests at once could each create a key.** Reason: CEO-only, the button is disabled while sending, and the On switch has the same race today; the next On fixes it.
+- **The chat's `ad_id` on a `source=api` row can be replaced by the customer sync** (`BotcakeCustomerSync::store` rewrites `ad_id` from the API, to null when the API has none). Reason: outside this change; whether a chat's `ad_id` should win over the sync is an owner decision.

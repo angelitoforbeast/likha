@@ -311,7 +311,7 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
         [$content] = $sent[0];
         $this->assertSame('https://botcake.io/api/public_api/v1/pages/3003/default_reply/content', $content->url());
         $this->assertTrue($content->hasHeader('access-token', self::TOKEN));
-        $body = '{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply"}';
+        $body = '{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply","ad_id":"{{ad_id}}","page_name":"{{page_name}}"}';
         $pad = ['key' => '', 'value' => ''];
         $this->assertSame(['name' => 'Default reply', 'blocks' => [[
             'key' => 'chat_to_site', 'title' => 'Chat to site', 'message_tag' => 'OTHER', 'next_step' => true, 'gotos' => [],
@@ -352,7 +352,7 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
 
         $html = $this->get('/chatblast/chats')->assertOk()
             ->assertSee('botcake:chat-setup')
-            ->assertSee('{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply"}')
+            ->assertSee('{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply","ad_id":"{{ad_id}}","page_name":"{{page_name}}"}')
             ->assertSeeInOrder(['Page Dos', 'yes', 'Page Tres', 'no', 'Page Uno', 'yes'])
             ->assertSeeInOrder(['Refused today', 'Bad key', '1'])
             ->getContent();
