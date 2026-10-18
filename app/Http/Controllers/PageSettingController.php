@@ -25,8 +25,11 @@ use Illuminate\Support\Facades\DB;
  */
 class PageSettingController extends Controller
 {
-    /** Hanggang ilang segundo mula sa simula ng Test token ang mga tawag sa Botcake (token, flows, templates). */
-    private const TEST_BUDGET = 30;
+    /**
+     * Hanggang ilang segundo mula sa simula ng Test token ang lahat ng tawag sa Botcake: ang token check (hanggang 20 s),
+     * ang flows at templates, at ang paghihintay ng rate limit sa pagitan nila.
+     */
+    private const TEST_BUDGET = 25;
 
     public function __construct(private PageSettings $settings)
     {
@@ -216,7 +219,8 @@ class PageSettingController extends Controller
         }
 
         try {
-            $status = $client->testToken($pageId, $token) ? 'ok' : 'invalid';
+            // Parehong rate key ng flows at templates na susunod: 2 request kada segundo kada page, kasama ang token check.
+            $status = $client->shared(sha1($token), 30)->testToken($pageId, $token) ? 'ok' : 'invalid';
         } catch (BotcakeException $e) {
             return redirect()->route('page-settings.index')->with('error', 'Hindi nasubukan ang token: ' . $e->getMessage());
         }
@@ -233,10 +237,10 @@ class PageSettingController extends Controller
     }
 
     /**
-     * "Test lahat ng token": isang page kada request (isa-isang tinatawag ng browser), isang Botcake call na walang
-     * retry, kaya hindi lalampas nang ~20 segundo. Itinatala gaya ng row button; ang error ay hindi itinatala.
-     * Kapag ok: ang pangalan ng mga flow at ang template, hanggang TEST_BUDGET segundo mula sa simula ng request;
-     * ang mga cell na isinulat ay ibinabalik (cells) para ma-update ang row nang walang reload.
+     * "Test lahat ng token": isang page kada request (isa-isang tinatawag ng browser), isang token check na walang
+     * retry (hanggang 20 s). Itinatala gaya ng row button; ang error ay hindi itinatala. Kapag ok: ang pangalan ng mga
+     * flow at ang template; ang buong request ay hindi lalampas nang ~TEST_BUDGET (25) segundo, kasama ang token check
+     * at ang paghihintay ng rate limit. Ang mga cell na isinulat ay ibinabalik (cells) para ma-update ang row nang walang reload.
      */
     public function testTokenJson(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, PageSettingsGrid $grid, BotcakeClock $clock)
     {
@@ -249,7 +253,7 @@ class PageSettingController extends Controller
         if (!$pageId || !$token) return response()->json(['status' => 'skipped', 'cell' => null]);
 
         try {
-            $status = $client->once()->testToken($pageId, $token) ? 'ok' : 'invalid';
+            $status = $client->shared(sha1($token), 20)->once(20)->testToken($pageId, $token) ? 'ok' : 'invalid';
         } catch (BotcakeException $e) {
             return response()->json(['status' => 'error', 'error' => $e->getMessage(), 'reason' => $e->reason, 'cell' => null]);
         }

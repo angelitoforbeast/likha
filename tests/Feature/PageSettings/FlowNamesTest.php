@@ -26,8 +26,11 @@ class FlowNamesTest extends BotcakeApiTestCase
     ];
 
     /** Mga sagot ng Botcake sa tawag na susunod; binibilang ang mga tawag kada path. */
-    private array $flowPages = [self::FLOWS];
+    private array $flowList = self::FLOWS;
     private mixed $flowAnswer = null;
+    private mixed $templateAnswer = null;
+    private array $flowQueries = [];
+    private array $requestTimes = [];
     private array $templates = [];
     private array $tokenAnswer = [200, ['success' => true, 'data' => []]];
     private float $tokenSeconds = 0;
@@ -50,16 +53,21 @@ class FlowNamesTest extends BotcakeApiTestCase
         Http::fake(function (Request $r) {
             $path = basename(parse_url($r->url(), PHP_URL_PATH));
             $this->calls[$path] = ($this->calls[$path] ?? 0) + 1;
+            $this->requestTimes[] = $this->clock->now();
             if ($path === 'custom_fields') {
                 $this->clock->time += $this->tokenSeconds;
                 return Http::response($this->tokenAnswer[1], $this->tokenAnswer[0]);
             }
             if ($path === 'flows') {
+                // Gaya ng totoong API: hindi pinapansin ang page; ang data.flows ay ang buong listahan.
+                $this->flowQueries[] = $r->data();
                 if ($this->flowAnswer !== null) return value($this->flowAnswer);
-                $page = (int) ($r->data()['page'] ?? 0);
-                return Http::response(['data' => ['flows' => $this->flowPages[$page - 1] ?? []], 'success' => true]);
+                return Http::response(['data' => ['flows' => $this->flowList, 'folders' => []], 'success' => true]);
             }
-            if ($path === 'message_templates') return Http::response(['data' => $this->templates, 'success' => true]);
+            if ($path === 'message_templates') {
+                if ($this->templateAnswer !== null) return value($this->templateAnswer);
+                return Http::response(['data' => $this->templates, 'success' => true]);
+            }
             return Http::response([], 404);
         });
     }
@@ -112,15 +120,15 @@ class FlowNamesTest extends BotcakeApiTestCase
     public function test_S_052_1_saving_a_flow_id_fills_its_name_and_a_botcake_failure_never_blocks_the_save(string $id, ?\Closure $answer, string $line, string $tone): void
     {
         $this->flowAnswer = $answer;
+        $this->settings()->set('Page Uno', 'botcake', 'template.shipping', 'post_order'); // may template na: flows lang
 
         $res = $this->cell('flow.shipping', $id)->assertOk()->assertJsonPath('cell.value', $id);
 
         $this->assertSame($id, $this->get52('flow.shipping'));
         $this->assertSame($line, $res->json('cells')['botcake.flow.shipping.name']['line']);
         $this->assertSame($tone, $res->json('cells')['botcake.flow.shipping.name']['tone']);
-        $this->assertSame(0, $this->calls['message_templates'], 'flows lang ang tinatawag kapag flow ID ang na-save');
-        // Ang 0.5 s ay ang 2 request kada segundo sa pagitan ng mga page; walang backoff ng retry (2, 4, 8 s).
-        $this->assertSame([], array_filter($this->clock->sleeps, fn ($s) => $s > 0.5), 'walang retry');
+        $this->assertSame(['flows' => 1, 'message_templates' => 0, 'custom_fields' => 0], $this->calls, 'isang flows call lang');
+        $this->assertSame([], $this->clock->sleeps, 'walang retry');
         $uno = collect($this->grid()['rows'])->firstWhere('name', 'Page Uno');
         $this->assertSame($line, $uno['cells']['botcake.flow.shipping.name']['line'], 'nakikita rin pagkatapos ng reload');
     }
@@ -156,59 +164,23 @@ class FlowNamesTest extends BotcakeApiTestCase
         $this->assertNull($this->get52('flow.shipping.name'), 'ang pangalan ng 7001 ay hindi isinusulat para sa 7002');
     }
 
-    public function test_S_052_2_every_page_of_the_flow_list_is_read_until_the_end_with_a_cap(): void
+    public function test_S_052_2_the_flow_list_is_read_with_one_call_and_an_odd_answer_marks_nothing_missing(): void
     {
-        // Tatlong page saka blangko: apat na tawag, at nakita ang nasa ikatlong page.
-        $this->flowPages = [[self::FLOWS[1]], [self::FLOWS[2]], [self::FLOWS[0]]];
-        $this->cell('flow.shipping', '7001')->assertOk();
-        $this->assertSame('CHATBLAST - SHIPPING STATUS (post_order)', $this->get52('flow.shipping.name'));
-        $this->assertSame(4, $this->calls['flows']);
+        $this->settings()->set('Page Uno', 'botcake', 'template.shipping', 'post_order');
 
-        // Hindi pinapansin ng API ang page: ang ikalawang page na walang bagong ID ang huli.
-        $this->calls['flows'] = 0;
-        $this->flowAnswer = fn () => Http::response(['data' => ['flows' => self::FLOWS], 'success' => true]);
+        // Isang tawag, walang ?page: ang wala sa buong listahan ay "Wala sa Botcake".
         $this->cell('flow.shipping', '7999')->assertOk();
-        $this->assertSame(2, $this->calls['flows']);
+        $this->assertSame(1, $this->calls['flows']);
+        $this->assertSame([[]], $this->flowQueries, 'walang page na parameter');
         $this->assertSame('!wala', $this->get52('flow.shipping.name'));
 
-        // Laging may bago: hanggang 10 page lang, at ang hindi nakita ay hindi "Wala sa Botcake".
-        $this->calls['flows'] = 0;
-        $n = 0;
-        $this->flowAnswer = function () use (&$n) {
-            $n++;
-            return Http::response(['data' => ['flows' => [['id' => 8000 + $n, 'name' => 'F' . $n, 'is_removed' => false]]], 'success' => true]);
-        };
-        $this->cell('flow.shipping', '7001')->assertOk();
-        $this->assertSame(10, $this->calls['flows']);
-        $this->assertSame('!hindi nasuri: hindi natapos basahin ang listahan ng flows', $this->get52('flow.shipping.name'));
-
-        // 9 s kada page sa 20 s ng save: tatlong page (ang huli ay may 2 s pa), saka "hindi natapos".
-        $this->clock->time += 100; // malayo sa huling request: walang 0.5 s na paghihintay
-        $this->calls['flows'] = 0;
-        $this->flowAnswer = function () use (&$n) {
-            $n++;
-            $this->clock->time += 9;
-            return Http::response(['data' => ['flows' => [['id' => 8000 + $n, 'name' => 'F' . $n, 'is_removed' => false]]], 'success' => true]);
-        };
-        $this->cell('flow.shipping', '7002')->assertOk();
+        // Kakaibang sagot (walang data.flows, o data null): hindi listahan, kaya walang minamarkahang wala.
+        foreach ([['data' => ['folders' => []], 'success' => true], ['data' => null, 'success' => true]] as $body) {
+            $this->flowAnswer = fn () => Http::response($body);
+            $this->cell('flow.shipping', '7001')->assertOk();
+            $this->assertSame('!hindi nasuri: Botcake: hindi listahan ang sagot', $this->get52('flow.shipping.name'));
+        }
         $this->assertSame(3, $this->calls['flows']);
-        $this->assertSame('!hindi nasuri: hindi natapos basahin ang listahan ng flows', $this->get52('flow.shipping.name'));
-
-        // Lampas sa huling page ay data: null: dulo iyon, hindi error.
-        $this->flowAnswer = function () use (&$n) {
-            return ++$n === 1 ? Http::response(['data' => ['flows' => self::FLOWS], 'success' => true]) : Http::response(['data' => null, 'success' => true]);
-        };
-        $n = 0;
-        $this->cell('flow.shipping', '7999')->assertOk();
-        $this->assertSame('!wala', $this->get52('flow.shipping.name'));
-
-        // Walang data sa ikalawang page: hindi dulo, kaya hindi masasabing "Wala sa Botcake".
-        $this->flowAnswer = function () use (&$n) {
-            return ++$n === 1 ? Http::response(['data' => ['flows' => self::FLOWS], 'success' => true]) : Http::response(['success' => true]);
-        };
-        $n = 0;
-        $this->cell('flow.shipping', '7998')->assertOk();
-        $this->assertSame('!hindi nasuri: Botcake: hindi listahan ang sagot', $this->get52('flow.shipping.name'));
     }
 
     public function test_S_052_3_test_lahat_refreshes_names_and_template_only_when_the_token_is_ok_and_returns_the_cells(): void
@@ -217,7 +189,9 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         $res = $this->testAll()->assertOk()->assertJsonPath('status', 'ok');
 
-        $this->assertSame(['flows' => 2, 'message_templates' => 1, 'custom_fields' => 1], $this->calls);
+        $this->assertSame(['flows' => 1, 'message_templates' => 1, 'custom_fields' => 1], $this->calls);
+        // Iisang rate key ang token check, flows at templates: hindi lalampas sa 2 request kada segundo.
+        $this->assertSame([1000.0, 1000.5, 1001.0], $this->requestTimes);
         $cells = $res->json('cells');
         $this->assertSame('CHATBLAST - SHIPPING STATUS (post_order)', $cells['botcake.flow.shipping.name']['line']);
         $this->assertSame('post_order', $cells['botcake.template.shipping']['value']);
@@ -235,7 +209,7 @@ class FlowNamesTest extends BotcakeApiTestCase
     public function test_S_052_3_test_lahat_skips_the_refresh_when_its_time_budget_is_spent(): void
     {
         $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '7001');
-        $this->tokenSeconds = 29; // mabagal ang token check: kulang na ang oras para sa flows at templates
+        $this->tokenSeconds = 24; // mabagal ang token check: sa 25 s na budget, kulang na ang oras para sa flows at templates
 
         $this->testAll()->assertOk()->assertJsonPath('status', 'ok')
             ->assertJsonPath('refresh_error', 'kulang sa oras');
@@ -278,7 +252,7 @@ class FlowNamesTest extends BotcakeApiTestCase
     public function test_S_052_4_an_empty_template_key_is_filled_by_the_flow_name_then_the_single_custom_field_template(string $flowName, array $templates, ?string $expected): void
     {
         $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '7001');
-        $this->flowPages = [[['id' => 7001, 'name' => $flowName, 'is_removed' => false]]];
+        $this->flowList = [['id' => 7001, 'name' => $flowName, 'is_removed' => false]];
         $this->templates = $templates;
 
         $this->testAll()->assertOk();
@@ -310,6 +284,34 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         // Kapag binura ng owner: pipili ulit ang system.
         $this->cell('template.shipping', '')->assertOk()->assertJsonPath('cell.value', 'post_order');
+    }
+
+    public function test_S_052_4_saving_the_shipping_flow_with_an_empty_template_picks_the_template_at_once(): void
+    {
+        $res = $this->cell('flow.shipping', '7001')->assertOk();
+
+        $this->assertSame(['flows' => 1, 'message_templates' => 1, 'custom_fields' => 0], $this->calls);
+        $this->assertSame('post_order', $res->json('cells')['botcake.template.shipping']['value']);
+        $this->assertSame("May update na po sa order nyo po❤️\n\n(mensahe ng sequence)", $res->json('cells')['botcake.template.shipping.text']['line']);
+
+        // Ibang flow, o may template na: flows lang.
+        $this->cell('flow.on_delivery', '7002')->assertOk();
+        $this->cell('flow.shipping', '7003')->assertOk();
+        $this->assertSame(['flows' => 3, 'message_templates' => 1, 'custom_fields' => 0], $this->calls);
+    }
+
+    public function test_S_052_5_a_failed_template_save_does_not_overwrite_a_newer_template(): void
+    {
+        // Habang hinihintay ang Botcake, may mas bagong save na naglagay ng ibang template at ng body nito.
+        $this->templateAnswer = function () {
+            $this->settings()->set('Page Uno', 'botcake', 'template.shipping', 'chatblast');
+            $this->settings()->set('Page Uno', 'botcake', 'template.shipping.text', 'Follow up po {{1}}', system: true);
+            return Http::response([], 500);
+        };
+
+        $this->cell('template.shipping', 'post_order')->assertOk()->assertJsonPath('refresh_error', 'Botcake: HTTP 500');
+
+        $this->assertSame('Follow up po {{1}}', $this->get52('template.shipping.text'), 'hindi pinalitan ng "hindi nasuri"');
     }
 
     public function test_S_052_7_a_refresh_with_the_same_answers_writes_no_new_row(): void

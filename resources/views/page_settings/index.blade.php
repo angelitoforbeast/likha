@@ -139,6 +139,7 @@
     let editing = null;      // {pk, key, td, input, original, timer}
     let needsRender = false;
     const marks = new Map(); // "pk|key" → {text, cls, title}
+    const saveSeq = new Map(); // "pk|key" → bilang ng huling save: ang sagot ng mas lumang save ay hindi na inilalapat
 
     const cellId = (pk, key) => pk + '|' + key;
 
@@ -438,6 +439,8 @@
 
         const id = cellId(ed.pk, ed.key);
         const row = rows.get(ed.pk), col = columns.find(c => c.key === ed.key);
+        const seq = (saveSeq.get(id) || 0) + 1;
+        saveSeq.set(id, seq);
         marks.set(id, {text: 'Saving…', cls: 'text-gray-400'});
         repaint(ed.pk, ed.key);
 
@@ -448,6 +451,8 @@
                 body: JSON.stringify({page_name: row.name, provider: col.provider, key: col.name, value, is_secret: ed.secret}),
             });
             const data = await res.json().catch(() => ({}));
+            // Huling dumating ang sagot ng mas lumang save (hal. mabagal na Botcake): ang mas bagong save ang masusunod.
+            if (saveSeq.get(id) !== seq) return;
             if (!res.ok) {
                 marks.set(id, {text: '!', cls: 'text-red-600', title: data.error || data.message || ('Hindi nai-save (' + res.status + ')')});
             } else {
@@ -462,6 +467,7 @@
                 setTimeout(() => { if (marks.get(id)?.cls === 'text-green-600') { marks.delete(id); repaint(ed.pk, ed.key); } }, 2500);
             }
         } catch (err) {
+            if (saveSeq.get(id) !== seq) return;
             marks.set(id, {text: '!', cls: 'text-red-600', title: 'Walang koneksyon: hindi nai-save.'});
         }
         if (needsRender && !editing) render(); else paintedBy(ed.key).forEach(k => repaint(ed.pk, k));

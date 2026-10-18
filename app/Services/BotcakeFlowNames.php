@@ -23,7 +23,6 @@ class BotcakeFlowNames
     /** Ang ipinapakita kapalit ng {{1}}: doon pumapasok ang mensahe ng chatblast sequence. */
     public const SLOT = '(mensahe ng sequence)';
 
-    public const MAX_FLOW_PAGES = 10;
     private const CALL_TIMEOUT = 8;
     private const MIN_SECONDS = 2; // mas kaunti pa rito ang natitira: hindi na tatawag
     private const SAVE_BUDGET = 20;
@@ -53,7 +52,8 @@ class BotcakeFlowNames
     }
 
     /**
-     * Pagkatapos i-save ang flow ID (isang flows read) o ang template (isang templates call). Ang pagkabigo ng Botcake
+     * Pagkatapos i-save ang flow ID (isang flows call; kapag shipping flow at blangko ang template, isang templates call
+     * din para sa auto-pick) o ang template (isang templates call). Ang pagkabigo ng Botcake
      * ay hindi humaharang sa save: itinatala bilang "hindi nasuri: <dahilan>" sa key na na-save, para hindi maiwan
      * ang pangalan ng lumang ID.
      * @return array{written: array<string, ?PageSetting>, error: ?string}
@@ -67,6 +67,11 @@ class BotcakeFlowNames
             $error = $this->refreshTemplate($page, $deadline, $written, true);
         } else {
             $error = $this->refreshFlows($page, $deadline, $written, substr($full, strlen('botcake.')));
+            // Bagong shipping flow at blangko pa ang template: pipili na ngayon, hindi na hihintayin ang Test token.
+            if ($full === 'botcake.flow.shipping' && !$this->settings->get($page, 'botcake', 'template.shipping')) {
+                $templateError = $this->refreshTemplate($page, $deadline, $written, false);
+                $error ??= $templateError;
+            }
         }
 
         return ['written' => $written, 'error' => $error];
@@ -100,17 +105,15 @@ class BotcakeFlowNames
             ->mapWithKeys(fn ($s) => [$s->key => trim((string) $s->value)])->all();
         if (!$ids) return null;
 
-        [$flows, $complete, $error] = $this->readFlows($page, $deadline);
+        [$flows, $error] = $this->readFlows($page, $deadline);
 
         foreach ($ids as $key => $id) {
             if ($error !== null) {
                 $value = $key === $saved ? self::UNCHECKED . $error : null;
             } elseif (isset($flows[$id])) {
                 $value = $flows[$id]['removed'] ? self::REMOVED : $flows[$id]['name'];
-            } elseif ($complete) {
-                $value = self::NOT_FOUND;
             } else {
-                $value = $key === $saved ? self::UNCHECKED . 'hindi natapos basahin ang listahan ng flows' : null;
+                $value = self::NOT_FOUND;
             }
             // Habang hinihintay ang Botcake, maaaring napalitan na ang ID ng ibang save: ang mas bagong request ang magsusulat.
             if ($value === null || trim((string) $this->settings->get($page, 'botcake', $key)) !== $id) continue;
@@ -127,8 +130,11 @@ class BotcakeFlowNames
      */
     private function refreshTemplate(string $page, float $deadline, array &$written, bool $saved): ?string
     {
-        [$templates, $error] = $this->readTemplates($page, $deadline);
         $name = trim((string) $this->settings->get($page, 'botcake', 'template.shipping'));
+        [$templates, $error] = $this->readTemplates($page, $deadline);
+
+        // Habang hinihintay ang Botcake, maaaring napalitan na ang template ng ibang save: ang mas bagong request ang magsusulat.
+        if (trim((string) $this->settings->get($page, 'botcake', 'template.shipping')) !== $name) return $error;
 
         if ($error !== null) {
             if ($saved && $name !== '') $written['botcake.template.shipping.text'] = $this->write($page, 'template.shipping.text', self::UNCHECKED . $error);
@@ -181,37 +187,26 @@ class BotcakeFlowNames
     }
 
     /**
-     * Lahat ng page ng GET flows (?page=1..), hanggang sa blangkong page, sa page na walang bagong ID (hindi pinapansin
-     * ng API ang page), sa MAX_FLOW_PAGES, o sa pagkaubos ng oras. $complete = nabasa hanggang dulo.
-     * @return array{0: array<string, array{name:string, removed:bool}>, 1: bool, 2: ?string} flows ayon sa id, complete, error
+     * GET flows: isang tawag, buong listahan (hindi pinapansin ng API ang ?page; ang data.flows ay lahat ng flow,
+     * flat). Kapag error o kakaibang sagot: walang listahan, kaya walang minamarkahang "wala".
+     * @return array{0: ?array<string, array{name:string, removed:bool}>, 1: ?string} flows ayon sa id, error
      */
     private function readFlows(string $page, float $deadline): array
     {
-        $flows = [];
-        for ($n = 1; $n <= self::MAX_FLOW_PAGES; $n++) {
-            [$body, $error] = $this->call($page, '/flows', ['page' => $n], $deadline);
-            if ($error !== null) {
-                // Ang unang page lang ang error; ang naubos na oras sa susunod na page ay "hindi natapos".
-                return $n === 1 || $error !== 'kulang sa oras' ? [[], false, $error] : [$flows, false, null];
-            }
-            $list = $body['data']['flows'] ?? null;
-            // Lampas sa huling page: data null. Ang ibang kakaibang sagot ay hindi itinuturing na dulo.
-            if ($n > 1 && array_key_exists('data', $body) && $body['data'] === null) return [$flows, true, null];
-            if (!is_array($list) || !array_is_list($list)) return [[], false, 'Botcake: hindi listahan ang sagot'];
+        [$body, $error] = $this->call($page, '/flows', [], $deadline);
+        if ($error !== null) return [null, $error];
 
-            $new = 0;
-            foreach ($list as $f) {
-                if (!is_array($f) || !isset($f['id']) || !is_scalar($f['id'])) continue;
-                $id = (string) $f['id'];
-                if (isset($flows[$id])) continue;
-                $name = is_string($f['name'] ?? null) ? trim($f['name']) : '';
-                $flows[$id] = ['name' => mb_substr($name !== '' ? $name : '(walang pangalan)', 0, 255), 'removed' => !empty($f['is_removed'])];
-                $new++;
-            }
-            if ($new === 0) return [$flows, true, null];
+        $list = $body['data']['flows'] ?? null;
+        if (!is_array($list) || !array_is_list($list)) return [null, 'Botcake: hindi listahan ang sagot'];
+
+        $flows = [];
+        foreach ($list as $f) {
+            if (!is_array($f) || !isset($f['id']) || !is_scalar($f['id'])) continue;
+            $name = is_string($f['name'] ?? null) ? trim($f['name']) : '';
+            $flows[(string) $f['id']] = ['name' => mb_substr($name !== '' ? $name : '(walang pangalan)', 0, 255), 'removed' => !empty($f['is_removed'])];
         }
 
-        return [$flows, false, null];
+        return [$flows, null];
     }
 
     /**
@@ -265,7 +260,8 @@ class BotcakeFlowNames
         $token  = trim((string) $this->settings->get($page, 'botcake', 'token'));
         if ($pageId === '' || $token === '') return [null, 'walang botcake.page_id o token'];
 
-        $left = $deadline - $this->clock->now();
+        // Kasama sa oras ang posibleng paghihintay ng rate limit (hanggang MIN_INTERVAL) bago ang request.
+        $left = $deadline - $this->clock->now() - BotcakeClient::MIN_INTERVAL;
         if ($left < self::MIN_SECONDS) return [null, 'kulang sa oras'];
         $timeout = (int) min(self::CALL_TIMEOUT, floor($left));
 
