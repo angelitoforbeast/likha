@@ -191,3 +191,66 @@ Not done: there is no running app with the server data here. To check after rele
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories; the cases above come from its Tests list and amendment 1.
+
+## Amendment 2
+
+### Amendment changes (kept in the handoff folder, not committed)
+
+1. **"Bawat oras":** a start, an end and every N hours (default 1), stored as a range beside `send_times`. Each expanded time runs under every send-time rule. The summary reads "Bawat oras, 9 AM-9 PM".
+2. **Per-day rule unchanged:** In transit and then Delivering on the same day is allowed; nothing else gets a second message.
+3. **The migration does not change the live send times.** Mira sets the hourly ranges after release.
+
+### What changed
+
+- **Migration `2026_10_19_100200_add_send_range_to_chatblast_campaigns`:** one nullable JSON column, `send_range` (`{"start":"09:00","end":"21:00","every":1}`). Live rows get NULL; `send_times` is untouched (tested).
+- **`ChatblastSchedule`:**
+  - `campaignTimes()` = `send_times` plus the expanded range, sorted, no duplicates.
+  - `rangeTimes()` expands from start to end within one day, every N hours. The end counts only when it lands on the step (5 AM to 4 PM every 2 hours gives 5, 7, … 3 PM). It returns nothing for an invalid range or a step under an hour.
+  - `invalidRange()`: start and end must be `HH:MM`, the end after the start (no crossing midnight), and every a whole number from 1 to 12.
+  - A step without its own times uses the sequence's times including the range. Due times, the next run, the auto run and the "new past time doesn't fire" stamp all go through the same times, so weekdays, the 3-hour limit, pause, off, the caps, the backlog rule and one message per waybill per status per day apply unchanged.
+- **Summary:**
+  - "Araw-araw, Bawat oras, 9 AM-9 PM";
+  - "Bawat 2 oras, 5 AM-3 PM" (shows the last real time);
+  - with a list as well: "8:00 AM at 10:30 AM; Bawat oras, 9:30 AM-11:30 AM".
+- **Sequence update (`send_range`):** a missing or null `every` means 1, a whole-number string is accepted, anything else is refused, and `null` clears the range. The change is logged as a settings field.
+- **Page:** a "Bawat oras" row in each sequence's schedule: on/off, every N hours, from and to. It saves on change with its own mark, and turning it off clears the range.
+
+### Tests (amendment 2)
+
+| Case | Test | Result |
+|---|---|---|
+| Expansion with an inclusive end (13 times for 9–21), every 2 hours, start minutes kept, merged with the list; summary text | `ChatblastScheduleTest::test_an_hourly_range_expands_with_an_inclusive_end_and_reads_as_bawat_oras` | pass |
+| Auto fires hourly inside the range only (nothing at 08:59, 09:00 / 10:00 / 11:00 yes, 10:05 no, 12:00 and 13:00 no) | `…::test_auto_fires_hourly_inside_the_range_only_and_once_per_hour` | pass |
+| A late tick inside the range runs once for the missed hours and stamps the latest | `…::test_a_late_tick_inside_the_range_runs_once_for_the_hours_it_missed` | pass |
+| In transit sent, then Delivering the same day is allowed; a second Delivering sequence is skipped | `…::test_a_waybill_messaged_in_transit_can_get_the_delivering_message_the_same_day_but_nothing_more` | pass |
+| Range saves and clears, with validation; a range added at 14:10 doesn't fire 14:00, and the next run is 15:00 | `ChatblastSequenceStepsTest::test_the_hourly_range_saves_validated_and_clears` | pass |
+| The migration leaves the live send times as they are (`send_range` NULL) | `ChatblastCampaignMigrationTest::test_the_schedule_columns_keep_the_live_campaigns_exactly_and_default_to_every_day` | pass |
+
+Red runs:
+- **First run:** the expansion, hourly-auto and save tests failed for the right reasons (no range support).
+- **Fix loop:** "null is saved as 1" and the summary end ("4 PM" instead of "3 PM").
+- **Already green when written:** the In transit → Delivering test and the late-tick test. They pin 048 behaviour that already held.
+
+**The full suite was being cut off, now fixed.** The suite had stopped at "Maximum execution time of 55 seconds exceeded": the build and flow endpoints call `set_time_limit(55)` inside the single PHPUnit process, and on Windows that counts wall-clock time. The chatblast test base now resets the limit after each test (test-only).
+
+Full suite on the final tree: `Tests: 1541, Assertions: 17971, Errors: 1, Failures: 1, PHPUnit Deprecations: 11, Skipped: 3`. The only reds are the known `ExampleTest` and `ImportStartTest`. The Chatblast folder alone: 127 tests, all pass.
+
+### Review (amendment 2)
+
+- **One scoped `skeptic-reviewer` pass, then a re-check:** no blocker or major remains.
+- **Major (fixed):** an explicit `every: null` passed validation and the expansion looped forever. A hand-made request could have killed the sequences page and stalled `chatblast:auto`. `every` now must be a whole number (missing or null means 1), and the expansion refuses a zero step on its own.
+- **Minors fixed:**
+  - the summary shows the last real time;
+  - tests for a range added mid-day, a late tick, `every` over 12, and a numeric string.
+- **Accepted in `TODO.md` under 048/050, with reasons:**
+  - rows skipped in a way that frees their key are rebuilt and skipped again each range hour;
+  - no `hasColumn` guard for `send_range`.
+
+### After release, updated by amendment 2
+
+- **`php artisan migrate --force` right after the deploy.** The new column is read by the sequences page and `chatblast:auto`, which fail until it exists.
+- **Live times are unchanged.** To set the owner's practice, on each site's /chatblast/sequence:
+  - Delivering: "Bawat 1 oras, mula 05:00 hanggang 16:00".
+  - In transit: "Bawat 1 oras, mula 09:00 hanggang 21:00".
+  - Remove the old 09:00 from the list if it is no longer wanted.
+  - Then switch to auto (the confirmation shows the ready count; the backlog is not sent).
