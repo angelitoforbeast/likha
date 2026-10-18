@@ -582,3 +582,13 @@ Accepted, not fixed:
 - **The artisan console output of `chatblast:build` and `chatblast:auto` is still Tagalog** (`BuildChatblast.php`, `AutoChatblast.php`). Reason: it is not on a page (it lands in the cron log); the brief covers the three chatblast pages.
 - **Rows written before the release keep their Tagalog reasons** (data) until their state really changes; recheck treats the Tagalog form of the same reason as unchanged (fixed after the independent review). Reason: no data rewrite for the language; the list becomes English as rows change.
 - **Flow panel results cached just before the release show "pangalan" as the template source for at most 10 minutes.** Reason: the cache expires on its own.
+
+## 056: Chatblast as its own app (2026-10-18)
+
+- **The role lookup is written once more,** in `layouts/chatblast.blade.php` (`employeeProfile->role ?? role`), beside the per-controller `getNormalizedRole()`. Reason: it matches the per-controller legacy pattern, and `NavAccess` trims the role itself. Suggestion for the owner: one shared helper.
+- **The path `/chatblast/page-settings` is written in four places** (`ChatblastNav` three times, the route prefix). Reason: small; changing it means changing the route anyway.
+- **/owner/nav-settings now suggests `/chatblast/page-settings` and its GET sub-pages under "Add to nav"** (`NavLink::unregisteredRoutes`). Reason: only the CEO sees it; adding one grants page settings access, the same as the old link.
+- **The old POST and JSON page settings paths are gone.** A page settings tab opened before the deploy gets 405 on save, Test token or Sync until it is reloaded; its GET polls follow the 301. Reason: the spec allows moving them with their callers.
+- **Missing tests accepted:** the merged main nav link keeping the page settings link's position, and an inactive `/chatblast/page-settings` link granting nothing. Reason: the first is in the browser screenshots, the second is `NavAccess`'s existing `is_active` rule.
+- **At phone width (390 px) /chatblast/page-settings scrolls sideways,** because the "+ Column" form in the page body is wider than the screen; the Dashboard table does too. The new top bar fits. Reason: the page bodies are out of scope, and the spec's no-scroll rule is for 1366 and 1280 px.
+- **The page settings sub-pages (Customers, PSID coverage, Orders) still have Tagalog body text** ("Orders ng page", "Lahat ng page", "Mula", "Ipakita"…). Reason: the spec keeps each page's content as it is; translating them is a separate change.
