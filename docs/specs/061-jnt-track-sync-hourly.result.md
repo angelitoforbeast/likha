@@ -4,6 +4,7 @@ Spec: `docs/specs/061-jnt-track-sync-hourly.md`. Plan: `docs/plans/061-jnt-track
 
 - **Branch:** `feat/061-jnt-track-sync-hourly`, cut from `feat/057-page-auto-setup` at `d0f9a4e3`, with `main` (`5ce36281`) merged in first. Not pushed.
 - **Merge conflicts:** `TODO.md` and `qa/stories.md` keep both sides. `PageSettings::deactivate()` keeps both cache clears (Ready and the chat page map). In the chatblast view, main's Test PSID modal and sticky table won; the page-settings link `#test-psid` now opens the modal.
+- **Second merge of `main`** (`9f10632b`, with specs 051 and 062) in `48170c3f`: `TODO.md` and `qa/stories.md` keep both sides; in the chatblast view only a comment conflicted (main's wording kept). No lock file changed. After the merge, `tests/Feature/Chatblast`, `tests/Feature/PageSettings` and `tests/Feature/Jnt`: 394 tests, all passing.
 - **Tests never call J&T:** fake HTTP and a fake clock only.
 
 ## Commits
