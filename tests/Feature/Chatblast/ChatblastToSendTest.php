@@ -97,6 +97,31 @@ class ChatblastToSendTest extends ChatblastTestCase
         $this->postJson('/chatblast/retry-failed', ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 1);
     }
 
+    public static function historyOrder(): array
+    {
+        // [chip, mga row na idinadagdag nang sunod-sunod (status, ilang araw nang binuo, oras ng sent_at, oras ng updated_at), inaasahang ayos]
+        return [
+            'sent: sent_at pababa, id ang tie-breaker, walang sent_at sa huli' => ['sent', [
+                ['sent', 3, '09:30', '09:30'], ['sent', 1, '08:00', '08:00'], ['unknown', 0, null, '09:50'], ['sent', 2, '09:30', '09:30'],
+            ], [3, 0, 1, 2]],
+            'failed: updated_at pababa, id ang tie-breaker' => ['failed', [
+                ['failed', 3, null, '09:30'], ['field_mismatch', 1, null, '08:00'], ['failed', 2, null, '09:30'],
+            ], [2, 0, 1]],
+        ];
+    }
+
+    /** @dataProvider historyOrder */
+    public function test_S_060_7_history_lists_the_latest_processed_first(string $chip, array $rows, array $order): void
+    {
+        $today = now('Asia/Manila')->toDateString();
+        $at = fn (?string $time) => $time === null ? null : now()->setTimeFromTimeString($time);
+        $ids = array_map(fn ($r) => $this->msg($r[0], ['created_at' => now()->subDays($r[1]), 'sent_at' => $at($r[2]), 'updated_at' => $at($r[3])]), $rows);
+
+        $listed = array_column($this->list(['view' => 'history', 'from' => $today, 'to' => $today, 'status' => $chip])->json('rows'), 'id');
+
+        $this->assertSame(array_map(fn ($i) => $ids[$i], $order), $listed);
+    }
+
     public function test_S_056_28_to_send_shows_when_it_was_updated_and_offers_refresh_now_instead_of_fetch_new(): void
     {
         $this->assertSame(['updated' => null, 'next' => '10:15'], $this->list(['view' => 'send'])->json('state.refresh'));

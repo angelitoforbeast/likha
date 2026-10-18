@@ -118,7 +118,7 @@ class ChatblastController extends Controller
         $readyRows = $grouped?->where('status', 'ready');
         $page   = max(1, (int) $this->str($request, 'p', 6));
 
-        $rows = $this->filtered($request, true)->orderByDesc('id')->offset(($page - 1) * self::PER_PAGE)->limit(self::PER_PAGE)
+        $rows = $this->ordered($this->filtered($request, true), $send ? null : $this->historyChip($request))->offset(($page - 1) * self::PER_PAGE)->limit(self::PER_PAGE)
             ->get(['id', 'created_at', 'page_name', 'kind', 'day', 'version', 'fb_name', 'waybill', 'jnt_status', 'psid', 'text', 'status', 'reason', 'attempts', 'last_http', 'sent_at', 'is_test']);
         $jnt = $rows->isEmpty() ? collect() : DB::table('from_jnts')->whereIn('waybill_number', $rows->pluck('waybill')->unique()->values())
             ->selectRaw('waybill_number, MAX(status) AS status')->groupBy('waybill_number')->pluck('status', 'waybill_number');
@@ -342,6 +342,23 @@ class ChatblastController extends Controller
         if ($from->diffInDays($to) > self::MAX_DAYS) $from = $to->copy()->subDays(self::MAX_DAYS)->startOfDay();
 
         return [$from, $to];
+    }
+
+    /**
+     * Ang ayos ng listahan. To send: ang pinakabagong nabuo muna (id). History: ang pinakabagong naproseso muna: sa Sent,
+     * sent_at pababa (ang walang sent_at, hal. ilang unconfirmed, sa huli); sa ibang chip, updated_at pababa. Ang id ang
+     * tie-breaker. Sa MySQL at SQLite, NULL ang pinakamaliit kaya nasa huli na sa DESC; sa pgsql, kailangan ang NULLS LAST.
+     */
+    private function ordered($q, ?array $chip)
+    {
+        if ($chip === null) return $q->orderByDesc('id');
+        if ($chip === self::HISTORY_CHIPS['sent']) {
+            DB::getDriverName() === 'pgsql' ? $q->orderByRaw('sent_at DESC NULLS LAST') : $q->orderByDesc('sent_at');
+        } else {
+            $q->orderByDesc('updated_at');
+        }
+
+        return $q->orderByDesc('id');
     }
 
     /**

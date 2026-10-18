@@ -1109,3 +1109,11 @@ Amendment 1. Tests in `tests/Feature/Chatblast/ChatblastAppTest.php` and `tests/
 | S-060.4 | Given To send or History, then the fixed block is the title with its description, one filter row and one chip row; the chip row holds the chips, the "Sending: …" status at the right in small text and a "Test PSID" button at its right end; there is no Test PSID disclosure | `test_S_060_4…` (2 data sets) | Passed · 2026-10-18 · auto |
 | S-060.5 | Given To send, when "Test PSID" is clicked, then the picker opens in a modal (search, pick, current PSID) and closes with ✕, Escape or a click outside | browser check | Passed · 2026-10-18 · headless browser |
 | S-060.6 | Given Page settings, then a "Ready N" chip comes right after "Pages N" and counts the pages with the green row border; clicking it shows only those pages, clicking it again shows every page, and it combines with the name search | `test_S_060_6…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-060B History lists the latest processed first (P1)
+
+Amendment 2. Test in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.7 | Given History > Sent, when a row built earlier was sent later than another, then it is listed first (sent_at descending, then id descending; a row without sent_at goes last); on the other chips the order is the time the row was processed (updated_at) descending, then id descending; To send keeps its order | `test_S_060_7…` (sent, failed) | Passed · 2026-10-18 · auto |
