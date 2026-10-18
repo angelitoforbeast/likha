@@ -84,6 +84,37 @@ class PageSettingsGridTest extends BotcakeApiTestCase
         ], $groups);
     }
 
+    public function test_S_054_2_the_grid_has_five_cells_per_row_in_a_fixed_table_and_keeps_every_action(): void
+    {
+        $res = $this->get('/page-settings')->assertOk();
+
+        $res->assertSee('table-fixed', false)
+            ->assertSee("[['botcake', 'Botcake'], ['flows', 'Flows']]", false)
+            ->assertSee("text: 'Orders / Customers'", false)
+            ->assertSee("text: 'Sync', title: 'Huling sync / Susunod na sync'", false);
+        // Ang bawat action ng row at ng page: maliit na button o link, may title.
+        foreach (["'Test', 'Test token'", "'Sync', 'Sync now'", "title: 'Customers'", "title: 'Orders na walang PSID'", "title: 'History'",
+                  'id="test-all"', 'id="sync-all"', 'id="sync-all-pause"', 'id="sync-all-resume"', 'id="sync-all-stop"', 'id="add-page"', 'id="add-column"'] as $action) {
+            $res->assertSee($action, false);
+        }
+    }
+
+    public function test_S_054_3_the_sync_cell_shows_the_dates_and_time_then_the_next_stop_date(): void
+    {
+        $this->get('/page-settings')
+            ->assertSee("s.dates ? s.dates + ' · ' + (s.at || '').slice(11) : (s.at || s.status)", false)
+            ->assertSee("'susunod: ' + (nx.from ? 'mula ' + nx.from : nx.label)", false);
+    }
+
+    public function test_S_054_4_open_detail_rows_live_outside_the_render_and_hold_the_other_keys_and_history(): void
+    {
+        $this->get('/page-settings')
+            ->assertSee('const open = new Set();', false)
+            ->assertSee('return open.has(r.key) ? [tr, detailTr(r)] : [tr];', false)
+            ->assertSee("columns.filter(c => c.group === 'other').map(c => line(r, c, 'w-40'))", false)
+            ->assertSee("class: 'hist-link", false);
+    }
+
     public function test_an_empty_table_still_shows_the_known_columns_including_the_four_flows(): void
     {
         $html = $this->get('/page-settings')->assertOk()->getContent();

@@ -10,9 +10,9 @@
         #grid-table th.sticky-col, #grid-table td.sticky-col { position: sticky; left: 0; z-index: 2; }
         #grid-table thead th { position: sticky; top: 0; z-index: 3; }
         #grid-table thead th.sticky-col { z-index: 4; }
-        #grid-table td.cell { cursor: text; }
-        #grid-table td.cell.readonly { cursor: default; }
-        #grid-table td.cell:hover .hist { visibility: visible; }
+        #grid-table .cell { cursor: text; }
+        #grid-table .cell.readonly { cursor: default; }
+        #grid-table .cell:hover .hist, #grid-table .cell:focus .hist { visibility: visible; }
         #grid-table .hist { visibility: hidden; }
     </style>
 </head>
@@ -96,6 +96,7 @@
         Token / secret: blangko = walang palit; ang laman ay hindi kailanman ipinapakita (huling 4 lang). Kada ilang segundo, kinukuha ang binago ng iba.
         ID ng Botcake, flow at field: numero lang.
         Sa ilalim ng flow ID: ang pangalan nito sa Botcake (kinukuha pagka-save at sa Test token na ok). Shipping template: kusang pinipili kapag blangko; puwedeng palitan.
+        ▸ sa tabi ng page: ang buong pangalan ng flows, ang buong template, ang detalye ng sync, ang ibang key at ang history.
     </p>
 
     <div id="grid"
@@ -110,7 +111,7 @@
          data-sync-all-url="{{ route('page-settings.sync-all') }}"
          data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}"
          data-customers-url="{{ route('page-settings.customers') }}">
-        <table id="grid-table" class="text-sm border-collapse min-w-full"></table>
+        <table id="grid-table" class="text-sm border-collapse w-full table-fixed"></table>
     </div>
 
     <div id="history" class="hidden fixed right-0 top-0 h-full w-96 max-w-full bg-white shadow-xl border-l p-4 overflow-auto text-sm z-50">
@@ -140,6 +141,7 @@
     let needsRender = false;
     const marks = new Map(); // "pk|key" → {text, cls, title}
     const saveSeq = new Map(); // "pk|key" → bilang ng huling save: ang sagot ng mas lumang save ay hindi na inilalapat
+    const open = new Set(); // mga page na bukas ang detalye: nasa labas ng render(), kaya hindi nagsasara sa poll o filter
 
     const cellId = (pk, key) => pk + '|' + key;
 
@@ -176,7 +178,7 @@
     function ensureColumn(key, secret) {
         if (columns.some(c => c.key === key)) return false;
         const dot = key.indexOf('.');
-        columns.push({key, provider: key.slice(0, dot), name: key.slice(dot + 1), label: key, secret: !!secret, readonly: false});
+        columns.push({key, provider: key.slice(0, dot), name: key.slice(dot + 1), label: key, secret: !!secret, readonly: false, group: 'other'});
         const known = columns.filter(c => c.label !== c.key), other = columns.filter(c => c.label === c.key);
         other.sort((a, b) => a.key.localeCompare(b.key));
         columns = known.concat(other);
@@ -191,40 +193,63 @@
 
     // ---- render ----
 
+    // Ang mga cell ng bawat row, para walang horizontal scroll: ang mga column ay pinagsama ayon sa group (mula sa server).
+    const GROUPS = [['botcake', 'Botcake'], ['flows', 'Flows']];
+    const WIDTHS = ['13%', '23%', '31%', '8%', '15%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
+    // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
+    const SHORT = {'botcake.page_id': 'ID', 'botcake.token': 'Token', 'botcake.token_status': 'Status', 'botcake.field.message': 'Message field',
+        'botcake.test_psid': 'Test PSID', 'botcake.flow.shipping': 'Shipping', 'botcake.flow.on_delivery': 'Delivering',
+        'botcake.flow.in_transit': 'In transit', 'botcake.flow.broadcast': 'Broadcast', 'botcake.template.shipping': 'Template'};
+
     function render() {
         if (editing) { needsRender = true; return; }
         needsRender = false;
 
+        const th = 'bg-gray-100 px-2 py-2 border-b border-r';
         const head = el('tr', {class: 'bg-gray-100 text-left text-xs text-gray-600'}, [
-            el('th', {class: 'sticky-col bg-gray-100 px-3 py-2 border-b border-r min-w-[14rem]', text: 'Page'}),
-            ...columns.map(c => el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', title: c.key}, [
-                c.label,
-                c.readonly ? el('span', {class: 'ml-1 text-gray-400', text: '(system)'}) : null,
-            ])),
-            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: ORDERS_LABEL}),
-            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r', text: 'Customers'}),
-            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Huling sync'}),
-            el('th', {class: 'bg-gray-100 px-3 py-2 border-b border-r whitespace-nowrap', text: 'Susunod na sync'}),
-            el('th', {class: 'bg-gray-100 px-3 py-2 border-b', text: ''}),
+            el('th', {class: 'sticky-col ' + th, text: 'Page'}),
+            ...GROUPS.map(([, label]) => el('th', {class: th, text: label})),
+            el('th', {class: th, text: 'Orders / Customers', title: ORDERS_LABEL + ' / Customers'}),
+            el('th', {class: th, text: 'Sync', title: 'Huling sync / Susunod na sync'}),
+            el('th', {class: 'bg-gray-100 px-2 py-2 border-b', text: ''}),
         ]);
 
         // Walang order sa window: naka-gray ang buong row (maaari pa ring i-edit; hindi nawawala ang settings).
-        const body = sortedRows().map(r => el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
-            el('td', {class: 'sticky-col ' + (r.info.orders ? 'bg-white' : 'bg-gray-50') + ' px-3 py-1 border-b border-r font-medium whitespace-nowrap', text: r.name}),
-            ...columns.map(c => cellTd(r, c)),
-            el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'orders'}, String(r.info.orders || 0)),
-            el('td', {class: 'px-3 py-1 border-b border-r text-right', 'data-info': 'customers'}, infoCustomers(r)),
-            paintSync(el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'sync'}), r),
-            el('td', {class: 'px-3 py-1 border-b border-r whitespace-nowrap text-xs', 'data-info': 'next'}, infoNext(r)),
-            el('td', {class: 'px-3 py-1 border-b whitespace-nowrap', 'data-info': 'actions'}, actions(r)),
-        ]));
+        const body = sortedRows().flatMap(r => {
+            const tr = el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
+                pageTd(r),
+                ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'}, columns.filter(c => c.group === group).map(c => line(r, c)))),
+                el('td', {class: 'px-2 py-1 border-b border-r align-top text-right text-xs', 'data-info': 'oc', title: ORDERS_LABEL + ' / Customers'}, infoOc(r)),
+                paintSync(el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'sync'}), r),
+                el('td', {class: 'px-2 py-1 border-b align-top', 'data-info': 'actions'}, actions(r)),
+            ]);
+            return open.has(r.key) ? [tr, detailTr(r)] : [tr];
+        });
 
-        table.replaceChildren(el('thead', {}, head), el('tbody', {}, body.length ? body
-            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(columns.length + 6), text: 'Wala pang page. Gamitin ang + Page.'}))));
+        table.replaceChildren(el('colgroup', {}, WIDTHS.map(w => el('col', {style: 'width: ' + w}))), el('thead', {}, head), el('tbody', {}, body.length ? body
+            : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(WIDTHS.length), text: 'Wala pang page. Gamitin ang + Page.'}))));
     }
 
-    function cellTd(row, col) {
-        const td = el('td', {class: 'cell px-3 py-1 border-b border-r align-top min-w-[9rem]' + (col.readonly ? ' readonly bg-gray-50 text-gray-600' : ''),
+    function pageTd(r) {
+        const isOpen = open.has(r.key);
+        return el('td', {class: 'sticky-col ' + (r.info.orders ? 'bg-white' : 'bg-gray-50') + ' px-2 py-1 border-b border-r align-top font-medium break-words'}, [
+            el('button', {type: 'button', class: 'toggle mr-1 text-gray-500 hover:text-gray-900', 'data-pk': r.key, 'aria-expanded': String(isOpen),
+                title: isOpen ? 'Isara ang detalye' : 'Buksan ang detalye', text: isOpen ? '▾' : '▸'}),
+            r.name,
+        ]);
+    }
+
+    // Isang linya sa loob ng cell: maliit na grey na label, saka ang value na nae-edit sa lugar (ang .cell).
+    function line(row, col, labelWidth = 'w-20') {
+        return el('div', {class: 'flex items-baseline gap-1 min-w-0'}, [
+            el('span', {class: labelWidth + ' shrink-0 truncate text-[11px] text-gray-400', title: col.label + (col.readonly ? ' (system)' : '') + ' · ' + col.key,
+                text: SHORT[col.key] || col.label}),
+            cellEl(row, col),
+        ]);
+    }
+
+    function cellEl(row, col) {
+        const td = el('div', {class: 'cell flex-1 min-w-0 rounded px-1' + (col.readonly ? ' readonly bg-gray-50 text-gray-600' : ''),
             'data-pk': row.key, 'data-key': col.key});
         if (!col.readonly) td.tabIndex = 0;
         paint(td, row, col);
@@ -254,7 +279,7 @@
 
     // Isang linya, putol kapag mahaba; ang buong text ay nasa hover.
     function detailLine(text, tone) {
-        return el('div', {class: 'text-xs truncate max-w-[18rem] ' + (TONE[tone] || 'text-gray-600'), title: text, text});
+        return el('div', {class: 'text-xs truncate ' + (TONE[tone] || 'text-gray-600'), title: text, text});
     }
 
     function detailOf(row, key) {
@@ -264,15 +289,8 @@
 
     function detailLines(row, col) {
         const cell = row.cells[col.key];
-        if (FLOW_KEY.test(col.key) && cell) {
-            const out = [detailOf(row, col.key + '.name')];
-            if (col.key === SHIPPING_KEY) {
-                const t = row.cells[TEMPLATE_KEY], d = row.cells[TEMPLATE_KEY + '.text'];
-                out.push(!t ? detailLine('Template: piliin ang template', 'grey')
-                    : detailLine('Template: ' + t.value + ' — ' + (d ? d.line : 'hindi pa nasusuri'), d ? d.tone : 'grey'));
-            }
-            return out;
-        }
+        // Ang template ay nasa susunod na linya ng parehong cell, kaya wala na itong linya sa ilalim ng shipping flow.
+        if (FLOW_KEY.test(col.key) && cell) return [detailOf(row, col.key + '.name')];
         if (col.key === TEMPLATE_KEY) return [cell ? detailOf(row, TEMPLATE_KEY + '.text') : detailLine('piliin ang template', 'grey')];
         return [];
     }
@@ -298,12 +316,13 @@
             editing.mark.className = 'block text-xs ' + (m ? m.cls : '');
             return;
         }
-        const td = table.querySelector(`td.cell[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`);
+        const td = table.querySelector(`.cell[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`);
         const row = rows.get(pk), col = columns.find(c => c.key === key);
         if (td && row && col) paint(td, row, col);
+        refreshDetail(pk);
     }
 
-    function infoCustomers(r) { return String(r.info.customers ?? 0); }
+    function infoOc(r) { return String(r.info.orders || 0) + ' / ' + String(r.info.customers ?? 0); }
 
     function infoSync(r) {
         const s = r.info.last_sync;
@@ -315,15 +334,78 @@
             + (s.failed && r.info.next ? ' · susunod: ' + (r.info.next.from ? 'mula ' + r.info.next.from : r.info.next.label) : '');
     }
 
-    // Pula ang "Huling sync" kapag failed ang huling run.
+    // Ang sync cell: "Okt 17 → Okt 18 · 01:04" at "susunod: mula Okt 17"; ang buong detalye ay nasa hover at sa detalye ng row.
+    // Pula kapag failed ang huling run.
     function paintSync(td, r) {
-        const s = r.info.last_sync;
-        td.textContent = infoSync(r);
+        const s = r.info.last_sync, nx = r.info.next;
+        const last = s ? (s.dates ? s.dates + ' · ' + (s.at || '').slice(11) : (s.at || s.status)) : 'wala pa';
+        const next = nx ? 'susunod: ' + (nx.from ? 'mula ' + nx.from : nx.label) : null;
+        td.title = infoSync(r) + (nx ? '\nSusunod na sync: ' + nx.label : '');
+        put(td, el('div', {class: 'truncate', text: last}), next ? el('div', {class: 'truncate', text: next}) : null);
         td.classList.toggle('text-red-600', !!(s && s.failed));
         return td;
     }
 
-    function infoNext(r) { return r.info.next ? r.info.next.label : ''; }
+    // ---- ang detalye ng row (▸): ang hindi kasya sa mga cell ----
+
+    function detailTr(r) {
+        const other = columns.filter(c => c.group === 'other');
+        return el('tr', {class: 'detail bg-gray-50', 'data-detail': r.key}, el('td', {class: 'px-4 py-2 border-b text-xs', colspan: String(WIDTHS.length)}, [
+            el('div', {class: 'grid grid-cols-3 gap-4', 'data-detail-info': ''}, detailInfo(r)),
+            el('div', {class: 'mt-2'}, [
+                el('div', {class: 'font-semibold text-gray-600', text: 'Ibang key'}),
+                other.length ? el('div', {class: 'grid grid-cols-2 gap-x-4'}, columns.filter(c => c.group === 'other').map(c => line(r, c, 'w-40')))
+                    : el('div', {class: 'text-gray-400', text: 'Wala (gamitin ang + Column).'}),
+            ]),
+            el('div', {class: 'mt-2 flex flex-wrap items-baseline gap-x-3'}, [
+                el('span', {class: 'font-semibold text-gray-600', text: 'History:'}),
+                ...columns.map(c => el('button', {class: 'hist-link text-blue-700 hover:underline', type: 'button', 'data-pk': r.key, 'data-key': c.key, title: c.key, text: c.label})),
+            ]),
+        ]));
+    }
+
+    const heading = text => el('div', {class: 'font-semibold text-gray-600', text});
+
+    // Buong text, walang putol: ang pangalan ng flows, ang body ng template at ang sync.
+    function detailInfo(r) {
+        const n = v => Number(v || 0).toLocaleString('en-US');
+        const s = r.info.last_sync;
+        const t = r.cells[TEMPLATE_KEY], body = r.cells[TEMPLATE_KEY + '.text'];
+        return [
+            el('div', {}, [heading('Flows'), ...columns.filter(c => FLOW_KEY.test(c.key)).map(c => {
+                const id = r.cells[c.key], name = r.cells[c.key + '.name'];
+                return el('div', {class: 'break-words'}, [
+                    el('span', {class: 'text-gray-500', text: (SHORT[c.key] || c.label) + ': '}),
+                    el('span', {class: 'font-mono', text: id ? id.value : '—'}),
+                    id ? el('span', {class: TONE[name ? name.tone : 'grey'] || 'text-gray-700', text: ' — ' + (name ? name.line : 'hindi pa nasusuri')}) : null,
+                ]);
+            })]),
+            el('div', {}, [heading('Shipping template'),
+                el('div', {class: 'font-mono break-all', text: t ? t.value : 'piliin ang template'}),
+                t ? el('div', {class: 'whitespace-pre-wrap break-words ' + (TONE[body ? body.tone : 'grey'] || 'text-gray-700'), text: body ? body.line : 'hindi pa nasusuri'}) : null,
+            ]),
+            el('div', {class: s && s.failed ? 'text-red-600' : ''}, [heading('Sync'), ...[
+                'Huling sync: ' + (s ? [s.dates, s.kind, s.at, s.stop_reason || s.status].filter(Boolean).join(' · ') : 'wala pa'),
+                s ? '+' + n(s.new) + ' bago · ' + n(s.updated) + ' na-update · ' + n(s.matched) + ' na-match · ' + n(s.ad_filled) + ' ad id' : null,
+                s && s.error ? 'Error: ' + s.error : null,
+                'Susunod na sync: ' + (r.info.next ? r.info.next.label : '—'),
+                ORDERS_LABEL + ': ' + n(r.info.orders) + ' · Customers: ' + n(r.info.customers),
+            ].filter(Boolean).map(text => el('div', {class: 'break-words', text}))]),
+        ];
+    }
+
+    // Ang bahaging hindi nae-edit lang ang binubuo ulit, para hindi mawala ang ine-edit na ibang key.
+    function refreshDetail(pk) {
+        const box = table.querySelector(`tr[data-detail="${CSS.escape(pk)}"] [data-detail-info]`);
+        const r = rows.get(pk);
+        if (box && r) put(box, ...detailInfo(r));
+    }
+
+    function toggle(pk) {
+        if (open.has(pk)) open.delete(pk); else open.add(pk);
+        render();
+        table.querySelector(`.toggle[data-pk="${CSS.escape(pk)}"]`)?.focus();
+    }
 
     // Kapareho ng BotcakeSyncAll::summary(): bilang kada uri ng susunod na sync.
     const SUMMARY = {window: 'window', continue: 'tuloy', by_date: 'by date', fresh: 'laktaw (sariwa)', missing: 'walang ID/token', invalid: 'token invalid'};
@@ -334,11 +416,11 @@
         document.getElementById('plan-summary').textContent = text || 'wala';
     }
 
-    function postForm(action, pageName, label, cls) {
+    function postForm(action, pageName, label, title, cls) {
         const f = el('form', {method: 'POST', action, class: 'inline'}, [
             el('input', {type: 'hidden', name: '_token', value: csrf}),
             el('input', {type: 'hidden', name: 'page_name', value: pageName}),
-            el('button', {class: cls, text: label}),
+            el('button', {class: cls, title, text: label}),
         ]);
         return f;
     }
@@ -346,12 +428,12 @@
     function actions(r) {
         const out = [];
         if (r.info.botcake) {
-            out.push(postForm(url.testTokenUrl, r.name, 'Test token', 'bg-gray-200 hover:bg-gray-300 px-2 py-0.5 rounded mr-1 text-xs'));
-            out.push(postForm(url.syncUrl, r.name, 'Sync now', 'bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded mr-1 text-xs'));
+            out.push(postForm(url.testTokenUrl, r.name, 'Test', 'Test token', 'bg-gray-200 hover:bg-gray-300 px-1.5 py-0.5 rounded text-xs'));
+            out.push(postForm(url.syncUrl, r.name, 'Sync', 'Sync now', 'bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded text-xs'));
         }
-        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs mr-2', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), text: 'Customers'}));
-        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), text: 'Orders'}));
-        return out;
+        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), title: 'Customers', text: 'Cust.'}));
+        out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), title: 'Orders na walang PSID', text: 'Orders'}));
+        return [el('div', {class: 'flex flex-wrap items-center gap-1'}, out)];
     }
 
     // Kapag nagbago ang Botcake ID o token: ang mga button lang ng row ang binabago, hindi ang buong table
@@ -366,16 +448,20 @@
         const tr = table.querySelector(`tr[data-pk="${CSS.escape(pk)}"]`);
         const r = rows.get(pk);
         if (!tr || !r) return;
-        tr.querySelector('[data-info="customers"]').textContent = infoCustomers(r);
+        tr.querySelector('[data-info="oc"]').textContent = infoOc(r);
         paintSync(tr.querySelector('[data-info="sync"]'), r);
-        tr.querySelector('[data-info="next"]').textContent = infoNext(r);
+        refreshDetail(pk);
         refreshSummary();
     }
 
     // ---- editing ----
 
     table.addEventListener('click', e => {
-        const td = e.target.closest('td.cell');
+        const toggler = e.target.closest('.toggle');
+        if (toggler) { toggle(toggler.dataset.pk); return; }
+        const link = e.target.closest('.hist-link');
+        if (link) { openHistory(link.dataset.pk, link.dataset.key); return; }
+        const td = e.target.closest('.cell');
         if (!td) return;
         const pk = td.dataset.pk, key = td.dataset.key;
         if (e.target.closest('.hist')) { openHistory(pk, key); return; }
@@ -387,7 +473,7 @@
     // Keyboard: Tab papunta sa cell, Enter o F2 para mag-edit, Enter ulit para i-save, Escape para hindi ituloy.
     table.addEventListener('keydown', e => {
         const td = e.target;
-        if (!td.matches || !td.matches('td.cell') || (e.key !== 'Enter' && e.key !== 'F2')) return;
+        if (!td.matches || !td.matches('.cell') || (e.key !== 'Enter' && e.key !== 'F2')) return;
         e.preventDefault();
         const col = columns.find(c => c.key === td.dataset.key);
         if (!col.readonly) startEdit(td, rows.get(td.dataset.pk), col);
@@ -397,7 +483,7 @@
         if (editing) {
             finishEdit(true);
             // Kung nabuo ulit ang table, ang bagong td ng parehong cell ang gagamitin.
-            td = table.querySelector(`td.cell[data-pk="${CSS.escape(row.key)}"][data-key="${CSS.escape(col.key)}"]`) || td;
+            td = table.querySelector(`.cell[data-pk="${CSS.escape(row.key)}"][data-key="${CSS.escape(col.key)}"]`) || td;
         }
         const cell = row.cells[col.key];
         const secret = col.secret || !!(cell && cell.secret);
@@ -424,7 +510,7 @@
 
     // Bumabalik ang focus sa cell, kahit nabuo ulit ang table.
     function refocus(pk, key) {
-        table.querySelector(`td.cell[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`)?.focus();
+        table.querySelector(`.cell[data-pk="${CSS.escape(pk)}"][data-key="${CSS.escape(key)}"]`)?.focus();
     }
 
     function finishEdit(doSave) {
