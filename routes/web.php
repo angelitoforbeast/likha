@@ -310,10 +310,11 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-setting
 });
 
 // Ang lumang /page-settings (bookmarks, links ng staff): 301 sa parehong path sa ilalim ng /chatblast, kasama ang query.
-// GET lang; ang mga POST at JSON ay lumipat kasama ng mga tumatawag (route() lahat).
-Route::get('/page-settings/{rest?}', function (\Illuminate\Http\Request $request, ?string $rest = null) {
+// GET lang; ang mga POST at JSON ay lumipat kasama ng mga tumatawag (route() lahat). Ang raw path (naka-encode pa) ang
+// dinadala, hindi ang decoded na {rest}: ang %2F, %3F at %0D%0A ay nananatiling encoded sa Location.
+Route::get('/page-settings/{rest?}', function (\Illuminate\Http\Request $request) {
     $query = $request->getQueryString();
-    return redirect('/chatblast/page-settings' . ($rest !== null ? '/' . $rest : '') . ($query ? '?' . $query : ''), 301);
+    return redirect('/chatblast' . $request->getPathInfo() . ($query ? '?' . $query : ''), 301);
 })->where('rest', '.*')->name('page-settings.legacy');
 
 Route::prefix('botcake/psid')->group(function () {

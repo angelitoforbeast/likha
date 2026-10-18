@@ -18,6 +18,10 @@ class ChatblastAppTest extends ChatblastTestCase
             'page'         => ['/page-settings?a=1&b=two', '/chatblast/page-settings?a=1&b=two'],
             'walang query' => ['/page-settings', '/chatblast/page-settings'],
             'sub-page'     => ['/page-settings/customers?page=Page%20Uno', '/chatblast/page-settings/customers?page=Page%20Uno'],
+            // Ang path ay galing sa user: dinadala nang naka-encode pa rin, sa app host at sa ilalim ng /chatblast/page-settings.
+            'ibang host'   => ['/page-settings/%2F%2Fevil.example/x', '/chatblast/page-settings/%2F%2Fevil.example/x'],
+            'naka-encode'  => ['/page-settings/customers%3Fpage=x', '/chatblast/page-settings/customers%3Fpage=x'],
+            'bagong linya' => ['/page-settings/a%0D%0ALocation:%20x', '/chatblast/page-settings/a%0D%0ALocation:%20x'],
         ];
     }
 
