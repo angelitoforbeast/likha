@@ -287,7 +287,7 @@ class ChatblastController extends Controller
         $q = BotcakeMessage::query()->where(function ($w) use ($from, $to, $windows) {
             $w->whereBetween('created_at', [$from, $to]);
             foreach ($windows as $kind => $days) {
-                $w->orWhere(fn ($r) => $r->where('status', 'ready')->where('kind', $kind)->where('created_at', '>=', now()->subDays((int) $days)));
+                $w->orWhere(fn ($r) => $r->where('status', 'ready')->where('is_test', false)->where('kind', $kind)->where('created_at', '>=', now()->subDays((int) $days)));
             }
         });
 

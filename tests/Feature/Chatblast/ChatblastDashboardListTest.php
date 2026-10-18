@@ -86,6 +86,14 @@ class ChatblastDashboardListTest extends ChatblastTestCase
         $day = now('Asia/Manila')->subDay()->toDateString();
         $this->postJson('/chatblast/send-filtered', ['from' => $day, 'to' => $day])->assertOk()->assertJsonPath('queued', 0);
         $this->assertSame('ready', BotcakeMessage::find($other)->status);
+
+        // Ang filter ng page, sequence at hanap ay sumasaklaw din sa ready mula sa naunang araw; ang test row ay hindi kasama.
+        $test = $this->msg('ready', ['created_at' => now()->subDays(2), 'is_test' => true]);
+        foreach ([['page' => 'Page Dos'], ['kind' => 'in_transit'], ['q' => 'Iba']] as $filter) {
+            $this->postJson('/chatblast/send-filtered', $filter + ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 0);
+        }
+        $this->assertSame(['ready', 'ready'], [BotcakeMessage::find($other)->status, BotcakeMessage::find($test)->status]);
+        $this->assertSame(1, $this->list()->json('earlier_ready'), 'ang test row ay hindi binibilang');
     }
 
     public function test_S_056_11_fetch_new_runs_as_a_queued_job_one_at_a_time_and_always_frees_the_lock(): void
@@ -128,6 +136,21 @@ class ChatblastDashboardListTest extends ChatblastTestCase
         $probe->release();
         $this->assertSame('failed', $this->list()->json('state.build.status'));
         $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertOk(); // malaya na ang slot
+
+        // Nawala ang slot habang naghihintay pa (hal. walang worker nang 10 minuto): "stopped", at puwede nang pindutin ulit.
+        Cache::forget(ChatblastBuildJob::SLOT);
+        $build = $this->list()->json('state.build');
+        $this->assertSame(['stopped', 'The fetch waited too long for the worker; press Fetch new again.'], [$build['status'], $build['error']]);
+
+        // Kinuha ng ibang build ang lock bago tumakbo ang job: busy, at ang lock ng iba ay hindi ginagalaw.
+        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertOk();
+        $job = Queue::pushed(ChatblastBuildJob::class)->last();
+        $other = Cache::lock(Chatblast::BUILD_LOCK, 60);
+        $other->get();
+        $job->handle(app(Chatblast::class));
+        $this->assertSame('busy', $this->list()->json('state.build.status'));
+        $this->assertFalse(Cache::lock(Chatblast::BUILD_LOCK, 5)->get());
+        $other->release();
     }
 
     public function test_S_056_12_the_dashboard_says_what_the_list_covers_and_shows_the_fetch_progress(): void

@@ -61,7 +61,7 @@
 
     {{-- Mga aksyon --}}
     <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
-        <button id="build" type="button" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1 rounded">Fetch new</button>
+        <button id="build" type="button" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1 rounded disabled:opacity-50">Fetch new</button>
         <button id="send-selected" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50" disabled>Send selected (0)</button>
         <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send all ready</button>
         <button id="retry" type="button" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Retry failed</button>
@@ -169,7 +169,7 @@
         const params = {...filters(), p: page};
         if (light && Date.now() - countsAt < 30000) params.light = '1';
         const res = await fetch(url.listUrl + '?' + new URLSearchParams(params), {headers: {'Accept': 'application/json'}});
-        if (!res.ok) { notice('Could not load the list (HTTP ' + res.status + ').', 'text-red-600'); return; }
+        if (!res.ok) { notice('Could not load the list (HTTP ' + res.status + ').', 'text-red-600'); schedule(); return; } // tuloy ang poll
         last = await res.json();
         if (last.counts) { counts = last.counts; total = last.total; earlier = last.earlier_ready || 0; countsAt = Date.now(); }
         last.counts = counts;
@@ -209,15 +209,22 @@
 
     // "Fetch new" ay tumatakbo sa queue: ipinapakita ang lagay habang naghihintay o tumatakbo, at ang resulta kapag tapos
     // (para sa pindot sa tab na ito). Habang tumatakbo, naka-disable ang button (kahit ibang tab o user ang pumindot).
+    // Ang progress ay isinusulat lang kapag walang ibang mensahe (o progress na rin ang nakasulat), para hindi matakpan
+    // ang "N queued" o ang error ng ibang button; ang naiwang progress ay binubura kapag tapos na.
     let watchBuild = false;
+    const PROGRESS = 'Fetching new messages in the background';
     const buildRunning = b => !!b && (b.status === 'queued' || b.status === 'running');
     function renderBuild(b) {
         document.getElementById('build').disabled = buildRunning(b);
+        const shown = document.getElementById('notice').textContent;
         if (buildRunning(b)) {
-            notice('Fetching new messages in the background: ' + (b.status === 'queued' ? 'waiting for the worker' : 'running')
-                + ' · ' + fmt(b.seconds) + ' s. The list updates when it is done.');
+            if (watchBuild || shown === '' || shown.startsWith(PROGRESS)) {
+                notice(PROGRESS + ': ' + (b.status === 'queued' ? 'waiting for the worker' : 'running')
+                    + ' · ' + fmt(b.seconds) + ' s. The list updates when it is done.');
+            }
             return;
         }
+        if (!watchBuild && shown.startsWith(PROGRESS)) notice('');
         if (!watchBuild || !b) return;
         watchBuild = false;
         if (b.status === 'done') {
