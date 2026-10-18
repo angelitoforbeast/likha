@@ -14,11 +14,27 @@ use Illuminate\Support\Facades\Log;
  */
 class PageSettings
 {
-    /** Mga key na system lang ang sumusulat (hindi tinatanggap mula sa page). */
-    public const SYSTEM_KEYS = ['botcake.token_status'];
+    /**
+     * Mga key na system lang ang sumusulat (hindi tinatanggap mula sa page). Kasama rin ang mga tugma sa
+     * DETAIL_PATTERN: ang pangalan ng bawat flow (botcake.flow.<x>.name) at ang body ng shipping template.
+     */
+    public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text'];
+
+    /** Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID o template), hindi bilang sariling column. */
+    public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$/';
 
     /** Mga key na laging secret. */
     public const SECRET_KEYS = ['botcake.token'];
+
+    public static function isSystemKey(string $full): bool
+    {
+        return in_array($full, self::SYSTEM_KEYS, true) || self::isDetailKey($full);
+    }
+
+    public static function isDetailKey(string $full): bool
+    {
+        return (bool) preg_match(self::DETAIL_PATTERN, $full);
+    }
 
     public function normPage(?string $page): string
     {
@@ -54,7 +70,7 @@ class PageSettings
             return ['key' => 'Key: maliliit na letra, numero, _ at . lang (hal. flow.on_delivery).'];
         }
 
-        if (!$system && in_array($full, self::SYSTEM_KEYS, true)) {
+        if (!$system && self::isSystemKey($full)) {
             return ['value' => 'Ang ' . $full . ' ay isinusulat ng system (Test token / sync), hindi dito.'];
         }
 

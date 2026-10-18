@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SyncBotcakeCustomersJob;
+use App\Support\BotcakeClock;
 use App\Support\NavAccess;
 use App\Models\MacroOutput;
 use App\Models\PageSetting;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeCustomerSync;
 use App\Services\BotcakeException;
+use App\Services\BotcakeFlowNames;
 use App\Services\BotcakeSyncAll;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
@@ -23,6 +25,12 @@ use Illuminate\Support\Facades\DB;
  */
 class PageSettingController extends Controller
 {
+    /**
+     * Hanggang ilang segundo mula sa simula ng Test token ang lahat ng tawag sa Botcake: ang token check (hanggang 20 s),
+     * ang flows at templates, at ang paghihintay ng rate limit sa pagitan nila.
+     */
+    private const TEST_BUDGET = 25;
+
     public function __construct(private PageSettings $settings)
     {
     }
@@ -89,10 +97,20 @@ class PageSettingController extends Controller
 
         if ($request->boolean('clear') || ($value === '' && !$secret)) {
             if (!$current) return response()->json(['status' => 'unchanged', 'cell' => null]);
-            if (in_array($provider . '.' . $key, PageSettings::SYSTEM_KEYS, true)) {
+            if (PageSettings::isSystemKey($provider . '.' . $key)) {
                 return response()->json(['error' => 'Ang ' . $provider . '.' . $key . ' ay isinusulat ng system.'], 422);
             }
             foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());
+            // Ang binurang template ay pinipili ulit ng system (kapag may iisang malinaw na template).
+            if ($provider . '.' . $key === 'botcake.template.shipping') {
+                return response()->json($this->refreshAfterSave($page, 'botcake.template.shipping', $grid) + ['status' => 'cleared', 'cell' => null]);
+            }
+            // Binurang flow ID: kasama ang pangalan nito, para hindi ito magamit sa pagpili ng template.
+            if (BotcakeFlowNames::watches($provider . '.' . $key)) {
+                $names = $this->settings->pageQuery($page)->where('provider', $provider)->where('key', $key . '.name')->where('active', true)->get();
+                foreach ($names as $s) $this->settings->deactivate($s);
+                return response()->json(['status' => 'cleared', 'cell' => null, 'cells' => [$provider . '.' . $key . '.name' => null]]);
+            }
             return response()->json(['status' => 'cleared', 'cell' => null]);
         }
 
@@ -104,8 +122,33 @@ class PageSettingController extends Controller
         if ($errors) return response()->json(['error' => reset($errors)], 422);
 
         $res = $this->settings->set($page, $provider, $key, $value, $secret, Auth::id());
+        $out = ['status' => $res['status'], 'cell' => $grid->cell($res['setting'])];
 
-        return response()->json(['status' => $res['status'], 'cell' => $grid->cell($res['setting'])]);
+        // Flow ID o template: ang pangalan o body mula sa Botcake, para sa page na ito lang. Hindi humaharang ang error.
+        if (BotcakeFlowNames::watches($provider . '.' . $key)) {
+            $out = $this->refreshAfterSave($page, $provider . '.' . $key, $grid) + $out;
+        }
+
+        return response()->json($out);
+    }
+
+    /**
+     * Ang mga cell na isinulat ng BotcakeFlowNames (pangalan, template, body), para ma-update ang row nang walang reload.
+     * Kapag pinili ng system ang template, iyon din ang cell ng template.
+     */
+    private function refreshAfterSave(string $page, string $full, PageSettingsGrid $grid): array
+    {
+        $res = app(BotcakeFlowNames::class)->afterSave($page, $full);
+        $out = ['cells' => $this->cells($res['written'], $grid), 'refresh_error' => $res['error']];
+        if (isset($res['written'][$full])) $out['cell'] = $grid->cell($res['written'][$full]);
+
+        return $out;
+    }
+
+    /** @param array<string, ?PageSetting> $written */
+    private function cells(array $written, PageSettingsGrid $grid): array
+    {
+        return array_map(fn ($s) => $s ? $grid->cell($s) : null, $written);
     }
 
     /** Ang dating values ng isang cell (secret = huling 4 lang). */
@@ -159,10 +202,14 @@ class PageSettingController extends Controller
         return redirect()->route('page-settings.index')->with('success', $label . ': ' . $res['setting']->page_name . ' · ' . $res['setting']->fullKey());
     }
 
-    /** Isang custom_fields call: ok o invalid, itinatala sa botcake.token_status. */
-    public function testToken(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync)
+    /**
+     * Isang custom_fields call: ok o invalid, itinatala sa botcake.token_status. Kapag ok: ang pangalan ng mga flow at
+     * ang template (isang flows read at isang templates call).
+     */
+    public function testToken(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, BotcakeClock $clock)
     {
         $this->checkAccess();
+        $start = $clock->now();
 
         $page   = (string) $request->input('page_name', '');
         $pageId = $this->settings->get($page, 'botcake', 'page_id');
@@ -172,23 +219,33 @@ class PageSettingController extends Controller
         }
 
         try {
-            $status = $client->testToken($pageId, $token) ? 'ok' : 'invalid';
+            // Parehong rate key ng flows at templates na susunod: 2 request kada segundo kada page, kasama ang token check.
+            $status = $client->shared(sha1($token), 30)->testToken($pageId, $token) ? 'ok' : 'invalid';
         } catch (BotcakeException $e) {
             return redirect()->route('page-settings.index')->with('error', 'Hindi nasubukan ang token: ' . $e->getMessage());
         }
 
         $sync->tokenStatus($page, $status, true);
 
-        return redirect()->route('page-settings.index')->with($status === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $status);
+        $note = '';
+        if ($status === 'ok') {
+            $res = app(BotcakeFlowNames::class)->afterTokenOk($page, $start + self::TEST_BUDGET);
+            $note = $res['error'] === null ? ' · na-refresh ang flows at template' : ' · hindi na-refresh ang flows at template: ' . $res['error'];
+        }
+
+        return redirect()->route('page-settings.index')->with($status === 'ok' ? 'success' : 'error', $this->settings->normPage($page) . ' · Token: ' . $status . $note);
     }
 
     /**
-     * "Test lahat ng token": isang page kada request (isa-isang tinatawag ng browser), isang Botcake call na walang
-     * retry, kaya hindi lalampas nang ~20 segundo. Itinatala gaya ng row button; ang error ay hindi itinatala.
+     * "Test lahat ng token": isang page kada request (isa-isang tinatawag ng browser), isang token check na walang
+     * retry (hanggang 20 s). Itinatala gaya ng row button; ang error ay hindi itinatala. Kapag ok: ang pangalan ng mga
+     * flow at ang template; ang buong request ay hindi lalampas nang ~TEST_BUDGET (25) segundo, kasama ang token check
+     * at ang paghihintay ng rate limit. Ang mga cell na isinulat ay ibinabalik (cells) para ma-update ang row nang walang reload.
      */
-    public function testTokenJson(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, PageSettingsGrid $grid)
+    public function testTokenJson(Request $request, BotcakeClient $client, BotcakeCustomerSync $sync, PageSettingsGrid $grid, BotcakeClock $clock)
     {
         $this->checkAccess();
+        $start = $clock->now();
 
         $page   = (string) $request->input('page_name', '');
         $pageId = $this->settings->get($page, 'botcake', 'page_id');
@@ -196,7 +253,7 @@ class PageSettingController extends Controller
         if (!$pageId || !$token) return response()->json(['status' => 'skipped', 'cell' => null]);
 
         try {
-            $status = $client->once()->testToken($pageId, $token) ? 'ok' : 'invalid';
+            $status = $client->shared(sha1($token), 20)->once(20)->testToken($pageId, $token) ? 'ok' : 'invalid';
         } catch (BotcakeException $e) {
             return response()->json(['status' => 'error', 'error' => $e->getMessage(), 'reason' => $e->reason, 'cell' => null]);
         }
@@ -205,7 +262,14 @@ class PageSettingController extends Controller
         $row = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'token_status')
             ->where('active', true)->orderByDesc('id')->first();
 
-        return response()->json(['status' => $status, 'cell' => $row ? $grid->cell($row) : null]);
+        $out = ['status' => $status, 'cell' => $row ? $grid->cell($row) : null, 'cells' => null];
+        if ($status === 'ok') {
+            $res = app(BotcakeFlowNames::class)->afterTokenOk($page, $start + self::TEST_BUDGET);
+            $out['cells'] = $this->cells($res['written'], $grid);
+            $out['refresh_error'] = $res['error'];
+        }
+
+        return response()->json($out);
     }
 
     /** Incremental sync ng isang page, sa queue. */

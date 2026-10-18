@@ -540,3 +540,13 @@ Accepted, not fixed:
 - **(review) `auto_runs` joins the other new columns without a `hasColumn` guard** (same deploy-to-migrate window; merge danger in the result).
 - **(review) A failed optimistic save on the sequence page restores the value it saw at click time,** which can undo a newer value from a second save still in flight; nothing wrong is stored on the server, and the page says to reload. Reason: the server refuses the stale save; a reload shows the truth.
 - **(review) Missing test (minor):** two overlapping auto runs claiming the same time (the second claims nothing). Reason: the claim is under the row lock and `queue()` only moves rows that are still sendable, so a row is never queued twice.
+## 052: flow names and shipping template on /page-settings (2026-10-18)
+
+- **A flow name that itself begins with a marker** (`!wala`, `!bura`, `!hindi approved`, `!hindi nasuri: `) is shown as that marker. Reason: unrealistic Botcake answer; the worst case is a wrong grey or red line, no data lost.
+- **The flow-key and detail-key patterns live in PHP (`PageSettings::DETAIL_PATTERN`, `BotcakeFlowNames::watches`, the `refreshFlows` filter) and in the grid JS (`FLOW_KEY`, `DETAIL_KEY`).** Reason: the browser needs them without a round trip; they change together, and the tests cover the PHP side.
+- **`POST /page-settings` (`store`, no UI) changes a flow ID without a refresh.** Reason: the grid saves through `/page-settings/cell`; the next Test token or cell save fills the name.
+- **The re-checks of a flow ID or template name before a write are not under a lock.** Reason: they narrow a window of up to 20 s to milliseconds; the next save or Test token rewrites the line.
+- **No JS test for the grid's second lines or for ignoring a late save response** (per-cell sequence number in the view). Reason: the project has no JS test harness (adding one is a new dependency); S-052.10 is an owner check by hand.
+- **The auto-picked template is stored in `botcake.template.shipping`, and `ChatblastFlowInfo::pickTemplate` treats it as the owner's choice.** Reason: the pick follows the same rules, so the chatblast preview lands on the same template; `ChatblastFlowInfo` belongs to the chatblast pages, which another branch is changing.
+- **Deactivating a `.name` or `.text` row only resets its line to "hindi pa nasusuri".** Reason: the next save or Test token fills it again; nothing else reads those rows.
+- **The row Test token button still retries the token check (up to 3 times) before the refresh,** so on a slow Botcake its refresh is skipped as "kulang sa oras". Reason: only Test lahat has a per-request limit; the row button's retry behaviour is unchanged apart from the shared rate key.
