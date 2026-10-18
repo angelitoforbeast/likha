@@ -674,3 +674,11 @@ Accepted, not fixed:
 
 - **The page-script tests for the edit dropdown find literals only;** the browser check proves the behaviour. Reason: no JS test harness.
 - **A list stored before 062 holds the CHATBLAST / "GPT Input" candidates only** until the page's next Test or Botcake ID / token save, so its dropdown lists only those. Reason: the next Test refreshes it; "Test all tokens" refreshes every page at once.
+
+## 063: Meta payment dates (2026-10-18)
+
+- **The importer holds the whole file in memory before writing** (it decides the date order from every row first, so it no longer streams 2,000 rows at a time). Reason: the date order rule needs a first pass over the rows, and real Meta invoice summaries are a few dozen rows; the upload limit is 50 MB.
+- **Text dates that aren't plain slash or ISO (e.g. `03/10/2026 00:00`, `Feb 30, 2026`) still fall to the loose `Carbon::parse`.** Reason: already true before; Meta files today have plain dates, and the range guard catches far-off results.
+- **Untested here:** xlsx uploads (DateTime cells and numeric serials skip the order rule), D/M decided by a data row alone, 2-digit years, the backfill's equal-distance and "row changed while running" guards, `--dry-run` with `--apply`, and the MySQL/pgsql backup statements (sqlite only in tests). Reason: on the owner's command path, or branches read by the reviewer; the suite stays small.
+- **Two small additions beyond the brief:** `.` is accepted as a date separator, and the command refuses `--dry-run` together with `--apply`. Reason: harmless, kept.
+- **The backfill can flag a correct row** when its day is 12 or less and above its month, and it was first imported about a month or more after the payment (the swapped reading is then closer to `created_at`). Reason: the rule is decided in the spec; none of the stored sample files is that late. The owner can check the dry-run CSV: rows whose `source_filename` was a "Billing report" (lowercase) file should not appear.
