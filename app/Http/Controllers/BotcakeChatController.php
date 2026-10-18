@@ -112,6 +112,12 @@ class BotcakeChatController extends Controller
         // (6) Ang key ay dapat sa page na ito.
         if (!$guard->keyFitsPage($pageName, $given)) return $refuse('bad_key');
 
+        // (6b) Naka-Off ang bot ng page sa /chatbot: sumasagot pero walang iniimbak (binibilang).
+        if ($guard->botOff($pageName)) {
+            $guard->count('bot_off');
+            return response()->json(['ok' => true]);
+        }
+
         // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
         // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
         $check = $f['psid'] === null ? 'unchecked' : $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name']);

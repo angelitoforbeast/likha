@@ -294,6 +294,17 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     });
 });
 
+// /chatbot: ang listahan ng page ng sariling chatbot (On/Off, FLOW, botfields). Access gaya ng /chatblast (403 sa iba);
+// ang On/Off at ang pagdagdag ng page ay CEO lang (sa controller).
+Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatbot.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\ChatbotController::class, 'index'])->name('index');
+    Route::get('/data', [\App\Http\Controllers\ChatbotController::class, 'data'])->name('data');
+    Route::post('/cell', [\App\Http\Controllers\ChatbotController::class, 'cell'])->middleware('throttle:120,1,chatbot-cell')->name('cell');
+    Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');
+    Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
+    Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
+});
+
 // Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings
 // (NavAccess, sa controller): 404 sa iba.
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-settings')->name('page-settings.')->group(function () {

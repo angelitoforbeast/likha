@@ -258,6 +258,22 @@ class BotcakeChatSecurityTest extends ChatblastTestCase
             && !str_contains(json_encode($ctx), self::TOKEN) && !str_contains(json_encode($ctx), self::KEY_UNO))->once();
     }
 
+    public function test_S_068_8_a_page_with_the_bot_off_keeps_no_chats_and_is_counted(): void
+    {
+        Http::fake();
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '0');
+
+        BotcakePsid::create(['page' => 'Page Dos', 'fb_name' => 'Ana Cruz', 'psid' => 'psid-known', 'status' => 'available', 'source' => 'api']);
+
+        $this->send(['message' => 'while off'])->assertOk()->assertExactJson(['ok' => true]);
+        $this->send(['message' => 'dos on', 'page_id' => '2002'], self::KEY_DOS)->assertOk(); // walang active na row: On
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '1');
+        $this->send(['message' => 'back on'])->assertOk();
+
+        $this->assertSame(['dos on', 'back on'], BotcakeChat::orderBy('id')->pluck('message')->all());
+        $this->assertSame(1, $this->counts()['bot_off'] ?? 0);
+    }
+
     public function test_S_067_8_the_setup_command_dry_run_writes_nothing_and_prints_no_key(): void
     {
         Http::fake();

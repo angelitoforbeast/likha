@@ -19,7 +19,7 @@ class BotcakeChatGuard
     /** Dahilan => label sa Setup box. */
     public const REASONS = [
         'bad_ip' => 'IP not on the list', 'bad_key' => 'Bad key', 'unknown_page' => 'Unknown page', 'psid_not_found' => 'PSID not on the page',
-        'psid_unchecked' => 'PSID could not be checked',
+        'psid_unchecked' => 'PSID could not be checked', 'bot_off' => 'Bot off',
     ];
     public const VERIFY_TIMEOUT = 5;      // segundo: naghihintay ang Botcake sa sagot
     public const NOT_ON_PAGE_SECONDS = 3600;
@@ -76,6 +76,12 @@ class BotcakeChatGuard
         if ($own !== '' && hash_equals($own, $given)) return true;
 
         return $this->sharedKeyOk($given);
+    }
+
+    /** Naka-Off ba ang bot ng page sa /chatbot (chatbot.active = 0)? Walang row = On. */
+    public function botOff(string $page): bool
+    {
+        return $this->settings->get($page, 'chatbot', 'active') === '0';
     }
 
     private function sharedKeyOk(string $given): bool
