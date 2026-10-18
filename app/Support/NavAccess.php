@@ -12,18 +12,19 @@ use Illuminate\Support\Facades\Schema;
  */
 class NavAccess
 {
-    public static function allows(?string $role, string $url): bool
+    /** @param string|string[] $url ang route_url, o ilan (pasok kapag isa man ang naka-check) */
+    public static function allows(?string $role, string|array $url): bool
     {
         $role = preg_replace('/\s+/u', ' ', trim((string) $role));
         if ($role === 'CEO') return true;
         if ($role === '' || !Schema::hasTable('nav_links') || !Schema::hasTable('nav_link_role_visibility')) return false;
 
-        $url = '/' . ltrim($url, '/');
+        $urls = array_map(fn ($u) => '/' . ltrim($u, '/'), (array) $url);
 
         return DB::table('nav_links as l')
             ->join('nav_link_role_visibility as v', 'v.nav_link_id', '=', 'l.id')
             ->where('l.is_active', true)
-            ->whereIn('l.route_url', [$url, ltrim($url, '/')])
+            ->whereIn('l.route_url', array_merge($urls, array_map(fn ($u) => ltrim($u, '/'), $urls)))
             ->where('v.role', $role)
             ->where('v.is_visible', true)
             ->exists();

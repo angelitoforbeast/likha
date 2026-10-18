@@ -44,19 +44,23 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->msg('failed', ['last_http' => 500]);
         $this->msg('no_psid', ['psid' => null, 'reason' => 'walang PSID']);
         $this->msg('ready', ['page_name' => 'Page Dos']);
-        $this->msg('ready', ['created_at' => now()->subDays(2)]); // hindi ngayong araw
+        $this->msg('ready', ['created_at' => now()->subDays(2)]); // hindi ngayong araw, pero ready pa: nasa To send
+        $this->msg('sent', ['created_at' => now()->subDays(2), 'sent_at' => now()->subDays(2)]); // hindi ngayong araw
 
+        // To send (default): ang ready, anuman ang petsa.
         $res = $this->list();
-        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'ready' => 104, 'sent' => 1], $res->json('counts'), 'default: ngayong araw');
-        $this->assertSame([107, 100, 1], [$res->json('total'), count($res->json('rows')), $res->json('page')]);
+        $this->assertSame(['ready' => 105], $res->json('counts'));
+        $this->assertSame([105, 100, 1], [$res->json('total'), count($res->json('rows')), $res->json('page')]);
         $this->assertSame('Hello Buyer', $res->json('rows.0.first_line'));
         $this->assertSame('3456', $res->json('rows.0.psid_last4'));
         $this->assertArrayNotHasKey('psid', $res->json('rows.0'));
-        $this->assertCount(7, $this->list(['p' => 2])->json('rows'));
-
+        $this->assertCount(5, $this->list(['p' => 2])->json('rows'));
         $this->assertSame(['ready' => 1], $this->list(['page' => 'Page Dos'])->json('counts'));
-        $this->assertSame(1, $this->list(['status' => 'failed'])->json('total'));
-        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'ready' => 105, 'sent' => 1], $this->list(['from' => now()->subDays(3)->toDateString()])->json('counts'));
+
+        // History: ang naproseso, ayon sa From/To (default ngayong araw).
+        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'sent' => 1], $this->list(['view' => 'history'])->json('counts'));
+        $this->assertSame(1, $this->list(['view' => 'history', 'status' => 'failed'])->json('total'));
+        $this->assertSame(['failed' => 1, 'no_psid' => 1, 'sent' => 2], $this->list(['view' => 'history', 'from' => now()->subDays(3)->toDateString()])->json('counts'));
         $this->assertSame(['paused' => false, 'queued' => 0, 'sent' => 1], array_intersect_key($this->list()->json('state'), array_flip(['sent', 'queued', 'paused'])));
     }
 
@@ -94,7 +98,7 @@ class ChatblastPageTest extends ChatblastTestCase
 
         $ten = $count(10);
         $this->assertSame($ten, $count(1000));
-        $this->assertLessThanOrEqual(7, $ten);
+        $this->assertLessThanOrEqual(8, $ten); // +1: ang naka-off na sequence para sa bilang ng "Send all ready"
     }
 
     public function test_the_side_panel_shows_every_step_and_never_the_token(): void
@@ -124,13 +128,13 @@ class ChatblastPageTest extends ChatblastTestCase
 
     public function test_the_buttons_build_send_retry_and_pause(): void
     {
-        Queue::fake();
+        Queue::fake([\App\Jobs\SendChatblastMessage::class]); // ang build job ay tumatakbo (sync queue sa test)
         $this->page('Page Uno');
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a');
         $this->shipped('Page Uno', 'Ben Reyes', 'WB-002', 'psid-b');
         $this->shipped('Page Uno', 'Cora Diaz', 'WB-003', null);
 
-        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertOk()->assertJsonPath('result.added', 3);
+        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertOk()->assertJsonPath('run.status', 'done')->assertJsonPath('run.result.added', 3);
         BotcakeMessage::where('waybill', 'WB-002')->update(['status' => 'failed']);
         DB::table('botcake_messages')->where('waybill', 'WB-002')->update(['created_at' => now()->subDays(5)]);
 
@@ -169,7 +173,7 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->assertSame(['psid-owner-7788', 'queued'], [BotcakeMessage::where('is_test', true)->value('psid'), BotcakeMessage::where('is_test', true)->value('status')]);
         $this->assertSame('ready', BotcakeMessage::where('is_test', false)->value('status'));
 
-        $grid = $this->get('/page-settings')->assertOk()->viewData('grid');
+        $grid = $this->get('/chatblast/page-settings')->assertOk()->viewData('grid');
         $this->assertContains('botcake.test_psid', array_column($grid['columns'], 'key'));
         $this->assertSame('Test PSID', collect($grid['columns'])->firstWhere('key', 'botcake.test_psid')['label']);
     }

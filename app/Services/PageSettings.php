@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\BotcakeChat;
 use App\Models\PageSetting;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -14,11 +15,31 @@ use Illuminate\Support\Facades\Log;
  */
 class PageSettings
 {
-    /** Mga key na system lang ang sumusulat (hindi tinatanggap mula sa page). */
-    public const SYSTEM_KEYS = ['botcake.token_status'];
+    /**
+     * Mga key na system lang ang sumusulat (hindi tinatanggap mula sa page). Kasama rin ang mga tugma sa
+     * DETAIL_PATTERN: ang pangalan ng bawat flow (botcake.flow.<x>.name) at ang body ng shipping template.
+     */
+    public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
+        'botcake.flow.shipping.options', 'botcake.field.message.options'];
+
+    /**
+     * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
+     * column: ang pangalan ng flow, ang body ng template, at ang mga kandidato para sa dropdown (JSON na [{id, name}]).
+     */
+    public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/';
 
     /** Mga key na laging secret. */
     public const SECRET_KEYS = ['botcake.token'];
+
+    public static function isSystemKey(string $full): bool
+    {
+        return in_array($full, self::SYSTEM_KEYS, true) || self::isDetailKey($full);
+    }
+
+    public static function isDetailKey(string $full): bool
+    {
+        return (bool) preg_match(self::DETAIL_PATTERN, $full);
+    }
 
     public function normPage(?string $page): string
     {
@@ -47,24 +68,24 @@ class PageSettings
         $value    = trim((string) $value);
         $full     = $provider . '.' . $key;
 
-        if ($this->normPage($page) === '') return ['page_name' => 'Kailangan ang page.'];
-        if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: hanggang 255 na character lang.'];
-        if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: maliliit na letra, numero at _ lang.'];
+        if ($this->normPage($page) === '') return ['page_name' => 'The page is required.'];
+        if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: 255 characters at most.'];
+        if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: lowercase letters, digits and _ only.'];
         if (strlen($key) > 100 || !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key)) {
-            return ['key' => 'Key: maliliit na letra, numero, _ at . lang (hal. flow.on_delivery).'];
+            return ['key' => 'Key: lowercase letters, digits, _ and . only (e.g. flow.on_delivery).'];
         }
 
-        if (!$system && in_array($full, self::SYSTEM_KEYS, true)) {
-            return ['value' => 'Ang ' . $full . ' ay isinusulat ng system (Test token / sync), hindi dito.'];
+        if (!$system && self::isSystemKey($full)) {
+            return ['value' => $full . ' is written by the system (Test token / sync), not here.'];
         }
 
         $digits = $full === 'botcake.page_id'
             || preg_match('/^botcake\.(flow|field)\.[a-z0-9_]+$/', $full);
 
         if ($digits && !preg_match('/^\d+$/', $value)) {
-            return ['value' => 'Ang ' . $full . ' ay numero lang (walang espasyo, slash o letra).'];
+            return ['value' => $full . ' takes digits only (no spaces, slashes or letters).'];
         }
-        if ($value === '') return ['value' => 'Kailangan ang value.'];
+        if ($value === '') return ['value' => 'The value is required.'];
 
         return null;
     }
@@ -83,7 +104,7 @@ class PageSettings
         $value    = trim($value);
         $secret   = $secret || in_array($provider . '.' . $key, self::SECRET_KEYS, true);
 
-        return DB::transaction(function () use ($page, $provider, $key, $value, $secret, $userId) {
+        $res = DB::transaction(function () use ($page, $provider, $key, $value, $secret, $userId) {
             $current = $this->pageQuery($page)->where('provider', $provider)->where('key', $key)
                 ->where('active', true)->lockForUpdate()->orderByDesc('id')->get();
 
@@ -115,8 +136,21 @@ class PageSettings
                 'page' => $name, 'key' => $provider . '.' . $key, 'setting_id' => $setting->id, 'by' => $userId,
             ]);
 
+            // Ang mapa ng page_id => page ng /api/botcake/chat ay naka-cache: binubura ngayon at pagkatapos ng commit.
+            if ($provider === 'botcake' && $key === 'page_id') $this->forgetChatPageMap();
+
             return ['status' => $status, 'setting' => $setting];
         });
+        // Pagkatapos ng commit: ang Ready ng page (ChatblastReady) ay kinukuwenta ulit sa susunod na tanong.
+        if ($res['status'] !== 'unchanged' && ChatblastReady::watches($provider, $key)) ChatblastReady::forget($this->pageKey($page));
+
+        return $res;
+    }
+
+    private function forgetChatPageMap(): void
+    {
+        BotcakeChat::forgetPageMap();
+        DB::afterCommit(fn () => BotcakeChat::forgetPageMap());
     }
 
     public function deactivate(PageSetting $setting, ?int $userId = null): void
@@ -124,6 +158,8 @@ class PageSettings
         if (!$setting->active) return;
 
         $setting->update(['active' => false, 'replaced_at' => now()]);
+        if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
+        if ($setting->provider === 'botcake' && $setting->key === 'page_id') $this->forgetChatPageMap();
         Log::info('PageSettings: deactivated', [
             'page' => $setting->page_name, 'key' => $setting->fullKey(), 'setting_id' => $setting->id, 'by' => $userId,
         ]);

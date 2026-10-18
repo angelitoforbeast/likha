@@ -54,7 +54,7 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
         DB::table('from_jnts')->where('waybill_number', 'WB-P')->update(['status' => 'Delivered']);
         $this->travel(1)->days();
         app(Chatblast::class)->build('c-test', 1);
-        $this->assertSame(['skipped', 'Hindi na Problematic/For Return ang waybill (ngayon: Delivered)'],
+        $this->assertSame(['skipped', 'The waybill is no longer Problematic/For Return (now: Delivered)'],
             [$this->rows('c-test')->firstWhere('waybill', 'WB-P')->status, $this->rows('c-test')->firstWhere('waybill', 'WB-P')->reason]);
     }
 
@@ -125,9 +125,9 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
 
         $c->update(['pages' => ['Page Uno']]);
         app(ChatblastSender::class)->process($one->id);
-        $this->assertSame(['skipped', 'Wala na ang page na Page Dos sa campaign'], [$one->fresh()->status, $one->fresh()->reason]);
+        $this->assertSame(['skipped', 'Page "Page Dos" is no longer in the sequence'], [$one->fresh()->status, $one->fresh()->reason]);
         app(Chatblast::class)->build('c-test', 1);
-        $this->assertSame(['skipped', 'Wala na ang page na Page Dos sa campaign'], [$two->fresh()->status, $two->fresh()->reason]);
+        $this->assertSame(['skipped', 'Page "Page Dos" is no longer in the sequence'], [$two->fresh()->status, $two->fresh()->reason]);
         Http::assertNothingSent();
     }
 
@@ -222,7 +222,7 @@ class ChatblastCampaignBuildTest extends ChatblastTestCase
             'psid' => 'psid-a', 'text' => 'Hello', 'status' => 'queued', 'attempts' => 0, 'is_test' => false, 'created_at' => now(), 'updated_at' => now()]);
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
         app(ChatblastSender::class)->process($id);
-        $this->assertSame(['skipped', 'Walang campaign ang mensaheng ito'], [BotcakeMessage::find($id)->status, BotcakeMessage::find($id)->reason]);
+        $this->assertSame(['skipped', 'This message has no sequence'], [BotcakeMessage::find($id)->status, BotcakeMessage::find($id)->reason]);
         Http::assertNothingSent();
     }
 

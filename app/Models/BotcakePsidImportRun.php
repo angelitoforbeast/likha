@@ -50,11 +50,17 @@ class BotcakePsidImportRun extends Model
         'current_page',
         'started_by',
         'finished_at',
+        'subscribed_newest',
+        'subscribed_oldest',
+        'stop_date',
     ];
 
     protected $casts = [
-        'sync_state'  => 'array',
-        'finished_at' => 'datetime',
+        'sync_state'        => 'array',
+        'finished_at'       => 'datetime',
+        'subscribed_newest' => 'date',
+        'subscribed_oldest' => 'date',
+        'stop_date'         => 'date',
     ];
 
     public function events()

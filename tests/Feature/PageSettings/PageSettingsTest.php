@@ -17,7 +17,7 @@ class PageSettingsTest extends BotcakeApiTestCase
 
     private function save(array $input)
     {
-        return $this->post('/page-settings', $input + ['provider' => 'botcake']);
+        return $this->post('/chatblast/page-settings', $input + ['provider' => 'botcake']);
     }
 
     public function test_a_new_value_replaces_the_active_row_and_keeps_the_old_one_as_history(): void
@@ -53,7 +53,7 @@ class PageSettingsTest extends BotcakeApiTestCase
         $this->assertSame(self::TOKEN, Crypt::decryptString($raw));
         $this->assertTrue((bool) PageSetting::sole()->is_secret, 'ang token ay laging secret');
 
-        $html = $this->get('/page-settings')->assertOk()->getContent();
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
         $this->assertStringNotContainsString(self::TOKEN, $html);
         $this->assertStringNotContainsString('tok-test', $html);
         $this->assertStringContainsString('9f3k', $html, 'huling 4 na character lang ang nakikita');
@@ -111,13 +111,13 @@ class PageSettingsTest extends BotcakeApiTestCase
         $this->save(['page_name' => 'Page Uno', 'key' => 'page_id', 'value' => '1111']);
         $id = PageSetting::sole()->id;
 
-        $this->post("/page-settings/{$id}/deactivate")->assertRedirect();
+        $this->post("/chatblast/page-settings/{$id}/deactivate")->assertRedirect();
 
         $row = PageSetting::sole();
         $this->assertFalse((bool) $row->active);
         $this->assertNotNull($row->replaced_at);
         $this->assertNull(app(PageSettings::class)->get('Page Uno', 'botcake', 'page_id'));
-        $this->assertSame('1111', $this->getJson('/page-settings/history?page_name=Page%20Uno&provider=botcake&key=page_id')->json('history.0.value'), 'nasa history pa rin');
+        $this->assertSame('1111', $this->getJson('/chatblast/page-settings/history?page_name=Page%20Uno&provider=botcake&key=page_id')->json('history.0.value'), 'nasa history pa rin');
     }
 
     public function test_a_role_checked_in_nav_settings_reaches_the_pages_and_others_do_not(): void
@@ -134,28 +134,28 @@ class PageSettingsTest extends BotcakeApiTestCase
         }
 
         $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
-        $this->get('/page-settings')->assertOk();
-        $this->get('/page-settings/customers?page=Page%20Uno')->assertOk();
-        $this->get('/page-settings/psid-coverage')->assertOk();
+        $this->get('/chatblast/page-settings')->assertOk();
+        $this->get('/chatblast/page-settings/customers?page=Page%20Uno')->assertOk();
+        $this->get('/chatblast/page-settings/psid-coverage')->assertOk();
 
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $this->get('/page-settings')->assertOk();
+        $this->get('/chatblast/page-settings')->assertOk();
 
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
-        $this->get('/page-settings')->assertNotFound();
-        $this->get('/page-settings/customers?page=Page%20Uno')->assertNotFound();
+        $this->get('/chatblast/page-settings')->assertNotFound();
+        $this->get('/chatblast/page-settings/customers?page=Page%20Uno')->assertNotFound();
 
         // naka-uncheck ulit: sarado na
         \Illuminate\Support\Facades\DB::table('nav_link_role_visibility')->where('role', 'Marketing')->update(['is_visible' => false]);
         $this->actingAs($this->user('Marketing', 'mkt2@example.test'));
-        $this->get('/page-settings')->assertNotFound();
+        $this->get('/chatblast/page-settings')->assertNotFound();
     }
 
     public function test_only_the_ceo_reaches_the_page(): void
     {
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
 
-        $this->get('/page-settings')->assertNotFound();
+        $this->get('/chatblast/page-settings')->assertNotFound();
         $this->save(['page_name' => 'Page Uno', 'key' => 'page_id', 'value' => '1111'])->assertNotFound();
         $this->assertSame(0, PageSetting::count());
     }

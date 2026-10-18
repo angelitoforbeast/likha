@@ -15,6 +15,7 @@ No JavaScript test exists for the order page, so these are checked by hand on th
 - [ ] S-09.7 (slice 016): on a phone, tap a night's "N for a person" count on the AI checker logs page. Checker 1 should open in the same tab with that night's rows.
 - [ ] S-22.5 (slice 019): open your usual Old view link (`/item?...&layout=old`). It should show the table with suppliers, and nothing you use should be missing; "Original table" in the toolbar opens the table as it was.
 - [ ] S-38.11 (slice 020; replaces S-13.7, S-17.7 and S-19.8 of slice 017): on your own laptop, open your usual item table (`/item?...&layout=old`). The whole table should fit the screen with no sideways scroll and read well: one column per supplier numbered like your Finance → Supply list, "+N columns" for the columns one step away, "Sourcing" and "Sales" one tap apart, and nothing you use missing.
+- [ ] S-052.10 (slice 052): open /page-settings. Under each flow ID you should see its Botcake name (or red "Wala sa Botcake" / "Bura na sa Botcake", grey "hindi pa nasusuri"); under the shipping flow also "Template: <name> — <body>", with the whole body on hover; under Shipping template its body, or grey "piliin ang template". Save a flow ID, and press Test lahat: the lines should change without a reload.
 
 ## Slice 015 – row runner error message
 
@@ -1015,3 +1016,234 @@ Tests: `ChecklistDeadlineFieldTest`, `ChecklistBadgeTest`, `ChecklistRecheckLimi
 | S-051.29 | The feed item shows rechecks and overridden (by, at), without the reason | `StaffFeedApiTest::test_S_051_29…` | Passed · 2026-10-18 · auto |
 | S-051.30 | (amendment 2) Two checks plus an override, then the limited user's check runs (overrides are not counted) and the next is refused | `ChecklistRecheckLimitTest::test_S_051_30…` | Passed · 2026-10-18 · auto |
 | S-051.31 | (amendment 3) For one person, checklist_today lists every task due today, earliest scheduled time first (untimed last, then task id): approved, not_approved (rechecks 1), not submitted (submitted false, submitted_at and verdict null), a group task submitted by another person (submitted true, that time); inactive and not-due tasks absent; no note, photo path, prompt or AI text | `StaffFeedApiTest::test_S_051_31…` | Passed · 2026-10-18 · auto |
+## Slice 052 – What each Botcake flow ID is, on /page-settings
+
+Slice 052: 9 passed, 0 failed, 0 blocked, 0 skipped, 1 not run (owner check)
+
+### S-052 The owner sees the name of each flow ID and the template the shipping flow sends (P1)
+
+Tests are in `tests/Feature/PageSettings/FlowNamesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-052.1 | Given a page with id and token, when the owner saves a flow ID that Botcake lists, then the save is ok, one flows call is made (no page parameter, no retry) and the cell's second line is the flow name; when the ID is not in that full list, the line is red "Wala sa Botcake"; when is_removed, red "Bura na sa Botcake"; when Botcake answers 500, success:false, not a list or not at all, the save is still ok and the line is "hindi nasuri: (reason)"; the other flow keys of the page get their names too, a failure marks only the saved key; a read that finishes after another save changed the ID writes nothing; clearing a flow ID clears its name | `test_S_052_1…` (3, 7 data sets) | Passed · 2026-10-18 · auto |
+| S-052.2 | Given the flows API ignores the page number and returns the full list, then the list is read with one call and no page parameter; an odd answer (no data.flows, or data null) marks nothing "Wala sa Botcake" and the saved key says "hindi nasuri" | `test_S_052_2…` | Passed · 2026-10-18 · auto |
+| S-052.3 | Given Test token (row) or Test lahat, when the token is ok, then one flows call and one templates call refresh the names and template, and Test lahat returns them in its cells; the token check, flows and templates calls share the page's rate key (at least 0.5 s apart); when the token is invalid or errors, no flows or templates call is made; Test lahat stays within 25 s, token check included, and skips the refresh with "kulang sa oras" when the time is spent | `test_S_052_3…` (3) | Passed · 2026-10-18 · auto |
+| S-052.4 | Given an empty template key, then the pick is (1) the name in parentheses at the end of the shipping flow name when APPROVED; (2) else the single APPROVED template with {{1}} and example "Custom Field"; (3) else none and "piliin ang template"; a pending template, a second candidate or a blank name does not count; the pick also runs right after the shipping flow is saved (one templates call), not after other flows or when a template is set | `test_S_052_4…` (6 data sets, plus 1) | Passed · 2026-10-18 · auto |
+| S-052.5 | Given a template name typed by the owner, then a refresh keeps it; when it is an APPROVED template its body shows with {{1}} as "(mensahe ng sequence)"; when it is unknown or not APPROVED, the line is red; when the owner clears it, the system picks again; a failed template save never marks a newer template's body "hindi nasuri" | `test_S_052_5…` (2) | Passed · 2026-10-18 · auto |
+| S-052.6 | Given a post of botcake.flow.<x>.name or botcake.template.shipping.text from the page (cell or form), then 422 and nothing is written; botcake.template.shipping itself is editable free text | `test_S_052_6…` | Passed · 2026-10-18 · auto |
+| S-052.7 | Given name and text rows, then they are not grid columns, the template column is (after the four flows), and the rows sit in their page's cells with their line and tone; a refresh with the same answers writes no new row | `test_S_052_7…` (2) | Passed · 2026-10-18 · auto |
+| S-052.8 | Given any refresh, then the full token is in no response, its last 4 in no log line or stored value, and only names and body text are stored | `test_S_052_8…` | Passed · 2026-10-18 · auto |
+| S-052.9 | Given a non-CEO role without the page in nav settings, then saving a cell, Test token and Test lahat are 404 and no Botcake call is made | `test_S_052_9…` | Passed · 2026-10-18 · auto |
+| S-052.10 | (by hand) On /page-settings, each flow cell shows its name line, the shipping flow also the template line with the full body on hover, and the template column its body line; saving a flow ID or Test lahat updates the lines without a reload | Owner check | not run |
+
+## Slice 054 – /page-settings fits the screen, with no horizontal scroll
+
+### S-054 The owner sees and edits every page setting without scrolling sideways (P1)
+
+Tests are in `tests/Feature/PageSettings/PageSettingsGridTest.php`; the browser cases are in the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-054.1 | Given known and other keys, when the grid is built, then every column carries its group: ID, token, token status, message field and test PSID in `botcake`; the 4 flows in `flows`; the shipping template name in `template` (edited in the ▸ row); every other key in `other`; the known keys still come first, in order | `test_S_054_1…` | Passed · 2026-10-18 · auto |
+| S-054.2 | Given the page, then the table header is Page, Botcake, Flows, Orders / Customers, Sync and the actions, and every action is still there: Test token, Sync now, Customers, Orders, History, Test lahat, Sync lahat with pause, resume and stop, + Page, + Column | `test_S_054_2…` | Passed · 2026-10-18 · auto |
+| S-054.3 | Given a last sync and a next sync, then the sync cell shows "dates · time" and "susunod: mula …", red when the last run failed | `test_S_054_3…` | Passed · 2026-10-18 · auto |
+| S-054.4 | Given an open detail row, when a poll, a re-render or the filter runs, then it stays open; the detail row holds the full flow names, the template body, the sync details, the other keys (editable) and a History button per key | `test_S_054_4…` | Passed · 2026-10-18 · auto |
+| S-054.5 | (browser) At 1366 and 1280 px, `scrollWidth <= clientWidth` for the page and the grid; a value in the Botcake cell and one in the Flows cell save in place; the detail row stays open through a poll; an other key saves from the detail row | Browser check | Passed · 2026-10-18 · headless browser |
+| S-054.6 | Given lines and run errors stored in Tagalog before the page turned English (flow and template reasons, "(walang body)", "(walang pangalan)", run `last_error`), when the grid loads, then they show in English; the stored markers are unchanged | `test_S_054_6…` (PageSettingsGridTest, SyncPlanTest) | Passed · 2026-10-18 · auto |
+| S-054.7 | Given /page-settings, then every UI text is English (title, headers, labels, buttons, statuses, notices, errors, empty states, tooltips, sync line, plan, 052 flow lines, run panel), months in English; code comments may stay Tagalog | `test_S_054_7…` and the browser scan | Passed · 2026-10-18 · auto + headless browser |
+| S-054.8 | Given the grid, then a summary bar shows Pages, With orders, Token invalid, Setup incomplete (a page with orders missing ID, token, shipping flow, message field or template), Flow problems (a red line of a flow that has an ID, or a shipping template that is not APPROVED) and Last sync failed, counted from the loaded grid; a chip shows only those pages together with the name filter, a second click (or Pages) clears it, and focus stays on the chip | `test_S_054_8…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+| S-054.9 | Given a row with orders, then the Page cell has a left border: red when the token is invalid, the last sync failed or the shipping template is not APPROVED, amber when the setup is incomplete, green when complete with token ok, none otherwise; a row without orders has no coloured border at all (the chips still count it); the legend is in the summary bar | `test_S_054_9…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+| S-054.10 | Given a flow, then the Flows cell shows one block per flow: the editable ID, the Botcake name in full (only when the flow has an ID; clearing the ID, also from the history panel, removes the name at once), and for the shipping flow (with an ID) the full template content with {{1}} as "(sequence message)", wrapping, never clipped; no "Not checked yet", "Pick a template" or "Template: …"; unknown names or content show nothing; only "Not in Botcake", "Deleted in Botcake" and, under the content, "Template not approved in Botcake" show, in red; a failed check shows nothing in the cell and "Check failed: <reason>" in the ▸ row; while the ID is edited, on Escape or on an unchanged value, the name and content stay as they are; after a different ID is saved the old ones stay until the new ones arrive (no blank); the template name is edited in the ▸ row and the content follows | `test_S_054_10…` and the browser check (fake Botcake) | Passed · 2026-10-18 · auto + headless browser |
+
+## Slice 056 – Chatblast as its own app
+
+### S-056 Staff open Chatblast as its own tool, with its own nav, and page settings lives inside it (P1)
+
+Tests are in `tests/Feature/Chatblast/ChatblastAppTest.php` unless named; the browser case is in the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.1 | Given the CEO, when they open /chatblast, /chatblast/campaigns, /chatblast/sequence, /chatblast/page-settings and its Customers, PSID coverage and Orders pages, then each shows the Chatblast brand, the nav items (To send, History, Messages, Sequences, Page settings) with the current one marked active, "← Likha" and the user's name, no Log out, and no main Likha nav link | `test_S_056_1…` | Passed · 2026-10-18 · auto |
+| S-056.2 | Given an old link, when GET /page-settings?a=1 or /page-settings/customers?page=X, then 301 to the same path under /chatblast with the query kept; a hostile path (%2F%2F, %3F, %0D%0A) stays percent-encoded under /chatblast/page-settings on the app host | `test_S_056_2…` | Passed · 2026-10-18 · auto |
+| S-056.3 | Given /chatblast/page-settings, then save, cell, grid, history, page check, test token (row and one), sync, sync all and its controls answer there (the existing page settings tests, moved to the new path) | `tests/Feature/PageSettings/*` | Passed · 2026-10-18 · auto |
+| S-056.4 | Given a role checked for /page-settings in nav-settings, then it opens /chatblast/page-settings; given the link's URL changed to /chatblast/page-settings, then it still does; given a role not checked, then 404 as before | `test_S_056_4…` and `PageSettingsTest::test_a_role_checked_in_nav_settings…` | Passed · 2026-10-18 · auto |
+| S-056.5 | Given a role with page settings access but not /chatblast, when it opens page settings, then the Chatblast nav shows only Page settings, and /chatblast stays 404 | `test_S_056_5…` | Passed · 2026-10-18 · auto |
+| S-056.6 | Given the main Likha nav, when the role sees both the Chatblast and Page Settings links, then one "Chatblast" link to /chatblast shows; when it sees only Page Settings, then one "Chatblast" link to /chatblast/page-settings; when it sees neither, then none | `test_S_056_6…` | Passed · 2026-10-18 · auto |
+| S-056.7 | (browser) At 1366 and 1280 px, /chatblast/page-settings has no horizontal scroll (page and grid); the four nav items open their pages | Browser check | Passed · 2026-10-18 · headless browser |
+
+### S-056B The Dashboard list shows what still needs sending, and Fetch new never hangs (P1)
+
+Amendment 1. Tests are in `tests/Feature/Chatblast/ChatblastDashboardListTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.8 | Given ready, sent and skipped rows today, when the list loads with no status chosen, then the rows and the total leave out skipped, the counts still include skipped; when status = skipped, then only skipped rows show, with their reasons | `test_S_056_8…` | Replaced by amendment 2 (see S-056.16 to S-056.18) |
+| S-056.9 | Given a ready row built yesterday and one built outside its sequence's window, a sent row built yesterday, when the default view (From = To = today) loads, then the ready row from yesterday is in the rows and the ready count, `earlier_ready` is 1, the others are not; given From = To = yesterday, then exactly yesterday's rows show and `earlier_ready` is 0 | `test_S_056_9…` | Replaced by amendment 2 (see S-056.16 to S-056.18) |
+| S-056.10 | Given the default view with a ready row from yesterday, when "Send all ready" is pressed, then that row is queued too; with an exact range that leaves it out, it is not; with a page, sequence or search filter that leaves it out, it is not; an earlier test row is neither counted nor sent | `test_S_056_10…` | Replaced by amendment 2 (see S-056.16 to S-056.18) |
+| S-056.11 | Given Fetch new, then a build job is queued and the list's state shows it queued; a second press while it waits, or while the build lock is held, gets 409 "A fetch is already running"; when the job runs, the state shows done with the result and the lock and slot are free; when the job fails or times out, its own lock is released and the state shows failed, while a lock held by another build is left alone; when the slot is gone while it still waits, then the state shows stopped with "The fetch waited too long for the worker"; when another build takes the lock before the job runs, then the state shows busy | `test_S_056_11…` | Passed · 2026-10-18 · auto |
+| S-056.12 | Given the Dashboard, then the "all" chip says "all (no skipped)", the page shows "+ N ready from earlier days" when there are some, and Fetch new shows the progress of the background fetch | `test_S_056_12…` and the browser check | Replaced by amendment 2 (see S-056.16 to S-056.18) |
+
+### S-056C To send and History are separate; no ready row gets stuck, and auto sends only re-checked rows (P1)
+
+Amendment 2. It replaces S-056.9 and S-056.10 (amendment 1's earlier ready rows under the date filter). Tests are in
+`tests/Feature/Chatblast/ChatblastToSendTest.php`, and the auto cases in `ChatblastAutoTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.13 | Given an auto sequence switched on last night and a ready row built yesterday whose waybill is still In Transit, when auto's due time comes today, then its fetch re-checks the row and auto queues it, together with today's new rows | `ChatblastAutoTest::test_S_056_13…` | Passed · 2026-10-18 · auto |
+| S-056.14 | Given a ready row from yesterday whose waybill moved from In Transit to Delivering, when any fetch runs, then the row is skipped with "The waybill is no longer In Transit (now: Delivering)", its key is released, and the Delivering sequence builds its own row for the waybill | `ChatblastAutoTest::test_S_056_14…` | Passed · 2026-10-18 · auto |
+| S-056.15 | Given a ready row built and last re-checked before auto was switched on, when auto runs and its fetch does not re-check the row, then auto does not queue it; a row built after the switch is queued | `ChatblastAutoTest::test_S_056_15…` | Passed · 2026-10-18 · auto |
+| S-056.16 | Given ready rows built today and three days ago on two pages and two sequences, when Send all ready is pressed (any From/To in the request), then every ready row of the chosen page and sequence is queued, whatever its build date; the search does not narrow it | `test_S_056_16…` | Passed · 2026-10-18 · auto |
+| S-056.17 | Given ready, queued, sent, failed, skipped and no PSID rows on several days, then To send lists ready, queued and sending of any date, with counts per status, per sequence and per page and the sendable count; History lists the rest within From/To, with status chips; Page, Sequence and Search narrow both | `test_S_056_17…` | Passed · 2026-10-18 · auto |
+| S-056.18 | Given the Chatblast nav, then it reads To send · History · Messages · Sequences · Page settings; To send has Fetch new, Send selected, Send all ready, Pause and Resume and no dates; History has From/To and Retry failed and no send buttons | `test_S_056_18…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+| S-056.19 | Given a ready row whose order (ts_date) is older than its sequence's window while the waybill is still In Transit, when any fetch runs (also auto's), then the row is skipped with "The order is older than the sequence's N-day window", its key is released, and auto does not queue it | `ChatblastAutoTest::test_S_056_19…` | Passed · 2026-10-18 · auto |
+| S-056.20 | Given rows built days ago and sent or failed today, when History shows today, then they are listed (dates are when a row was processed: sent_at for sent, the last change for the rest), and Retry failed queues today's failures | `test_S_056_20…` | Passed · 2026-10-18 · auto |
+| S-056.21 | Given ready rows of a sequence that is off, then the "Send all ready" count leaves them out (the sender refuses them too) | `test_S_056_21…` | Passed · 2026-10-18 · auto |
+
+### S-056D Staff see what the customer saw, and open the customer in Botcake (P2)
+
+Amendment 3. Tests are in `tests/Feature/Chatblast/ChatblastCustomerSawTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.22 | Given a row and its page's stored shipping template body with {{1}}, when the panel opens, then it shows the body with {{1}} replaced by the row text; given no body, a marker ("!…") or no {{1}}, then the row text alone with "Template text unknown: run Test token on the page"; no Botcake call is made | `test_S_056_22…` (4 data sets) | Passed · 2026-10-18 · auto |
+| S-056.23 | Given a row with a PSID on a page with botcake.page_id, then the panel has "Open in Botcake" built from the one configured URL format; without a PSID or a page ID, no link | `test_S_056_23…` | Passed · 2026-10-18 · auto |
+| S-056.24 | Given History, then a sent row's first line is the first line of what the customer saw; other rows keep their own first line | `test_S_056_24…` | Passed · 2026-10-18 · auto |
+| S-056.25 | Given To send or History, then the panel has the chat bubble ("What the customer saw", or "will see" before sending) and the link opens in a new tab | `test_S_056_25…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-056E To send is always current without a refresh button (P1)
+
+Amendment 4. Tests are named per case.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.26 | Given chatblast:auto every 5 minutes, then from 06:15 to 23:15 Manila, once per hour at the first run at or after :15, a full fetch builds and re-checks To send; it never sends (also while paused); it is skipped while another fetch runs and retried in the same hour | `ChatblastAutoTest::test_S_056_26…` | Passed · 2026-10-18 · auto |
+| S-056.27 | Given more Delivering candidates than the J&T budget reaches, then the newest orders are tracked first and the oldest are left pending | `ChatblastTrackTest::test_the_build_tracks_for_at_most_60_seconds…` | Passed · 2026-10-18 · auto |
+| S-056.28 | Given To send, then it shows "Updated HH:MM · next refresh HH:MM" (with the date when the last full fetch was not today) and a small "Refresh now" button; no "Fetch new" | `ChatblastToSendTest::test_S_056_28…` | Passed · 2026-10-18 · auto + headless browser |
+| S-056.29 | Given a row built as Delivering whose waybill is now Delivered, then the panel shows "J&T at build: Delivering" and "J&T now: Delivered" | `ChatblastToSendTest::test_S_056_29…` | Passed · 2026-10-18 · auto + headless browser |
+| S-056.30 | Given an auto sequence whose Day 2 has its own time (15:00), when the waybill becomes eligible after 15:00, then the hourly refresh does not build Day 2, so it is not sent at the next unrelated time; it goes out at 15:00 the next day | `ChatblastScheduleTest::test_S_056_30…` | Passed · 2026-10-18 · auto |
+| S-056.31 | Given the refresh, then 23:15 runs and 00:15 does not; when the full fetch throws, then auto's sends of that run still go out and the refresh is tried again on the next run (the claim is released) | `ChatblastAutoTest::test_S_056_31…` | Passed · 2026-10-18 · auto |
+
+### S-056F Fixes from the independent review (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.32 | Given the 06:15 refresh still running past 300 s, when chatblast:auto runs again at 06:20 or another build starts, then no second refresh starts (the hour was claimed before building) and the build gets "busy" (the lock lasts longer than any build) | `ChatblastAutoTest::test_S_056_32…` | Passed · 2026-10-18 · auto |
+| S-056.33 | Given a Delivering row built on an earlier day, when J&T gives no answer at send time, then it is not sent: ready again with "J&T not reached; will retry at the next send time"; a row built today keeps the old behaviour | `ChatblastTrackTest::test_S_056_33…` (2 data sets) | Passed · 2026-10-18 · auto |
+| S-056.34 | Given two due auto sequences, when the first one's build throws, then it is reported and the next sequence still sends | `ChatblastAutoTest::test_S_056_34…` | Passed · 2026-10-18 · auto |
+
+### S-056G History is what was actually sent (P1)
+
+Amendment 5. Tests are in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.35 | Given sent, unsure, failed, field mismatch, skipped, no PSID and no config rows, when History opens, then only sent and "Sent (unconfirmed)" rows show, the total counts them, and the counts of every chip are there; the Failed chip shows failed and field mismatch, and Skipped, No PSID and No config each show their own state | `test_S_056_35…` | Passed · 2026-10-18 · auto |
+| S-056.36 | Given History, then there is no "all" chip, Sent is first and selected, the other chips are not, Retry failed shows only with Failed, and an empty Sent view says "Nothing sent in this range yet." | `test_S_056_36…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-056H Page settings shows the one flow chatblast uses, and where to click (P1)
+
+Amendment 7. Test in `tests/Feature/PageSettings/PageSettingsGridTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-056.37 | Given /chatblast/page-settings, then the column reads "Chatblast flow" with one block (shipping flow ID, name, content); other flow slots with a value show under ▸ as "Other flow IDs (not used by chatblast)", editable; the content's {{1}} shows as "[message for the customer]" with "Filled per customer, see To send / History"; every empty editable value shows "+ set" with a dashed outline on hover | `test_S_056_37…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+## Slice 057 – A new page sets itself up in Page settings
+
+### S-057 Staff add a page and it finds its flow, field and template, then turns Ready after a test send (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-057.1 | Given a page, when its Botcake ID or token is saved and it has both, then the token is tested in the same request (one custom_fields call, no retry); ok: the flows, fields and templates are read and the cells come back; invalid: token_status invalid and nothing else is read; a Botcake failure never blocks the save | `test_S_057_1…` | Passed · 2026-10-18 · auto |
+| S-057.2 | Given flows and fields from Botcake, then the flow candidates are the non-removed CHATBLAST flows: the one "(post_order)" one is picked, else the only one, else none; the field candidates are "GPT Input"-like or "message": picked only when exactly one; both lists are stored for the dropdown; a value a person saved is never overwritten | `test_S_057_2…` | Passed · 2026-10-18 · auto |
+| S-057.3 | Given a saved flow or field that is not among the candidates, then it is kept, and the page shows "This flow is not a CHATBLAST flow in Botcake" / "This field is not a 'GPT Input' field in Botcake" | `test_S_057_3…` | Passed · 2026-10-18 · auto |
+| S-057.4 | Given several candidates, when one is chosen in the dropdown, then it is saved like a typed value; when there are none, then the guide lines show (no flow, no field) and "How to set up a new page" opens a checklist; "No approved post_order template" shows only when the templates check ran and found none, and a failed or timed-out check shows "Template check failed: <reason>" | `test_S_057_4…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+| S-057.5 | Given a complete page with no test and no real send, then its rows are no_config "Page not ready: needs a test send" (not in To send, not sent by auto or the sender); after a successful test send (test_ok) or a real send after the last change, the next fetch makes them ready | `test_S_057_5…` | Passed · 2026-10-18 · auto |
+| S-057.6 | Given a tested page, when its flow, field, token or page ID changes, then it needs a test again (at once: the 60 s Ready cache is cleared on a setup or test change) | `test_S_057_6…` | Passed · 2026-10-18 · auto |
+| S-057.7 | Given Send test on a page, then a test row with the page's latest text (or a sample) goes to the Test PSID; without a Test PSID (also when it is cleared during the request), 422 "Set a Test PSID first"; a test that ends sent writes botcake.test_ok | `test_S_057_7…` | Passed · 2026-10-18 · auto |
+| S-057.8 | Given Page settings, then a complete untested page shows amber "Needs a test send" with Send test, the "Needs test N" chip counts it, and green Ready needs a test | `test_S_057_8…` | Passed · 2026-10-18 · auto + headless browser |
+| S-057.9 | Given the row actions Test and Sync, then they run with fetch (no reload); Sync answers JSON for fetch | `test_S_057_9…` | Passed · 2026-10-18 · auto |
+| S-057.10 | (browser) Add a page with a fake Botcake: it fills itself, a dropdown choice saves, Send test turns it Ready, and the scroll position stays | Browser check | Passed · 2026-10-18 · headless browser, fake Botcake |
+| S-057.11 | Given a complete untested page, when the CEO presses "Mark as tested" and confirms, then botcake.test_ok is written now with the CEO's user id and the page is Ready, with nothing sent; another role with Page settings access gets 403 and no button; an incomplete page gets 422 | `test_S_057_11…` | Passed · 2026-10-18 · auto |
+
+## S-059 Customer chats from Botcake's JSON API block
+
+Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
+
+### S-059A Botcake sends each customer message to the website (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.1 | Given the chat key is set, when a request has no key, a wrong key, or the key is not set on the server, then it gets 401 with no detail and nothing is stored | `test_S_059_1…` (4 data sets) | Passed · 2026-10-18 · auto |
+| S-059.2 | Given the right key in the `X-Chat-Key` header or the `key` param, when Botcake sends JSON, a form, GET query params, or JSON as text/plain (key in the header or in the body), then it gets `{"ok":true}` and one row is stored with page id, PSID, name and message | `test_S_059_2…` (5 data sets) | Passed · 2026-10-18 · auto |
+| S-059.3 | Given params named in any case or with an alias (`user_id`/`fb_id`, `text`/`last_input`/`last_user_input`, `full_name`) and unknown extra params, then the known fields are filled and the full payload is kept, without the key | `test_S_059_3…` | Passed · 2026-10-18 · auto |
+| S-059.4 | Given a stored message, when the same message_id comes again, or the same page + PSID + message within 10 seconds, then it is not stored again (still `{"ok":true}`); after 10 seconds the same text is stored | `test_S_059_4…` | Passed · 2026-10-18 · auto |
+| S-059.5 | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | Passed · 2026-10-18 · auto |
+| S-059.6 | Given the per-IP limit, when one IP sends more than the limit in a minute, then it gets 429 | `test_S_059_6…` | Passed · 2026-10-18 · auto |
+| S-059.7 | Given a request with neither PSID nor message (e.g. an empty test Send), then it gets `{"ok":true}` and nothing is stored | `test_S_059_7…` | Passed · 2026-10-18 · auto |
+| S-059.13 | Given a message over 5000 characters, a name over 255, a PSID over 64, a nested param, 60 params and invalid UTF-8, then it gets `{"ok":true}` and is stored cut to the column sizes (payload: at most 50 params, 2000 characters each, arrays as JSON, bytes made valid) | `test_S_059_13…` | Passed · 2026-10-18 · auto |
+
+### S-059B The Chats page (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.8 | Given a role with /chatblast access, then /chatblast/chats lists the latest messages (time, page, customer, message) newest first and the Chatblast nav has "Chats"; a role without access gets 404 | `test_S_059_8…` | Passed · 2026-10-18 · auto |
+| S-059.9 | Given messages on two pages and two days, when filtering by page, by date, or searching a name or a word of the text, then only the matching messages show | `test_S_059_9…` | Passed · 2026-10-18 · auto |
+| S-059.10 | Given a customer, when their name is clicked, then their messages show oldest first, and no other customer's | `test_S_059_10…` | Passed · 2026-10-18 · auto |
+| S-059.11 | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | Passed · 2026-10-18 · auto |
+| S-059.14 | Given a stored name and message with HTML, then the Chats list and the customer view show it as text | `test_S_059_14…` | Passed · 2026-10-18 · auto |
+
+### S-059C Retention (P2)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.12 | Given chats older and newer than 90 days, when the prune runs (its command, or chatblast:auto once a day), then only the older ones are deleted | `test_S_059_12…` | Passed · 2026-10-18 · auto |
+
+### S-059D Amendment 1: Botcake's own variable names and pages without a page variable (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.3 (extended) | Given Botcake's variables `user.id` (or `id`), `user.full_name` and `last_text_input`, in JSON (with the dot) or GET (PHP turns the dot into `_`), then they fill psid, name and message | `test_S_059_3…` | Passed · 2026-10-18 · auto |
+| S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
+| S-059.16 | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+| S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
+
+### S-059E Fixes from the independent review: fast at millions of rows (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-059.18 | Given chats and pages, when the Chats page opens (with or without a page filter), then no query counts or groups the whole chats table; the page list comes from page settings plus a cached (10 min) list of other page ids ("Unknown page (ID …)"); the table has a (page_id, received_at) index | `test_S_059_18…` | Passed · 2026-10-18 · auto |
+| S-059.19 | Given more old chats than one batch (5000), when the prune runs, then it deletes in batches until none are left (up to 40 batches a run) and keeps newer chats | `test_S_059_19…` | Passed · 2026-10-18 · auto |
+| S-059.20 | Given the cached page id → page map, when a page's botcake.page_id is saved, then the next chat with the new id gets the page name at once and the old id is gone from the map | `test_S_059_20…` | Passed · 2026-10-18 · auto |
+| S-059.21 | Given a body over 64 KB, then a wrong header key gets 401 (checked first) and otherwise it gets 413; nothing is stored | `test_S_059_21…` (3 data sets) | Passed · 2026-10-18 · auto |
+| S-059.3 / S-059.13 (extended) | The payload no longer repeats the fields that have their own column (page_id, psid, name, message, under whatever alias they came) | `test_S_059_3…`, `test_S_059_13…` | Passed · 2026-10-18 · auto |
+| S-059.16 (extended) | The Setup box says "Prefer POST + header; GET puts the key in server logs." | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+### S-060 Chatblast pages keep the header fixed and scroll only the data (P1)
+
+Spec 060. Test in `tests/Feature/Chatblast/ChatblastAppTest.php`; the scrolling itself is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.1 | Given any of the five Chatblast pages, then the page is one full-height column whose data area is its only scroll container (one `cb-scroll`), with the top bar and page header outside it; on To send, History and Page settings that area holds the table, whose column header row sticks to its top | `test_S_060_1…` (5 data sets) | Passed · 2026-10-18 · auto |
+| S-060.2 | Given a table page, when the rows are scrolled at 1366 or 1280 px, then the top bar, the page header with its filters, chips and buttons, and the column header row stay in place, the page has no horizontal scroll, and a row still opens its details modal | browser check | Passed · 2026-10-18 · headless browser |
+| S-060.3 | Given Messages or Sequences (cards), when the cards are scrolled, then the top bar and the page header with its filters stay in place | browser check | Passed · 2026-10-18 · headless browser |
+
+### S-060A A short fixed block, and a Ready chip on Page settings (P1)
+
+Amendment 1. Tests in `tests/Feature/Chatblast/ChatblastAppTest.php` and `tests/Feature/PageSettings/PageSettingsGridTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.4 | Given To send or History, then the fixed block is the title with its description, one filter row and one chip row; the chip row holds the chips, the "Sending: …" status at the right in small text and a "Test PSID" button at its right end; there is no Test PSID disclosure | `test_S_060_4…` (2 data sets) | Passed · 2026-10-18 · auto |
+| S-060.5 | Given To send, when "Test PSID" is clicked, then the picker opens in a modal (search, pick, current PSID) and closes with ✕, Escape or a click outside | browser check | Passed · 2026-10-18 · headless browser |
+| S-060.6 | Given Page settings, then a "Ready N" chip comes right after "Pages N" and counts the pages with the green row border; clicking it shows only those pages, clicking it again shows every page, and it combines with the name search | `test_S_060_6…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
+
+### S-060B History lists the latest processed first (P1)
+
+Amendment 2. Test in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-060.7 | Given History > Sent, when a row built earlier was sent later than another, then it is listed first (sent_at descending, then id descending; a row without sent_at goes last); on the other chips the order is the time the row was processed (updated_at) descending, then id descending; To send keeps its order | `test_S_060_7…` (sent, failed) | Passed · 2026-10-18 · auto |

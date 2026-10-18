@@ -37,7 +37,7 @@ class BotcakePanelTest extends BotcakeApiTestCase
     {
         Http::fake(['botcake.io/api/public_api/v1/pages/1001/custom_fields*' => Http::response($body, $status)]);
 
-        $res = $this->followingRedirects()->post('/page-settings/test-token', ['page_name' => 'page uno'])->assertOk();
+        $res = $this->followingRedirects()->post('/chatblast/page-settings/test-token', ['page_name' => 'page uno'])->assertOk();
 
         Http::assertSentCount(1);
         $this->assertStringStartsWith($expected . ' ', (string) app(PageSettings::class)->get('Page Uno', 'botcake', 'token_status'));
@@ -49,7 +49,7 @@ class BotcakePanelTest extends BotcakeApiTestCase
     {
         Queue::fake();
 
-        $this->post('/page-settings/sync', ['page_name' => 'Page Uno'])->assertRedirect();
+        $this->post('/chatblast/page-settings/sync', ['page_name' => 'Page Uno'])->assertRedirect();
 
         Queue::assertPushed(SyncBotcakeCustomersJob::class, fn ($job) => $job->page === 'Page Uno' && $job->full === false);
     }
@@ -59,8 +59,8 @@ class BotcakePanelTest extends BotcakeApiTestCase
         Queue::fake();
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
 
-        $this->post('/page-settings/test-token', ['page_name' => 'Page Uno'])->assertNotFound();
-        $this->post('/page-settings/sync', ['page_name' => 'Page Uno'])->assertNotFound();
+        $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertNotFound();
+        $this->post('/chatblast/page-settings/sync', ['page_name' => 'Page Uno'])->assertNotFound();
         Queue::assertNothingPushed();
     }
 }

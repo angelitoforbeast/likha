@@ -1,21 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Botcake customers · {{ $page }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
+@extends('layouts.chatblast')
 
-<div class="p-4 sm:p-6">
-    <div class="flex items-center justify-between mb-4">
-        <h1 class="text-xl font-semibold">Botcake customers · {{ $page }}</h1>
-        <div class="flex gap-4 text-sm">
-            <a href="{{ route('page-settings.psid-coverage.orders', ['page_name' => $page]) }}" class="text-blue-700 hover:underline">Orders ng page</a>
-            <a href="{{ route('page-settings.index') }}" class="text-gray-600 hover:underline">Page Settings</a>
-        </div>
-    </div>
+@section('title', 'Botcake customers · ' . $page)
+@section('heading', 'Botcake customers · ' . $page)
+
+@section('actions')
+    <a href="{{ route('page-settings.psid-coverage.orders', ['page_name' => $page]) }}" class="text-blue-700 hover:underline">Orders ng page</a>
+    <a href="{{ route('page-settings.index') }}" class="text-gray-600 hover:underline">Page Settings</a>
+@endsection
+
+@section('content')
+<div>
 
     <form method="GET" action="{{ route('page-settings.customers') }}" class="flex flex-wrap items-center gap-2 mb-4 text-sm">
         <input type="hidden" name="page" value="{{ $page }}">
@@ -75,5 +69,4 @@
         @if($customers->nextPageUrl())<a class="text-blue-700 hover:underline" href="{{ $customers->nextPageUrl() }}">Susunod →</a>@endif
     </div>
 </div>
-</body>
-</html>
+@endsection

@@ -177,6 +177,10 @@ class ChatblastTrackTest extends ChatblastTestCase
         $this->assertCount(2, $this->jntCalls(), 'tumigil pagkalipas ng 60 s');
         $this->assertSame(60, BotcakeMessage::count(), 'nabuo pa rin ang lahat');
         $this->assertSame(20, BotcakeMessage::get()->filter(fn ($m) => empty($m->vars['tracked_at']))->count(), 'ang 20 na hindi naabot: rider pending');
+        // S-056.27: ang pinakabagong order muna; ang hindi naabot ay ang pinakaluma.
+        $this->assertSame(sprintf('JT%010d', 60), $this->jntCalls()[0][0]);
+        $this->assertEqualsCanonicalizing(array_map(fn ($i) => sprintf('JT%010d', $i), range(1, 20)),
+            BotcakeMessage::get()->filter(fn ($m) => empty($m->vars['tracked_at']))->pluck('waybill')->all());
         $this->assertSame(20, json_decode(DB::table('jnt_track_sync_runs')->whereNull('date_from')->value('result_sample'), true)['pending']);
     }
 
@@ -389,7 +393,7 @@ class ChatblastTrackTest extends ChatblastTestCase
 
         $lock = \Illuminate\Support\Facades\Cache::lock(Chatblast::BUILD_LOCK, 60);
         $lock->get();
-        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertStatus(409)->assertJsonPath('error', 'May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito.');
+        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertStatus(409)->assertJsonPath('error', 'A fetch is already running; try again after it.');
         $lock->release();
     }
 
@@ -437,18 +441,18 @@ class ChatblastTrackTest extends ChatblastTestCase
 
     public static function riderVersions(): array
     {
-        // [mga bersyon ng araw, inaasahang status, inaasahang text]
         return [
-            'may bersyong walang rider'  => [['Rider {rider} {rider_phone}', 'Walang rider {name}'], 'sent', 'Walang rider Ana Cruz'],
-            'lahat ay may rider'         => [['Rider {rider} {rider_phone}'], 'no_config', null],
+            'may bersyong walang rider' => [['Rider {rider} {rider_phone}', 'Walang rider {name}']],
+            'lahat ay may rider'        => [['Rider {rider} {rider_phone}']],
         ];
     }
 
     /**
-     * Ang rider ng kuha kahapon ay hindi ginagamit kapag walang sagot ang J&T bago ipadala ngayon.
+     * S-056.33: ang Delivering row na nabuo noong naunang araw ay hindi ipinapadala kapag walang sagot ang J&T bago ipadala
+     * (hindi alam kung On Delivery pa): ibinabalik sa ready para sa susunod na oras; walang mensahe sa customer.
      * @dataProvider riderVersions
      */
-    public function test_yesterdays_rider_is_dropped_when_the_send_time_track_gets_no_answer(array $versions, string $status, ?string $text): void
+    public function test_S_056_33_an_earlier_days_delivering_row_is_not_sent_when_jnt_gives_no_answer_at_send_time(array $versions): void
     {
         app(Chatblast::class)->setSequence('delivering', [$versions]);
         $this->shipped('Page Uno', 'Ana Cruz', 'JT0000000002', 'psid-a');
@@ -461,9 +465,8 @@ class ChatblastTrackTest extends ChatblastTestCase
         app(ChatblastSender::class)->queue(BotcakeMessage::pluck('id')->all(), 1);
 
         $row = BotcakeMessage::sole();
-        $this->assertSame([$status, $text], [$row->status, $row->text]);
-        if ($status === 'no_config') $this->assertSame(Chatblast::RIDER_REASON, $row->reason);
-        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains((string) json_encode($r[0]->data()), 'Juan D. Cruz')), 'hindi naipadala ang rider kahapon');
+        $this->assertSame(['ready', 'J&T not reached; will retry at the next send time'], [$row->status, $row->reason]);
+        $this->assertFalse(collect(Http::recorded())->contains(fn ($r) => str_contains($r[0]->url(), 'botcake.io')), 'walang mensahe sa customer');
     }
 
     public function test_a_from_jnts_copy_with_no_status_is_updated_too(): void

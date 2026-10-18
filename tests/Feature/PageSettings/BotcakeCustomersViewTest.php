@@ -32,7 +32,7 @@ class BotcakeCustomersViewTest extends BotcakeApiTestCase
 
     private function list(string $query = '')
     {
-        return $this->get('/page-settings/customers?page=page%20uno' . $query)->assertOk();
+        return $this->get('/chatblast/page-settings/customers?page=page%20uno' . $query)->assertOk();
     }
 
     private function psids($res): array
@@ -54,7 +54,7 @@ class BotcakeCustomersViewTest extends BotcakeApiTestCase
         $this->assertSame(52, $first->viewData('customers')->total());
 
         $this->assertSame(['p51', 'never'], $this->psids($this->list('&p=2')), 'walang last interaction = huli');
-        $this->assertStringContainsString('/page-settings/customers?page=page%20uno&amp;p=2', $first->getContent());
+        $this->assertStringContainsString('/chatblast/page-settings/customers?page=page%20uno&amp;p=2', $first->getContent());
     }
 
     public function test_search_by_name_or_phone_and_filter_by_status_and_ad(): void
@@ -135,12 +135,12 @@ class BotcakeCustomersViewTest extends BotcakeApiTestCase
 
     public function test_only_the_ceo_reaches_it_and_the_grid_links_to_it(): void
     {
-        $this->assertStringContainsString(route('page-settings.customers'), $this->get('/page-settings')->getContent());
+        $this->assertStringContainsString(route('page-settings.customers'), $this->get('/chatblast/page-settings')->getContent());
 
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $this->get('/page-settings/customers?page=Page%20Uno')->assertNotFound();
+        $this->get('/chatblast/page-settings/customers?page=Page%20Uno')->assertNotFound();
 
         $this->actingAs($this->user('CEO', 'ceo2@example.test'));
-        $this->get('/page-settings/customers?page[]=x&q[]=y')->assertOk();
+        $this->get('/chatblast/page-settings/customers?page[]=x&q[]=y')->assertOk();
     }
 }

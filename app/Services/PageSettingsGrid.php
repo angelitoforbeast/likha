@@ -27,8 +27,10 @@ class PageSettingsGrid
         'botcake.flow.on_delivery' => 'Delivering flow ID',
         'botcake.flow.in_transit'  => 'In transit flow ID',
         'botcake.flow.broadcast'   => 'Broadcast flow ID',
+        'botcake.template.shipping' => 'Shipping template',
         'botcake.field.message'    => 'Message field ID',
         'botcake.test_psid'        => 'Test PSID',
+        'botcake.test_ok'          => 'Test send', // system: huling matagumpay na Send test (ChatblastReady)
         'botcake.token_status'     => 'Token status',
     ];
 
@@ -63,8 +65,10 @@ class PageSettingsGrid
         }
 
         $info = $this->info(array_keys($rows));
+        // Ang huling totoong padala kada page: ang page ay "nasubukan" kapag ito o ang Send test ay pagkatapos ng setup.
+        $ready = app(ChatblastReady::class)->states();
         foreach ($rows as $pk => &$row) {
-            $row['info'] = $this->rowInfo($row['cells'], $info, $pk) + ['orders' => $orders[$pk]['orders'] ?? 0];
+            $row['info'] = $this->rowInfo($row['cells'], $info, $pk) + ['orders' => $orders[$pk]['orders'] ?? 0, 'last_send' => $ready[$pk]['last_send'] ?? null];
         }
         unset($row);
 
@@ -175,17 +179,22 @@ class PageSettingsGrid
         ])->all();
     }
 
-    /** Ang ipinapadala sa browser para sa isang setting: hindi kailanman ang secret mismo. */
+    /**
+     * Ang ipinapadala sa browser para sa isang setting: hindi kailanman ang secret mismo. Ang pangalan ng flow at ang
+     * body ng template ay may line (ang ipinapakita sa ilalim ng cell) at tone (red, grey o blangko).
+     */
     public function cell(PageSetting $s, ?Collection $names = null): array
     {
         $names ??= $this->userNames(collect([$s]));
+        $line = PageSettings::isDetailKey($s->fullKey()) ? BotcakeFlowNames::line((string) $s->value) : [];
 
-        return [
+        return $line + [
             'id'     => $s->id,
             'value'  => $s->displayValue(),
             'secret' => (bool) $s->is_secret,
             'by'     => $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system',
             'at'     => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
+            'ts'     => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i:s'), // para sa "nasubukan na" sa page
         ];
     }
 
@@ -214,15 +223,29 @@ class PageSettingsGrid
             'name'     => substr(strstr($key, '.'), 1),
             'label'    => $label ?? $key,
             'secret'   => in_array($key, PageSettings::SECRET_KEYS, true) || isset($secret[$key]),
-            'readonly' => in_array($key, PageSettings::SYSTEM_KEYS, true),
+            'readonly' => PageSettings::isSystemKey($key),
+            'group'    => self::group($key),
         ];
 
-        $other = $active->map(fn ($s) => $s->fullKey())->unique()->reject(fn ($k) => isset(self::KNOWN[$k]))->sort()->values();
+        $other = $active->map(fn ($s) => $s->fullKey())->unique()
+            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k))->sort()->values();
 
         return array_merge(
             array_map($col, array_keys(self::KNOWN), array_values(self::KNOWN)),
             $other->map(fn ($k) => $col($k, null))->all()
         );
+    }
+
+    /**
+     * Kung saang cell ng row nakalagay ang column, para walang horizontal scroll: "flows" (ang 4 na flow), "template" (ang
+     * pangalan ng shipping template, nasa nabubuksang row; ang body ay nasa Flows cell), "botcake" (ang ibang kilalang key)
+     * o "other" (ibang key, nasa nabubuksang row).
+     */
+    private static function group(string $key): string
+    {
+        if (!isset(self::KNOWN[$key])) return 'other';
+        if ($key === 'botcake.template.shipping') return 'template';
+        return str_starts_with($key, 'botcake.flow.') ? 'flows' : 'botcake';
     }
 
     /** @return Collection<int, string> user id => pangalan, sa isang query */
@@ -258,7 +281,11 @@ class PageSettingsGrid
         foreach ($runs as $run) {
             $pk = $this->settings->pageKey((string) $run->page_name);
             if (!isset($out[$pk])) continue;
+            // Mga petsang nabasa ng run, pinakaluma → pinakabago (hal. "Okt 17 → Okt 18"); iisa kapag pareho.
+            $dates = array_unique(array_filter([BotcakeCustomerSync::shortDate($run->subscribed_oldest), BotcakeCustomerSync::shortDate($run->subscribed_newest)]));
             $out[$pk]['last_sync'] = [
+                'dates'       => $dates ? implode(' → ', $dates) : null,
+                'failed'      => $run->status === 'failed',
                 'at'          => $run->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
                 'status'      => $run->status,
                 'stop_reason' => $run->stop_reason,
@@ -267,11 +294,25 @@ class PageSettingsGrid
                 'updated'     => (int) $run->customers_updated,
                 'matched'     => (int) $run->matched_by_name + (int) $run->matched_by_phone,
                 'ad_filled'   => (int) $run->ad_filled,
-                'error'       => $run->last_error,
+                'error'       => self::englishError($run->last_error),
             ];
         }
 
         return $out;
+    }
+
+    /** Ang Tagalog na error ng run na naitala bago naging English ang page: ipinapakita sa English (hindi binabago ang row). */
+    private const OLD_ERRORS = [
+        'Pinatay ang sync bago natapos (hal. timeout ng worker)' => 'The sync was killed before it finished (e.g. a worker timeout)',
+        'Botcake: tinanggihan ang token (success:false)'         => 'Botcake: token refused (success:false)',
+        'Walang botcake.page_id o botcake.token ang page'        => 'The page has no botcake.page_id or botcake.token',
+        'Botcake: hindi listahan ang sagot ng customer list'     => 'Botcake: the customer list answer is not a list',
+    ];
+
+    private static function englishError(?string $error): ?string
+    {
+        if ($error === null) return null;
+        return self::OLD_ERRORS[$error] ?? preg_replace('/ pagkatapos ng (\d+) retry$/', ' after $1 retries', $error);
     }
 
     private function rowInfo(array $cells, array $info, string $pk): array

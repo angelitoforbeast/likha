@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 
 /**
  * "Sync lahat" ng /page-settings. Ang bawat page na may botcake.page_id at token na hindi invalid ay sine-sync, isa-isa sa
- * ayos ng grid, ayon sa plan() nito (window, tuloy o incremental); ang incremental na sariwa ay nilalaktawan (next()).
+ * ayos ng grid, ayon sa plan() nito (window, tuloy o by date); ang by date na sariwa ay nilalaktawan (next()).
  *
  * Ang run ay isang row sa botcake_psid_import_runs (source sync_all), hindi sa cache: hindi ito nawawala sa cache:clear o
  * deploy, at may history. page_index = ang page na susunod o kasalukuyan. current_page = may job na may hawak ng page na
@@ -240,7 +240,7 @@ class BotcakeSyncAll
 
         return (bool) BotcakePsidImportRun::whereKey($run->id)->where('status', 'running')->update($last
             ? ['status' => 'done', 'page_index' => $total, 'current_page' => null, 'finished_at' => now()]
-            : ['status' => 'stopped', 'current_page' => null, 'finished_at' => now(), 'last_error' => 'Naputol ang lumang run: walang job at walang state sa cache']);
+            : ['status' => 'stopped', 'current_page' => null, 'finished_at' => now(), 'last_error' => 'Old run cut off: no job and no state in the cache']);
     }
 
     /** May naka-queue o tumatakbong job ba ang run (database queue lang). True kapag hindi masabi. */
@@ -359,16 +359,17 @@ class BotcakeSyncAll
     }
 
     public const SUMMARY = [
-        'window' => 'window', 'continue' => 'tuloy', 'incremental' => 'incremental',
-        'fresh' => 'laktaw (sariwa)', 'missing' => 'walang ID/token', 'invalid' => 'token invalid',
+        'window' => 'window', 'continue' => 'resume', 'by_date' => 'by date',
+        'fresh' => 'skipped (fresh)', 'missing' => 'no ID/token', 'invalid' => 'token invalid',
     ];
 
     /**
      * Ano ang gagawin ng susunod na sync ng bawat row (grid row: key + cells + info.botcake), para sa Sync lahat: ang
-     * plan() ng spec 044 at, sa ibabaw, ang laktaw kapag incremental at may matagumpay na api run sa huling N oras
+     * plan() ng sync at, sa ibabaw, ang laktaw kapag by date at may matagumpay na api run sa huling N oras
      * (services.botcake.sync_all_fresh_hours). Ang window read at ang tuloy ay hindi nilalaktawan. Dalawang query lang.
+     * from = stop date ng by date ("Okt 17"), kahit "laktaw" ang label.
      * @param array<int|string, array> $rows
-     * @return array<string, array{kind:string, label:string}> pageKey => uri at label
+     * @return array<string, array{kind:string, label:string, from?:?string}> pageKey => uri, label at stop date
      */
     public function next(array $rows): array
     {
@@ -379,17 +380,22 @@ class BotcakeSyncAll
 
         foreach ($rows as $row) {
             $pk = $row['key'];
-            if (!($row['info']['botcake'] ?? false)) { $out[$pk] = ['kind' => 'missing', 'label' => 'walang ID/token']; continue; }
+            if (!($row['info']['botcake'] ?? false)) { $out[$pk] = ['kind' => 'missing', 'label' => 'no ID/token']; continue; }
             if (str_starts_with((string) ($row['cells']['botcake.token_status']['value'] ?? ''), 'invalid')) {
                 $out[$pk] = ['kind' => 'invalid', 'label' => 'token invalid'];
                 continue;
             }
 
             $plans ??= $this->sync->plans();
-            [$kind, $start] = $plans[$pk] ?? ['window', 1];
+            [$kind, $start, $stop] = ($plans[$pk] ?? ['window', 1]) + [2 => null];
+            $from = BotcakeCustomerSync::shortDate($stop); // stop date ng by date, para sa "susunod: mula …"
+            if ($start > 1) {
+                $out[$pk] = $kind === 'by_date' ? ['kind' => 'continue', 'label' => 'resume from batch ' . $start . ' (by date, from ' . $from . ')', 'from' => $from]
+                    : ['kind' => 'continue', 'label' => 'resume from batch ' . $start];
+                continue;
+            }
             if ($kind === 'window') {
-                $out[$pk] = $start > 1 ? ['kind' => 'continue', 'label' => 'tuloy mula batch ' . $start]
-                    : ['kind' => 'window', 'label' => 'window (' . $days . ' araw, buo)'];
+                $out[$pk] = ['kind' => 'window', 'label' => 'window (' . $days . ' days, full)'];
                 continue;
             }
 
@@ -397,16 +403,16 @@ class BotcakeSyncAll
             $at = $fresh[$pk] ?? null;
             if ($at && $at->gt(now()->subMinutes((int) round($hours * 60)))) {
                 $mins = (int) $at->diffInMinutes(now(), true);
-                $out[$pk] = ['kind' => 'fresh', 'label' => 'laktaw (sariwa, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' oras') . ' na)'];
+                $out[$pk] = ['kind' => 'fresh', 'label' => 'skipped (fresh, ' . ($mins < 60 ? $mins . ' min' : intdiv($mins, 60) . ' h') . ' ago)', 'from' => $from];
                 continue;
             }
-            $out[$pk] = ['kind' => 'incremental', 'label' => 'incremental'];
+            $out[$pk] = ['kind' => 'by_date', 'label' => 'by date, from ' . $from, 'from' => $from];
         }
 
         return $out;
     }
 
-    /** Ang isang linya ng plano ng Sync lahat, hal. "12 window, 3 tuloy, 20 incremental, 6 laktaw (sariwa)". */
+    /** Ang isang linya ng plano ng Sync lahat, hal. "12 window, 3 tuloy, 20 by date, 6 laktaw (sariwa)". */
     public static function summary(array $next): string
     {
         $count = array_count_values(array_column($next, 'kind'));
@@ -429,7 +435,7 @@ class BotcakeSyncAll
         $rows = collect(app(PageSettingsGrid::class)->build()['rows']);
 
         $pages = $rows->filter(fn ($r) => isset($botcake[$r['key']])
-                && in_array($r['info']['next']['kind'] ?? null, ['window', 'continue', 'incremental'], true))
+                && in_array($r['info']['next']['kind'] ?? null, ['window', 'continue', 'by_date'], true))
             ->map(fn ($r) => $botcake[$r['key']])->values()->all();
 
         return [$pages, $rows->where('info.next.kind', 'fresh')->count()];

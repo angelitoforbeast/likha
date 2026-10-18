@@ -6,6 +6,7 @@ use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Ang dalawang dating uri (in_transit, delivering) ay nagiging dalawang campaign: ang naka-save na text (o ang default),
@@ -14,6 +15,60 @@ use App\Services\Chatblast;
 class ChatblastCampaignMigrationTest extends ChatblastTestCase
 {
     protected bool $withCampaigns = false;
+
+    public function test_the_schedule_columns_keep_the_live_campaigns_exactly_and_default_to_every_day(): void
+    {
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php']]);
+        $days = fn (string $w, int $n) => array_map(fn ($d) => [$w . ' araw ' . $d . ' A {name}', $w . ' araw ' . $d . ' B {waybill}'], range(1, $n));
+        DB::table('chatblast_campaigns')->where('kind', 'in_transit')->update(['days' => json_encode($days('Biyahe', 10)), 'pages' => json_encode(['Page Uno'])]);
+        DB::table('chatblast_campaigns')->where('kind', 'delivering')->update(['days' => json_encode($days('Deliver', 5)), 'send_times' => json_encode(['09:15', '15:00'])]);
+        $before = DB::table('chatblast_campaigns')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
+
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php',
+            'database/migrations/2026_10_19_100200_add_send_range_to_chatblast_campaigns.php',
+        ]]);
+
+        $after = DB::table('chatblast_campaigns')->orderBy('id')->get()->map(fn ($r) => (array) $r)->all();
+        foreach ($before as $i => $row) {
+            $this->assertSame($row, array_intersect_key($after[$i], $row), 'walang nabago sa dating column');
+            $this->assertSame([null, null, null, null], [$after[$i]['weekdays'], $after[$i]['step_times'], $after[$i]['daily_cap'], $after[$i]['send_range']],
+                'walang bagong oras; ang send_times ay pareho (sa itaas)');
+        }
+        $it = ChatblastCampaign::where('kind', 'in_transit')->sole();
+        $this->assertCount(10, $it->days);
+        $this->assertSame('Biyahe araw 10 B {waybill}', $it->days[9][1]);
+    }
+
+    public function test_each_day_of_the_live_campaigns_becomes_a_message_with_exactly_its_texts(): void
+    {
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_18_400000_create_chatblast_campaigns_table.php',
+            'database/migrations/2026_10_19_100000_add_schedule_to_chatblast_campaigns.php',
+        ]]);
+        $days = fn (string $w, int $n) => array_map(fn ($d) => ["Hello Ma'am/Sir {name}, " . $w . ' ' . $d . ' — ₱{cod} “A”', $w . ' ' . $d . " B\n{waybill}"], range(1, $n));
+        DB::table('chatblast_campaigns')->where('kind', 'in_transit')->update(['days' => json_encode($days('Biyahe', 10), JSON_UNESCAPED_UNICODE)]);
+        DB::table('chatblast_campaigns')->where('kind', 'delivering')->update(['days' => json_encode($days('Deliver', 5))]);
+        $row = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'WB-1', 'kind' => 'in_transit', 'day' => 3, 'version' => 'B', 'status' => 'sent', 'text' => 'x']);
+        $before = DB::table('chatblast_campaigns')->orderBy('id')->pluck('days', 'kind')->map(fn ($j) => json_decode($j, true))->all();
+
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_19_100100_create_chatblast_messages_table.php']]);
+
+        foreach (['in_transit' => ['In transit', 10], 'delivering' => ['Delivering', 5]] as $kind => [$name, $n]) {
+            $c = ChatblastCampaign::where('kind', $kind)->sole();
+            $this->assertSame($before[$kind], $c->days, 'pareho ang days');
+            $this->assertCount($n, $c->step_messages);
+            foreach ($c->step_messages as $i => $id) {
+                $m = \App\Models\ChatblastMessage::findOrFail($id);
+                $this->assertSame([$name . ' · Day ' . ($i + 1), $before[$kind][$i]], [$m->name, $m->versions]);
+            }
+        }
+        $this->assertSame(15, \App\Models\ChatblastMessage::count());
+        $this->assertSame(['in_transit', 3, 'B'], [$row->fresh()->kind, $row->fresh()->day, $row->fresh()->version]);
+
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_19_100100_create_chatblast_messages_table.php']]);
+        $this->assertSame(15, \App\Models\ChatblastMessage::count(), 'isang beses lang');
+    }
 
     public function test_the_two_kinds_become_two_manual_campaigns_with_their_texts_and_their_rows(): void
     {

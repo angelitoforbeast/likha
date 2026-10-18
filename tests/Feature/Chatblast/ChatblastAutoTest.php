@@ -7,9 +7,11 @@ use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
 use App\Services\Chatblast;
 use App\Services\ChatblastSender;
+use Carbon\Carbon;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
@@ -54,7 +56,7 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
 
         $this->tick('2026-10-18 08:59:00');
-        $this->assertSame([], $this->statuses(), 'hindi pa oras');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses(), 'hindi pa oras: nasa To send (kusang refresh), hindi pa naipadala');
         app(Chatblast::class)->build('in_transit', 1); // ready na row ng ibang (manual) campaign ngayong araw
 
         $this->tick('2026-10-18 09:00:00');
@@ -103,23 +105,190 @@ class ChatblastAutoTest extends ChatblastTestCase
         foreach (['c-off', 'c-manual', 'c-late', 'c-new'] as $kind) $this->assertSame([], $this->statuses($kind), $kind);
     }
 
-    public function test_auto_never_sends_the_backlog_only_rows_built_today_after_the_switch(): void
+    public function test_S_056_13_a_ready_row_from_before_the_switch_is_sent_once_auto_s_fetch_re_checks_it(): void
     {
         $this->travelTo('2026-10-17 08:00:00');
         $this->campaign(['send_times' => ['09:00', '15:00'], 'mode' => 'manual']);
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
         app(Chatblast::class)->build('c-auto', 1); // kahapon: ready, hindi naipadala
-
-        $this->travelTo('2026-10-18 09:30:00');
-        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
-        app(Chatblast::class)->build('c-auto', 1); // ngayong araw pero bago i-auto
-        $this->travelTo('2026-10-18 10:00:00');
+        $this->travelTo('2026-10-17 20:00:00');
         ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
 
-        $this->travelTo('2026-10-18 12:00:00');
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-18 09:00:00');
+
+        // In Transit pa ang WB-1: nasuri ulit ng fetch ng auto bago magpadala, kaya ipinadala kasama ng bago.
+        $this->assertSame(['WB-1' => 'queued', 'WB-2' => 'queued'], $this->statuses());
+        $this->assertSame('2026-10-17', BotcakeMessage::where('waybill', 'WB-1')->sole()->created_at->toDateString(), 'ang dating row, hindi bagong row');
+    }
+
+    public function test_S_056_14_a_ready_row_whose_waybill_moved_on_is_skipped_frees_its_key_and_the_next_sequence_builds(): void
+    {
+        $this->travelTo('2026-10-17 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->campaign(['kind' => 'c-deliv', 'name' => 'Deliv', 'statuses' => ['Delivering'], 'mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1);
+
+        $this->travelTo('2026-10-18 08:00:00');
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'Delivering']);
+        app(Chatblast::class)->build('c-auto', 1);
+        app(Chatblast::class)->build('c-deliv', 1);
+
+        $old = BotcakeMessage::where('kind', 'c-auto')->sole();
+        $this->assertSame(['skipped', 'The waybill is no longer In Transit (now: Delivering)', null], [$old->status, $old->reason, $old->dedupe_key]);
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses('c-deliv'));
+
+        // Bumalik sa In Transit (hal. mula Problematic): ang parehong sequence ay may bagong row, dahil nabitawan ang key.
+        $this->travelTo('2026-10-19 08:00:00');
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'In Transit']);
+        $this->shipped('Page Uno', 'Cora Diaz', 'WB-9', null, 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1); // ang WB-9 ay no_psid
+        $noPsid = BotcakeMessage::where('waybill', 'WB-9')->sole()->id;
+        DB::table('botcake_messages')->where('id', $noPsid)->update(['updated_at' => '2026-10-10 08:00:00']);
+        app(Chatblast::class)->build('c-auto', 1);
+        $this->assertSame(['skipped', 'ready'], BotcakeMessage::where('kind', 'c-auto')->where('waybill', 'WB-1')->orderBy('id')->pluck('status')->all());
+        $this->assertSame('2026-10-10 08:00:00', (string) DB::table('botcake_messages')->where('id', $noPsid)->value('updated_at'), 'ang tatak ay sa ready lang');
+    }
+
+    public function test_S_056_19_a_ready_row_whose_order_left_the_sequence_window_is_skipped_and_not_sent(): void
+    {
+        $this->travelTo('2026-10-01 08:00:00');
+        $this->campaign(['mode' => 'manual', 'window_days' => 10]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit'); // order ng 10-01
+        app(Chatblast::class)->build('c-auto', 1);
+        $this->travelTo('2026-10-17 20:00:00');
+        ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
+
+        $this->tick('2026-10-18 09:00:00'); // In Transit pa sa J&T, pero 17 araw na ang order: labas sa 10 araw
+
+        $old = BotcakeMessage::where('kind', 'c-auto')->sole();
+        $this->assertSame(['skipped', 'The order is older than the sequence\'s 10-day window', null], [$old->status, $old->reason, $old->dedupe_key]);
+    }
+
+    public function test_S_056_15_auto_does_not_send_a_row_nobody_re_checked_since_before_the_switch(): void
+    {
+        $this->travelTo('2026-10-17 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1); // kahapon, at hindi na nasuri ulit
+        $this->travelTo('2026-10-17 20:00:00');
+        ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
+
+        $this->travelTo('2026-10-18 08:30:00');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        DB::table('botcake_messages')->insert(['page_name' => 'Page Uno', 'waybill' => 'WB-2', 'kind' => 'c-auto', 'day' => 1, 'psid' => 'psid-b',
+            'text' => 'Hi Ben', 'status' => 'ready', 'attempts' => 0, 'is_test' => false, 'dedupe_key' => 'WB-2|c-auto|1', 'created_at' => now(), 'updated_at' => now()]);
+
+        // Ang fetch ng auto ay hindi nakasuri (hal. walang naabot): ang hindi nasuri mula bago i-auto ay hindi ipinapadala.
+        $this->partialMock(Chatblast::class, fn ($m) => $m->shouldReceive('build')->andReturn(['added' => 0]));
+        $this->tick('2026-10-18 09:00:00');
+
+        $this->assertSame(['WB-1' => 'ready', 'WB-2' => 'queued'], $this->statuses());
+    }
+
+    public function test_S_056_26_the_to_send_list_refreshes_itself_at_quarter_past_each_hour_and_never_sends(): void
+    {
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+
+        $this->tick('2026-10-18 09:10:00');
+        $this->assertSame([], $this->statuses(), 'bago mag-:15');
+        $this->tick('2026-10-18 09:15:00');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses(), 'ang refresh ng 09:15');
+        Queue::assertNothingPushed();
+        $this->assertSame('09:15', app(Chatblast::class)->refreshState()['updated']);
+
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-18 09:40:00');
+        $this->assertArrayNotHasKey('WB-2', $this->statuses(), 'isang refresh lang kada oras');
+
+        $this->travelTo('2026-10-18 10:15:00');
+        $lock = Cache::lock(Chatblast::BUILD_LOCK, 300); // pagkatapos ng travel: ang lock ng array cache ay may oras
+        $lock->get();
+        Artisan::call('chatblast:auto');
+        $this->assertArrayNotHasKey('WB-2', $this->statuses(), 'may tumatakbong pagkuha: laktaw');
+        $lock->release();
+        $this->tick('2026-10-18 10:20:00');
+        $this->assertSame('ready', $this->statuses()['WB-2'], 'sa susunod na takbo sa parehong oras');
+
         $this->shipped('Page Uno', 'Cora Diaz', 'WB-3', 'psid-c', 'In Transit');
-        $this->tick('2026-10-18 15:00:00');
-        $this->assertSame(['WB-1' => 'ready', 'WB-2' => 'ready', 'WB-3' => 'queued'], $this->statuses(), 'ang bago lang mula ngayong araw, pagkatapos i-auto');
+        app(ChatblastSender::class)->pause();
+        $this->tick('2026-10-19 05:20:00');
+        $this->assertArrayNotHasKey('WB-3', $this->statuses(), 'labas sa 06:15–23:15');
+        $this->tick('2026-10-19 06:15:00');
+        $this->assertSame('ready', $this->statuses()['WB-3'], 'kahit naka-pause: hindi ito nagpapadala');
+        Queue::assertNothingPushed();
+        $this->assertSame(['updated' => '06:15', 'next' => '07:15'], app(Chatblast::class)->refreshState());
+        $this->travelTo('2026-10-19 23:40:00');
+        $this->assertSame('06:15', app(Chatblast::class)->refreshState()['next'], 'pagkatapos ng 23:15: bukas');
+    }
+
+    public function test_S_056_31_the_refresh_runs_until_23_15_and_a_failing_refresh_never_stops_auto(): void
+    {
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        $this->tick('2026-10-18 23:15:00');
+        $this->assertSame(['WB-1' => 'ready'], $this->statuses(), '23:15 ang huling refresh');
+        $this->shipped('Page Uno', 'Ben Reyes', 'WB-2', 'psid-b', 'In Transit');
+        $this->tick('2026-10-19 00:15:00');
+        $this->assertArrayNotHasKey('WB-2', $this->statuses(), 'walang refresh ng 00:15');
+
+        // Pumalya ang buong pagkuha ng refresh: tuloy pa rin ang auto, at hindi ito inuulit nang kada 5 minuto sa oras na iyon.
+        $this->campaign(['kind' => 'c-auto2', 'send_times' => ['09:00'], 'mode_changed_at' => Carbon::parse('2026-10-19 06:00:00', 'Asia/Manila')]);
+        $this->travelTo('2026-10-19 08:30:00');
+        $ready = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'WB-9', 'kind' => 'c-auto2', 'day' => 1, 'psid' => 'psid-z',
+            'text' => 'Hi', 'status' => 'ready', 'attempts' => 0, 'is_test' => false]);
+        $calls = (object) ['n' => 0]; // objekto: ang fn () ay kumukopya ng variable
+        $this->partialMock(Chatblast::class, fn ($m) => $m->shouldReceive('build')->andReturnUsing(function ($kind = null) use ($calls) {
+            if ($kind === null) { $calls->n++; throw new \RuntimeException('database went away'); }
+            return ['added' => 0];
+        }));
+        $this->tick('2026-10-19 09:15:00');
+        $this->assertSame('queued', $ready->fresh()->status, 'naipadala pa rin ang auto ng 09:00');
+        $this->tick('2026-10-19 09:20:00');
+        $this->assertSame(2, $calls->n, 'pumalya: binibitawan ang claim ng oras, kaya sinusubok ulit sa susunod na takbo');
+    }
+
+    public function test_S_056_32_a_long_refresh_is_never_started_twice_and_no_other_build_runs_beside_it(): void
+    {
+        $this->travelTo('2026-10-18 06:00:00');
+        $this->campaign(['mode' => 'manual']);
+        $seen = (object) ['tracks' => 0, 'refresh' => 'not run', 'build' => 'not run'];
+        // Habang tumatakbo pa ang unang refresh (lampas na sa 5 minuto), dumating ang susunod na chatblast:auto at isang build.
+        $this->mock(\App\Services\Jnt\JntTracker::class, fn ($m) => $m->shouldReceive('refresh')->andReturnUsing(function () use ($seen) {
+            if ($seen->tracks++ > 0) return null;
+            $this->travelTo('2026-10-18 06:21:00');
+            $seen->refresh = app(Chatblast::class)->refreshIfDue();
+            $seen->build = app(Chatblast::class)->build('c-auto', 1);
+            return null;
+        }));
+
+        $this->tick('2026-10-18 06:15:00');
+
+        $this->assertNull($seen->refresh, 'ang refresh ng 06:20 ay hindi nagsisimula: kinuha na ng 06:15 ang oras');
+        $this->assertSame(['busy' => true], $seen->build, 'hawak pa ng unang refresh ang build lock, kahit lampas 300 s');
+        $this->assertSame(1, $seen->tracks, 'iisang pagkuha lang ang tumakbo');
+    }
+
+    public function test_S_056_34_a_sequence_whose_build_throws_never_stops_the_next_sequence(): void
+    {
+        $this->travelTo('2026-10-18 08:00:00');
+        $this->campaign(['kind' => 'c-bad', 'send_times' => ['09:00'], 'mode_changed_at' => now()->subHour()]);
+        $this->campaign(['kind' => 'c-good', 'send_times' => ['09:00'], 'mode_changed_at' => now()->subHour()]);
+        $ready = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'WB-9', 'kind' => 'c-good', 'day' => 1, 'psid' => 'psid-z',
+            'text' => 'Hi', 'status' => 'ready', 'attempts' => 0, 'is_test' => false]);
+        $this->partialMock(Chatblast::class, fn ($m) => $m->shouldReceive('build')->andReturnUsing(function ($kind = null) {
+            if ($kind === 'c-bad') throw new \RuntimeException('database went away');
+            return ['added' => 0];
+        }));
+
+        $this->tick('2026-10-18 09:00:00');
+
+        $this->assertSame('queued', $ready->fresh()->status, 'ang kasunod na sequence ay naipadala pa rin');
     }
 
     public function test_the_scheduler_runs_it_every_five_minutes(): void

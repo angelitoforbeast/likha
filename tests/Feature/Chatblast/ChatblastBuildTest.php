@@ -28,8 +28,8 @@ class ChatblastBuildTest extends ChatblastTestCase
         $rows = BotcakeMessage::orderBy('waybill')->get()->keyBy('waybill');
         $this->assertSame(['WB-001', 'WB-002', 'WB-003', 'WB-004'], $rows->keys()->all());
         $this->assertSame(['ready', 'no_psid', 'no_config', 'no_config'], $rows->pluck('status')->values()->all());
-        $this->assertSame('walang flow.shipping, field.message', $rows['WB-003']->reason);
-        $this->assertSame('walang page_id, token, flow.shipping, field.message', $rows['WB-004']->reason);
+        $this->assertSame('missing flow.shipping, field.message', $rows['WB-003']->reason);
+        $this->assertSame('missing page_id, token, flow.shipping, field.message', $rows['WB-004']->reason);
         $this->assertSame('psid-a', $rows['WB-001']->psid);
         $this->assertSame(['delivering', 'Delivering', false, 1], [$rows['WB-001']->kind, $rows['WB-001']->jnt_status, $rows['WB-001']->is_test, $rows['WB-001']->created_by]);
         $this->assertSame(['added' => 4, 'ready' => 1, 'no_psid' => 1, 'no_config' => 2, 'updated' => 0, 'skipped' => 0, 'tracked' => 0, 'rider_pending' => 0], $first);

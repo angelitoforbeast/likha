@@ -141,7 +141,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
 
         $chatblast->setSequence('in_transit', [['Rider {rider}', 'Tawag {rider_phone}']]);
         $row = $row->fresh();
-        $this->assertSame(['no_config', 'walang rider info'], [$row->status, $row->reason]);
+        $this->assertSame(['no_config', 'no rider info'], [$row->status, $row->reason]);
     }
 
     public function test_the_editor_saves_the_days_and_refuses_empty_ones(): void
@@ -167,7 +167,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
         $this->shipped('Page Uno', 'Ana Cruz', 'WB-001', 'psid-a', 'In Transit');
         $this->build();
         $row = $this->getJson('/chatblast/list?' . http_build_query(['kind' => 'in_transit']))->assertOk()->json('rows.0');
-        $this->assertSame([1, 'B', 'Araw 1 · B'], [$row['day'], $row['version'], $row['step']], 'WB-001: 1 mod 2 = bersyon B');
+        $this->assertSame([1, 'B', 'Day 1 · B'], [$row['day'], $row['version'], $row['step']], 'WB-001: 1 mod 2 = bersyon B');
     }
 
     public function test_a_day_sent_today_blocks_the_next_day_until_tomorrow_even_if_it_was_built_yesterday(): void
@@ -189,7 +189,7 @@ class ChatblastSequenceTest extends ChatblastTestCase
         app(ChatblastSender::class)->queue([$day2->id], 1);
         Http::assertNothingSent();
         $this->assertSame('skipped', $day2->fresh()->status);
-        $this->assertStringContainsString('ngayong araw', $day2->fresh()->reason);
+        $this->assertStringContainsString('already sent a message to the waybill today', $day2->fresh()->reason);
 
         $this->travelTo('2026-10-19 09:00:00');
         $this->assertSame(0, $this->build()['added'], 'ang Araw 2 ay mayroon na (ipadala ulit bukas)');
@@ -267,6 +267,6 @@ class ChatblastSequenceTest extends ChatblastTestCase
 
         app(ChatblastSender::class)->queue([$this->rows()->firstWhere('waybill', 'WB-001')->id], 1);
         Http::assertNothingSent();
-        $this->assertStringContainsString('Araw 3', $this->rows()->firstWhere('waybill', 'WB-001')->reason);
+        $this->assertStringContainsString('Day 3', $this->rows()->firstWhere('waybill', 'WB-001')->reason);
     }
 }

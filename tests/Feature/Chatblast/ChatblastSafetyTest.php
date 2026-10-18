@@ -110,8 +110,8 @@ class ChatblastSafetyTest extends ChatblastTestCase
         // [order na kulang, mga bersyon ng araw, inaasahang bersyon o null, dahilan kapag no_config]
         return [
             'COD null, may ibang bersyon' => [['COD' => null], ['Bayad PHP {cod}', 'Salamat {name}'], 'B', null],
-            'COD 0, iisang bersyon'       => [['COD' => '0'], ['Bayad PHP {cod}'], null, 'walang {cod}'],
-            'walang pangalan at receiver' => [['fb_name' => '', 'receiver' => ''], ['Hello {name}'], null, 'walang {name}'],
+            'COD 0, iisang bersyon'       => [['COD' => '0'], ['Bayad PHP {cod}'], null, 'missing {cod}'],
+            'walang pangalan at receiver' => [['fb_name' => '', 'receiver' => ''], ['Hello {name}'], null, 'missing {name}'],
             'walang rider phone'          => [[], ['Tawag {rider_phone}', 'Hello {name}'], 'B', null],
         ];
     }
@@ -162,7 +162,7 @@ class ChatblastSafetyTest extends ChatblastTestCase
 
         Http::assertNothingSent();
         $old = BotcakeMessage::where('waybill', 'WB-001')->sole();
-        $this->assertSame(['skipped', 'nagbago ang PSID/page'], [$old->status, $old->reason]);
+        $this->assertSame(['skipped', 'the PSID/page changed'], [$old->status, $old->reason]);
 
         $this->assertSame(1, app(Chatblast::class)->build('delivering')['added']);
         $this->assertSame('psid-z', BotcakeMessage::where('waybill', 'WB-001')->where('status', 'ready')->sole()->psid);
@@ -171,7 +171,7 @@ class ChatblastSafetyTest extends ChatblastTestCase
         $fresh = BotcakeMessage::where('waybill', 'WB-001')->where('status', 'ready')->sole();
         app(ChatblastSender::class)->queue([$fresh->id], 1);
         Http::assertNothingSent();
-        $this->assertSame(['skipped', 'nagbago ang PSID/page', null], [$fresh->fresh()->status, $fresh->fresh()->reason, $fresh->fresh()->dedupe_key]);
+        $this->assertSame(['skipped', 'the PSID/page changed', null], [$fresh->fresh()->status, $fresh->fresh()->reason, $fresh->fresh()->dedupe_key]);
     }
 
     public function test_a_row_refused_for_its_text_stays_refused_after_the_next_build(): void

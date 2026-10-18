@@ -129,7 +129,7 @@ class ChatblastSendTest extends ChatblastTestCase
 
         $this->assertSame(['failed', 401], [$this->row()->status, $this->row()->last_http]);
         $this->assertStringStartsWith('invalid ', (string) app(PageSettings::class)->get('Page Uno', 'botcake', 'token_status'));
-        $this->assertSame(['ready', 'Huminto: token invalid'], [$this->row('WB-002')->status, $this->row('WB-002')->reason], 'ang iba sa page ay hindi na itinutuloy');
+        $this->assertSame(['ready', 'Stopped: token invalid'], [$this->row('WB-002')->status, $this->row('WB-002')->reason], 'ang iba sa page ay hindi na itinutuloy');
         app(ChatblastSender::class)->process($this->row('WB-002')->id);
         $this->assertCount(1, Http::recorded());
     }
@@ -233,7 +233,7 @@ class ChatblastSendTest extends ChatblastTestCase
 
         $this->assertSame(1, $flows, 'walang retry ng send_flow');
         $this->assertSame('unknown', $row->status);
-        $this->assertStringContainsString('Hindi tiyak', $row->reason);
+        $this->assertStringContainsString('Not sure it was sent', $row->reason);
         $this->assertSame(0, app(ChatblastSender::class)->queue([$row->id], 1));
         $this->assertSame('flow', collect($row->steps)->last()['step']);
     }

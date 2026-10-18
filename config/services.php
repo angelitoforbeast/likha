@@ -84,18 +84,25 @@ return [
     // Botcake customer sync (botcake:sync-customers sa schedule). Naka-off kapag walang laman.
     'botcake' => [
         'sync_enabled' => (bool) env('BOTCAKE_SYNC_ENABLED', false),
-        // Max na batch (10 customer bawat isa) kada incremental run ng isang page; walang cap ang --full.
+        // Max na batch ng lumang incremental read; hindi na ginagamit mula nang palitan ito ng by date read (stop date ang hangganan).
         'sync_max_batches' => (int) env('BOTCAKE_SYNC_MAX_BATCHES', 300),
         // Hanggang ilang araw pabalik ang binabasa (date_subscribed_at); humihinto ang sync sa unang mas lumang customer.
         'sync_max_age_days' => (int) env('BOTCAKE_SYNC_MAX_AGE_DAYS', 45),
         // /page-settings: rows = mga page na may order sa huling ilang araw (ts_date), saka ang mga may settings.
         'grid_order_days' => (int) env('BOTCAKE_GRID_ORDER_DAYS', 30),
-        // Sync lahat: nilalaktawan ang page na incremental lang ang kailangan at may matagumpay na sync sa huling ilang oras.
+        // Sync lahat: nilalaktawan ang page na by date lang ang kailangan at may matagumpay na sync sa huling ilang oras.
         'sync_all_fresh_hours' => (float) env('BOTCAKE_SYNC_ALL_FRESH_HOURS', 6),
         // /chatblast: hanggang ilang totoong mensahe kada page kada araw (Manila).
         'chatblast_daily_cap' => (int) env('BOTCAKE_CHATBLAST_DAILY_CAP', 3000),
         // /chatblast: ilang segundo pagkatapos ng send_flow bago ang susunod na mensahe sa parehong customer (page + PSID).
         'chatblast_customer_gap' => (int) env('BOTCAKE_CHATBLAST_CUSTOMER_GAP', 20),
+        // /chatblast "Open in Botcake": ang live chat ng page sa Botcake. {page_id} = botcake.page_id; {psid} = ang
+        // customer (kapag may kumpirmadong anyo ng URL na may customer). Hindi pa kumpirmado ang path: ayusin dito.
+        'inbox_url' => env('BOTCAKE_INBOX_URL', 'https://botcake.io/pages/{page_id}/live_chat'),
+        // /api/botcake/chat (JSON API block ng Botcake): ang shared key (header X-Chat-Key o param key); walang laman = 401
+        // sa lahat. chat_rate: ilang request kada minuto kada IP (iilang IP ng Botcake para sa ~170 page).
+        'chat_key'  => env('BOTCAKE_CHAT_KEY'),
+        'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

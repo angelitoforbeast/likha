@@ -1,0 +1,233 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\ChatblastCampaign;
+use Carbon\Carbon;
+
+/**
+ * Ang schedule ng campaign na naka-auto: ang mga oras ng padala (Manila) sa mga napiling araw ng linggo (wala = araw-
+ * araw), at ang sariling oras ng isang step (ang mga row ng step na iyon ay sa oras nito lang ipinapadala). Ang isang oras
+ * ay tumatakbo isang beses kada araw, hanggang 3 oras pagkatapos nito, at hindi kailanman bago ang huling takbo
+ * (auto_ran_at: itinatala rin kapag in-auto o in-on ulit). Ang mga oras na tapos na ngayong araw ay nasa auto_runs, kaya
+ * bawat oras ay sa sarili nito: ang bagong oras na lumipas na ay itinatalang tapos nang hindi ginagalaw ang iba.
+ */
+class ChatblastSchedule
+{
+    public const LATE_LIMIT_HOURS = 3;
+    public const DAY_NAMES = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'];
+    private const TIME = '/^([01]\d|2[0-3]):([0-5]\d)$/';
+
+    /** Ang mga oras ng step (0 = Day 1): ang sarili nito, o ang mga oras ng campaign. @return string[] */
+    public function timesFor(ChatblastCampaign $c, int $step): array
+    {
+        $own = ((array) ($c->step_times ?? []))[$step] ?? null;
+        $times = is_array($own) && $own ? $own : $this->campaignTimes($c);
+
+        return array_values(array_filter($times, fn ($t) => is_string($t) && preg_match(self::TIME, $t)));
+    }
+
+    /** Ang mga oras ng campaign: ang listahan at ang "bawat oras" nito, magkakasunod at walang doble. @return string[] */
+    public function campaignTimes(ChatblastCampaign $c): array
+    {
+        $times = array_merge((array) ($c->send_times ?? []), self::rangeTimes($c->send_range));
+        $times = array_values(array_unique(array_filter($times, fn ($t) => is_string($t) && preg_match(self::TIME, $t))));
+        sort($times);
+
+        return $times;
+    }
+
+    /**
+     * Ang mga oras ng "bawat oras": mula start, bawat N oras, hanggang end (kasama kapag tumapat), sa loob ng isang
+     * araw. Walang laman kapag wala o mali ang range. @return string[]
+     */
+    public static function rangeTimes(mixed $range): array
+    {
+        if ($range === null || self::invalidRange($range) !== null) return [];
+        [$from, $to] = [self::minutes($range['start']), self::minutes($range['end'])];
+        $step = 60 * (int) $range['every'];
+        if ($step < 60) return []; // hindi kailanman umiikot nang walang hanggan
+        $out = [];
+        for ($m = $from; $m <= $to; $m += $step) $out[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+
+        return $out;
+    }
+
+    /** Ang mali sa range, o null kapag tama (o wala): start at end na "HH:MM", end pagkatapos ng start, every 1–12 oras. */
+    public static function invalidRange(mixed $range): ?string
+    {
+        if ($range === null) return null;
+        if (!is_array($range) || !isset($range['start'], $range['end'])) return 'a start and an end are needed.';
+        foreach (['start', 'end'] as $k) {
+            if (!is_string($range[$k]) || !preg_match(self::TIME, $range[$k])) return 'a time is HH:MM (00:00 to 23:59).';
+        }
+        if (self::minutes($range['end']) <= self::minutes($range['start'])) return 'the end must be after the start (on the same day).';
+        $every = $range['every'] ?? null; // walang default dito: ang controller ang naglalagay ng 1
+        if (!is_int($every) || $every < 1 || $every > 12) return 'every 1 to 12 hours.';
+
+        return null;
+    }
+
+    private static function minutes(string $t): int
+    {
+        return (int) substr($t, 0, 2) * 60 + (int) substr($t, 3, 2);
+    }
+
+    /** Lahat ng oras ng campaign at ng mga step nito, magkakasunod. @return string[] */
+    public function allTimes(ChatblastCampaign $c): array
+    {
+        $all = [];
+        foreach (array_keys((array) $c->days) as $i) array_push($all, ...$this->timesFor($c, $i));
+        $all = array_values(array_unique($all));
+        sort($all);
+
+        return $all;
+    }
+
+    public function onWeekday(ChatblastCampaign $c, Carbon $day): bool
+    {
+        $days = (array) ($c->weekdays ?? []);
+        return !$days || in_array($day->isoWeekday(), array_map('intval', $days), true);
+    }
+
+    /**
+     * Ang mga oras na dapat tumakbo ngayon: ngayong araw (kung kasama ang araw), dumating na, hindi lampas 3 oras, at
+     * pagkatapos ng huling takbo. @return array<string, Carbon> "HH:MM" => oras ngayong araw (Manila)
+     */
+    public function due(ChatblastCampaign $c, Carbon $now): array
+    {
+        $now = $now->copy()->timezone('Asia/Manila');
+        if (!$this->onWeekday($c, $now)) return [];
+
+        $due = [];
+        foreach ($this->allTimes($c) as $t) {
+            $at = $now->copy()->setTimeFromTimeString($t);
+            if ($at->gt($now) || $now->gte($at->copy()->addHours(self::LATE_LIMIT_HOURS))) continue;
+            if ($c->auto_ran_at && $c->auto_ran_at->gte($at)) continue;
+            if (in_array($t, $this->ranToday($c, $now), true)) continue; // tumakbo na ngayong araw
+            $due[$t] = $at;
+        }
+
+        return $due;
+    }
+
+    /** Ang mga oras na tapos na (o itinalang tapos) ngayong araw, Manila. @return string[] */
+    public function ranToday(ChatblastCampaign $c, Carbon $now): array
+    {
+        $runs = (array) ($c->auto_runs ?? []);
+        return ($runs['date'] ?? null) === $now->copy()->timezone('Asia/Manila')->toDateString() ? array_values((array) ($runs['times'] ?? [])) : [];
+    }
+
+    /** Itala ang mga oras na ito bilang tapos ngayong araw (hindi sine-save). @param string[] $times */
+    public function markRan(ChatblastCampaign $c, array $times, Carbon $now): void
+    {
+        $all = array_values(array_unique(array_merge($this->ranToday($c, $now), $times)));
+        sort($all);
+        $c->auto_runs = ['date' => $now->copy()->timezone('Asia/Manila')->toDateString(), 'times' => $all];
+    }
+
+    /**
+     * Ang mga step (1 = Day 1) na dumating na ang oras ngayong araw (kasama ang araw ng linggo): ang mga row nila na
+     * nabuo ngayong araw at naging ready lang pagkatapos ay ipinapadala sa susunod na takbo (hindi bago ang oras nila).
+     * @return int[]
+     */
+    public function stepsCome(ChatblastCampaign $c, Carbon $now): array
+    {
+        $now = $now->copy()->timezone('Asia/Manila');
+        if (!$this->onWeekday($c, $now)) return [];
+        $steps = [];
+        foreach (array_keys((array) $c->days) as $i) {
+            foreach ($this->timesFor($c, $i) as $t) {
+                if ($now->copy()->setTimeFromTimeString($t)->lte($now)) { $steps[] = $i + 1; break; }
+            }
+        }
+
+        return $steps;
+    }
+
+    /** Ang mga step (1 = Day 1) na may isa sa mga oras na ito. @param string[] $times @return int[] */
+    public function stepsAt(ChatblastCampaign $c, array $times): array
+    {
+        $steps = [];
+        foreach (array_keys((array) $c->days) as $i) {
+            if (array_intersect($this->timesFor($c, $i), $times)) $steps[] = $i + 1;
+        }
+
+        return $steps;
+    }
+
+    /** Ang susunod na oras ng takbo (Manila), o null kapag manual, naka-off, o walang oras. */
+    public function nextRun(ChatblastCampaign $c, Carbon $now): ?Carbon
+    {
+        if (!$c->active || $c->mode !== 'auto' || !($times = $this->allTimes($c))) return null;
+        $now = $now->copy()->timezone('Asia/Manila');
+        for ($i = 0; $i <= 7; $i++) {
+            $day = $now->copy()->addDays($i)->startOfDay();
+            if (!$this->onWeekday($c, $day)) continue;
+            foreach ($times as $t) {
+                $at = $day->copy()->setTimeFromTimeString($t);
+                if ($at->gt($now)) return $at;
+            }
+        }
+
+        return null;
+    }
+
+    /** Hal. "Araw-araw, 9:15 AM at 3:00 PM; Day 1 tuwing 10:00 AM". */
+    public function summary(ChatblastCampaign $c): string
+    {
+        $days = array_map('intval', (array) ($c->weekdays ?? []));
+        sort($days);
+        $when = !$days || count($days) === 7 ? 'Every day' : implode(', ', array_map(fn ($d) => self::DAY_NAMES[$d] ?? '?', $days));
+        $times = (array) ($c->send_times ?? []);
+        $parts = [];
+        if ($times) $parts[] = self::join(array_map([self::class, 'clock'], $times));
+        if (self::rangeTimes($c->send_range)) {
+            $r = $c->send_range;
+            $every = (int) ($r['every'] ?? 1);
+            $all = self::rangeTimes($r); // ang huling totoong oras (hal. bawat 2 oras, 5 AM hanggang 4 PM: 3 PM ang huli)
+            $parts[] = ($every === 1 ? 'every hour' : 'every ' . $every . ' hours') . ', ' . self::hour($all[0]) . '–' . self::hour(end($all));
+        }
+        $text = $when . ', ' . ($parts ? implode('; ', $parts) : 'no times');
+
+        foreach ((array) ($c->step_times ?? []) as $i => $own) {
+            if (is_array($own) && $own) $text .= '; Day ' . ($i + 1) . ' at ' . self::join(array_map([self::class, 'clock'], $own));
+        }
+        if (!$c->active) return 'Off. ' . $text;
+        if ($c->mode !== 'auto') return 'Manual (times are not followed). ' . $text;
+
+        return $text;
+    }
+
+    /**
+     * Pagkatapos baguhin ang schedule ng campaign na auto: ang oras na dapat tumakbo ngayon sa bago pero hindi sa dati
+     * (hal. bagong oras na lumipas na, o idinagdag ang araw na ito) ay itinatala bilang tumakbo na, kaya hindi ito
+     * tatakbo; ang dating oras na hindi pa tumatakbo ay hindi naaapektuhan kapag mas huli ito. Hindi sine-save.
+     */
+    public function stampNewPastTimes(ChatblastCampaign $before, ChatblastCampaign $after): void
+    {
+        if ($after->mode !== 'auto' || $before->mode !== 'auto') return; // ang paglipat sa auto ay may sariling tatak
+        $now = Carbon::now('Asia/Manila');
+        $added = array_diff_key($this->due($after, $now), $this->due($before, $now));
+        if ($added) $this->markRan($after, array_keys($added), $now); // ang mga bago lang; ang dating oras ay tatakbo pa
+    }
+
+    /** "15:00" → "3:00 PM". */
+    public static function clock(string $t): string
+    {
+        return Carbon::createFromFormat('H:i', $t)->format('g:i A');
+    }
+
+    /** "09:00" → "9 AM", "09:30" → "9:30 AM" (para sa bawat oras). */
+    private static function hour(string $t): string
+    {
+        return Carbon::createFromFormat('H:i', $t)->format(str_ends_with($t, ':00') ? 'g A' : 'g:i A');
+    }
+
+    private static function join(array $parts): string
+    {
+        if (count($parts) < 2) return implode('', $parts);
+        $last = array_pop($parts);
+        return implode(', ', $parts) . ' and ' . $last;
+    }
+}
