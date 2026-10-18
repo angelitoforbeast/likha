@@ -10,8 +10,10 @@ Commits on `feat/055-chatblast-english` (from `main` at 98e1ea66):
 - `7d9ebe50` test: the three pages and a validation error are English; rows with the old reasons behave the same
 - `cdb60757` fix: the review's leftovers (close button, the "all" chip, "tries", "(copy)", "Botcake: no answer")
 - docs: result and TODO
+- `c4367279` fix: recheck leaves old rows whose stored reason is the Tagalog form of the same reason alone (independent review)
+- docs: result corrected for that review
 
-No migration, and no data was rewritten. Code comments and `Log::` lines are unchanged.
+No migration, and nothing rewrites stored rows for the language. A stored Tagalog reason is replaced only when the row's state really changes, as before (for example a `no_config` row whose missing settings change), and then by the English text. The first version of this branch did rewrite old `no_psid` / `no_config` rows on the first "Fetch new"; the independent review caught it and it is fixed (see below). Code comments and `Log::` lines are unchanged.
 
 ## Pages and strings changed
 
@@ -77,7 +79,6 @@ Full suite (`vendor/bin/phpunit`) on the final tree: `Tests: 1604, Assertions: 1
   - the English "incomplete text" reason now has a test.
 - **Accepted in `TODO.md`, with reasons:**
   - the console output;
-  - the first "Fetch new" after the release rewrites the stored reason of older `no_psid` / `no_config` rows to English (same status, display only) and counts them once as updated;
   - a flow-panel result cached just before the release shows "pangalan" for at most 10 minutes;
   - the stale-page messages follow the brief's wording ("in another tab"), although another person may have made the change.
 
@@ -99,3 +100,16 @@ Nothing beyond the deploy: no migration, no queue restart needed for the pages. 
 ## Story changes
 
 None. The brief brought no `qa/stories.md` stories; the cases above come from its Tests list.
+
+## Independent review (98e1ea66..932b937b)
+
+No majors. One minor, fixed:
+
+- **`Chatblast::recheck()` compared the new English reason with the stored one,** so every old `no_psid` / `no_config` row (with its Tagalog reason) looked changed. On live Likha that is about 2,700 rows. The first "Fetch new" after release would have updated each one with its own query, inside the web request's 55 s limit, and counted them all as "updated".
+- **Fix:** when the status and PSID are the same and the stored reason is the Tagalog form of the same reason, the row counts as unchanged: it is not written and not counted. `Chatblast::legacyReadiness()` maps the two readiness reasons ("missing <keys>" ↔ "walang <keys>", and the no-PSID text ↔ its old text). A row whose state really changed is still written, in English.
+- **Regression test:** `ChatblastEnglishTest::test_old_no_config_and_no_psid_rows_with_the_same_reason_in_tagalog_are_not_rewritten_or_counted`.
+  - An old `no_psid` row and an old `no_config` row with Tagalog reasons stay untouched (reason and `updated_at`), and "updated" is 0.
+  - After the page's settings change, the `no_config` row is written ("missing field.message") and counted.
+  - It failed first with "2 is identical to 0".
+
+The Chatblast folder: 137 tests, all pass. Full suite on the final tree: `Tests: 1605, Assertions: 18328, Errors: 1, Failures: 1, PHPUnit Deprecations: 16, Skipped: 3`; the only reds are the known `ExampleTest` and `ImportStartTest`.

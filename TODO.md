@@ -567,5 +567,5 @@ Accepted, not fixed:
 ## 055: chatblast pages in English (2026-10-19)
 
 - **The artisan console output of `chatblast:build` and `chatblast:auto` is still Tagalog** (`BuildChatblast.php`, `AutoChatblast.php`). Reason: it is not on a page (it lands in the cron log); the brief covers the three chatblast pages.
-- **Rows written before the release keep their Tagalog reasons** (data). The first "Fetch new" after the release rewrites the reason of older `no_psid` / `no_config` rows to the English text (recheck compares the reason it would write), and counts them once in "N updated". Reason: same status, display only; it makes the list English over time.
+- **Rows written before the release keep their Tagalog reasons** (data) until their state really changes; recheck treats the Tagalog form of the same reason as unchanged (fixed after the independent review). Reason: no data rewrite for the language; the list becomes English as rows change.
 - **Flow panel results cached just before the release show "pangalan" as the template source for at most 10 minutes.** Reason: the cache expires on its own.
