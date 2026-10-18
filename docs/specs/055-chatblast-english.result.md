@@ -113,3 +113,11 @@ No majors. One minor, fixed:
   - It failed first with "2 is identical to 0".
 
 The Chatblast folder: 137 tests, all pass. Full suite on the final tree: `Tests: 1605, Assertions: 18328, Errors: 1, Failures: 1, PHPUnit Deprecations: 16, Skipped: 3`; the only reds are the known `ExampleTest` and `ImportStartTest`.
+
+## Amendment 055-1: old row reasons shown in English
+
+After the release, /chatblast still showed Tagalog: the page itself was English, but rows written before the release keep their stored Tagalog reasons, and the list (badge title), the row panel and the counts showed them as stored.
+
+`App\Support\ChatblastReason::display()` now maps every known legacy reason form to its English equivalent for display. It is prefix-aware, keeping the details (settings keys, page, day, status, HTTP code, counts), and covers the missing settings / PSID / rider / placeholder reasons, the stale, page, day and same-day skips, the cross-sequence and both cap skips, the unsure, killed, token and read-back failures. `ChatblastController` uses it for the reason in the list rows and in the side panel. These are the only places a stored reason reaches the browser: the Messages and Sequences pages show none.
+
+Unknown forms, such as "Error: …" exception text, are passed through unchanged. Stored rows are never written. Message texts and J&T statuses (data) are unchanged, and the other server labels on the page were already English. One test (`ChatblastEnglishTest::test_old_tagalog_reasons_come_out_english_in_the_list_and_the_panel_without_rewriting_the_rows`) checks ten old reasons in the list JSON and the panel, with the rows and the customer text untouched. Only the Chatblast tests were run, per the amendment: 138 pass.
