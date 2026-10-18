@@ -275,10 +275,13 @@ class ChatblastController extends Controller
         return $queued;
     }
 
-    /** Ang "Send all ready" ng To send: lahat ng ready (hindi test), pinakikitid lang ng page at sequence; walang petsa. */
+    /**
+     * Ang "Send all ready" ng To send: lahat ng ready (hindi test) ng mga naka-on na sequence (ang naka-off ay tinatanggihan
+     * din ng sender), pinakikitid lang ng page at sequence; walang petsa.
+     */
     private function sendable(Request $request)
     {
-        $q = BotcakeMessage::where('status', 'ready')->where('is_test', false);
+        $q = BotcakeMessage::where('status', 'ready')->where('is_test', false)->whereNotIn('kind', ChatblastCampaign::where('active', false)->pluck('kind'));
         if (($page = $this->str($request, 'page')) !== '') $q->where('page_name', $page);
         if (($kind = $this->str($request, 'kind', 30)) !== '') $q->where('kind', $kind);
 
@@ -308,8 +311,12 @@ class ChatblastController extends Controller
         if ($view === 'send') {
             $q = BotcakeMessage::whereIn('status', self::TO_SEND)->where('is_test', false);
         } else {
+            // Ang petsa ay kung kailan naproseso (naipadala: sent_at; ang iba: ang huling pagbabago), hindi ang pagbuo:
+            // ang lumang ready na ipinadala o pumalya ngayon ay nasa History ngayong araw.
             [$from, $to] = $this->range($request);
-            $q = BotcakeMessage::whereIn('status', self::HISTORY)->whereBetween('created_at', [$from, $to]);
+            $q = BotcakeMessage::whereIn('status', self::HISTORY)->where(fn ($w) => $w
+                ->where(fn ($s) => $s->where('status', 'sent')->whereBetween('sent_at', [$from, $to]))
+                ->orWhere(fn ($o) => $o->where('status', '<>', 'sent')->whereBetween('updated_at', [$from, $to])));
         }
 
         if (($page = $this->str($request, 'page')) !== '') $q->where('page_name', $page);

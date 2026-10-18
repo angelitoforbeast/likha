@@ -98,7 +98,7 @@ class ChatblastPageTest extends ChatblastTestCase
 
         $ten = $count(10);
         $this->assertSame($ten, $count(1000));
-        $this->assertLessThanOrEqual(7, $ten);
+        $this->assertLessThanOrEqual(8, $ten); // +1: ang naka-off na sequence para sa bilang ng "Send all ready"
     }
 
     public function test_the_side_panel_shows_every_step_and_never_the_token(): void

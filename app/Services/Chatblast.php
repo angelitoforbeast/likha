@@ -573,15 +573,26 @@ class Chatblast
     private function skipStale(ChatblastCampaign $c): int
     {
         $skipped = 0;
+        // Ang window ng campaign ayon sa petsa ng order (ts_date), gaya ng candidates(): ang lumang order ay hindi na
+        // pinapadalhan, kahit In Transit pa sa J&T (ang lumang row ay may pinakamatagal nang hindi na-track na status).
+        $since = now('Asia/Manila')->subDays($c->window_days)->toDateString();
         BotcakeMessage::where('kind', $c->kind)->where('is_test', false)->whereIn('status', array_diff(self::UNSENT, ['skipped']))
-            ->select('id', 'waybill', 'page_name', 'status')->chunkById(500, function ($rows) use (&$skipped, $c) {
+            ->select('id', 'waybill', 'page_name', 'status', 'macro_output_id', 'created_at')->chunkById(500, function ($rows) use (&$skipped, $c, $since) {
                 $now = $this->currentStatuses($rows->pluck('waybill')->unique()->values()->all());
+                $orderDates = DB::table('macro_output')->whereIn('id', $rows->pluck('macro_output_id')->filter()->unique()->values()->all())->pluck('ts_date', 'id');
                 $valid = [];
                 foreach ($rows as $row) {
                     if (!$this->onPage($c, (string) $row->page_name)) {
                         // Maaaring ibalik ang page sa campaign: binibitawan ang key para may bagong row noon.
                         $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
                             ->update(['status' => 'skipped', 'reason' => self::pageReason($row->page_name), 'dedupe_key' => null]);
+                        continue;
+                    }
+                    // Walang order (hal. nabura): ang petsa ng pagbuo ang batayan.
+                    $orderDate = substr((string) ($orderDates[$row->macro_output_id] ?? $row->created_at?->timezone('Asia/Manila')->toDateString()), 0, 10);
+                    if ($orderDate !== '' && $orderDate < $since) {
+                        $skipped += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)
+                            ->update(['status' => 'skipped', 'reason' => 'The order is older than the sequence\'s ' . $c->window_days . '-day window', 'dedupe_key' => null]);
                         continue;
                     }
                     if ($this->matches($c, $now[$row->waybill] ?? [])) {

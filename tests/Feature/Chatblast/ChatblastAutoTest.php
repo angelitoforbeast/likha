@@ -138,6 +138,32 @@ class ChatblastAutoTest extends ChatblastTestCase
         $old = BotcakeMessage::where('kind', 'c-auto')->sole();
         $this->assertSame(['skipped', 'The waybill is no longer In Transit (now: Delivering)', null], [$old->status, $old->reason, $old->dedupe_key]);
         $this->assertSame(['WB-1' => 'ready'], $this->statuses('c-deliv'));
+
+        // Bumalik sa In Transit (hal. mula Problematic): ang parehong sequence ay may bagong row, dahil nabitawan ang key.
+        $this->travelTo('2026-10-19 08:00:00');
+        DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'In Transit']);
+        $this->shipped('Page Uno', 'Cora Diaz', 'WB-9', null, 'In Transit');
+        app(Chatblast::class)->build('c-auto', 1); // ang WB-9 ay no_psid
+        $noPsid = BotcakeMessage::where('waybill', 'WB-9')->sole()->id;
+        DB::table('botcake_messages')->where('id', $noPsid)->update(['updated_at' => '2026-10-10 08:00:00']);
+        app(Chatblast::class)->build('c-auto', 1);
+        $this->assertSame(['skipped', 'ready'], BotcakeMessage::where('kind', 'c-auto')->where('waybill', 'WB-1')->orderBy('id')->pluck('status')->all());
+        $this->assertSame('2026-10-10 08:00:00', (string) DB::table('botcake_messages')->where('id', $noPsid)->value('updated_at'), 'ang tatak ay sa ready lang');
+    }
+
+    public function test_S_056_19_a_ready_row_whose_order_left_the_sequence_window_is_skipped_and_not_sent(): void
+    {
+        $this->travelTo('2026-10-01 08:00:00');
+        $this->campaign(['mode' => 'manual', 'window_days' => 10]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit'); // order ng 10-01
+        app(Chatblast::class)->build('c-auto', 1);
+        $this->travelTo('2026-10-17 20:00:00');
+        ChatblastCampaign::where('kind', 'c-auto')->update(['mode' => 'auto', 'mode_changed_at' => now(), 'auto_ran_at' => now()]);
+
+        $this->tick('2026-10-18 09:00:00'); // In Transit pa sa J&T, pero 17 araw na ang order: labas sa 10 araw
+
+        $old = BotcakeMessage::where('kind', 'c-auto')->sole();
+        $this->assertSame(['skipped', 'The order is older than the sequence\'s 10-day window', null], [$old->status, $old->reason, $old->dedupe_key]);
     }
 
     public function test_S_056_15_auto_does_not_send_a_row_nobody_re_checked_since_before_the_switch(): void

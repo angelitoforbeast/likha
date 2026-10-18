@@ -81,6 +81,29 @@ class ChatblastToSendTest extends ChatblastTestCase
         $this->assertContains($oldSent, array_column($this->list(['view' => 'history', 'from' => $from, 'to' => $today])->json('rows'), 'id'));
     }
 
+    public function test_S_056_20_history_dates_are_when_the_row_was_processed_not_when_it_was_built(): void
+    {
+        $sentToday = $this->msg('sent', ['created_at' => now()->subDays(3), 'sent_at' => now()]);          // backlog, ipinadala ngayon
+        $failedToday = $this->msg('failed', ['created_at' => now()->subDays(3), 'updated_at' => now()]);   // backlog, pumalya ngayon
+        $this->msg('sent', ['created_at' => now(), 'sent_at' => now()->subDays(2), 'updated_at' => now()]); // hindi ngayon naipadala
+
+        $today = now('Asia/Manila')->toDateString();
+        $res = $this->list(['view' => 'history', 'from' => $today, 'to' => $today]);
+        $this->assertEqualsCanonicalizing([$sentToday, $failedToday], array_column($res->json('rows'), 'id'));
+
+        Queue::fake([SendChatblastMessage::class]);
+        $this->postJson('/chatblast/retry-failed', ['from' => $today, 'to' => $today])->assertOk()->assertJsonPath('queued', 1);
+    }
+
+    public function test_S_056_21_send_all_ready_counts_only_sequences_that_are_on(): void
+    {
+        $this->msg('ready');
+        $this->msg('ready', ['kind' => 'in_transit']);
+        \App\Models\ChatblastCampaign::where('kind', 'in_transit')->update(['active' => false]);
+
+        $this->assertSame(1, $this->list(['view' => 'send'])->json('sendable'));
+    }
+
     public function test_S_056_18_the_nav_and_the_two_pages_have_their_own_tools(): void
     {
         $send = $this->get('/chatblast')->assertOk()->getContent();
