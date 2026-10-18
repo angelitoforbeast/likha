@@ -45,6 +45,11 @@
   // page load. Only the JNT Config hub page fetches counts directly. Re-enable
   // here once we add caching to NavBadgeService.
   $navBadges = [];
+
+  // Checklist badge ng naka-login (sariling role, hindi ang "view as"): naka-cache nang 60 segundo,
+  // at null kapag pumalya. Ang link ay hinahanap sa URL dahil sa nav settings itinakda ang key nito.
+  $checklistBadge = \App\Services\ChecklistBadge::forUser(Auth::user());
+  $isChecklistLink = fn ($link) => trim((string) $link->route_url, '/') === 'checklist';
 @endphp
 
 <div class="min-h-full">
@@ -72,11 +77,17 @@
                      Default visibility seeded from previous hardcoded layout via
                      migration 2026_05_18_140000. New links go thru that route. --}}
                 @foreach($navLinks as $link)
+                  @php $cb = $checklistBadge && $isChecklistLink($link) ? $checklistBadge : null; @endphp
                   <x-navlink
                     href="{{ $link->route_url }}"
                     :active="$link->active_pattern ? request()->is($link->active_pattern) : false"
                     :label="$link->label"
-                    :badge="$navBadges[$link->key] ?? 0">
+                    :badge="$cb ? $cb['count'] : ($navBadges[$link->key] ?? 0)"
+                    :badge-tone="$cb['tone'] ?? 'red'"
+                    :badge-title="$cb['title'] ?? null"
+                    :badge-key="$cb ? 'checklist' : null"
+                    :badge-team="$cb['team'] ?? 0"
+                    :badge-team-title="$cb['team_title'] ?? null">
                     @if($link->icon)
                       <i class="{{ $link->icon }}"></i>
                     @else
@@ -166,6 +177,16 @@
             <span class="min-w-0 flex-1 truncate">{{ $link->label }}</span>
             @if((int) ($navBadges[$link->key] ?? 0) > 0)
               <span class="rounded-full bg-red-600 px-1.5 text-[10px] font-bold leading-4 text-white">{{ (int) $navBadges[$link->key] > 99 ? '99+' : (int) $navBadges[$link->key] }}</span>
+            @endif
+            @if($checklistBadge && $isChecklistLink($link))
+              @if($checklistBadge['count'] > 0)
+                <span class="rounded-full px-1.5 text-[10px] font-bold leading-4 {{ $checklistBadge['tone'] === 'red' ? 'bg-red-600 text-white' : 'bg-gray-400 text-gray-900' }}"
+                      title="{{ $checklistBadge['title'] }}">{{ $checklistBadge['count'] > 99 ? '99+' : $checklistBadge['count'] }}</span>
+              @endif
+              @if($checklistBadge['team'] > 0)
+                <span class="rounded-full bg-orange-500 px-1.5 text-[10px] font-bold leading-4 text-white"
+                      title="{{ $checklistBadge['team_title'] }}">{{ $checklistBadge['team'] > 99 ? '99+' : $checklistBadge['team'] }}</span>
+              @endif
             @endif
           </a>
         @endforeach

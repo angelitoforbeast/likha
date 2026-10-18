@@ -81,14 +81,13 @@ class ChecklistDueToday
      */
     public static function rows(array $userIds, Carbon $day): array
     {
-        if (!$userIds || !Schema::hasTable('checklist_tasks') || !Schema::hasTable('checklist_task_users')
-            || !Schema::hasTable('checklist_submissions')) {
+        $schema = self::schema();
+        if (!$userIds || !$schema['tasks']) {
             return [];
         }
         $dayStr = $day->toDateString();
         $nextStr = $day->copy()->addDay()->toDateString();
-        // Ang mga oras na column ay binabasa lang kung nandoon na (hal. bago ang migration ng deadline)
-        $timeCols = array_values(array_intersect(['scheduled_time', 'deadline_time'], Schema::getColumnListing('checklist_tasks')));
+        $timeCols = $schema['time_cols'];
 
         $assigned = DB::table('checklist_tasks as t')
             ->join('checklist_task_users as tu', 'tu.checklist_task_id', '=', 't.id')
@@ -170,12 +169,36 @@ class ChecklistDueToday
     }
 
     /**
+     * Mga table at column na kailangan, isang beses kada request (nasa app container, kaya bago ulit
+     * sa susunod na request): tasks = may checklist_tasks, checklist_task_users at checklist_submissions;
+     * time_cols = ang mga oras na column na nandoon na (hal. bago ang migration ng deadline);
+     * approval = may checklist_analysis_logs na may verdict.
+     *
+     * @return array{tasks:bool, time_cols:list<string>, approval:bool}
+     */
+    public static function schema(): array
+    {
+        $key = self::class . '.schema';
+        if (!app()->bound($key)) {
+            $tasks = Schema::hasTable('checklist_tasks') && Schema::hasTable('checklist_task_users')
+                && Schema::hasTable('checklist_submissions');
+            app()->instance($key, [
+                'tasks'     => $tasks,
+                'time_cols' => $tasks ? array_values(array_intersect(['scheduled_time', 'deadline_time'], Schema::getColumnListing('checklist_tasks'))) : [],
+                'approval'  => $tasks && Schema::hasTable('checklist_analysis_logs') && Schema::hasColumn('checklist_analysis_logs', 'verdict'),
+            ]);
+        }
+
+        return app($key);
+    }
+
+    /**
      * Dagdag sa query ng submissions (alias s): verdict = pinakahuling approval verdict,
      * approval_checks = ilang approval check na. Wala kapag wala pang approval logs.
      */
     public static function withApproval($query): void
     {
-        if (!Schema::hasTable('checklist_analysis_logs') || !Schema::hasColumn('checklist_analysis_logs', 'verdict')) {
+        if (!self::schema()['approval']) {
             return;
         }
         $query->selectSub(DB::table('checklist_analysis_logs as l')

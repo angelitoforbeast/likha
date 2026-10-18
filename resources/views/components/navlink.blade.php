@@ -7,6 +7,13 @@
   // top-right of the icon when > 0. Used by NavBadgeService for "needs
   // attention" indicators (e.g., unmapped pages on JNT Config link).
   'badge' => 0,
+  // Para sa Checklist badge: 'red' o 'neutral' (abo), ang hover text, at isang pangalawang maliit
+  // na bilang (late sa team ng CEO / OIC). Ang default ay ang dating pulang badge.
+  'badgeTone' => 'red',
+  'badgeTitle' => null,
+  'badgeKey' => null,
+  'badgeTeam' => 0,
+  'badgeTeamTitle' => null,
 ])
 
 @php
@@ -48,10 +55,19 @@
         {{-- Messenger-style superscript badge: small red circle, top-right of icon.
              Auto-shrinks to "99+" when count is large. --}}
         <span class="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full
-                     bg-red-600 text-white text-[9px] font-bold leading-[16px] text-center
-                     ring-1 ring-gray-800 pointer-events-none"
-              title="{{ (int) $badge }} item(s) need attention">
+                     {{ $badgeTone === 'neutral' ? 'bg-gray-400 text-gray-900' : 'bg-red-600 text-white' }} text-[9px] font-bold leading-[16px] text-center
+                     ring-1 ring-gray-800 {{ $badgeTitle ? '' : 'pointer-events-none' }}"
+              @if($badgeKey) data-badge="{{ $badgeKey }}" data-count="{{ (int) $badge }}" data-tone="{{ $badgeTone }}" @endif
+              title="{{ $badgeTitle ?? ((int) $badge . ' item(s) need attention') }}">
           {{ (int) $badge > 99 ? '99+' : (int) $badge }}
+        </span>
+      @endif
+      @if((int) $badgeTeam > 0)
+        <span class="absolute -bottom-2 -right-2 min-w-[14px] h-[14px] px-0.5 rounded-full
+                     bg-orange-500 text-white text-[8px] font-bold leading-[14px] text-center ring-1 ring-gray-800"
+              @if($badgeKey) data-badge="{{ $badgeKey }}-team" data-count="{{ (int) $badgeTeam }}" @endif
+              title="{{ $badgeTeamTitle }}">
+          {{ (int) $badgeTeam > 99 ? '99+' : (int) $badgeTeam }}
         </span>
       @endif
     </span>
