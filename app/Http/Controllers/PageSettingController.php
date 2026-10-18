@@ -49,7 +49,7 @@ class PageSettingController extends Controller
     {
         $this->checkAccess();
 
-        return view('page_settings.index', ['grid' => $grid->build()]);
+        return view('page_settings.index', ['grid' => $grid->build(), 'isCeo' => $this->getNormalizedRole() === 'CEO']);
     }
 
     /** Poll: kapag may ?since=, ang mga cell lang na nagbago mula noon; kung wala, ang buong grid. */
@@ -291,8 +291,31 @@ class PageSettingController extends Controller
         $latest = BotcakeMessage::where('is_test', false)->whereNotNull('text')->where('text', '<>', '')
             ->whereRaw("LOWER($trim(page_name)) = ?", [$this->settings->pageKey($page)])->orderByDesc('id')->first(['id']);
         $test = $latest ? $sender->sendTest($latest->id, Auth::id()) : $sender->sendTestText($page, ChatblastReady::SAMPLE_TEXT, Auth::id());
+        // Nabura ang Test PSID pagkatapos ng check sa itaas: walang row na ginawa ang sender.
+        if (!$test) return response()->json(['error' => 'Set a Test PSID first'], 422);
 
         return response()->json(['status' => $test->status, 'id' => $test->id]);
+    }
+
+    /**
+     * "Mark as tested" (CEO lang): ang page na sinuri mismo ng may-ari ay Ready na nang walang Send test. Isinusulat ang
+     * test_ok ngayon, kasama ang user id ng CEO; walang ipinapadala.
+     */
+    public function markTested(Request $request, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') abort(403);
+
+        $page = $this->settings->normPage((string) $request->input('page_name', ''));
+        foreach (Chatblast::REQUIRED as $key) {
+            if (trim((string) $this->settings->get($page, 'botcake', $key)) === '') {
+                return response()->json(['error' => 'Complete the setup first (Botcake ID, token, Chatblast flow and message field).'], 422);
+            }
+        }
+
+        $res = $this->settings->set($page, 'botcake', 'test_ok', now('Asia/Manila')->format('Y-m-d H:i:s'), false, Auth::id(), true);
+
+        return response()->json(['status' => 'marked', 'cell' => $grid->cell($res['setting'])]);
     }
 
     /** Incremental sync ng isang page, sa queue. */

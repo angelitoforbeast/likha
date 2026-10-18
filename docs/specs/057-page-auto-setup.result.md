@@ -213,3 +213,48 @@ Red runs, before the code:
 6. **"In the save response, or in a queued job":** I chose the save response. A queued job would leave the row waiting for the 5 s poll with nothing to show. The cost is a save that can take up to ~25 s.
 7. **Send test text:** "a sample row's text" means a real customer's message goes to the staff's own Test PSID. That is as the brief says, and worth knowing.
 8. **The Test PSID picker** lives on To send (/chatblast). A role with only Page settings access cannot open it, but can type the Test PSID in its cell.
+
+## Independent review: the minors, fixed
+
+The independent review of `5e916162..96395740` found no majors. Each minor below was fixed test-first; the new tests failed before the change.
+
+| Minor | Fix | Test (red run) |
+|---|---|---|
+| 1. A Test PSID cleared between the check and the send crashed Send test (500) | The controller answers 422 "Set a Test PSID first" when the sender made no row | `test_S_057_7_a_test_psid_cleared_between_the_check_and_the_send_answers_422` (red: 500, "Attempt to read property status on null") |
+| 2. The candidate lists were not in `SYSTEM_KEYS` | `botcake.flow.shipping.options` and `botcake.field.message.options` added. /cell already refused writing and clearing them through the detail-key pattern; the test now pins both | `test_S_057_3…` (red: not in `SYSTEM_KEYS`; the write and clear assertions passed before) |
+| 3. "No approved post_order template" was guessed from the flow list | The templates check now records its result in `botcake.template.shipping.text`: `NO_TEMPLATE` when it ran and found none (red line "No approved post_order template in Botcake."), or "not checked: <reason>" when the call failed or ran out of time, shown as "Template check failed: <reason>". The red "template not approved" row state needs a template name, so "none found" does not count as a broken template | `test_S_057_4_no_approved_template_shows_only_when_the_template_check_ran_and_found_none` (2 data sets; red: no text cell) |
+| 4. A save whose token test errored said only "Token: error" | The notice adds the reason (`refresh_error`, e.g. "Botcake: no answer") | `test_S_057_1_a_failed_save_check_names_the_reason_and_a_non_botcake_error_is_reported` (red: literal missing) |
+| 5. A non-Botcake exception in the token test was swallowed | `report($e)` before the generic "Botcake: no answer" | the same test (red: not reported) |
+| 6. The sender's Ready check scanned the sent rows on every send | `ChatblastReady::tested()` is cached 60 s per page; `PageSettings::set` (after its transaction) and `deactivate` clear it when a setup key or `test_ok` changes, so a setup change or a successful test counts at once | `test_S_057_6_the_ready_state_is_cached_per_page_and_cleared_when_the_setup_or_the_test_changes` (red: queries on the second call) |
+
+**Added: "Mark as tested" (CEO only).**
+- On a complete page that needs a test, the CEO sees "Mark as tested". After a confirm it posts to `/chatblast/page-settings/mark-tested`, which writes `botcake.test_ok` with the current time and the CEO's user id. Nothing is sent.
+- Refusals:
+  - other roles with Page settings access get 403, and the page has no URL or button for them;
+  - roles without access get 404;
+  - an incomplete page gets 422.
+- Test: `test_S_057_11_the_ceo_can_mark_a_page_tested_and_no_one_else_can` (red: 404 on the missing route).
+
+**Changed tests:**
+- `FlowNamesTest` S-052.4: when nothing is picked, the template text is now the `NO_TEMPLATE` marker, not empty.
+- `PageSettingsGridTest` S-054.8: the template-state literal now includes the template-name check.
+
+**Story changes:**
+- S-057.4: the template guide rule is reworded.
+- S-057.6: the Ready change takes effect at once despite the cache.
+- S-057.7: covers the Test PSID cleared mid-request.
+- New S-057.11: Mark as tested.
+
+**Suite:** `tests/Feature/Chatblast` and `tests/Feature/PageSettings`: `Tests: 325`, `2380 assertions`, all passing (the warnings are PHPUnit's doc-comment data provider notices, as before). The full suite was not re-run for this round.
+
+**Accepted, in `TODO.md`:**
+- the cache-clear gap if `set()` ever runs inside an outer transaction;
+- the Test send line not saying a page was marked by hand;
+- pages whose template check failed before this change show no template line until their next Test.
+
+**Not re-checked in the browser:**
+- the new template lines;
+- the error notice;
+- the Mark as tested button and its confirm.
+
+The view tests find their strings only.

@@ -41,6 +41,8 @@ class BotcakePageSetup
             // Parehong rate key ng flows at templates na susunod: 2 request kada segundo kada page.
             $res = $this->client->shared(sha1($token), self::TOKEN_TIMEOUT)->once(self::TOKEN_TIMEOUT)->tokenAndFields($pageId, $token);
         } catch (Throwable $e) {
+            // Ang hindi galing sa Botcake ay bug: itinatala, saka ang pangkalahatang mensahe lang sa page.
+            if (!$e instanceof BotcakeException) report($e);
             $reason = $e instanceof BotcakeException ? $e->reason : null;
             return ['status' => 'error', 'written' => [], 'error' => $e instanceof BotcakeException ? $e->getMessage() : 'Botcake: no answer', 'reason' => $reason];
         }

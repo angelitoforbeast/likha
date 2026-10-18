@@ -21,6 +21,7 @@ class PageAutoSetupTest extends BotcakeApiTestCase
     private array $templates = [];
     private array $tokenAnswer = [200, null]; // [http, body]; null body = success:true na may fieldList
     private mixed $flowAnswer = null;
+    private int $templateHttp = 200;
     private array $calls = [];
 
     protected function setUp(): void
@@ -48,7 +49,7 @@ class PageAutoSetupTest extends BotcakeApiTestCase
                 if ($this->flowAnswer !== null) return value($this->flowAnswer);
                 return Http::response(['data' => ['flows' => $this->flowList, 'folders' => []], 'success' => true]);
             }
-            if ($path === 'message_templates') return Http::response(['data' => $this->templates, 'success' => true]);
+            if ($path === 'message_templates') return Http::response(['data' => $this->templates, 'success' => true], $this->templateHttp);
             return Http::response([], 404);
         });
     }
@@ -166,6 +167,10 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->assertStringContainsString("This field is not a 'GPT Input' field in Botcake", $html);
         // Ang options ay hindi naisusulat mula sa page.
         $this->cell('flow.shipping.options', '[]')->assertStatus(422);
+        $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Dos', 'provider' => 'botcake', 'key' => 'field.message.options', 'clear' => true])->assertStatus(422);
+        $this->assertNotNull($this->get57('field.message.options'));
+        $this->assertContains('botcake.flow.shipping.options', PageSettings::SYSTEM_KEYS);
+        $this->assertContains('botcake.field.message.options', PageSettings::SYSTEM_KEYS);
     }
 
     public function test_S_057_4_the_page_has_the_dropdown_the_guides_and_the_setup_checklist(): void
@@ -175,7 +180,7 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         foreach ([
             "No CHATBLAST flow in Botcake. In Botcake, copy 'CHATBLAST - SHIPPING STATUS (post_order)' from another page to this page, then press Test.",
             "No 'GPT Input' custom field in Botcake. Create it, then press Test.",
-            'No approved post_order template in Botcake.',
+            'Template check failed: ',
             "el('select', {class: 'cb-pick",
             "o.name + ' · ' + o.id",
             'How to set up a new page',
@@ -217,5 +222,42 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $s->set('Page Dos', 'botcake', 'token', self::TOKEN);
         $this->postJson('/chatblast/page-settings/sync', ['page_name' => 'Page Dos'])->assertOk()->assertJsonPath('status', 'queued');
         $this->postJson('/chatblast/page-settings/sync', ['page_name' => 'Page Wala'])->assertStatus(422);
+    }
+
+    public static function templateCases(): array
+    {
+        return [
+            'nasuri, walang approved' => [200, [], 'No approved post_order template in Botcake.', 'red'],
+            'bigo ang templates call' => [500, null, 'Check failed: Botcake: HTTP 500', 'grey'],
+        ];
+    }
+
+    /** @dataProvider templateCases */
+    public function test_S_057_4_no_approved_template_shows_only_when_the_template_check_ran_and_found_none(int $http, ?array $templates, string $line, string $tone): void
+    {
+        $this->templateHttp = $http;
+        if ($templates !== null) $this->templates = $templates;
+        $this->cell('page_id', '2002')->assertOk();
+        $res = $this->cell('token', self::TOKEN)->assertOk();
+
+        $this->assertNull($this->get57('template.shipping'));
+        $this->assertSame([$line, $tone], [$res->json('cells')['botcake.template.shipping.text']['line'] ?? null, $res->json('cells')['botcake.template.shipping.text']['tone'] ?? null]);
+        // Ang page ay ayon sa naitala, hindi sa listahan ng flow: walang paghula na "walang template" kapag bigo ang call.
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+        $this->assertStringNotContainsString("optionsOf(row, SHIPPING_KEY) !== null) out.push", $html);
+    }
+
+    public function test_S_057_1_a_failed_save_check_names_the_reason_and_a_non_botcake_error_is_reported(): void
+    {
+        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+        $this->assertStringContainsString("(data.refresh_error ? ' · ' + data.refresh_error : '')", $html, 'ang dahilan ng error ay nasa notice');
+
+        \Illuminate\Support\Facades\Exceptions::fake();
+        $this->mock(\App\Services\BotcakeClient::class, function ($m) {
+            $m->shouldReceive('shared')->andThrow(new \RuntimeException('boom inside'));
+        });
+        $this->cell('page_id', '2002')->assertOk();
+        $this->cell('token', self::TOKEN)->assertOk()->assertJsonPath('token_test', 'error')->assertJsonPath('refresh_error', 'Botcake: no answer');
+        \Illuminate\Support\Facades\Exceptions::assertReported(fn (\RuntimeException $e) => $e->getMessage() === 'boom inside');
     }
 }

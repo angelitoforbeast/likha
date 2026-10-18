@@ -14,11 +14,15 @@ use App\Support\BotcakeClock;
  */
 class BotcakeFlowNames
 {
-    /** Mga marker sa value: wala sa listahan ng page, bura na sa Botcake, o hindi nasuri (may dahilan pagkatapos). */
+    /**
+     * Mga marker sa value: wala sa listahan ng page, bura na sa Botcake, o hindi nasuri (may dahilan pagkatapos). Sa body
+     * ng template: walang template na mapipili (nasuri ang templates ng page, walang APPROVED na tugma).
+     */
     public const NOT_FOUND    = '!wala';
     public const REMOVED      = '!bura';
     public const NOT_APPROVED = '!hindi approved';
     public const UNCHECKED    = '!hindi nasuri: ';
+    public const NO_TEMPLATE  = '!walang approved';
 
     /** Ang ipinapakita kapalit ng {{1}}: doon pumapasok ang mensahe ng chatblast sequence. */
     public const SLOT = '(sequence message)';
@@ -40,6 +44,7 @@ class BotcakeFlowNames
         if ($value === self::NOT_FOUND) return ['line' => 'Not in Botcake', 'tone' => 'red'];
         if ($value === self::REMOVED) return ['line' => 'Deleted in Botcake', 'tone' => 'red'];
         if ($value === self::NOT_APPROVED) return ['line' => 'Template not approved in Botcake', 'tone' => 'red'];
+        if ($value === self::NO_TEMPLATE) return ['line' => 'No approved post_order template in Botcake.', 'tone' => 'red'];
         if (str_starts_with($value, self::UNCHECKED)) {
             $reason = substr($value, strlen(self::UNCHECKED));
             return ['line' => 'Check failed: ' . (self::OLD_TEXT[$reason] ?? $reason), 'tone' => 'grey'];
@@ -175,7 +180,8 @@ class BotcakeFlowNames
     /**
      * Ang template ng shipping flow: kapag blangko ang botcake.template.shipping, pipili ang system (pick()); saka ang
      * body nito sa botcake.template.shipping.text, o NOT_APPROVED kapag hindi ito APPROVED na template ng page.
-     * $saved = kase-save lang ang template: ang pagkabigo ay itinatala sa text.
+     * $saved = kase-save lang ang template: ang pagkabigo ay itinatala sa text. Walang template: ang pagkabigo o ang
+     * "walang mapipili" (NO_TEMPLATE) ay itinatala rin, para alam ng page kung nasuri talaga.
      */
     private function refreshTemplate(string $page, float $deadline, array &$written, bool $saved): ?string
     {
@@ -186,7 +192,7 @@ class BotcakeFlowNames
         if (trim((string) $this->settings->get($page, 'botcake', 'template.shipping')) !== $name) return $error;
 
         if ($error !== null) {
-            if ($saved && $name !== '') $written['botcake.template.shipping.text'] = $this->write($page, 'template.shipping.text', self::UNCHECKED . $error);
+            if ($saved || $name === '') $written['botcake.template.shipping.text'] = $this->write($page, 'template.shipping.text', self::UNCHECKED . $error);
             return $error;
         }
 
@@ -198,9 +204,7 @@ class BotcakeFlowNames
         }
 
         if ($name === '') {
-            $old = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'template.shipping.text')->where('active', true)->get();
-            foreach ($old as $s) $this->settings->deactivate($s);
-            if ($old->isNotEmpty()) $written['botcake.template.shipping.text'] = null;
+            $written['botcake.template.shipping.text'] = $this->write($page, 'template.shipping.text', self::NO_TEMPLATE);
             return null;
         }
 

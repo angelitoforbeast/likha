@@ -8,10 +8,12 @@ use App\Services\Chatblast;
 use App\Services\ChatblastReady;
 use App\Services\ChatblastSender;
 use App\Services\PageSettings;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Ready ang page kapag kumpleto ang setup AT may kumpirmadong padala pagkatapos ng huling pagbabago ng setup: isang
@@ -198,5 +200,95 @@ class ChatblastReadyTest extends ChatblastTestCase
 
         $this->postJson('/chatblast/page-settings/send-test', ['page_name' => 'Page Uno'])->assertNotFound();
         $this->assertSame(0, BotcakeMessage::where('is_test', true)->count());
+    }
+
+    public function test_S_057_7_a_test_psid_cleared_between_the_check_and_the_send_answers_422(): void
+    {
+        $this->page('Page Uno', '1001', [], false);
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'test_psid', 'psid-owner-7788');
+        // Nabura ang Test PSID habang tumatakbo ang request: ang sender ay walang ginawang row (null).
+        $this->mock(ChatblastSender::class, function ($m) {
+            $m->shouldReceive('sendTestText')->once()->andReturnNull();
+        });
+
+        $this->postJson('/chatblast/page-settings/send-test', ['page_name' => 'Page Uno'])
+            ->assertStatus(422)->assertJsonPath('error', 'Set a Test PSID first');
+    }
+
+    public function test_S_057_6_the_ready_state_is_cached_per_page_and_cleared_when_the_setup_or_the_test_changes(): void
+    {
+        $this->page('Page Uno');
+        $ready = app(ChatblastReady::class);
+        $this->assertTrue($ready->tested('Page Uno'));
+
+        // Ang pangalawang tanong sa loob ng 60 s: walang query (ang sender ay nagtatanong sa bawat totoong padala).
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        $this->assertTrue($ready->tested('page uno'));
+        $this->assertSame([], DB::getQueryLog());
+        DB::disableQueryLog();
+
+        // Bagong setup: agad na hindi Ready; matagumpay na test: agad na Ready.
+        $this->travel(1)->seconds();
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'field.message', '9009');
+        $this->assertFalse($ready->tested('Page Uno'));
+        $this->travel(1)->seconds();
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'test_ok', now()->format('Y-m-d H:i:s'), false, null, true);
+        $this->assertTrue($ready->tested('Page Uno'));
+
+        // Binurang setup key: hindi na rin ito ang naka-cache.
+        $field = \App\Models\PageSetting::where('key', 'field.message')->where('active', true)->first();
+        app(PageSettings::class)->deactivate($field);
+        $this->travel(1)->seconds();
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'field.message', '9010');
+        $this->assertFalse($ready->tested('Page Uno'));
+    }
+
+    /** Isang role na may Page settings sa /owner/nav-settings, pero hindi CEO. */
+    private function pageSettingsRole(string $role): void
+    {
+        Schema::create('nav_links', function (Blueprint $t) {
+            $t->id();
+            $t->string('route_url');
+            $t->boolean('is_active')->default(true);
+        });
+        Schema::create('nav_link_role_visibility', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('nav_link_id');
+            $t->string('role');
+            $t->boolean('is_visible')->default(true);
+        });
+        $id = DB::table('nav_links')->insertGetId(['route_url' => '/chatblast/page-settings', 'is_active' => true]);
+        DB::table('nav_link_role_visibility')->insert(['nav_link_id' => $id, 'role' => $role, 'is_visible' => true]);
+    }
+
+    public function test_S_057_11_the_ceo_can_mark_a_page_tested_and_no_one_else_can(): void
+    {
+        $this->page('Page Uno', '1001', [], false);
+        $this->assertFalse(app(ChatblastReady::class)->tested('Page Uno'));
+
+        // Ibang role na may Page settings: hindi pinapayagan, walang isinusulat.
+        $this->pageSettingsRole('Marketing');
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->get('/chatblast/page-settings')->assertOk()->assertDontSee('data-mark-tested-url', false);
+        $this->postJson('/chatblast/page-settings/mark-tested', ['page_name' => 'Page Uno'])->assertForbidden();
+        $this->assertNull(app(PageSettings::class)->get('Page Uno', 'botcake', 'test_ok'));
+
+        // Kulang ang setup: walang maimamarka.
+        $ceo = $this->user('CEO', 'ceo2@example.test');
+        $this->actingAs($ceo);
+        $this->page('Page Tres', '1003', ['field.message'], false);
+        $this->postJson('/chatblast/page-settings/mark-tested', ['page_name' => 'Page Tres'])->assertStatus(422);
+
+        $this->get('/chatblast/page-settings')->assertOk()->assertSee('data-mark-tested-url', false)
+            ->assertSee("btn('mark-tested', 'Mark as tested'", false)->assertSee('confirm(', false);
+        $this->travel(1)->seconds();
+        $this->postJson('/chatblast/page-settings/mark-tested', ['page_name' => 'page uno'])->assertOk()
+            ->assertJsonPath('cell.by', fn ($by) => is_string($by) && $by !== 'system');
+        $row = \App\Models\PageSetting::where('key', 'test_ok')->where('active', true)->first();
+        $this->assertSame($ceo->id, $row->created_by);
+        $this->assertSame(now('Asia/Manila')->format('Y-m-d H:i:s'), $row->value);
+        $this->assertTrue(app(ChatblastReady::class)->tested('Page Uno'));
+        $this->assertSame(0, BotcakeMessage::where('is_test', true)->count(), 'walang ipinapadala');
     }
 }

@@ -18,7 +18,8 @@ class PageSettings
      * Mga key na system lang ang sumusulat (hindi tinatanggap mula sa page). Kasama rin ang mga tugma sa
      * DETAIL_PATTERN: ang pangalan ng bawat flow (botcake.flow.<x>.name) at ang body ng shipping template.
      */
-    public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok'];
+    public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
+        'botcake.flow.shipping.options', 'botcake.field.message.options'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -102,7 +103,7 @@ class PageSettings
         $value    = trim($value);
         $secret   = $secret || in_array($provider . '.' . $key, self::SECRET_KEYS, true);
 
-        return DB::transaction(function () use ($page, $provider, $key, $value, $secret, $userId) {
+        $res = DB::transaction(function () use ($page, $provider, $key, $value, $secret, $userId) {
             $current = $this->pageQuery($page)->where('provider', $provider)->where('key', $key)
                 ->where('active', true)->lockForUpdate()->orderByDesc('id')->get();
 
@@ -136,6 +137,10 @@ class PageSettings
 
             return ['status' => $status, 'setting' => $setting];
         });
+        // Pagkatapos ng commit: ang Ready ng page (ChatblastReady) ay kinukuwenta ulit sa susunod na tanong.
+        if ($res['status'] !== 'unchanged' && ChatblastReady::watches($provider, $key)) ChatblastReady::forget($this->pageKey($page));
+
+        return $res;
     }
 
     public function deactivate(PageSetting $setting, ?int $userId = null): void
@@ -143,6 +148,7 @@ class PageSettings
         if (!$setting->active) return;
 
         $setting->update(['active' => false, 'replaced_at' => now()]);
+        if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
         Log::info('PageSettings: deactivated', [
             'page' => $setting->page_name, 'key' => $setting->fullKey(), 'setting_id' => $setting->id, 'by' => $userId,
         ]);

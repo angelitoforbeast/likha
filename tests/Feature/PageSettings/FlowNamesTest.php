@@ -259,7 +259,8 @@ class FlowNamesTest extends BotcakeApiTestCase
 
         $this->assertSame($expected, $this->get52('template.shipping'));
         if ($expected === null) {
-            $this->assertNull($this->get52('template.shipping.text'), 'walang template: "piliin ang template" sa grid');
+            // Nasuri at walang mapipili: itinatala, para "No approved post_order template" lang kapag nasuri talaga.
+            $this->assertSame(\App\Services\BotcakeFlowNames::NO_TEMPLATE, $this->get52('template.shipping.text'));
         }
     }
 

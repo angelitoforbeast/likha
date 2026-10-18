@@ -169,7 +169,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
                   // Isang state() kada row sa bawat update ng bar; ang pangalan ng flow ay bilang lang kapag may ID ang flow.
                   'const st = new Map(all.map(r => [r, state(r)]));',
                   "flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),",
-                  "template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),",
+                  "template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),",
                   // Sa bawat poll, kapag may chip at walang ine-edit, sinasala ulit ang mga row.
                   'if (structure || (chip && !editing)) render();',
                   "const REQUIRED = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message', 'botcake.template.shipping'];",

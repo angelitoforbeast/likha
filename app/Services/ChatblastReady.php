@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BotcakeMessage;
 use App\Models\PageSetting;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -22,6 +23,9 @@ class ChatblastReady
 
     /** Ang setup na kapag nagbago ay kailangan ulit ng test. */
     public const CONFIG = ['page_id', 'token', 'flow.shipping', 'field.message'];
+
+    /** Segundo ng cache ng tested() kada page (tinatanong ng sender sa bawat totoong padala). */
+    private const CACHE_SECONDS = 60;
 
     public function __construct(private PageSettings $settings)
     {
@@ -62,8 +66,32 @@ class ChatblastReady
         return $out;
     }
 
-    /** Para sa isang page (sender, Send test). */
+    /**
+     * Para sa isang page (sender, Send test). Naka-cache nang 60 s kada page: ang MAX(queued_at) ay sumusuri sa mga
+     * naipadalang row sa bawat padala. Binubura ng PageSettings ang cache kapag nagbago ang setup o ang test_ok.
+     */
     public function tested(string $page): bool
+    {
+        return Cache::remember(self::cacheKey($this->settings->pageKey($page)), self::CACHE_SECONDS, fn () => $this->fresh($page));
+    }
+
+    /** Ang cache ng page: binubura kapag nagbago ang alinman sa CONFIG o ang test_ok nito. */
+    public static function forget(string $pageKey): void
+    {
+        Cache::forget(self::cacheKey($pageKey));
+    }
+
+    public static function watches(string $provider, string $key): bool
+    {
+        return $provider === 'botcake' && in_array($key, [...self::CONFIG, 'test_ok'], true);
+    }
+
+    private static function cacheKey(string $pageKey): string
+    {
+        return 'chatblast:ready:' . sha1($pageKey);
+    }
+
+    private function fresh(string $page): bool
     {
         $rows = $this->settings->pageQuery($page)->where('active', true)->where('provider', 'botcake')
             ->whereIn('key', [...self::CONFIG, 'test_ok'])->get(['key', 'created_at']);

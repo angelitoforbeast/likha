@@ -112,6 +112,7 @@
          data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
          data-send-test-url="{{ route('page-settings.send-test') }}"
+         @if ($isCeo ?? false) data-mark-tested-url="{{ route('page-settings.mark-tested') }}" @endif
          data-test-psid-picker-url="{{ route('chatblast.index') }}#test-psid"
          data-sync-all-url="{{ route('page-settings.sync-all') }}"
          data-coverage-url="{{ route('page-settings.psid-coverage.orders') }}"
@@ -231,7 +232,7 @@
             // Pulang linya ng flow na may ID: wala sa Botcake o bura na.
             flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),
             // Hindi APPROVED ang template ng shipping flow: bigo ang pagpapadala.
-            template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),
+            template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),
         };
     }
 
@@ -475,8 +476,9 @@
             const body = row.cells[TEMPLATE_KEY + '.text'];
             if (body && body.tone === '' && !UNKNOWN.includes(body.line)) out.push(...withToken(body.line));
             if (body && body.tone === 'red') out.push(el('div', {class: 'text-xs text-red-600', text: body.line}));
-            // Nasuri na ang Botcake (may listahan ng kandidato) pero walang napiling template: walang APPROVED na template.
-            if (!row.cells[TEMPLATE_KEY] && optionsOf(row, SHIPPING_KEY) !== null) out.push(el('div', {class: 'text-xs text-red-600', text: 'No approved post_order template in Botcake.'}));
+            // Walang template at bigo ang pagsuri ng templates (hal. walang sagot, kulang sa oras): ang dahilan, hindi "walang
+            // approved". Ang "walang approved" ay ang pulang linya sa itaas, kapag nasuri talaga at walang napili.
+            if (!row.cells[TEMPLATE_KEY] && body && body.tone === 'grey') out.push(el('div', {class: 'text-xs text-gray-500', text: 'Template check failed: ' + body.line.replace(/^Check failed: /, '')}));
         }
         return out;
     }
@@ -650,6 +652,8 @@
         if (complete(r)) {
             out.push(r.cells['botcake.test_psid'] ? btn('send-test', 'Send test', 'Send a test message to the Test PSID')
                 : el('a', {class: 'text-xs text-amber-700 hover:underline', href: url.testPsidPickerUrl, title: 'Pick the Test PSID of the page on To send', text: 'Set a Test PSID first'}));
+            // CEO lang (ang URL ay nasa page para sa CEO lang): ang page na sinuri na mismo ng may-ari.
+            if (url.markTestedUrl && !tested(r)) out.push(btn('mark-tested', 'Mark as tested', 'Mark the page as tested without a test send'));
         }
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.customersUrl + '?page=' + encodeURIComponent(r.name), title: 'Customers', text: 'Cust.'}));
         out.push(el('a', {class: 'text-blue-700 hover:underline text-xs', href: url.coverageUrl + '?page_name=' + encodeURIComponent(r.name), title: 'Orders without a PSID', text: 'Orders'}));
@@ -672,6 +676,13 @@
                 const res = await fetch(url.syncUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
                 const data = await res.json().catch(() => ({}));
                 notice(data.message || data.error || ('HTTP ' + res.status), res.ok ? 'text-green-700' : 'text-red-600');
+            } else if (b.dataset.act === 'mark-tested') {
+                if (confirm('Mark ' + r.name + ' as tested? Chatblast will send to this page without a test send.')) {
+                    const res = await fetch(url.markTestedUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok) { applyCells(r, {[TEST_OK_KEY]: data.cell}); refreshActions(r.key); }
+                    notice(res.ok ? r.name + ': marked as tested.' : (data.error || ('HTTP ' + res.status)), res.ok ? 'text-green-700' : 'text-red-600');
+                }
             } else if (b.dataset.act === 'send-test') {
                 const res = await fetch(url.sendTestUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
                 const data = await res.json().catch(() => ({}));
@@ -809,7 +820,8 @@
                 // Kumpleto na ang ID at token: sinubukan na ng server ang token at kinuha ang flow, field at template.
                 if (data.token_test) {
                     notice(row.name + ' · Token: ' + data.token_test + (data.token_test === 'ok'
-                        ? (data.refresh_error ? ' · flow, field and template not checked: ' + data.refresh_error : ' · flow, field and template checked') : ''),
+                        ? (data.refresh_error ? ' · flow, field and template not checked: ' + data.refresh_error : ' · flow, field and template checked')
+                        : (data.refresh_error ? ' · ' + data.refresh_error : '')),
                         data.token_test === 'ok' ? 'text-green-700' : 'text-red-600');
                 }
                 refreshActions(ed.pk); // ang Send test ay lumalabas kapag kumpleto na ang setup

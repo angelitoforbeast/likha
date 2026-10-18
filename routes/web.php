@@ -304,6 +304,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-setting
     Route::post('/test-token/one', [PageSettingController::class, 'testTokenJson'])->middleware('throttle:120,1,page-settings-test-one')->name('test-token-one');
     Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1,page-settings-sync')->name('sync');
     Route::post('/send-test', [PageSettingController::class, 'sendTest'])->middleware('throttle:20,1,page-settings-send-test')->name('send-test');
+    Route::post('/mark-tested', [PageSettingController::class, 'markTested'])->middleware('throttle:20,1,page-settings-mark-tested')->name('mark-tested');
     Route::post('/sync-all', [PageSettingController::class, 'syncAll'])->middleware('throttle:10,1,page-settings-sync-all')->name('sync-all');
     Route::post('/sync-all/{action}', [PageSettingController::class, 'syncAllControl'])->whereIn('action', ['pause', 'resume', 'stop'])->middleware('throttle:30,1,page-settings-sync-all-control')->name('sync-all.control');
     Route::get('/customers', [BotcakeCustomersController::class, 'index'])->name('customers');
