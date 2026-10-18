@@ -253,4 +253,48 @@ class JntTrackSyncAutoTest extends ChatblastTestCase
         $this->assertSame(['Arrival', '2026-10-17 21:20:00'], [$old->scan_type, substr((string) $old->checked_at, 0, 19)], 'hindi "bago" ang hindi nasagot');
         $this->assertSame(1, (int) DB::table('jnt_track_sync_runs')->value('skipped'));
     }
+
+    public function test_S_061_11_the_page_shows_the_automatic_runs_the_next_run_and_the_setting(): void
+    {
+        $at = fn (string $t) => ['created_at' => $t, 'updated_at' => $t, 'started_at' => $t];
+        DB::table('jnt_track_sync_runs')->insert(['kind' => 'auto', 'status' => 'done', 'dry_run' => false, 'total' => 120, 'processed' => 100, 'updated' => 7,
+            'unmapped' => 3, 'skipped' => 2, 'finished_at' => '2026-10-18 08:31:00', 'result_sample' => json_encode(['rider_found' => 5, 'pending' => 20, 'capped' => true])] + $at('2026-10-18 08:20:00'));
+        DB::table('jnt_track_sync_runs')->insert(['kind' => 'auto', 'status' => 'failed', 'dry_run' => false, 'last_error' => 'J&T timed out',
+            'finished_at' => '2026-10-18 07:21:00'] + $at('2026-10-18 07:20:00'));
+        DB::table('jnt_track_sync_runs')->insert(['date_from' => '2026-10-01', 'date_to' => '2026-10-18', 'status' => 'done', 'dry_run' => true] + $at('2026-10-18 08:00:00'));
+
+        $this->actingAs($this->user('CEO'));
+        $html = $this->get('/jnt/track-sync')->assertOk()->getContent();
+
+        foreach (['Automatic track-sync', 'On', 'Next run 10:20', '08:20', '08:31', 'J&amp;T timed out', '20 not reached'] as $text) {
+            $this->assertStringContainsString($text, $html);
+        }
+        $this->assertMatchesRegularExpression('#<td[^>]*>\s*100\s*</td>\s*<td[^>]*>\s*7\s*</td>\s*<td[^>]*>\s*3\s*</td>\s*<td[^>]*>\s*2\s*</td>\s*<td[^>]*>\s*5\s*</td>#', $html, 'checked, status changed, unmapped, no answer, rider');
+        $this->assertSame(2, substr_count($html, 'data-auto-run'), 'ang manual na run ay wala sa listahan ng awtomatiko');
+        $this->assertStringContainsString('id="auto-toggle"', $html);
+
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->assertStringNotContainsString('id="auto-toggle"', $this->get('/jnt/track-sync')->assertOk()->getContent(), 'CEO lang ang may toggle');
+    }
+
+    public function test_S_061_11_only_the_ceo_switches_it_and_the_stored_setting_overrides_the_env(): void
+    {
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->postJson('/jnt/track-sync/auto', ['on' => false])->assertForbidden();
+        $this->assertTrue(JntAutoTrackSync::enabled());
+
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->postJson('/jnt/track-sync/auto', ['on' => false])->assertNotFound();
+
+        $this->actingAs($this->user('CEO'));
+        $this->postJson('/jnt/track-sync/auto', ['on' => false])->assertOk()->assertJsonPath('on', false);
+        $this->assertFalse(JntAutoTrackSync::enabled(), 'naka-off kahit JNT_TRACK_SYNC_AUTO=true');
+        $this->waybill('JT0000000001');
+        $this->assertNull($this->sync());
+
+        config(['services.jnt.track_sync_auto' => false]);
+        $this->postJson('/jnt/track-sync/auto', ['on' => true])->assertOk()->assertJsonPath('on', true);
+        $this->assertTrue(JntAutoTrackSync::enabled(), 'naka-on kahit false ang env');
+        $this->postJson('/jnt/track-sync/auto', [])->assertStatus(422);
+    }
 }

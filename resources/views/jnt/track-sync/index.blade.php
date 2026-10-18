@@ -32,22 +32,63 @@
   </style>
 
   <div class="ts-wrap" x-data="trackSync()" x-init="init()">
-    {{-- Ang awtomatikong track ng chatblast (kapag kumukuha ng listahan at bago ipadala ang delivering). --}}
+    {{-- Ang kusang track-sync kada oras (JntAutoTrackSync): ang mga huling takbo, ang susunod, at ang on/off (CEO lang). --}}
     <div class="ts-card" style="font-size:13px">
-      @if($autoRun)
-        <b>Huling awtomatikong track</b> ({{ $autoSample['source'] ?? 'chatblast' }}):
-        {{ \Carbon\Carbon::parse($autoRun->finished_at ?? $autoRun->created_at)->format('Y-m-d H:i') }}
-        · nasuri: {{ (int) $autoRun->processed }} · nag-iba ang status: {{ (int) $autoRun->updated }}
-        · rider: {{ (int) ($autoSample['rider_found'] ?? 0) }} · walang sagot: {{ (int) $autoRun->skipped }}
-        · hindi naabot (sa susunod): {{ (int) ($autoSample['pending'] ?? 0) }}
-        @if($autoRun->last_error) · <span style="color:#b91c1c">error: {{ $autoRun->last_error }}</span> @endif
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <b>Automatic track-sync</b>
+        <span class="ts-badge {{ $autoOn ? 'b-done' : 'b-queued' }}">{{ $autoOn ? 'On' : 'Off' }}</span>
+        <span class="ts-muted">Every hour at :20 (06:20–23:20 and 02:20, Manila), open waybills of the last 60 days, up to 40 minutes a run · Next run {{ $autoNext->format('H:i') }}{{ $autoOn ? '' : ' (when switched on)' }}</span>
+        @if($isCeo)
+          <button id="auto-toggle" type="button" class="ts-btn {{ $autoOn ? 'preview' : 'apply' }}" data-on="{{ $autoOn ? '0' : '1' }}"
+                  data-url="{{ route('jnt.track-sync.auto') }}">{{ $autoOn ? 'Switch off' : 'Switch on' }}</button>
+        @endif
+      </div>
+      @if($autoRuns->isEmpty())
+        <div class="ts-muted" style="margin-top:8px">No automatic run yet.</div>
       @else
-        <b>Huling awtomatikong track:</b> wala pa.
+        <table class="ts-tbl">
+          <thead><tr><th>#</th><th>Kind</th><th>Started</th><th>Done</th><th>Status</th><th>Waybills</th><th>Checked</th><th>Status changed</th><th>Unmapped</th><th>No answer</th><th>Rider</th><th>Note</th></tr></thead>
+          <tbody>
+          @foreach($autoRuns as $r)
+            <tr data-auto-run>
+              <td>{{ $r->id }}</td>
+              <td>{{ $r->kind }}</td>
+              <td>{{ $r->started_at ? \Carbon\Carbon::parse($r->started_at)->format('M j H:i') : '—' }}</td>
+              <td>{{ $r->finished_at ? \Carbon\Carbon::parse($r->finished_at)->format('M j H:i') : '—' }}</td>
+              <td><span class="ts-badge {{ ['running' => 'b-run', 'done' => 'b-done', 'failed' => 'b-fail'][$r->status] ?? 'b-queued' }}">{{ $r->status }}</span></td>
+              <td>{{ (int) $r->total }}</td>
+              <td>{{ (int) $r->processed }}</td>
+              <td>{{ (int) $r->updated }}</td>
+              <td>{{ (int) $r->unmapped }}</td>
+              <td>{{ (int) $r->skipped }}</td>
+              <td>{{ (int) ($r->sample['rider_found'] ?? 0) }}</td>
+              <td>
+                @if(!empty($r->sample['pending'])){{ (int) $r->sample['pending'] }} not reached (the next run starts with them)@endif
+                @if($r->last_error)<span style="color:#b91c1c">Error: {{ $r->last_error }}</span>@endif
+              </td>
+            </tr>
+          @endforeach
+          </tbody>
+        </table>
       @endif
     </div>
+    @if($isCeo)
+      <script>
+        document.getElementById('auto-toggle').addEventListener('click', async (e) => {
+          const b = e.currentTarget, on = b.dataset.on === '1';
+          if (!confirm(on ? 'Switch the automatic track-sync on?' : 'Switch the automatic track-sync off?')) return;
+          b.disabled = true;
+          const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+          const res = await fetch(b.dataset.url, {method: 'POST', headers: {'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({on})});
+          if (res.ok) { location.reload(); return; }
+          alert('Could not save the setting (' + res.status + ').');
+          b.disabled = false;
+        });
+      </script>
+    @endif
     <div class="ts-note">
-      <b>Paano ito gumagana:</b> Kinukuha ang mga <b>non-final</b> na waybill sa <b>from_jnts</b> (status NOT <b>Delivered/Returned</b> — final na yun, di gagalawin) sa napiling <b>date range</b> (submission_time), tapos tinatawagan ang J&T <b>TRACKQUERY</b> (by batches) para i-refresh ang <b>status</b> + <b>status_logs</b> (from → to) + <b>signingtime</b>.<br>
-      <b>Preview (dry-run)</b> = walang isusulat — makikita mo muna ang mga magbabago at ang <b>unmapped</b> (hal. <i>Problematic</i>) bago mag-<b>Apply</b>.
+      <b>How the manual run works:</b> it takes the <b>non-final</b> waybills in <b>from_jnts</b> (status not <b>Delivered/Returned</b>; those are final and never touched) in the chosen <b>date range</b> (submission_time), and calls J&T <b>TRACKQUERY</b> in batches to refresh the <b>status</b> + <b>status_logs</b> (from → to) + <b>signingtime</b>.<br>
+      <b>Preview (dry-run)</b> writes nothing: you first see what would change and the <b>unmapped</b> scans (e.g. <i>Problematic</i>) before you <b>Apply</b>.
     </div>
 
     <div class="ts-card">
@@ -55,7 +96,7 @@
         <label class="ts-fld"><span>From (submission date)</span><input type="date" x-model="dateFrom"></label>
         <label class="ts-fld"><span>To</span><input type="date" x-model="dateTo"></label>
         <button class="ts-btn preview" :disabled="busy" @click="start(true)">🔍 Preview (dry-run)</button>
-        <button class="ts-btn apply" :disabled="busy" @click="applyConfirm()">✍️ Apply (isulat na)</button>
+        <button class="ts-btn apply" :disabled="busy" @click="applyConfirm()">✍️ Apply (write)</button>
         <span class="ts-muted" x-show="busy" x-text="phase"></span>
       </div>
     </div>
@@ -72,18 +113,18 @@
 
       <div class="ts-stat">
         <div class="ts-tile" :class="activeCat===null?'sel':''" @click="activeCat=null"><b x-text="run?.total||0"></b><span>Total</span></div>
-        <div class="ts-tile upd" :class="activeCat==='updated'?'sel':''" @click="activeCat='updated'"><b x-text="run?.updated||0"></b><span x-text="run?.dry_run ? 'Mababago' : 'Updated'"></span></div>
+        <div class="ts-tile upd" :class="activeCat==='updated'?'sel':''" @click="activeCat='updated'"><b x-text="run?.updated||0"></b><span x-text="run?.dry_run ? 'Would change' : 'Updated'"></span></div>
         <div class="ts-tile" :class="activeCat==='unchanged'?'sel':''" @click="activeCat='unchanged'"><b x-text="run?.unchanged||0"></b><span>Unchanged</span></div>
         <div class="ts-tile skip" :class="activeCat==='skipped'?'sel':''" @click="activeCat='skipped'"><b x-text="run?.skipped||0"></b><span>Skipped</span></div>
         <div class="ts-tile unmap" :class="activeCat==='unmapped'?'sel':''" @click="activeCat='unmapped'"><b x-text="run?.unmapped||0"></b><span>Unmapped</span></div>
         <div class="ts-tile fail" :class="activeCat==='failed'?'sel':''" @click="activeCat='failed'"><b x-text="run?.failed||0"></b><span>Failed</span></div>
       </div>
-      <div class="ts-muted" style="margin-top:6px;font-size:11px;">I-click ang tile para makita ang listahan ng waybills.</div>
+      <div class="ts-muted" style="margin-top:6px;font-size:11px;">Click a tile to see its waybills.</div>
 
       <!-- Unmapped scantypes -->
       <template x-if="unmappedTypes().length">
         <div style="margin-top:12px;">
-          <div style="font-size:12px;font-weight:700;color:#b91c1c;">⚠ Unmapped scantypes (kailangan i-decide ang mapping — hindi isinulat):</div>
+          <div style="font-size:12px;font-weight:700;color:#b91c1c;">⚠ Unmapped scantypes (a mapping is still to be decided; not written):</div>
           <div style="margin-top:4px;">
             <template x-for="u in unmappedTypes()" :key="u.type">
               <span class="ts-pill" x-text="u.type+' ('+u.count+')'"></span>
@@ -97,11 +138,11 @@
         <div style="margin-top:12px;">
           <div style="font-size:12px;font-weight:700;color:#334155;">
             <span style="text-transform:capitalize;" x-text="activeCat"></span>:
-            <span x-text="catRows().length"></span> ipinapakita<span x-show="catCount()>catRows().length" x-text="' (sa kabuuang '+catCount()+' — unang '+catRows().length+')'"></span>
+            <span x-text="catRows().length"></span> shown<span x-show="catCount()>catRows().length" x-text="' (of '+catCount()+'; the first '+catRows().length+')'"></span>
           </div>
           <div style="max-height:340px;overflow:auto;margin-top:4px;">
             <table class="ts-tbl">
-              <thead><tr><th>Waybill</th><th>Detalye</th><th>Scantype</th></tr></thead>
+              <thead><tr><th>Waybill</th><th>Detail</th><th>Scantype</th></tr></thead>
               <tbody>
                 <template x-for="r in catRows()" :key="r.waybill">
                   <tr>
@@ -113,7 +154,7 @@
                     <td x-text="r.scantype||''"></td>
                   </tr>
                 </template>
-                <template x-if="!catRows().length"><tr><td colspan="3" class="ts-muted" style="text-align:center;">Walang laman sa category na ito.</td></tr></template>
+                <template x-if="!catRows().length"><tr><td colspan="3" class="ts-muted" style="text-align:center;">Nothing in this category.</td></tr></template>
               </tbody>
             </table>
           </div>
@@ -124,7 +165,7 @@
     <!-- History -->
     <div class="ts-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <b style="font-size:13px;">Recent runs</b>
+        <b style="font-size:13px;">Recent manual runs</b>
         <button class="ts-btn" style="background:#f1f5f9;color:#475569;padding:5px 10px;" @click="loadHistory()">↻ Refresh</button>
       </div>
       <div style="max-height:280px;overflow:auto;margin-top:6px;">
@@ -141,7 +182,7 @@
                 <td class="ts-muted" x-text="(h.created_at||'').substring(0,16).replace('T',' ')"></td>
               </tr>
             </template>
-            <template x-if="!history.length"><tr><td colspan="9" class="ts-muted" style="text-align:center;">Wala pang run.</td></tr></template>
+            <template x-if="!history.length"><tr><td colspan="9" class="ts-muted" style="text-align:center;">No manual run yet.</td></tr></template>
           </tbody>
         </table>
       </div>
@@ -179,7 +220,7 @@
         },
 
         applyConfirm(){
-          if (confirm('APPLY na — isusulat ang status/status_logs sa from_jnts para sa range na ito. Tuloy?')) this.start(false);
+          if (confirm('APPLY: this writes the status/status_logs in from_jnts for this range. Continue?')) this.start(false);
         },
 
         async start(dryRun){

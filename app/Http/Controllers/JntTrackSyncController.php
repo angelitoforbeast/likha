@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SyncFromJntStatusByTrack;
+use App\Models\AppSetting;
+use App\Services\Jnt\JntAutoTrackSync;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 /**
@@ -14,7 +17,8 @@ use Carbon\Carbon;
  */
 class JntTrackSyncController extends Controller
 {
-    private function checkAccess(): void
+    /** @return bool kung CEO */
+    private function checkAccess(): bool
     {
         $raw  = Auth::user()?->employeeProfile?->role ?? '';
         $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
@@ -22,26 +26,41 @@ class JntTrackSyncController extends Controller
         $isMOIC      = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $norm) === 1;
         $isMarketing = preg_match('/^marketing$/iu', $norm) === 1;
         if (!($isCEO || $isMOIC || $isMarketing)) abort(404);
+
+        return $isCEO;
     }
 
     public function index()
     {
-        $this->checkAccess();
+        $isCeo = $this->checkAccess();
         $tz    = 'Asia/Manila';
         $today = Carbon::now($tz)->toDateString();
         // Default = simula ng NAKARAANG buwan → ngayon (gaya ng /jnt/hold).
         $first = Carbon::now($tz)->startOfMonth()->subMonth()->toDateString();
 
-        // Ang huling awtomatikong track (mula sa chatblast: walang date range).
-        $auto = DB::table('jnt_track_sync_runs')->whereNull('date_from')->orderByDesc('id')->first();
-        $autoSample = $auto && $auto->result_sample ? (array) json_decode($auto->result_sample, true) : [];
+        // Ang mga kusang track-sync kada oras (kind = auto), pinakabago muna.
+        $hasKind = Schema::hasColumn('jnt_track_sync_runs', 'kind'); // hindi pa na-migrate: walang listahan
+        $autoRuns = !$hasKind ? collect() : DB::table('jnt_track_sync_runs')->where('kind', JntAutoTrackSync::KIND)->orderByDesc('id')->limit(12)->get()
+            ->map(function ($r) { $r->sample = $r->result_sample ? (array) json_decode($r->result_sample, true) : []; return $r; });
 
         return view('jnt.track-sync.index', [
             'defaultFrom' => $first,
             'defaultTo'   => $today,
-            'autoRun'     => $auto,
-            'autoSample'  => $autoSample,
+            'autoRuns'    => $autoRuns,
+            'autoOn'      => JntAutoTrackSync::enabled(),
+            'autoNext'    => JntAutoTrackSync::nextRun(),
+            'isCeo'       => $isCeo,
         ]);
+    }
+
+    /** POST — i-on o i-off ang kusang track-sync (CEO lang). Nasa app_settings; nananaig sa JNT_TRACK_SYNC_AUTO. */
+    public function auto(Request $request)
+    {
+        if (!$this->checkAccess()) abort(403);
+        $on = $request->validate(['on' => 'required|boolean'])['on'];
+        AppSetting::set(JntAutoTrackSync::SETTING, $on ? '1' : '0');
+
+        return response()->json(['ok' => true, 'on' => JntAutoTrackSync::enabled()]);
     }
 
     /** POST — magsimula ng preview (dry-run) o apply. */

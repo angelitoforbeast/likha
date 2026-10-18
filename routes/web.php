@@ -1064,6 +1064,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/jnt/track-sync/start',        [\App\Http\Controllers\JntTrackSyncController::class, 'start'])  ->middleware('throttle:30,1')->name('jnt.track-sync.start');
     Route::get ('/jnt/track-sync/status/{run}', [\App\Http\Controllers\JntTrackSyncController::class, 'status']) ->whereNumber('run')->name('jnt.track-sync.status');
     Route::get ('/jnt/track-sync/history',      [\App\Http\Controllers\JntTrackSyncController::class, 'history'])->name('jnt.track-sync.history');
+    Route::post('/jnt/track-sync/auto',         [\App\Http\Controllers\JntTrackSyncController::class, 'auto'])   ->middleware('throttle:30,1')->name('jnt.track-sync.auto');
 
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');
