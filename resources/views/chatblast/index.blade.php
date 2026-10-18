@@ -31,8 +31,8 @@
     <div class="flex items-center justify-between mb-3">
         <h1 class="text-2xl font-semibold">Chatblast</h1>
         <div class="flex gap-4 text-sm">
-            <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Mga mensahe</a>
-            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Mga sequence</a>
+            <a href="{{ route('chatblast.campaigns.index') }}" class="text-blue-700 hover:underline">Messages</a>
+            <a href="{{ route('chatblast.sequence.index') }}" class="text-blue-700 hover:underline">Sequences</a>
             <a href="{{ route('page-settings.index') }}" class="text-blue-700 hover:underline">Page Settings</a>
             <a href="{{ url('/') }}" class="text-gray-600 hover:underline">Home</a>
         </div>
@@ -40,27 +40,27 @@
 
     {{-- Mga filter --}}
     <form id="filters" class="flex flex-wrap items-end gap-3 mb-3 text-sm">
-        <label class="flex flex-col text-xs text-gray-600">Mula<input type="date" name="from" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
-        <label class="flex flex-col text-xs text-gray-600">Hanggang<input type="date" name="to" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
+        <label class="flex flex-col text-xs text-gray-600">From<input type="date" name="from" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
+        <label class="flex flex-col text-xs text-gray-600">To<input type="date" name="to" value="{{ $today }}" class="border rounded px-2 py-1 text-sm text-gray-900"></label>
         <label class="flex flex-col text-xs text-gray-600">Page
             <select name="page" class="border rounded px-2 py-1 text-sm text-gray-900">
-                <option value="">Lahat</option>
+                <option value="">All</option>
                 @foreach($pages as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
             </select>
         </label>
-        <label class="flex flex-col text-xs text-gray-600">Campaign
+        <label class="flex flex-col text-xs text-gray-600">Sequence
             <select name="kind" class="border rounded px-2 py-1 text-sm text-gray-900">
-                <option value="">Lahat</option>
+                <option value="">All</option>
                 @foreach($campaigns as $c)<option value="{{ $c->kind }}">{{ $c->name }}{{ $c->active ? '' : ' (off)' }}</option>@endforeach
             </select>
         </label>
-        <label class="flex flex-col text-xs text-gray-600">Hanapin<input name="q" placeholder="pangalan o waybill" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
+        <label class="flex flex-col text-xs text-gray-600">Search<input name="q" placeholder="name or waybill" class="border rounded px-2 py-1 text-sm text-gray-900 w-56"></label>
         <input type="hidden" name="status" value="">
-        <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Ipakita</button>
+        <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Show</button>
     </form>
 
     {{-- Bilang kada status (pindutin para salain) at ang lagay ng pagpapadala --}}
-    <div id="chips" class="flex flex-wrap gap-2 mb-2 text-xs" aria-label="Bilang kada status"></div>
+    <div id="chips" class="flex flex-wrap gap-2 mb-2 text-xs" aria-label="Count per status"></div>
     <div class="flex flex-wrap items-center gap-3 mb-3 text-sm">
         <span id="state" class="text-xs text-gray-700" aria-live="polite"></span>
         <span id="test-psid-owner" class="text-xs text-gray-700"></span>
@@ -70,9 +70,9 @@
 
     {{-- Mga aksyon --}}
     <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
-        <button id="build" type="button" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1 rounded">Kunin ang mga bago</button>
+        <button id="build" type="button" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1 rounded">Fetch new</button>
         <button id="send-selected" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded disabled:opacity-50" disabled>Send selected (0)</button>
-        <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send lahat ng ready</button>
+        <button id="send-filtered" type="button" class="bg-blue-700 hover:bg-blue-800 text-white px-3 py-1 rounded">Send all ready</button>
         <button id="retry" type="button" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded">Retry failed</button>
         <span id="notice" class="text-xs" aria-live="polite"></span>
     </div>
@@ -81,12 +81,12 @@
         <summary class="cursor-pointer font-medium">Test PSID</summary>
         <div class="grid lg:grid-cols-3 gap-4 mt-2">
             <form id="test-psid-form">
-                <p class="text-xs text-gray-600 mb-1">Test PSID ng page (ang sarili mong account sa Botcake customers ng page): dito napupunta ang "Send test".</p>
+                <p class="text-xs text-gray-600 mb-1">The page's Test PSID (your own account among the page's Botcake customers): every "Send test" goes here.</p>
                 <select name="page" class="border rounded px-2 py-1 text-sm mb-1">
                     @foreach($pages as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
                 </select>
-                <input name="q" placeholder="hanapin ang pangalan" class="border rounded px-2 py-1 text-sm">
-                <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Hanapin</button>
+                <input name="q" placeholder="search a name" class="border rounded px-2 py-1 text-sm">
+                <button class="bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Search</button>
                 <div id="test-psid-current" class="text-xs text-gray-600 mt-1"></div>
                 <ul id="test-psid-results" class="text-sm mt-1 space-y-1"></ul>
             </form>
@@ -97,8 +97,8 @@
         <table id="cb-table" class="text-sm border-collapse min-w-full">
             <thead>
             <tr class="bg-gray-100 text-left text-xs text-gray-600">
-                <th class="bg-gray-100 px-2 py-2 border-b"><input type="checkbox" id="check-all" aria-label="Piliin lahat"></th>
-                @foreach(['Oras', 'Page', 'Customer', 'Waybill', 'J&T', 'PSID', 'Mensahe', 'Status', 'Subok', 'HTTP', 'Naipadala'] as $h)
+                <th class="bg-gray-100 px-2 py-2 border-b"><input type="checkbox" id="check-all" aria-label="Select all"></th>
+                @foreach(['Time', 'Page', 'Customer', 'Waybill', 'J&T', 'PSID', 'Message', 'Status', 'Tries', 'HTTP', 'Sent'] as $h)
                     <th class="bg-gray-100 px-2 py-2 border-b whitespace-nowrap">{{ $h }}</th>
                 @endforeach
             </tr>
@@ -113,7 +113,7 @@
     </div>
 
     {{-- Side panel: lahat ng kailangan sa debug ng isang mensahe --}}
-    <aside id="panel" class="hidden fixed right-0 top-0 h-full w-[34rem] max-w-full bg-white shadow-xl border-l p-4 overflow-auto text-sm z-50" aria-label="Detalye ng mensahe">
+    <aside id="panel" class="hidden fixed right-0 top-0 h-full w-[34rem] max-w-full bg-white shadow-xl border-l p-4 overflow-auto text-sm z-50" aria-label="Message details">
         <div class="flex justify-between items-center mb-2">
             <div id="panel-title" class="font-semibold"></div>
             <button id="panel-close" type="button" class="text-gray-500 hover:text-gray-800 px-2" aria-label="Isara">✕</button>
@@ -126,8 +126,8 @@
 (function () {
     const box = document.getElementById('cb'), url = box.dataset;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
-    const LABEL = {ready: 'ready', no_psid: 'walang PSID', no_config: 'walang config', queued: 'queued', sending: 'sending', sent: 'sent',
-        failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped', unknown: 'hindi tiyak'};
+    const LABEL = {ready: 'ready', no_psid: 'no PSID', no_config: 'no config', queued: 'queued', sending: 'sending', sent: 'sent',
+        failed: 'failed', field_mismatch: 'field mismatch', skipped: 'skipped', unknown: 'unsure'};
     const COLOR = {ready: 'bg-blue-100 text-blue-800', no_psid: 'bg-gray-200 text-gray-700', no_config: 'bg-gray-200 text-gray-700',
         queued: 'bg-indigo-100 text-indigo-800', sending: 'bg-indigo-200 text-indigo-900', sent: 'bg-green-100 text-green-800',
         failed: 'bg-red-100 text-red-800', field_mismatch: 'bg-orange-100 text-orange-800', skipped: 'bg-yellow-100 text-yellow-800',
@@ -178,7 +178,7 @@
         const params = {...filters(), p: page};
         if (light && Date.now() - countsAt < 30000) params.light = '1';
         const res = await fetch(url.listUrl + '?' + new URLSearchParams(params), {headers: {'Accept': 'application/json'}});
-        if (!res.ok) { notice('Hindi nakuha ang listahan (HTTP ' + res.status + ').', 'text-red-600'); return; }
+        if (!res.ok) { notice('Could not load the list (HTTP ' + res.status + ').', 'text-red-600'); return; }
         last = await res.json();
         if (last.counts) { counts = last.counts; total = last.total; countsAt = Date.now(); }
         last.counts = counts;
@@ -187,7 +187,7 @@
         renderTestPsid(last.test_psid);
         renderRows(last.rows);
         const pages = Math.max(1, Math.ceil(total / last.per_page));
-        document.getElementById('pager').textContent = 'Pahina ' + last.page + ' / ' + pages + ' · ' + fmt(total) + ' row';
+        document.getElementById('pager').textContent = 'Page ' + last.page + ' / ' + pages + ' · ' + fmt(total) + ' rows';
         document.getElementById('prev').disabled = last.page <= 1;
         document.getElementById('next').disabled = last.page >= pages;
         schedule();
@@ -206,15 +206,15 @@
     }
 
     function renderState(s) {
-        document.getElementById('state').textContent = 'Pagpapadala: ' + (s.paused ? 'naka-pause' : 'tumatakbo') + ' · nasa queue: ' + fmt(s.queued)
-            + ' · naipadala sa huling oras: ' + fmt(s.sent);
+        document.getElementById('state').textContent = 'Sending: ' + (s.paused ? 'paused' : 'running') + ' · in queue: ' + fmt(s.queued)
+            + ' · sent in the last hour: ' + fmt(s.sent);
         document.getElementById('pause').classList.toggle('hidden', s.paused);
         document.getElementById('resume').classList.toggle('hidden', !s.paused);
     }
 
     function renderRows(rows) {
         const body = rows.map(r => {
-            const check = el('input', {type: 'checkbox', 'aria-label': 'Piliin ' + r.waybill});
+            const check = el('input', {type: 'checkbox', 'aria-label': 'Select ' + r.waybill});
             check.checked = selected.has(r.id);
             check.addEventListener('click', e => { e.stopPropagation(); check.checked ? selected.add(r.id) : selected.delete(r.id); refreshSelected(); });
             const tr = el('tr', {class: 'border-b hover:bg-gray-50' + (r.id === openId ? ' selected-row' : ''), tabindex: '0', 'data-id': r.id}, [
@@ -236,7 +236,7 @@
             return tr;
         });
         document.getElementById('cb-rows').replaceChildren(...(body.length ? body
-            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: 'Walang mensahe sa filter na ito. Pindutin ang "Kunin ang mga bago".'}))]));
+            : [el('tr', {}, el('td', {colspan: '12', class: 'px-3 py-4 text-gray-500', text: 'No messages in this filter. Press "Fetch new".'}))]));
         document.getElementById('check-all').checked = rows.length > 0 && rows.every(r => selected.has(r.id));
     }
 
@@ -257,7 +257,7 @@
     function renderTestPsid(t) {
         const page = filters().page;
         document.getElementById('test-psid-owner').textContent = !page ? ''
-            : (t ? 'Test PSID ng ' + page + ': ' + t.name + ' (…' + t.psid_last4 + ')' : 'Walang Test PSID ang ' + page);
+            : (t ? 'Test PSID of ' + page + ': ' + t.name + ' (…' + t.psid_last4 + ')' : 'No Test PSID for ' + page);
     }
     document.addEventListener('visibilitychange', schedule);
 
@@ -266,28 +266,28 @@
     async function openPanel(id, quiet = false) {
         openId = id;
         const res = await fetch(url.showUrl + '/' + id, {headers: {'Accept': 'application/json'}});
-        if (!res.ok) { if (!quiet) notice('Hindi nakuha ang detalye.', 'text-red-600'); return; }
+        if (!res.ok) { if (!quiet) notice('Could not load the details.', 'text-red-600'); return; }
         const m = await res.json();
         document.getElementById('panel-title').replaceChildren(m.waybill + ' · ', badge(m.status), m.is_test ? ' (test)' : '');
         const kv = (k, v) => el('div', {class: 'flex gap-2'}, [el('span', {class: 'text-gray-500 w-28 shrink-0', text: k}), el('span', {class: 'break-all', text: v == null || v === '' ? '—' : String(v)})]);
         const steps = (m.steps || []).map(s => el('div', {class: 'border rounded p-2 mb-2'}, [
             el('div', {class: 'font-medium', text: s.step + ' · ' + s.method + ' ' + s.path}),
             el('div', {class: 'text-xs text-gray-600', text: 'HTTP ' + s.http + ' · ' + s.attempts + ' subok · ' + s.at}),
-            el('div', {class: 'text-xs text-gray-500 mt-1', text: 'Request (walang token):'}),
+            el('div', {class: 'text-xs text-gray-500 mt-1', text: 'Request (no token):'}),
             el('pre', {class: 'cb text-xs bg-gray-50 p-1 rounded', text: JSON.stringify(s.request, null, 1)}),
-            el('div', {class: 'text-xs text-gray-500 mt-1', text: 'Sagot:'}),
+            el('div', {class: 'text-xs text-gray-500 mt-1', text: 'Response:'}),
             el('pre', {class: 'cb text-xs bg-gray-50 p-1 rounded', text: s.response}),
         ]));
         const actions = el('div', {class: 'flex gap-2 my-2'});
         if (['ready', 'failed', 'field_mismatch', 'skipped'].includes(m.status) && m.psid) {
             const send = el('button', {type: 'button', class: 'bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded', text: 'Send'});
-            send.addEventListener('click', () => sendIds([m.id], 'Ipadala sa customer ang mensaheng ito?'));
+            send.addEventListener('click', () => sendIds([m.id], 'Send this message to the customer?'));
             actions.append(send);
         }
         if (!m.is_test) {
             const test = el('button', {type: 'button', class: 'bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded', text: 'Send test'});
             test.addEventListener('click', async () => {
-                try { await post(url.testUrl, {id: m.id}); notice('Naka-queue ang test sa Test PSID ng page.', 'text-green-700'); load(); }
+                try { await post(url.testUrl, {id: m.id}); notice('The test is queued to the page\'s Test PSID.', 'text-green-700'); load(); }
                 catch (e) { notice(e.message, 'text-red-600'); }
             });
             actions.append(test);
@@ -295,14 +295,14 @@
         document.getElementById('panel-body').replaceChildren(
             m.reason ? el('div', {class: 'mb-2 px-2 py-1 rounded bg-amber-50 text-amber-900', text: m.reason}) : '',
             actions,
-            el('div', {class: 'text-xs text-gray-500', text: 'Buong text:'}),
+            el('div', {class: 'text-xs text-gray-500', text: 'Full text:'}),
             el('pre', {class: 'cb bg-gray-50 border rounded p-2 mb-2', text: m.text || ''}),
-            kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Campaign', CAMPAIGNS[m.kind] || m.kind), kv('Araw', m.step), kv('J&T', m.jnt_status),
-            kv('Subok', m.attempts), kv('Huling HTTP', m.last_http), kv('Ginawa', m.created_at + ' · ' + m.created_by),
-            kv('Na-queue', m.queued_at), kv('Naipadala', m.sent_at ? m.sent_at + ' · ' + (m.sent_by || '') : null),
-            kv('Test ng', m.test_of), kv('Order id', m.macro_output_id),
-            el('div', {class: 'font-medium mt-3 mb-1', text: 'Mga hakbang'}),
-            ...(steps.length ? steps : [el('div', {class: 'text-gray-500', text: 'Wala pang hakbang (hindi pa naipapadala).'})]),
+            kv('Page', m.page), kv('Customer', m.customer), kv('PSID', m.psid), kv('Sequence', CAMPAIGNS[m.kind] || m.kind), kv('Step', m.step), kv('J&T', m.jnt_status),
+            kv('Tries', m.attempts), kv('Last HTTP', m.last_http), kv('Created', m.created_at + ' · ' + m.created_by),
+            kv('Queued', m.queued_at), kv('Sent', m.sent_at ? m.sent_at + ' · ' + (m.sent_by || '') : null),
+            kv('Test of', m.test_of), kv('Order id', m.macro_output_id),
+            el('div', {class: 'font-medium mt-3 mb-1', text: 'Send steps'}),
+            ...(steps.length ? steps : [el('div', {class: 'text-gray-500', text: 'No send steps yet (not sent yet).'})]),
         );
         document.getElementById('panel').classList.remove('hidden');
         for (const tr of document.querySelectorAll('#cb-rows tr')) tr.classList.toggle('selected-row', Number(tr.dataset.id) === id);
@@ -315,7 +315,7 @@
         if (!confirm(question)) return;
         try {
             const d = await post(url.sendUrl, {ids});
-            notice(fmt(d.queued) + ' ang naka-queue.', 'text-green-700');
+            notice(fmt(d.queued) + ' queued.', 'text-green-700');
             ids.forEach(i => selected.delete(i));
             refreshSelected();
             load();
@@ -323,18 +323,18 @@
         } catch (e) { notice(e.message, 'text-red-600'); }
     }
 
-    document.getElementById('send-selected').addEventListener('click', () => sendIds([...selected], 'Ipadala sa ' + selected.size + ' customer?'));
+    document.getElementById('send-selected').addEventListener('click', () => sendIds([...selected], 'Send to ' + selected.size + ' customer(s)?'));
 
     document.getElementById('send-filtered').addEventListener('click', async () => {
         const ready = (last && last.counts.ready) || 0;
-        if (!confirm('Ipadala ang lahat ng ready sa filter na ito (' + fmt(ready) + ')?')) return;
-        try { const d = await post(url.sendFilteredUrl, filters()); notice(fmt(d.queued) + ' ang naka-queue.', 'text-green-700'); load(); }
+        if (!confirm('Send all ready messages in this filter (' + fmt(ready) + ')?')) return;
+        try { const d = await post(url.sendFilteredUrl, filters()); notice(fmt(d.queued) + ' queued.', 'text-green-700'); load(); }
         catch (e) { notice(e.message, 'text-red-600'); }
     });
 
     document.getElementById('retry').addEventListener('click', async () => {
-        if (!confirm('Ipadala ulit ang failed at field mismatch sa filter na ito?')) return;
-        try { const d = await post(url.retryUrl, filters()); notice(fmt(d.queued) + ' ang naka-queue ulit.', 'text-green-700'); load(); }
+        if (!confirm('Send the failed and field mismatch messages in this filter again?')) return;
+        try { const d = await post(url.retryUrl, filters()); notice(fmt(d.queued) + ' queued again.', 'text-green-700'); load(); }
         catch (e) { notice(e.message, 'text-red-600'); }
     });
 
@@ -343,8 +343,8 @@
         btn.disabled = true;
         try {
             const r = (await post(url.buildUrl, {kind: filters().kind})).result;
-            notice(fmt(r.added) + ' bago (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' walang PSID, ' + fmt(r.no_config) + ' walang config); ' + fmt(r.updated) + ' na-update; J&T: '
-                + fmt(r.tracked) + ' na-track' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (susunod na kuha o bago ipadala)' : '') + '.', 'text-green-700');
+            notice(fmt(r.added) + ' new (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' no PSID, ' + fmt(r.no_config) + ' no config); ' + fmt(r.updated) + ' updated; J&T: '
+                + fmt(r.tracked) + ' tracked' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (next fetch or before sending)' : '') + '.', 'text-green-700');
             load();
         } catch (err) { notice(err.message, 'text-red-600'); }
         btn.disabled = false;
@@ -373,17 +373,17 @@
         e.preventDefault();
         const res = await fetch(url.testPsidUrl + '?' + new URLSearchParams({page: pf.page.value, q: pf.q.value}), {headers: {'Accept': 'application/json'}});
         const d = await res.json().catch(() => ({customers: []}));
-        document.getElementById('test-psid-current').textContent = d.current ? 'Kasalukuyang Test PSID: …' + d.current : 'Wala pang Test PSID ang page.';
+        document.getElementById('test-psid-current').textContent = d.current ? 'Current Test PSID: …' + d.current : 'The page has no Test PSID yet.';
         document.getElementById('test-psid-results').replaceChildren(...(d.customers || []).map(c => {
             const b = el('button', {type: 'button', class: 'text-blue-700 hover:underline', text: c.name + ' (…' + c.psid_last4 + ')'});
             b.addEventListener('click', async () => {
-                if (!confirm('Gawing Test PSID ng ' + pf.page.value + ' si "' + c.name + '" (PSID …' + c.psid_last4 + ')? Dito mapupunta ang lahat ng "Send test" ng page.')) return;
-                try { const s = await post(url.testPsidUrl, {page: pf.page.value, customer_id: c.id}); document.getElementById('test-psid-current').textContent = 'Na-save: ' + s.name + ' (…' + s.psid_last4 + ')'; load(); }
+                if (!confirm('Make "' + c.name + '" (PSID …' + c.psid_last4 + ') the Test PSID of ' + pf.page.value + '? Every "Send test" of the page goes there.')) return;
+                try { const s = await post(url.testPsidUrl, {page: pf.page.value, customer_id: c.id}); document.getElementById('test-psid-current').textContent = 'Saved: ' + s.name + ' (…' + s.psid_last4 + ')'; load(); }
                 catch (err) { notice(err.message, 'text-red-600'); }
             });
             return el('li', {}, b);
         }));
-        if (!(d.customers || []).length) document.getElementById('test-psid-results').append(el('li', {class: 'text-gray-500', text: 'Walang tugma (kahit 2 letra ng simula ng pangalan).'}));
+        if (!(d.customers || []).length) document.getElementById('test-psid-results').append(el('li', {class: 'text-gray-500', text: 'No match (type at least 2 letters of the start of the name).'}));
     });
 
     load();

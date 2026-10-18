@@ -22,7 +22,7 @@ class ChatblastMessageController extends Controller
 {
     private const MAX_NAME = 140;
     public const SENT_DAYS = 30; // ang bilang ng naipadala sa page ay sa huling 30 araw lang
-    private const STALE = 'Nabago na ang bersyong ito (ibang tab o tao); i-reload ang page.';
+    private const STALE = 'Reload the page: this version changed in another tab.';
 
     public function __construct(private Chatblast $chatblast, private PageSettings $settings)
     {
@@ -84,13 +84,13 @@ class ChatblastMessageController extends Controller
     {
         $this->checkAccess();
         $name = $this->name($request->input('name'));
-        if ($name === null) return response()->json(['error' => 'Pangalan: 1 hanggang ' . self::MAX_NAME . ' na character.'], 422);
-        if (ChatblastMessage::where('name', $name)->exists()) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
-        if (($error = $this->chatblast->invalid([[$request->input('text')]])) !== null) return response()->json(['error' => str_replace('Araw 1', 'Mensahe', $error)], 422);
+        if ($name === null) return response()->json(['error' => 'Name: 1 to ' . self::MAX_NAME . ' characters.'], 422);
+        if (ChatblastMessage::where('name', $name)->exists()) return response()->json(['error' => 'A message with this name already exists.'], 422);
+        if (($error = $this->chatblast->invalid([[$request->input('text')]])) !== null) return response()->json(['error' => str_replace('Day 1', 'Message', $error)], 422);
 
         $m = new ChatblastMessage(['name' => $name, 'versions' => [trim((string) $request->input('text'))]]);
         Chatblast::log($m, Auth::id(), ['what' => 'create']);
-        if (!$this->saved($m)) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
+        if (!$this->saved($m)) return response()->json(['error' => 'A message with this name already exists.'], 422);
 
         return response()->json(['message' => ['id' => $m->id, 'name' => $m->name, 'versions' => $m->versions]], 201);
     }
@@ -101,12 +101,12 @@ class ChatblastMessageController extends Controller
         $this->checkAccess();
         $m = ChatblastMessage::findOrFail($id);
         $name = $this->name($request->input('name'));
-        if ($name === null) return response()->json(['error' => 'Pangalan: 1 hanggang ' . self::MAX_NAME . ' na character.'], 422);
-        if (ChatblastMessage::where('name', $name)->whereKeyNot($id)->exists()) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
+        if ($name === null) return response()->json(['error' => 'Name: 1 to ' . self::MAX_NAME . ' characters.'], 422);
+        if (ChatblastMessage::where('name', $name)->whereKeyNot($id)->exists()) return response()->json(['error' => 'A message with this name already exists.'], 422);
 
         Chatblast::log($m, Auth::id(), ['what' => 'rename', 'old' => $m->name, 'new' => $name]);
         $m->name = $name;
-        if (!$this->saved($m)) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
+        if (!$this->saved($m)) return response()->json(['error' => 'A message with this name already exists.'], 422);
 
         return response()->json(['name' => $m->name]);
     }
@@ -118,7 +118,7 @@ class ChatblastMessageController extends Controller
         $src = ChatblastMessage::findOrFail($id);
         $m = new ChatblastMessage(['name' => $this->chatblast->freeName($src->name . ' (kopya)'), 'versions' => $src->versions]);
         Chatblast::log($m, Auth::id(), ['what' => 'duplicate', 'of' => $src->id]);
-        if (!$this->saved($m)) return response()->json(['error' => 'May mensahe nang ganitong pangalan.'], 422);
+        if (!$this->saved($m)) return response()->json(['error' => 'A message with this name already exists.'], 422);
 
         return response()->json(['message' => ['id' => $m->id, 'name' => $m->name, 'versions' => $m->versions]], 201);
     }
@@ -132,7 +132,7 @@ class ChatblastMessageController extends Controller
             $m = ChatblastMessage::whereKey($id)->lockForUpdate()->firstOrFail();
             $users = $this->chatblast->usersOf([$m->id]);
             if ($users->isNotEmpty()) {
-                return response()->json(['error' => 'Ginagamit pa ng ' . $users->pluck('name')->implode(', ') . '; palitan muna ang step.'], 422);
+                return response()->json(['error' => 'Still used by ' . $users->pluck('name')->implode(', ') . '; change that step first.'], 422);
             }
             $m->delete();
 
@@ -147,10 +147,10 @@ class ChatblastMessageController extends Controller
         $v = $this->version($request);
         $expect = $this->expected($request);
         $text = $request->input('text');
-        if (!is_string($text)) return response()->json(['error' => 'Walang text.'], 422);
+        if (!is_string($text)) return response()->json(['error' => 'No text.'], 422);
 
         return $this->edit($id, function (array $versions) use ($v, $text, $expect, &$old) {
-            if (!isset($versions[$v])) throw new InvalidArgumentException('Walang ganitong bersyon.');
+            if (!isset($versions[$v])) throw new InvalidArgumentException('No such version.');
             if ($expect !== null && $versions[$v] !== $expect) throw new InvalidArgumentException(self::STALE);
             $old = $versions[$v];
             $versions[$v] = $text;
@@ -177,7 +177,7 @@ class ChatblastMessageController extends Controller
         $expect = $this->expected($request);
 
         return $this->edit($id, function (array $versions) use ($v, $expect, &$old) {
-            if (!isset($versions[$v])) throw new InvalidArgumentException('Walang ganitong bersyon.');
+            if (!isset($versions[$v])) throw new InvalidArgumentException('No such version.');
             if ($expect !== null && $versions[$v] !== $expect) throw new InvalidArgumentException(self::STALE);
             $old = $versions[$v];
             array_splice($versions, $v, 1);

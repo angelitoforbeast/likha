@@ -15,7 +15,7 @@ use Carbon\Carbon;
 class ChatblastSchedule
 {
     public const LATE_LIMIT_HOURS = 3;
-    public const DAY_NAMES = [1 => 'Lun', 2 => 'Mar', 3 => 'Miy', 4 => 'Huw', 5 => 'Biy', 6 => 'Sab', 7 => 'Lin'];
+    public const DAY_NAMES = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'Sat', 7 => 'Sun'];
     private const TIME = '/^([01]\d|2[0-3]):([0-5]\d)$/';
 
     /** Ang mga oras ng step (0 = Day 1): ang sarili nito, o ang mga oras ng campaign. @return string[] */
@@ -57,13 +57,13 @@ class ChatblastSchedule
     public static function invalidRange(mixed $range): ?string
     {
         if ($range === null) return null;
-        if (!is_array($range) || !isset($range['start'], $range['end'])) return 'kailangan ang simula at dulo.';
+        if (!is_array($range) || !isset($range['start'], $range['end'])) return 'a start and an end are needed.';
         foreach (['start', 'end'] as $k) {
-            if (!is_string($range[$k]) || !preg_match(self::TIME, $range[$k])) return 'ang oras ay HH:MM (00:00 hanggang 23:59).';
+            if (!is_string($range[$k]) || !preg_match(self::TIME, $range[$k])) return 'a time is HH:MM (00:00 to 23:59).';
         }
-        if (self::minutes($range['end']) <= self::minutes($range['start'])) return 'ang dulo ay dapat pagkatapos ng simula (sa parehong araw).';
+        if (self::minutes($range['end']) <= self::minutes($range['start'])) return 'the end must be after the start (on the same day).';
         $every = $range['every'] ?? null; // walang default dito: ang controller ang naglalagay ng 1
-        if (!is_int($every) || $every < 1 || $every > 12) return 'bawat 1 hanggang 12 oras.';
+        if (!is_int($every) || $every < 1 || $every > 12) return 'every 1 to 12 hours.';
 
         return null;
     }
@@ -178,7 +178,7 @@ class ChatblastSchedule
     {
         $days = array_map('intval', (array) ($c->weekdays ?? []));
         sort($days);
-        $when = !$days || count($days) === 7 ? 'Araw-araw' : implode(', ', array_map(fn ($d) => self::DAY_NAMES[$d] ?? '?', $days));
+        $when = !$days || count($days) === 7 ? 'Every day' : implode(', ', array_map(fn ($d) => self::DAY_NAMES[$d] ?? '?', $days));
         $times = (array) ($c->send_times ?? []);
         $parts = [];
         if ($times) $parts[] = self::join(array_map([self::class, 'clock'], $times));
@@ -186,15 +186,15 @@ class ChatblastSchedule
             $r = $c->send_range;
             $every = (int) ($r['every'] ?? 1);
             $all = self::rangeTimes($r); // ang huling totoong oras (hal. bawat 2 oras, 5 AM hanggang 4 PM: 3 PM ang huli)
-            $parts[] = ($every === 1 ? 'Bawat oras' : 'Bawat ' . $every . ' oras') . ', ' . self::hour($all[0]) . '-' . self::hour(end($all));
+            $parts[] = ($every === 1 ? 'every hour' : 'every ' . $every . ' hours') . ', ' . self::hour($all[0]) . '–' . self::hour(end($all));
         }
-        $text = $when . ', ' . ($parts ? implode('; ', $parts) : 'walang oras');
+        $text = $when . ', ' . ($parts ? implode('; ', $parts) : 'no times');
 
         foreach ((array) ($c->step_times ?? []) as $i => $own) {
-            if (is_array($own) && $own) $text .= '; Day ' . ($i + 1) . ' tuwing ' . self::join(array_map([self::class, 'clock'], $own));
+            if (is_array($own) && $own) $text .= '; Day ' . ($i + 1) . ' at ' . self::join(array_map([self::class, 'clock'], $own));
         }
-        if (!$c->active) return 'Naka-off. ' . $text;
-        if ($c->mode !== 'auto') return 'Mano-mano (hindi sinusunod ang oras). ' . $text;
+        if (!$c->active) return 'Off. ' . $text;
+        if ($c->mode !== 'auto') return 'Manual (times are not followed). ' . $text;
 
         return $text;
     }
@@ -228,6 +228,6 @@ class ChatblastSchedule
     {
         if (count($parts) < 2) return implode('', $parts);
         $last = array_pop($parts);
-        return implode(', ', $parts) . ' at ' . $last;
+        return implode(', ', $parts) . ' and ' . $last;
     }
 }

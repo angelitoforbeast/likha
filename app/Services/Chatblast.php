@@ -28,8 +28,12 @@ class Chatblast
     /** Ang status na ito na may RTS reason ay pabalik na sa seller (gaya ng /jnt status): hindi ito ang biyahe papunta. */
     private const RTS_EXCLUDED = ['In Transit', 'Delivering'];
     public const LOG_MAX = 200; // ilang pagbabago ang itinatago sa log ng campaign
-    public const CROSS = 'may naipadala na ngayong araw sa ibang campaign';
-    public const CAMPAIGN_CAP = 'Naabot ang daily cap ng campaign sa page';
+    public const CROSS = 'already sent today by another sequence';
+    public const CAMPAIGN_CAP = 'Sequence daily cap reached for the page';
+    // Ang dating (Tagalog) na dahilan ng mga row bago ang English: tinatanggap pa rin ng mga paghahambing.
+    public const LEGACY_CROSS = 'may naipadala na ngayong araw sa ibang campaign';
+    public const LEGACY_CAMPAIGN_CAP = 'Naabot ang daily cap ng campaign sa page';
+    public const LEGACY_RIDER_REASON = 'walang rider info';
 
     /** Ang kailangan ng page para makapagpadala (page_id para sa bawat API path). */
     public const REQUIRED = ['page_id', 'token', 'flow.shipping', 'field.message'];
@@ -38,7 +42,7 @@ class Chatblast
     public const UNSENT = ['ready', 'no_psid', 'no_config', 'failed', 'field_mismatch', 'skipped'];
 
     public const PLACEHOLDERS = ['name', 'item', 'cod', 'waybill', 'page', 'rider', 'rider_phone'];
-    public const RIDER_REASON = 'walang rider info';
+    public const RIDER_REASON = 'no rider info';
     public const TRACK_BUDGET = 60;        // segundo ng J&T tracking ng chatblast:build (ang web build: 20, tingnan ang controller)
     public const SEND_TRACK_BUDGET = 10;   // segundo ng J&T bago ipadala: isang tawag
     public const BUILD_LOCK = 'chatblast-build';
@@ -75,23 +79,23 @@ class Chatblast
     /** Ang mali sa mga araw, o null kapag tama: kahit isang araw, bawat araw kahit isang bersyon, walang blangkong text. */
     public function invalid(mixed $days): ?string
     {
-        if (!is_array($days) || !array_is_list($days) || !$days) return 'Kahit isang araw.';
-        if (count($days) > self::MAX_DAYS) return 'Hanggang ' . self::MAX_DAYS . ' na araw lang.';
+        if (!is_array($days) || !array_is_list($days) || !$days) return 'At least one day.';
+        if (count($days) > self::MAX_DAYS) return 'At most ' . self::MAX_DAYS . ' days.';
         foreach ($days as $i => $versions) {
             $n = $i + 1;
-            if (!is_array($versions) || !array_is_list($versions) || !$versions) return 'Araw ' . $n . ': kahit isang bersyon ng text.';
-            if (count($versions) > self::MAX_VERSIONS) return 'Araw ' . $n . ': hanggang ' . self::MAX_VERSIONS . ' na bersyon lang.';
+            if (!is_array($versions) || !array_is_list($versions) || !$versions) return 'Day ' . $n . ': at least one version.';
+            if (count($versions) > self::MAX_VERSIONS) return 'Day ' . $n . ': at most ' . self::MAX_VERSIONS . ' versions.';
             foreach ($versions as $j => $text) {
-                $label = 'Araw ' . $n . ' · ' . self::label($j);
-                if (!is_string($text) || trim($text) === '') return $label . ': walang laman ang text.';
-                if (mb_strlen($text) > self::MAX_TEXT) return $label . ': hanggang ' . self::MAX_TEXT . ' na character lang.';
+                $label = 'Day ' . $n . ' · ' . self::label($j);
+                if (!is_string($text) || trim($text) === '') return $label . ': the text is empty.';
+                if (mb_strlen($text) > self::MAX_TEXT) return $label . ': at most ' . self::MAX_TEXT . ' characters.';
                 preg_match_all('/\{([^{}]*)\}/', $text, $m); // anumang {…}: ang may maling baybay ay hindi lalabas nang ganoon sa customer
                 $unknown = array_diff($m[1], self::PLACEHOLDERS);
-                if ($unknown) return $label . ': hindi kilalang placeholder {' . reset($unknown) . '}.';
+                if ($unknown) return $label . ': unknown placeholder {' . reset($unknown) . '}.';
             }
         }
         if (strlen((string) json_encode($days, JSON_UNESCAPED_UNICODE)) > self::MAX_TOTAL) { // bytes: ang TEXT ay 65,535 bytes
-            return 'Masyadong mahaba ang lahat ng text ng uri (hanggang ' . number_format(self::MAX_TOTAL) . ' bytes).';
+            return 'All texts together are too long (at most ' . number_format(self::MAX_TOTAL) . ' bytes).';
         }
 
         return null;
@@ -105,7 +109,7 @@ class Chatblast
     public function setSequence(string $kind, mixed $days, ?int $userId = null): int
     {
         $c = $this->campaign($kind);
-        if (!$c) throw new InvalidArgumentException('Hindi kilalang campaign.');
+        if (!$c) throw new InvalidArgumentException('Unknown sequence.');
         if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
 
         $ids = DB::transaction(function () use ($c, $days, $userId) {
@@ -144,9 +148,9 @@ class Chatblast
     {
         DB::transaction(function () use ($messageId, $change, $userId, $entry) {
             $m = ChatblastMessage::whereKey($messageId)->lockForUpdate()->first();
-            if (!$m) throw new InvalidArgumentException('Walang ganitong mensahe.');
+            if (!$m) throw new InvalidArgumentException('No such message.');
             $versions = $change((array) $m->versions);
-            if (($error = $this->invalid([$versions])) !== null) throw new InvalidArgumentException(str_replace('Araw 1', 'Mensahe', $error));
+            if (($error = $this->invalid([$versions])) !== null) throw new InvalidArgumentException(str_replace('Day 1', 'Message', $error));
             // Ang bawat sequence na gagamit nito ay dapat kasya pa rin (hal. ang laki ng lahat ng text).
             foreach ($this->usersOf([$messageId]) as $c) {
                 $days = $this->resolve((array) $c->step_messages, [$messageId => array_map('trim', $versions)]);
@@ -178,7 +182,7 @@ class Chatblast
         $found = $q->get(['id', 'versions'])->keyBy('id');
         return array_map(function ($id) use ($found, $override) {
             if (array_key_exists((int) $id, $override)) return $override[(int) $id];
-            if (!isset($found[(int) $id])) throw new InvalidArgumentException('Walang ganitong mensahe (#' . (int) $id . ').');
+            if (!isset($found[(int) $id])) throw new InvalidArgumentException('No such message (#' . (int) $id . ').');
             return (array) $found[(int) $id]->versions;
         }, array_values($messageIds));
     }
@@ -205,14 +209,14 @@ class Chatblast
     {
         $c = DB::transaction(function () use ($campaignId, $change, $userId, $entry, $log) {
             $c = ChatblastCampaign::whereKey($campaignId)->lockForUpdate()->first();
-            if (!$c) throw new InvalidArgumentException('Walang ganitong sequence.');
+            if (!$c) throw new InvalidArgumentException('No such sequence.');
             $before = clone $c;
             $ids = array_values((array) ($c->step_messages ?? []));
             $times = array_pad(array_slice((array) ($c->step_times ?? []), 0, count($ids)), count($ids), null);
             [$ids, $times] = $change($ids, $times);
             $ids = array_map('intval', array_values((array) $ids));
-            if (!$ids) throw new InvalidArgumentException('Kahit isang step.');
-            if (count($ids) > self::MAX_DAYS) throw new InvalidArgumentException('Hanggang ' . self::MAX_DAYS . ' na step lang.');
+            if (!$ids) throw new InvalidArgumentException('At least one step.');
+            if (count($ids) > self::MAX_DAYS) throw new InvalidArgumentException('At most ' . self::MAX_DAYS . ' steps.');
             $days = $this->resolve($ids, [], true);
             if (($error = $this->invalid($days)) !== null) throw new InvalidArgumentException($error);
             $times = array_pad(array_slice(array_values((array) $times), 0, count($ids)), count($ids), null);
@@ -239,9 +243,9 @@ class Chatblast
     public static function invalidTimes(mixed $times): ?string
     {
         if ($times === null) return null;
-        if (!is_array($times) || !array_is_list($times) || count($times) > 6) return 'hanggang 6 na oras.';
+        if (!is_array($times) || !array_is_list($times) || count($times) > 6) return 'at most 6 times.';
         foreach ($times as $t) {
-            if (!is_string($t) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) return 'oras ay HH:MM (00:00 hanggang 23:59).';
+            if (!is_string($t) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) return 'a time is HH:MM (00:00 to 23:59).';
         }
         return null;
     }
@@ -300,13 +304,13 @@ class Chatblast
             $vars = array_merge((array) $m->vars, ['rider' => '', 'rider_phone' => '']);
         } else {
             $scan = $track['latest'][$m->waybill];
-            if (!self::isOnDelivery($scan)) return ['skipped', 'Hindi na On Delivery ang huling scan ng J&T (' . ($scan ?: 'walang scantype') . ')'];
+            if (!self::isOnDelivery($scan)) return ['skipped', 'The latest J&T scan is no longer On Delivery (' . ($scan ?: 'no scantype') . ')'];
             [$rider, $phone] = $track['riders'][$m->waybill] ?? ['', ''];
             $vars = array_merge((array) $m->vars, ['rider' => self::riderName($rider), 'rider_phone' => self::riderPhone($phone), 'tracked_at' => now()->toIso8601String()]);
         }
 
         $days = $this->sequence($m->kind);
-        if ($m->day > count($days)) return ['skipped', 'Wala nang Araw ' . $m->day . ' sa mga araw ng uri'];
+        if ($m->day > count($days)) return ['skipped', 'Day ' . $m->day . ' no longer exists in the sequence'];
         $pick = $this->pick($days[$m->day - 1], $m->waybill, $vars);
         if ($pick === null) {
             // Walang bersyong buo kung wala ang rider: hindi ang lumang text (na may lumang rider) ang ipapadala.
@@ -344,13 +348,17 @@ class Chatblast
         $missing = array_unique(array_merge(...array_map(fn ($t) => $this->missingIn($t, $vars), $versions)));
         $other = array_values(array_diff($missing, ['rider', 'rider_phone']));
 
-        return $other ? 'walang {' . $other[0] . '}' : self::RIDER_REASON;
+        return $other ? 'missing {' . $other[0] . '}' : self::RIDER_REASON;
     }
 
     /** Dahilan na galing sa kulang na laman ng text (hindi sa PSID o settings): hindi ito binabago ng recheck. */
     public static function isTextReason(?string $reason): bool
     {
-        return $reason === self::RIDER_REASON || str_starts_with((string) $reason, 'walang {') || str_starts_with((string) $reason, 'hindi buo ang text');
+        if (in_array($reason, [self::RIDER_REASON, self::LEGACY_RIDER_REASON], true)) return true;
+        foreach (['missing {', 'incomplete text', 'walang {', 'hindi buo ang text'] as $prefix) { // English, at ang dating Tagalog
+            if (str_starts_with((string) $reason, $prefix)) return true;
+        }
+        return false;
     }
 
     /**
@@ -435,7 +443,7 @@ class Chatblast
                 ->each(function ($row) use ($tracked, &$out) {
                     $out['skipped'] += BotcakeMessage::whereKey($row->id)->whereIn('status', self::UNSENT)->update([
                         'status' => 'skipped', 'dedupe_key' => null,
-                        'reason' => 'Hindi na On Delivery ang huling scan ng J&T (' . ($tracked[$row->waybill] ?: 'walang scantype') . ')',
+                        'reason' => 'The latest J&T scan is no longer On Delivery (' . ($tracked[$row->waybill] ?: 'no scantype') . ')',
                     ]);
                 });
         }
@@ -515,8 +523,8 @@ class Chatblast
     /** @return array{0:string, 1:?string} [status, dahilan] */
     private function readiness(?string $psid, array $missingKeys): array
     {
-        if ($missingKeys) return ['no_config', 'walang ' . implode(', ', $missingKeys)];
-        if (trim((string) $psid) === '') return ['no_psid', 'walang PSID ang order (hindi pa tugma sa Botcake customer)'];
+        if ($missingKeys) return ['no_config', 'missing ' . implode(', ', $missingKeys)];
+        if (trim((string) $psid) === '') return ['no_psid', 'the order has no PSID (not matched to a Botcake customer yet)'];
 
         return ['ready', null];
     }
@@ -578,7 +586,7 @@ class Chatblast
 
     public static function pageReason(string $page): string
     {
-        return 'Wala na ang page na ' . $page . ' sa campaign';
+        return 'Page "' . $page . '" is no longer in the sequence';
     }
 
     /**
@@ -609,7 +617,7 @@ class Chatblast
     private function staleReason(ChatblastCampaign $c, array $rows): string
     {
         $top = $this->latest($rows);
-        return 'Hindi na ' . implode('/', (array) $c->statuses) . ' ang waybill (ngayon: ' . ($top['status'] ?? 'wala sa J&T') . ')';
+        return 'The waybill is no longer ' . implode('/', (array) $c->statuses) . ' (now: ' . ($top['status'] ?? 'not in J&T') . ')';
     }
 
     /**
@@ -674,7 +682,7 @@ class Chatblast
      */
     public function blockedToday(BotcakeMessage $m): ?string
     {
-        if ($m->day > count($this->sequence($m->kind))) return 'Wala nang Araw ' . $m->day . ' sa mga araw ng uri';
+        if ($m->day > count($this->sequence($m->kind))) return 'Day ' . $m->day . ' no longer exists in the sequence';
 
         $today = Carbon::now('Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
         $other = BotcakeMessage::where('waybill', $m->waybill)->where('kind', $m->kind)->where('is_test', false)->whereKeyNot($m->id)
@@ -685,7 +693,7 @@ class Chatblast
 
         // Kada waybill ang patakaran, hindi kada customer: ang customer na may dalawang waybill ay may tig-isang mensahe
         // ang bawat waybill, kahit parehong uri sa parehong araw (sunod-sunod, dahil sa lock ng customer sa sender).
-        return $other ? 'May naipadala nang mensahe ng uring ito sa waybill ngayong araw; ipadala bukas' : null;
+        return $other ? 'This sequence already sent a message to the waybill today; send it tomorrow' : null;
     }
 
     /** Binubuo ulit ang text ng hindi pa naipapadala ayon sa bagong mga araw. @return int bilang ng nabago */
@@ -697,7 +705,7 @@ class Chatblast
             ->chunkById(500, function ($rows) use ($days, $missing, &$changed) {
                 foreach ($rows as $row) {
                     if ($row->day > count($days)) {
-                        $set = ['status' => 'skipped', 'reason' => 'Wala nang Araw ' . $row->day . ' sa mga araw ng uri'];
+                        $set = ['status' => 'skipped', 'reason' => 'Day ' . $row->day . ' no longer exists in the sequence'];
                     } elseif (($pick = $this->pick($days[$row->day - 1], $row->waybill, (array) $row->vars)) === null) {
                         $set = ['status' => 'no_config', 'reason' => $this->missingReason($days[$row->day - 1], (array) $row->vars), 'version' => null, 'text' => null];
                     } else {
@@ -751,7 +759,8 @@ class Chatblast
                 ->where('m.is_test', false)
                 // Ang itinabi dahil nagbago ang PSID/page ay hindi bilang; ang nilaktawan dahil may naipadala na ang ibang
                 // campaign ngayong araw ay bilang (walang bagong row hanggang bukas).
-                ->where(fn ($k) => $k->whereNotNull('m.dedupe_key')->orWhere('m.reason', self::CROSS)->orWhere('m.reason', 'like', self::CAMPAIGN_CAP . '%'))
+                ->where(fn ($k) => $k->whereNotNull('m.dedupe_key')->whereIn('m.reason', [self::CROSS, self::LEGACY_CROSS], 'or')
+                    ->orWhere('m.reason', 'like', self::CAMPAIGN_CAP . '%')->orWhere('m.reason', 'like', self::LEGACY_CAMPAIGN_CAP . '%'))
                 ->where(fn ($t) => $t->where('m.created_at', '>=', $today)->orWhere('m.sent_at', '>=', $today)->orWhere('m.queued_at', '>=', $today)
                     ->orWhere(fn ($u) => $u->where('m.status', 'unknown')->where('m.updated_at', '>=', $today)))
                 ->selectRaw('1'))

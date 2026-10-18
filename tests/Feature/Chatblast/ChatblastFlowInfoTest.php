@@ -48,7 +48,7 @@ class ChatblastFlowInfoTest extends ChatblastTestCase
     {
         $res = $this->info()->assertOk();
         $this->assertSame(['5501', 'CHATBLAST Shipping update'], [$res->json('flow.id'), $res->json('flow.name')]);
-        $this->assertSame(['chatblast_shipping_update', 'APPROVED', 'UTILITY', "Update po sa order:\n{{1}}", 'pangalan'],
+        $this->assertSame(['chatblast_shipping_update', 'APPROVED', 'UTILITY', "Update po sa order:\n{{1}}", 'name'],
             [$res->json('template.name'), $res->json('template.status'), $res->json('template.category'), $res->json('template.body'), $res->json('template.source')]);
         $this->assertSame(['7701', 'chatblast_message'], [$res->json('field.id'), $res->json('field.name')]);
         $this->assertStringStartsWith("Update po sa order:\nHello Ma'am/Sir Juan Dela Cruz, nasa biyahe na po ang order niyo", $res->json('preview'));
@@ -82,7 +82,7 @@ class ChatblastFlowInfoTest extends ChatblastTestCase
         \App\Models\ChatblastCampaign::where('kind', 'in_transit')->update(['pages' => json_encode(['Ibang Page'])]);
 
         $res = $this->info()->assertOk();
-        $this->assertSame(['Hindi nakita ang field.message sa Botcake: hindi lalabas ang mensahe.'], $res->json('check'));
+        $this->assertSame(['field.message was not found in Botcake: the message will not show.'], $res->json('check'));
         $this->assertSame('Delivering', $res->json('sample.campaign'), 'ang In transit ay para sa ibang page');
     }
 

@@ -389,7 +389,7 @@ class ChatblastTrackTest extends ChatblastTestCase
 
         $lock = \Illuminate\Support\Facades\Cache::lock(Chatblast::BUILD_LOCK, 60);
         $lock->get();
-        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertStatus(409)->assertJsonPath('error', 'May tumatakbong pagkuha ng listahan; subukan ulit pagkatapos nito.');
+        $this->postJson('/chatblast/build', ['kind' => 'delivering'])->assertStatus(409)->assertJsonPath('error', 'A fetch is already running; try again after it.');
         $lock->release();
     }
 

@@ -57,26 +57,26 @@ class ChatblastFlowInfo
             $ok = $r['http'] >= 200 && $r['http'] < 300 && is_array($r['body']) && ($r['body']['success'] ?? true) !== false;
             if ($ok) return [$r['body'], null];
             $refused = $r['http'] >= 200 && $r['http'] < 300;
-            return [null, $refused ? 'Botcake: tinanggihan (success:false)' : 'Botcake: HTTP ' . ($r['http'] ?: 'walang sagot')];
+            return [null, $refused ? 'Botcake: refused (success:false)' : 'Botcake: HTTP ' . ($r['http'] ?: 'no answer')];
         };
 
         [$flows, $flowError] = $call($base . '/flows');
         $flowName = $flows === null ? null : self::nameOf($flows, $flowId);
-        if ($flows !== null && $flowName === null) $flowError = 'Wala ang flow ' . $flowId . ' sa mga flow ng page';
+        if ($flows !== null && $flowName === null) $flowError = 'Flow ' . $flowId . ' is not among the page\'s flows';
 
         [$fields, $fieldError] = $call($base . '/custom_fields');
         $fieldName = $fields === null ? null : self::nameOf($fields, $fieldId);
-        if ($fields !== null && $fieldName === null) $fieldError = 'Wala ang field ' . $fieldId . ' sa mga custom field ng page';
+        if ($fields !== null && $fieldName === null) $fieldError = 'Field ' . $fieldId . ' is not among the page\'s custom fields';
 
         [$list, $templateError] = $call($base . '/message_templates');
         $template = $list === null ? null : $this->pickTemplate(self::templates($list), $get('template.shipping'), $flowName);
 
         $check = [];
-        if ($flowName === null || stripos($flowName, 'CHATBLAST') === false) $check[] = 'Ang flow ay walang "CHATBLAST" sa pangalan (o hindi nakita): baka maling flow.';
-        if ($template === null) $check[] = 'Hindi matukoy ang template ng flow: itakda ang botcake template.shipping sa /page-settings, o tingnan sa Botcake; ang {{1}} ay hindi matiyak.';
-        elseif (!str_contains($template['body'], '{{1}}')) $check[] = 'Ang template ay walang {{1}}: hindi lalabas ang mensahe.';
-        if ($template !== null && strtoupper($template['status']) !== 'APPROVED') $check[] = 'Hindi APPROVED ang template (' . ($template['status'] ?: 'walang status') . ').';
-        if ($fieldName === null) $check[] = 'Hindi nakita ang field.message sa Botcake: hindi lalabas ang mensahe.';
+        if ($flowName === null || stripos($flowName, 'CHATBLAST') === false) $check[] = 'The flow name has no "CHATBLAST" (or the flow was not found): it may be the wrong flow.';
+        if ($template === null) $check[] = 'The flow\'s template could not be identified: set botcake template.shipping on /page-settings, or check Botcake; {{1}} cannot be confirmed.';
+        elseif (!str_contains($template['body'], '{{1}}')) $check[] = 'The template has no {{1}}: the message will not show.';
+        if ($template !== null && strtoupper($template['status']) !== 'APPROVED') $check[] = 'The template is not APPROVED (' . ($template['status'] ?: 'no status') . ').';
+        if ($fieldName === null) $check[] = 'field.message was not found in Botcake: the message will not show.';
 
         $sample = $this->sampleMessage($page);
 
@@ -148,7 +148,7 @@ class ChatblastFlowInfo
             $n = $norm($t['name']);
             return strtoupper($t['status']) === 'APPROVED' && $n !== '' && (str_contains($flow, $n) || str_contains($n, $flow));
         }));
-        return count($hits) === 1 ? $hits[0] + ['source' => 'pangalan'] : null;
+        return count($hits) === 1 ? $hits[0] + ['source' => 'name'] : null;
     }
 
     /** Ang Day 1 · A ng unang naka-on na campaign na nagpapadala sa page na ito, gamit ang halimbawang order. */
@@ -157,7 +157,7 @@ class ChatblastFlowInfo
         $key = $this->settings->pageKey($page);
         $c = ChatblastCampaign::where('active', true)->orderBy('id')->get(['id', 'name', 'days', 'pages'])
             ->first(fn ($c) => !$c->pages || in_array($key, array_map(fn ($p) => $this->settings->pageKey((string) $p), $c->pages), true));
-        $text = $c && $this->chatblast->invalid($c->days) === null ? $this->chatblast->render($c->days[0][0], self::SAMPLE + ['page' => $page]) : 'Hello po, ito ang mensahe.';
+        $text = $c && $this->chatblast->invalid($c->days) === null ? $this->chatblast->render($c->days[0][0], self::SAMPLE + ['page' => $page]) : 'Hello, this is the message.';
 
         return ['campaign' => $c?->name, 'text' => $text];
     }
