@@ -10,6 +10,7 @@ use App\Models\ChecklistAnalysisLog;
 use App\Models\ChecklistTaskChange;
 use App\Models\ChecklistSubmissionValue;
 use App\Models\User;
+use App\Services\ChecklistBadge;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -259,11 +260,13 @@ class ChecklistController extends Controller
 
         $prevDate = $dateObj->copy()->subDay()->toDateString();
         $nextDate = $dateObj->copy()->addDay()->toDateString();
+        // Kung puwede kang lumampas sa limit ng approval check (at mag-override) sa isang submission
+        $canBypassChecks = fn (ChecklistSubmission $s) => $this->canBypassCheckLimit($s);
 
         return view('checklist.report', compact(
             'tasks', 'submissionsByTask', 'submissionsGroupedByTask',
             'doneCount', 'totalTasks',
-            'dateObj', 'prevDate', 'nextDate', 'isToday'
+            'dateObj', 'prevDate', 'nextDate', 'isToday', 'canBypassChecks'
         ));
     }
 
@@ -1124,6 +1127,9 @@ class ChecklistController extends Controller
     public function approvalCheck(Request $request, ChecklistSubmission $submission)
     {
         $this->authorizeReviewSubmission($submission);
+        if (!$this->canBypassCheckLimit($submission) && $submission->approvalLogs()->count() >= self::CHECK_LIMIT) {
+            $this->refuse(self::CHECK_LIMIT_MESSAGE, true);
+        }
 
         $submission->load(['task', 'files']);
         $task     = $submission->task;
@@ -1192,6 +1198,40 @@ class ChecklistController extends Controller
         ], 500);
     }
 
+    /**
+     * Override ng approval verdict sa kamay (walang AI call): CEO o OIC ng department ng nagsumite lang,
+     * may maikling dahilan. Isang approval row na may is_override, kaya ito na ang pinakahuling verdict.
+     */
+    public function approvalOverride(Request $request, ChecklistSubmission $submission)
+    {
+        if (!$this->canBypassCheckLimit($submission)) {
+            $this->refuse('CEO o OIC ng department ng nagsumite lang ang puwedeng mag-override.', true);
+        }
+        $validated = $request->validate([
+            'verdict' => 'required|in:approved,not_approved',
+            'reason'  => 'required|string|max:500',
+        ]);
+
+        $log = ChecklistAnalysisLog::create([
+            'submission_id'   => $submission->id,
+            'user_id'         => Auth::id(),
+            'log_type'        => 'approval',
+            'prompt_used'     => null,
+            'analysis_result' => trim($validated['reason']),
+            'verdict'         => $validated['verdict'],
+            'is_override'     => true,
+        ]);
+
+        return response()->json([
+            'verdict'     => $log->verdict,
+            'analysis'    => $log->analysis_result,
+            'prompt_used' => null,
+            'is_override' => true,
+            'checked_by'  => Auth::user()?->name,
+            'checked_at'  => now()->format('M j, g:i A'),
+        ]);
+    }
+
     public function getApprovalLogs(ChecklistSubmission $submission)
     {
         $this->authorizeReviewSubmission($submission);
@@ -1203,6 +1243,7 @@ class ChecklistController extends Controller
             'prompt_used' => $log->prompt_used,
             'user'        => $log->user?->name ?? 'Unknown',
             'created_at'  => $log->created_at->format('M j, Y g:i A'),
+            'is_override' => (bool) ($log->is_override ?? false),
         ]);
 
         return response()->json(['logs' => $logs]);
@@ -1351,6 +1392,32 @@ class ChecklistController extends Controller
         if (!$task || !$this->oicSeesTask($task)) {
             $this->refuse('Sa sarili mong submission lang ito puwede (o sa department mo kung OIC ka).', true);
         }
+    }
+
+    /** Ilang approval row (kahit sino ang nagpatakbo, pati ang awtomatiko) bago kailangan ang CEO o OIC. */
+    private const CHECK_LIMIT = 2;
+
+    public const CHECK_LIMIT_MESSAGE = 'Naka-2 check na; OIC o CEO na lang ang pwedeng mag-check o mag-override.';
+
+    /**
+     * Lampas sa CHECK_LIMIT at override: CEO, o OIC na ang department ay ang department ng nagsumite
+     * (parehong grouping ng Checklist badge) o ang department ng task.
+     */
+    public function canBypassCheckLimit(ChecklistSubmission $submission): bool
+    {
+        if ($this->isCeo()) {
+            return true;
+        }
+        if (!$this->isOic() || ($mine = $this->oicDepartment()) === '') {
+            return false;
+        }
+        $task = ChecklistTask::withTrashed()->find($submission->checklist_task_id);
+        if ($task && $this->isOicOf($task->department)) {
+            return true;
+        }
+        $profile = $submission->user?->employeeProfile;
+
+        return $profile !== null && ChecklistBadge::departmentKey($profile->department, $profile->role) === $mine;
     }
 
     /** 403: JSON {"ok":false,...} para sa fetch() ng page, HTML 403 para sa mga form. */

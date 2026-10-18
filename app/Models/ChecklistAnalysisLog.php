@@ -7,7 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChecklistAnalysisLog extends Model
 {
-    protected $fillable = ['submission_id', 'user_id', 'log_type', 'prompt_used', 'analysis_result', 'verdict'];
+    protected $fillable = ['submission_id', 'user_id', 'log_type', 'prompt_used', 'analysis_result', 'verdict', 'is_override'];
+
+    protected $casts = [
+        'is_override' => 'boolean',   // verdict na itinakda ng CEO o OIC sa kamay, hindi ng AI
+    ];
 
     public function submission(): BelongsTo
     {
