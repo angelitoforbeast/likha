@@ -185,7 +185,7 @@ class BotcakeMockTest extends ChatblastTestCase
         $this->assertStringNotContainsString($stored, $out, 'the key is never printed');
         $psids = BotcakePsid::where('page', self::PAGE)->where('source', 'stress_test')->pluck('psid');
         $this->assertCount(3, $psids);
-        $this->assertMatchesRegularExpression('/^99\d{14}$/', $psids[0]);
+        $this->assertSame(['9900000000000000', '9900000000000001', '9900000000000002'], $psids->sort()->values()->all(), 'in order: the PSIDs the k6 scripts send');
 
         // --flow-from copies the chatbot settings and turns the page On.
         $this->page('Page Uno', '1001');

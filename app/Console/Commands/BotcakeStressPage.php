@@ -77,7 +77,9 @@ class BotcakeStressPage extends Command
         $rows = [];
         $now = now();
         for ($i = 1; $i <= $n; $i++) {
-            $rows[] = ['page' => $page, 'psid' => BotcakeMock::PREFIX . str_pad((string) random_int(0, 99999999999999), 14, '0', STR_PAD_LEFT), 'fb_name' => 'Stress ' . $i,
+            // In order (99 + 0, 1, 2, …): the same PSIDs the k6 scripts send (psid(pool) in tests/stress/common.js), so every
+            // chat is a known customer and needs no verify call (capped per page per minute).
+            $rows[] = ['page' => $page, 'psid' => BotcakeMock::PREFIX . str_pad((string) ($i - 1), 14, '0', STR_PAD_LEFT), 'fb_name' => 'Stress ' . $i,
                 'status' => 'available', 'source' => 'stress_test', 'first_seen_at' => $now, 'created_at' => $now, 'updated_at' => $now];
             if (count($rows) === 1000 || $i === $n) { BotcakePsid::insert($rows); $rows = []; }
         }

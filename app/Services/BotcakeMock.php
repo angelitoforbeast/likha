@@ -31,6 +31,9 @@ class BotcakeMock
     /** Para sa test: ang "roll" ng error (0–1); null = mt_rand. */
     public static ?Closure $roll = null;
 
+    private static ?array $memo = null;
+    private static float $memoAt = 0;
+
     public static function isTestId(string $pageId): bool
     {
         return str_starts_with(trim($pageId), self::PREFIX) && ctype_digit(trim($pageId));
@@ -43,7 +46,11 @@ class BotcakeMock
      */
     public static function pages(): array
     {
-        return Cache::remember(self::PAGES_CACHE, 60, function () {
+        // Sa bawat tawag sa Botcake (pati totoong page): nasa memory ng worker nang 10 s, para hindi isang cache read kada tawag.
+        if (self::$memo !== null && microtime(true) - self::$memoAt < 10) return self::$memo;
+        self::$memoAt = microtime(true);
+
+        return self::$memo = Cache::remember(self::PAGES_CACHE, 60, function () {
             $by = [];
             foreach (PageSetting::where('provider', 'botcake')->whereIn('key', self::KEYS)->where('active', true)->orderBy('id')->get(['page_name', 'key', 'value', 'is_secret']) as $s) {
                 $by[mb_strtolower(trim((string) $s->page_name))][$s->key] = trim((string) $s->plainValue());
@@ -63,6 +70,7 @@ class BotcakeMock
 
     public static function forget(): void
     {
+        self::$memo = null;
         Cache::forget(self::PAGES_CACHE);
     }
 

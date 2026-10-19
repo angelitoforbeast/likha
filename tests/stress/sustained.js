@@ -9,5 +9,5 @@ export const options = {
 };
 
 export default function () {
-  chat(100000);
+  chat(10000);
 }

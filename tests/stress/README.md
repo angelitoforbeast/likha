@@ -18,10 +18,10 @@ They send chats to `/api/botcake/chat` for the stress-test page `ZZ STRESS TEST`
    php artisan botcake:chat-test-ip <tester-ip> --hours=3
    ```
 
-2. **Create the page** with fake customers. The chat key is written only to the key file (mode 600) and is never printed.
+2. **Create the page** with fake customers. Seed at least as many as the scripts' pool (10,000 for intake and sustained, 1,000 for flow): the scripts send exactly those PSIDs, so no chat needs a verify call. The chat key is written only to the key file (mode 600) and is never printed.
 
    ```
-   php artisan botcake:stress-page --seed=1000 --key-file=/home/<you>/stress-key.txt
+   php artisan botcake:stress-page --seed=10000 --key-file=/home/<you>/stress-key.txt
    ```
 
 3. **Give it a flow.** This copies a real page's chatbot settings (the flow and its botfields) and turns the test page On. The real page is not changed.
