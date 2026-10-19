@@ -128,7 +128,7 @@ class ChatbotTabsController extends Controller
 
     // ---- Test ----
 
-    public function test()
+    public function test(Request $request)
     {
         $this->checkAccess();
         $names = ChatbotFlow::pluck('name', 'id');
@@ -138,12 +138,15 @@ class ChatbotTabsController extends Controller
         return view('chatbot.test', [
             'pages' => $this->pages(), 'flows' => ChatbotFlow::orderBy('name')->pluck('name', 'id'), 'pageFlows' => $flows,
             'repliesOn' => BotcakeOutbox::enabled(),
+            // Mula sa Preview / Test ng editor: ang flow na iyon at ang draft.
+            'pickFlow' => (int) $this->str($request, 'flow', 20), 'pickVersion' => $this->str($request, 'version', 10) === 'published' ? 'published' : 'draft',
         ]);
     }
 
     /**
      * Isang mensahe ng test customer (PSID 0, hiwalay sa totoong customer): ang flow ng page (o ang napili), sa
-     * TestOutbox (walang Botcake, walang sheet). Ang AI step ay totoong tumatawag sa OpenAI.
+     * TestOutbox (walang Botcake, walang sheet). Ang AI step ay totoong tumatawag sa OpenAI. version: ang draft (default)
+     * o ang published; ang live na takbo ay laging published.
      */
     public function testSend(Request $request, ChatbotPage $chatbotPage, FlowEngine $engine)
     {
@@ -152,17 +155,19 @@ class ChatbotTabsController extends Controller
         if ($page === null) return response()->json(['error' => 'Pick a page that has a Botcake ID.'], 422);
         $flowId = (int) $this->str($request, 'flow_id', 20);
         $flow = $flowId ? ChatbotFlow::find($flowId) : $this->pageFlow($page);
-        if (!$flow || !is_array($flow->graph)) return response()->json(['error' => 'This page has no flow. Pick one.'], 422);
+        $version = $this->str($request, 'version', 10) === 'published' ? 'published' : 'draft';
+        $graph = $flow ? ($version === 'published' ? $flow->graph : $flow->draft()) : null;
+        if (!is_array($graph)) return response()->json(['error' => 'This page has no flow. Pick one.'], 422);
 
         $fields = new CustomerFields((int) $pageId, CustomerFields::TEST_PSID);
-        $run = new FlowRun($flow->id, $flow->graph, $page, $pageId, $chatbotPage->botfields($page), $fields, null,
+        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page), $fields, null,
             $this->str($request, 'message', 2000), 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
         $engine->run($run, new TestOutbox());
         $now = $fields->fields();
         ksort($now);
 
         return response()->json([
-            'flow' => $flow->name, 'path' => $run->path, 'sends' => $run->sends, 'sheet_rows' => $run->sheetRows,
+            'flow' => $flow->name, 'version' => $version, 'path' => $run->path, 'sends' => $run->sends, 'sheet_rows' => $run->sheetRows,
             'changes' => $fields->changes, 'fields' => (object) $now, 'stopped' => $run->stopped,
             'waiting' => $fields->get(CustomerFields::WAIT) !== null,
         ]);

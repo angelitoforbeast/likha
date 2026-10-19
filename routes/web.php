@@ -302,6 +302,10 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'edit'])->whereNumber('id')->name('flows.edit');
     Route::get('/flows/{id}/graph', [\App\Http\Controllers\ChatbotFlowController::class, 'graph'])->whereNumber('id')->name('flows.graph');
     Route::put('/flows/{id}/graph', [\App\Http\Controllers\ChatbotFlowController::class, 'saveGraph'])->whereNumber('id')->middleware('throttle:120,1,chatbot-graph')->name('flows.save');
+    Route::post('/flows/{id}/publish', [\App\Http\Controllers\ChatbotFlowController::class, 'publish'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.publish');
+    Route::post('/flows/{id}/discard', [\App\Http\Controllers\ChatbotFlowController::class, 'discard'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.discard');
+    Route::get('/flows/{id}/versions', [\App\Http\Controllers\ChatbotFlowController::class, 'versions'])->whereNumber('id')->name('flows.versions');
+    Route::post('/flows/{id}/versions/{version}/restore', [\App\Http\Controllers\ChatbotFlowController::class, 'restore'])->whereNumber(['id', 'version'])->middleware('throttle:30,1,chatbot-flows')->name('flows.restore');
     Route::post('/flows/{id}/rename', [\App\Http\Controllers\ChatbotFlowController::class, 'rename'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.rename');
     Route::post('/flows/{id}/duplicate', [\App\Http\Controllers\ChatbotFlowController::class, 'duplicate'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.duplicate');
     Route::delete('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'destroy'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.destroy');

@@ -24,7 +24,13 @@
             <label class="flex flex-col text-xs text-slate-500">Flow
                 <select id="t-flow" class="max-w-[16rem] rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900">
                     <option value="">The page's flow</option>
-                    @foreach($flows as $id => $name)<option value="{{ $id }}">{{ $name }}</option>@endforeach
+                    @foreach($flows as $id => $name)<option value="{{ $id }}" @selected($pickFlow === $id)>{{ $name }}</option>@endforeach
+                </select>
+            </label>
+            <label class="flex flex-col text-xs text-slate-500">Version
+                <select id="t-version" class="rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900">
+                    <option value="draft" @selected($pickVersion === 'draft')>Draft</option>
+                    <option value="published" @selected($pickVersion === 'published')>Published (live)</option>
                 </select>
             </label>
             <span id="t-pageflow" class="text-xs text-slate-500"></span>
@@ -64,7 +70,7 @@
         const msg = $('t-msg').value;
         log(el('div', {class: 'flex justify-end'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-blue-600 px-3 py-1.5 text-white', text: msg || '(empty)'})));
         $('t-msg').value = '';
-        const {ok, data} = await post(box.dataset.sendUrl, {page_name: $('t-page').value, flow_id: $('t-flow').value, message: msg});
+        const {ok, data} = await post(box.dataset.sendUrl, {page_name: $('t-page').value, flow_id: $('t-flow').value, version: $('t-version').value, message: msg});
         if (!ok) return log(el('div', {class: 'text-xs text-red-700', text: data.error || data.message || 'Could not run.'}));
         (data.sends || []).forEach(s => s.messages.forEach(m => log(el('div', {class: 'flex'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-white px-3 py-1.5 shadow-sm'},
             m.type === 'image' ? [el('img', {src: m.url, alt: '', referrerpolicy: 'no-referrer', class: 'max-h-40 rounded'}), el('div', {class: 'break-all text-xs text-slate-500', text: m.url})] : m.text)))));
