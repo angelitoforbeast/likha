@@ -1,6 +1,6 @@
 @extends('layouts.chatblast')
 
-@section('title', 'Page Settings')
+@section('title', 'Page settings')
 @section('heading', 'Page Settings')
 @section('description', 'The Botcake settings of every page: ID, token, flows, message field and template. Values save as you type.')
 
