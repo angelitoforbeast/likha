@@ -10,7 +10,7 @@ use InvalidArgumentException;
  */
 class FlowGraph
 {
-    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'sheet', 'end'];
+    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'sheet', 'sequence', 'end'];
 
     public const RULES = [
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
@@ -36,7 +36,7 @@ class FlowGraph
         $config = (array) ($node['config'] ?? []);
 
         return match ($node['type'] ?? '') {
-            'start', 'set' => ['next'],
+            'start', 'set', 'sequence' => ['next'],
             'condition' => array_merge(array_map(fn ($i) => 'row_' . ($i + 1), array_keys(array_values((array) ($config['rows'] ?? [])))), ['no']),
             'send' => !empty($config['wait']) ? (self::skipMinutes($config) ? ['reply', 'skipped'] : ['reply']) : ['continue'],
             'ai' => ['success', 'failed'],
@@ -136,6 +136,11 @@ class FlowGraph
                 'tab' => $text($c['tab'] ?? '', 100),
                 'columns' => array_slice(array_values(array_map(fn ($l) => $text($l), is_array($c['columns'] ?? null)
                     ? $c['columns'] : preg_split('/\r\n|\r|\n/', (string) ($c['columns'] ?? '')))), 0, self::MAX_COLUMNS),
+            ],
+            // sequence_id 0 = lahat (unsubscribe lang)
+            'sequence' => [
+                'action' => ($c['action'] ?? '') === 'unsubscribe' ? 'unsubscribe' : 'subscribe',
+                'sequence_id' => max(0, (int) (is_numeric($c['sequence_id'] ?? null) ? $c['sequence_id'] : 0)),
             ],
             default => [],
         };

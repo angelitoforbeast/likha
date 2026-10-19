@@ -65,6 +65,7 @@
         <button type="button" class="cb-btn cb-btn-sm" data-add="set">Set field</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="ai">AI</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sheet">Google Sheet</button>
+        <button type="button" class="cb-btn cb-btn-sm" data-add="sequence">Sequence</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="end">End</button>
         <span class="mx-1 text-slate-300">|</span>
         <button type="button" class="cb-btn cb-btn-sm" id="arrange">Arrange</button>
@@ -137,9 +138,9 @@
     const cv = $('cv'), world = $('world'), svg = $('wires');
     const W = 220, NS = 'http://www.w3.org/2000/svg';
     const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
-    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', end: 'End'};
+    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', sequence: 'Sequence', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
-    let graph = {nodes: [], edges: []}, variables = [], rules = {};
+    let graph = {nodes: [], edges: []}, variables = [], rules = {}, sequences = [];
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
     // Ang draft: version (para sa check ng dalawang nag-e-edit), kalagayan, at kung may lokal na pagbabagong hindi pa naise-save.
     let version = 0, state = 'published', pages = [], dirty = false, conflict = false, leaving = false, pending = Promise.resolve();
@@ -162,7 +163,7 @@
     function ports(n) {
         const c = n.config || {};
         switch (n.type) {
-            case 'start': case 'set': return ['next'];
+            case 'start': case 'set': case 'sequence': return ['next'];
             case 'condition': return [...(c.rows || []).map((_, i) => 'row_' + (i + 1)), 'no'];
             case 'send': return c.wait ? (skipMinutes(c) ? ['reply', 'skipped'] : ['reply']) : ['continue'];
             case 'ai': return ['success', 'failed'];
@@ -187,6 +188,11 @@
             case 'set': return (c.ops || []).map(o => o.op === 'clear_all' ? 'clear all fields' : o.op + ' ' + (o.field || '?') + (o.op === 'set' || o.op === 'append' ? ' = ' + (o.value || '') : '')).join('\n');
             case 'ai': return (c.model || 'gpt-4o-mini') + (c.save_to ? ' → ' + c.save_to : '') + (c.send ? ', sends the answer' : '');
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
+            case 'sequence': {
+                const s = sequences.find(x => x.id === c.sequence_id);
+                const name = c.sequence_id ? (s ? s.name : 'a deleted sequence') : (c.action === 'unsubscribe' ? 'all sequences' : 'Pick a sequence');
+                return (c.action === 'unsubscribe' ? 'Unsubscribe from ' : 'Subscribe to ') + name;
+            }
             case 'condition': return (c.rows || []).length ? '' : 'Add rows to check';
             default: return '';
         }
@@ -334,7 +340,7 @@
     const DEFAULTS = {
         condition: {rows: [{variable: 'last_input', rule: 'contains', value: ''}]}, send: {items: [{type: 'text', value: ''}], wait: false, save_to: ''},
         set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 0, max_tokens: 250, save_to: '', send: false},
-        sheet: {sheet: '', tab: '', columns: []}, end: {},
+        sheet: {sheet: '', tab: '', columns: []}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
         const next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
@@ -426,6 +432,18 @@
             body.append(label('Spreadsheet link or ID', bind(input({maxlength: 300, placeholder: 'https://docs.google.com/spreadsheets/d/…'}, c.sheet), v => c.sheet = v)));
             body.append(label('Tab', bind(input({maxlength: 100, placeholder: 'Sheet1'}, c.tab), v => c.tab = v)));
             body.append(label('Columns: one template per line (A, B, C …). A cell with a variable is never a formula.', bind(input({tag: 'textarea', rows: 8}, (c.columns || []).join('\n')), v => c.columns = v.split(/\r?\n/))));
+        }
+        if (n.type === 'sequence') {
+            const pick = el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
+            const fill = () => {
+                const opts = (c.action === 'unsubscribe' ? [[0, 'All sequences']] : [[0, '— Pick a sequence —']]).concat(sequences.map(s => [s.id, s.name]));
+                pick.replaceChildren(...opts.map(([id, t]) => el('option', {value: id, text: t, selected: id === c.sequence_id})));
+            };
+            fill();
+            body.append(label('Do', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'},
+                [['subscribe', 'Subscribe to a sequence'], ['unsubscribe', 'Unsubscribe']].map(([k, t]) => el('option', {value: k, text: t, selected: c.action === k}))), v => { c.action = v; fill(); })));
+            body.append(label('Sequence', bind(pick, v => c.sequence_id = parseInt(v, 10) || 0)));
+            body.append(el('p', {class: 'text-xs text-slate-500', text: 'Subscribing while the customer is already in it does nothing; after an unsubscribe it starts again from step 1. Sequences are made in Chatbot → Sequences.'}));
         }
         $('vars').replaceChildren(...variables.map(v => { const b = el('button', {type: 'button', class: 'rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] hover:bg-slate-200', text: OPEN + v + CLOSE});
             b.addEventListener('click', () => { if (!lastField) return; const s = lastField.selectionStart ?? lastField.value.length; lastField.value = lastField.value.slice(0, s) + OPEN + v + CLOSE + lastField.value.slice(s); lastField.dispatchEvent(new Event('input')); lastField.focus(); }); return b; }));
@@ -600,7 +618,7 @@
     });
 
     fetch(ed.dataset.graphUrl, {headers: {'Accept': 'application/json'}}).then(r => r.json()).then(data => {
-        graph = data.graph; variables = data.variables || []; rules = data.rules || {};
+        graph = data.graph; variables = data.variables || []; rules = data.rules || {}; sequences = data.sequences || [];
         graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
         current = snapshot(); setState(data);
         applyView(); render(); fit();

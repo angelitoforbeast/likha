@@ -129,6 +129,9 @@ class ChatbotFlowController extends Controller
         return response()->json($this->state($flow) + [
             'id' => $flow->id, 'name' => $flow->name, 'graph' => $flow->draft() ?? FlowGraph::blank(),
             'variables' => $this->variables($flow), 'rules' => FlowGraph::RULES, 'pages' => $this->pagesUsing($flow->id),
+            // Para sa step na Sequence (wala pang table = walang listahan).
+            'sequences' => \Illuminate\Support\Facades\Schema::hasTable('chatbot_sequences')
+                ? \App\Models\ChatbotSequence::orderBy('name')->limit(500)->get(['id', 'name'])->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])->all() : [],
         ]);
     }
 

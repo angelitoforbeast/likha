@@ -133,8 +133,32 @@ class FlowEngine
             'set' => $this->set($node, $c, $run),
             'ai' => $this->ai($node, $c, $run, $outbox),
             'sheet' => $this->sheet($node, $c, $run, $outbox),
+            'sequence' => $this->sequence($node, $c, $run),
             default => ['port' => null],
         };
+    }
+
+    /** Subscribe o unsubscribe sa isang sequence (o sa lahat). Ang Test tab ay walang binabago. */
+    private function sequence(array $node, array $c, FlowRun $run): array
+    {
+        $action = ($c['action'] ?? '') === 'unsubscribe' ? 'unsubscribe' : 'subscribe';
+        $id = (int) ($c['sequence_id'] ?? 0);
+        if ($run->test) {
+            $name = $id ? (string) (\App\Models\ChatbotSequence::whereKey($id)->value('name') ?? '#' . $id) : 'all sequences';
+            $run->event('sequence', $node['id'], ['op' => 'test', 'action' => $action, 'name' => $name]);
+            return ['port' => 'next', 'note' => 'Test: would ' . $action . ' ' . $name];
+        }
+        // app(): ChatbotSequences ay gumagamit din ng engine na ito.
+        $sequences = app(ChatbotSequences::class);
+        $pageId = (int) $run->pageId;
+        $psid = $run->fields->psid;
+        if ($action === 'unsubscribe') {
+            $names = $sequences->unsubscribe($id ?: null, $pageId, $psid, 'flow', $run, $node['id']);
+            return ['port' => 'next', 'note' => $names ? 'Unsubscribed from ' . implode(', ', $names) : 'Not in any matching sequence'];
+        }
+        $r = $sequences->subscribe($id, $pageId, $psid, 'flow', $run->flowId, $run, $node['id']);
+
+        return ['port' => 'next', 'note' => ucfirst($r['result']) . ': ' . $r['name']];
     }
 
     private function condition(array $c, FlowRun $run): array
