@@ -1529,3 +1529,12 @@ Spec 070. Tests are in `tests/Feature/Chatblast/ChatbotSequenceEngineTest.php` (
 | S-070.5e | Given the customer is busy (another run holds the lock), the step is retried in 1 minute; a page with no Botcake ID is an error (page not set up); a paused sequence or one with no active steps refuses to subscribe, with an event | `test_S_070_5e…` | Passed · 2026-10-19 · auto |
 | S-070.6 | Given exit on reply is on, when the customer sends a chat on that page, then their active subscriptions on that page are unsubscribed (reply) with an event, subscriptions on other pages and in sequences with exit off stay, and the bot's flow still runs for that chat | `test_S_070_6…` | Passed · 2026-10-19 · auto |
 | S-070.7 | The subscribers page lists customer, page, status, current step, next send, last sent, enrolled via and exit reason, filtered by status and page, newest first with "Older"; queries name the sequence and have a limit | `test_S_070_7…` | Passed · 2026-10-19 · auto |
+## S-077 AI steps remember up to 100 messages, 100 by default
+
+Spec 077. Tests are in `tests/Feature/Chatblast/ChatbotAiHistoryTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-077.1 | Given a new AI step (no `history` key, or added in the editor), then it remembers 100 messages; an explicit 0 stays 0 and a saved value stays as it is; the form says "Remember the last N messages of this customer on this page (0 = off, max 100)" | `test_S_077_1…` | Passed · 2026-10-19 · auto |
+| S-077.2 | 100 is accepted; 101 or more is clamped to 100 and below 0 to 0 (as before for out-of-range values) | `test_S_077_2…` | Passed · 2026-10-19 · auto |
+| S-077.3 | Given 120 chats and 120 sent replies of this customer on this page, plus chats and replies of other customers and pages, when an AI step with history 100 runs, then the request carries the newest 100 of this customer's messages on this page, oldest first, between the system prompt and the current message | `test_S_077_3…` | Passed · 2026-10-19 · auto |

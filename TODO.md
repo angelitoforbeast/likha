@@ -781,3 +781,7 @@ Accepted, not fixed:
 - **With replies switched off, a step still counts as ran** ("Last sent" is set, and the pointer advances) although Botcake was not called. Reason: the emergency stop logs every send as skipped; a run is still a run.
 - **The inbox sequence endpoint accepts a 19-digit PSID above PHP's integer limit**, which saturates when cast. Reason: only staff send it, and real PSIDs are 16–17 digits.
 - **Unsubscribe and re-subscribe in the inbox while a step is running** can move the restarted subscription past step 1. Reason: the window is the length of one step run; staff can unsubscribe and subscribe again.
+## 077: AI history up to 100 (2026-10-19)
+
+- **100 messages can be a large prompt.** Each sent reply is up to 2,000 characters, and a customer chat has no cap of its own, so 100 messages can reach roughly 50,000 tokens per AI call, paid on every call, up to 10 calls per run. Reason: the owner's choice. `ChatbotAi` sends the messages as they are, with no character budget. Suggestion for the owner: a total character cap on the history if OpenAI costs rise.
+- **Manual replies from the inbox (`kind = manual`) are not in the AI history,** only the bot's sent replies (`kind = send`). Reason: the brief says to keep the history as it is. Including the staff's own replies is a question for the owner.
