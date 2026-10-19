@@ -18,6 +18,8 @@ class PruneBotcakeChats extends Command
     {
         $deleted = BotcakeChat::prune();
         $this->info("botcake_chats: {$deleted} row(s) na mas luma sa 90 araw ang binura.");
+        $events = \App\Services\Chatbot\ChatbotEvents::prune();
+        $this->info("chatbot_events: {$events} row(s) na mas luma sa 30 araw ang binura.");
 
         return self::SUCCESS;
     }

@@ -13,6 +13,7 @@ class CustomerFields
 {
     public const WAIT = '__wait';
     public const LAST_CHAT = '__last_chat';
+    public const BOT_PAUSED = '__bot_paused'; // '1' = tao ang sumasagot sa customer na ito (/chatbot/inbox): walang takbo ang bot
     public const TEST_PSID = 0; // ang test customer ng Test tab
 
     /** @var array<string, string> */
@@ -63,11 +64,11 @@ class CustomerFields
         DB::table('chatbot_customer_values')->where('page_id', $this->pageId)->where('psid', $this->psid)->where('key', $key)->delete();
     }
 
-    /** "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat. */
+    /** "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat at ang pause ng tao. */
     public function clearAll(): void
     {
         foreach (array_keys($this->values) as $key) {
-            if ($key !== self::LAST_CHAT) $this->clear((string) $key);
+            if (!in_array($key, [self::LAST_CHAT, self::BOT_PAUSED], true)) $this->clear((string) $key);
         }
     }
 }

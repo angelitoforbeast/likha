@@ -45,15 +45,24 @@ class ChatbotRunner
             $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {
                 $fields->set(CustomerFields::LAST_CHAT, (string) $c->id);
-                // Ang chat na naghintay nang matagal (hal. patay ang worker) ay hindi na sinasagot: luma na ang usapan.
-                if ($c->received_at && $c->received_at->lt($staleBefore)) continue;
                 $flow = $this->page->flow((string) $c->page_name);
                 if (!$flow || !is_array($flow->graph)) continue;
+                // Tao ang sumasagot sa customer na ito (/chatbot/inbox): tapos na ang chat, walang takbo.
+                if ($fields->get(CustomerFields::BOT_PAUSED) === '1') {
+                    ChatbotEvents::skipped((int) $c->page_id, (int) $c->psid, $c->id, $flow->id, 'bot paused');
+                    continue;
+                }
+                // Ang chat na naghintay nang matagal (hal. patay ang worker) ay hindi na sinasagot: luma na ang usapan.
+                if ($c->received_at && $c->received_at->lt($staleBefore)) {
+                    ChatbotEvents::skipped((int) $c->page_id, (int) $c->psid, $c->id, $flow->id, 'chat too old');
+                    continue;
+                }
                 $botfields ??= $this->page->botfields((string) $c->page_name);
 
                 $run = new FlowRun($flow->id, $flow->graph, (string) $c->page_name, (string) $c->page_id, $botfields, $fields, $c->id,
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
                 $this->engine->run($run, $this->outbox);
+                ChatbotEvents::store($run, (int) $c->page_id, (int) $c->psid);
             }
 
             return 'done';

@@ -33,7 +33,10 @@ class FlowEngine
         if ($current === false) {
             $start = collect($nodes)->firstWhere('type', 'start');
             $current = $start['id'] ?? null;
+            $run->event('run_started', null, ['reason' => 'new', 'flow' => $run->flowId]);
         }
+        $suspended = false;
+        $lastType = null;
 
         for ($steps = 0; $current !== null; $steps++) {
             if ($steps >= self::MAX_STEPS) {
@@ -53,6 +56,8 @@ class FlowEngine
 
             $ports = FlowGraph::ports($node);
             $port = $r['port'] ?? null;
+            $lastType = $node['type'];
+            if ($node['type'] === 'condition') $run->event('condition', $node['id'], ['result' => $port === 'no' ? 'no' : str_replace('row_', 'row ', (string) $port)]);
             if ($port === 'failed' && !in_array('failed', $ports, true)) {
                 // Walang failed port ang node na ito: hihinto ang takbo.
                 $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => null, 'note' => $r['note'] ?? null];
@@ -66,10 +71,17 @@ class FlowEngine
                 Log::warning('chatbot: run stopped', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId, 'node' => $node['id'], 'note' => $run->stopped]);
                 break;
             }
+            if (!empty($r['suspend'])) $suspended = true;
             if (!empty($r['suspend']) || $port === null) break;
 
             $current = $edges[$node['id'] . ':' . $port] ?? null;
         }
+
+        // Ang dahilan: ang huminto, ang naghihintay, ang End, ang pumalyang step na walang kasunod, o walang kasunod.
+        $lastStep = $run->path ? end($run->path) : null;
+        $reason = $run->stopped ?? ($suspended ? 'waiting for a reply' : ($lastType === 'end' ? 'end'
+            : (($lastStep['port'] ?? null) === 'failed' ? (string) ($lastStep['note'] ?? 'a step failed') : 'no next step')));
+        $run->event('run_ended', null, ['reason' => $reason, 'path' => array_slice(array_column($run->path, 'node'), 0, 100)]);
 
         return $run;
     }
@@ -87,7 +99,11 @@ class FlowEngine
         $run->fields->clear(CustomerFields::WAIT);
         if ((int) $flowId !== $run->flowId || !$node || $node['type'] !== 'send' || empty($node['config']['wait'])) return false;
 
-        if (($node['config']['save_to'] ?? '') !== '') $run->fields->set($node['config']['save_to'], $run->input);
+        $run->event('run_started', null, ['reason' => 'resumed after wait', 'flow' => $run->flowId]);
+        if (($node['config']['save_to'] ?? '') !== '') {
+            $run->fields->set($node['config']['save_to'], $run->input);
+            $run->event('field', $nodeId, ['op' => 'set', 'field' => $node['config']['save_to'], 'value' => $run->input]);
+        }
         $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => 'reply', 'note' => 'Reply received'];
 
         return $edges[$nodeId . ':reply'] ?? null;
@@ -103,7 +119,7 @@ class FlowEngine
             'end' => ['port' => null],
             'condition' => $this->condition($c, $run),
             'send' => $this->send($node, $c, $run, $outbox),
-            'set' => $this->set($c, $run),
+            'set' => $this->set($node, $c, $run),
             'ai' => $this->ai($node, $c, $run, $outbox),
             'sheet' => $this->sheet($node, $c, $run, $outbox),
             default => ['port' => null],
@@ -166,19 +182,21 @@ class FlowEngine
         if ($messages) {
             $res = $outbox->send($run, $node['id'], $messages);
             $run->sends[] = ['node' => $node['id'], 'messages' => $messages, 'status' => $res['status'], 'error' => $res['error']];
+            if ($res['status'] === 'skipped') $run->event('skipped', $node['id'], ['reason' => 'replies off']);
             if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Send failed: ' . $res['error']];
             $note = count($messages) . ' message' . (count($messages) === 1 ? '' : 's') . ' ' . $res['status'];
         }
 
         if (!empty($c['wait'])) {
             $run->fields->set(CustomerFields::WAIT, $run->flowId . ':' . $node['id']);
+            $run->event('waiting', $node['id']);
             return ['port' => 'reply', 'note' => $note . '; waiting for the reply', 'suspend' => true];
         }
 
         return ['port' => 'continue', 'note' => $note];
     }
 
-    private function set(array $c, FlowRun $run): array
+    private function set(array $node, array $c, FlowRun $run): array
     {
         $done = [];
         foreach ((array) ($c['ops'] ?? []) as $op) {
@@ -187,10 +205,12 @@ class FlowEngine
                 case 'clear_all':
                     $run->fields->clearAll();
                     $done[] = 'cleared all fields';
+                    $run->event('field', $node['id'], ['op' => 'clear_all']);
                     break;
                 case 'clear':
                     if ($field !== '') $run->fields->clear($field);
                     $done[] = "cleared {$field}";
+                    if ($field !== '') $run->event('field', $node['id'], ['op' => 'clear', 'field' => $field]);
                     break;
                 case 'append':
                     if ($field === '') break;
@@ -198,11 +218,14 @@ class FlowEngine
                     $old = (string) $run->fields->get($field);
                     $run->fields->set($field, $old === '' ? $v : $old . (string) ($op['separator'] ?? ', ') . $v);
                     $done[] = "appended to {$field}";
+                    $run->event('field', $node['id'], ['op' => 'append', 'field' => $field, 'value' => $v]);
                     break;
                 default:
                     if ($field === '') break;
-                    $run->fields->set($field, $run->text((string) ($op['value'] ?? '')));
+                    $v = $run->text((string) ($op['value'] ?? ''));
+                    $run->fields->set($field, $v);
                     $done[] = "set {$field}";
+                    $run->event('field', $node['id'], ['op' => 'set', 'field' => $field, 'value' => $v]);
             }
         }
 
@@ -221,7 +244,11 @@ class FlowEngine
         $messages[] = ['role' => 'user', 'content' => $run->text((string) ($c['user'] ?? '{{last_input}}'))];
 
         $res = $this->ai->complete((string) ($c['model'] ?? 'gpt-4o-mini'), $messages, (int) ($c['max_tokens'] ?? 250));
-        if (!$res['ok']) return ['port' => 'failed', 'note' => 'AI failed: ' . $res['error']];
+        if (!$res['ok']) {
+            $run->event('ai', $node['id'], ['result' => 'failed', 'model' => (string) ($c['model'] ?? 'gpt-4o-mini'), 'error' => (string) $res['error']]);
+            return ['port' => 'failed', 'note' => 'AI failed: ' . $res['error']];
+        }
+        $run->event('ai', $node['id'], ['result' => 'success', 'model' => (string) ($c['model'] ?? 'gpt-4o-mini'), 'saved_to' => (string) ($c['save_to'] ?? '')]);
 
         if (($c['save_to'] ?? '') !== '') $run->fields->set($c['save_to'], $res['text']);
         if (!empty($c['send'])) {
@@ -265,6 +292,7 @@ class FlowEngine
         $row = array_map(fn ($t) => ChatbotVars::sheetCell((string) $t, $vars), (array) ($c['columns'] ?? []));
         $res = $outbox->appendRow($run, $node['id'], $id, $tab, $row);
         $run->sheetRows[] = ['node' => $node['id'], 'sheet' => $id, 'tab' => $tab, 'row' => $row, 'status' => $res['status'], 'error' => $res['error']];
+        $run->event('sheet', $node['id'], ['result' => ['sent' => 'written', 'failed' => 'failed', 'skipped' => 'skipped'][$res['status']] ?? $res['status'], 'error' => (string) $res['error']]);
         if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Sheet failed: ' . $res['error']];
 
         return ['port' => 'next', 'note' => 'Row ' . $res['status']];

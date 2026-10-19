@@ -118,12 +118,19 @@ class ChatbotTabsController extends Controller
         ]);
     }
 
+    /** @var array<int, string> pangalan ng user kada id, isang basa lang kada request */
+    private array $userNames = [];
+
     private function summary(ChatbotReply $r): string
     {
         $c = (array) $r->content;
         if ($r->kind === 'sheet') return 'Sheet row: ' . implode(' | ', array_map('strval', (array) ($c['row'] ?? [])));
 
-        return implode(' · ', array_map(fn ($m) => ($m['type'] ?? '') === 'image' ? '[image] ' . ($m['url'] ?? '') : (string) ($m['text'] ?? ''), $c));
+        $text = implode(' · ', array_map(fn ($m) => ($m['type'] ?? '') === 'image' ? '[image] ' . ($m['url'] ?? '') : (string) ($m['text'] ?? ''), $c));
+        // Ang manual na sagot mula sa /chatbot/inbox: kita kung sino ang nagpadala.
+        if ($r->kind === 'manual') return 'Manual by ' . (($this->userNames[(int) $r->user_id] ??= (string) \App\Models\User::whereKey($r->user_id)->value('name')) ?: 'a user') . ': ' . $text;
+
+        return $text;
     }
 
     // ---- Test ----

@@ -97,6 +97,9 @@ class BotcakeChat extends Model
     /** Ang prune nang isang beses kada araw (Manila), para sa server na chatblast:auto lang ang tumatakbo sa cron. */
     public static function pruneDaily(): void
     {
-        if (Cache::add('botcake-chats:pruned:' . now('Asia/Manila')->toDateString(), true, now()->addDays(2))) static::prune();
+        if (Cache::add('botcake-chats:pruned:' . now('Asia/Manila')->toDateString(), true, now()->addDays(2))) {
+            static::prune();
+            \App\Services\Chatbot\ChatbotEvents::prune(); // ang executed actions: 30 araw
+        }
     }
 }

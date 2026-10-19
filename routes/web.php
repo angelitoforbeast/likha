@@ -308,6 +308,13 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
 
     Route::get('/chats', [ChatblastChatController::class, 'index'])->name('chats');
     Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');
+    Route::get('/inbox', [\App\Http\Controllers\ChatbotInboxController::class, 'index'])->name('inbox');
+    Route::get('/inbox/conversations', [\App\Http\Controllers\ChatbotInboxController::class, 'conversations'])->middleware('throttle:120,1,chatbot-inbox-list')->name('inbox.conversations');
+    Route::get('/inbox/thread', [\App\Http\Controllers\ChatbotInboxController::class, 'thread'])->middleware('throttle:240,1,chatbot-inbox-thread')->name('inbox.thread');
+    Route::get('/inbox/panel', [\App\Http\Controllers\ChatbotInboxController::class, 'panel'])->middleware('throttle:120,1,chatbot-inbox-panel')->name('inbox.panel');
+    Route::post('/inbox/send', [\App\Http\Controllers\ChatbotInboxController::class, 'send'])->middleware('throttle:30,1,chatbot-inbox-send')->name('inbox.send');
+    Route::post('/inbox/pause', [\App\Http\Controllers\ChatbotInboxController::class, 'pause'])->middleware('throttle:60,1,chatbot-inbox-pause')->name('inbox.pause');
+    Route::post('/inbox/roles', [\App\Http\Controllers\ChatbotInboxController::class, 'roles'])->middleware('throttle:30,1,chatbot-inbox-roles')->name('inbox.roles');
     Route::post('/customer-fields', [\App\Http\Controllers\ChatbotTabsController::class, 'customerFields'])->middleware('throttle:60,1,chatbot-customer-fields')->name('customer-fields');
     Route::get('/replies', [\App\Http\Controllers\ChatbotTabsController::class, 'replies'])->name('replies');
     Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->middleware('throttle:60,1,chatbot-replies')->name('replies.data');

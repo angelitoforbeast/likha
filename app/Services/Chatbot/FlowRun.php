@@ -16,6 +16,16 @@ class FlowRun
     public array $sheetRows = [];
     public ?string $stopped = null; // bakit huminto nang maaga (hal. limit, error)
     public int $aiCalls = 0;
+    /** @var array<int, array{type: string, node: ?string, detail: array}> ang executed actions (isinusulat nang sabay pagkatapos) */
+    public array $events = [];
+    public ?string $runId = null;
+
+    /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
+    public function event(string $type, ?string $node = null, array $detail = []): void
+    {
+        $detail = array_map(fn ($v) => is_string($v) ? mb_substr($v, 0, 200) : $v, $detail);
+        $this->events[] = ['type' => $type, 'node' => $node, 'detail' => $detail + ['run' => $this->runId ??= bin2hex(random_bytes(4))]];
+    }
 
     public function __construct(
         public readonly int $flowId,

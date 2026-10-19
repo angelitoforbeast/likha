@@ -1457,3 +1457,23 @@ Spec 073. Tests are in `tests/Feature/Chatblast/ChatbotLongPromptTest.php`.
 | S-073.1 | Given a 14,113-character prompt with line breaks, ñ and emoji, when it is saved in a botfield cell, then page settings and /chatbot/data give it back unchanged; 50,000 plain characters are accepted | `test_S_073_1…` | Passed · 2026-10-19 · auto |
 | S-073.2 | Given that prompt in Prompt 2 and an AI step whose system prompt is `{{Prompt 2}}` plus more text, then the OpenAI request's system message is the whole expanded text, uncut | `test_S_073_2…` | Passed · 2026-10-19 · auto |
 | S-073.3 | Given a value over 50,000 characters, or within 50,000 characters but over 60,000 bytes, then 422 with a clear message and the old value stays; exactly 60,000 bytes is accepted | `test_S_073_3…` (2 data sets) | Passed · 2026-10-19 · auto |
+
+## S-074 /chatbot/inbox: a Pancake-style inbox for the chatbot
+
+Spec 074 with amendments 1 and 2. Tests are in `tests/Feature/Chatblast/ChatbotInboxTest.php` (S-074.1–6) and `tests/Feature/Chatblast/ChatbotInboxActionsTest.php` (R1–R4, E1–E3).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-074.1 | Given chats and bot replies on a page, when the list opens (7 days by default), then conversations are newest activity first, the preview is the last message ("Bot: " / "You: " for ours), and the dot shows when the customer's message is last or our last reply was not sent; 24h / 30d bound the list; search matches a name or a PSID prefix; an unknown page → 422 | `test_S_074_1…` | Passed · 2026-10-19 · auto |
+| S-074.2 | Given chats, sent, failed and skipped replies, sheet rows, a photo and a Like, when the thread opens, then they are merged in time order: customer left, ours right with the reason when failed or skipped, sheet rows as a system line ("Order row written to sheet" / "Order row failed: …") | `test_S_074_2…` | Passed · 2026-10-19 · auto |
+| S-074.3 | Given more than 50 items, when the thread opens, then the newest 50 come with "Load older" (50 at a time, no gaps or repeats); polling with the newer cursor returns only newer items | `test_S_074_3…` | Passed · 2026-10-19 · auto |
+| S-074.4 | The panel shows name, PSID, ad_id, source, first seen, CHAT STATUS, "Waiting for reply at step nX" (from __wait), the fields without the reserved __ keys, the page's botfields and a link to the flow | `test_S_074_4…` | Passed · 2026-10-19 · auto |
+| S-074.5 | A role without Chatblast access gets 403 on every inbox route; the nav shows Inbox after Chats; only the CEO can edit or clear fields | `test_S_074_5…` | Passed · 2026-10-19 · auto |
+| S-074.6 | Every list query names the page and a start time (or ids) and has a limit; every thread query names the page and the customer and has a limit; the (page_id, psid, id) indexes exist | `test_S_074_6…` | Passed · 2026-10-19 · auto |
+| S-074.R1 | Given a customer who wrote within 24 hours, when an allowed user sends text and an image link, then send_content gets exactly the bot's body (text, then image), the send is logged as kind manual with the user, the thread shows it by the user's name, and Replies shows "Manual by …" | `test_S_074_R1…` | Passed · 2026-10-19 · auto |
+| S-074.R2 | Given the last customer message is over 24 hours old (or there is none), or the image link is not http/https, or the message is empty or over 2,000 characters, then 422 and nothing is sent or logged | `test_S_074_R2…` | Passed · 2026-10-19 · auto |
+| S-074.R3 | A role outside chatbot.reply_roles gets 403 on send and pause; only the CEO sets the roles (CEO always included); the 31st send in a minute → 429 | `test_S_074_R3…` | Passed · 2026-10-19 · auto |
+| S-074.R4 | Given the bot is paused for a customer, then new chats are marked handled with a "bot paused" event and nothing is sent; after unpausing, the bot answers again | `test_S_074_R4…` | Passed · 2026-10-19 · auto |
+| S-074.E1 | Given a CBB-like flow (fields, condition, AI, sheet, wait), when it runs, then its events are written in one insert without the prompt text, and with "View executed actions" the thread shows them as lines after the chat, in order | `test_S_074_E1…` | Passed · 2026-10-19 · auto |
+| S-074.E2 | The panel lists executed runs (flow, path, result), error logs (failed sends, failed AI steps) and the customer's images | `test_S_074_E2…` | Passed · 2026-10-19 · auto |
+| S-074.E3 | The Human tab lists paused customers and the Bot tab the others; events older than 30 days are pruned | `test_S_074_E3…` | Passed · 2026-10-19 · auto |
