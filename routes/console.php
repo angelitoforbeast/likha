@@ -86,9 +86,10 @@ Schedule::command('staff-events:prune')
     ->withoutOverlapping();
 
 // Chatbot: ang "wait for reply" na lampas na sa skip_after ay nagpapatuloy sa port na skipped.
+// Ang tick ay nagpapadala lang ng mga job sa queue na "chatbot" (doon ang padala).
 Schedule::command('chatbot:resume-skipped')
     ->everyMinute()
-    ->withoutOverlapping();
+    ->withoutOverlapping(5); // 5 min: ang tick na nag-crash ay hindi haharang nang isang araw
 
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')

@@ -89,9 +89,12 @@ class ChatbotRunner
 
         try {
             $fields = new CustomerFields((int) $wait->page_id, (int) $wait->psid);
-            $pending = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)
-                ->where('id', '>', (int) $fields->get(CustomerFields::LAST_CHAT))->exists();
-            if ($pending) return 'waiting';
+            $unrun = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)
+                ->where('id', '>', (int) $fields->get(CustomerFields::LAST_CHAT));
+            // Ang sagot na tatakbo pa ang nananaig. Ang luma na (hindi na tatakbo, hal. lampas sa retry ng job) ay hindi
+            // humaharang: sumagot ang customer, kaya walang skip (sa ibaba).
+            if ((clone $unrun)->where('received_at', '>=', now()->subMinutes(self::STALE_MINUTES))->exists()) return 'waiting';
+            $replied = $unrun->exists();
             if (DB::table('chatbot_waits')->where('id', $waitId)->where('due_at', '<=', now())->delete() !== 1) return 'gone';
             // Natapos na ang paghihintay sa ibang paraan (sagot, "clear all fields", ibang wait): wala nang gagawin.
             if ($fields->get(CustomerFields::WAIT) !== $wait->flow_id . ':' . $wait->node_id) return 'gone';
@@ -106,8 +109,10 @@ class ChatbotRunner
                 return 'dropped';
             };
             // Ang haba ng hinintay ay mula sa row mismo (naitala → deadline), kahit nawala na ang step.
-            $label = 'no reply in ' . FlowGraph::skipLabel((int) round(abs(Carbon::parse($wait->created_at ?? $wait->due_at)->diffInMinutes(Carbon::parse($wait->due_at)))));
+            $after = FlowGraph::skipLabel((int) round(abs(Carbon::parse($wait->created_at ?? $wait->due_at)->diffInMinutes(Carbon::parse($wait->due_at)))));
+            $label = 'no reply in ' . $after;
 
+            if ($replied) return $drop($label . ', but the customer replied and the reply was not run', false);
             if (!$flow || !is_array($flow->graph)) return $drop($label . ', but the page is off or has no flow', false);
             // Tao ang sumasagot: walang takbo; ang __wait ay naiiwan (ang sagot ng customer ay nagpapatuloy pa rin).
             if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $drop($label . ', but the bot paused', false);
@@ -120,7 +125,7 @@ class ChatbotRunner
 
             $run = new FlowRun($flow->id, $flow->graph, (string) $last->page_name, (string) $last->page_id, $this->page->botfields((string) $last->page_name), $fields, null,
                 (string) $last->message, (string) $last->name, $last->received_at->timezone('Asia/Manila')->format('Y-m-d H:i'));
-            $run->skipWait = true;
+            $run->skippedAfter = $after;
             $this->engine->run($run, $this->outbox);
             ChatbotEvents::store($run, (int) $wait->page_id, (int) $wait->psid);
 

@@ -21,6 +21,7 @@ return new class extends Migration {
             $table->unsignedBigInteger('flow_id');
             $table->string('node_id', 20);
             $table->timestamp('due_at');
+            $table->timestamp('dispatched_at')->nullable(); // naipadala na sa queue ng tick
             $table->timestamp('created_at')->nullable();
 
             $table->unique(['page_id', 'psid']);

@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use App\Jobs\ResumeChatbotWait;
 use InvalidArgumentException;
 
 /**
@@ -54,7 +56,7 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
         return FlowGraph::clean(['nodes' => $nodes, 'edges' => $edges]);
     }
 
-    private function live(array $graph = null, string $name = 'Main'): ChatbotFlow
+    private function live(?array $graph = null, string $name = 'Main'): ChatbotFlow
     {
         $flow = ChatbotFlow::create(['name' => $name, 'graph' => $graph ?? $this->graph()]);
         DB::table('chatbot_flows')->where('id', $flow->id)->update(['published_at' => now()]);
@@ -143,7 +145,31 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
         $this->assertSame(1, $this->waits('7002')->count());
         $held->release();
         $this->tick();
+        $this->assertSame(['Want to order?'], $this->sent('7002'), 'naipadala na sa queue: sinusubukan ulit pagkalipas ng 5 minuto');
+        $this->travel(6)->minutes();
+        $this->tick();
         $this->assertSame(['Want to order?', 'Still there?'], $this->sent('7002'));
+    }
+
+    public function test_S_076_2_the_row_is_claimed_once_and_each_wait_is_one_job_on_the_chatbot_queue(): void
+    {
+        $this->live();
+        $this->says('Hi');
+        $this->travel(121)->minutes();
+        $id = (int) $this->waits()->value('id');
+
+        // Iisang job kada wait; ang pangalawang tick ay hindi nagpapadala ulit habang nasa queue pa.
+        Queue::fake();
+        $this->tick();
+        $this->tick();
+        Queue::assertPushedOn('chatbot', ResumeChatbotWait::class, fn ($job) => $job->waitId === $id);
+        Queue::assertPushed(ResumeChatbotWait::class, 1);
+
+        // Ang claim: ang row na nabasa pero naitulak na ang deadline (ibang takbo ang nauna) ay hindi pinapatakbo.
+        $this->waits()->update(['due_at' => now()->addHour()]);
+        $this->assertSame('gone', app(ChatbotRunner::class)->skip($id));
+        $this->assertSame(['Want to order?'], $this->sent());
+        $this->assertSame(1, $this->waits()->count());
     }
 
     public static function dropped(): array
@@ -178,6 +204,8 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
         $this->assertSame(['Want to order?'], $this->sent());
         $this->assertSame(0, $this->waits()->count());
         $this->assertSame('Skipped: no reply in 2 h, but the ' . $reason . ' (n2)', $this->lastEvent('7001', 'skipped'));
+        // Ang sagot ay nagpapatuloy pa rin kapag ang step ay naghihintay pa (walang skip lang), o tao ang sumasagot.
+        $this->assertSame(in_array($change, ['skip removed', 'paused', 'page off', 'no flow'], true), (new CustomerFields(1001, 7001))->get(CustomerFields::WAIT) !== null);
     }
 
     public function test_S_076_3_a_draft_change_does_not_touch_the_live_wait(): void
@@ -190,6 +218,13 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
         $this->tick();
 
         $this->assertSame(['Want to order?', 'Still there?'], $this->sent());
+
+        // Ang haba sa event ay ang hinintay talaga (2 h), kahit 5 h na sa bagong publish.
+        $this->says('Hi', '7002');
+        DB::table('chatbot_flows')->where('id', $flow->id)->update(['graph' => json_encode($this->graph(['amount' => 5, 'unit' => 'hours']))]);
+        $this->travel(121)->minutes();
+        $this->tick();
+        $this->assertSame('No reply in 2 h → skipped at step n2', $this->lastEvent('7002', 'wait_skipped'));
     }
 
     public function test_S_076_4_outside_24_hours_nothing_is_sent_and_the_event_is_logged(): void
@@ -215,7 +250,7 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
             $this->assertArrayNotHasKey('skip_after', $send(['skip_after' => $empty]));
         }
         $this->assertArrayNotHasKey('skip_after', FlowGraph::cleanConfig('send', ['wait' => false, 'skip_after' => ['amount' => 2, 'unit' => 'hours']]));
-        foreach ([['amount' => 24, 'unit' => 'hours'], ['amount' => 1381, 'unit' => 'minutes']] as $tooLong) {
+        foreach ([['amount' => 24, 'unit' => 'hours'], ['amount' => 1381, 'unit' => 'minutes'], ['amount' => '99999999999999999999', 'unit' => 'hours']] as $tooLong) {
             try {
                 $send(['skip_after' => $tooLong]);
                 $this->fail('over 23 hours was accepted');
@@ -245,6 +280,24 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
         app(ChatbotRunner::class)->handle($reply->id);
         $this->assertSame(['Want to order?', 'Thanks: Yes'], $this->sent());
         $this->assertSame(0, $this->waits()->count());
+    }
+
+    public function test_S_076_6_a_reply_that_can_no_longer_run_ends_the_timer_without_a_send(): void
+    {
+        $this->live();
+        $this->says('Hi');
+        $this->says('Hi', '7002');
+        $this->travel(10)->minutes();
+        $this->says('Yes', '7001', false); // hindi natakbo (hal. patay ang worker nang lampas 30 minuto)
+
+        $this->travel(111)->minutes();
+        $this->tick();
+
+        $this->assertSame(['Want to order?'], $this->sent());
+        $this->assertSame(0, $this->waits()->count());
+        $this->assertSame('Skipped: no reply in 2 h, but the customer replied and the reply was not run (n2)', $this->lastEvent('7001', 'skipped'));
+        $this->assertNotNull((new CustomerFields(1001, 7001))->get(CustomerFields::WAIT), 'ang susunod na sagot ay nagpapatuloy pa rin');
+        $this->assertSame(['Want to order?', 'Still there?'], $this->sent('7002'), 'hindi nito hinaharangan ang iba');
     }
 
     public function test_S_076_7_the_timer_follows_wait(): void

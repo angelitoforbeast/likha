@@ -99,9 +99,9 @@ class FlowEngine
         $run->fields->clear(CustomerFields::WAIT);
         if ((int) $flowId !== $run->flowId || !$node || $node['type'] !== 'send' || empty($node['config']['wait'])) return false;
 
-        if ($run->skipWait) {
+        if ($run->skippedAfter !== null) {
             // Walang sagot sa takdang oras: ang port na skipped, walang sine-save.
-            $label = FlowGraph::skipLabel(FlowGraph::skipMinutes((array) $node['config']));
+            $label = $run->skippedAfter;
             $run->event('run_started', null, ['reason' => 'no reply in ' . $label, 'flow' => $run->flowId]);
             $run->event('wait_skipped', $nodeId, ['after' => $label]);
             $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => 'skipped', 'note' => 'No reply in ' . $label];

@@ -147,7 +147,8 @@ class FlowGraph
      */
     private static function cleanSkip(mixed $v): ?array
     {
-        if (!is_array($v) || !is_numeric($v['amount'] ?? null) || (int) $v['amount'] < 1) return null;
+        if (!is_array($v) || !is_numeric($v['amount'] ?? null) || (float) $v['amount'] < 1) return null;
+        if ((float) $v['amount'] > self::MAX_SKIP_MINUTES) throw new InvalidArgumentException('Skip after can be at most 23 hours.');
         $skip = ['amount' => (int) $v['amount'], 'unit' => ($v['unit'] ?? '') === 'hours' ? 'hours' : 'minutes'];
         if (self::skipMinutes(['skip_after' => $skip]) > self::MAX_SKIP_MINUTES) throw new InvalidArgumentException('Skip after can be at most 23 hours.');
 
@@ -160,7 +161,8 @@ class FlowGraph
         $skip = $config['skip_after'] ?? null;
         if (!is_array($skip)) return 0;
 
-        return max(0, (int) ($skip['amount'] ?? 0)) * (($skip['unit'] ?? '') === 'hours' ? 60 : 1);
+        // Hangganan bago paramihin: ang napakalaking numero ay hindi nagiging float.
+        return min(max(0, (int) ($skip['amount'] ?? 0)), self::MAX_SKIP_MINUTES + 1) * (($skip['unit'] ?? '') === 'hours' ? 60 : 1);
     }
 
     /** "2 h", "30 min", "1 h 30 min" (para sa mga event). */

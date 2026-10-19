@@ -2,42 +2,41 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Chatbot\ChatbotRunner;
+use App\Jobs\ResumeChatbotWait;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang "wait for reply" na lampas na sa skip_after: nagpapatuloy sa port na skipped (kada minuto, via scheduler). Ayon
- * sa due_at (index), 500 kada batch, hanggang 50 segundo bawat tick; ang hindi natapos ay sa susunod na tick.
+ * Ang "wait for reply" na lampas na sa skip_after: isang job kada hinihintay sa queue na "chatbot" (kada minuto, via
+ * scheduler), ayon sa due_at (index), 500 kada batch, hanggang 50 segundo. Ang naipadala na ay hindi ipinapadala ulit
+ * hangga't hindi lumilipas ang REDISPATCH_MINUTES (ang naiwan o nawalang job ay sinusubukan ulit).
  */
 class ResumeSkippedChatbotWaits extends Command
 {
     public const BATCH = 500;
     public const SECONDS = 50;
+    public const REDISPATCH_MINUTES = 5;
 
     protected $signature   = 'chatbot:resume-skipped';
-    protected $description = 'Resume chatbot waits past their skip_after deadline through the skipped port';
+    protected $description = 'Queue a resume through the skipped port for each chatbot wait past its skip_after deadline';
 
-    public function handle(ChatbotRunner $runner): int
+    public function handle(): int
     {
         if (!Schema::hasTable('chatbot_waits')) return self::SUCCESS;
         $until = microtime(true) + self::SECONDS;
-        $counts = [];
-        $left = [];
+        $queued = 0;
         do {
-            // Ang natapos ay nabubura; ang naiwan (locked, may chat pa sa queue) ay nilalaktawan sa tick na ito, para hindi umikot.
-            $ids = DB::table('chatbot_waits')->where('due_at', '<=', now())->when($left, fn ($q) => $q->whereNotIn('id', $left))
+            $ids = DB::table('chatbot_waits')->where('due_at', '<=', now())
+                ->where(fn ($q) => $q->whereNull('dispatched_at')->orWhere('dispatched_at', '<', now()->subMinutes(self::REDISPATCH_MINUTES)))
                 ->orderBy('due_at')->limit(self::BATCH)->pluck('id');
-            foreach ($ids as $id) {
-                $result = $runner->skip((int) $id);
-                $counts[$result] = ($counts[$result] ?? 0) + 1;
-                if (in_array($result, ['locked', 'waiting'], true)) $left[] = (int) $id;
-                if (microtime(true) > $until || count($left) >= self::BATCH) break 2;
-            }
-        } while ($ids->count() === self::BATCH);
+            if ($ids->isEmpty()) break;
+            DB::table('chatbot_waits')->whereIn('id', $ids)->update(['dispatched_at' => now()]);
+            foreach ($ids as $id) ResumeChatbotWait::dispatch((int) $id);
+            $queued += $ids->count();
+        } while ($ids->count() === self::BATCH && microtime(true) < $until);
 
-        if ($counts) $this->info('chatbot waits: ' . implode(', ', array_map(fn ($k, $v) => "{$k} {$v}", array_keys($counts), $counts)));
+        if ($queued) $this->info("chatbot waits: {$queued} queued");
 
         return self::SUCCESS;
     }

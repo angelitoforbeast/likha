@@ -24,8 +24,8 @@ class ChatbotWaits
     public static function park(int $pageId, int $psid, int $flowId, string $nodeId, CarbonInterface $due): void
     {
         self::guard(fn () => DB::table('chatbot_waits')->upsert(
-            [['page_id' => $pageId, 'psid' => $psid, 'flow_id' => $flowId, 'node_id' => $nodeId, 'due_at' => $due, 'created_at' => now()]],
-            ['page_id', 'psid'], ['flow_id', 'node_id', 'due_at', 'created_at'],
+            [['page_id' => $pageId, 'psid' => $psid, 'flow_id' => $flowId, 'node_id' => $nodeId, 'due_at' => $due, 'dispatched_at' => null, 'created_at' => now()]],
+            ['page_id', 'psid'], ['flow_id', 'node_id', 'due_at', 'dispatched_at', 'created_at'],
         ));
     }
 
