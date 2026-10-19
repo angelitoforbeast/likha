@@ -1567,3 +1567,11 @@ Spec 080 and amendment 1. Test in `tests/Feature/Chatblast/ChatbotPagesTest.php`
 | S-080.2 | When a cell is clicked (or focused and Enter / Space pressed), then the whole row opens: every text cell shows its full text, up to about 240 px with its own scroll; clicking a cell of the open row closes it back to 3 lines; opening another row closes the first | browser | Passed · 2026-10-19 · browser |
 | S-080.3 | Each editable cell has a pencil ("Edit <column>"), shown on hover and focus on desktop and always on a phone or touch screen, as its own tab stop; it is the only way to open the editor and does not open the row; a text cell opens the modal textarea with its line breaks, an image cell the URL editor | `test_S_080…` + browser | Passed · 2026-10-19 · auto + browser |
 | S-080.4 | No page-level horizontal scroll at 1366 and 390 px; the switch, FLOW and the sticky columns are unchanged | browser | Passed · 2026-10-19 · browser |
+
+## S-081 Each Seq N sits right after its Seq Img N
+
+Spec 081. Test in `tests/Feature/Chatblast/ChatbotPagesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-081.1 | The /chatbot/pages columns after PICTURE are Seq Img 1, Seq 1, Seq Img 2, Seq 2, …, Seq Img 20, Seq 20 (keys and labels unchanged); a column added with "+ Column" comes after them | `test_S_081_each_seq_sits_right_after_its_seq_img` | Passed · 2026-10-19 · auto |
