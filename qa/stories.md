@@ -1493,3 +1493,18 @@ Spec 075. Tests are in `tests/Feature/Chatblast/ChatbotDraftPublishTest.php`; S-
 | S-075.8 | The status is "Never published" for a new flow until its first Publish, "Draft (unpublished changes)" after a change, and "Published" after Publish, after Discard, or when the saved draft is exactly the published graph ("1" → "01" is a change); the editor gets the number of pages using the flow | `test_S_075_8…` | Passed · 2026-10-19 · auto |
 | S-075.9 | Duplicate copies the published graph and the draft; the copy is "Never published"; deleting a flow deletes its history | `test_S_075_9…` | Passed · 2026-10-19 · auto |
 | S-075.10 | In the editor: Undo/Redo (buttons, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, at least 50 steps) cover add, move, delete, duplicate, wire, unwire and form edits; Save draft, Publish (confirm with page count and note), Discard (confirm), History with Restore, Preview / Test, the status chip; leaving with unsaved changes warns; a conflict shows Reload / Overwrite; no page-level horizontal scroll at phone width | browser check | Passed · 2026-10-19 · browser |
+
+## S-076 "Wait for reply" can skip after a set time
+
+Spec 076. Tests are in `tests/Feature/Chatblast/ChatbotWaitSkipTest.php`; S-076.8 is also checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-076.1 | Given a Send step with wait and `skip_after`, when a live run reaches it, then `__wait` and a `chatbot_waits` row (due = now + skip_after) are stored and the event reads "Waiting for reply at step nX (skips after 2 h)"; when the customer replies before the deadline, the run goes on through `reply` and the row is gone | `test_S_076_1…` | — |
+| S-076.2 | Given a wait past its deadline, when `chatbot:resume-skipped` runs, then the run goes on through `skipped` (no field saved) and the event reads "No reply in 2 h → skipped at step nX"; a second tick sends nothing more; a row not yet due, or a customer whose lock is held, is left for a later tick | `test_S_076_2…` | — |
+| S-076.3 | Given a due wait whose published flow changed (another flow on the page, the step removed, or `skip_after` removed), a page that is Off or has no flow, or a paused bot, when the tick runs, then nothing is sent, the timer is dropped and a "skipped" event says why | `test_S_076_3…` | — |
+| S-076.4 | Given a due wait whose customer's last message is 24 hours old or more, when the tick runs, then nothing is sent, the wait ends and the event says the 24-hour window has closed | `test_S_076_4…` | — |
+| S-076.5 | `skip_after` is kept only with wait on and an amount of 1 or more; up to 23 hours (1380 minutes) is allowed and more is refused with a clear message; the `skipped` port is refused unless `skip_after` is set | `test_S_076_5…` | — |
+| S-076.6 | Given a chat of the customer that arrived before the deadline but has not run yet, when the tick runs, then the wait is left for the reply | `test_S_076_6…` | — |
+| S-076.7 | A wait without `skip_after`, a "Clear all fields" or a reply removes the customer's timer; the Test tab never writes a timer | `test_S_076_7…` | — |
+| S-076.8 | The editor's Send form has "Skip if no reply after [amount] [minutes / hours]" under the wait box; the step shows a `skipped` port; the setting saves and loads | `test_S_076_8…` + browser | — |
