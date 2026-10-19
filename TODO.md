@@ -737,3 +737,13 @@ Accepted, not fixed:
 - **The path where `turnOn` throws during "+ Page" has no test.** Reason: same fixed message as the token test's catch; `BotcakeClient` returns errors as arrays, so a throw is a bug path only.
 - **Two "+ Page" requests at once could each create a key.** Reason: CEO-only, the button is disabled while sending, and the On switch has the same race today; the next On fixes it.
 - **The chat's `ad_id` on a `source=api` row can be replaced by the customer sync** (`BotcakeCustomerSync::store` rewrites `ad_id` from the API, to null when the API has none). Reason: outside this change; whether a chat's `ad_id` should win over the sync is an owner decision.
+
+## 075: flow draft, Undo/Redo, Save and Publish (2026-10-19)
+
+- **Deploy order:** run the migration (`2026_10_24_100000_add_draft_to_chatbot_flows.php`) together with the code. Until it runs, the editor's save, Publish and History return 500 (unknown column `draft_version`, missing `chatbot_flow_versions`); live runs are unaffected because they read only `graph`. There is no `Schema::hasTable` guard on the new table. Reason: the editor needs the new columns anyway, so a guard would only hide a missed migration.
+- **Overwrite vs. Publish at the same moment:** an Overwrite skips the version check and compares with the published graph read just before its update. If someone publishes in those milliseconds, the overwritten draft may be judged against the old published graph. Reason: it needs a deliberate Overwrite click in a window of milliseconds, and the worst case is a wrong status chip, not lost data.
+- **"Duplicate step" copies the step as last applied,** not unsaved edits still open in its form (those are dropped with the form). Reason: same as Cancel; cosmetic.
+- **A duplicated flow is "Never published" but carries the source's published graph,** so if a page is linked to the copy before its first Publish, customers get that graph. Reason: this is what the spec asks ("Duplicate copies the published graph and the draft") and the story's choice; whether the copy should count as published is a question for the owner.
+- **Untested small paths:** Restore of a stored version that no longer passes `FlowGraph::clean` (422), and the publish note trimmed to 200 characters or sent as an array. Reason: trusted stored data and a defensive cut; each is one line.
+- **Supersedes the 069 entry "Editor autosave is last-write-wins":** saves now carry `draft_version` and a stale one gets 409 with Reload / Overwrite.
+- **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only, no real key or token.
