@@ -30,9 +30,17 @@ They send chats to `/api/botcake/chat` for the stress-test page `ZZ STRESS TEST`
    php artisan botcake:stress-page --flow-from="Tech Flask"
    ```
 
-4. **Optional: a slow or flaky Botcake.** These settings can be written only from the CLI.
-   - `botcake.mock_latency_ms`: the delay of each fake call, default 400, max 5000.
-   - `botcake.mock_error_rate`: 0 to 0.5. A send then answers HTTP 500 at that rate, so the retry and failed paths run.
+   **Check the flow first.** A Google Sheet step in it really appends a row to that sheet for every test chat. Copy a flow without one, or remove the step from a copy of the flow.
+
+4. **Optional: a slow or flaky Botcake.**
+
+   ```
+   php artisan botcake:stress-page --latency=400 --error-rate=0.1
+   ```
+
+   - `--latency` is the delay of each fake call in ms. Default 400, max 5000.
+   - `--error-rate` runs from 0 to 0.5. A send then answers HTTP 500 at that rate, so the retry and failed paths run.
+   - Only the CLI can set these; the page-settings screen refuses them.
 
 Copy the key file to the tester's machine as `key.txt`, next to these scripts.
 
@@ -53,4 +61,6 @@ php artisan botcake:stress-page --stats     # chats in, runs, replies, AI, fake 
 php artisan botcake:stress-page --cleanup   # deletes every row of the test page and clears its caches
 ```
 
-`botcake:stress-page` refuses any page ID that doesn't start with `99`, and any page name that has a real Botcake page ID.
+`botcake:stress-page` refuses any page ID that doesn't start with `99`, and any page name that has (or had) a real Botcake page ID. Apart from `--seed` on a new name, it works only on a page that is already a stress-test page.
+
+The fake Botcake keeps its fields, statistics and call counters in the app's cache. On the database cache that is a few small queries per fake call, which a real Botcake call doesn't make. It's a small load, but keep it in mind when reading the numbers.

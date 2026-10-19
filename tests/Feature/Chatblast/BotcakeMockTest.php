@@ -221,4 +221,73 @@ class BotcakeMockTest extends ChatblastTestCase
         $this->assertSame('1001', $s->get('Page Uno', 'botcake', 'page_id'));
         @unlink($key);
     }
+
+    public function test_S_086_7_a_real_page_without_an_active_page_id_is_never_touched_and_cleanup_keeps_other_pages(): void
+    {
+        Http::fake();
+        $s = app(PageSettings::class);
+        // A real page whose Botcake ID was cleared on /page-settings (the row is history now), and a second test page.
+        $s->set('Real Shop', 'botcake', 'page_id', '1234567');
+        $s->deactivate(PageSetting::where('page_name', 'Real Shop')->where('key', 'page_id')->first());
+        $s->set('Real Shop', 'botcake', 'flow.shipping', '5501');
+        \App\Models\BotcakeMessage::create(['page_name' => 'Real Shop', 'waybill' => 'JT1', 'kind' => 'in_transit', 'status' => 'sent', 'is_test' => false]);
+        $before = [PageSetting::where('page_name', 'Real Shop')->count(), \App\Models\BotcakeMessage::where('page_name', 'Real Shop')->count()];
+        foreach (['--cleanup' => true, '--seed' => 1, '--stats' => true, '--latency' => 100] as $opt => $v) {
+            $this->assertSame(1, Artisan::call('botcake:stress-page', [$opt => $v, '--page' => 'Real Shop', '--key-file' => sys_get_temp_dir() . '/x.txt']), $opt);
+        }
+        $this->assertSame($before, [PageSetting::where('page_name', 'Real Shop')->count(), \App\Models\BotcakeMessage::where('page_name', 'Real Shop')->count()]);
+
+        // Cleanup of the default test page leaves another test page and a real page alone.
+        $key = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'stress-key-' . uniqid() . '.txt';
+        Artisan::call('botcake:stress-page', ['--seed' => 1, '--key-file' => $key]);
+        Artisan::call('botcake:stress-page', ['--seed' => 1, '--key-file' => $key, '--page' => 'ZZ OTHER TEST', '--page-id' => '990000000000002']);
+        foreach ([[self::PAGE, self::MOCK_ID], ['ZZ OTHER TEST', '990000000000002'], ['Page Uno', '1001']] as [$p, $id]) {
+            ChatbotReply::create(['page_id' => (int) $id, 'psid' => 1, 'kind' => 'send', 'status' => 'sent', 'content' => [], 'sent_at' => now()]);
+            \Illuminate\Support\Facades\DB::table('chatbot_events')->insert(['page_id' => (int) $id, 'psid' => 1, 'type' => 'run_started', 'detail' => '{}', 'created_at' => now()]);
+            BotcakePsid::create(['page' => $p, 'psid' => '1', 'fb_name' => 'x', 'status' => 'verified', 'source' => 'chat_verify']);
+        }
+        Artisan::call('botcake:stress-page', ['--cleanup' => true]);
+        $this->assertSame([0, 1, 1], [ChatbotReply::where('page_id', (int) self::MOCK_ID)->count(), ChatbotReply::where('page_id', 990000000000002)->count(), ChatbotReply::where('page_id', 1001)->count()]);
+        $this->assertSame([1, 1], [\Illuminate\Support\Facades\DB::table('chatbot_events')->where('page_id', 990000000000002)->count(), BotcakePsid::where('page', 'Page Uno')->count()]);
+        $this->assertGreaterThanOrEqual(4, PageSetting::where('page_name', 'ZZ OTHER TEST')->where('active', true)->count(), 'the other test page keeps its settings');
+        @unlink($key);
+    }
+
+    public function test_S_086_8_latency_and_error_rate_are_set_from_the_command_and_the_flag_lifecycle(): void
+    {
+        Http::fake(['botcake.io/*' => Http::response(['success' => true])]);
+        $key = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'stress-key-' . uniqid() . '.txt';
+        Artisan::call('botcake:stress-page', ['--seed' => 0, '--key-file' => $key]);
+        $this->assertSame(0, Artisan::call('botcake:stress-page', ['--latency' => 1500, '--error-rate' => 0.2]));
+        $this->assertSame(['latency' => 1500, 'error' => 0.2], BotcakeMock::pages()[self::MOCK_ID]);
+        $this->assertSame(1, Artisan::call('botcake:stress-page', ['--latency' => 6000]), 'over 5000 ms');
+        $this->assertSame(1, Artisan::call('botcake:stress-page', ['--error-rate' => 0.6]), 'over 0.5');
+
+        // Without the flag, a 99… page calls the real host; removing the flag takes effect at once.
+        $s = app(PageSettings::class);
+        $s->deactivate(PageSetting::where('page_name', self::PAGE)->where('key', 'mock')->where('active', true)->first());
+        $this->client()->sendContent(self::MOCK_ID, '9900000000000000', [['type' => 'text', 'text' => 'Hi']], 'mock');
+        Http::assertSent(fn (HttpRequest $r) => str_contains($r->url(), 'pages/' . self::MOCK_ID . '/flows/send_content'));
+        $this->assertSame(1, Artisan::call('botcake:stress-page', ['--cleanup' => true]), 'no longer a test page: refused');
+        @unlink($key);
+    }
+
+    public function test_S_086_9_stats_count_ai_results_and_replies(): void
+    {
+        Http::fake();
+        $key = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'stress-key-' . uniqid() . '.txt';
+        Artisan::call('botcake:stress-page', ['--seed' => 1, '--key-file' => $key]);
+        $ev = fn (string $result) => \Illuminate\Support\Facades\DB::table('chatbot_events')->insert(['page_id' => (int) self::MOCK_ID, 'psid' => 1, 'type' => 'ai',
+            'detail' => json_encode(['result' => $result, 'model' => 'gpt-4o-mini']), 'created_at' => now()]);
+        $ev('success'); $ev('success'); $ev('failed');
+        ChatbotReply::create(['page_id' => (int) self::MOCK_ID, 'psid' => 1, 'kind' => 'send', 'status' => 'failed', 'content' => [], 'sent_at' => now()]);
+
+        Artisan::call('botcake:stress-page', ['--stats' => true]);
+        $out = Artisan::output();
+
+        $this->assertMatchesRegularExpression('/AI ok\s+2\R/', $out);
+        $this->assertMatchesRegularExpression('/AI failed\s+1\R/', $out);
+        $this->assertMatchesRegularExpression('/Replies failed\s+1\R/', $out);
+        @unlink($key);
+    }
 }

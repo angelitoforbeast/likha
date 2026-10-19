@@ -142,7 +142,10 @@ class PageSettings
             // Ang naka-cache ng /api/botcake/chat (page_id => page, mga hash ng chat.key): binubura ngayon at pagkatapos ng commit.
             if ($provider === 'botcake' && in_array($key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
             // Ang listahan ng mock page (BotcakeMock): binubura kapag nagbago ang flag, ang page_id o ang bagal at error.
-            if ($provider === 'botcake' && in_array($key, BotcakeMock::KEYS, true)) BotcakeMock::forget();
+            if ($provider === 'botcake' && in_array($key, BotcakeMock::KEYS, true)) {
+                BotcakeMock::forget();
+                DB::afterCommit(fn () => BotcakeMock::forget());
+            }
 
             return ['status' => $status, 'setting' => $setting];
         });

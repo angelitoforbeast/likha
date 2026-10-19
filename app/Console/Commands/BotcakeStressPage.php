@@ -29,6 +29,8 @@ class BotcakeStressPage extends Command
         {--seed= : Create the page with this many fake PSIDs}
         {--key-file= : With --seed: the file the chat key is written to (mode 600; never printed)}
         {--flow-from= : Copy this page\'s chatbot settings (flow, botfields) to the test page and turn it On}
+        {--latency= : The delay of each fake Botcake call in ms (0 to 5000)}
+        {--error-rate= : How often a fake send answers HTTP 500 (0 to 0.5)}
         {--stats : Print chats in, runs, replies, AI, mock calls, queue and the time to the first reply}
         {--cleanup : Delete every row of the test page and clear its caches}';
     protected $description = 'Set up, measure and clean up the stress-test page that runs against the fake Botcake';
@@ -39,22 +41,32 @@ class BotcakeStressPage extends Command
         $stored = trim((string) $settings->get($page, 'botcake', 'page_id'));
         $pageId = trim((string) ($this->option('page-id') ?: ($stored !== '' ? $stored : self::PAGE_ID)));
 
+        if ($page === '') { $this->error('The page name is required.'); return self::FAILURE; }
         if (!BotcakeMock::isTestId($pageId)) {
             $this->error('Refused: the page ID must start with ' . BotcakeMock::PREFIX . ' (test pages only).');
             return self::FAILURE;
         }
-        if ($stored !== '' && !BotcakeMock::isTestId($stored)) {
+        // Ang anumang page_id na naitala sa pangalang ito (pati history) na hindi 99…: totoong page, hindi kailanman ginagalaw.
+        $ids = $settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'page_id')->get()->map(fn ($s) => trim((string) $s->plainValue()));
+        if ($ids->contains(fn ($id) => $id !== '' && !BotcakeMock::isTestId($id))) {
             $this->error('Refused: "' . $page . '" has a real Botcake page ID.');
             return self::FAILURE;
         }
-        if ($page === '') { $this->error('The page name is required.'); return self::FAILURE; }
+        // Kailangang test page na ito: may botcake.mock = 1 at 99… na page ID. Sa --seed: test page na, o walang anumang setting.
+        $isTest = $settings->get($page, 'botcake', 'mock') === '1' && BotcakeMock::isTestId($stored);
+        $blank = !$settings->pageQuery($page)->exists();
+        if ($this->option('seed') !== null ? !($isTest || $blank) : !$isTest) {
+            $this->error('Refused: "' . $page . '" is not a stress-test page (botcake.mock = 1 with a ' . BotcakeMock::PREFIX . '… page ID)' . ($this->option('seed') !== null ? ' and already has settings.' : '. Run --seed first.'));
+            return self::FAILURE;
+        }
 
         if ($this->option('seed') !== null) return $this->seed($settings, $page, $pageId);
+        if ($this->option('latency') !== null || $this->option('error-rate') !== null) return $this->speed($settings, $page);
         if ($this->option('flow-from') !== null) return $this->flowFrom($settings, $page);
         if ($this->option('stats')) return $this->stats($page, $pageId);
         if ($this->option('cleanup')) return $this->cleanup($settings, $page, $pageId);
 
-        $this->error('Use --seed, --flow-from, --stats or --cleanup.');
+        $this->error('Use --seed, --latency / --error-rate, --flow-from, --stats or --cleanup.');
         return self::FAILURE;
     }
 
@@ -66,8 +78,10 @@ class BotcakeStressPage extends Command
         if ($file === '') { $this->error('--seed needs --key-file: the chat key is written only there.'); return self::FAILURE; }
 
         $key = bin2hex(random_bytes(24));
-        if (@file_put_contents($file, $key . "\n") === false) { $this->error('Could not write the key file.'); return self::FAILURE; }
+        // Sarado muna ang file (600), saka ang key: hindi ito nababasa ng iba kahit sandali.
+        if (@file_put_contents($file, '') === false) { $this->error('Could not write the key file.'); return self::FAILURE; }
         @chmod($file, 0600);
+        file_put_contents($file, $key . "\n");
 
         $settings->set($page, 'botcake', 'page_id', $pageId);
         $settings->set($page, 'botcake', 'token', 'mock');
@@ -84,6 +98,21 @@ class BotcakeStressPage extends Command
             if (count($rows) === 1000 || $i === $n) { BotcakePsid::insert($rows); $rows = []; }
         }
         $this->info("Seeded \"{$page}\" (page ID {$pageId}, mock Botcake) with {$n} PSIDs. The chat key is in the key file.");
+
+        return self::SUCCESS;
+    }
+
+    /** Ang bagal at ang error rate ng pekeng Botcake para sa page (CLI lang). */
+    private function speed(PageSettings $settings, string $page): int
+    {
+        $ms = $this->option('latency');
+        $rate = $this->option('error-rate');
+        if ($ms !== null && (!is_numeric($ms) || (int) $ms < 0 || (int) $ms > BotcakeMock::MAX_LATENCY_MS)) { $this->error('Use --latency from 0 to ' . BotcakeMock::MAX_LATENCY_MS . '.'); return self::FAILURE; }
+        if ($rate !== null && (!is_numeric($rate) || (float) $rate < 0 || (float) $rate > BotcakeMock::MAX_ERROR_RATE)) { $this->error('Use --error-rate from 0 to ' . BotcakeMock::MAX_ERROR_RATE . '.'); return self::FAILURE; }
+        if ($ms !== null) $settings->set($page, 'botcake', 'mock_latency_ms', (string) (int) $ms, false, null, true);
+        if ($rate !== null) $settings->set($page, 'botcake', 'mock_error_rate', (string) (float) $rate, false, null, true);
+        $p = BotcakeMock::pages()[trim((string) $settings->get($page, 'botcake', 'page_id'))] ?? null;
+        $this->info('Fake Botcake for "' . $page . '": ' . ($p ? $p['latency'] . ' ms per call, error rate ' . $p['error'] : 'not a mock page'));
 
         return self::SUCCESS;
     }
@@ -106,20 +135,20 @@ class BotcakeStressPage extends Command
     private function stats(string $page, string $pageId): int
     {
         $id = (int) $pageId;
-        $text = match (DB::getDriverName()) { 'pgsql' => 'detail::text', 'mysql' => 'CAST(detail AS CHAR)', default => 'detail' };
-        $events = fn (string $type, ?string $like = null) => !Schema::hasTable('chatbot_events') ? 0
-            : DB::table('chatbot_events')->where('page_id', $id)->where('type', $type)->when($like, fn ($q) => $q->whereRaw("$text LIKE ?", [$like]))->count();
+        $result = match (DB::getDriverName()) { 'pgsql' => "detail->>'result'", 'mysql' => "JSON_UNQUOTE(JSON_EXTRACT(detail, '$.result'))", default => "json_extract(detail, '$.result')" };
+        $events = fn (string $type, ?string $is = null) => !Schema::hasTable('chatbot_events') ? 0
+            : DB::table('chatbot_events')->where('page_id', $id)->where('type', $type)->when($is, fn ($q) => $q->whereRaw("$result = ?", [$is]))->count();
         $replies = Schema::hasTable('chatbot_replies') ? DB::table('chatbot_replies')->where('page_id', $id)->selectRaw('status, COUNT(*) AS n')->groupBy('status')->pluck('n', 'status') : collect();
         $jobs = Schema::hasTable('jobs') ? DB::table('jobs')->where('queue', 'chatbot')->count() : 0;
 
         // Ang oras mula sa pagdating ng chat hanggang sa unang naipadalang sagot nito (ayon sa chat_id).
         $times = [];
         if (Schema::hasTable('chatbot_replies')) {
-            $first = DB::table('chatbot_replies')->where('page_id', $id)->where('status', 'sent')->whereNotNull('chat_id')
-                ->selectRaw('chat_id, MIN(sent_at) AS sent')->groupBy('chat_id')->pluck('sent', 'chat_id');
-            $received = BotcakeChat::whereIn('id', $first->keys()->all())->pluck('received_at', 'id');
-            foreach ($first as $chatId => $sent) {
-                if (isset($received[$chatId]) && $received[$chatId]) $times[] = max(0, \Illuminate\Support\Carbon::parse($sent)->getTimestamp() - $received[$chatId]->getTimestamp());
+            $rows = DB::table('chatbot_replies as r')->join('botcake_chats as c', 'c.id', '=', 'r.chat_id')
+                ->where('r.page_id', $id)->where('r.status', 'sent')->whereNotNull('c.received_at')
+                ->groupBy('r.chat_id', 'c.received_at')->selectRaw('r.chat_id, MIN(r.sent_at) AS sent, c.received_at AS received')->cursor();
+            foreach ($rows as $r) {
+                $times[] = max(0, \Illuminate\Support\Carbon::parse($r->sent)->getTimestamp() - \Illuminate\Support\Carbon::parse($r->received)->getTimestamp());
             }
         }
         sort($times);
@@ -132,8 +161,8 @@ class BotcakeStressPage extends Command
         $line('Flow runs', $events('run_started'));
         $line('Replies sent', (int) ($replies['sent'] ?? 0));
         $line('Replies failed', (int) ($replies['failed'] ?? 0));
-        $line('AI ok', $events('ai', '%"result":"success"%'));
-        $line('AI failed', $events('ai', '%"result":"failed"%'));
+        $line('AI ok', $events('ai', 'success'));
+        $line('AI failed', $events('ai', 'failed'));
         $line('Mock calls', $mock ? implode(', ', array_map(fn ($k, $v) => "{$k} {$v}", array_keys($mock), $mock)) : 'none');
         $line('Jobs waiting (chatbot)', $jobs);
         $line('Chat to first reply', $times ? sprintf('avg %.1f s, p95 %.1f s (%d chats)', array_sum($times) / count($times), $p95, count($times)) : 'no reply yet');
