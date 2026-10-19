@@ -26,6 +26,7 @@
 
 @section('content')
 <div class="cb-page">
+    @include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? []])
 
     @if(session('success'))
         <div class="mb-3 px-4 py-2 rounded bg-green-100 text-green-800 text-sm">{{ session('success') }}</div>
@@ -1232,6 +1233,15 @@
     });
 
     document.getElementById('filter').addEventListener('input', () => render());
+    // Mula sa "Fix" ng listahan ng naharang na page, ?q=pangalan ng page: ang filter, at bukas ang row ng page kapag mayroon na.
+    const fixPage = new URLSearchParams(location.search).get('q');
+    if (fixPage) {
+        document.getElementById('filter').value = fixPage;
+        const hit = [...rows.values()].find(r => r.name.toLowerCase() === fixPage.trim().toLowerCase());
+        if (hit) open.add(hit.key);
+        render();
+        if (hit) table.querySelector(`tr[data-pk="${CSS.escape(hit.key)}"]`)?.scrollIntoView({block: 'center'});
+    }
 
     showSyncAll(initial.sync_all);
 

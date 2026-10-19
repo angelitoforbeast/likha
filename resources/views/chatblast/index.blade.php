@@ -19,6 +19,7 @@
 @endpush
 
 @section('content')
+@include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? []])
 <div id="cb" class="cb-page"
      data-view="{{ $view }}"
      data-list-url="{{ route('chatblast.list') }}"
