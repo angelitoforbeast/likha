@@ -319,6 +319,12 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/inbox/send', [\App\Http\Controllers\ChatbotInboxController::class, 'send'])->middleware('throttle:30,1,chatbot-inbox-send')->name('inbox.send');
     Route::post('/inbox/pause', [\App\Http\Controllers\ChatbotInboxController::class, 'pause'])->middleware('throttle:60,1,chatbot-inbox-pause')->name('inbox.pause');
     Route::post('/inbox/roles', [\App\Http\Controllers\ChatbotInboxController::class, 'roles'])->middleware('throttle:30,1,chatbot-inbox-roles')->name('inbox.roles');
+    Route::post('/inbox/sequence', [\App\Http\Controllers\ChatbotInboxController::class, 'sequence'])->middleware('throttle:60,1,chatbot-inbox-sequence')->name('inbox.sequence');
+    Route::get('/sequences', [\App\Http\Controllers\ChatbotSequenceController::class, 'index'])->name('sequences.index');
+    Route::post('/sequences', [\App\Http\Controllers\ChatbotSequenceController::class, 'store'])->middleware('throttle:30,1,chatbot-sequences')->name('sequences.store');
+    Route::get('/sequences/{id}', [\App\Http\Controllers\ChatbotSequenceController::class, 'edit'])->whereNumber('id')->name('sequences.edit');
+    Route::put('/sequences/{id}', [\App\Http\Controllers\ChatbotSequenceController::class, 'update'])->whereNumber('id')->middleware('throttle:60,1,chatbot-sequences-save')->name('sequences.update');
+    Route::get('/sequences/{id}/subscribers', [\App\Http\Controllers\ChatbotSequenceController::class, 'subscribers'])->whereNumber('id')->middleware('throttle:120,1,chatbot-sequences-subs')->name('sequences.subscribers');
     Route::post('/customer-fields', [\App\Http\Controllers\ChatbotTabsController::class, 'customerFields'])->middleware('throttle:60,1,chatbot-customer-fields')->name('customer-fields');
     Route::get('/replies', [\App\Http\Controllers\ChatbotTabsController::class, 'replies'])->name('replies');
     Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->middleware('throttle:60,1,chatbot-replies')->name('replies.data');

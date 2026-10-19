@@ -168,6 +168,27 @@ class ChatbotInboxController extends Controller
             'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You']]);
     }
 
+    /** Subscribe o unsubscribe ang customer sa isang sequence (ang mga puwedeng sumagot). */
+    public function sequence(Request $request)
+    {
+        $this->checkAccess();
+        if (!$this->canSend()) abort(403);
+        [$pageId, , $psid] = $this->target($request);
+        $action = $this->str($request, 'action', 20);
+        $id = $this->str($request, 'sequence_id', 20);
+        if (!in_array($action, ['subscribe', 'unsubscribe'], true) || !ctype_digit($id) || !\App\Models\ChatbotSequence::whereKey((int) $id)->exists()) {
+            return response()->json(['error' => 'Pick a sequence.'], 422);
+        }
+        $sequences = app(\App\Services\Chatbot\ChatbotSequences::class);
+        if ($action === 'unsubscribe') {
+            $names = $sequences->unsubscribe((int) $id, (int) $pageId, (int) $psid, 'inbox');
+            return response()->json(['result' => $names ? 'unsubscribed' : 'not subscribed']);
+        }
+        $r = $sequences->subscribe((int) $id, (int) $pageId, (int) $psid, 'inbox', Auth::id());
+
+        return response()->json(['result' => $r['result']] + (isset($r['reason']) ? ['error' => 'Not subscribed: ' . $r['reason'] . '.'] : []));
+    }
+
     /** "Bot for this customer": On (walang laman) o Off (__bot_paused = 1). */
     public function pause(Request $request)
     {

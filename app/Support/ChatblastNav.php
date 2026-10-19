@@ -45,7 +45,7 @@ class ChatblastNav
     }
 
     /**
-     * Ang nav ng /chatbot (Flow, Page settings, Chats, Replies, Test) at ang link pabalik sa Chatblast. Access gaya ng
+     * Ang nav ng /chatbot (Flow, Sequences, Page settings, Chats, Inbox, Replies, Test) at ang link pabalik sa Chatblast. Access gaya ng
      * /chatblast.
      * @return array<int, array{label: string, url: string, active: bool}>
      */
@@ -55,6 +55,7 @@ class ChatblastNav
 
         return [
             ['label' => 'Flow', 'url' => '/chatbot', 'active' => request()->is('chatbot', 'chatbot/flows*')],
+            ['label' => 'Sequences', 'url' => '/chatbot/sequences', 'active' => request()->is('chatbot/sequences*')],
             ['label' => 'Page settings', 'url' => '/chatbot/pages', 'active' => request()->is('chatbot/pages*')],
             ['label' => 'Chats', 'url' => '/chatbot/chats', 'active' => request()->is('chatbot/chats*')],
             ['label' => 'Inbox', 'url' => '/chatbot/inbox', 'active' => request()->is('chatbot/inbox*')],

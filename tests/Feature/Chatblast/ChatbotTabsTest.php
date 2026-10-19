@@ -62,7 +62,7 @@ class ChatbotTabsTest extends ChatblastTestCase
 
         $html = $this->get('/chatbot')->assertOk()->getContent();
         preg_match_all('#data-cb-nav="([^"]+)"#', $html, $m);
-        $this->assertSame(['Flow', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test', 'Chatblast'], $m[1]);
+        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test', 'Chatblast'], $m[1]);
         $this->assertStringContainsString('data-cb-nav="Flow" aria-current="page"', preg_replace('/\s+/', ' ', $html));
         $this->assertMatchesRegularExpression('#<a href="[^"]*/chatblast"[^>]*data-cb-nav="Chatblast"#', $html);
 

@@ -6,6 +6,8 @@ use App\Models\BotcakeChat;
 use App\Models\BotcakePsid;
 use App\Models\ChatbotFlow;
 use App\Models\ChatbotReply;
+use App\Models\ChatbotSequence;
+use App\Models\ChatbotSequenceSubscription;
 use App\Models\User;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
@@ -297,7 +299,20 @@ class Inbox
             'runs' => $this->runs($pageId, $psid),
             'errors' => $this->errors($pageId, $psid),
             'media' => $this->media($pageId, $psid),
-        ];
+        ] + $this->sequences($pageId, $psid);
+    }
+
+    /** Ang mga sequence ng customer (index (page_id, psid)) at ang lahat ng sequence para sa Subscribe. */
+    private function sequences(string $pageId, string $psid): array
+    {
+        if (!Schema::hasTable('chatbot_sequence_subscriptions')) return ['sequences' => [], 'all_sequences' => []];
+        $all = ChatbotSequence::orderBy('name')->limit(500)->get(['id', 'name']);
+        $mine = ChatbotSequenceSubscription::with('sequence:id,name')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->limit(100)->get()
+            ->map(fn ($s) => ['id' => (int) $s->sequence_id, 'name' => (string) ($s->sequence?->name ?? '#' . $s->sequence_id), 'status' => $s->status,
+                'step' => (int) $s->current_step, 'next_send' => self::iso($s->next_send_at)])
+            ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)->values()->all();
+
+        return ['sequences' => $mine, 'all_sequences' => $all->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])->all()];
     }
 
     /** Ang huling 20 takbo: oras, flow, ang dinaanan na mga step at ang resulta. */

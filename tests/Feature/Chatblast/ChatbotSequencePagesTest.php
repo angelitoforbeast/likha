@@ -90,6 +90,147 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
         return $e ? ChatbotEvents::text($e->type, $e->node_id, (array) json_decode($e->detail, true)) : '';
     }
 
+    private function navLink(array $roles): void
+    {
+        if (!Schema::hasTable('nav_links')) {
+            Artisan::call('migrate', ['--path' => 'database/migrations/2026_05_18_140000_create_nav_links_and_visibility_tables.php', '--force' => true]);
+        }
+        $id = DB::table('nav_links')->insertGetId(['key' => 'chatblast', 'label' => 'Chatblast', 'route_url' => '/chatblast', 'icon' => 'x', 'active_pattern' => 'chatblast*',
+            'is_active' => true, 'sort_order' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        foreach ($roles as $role) DB::table('nav_link_role_visibility')->insert(['nav_link_id' => $id, 'role' => $role, 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    private function subscriber(ChatbotSequence $seq, int $psid, string $status, int $page = 1001, array $extra = []): void
+    {
+        DB::table('chatbot_sequence_subscriptions')->insert($extra + ['sequence_id' => $seq->id, 'page_id' => $page, 'psid' => $psid, 'status' => $status, 'current_step' => 1,
+            'next_send_at' => $status === 'active' ? now()->addHour() : null, 'enrolled_via' => 'flow', 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    public function test_S_070_1_the_list_shows_steps_enrolled_completed_and_status_behind_chatblast_access(): void
+    {
+        $seq = $this->sequence('Preorder');
+        $seq->steps()->create(['position' => 2, 'delay_amount' => 1, 'delay_unit' => 'days', 'flow_id' => null, 'active' => true]);
+        $this->sequence('Newsletter', ['active' => false]);
+        foreach ([7001, 7002, 7003] as $p) $this->subscriber($seq, $p, 'active');
+        $this->subscriber($seq, 7004, 'completed');
+        $this->subscriber($seq, 7005, 'unsubscribed');
+
+        $routes = [['get', '/chatbot/sequences'], ['post', '/chatbot/sequences'], ['get', '/chatbot/sequences/' . $seq->id], ['put', '/chatbot/sequences/' . $seq->id],
+            ['get', '/chatbot/sequences/' . $seq->id . '/subscribers'], ['post', '/chatbot/inbox/sequence']];
+        foreach ($routes as [$m, $url]) $this->{$m}($url)->assertRedirect('/login');
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        foreach ($routes as [$m, $url]) $this->{$m . 'Json'}($url)->assertForbidden();
+
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/sequences')->assertOk()->getContent();
+        preg_match_all('/data-cb-nav="([^"]+)"/', $html, $m);
+        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test', 'Chatblast'], $m[1]);
+        preg_match_all('/<tr data-sequence="(\d+)">(.*?)<\/tr>/s', $html, $rows);
+        $cells = array_map(fn ($r) => array_map(fn ($c) => trim(strip_tags($c)), preg_split('/<\/td>/', $r)), $rows[2]);
+        $this->assertSame(['Newsletter', '1', '0', '0', 'Paused'], array_slice(array_map(fn ($c) => preg_replace('/\s+/', ' ', $c), $cells[0]), 0, 5));
+        $this->assertSame(['Preorder', '2', '3', '1', 'Active'], array_slice(array_map(fn ($c) => preg_replace('/\s+/', ' ', $c), $cells[1]), 0, 5));
+        $this->assertStringContainsString('+ New sequence', $html);
+
+        $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertRedirect();
+        $new = ChatbotSequence::where('name', 'Follow up')->first();
+        $this->assertSame([true, true, '08:00', '21:00', 'skip'], [$new->active, $new->exit_on_reply, $new->send_from, $new->send_to, $new->outside_window]);
+        $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertSessionHasErrors('name');
+    }
+
+    public function test_S_070_2_the_editor_saves_the_settings_and_the_steps_in_order(): void
+    {
+        $seq = $this->sequence('Preorder');
+        $a = $this->sendFlow('A');
+        $b = $this->sendFlow('B');
+        $this->sequence('Taken');
+        $this->actingAs($this->user());
+        $this->get('/chatbot/sequences/' . $seq->id)->assertOk()->assertSee('Exit when the customer replies')->assertSee('Flow A');
+
+        $body = ['name' => ' Preorder 2 ', 'description' => 'For pre-orders', 'active' => false, 'exit_on_reply' => false, 'send_from' => '09:30', 'send_to' => '20:00',
+            'outside_window' => 'stop', 'steps' => [
+                ['delay_amount' => 10, 'delay_unit' => 'minutes', 'flow_id' => $b->id, 'active' => true],
+                ['delay_amount' => 1, 'delay_unit' => 'days', 'flow_id' => $a->id, 'active' => false],
+            ]];
+        $this->putJson('/chatbot/sequences/' . $seq->id, $body)->assertOk();
+
+        $seq->refresh();
+        $this->assertSame(['Preorder 2', 'For pre-orders', false, false, '09:30', '20:00', 'stop'],
+            [$seq->name, $seq->description, $seq->active, $seq->exit_on_reply, $seq->send_from, $seq->send_to, $seq->outside_window]);
+        $this->assertSame([[1, 10, 'minutes', $b->id, true], [2, 1, 'days', $a->id, false]],
+            $seq->steps->map(fn ($s) => [$s->position, $s->delay_amount, $s->delay_unit, $s->flow_id, $s->active])->all());
+
+        $bad = [
+            ['name' => 'Taken'], ['name' => ''], ['send_from' => '25:00'], ['send_to' => '8am'], ['outside_window' => 'wait'],
+            ['steps' => [['delay_amount' => 1, 'delay_unit' => 'weeks', 'flow_id' => $a->id, 'active' => true]]],
+            ['steps' => [['delay_amount' => -1, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true]]],
+            ['steps' => [['delay_amount' => 1, 'delay_unit' => 'hours', 'flow_id' => 999999, 'active' => true]]],
+            ['steps' => array_fill(0, 51, ['delay_amount' => 1, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true])],
+        ];
+        foreach ($bad as $change) $this->putJson('/chatbot/sequences/' . $seq->id, array_merge($body, $change))->assertStatus(422);
+        $this->assertSame(['Preorder 2', 2], [$seq->fresh()->name, $seq->steps()->count()], 'nothing changed');
+    }
+
+    public function test_S_070_7_the_subscribers_page_filters_by_status_and_page_with_bounded_queries(): void
+    {
+        $this->page('Page Dos', '2002');
+        $seq = $this->sequence('Preorder');
+        $other = $this->sequence('Other');
+        for ($p = 1; $p <= 105; $p++) $this->subscriber($seq, 8000 + $p, 'active');
+        $this->subscriber($seq, 7001, 'unsubscribed', 1001, ['exit_reason' => 'reply', 'last_sent_at' => '2026-10-20 09:00:00', 'current_step' => 2]);
+        $this->subscriber($seq, 7002, 'active', 2002);
+        $this->subscriber($other, 7003, 'active');
+        $this->actingAs($this->user());
+
+        DB::enableQueryLog();
+        $html = $this->get('/chatbot/sequences/' . $seq->id . '/subscribers')->assertOk()->getContent();
+        $queries = array_filter(DB::getQueryLog(), fn ($q) => str_contains($q['query'], 'from "chatbot_sequence_subscriptions"'));
+        foreach ($queries as $q) $this->assertMatchesRegularExpression('/"sequence_id" = \?.*limit \d+/s', $q['query'], $q['query']);
+        $this->assertSame(100, substr_count($html, '<tr data-row='), 'newest 100, then Older');
+        $this->assertStringContainsString('Older', $html);
+        $this->assertStringNotContainsString('PSID …7003', $html);
+
+        $html = $this->get('/chatbot/sequences/' . $seq->id . '/subscribers?status=unsubscribed')->assertOk()->getContent();
+        $this->assertSame(1, substr_count($html, '<tr data-row='));
+        foreach (['PSID …7001', 'Page Uno', 'unsubscribed', 'reply', 'flow', '2026-10-20 09:00'] as $text) $this->assertStringContainsString($text, $html);
+        $html = $this->get('/chatbot/sequences/' . $seq->id . '/subscribers?page_id=2002')->assertOk()->getContent();
+        $this->assertSame(1, substr_count($html, '<tr data-row='));
+        $this->assertStringContainsString('Page Dos', $html);
+        $this->get('/chatbot/sequences/' . $seq->id . '/subscribers?status=nope&page_id=x')->assertOk();
+    }
+
+    public function test_S_070_3b_the_inbox_lists_the_customers_sequences_and_allowed_users_subscribe_and_unsubscribe(): void
+    {
+        $seq = $this->sequence('Preorder');
+        $done = $this->sequence('Old promo');
+        $this->subscriber($done, 7001, 'completed');
+        BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '7001', 'name' => 'Ana Cruz', 'message' => 'Hi', 'payload' => [], 'received_at' => now()]);
+        $ceo = $this->user();
+        $this->actingAs($ceo);
+
+        $p = $this->getJson('/chatbot/inbox/panel?page_id=1001&psid=7001')->assertOk()->json();
+        $this->assertSame([['id' => $done->id, 'name' => 'Old promo', 'status' => 'completed', 'step' => 1, 'next_send' => null]], $p['sequences']);
+        $this->assertSame([['id' => $done->id, 'name' => 'Old promo'], ['id' => $seq->id, 'name' => 'Preorder']], $p['all_sequences']);
+
+        $this->postJson('/chatbot/inbox/sequence', ['page_id' => '1001', 'psid' => '7001', 'sequence_id' => $seq->id, 'action' => 'subscribe'])->assertOk()
+            ->assertJson(['result' => 'subscribed']);
+        $row = $this->sub($seq);
+        $this->assertSame(['active', 'inbox', $ceo->id, '2026-10-20 12:00'], [$row->status, $row->enrolled_via, (int) $row->enrolled_by, substr($row->next_send_at, 0, 16)]);
+        $this->assertSame('Subscribed to sequence Preorder', $this->lastSequenceEvent());
+        $this->assertSame('2026-10-20T12:00:00+08:00', collect($this->getJson('/chatbot/inbox/panel?page_id=1001&psid=7001')->json('sequences'))->firstWhere('id', $seq->id)['next_send']);
+
+        $this->postJson('/chatbot/inbox/sequence', ['page_id' => '1001', 'psid' => '7001', 'sequence_id' => $seq->id, 'action' => 'unsubscribe'])->assertOk();
+        $this->assertSame(['unsubscribed', 'inbox'], [$this->sub($seq)->status, $this->sub($seq)->exit_reason]);
+        $this->postJson('/chatbot/inbox/sequence', ['page_id' => '1001', 'psid' => '7001', 'sequence_id' => 999, 'action' => 'subscribe'])->assertStatus(422);
+        $this->postJson('/chatbot/inbox/sequence', ['page_id' => '1001', 'psid' => '7001', 'sequence_id' => $seq->id, 'action' => 'wipe'])->assertStatus(422);
+
+        // Ang may Chatblast access na hindi kasama sa mga sumasagot: nakikita, hindi nakakapagbago.
+        $this->navLink(['Marketing']);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->assertCount(2, $this->getJson('/chatbot/inbox/panel?page_id=1001&psid=7001')->assertOk()->json('sequences'));
+        $this->postJson('/chatbot/inbox/sequence', ['page_id' => '1001', 'psid' => '7001', 'sequence_id' => $seq->id, 'action' => 'subscribe'])->assertForbidden();
+        $this->assertSame('unsubscribed', $this->sub($seq)->status);
+    }
+
     public function test_S_070_3a_a_sequence_step_in_a_flow_subscribes_and_unsubscribes(): void
     {
         $seq = $this->sequence('Preorder');

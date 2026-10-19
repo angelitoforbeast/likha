@@ -33,7 +33,7 @@
     <p class="cb-card px-4 py-3 text-sm text-slate-600">No page has a Botcake ID yet. Add one in <a href="{{ url('/chatblast/page-settings') }}" class="text-blue-700 hover:underline">Page settings</a>.</p>
 @else
 <div id="ib" data-list-url="{{ route('chatbot.inbox.conversations') }}" data-thread-url="{{ route('chatbot.inbox.thread') }}" data-panel-url="{{ route('chatbot.inbox.panel') }}"
-     data-send-url="{{ route('chatbot.inbox.send') }}" data-pause-url="{{ route('chatbot.inbox.pause') }}" data-roles-url="{{ route('chatbot.inbox.roles') }}"
+     data-send-url="{{ route('chatbot.inbox.send') }}" data-pause-url="{{ route('chatbot.inbox.pause') }}" data-roles-url="{{ route('chatbot.inbox.roles') }}" data-sequence-url="{{ route('chatbot.inbox.sequence') }}"
      data-fields-url="{{ route('chatbot.customer-fields') }}" data-pages-url="{{ route('chatbot.pages.index') }}"
      data-can-send="{{ $canSend ? '1' : '0' }}" data-user="{{ auth()->user()?->name ?: 'You' }}">
 
@@ -334,6 +334,35 @@
     setInterval(() => { poll(); if (!document.hidden) loadList(); }, POLL);
 
     // ---- Panel ----
+    // Ang mga sequence ng customer; ang puwedeng sumagot ay nakakapag-subscribe at unsubscribe.
+    function sequencesBox(p) {
+        const STATUS = {active: 'bg-green-100 text-green-800', paused: 'bg-amber-100 text-amber-900', completed: 'bg-blue-100 text-blue-800', unsubscribed: 'bg-slate-200 text-slate-700', error: 'bg-red-100 text-red-800'};
+        const note = el('p', {class: 'mt-1 min-h-[1rem] text-xs', 'aria-live': 'polite'});
+        const act = async (action, id) => {
+            const res = await postJson(D.sequenceUrl, {page_id: S.page, psid: p.psid, sequence_id: id, action});
+            if (!res.ok || res.data.error) { note.className = 'mt-1 min-h-[1rem] text-xs text-red-700'; note.textContent = errText(res, 'Not saved.') || res.data.error; return; }
+            loadPanel(threadSeq);
+        };
+        const rows = (p.sequences || []).map(s => el('li', {class: 'flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-xs'}, [
+            el('span', {class: 'min-w-0 flex-1 break-words font-medium', text: s.name}),
+            el('span', {class: 'rounded-full px-1.5 py-0.5 ' + (STATUS[s.status] || ''), text: s.status}),
+            el('span', {class: 'w-full text-slate-500', text: s.status === 'active' || s.status === 'paused'
+                ? 'Step ' + s.step + (s.next_send ? ' · next ' + new Date(s.next_send).toLocaleString('en-US', {timeZone: 'Asia/Manila', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}) : '') : ''}),
+            p.can_send && (s.status === 'active' || s.status === 'paused') ? (() => { const b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Unsubscribe'});
+                b.addEventListener('click', () => { if (confirm('Unsubscribe from ' + s.name + '?')) act('unsubscribe', s.id); }); return b; })() : null,
+        ]));
+        const out = [rows.length ? el('ul', {class: 'divide-y divide-slate-100'}, rows) : el('p', {class: 'text-xs text-slate-500', text: 'Not in any sequence.'})];
+        if (p.can_send && (p.all_sequences || []).length) {
+            const pick = el('select', {class: 'min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs', 'aria-label': 'Sequence to subscribe to'},
+                p.all_sequences.map(s => el('option', {value: s.id, text: s.name})));
+            const go = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Subscribe'});
+            go.addEventListener('click', () => act('subscribe', parseInt(pick.value, 10)));
+            out.push(el('div', {class: 'mt-2 flex items-center gap-2'}, [pick, go]));
+        }
+        out.push(note);
+        return out;
+    }
+
     function section(title, children, open = true) {
         return el('details', {class: 'border-t border-slate-100 py-2', open}, [el('summary', {class: 'cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500', text: title}), el('div', {class: 'mt-1.5'}, children)]);
     }
@@ -385,6 +414,8 @@
             el('span', {class: 'line-clamp-3 whitespace-pre-line break-words', text: b.value})]));
         bf.push(el('a', {href: D.pagesUrl, class: 'mt-1 inline-block text-xs text-blue-700 hover:underline', text: 'Edit in Page settings'}));
         body.push(section('Page botfields', bf, false));
+
+        body.push(section('Subscribed sequences', sequencesBox(p)));
 
         body.push(section('Flow', p.flow ? el('a', {href: p.flow.url, class: 'text-blue-700 hover:underline', text: p.flow.name + ' (open in editor)'}) : el('p', {class: 'text-xs text-slate-500', text: 'No flow on this page.'})));
 
