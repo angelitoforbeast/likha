@@ -144,6 +144,8 @@ class ChatbotInboxController extends Controller
         if ($text !== '') $messages[] = ['type' => 'text', 'text' => $text];
         if ($image !== '') $messages[] = ['type' => 'image', 'url' => $image];
 
+        // Pause muna bago ipadala: ang chat na dumating habang naghihintay sa Botcake ay hindi na sasagutin ng bot.
+        if ($request->boolean('pause')) (new CustomerFields((int) $pageId, (int) $psid))->set(CustomerFields::BOT_PAUSED, '1');
         $token = trim((string) $this->settings->get($page, 'botcake', 'token'));
         $status = 'failed';
         $error = 'The page has no Botcake token.';
@@ -161,7 +163,6 @@ class ChatbotInboxController extends Controller
         }
         $reply = ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
             'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]);
-        if ($request->boolean('pause')) (new CustomerFields((int) $pageId, (int) $psid))->set(CustomerFields::BOT_PAUSED, '1');
 
         return response()->json(['item' => ['key' => 'out-' . $reply->id, 'id' => $reply->id, 'side' => 'out', 'at' => Inbox::iso($reply->sent_at),
             'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You']]);

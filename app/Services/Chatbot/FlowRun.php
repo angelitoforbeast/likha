@@ -24,7 +24,8 @@ class FlowRun
     public function event(string $type, ?string $node = null, array $detail = []): void
     {
         $detail = array_map(fn ($v) => is_string($v) ? mb_substr($v, 0, 200) : $v, $detail);
-        $this->events[] = ['type' => $type, 'node' => $node, 'detail' => $detail + ['run' => $this->runId ??= bin2hex(random_bytes(4))]];
+        // Ang oras ng bawat event ay ang oras nito sa takbo (hindi ang oras ng insert), para nasa tamang puwesto sa usapan.
+        $this->events[] = ['type' => $type, 'node' => $node, 'detail' => $detail + ['run' => $this->runId ??= bin2hex(random_bytes(4))], 'at' => now()];
     }
 
     public function __construct(

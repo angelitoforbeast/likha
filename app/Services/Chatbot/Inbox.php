@@ -49,11 +49,21 @@ class Inbox
         return Schema::hasTable('chatbot_events');
     }
 
-    /** @return array<int, string> ang mga customer ng page na naka-pause ang bot (tao ang sumasagot) */
-    public function pausedPsids(string $pageId): array
+    /**
+     * Alin sa mga customer na ito ang naka-pause ang bot (tao ang sumasagot). Ayon sa psid lang (index (page_id, psid,
+     * key)), hindi lahat ng customer ng page.
+     * @param array<int, string> $psids
+     * @return array<int, string>
+     */
+    public function pausedPsids(string $pageId, array $psids): array
     {
-        return DB::table('chatbot_customer_values')->where('page_id', (int) $pageId)->where('key', CustomerFields::BOT_PAUSED)->where('value', '1')
-            ->limit(5000)->pluck('psid')->map(fn ($p) => (string) $p)->all();
+        $paused = [];
+        foreach (array_chunk(array_values(array_filter($psids, 'ctype_digit')), 500) as $chunk) {
+            $paused = array_merge($paused, DB::table('chatbot_customer_values')->where('page_id', (int) $pageId)->whereIn('psid', array_map('intval', $chunk))
+                ->where('key', CustomerFields::BOT_PAUSED)->where('value', '1')->pluck('psid')->map(fn ($p) => (string) $p)->all());
+        }
+
+        return $paused;
     }
 
     /**
@@ -76,9 +86,10 @@ class Inbox
         // May hanap: ang mga customer na tugma sa papasok lang (ang pangalan ay nasa botcake_chats).
         if ($q !== '') $out = $out->only($in->keys()->all());
 
-        $paused = array_flip($this->pausedPsids($pageId));
+        $all = $in->keys()->merge($out->keys())->unique();
+        $paused = array_flip($this->pausedPsids($pageId, $all->map(fn ($p) => (string) $p)->all()));
         $rows = [];
-        foreach ($in->keys()->merge($out->keys())->unique() as $psid) {
+        foreach ($all as $psid) {
             $human = isset($paused[(string) $psid]);
             if (($tab === 'human' && !$human) || ($tab === 'bot' && $human)) continue;
             $rows[$psid] = ['in' => $in[$psid] ?? null, 'out' => $out[$psid] ?? null, 'human' => $human];
@@ -167,10 +178,13 @@ class Inbox
 
         return [
             'items' => array_map([self::class, 'strip'], $items),
-            // Ang mas luma: mula sa pinakalumang naipakita ng bawat table (o ang dating cursor kapag walang naipakita).
-            'older' => ['in' => $shownIn ? min(array_column($shownIn, 'id')) : (int) ($before['in'] ?? 0), 'out' => $shownOut ? min(array_column($shownOut, 'id')) : (int) ($before['out'] ?? 0),
+            // Ang mas luma: mula sa pinakalumang naipakita ng bawat table. Kapag walang naipakita ang isang table, ang lahat ng
+        // nakuha rito ay mas luma pa, kaya kasama sila sa susunod (pinakamalaking id + 1); kung wala, ang dating cursor.
+            'older' => ['in' => $shownIn ? min(array_column($shownIn, 'id')) : ($in->isNotEmpty() ? (int) $in->max('id') + 1 : (int) ($before['in'] ?? 0)),
+                'out' => $shownOut ? min(array_column($shownOut, 'id')) : ($out->isNotEmpty() ? (int) $out->max('id') + 1 : (int) ($before['out'] ?? 0)),
                 'at' => $oldestAt ? Carbon::parse($oldestAt)->toIso8601String() : ($before['at'] ?? null)],
-            'newer' => $before ? null : ['in' => (int) ($in->max('id') ?? 0), 'out' => (int) ($out->max('id') ?? 0), 'ev' => (int) ($ev->max('id') ?? 0)],
+            // Ang polling ng event ay mula sa pinakabagong event ng customer, hindi sa naipakita (para hindi bumalik ang mga luma).
+            'newer' => $before ? null : ['in' => (int) ($in->max('id') ?? 0), 'out' => (int) ($out->max('id') ?? 0), 'ev' => $events ? (int) ($evQ()->max('id') ?? 0) : 0],
             'has_older' => $hasOlder,
         ];
     }

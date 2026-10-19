@@ -91,6 +91,7 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
         $reply = ChatbotReply::sole();
         $this->assertSame(['manual', 'sent', $ceo->id, 1001, 7001], [$reply->kind, $reply->status, $reply->user_id, $reply->page_id, $reply->psid]);
         $this->assertSame(['out', 'CEO User', 'sent'], [$res['item']['side'], $res['item']['by'], $res['item']['status']]);
+        $this->assertStringNotContainsString(self::TOKEN, json_encode($res));
         $thread = $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001')->json('items');
         $this->assertSame('CEO User', last($thread)['by']);
         $row = $this->getJson('/chatbot/replies/data?date=2026-10-19')->assertOk()->json('rows.0');
@@ -129,7 +130,11 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
         $this->postJson('/chatbot/inbox/pause', ['page_id' => '1001', 'psid' => '7001', 'paused' => true])->assertForbidden();
 
         $this->actingAs($this->user());
-        $this->postJson('/chatbot/inbox/roles', ['roles' => ['Marketing', ' ', 'Marketing']])->assertOk()->assertJson(['roles' => ['CEO', 'Marketing']]);
+        $this->postJson('/chatbot/inbox/roles', ['roles' => ['Marketing', ' ', 'Marketing', 'Data Encoder']])->assertOk()->assertJson(['roles' => ['CEO', 'Marketing', 'Data Encoder']]);
+        // Nasa reply_roles pero walang Chatblast access: 403 pa rin.
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->postJson('/chatbot/inbox/send', ['page_id' => '1001', 'psid' => '7001', 'text' => 'Hi'])->assertForbidden();
+        $this->postJson('/chatbot/inbox/pause', ['page_id' => '1001', 'psid' => '7001', 'paused' => true])->assertForbidden();
 
         $this->travel(61)->seconds(); // bagong minuto: ang 403 kanina ay bilang din sa throttle
         $this->actingAs($mkt);
@@ -141,12 +146,17 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
 
     public function test_S_074_R4_a_paused_customer_gets_no_bot_runs_until_unpaused(): void
     {
-        Http::fake([self::SEND => Http::response(['success' => true]), 'api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'AI answer']]]])]);
+        $pausedAtSend = [];
+        Http::fake([self::SEND => function () use (&$pausedAtSend) {
+            $pausedAtSend[] = (new CustomerFields(1001, 7001))->get(CustomerFields::BOT_PAUSED);
+            return Http::response(['success' => true]);
+        }, 'api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'AI answer']]]])]);
         $this->cbbFlow();
         app(ChatbotRunner::class)->handle($this->in('7001', 'hello', '2026-10-19 11:00:00')->id); // may marker na
         $this->actingAs($this->user());
 
         $this->postJson('/chatbot/inbox/send', ['page_id' => '1001', 'psid' => '7001', 'text' => 'A human here', 'pause' => true])->assertOk();
+        $this->assertSame('1', end($pausedAtSend), 'naka-pause na bago ipadala, para walang takbo ng bot habang naghihintay sa Botcake');
         $this->assertTrue($this->getJson('/chatbot/inbox/panel?page_id=1001&psid=7001')->json('bot_paused'));
         $sent = ChatbotReply::count();
 
@@ -166,9 +176,16 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
 
     public function test_S_074_E1_a_run_writes_its_events_in_one_insert_without_the_prompt(): void
     {
-        Http::fake([self::SEND => Http::response(['success' => true]), 'api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'It is 499.']]]])]);
+        // Ang AI ay 3 segundo at ang sheet ay 2 segundo pa: ang bawat event ay may sariling oras sa usapan.
+        Http::fake([self::SEND => Http::response(['success' => true]), 'api.openai.com/*' => function () {
+            $this->travel(3)->seconds();
+            return Http::response(['choices' => [['message' => ['content' => 'It is 499.']]]]);
+        }]);
         $this->cbbFlow();
-        $chat = $this->in('7001', 'what is the price', '2026-10-19 11:50:00');
+        $this->app->instance(\App\Services\Chatbot\ChatbotSheet::class, new class extends \App\Services\Chatbot\ChatbotSheet {
+            public function append(string $spreadsheetId, string $tab, array $row): void { \Illuminate\Support\Carbon::setTestNow(now()->addSeconds(2)); }
+        });
+        $chat = $this->in('7001', 'what is the price ' . str_repeat('x', 300), '2026-10-19 11:50:00');
 
         DB::enableQueryLog();
         app(ChatbotRunner::class)->handle($chat->id);
@@ -180,6 +197,7 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
         $this->assertSame([null, 'n2', 'n2', 'n3', 'n4', 'n5', 'n6', null], $events->pluck('node_id')->all());
         $this->assertStringNotContainsString('SECRET PROMPT', $events->pluck('detail')->implode(' '));
         $this->assertSame(1, $events->pluck('detail')->map(fn ($d) => json_decode($d, true)['run'] ?? null)->unique()->count());
+        $this->assertSame(200, $events->pluck('detail')->flatMap(fn ($d) => array_map(fn ($v) => is_string($v) ? mb_strlen($v) : 0, json_decode($d, true)))->max(), 'ang value ay hanggang 200 character');
 
         $this->actingAs($this->user());
         $lines = collect($this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001&events=1')->assertOk()->json('items'));
@@ -187,7 +205,8 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
             'Flow Main COD started (new)', 'Custom field value changed — CHAT STATUS was set to LOOP 1', 'Custom field value changed — ALL USER INPUT appended',
             'Condition n3 → row 1', 'AI step n4 → success (saved to GPT INPUT)', 'Sheet row n5 → written', 'Waiting for reply at step n6', 'Run ended (waiting for a reply)',
         ], $lines->where('side', 'event')->pluck('text')->values()->all());
-        $this->assertSame(['in', 'event', 'event', 'event', 'event', 'event', 'event', 'event', 'event'], $lines->take(9)->pluck('side')->all(), 'ang mga event ay pagkatapos ng chat');
+        $this->assertSame(['in', 'run_started', 'field', 'field', 'condition', 'ai', 'out: It is 499.', 'sheet', 'waiting', 'run_ended', 'system', 'out: Anything else?'],
+            $lines->map(fn ($x) => $x['side'] === 'event' ? $x['type'] : ($x['side'] === 'out' ? 'out: ' . $x['messages'][0]['text'] : $x['side']))->all(), 'ang mga event ay nasa oras nila, sa pagitan ng mga bubble');
         $this->assertSame([], collect($this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001')->json('items'))->where('side', 'event')->all());
     }
 
@@ -231,5 +250,11 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
         }
         Artisan::call('botcake:prune-chats');
         $this->assertSame([now()->subDays(29)->format('Y-m-d H:i:s')], DB::table('chatbot_events')->pluck('created_at')->map(fn ($t) => (string) $t)->all());
+
+        // Ang event na mas luma sa 50 na naipakita ay hindi rin lumalabas sa polling.
+        for ($i = 0; $i < 51; $i++) $this->in('7001', 'm' . $i, now()->subMinutes(100 - $i)->format('Y-m-d H:i:s'));
+        $first = $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001&events=1')->assertOk()->json();
+        $this->assertSame([], collect($first['items'])->where('side', 'event')->values()->all());
+        $this->assertSame([], $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001&events=1&' . http_build_query(['after' => $first['newer']]))->json('items'));
     }
 }

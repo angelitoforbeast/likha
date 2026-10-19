@@ -19,7 +19,7 @@
         #ib-grid[data-view="thread"] > section:not(#ib-thread),
         #ib-grid[data-view="panel"] > section:not(#ib-panel) { display: none; }
     }
-    @media (min-width: 1024px) { .ib-back { display: none; } }
+    @media (min-width: 1024px) { #ib .ib-back { display: none; } }
     .ib-bubble { max-width: min(36rem, 85%); }
     .ib-bubble .ib-time { display: none; }
     .ib-bubble:hover .ib-time, .ib-bubble.ib-show-time .ib-time, .ib-bubble:focus-within .ib-time { display: block; }
@@ -239,8 +239,8 @@
             time]);
     }
     function imageLink(url) {
-        const a = el('a', {href: url, target: '_blank', rel: 'noopener noreferrer', class: 'block'}, el('img', {src: url, alt: 'Image', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'max-h-48 max-w-[14rem] rounded-xl border border-slate-200 object-cover'}));
-        return a;
+        return el('a', {href: url, target: '_blank', rel: 'noopener noreferrer', class: 'block'},
+            el('img', {src: url, alt: 'Image', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'max-h-48 max-w-[14rem] rounded-xl border border-slate-200 object-cover'}));
     }
     function daySep(iso) { return el('li', {class: 'py-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400', 'data-day': ymd(new Date(iso)), text: dayLabel(iso)}); }
 
@@ -267,9 +267,18 @@
         return nodes.length;
     }
     const nearBottom = () => { const s = $('ib-scroll'); return s.scrollHeight - s.scrollTop - s.clientHeight < 80; };
-    const toBottom = () => { const s = $('ib-scroll'); s.scrollTop = s.scrollHeight; $('ib-pill').classList.add('hidden'); };
+    const pinBottom = () => { const s = $('ib-scroll'); s.scrollTop = s.scrollHeight; S.pinTop = s.scrollTop; };
+    const toBottom = () => { pinBottom(); S.stick = true; $('ib-pill').classList.add('hidden'); };
     $('ib-pill').addEventListener('click', toBottom);
-    $('ib-scroll').addEventListener('scroll', () => { if (nearBottom()) $('ib-pill').classList.add('hidden'); });
+    $('ib-scroll').addEventListener('scroll', () => {
+        // Ang scroll na galing sa pinBottom ay hindi galaw ng tao: hindi nito binabago ang "nasa ibaba".
+        if (S.stick && Math.abs($('ib-scroll').scrollTop - S.pinTop) < 2) return;
+        S.stick = nearBottom();
+        if (S.stick) { S.pinTop = $('ib-scroll').scrollTop; $('ib-pill').classList.add('hidden'); }
+    });
+    // Nagbabago ang taas (larawang na-load, lumitaw ang reply box): manatili sa ibaba kung doon nakatingin.
+    const pin = new ResizeObserver(() => { if (S.stick) pinBottom(); });
+    pin.observe($('ib-scroll')); pin.observe($('ib-items'));
     $('ib-items').addEventListener('click', e => { const b = e.target.closest('.ib-bubble'); if (b && !e.target.closest('a')) b.classList.toggle('ib-show-time'); });
 
     const eventsOn = () => $('ib-events').checked;
@@ -280,6 +289,7 @@
         $('ib-who').textContent = name; $('ib-who-sub').textContent = 'PSID ' + psid;
         $('ib-items').replaceChildren(); $('ib-older').classList.add('hidden'); $('ib-to-panel').disabled = false;
         $('ib-text').value = ''; $('ib-image').value = ''; preview(); $('ib-send-note').textContent = '';
+        $('ib-image-row').classList.add('hidden'); $('ib-image-row').classList.remove('flex'); $('ib-attach').setAttribute('aria-expanded', 'false');
         show('thread');
         loadList();
         try {

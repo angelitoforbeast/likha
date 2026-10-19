@@ -30,7 +30,7 @@ class ChatbotEvents
         $now = now();
         self::insert(array_map(fn ($e) => [
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'node_id' => $e['node'],
-            'type' => $e['type'], 'detail' => json_encode($e['detail'], JSON_UNESCAPED_UNICODE), 'created_at' => $now,
+            'type' => $e['type'], 'detail' => json_encode($e['detail'], JSON_UNESCAPED_UNICODE), 'created_at' => $e['at'] ?? $now,
         ], $run->events));
     }
 

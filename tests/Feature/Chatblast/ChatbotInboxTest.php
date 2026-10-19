@@ -135,6 +135,15 @@ class ChatbotInboxTest extends ChatblastTestCase
         $this->assertSame(['in', 'out'], array_column($new['items'], 'side'));
         $again = $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001&' . http_build_query(['after' => $new['newer']]))->assertOk()->json();
         $this->assertSame([], $again['items']);
+
+        // Isang table na walang naipakita sa unang 50 (hal. 55 chat pagkatapos ng huling sagot): kasama pa rin sa "Load older".
+        foreach ([1, 2, 3] as $i) $this->out('7002', [['type' => 'text', 'text' => 'old reply ' . $i]], now()->subMinutes(300 - $i)->format('Y-m-d H:i:s'));
+        for ($i = 0; $i < 55; $i++) $this->in('7002', 'later ' . $i, now()->subMinutes(200 - $i)->format('Y-m-d H:i:s'));
+        $first = $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7002')->assertOk()->json();
+        $this->assertSame(['in'], array_values(array_unique(array_column($first['items'], 'side'))));
+        $older = $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7002&' . http_build_query(['before' => $first['older']]))->assertOk()->json();
+        $this->assertSame(['old reply 1', 'old reply 2', 'old reply 3', 'later 0', 'later 1', 'later 2', 'later 3', 'later 4'],
+            array_map(fn ($x) => $x['text'] ?? $x['messages'][0]['text'], $older['items']));
     }
 
     public function test_S_074_4_the_panel_shows_the_customer_fields_the_wait_and_the_page(): void
@@ -198,6 +207,7 @@ class ChatbotInboxTest extends ChatblastTestCase
         DB::enableQueryLog();
         $this->getJson('/chatbot/inbox/conversations?page_id=1001&q=ana')->assertOk();
         $list = $this->tableQueries();
+        $paused = array_filter(DB::getQueryLog(), fn ($q) => str_contains($q['query'], 'from "chatbot_customer_values"'));
         DB::flushQueryLog();
         $this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001')->assertOk();
         $thread = $this->tableQueries();
@@ -208,6 +218,8 @@ class ChatbotInboxTest extends ChatblastTestCase
             $this->assertMatchesRegularExpression('/"(received_at|sent_at)" >= \?|"id" in \(/', $q['query'], 'bounded by time or by ids: ' . $q['query']);
             $this->assertMatchesRegularExpression('/limit \d+|"id" in \(/', $q['query'], $q['query']);
         }
+        $this->assertNotEmpty($paused);
+        foreach ($paused as $q) $this->assertMatchesRegularExpression('/"page_id" = \? and "psid" in \(/', $q['query'], 'the pause lookup names the listed customers: ' . $q['query']);
         $this->assertNotEmpty($thread);
         foreach ($thread as $q) $this->assertMatchesRegularExpression('/"page_id" = \? and "psid" = \?.*limit \d+/', $q['query'], $q['query']);
 
