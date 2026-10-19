@@ -102,6 +102,10 @@ class BotcakeMockTest extends ChatblastTestCase
         // The page can't set the flag itself.
         $this->actingAs($this->user());
         $this->postJson('/chatblast/page-settings/cell', ['page_name' => self::PAGE, 'provider' => 'botcake', 'key' => 'mock', 'value' => '1'])->assertStatus(422);
+        // Nor remove it (that would lock the stress page out of its own cleanup).
+        $flag = PageSetting::where('page_name', 'Page Uno')->where('key', 'mock')->where('active', true)->first();
+        $this->post('/chatblast/page-settings/' . $flag->id . '/deactivate')->assertSessionHasErrors('value');
+        $this->assertTrue($flag->fresh()->active);
     }
 
     public function test_S_086_3_the_latency_setting_is_applied_and_capped(): void

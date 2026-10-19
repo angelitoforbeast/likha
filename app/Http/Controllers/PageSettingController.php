@@ -427,8 +427,8 @@ class PageSettingController extends Controller
         if ($setting->fullKey() === 'chatbot.active') {
             return redirect()->route('page-settings.index')->withErrors(['value' => 'chatbot.active is changed with the On/Off switch on /chatbot.']);
         }
-        if (in_array($setting->fullKey(), PageSettingsGrid::CHECK_CELLS, true)) {
-            return redirect()->route('page-settings.index')->withErrors(['value' => $setting->fullKey() . ' is written by the setup check.']);
+        if (in_array($setting->fullKey(), [...PageSettingsGrid::CHECK_CELLS, 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate'], true)) {
+            return redirect()->route('page-settings.index')->withErrors(['value' => $setting->fullKey() . ' is written by the system, not here.']);
         }
         $this->settings->deactivate($setting, Auth::id());
 

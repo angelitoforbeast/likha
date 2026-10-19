@@ -81,7 +81,7 @@ class BotcakeStressPage extends Command
         // Sarado muna ang file (600), saka ang key: hindi ito nababasa ng iba kahit sandali.
         if (@file_put_contents($file, '') === false) { $this->error('Could not write the key file.'); return self::FAILURE; }
         @chmod($file, 0600);
-        file_put_contents($file, $key . "\n");
+        if (@file_put_contents($file, $key . "\n") === false) { $this->error('Could not write the key file.'); return self::FAILURE; }
 
         $settings->set($page, 'botcake', 'page_id', $pageId);
         $settings->set($page, 'botcake', 'token', 'mock');
