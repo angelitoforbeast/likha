@@ -27,7 +27,7 @@ class FlowGraph
     public const MAX_COLUMNS = 50;   // Google Sheet
     public const MAX_TEXT = 2000;    // isang text, value o template
     public const MAX_PROMPT = 10000;
-    public const MAX_HISTORY = 20;
+    public const MAX_HISTORY = 100;
     public const MAX_SKIP_MINUTES = 23 * 60; // ang padala pagkatapos ng skip ay dapat nasa 24 oras ng Messenger pa
 
     /** Ang mga port na palabas ng node, ayon sa uri at config. */
@@ -126,7 +126,8 @@ class FlowGraph
                 'model' => preg_match('/^[a-z0-9][a-z0-9.\-:]{0,60}$/i', (string) ($c['model'] ?? '')) ? (string) $c['model'] : 'gpt-4o-mini',
                 'system' => $text($c['system'] ?? '', self::MAX_PROMPT),
                 'user' => $text(($c['user'] ?? '') !== '' ? $c['user'] : '{{last_input}}', self::MAX_PROMPT),
-                'history' => max(0, min(self::MAX_HISTORY, (int) ($c['history'] ?? 0))),
+                // Ang bagong step (walang key) ay 100; ang 0 at ang naka-save na value ay hindi ginagalaw.
+                'history' => max(0, min(self::MAX_HISTORY, (int) (array_key_exists('history', $c) ? $c['history'] : self::MAX_HISTORY))),
                 'max_tokens' => max(1, min(4000, (int) ($c['max_tokens'] ?? 250) ?: 250)),
                 'save_to' => $field($c['save_to'] ?? ''),
                 'send' => !empty($c['send']),

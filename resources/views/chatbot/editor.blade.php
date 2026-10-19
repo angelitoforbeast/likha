@@ -333,7 +333,7 @@
     // ---- add a step ----
     const DEFAULTS = {
         condition: {rows: [{variable: 'last_input', rule: 'contains', value: ''}]}, send: {items: [{type: 'text', value: ''}], wait: false, save_to: ''},
-        set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 0, max_tokens: 250, save_to: '', send: false},
+        set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 100, max_tokens: 250, save_to: '', send: false},
         sheet: {sheet: '', tab: '', columns: []}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
@@ -416,7 +416,7 @@
             body.append(label('System prompt (e.g. ' + OPEN + 'Prompt 1' + CLOSE + ')', bind(input({tag: 'textarea', rows: 4, maxlength: 10000}, c.system), v => c.system = v)));
             body.append(label('User message', bind(input({tag: 'textarea', rows: 2, maxlength: 10000}, c.user || OPEN + 'last_input' + CLOSE), v => c.user = v)));
             body.append(el('div', {class: 'grid gap-2 sm:grid-cols-3'}, [
-                label('Remember the last N messages (0 = off)', bind(input({type: 'number', min: 0, max: 20}, c.history ?? 0), v => c.history = parseInt(v, 10) || 0)),
+                label('Remember the last N messages of this customer on this page (0 = off, max 100)', bind(input({type: 'number', min: 0, max: 100}, c.history ?? 0), v => c.history = parseInt(v, 10) || 0)),
                 label('Max tokens', bind(input({type: 'number', min: 1, max: 4000}, c.max_tokens ?? 250), v => c.max_tokens = parseInt(v, 10) || 250)),
                 label('Save the answer into', bind(input({list: listId, maxlength: 100, placeholder: 'e.g. GPT INPUT'}, c.save_to), v => c.save_to = v)),
             ]));

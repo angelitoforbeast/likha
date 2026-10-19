@@ -175,8 +175,8 @@ class ChatbotHardeningTest extends ChatblastTestCase
         $this->assertCount(20, FlowGraph::cleanConfig('condition', ['rows' => array_fill(0, 30, ['variable' => 'x'])])['rows']);
         $this->assertCount(20, FlowGraph::cleanConfig('set', ['ops' => array_fill(0, 30, ['op' => 'set'])])['ops']);
         $this->assertCount(50, FlowGraph::cleanConfig('sheet', ['columns' => implode("\n", range(1, 60))])['columns']);
-        $ai = FlowGraph::cleanConfig('ai', ['system' => str_repeat('s', 12000), 'max_tokens' => 99999, 'history' => 99, 'model' => 'gpt-4o; rm -rf']);
-        $this->assertSame([10000, 4000, 20, 'gpt-4o-mini'], [mb_strlen($ai['system']), $ai['max_tokens'], $ai['history'], $ai['model']]);
+        $ai = FlowGraph::cleanConfig('ai', ['system' => str_repeat('s', 12000), 'max_tokens' => 99999, 'history' => 150, 'model' => 'gpt-4o; rm -rf']);
+        $this->assertSame([10000, 4000, 100, 'gpt-4o-mini'], [mb_strlen($ai['system']), $ai['max_tokens'], $ai['history'], $ai['model']]);
         $fields = new CustomerFields(1001, 7001);
         $fields->set('long', str_repeat('é', 20000));
         $this->assertSame(16000, mb_strlen((new CustomerFields(1001, 7001))->get('long')));
