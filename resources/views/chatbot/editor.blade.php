@@ -4,7 +4,7 @@
 @section('heading', $flow->name)
 
 @section('description')
-    Drag from a port (the dot on the right of a step) to another step to wire them. Click a step to edit it. Changes save by themselves.
+    Drag from a port (the dot on the right of a step) to another step to wire them. Click a step to edit it. Changes save to a draft by themselves; customers get them only after you press Publish.
 @endsection
 
 @section('actions')
@@ -35,7 +35,29 @@
 @section('content')
 @include('chatbot.partials.switch', ['repliesOn' => $repliesOn])
 
-<div id="ed" data-graph-url="{{ route('chatbot.flows.graph', $flow->id) }}" data-save-url="{{ route('chatbot.flows.save', $flow->id) }}">
+<div id="ed" data-graph-url="{{ route('chatbot.flows.graph', $flow->id) }}" data-save-url="{{ route('chatbot.flows.save', $flow->id) }}"
+     data-publish-url="{{ route('chatbot.flows.publish', $flow->id) }}" data-discard-url="{{ route('chatbot.flows.discard', $flow->id) }}"
+     data-versions-url="{{ route('chatbot.flows.versions', $flow->id) }}" data-restore-url="{{ route('chatbot.flows.restore', [$flow->id, 0]) }}"
+     data-test-url="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}">
+    {{-- Ang draft: ang mga pagbabago ay hindi live hanggang Publish. --}}
+    <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
+        <span id="chip" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700" aria-live="polite">…</span>
+        <button type="button" class="cb-btn cb-btn-sm" id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button type="button" class="cb-btn cb-btn-sm" id="redo" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" disabled>Redo</button>
+        <span class="mx-1 text-slate-300">|</span>
+        <button type="button" class="cb-btn cb-btn-sm" id="save-draft">Save draft</button>
+        <button type="button" class="cb-btn cb-btn-sm cb-btn-primary" id="publish">Publish</button>
+        <button type="button" class="cb-btn cb-btn-sm" id="discard" disabled>Discard draft</button>
+        <button type="button" class="cb-btn cb-btn-sm" id="history">History</button>
+        <a href="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}" class="cb-btn cb-btn-sm" id="preview">Preview / Test</a>
+        <span id="status" class="text-xs text-slate-500" aria-live="polite"></span>
+    </div>
+    <div id="conflict" class="mb-2 hidden flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+        <span>This draft changed since you opened it. Reload, or overwrite?</span>
+        <button type="button" class="cb-btn cb-btn-sm" id="c-reload">Reload</button>
+        <button type="button" class="cb-btn cb-btn-sm text-red-700" id="c-overwrite">Overwrite</button>
+    </div>
+
     <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span class="text-xs text-slate-500">Add:</span>
         <button type="button" class="cb-btn cb-btn-sm" data-add="condition">Condition</button>
@@ -50,7 +72,6 @@
         <button type="button" class="cb-btn cb-btn-sm" id="zoom-in" aria-label="Zoom in">+</button>
         <button type="button" class="cb-btn cb-btn-sm" id="fit">Fit</button>
         <button type="button" class="cb-btn cb-btn-sm hidden" id="del-wire">Remove wire</button>
-        <span id="status" class="text-xs text-slate-500" aria-live="polite"></span>
     </div>
 
     <div id="cv" class="cb-card relative overflow-hidden">
@@ -74,9 +95,38 @@
             <div class="mt-4 flex flex-wrap gap-2">
                 <button type="button" id="form-apply" class="cb-btn cb-btn-primary">Done</button>
                 <button type="button" data-form-close class="cb-btn">Cancel</button>
-                <button type="button" id="form-delete" class="cb-btn ml-auto text-red-700">Delete step</button>
+                <button type="button" id="form-duplicate" class="cb-btn ml-auto">Duplicate step</button>
+                <button type="button" id="form-delete" class="cb-btn text-red-700">Delete step</button>
             </div>
         </div>
+    </div>
+
+    {{-- Publish: kumpirma, ilang page ang gumagamit, at isang note para sa History. --}}
+    <div id="pub-box" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="pub-title">
+        <div class="mx-auto w-full max-w-md rounded-xl bg-white p-5 text-sm shadow-lg">
+            <div id="pub-title" class="mb-2 font-semibold">Publish this flow?</div>
+            <p id="pub-pages" class="mb-3 text-slate-700"></p>
+            <label class="block text-xs text-slate-600"><span class="mb-0.5 block">Note (optional, shown in History)</span>
+                <input id="pub-note" maxlength="200" autocomplete="off" class="w-full rounded-md border border-slate-300 px-2 py-1 text-sm" placeholder="e.g. New price reply">
+            </label>
+            <p id="pub-error" class="mt-2 hidden rounded-md bg-red-50 px-2 py-1 text-red-700" role="alert"></p>
+            <div class="mt-4 flex flex-wrap gap-2">
+                <button type="button" id="pub-go" class="cb-btn cb-btn-primary">Publish now</button>
+                <button type="button" data-pub-close class="cb-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    {{-- History: ang huling 20 Publish; ang Restore ay sa draft lang. --}}
+    <div id="hist-box" class="fixed inset-0 z-50 hidden bg-slate-900/30" role="dialog" aria-modal="true" aria-labelledby="hist-title">
+        <aside class="ml-auto flex h-full w-full max-w-sm flex-col bg-white p-4 text-sm shadow-lg">
+            <div class="mb-2 flex items-center justify-between gap-3">
+                <div id="hist-title" class="font-semibold">History</div>
+                <button type="button" data-hist-close class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <p class="text-xs text-slate-500">The last 20 publishes. Restore puts a version in the draft; it goes live only when you publish.</p>
+            <ol id="hist-list" class="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto"></ol>
+        </aside>
     </div>
 </div>
 
@@ -90,7 +140,12 @@
     const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], rules = {};
-    let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, saving = false, again = false, lastField = null;
+    let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
+    // Ang draft: version (para sa check ng dalawang nag-e-edit), kalagayan, at kung may lokal na pagbabagong hindi pa naise-save.
+    let version = 0, state = 'published', pages = [], dirty = false, conflict = false, leaving = false, pending = Promise.resolve();
+    // Undo/Redo: mga snapshot (JSON) ng graph, sa browser lang.
+    const HISTORY = 100;
+    let undoStack = [], redoStack = [], current = null;
 
     function el(tag, attrs = {}, children = []) {
         const e = document.createElement(tag);
@@ -241,6 +296,15 @@
             graph.edges.splice(selWire, 1); selWire = null; $('del-wire').classList.add('hidden'); render(); changed();
         }
         if (ev.key === 'Escape' && !$('form-box').classList.contains('hidden')) closeForm();
+        if (ev.key === 'Escape') { closePublish(); closeHistory(); }
+        // Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y; hindi sa loob ng field o ng bukas na kahon (doon ang sariling undo ng browser).
+        const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+        const boxOpen = ['form-box', 'pub-box', 'hist-box'].some(id => !$(id).classList.contains('hidden'));
+        if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !typing && !boxOpen) {
+            const k = ev.key.toLowerCase();
+            if (k === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); }
+            else if ((k === 'z' && ev.shiftKey) || k === 'y') { ev.preventDefault(); redo(); }
+        }
     });
 
     // ---- auto-arrange: mga hanay ayon sa layo mula sa Start ----
@@ -301,6 +365,7 @@
         const c = editing.c, body = $('form-body');
         $('form-title').textContent = LABEL[n.type] + ' · ' + n.id;
         $('form-delete').classList.toggle('hidden', n.type === 'start');
+        $('form-duplicate').classList.toggle('hidden', n.type === 'start');
         body.replaceChildren();
         body.append(el('datalist', {id: listId}, variables.map(v => el('option', {value: v}))));
         if (n.type === 'start') body.append(el('p', {class: 'text-slate-600', text: 'Every chat that is not waiting for a reply starts here.'}));
@@ -371,6 +436,12 @@
         graph.edges = graph.edges.filter(e => e.from !== editing.n.id || keep.includes(e.port)); // ang nawalang port ay walang wire
         closeForm(); render(); changed();
     });
+    $('form-duplicate').addEventListener('click', () => {
+        if (!editing || editing.n.type === 'start') return;
+        const src = editing.n, next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
+        const n = {id: 'n' + next, type: src.type, x: src.x + 40, y: src.y + 40, config: JSON.parse(JSON.stringify(src.config || {}))}; // walang wire
+        graph.nodes.push(n); closeForm(); render(); changed();
+    });
     $('form-delete').addEventListener('click', () => {
         if (!editing || editing.n.type === 'start' || !confirm('Delete this step and its wires?')) return;
         const id = editing.n.id;
@@ -379,24 +450,148 @@
         closeForm(); render(); changed();
     });
 
-    // ---- autosave ----
-    function changed() { status('Unsaved…'); clearTimeout(saveTimer); saveTimer = setTimeout(save, 800); }
-    async function save() {
-        if (saving) { again = true; return; }
-        saving = true; status('Saving…');
-        try {
-            const res = await fetch(ed.dataset.saveUrl, {method: 'PUT', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({graph})});
-            const data = await res.json().catch(() => ({}));
-            if (res.ok) status('Saved ' + data.saved_at, 'text-green-700'); else status('Not saved: ' + (data.error || data.message || res.status), 'text-red-600');
-        } catch (e) { status('Not saved: no connection', 'text-red-600'); }
-        saving = false;
-        if (again) { again = false; save(); }
+    // ---- undo / redo ----
+    const snapshot = () => JSON.stringify(graph);
+    function updateUndo() { $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length; }
+    /** Ang bagong graph ay isang hakbang na mababawi (pagbabago sa canvas, Discard, Restore). */
+    function remember() {
+        const now = snapshot();
+        if (now === current) return false;
+        if (current !== null) { undoStack.push(current); if (undoStack.length > HISTORY) undoStack.shift(); }
+        redoStack = []; current = now; updateUndo();
+        return true;
     }
-    window.addEventListener('beforeunload', ev => { if (saveTimer && $('status').textContent === 'Unsaved…') { ev.preventDefault(); ev.returnValue = ''; } });
+    function jump(from, to) {
+        if (!from.length) return;
+        to.push(current); current = from.pop(); graph = JSON.parse(current);
+        selWire = null; $('del-wire').classList.add('hidden');
+        render(); updateUndo(); schedule();
+    }
+    const undo = () => jump(undoStack, redoStack), redo = () => jump(redoStack, undoStack);
+    $('undo').addEventListener('click', undo);
+    $('redo').addEventListener('click', redo);
+
+    // ---- the draft: autosave, Save draft, Publish, Discard, History ----
+    const CHIP = {
+        never: ['Never published', 'bg-slate-100 text-slate-700'],
+        draft: ['Draft (unpublished changes)', 'bg-amber-100 text-amber-900'],
+        published: ['Published', 'bg-green-100 text-green-800'],
+    };
+    function setState(data) {
+        if (data.version != null) version = data.version;
+        if (data.status) state = data.status;
+        if (data.pages) pages = data.pages;
+        const [text, cls] = CHIP[state] || CHIP.draft;
+        $('chip').className = 'rounded-full px-2 py-0.5 text-xs font-medium ' + cls;
+        $('chip').textContent = text;
+        $('chip').title = data.published_at ? 'Last published ' + data.published_at : '';
+        $('discard').disabled = state === 'never' || (state !== 'draft' && !dirty); // walang published na mababalikan
+    }
+    const send = (url, method, body) => fetch(url, {method, headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify(body)})
+        .then(async r => ({ok: r.ok, code: r.status, data: await r.json().catch(() => ({}))}));
+    function showConflict(on) { conflict = on; $('conflict').classList.toggle('hidden', !on); $('conflict').classList.toggle('flex', on); }
+
+    function changed() { if (remember()) schedule(); }
+    function schedule() { dirty = true; setState({}); status('Unsaved…'); clearTimeout(saveTimer); saveTimer = setTimeout(() => save(), 800); }
+    /** Iisang save sa isang pagkakataon, sunod-sunod; ang huling graph ang ipinapadala. */
+    function save(overwrite = false) { clearTimeout(saveTimer); saveTimer = null; pending = pending.then(() => saveNow(overwrite)); return pending; }
+    async function saveNow(overwrite) {
+        if ((!dirty && !overwrite) || (conflict && !overwrite)) return;
+        const body = snapshot();
+        status('Saving…');
+        try {
+            const {ok, code, data} = await send(ed.dataset.saveUrl, 'PUT', {graph: JSON.parse(body), version, overwrite});
+            if (ok) {
+                showConflict(false);
+                dirty = snapshot() !== body;
+                setState(data);
+                status(dirty ? 'Unsaved…' : 'Draft saved ' + data.saved_at, dirty ? 'text-slate-500' : 'text-green-700');
+            } else if (code === 409) { showConflict(true); status('Not saved', 'text-red-600'); }
+            else status('Not saved: ' + (data.error || data.message || code), 'text-red-600');
+        } catch (e) { status('Not saved: no connection', 'text-red-600'); }
+    }
+    $('save-draft').addEventListener('click', () => { if (!dirty) return status('No changes to save.'); save(); });
+    $('c-reload').addEventListener('click', () => { leaving = true; location.reload(); });
+    $('c-overwrite').addEventListener('click', () => save(true));
+    window.addEventListener('beforeunload', ev => { if (!leaving && (dirty || saveTimer)) { ev.preventDefault(); ev.returnValue = ''; } });
+
+    /** Isang bagong graph mula sa server (Discard, Restore): mababawi ng Undo, at naka-save na. */
+    function replaceGraph(g) {
+        graph = g; graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
+        remember(); dirty = false; selWire = null; $('del-wire').classList.add('hidden'); render();
+    }
+
+    function closePublish() { $('pub-box').classList.add('hidden'); }
+    $('publish').addEventListener('click', () => {
+        $('pub-pages').textContent = pages.length
+            ? 'Live customers on ' + pages.length + ' page' + (pages.length === 1 ? '' : 's') + ' (' + pages.join(', ') + ') get this version right away.'
+            : 'No page uses this flow yet. It goes live once a page picks it.';
+        $('pub-note').value = ''; $('pub-error').classList.add('hidden'); $('pub-go').disabled = false;
+        $('pub-box').classList.remove('hidden'); $('pub-note').focus();
+    });
+    document.querySelectorAll('[data-pub-close]').forEach(b => b.addEventListener('click', closePublish));
+    $('pub-go').addEventListener('click', async () => {
+        const fail = t => { $('pub-error').textContent = t; $('pub-error').classList.remove('hidden'); $('pub-go').disabled = false; };
+        $('pub-go').disabled = true;
+        await save();
+        if (conflict) return fail('This draft changed since you opened it. Reload, or overwrite, then publish.');
+        if (dirty) return fail('The draft is not saved yet. Try again.');
+        const {ok, code, data} = await send(ed.dataset.publishUrl, 'POST', {version, note: $('pub-note').value});
+        if (code === 409) { showConflict(true); return fail(data.error); }
+        if (!ok) return fail(data.error || data.message || 'Not published.');
+        setState(data); closePublish();
+        status('Published ' + (data.published_at || '').slice(11), 'text-green-700');
+    });
+
+    $('discard').addEventListener('click', async () => {
+        if (!confirm('Discard the draft and go back to the published version?')) return;
+        clearTimeout(saveTimer); saveTimer = null; await pending;
+        const {ok, code, data} = await send(ed.dataset.discardUrl, 'POST', {version});
+        if (code === 409) return showConflict(true);
+        if (!ok) return status('Not discarded: ' + (data.error || data.message || code), 'text-red-600');
+        replaceGraph(data.graph); setState(data); status('Draft discarded', 'text-green-700');
+    });
+
+    function closeHistory() { $('hist-box').classList.add('hidden'); }
+    document.querySelectorAll('[data-hist-close]').forEach(b => b.addEventListener('click', closeHistory));
+    $('hist-box').addEventListener('click', ev => { if (ev.target === $('hist-box')) closeHistory(); });
+    $('history').addEventListener('click', async () => {
+        $('hist-list').replaceChildren(el('li', {class: 'text-xs text-slate-500', text: 'Loading…'}));
+        $('hist-box').classList.remove('hidden');
+        try {
+            const data = await fetch(ed.dataset.versionsUrl, {headers: {'Accept': 'application/json'}}).then(r => r.json());
+            const list = data.versions || [];
+            $('hist-list').replaceChildren(...(list.length ? list.map(v => {
+                const b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm mt-1', text: 'Restore'});
+                b.addEventListener('click', () => restore(v));
+                return el('li', {class: 'rounded-md border border-slate-200 p-2'}, [
+                    el('div', {class: 'font-medium', text: v.at || ''}), el('div', {class: 'text-xs text-slate-500', text: v.by || 'Unknown'}),
+                    v.note ? el('div', {class: 'break-words text-slate-700', text: v.note}) : null, b]);
+            }) : [el('li', {class: 'text-xs text-slate-500', text: 'No publishes yet.'})]));
+            $('hist-list').querySelector('button')?.focus();
+        } catch (e) { $('hist-list').replaceChildren(el('li', {class: 'text-xs text-red-700', text: 'Could not load the history.'})); }
+    });
+    async function restore(v) {
+        if (!confirm('Put the version of ' + v.at + ' in the draft? It goes live only when you publish.')) return;
+        clearTimeout(saveTimer); saveTimer = null; await pending;
+        const {ok, code, data} = await send(ed.dataset.restoreUrl.replace(/\/versions\/0\/restore$/, '/versions/' + v.id + '/restore'), 'POST', {version});
+        if (code === 409) { closeHistory(); return showConflict(true); }
+        if (!ok) return status('Not restored: ' + (data.error || data.message || code), 'text-red-600');
+        replaceGraph(data.graph); setState(data); closeHistory(); fit();
+        status('Version of ' + v.at + ' restored to the draft', 'text-green-700');
+    }
+
+    $('preview').addEventListener('click', async ev => {
+        ev.preventDefault();
+        await save();
+        if (dirty || conflict) return status('Save the draft first, then test it.', 'text-red-600');
+        leaving = true; location.href = ed.dataset.testUrl;
+    });
 
     fetch(ed.dataset.graphUrl, {headers: {'Accept': 'application/json'}}).then(r => r.json()).then(data => {
         graph = data.graph; variables = data.variables || []; rules = data.rules || {};
         graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
+        current = snapshot(); setState(data);
         applyView(); render(); fit();
     }).catch(() => status('Could not load the flow.', 'text-red-600'));
 })();

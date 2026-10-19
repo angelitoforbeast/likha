@@ -23,6 +23,7 @@ class ChatbotEditorTest extends ChatblastTestCase
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2026_10_20_100000_create_botcake_chats_table.php',
             'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
+            'database/migrations/2026_10_24_100000_add_draft_to_chatbot_flows.php',
         ]]);
         $this->page('Page Uno', '1001');
         $this->page('Page Dos', '2002');
@@ -63,7 +64,7 @@ class ChatbotEditorTest extends ChatblastTestCase
         $this->actingAs($ceo = $this->user());
         $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
 
-        $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $this->graph()])->assertOk()->assertJsonStructure(['saved_at']);
+        $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $this->graph(), 'version' => 0])->assertOk()->assertJsonStructure(['saved_at']);
         $saved = $this->getJson("/chatbot/flows/{$flow->id}/graph")->assertOk()->json();
 
         $this->assertSame(FlowGraph::clean($this->graph()), $saved['graph']);
@@ -146,6 +147,8 @@ class ChatbotEditorTest extends ChatblastTestCase
         $this->postJson("/chatbot/flows/{$flow->id}/rename", ['name' => 'X'])->assertForbidden();
         $this->postJson("/chatbot/flows/{$flow->id}/duplicate")->assertForbidden();
         $this->deleteJson("/chatbot/flows/{$flow->id}")->assertForbidden();
+        foreach (['publish', 'discard', 'versions/1/restore'] as $action) $this->postJson("/chatbot/flows/{$flow->id}/{$action}", ['version' => 0])->assertForbidden();
+        $this->getJson("/chatbot/flows/{$flow->id}/versions")->assertForbidden();
         $this->assertSame(1, ChatbotFlow::count());
 
         $this->navLink('/chatblast', ['Marketing']);
@@ -155,7 +158,7 @@ class ChatbotEditorTest extends ChatblastTestCase
         $html = $this->get("/chatbot/flows/{$flow->id}")->assertOk()->getContent();
         $this->assertStringContainsString("const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125);", $html);
         $this->assertDoesNotMatchRegularExpression("/const OPEN = .,/", $html);
-        $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $this->graph()])->assertOk();
+        $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $this->graph(), 'version' => 0])->assertOk();
     }
 
     public function test_S_069_D5_the_page_list_flow_is_a_dropdown_of_flows(): void
