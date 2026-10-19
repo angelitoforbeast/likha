@@ -737,3 +737,13 @@ Accepted, not fixed:
 - **The path where `turnOn` throws during "+ Page" has no test.** Reason: same fixed message as the token test's catch; `BotcakeClient` returns errors as arrays, so a throw is a bug path only.
 - **Two "+ Page" requests at once could each create a key.** Reason: CEO-only, the button is disabled while sending, and the On switch has the same race today; the next On fixes it.
 - **The chat's `ad_id` on a `source=api` row can be replaced by the customer sync** (`BotcakeCustomerSync::store` rewrites `ad_id` from the API, to null when the API has none). Reason: outside this change; whether a chat's `ad_id` should win over the sync is an owner decision.
+
+## 074: chatbot inbox (2026-10-19)
+
+- **Run the two new migrations on deploy** (`2026_10_24_100000_add_inbox_indexes`, `2026_10_24_100100_create_chatbot_events_and_reply_user`). The `(page_id, psid, id)` index on `botcake_chats` (about 90 days of rows) is a long ALTER on MySQL; run it at a quiet hour. Until `chatbot_replies.user_id` exists, a manual send reaches the customer and then fails to log with a 500. Reason: migrations run by hand on deploy.
+- **The list regroups the whole window every 5 seconds** (two GROUP BY psid queries, bounded by page, window and LIMIT). With 30d on a busy page that reads 30 days of rows per refresh. Reason: the brief asks the list to refresh every 5 s; the queries use the (page_id, received_at) and (page_id, sent_at) indexes. Measure on production before caching the list or grouping on MAX(id) only.
+- **The Human/Bot tabs filter after the 500-customer group limit,** and the chat and reply groups are limited separately. A paused customer outside the 500 most recent is not under Human, and a customer ranked high in chats but past 500 in replies shows a wrong dot. Reason: only for pages with more than 500 active customers in the window; 24h narrows it.
+- **Manual sends share the page's Botcake rate key with chatblast and the bot.** Reason: the real limit is per token; 30 sends a minute per user bounds it.
+- **A double submit of Send** (two quick Enters) can send twice. Reason: the button is disabled while sending; the server has no idempotency key.
+- **Manual sends ignore the emergency stop** (CHATBOT_REPLIES_ENABLED=false). Reason: a person chose to send; the switch stops the bot.
+- **Events in the same second sort chat, then event, then reply,** so a run's last events can show just above the reply they came with. Reason: timestamps are whole seconds; each event now keeps its own time, so only same-second items tie.
