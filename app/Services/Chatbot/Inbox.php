@@ -167,6 +167,8 @@ class Inbox
 
         // Ang mga event sa parehong saklaw ng oras: mula sa pinakalumang naipakita (o mula pa noong una kapag wala nang
         // mas luma) hanggang sa dating pinakaluma (kapag "Load older") o hanggang ngayon.
+        // Ang pinakabagong event ay binabasa bago ang listahan: ang takbong naisulat sa pagitan ay lalabas pa sa polling.
+        $evMax = !$before && $events ? (int) ($evQ()->max('id') ?? 0) : 0;
         $ev = collect();
         if ($events) {
             $ev = $evQ()->when($hasOlder && $oldestAt, fn ($w) => $w->where('created_at', '>=', $oldestAt))
@@ -184,7 +186,7 @@ class Inbox
                 'out' => $shownOut ? min(array_column($shownOut, 'id')) : ($out->isNotEmpty() ? (int) $out->max('id') + 1 : (int) ($before['out'] ?? 0)),
                 'at' => $oldestAt ? Carbon::parse($oldestAt)->toIso8601String() : ($before['at'] ?? null)],
             // Ang polling ng event ay mula sa pinakabagong event ng customer, hindi sa naipakita (para hindi bumalik ang mga luma).
-            'newer' => $before ? null : ['in' => (int) ($in->max('id') ?? 0), 'out' => (int) ($out->max('id') ?? 0), 'ev' => $events ? (int) ($evQ()->max('id') ?? 0) : 0],
+            'newer' => $before ? null : ['in' => (int) ($in->max('id') ?? 0), 'out' => (int) ($out->max('id') ?? 0), 'ev' => $evMax],
             'has_older' => $hasOlder,
         ];
     }
