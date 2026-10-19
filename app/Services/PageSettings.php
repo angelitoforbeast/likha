@@ -21,7 +21,7 @@ class PageSettings
      */
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
         'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
-        'botcake.setup.check', 'botcake.setup.delivery'];
+        'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -141,6 +141,8 @@ class PageSettings
 
             // Ang naka-cache ng /api/botcake/chat (page_id => page, mga hash ng chat.key): binubura ngayon at pagkatapos ng commit.
             if ($provider === 'botcake' && in_array($key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
+            // Ang listahan ng mock page (BotcakeMock): binubura kapag nagbago ang flag, ang page_id o ang bagal at error.
+            if ($provider === 'botcake' && in_array($key, BotcakeMock::KEYS, true)) BotcakeMock::forget();
 
             return ['status' => $status, 'setting' => $setting];
         });
@@ -163,6 +165,7 @@ class PageSettings
         $setting->update(['active' => false, 'replaced_at' => now()]);
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
         if ($setting->provider === 'botcake' && in_array($setting->key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
+        if ($setting->provider === 'botcake' && in_array($setting->key, BotcakeMock::KEYS, true)) BotcakeMock::forget();
         Log::info('PageSettings: deactivated', [
             'page' => $setting->page_name, 'key' => $setting->fullKey(), 'setting_id' => $setting->id, 'by' => $userId,
         ]);

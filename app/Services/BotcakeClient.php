@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Http;
 /**
  * Botcake public API. Hanggang 2 request kada segundo (kasama ang retry); sa 429, 5xx o putol na koneksyon:
  * hintay 2, 4, 8 segundo (max 3 retry), saka BotcakeException. Ang token ay nasa header lang: hindi ito
- * kasama sa anumang mensahe ng error o log.
+ * kasama sa anumang mensahe ng error o log. Ang test page (BotcakeMock: botcake.mock = 1 at page_id na 99…) ay sinasagot
+ * dito mismo, walang HTTP, pero dumadaan pa rin sa parehong throttle, retry at mga failed na daan.
  */
 class BotcakeClient
 {
@@ -58,8 +59,10 @@ class BotcakeClient
             $this->throttle();
 
             try {
-                $req = Http::withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout);
-                $res = $method === 'GET' ? $req->get(self::BASE . $path, $data) : $req->post(self::BASE . $path, $data);
+                if (($res = $this->mock($method, $path, $data)) === null) {
+                    $req = Http::withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout);
+                    $res = $method === 'GET' ? $req->get(self::BASE . $path, $data) : $req->post(self::BASE . $path, $data);
+                }
                 $status = $res->status();
             } catch (ConnectionException $e) {
                 $res = null;
@@ -182,7 +185,7 @@ class BotcakeClient
             $this->throttle();
 
             try {
-                $res = Http::withHeaders(['access-token' => $token])
+                $res = $this->mock('GET', $path, $query) ?? Http::withHeaders(['access-token' => $token])
                     ->acceptJson()
                     ->connectTimeout(10)
                     ->timeout($this->timeout)
@@ -215,6 +218,14 @@ class BotcakeClient
             }
             $this->clock->sleep((float) $wait);
         }
+    }
+
+    /** Ang sagot ng BotcakeMock bilang totoong Response (test page lang), o null para sa totoong Botcake. */
+    private function mock(string $method, string $path, array $data): ?Response
+    {
+        $a = BotcakeMock::answer($method, $path, $data, $this->clock);
+
+        return $a === null ? null : new Response(new \GuzzleHttp\Psr7\Response($a[0], ['Content-Type' => 'application/json'], json_encode($a[1])));
     }
 
     private function throttle(): void
