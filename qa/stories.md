@@ -1457,3 +1457,20 @@ Spec 073. Tests are in `tests/Feature/Chatblast/ChatbotLongPromptTest.php`.
 | S-073.1 | Given a 14,113-character prompt with line breaks, ñ and emoji, when it is saved in a botfield cell, then page settings and /chatbot/data give it back unchanged; 50,000 plain characters are accepted | `test_S_073_1…` | Passed · 2026-10-19 · auto |
 | S-073.2 | Given that prompt in Prompt 2 and an AI step whose system prompt is `{{Prompt 2}}` plus more text, then the OpenAI request's system message is the whole expanded text, uncut | `test_S_073_2…` | Passed · 2026-10-19 · auto |
 | S-073.3 | Given a value over 50,000 characters, or within 50,000 characters but over 60,000 bytes, then 422 with a clear message and the old value stays; exactly 60,000 bytes is accepted | `test_S_073_3…` (2 data sets) | Passed · 2026-10-19 · auto |
+
+## S-075 The flow editor gets a draft, Undo/Redo, Save and Publish
+
+Spec 075. Tests are in `tests/Feature/Chatblast/ChatbotDraftPublishTest.php`; S-075.10 is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-075.1 | Given a published flow linked to a page, when the editor saves a change, then a live chat still gets the published reply; after Publish the next chat gets the new one | `test_S_075_1…` | — |
+| S-075.2 | Given a stored draft that does not pass `FlowGraph::clean`, when Publish is pressed, then 422 "This flow cannot be published: …", the published graph stays and no version is kept; Publish with no unpublished changes on a published flow is refused too | `test_S_075_2…` | — |
+| S-075.3 | Given a draft, when Discard is pressed, then the editor gets the published graph back, the status is Published, and the live graph is untouched | `test_S_075_3…` | — |
+| S-075.4 | Given publishes with notes, then History lists the last 20, newest first, with who, when and the note, and at most 50 are kept per flow; Restore puts that version in the draft (status Draft, live graph unchanged); a version of another flow is 404 | `test_S_075_4…` | — |
+| S-075.5 | Given a draft at version N, when a save, Publish, Discard or Restore sends another version (or none), then 409 "This draft changed since you opened it. Reload, or overwrite?" and nothing changes; a save with overwrite goes through | `test_S_075_5…` | — |
+| S-075.6 | Given a flow with a draft, the Test tab runs the draft by default and the published version when asked | `test_S_075_6…` | — |
+| S-075.7 | Given a flow saved before the migration, when the migration runs, then it is Published (no draft) and a live chat runs it as before | `test_S_075_7…` | — |
+| S-075.8 | The status is "Never published" for a new flow until its first Publish, "Draft (unpublished changes)" after a change, and "Published" after Publish, after Discard, or when the saved draft equals the published graph; the editor gets the number of pages using the flow | `test_S_075_8…` | — |
+| S-075.9 | Duplicate copies the published graph and the draft; the copy is "Never published" | `test_S_075_9…` | — |
+| S-075.10 | In the editor: Undo/Redo (buttons, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, at least 50 steps) cover add, move, delete, duplicate, wire, unwire and form edits; Save draft, Publish (confirm with page count and note), Discard (confirm), History with Restore, Preview / Test, the status chip; leaving with unsaved changes warns; a conflict shows Reload / Overwrite; no page-level horizontal scroll at phone width | browser check | — |
