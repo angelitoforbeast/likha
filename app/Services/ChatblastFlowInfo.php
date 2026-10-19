@@ -72,7 +72,7 @@ class ChatblastFlowInfo
         $template = $list === null ? null : $this->pickTemplate(self::templates($list), $get('template.shipping'), $flowName);
 
         $check = [];
-        if ($flowName === null || stripos($flowName, 'CHATBLAST') === false) $check[] = 'The flow name has no "CHATBLAST" (or the flow was not found): it may be the wrong flow.';
+        if ($flowName === null) $check[] = 'The flow was not found in Botcake.';
         if ($template === null) $check[] = 'The flow\'s template could not be identified: set botcake template.shipping on /page-settings, or check Botcake; {{1}} cannot be confirmed.';
         elseif (!str_contains($template['body'], '{{1}}')) $check[] = 'The template has no {{1}}: the message will not show.';
         if ($template !== null && strtoupper($template['status']) !== 'APPROVED') $check[] = 'The template is not APPROVED (' . ($template['status'] ?: 'no status') . ').';
@@ -130,25 +130,16 @@ class ChatblastFlowInfo
     }
 
     /**
-     * Ang template ng flow: ang nasa page setting (botcake.template.shipping) kapag mayroon; kung wala, ang iisang
-     * approved template na kapareho o kasama sa pangalan ng flow (hindi pinapansin ang laki ng titik, espasyo at _).
+     * Ang template ng flow: ang nasa page setting (botcake.template.shipping) kapag mayroon; kung wala, ang pangalan ng
+     * Setup box (ChatblastSetupCheck). Parehong paghahambing ng setup check: trim, iisang espasyo, hindi case-sensitive.
      */
     private function pickTemplate(array $templates, string $setting, ?string $flowName): ?array
     {
-        $norm = fn (string $s) => preg_replace('/[^a-z0-9]+/', '', strtolower($s));
-        if ($setting !== '') {
-            foreach ($templates as $t) {
-                if ($norm($t['name']) === $norm($setting)) return $t + ['source' => 'setting'];
-            }
-            return null;
+        $name = $setting !== '' ? $setting : app(ChatblastSetupCheck::class)->names()['template'];
+        foreach ($templates as $t) {
+            if (ChatblastSetupCheck::norm($t['name']) === ChatblastSetupCheck::norm($name)) return $t + ['source' => $setting !== '' ? 'setting' : 'setup'];
         }
-        if ($flowName === null) return null;
-        $flow = $norm($flowName);
-        $hits = array_values(array_filter($templates, function ($t) use ($norm, $flow) {
-            $n = $norm($t['name']);
-            return strtoupper($t['status']) === 'APPROVED' && $n !== '' && (str_contains($flow, $n) || str_contains($n, $flow));
-        }));
-        return count($hits) === 1 ? $hits[0] + ['source' => 'name'] : null;
+        return null;
     }
 
     /** Ang Day 1 · A ng unang naka-on na campaign na nagpapadala sa page na ito, gamit ang halimbawang order. */

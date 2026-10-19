@@ -9,7 +9,7 @@ use Tests\Feature\Botcake\BotcakeApiTestCase;
 
 /**
  * Ang bagong page na kusang nase-setup: ang pag-save ng Botcake ID o token ay agad na sumusubok sa token, at kapag ok,
- * kinukuha ang mga flow, custom field at template; pinupunan ang malinaw at blangko; ang marami ay para sa dropdown.
+ * ang setup check (spec 082): ang flow, ang custom field at ang template ayon sa eksaktong pangalan ng Setup box.
  * Pekeng Botcake at orasan dito; walang totoong tawag.
  */
 class PageAutoSetupTest extends BotcakeApiTestCase
@@ -30,12 +30,12 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->actingAs($this->user());
 
         $this->flowList = [
-            ['id' => 501, 'name' => 'CHATBLAST - SHIPPING STATUS', 'is_removed' => false],
-            ['id' => 502, 'name' => 'CHATBLAST - SHIPPING STATUS (post_order)', 'is_removed' => false],
+            ['id' => 501, 'name' => 'CHATBLAST - SHIPPING STATUS (post_order)', 'is_removed' => false],
+            ['id' => 502, 'name' => 'UPDATE SHIPPING STATUS 2026', 'is_removed' => false],
             ['id' => 503, 'name' => 'Welcome', 'is_removed' => false],
-            ['id' => 504, 'name' => 'CHATBLAST old', 'is_removed' => true],
+            ['id' => 504, 'name' => 'UPDATE SHIPPING STATUS 2026', 'is_removed' => true],
         ];
-        $this->fieldList = [['id' => 801, 'name' => 'GPT Input'], ['id' => 802, 'name' => 'Phone']];
+        $this->fieldList = [['id' => 801, 'name' => 'message'], ['id' => 802, 'name' => 'GPT Input']];
         $this->templates = [['name' => 'post_order', 'status' => 'APPROVED', 'category' => 'UTILITY',
             'components' => [['type' => 'BODY', 'text' => "Update po\n{{1}}", 'example' => ['body_text' => [['Custom Field']]]]]]];
 
@@ -75,9 +75,9 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->assertSame([], $this->calls);
 
         $res = $this->cell('token', self::TOKEN)->assertOk();
-        $this->assertSame(['custom_fields', 'flows', 'message_templates'], $this->calls, 'isang token check (na may custom fields), flows, templates');
+        $this->assertSame(['custom_fields', 'flows', 'message_templates', 'statistics'], $this->calls, 'isang token check (na may custom fields), flows, templates, saka ang baseline ng bagong flow');
         $this->assertSame('ok', substr((string) $this->get57('token_status'), 0, 2));
-        $this->assertSame('502', $this->get57('flow.shipping'), 'ang (post_order) ang napili');
+        $this->assertSame('502', $this->get57('flow.shipping'), 'ang eksaktong pangalan ng Setup box (hindi ang burang kapangalan)');
         $this->assertSame('801', $this->get57('field.message'));
         $this->assertSame('post_order', $this->get57('template.shipping'));
         foreach (['botcake.token_status', 'botcake.flow.shipping', 'botcake.field.message', 'botcake.flow.shipping.options', 'botcake.field.message.options'] as $key) {
@@ -108,23 +108,21 @@ class PageAutoSetupTest extends BotcakeApiTestCase
     public static function flowCases(): array
     {
         return [
-            'post_order ang pinipili'     => [[[1, 'CHATBLAST - SHIPPING STATUS'], [2, 'CHATBLAST - SHIPPING STATUS (post_order)']], '2'],
-            'iisang kandidato'            => [[[3, 'chatblast shipping'], [4, 'Welcome']], '3'],
-            'dalawa, walang post_order'   => [[[5, 'CHATBLAST A'], [6, 'CHATBLAST B']], null],
-            'dalawang post_order'         => [[[7, 'CHATBLAST (post_order)'], [8, 'CHATBLAST copy (post_order)']], null],
-            'walang CHATBLAST'            => [[[9, 'Welcome']], null],
+            'isa, iba ang laki ng titik at espasyo' => [[[1, '  update   shipping status 2026 '], [2, 'Welcome']], '1'],
+            'dalawang kapangalan'                  => [[[5, 'UPDATE SHIPPING STATUS 2026'], [6, 'Update Shipping Status 2026']], null],
+            'walang tugma (hindi fuzzy)'           => [[[7, 'CHATBLAST (post_order)'], [8, 'UPDATE SHIPPING STATUS 2026 copy']], null],
         ];
     }
 
     /** @dataProvider flowCases */
-    public function test_S_057_2_the_flow_is_filled_only_when_one_candidate_is_clear_and_the_list_is_kept_for_the_dropdown(array $flows, ?string $picked): void
+    public function test_S_057_2_the_flow_is_set_only_when_exactly_one_has_the_setup_name_and_the_list_is_kept_for_the_dropdown(array $flows, ?string $picked): void
     {
         $this->flowList = array_map(fn ($f) => ['id' => $f[0], 'name' => $f[1], 'is_removed' => false], $flows);
         $this->settings()->set('Page Dos', 'botcake', 'page_id', '2002');
         $this->cell('token', self::TOKEN)->assertOk();
 
         $this->assertSame($picked, $this->get57('flow.shipping'));
-        $expected = array_values(array_map(fn ($f) => (string) $f[0], array_filter($flows, fn ($f) => stripos($f[1], 'chatblast') !== false)));
+        $expected = array_values(array_map(fn ($f) => (string) $f[0], array_filter($flows, fn ($f) => \App\Services\ChatblastSetupCheck::norm($f[1]) === 'update shipping status 2026')));
         $list = json_decode((string) $this->get57('flow.shipping.options'), true);
         $this->assertEqualsCanonicalizing($expected, array_column(array_filter($list, fn ($f) => $f['candidate']), 'id'));
         $this->assertCount(count($flows), $list, 'ang buong listahan ng flow (spec 062)');
@@ -134,15 +132,14 @@ class PageAutoSetupTest extends BotcakeApiTestCase
     {
         return [
             // [mga field, ang napili, ilang kandidato sa dropdown]
-            'GPT Input'          => [[[11, 'GPT Input'], [12, 'Phone']], '11', 1],
-            'message'            => [[[13, 'Message']], '13', 1],
-            'dalawang baybay'    => [[[14, 'GPT Input'], [15, 'GPT-INPUT']], null, 2],
-            'wala'               => [[[16, 'Phone']], null, 0],
+            'message (iba ang laki)' => [[[13, ' Message '], [12, 'Phone']], '13', 1],
+            'dalawang message'       => [[[14, 'message'], [15, 'MESSAGE']], null, 2],
+            'GPT Input ay hindi ito' => [[[11, 'GPT Input']], null, 0],
         ];
     }
 
     /** @dataProvider fieldCases */
-    public function test_S_057_2_the_field_is_filled_only_when_exactly_one_is_gpt_input_or_message(array $fields, ?string $picked, int $options): void
+    public function test_S_057_2_the_field_is_set_only_when_exactly_one_has_the_setup_name(array $fields, ?string $picked, int $options): void
     {
         $this->fieldList = array_map(fn ($f) => ['id' => $f[0], 'name' => $f[1]], $fields);
         $this->settings()->set('Page Dos', 'botcake', 'page_id', '2002');
@@ -154,27 +151,24 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $this->assertCount(count($fields), $list, 'ang buong listahan ng field (spec 062)');
     }
 
-    public function test_S_057_3_a_value_a_person_saved_is_never_overwritten_and_stays_even_when_it_is_not_a_candidate(): void
+    public function test_S_057_3_a_value_a_person_saved_is_replaced_by_the_setup_name_and_kept_as_history(): void
     {
         $s = $this->settings();
         $s->set('Page Dos', 'botcake', 'page_id', '2002');
-        $s->set('Page Dos', 'botcake', 'flow.shipping', '999', false, 1);   // hindi CHATBLAST flow
-        $s->set('Page Dos', 'botcake', 'field.message', '777', false, 1);   // hindi GPT Input
+        $s->set('Page Dos', 'botcake', 'flow.shipping', '999', false, 1);   // ibang flow, inilagay ng tao
+        $s->set('Page Dos', 'botcake', 'field.message', '777', false, 1);
 
         $this->cell('token', self::TOKEN)->assertOk();
 
-        $this->assertSame(['999', '777'], [$this->get57('flow.shipping'), $this->get57('field.message')]);
-        $this->assertSame(['502', '501'], array_column(array_filter(json_decode((string) $this->get57('flow.shipping.options'), true), fn ($f) => $f['candidate']), 'id'));
-        // Ang babala ay sa page: ang value ay wala sa options.
-        $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
-        $this->assertStringContainsString('This flow is not a CHATBLAST flow in Botcake', $html);
-        $this->assertStringContainsString("This field is not a 'GPT Input' field in Botcake", $html);
-        // Ang options ay hindi naisusulat mula sa page.
+        $this->assertSame(['502', '801'], [$this->get57('flow.shipping'), $this->get57('field.message')]);
+        $this->assertSame(['999'], array_column($this->get('/chatblast/page-settings/history?page_name=Page%20Dos&provider=botcake&key=flow.shipping')->json('history'), 'value'));
+        $this->assertSame(['502'], array_column(array_filter(json_decode((string) $this->get57('flow.shipping.options'), true), fn ($f) => $f['candidate']), 'id'));
+        // Ang options at ang check ay hindi naisusulat mula sa page.
         $this->cell('flow.shipping.options', '[]')->assertStatus(422);
+        $this->cell('setup.check', '{}')->assertStatus(422);
         $this->postJson('/chatblast/page-settings/cell', ['page_name' => 'Page Dos', 'provider' => 'botcake', 'key' => 'field.message.options', 'clear' => true])->assertStatus(422);
         $this->assertNotNull($this->get57('field.message.options'));
-        $this->assertContains('botcake.flow.shipping.options', PageSettings::SYSTEM_KEYS);
-        $this->assertContains('botcake.field.message.options', PageSettings::SYSTEM_KEYS);
+        foreach (['botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.setup.check', 'botcake.setup.delivery'] as $key) $this->assertContains($key, PageSettings::SYSTEM_KEYS);
     }
 
     public function test_S_057_4_the_page_has_the_dropdown_the_guides_and_the_setup_checklist(): void
@@ -182,8 +176,8 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
 
         foreach ([
-            "No CHATBLAST flow in Botcake. In Botcake, copy 'CHATBLAST - SHIPPING STATUS (post_order)' from another page to this page, then press Test.",
-            "No 'GPT Input' custom field in Botcake. Create it, then press Test.",
+            "'No flow named \"' + SETUP.flow + '\" in Botcake. Copy it in Botcake from another page to this page, then press Check.'",
+            "'No custom field named \"' + SETUP.field + '\" in Botcake. Create it in Botcake, then press Check.'",
             'Template check failed: ',
             "function startPick(td, row, col, original)",
             "o.name + ' · ' + o.id",
@@ -234,13 +228,13 @@ class PageAutoSetupTest extends BotcakeApiTestCase
     public static function templateCases(): array
     {
         return [
-            'nasuri, walang approved' => [200, [], 'No approved post_order template in Botcake.', 'red'],
-            'bigo ang templates call' => [500, null, 'Check failed: Botcake: HTTP 500', 'grey'],
+            'nasuri, walang approved' => [200, [], 'x', 'No template named post_order in Botcake'],
+            'bigo ang templates call' => [500, null, 'error', 'Botcake: HTTP 500'],
         ];
     }
 
     /** @dataProvider templateCases */
-    public function test_S_057_4_no_approved_template_shows_only_when_the_template_check_ran_and_found_none(int $http, ?array $templates, string $line, string $tone): void
+    public function test_S_057_4_no_approved_template_shows_only_when_the_template_check_ran_and_found_none(int $http, ?array $templates, string $kind, string $reason): void
     {
         $this->templateHttp = $http;
         if ($templates !== null) $this->templates = $templates;
@@ -248,7 +242,9 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $res = $this->cell('token', self::TOKEN)->assertOk();
 
         $this->assertNull($this->get57('template.shipping'));
-        $this->assertSame([$line, $tone], [$res->json('cells')['botcake.template.shipping.text']['line'] ?? null, $res->json('cells')['botcake.template.shipping.text']['tone'] ?? null]);
+        $check = json_decode($res->json('cells')['botcake.setup.check']['value'], true);
+        // X kapag nasuri at walang tugma; "Check failed" (walang binago) kapag bigo ang tawag.
+        $this->assertSame($reason, $kind === 'x' ? $check['x'][0] : $check['error']);
         // Ang page ay ayon sa naitala, hindi sa listahan ng flow: walang paghula na "walang template" kapag bigo ang call.
         $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
         $this->assertStringNotContainsString("optionsOf(row, SHIPPING_KEY) !== null) out.push", $html);

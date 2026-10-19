@@ -12,6 +12,8 @@ use App\Services\BotcakePageSetup;
 use App\Models\BotcakeMessage;
 use App\Services\Chatblast;
 use App\Services\ChatblastReady;
+use App\Services\ChatblastSetupCheck;
+use App\Jobs\RunChatblastSetupCheck;
 use App\Services\ChatblastSender;
 use App\Services\BotcakeSyncAll;
 use App\Services\PageSettings;
@@ -50,6 +52,54 @@ class PageSettingController extends Controller
         $this->checkAccess();
 
         return view('page_settings.index', ['grid' => $grid->build(), 'isCeo' => $this->getNormalizedRole() === 'CEO']);
+    }
+
+    /**
+     * Ang Setup box: ang tatlong pangalan para sa lahat ng page (page na "_all"), saka Check all. Para sa may access sa
+     * page settings (gaya ng pag-edit ng cell).
+     */
+    public function saveSetup(Request $request)
+    {
+        $this->checkAccess();
+        $names = [];
+        foreach (ChatblastSetupCheck::NAME_KEYS as $what => $key) {
+            $v = preg_replace('/\s+/u', ' ', trim((string) $request->input($what, '')));
+            if ($v === '' || mb_strlen($v) > 255) return response()->json(['error' => ucfirst($what === 'field' ? 'custom field' : $what) . ' name: 1 to 255 characters.'], 422);
+            $names[$key] = $v;
+        }
+        foreach ($names as $key => $v) $this->settings->set(ChatblastSetupCheck::ALL_PAGE, 'botcake', $key, $v, false, Auth::id(), true);
+
+        return response()->json(['names' => app(ChatblastSetupCheck::class)->names()] + $this->queueCheckAll());
+    }
+
+    /** Check all: isang job sa queue "default" (hindi sabay ang dalawa). */
+    public function checkAll()
+    {
+        $this->checkAccess();
+
+        return response()->json($this->queueCheckAll());
+    }
+
+    public function setupProgress()
+    {
+        $this->checkAccess();
+
+        return response()->json(['progress' => RunChatblastSetupCheck::progress()]);
+    }
+
+    /** @return array{queued: bool, progress: ?array} */
+    private function queueCheckAll(): array
+    {
+        $p = RunChatblastSetupCheck::progress();
+        // Naka-queue o tumatakbo pa (hanggang 1 oras): hindi na nagdadagdag ng isa pa.
+        if ($p && in_array($p['status'] ?? '', ['queued', 'running'], true)
+            && now()->diffInMinutes(\Illuminate\Support\Carbon::parse($p['started_at'] ?? $p['queued_at'] ?? now())) < 60) {
+            return ['queued' => false, 'progress' => $p];
+        }
+        RunChatblastSetupCheck::queued(Auth::id());
+        RunChatblastSetupCheck::dispatch(Auth::id());
+
+        return ['queued' => true, 'progress' => RunChatblastSetupCheck::progress()];
     }
 
     /** Poll: kapag may ?since=, ang mga cell lang na nagbago mula noon; kung wala, ang buong grid. */

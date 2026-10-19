@@ -226,42 +226,10 @@ class FlowNamesTest extends BotcakeApiTestCase
         $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect();
         $this->assertSame(0, $this->calls['flows'] + $this->calls['message_templates']);
 
-        $this->tokenAnswer = [200, ['success' => true]];
+        $this->tokenAnswer = [200, ['success' => true, 'data' => []]];
         $this->post('/chatblast/page-settings/test-token', ['page_name' => 'Page Uno'])->assertRedirect()->assertSessionHas('success');
         $this->assertSame('CHATBLAST - SHIPPING STATUS (post_order)', $this->get52('flow.shipping.name'));
         $this->assertSame('post_order', $this->get52('template.shipping'));
-    }
-
-    public static function picks(): array
-    {
-        $chatblast = self::template('chatblast', 'APPROVED', 'Follow up ko lang po yung sa order❤️ {{1}}', ['body_text' => [['Custom Field']]]);
-        $pending   = self::template('chatblast', 'PENDING', 'Follow up po {{1}}', ['body_text' => [['Custom Field']]]);
-        $plain     = self::template('post_order', 'APPROVED', 'May update po {{1}}'); // walang "Custom Field" na example
-
-        return [
-            '1: name in parentheses' => ['CHATBLAST - SHIPPING STATUS (post_order)', [$plain, $chatblast], 'post_order'],
-            '1 pending, then 2'      => ['SHIPPING (chatblast)', [$pending, self::template('ship_x', 'APPROVED', 'Hi {{1}}', ['body_text' => [['custom field']]])], 'ship_x'],
-            '2: single candidate'    => ['SHIPPING STATUS', [$chatblast, self::template('promo_x', 'APPROVED', 'Sale po!')], 'chatblast'],
-            '3: two candidates'      => ['SHIPPING STATUS', [$chatblast, self::template('ship_x', 'APPROVED', 'Hi {{1}}', ['body_text' => [['Custom Field']]])], null],
-            '3: pending only'        => ['SHIPPING STATUS', [$pending], null],
-            'blank name is skipped'  => ['SHIPPING ( )', [self::template('  ', 'APPROVED', 'Hi {{1}}', ['body_text' => [['Custom Field']]])], null],
-        ];
-    }
-
-    /** @dataProvider picks */
-    public function test_S_052_4_an_empty_template_key_is_filled_by_the_flow_name_then_the_single_custom_field_template(string $flowName, array $templates, ?string $expected): void
-    {
-        $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '7001');
-        $this->flowList = [['id' => 7001, 'name' => $flowName, 'is_removed' => false]];
-        $this->templates = $templates;
-
-        $this->testAll()->assertOk();
-
-        $this->assertSame($expected, $this->get52('template.shipping'));
-        if ($expected === null) {
-            // Nasuri at walang mapipili: itinatala, para "No approved post_order template" lang kapag nasuri talaga.
-            $this->assertSame(\App\Services\BotcakeFlowNames::NO_TEMPLATE, $this->get52('template.shipping.text'));
-        }
     }
 
     public function test_S_052_5_a_template_typed_by_the_owner_is_kept_and_an_unknown_or_pending_name_shows_red(): void
@@ -276,29 +244,29 @@ class FlowNamesTest extends BotcakeApiTestCase
         $this->assertSame('Follow up ko lang po yung sa order❤️ (sequence message)', $res->json('cells')['botcake.template.shipping.text']['line']);
 
         $this->testAll()->assertOk();
-        $this->assertSame('chatblast', $this->get52('template.shipping'), 'hindi pinapalitan ng auto-pick ang itinype ng owner');
+        $this->assertSame('post_order', $this->get52('template.shipping'), 'ang setup check ang nagsusulat ng pangalan ng Setup box');
 
         foreach (['wala_ito', 'luma_x'] as $name) {
             $text = $this->cell('template.shipping', $name)->assertOk()->json('cells')['botcake.template.shipping.text'];
             $this->assertSame(['Template not approved in Botcake', 'red'], [$text['line'], $text['tone']], $name);
         }
 
-        // Kapag binura ng owner: pipili ulit ang system.
-        $this->cell('template.shipping', '')->assertOk()->assertJsonPath('cell.value', 'post_order');
+        // Kapag binura ng owner: walang auto-pick (ang susunod na setup check ang maglalagay ulit).
+        $this->cell('template.shipping', '')->assertOk()->assertJsonPath('cell', null);
     }
 
-    public function test_S_052_4_saving_the_shipping_flow_with_an_empty_template_picks_the_template_at_once(): void
+    public function test_S_052_4_saving_the_shipping_flow_with_an_empty_template_shows_no_template_without_a_pick(): void
     {
         $res = $this->cell('flow.shipping', '7001')->assertOk();
 
         $this->assertSame(['flows' => 1, 'message_templates' => 1, 'custom_fields' => 0], $this->calls);
-        $this->assertSame('post_order', $res->json('cells')['botcake.template.shipping']['value']);
-        $this->assertSame("May update na po sa order nyo po❤️\n\n(sequence message)", $res->json('cells')['botcake.template.shipping.text']['line']);
+        $this->assertArrayNotHasKey('botcake.template.shipping', $res->json('cells'), 'no auto-pick from the flow name');
+        $this->assertSame(\App\Services\BotcakeFlowNames::NO_TEMPLATE, $this->get52('template.shipping.text'));
 
-        // Ibang flow, o may template na: flows lang.
+        // Ibang flow: flows lang; ang shipping flow na wala pa ring template: templates ulit.
         $this->cell('flow.on_delivery', '7002')->assertOk();
         $this->cell('flow.shipping', '7003')->assertOk();
-        $this->assertSame(['flows' => 3, 'message_templates' => 1, 'custom_fields' => 0], $this->calls);
+        $this->assertSame(['flows' => 3, 'message_templates' => 2, 'custom_fields' => 0], $this->calls);
     }
 
     public function test_S_052_5_a_failed_template_save_does_not_overwrite_a_newer_template(): void

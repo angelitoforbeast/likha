@@ -26,7 +26,7 @@ class ChatblastFlowInfoTest extends ChatblastTestCase
             ['id' => 5500, 'name' => 'Ibang flow'], ['id' => 5501, 'name' => 'CHATBLAST Shipping update'],
         ]]]]];
         $this->templates = ['success' => true, 'data' => [
-            ['name' => 'chatblast_shipping_update', 'status' => 'APPROVED', 'category' => 'UTILITY',
+            ['name' => 'post_order', 'status' => 'APPROVED', 'category' => 'UTILITY',
                 'components' => [['type' => 'HEADER', 'text' => 'x'], ['type' => 'BODY', 'text' => "Update po sa order:\n{{1}}"]]],
             ['name' => 'promo_sale', 'status' => 'APPROVED', 'category' => 'MARKETING', 'components' => [['type' => 'BODY', 'text' => 'Sale! {{1}}']]],
         ]];
@@ -48,7 +48,7 @@ class ChatblastFlowInfoTest extends ChatblastTestCase
     {
         $res = $this->info()->assertOk();
         $this->assertSame(['5501', 'CHATBLAST Shipping update'], [$res->json('flow.id'), $res->json('flow.name')]);
-        $this->assertSame(['chatblast_shipping_update', 'APPROVED', 'UTILITY', "Update po sa order:\n{{1}}", 'name'],
+        $this->assertSame(['post_order', 'APPROVED', 'UTILITY', "Update po sa order:\n{{1}}", 'setup'],
             [$res->json('template.name'), $res->json('template.status'), $res->json('template.category'), $res->json('template.body'), $res->json('template.source')]);
         $this->assertSame(['7701', 'chatblast_message'], [$res->json('field.id'), $res->json('field.name')]);
         $this->assertStringStartsWith("Update po sa order:\nHello Ma'am/Sir Juan Dela Cruz, nasa biyahe na po ang order niyo", $res->json('preview'));
@@ -70,10 +70,11 @@ class ChatblastFlowInfoTest extends ChatblastTestCase
 
         $res = $this->info()->assertOk();
         $this->assertSame(['Ibang flow', 'promo_sale', 'setting'], [$res->json('flow.name'), $res->json('template.name'), $res->json('template.source')]);
-        $this->assertCount(3, $res->json('check'));
-        $this->assertStringContainsString('CHATBLAST', $res->json('check.0'));
-        $this->assertStringContainsString('{{1}}', $res->json('check.1'));
-        $this->assertStringContainsString('PAUSED', $res->json('check.2'));
+        // Walang babala sa pangalan ng flow (CHATBLAST): ang Setup box ang may tamang pangalan, at ang setup check ang nagsusuri.
+        $this->assertCount(2, $res->json('check'));
+        $this->assertStringContainsString('{{1}}', $res->json('check.0'));
+        $this->assertStringContainsString('PAUSED', $res->json('check.1'));
+        $this->assertStringNotContainsString('CHATBLAST', implode(' ', $res->json('check')));
     }
 
     public function test_a_missing_field_is_flagged_and_the_sample_comes_from_a_campaign_that_sends_to_the_page(): void

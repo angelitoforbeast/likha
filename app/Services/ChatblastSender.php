@@ -189,8 +189,9 @@ class ChatblastSender
         }
         // Ang page ay dapat Ready: may kumpirmadong padala (test o totoo) pagkatapos ng huling pagbabago ng setup. Ang test
         // send mismo ang paraan para maging Ready, kaya hindi ito saklaw. Babalik sa ready sa unang pagkuha pagkatapos ng test.
-        if (!$m->is_test && !app(ChatblastReady::class)->tested($m->page_name)) {
-            $this->finish($m, 'no_config', ChatblastReady::NOT_TESTED, null, []);
+        // Ang dahilan ay ang X ng setup check o ng delivered check kapag mayroon, kung hindi "needs a test send".
+        if (!$m->is_test && ($why = app(ChatblastReady::class)->reason($m->page_name)) !== null) {
+            $this->finish($m, 'no_config', $why, null, []);
             return;
         }
 

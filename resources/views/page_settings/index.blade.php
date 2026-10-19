@@ -39,6 +39,30 @@
         </div>
     @endif
 
+    {{-- Ang Setup box: iisang pangalan ng flow, custom field at template para sa lahat ng page. Ang setup check ang nagsusulat
+         ng flow ID, field ID at template ng bawat page (Test token, Check all, at gabi-gabi). --}}
+    <section id="setup-box" class="cb-card mb-3 p-3 text-sm" aria-labelledby="setup-title"
+             data-url="{{ route('page-settings.setup') }}" data-check-url="{{ route('page-settings.setup.check-all') }}" data-progress-url="{{ route('page-settings.setup.progress') }}">
+        <div class="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h2 id="setup-title" class="font-semibold">Setup for every page</h2>
+            <span class="text-xs text-gray-500">Each page's flow ID, message field ID and template are set from these exact names. Checked every night at 21:30.</span>
+        </div>
+        <form id="setup-form" class="flex flex-wrap items-end gap-3">
+            <label class="flex w-full flex-col gap-0.5 text-xs text-gray-600 sm:w-64">Flow name
+                <input name="flow" required maxlength="255" value="{{ $grid['setup']['names']['flow'] }}" class="w-full rounded border px-2 py-1 text-sm text-gray-900">
+            </label>
+            <label class="flex w-full flex-col gap-0.5 text-xs text-gray-600 sm:w-40">Custom field name
+                <input name="field" required maxlength="255" value="{{ $grid['setup']['names']['field'] }}" class="w-full rounded border px-2 py-1 text-sm text-gray-900">
+            </label>
+            <label class="flex w-full flex-col gap-0.5 text-xs text-gray-600 sm:w-40">Template name
+                <input name="template" required maxlength="255" value="{{ $grid['setup']['names']['template'] }}" class="w-full rounded border px-2 py-1 text-sm text-gray-900">
+            </label>
+            <button class="cb-btn cb-btn-primary">Save and check all</button>
+            <button type="button" id="setup-check-all" class="cb-btn">Check all</button>
+            <span id="setup-status" class="min-w-0 text-xs text-gray-600" aria-live="polite"></span>
+        </form>
+    </section>
+
     <div class="cb-filters flex flex-wrap items-end gap-4 mb-3 text-sm">
         <input id="filter" placeholder="Search pages" class="border rounded px-2 py-1">
 
@@ -95,7 +119,7 @@
         Click a value and type: it saves by itself (Enter, leaving the field, or a few seconds without typing). Blank = delete the setting.
         Token / secret: blank = no change; the value is never shown (last 4 only). Every few seconds, changes made by others are loaded.
         Botcake, flow and field IDs: digits only.
-        The Chatblast flow (the one every sequence sends through) shows its ID, its name in Botcake (read after a save and after an ok Test token) and the template content, where [message for the customer] is each customer's message. The template name is under ▸: picked automatically when blank; you can change it. "+ set": no value yet, click to set it.
+        The Chatblast flow (the one every sequence sends through) shows its ID, its name in Botcake and the template content, where [message for the customer] is each customer's message. The flow ID, the message field ID and the template are set by the check from the names in "Setup for every page". "+ set": no value yet, click to set it.
         ▸ next to a page: the full flow names, the full template, the sync details, the other keys and the history.
     </p>
 
@@ -141,10 +165,10 @@
             </div>
             <ol class="list-decimal space-y-2 pl-5 text-slate-700">
                 <li><b>Botcake ID and token.</b> Add the page with + Page, then type its Botcake ID and its token (Botcake: page settings, API).</li>
-                <li><b>The automatic check.</b> When both are saved, the token is tested and the CHATBLAST flow, the "GPT Input" field and the approved template are filled in. If there are several, pick one from the list.</li>
-                <li><b>Copy the flow and field in Botcake if missing.</b> A red line says what is missing: copy "CHATBLAST - SHIPPING STATUS (post_order)" from another page, or create the "GPT Input" custom field, then press Test.</li>
-                <li><b>Send test to the Test PSID.</b> Set the page's Test PSID (your own account), then press Send test and check Messenger.</li>
-                <li><b>Ready.</b> When the test is sent, the row turns green: the page's messages are now in To send and auto.</li>
+                <li><b>The automatic check.</b> When both are saved, the token is tested and the flow, the custom field and the template named in "Setup for every page" are found and set. The Check column shows a check, or an X with the reason.</li>
+                <li><b>Copy the flow and field in Botcake if missing.</b> An X says what is missing: copy the flow from another page, or create the custom field, then press Test.</li>
+                <li><b>Ready.</b> When the check passes, the row turns green without a test send: the page's messages are now in To send and auto. After the first sends, the check also confirms in Botcake that they were delivered.</li>
+                <li><b>Send test to the Test PSID (optional).</b> Needed only when a person changes the flow or field ID by hand: set the page's Test PSID (your own account), then press Send test and check Messenger.</li>
             </ol>
         </div>
     </div>
@@ -161,6 +185,7 @@
     const ORDERS_LABEL = @json('Orders (' . $grid['order_days'] . ' days)');
 
     let columns = initial.columns;
+    const SETUP = initial.setup.names; // ang mga pangalan ng Setup box (para sa mga gabay)
     const rows = new Map(initial.rows.map(r => [r.key, r]));
     let since = initial.now;
     let editing = null;      // {pk, key, td, input, original, timer}
@@ -214,11 +239,21 @@
     // ChatblastReady sa server. Ang mga oras ay buong timestamp (ts) ng cell at info.last_send.
     const CONFIG_KEYS = ['botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.field.message'];
     const TEST_OK_KEY = 'botcake.test_ok';
+    const CHECK_KEY = 'botcake.setup.check', DELIVERY_KEY = 'botcake.setup.delivery';
+    const json = c => { try { const v = JSON.parse(c?.value || ''); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } };
+    const checkOf = r => json(r.cells[CHECK_KEY]), deliveryOf = r => json(r.cells[DELIVERY_KEY]);
+    // Gaya ng ChatblastReady sa server: hindi Ready ang X ng check o ang "none delivered"; kung wala, Ready kapag may test o
+    // totoong padala pagkatapos ng setup, o kapag ang check ang sumulat ng flow at field at pumasa pagkatapos ng setup.
     function tested(r) {
+        const c = checkOf(r), d = deliveryOf(r);
+        if (c && c.ok === false) return false;
+        if (d && d.status === 'not_delivered') return false;
         const changed = CONFIG_KEYS.map(k => r.cells[k]?.ts || '').sort().pop();
         if (!changed) return false;
         const test = r.cells[TEST_OK_KEY]?.ts || '';
-        return (test !== '' && test >= changed) || (!!r.info.last_send && r.info.last_send >= changed);
+        if ((test !== '' && test >= changed) || (!!r.info.last_send && r.info.last_send >= changed)) return true;
+        const system = k => r.cells[k] && r.cells[k].by === 'system';
+        return !!(c && c.ok === true && String(c.at || '') >= changed && system('botcake.flow.shipping') && system(FIELD_KEY));
     }
     // Kumpleto para sa pagpapadala: ang 4 na key ng server (Chatblast::REQUIRED), hindi kasama ang template.
     const complete = r => CONFIG_KEYS.every(k => r.cells[k]);
@@ -234,6 +269,8 @@
             needsTest: complete(r) && !tested(r),
             // Pulang linya ng flow na may ID: wala sa Botcake o bura na.
             flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),
+            // X ng setup check (flow, field o template) o ng delivered check: hindi nagpapadala.
+            checkX: (checkOf(r)?.ok === false) || deliveryOf(r)?.status === 'not_delivered',
             // Hindi APPROVED ang template ng shipping flow: bigo ang pagpapadala.
             template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),
         };
@@ -247,9 +284,10 @@
         ['incomplete', 'Setup incomplete', (r, st) => st.incomplete],
         ['needs_test', 'Needs test', (r, st) => st.needsTest],
         ['flows', 'Flow problems', (r, st) => st.flows || st.template],
+        ['check', 'Check X', (r, st) => st.checkX],
         ['failed', 'Last sync failed', (r, st) => st.failed],
     ];
-    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete or needs a test send'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']];
+    const LEGEND = [['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete or needs a test send'], ['bg-red-500', 'Token invalid, last sync failed, template not approved or an X in Check']];
     let chip = null; // ang naka-pindot na chip; null = lahat
 
     function chipFilter(r) {
@@ -285,7 +323,7 @@
 
     function borderOf(r) {
         const st = state(r);
-        return !r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete || st.needsTest ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
+        return !r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template || st.checkX ? 'border-l-red-500' : st.incomplete || st.needsTest ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent';
     }
 
     // Pagkatapos magbago ang cell o info ng isang page: ang kulay ng row at ang mga bilang lang, hindi ang buong table.
@@ -316,7 +354,7 @@
     // Ang mga cell ng bawat row, para walang horizontal scroll: ang mga column ay pinagsama ayon sa group (mula sa server).
     // Ang "Chatblast flow" ay ang shipping flow lang: dito dumadaan ang bawat sequence. Ang ibang flow slot ay nasa ▸.
     const GROUPS = [['botcake', 'Botcake'], ['flows', 'Chatblast flow']];
-    const WIDTHS = ['12%', '22%', '29%', '7%', '20%', '10%']; // Page, Botcake, Flows, Orders / Customers, Sync, actions
+    const WIDTHS = ['12%', '13%', '19%', '24%', '7%', '15%', '10%']; // Page, Check, Botcake, Flows, Orders / Customers, Sync, actions
     // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
     // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID.
     const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid', 'botcake.test_ok'];
@@ -333,6 +371,7 @@
         const th = 'bg-gray-100 px-2 py-2 border-b border-r';
         const head = el('tr', {class: 'bg-gray-100 text-left text-xs text-gray-600'}, [
             el('th', {class: 'sticky-col ' + th, text: 'Page'}),
+            el('th', {class: th, text: 'Check', title: 'The setup check: flow, custom field and template by the names in "Setup for every page", and delivery'}),
             ...GROUPS.map(([, label]) => el('th', {class: th, text: label})),
             el('th', {class: th, text: 'Orders / Customers', title: ORDERS_LABEL + ' / Customers'}),
             el('th', {class: th, text: 'Sync', title: 'Last sync / Next sync'}),
@@ -343,6 +382,7 @@
         const body = sortedRows().flatMap(r => {
             const tr = el('tr', {class: 'hover:bg-blue-50/40' + (r.info.orders ? '' : ' text-gray-400'), 'data-pk': r.key}, [
                 pageTd(r),
+                el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'check'}, checkCell(r)),
                 ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'},
                     group === 'flows' ? inGroup(group).filter(c => c.key === SHIPPING_KEY).map(c => flowBlock(r, c)) : inGroup(group).map(c => line(r, c)))),
                 el('td', {class: 'px-2 py-1 border-b border-r align-top text-right text-xs', 'data-info': 'oc', title: ORDERS_LABEL + ' / Customers'}, infoOc(r)),
@@ -355,6 +395,33 @@
         table.replaceChildren(el('colgroup', {}, WIDTHS.map(w => el('col', {style: 'width: ' + w}))), el('thead', {}, head), el('tbody', {}, body.length ? body
             : el('tr', {}, el('td', {class: 'px-3 py-3 text-gray-500', colspan: String(WIDTHS.length), text: rows.size ? 'No pages match the filter.' : 'No pages yet. Use + Page.'}))));
         summaryBar();
+    }
+
+    // Ang mga icon na gamit sa Likha (gaya ng nav ng chatblast): bilog na may check, o bilog na may X.
+    const ICON_PATHS = {ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>', x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'};
+    function icon(kind, label) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        for (const [k, v] of Object.entries({viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+            class: 'h-4 w-4 shrink-0 ' + (kind === 'ok' ? 'text-green-600' : 'text-red-600'), role: 'img', 'aria-label': label})) svg.setAttribute(k, v);
+        svg.innerHTML = ICON_PATHS[kind]; // nakapirming SVG, walang data mula sa labas
+        return svg;
+    }
+    const iconLine = (kind, label, text, cls) => el('div', {class: 'flex items-start gap-1'}, [icon(kind, label), el('span', {class: 'min-w-0 break-words ' + cls, text})]);
+
+    // Ang Check column: check o X (ang dahilan sa ilalim), ang delivered check, kailan nasuri, at ang grey na "Check failed".
+    function checkCell(r) {
+        const c = checkOf(r), d = deliveryOf(r), cell = r.cells[CHECK_KEY], out = [];
+        if (!c) return [el('span', {class: 'text-gray-400', text: r.info.botcake ? 'No check yet' : '—'})];
+        if (c.ok === true) out.push(iconLine('ok', 'Check passed', 'Flow, field and template', 'text-green-700'));
+        else if (c.ok === false) out.push(icon('x', 'Check failed: ' + (c.x || []).join('; ')), ...(c.x || []).map(t => el('div', {class: 'break-words text-red-700', text: t})));
+        if (d && c.ok === true) {
+            if (d.status === 'delivered') out.push(iconLine('ok', 'Delivered', 'Delivered (Botcake)', 'text-green-700'));
+            else if (d.status === 'not_delivered') out.push(iconLine('x', 'Not delivered', 'Sent ' + (d.sent || 0) + ', none delivered (Botcake)', 'text-red-700'));
+            else out.push(el('div', {class: 'text-gray-500', text: 'Delivery: waiting for a send'}));
+        }
+        if (c.error) out.push(el('div', {class: 'break-words text-gray-500', text: 'Check failed: ' + c.error}));
+        if (cell) out.push(el('div', {class: 'text-gray-400', text: 'Checked ' + cell.at}));
+        return out;
     }
 
     function pageTd(r) {
@@ -383,10 +450,10 @@
     const FIELD_KEY = 'botcake.field.message';
     const PICK_KEYS = ['botcake.flow.shipping', FIELD_KEY];
     const GUIDE = {
-        'botcake.flow.shipping': "No CHATBLAST flow in Botcake. In Botcake, copy 'CHATBLAST - SHIPPING STATUS (post_order)' from another page to this page, then press Test.",
-        [FIELD_KEY]: "No 'GPT Input' custom field in Botcake. Create it, then press Test.",
+        'botcake.flow.shipping': 'No flow named "' + SETUP.flow + '" in Botcake. Copy it in Botcake from another page to this page, then press Check.',
+        [FIELD_KEY]: 'No custom field named "' + SETUP.field + '" in Botcake. Create it in Botcake, then press Check.',
     };
-    const NOT_CANDIDATE = {'botcake.flow.shipping': 'This flow is not a CHATBLAST flow in Botcake', [FIELD_KEY]: "This field is not a 'GPT Input' field in Botcake"};
+    const NOT_CANDIDATE = {'botcake.flow.shipping': 'This flow is not "' + SETUP.flow + '" in Botcake', [FIELD_KEY]: 'This field is not "' + SETUP.field + '" in Botcake'};
 
     // Ang listahan ([{id, name, candidate, recommended}], nakaayos na) mula sa huling Test, o null kapag hindi pa nasusuri.
     // Ang listahang naitala bago nagkaroon ng candidate ay mga kandidato lang, kaya ang walang candidate ay kandidato.
@@ -1147,6 +1214,43 @@
     document.getElementById('filter').addEventListener('input', () => render());
 
     showSyncAll(initial.sync_all);
+
+    // ---- Setup box: i-save ang mga pangalan (saka Check all), Check all, at ang takbo ng Check all ----
+    const setupBox = document.getElementById('setup-box'), setupStatus = document.getElementById('setup-status');
+    let setupTimer = null;
+    const hm = iso => iso ? new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
+    function showSetup(p) {
+        clearTimeout(setupTimer);
+        if (!p) { setupStatus.textContent = ''; return; }
+        if (p.status === 'queued' || p.status === 'running') {
+            setupStatus.className = 'min-w-0 text-xs text-blue-800';
+            setupStatus.textContent = p.status === 'queued' ? 'Check all is queued…' : 'Checking ' + p.done + ' of ' + p.total + ' pages…';
+            setupTimer = setTimeout(async () => {
+                const res = await fetch(setupBox.dataset.progressUrl, {headers: {'Accept': 'application/json'}});
+                if (res.ok) showSetup((await res.json()).progress); // ang mga cell ng bawat page ay dumarating sa poll ng grid
+            }, 4000);
+            return;
+        }
+        setupStatus.className = 'min-w-0 text-xs ' + (p.status === 'done' ? 'text-gray-600' : 'text-red-600');
+        setupStatus.textContent = p.status === 'done'
+            ? 'Last Check all finished ' + hm(p.finished_at) + ': ' + p.total + ' pages, ' + p.x + ' with an X, ' + p.failed + ' could not be checked.'
+            : 'Check all stopped ' + hm(p.finished_at) + ' after ' + p.done + ' of ' + p.total + ' pages.';
+    }
+    async function setupPost(url, body) {
+        const res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify(body)});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setupStatus.className = 'min-w-0 text-xs text-red-600'; setupStatus.textContent = data.error || data.message || ('HTTP ' + res.status); return; }
+        if (data.names) Object.assign(SETUP, data.names);
+        showSetup(data.progress);
+        if (data.queued === false) setupStatus.textContent = 'A Check all is already running. ' + setupStatus.textContent;
+    }
+    document.getElementById('setup-form').addEventListener('submit', ev => {
+        ev.preventDefault();
+        const f = new FormData(ev.target);
+        setupPost(setupBox.dataset.url, {flow: f.get('flow'), field: f.get('field'), template: f.get('template')});
+    });
+    document.getElementById('setup-check-all').addEventListener('click', () => setupPost(setupBox.dataset.checkUrl, {}));
+    showSetup(initial.setup.progress);
     render();
 })();
 </script>

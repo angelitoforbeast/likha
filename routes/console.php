@@ -96,6 +96,16 @@ Schedule::command('chatbot:sequence-tick')
     ->everyMinute()
     ->withoutOverlapping(5);
 
+// Chatblast setup check (flow, field at template ayon sa Setup box ng /chatblast/page-settings): gabi-gabi, 21:30
+// Manila, pagkatapos ng In transit window. Ang delivered check ng bagong flow: kada oras sa :45, ang hindi pa kumpirmado lang.
+Schedule::command('botcake:setup-check --all')
+    ->timezone('Asia/Manila')
+    ->dailyAt('21:30')
+    ->withoutOverlapping(120);
+Schedule::command('botcake:setup-delivered')
+    ->hourlyAt(45)
+    ->withoutOverlapping(30);
+
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')
     ->timezone('Asia/Manila')
