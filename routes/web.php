@@ -348,6 +348,9 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-setting
     Route::post('/', [PageSettingController::class, 'store'])->name('store');
     Route::get('/grid', [PageSettingController::class, 'grid'])->name('grid');
     Route::post('/cell', [PageSettingController::class, 'saveCell'])->middleware('throttle:120,1')->name('cell');
+    Route::post('/setup', [PageSettingController::class, 'saveSetup'])->middleware('throttle:10,1,page-settings-setup')->name('setup');
+    Route::post('/setup/check-all', [PageSettingController::class, 'checkAll'])->middleware('throttle:10,1,page-settings-setup')->name('setup.check-all');
+    Route::get('/setup/progress', [PageSettingController::class, 'setupProgress'])->name('setup.progress');
     Route::get('/history', [PageSettingController::class, 'history'])->name('history');
     Route::get('/page-check', [PageSettingController::class, 'pageCheck'])->middleware('throttle:30,1')->name('page-check');
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');

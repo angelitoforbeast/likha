@@ -49,7 +49,7 @@ class ChatbotController extends Controller
         $this->checkAccess();
         $listed = array_map(fn ($p) => $this->settings->pageKey($p), $this->pages());
         // Para sa "+ Page": ang mga page sa page settings na wala pa sa listahan.
-        $others = PageSetting::where('active', true)->distinct()->orderBy('page_name')->pluck('page_name')
+        $others = PageSetting::where('active', true)->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)->distinct()->orderBy('page_name')->pluck('page_name')
             ->unique(fn ($p) => $this->settings->pageKey($p))->reject(fn ($p) => in_array($this->settings->pageKey($p), $listed, true))->values();
 
         return view('chatbot.index', ['isCeo' => $this->role() === 'CEO', 'otherPages' => $others, 'repliesOn' => \App\Services\Chatbot\BotcakeOutbox::enabled()]);

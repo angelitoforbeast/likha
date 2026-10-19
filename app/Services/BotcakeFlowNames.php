@@ -75,8 +75,8 @@ class BotcakeFlowNames
     }
 
     /**
-     * Pagkatapos i-save ang flow ID (isang flows call; kapag shipping flow at blangko ang template, isang templates call
-     * din para sa auto-pick) o ang template (isang templates call). Ang pagkabigo ng Botcake
+     * Pagkatapos i-save ang flow ID (isang flows call; kapag shipping flow, isang templates call din para sa body ng
+     * template) o ang template (isang templates call). Ang pagkabigo ng Botcake
      * ay hindi humaharang sa save: itinatala bilang "hindi nasuri: <dahilan>" sa key na na-save, para hindi maiwan
      * ang pangalan ng lumang ID.
      * @return array{written: array<string, ?PageSetting>, error: ?string}
@@ -90,7 +90,7 @@ class BotcakeFlowNames
             $error = $this->refreshTemplate($page, $deadline, $written, true);
         } else {
             $error = $this->refreshFlows($page, $deadline, $written, substr($full, strlen('botcake.')));
-            // Bagong shipping flow at blangko pa ang template: pipili na ngayon, hindi na hihintayin ang Test token.
+            // Bagong shipping flow at blangko pa ang template: ang "walang template" ay makikita na ngayon.
             if ($full === 'botcake.flow.shipping' && !$this->settings->get($page, 'botcake', 'template.shipping')) {
                 $templateError = $this->refreshTemplate($page, $deadline, $written, false);
                 $error ??= $templateError;
@@ -101,27 +101,7 @@ class BotcakeFlowNames
     }
 
     /**
-     * Pagkatapos ng Test token na ok: ang flows muna (para sa pangalan ng shipping flow), saka ang templates. Hanggang
-     * $deadline lang (oras ng BotcakeClock); ang pagkabigo ay hindi isinusulat, naiiwan ang dating mga linya.
-     * @return array{written: array<string, ?PageSetting>, error: ?string}
-     */
-    public function afterTokenOk(string $page, float $deadline): array
-    {
-        $written = [];
-        $error = $this->refreshFlows($page, $deadline, $written, null);
-
-        // Walang shipping flow at walang template: walang ipapakita, kaya walang templates call.
-        $error2 = null;
-        if ($this->settings->get($page, 'botcake', 'flow.shipping') || $this->settings->get($page, 'botcake', 'template.shipping')) {
-            $error2 = $this->refreshTemplate($page, $deadline, $written, false);
-        }
-
-        return ['written' => $written, 'error' => $error ?? $error2];
-    }
-
-    /**
-     * $saved = ang flow key na kase-save lang (hal. flow.shipping), o null sa Test token. Ibinabalik ang error.
-     * Binabasa ang listahan kahit wala pang flow ID ang page (bagong page): doon kinukuha ang mga CHATBLAST flow.
+     * $saved = ang flow key na kase-save lang (hal. flow.shipping). Ibinabalik ang error.
      */
     private function refreshFlows(string $page, float $deadline, array &$written, ?string $saved): ?string
     {
@@ -132,10 +112,7 @@ class BotcakeFlowNames
             ->mapWithKeys(fn ($s) => [$s->key => trim((string) $s->value)])->all();
 
         [$flows, $error] = $this->readFlows($page, $deadline);
-        if ($flows !== null) {
-            $this->detectFlow($page, $flows, $written);
-            if (isset($written['botcake.flow.shipping'])) $ids['flow.shipping'] = trim((string) $written['botcake.flow.shipping']->value);
-        }
+        if ($flows !== null) $this->detectFlow($page, $flows, $written);
         if (!$ids) return $error;
 
         foreach ($ids as $key => $id) {
@@ -155,37 +132,22 @@ class BotcakeFlowNames
     }
 
     /**
-     * Ang listahan ng dropdown ng Chatblast flow (botcake.flow.shipping.options): lahat ng hindi burang flow, bawat isa
-     * may candidate (may "CHATBLAST" sa pangalan, kahit anong laki ng titik) at recommended (kandidatong may
-     * "(post_order)"). Ang ayos: ang recommended, ang ibang kandidato, saka ang iba, bawat grupo ayon sa pangalan.
-     * Kapag blangko ang botcake.flow.shipping:
-     * ang iisang may "(post_order)", o ang iisang kandidato; kung hindi malinaw, walang pinupunan. Hindi kailanman
-     * pinapalitan ang value na naitala na (ng tao o ng system).
+     * Ang listahan ng dropdown ng Chatblast flow (botcake.flow.shipping.options): lahat ng hindi burang flow; ang may
+     * pangalang tugma sa Setup box (ChatblastSetupCheck) ang recommended. Display lang: ang ID ay isinusulat ng
+     * ChatblastSetupCheck, hindi rito.
      * @param array<string, array{name:string, removed:bool}> $flows
      */
     private function detectFlow(string $page, array $flows, array &$written): void
     {
-        $list = [];
-        foreach ($flows as $id => $f) {
-            if ($f['removed']) continue;
-            $candidate = stripos($f['name'], 'CHATBLAST') !== false;
-            $list[] = ['id' => (string) $id, 'name' => $f['name'], 'candidate' => $candidate, 'recommended' => $candidate && stripos($f['name'], '(post_order)') !== false];
-        }
-        usort($list, fn ($a, $b) => [!$a['candidate'], !$a['recommended'], mb_strtolower($a['name']), $a['id']] <=> [!$b['candidate'], !$b['recommended'], mb_strtolower($b['name']), $b['id']]);
-        $written['botcake.flow.shipping.options'] = $this->write($page, 'flow.shipping.options', json_encode($list, JSON_UNESCAPED_UNICODE));
-        $candidates = array_values(array_filter($list, fn ($f) => $f['candidate']));
-
-        if (trim((string) $this->settings->get($page, 'botcake', 'flow.shipping')) !== '') return;
-        $postOrder = array_values(array_filter($candidates, fn ($c) => stripos($c['name'], '(post_order)') !== false));
-        $pick = count($postOrder) === 1 ? $postOrder[0] : (count($candidates) === 1 ? $candidates[0] : null);
-        if ($pick !== null && ctype_digit($pick['id'])) {
-            $written['botcake.flow.shipping'] = $this->settings->set($page, 'botcake', 'flow.shipping', $pick['id'])['setting'];
-        }
+        $items = [];
+        foreach ($flows as $id => $f) if (!$f['removed']) $items[] = ['id' => (string) $id, 'name' => $f['name']];
+        $name = app(ChatblastSetupCheck::class)->names()['flow'];
+        $written['botcake.flow.shipping.options'] = $this->write($page, 'flow.shipping.options', json_encode(ChatblastSetupCheck::options($items, $name), JSON_UNESCAPED_UNICODE));
     }
 
     /**
-     * Ang template ng shipping flow: kapag blangko ang botcake.template.shipping, pipili ang system (pick()); saka ang
-     * body nito sa botcake.template.shipping.text, o NOT_APPROVED kapag hindi ito APPROVED na template ng page.
+     * Ang template ng shipping flow (ang pangalan ay mula sa tao o sa ChatblastSetupCheck): ang body nito sa
+     * botcake.template.shipping.text, o NOT_APPROVED kapag hindi ito APPROVED na template ng page.
      * $saved = kase-save lang ang template: ang pagkabigo ay itinatala sa text. Walang template: ang pagkabigo o ang
      * "walang mapipili" (NO_TEMPLATE) ay itinatala rin, para alam ng page kung nasuri talaga.
      */
@@ -203,13 +165,6 @@ class BotcakeFlowNames
         }
 
         if ($name === '') {
-            $name = (string) $this->pick($templates, (string) $this->settings->get($page, 'botcake', 'flow.shipping.name'));
-            if ($name !== '') {
-                $written['botcake.template.shipping'] = $this->settings->set($page, 'botcake', 'template.shipping', $name)['setting'];
-            }
-        }
-
-        if ($name === '') {
             $written['botcake.template.shipping.text'] = $this->write($page, 'template.shipping.text', self::NO_TEMPLATE);
             return null;
         }
@@ -221,26 +176,10 @@ class BotcakeFlowNames
         return null;
     }
 
-    /**
-     * Ang auto-pick: (1) ang pangalan sa panaklong sa dulo ng pangalan ng shipping flow, kapag APPROVED na template;
-     * (2) kung wala, ang iisang APPROVED template na may {{1}} sa BODY at "Custom Field" sa example; (3) kung wala, null.
-     */
-    private function pick(array $templates, string $flowName): ?string
-    {
-        if (!str_starts_with($flowName, '!') && preg_match('/\(([^()]+)\)\s*$/u', $flowName, $m)) {
-            if ($t = $this->approved($templates, $m[1])) return $t['name'];
-        }
-
-        $hits = array_values(array_filter($templates, fn ($t) => $t['approved'] && str_contains($t['body'], '{{1}}') && $t['custom_field']));
-
-        return count($hits) === 1 ? $hits[0]['name'] : null;
-    }
-
     private function approved(array $templates, string $name): ?array
     {
-        $key = mb_strtolower(trim($name), 'UTF-8');
         foreach ($templates as $t) {
-            if ($t['approved'] && mb_strtolower(trim($t['name']), 'UTF-8') === $key) return $t;
+            if ($t['approved'] && ChatblastSetupCheck::norm($t['name']) === ChatblastSetupCheck::norm($name)) return $t;
         }
         return null;
     }
@@ -250,7 +189,7 @@ class BotcakeFlowNames
      * flat). Kapag error o kakaibang sagot: walang listahan, kaya walang minamarkahang "wala".
      * @return array{0: ?array<string, array{name:string, removed:bool}>, 1: ?string} flows ayon sa id, error
      */
-    private function readFlows(string $page, float $deadline): array
+    public function readFlows(string $page, float $deadline): array
     {
         [$body, $error] = $this->call($page, '/flows', [], $deadline);
         if ($error !== null) return [null, $error];
@@ -269,10 +208,10 @@ class BotcakeFlowNames
     }
 
     /**
-     * GET message_templates: name, APPROVED o hindi, ang BODY text at kung may "Custom Field" sa example nito.
-     * @return array{0: ?array<int, array{name:string, approved:bool, body:string, custom_field:bool}>, 1: ?string}
+     * GET message_templates: name, APPROVED o hindi, at ang BODY text.
+     * @return array{0: ?array<int, array{name:string, approved:bool, body:string}>, 1: ?string}
      */
-    private function readTemplates(string $page, float $deadline): array
+    public function readTemplates(string $page, float $deadline): array
     {
         [$body, $error] = $this->call($page, '/message_templates', [], $deadline);
         if ($error !== null || $body === null) return [null, $error];
@@ -284,28 +223,15 @@ class BotcakeFlowNames
         foreach ($list as $t) {
             if (!is_array($t) || !is_string($t['name'] ?? null) || trim($t['name']) === '') continue;
             $text = '';
-            $custom = false;
             foreach ((array) ($t['components'] ?? []) as $c) {
                 if (!is_array($c) || strtoupper((string) ($c['type'] ?? '')) !== 'BODY') continue;
                 $text = is_string($c['text'] ?? null) ? $c['text'] : '';
-                $custom = self::hasCustomField($c['example'] ?? null);
             }
             $out[] = ['name' => trim($t['name']), 'approved' => strtoupper((string) ($t['status'] ?? '')) === 'APPROVED',
-                'body' => mb_substr(trim($text), 0, 2000), 'custom_field' => $custom];
+                'body' => mb_substr(trim($text), 0, 2000)];
         }
 
         return [$out, null];
-    }
-
-    /** May "Custom Field" saanman sa example (string o nested na listahan, gaya ng body_text: [["Custom Field"]]). */
-    private static function hasCustomField(mixed $example): bool
-    {
-        if (is_string($example)) return strcasecmp(trim($example), 'Custom Field') === 0;
-        if (!is_array($example)) return false;
-        foreach ($example as $v) {
-            if (self::hasCustomField($v)) return true;
-        }
-        return false;
     }
 
     /**
@@ -333,6 +259,27 @@ class BotcakeFlowNames
         if (($r['body']['success'] ?? true) === false) return [null, 'Botcake: refused (success:false)'];
 
         return [$r['body'], null];
+    }
+
+    /**
+     * Ang pangalan ng bawat flow ID ng page (botcake.flow.<x>.name) mula sa nabasang listahan: ang pangalan, bura na, o
+     * wala sa listahan. Para sa ChatblastSetupCheck (iisang flows call kada check).
+     * @param array<string, array{name:string, removed:bool}> $flows
+     * @return array<string, PageSetting>
+     */
+    public function writeFlowNames(string $page, array $flows): array
+    {
+        $written = [];
+        $ids = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('active', true)
+            ->where('key', 'like', 'flow.%')->orderBy('id')->get()
+            ->filter(fn ($s) => preg_match('/^flow\.[a-z0-9_]+$/', $s->key))
+            ->mapWithKeys(fn ($s) => [$s->key => trim((string) $s->value)])->all();
+        foreach ($ids as $key => $id) {
+            $value = isset($flows[$id]) ? ($flows[$id]['removed'] ? self::REMOVED : $flows[$id]['name']) : self::NOT_FOUND;
+            $written['botcake.' . $key . '.name'] = $this->write($page, $key . '.name', $value);
+        }
+
+        return $written;
     }
 
     private function write(string $page, string $key, string $value): PageSetting

@@ -1586,3 +1586,23 @@ Spec 083. Tests in `tests/Feature/Chatblast/BotcakeChatLimitTest.php`.
 | S-083.2 | Given any other IP, then it gets 429 after `chat_rate` in a minute, as before | `test_S_083_2…` | Passed · 2026-10-20 · auto |
 | S-083.3 | Given `botcake:chat-test-ip {ip} --hours=2`, then that IP is unlimited until it expires, then limited again; `--list` shows it with its expiry | `test_S_083_3…` | Passed · 2026-10-20 · auto |
 | S-083.4 | `--remove` takes the IP off; a bad IP, or `--hours` outside 1–12, is refused and adds nothing | `test_S_083_4…` | Passed · 2026-10-20 · auto |
+
+## S-082 Chatblast flow and message field set by fixed names, with a check per page
+
+Spec 082. Tests are in `tests/Feature/Chatblast/ChatblastSetupCheckTest.php` (and the updated `tests/Feature/PageSettings` tests); S-082.10 is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-082.1 | Given a flow "  update   SHIPPING status 2026 ", a removed flow and a "… (copy)" flow, and a field " MESSAGE", when the check runs, then the one live exact match (trim, case, inner spaces) is written as a system write to flow.shipping and field.message, replacing a person's value (kept as history), and the template name is written | `test_S_082_1…` | Passed · 2026-10-20 · auto |
+| S-082.2 | Given no match or two matches for the flow or the field, then an X ("No flow named … in Botcake", "2 flows named …", and the same for custom fields), the stored value stays, and the page is not Ready (sends skip with that reason) even if it was tested on the old flow | `test_S_082_2…` (4 data sets) | Passed · 2026-10-20 · auto |
+| S-082.3 | The template passes only when an APPROVED template has the exact name and its BODY has {{1}}; not approved, no {{1}}, or only another name is an X and the page is not Ready | `test_S_082_3…` (4 data sets) | Passed · 2026-10-20 · auto |
+| S-082.4 | When the check sets the flow and field and passes, the page is Ready without a Send test; when a person then changes the flow or field, it needs a test again; the next check sets it back and it is Ready again | `test_S_082_4…` | Passed · 2026-10-20 · auto |
+| S-082.5 | When Botcake can't be reached (flows HTTP 500, or the token test itself fails), then nothing changes, the last result stays, a grey "Check failed: <reason>" is recorded, and Ready stays as it was | `test_S_082_5…` | Passed · 2026-10-20 · auto |
+| S-082.6 | When the check sets a new flow ID, its statistics are the baseline; a send via that flow under 60 minutes old waits (no statistics call); after 60 minutes, delivery above the baseline is Delivered (no more checks), otherwise "Sent N, none delivered (Botcake)" and the page is not Ready; sends via another flow don't count | `test_S_082_6…` | Passed · 2026-10-20 · auto |
+| S-082.7 | The Setup box names are stored on the reserved page `_all`; `_all` is not in the grid rows or columns, the poll, Ready, `pagesWith`, chatblast's missing setup, or the /chatbot "+ Page" dropdown; the page can't write `_all`; an empty name is refused | `test_S_082_7…` | Passed · 2026-10-20 · auto |
+| S-082.8 | `botcake:setup-check --all --dry-run` prints each page's current → found IDs, the result and whether Ready would change, and writes nothing | `test_S_082_8…` | Passed · 2026-10-20 · auto |
+| S-082.9 | Check all is one queued job on `default` (a second press while it runs adds none), with progress (done of total, X count, could not be checked, finish time); the page has the Setup box and the Check column | `test_S_082_9…` | Passed · 2026-10-20 · auto |
+| S-082.10 | On /chatblast/page-settings at 1366 and 390 px: the Setup box, the Check column with a check icon and an X icon (reasons under it, "Checked …", delivered or not, grey "Check failed"), no text glyphs, no page-level horizontal scroll | browser | Passed · 2026-10-20 · browser |
+| S-082.11 | After a passed check, a flow or field ID that differs from the one the check found (e.g. picked by a person) blocks the page with "the flow ID is not the flow named …", even with a Send test; the page shows it as an X | `test_S_082_11…` + browser | Passed · 2026-10-20 · auto + browser |
+| S-082.12 | The sender skips a page with an X: no_config with the X reason, nothing sent | `test_S_082_12…` | Passed · 2026-10-20 · auto |
+| S-082.13 | The Setup routes are 404 without page-settings access; names saved during a running Check all run it again; `_all` in any spelling, `_all` on the old form, a 256-character name and deactivating a check row are refused | `test_S_082_13…` | Passed · 2026-10-20 · auto |

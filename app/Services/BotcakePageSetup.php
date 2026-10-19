@@ -8,9 +8,9 @@ use Throwable;
 
 /**
  * Ang kusang setup ng page sa /chatblast/page-settings: ang token test (isang custom_fields call, walang retry), at
- * kapag ok, ang mga custom field (mula sa parehong sagot), ang mga flow at ang template. Pinupunan lang ang blangko
- * at malinaw; ang marami ay itinatabi para sa dropdown. Tinatawag pagkatapos i-save ang Botcake ID o token, at ng
- * Test (row at Test lahat). Ang pagkabigo ng Botcake ay ibinabalik bilang error, hindi itinatapon.
+ * kapag ok, ang setup check ayon sa mga pangalan ng Setup box (ChatblastSetupCheck: ang mga custom field mula sa parehong
+ * sagot, saka ang mga flow at ang template). Tinatawag pagkatapos i-save ang Botcake ID o token, ng Test (row at Test
+ * lahat), ng Check all at ng gabi-gabing check. Ang pagkabigo ng Botcake ay ibinabalik bilang error, hindi itinatapon.
  */
 class BotcakePageSetup
 {
@@ -21,7 +21,7 @@ class BotcakePageSetup
         private PageSettings $settings,
         private BotcakeClient $client,
         private BotcakeCustomerSync $sync,
-        private BotcakeFlowNames $names,
+        private ChatblastSetupCheck $setup,
         private BotcakeClock $clock,
     ) {
     }
@@ -44,53 +44,27 @@ class BotcakePageSetup
             // Ang hindi galing sa Botcake ay bug: itinatala, saka ang pangkalahatang mensahe lang sa page.
             if (!$e instanceof BotcakeException) report($e);
             $reason = $e instanceof BotcakeException ? $e->reason : null;
-            return ['status' => 'error', 'written' => [], 'error' => $e instanceof BotcakeException ? $e->getMessage() : 'Botcake: no answer', 'reason' => $reason];
+            $error = $e instanceof BotcakeException ? $e->getMessage() : 'Botcake: no answer';
+            $this->setup->recordFailure($page, $error); // ang grey na "Check failed" sa Check column
+            return ['status' => 'error', 'written' => [], 'error' => $error, 'reason' => $reason];
         }
 
         $status = $res['ok'] ? 'ok' : 'invalid';
         $this->sync->tokenStatus($page, $status, true);
         $written = ['botcake.token_status' => $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'token_status')
             ->where('active', true)->orderByDesc('id')->first()];
-        if ($status !== 'ok') return ['status' => $status, 'written' => $written, 'error' => null, 'reason' => null];
-
-        if ($res['fields'] !== null) $this->detectField($page, $res['fields'], $written);
+        if ($status !== 'ok') {
+            $written['botcake.' . ChatblastSetupCheck::CHECK_KEY] = $this->setup->recordFailure($page, 'token invalid');
+            return ['status' => $status, 'written' => $written, 'error' => null, 'reason' => null];
+        }
 
         try {
-            $after = $this->names->afterTokenOk($page, $deadline);
+            $check = $this->setup->run($page, $res['fields'], $deadline); // null (kakaibang sagot): babasahin ulit ng check
         } catch (Throwable $e) {
             report($e);
-            return ['status' => 'ok', 'written' => $written, 'error' => 'Botcake: no answer', 'reason' => null];
+            return ['status' => 'ok', 'written' => $written, 'error' => 'Botcake: no answer', 'reason' => null, 'check' => null];
         }
 
-        return ['status' => 'ok', 'written' => array_merge($written, $after['written']), 'error' => $after['error'], 'reason' => null];
-    }
-
-    /**
-     * Ang mga kandidato ng message field: ang pangalang, kapag maliliit na titik at walang espasyo o gitling, ay
-     * "gptinput" o "message". Ang listahan ng dropdown (botcake.field.message.options) ay lahat ng custom field: ang mga
-     * kandidato muna (recommended), saka ang iba, bawat grupo ayon sa pangalan. Kapag blangko ang field at iisa ang kandidato,
-     * iyon ang pinupunan. Hindi kailanman pinapalitan ang naitala na.
-     * @param array<int, array{id: string, name: string}> $fields
-     */
-    private function detectField(string $page, array $fields, array &$written): void
-    {
-        $list = array_map(function ($f) {
-            $candidate = in_array(self::norm($f['name']), ['gptinput', 'message'], true);
-            return ['id' => $f['id'], 'name' => $f['name'], 'candidate' => $candidate, 'recommended' => $candidate];
-        }, $fields);
-        usort($list, fn ($a, $b) => [!$a['candidate'], mb_strtolower($a['name']), $a['id']] <=> [!$b['candidate'], mb_strtolower($b['name']), $b['id']]);
-        $written['botcake.field.message.options'] = $this->settings->set($page, 'botcake', 'field.message.options',
-            json_encode($list, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
-        $candidates = array_values(array_filter($list, fn ($f) => $f['candidate']));
-
-        if (trim((string) $this->settings->get($page, 'botcake', 'field.message')) !== '') return;
-        if (count($candidates) === 1 && ctype_digit($candidates[0]['id'])) {
-            $written['botcake.field.message'] = $this->settings->set($page, 'botcake', 'field.message', $candidates[0]['id'])['setting'];
-        }
-    }
-
-    private static function norm(string $name): string
-    {
-        return str_replace([' ', '-'], '', mb_strtolower(trim($name), 'UTF-8'));
+        return ['status' => 'ok', 'written' => array_merge($written, $check['written']), 'error' => $check['error'], 'reason' => null, 'check' => $check];
     }
 }

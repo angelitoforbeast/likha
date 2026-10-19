@@ -20,7 +20,8 @@ class PageSettings
      * DETAIL_PATTERN: ang pangalan ng bawat flow (botcake.flow.<x>.name) at ang body ng shipping template.
      */
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
-        'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id'];
+        'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
+        'botcake.setup.check', 'botcake.setup.delivery'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -69,6 +70,8 @@ class PageSettings
         $full     = $provider . '.' . $key;
 
         if ($this->normPage($page) === '') return ['page_name' => 'The page is required.'];
+        // Ang "_all" ay ang mga pangalan ng Setup box (ChatblastSetupCheck), hindi page: isinusulat lang ng Setup box.
+        if (!$system && $this->pageKey($page) === ChatblastSetupCheck::ALL_PAGE) return ['page_name' => '"' . ChatblastSetupCheck::ALL_PAGE . '" is reserved for the Setup box.'];
         if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: 255 characters at most.'];
         if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: lowercase letters, digits and _ only.'];
         if (strlen($key) > 100 || !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key)) {
@@ -178,7 +181,7 @@ class PageSettings
     public function pagesWith(string $provider, array $keys): array
     {
         $keys = array_values(array_unique($keys));
-        $rows = PageSetting::where('provider', $provider)->whereIn('key', $keys)->where('active', true)
+        $rows = PageSetting::where('provider', $provider)->whereIn('key', $keys)->where('active', true)->where('page_name', '!=', ChatblastSetupCheck::ALL_PAGE)
             ->orderBy('id')->get(['page_name', 'key']);
 
         return $rows->groupBy(fn ($r) => $this->pageKey($r->page_name))

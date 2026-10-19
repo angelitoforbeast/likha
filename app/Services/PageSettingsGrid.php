@@ -34,6 +34,9 @@ class PageSettingsGrid
         'botcake.token_status'     => 'Token status',
     ];
 
+    /** Ang resulta ng setup check at ng delivered check: nasa Check column (mula sa cells ng row), hindi sariling column. */
+    public const CHECK_CELLS = ['botcake.setup.check', 'botcake.setup.delivery'];
+
     public function __construct(private PageSettings $settings, private BotcakeCustomerSync $sync, private BotcakeSyncAll $syncAll)
     {
     }
@@ -48,7 +51,10 @@ class PageSettingsGrid
     public function build(): array
     {
         $now    = $this->now();
-        $active = PageSetting::where('active', true)->orderBy('id')->get();
+        // Ang "_all" (ang mga pangalan ng Setup box) ay hindi page: wala sa grid; ang mga pangalan ay para sa Setup box.
+        [$all, $active] = PageSetting::where('active', true)->orderBy('id')->get()
+            ->partition(fn ($s) => $this->settings->pageKey($s->page_name) === ChatblastSetupCheck::ALL_PAGE);
+        $active = $active->values();
         $names  = $this->userNames($active);
 
         $rows = [];
@@ -82,6 +88,8 @@ class PageSettingsGrid
             'columns' => $this->columns($active), 'rows' => array_values($rows), 'now' => $now,
             'sync_lock' => $this->syncLock(), 'sync_all' => $this->syncAll->panel(), 'order_days' => $this->orderDays(),
             'plan_summary' => BotcakeSyncAll::summary($next),
+            // Ang Setup box: ang mga pangalan para sa lahat ng page at ang huling Check all.
+            'setup' => ['names' => ChatblastSetupCheck::namesFrom($all), 'progress' => \App\Jobs\RunChatblastSetupCheck::progress()],
         ];
     }
 
@@ -131,7 +139,7 @@ class PageSettingsGrid
     {
         $now     = $this->now();
         $changed = PageSetting::where(fn ($q) => $q->where('created_at', '>=', $since)->orWhere('replaced_at', '>=', $since))
-            ->orderBy('id')->get();
+            ->where('page_name', '!=', ChatblastSetupCheck::ALL_PAGE)->orderBy('id')->get();
         $names   = $this->userNames($changed->where('active', true));
 
         $cells = [];
@@ -228,7 +236,7 @@ class PageSettingsGrid
         ];
 
         $other = $active->map(fn ($s) => $s->fullKey())->unique()
-            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k))->sort()->values();
+            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k) || in_array($k, self::CHECK_CELLS, true))->sort()->values();
 
         return array_merge(
             array_map($col, array_keys(self::KNOWN), array_values(self::KNOWN)),
