@@ -485,7 +485,7 @@
         $('chip').className = 'rounded-full px-2 py-0.5 text-xs font-medium ' + cls;
         $('chip').textContent = text;
         $('chip').title = data.published_at ? 'Last published ' + data.published_at : '';
-        $('discard').disabled = state !== 'draft' && !dirty;
+        $('discard').disabled = state === 'never' || (state !== 'draft' && !dirty); // walang published na mababalikan
     }
     const send = (url, method, body) => fetch(url, {method, headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify(body)})
         .then(async r => ({ok: r.ok, code: r.status, data: await r.json().catch(() => ({}))}));

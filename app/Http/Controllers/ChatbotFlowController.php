@@ -101,7 +101,10 @@ class ChatbotFlowController extends Controller
         if ($pages) {
             return response()->json(['error' => implode(', ', $pages) . ' ' . (count($pages) === 1 ? 'uses' : 'use') . ' this flow. Pick another flow for ' . (count($pages) === 1 ? 'it' : 'them') . ' first.'], 422);
         }
-        $flow->delete();
+        DB::transaction(function () use ($flow) {
+            DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->delete();
+            $flow->delete();
+        });
 
         return response()->json(['ok' => true]);
     }
@@ -164,7 +167,7 @@ class ChatbotFlowController extends Controller
             } catch (InvalidArgumentException $e) {
                 return response()->json(['error' => 'This flow cannot be published: ' . $e->getMessage()], 422);
             }
-            $this->write($flow, $request, ['graph' => json_encode($graph), 'draft_graph' => null, 'published_at' => now(), 'published_by' => Auth::id()]);
+            if (!$this->write($flow, $request, ['graph' => json_encode($graph), 'draft_graph' => null, 'published_at' => now(), 'published_by' => Auth::id()])) return $this->conflict();
             DB::table('chatbot_flow_versions')->insert(['flow_id' => $flow->id, 'graph' => json_encode($graph), 'note' => $note !== '' ? $note : null, 'published_by' => Auth::id(), 'created_at' => now()]);
             $oldest = DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->orderByDesc('id')->offset(self::KEEP_VERSIONS)->limit(1)->value('id');
             if ($oldest) DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->where('id', '<=', $oldest)->delete();
@@ -173,11 +176,12 @@ class ChatbotFlowController extends Controller
         });
     }
 
-    /** Burahin ang draft: balik sa published. */
+    /** Burahin ang draft: balik sa published. Ang hindi pa naipa-publish ay walang mababalikan (mawawala lang ang gawa). */
     public function discard(Request $request, int $id)
     {
         $this->checkAccess();
         $flow = ChatbotFlow::findOrFail($id);
+        if ($flow->published_at === null) return response()->json(['error' => 'This flow was never published, so there is no published version to go back to.'], 422);
         if (!$this->write($flow, $request, ['draft_graph' => null, 'updated_by' => Auth::id()])) return $this->conflict();
         $flow = $flow->fresh();
 
@@ -215,10 +219,13 @@ class ChatbotFlowController extends Controller
         return response()->json($this->state($flow->fresh()) + ['graph' => $graph]);
     }
 
-    /** Ang isusulat sa draft_graph: null kapag kapareho ng published (walang hindi pa naipa-publish). */
+    /**
+     * Ang isusulat sa draft_graph: null kapag kapareho ng published (walang hindi pa naipa-publish). Mahigpit (===): sa
+     * ==, ang "1" at "01" ay magkapareho at mawawala ang pagbabago. Pareho ang ayos ng key dahil galing sa clean ang dalawa.
+     */
     private function draftValue(ChatbotFlow $flow, array $graph): ?string
     {
-        return $flow->published_at !== null && $graph == $flow->graph ? null : json_encode($graph);
+        return $flow->published_at !== null && $graph === $flow->graph ? null : json_encode($graph);
     }
 
     /**

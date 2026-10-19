@@ -123,6 +123,12 @@ class ChatbotDraftPublishTest extends ChatblastTestCase
         $this->assertNull(ChatbotFlow::find($flow->id)->draft_graph);
         $this->assertSame($this->says('Old reply'), $this->getJson("/chatbot/flows/{$flow->id}/graph")->assertJson(['status' => 'published'])->json('graph'));
         $this->assertSame($this->says('Old reply'), ChatbotFlow::find($flow->id)->graph);
+
+        // Ang flow na hindi pa naipa-publish ay walang published na mababalikan: hindi binubura ang draft.
+        $fresh = ChatbotFlow::create(['name' => 'Fresh', 'graph' => FlowGraph::blank()]);
+        $this->save($fresh, $this->says('Work in progress'))->assertOk();
+        $this->act($fresh, 'discard')->assertStatus(422)->assertJson(['error' => 'This flow was never published, so there is no published version to go back to.']);
+        $this->assertSame($this->says('Work in progress'), ChatbotFlow::find($fresh->id)->draft_graph);
     }
 
     public function test_S_075_4_history_lists_publishes_and_restore_puts_one_in_the_draft(): void
@@ -156,6 +162,7 @@ class ChatbotDraftPublishTest extends ChatblastTestCase
         $this->act($flow, 'publish', ['note' => 'Latest'])->assertOk();
         $this->assertSame(50, DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->count());
         $this->assertSame('Latest', DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->orderByDesc('id')->value('note'));
+        $this->assertSame('N3', DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->orderBy('id')->value('note'), 'ang 6 na pinakaluma ang nabura');
     }
 
     public function test_S_075_5_a_write_on_a_stale_draft_version_is_refused(): void
@@ -168,9 +175,15 @@ class ChatbotDraftPublishTest extends ChatblastTestCase
 
         $this->save($flow, $this->says('Second person'), $opened)->assertStatus(409)->assertJson(['error' => $message, 'conflict' => true]);
         $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $this->says('No version')])->assertStatus(409);
-        foreach (['publish', 'discard'] as $what) $this->postJson("/chatbot/flows/{$flow->id}/{$what}", ['version' => $opened])->assertStatus(409)->assertJson(['error' => $message]);
-        $this->assertSame($this->says('First person'), ChatbotFlow::find($flow->id)->draft_graph);
-        $this->assertSame($this->says('Old reply'), ChatbotFlow::find($flow->id)->graph);
+        $this->act($flow, 'publish')->assertOk();
+        $restore = 'versions/' . DB::table('chatbot_flow_versions')->value('id') . '/restore';
+        $this->save($flow, $this->says('First person again'))->assertOk();
+        foreach (['publish', 'discard', $restore] as $what) {
+            foreach ([['version' => $opened], []] as $body) $this->postJson("/chatbot/flows/{$flow->id}/{$what}", $body)->assertStatus(409)->assertJson(['error' => $message]);
+        }
+        $this->assertSame($this->says('First person again'), ChatbotFlow::find($flow->id)->draft_graph);
+        $this->assertSame($this->says('First person'), ChatbotFlow::find($flow->id)->graph);
+        $opened = ChatbotFlow::find($flow->id)->draft_version - 1;
 
         $this->save($flow, $this->says('Second person'), $opened, ['overwrite' => true])->assertOk();
         $this->assertSame($this->says('Second person'), ChatbotFlow::find($flow->id)->draft_graph);
@@ -221,6 +234,11 @@ class ChatbotDraftPublishTest extends ChatblastTestCase
         $this->save($flow, $this->says('Changed'))->assertOk()->assertJson(['status' => 'draft']);
         $this->save($flow, $this->says('Old reply'))->assertOk()->assertJson(['status' => 'published']);
         $this->assertNull(ChatbotFlow::find($flow->id)->draft_graph, 'ang draft na kapareho ng published ay walang draft');
+        // Ang "1" at "01" (o "500" at "500.00") ay magkaiba: hindi nawawala ang ganitong pagbabago.
+        $this->save($flow, $this->says('1'))->assertOk();
+        $this->act($flow, 'publish')->assertOk();
+        $this->save($flow, $this->says('01'))->assertOk()->assertJson(['status' => 'draft']);
+        $this->assertSame($this->says('01'), ChatbotFlow::find($flow->id)->draft_graph);
 
         $html = $this->get("/chatbot/flows/{$flow->id}")->assertOk()->getContent();
         foreach (['Undo', 'Redo', 'Save draft', 'Publish', 'Discard draft', 'History', 'Preview / Test'] as $button) $this->assertStringContainsString('>' . $button . '<', $html);
@@ -236,5 +254,10 @@ class ChatbotDraftPublishTest extends ChatblastTestCase
 
         $this->assertSame([$this->says('Old reply'), $this->says('Draft reply'), null], [$copy->graph, $copy->draft_graph, $copy->published_at]);
         $this->getJson("/chatbot/flows/{$copy->id}/graph")->assertJson(['status' => 'never']);
+
+        // Ang binurang flow ay walang naiiwang history.
+        $this->act($copy, 'publish')->assertOk();
+        $this->deleteJson("/chatbot/flows/{$copy->id}")->assertOk();
+        $this->assertSame(0, DB::table('chatbot_flow_versions')->where('flow_id', $copy->id)->count());
     }
 }

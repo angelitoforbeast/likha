@@ -147,6 +147,8 @@ class ChatbotEditorTest extends ChatblastTestCase
         $this->postJson("/chatbot/flows/{$flow->id}/rename", ['name' => 'X'])->assertForbidden();
         $this->postJson("/chatbot/flows/{$flow->id}/duplicate")->assertForbidden();
         $this->deleteJson("/chatbot/flows/{$flow->id}")->assertForbidden();
+        foreach (['publish', 'discard', 'versions/1/restore'] as $action) $this->postJson("/chatbot/flows/{$flow->id}/{$action}", ['version' => 0])->assertForbidden();
+        $this->getJson("/chatbot/flows/{$flow->id}/versions")->assertForbidden();
         $this->assertSame(1, ChatbotFlow::count());
 
         $this->navLink('/chatblast', ['Marketing']);
