@@ -756,3 +756,14 @@ Accepted, not fixed:
 - **Untested small paths:** Restore of a stored version that no longer passes `FlowGraph::clean` (422), and the publish note trimmed to 200 characters or sent as an array. Reason: trusted stored data and a defensive cut; each is one line.
 - **Supersedes the 069 entry "Editor autosave is last-write-wins":** saves now carry `draft_version` and a stale one gets 409 with Reload / Overwrite.
 - **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only, no real key or token.
+
+## 076: wait for reply can skip after a set time (2026-10-19)
+
+- **Deploy:** run `2026_10_25_100000_create_chatbot_waits_table.php` with the code, and make sure `schedule:run` (cron) and the `chatbot` queue worker run. Without the table, waits work as before, with no timer. Without the scheduler, nothing skips. If both `vps` and `vps2` run the scheduler, each queues the same rows, which is harmless: the one-row claim lets only one job act.
+- **An AI step on the skipped branch sees the customer's last message twice:** once as `{{last_input}}` and once in its history, because the skipped run has no chat id. Reason: rare (AI right after a skip), and the extra line is the same text.
+- **The tick reads due rows by `due_at` and skips the ones queued in the last 5 minutes in the same scan.** With a very large queue backlog, it reads past those rows. Reason: bounded by the backlog, and the `chatbot` queue drains it; measure before adding an index on `dispatched_at`.
+- **A wait whose customer has no `botcake_chats` row is dropped as "page is off or has no flow".** Reason: practically unreachable (a wait is always set by a chat), so the wording does not matter.
+- **The editor's amount field caps at 23 hours only as a hint.** Typing 24 hours makes every autosave fail with "Skip after can be at most 23 hours." until it is fixed. Reason: the message is shown, and the server refuses it.
+- **A "Clear all fields" on the skipped branch removes the deadline with `__wait`.** Reason: the intended sync; noted for whoever builds on it.
+- **While the chatbot worker is down, the tick queues each due wait again every 5 minutes.** The extra jobs end at once (no row, or the claim fails). Reason: a little queue churn during an outage only.
+- **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only.
