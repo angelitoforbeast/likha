@@ -1556,3 +1556,14 @@ Spec 079. Test in `tests/Unit/ChecklistDeadlineTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-079.1 | Given a task scheduled at 15:45 without its own deadline, then its deadline is 16:15; it is not late at 16:00, 16:10 or 16:15:00, and it is late at 16:15:01; a task with its own deadline_time keeps it | `test_S_079_a_task_scheduled_at_1545_is_late_only_after_1615` + the S-051.6 data sets | Passed · 2026-10-19 · auto |
+
+## S-080 Botfield cells on /chatbot/pages keep line breaks; a click opens the row; a pencil edits
+
+Spec 080 and amendment 1. Test in `tests/Feature/Chatblast/ChatbotPagesTest.php` (the markup); the behaviour is checked in the browser at 1366 and 390 px.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-080.1 | Given a multi-line value (Main Flow, Fill-Up Form, a Prompt), then the cell shows it with its line breaks, long words wrap inside the cell, and a closed row shows at most 3 lines per cell with a fade when there is more; there is no "See more" link | `test_S_080…` + browser | Passed · 2026-10-19 · auto + browser |
+| S-080.2 | When a cell is clicked (or focused and Enter / Space pressed), then the whole row opens: every text cell shows its full text, up to about 240 px with its own scroll; clicking a cell of the open row closes it back to 3 lines; opening another row closes the first | browser | Passed · 2026-10-19 · browser |
+| S-080.3 | Each editable cell has a pencil ("Edit <column>"), shown on hover and focus on desktop and always on a phone or touch screen, as its own tab stop; it is the only way to open the editor and does not open the row; a text cell opens the modal textarea with its line breaks, an image cell the URL editor | `test_S_080…` + browser | Passed · 2026-10-19 · auto + browser |
+| S-080.4 | No page-level horizontal scroll at 1366 and 390 px; the switch, FLOW and the sticky columns are unchanged | browser | Passed · 2026-10-19 · browser |
