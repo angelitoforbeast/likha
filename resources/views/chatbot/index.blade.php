@@ -1,6 +1,6 @@
 @extends('layouts.chatblast')
 
-@section('title', 'Chatbot · Pages')
+@section('title', 'Chatbot · Page settings')
 @section('heading', 'Chatbot')
 
 @section('description')

@@ -62,12 +62,12 @@ class ChatbotTabsTest extends ChatblastTestCase
 
         $html = $this->get('/chatbot')->assertOk()->getContent();
         preg_match_all('#data-cb-nav="([^"]+)"#', $html, $m);
-        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test', 'Chatblast'], $m[1]);
+        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test'], $m[1]); // the app switcher replaces the Chatblast tab
         $this->assertStringContainsString('data-cb-nav="Flow" aria-current="page"', preg_replace('/\s+/', ' ', $html));
-        $this->assertMatchesRegularExpression('#<a href="[^"]*/chatblast"[^>]*data-cb-nav="Chatblast"#', $html);
+        $this->assertMatchesRegularExpression('#<a href="[^"]*/chatblast"[^>]*data-app="chatblast"#', $html); // the switcher
 
         $html = $this->get('/chatblast')->assertOk()->getContent();
-        $this->assertMatchesRegularExpression('#<a href="[^"]*/chatbot"[^>]*data-cb-nav="Chatbot"#', $html);
+        $this->assertMatchesRegularExpression('#<a href="[^"]*/chatbot"[^>]*data-app="chatbot"#', $html); // the switcher
     }
 
     public function test_S_069_T2_chats_show_under_chatbot_and_the_ceo_edits_a_customers_fields(): void

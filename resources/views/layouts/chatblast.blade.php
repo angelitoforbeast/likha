@@ -7,7 +7,15 @@
   nag-i-scroll. Ang laman ng page ay isang .cb-page na column; ang isang .cb-scroll sa loob nito ang tanging may scroll.
 --}}
 @php
-  $cbItems = \App\Support\ChatblastNav::items(Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '');
+  $cbRole = Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '';
+  $cbItems = \App\Support\ChatblastNav::items($cbRole);
+  // Ang app (Chatblast o Chatbot) ay ayon sa URL: may sariling kulay, at ang title ng tab ay laging nagsisimula rito.
+  $cbApp = request()->is('chatbot', 'chatbot/*') ? 'chatbot' : 'chatblast';
+  $cbAppName = $cbApp === 'chatbot' ? 'Chatbot' : 'Chatblast';
+  $cbTitle = trim(preg_replace('/^(Chatblast|Chatbot)\s*·\s*/u', '', trim($__env->yieldContent('title', $cbAppName))));
+  $cbTitle = $cbTitle === '' || $cbTitle === $cbAppName ? $cbAppName : $cbAppName . ' · ' . $cbTitle;
+  // Ang Chatbot ay para sa may /chatblast access (gaya ng mga route nito); ang iba ay walang link papunta roon.
+  $cbChatbotOpen = \App\Support\NavAccess::allows(preg_replace('/\s+/u', ' ', trim((string) $cbRole)), '/chatblast');
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -15,7 +23,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>@yield('title', 'Chatblast')</title>
+    <title>{{ $cbTitle }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     {{-- Iisang itsura sa lahat ng page: isang primary na button (asul), ang iba ay neutral; chip na pill; card na may
          manipis na border; table na may magaan na hati ng row at walang mabigat na band sa header. --}}
@@ -48,20 +56,35 @@
 <body class="flex h-screen flex-col overflow-hidden bg-slate-50 text-gray-900" data-chatblast-app>
 
 <header class="shrink-0 border-b border-slate-200 bg-white">
-    <div class="flex h-14 items-center gap-6 px-4 sm:px-6">
-        <a href="{{ url($cbItems[0]['url'] ?? '/') }}" class="flex shrink-0 items-center gap-2">
-            <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 text-white">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>
-                </svg>
-            </span>
-            <span class="text-base font-semibold tracking-tight text-slate-900">{{ request()->is('chatbot', 'chatbot/*') ? 'Chatbot' : 'Chatblast' }}</span>
-        </a>
+    <div class="flex h-14 items-center gap-3 px-4 sm:gap-6 sm:px-6">
+        {{-- Ang switcher: ang kasalukuyang app ay puno (sariling kulay), ang isa ay simpleng link sa home nito. --}}
+        @php
+            $cbApps = [
+                'chatblast' => ['name' => 'Chatblast', 'short' => 'Blast', 'url' => '/chatblast', 'tile' => 'from-violet-600 to-indigo-600',
+                    'icon' => '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>'],
+                'chatbot' => ['name' => 'Chatbot', 'short' => 'Bot', 'url' => '/chatbot', 'tile' => 'from-emerald-500 to-teal-600',
+                    'icon' => '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>'],
+            ];
+        @endphp
+        <div class="flex shrink-0 items-center gap-0.5 rounded-xl border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="App" data-app-switch data-current="{{ $cbApp }}">
+            @foreach($cbApps as $key => $a)
+                @php($current = $key === $cbApp)
+                @if($current || $key === 'chatblast' || $cbChatbotOpen)
+                    <a href="{{ url($a['url']) }}" data-app="{{ $key }}" @if($current) aria-current="page" @endif title="{{ $a['name'] }}"
+                       class="flex items-center gap-1.5 rounded-lg py-1 pl-1 pr-2 text-sm font-semibold {{ $current ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:bg-white hover:text-slate-800' }}">
+                        <span class="inline-flex h-7 w-7 items-center justify-center rounded-lg {{ $current ? 'bg-gradient-to-br ' . $a['tile'] . ' text-white' : 'bg-slate-200 text-slate-600' }}">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $a['icon'] !!}</svg>
+                        </span>
+                        <span class="sm:hidden">{{ $a['short'] }}</span><span class="hidden sm:inline">{{ $a['name'] }}</span>
+                    </a>
+                @endif
+            @endforeach
+        </div>
 
-        <nav class="flex min-w-0 items-center gap-1 overflow-x-auto text-sm" aria-label="Chatblast">
+        <nav class="flex min-w-0 items-center gap-1 overflow-x-auto text-sm" aria-label="{{ $cbAppName }}">
             @foreach($cbItems as $item)
                 <a href="{{ url($item['url']) }}" data-cb-nav="{{ $item['label'] }}" @if($item['active']) aria-current="page" @endif
-                   class="whitespace-nowrap rounded-md px-3 py-1.5 font-medium {{ $item['active'] ? 'bg-violet-50 text-violet-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">{{ $item['label'] }}</a>
+                   class="whitespace-nowrap rounded-md px-3 py-1.5 font-medium {{ $item['active'] ? ($cbApp === 'chatbot' ? 'bg-emerald-50 text-emerald-700' : 'bg-violet-50 text-violet-700') : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">{{ $item['label'] }}</a>
             @endforeach
         </nav>
 

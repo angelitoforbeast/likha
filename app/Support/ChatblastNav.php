@@ -5,8 +5,8 @@ namespace App\Support;
 use Illuminate\Support\Collection;
 
 /**
- * Ang nav ng Chatblast app (To send, History, Messages, Sequences, Chats, Chatbot, Page settings) at ang iisang Chatblast link sa main
- * nav ng Likha. Ang access ay galing sa /owner/nav-settings (NavAccess): /chatblast para sa unang anim, at ang link ng page
+ * Ang nav ng Chatblast app (To send, History, Messages, Sequences, Chats, Page settings) at ng Chatbot (ang switcher sa top
+ * bar ang daan sa pagitan ng dalawa), at ang Chatblast at Chatbot links sa main nav ng Likha. Ang access ay galing sa /owner/nav-settings (NavAccess): /chatblast para sa unang anim, at ang link ng page
  * settings sa luma o bagong path nito.
  */
 class ChatblastNav
@@ -35,7 +35,6 @@ class ChatblastNav
             $items[] = ['label' => 'Messages', 'url' => '/chatblast/campaigns', 'active' => request()->is('chatblast/campaigns*')];
             $items[] = ['label' => 'Sequences', 'url' => '/chatblast/sequence', 'active' => request()->is('chatblast/sequence*')];
             $items[] = ['label' => 'Chats', 'url' => '/chatblast/chats', 'active' => request()->is('chatblast/chats*')];
-            $items[] = ['label' => 'Chatbot', 'url' => '/chatbot', 'active' => request()->is('chatbot*')];
         }
         if (self::allowsPageSettings($role)) {
             $items[] = ['label' => 'Page settings', 'url' => '/chatblast/page-settings', 'active' => request()->is('chatblast/page-settings*')];
@@ -45,8 +44,7 @@ class ChatblastNav
     }
 
     /**
-     * Ang nav ng /chatbot (Flow, Page settings, Chats, Replies, Test) at ang link pabalik sa Chatblast. Access gaya ng
-     * /chatblast.
+     * Ang nav ng /chatbot (Flow, Sequences, Page settings, Chats, Inbox, Replies, Test). Access gaya ng /chatblast.
      * @return array<int, array{label: string, url: string, active: bool}>
      */
     public static function chatbotItems(?string $role): array
@@ -61,7 +59,6 @@ class ChatblastNav
             ['label' => 'Inbox', 'url' => '/chatbot/inbox', 'active' => request()->is('chatbot/inbox*')],
             ['label' => 'Replies', 'url' => '/chatbot/replies', 'active' => request()->is('chatbot/replies*')],
             ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
-            ['label' => 'Chatblast', 'url' => '/chatblast', 'active' => false],
         ];
     }
 
@@ -77,7 +74,9 @@ class ChatblastNav
         $hasChatblast = $links->contains(fn ($link) => $path($link) === '/chatblast');
 
         $shown = false;
-        return $links->filter(function ($link) use ($isPageSettings, $hasChatblast, &$shown) {
+        return $links->filter(function ($link) use ($isPageSettings, $hasChatblast, $path, &$shown) {
+            // Ang Chatbot ay para lang sa may /chatblast (gaya ng mga route ng /chatbot).
+            if ($path($link) === '/chatbot') return $hasChatblast;
             if (!$isPageSettings($link)) return true;
             if ($hasChatblast || $shown) return false;
             return $shown = true;

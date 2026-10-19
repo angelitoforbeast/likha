@@ -193,7 +193,7 @@ class ChatbotInboxTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
         preg_match_all('#data-cb-nav="([^"]+)"#', $html, $m);
-        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test', 'Chatblast'], $m[1]);
+        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test'], $m[1]); // the app switcher replaces the Chatblast tab
         $this->postJson('/chatbot/customer-fields', ['page_id' => '1001', 'psid' => '7001', 'key' => 'chat status', 'value' => 'LOOP 2'])->assertOk();
         $this->assertSame('LOOP 2', $this->getJson('/chatbot/inbox/panel?page_id=1001&psid=7001')->json('chat_status'));
     }
