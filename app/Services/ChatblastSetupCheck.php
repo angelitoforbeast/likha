@@ -170,13 +170,22 @@ class ChatblastSetupCheck
     private function failed(string $page, string $reason, bool $dryRun, array $base): array
     {
         $out = ['status' => 'error', 'error' => $reason] + $base;
-        if ($dryRun) return $out;
-        $check = $this->check($page) ?? [];
-        $check['error'] = $reason;
-        $check['error_at'] = now()->format('Y-m-d H:i:s');
-        $out['written']['botcake.' . self::CHECK_KEY] = $this->settings->set($page, 'botcake', self::CHECK_KEY, json_encode($check, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
+        if (!$dryRun) $out['written']['botcake.' . self::CHECK_KEY] = $this->recordFailure($page, $reason);
 
         return $out;
+    }
+
+    /**
+     * Ang "Check failed: <dahilan>" ng page (pati kapag ang token test mismo ang pumalya, bago ang check): ang huling
+     * resulta ay naiiwan, kaya hindi nagbabago ang Ready.
+     */
+    public function recordFailure(string $page, string $reason)
+    {
+        $check = $this->check($page) ?? [];
+        $check['error'] = mb_substr($reason, 0, 200);
+        $check['error_at'] = now()->format('Y-m-d H:i:s');
+
+        return $this->settings->set($page, 'botcake', self::CHECK_KEY, json_encode($check, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
     }
 
     /** Ang huling naitalang check ng page (JSON), o null. */

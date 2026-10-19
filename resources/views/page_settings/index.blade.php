@@ -252,8 +252,12 @@
         if (!changed) return false;
         const test = r.cells[TEST_OK_KEY]?.ts || '';
         if ((test !== '' && test >= changed) || (!!r.info.last_send && r.info.last_send >= changed)) return true;
-        const system = k => r.cells[k] && r.cells[k].by === 'system';
-        return !!(c && c.ok === true && String(c.at || '') >= changed && system('botcake.flow.shipping') && system(FIELD_KEY));
+        return byCheck(r, changed);
+    }
+    // Ready dahil ang check ang sumulat ng flow at field (system) at pumasa pagkatapos ng huling pagbabago: walang Send test.
+    function byCheck(r, changed = CONFIG_KEYS.map(k => r.cells[k]?.ts || '').sort().pop()) {
+        const c = checkOf(r), system = k => r.cells[k] && r.cells[k].by === 'system';
+        return !!(changed && c && c.ok === true && String(c.at || '') >= changed && system('botcake.flow.shipping') && system(FIELD_KEY));
     }
     // Kumpleto para sa pagpapadala: ang 4 na key ng server (Chatblast::REQUIRED), hindi kasama ang template.
     const complete = r => CONFIG_KEYS.every(k => r.cells[k]);
@@ -539,7 +543,9 @@
         td.classList.toggle('bg-red-50', !!(mark && mark.cls === 'text-red-600'));
         // Ang "Test send": kailan nasubukan, o amber na "Needs a test send" kapag kumpleto pero hindi pa nasubukan.
         if (col.key === TEST_OK_KEY) {
-            put(td, tested(row) ? el('span', {class: 'text-xs text-green-700', text: cell ? 'Tested ' + cell.at : 'Tested by a real send'})
+            const x = checkOf(row)?.ok === false || deliveryOf(row)?.status === 'not_delivered';
+            put(td, tested(row) ? el('span', {class: 'text-xs text-green-700', text: cell && !byCheck(row) ? 'Tested ' + cell.at : byCheck(row) ? 'Not needed: set by the check' : 'Tested by a real send'})
+                : x ? el('span', {class: 'text-xs font-medium text-red-700', text: 'Not ready: see Check'})
                 : complete(row) ? el('span', {class: 'text-xs font-medium text-amber-700', text: 'Needs a test send'})
                 : el('span', {class: 'text-xs text-gray-400', text: '—'}));
             return;

@@ -27,6 +27,7 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
     private array $templates = [];
     private array $stats = ['sent' => 0, 'delivery' => 0];
     private int $flowsHttp = 200;
+    private int $fieldsHttp = 200;
     private array $calls = [];
 
     protected function setUp(): void
@@ -42,7 +43,7 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
             $this->calls[] = basename($path);
             if (str_ends_with($path, '/statistics')) return Http::response(['success' => true, 'data' => $this->stats + ['seen' => 0, 'total_phone_number' => 0, 'is_clicked' => 0]]);
             if (str_ends_with($path, '/flows')) return Http::response(['success' => true, 'data' => ['flows' => $this->flows, 'folders' => []]], $this->flowsHttp);
-            if (str_ends_with($path, '/custom_fields')) return Http::response(['success' => true, 'data' => $this->fields]);
+            if (str_ends_with($path, '/custom_fields')) return Http::response(['success' => true, 'data' => $this->fields], $this->fieldsHttp);
             if (str_ends_with($path, '/message_templates')) return Http::response(['success' => true, 'data' => $this->templates]);
             return Http::response(['success' => false], 404);
         }]);
@@ -166,6 +167,13 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
         $this->assertSame($before, PageSetting::where('active', true)->whereNotIn('key', ['setup.check'])->pluck('value', 'key')->all());
         $check = json_decode($this->val('setup.check'), true);
         $this->assertSame([true, 'Botcake: HTTP 500'], [$check['ok'], $check['error']], 'the last result stays, with the failure beside it');
+        $this->assertNull($this->ready());
+
+        // The token test itself fails (Test token, Check all, nightly): the same grey line, nothing else changes.
+        $this->fieldsHttp = 500;
+        $this->assertSame('error', app(\App\Services\BotcakePageSetup::class)->check('Page Uno')['status']);
+        $this->assertStringContainsString('500', json_decode($this->val('setup.check'), true)['error']);
+        $this->assertSame($before, PageSetting::where('active', true)->whereNotIn('key', ['setup.check'])->pluck('value', 'key')->all());
         $this->assertNull($this->ready());
     }
 
