@@ -28,8 +28,11 @@ class ChatbotFields
             'main_flow' => 'Main Flow', 'main_flow_2' => 'Main Flow 2', 'fill_up_form' => 'Fill-Up Form', 'loop_3_form' => 'Loop 3 Form',
             'prompt_1' => 'Prompt 1', 'prompt_2' => 'Prompt 2', 'prompt_3' => 'Prompt 3', 'picture' => 'PICTURE',
         ];
-        for ($i = 1; $i <= 20; $i++) $cols['seq_' . $i] = 'Seq ' . $i;
-        for ($i = 1; $i <= 20; $i++) $cols['seq_img_' . $i] = 'Seq Img ' . $i;
+        // Magkatabi ang larawan at text ng bawat step (larawan muna, gaya ng padala): Seq Img 1, Seq 1, Seq Img 2, …
+        for ($i = 1; $i <= 20; $i++) {
+            $cols['seq_img_' . $i] = 'Seq Img ' . $i;
+            $cols['seq_' . $i] = 'Seq ' . $i;
+        }
 
         return $cols;
     }

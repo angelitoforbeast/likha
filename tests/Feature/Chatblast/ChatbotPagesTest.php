@@ -315,4 +315,20 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->assertStringNotContainsString('See more', $html);
         $this->assertStringNotContainsString("String(value).split('\n')[0]", $html, 'the whole value is shown, not only its first line');
     }
+
+    /** Ang larawan at text ng bawat sequence step ay magkatabi: Seq Img N, saka Seq N; ang idinagdag na column ay sa dulo. */
+    public function test_S_081_each_seq_sits_right_after_its_seq_img(): void
+    {
+        $this->actingAs($this->user());
+        $this->postJson('/chatbot/column', ['name' => 'Promo'])->assertOk();
+
+        $columns = $this->getJson('/chatbot/data')->assertOk()->json('columns');
+        $keys = array_column($columns, 'key');
+        $after = array_slice($keys, array_search('picture', $keys, true) + 1, 41);
+
+        $expected = [];
+        for ($i = 1; $i <= 20; $i++) array_push($expected, 'seq_img_' . $i, 'seq_' . $i);
+        $this->assertSame([...$expected, 'promo'], $after);
+        $this->assertSame(['Seq Img 1', 'Seq 1', 'Seq Img 2'], array_slice(array_column($columns, 'label'), array_search('seq_img_1', $keys, true), 3));
+    }
 }
