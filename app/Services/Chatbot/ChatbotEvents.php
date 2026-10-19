@@ -41,6 +41,14 @@ class ChatbotEvents
             'type' => 'skipped', 'detail' => json_encode(['reason' => $reason, 'run' => bin2hex(random_bytes(4))]), 'created_at' => now()]);
     }
 
+    /** Isang event na hindi bahagi ng takbo (hal. sequence mula sa inbox o sa tick). */
+    public static function write(int $pageId, int $psid, string $type, array $detail, ?int $flowId = null, ?string $node = null): void
+    {
+        $detail = array_map(fn ($v) => is_string($v) ? mb_substr($v, 0, 200) : $v, $detail);
+        self::insert(['page_id' => $pageId, 'psid' => $psid, 'chat_id' => null, 'flow_id' => $flowId, 'node_id' => $node,
+            'type' => $type, 'detail' => json_encode($detail + ['run' => bin2hex(random_bytes(4))], JSON_UNESCAPED_UNICODE), 'created_at' => now()]);
+    }
+
     public static function prune(): int
     {
         if (!Schema::hasTable('chatbot_events')) return 0;
@@ -51,6 +59,28 @@ class ChatbotEvents
         } while ($ids->count() === 5000);
 
         return $deleted;
+    }
+
+    private static function sequenceText(array $d): string
+    {
+        $name = (string) ($d['name'] ?? '?');
+        $step = 'Sequence ' . $name . ' step ' . ($d['step'] ?? '?');
+
+        return match ($d['op'] ?? '') {
+            'subscribed' => 'Subscribed to sequence ' . $name,
+            'already' => 'Already in sequence ' . $name,
+            'refused' => 'Not subscribed to ' . $name . ': ' . ($d['reason'] ?? ''),
+            'unsubscribed' => 'Unsubscribed from ' . $name . ' (' . ($d['reason'] ?? '') . ')',
+            'ran' => $step . ' ran',
+            'skipped' => $step . ' skipped (' . ($d['reason'] ?? '') . ')',
+            'held' => $step . ' held (' . ($d['reason'] ?? '') . ')',
+            'failed' => $step . ' failed: ' . ($d['error'] ?? ''),
+            'paused' => 'Sequence ' . $name . ' paused (' . ($d['reason'] ?? '') . ')',
+            'stopped' => 'Sequence ' . $name . ' stopped (' . ($d['reason'] ?? '') . ')',
+            'completed' => 'Sequence ' . $name . ' completed',
+            'test' => 'Test: would ' . ($d['action'] ?? 'subscribe') . ' ' . $name,
+            default => 'Sequence ' . $name,
+        };
     }
 
     /** Ang linya sa usapan (gaya ng CBB). $flows: id => pangalan. */
@@ -75,6 +105,7 @@ class ChatbotEvents
             'wait_skipped' => 'No reply in ' . ($d['after'] ?? '?') . ' → skipped at step ' . $node,
             'run_ended' => 'Run ended (' . ($d['reason'] ?? 'end') . ')',
             'skipped' => 'Skipped: ' . ($d['reason'] ?? '') . ($node ? ' (' . $node . ')' : ''),
+            'sequence' => self::sequenceText($d),
             default => $type,
         };
     }

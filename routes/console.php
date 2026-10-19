@@ -91,6 +91,11 @@ Schedule::command('chatbot:resume-skipped')
     ->everyMinute()
     ->withoutOverlapping(5); // 5 min: ang tick na nag-crash ay hindi haharang nang isang araw
 
+// Chatbot sequences (drip): ang mga due na step ay ipinapadala bilang job sa queue na "chatbot".
+Schedule::command('chatbot:sequence-tick')
+    ->everyMinute()
+    ->withoutOverlapping(5);
+
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')
     ->timezone('Asia/Manila')

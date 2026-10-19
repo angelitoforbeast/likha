@@ -29,11 +29,12 @@ class FlowEngine
         $edges = [];
         foreach ($run->graph['edges'] ?? [] as $e) $edges[$e['from'] . ':' . $e['port']] = $e['to'];
 
-        $current = $this->resumePoint($run, $nodes, $edges);
+        // Ang step ng sequence ay laging mula sa Start: hindi nito ipinagpapatuloy o binubura ang wait ng main flow.
+        $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
         if ($current === false) {
             $start = collect($nodes)->firstWhere('type', 'start');
             $current = $start['id'] ?? null;
-            $run->event('run_started', null, ['reason' => 'new', 'flow' => $run->flowId]);
+            $run->event('run_started', null, ['reason' => $run->startedBy ?? 'new', 'flow' => $run->flowId]);
         }
         $suspended = false;
         $lastType = null;

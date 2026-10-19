@@ -321,11 +321,12 @@ class Inbox
         $sends = ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('status', 'failed')->orderByDesc('id')->limit(20)
             ->get(['kind', 'error', 'sent_at'])->map(fn ($r) => ['at' => self::iso($r->sent_at), 'raw' => (string) $r->sent_at,
                 'text' => ($r->kind === 'sheet' ? 'Sheet row failed: ' : 'Send failed: ') . $r->error]);
-        $steps = !$this->hasEvents() ? collect() : DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('type', 'ai')->orderByDesc('id')->limit(50)->get()
-            ->filter(fn ($e) => (json_decode((string) $e->detail, true)['result'] ?? '') === 'failed')
-            ->map(fn ($e) => ['at' => self::iso($e->created_at), 'raw' => (string) $e->created_at, 'text' => ChatbotEvents::text('ai', $e->node_id, json_decode((string) $e->detail, true) ?: [])]);
+        $steps = !$this->hasEvents() ? collect() : DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->whereIn('type', ['ai', 'sequence'])->orderByDesc('id')->limit(50)->get()
+            ->filter(fn ($e) => in_array('failed', [json_decode((string) $e->detail, true)['result'] ?? '', json_decode((string) $e->detail, true)['op'] ?? ''], true))
+            ->map(fn ($e) => ['at' => self::iso($e->created_at), 'raw' => (string) $e->created_at, 'text' => ChatbotEvents::text($e->type, $e->node_id, json_decode((string) $e->detail, true) ?: [])]);
 
-        return $sends->merge($steps)->sortByDesc('raw')->take(20)->map(fn ($x) => ['at' => $x['at'], 'text' => $x['text']])->values()->all();
+        // toBase: ang walang laman na Eloquent collection ay hindi puwedeng pagsamahin sa mga array.
+        return $sends->toBase()->merge($steps)->sortByDesc('raw')->take(20)->map(fn ($x) => ['at' => $x['at'], 'text' => $x['text']])->values()->all();
     }
 
     /** Ang mga larawang ipinadala ng customer (payload.image_url ng [Photo]), pinakabago muna. */

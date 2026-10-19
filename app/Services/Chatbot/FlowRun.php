@@ -21,6 +21,8 @@ class FlowRun
     public ?string $runId = null;
     /** Walang sagot sa takdang oras (hal. "2 h", ang hinintay talaga): nagpapatuloy ang hinihintay sa port na skipped. */
     public ?string $skippedAfter = null;
+    /** Pinatakbo ng sequence (hal. "sequence X step 2"): mula sa Start, at ang __wait ng customer ay hindi ginagalaw. */
+    public ?string $startedBy = null;
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void
