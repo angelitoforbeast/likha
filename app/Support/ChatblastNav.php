@@ -45,7 +45,7 @@ class ChatblastNav
     }
 
     /**
-     * Ang nav ng /chatbot (Flow, Sequences, Page settings, Chats, Inbox, Replies, Test) at ang link pabalik sa Chatblast. Access gaya ng
+     * Ang nav ng /chatbot (Flow, Page settings, Chats, Replies, Test) at ang link pabalik sa Chatblast. Access gaya ng
      * /chatblast.
      * @return array<int, array{label: string, url: string, active: bool}>
      */

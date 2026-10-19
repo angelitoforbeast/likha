@@ -31,6 +31,8 @@ class ChatbotSequences
     public const LOCKED_RETRY_MINUTES = 1;
     public const WINDOW_HOURS = 24;       // Messenger: send_content sa loob ng 24 oras mula sa huling mensahe ng customer
 
+    private static ?bool $tables = null; // kada proseso: true lang ang iniimbak (sa ibaba)
+
     public function __construct(private PageSettings $settings, private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox)
     {
     }
@@ -139,6 +141,11 @@ class ChatbotSequences
     public function exitOnReply(int $pageId, int $psid): void
     {
         try {
+            // Hindi pa na-migrate (mano-mano ang migrate pagkatapos ng deploy): walang gagawin, walang error.
+            if (!self::$tables) {
+                if (!\Illuminate\Support\Facades\Schema::hasTable('chatbot_sequence_subscriptions')) return;
+                self::$tables = true;
+            }
             $this->unsubscribe(null, $pageId, $psid, 'reply', onlyExitOnReply: true);
         } catch (Throwable $e) {
             report($e);
@@ -159,13 +166,14 @@ class ChatbotSequences
      * @param array<int, int> $ids
      * @return array<int, int> ang mga nakuha
      */
-    public function claim(array $ids): array
+    public function claim(array $ids, ?string $stamp = null): array
     {
+        $stamp ??= now()->format('Y-m-d H:i:s');
         $claimed = [];
         foreach ($ids as $id) {
             $n = DB::table('chatbot_sequence_subscriptions')->where('id', $id)->where('status', 'active')
                 ->where(fn ($q) => $q->whereNull('dispatched_at')->orWhere('dispatched_at', '<', now()->subMinutes(self::REDISPATCH_MINUTES)))
-                ->update(['dispatched_at' => now()]);
+                ->update(['dispatched_at' => $stamp]);
             if ($n === 1) $claimed[] = (int) $id;
         }
 
@@ -196,14 +204,16 @@ class ChatbotSequences
         $until = microtime(true) + self::SECONDS;
         $queued = 0;
         do {
-            $ids = DB::transaction(fn () => DB::table('chatbot_sequence_subscriptions as s')
+            // Walang row lock: ang kondisyonal na claim (isa-isa) ang nagsisiguro na isang beses lang.
+            $ids = DB::table('chatbot_sequence_subscriptions as s')
                 ->join('chatbot_sequences as q', 'q.id', '=', 's.sequence_id')
                 ->where('s.status', 'active')->where('q.active', true)->where('s.next_send_at', '<=', now())
                 ->where(fn ($w) => $w->whereNull('s.dispatched_at')->orWhere('s.dispatched_at', '<', now()->subMinutes(self::REDISPATCH_MINUTES)))
-                ->orderBy('s.next_send_at')->limit(self::BATCH)->lockForUpdate()->pluck('s.id')->map(fn ($id) => (int) $id)->all());
+                ->orderBy('s.next_send_at')->limit(self::BATCH)->pluck('s.id')->map(fn ($id) => (int) $id)->all();
             if (!$ids) break;
-            foreach ($this->claim($ids) as $id) {
-                RunChatbotSequenceStep::dispatch($id);
+            $stamp = now()->format('Y-m-d H:i:s');
+            foreach ($this->claim($ids, $stamp) as $id) {
+                RunChatbotSequenceStep::dispatch($id, $stamp);
                 $queued++;
             }
         } while (count($ids) === self::BATCH && microtime(true) < $until);
@@ -218,11 +228,12 @@ class ChatbotSequences
      * at umuusad pa rin (walang paulit-ulit).
      * @return string 'ran' | 'skipped' | 'failed' | 'held' | 'paused' | 'stopped' | 'completed' | 'locked' | 'gone'
      */
-    public function runStep(int $subscriptionId): string
+    public function runStep(int $subscriptionId, ?string $claim = null): string
     {
         $sub = ChatbotSequenceSubscription::find($subscriptionId);
         if (!$sub || $sub->status !== 'active') return 'gone';
-        $release = fn (array $extra = []) => ChatbotSequenceSubscription::whereKey($sub->id)->update($extra + ['dispatched_at' => null, 'updated_at' => now()]);
+        // Habang active lang: ang sabay na unsubscribe (sagot, inbox) ay hindi binabalik.
+        $release = fn (array $extra = []) => ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($extra + ['dispatched_at' => null, 'updated_at' => now()]);
 
         $lock = Cache::lock('chatbot-run:' . $sub->page_id . ':' . $sub->psid, ChatbotRunner::LOCK_SECONDS);
         if (!$lock->get()) {
@@ -233,9 +244,16 @@ class ChatbotSequences
         try {
             $sub->refresh();
             if ($sub->status !== 'active') return 'gone';
+            // Ang job na naunahan ng mas bagong claim (naipon ang queue nang lampas 10 minuto) ay walang ginagawa.
+            if ($claim !== null && $sub->dispatched_at?->format('Y-m-d H:i:s') !== $claim) return 'gone';
+            if (!$sub->next_send_at || $sub->next_send_at->gt(now())) {
+                if ($claim !== null) $release();
+                return 'gone';
+            }
             $seq = $sub->sequence;
             if (!$seq) {
                 $release(['status' => 'error', 'exit_reason' => 'sequence deleted', 'next_send_at' => null]);
+                $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => 'the sequence was deleted', 'name' => '#' . $sub->sequence_id, 'step' => $sub->current_step]);
                 return 'gone';
             }
             if (!$seq->active) {
@@ -304,10 +322,11 @@ class ChatbotSequences
         $next = $this->stepFrom($seq, $step->position + 1);
         $values = ['dispatched_at' => null, 'updated_at' => now()] + ($sent ? ['last_sent_at' => now()] : []);
         if (!$next) {
-            ChatbotSequenceSubscription::whereKey($sub->id)->update($values);
+            ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values);
             return $this->complete($sub->fresh(), $seq);
         }
-        ChatbotSequenceSubscription::whereKey($sub->id)->update($values + ['current_step' => $next->position,
+        // Habang active lang: ang customer na sumagot (o inalis) habang tumatakbo ang step ay hindi ibinabalik.
+        ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values + ['current_step' => $next->position,
             'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit, $seq->send_from, $seq->send_to)]);
 
         return $sent ? 'ran' : 'skipped';
@@ -315,8 +334,9 @@ class ChatbotSequences
 
     private function complete(ChatbotSequenceSubscription $sub, ChatbotSequence $seq): string
     {
-        ChatbotSequenceSubscription::whereKey($sub->id)->update(['status' => 'completed', 'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
-        $this->event($sub->page_id, $sub->psid, ['op' => 'completed', 'name' => $seq->name]);
+        $done = ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')
+            ->update(['status' => 'completed', 'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
+        if ($done) $this->event($sub->page_id, $sub->psid, ['op' => 'completed', 'name' => $seq->name]);
 
         return 'completed';
     }

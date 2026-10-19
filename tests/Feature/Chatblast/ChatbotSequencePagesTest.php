@@ -160,7 +160,8 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
             $seq->steps->map(fn ($s) => [$s->position, $s->delay_amount, $s->delay_unit, $s->flow_id, $s->active])->all());
 
         $bad = [
-            ['name' => 'Taken'], ['name' => ''], ['send_from' => '25:00'], ['send_to' => '8am'], ['outside_window' => 'wait'],
+            ['name' => 'Taken'], ['name' => ''], ['name' => str_repeat('n', 121)], ['description' => str_repeat('d', 1001)], ['send_from' => '25:00'],
+            ['steps' => [['delay_amount' => 1000, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true]]], ['send_to' => '8am'], ['outside_window' => 'wait'],
             ['steps' => [['delay_amount' => 1, 'delay_unit' => 'weeks', 'flow_id' => $a->id, 'active' => true]]],
             ['steps' => [['delay_amount' => -1, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true]]],
             ['steps' => [['delay_amount' => 1, 'delay_unit' => 'hours', 'flow_id' => 999999, 'active' => true]]],

@@ -222,6 +222,11 @@ class FlowEngine
             $note = count($messages) . ' message' . (count($messages) === 1 ? '' : 's') . ' ' . $res['status'];
         }
 
+        // Ang step ng sequence ay hindi naghihintay: ang wait (at ang timer) ng customer ay sa main flow ng page.
+        if (!empty($c['wait']) && $run->startedBy !== null) {
+            $run->event('skipped', $node['id'], ['reason' => 'a sequence step does not wait for a reply']);
+            return ['port' => null, 'note' => $note . '; a sequence step does not wait for a reply'];
+        }
         if (!empty($c['wait'])) {
             $run->fields->set(CustomerFields::WAIT, $run->flowId . ':' . $node['id']);
             // Ang deadline ng skip (live lang: ang test customer ay walang tick). Ang wait na walang skip ay walang timer.

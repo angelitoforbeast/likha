@@ -51,10 +51,11 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
     }
 
     /** Isang published na flow na nagpapadala ng $text (hindi naka-link sa page). */
-    private function flow(string $text, bool $published = true): ChatbotFlow
+    private function flow(string $text, bool $published = true, bool $wait = false): ChatbotFlow
     {
+        $send = ['items' => [['type' => 'text', 'value' => $text]]] + ($wait ? ['wait' => true, 'save_to' => 'seq answer', 'skip_after' => ['amount' => 2, 'unit' => 'hours']] : []);
         $flow = ChatbotFlow::create(['name' => 'Flow ' . $text, 'graph' => FlowGraph::clean(['nodes' => [
-            ['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => $text]]]],
+            ['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'send', 'config' => $send],
         ], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]])]);
         if ($published) DB::table('chatbot_flows')->where('id', $flow->id)->update(['published_at' => now()]);
 
@@ -157,17 +158,33 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->travel(2)->minutes();
         $this->tick();
         Queue::assertPushed(RunChatbotSequenceStep::class, 4);
+
+        // Ang lumang job (naunahan ng bagong claim) at ang job ng row na hindi pa due ay walang ginagawa.
+        $this->chat();
+        $jobs = Queue::pushed(RunChatbotSequenceStep::class)->filter(fn ($j) => $j->subscriptionId === $ids[0])->values();
+        $this->assertCount(2, $jobs);
+        app()->call([$jobs[0], 'handle']);
+        $this->assertSame([], $this->sent(), 'the stale job does nothing');
+        app()->call([$jobs[1], 'handle']);
+        $this->assertSame(['Seq 1'], $this->sent());
+        app()->call([$jobs[1], 'handle']);
+        app()->call([$jobs[0], 'handle']);
+        $this->assertSame(['Seq 1'], $this->sent(), 'a second run of a done step sends nothing');
+        DB::table('chatbot_sequence_subscriptions')->where('id', $ids[1])->update(['next_send_at' => now()->addHour(), 'dispatched_at' => now()]);
+        app()->call([new RunChatbotSequenceStep($ids[1], now()->format('Y-m-d H:i:s')), 'handle']);
+        $this->assertSame([], $this->sent('7002'), 'not due yet');
     }
 
     public function test_S_070_4b_three_steps_run_their_published_flows_in_order_and_the_subscription_completes(): void
     {
-        $first = $this->flow('Seq 1');
+        $first = $this->flow('Seq 1', true, true); // may "wait for reply": hindi nito pinapalitan ang wait ng main flow
         DB::table('chatbot_flows')->where('id', $first->id)->update(['draft_graph' => json_encode(['nodes' => [], 'edges' => []])]);
         $seq = $this->sequence('Preorder', [[0, 'minutes', $first->id], [2, 'hours', $this->flow('Seq 2')->id], [5, 'minutes', $this->flow('Skipped')->id, false], [1, 'days', $this->flow('Seq 3')->id]],
             ['exit_on_reply' => false]);
         $this->chat();
         $fields = new CustomerFields(1001, 7001);
         $fields->set(CustomerFields::WAIT, '999:n2'); // naghihintay sa main flow ng page
+        \App\Services\Chatbot\ChatbotWaits::park(1001, 7001, 999, 'n2', now()->addHours(3));
 
         $this->assertSame('subscribed', $this->svc()->subscribe($seq->id, 1001, 7001, 'other')['result']);
         $this->assertSame(['active', 1, '2026-10-20 10:00'], [$this->sub($seq)->status, (int) $this->sub($seq)->current_step, substr($this->sub($seq)->next_send_at, 0, 16)]);
@@ -177,6 +194,7 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertSame(['Seq 1'], $this->sent(), 'ang published na graph, hindi ang draft');
         $this->assertSame([2, '2026-10-20 12:00', '2026-10-20 10:00', null], [(int) $row->current_step, substr($row->next_send_at, 0, 16), substr($row->last_sent_at, 0, 16), $row->dispatched_at]);
         $this->assertSame('999:n2', $fields->get(CustomerFields::WAIT), 'ang step ay hindi gumagalaw sa wait ng main flow');
+        $this->assertSame([[999, 'n2']], DB::table('chatbot_waits')->where('psid', 7001)->get()->map(fn ($w) => [(int) $w->flow_id, $w->node_id])->all(), 'the main timer stays');
 
         $this->travelTo('2026-10-20 12:00:00');
         $this->tick();
@@ -278,6 +296,29 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->tick();
         $this->assertSame([2, 'active'], [(int) $this->sub($other)->current_step, $this->sub($other)->status]);
         $this->assertSame('Sequence Second step 1 failed: engine broke', last($this->events()));
+    }
+
+    public function test_S_070_5e_a_busy_customer_is_retried_in_a_minute_an_unknown_page_is_an_error_and_a_paused_sequence_refuses(): void
+    {
+        $seq = $this->sequence('Preorder', [[0, 'minutes', $this->flow('Seq 1')->id]]);
+        $this->chat();
+        $this->svc()->subscribe($seq->id, 1001, 7001, 'other');
+        $lock = \Illuminate\Support\Facades\Cache::lock('chatbot-run:1001:7001', 300);
+        $lock->get();
+        $this->tick();
+        $lock->release();
+        $this->assertSame([], $this->sent());
+        $this->assertSame([1, '2026-10-20 10:01', null], [(int) $this->sub($seq)->current_step, substr($this->sub($seq)->next_send_at, 0, 16), $this->sub($seq)->dispatched_at]);
+
+        $this->svc()->subscribe($seq->id, 3003, 7001, 'other');
+        $this->tick();
+        $this->assertSame(['error', 'page not set up'], [$this->sub($seq, '7001', 3003)->status, $this->sub($seq, '7001', 3003)->exit_reason]);
+
+        $paused = $this->sequence('Paused', [[0, 'minutes', $this->flow('P')->id]], ['active' => false]);
+        $empty = $this->sequence('Empty', [[0, 'minutes', $this->flow('E')->id, false]]);
+        $this->assertSame(['refused', 'refused'], [$this->svc()->subscribe($paused->id, 1001, 7002, 'other')['result'], $this->svc()->subscribe($empty->id, 1001, 7002, 'other')['result']]);
+        $this->assertSame(['Not subscribed to Paused: the sequence is paused', 'Not subscribed to Empty: the sequence has no active steps'], $this->events('7002'));
+        $this->assertSame(0, DB::table('chatbot_sequence_subscriptions')->where('psid', 7002)->count());
     }
 
     public function test_S_070_6_a_reply_exits_the_sequences_of_that_page_that_exit_on_reply_and_the_bot_still_answers(): void

@@ -176,7 +176,7 @@ class ChatbotInboxController extends Controller
         [$pageId, , $psid] = $this->target($request);
         $action = $this->str($request, 'action', 20);
         $id = $this->str($request, 'sequence_id', 20);
-        if (!in_array($action, ['subscribe', 'unsubscribe'], true) || !ctype_digit($id) || !\App\Models\ChatbotSequence::whereKey((int) $id)->exists()) {
+        if (strlen($psid) > 19 || !in_array($action, ['subscribe', 'unsubscribe'], true) || !ctype_digit($id) || !\App\Models\ChatbotSequence::whereKey((int) $id)->exists()) {
             return response()->json(['error' => 'Pick a sequence.'], 422);
         }
         $sequences = app(\App\Services\Chatbot\ChatbotSequences::class);

@@ -153,8 +153,12 @@ class BotcakeChatController extends Controller
         if (!$this->isDuplicate($f)) {
             $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
             // Sumagot ang customer: alisin sa mga sequence ng page na may "exit when the customer replies".
-            if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) {
-                app(\App\Services\Chatbot\ChatbotSequences::class)->exitOnReply((int) $chat->page_id, (int) $chat->psid);
+            try {
+                if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) {
+                    app(\App\Services\Chatbot\ChatbotSequences::class)->exitOnReply((int) $chat->page_id, (int) $chat->psid);
+                }
+            } catch (\Throwable $e) {
+                report($e);
             }
             // Ang sariling chatbot: kapag may flow ang page (at naka-On), ang takbo ay sa queue na "chatbot". Ang
             // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.

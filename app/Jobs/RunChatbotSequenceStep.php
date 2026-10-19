@@ -20,13 +20,14 @@ class RunChatbotSequenceStep implements ShouldQueue
     public int $timeout = 280; // mas maikli sa lock ng customer (ChatbotRunner::LOCK_SECONDS)
     public int $tries = 1;
 
-    public function __construct(public int $subscriptionId)
+    /** $claim: ang dispatched_at na itinala ng tick para sa job na ito; ang naunahan ng mas bagong claim ay walang ginagawa. */
+    public function __construct(public int $subscriptionId, public ?string $claim = null)
     {
         $this->onQueue(RunChatbotFlow::QUEUE);
     }
 
     public function handle(ChatbotSequences $sequences): void
     {
-        $sequences->runStep($this->subscriptionId);
+        $sequences->runStep($this->subscriptionId, $this->claim);
     }
 }
