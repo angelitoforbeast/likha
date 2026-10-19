@@ -12,6 +12,15 @@
     /* Ang table lang ang nag-i-scroll (pataas at patagilid sa loob ng kahon); ang page ay hindi kailanman patagilid. */
     #cb-box { max-height: calc(100vh - 15rem); min-height: 18rem; }
     #cb-table th, #cb-table td { background: #fff; }
+    /* Text cell: buo ang line break, 3 linya kapag sarado (may fade kapag may kasunod pa). Ang click sa cell ay nagbubukas ng
+       buong row: bawat cell hanggang 15rem (mga 240 px), may sariling scroll. Ang lapis lang ang nagbubukas ng editor. */
+    #cb-table .cb-txt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; max-width: 14rem; white-space: pre-line; overflow-wrap: anywhere; }
+    #cb-table .cb-txt.cb-clamped { -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+    #cb-table tr.cb-open .cb-txt { display: block; -webkit-line-clamp: unset; max-height: 15rem; overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
+    #cb-table td.cb-cell { cursor: pointer; }
+    #cb-table .cb-edit { opacity: 0; }
+    #cb-table td.cb-cell:hover .cb-edit, #cb-table td.cb-cell:focus-within .cb-edit, #cb-table .cb-edit:focus { opacity: 1; }
+    @media (hover: none), (max-width: 639px) { #cb-table .cb-edit { opacity: 1; } }
     #cb-table thead th { position: sticky; top: 0; z-index: 20; }
     #cb-table .stick-1 { position: sticky; left: 0; z-index: 10; }
     #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3 { z-index: 30; }
@@ -104,6 +113,7 @@
     const PAUSE_MS = 800, table = $('cb-table');
     let columns = [], rows = [], flows = [], editing = null;
     const marks = new Map(), seqs = new Map(), errors = new Map();
+    let openRow = null; // ang page ng row na bukas (isa lang)
 
     function el(tag, attrs = {}, children = []) {
         const e = document.createElement(tag);
@@ -143,7 +153,7 @@
             ...columns.filter(c => c.key !== 'flow').map(c => el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-500', text: c.label})),
         ]);
         const list = visible();
-        const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page}, [
+        const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''})]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
@@ -154,6 +164,19 @@
         table.replaceChildren(el('thead', {}, head), body);
         $('count').textContent = list.length + ' of ' + rows.length + ' page' + (rows.length === 1 ? '' : 's');
         if (!rows.length) table.append(el('tbody', {}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '5', text: 'No page has a Botcake ID and token yet.'}))));
+        requestAnimationFrame(markClamped);
+    }
+
+    // Ang fade: sa text na lampas sa 3 linya ng row na sarado.
+    function markClamped() {
+        table.querySelectorAll('tbody tr:not(.cb-open) .cb-txt').forEach(t => { t.scrollTop = 0; t.classList.toggle('cb-clamped', t.scrollHeight > t.clientHeight + 1); });
+    }
+
+    /** Buksan ang buong row (isara ang dati), o isara kapag ito na ang bukas. */
+    function toggleRow(page) {
+        openRow = openRow === page ? null : page;
+        table.querySelectorAll('tbody tr').forEach(tr => tr.classList.toggle('cb-open', tr.dataset.page === openRow));
+        requestAnimationFrame(markClamped);
     }
 
     function activeCell(r) {
@@ -212,18 +235,24 @@
             if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
             return td;
         }
-        const td = el('td', {class: extra + ' border-b border-slate-100 px-3 py-2 align-top cursor-text', tabindex: '0', 'data-key': c.key});
+        const td = el('td', {class: extra + ' cb-cell border-b border-slate-100 px-3 py-2 align-top', tabindex: '0', 'data-key': c.key});
         let show;
         if (c.kind === 'image' && isUrl(value)) {
             show = el('span', {class: 'flex items-center gap-2'}, [el('img', {src: value, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'h-8 w-8 rounded object-cover'}), el('span', {class: 'max-w-[9rem] truncate text-xs', text: value})]);
+        } else if (value) {
+            show = el('span', {class: 'cb-txt', text: String(value)});
         } else {
-            show = el('span', {class: 'block max-w-[14rem] truncate ' + (value ? '' : 'text-slate-300'), text: value ? String(value).split('\n')[0] : (c.kind === 'image' ? '+ link' : '+ set')});
+            show = el('span', {class: 'block max-w-[14rem] truncate text-slate-300', text: c.kind === 'image' ? '+ link' : '+ set'});
         }
-        td.append(show);
+        const edit = el('button', {type: 'button', class: 'cb-edit shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500', 'aria-label': 'Edit ' + c.label, title: 'Edit ' + c.label, text: '✎'});
+        td.append(el('div', {class: 'flex items-start gap-1'}, [el('div', {class: 'min-w-0 flex-1'}, show), edit]));
         if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
+        // Ang lapis lang ang nagbubukas ng editor; ang click (o Enter / Space) sa cell ay nagbubukas o nagsasara ng row.
         const open = () => c.kind === 'long' ? openLong(r, c) : startEdit(td, r, c);
-        td.addEventListener('click', open);
-        td.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); open(); } });
+        edit.addEventListener('click', ev => { ev.stopPropagation(); open(); });
+        edit.addEventListener('keydown', ev => ev.stopPropagation());
+        td.addEventListener('click', ev => { if (!ev.target.closest('input')) toggleRow(r.page); });
+        td.addEventListener('keydown', ev => { if (ev.target === td && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); toggleRow(r.page); } });
         return td;
     }
 

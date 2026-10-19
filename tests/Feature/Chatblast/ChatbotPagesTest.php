@@ -296,4 +296,21 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->settings()->set('Page Uno', 'chatbot', 'note_x', 'from elsewhere');
         $this->assertContains('note_x', array_column($this->getJson('/chatbot/data')->json('columns'), 'key'));
     }
+
+    /**
+     * Ang text cell: may line break, 3 linya kapag sarado; ang pag-click sa cell ay nagbubukas ng buong row (isa lang,
+     * hanggang 15rem kada cell); ang lapis lang ang nagbubukas ng editor. Ang galaw mismo ay nasa browser check.
+     */
+    public function test_S_080_text_cells_keep_line_breaks_fold_to_three_lines_and_open_the_row(): void
+    {
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+
+        foreach (['.cb-txt {', 'white-space: pre-line', 'overflow-wrap: anywhere', '-webkit-line-clamp: 3', 'tr.cb-open .cb-txt {', 'max-height: 15rem',
+            '.cb-txt.cb-clamped {', "'aria-label': 'Edit ' + c.label", "ev.key === 'Enter' || ev.key === ' '"] as $part) {
+            $this->assertStringContainsString($part, $html);
+        }
+        $this->assertStringNotContainsString('See more', $html);
+        $this->assertStringNotContainsString("String(value).split('\n')[0]", $html, 'the whole value is shown, not only its first line');
+    }
 }
