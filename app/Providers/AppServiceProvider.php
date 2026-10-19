@@ -78,9 +78,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // /api/botcake/chat: kada IP, ayon sa services.botcake.chat_rate (binabasa kada request).
+        // /api/botcake/chat: kada IP, ayon sa services.botcake.chat_rate (binabasa kada request). Ang IP ng Botcake at ang
+        // test IP ay walang limit (Limit::none: walang cache write, na nag-deadlock sa dami ng chat).
         \Illuminate\Support\Facades\RateLimiter::for('botcake-chat', fn (\Illuminate\Http\Request $request) =>
-            \Illuminate\Cache\RateLimiting\Limit::perMinute(max(1, (int) config('services.botcake.chat_rate')))->by($request->ip()));
+            \App\Services\BotcakeChatGuard::unlimited((string) $request->server('REMOTE_ADDR'))
+                ? \Illuminate\Cache\RateLimiting\Limit::none()
+                : \Illuminate\Cache\RateLimiting\Limit::perMinute(max(1, (int) config('services.botcake.chat_rate')))->by($request->ip()));
 
         // Force HTTPS in production
         if (env('APP_ENV') === 'production') {

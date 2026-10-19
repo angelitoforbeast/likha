@@ -33,6 +33,38 @@ class BotcakeChatGuard
         return IpUtils::checkIp($ip, (array) config('services.botcake.chat_ips'));
     }
 
+    public const TEST_IPS_CACHE = 'botcake-chat:test-ips'; // [ip => unix na pag-expire], mula sa botcake:chat-test-ip
+    public const TEST_IP_MAX_HOURS = 12;
+
+    /**
+     * Walang rate limit (at walang cache write ng limiter): ang IP ng Botcake (config, walang cache read), o ang
+     * pansamantalang test IP na hindi pa expired. Ang REMOTE_ADDR lang ang tinitingnan, hindi ang body ng request.
+     */
+    public static function unlimited(string $ip): bool
+    {
+        if ($ip === '') return false;
+        if (IpUtils::checkIp($ip, (array) config('services.botcake.chat_ips'))) return true;
+
+        return (self::testIps()[$ip] ?? 0) > now()->getTimestamp();
+    }
+
+    /** @return array<string, int> ang mga test IP na hindi pa expired => unix na pag-expire */
+    public static function testIps(): array
+    {
+        $now = now()->getTimestamp();
+
+        return array_filter((array) Cache::get(self::TEST_IPS_CACHE, []), fn ($until) => (int) $until > $now);
+    }
+
+    /** Idagdag (hanggang $hours oras) o alisin ($hours = null) ang isang test IP. */
+    public static function setTestIp(string $ip, ?int $hours): void
+    {
+        $ips = self::testIps();
+        if ($hours === null) unset($ips[$ip]); else $ips[$ip] = now()->addHours($hours)->getTimestamp();
+        if (!$ips) { Cache::forget(self::TEST_IPS_CACHE); return; }
+        Cache::put(self::TEST_IPS_CACHE, $ips, now()->setTimestamp(max($ips)));
+    }
+
     public function enforcesIp(): bool
     {
         return config('services.botcake.chat_ip_mode') === 'enforce';

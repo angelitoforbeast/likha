@@ -1575,3 +1575,14 @@ Spec 081. Test in `tests/Feature/Chatblast/ChatbotPagesTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-081.1 | The /chatbot/pages columns after PICTURE are Seq Img 1, Seq 1, Seq Img 2, Seq 2, …, Seq Img 20, Seq 20 (keys and labels unchanged); a column added with "+ Column" comes after them | `test_S_081_each_seq_sits_right_after_its_seq_img` | Passed · 2026-10-19 · auto |
+
+## S-083 The chat endpoint never rate-limits Botcake's IP
+
+Spec 083. Tests in `tests/Feature/Chatblast/BotcakeChatLimitTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-083.1 | Given chats from an IP in `services.botcake.chat_ips` (REMOTE_ADDR), when it sends more than `chat_rate` in a minute, then all are accepted and the limiter writes nothing to the cache | `test_S_083_1…` | Passed · 2026-10-20 · auto |
+| S-083.2 | Given any other IP, then it gets 429 after `chat_rate` in a minute, as before | `test_S_083_2…` | Passed · 2026-10-20 · auto |
+| S-083.3 | Given `botcake:chat-test-ip {ip} --hours=2`, then that IP is unlimited until it expires, then limited again; `--list` shows it with its expiry | `test_S_083_3…` | Passed · 2026-10-20 · auto |
+| S-083.4 | `--remove` takes the IP off; a bad IP, or `--hours` outside 1–12, is refused and adds nothing | `test_S_083_4…` | Passed · 2026-10-20 · auto |
