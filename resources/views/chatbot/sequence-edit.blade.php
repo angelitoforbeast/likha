@@ -86,7 +86,7 @@
             const amount = el('input', {type: 'number', min: 0, max: 999, value: s.delay_amount, 'aria-label': 'Delay of step ' + (i + 1), class: 'w-20 rounded-md border border-slate-300 px-2 py-1'});
             const unit = el('select', {'aria-label': 'Unit of step ' + (i + 1), class: 'rounded-md border border-slate-300 px-2 py-1'},
                 Object.keys(UNIT).map(u => el('option', {value: u, text: u, selected: s.delay_unit === u})));
-            const flow = el('select', {'aria-label': 'Flow of step ' + (i + 1), class: 'min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1'},
+            const flow = el('select', {'aria-label': 'Flow of step ' + (i + 1), class: 'w-full min-w-0 rounded-md border border-slate-300 px-2 py-1 sm:w-auto sm:flex-1'},
                 [el('option', {value: '', text: '— Pick a flow —'})].concat(FLOWS.map(f => el('option', {value: f.id, text: f.name + (f.published ? '' : ' (not published)'), selected: f.id === s.flow_id}))));
             const active = el('input', {type: 'checkbox', checked: !!s.active, 'aria-label': 'Step ' + (i + 1) + ' active'});
             const counted = el('div', {class: 'text-xs text-slate-500', text: delayText(s, i)});
