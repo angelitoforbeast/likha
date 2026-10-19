@@ -244,10 +244,21 @@
     const checkOf = r => json(r.cells[CHECK_KEY]), deliveryOf = r => json(r.cells[DELIVERY_KEY]);
     // Gaya ng ChatblastReady sa server: hindi Ready ang X ng check o ang "none delivered"; kung wala, Ready kapag may test o
     // totoong padala pagkatapos ng setup, o kapag ang check ang sumulat ng flow at field at pumasa pagkatapos ng setup.
+    // Pagkatapos ng pumasang check: ang flow o field na iba sa nahanap nito (hal. pinili ng tao) ay humaharang, kahit may test.
+    function drift(r) {
+        const c = checkOf(r);
+        if (!c || c.ok !== true) return null;
+        for (const [key, what, kind] of [['botcake.flow.shipping', 'flow', 'flow'], [FIELD_KEY, 'field', 'custom field']]) {
+            const found = String(c[what]?.id || '');
+            if (found !== '' && String(r.cells[key]?.value || '') !== found) return 'The ' + what + ' ID is not the ' + kind + ' named ' + ((c.names || {})[what] || '') + ' (press Test to set it)';
+        }
+        return null;
+    }
+    const notDelivered = r => { const d = deliveryOf(r); return !!(d && d.status === 'not_delivered' && String(d.flow_id || '') === String(r.cells['botcake.flow.shipping']?.value || '')); };
     function tested(r) {
-        const c = checkOf(r), d = deliveryOf(r);
+        const c = checkOf(r);
         if (c && c.ok === false) return false;
-        if (d && d.status === 'not_delivered') return false;
+        if (drift(r) || notDelivered(r)) return false;
         const changed = CONFIG_KEYS.map(k => r.cells[k]?.ts || '').sort().pop();
         if (!changed) return false;
         const test = r.cells[TEST_OK_KEY]?.ts || '';
@@ -274,7 +285,7 @@
             // Pulang linya ng flow na may ID: wala sa Botcake o bura na.
             flows: Object.entries(r.cells).some(([k, c]) => FLOW_NAME.test(k) && c && c.tone === 'red' && r.cells[k.slice(0, -'.name'.length)]),
             // X ng setup check (flow, field o template) o ng delivered check: hindi nagpapadala.
-            checkX: (checkOf(r)?.ok === false) || deliveryOf(r)?.status === 'not_delivered',
+            checkX: (checkOf(r)?.ok === false) || notDelivered(r) || !!drift(r),
             // Hindi APPROVED ang template ng shipping flow: bigo ang pagpapadala.
             template: !!(r.cells[SHIPPING_KEY] && r.cells[TEMPLATE_KEY] && r.cells[TEMPLATE_KEY + '.text'] && r.cells[TEMPLATE_KEY + '.text'].tone === 'red'),
         };
@@ -416,11 +427,13 @@
     function checkCell(r) {
         const c = checkOf(r), d = deliveryOf(r), cell = r.cells[CHECK_KEY], out = [];
         if (!c) return [el('span', {class: 'text-gray-400', text: r.info.botcake ? 'No check yet' : '—'})];
-        if (c.ok === true) out.push(iconLine('ok', 'Check passed', 'Flow, field and template', 'text-green-700'));
+        const moved = drift(r);
+        if (c.ok === true && moved) out.push(iconLine('x', 'Not ready', moved, 'text-red-700'));
+        else if (c.ok === true) out.push(iconLine('ok', 'Check passed', 'Flow, field and template', 'text-green-700'));
         else if (c.ok === false) out.push(icon('x', 'Check failed: ' + (c.x || []).join('; ')), ...(c.x || []).map(t => el('div', {class: 'break-words text-red-700', text: t})));
         if (d && c.ok === true) {
             if (d.status === 'delivered') out.push(iconLine('ok', 'Delivered', 'Delivered (Botcake)', 'text-green-700'));
-            else if (d.status === 'not_delivered') out.push(iconLine('x', 'Not delivered', 'Sent ' + (d.sent || 0) + ', none delivered (Botcake)', 'text-red-700'));
+            else if (notDelivered(r)) out.push(iconLine('x', 'Not delivered', 'Sent ' + (d.sent || 0) + ', none delivered (Botcake)', 'text-red-700'));
             else out.push(el('div', {class: 'text-gray-500', text: 'Delivery: waiting for a send'}));
         }
         if (c.error) out.push(el('div', {class: 'break-words text-gray-500', text: 'Check failed: ' + c.error}));
@@ -543,7 +556,7 @@
         td.classList.toggle('bg-red-50', !!(mark && mark.cls === 'text-red-600'));
         // Ang "Test send": kailan nasubukan, o amber na "Needs a test send" kapag kumpleto pero hindi pa nasubukan.
         if (col.key === TEST_OK_KEY) {
-            const x = checkOf(row)?.ok === false || deliveryOf(row)?.status === 'not_delivered';
+            const x = checkOf(row)?.ok === false || notDelivered(row) || !!drift(row);
             put(td, tested(row) ? el('span', {class: 'text-xs text-green-700', text: cell && !byCheck(row) ? 'Tested ' + cell.at : byCheck(row) ? 'Not needed: set by the check' : 'Tested by a real send'})
                 : x ? el('span', {class: 'text-xs font-medium text-red-700', text: 'Not ready: see Check'})
                 : complete(row) ? el('span', {class: 'text-xs font-medium text-amber-700', text: 'Needs a test send'})

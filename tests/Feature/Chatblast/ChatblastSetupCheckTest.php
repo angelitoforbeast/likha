@@ -283,6 +283,19 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
         $this->assertStringNotContainsString("text: '✓'", $html);
     }
 
+    public function test_S_082_6_a_baseline_that_could_not_be_read_is_taken_by_the_next_hourly_run(): void
+    {
+        $this->stats = ['sent' => 'x', 'delivery' => null]; // not numbers: unreadable
+        $this->check();
+        $this->assertNull(json_decode($this->val('setup.delivery'), true)['base_delivery']);
+
+        $this->travel(1)->hours();
+        $this->stats = ['sent' => 10, 'delivery' => 9];
+        Artisan::call('botcake:setup-delivered');
+        $d = json_decode($this->val('setup.delivery'), true);
+        $this->assertSame(['pending', 10, 9, now()->format('Y-m-d H:i:s')], [$d['status'], $d['base_sent'], $d['base_delivery'], $d['since']]);
+    }
+
     public function test_S_082_11_after_a_passed_check_a_page_on_another_flow_or_field_is_not_ready_even_with_a_test(): void
     {
         $this->check();
