@@ -1515,6 +1515,6 @@ Spec 077. Tests are in `tests/Feature/Chatblast/ChatbotAiHistoryTest.php`.
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-077.1 | Given a new AI step (no `history` key, or added in the editor), then it remembers 100 messages; an explicit 0 stays 0 and a saved value stays as it is; the form says "Remember the last N messages of this customer on this page (0 = off, max 100)" | `test_S_077_1…` | — |
-| S-077.2 | 100 is accepted; 101 or more is clamped to 100 and below 0 to 0 (as before for out-of-range values) | `test_S_077_2…` | — |
-| S-077.3 | Given 120 chats and 120 sent replies of this customer on this page, plus chats and replies of other customers and pages, when an AI step with history 100 runs, then the request carries the newest 100 of this customer's messages on this page, oldest first, between the system prompt and the current message | `test_S_077_3…` | — |
+| S-077.1 | Given a new AI step (no `history` key, or added in the editor), then it remembers 100 messages; an explicit 0 stays 0 and a saved value stays as it is; the form says "Remember the last N messages of this customer on this page (0 = off, max 100)" | `test_S_077_1…` | Passed · 2026-10-19 · auto |
+| S-077.2 | 100 is accepted; 101 or more is clamped to 100 and below 0 to 0 (as before for out-of-range values) | `test_S_077_2…` | Passed · 2026-10-19 · auto |
+| S-077.3 | Given 120 chats and 120 sent replies of this customer on this page, plus chats and replies of other customers and pages, when an AI step with history 100 runs, then the request carries the newest 100 of this customer's messages on this page, oldest first, between the system prompt and the current message | `test_S_077_3…` | Passed · 2026-10-19 · auto |

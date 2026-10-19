@@ -767,3 +767,8 @@ Accepted, not fixed:
 - **A "Clear all fields" on the skipped branch removes the deadline with `__wait`.** Reason: the intended sync; noted for whoever builds on it.
 - **While the chatbot worker is down, the tick queues each due wait again every 5 minutes.** The extra jobs end at once (no row, or the claim fails). Reason: a little queue churn during an outage only.
 - **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only.
+
+## 077: AI history up to 100 (2026-10-19)
+
+- **100 messages can be a large prompt.** Each sent reply is up to 2,000 characters, and a customer chat has no cap of its own, so 100 messages can reach roughly 50,000 tokens per AI call, paid on every call, up to 10 calls per run. Reason: the owner's choice. `ChatbotAi` sends the messages as they are, with no character budget. Suggestion for the owner: a total character cap on the history if OpenAI costs rise.
+- **Manual replies from the inbox (`kind = manual`) are not in the AI history,** only the bot's sent replies (`kind = send`). Reason: the brief says to keep the history as it is. Including the staff's own replies is a question for the owner.
