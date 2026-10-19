@@ -767,3 +767,17 @@ Accepted, not fixed:
 - **A "Clear all fields" on the skipped branch removes the deadline with `__wait`.** Reason: the intended sync; noted for whoever builds on it.
 - **While the chatbot worker is down, the tick queues each due wait again every 5 minutes.** The extra jobs end at once (no row, or the claim fails). Reason: a little queue churn during an outage only.
 - **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only.
+
+## 070: chatbot sequences (2026-10-19)
+
+- **Run the migration on deploy** (`2026_10_26_100000_create_chatbot_sequence_tables`) and keep the scheduler and the `chatbot` queue worker running. Until the tables exist, the tick does nothing and exit on reply is skipped. Reason: migrations run by hand.
+- **The tick walks overdue rows of paused (inactive) sequences** before reaching due rows of active ones (no row lock any more, so no blocking). If the owner pauses a sequence with many overdue subscribers, each tick re-reads them. Reason: bounded by the 500 batch and the (status, next_send_at) index; measure before adding a sequence-active column to the index.
+- **`resumePaused` reads up to 500 paused pages per tick** with no progress marker. Reason: far above today's page count.
+- **While the bot is paused for a customer, a "held" event is written every hour** per subscription. Reason: it makes the hold visible in executed actions; events are pruned after 30 days.
+- **Replies sent while a page is Off are not stored** (the intake drops chats for an Off page), so they don't trigger exit on reply, and the 24-hour check later reads an older chat. Reason: the intake's Off rule predates sequences; after the page is On, the 24-hour guard still applies.
+- **No test for exit on reply failing** (a database error during the intake). Reason: the call is wrapped in try/catch twice and reports; a forced DB error in the intake test is costly to set up.
+- **A step flow's "Clear all fields" also clears the customer's wait in the main flow.** Reason: step flows act on the same customer fields by design (the brief allows set-field steps); only waits are protected.
+- **A reordered or edited sequence moves in-flight customers by position:** a customer at step 3 runs whatever step is third after the edit. Reason: steps are replaced on save (one JSON save); keeping step ids would need a stable-id editor.
+- **With replies switched off, a step still counts as ran** ("Last sent" is set, and the pointer advances) although Botcake was not called. Reason: the emergency stop logs every send as skipped; a run is still a run.
+- **The inbox sequence endpoint accepts a 19-digit PSID above PHP's integer limit**, which saturates when cast. Reason: only staff send it, and real PSIDs are 16–17 digits.
+- **Unsubscribe and re-subscribe in the inbox while a step is running** can move the restarted subscription past step 1. Reason: the window is the length of one step run; staff can unsubscribe and subscribe again.
