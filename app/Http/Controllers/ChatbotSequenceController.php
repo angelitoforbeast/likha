@@ -21,7 +21,6 @@ use Illuminate\Validation\Rule;
 class ChatbotSequenceController extends Controller
 {
     public const PER_PAGE = 100;
-    private const TIME = '/^([01]\d|2[0-3]):[0-5]\d$/';
 
     private function checkAccess(): void
     {
@@ -72,20 +71,16 @@ class ChatbotSequenceController extends Controller
             'description' => ['nullable', 'string', 'max:1000'],
             'active' => ['required', 'boolean'],
             'exit_on_reply' => ['required', 'boolean'],
-            'send_from' => ['required', 'string', 'regex:' . self::TIME],
-            'send_to' => ['required', 'string', 'regex:' . self::TIME],
-            'outside_window' => ['required', Rule::in(['skip', 'stop'])],
             'steps' => ['present', 'array', 'max:' . ChatbotSequence::MAX_STEPS],
             'steps.*' => ['array'],
             'steps.*.delay_amount' => ['required', 'integer', 'min:0', 'max:999'],
             'steps.*.delay_unit' => ['required', Rule::in(ChatbotSequenceStep::UNITS)],
             'steps.*.flow_id' => ['required', 'integer', Rule::exists('chatbot_flows', 'id')],
             'steps.*.active' => ['required', 'boolean'],
-        ], ['send_from.regex' => 'Use HH:MM, e.g. 08:00.', 'send_to.regex' => 'Use HH:MM, e.g. 21:00.']);
+        ]);
 
         DB::transaction(function () use ($seq, $data) {
-            $seq->update(['name' => $data['name'], 'description' => $data['description'] ?? null, 'active' => $data['active'], 'exit_on_reply' => $data['exit_on_reply'],
-                'send_from' => $data['send_from'], 'send_to' => $data['send_to'], 'outside_window' => $data['outside_window']]);
+            $seq->update(['name' => $data['name'], 'description' => $data['description'] ?? null, 'active' => $data['active'], 'exit_on_reply' => $data['exit_on_reply']]);
             $seq->steps()->delete();
             foreach (array_values($data['steps']) as $i => $s) {
                 $seq->steps()->create(['position' => $i + 1, 'delay_amount' => (int) $s['delay_amount'], 'delay_unit' => $s['delay_unit'],

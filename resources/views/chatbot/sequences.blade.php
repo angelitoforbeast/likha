@@ -4,7 +4,7 @@
 @section('heading', 'Sequences')
 
 @section('description')
-    Timed follow-ups: each step runs a published flow after its delay, inside the send hours and Messenger's 24-hour window. Customers join from a flow's Sequence step or the Inbox.
+    Timed follow-ups: each step runs a published flow at its delay; a step is skipped when the customer's last message is over 24 hours old (Messenger's rule). Customers join from a flow's Sequence step or the Inbox.
 @endsection
 
 @push('styles')

@@ -39,24 +39,12 @@ class ChatbotSequences
 
     // ---- Oras ----
 
-    /**
-     * Ang oras ng padala: $from + delay, inilipat sa loob ng send window (HH:MM, Manila). Kapag ang from ay mas huli
-     * sa to (hal. 20:00–02:00), tumatawid ang window sa hatinggabi. Pareho = buong araw.
-     */
-    public static function dueAt(CarbonInterface $from, int $amount, string $unit, string $windowFrom, string $windowTo): Carbon
+    /** Ang oras ng padala: $from + delay, anumang oras ng araw (Manila, sa minuto). */
+    public static function dueAt(CarbonInterface $from, int $amount, string $unit): Carbon
     {
         $t = Carbon::instance($from)->timezone('Asia/Manila')->seconds(0);
-        $t = match ($unit) { 'days' => $t->addDays($amount), 'hours' => $t->addHours($amount), default => $t->addMinutes($amount) };
-        $hm = $t->format('H:i');
-        $open = fn (Carbon $day) => $day->copy()->setTimeFromTimeString($windowFrom);
-        if ($windowFrom === $windowTo) return $t;
-        if ($windowFrom < $windowTo) {
-            if ($hm < $windowFrom) return $open($t);
-            if ($hm >= $windowTo) return $open($t->copy()->addDay());
-            return $t;
-        }
-        // Tumatawid sa hatinggabi: bukas mula $windowFrom hanggang hatinggabi at mula hatinggabi hanggang $windowTo.
-        return ($hm >= $windowFrom || $hm < $windowTo) ? $t : $open($t);
+
+        return match ($unit) { 'days' => $t->addDays($amount), 'hours' => $t->addHours($amount), default => $t->addMinutes($amount) };
     }
 
     // ---- Subscribe ----
@@ -92,7 +80,7 @@ class ChatbotSequences
         $first = $this->stepFrom($seq, 1);
         if (!$first) return $out(['result' => 'refused', 'name' => $seq->name, 'reason' => 'the sequence has no active steps']);
 
-        $values = ['status' => 'active', 'current_step' => $first->position, 'next_send_at' => self::dueAt(now(), $first->delay_amount, $first->delay_unit, $seq->send_from, $seq->send_to),
+        $values = ['status' => 'active', 'current_step' => $first->position, 'next_send_at' => self::dueAt(now(), $first->delay_amount, $first->delay_unit),
             'dispatched_at' => null, 'last_sent_at' => null, 'enrolled_via' => $via, 'enrolled_by' => $by, 'exit_reason' => null];
         $existing = ChatbotSequenceSubscription::where('sequence_id', $seq->id)->where('page_id', $pageId)->where('psid', $psid)->first();
         if ($existing && in_array($existing->status, ['active', 'paused'], true)) return $out(['result' => 'already', 'name' => $seq->name]);
@@ -226,7 +214,7 @@ class ChatbotSequences
     /**
      * Patakbuhin ang step ng isang subscription. Umuusad lang pagkatapos ng takbo o ng skip; ang pumalya ay error event
      * at umuusad pa rin (walang paulit-ulit).
-     * @return string 'ran' | 'skipped' | 'failed' | 'held' | 'paused' | 'stopped' | 'completed' | 'locked' | 'gone'
+     * @return string 'ran' | 'skipped' | 'failed' | 'held' | 'paused' | 'completed' | 'locked' | 'gone'
      */
     public function runStep(int $subscriptionId, ?string $claim = null): string
     {
@@ -282,12 +270,8 @@ class ChatbotSequences
                 return 'held';
             }
             $last = BotcakeChat::where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
+            // Lampas 24 oras mula sa huling mensahe ng customer: laging nilalaktawan ang step at nagpapatuloy ang sequence.
             if (!$last || !$last->received_at || $last->received_at->lte(now()->subHours(self::WINDOW_HOURS))) {
-                if ($seq->outside_window === 'stop') {
-                    $release(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null]);
-                    $this->event($sub->page_id, $sub->psid, ['op' => 'stopped', 'reason' => 'outside 24h', 'name' => $seq->name]);
-                    return 'stopped';
-                }
                 $this->event($sub->page_id, $sub->psid, ['op' => 'skipped', 'reason' => 'outside 24h'] + $detail);
                 return $this->advance($sub, $seq, $step, false);
             }
@@ -327,7 +311,7 @@ class ChatbotSequences
         }
         // Habang active lang: ang customer na sumagot (o inalis) habang tumatakbo ang step ay hindi ibinabalik.
         ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values + ['current_step' => $next->position,
-            'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit, $seq->send_from, $seq->send_to)]);
+            'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit)]);
 
         return $sent ? 'ran' : 'skipped';
     }

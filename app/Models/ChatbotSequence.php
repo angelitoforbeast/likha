@@ -10,7 +10,11 @@ class ChatbotSequence extends Model
 {
     public const MAX_STEPS = 50;
 
-    protected $fillable = ['name', 'description', 'active', 'exit_on_reply', 'send_from', 'send_to', 'outside_window'];
+    /**
+     * Ang send_from, send_to at outside_window ay nasa table pa pero hindi na ginagamit: ang step ay sa delay nito, anumang
+     * oras, at laging nilalaktawan kapag lampas 24 oras mula sa huling mensahe ng customer.
+     */
+    protected $fillable = ['name', 'description', 'active', 'exit_on_reply'];
 
     protected $casts = ['active' => 'boolean', 'exit_on_reply' => 'boolean'];
 

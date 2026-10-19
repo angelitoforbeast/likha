@@ -4,7 +4,7 @@
 @section('heading', $sequence->name)
 
 @section('description')
-    Each step runs its flow's published version from Start, then waits the next step's delay. Times are Manila time.
+    Each step runs its flow's published version from Start. Each step runs at its delay. A step is skipped when the customer's last message is over 24 hours old (Messenger's rule).
 @endsection
 
 @section('actions')
@@ -26,20 +26,6 @@
         <div class="flex flex-col gap-2">
             <label class="flex items-center gap-2"><input type="checkbox" name="active" @checked($sequence->active)> Active (sends steps)</label>
             <label class="flex items-center gap-2"><input type="checkbox" name="exit_on_reply" @checked($sequence->exit_on_reply)> Exit when the customer replies</label>
-        </div>
-        <div class="flex flex-wrap items-end gap-3">
-            <label class="flex flex-col gap-1 text-xs text-slate-500">Send from
-                <input type="time" name="send_from" required value="{{ $sequence->send_from }}" class="rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900">
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-500">Send until
-                <input type="time" name="send_to" required value="{{ $sequence->send_to }}" class="rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900">
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-slate-500">Outside the 24-hour window
-                <select name="outside_window" class="rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900">
-                    <option value="skip" @selected($sequence->outside_window === 'skip')>Skip the step and continue</option>
-                    <option value="stop" @selected($sequence->outside_window === 'stop')>Stop the sequence</option>
-                </select>
-            </label>
         </div>
     </section>
 
@@ -123,7 +109,6 @@
         if (steps.some(s => !s.flow_id)) return note('Pick a flow for every step.', 'text-red-700');
         const f = new FormData(form);
         const body = {name: f.get('name'), description: f.get('description'), active: form.active.checked, exit_on_reply: form.exit_on_reply.checked,
-            send_from: f.get('send_from'), send_to: f.get('send_to'), outside_window: f.get('outside_window'),
             steps: steps.map(s => ({delay_amount: s.delay_amount === '' ? null : s.delay_amount, delay_unit: s.delay_unit, flow_id: s.flow_id, active: !!s.active}))};
         $('sq-save').disabled = true; note('Saving…', 'text-slate-500');
         const res = await fetch(form.dataset.url, {method: 'PUT', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify(body)});

@@ -65,7 +65,7 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
     /** @param array<int, array{0: int, 1: string, 2: ?int, 3?: bool}> $steps [delay, unit, flow id, active] */
     private function sequence(string $name, array $steps, array $attrs = []): ChatbotSequence
     {
-        $seq = ChatbotSequence::create($attrs + ['name' => $name, 'active' => true, 'exit_on_reply' => true, 'send_from' => '08:00', 'send_to' => '21:00', 'outside_window' => 'skip']);
+        $seq = ChatbotSequence::create($attrs + ['name' => $name, 'active' => true, 'exit_on_reply' => true]);
         foreach ($steps as $i => $s) {
             $seq->steps()->create(['position' => $i + 1, 'delay_amount' => $s[0], 'delay_unit' => $s[1], 'flow_id' => $s[2], 'active' => $s[3] ?? true]);
         }
@@ -108,27 +108,21 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
             ->map(fn ($e) => ChatbotEvents::text($e->type, $e->node_id, (array) json_decode($e->detail, true)))->all();
     }
 
-    public static function windows(): array
+    public function test_S_078_1_a_step_due_at_2am_is_sent_at_2am(): void
     {
-        return [
-            'before the window' => ['08:00', '21:00', '2026-10-20 07:10', 0, 'minutes', '2026-10-20 08:00'],
-            'after the window' => ['08:00', '21:00', '2026-10-20 21:30', 0, 'minutes', '2026-10-21 08:00'],
-            'at the end is outside' => ['08:00', '21:00', '2026-10-20 21:00', 0, 'minutes', '2026-10-21 08:00'],
-            'inside' => ['08:00', '21:00', '2026-10-20 12:00', 0, 'minutes', '2026-10-20 12:00'],
-            'a delay crossing midnight' => ['08:00', '21:00', '2026-10-20 20:30', 45, 'minutes', '2026-10-21 08:00'],
-            'hours' => ['08:00', '21:00', '2026-10-20 10:00', 3, 'hours', '2026-10-20 13:00'],
-            'days' => ['08:00', '21:00', '2026-10-20 10:00', 2, 'days', '2026-10-22 10:00'],
-            'night window, after midnight' => ['20:00', '02:00', '2026-10-21 01:00', 0, 'minutes', '2026-10-21 01:00'],
-            'night window, in the gap' => ['20:00', '02:00', '2026-10-20 03:00', 0, 'minutes', '2026-10-20 20:00'],
-            'night window, before midnight' => ['20:00', '02:00', '2026-10-20 23:00', 0, 'minutes', '2026-10-20 23:00'],
-            'always open' => ['00:00', '00:00', '2026-10-20 03:00', 0, 'minutes', '2026-10-20 03:00'],
-        ];
-    }
+        $this->travelTo('2026-10-21 01:00:00');
+        $this->chat('7001', '2026-10-21 00:50:00');
+        $seq = $this->sequence('Night', [[1, 'hours', $this->flow('Seq 1')->id], [30, 'minutes', $this->flow('Seq 2')->id]]);
+        // Ang lumang send hours sa table (08:00–21:00) ay hindi na ginagamit.
+        DB::table('chatbot_sequences')->where('id', $seq->id)->update(['send_from' => '08:00', 'send_to' => '21:00']);
 
-    #[DataProvider('windows')]
-    public function test_S_070_4c_the_next_send_is_the_delay_moved_into_the_send_window(string $from, string $to, string $at, int $amount, string $unit, string $expected): void
-    {
-        $this->assertSame($expected, ChatbotSequences::dueAt(Carbon::parse($at), $amount, $unit, $from, $to)->format('Y-m-d H:i'));
+        $this->svc()->subscribe($seq->id, 1001, 7001, 'other');
+        $this->assertSame('2026-10-21 02:00', substr($this->sub($seq)->next_send_at, 0, 16));
+
+        $this->travelTo('2026-10-21 02:00:00');
+        $this->tick();
+        $this->assertSame(['Seq 1'], $this->sent());
+        $this->assertSame([2, '2026-10-21 02:30'], [(int) $this->sub($seq)->current_step, substr($this->sub($seq)->next_send_at, 0, 16)]);
     }
 
     public function test_S_070_4a_each_due_row_is_queued_once_on_the_chatbot_queue_and_a_stale_claim_again(): void
@@ -214,10 +208,12 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertCount(3, $this->sent(), 'tapos na: wala nang padala');
     }
 
-    public function test_S_070_5a_outside_24_hours_the_step_is_skipped_or_the_sequence_stops(): void
+    public function test_S_078_2_outside_24_hours_the_step_is_always_skipped(): void
     {
         $skip = $this->sequence('Skipper', [[0, 'minutes', $this->flow('Seq 1')->id], [1, 'hours', $this->flow('Seq 2')->id]]);
-        $stop = $this->sequence('Stopper', [[0, 'minutes', $this->flow('Stop 1')->id]], ['outside_window' => 'stop']);
+        $stop = $this->sequence('Stopper', [[0, 'minutes', $this->flow('Stop 1')->id], [2, 'hours', $this->flow('Stop 2')->id]]);
+        // Ang lumang "stop" sa table ay hindi na ginagamit: laging skip.
+        DB::table('chatbot_sequences')->where('id', $stop->id)->update(['outside_window' => 'stop']);
         $this->chat('7001', '2026-10-19 09:59:00');
         $this->chat('7002', '2026-10-19 09:59:00');
         $this->svc()->subscribe($skip->id, 1001, 7001, 'other');
@@ -228,8 +224,8 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertSame([[], []], [$this->sent('7001'), $this->sent('7002')]);
         $this->assertSame(['active', 2, '2026-10-20 11:00'], [$this->sub($skip)->status, (int) $this->sub($skip)->current_step, substr($this->sub($skip)->next_send_at, 0, 16)]);
         $this->assertSame('Sequence Skipper step 1 skipped (outside 24h)', last($this->events('7001')));
-        $this->assertSame(['unsubscribed', 'outside 24h', null], [$this->sub($stop, '7002')->status, $this->sub($stop, '7002')->exit_reason, $this->sub($stop, '7002')->next_send_at]);
-        $this->assertSame('Sequence Stopper stopped (outside 24h)', last($this->events('7002')));
+        $this->assertSame(['active', 2, '2026-10-20 12:00'], [$this->sub($stop, '7002')->status, (int) $this->sub($stop, '7002')->current_step, substr($this->sub($stop, '7002')->next_send_at, 0, 16)]);
+        $this->assertSame('Sequence Stopper step 1 skipped (outside 24h)', last($this->events('7002')));
     }
 
     public function test_S_070_5b_a_page_that_is_off_pauses_the_subscription_until_it_is_on_again(): void

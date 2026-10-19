@@ -66,7 +66,7 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
 
     private function sequence(string $name, array $attrs = []): ChatbotSequence
     {
-        $seq = ChatbotSequence::create($attrs + ['name' => $name, 'active' => true, 'exit_on_reply' => true, 'send_from' => '08:00', 'send_to' => '21:00', 'outside_window' => 'skip']);
+        $seq = ChatbotSequence::create($attrs + ['name' => $name, 'active' => true, 'exit_on_reply' => true]);
         $seq->steps()->create(['position' => 1, 'delay_amount' => 2, 'delay_unit' => 'hours', 'flow_id' => $this->sendFlow('Seq 1 of ' . $name)->id, 'active' => true]);
 
         return $seq;
@@ -133,7 +133,7 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
 
         $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertRedirect();
         $new = ChatbotSequence::where('name', 'Follow up')->first();
-        $this->assertSame([true, true, '08:00', '21:00', 'skip'], [$new->active, $new->exit_on_reply, $new->send_from, $new->send_to, $new->outside_window]);
+        $this->assertSame([true, true], [$new->active, $new->exit_on_reply]);
         $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertSessionHasErrors('name');
     }
 
@@ -144,24 +144,25 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
         $b = $this->sendFlow('B');
         $this->sequence('Taken');
         $this->actingAs($this->user());
-        $this->get('/chatbot/sequences/' . $seq->id)->assertOk()->assertSee('Exit when the customer replies')->assertSee('Flow A');
+        $this->get('/chatbot/sequences/' . $seq->id)->assertOk()->assertSee('Exit when the customer replies')->assertSee('Flow A')
+            ->assertSee("Each step runs at its delay. A step is skipped when the customer's last message is over 24 hours old (Messenger's rule).", false)
+            ->assertDontSee('Send from')->assertDontSee('Send until')->assertDontSee('Outside the 24-hour window');
+        $this->get('/chatbot/sequences')->assertOk()->assertDontSee('send hours');
 
-        $body = ['name' => ' Preorder 2 ', 'description' => 'For pre-orders', 'active' => false, 'exit_on_reply' => false, 'send_from' => '09:30', 'send_to' => '20:00',
-            'outside_window' => 'stop', 'steps' => [
+        $body = ['name' => ' Preorder 2 ', 'description' => 'For pre-orders', 'active' => false, 'exit_on_reply' => false, 'steps' => [
                 ['delay_amount' => 10, 'delay_unit' => 'minutes', 'flow_id' => $b->id, 'active' => true],
                 ['delay_amount' => 1, 'delay_unit' => 'days', 'flow_id' => $a->id, 'active' => false],
             ]];
         $this->putJson('/chatbot/sequences/' . $seq->id, $body)->assertOk();
 
         $seq->refresh();
-        $this->assertSame(['Preorder 2', 'For pre-orders', false, false, '09:30', '20:00', 'stop'],
-            [$seq->name, $seq->description, $seq->active, $seq->exit_on_reply, $seq->send_from, $seq->send_to, $seq->outside_window]);
+        $this->assertSame(['Preorder 2', 'For pre-orders', false, false], [$seq->name, $seq->description, $seq->active, $seq->exit_on_reply]);
         $this->assertSame([[1, 10, 'minutes', $b->id, true], [2, 1, 'days', $a->id, false]],
             $seq->steps->map(fn ($s) => [$s->position, $s->delay_amount, $s->delay_unit, $s->flow_id, $s->active])->all());
 
         $bad = [
-            ['name' => 'Taken'], ['name' => ''], ['name' => str_repeat('n', 121)], ['description' => str_repeat('d', 1001)], ['send_from' => '25:00'],
-            ['steps' => [['delay_amount' => 1000, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true]]], ['send_to' => '8am'], ['outside_window' => 'wait'],
+            ['name' => 'Taken'], ['name' => ''], ['name' => str_repeat('n', 121)], ['description' => str_repeat('d', 1001)],
+            ['steps' => [['delay_amount' => 1000, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true]]],
             ['steps' => [['delay_amount' => 1, 'delay_unit' => 'weeks', 'flow_id' => $a->id, 'active' => true]]],
             ['steps' => [['delay_amount' => -1, 'delay_unit' => 'hours', 'flow_id' => $a->id, 'active' => true]]],
             ['steps' => [['delay_amount' => 1, 'delay_unit' => 'hours', 'flow_id' => 999999, 'active' => true]]],
