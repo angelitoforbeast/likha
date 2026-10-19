@@ -307,7 +307,9 @@ class ChatbotPagesTest extends ChatblastTestCase
         $html = $this->get('/chatbot/pages')->assertOk()->getContent();
 
         foreach (['.cb-txt {', 'white-space: pre-line', 'overflow-wrap: anywhere', '-webkit-line-clamp: 3', 'tr.cb-open .cb-txt {', 'max-height: 15rem',
-            '.cb-txt.cb-clamped {', "'aria-label': 'Edit ' + c.label", "ev.key === 'Enter' || ev.key === ' '"] as $part) {
+            '.cb-txt.cb-clamped {', "'aria-label': 'Edit ' + c.label", "ev.key === 'Enter' || ev.key === ' '",
+            // Ang multi-line na text ay sa textarea ng modal (ang input ay nag-aalis ng line break); ang image ay sa URL editor.
+            "c.kind === 'image' ? startEdit(td, r, c) : openLong(r, c)"] as $part) {
             $this->assertStringContainsString($part, $html);
         }
         $this->assertStringNotContainsString('See more', $html);

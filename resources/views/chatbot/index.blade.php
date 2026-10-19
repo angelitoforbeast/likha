@@ -247,8 +247,9 @@
         const edit = el('button', {type: 'button', class: 'cb-edit shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500', 'aria-label': 'Edit ' + c.label, title: 'Edit ' + c.label, text: '✎'});
         td.append(el('div', {class: 'flex items-start gap-1'}, [el('div', {class: 'min-w-0 flex-1'}, show), edit]));
         if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
-        // Ang lapis lang ang nagbubukas ng editor; ang click (o Enter / Space) sa cell ay nagbubukas o nagsasara ng row.
-        const open = () => c.kind === 'long' ? openLong(r, c) : startEdit(td, r, c);
+        // Ang lapis lang ang nagbubukas ng editor (ang text sa textarea ng modal, dahil inaalis ng input ang line break; ang
+        // image ay sa URL editor). Ang click (o Enter / Space) sa cell ay nagbubukas o nagsasara ng row.
+        const open = () => c.kind === 'image' ? startEdit(td, r, c) : openLong(r, c);
         edit.addEventListener('click', ev => { ev.stopPropagation(); open(); });
         edit.addEventListener('keydown', ev => ev.stopPropagation());
         td.addEventListener('click', ev => { if (!ev.target.closest('input')) toggleRow(r.page); });
