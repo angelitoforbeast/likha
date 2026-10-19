@@ -17,8 +17,9 @@ use Illuminate\Support\Facades\Schema;
  *   field): isang matagumpay na Send test (botcake.test_ok, isinusulat ng sender kapag ang test ay naging sent) o isang
  *   totoong naipadalang chatblast (mula sa botcake_messages; walang itinatabi para rito); o
  * - ang setup check ang sumulat ng flow at field (system) at pumasa ito pagkatapos ng huling pagbabago: walang Send test.
- * Ang pagbabago ng setup ng tao (hal. ibang flow ID) ay ginagawang mas luma ang dating test, kaya kailangan ulit ng test;
- * walang binubura. Ang check na hindi naabot ang Botcake ay hindi binibilang (naiiwan ang dating resulta).
+ * Ang pagbabago ng setup ng tao (hal. ibang token) ay ginagawang mas luma ang dating test, kaya kailangan ulit ng test;
+ * walang binubura. Pagkatapos ng pumasang check, ang flow o field na iba sa nahanap nito ay hindi Ready kahit may test
+ * (ang page ay sa flow ng Setup box lang nagpapadala). Ang check na hindi naabot ang Botcake ay hindi binibilang (naiiwan ang dating resulta).
  */
 class ChatblastReady
 {
@@ -70,7 +71,7 @@ class ChatblastReady
         foreach ($out as $pk => $s) {
             $out[$pk]['blocker'] = self::blocker($s);
             $out[$pk]['tested'] = $out[$pk]['blocker'] === null;
-            unset($out[$pk]['check'], $out[$pk]['delivery'], $out[$pk]['system']);
+            unset($out[$pk]['check'], $out[$pk]['delivery'], $out[$pk]['system'], $out[$pk]['ids']);
         }
 
         return $out;
@@ -130,7 +131,7 @@ class ChatblastReady
 
     private static function blank(): array
     {
-        return ['changed' => null, 'test_ok' => null, 'last_send' => null, 'tested' => false, 'blocker' => null, 'check' => null, 'delivery' => null, 'system' => []];
+        return ['changed' => null, 'test_ok' => null, 'last_send' => null, 'tested' => false, 'blocker' => null, 'check' => null, 'delivery' => null, 'system' => [], 'ids' => []];
     }
 
     /** Isang active na row sa kalagayan ng page. */
@@ -141,8 +142,11 @@ class ChatblastReady
         if ($row->key === ChatblastSetupCheck::CHECK_KEY) { $s['check'] = json_decode((string) $row->value, true); return; }
         if ($row->key === ChatblastSetupCheck::DELIVERY_KEY) { $s['delivery'] = json_decode((string) $row->value, true); return; }
         $s['changed'] = max($s['changed'] ?? '', $at);
-        // Ang flow at field na isinulat ng setup check (system), hindi ng tao.
-        if (in_array($row->key, ['flow.shipping', 'field.message'], true)) $s['system'][$row->key] = $row->created_by === null;
+        // Ang flow at field: kung system (ang setup check) ang sumulat, at ang kasalukuyang ID.
+        if (in_array($row->key, ['flow.shipping', 'field.message'], true)) {
+            $s['system'][$row->key] = $row->created_by === null;
+            $s['ids'][$row->key] = trim((string) $row->value);
+        }
     }
 
     /** Ang dahilan kung bakit hindi Ready (X ng check, hindi delivered, o kailangan ng test), o null. */
@@ -150,8 +154,18 @@ class ChatblastReady
     {
         $check = is_array($s['check']) && isset($s['check']['ok']) ? $s['check'] : null;
         if ($check && !$check['ok']) return 'Page not ready: ' . (((array) ($check['x'] ?? []))[0] ?? 'the setup check failed');
+        // Pagkatapos ng pumasang check: ang flow at field ay dapat ang nahanap nito (hindi ibang flow ng tao, kahit may test).
+        if ($check && $check['ok']) {
+            $names = (array) ($check['names'] ?? []);
+            foreach (['flow.shipping' => ['flow', 'flow', 'flow'], 'field.message' => ['field', 'field', 'custom field']] as $key => [$what, $label, $kind]) {
+                $found = (string) ($check[$what]['id'] ?? '');
+                if ($found !== '' && ($s['ids'][$key] ?? '') !== $found) {
+                    return 'Page not ready: the ' . $label . ' ID is not the ' . $kind . ' named ' . ($names[$what] ?? '') . ' (press Test to set it)';
+                }
+            }
+        }
         $d = is_array($s['delivery']) ? $s['delivery'] : null;
-        if ($d && ($d['status'] ?? '') === 'not_delivered') return 'Page not ready: Sent ' . (int) ($d['sent'] ?? 0) . ', none delivered (Botcake)';
+        if ($d && ($d['status'] ?? '') === 'not_delivered' && (string) ($d['flow_id'] ?? '') === ($s['ids']['flow.shipping'] ?? '')) return 'Page not ready: Sent ' . (int) ($d['sent'] ?? 0) . ', none delivered (Botcake)';
         if ($s['changed'] === null) return self::NOT_TESTED;
 
         $tested = ($s['test_ok'] !== null && $s['test_ok'] >= $s['changed']) || ($s['last_send'] !== null && $s['last_send'] >= $s['changed']);

@@ -101,7 +101,8 @@ Schedule::command('chatbot:sequence-tick')
 Schedule::command('botcake:setup-check --all')
     ->timezone('Asia/Manila')
     ->dailyAt('21:30')
-    ->withoutOverlapping(120);
+    ->withoutOverlapping(120)
+    ->runInBackground(); // ilang minuto (60 page, 2 tawag kada segundo): hindi pinaghihintay ang ibang 21:30
 Schedule::command('botcake:setup-delivered')
     ->hourlyAt(45)
     ->withoutOverlapping(30);

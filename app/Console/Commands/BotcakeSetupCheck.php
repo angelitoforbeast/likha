@@ -31,7 +31,9 @@ class BotcakeSetupCheck extends Command
             if ($this->option('dry-run')) {
                 $r = $check->run($p, null, null, true);
                 $before = $ready->tested($p);
-                $after = $r['status'] !== 'checked' ? $before : ($r['ok'] && ($before || $this->systemWouldSet($settings, $p, $r)));
+                $d = $check->delivery($p);
+                $blockedByDelivery = ($d['status'] ?? '') === 'not_delivered' && (string) ($d['flow_id'] ?? '') === (string) ($r['flow']['id'] ?? '');
+                $after = $r['status'] !== 'checked' ? $before : ($r['ok'] && !$blockedByDelivery && ($before || $this->systemWouldSet($settings, $p, $r)));
                 $rows[] = [$p, $this->id($r['flow'] ?? []), $this->id($r['field'] ?? []), $this->result($r), ($before ? 'Ready' : 'not Ready') . ($after !== $before ? ' → ' . ($after ? 'Ready' : 'not Ready') : '')];
                 continue;
             }

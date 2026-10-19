@@ -178,9 +178,8 @@ class BotcakeFlowNames
 
     private function approved(array $templates, string $name): ?array
     {
-        $key = mb_strtolower(trim($name), 'UTF-8');
         foreach ($templates as $t) {
-            if ($t['approved'] && mb_strtolower(trim($t['name']), 'UTF-8') === $key) return $t;
+            if ($t['approved'] && ChatblastSetupCheck::norm($t['name']) === ChatblastSetupCheck::norm($name)) return $t;
         }
         return null;
     }
@@ -209,8 +208,8 @@ class BotcakeFlowNames
     }
 
     /**
-     * GET message_templates: name, APPROVED o hindi, ang BODY text at kung may "Custom Field" sa example nito.
-     * @return array{0: ?array<int, array{name:string, approved:bool, body:string, custom_field:bool}>, 1: ?string}
+     * GET message_templates: name, APPROVED o hindi, at ang BODY text.
+     * @return array{0: ?array<int, array{name:string, approved:bool, body:string}>, 1: ?string}
      */
     public function readTemplates(string $page, float $deadline): array
     {
@@ -224,28 +223,15 @@ class BotcakeFlowNames
         foreach ($list as $t) {
             if (!is_array($t) || !is_string($t['name'] ?? null) || trim($t['name']) === '') continue;
             $text = '';
-            $custom = false;
             foreach ((array) ($t['components'] ?? []) as $c) {
                 if (!is_array($c) || strtoupper((string) ($c['type'] ?? '')) !== 'BODY') continue;
                 $text = is_string($c['text'] ?? null) ? $c['text'] : '';
-                $custom = self::hasCustomField($c['example'] ?? null);
             }
             $out[] = ['name' => trim($t['name']), 'approved' => strtoupper((string) ($t['status'] ?? '')) === 'APPROVED',
-                'body' => mb_substr(trim($text), 0, 2000), 'custom_field' => $custom];
+                'body' => mb_substr(trim($text), 0, 2000)];
         }
 
         return [$out, null];
-    }
-
-    /** May "Custom Field" saanman sa example (string o nested na listahan, gaya ng body_text: [["Custom Field"]]). */
-    private static function hasCustomField(mixed $example): bool
-    {
-        if (is_string($example)) return strcasecmp(trim($example), 'Custom Field') === 0;
-        if (!is_array($example)) return false;
-        foreach ($example as $v) {
-            if (self::hasCustomField($v)) return true;
-        }
-        return false;
     }
 
     /**

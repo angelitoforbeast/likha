@@ -146,8 +146,16 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
         $this->travel(1)->minutes();
         $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '9100', false, null);           // same value: no change
         $this->settings()->set('Page Uno', 'botcake', 'field.message', '7701', false, $this->user('Marketing', 'mkt@example.test')->id);
-        $this->assertSame(ChatblastReady::NOT_TESTED, $this->ready(), 'a person changed the field: a Send test again');
-        $this->assertSame(ChatblastReady::NOT_TESTED, app(ChatblastReady::class)->states()['page uno']['blocker']);
+        // A person changed the field away from the one the check found: not Ready (a Send test would not help either).
+        $drift = 'Page not ready: the field ID is not the custom field named message (press Test to set it)';
+        $this->assertSame($drift, $this->ready());
+        $this->assertSame($drift, app(ChatblastReady::class)->states()['page uno']['blocker']);
+
+        // A person's change of another setup value (the token) needs a Send test, as before.
+        $this->settings()->set('Page Uno', 'botcake', 'field.message', '9200', false, null, true);
+        $this->travel(1)->minutes();
+        $this->settings()->set('Page Uno', 'botcake', 'token', 'tok-new-by-person-1234', false, $this->user('Admin', 'adm@example.test')->id);
+        $this->assertSame(ChatblastReady::NOT_TESTED, $this->ready());
 
         // The next check sets it back (system): Ready again.
         $this->travel(1)->minutes();
@@ -273,5 +281,65 @@ class ChatblastSetupCheckTest extends ChatblastTestCase
             $this->assertStringContainsString($needle, $html, $needle);
         }
         $this->assertStringNotContainsString("text: '✓'", $html);
+    }
+
+    public function test_S_082_11_after_a_passed_check_a_page_on_another_flow_or_field_is_not_ready_even_with_a_test(): void
+    {
+        $this->check();
+        $this->travel(1)->minutes();
+        $person = $this->user('Marketing', 'mkt@example.test')->id;
+        $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '5501', false, $person); // the old flow, picked by a person
+        $this->settings()->set('Page Uno', 'botcake', 'test_ok', now()->addMinute()->format('Y-m-d H:i:s'), false, null, true); // and a Send test
+        $this->travel(2)->minutes();
+
+        $this->assertSame('Page not ready: the flow ID is not the flow named UPDATE SHIPPING STATUS 2026 (press Test to set it)', $this->ready());
+
+        $this->settings()->set('Page Uno', 'botcake', 'flow.shipping', '9100', false, $person); // back to the found ID, by a person
+        $this->settings()->set('Page Uno', 'botcake', 'field.message', '7701', false, $person);
+        $this->assertSame('Page not ready: the field ID is not the custom field named message (press Test to set it)', $this->ready());
+    }
+
+    public function test_S_082_12_the_sender_skips_a_page_with_an_x_with_that_reason(): void
+    {
+        $this->flows = [];
+        $this->check();
+        $m = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'JT7001', 'kind' => 'in_transit', 'psid' => '7001', 'status' => 'queued', 'is_test' => false, 'text' => 'Hi', 'queued_at' => now()]);
+        Http::fake(['botcake.io/*' => Http::response(['success' => true])]); // a send would reach this
+
+        app(\App\Services\ChatblastSender::class)->process($m->id);
+
+        $m->refresh();
+        $this->assertSame(['no_config', 'Page not ready: No flow named UPDATE SHIPPING STATUS 2026 in Botcake'], [$m->status, $m->reason]);
+        Http::assertNothingSent();
+    }
+
+    public function test_S_082_13_the_setup_routes_need_page_settings_access_and_names_saved_during_a_run_run_again(): void
+    {
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->postJson('/chatblast/page-settings/setup', ['flow' => 'X', 'field' => 'x', 'template' => 'x'])->assertNotFound();
+        $this->postJson('/chatblast/page-settings/setup/check-all')->assertNotFound();
+        $this->getJson('/chatblast/page-settings/setup/progress')->assertNotFound();
+        $this->assertSame(0, PageSetting::where('page_name', '_all')->count());
+
+        // Names saved while a Check all runs: the run is queued again with the new names when it ends.
+        $this->actingAs(\App\Models\User::where('email', 'ceo@example.test')->first());
+        Queue::fake();
+        $this->postJson('/chatblast/page-settings/setup/check-all')->assertOk()->assertJsonPath('queued', true);
+        $this->postJson('/chatblast/page-settings/setup', ['flow' => 'UPDATE SHIPPING STATUS 2026', 'field' => 'message', 'template' => 'post_order'])->assertOk()->assertJsonPath('queued', false);
+        Queue::assertPushed(RunChatblastSetupCheck::class, 1);
+        (new RunChatblastSetupCheck())->handle($this->settings(), app(\App\Services\BotcakePageSetup::class));
+        Queue::assertPushed(RunChatblastSetupCheck::class, 2);
+
+        // The page can't write "_all" in any spelling, nor deactivate a check row.
+        foreach (['_ALL', ' _all '] as $name) {
+            $this->postJson('/chatblast/page-settings/cell', ['page_name' => $name, 'provider' => 'botcake', 'key' => 'setup.flow_name', 'value' => 'x'])->assertStatus(422);
+        }
+        $this->post('/chatblast/page-settings', ['page_name' => '_all', 'provider' => 'botcake', 'key' => 'setup.flow_name', 'value' => 'x'])->assertSessionHasErrors('page_name');
+        $this->postJson('/chatblast/page-settings/setup', ['flow' => str_repeat('f', 256), 'field' => 'x', 'template' => 'x'])->assertStatus(422);
+        $this->flows = [];
+        $this->check();
+        $row = PageSetting::where('key', 'setup.check')->where('active', true)->first();
+        $this->post('/chatblast/page-settings/' . $row->id . '/deactivate')->assertSessionHasErrors('value');
+        $this->assertTrue($row->fresh()->active);
     }
 }

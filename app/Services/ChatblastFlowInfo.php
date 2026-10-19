@@ -69,7 +69,7 @@ class ChatblastFlowInfo
         if ($fields !== null && $fieldName === null) $fieldError = 'Field ' . $fieldId . ' is not among the page\'s custom fields';
 
         [$list, $templateError] = $call($base . '/message_templates');
-        $template = $list === null ? null : $this->pickTemplate(self::templates($list), $get('template.shipping'), $flowName);
+        $template = $list === null ? null : $this->pickTemplate(self::templates($list), $get('template.shipping'));
 
         $check = [];
         if ($flowName === null) $check[] = 'The flow was not found in Botcake.';
@@ -133,7 +133,7 @@ class ChatblastFlowInfo
      * Ang template ng flow: ang nasa page setting (botcake.template.shipping) kapag mayroon; kung wala, ang pangalan ng
      * Setup box (ChatblastSetupCheck). Parehong paghahambing ng setup check: trim, iisang espasyo, hindi case-sensitive.
      */
-    private function pickTemplate(array $templates, string $setting, ?string $flowName): ?array
+    private function pickTemplate(array $templates, string $setting): ?array
     {
         $name = $setting !== '' ? $setting : app(ChatblastSetupCheck::class)->names()['template'];
         foreach ($templates as $t) {

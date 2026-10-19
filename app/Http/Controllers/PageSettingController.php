@@ -69,7 +69,7 @@ class PageSettingController extends Controller
         }
         foreach ($names as $key => $v) $this->settings->set(ChatblastSetupCheck::ALL_PAGE, 'botcake', $key, $v, false, Auth::id(), true);
 
-        return response()->json(['names' => app(ChatblastSetupCheck::class)->names()] + $this->queueCheckAll());
+        return response()->json(['names' => app(ChatblastSetupCheck::class)->names()] + $this->queueCheckAll(true));
     }
 
     /** Check all: isang job sa queue "default" (hindi sabay ang dalawa). */
@@ -88,19 +88,29 @@ class PageSettingController extends Controller
     }
 
     /** @return array{queued: bool, progress: ?array} */
-    private function queueCheckAll(): array
+    private function queueCheckAll(bool $namesChanged = false): array
     {
-        $p = RunChatblastSetupCheck::progress();
-        // Naka-queue o tumatakbo pa (hanggang 1 oras): hindi na nagdadagdag ng isa pa.
-        if ($p && in_array($p['status'] ?? '', ['queued', 'running'], true)
-            && now()->diffInMinutes(\Illuminate\Support\Carbon::parse($p['started_at'] ?? $p['queued_at'] ?? now())) < 60) {
-            return ['queued' => false, 'progress' => $p];
+        // Atomic: dalawang sabay na pindot ay isa lang ang nagpapadala ng job.
+        $lock = \Illuminate\Support\Facades\Cache::lock('chatblast:setup-check:queue', 10);
+        if (!$lock->get()) return ['queued' => false, 'progress' => RunChatblastSetupCheck::progress()];
+        try {
+            $p = RunChatblastSetupCheck::progress();
+            // Naka-queue o tumatakbo pa (hanggang 1 oras): hindi na nagdadagdag ng isa pa; ang bagong pangalan ay isa pang
+            // takbo pagkatapos nito.
+            if ($p && in_array($p['status'] ?? '', ['queued', 'running'], true)
+                && now()->diffInMinutes(\Illuminate\Support\Carbon::parse($p['started_at'] ?? $p['queued_at'] ?? now())) < 60) {
+                if ($namesChanged) \Illuminate\Support\Facades\Cache::put(RunChatblastSetupCheck::AGAIN, true, now()->addDay());
+                return ['queued' => false, 'progress' => $p];
+            }
+            RunChatblastSetupCheck::queued(Auth::id());
+            RunChatblastSetupCheck::dispatch(Auth::id());
+        } finally {
+            $lock->release();
         }
-        RunChatblastSetupCheck::queued(Auth::id());
-        RunChatblastSetupCheck::dispatch(Auth::id());
 
         return ['queued' => true, 'progress' => RunChatblastSetupCheck::progress()];
     }
+
 
     /** Poll: kapag may ?since=, ang mga cell lang na nagbago mula noon; kung wala, ang buong grid. */
     public function grid(Request $request, PageSettingsGrid $grid)
@@ -416,6 +426,9 @@ class PageSettingController extends Controller
         // Ang ACTIVE ng chatbot ay sa On/Off ng /chatbot lang (CEO), hindi dito.
         if ($setting->fullKey() === 'chatbot.active') {
             return redirect()->route('page-settings.index')->withErrors(['value' => 'chatbot.active is changed with the On/Off switch on /chatbot.']);
+        }
+        if (in_array($setting->fullKey(), PageSettingsGrid::CHECK_CELLS, true)) {
+            return redirect()->route('page-settings.index')->withErrors(['value' => $setting->fullKey() . ' is written by the setup check.']);
         }
         $this->settings->deactivate($setting, Auth::id());
 

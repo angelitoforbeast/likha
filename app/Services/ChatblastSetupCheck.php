@@ -98,11 +98,11 @@ class ChatblastSetupCheck
         // Ang flow at ang field: eksaktong isa.
         $flowHits = [];
         foreach ($flows as $id => $f) {
-            if (!$f['removed'] && self::norm($f['name']) === self::norm($names['flow'])) $flowHits[(string) $id] = $f['name'];
+            if (!$f['removed'] && ctype_digit((string) $id) && self::norm($f['name']) === self::norm($names['flow'])) $flowHits[(string) $id] = $f['name'];
         }
         $fieldHits = [];
         foreach ($fields as $f) {
-            if (self::norm($f['name']) === self::norm($names['field'])) $fieldHits[(string) $f['id']] = $f['name'];
+            if (ctype_digit((string) $f['id']) && self::norm($f['name']) === self::norm($names['field'])) $fieldHits[(string) $f['id']] = $f['name'];
         }
         $flow = $this->pick('flow', $flowHits, $names['flow'], trim((string) $this->settings->get($page, 'botcake', 'flow.shipping')));
         $field = $this->pick('field', $fieldHits, $names['field'], trim((string) $this->settings->get($page, 'botcake', 'field.message')));

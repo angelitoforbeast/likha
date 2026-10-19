@@ -167,7 +167,7 @@
                 <li><b>Botcake ID and token.</b> Add the page with + Page, then type its Botcake ID and its token (Botcake: page settings, API).</li>
                 <li><b>The automatic check.</b> When both are saved, the token is tested and the flow, the custom field and the template named in "Setup for every page" are found and set. The Check column shows a check, or an X with the reason.</li>
                 <li><b>Copy the flow and field in Botcake if missing.</b> An X says what is missing: copy the flow from another page, or create the custom field, then press Test.</li>
-                <li><b>Ready.</b> When the check passes, the row turns green without a test send: the page's messages are now in To send and auto. After the first sends, the check also confirms in Botcake that they were delivered.</li>
+                <li><b>Ready.</b> When the check sets the flow and field and passes, the row turns green without a test send: the page's messages are now in To send and auto. After the first sends, the check also confirms in Botcake that they were delivered.</li>
                 <li><b>Send test to the Test PSID (optional).</b> Needed only when a person changes the flow or field ID by hand: set the page's Test PSID (your own account), then press Send test and check Messenger.</li>
             </ol>
         </div>
@@ -454,8 +454,8 @@
     const FIELD_KEY = 'botcake.field.message';
     const PICK_KEYS = ['botcake.flow.shipping', FIELD_KEY];
     const GUIDE = {
-        'botcake.flow.shipping': 'No flow named "' + SETUP.flow + '" in Botcake. Copy it in Botcake from another page to this page, then press Check.',
-        [FIELD_KEY]: 'No custom field named "' + SETUP.field + '" in Botcake. Create it in Botcake, then press Check.',
+        'botcake.flow.shipping': 'No flow named "' + SETUP.flow + '" in Botcake. Copy it in Botcake from another page to this page, then press Test.',
+        [FIELD_KEY]: 'No custom field named "' + SETUP.field + '" in Botcake. Create it in Botcake, then press Test.',
     };
     const NOT_CANDIDATE = {'botcake.flow.shipping': 'This flow is not "' + SETUP.flow + '" in Botcake', [FIELD_KEY]: 'This field is not "' + SETUP.field + '" in Botcake'};
 

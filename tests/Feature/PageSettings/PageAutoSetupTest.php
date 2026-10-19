@@ -176,8 +176,8 @@ class PageAutoSetupTest extends BotcakeApiTestCase
         $html = $this->get('/chatblast/page-settings')->assertOk()->getContent();
 
         foreach ([
-            "'No flow named \"' + SETUP.flow + '\" in Botcake. Copy it in Botcake from another page to this page, then press Check.'",
-            "'No custom field named \"' + SETUP.field + '\" in Botcake. Create it in Botcake, then press Check.'",
+            "'No flow named \"' + SETUP.flow + '\" in Botcake. Copy it in Botcake from another page to this page, then press Test.'",
+            "'No custom field named \"' + SETUP.field + '\" in Botcake. Create it in Botcake, then press Test.'",
             'Template check failed: ',
             "function startPick(td, row, col, original)",
             "o.name + ' · ' + o.id",

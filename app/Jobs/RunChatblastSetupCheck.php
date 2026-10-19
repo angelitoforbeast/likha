@@ -21,7 +21,8 @@ class RunChatblastSetupCheck implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public const PROGRESS = 'chatblast:setup-check:progress';
-    public int $timeout = 3000; // ~60 page × hanggang 25 s
+    public const AGAIN = 'chatblast:setup-check:again'; // may bagong pangalan habang tumatakbo: isa pang takbo pagkatapos
+    public int $timeout = 1800; // mas maikli sa retry_after ng database queue (1900); ~60 page × ~2-25 s
     public int $tries = 1;
 
     public function __construct(public ?int $by = null)
@@ -63,6 +64,11 @@ class RunChatblastSetupCheck implements ShouldQueue
             Cache::put(self::PROGRESS, $p, now()->addDay());
         }
         Cache::put(self::PROGRESS, ['status' => 'done', 'finished_at' => now()->toIso8601String()] + $p, now()->addDays(7));
+        // Nagbago ang mga pangalan habang tumatakbo: ang mga naunang page ay sinuri sa lumang pangalan, kaya isa pang takbo.
+        if (Cache::pull(self::AGAIN)) {
+            self::queued($this->by);
+            self::dispatch($this->by);
+        }
     }
 
     public function failed(Throwable $e): void
