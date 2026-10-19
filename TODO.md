@@ -785,3 +785,12 @@ Accepted, not fixed:
 
 - **100 messages can be a large prompt.** Each sent reply is up to 2,000 characters, and a customer chat has no cap of its own, so 100 messages can reach roughly 50,000 tokens per AI call, paid on every call, up to 10 calls per run. Reason: the owner's choice. `ChatbotAi` sends the messages as they are, with no character budget. Suggestion for the owner: a total character cap on the history if OpenAI costs rise.
 - **Manual replies from the inbox (`kind = manual`) are not in the AI history,** only the bot's sent replies (`kind = send`). Reason: the brief says to keep the history as it is. Including the staff's own replies is a question for the owner.
+
+## 082: chatblast setup check by fixed names (2026-10-20)
+
+- **First run on live:** run `php artisan botcake:setup-check --all --dry-run` first (it writes nothing), then a real Check all. About 40 pages switch to the new flow and field, and the 16 that are Ready today stay Ready through the check. The ~20 pages without the flow get an X and stop sending until the staff add the flow in Botcake. Reason: the brief's intent; listed here so the switch is planned.
+- **A Setup-box save during a running Check all can wait for the nightly run** when the save reads "running" just as the job finishes, or when a worker was killed while "running" (under 60 minutes): the "run again" flag is then never picked up. Reason: a narrow race; the 21:30 run covers it.
+- **The chatblast build's no_config rows say "needs a test send"** even when the page's real blocker is an X. The sender, where a send is actually skipped, writes the exact reason. Reason: the build only marks rows not ready; changing its marker is outside this spec.
+- **The /chatbot "+ Page" (ChatbotController) runs the same token test and setup check** after adding a page, since it calls `BotcakePageSetup::check`. Reason: unchanged call; the check is the chatblast setup of the same page.
+- **On a phone, the "+ Column" button of /chatblast/page-settings is clipped at the right edge** (it was already like that). Reason: outside this spec.
+- **The browser check's scratch app ran a real Check all once** (the queue was `sync`): five token tests to botcake.io with fake tokens, which all ended as errors and wrote nothing. Reason: my mistake; the scratch queue is now `null`, and the check no longer presses Save or Check all.

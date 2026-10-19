@@ -431,7 +431,8 @@
         if (c.ok === true && moved) out.push(iconLine('x', 'Not ready', moved, 'text-red-700'));
         else if (c.ok === true) out.push(iconLine('ok', 'Check passed', 'Flow, field and template', 'text-green-700'));
         else if (c.ok === false) out.push(icon('x', 'Check failed: ' + (c.x || []).join('; ')), ...(c.x || []).map(t => el('div', {class: 'break-words text-red-700', text: t})));
-        if (d && c.ok === true) {
+        // Ang record ng ibang (lumang) flow ay hindi ipinapakita: para sa kasalukuyang flow lang ang delivered check.
+        if (d && c.ok === true && String(d.flow_id || '') === String(r.cells['botcake.flow.shipping']?.value || '')) {
             if (d.status === 'delivered') out.push(iconLine('ok', 'Delivered', 'Delivered (Botcake)', 'text-green-700'));
             else if (notDelivered(r)) out.push(iconLine('x', 'Not delivered', 'Sent ' + (d.sent || 0) + ', none delivered (Botcake)', 'text-red-700'));
             else out.push(el('div', {class: 'text-gray-500', text: 'Delivery: waiting for a send'}));
