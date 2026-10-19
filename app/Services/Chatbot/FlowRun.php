@@ -19,6 +19,8 @@ class FlowRun
     /** @var array<int, array{type: string, node: ?string, detail: array}> ang executed actions (isinusulat nang sabay pagkatapos) */
     public array $events = [];
     public ?string $runId = null;
+    /** true: walang sagot sa takdang oras; nagpapatuloy ang hinihintay sa port na skipped (chatbot:resume-skipped). */
+    public bool $skipWait = false;
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void

@@ -85,6 +85,11 @@ Schedule::command('staff-events:prune')
     ->dailyAt('04:20')
     ->withoutOverlapping();
 
+// Chatbot: ang "wait for reply" na lampas na sa skip_after ay nagpapatuloy sa port na skipped.
+Schedule::command('chatbot:resume-skipped')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')
     ->timezone('Asia/Manila')

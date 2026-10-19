@@ -28,6 +28,7 @@ class FlowGraph
     public const MAX_TEXT = 2000;    // isang text, value o template
     public const MAX_PROMPT = 10000;
     public const MAX_HISTORY = 20;
+    public const MAX_SKIP_MINUTES = 23 * 60; // ang padala pagkatapos ng skip ay dapat nasa 24 oras ng Messenger pa
 
     /** Ang mga port na palabas ng node, ayon sa uri at config. */
     public static function ports(array $node): array
@@ -37,7 +38,7 @@ class FlowGraph
         return match ($node['type'] ?? '') {
             'start', 'set' => ['next'],
             'condition' => array_merge(array_map(fn ($i) => 'row_' . ($i + 1), array_keys(array_values((array) ($config['rows'] ?? [])))), ['no']),
-            'send' => !empty($config['wait']) ? ['reply'] : ['continue'],
+            'send' => !empty($config['wait']) ? (self::skipMinutes($config) ? ['reply', 'skipped'] : ['reply']) : ['continue'],
             'ai' => ['success', 'failed'],
             'sheet' => ['next', 'failed'],
             default => [],
@@ -114,7 +115,7 @@ class FlowGraph
                 ], array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))),
                 'wait' => !empty($c['wait']),
                 'save_to' => $field($c['save_to'] ?? ''),
-            ],
+            ] + (!empty($c['wait']) && ($skip = self::cleanSkip($c['skip_after'] ?? null)) ? ['skip_after' => $skip] : []),
             'set' => ['ops' => array_values(array_map(fn ($o) => [
                 'op' => in_array($o['op'] ?? '', self::SET_OPS, true) ? $o['op'] : 'set',
                 'field' => $field($o['field'] ?? ''),
@@ -138,6 +139,37 @@ class FlowGraph
             ],
             default => [],
         };
+    }
+
+    /**
+     * Ang skip_after ng isang wait: {amount, unit} kapag may amount na 1 o higit pa, null kapag wala (walang key sa
+     * config, kaya ang lumang graph ay hindi nagbabago). Lampas sa 23 oras: InvalidArgumentException.
+     */
+    private static function cleanSkip(mixed $v): ?array
+    {
+        if (!is_array($v) || !is_numeric($v['amount'] ?? null) || (int) $v['amount'] < 1) return null;
+        $skip = ['amount' => (int) $v['amount'], 'unit' => ($v['unit'] ?? '') === 'hours' ? 'hours' : 'minutes'];
+        if (self::skipMinutes(['skip_after' => $skip]) > self::MAX_SKIP_MINUTES) throw new InvalidArgumentException('Skip after can be at most 23 hours.');
+
+        return $skip;
+    }
+
+    /** Ilang minuto ang skip_after ng config ng isang Send (0 = walang skip). */
+    public static function skipMinutes(array $config): int
+    {
+        $skip = $config['skip_after'] ?? null;
+        if (!is_array($skip)) return 0;
+
+        return max(0, (int) ($skip['amount'] ?? 0)) * (($skip['unit'] ?? '') === 'hours' ? 60 : 1);
+    }
+
+    /** "2 h", "30 min", "1 h 30 min" (para sa mga event). */
+    public static function skipLabel(int $minutes): string
+    {
+        $h = intdiv($minutes, 60);
+        $m = $minutes % 60;
+
+        return trim(($h ? $h . ' h' : '') . ($h && $m ? ' ' : '') . ($m ? $m . ' min' : ''));
     }
 
     /** Ang spreadsheet ID mula sa URL o ID mismo (null kapag hindi mukhang ID). */

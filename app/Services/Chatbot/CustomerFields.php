@@ -62,6 +62,8 @@ class CustomerFields
         if (!str_starts_with($key, '__')) $this->changes[] = ['key' => $key, 'from' => $this->values[$key], 'to' => null];
         unset($this->values[$key]);
         DB::table('chatbot_customer_values')->where('page_id', $this->pageId)->where('psid', $this->psid)->where('key', $key)->delete();
+        // Ang timer ng skip ay kasabay ng __wait: tapos na ang paghihintay (sagot, skip, "clear all fields").
+        if ($key === self::WAIT) ChatbotWaits::forget($this->pageId, $this->psid);
     }
 
     /** "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat at ang pause ng tao. */

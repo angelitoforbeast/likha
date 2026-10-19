@@ -34,10 +34,10 @@ class ChatbotEvents
         ], $run->events));
     }
 
-    /** Ang chat na hindi pinatakbo (bot paused, chat too old). */
-    public static function skipped(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $reason): void
+    /** Ang chat na hindi pinatakbo (bot paused, chat too old), o ang skip na hindi itinuloy ($node). */
+    public static function skipped(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $reason, ?string $node = null): void
     {
-        self::insert(['page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId, 'node_id' => null,
+        self::insert(['page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId, 'node_id' => $node,
             'type' => 'skipped', 'detail' => json_encode(['reason' => $reason, 'run' => bin2hex(random_bytes(4))]), 'created_at' => now()]);
     }
 
@@ -71,7 +71,8 @@ class ChatbotEvents
                 ? 'success' . (($d['saved_to'] ?? '') !== '' ? ' (saved to ' . mb_strtoupper($d['saved_to']) . ')' : '')
                 : 'failed: ' . ($d['error'] ?? '')),
             'sheet' => 'Sheet row ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
-            'waiting' => 'Waiting for reply at step ' . $node,
+            'waiting' => 'Waiting for reply at step ' . $node . (($d['skip_after'] ?? '') !== '' ? ' (skips after ' . $d['skip_after'] . ')' : ''),
+            'wait_skipped' => 'No reply in ' . ($d['after'] ?? '?') . ' → skipped at step ' . $node,
             'run_ended' => 'Run ended (' . ($d['reason'] ?? 'end') . ')',
             'skipped' => 'Skipped: ' . ($d['reason'] ?? '') . ($node ? ' (' . $node . ')' : ''),
             default => $type,

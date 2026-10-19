@@ -99,6 +99,16 @@ class FlowEngine
         $run->fields->clear(CustomerFields::WAIT);
         if ((int) $flowId !== $run->flowId || !$node || $node['type'] !== 'send' || empty($node['config']['wait'])) return false;
 
+        if ($run->skipWait) {
+            // Walang sagot sa takdang oras: ang port na skipped, walang sine-save.
+            $label = FlowGraph::skipLabel(FlowGraph::skipMinutes((array) $node['config']));
+            $run->event('run_started', null, ['reason' => 'no reply in ' . $label, 'flow' => $run->flowId]);
+            $run->event('wait_skipped', $nodeId, ['after' => $label]);
+            $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => 'skipped', 'note' => 'No reply in ' . $label];
+
+            return $edges[$nodeId . ':skipped'] ?? null;
+        }
+
         $run->event('run_started', null, ['reason' => 'resumed after wait', 'flow' => $run->flowId]);
         if (($node['config']['save_to'] ?? '') !== '') {
             $run->fields->set($node['config']['save_to'], $run->input);
@@ -189,7 +199,13 @@ class FlowEngine
 
         if (!empty($c['wait'])) {
             $run->fields->set(CustomerFields::WAIT, $run->flowId . ':' . $node['id']);
-            $run->event('waiting', $node['id']);
+            // Ang deadline ng skip (live lang: ang test customer ay walang tick). Ang wait na walang skip ay walang timer.
+            $minutes = FlowGraph::skipMinutes($c);
+            if (!$run->test) {
+                if ($minutes) ChatbotWaits::park($run->fields->pageId, $run->fields->psid, $run->flowId, $node['id'], now()->addMinutes($minutes));
+                else ChatbotWaits::forget($run->fields->pageId, $run->fields->psid);
+            }
+            $run->event('waiting', $node['id'], $minutes ? ['skip_after' => FlowGraph::skipLabel($minutes)] : []);
             return ['port' => 'reply', 'note' => $note . '; waiting for the reply', 'suspend' => true];
         }
 

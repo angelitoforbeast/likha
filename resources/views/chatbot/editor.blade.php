@@ -138,7 +138,7 @@
     const W = 220, NS = 'http://www.w3.org/2000/svg';
     const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
     const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', end: 'End'};
-    const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', no: 'no match', success: 'success', failed: 'failed'};
+    const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], rules = {};
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
     // Ang draft: version (para sa check ng dalawang nag-e-edit), kalagayan, at kung may lokal na pagbabagong hindi pa naise-save.
@@ -164,12 +164,15 @@
         switch (n.type) {
             case 'start': case 'set': return ['next'];
             case 'condition': return [...(c.rows || []).map((_, i) => 'row_' + (i + 1)), 'no'];
-            case 'send': return c.wait ? ['reply'] : ['continue'];
+            case 'send': return c.wait ? (skipMinutes(c) ? ['reply', 'skipped'] : ['reply']) : ['continue'];
             case 'ai': return ['success', 'failed'];
             case 'sheet': return ['next', 'failed'];
             default: return [];
         }
     }
+    // Kapareho ng FlowGraph::skipMinutes at skipLabel.
+    const skipMinutes = c => c.skip_after && parseInt(c.skip_after.amount, 10) >= 1 ? parseInt(c.skip_after.amount, 10) * (c.skip_after.unit === 'hours' ? 60 : 1) : 0;
+    const skipLabel = m => [Math.floor(m / 60) ? Math.floor(m / 60) + ' h' : '', m % 60 ? m % 60 + ' min' : ''].filter(Boolean).join(' ');
     function portLabel(n, p) {
         if (p.startsWith('row_')) {
             const r = (n.config.rows || [])[parseInt(p.slice(4), 10) - 1] || {};
@@ -180,7 +183,7 @@
     function summary(n) {
         const c = n.config || {};
         switch (n.type) {
-            case 'send': return (c.items || []).map(i => (i.type === 'image' ? '🖼 ' : '') + (i.value || '')).join('\n') + (c.wait ? '\n⏳ waits for reply' + (c.save_to ? ' → ' + c.save_to : '') : '');
+            case 'send': return (c.items || []).map(i => (i.type === 'image' ? '🖼 ' : '') + (i.value || '')).join('\n') + (c.wait ? '\n⏳ waits for reply' + (c.save_to ? ' → ' + c.save_to : '') + (skipMinutes(c) ? ', skips after ' + skipLabel(skipMinutes(c)) : '') : '');
             case 'set': return (c.ops || []).map(o => o.op === 'clear_all' ? 'clear all fields' : o.op + ' ' + (o.field || '?') + (o.op === 'set' || o.op === 'append' ? ' = ' + (o.value || '') : '')).join('\n');
             case 'ai': return (c.model || 'gpt-4o-mini') + (c.save_to ? ' → ' + c.save_to : '') + (c.send ? ', sends the answer' : '');
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
@@ -387,6 +390,14 @@
             make.blank = () => ({type: 'text', value: ''});
             body.append(rowsEditor(c.items = c.items || [], make, 10, '+ Message'));
             body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: !!c.wait}), v => c.wait = v, true), 'Wait for the reply (exits on "reply")']));
+            // Skip: walang sagot sa takdang oras → "skipped". Hanggang 23 oras (ang padala ay nasa 24 oras ng Messenger pa).
+            const skip = c.skip_after || {amount: '', unit: 'hours'};
+            const amount = input({type: 'number', min: 1, max: skip.unit === 'hours' ? 23 : 1380, placeholder: 'never', 'aria-label': 'Skip after', class: 'w-24 rounded-md border border-slate-300 px-2 py-1 text-sm'}, skip.amount);
+            const unit = el('select', {class: 'rounded-md border border-slate-300 px-2 py-1 text-sm', 'aria-label': 'Unit'}, [el('option', {value: 'minutes', text: 'minutes', selected: skip.unit === 'minutes'}), el('option', {value: 'hours', text: 'hours', selected: skip.unit !== 'minutes'})]);
+            const setSkip = () => { amount.max = unit.value === 'hours' ? 23 : 1380; c.skip_after = parseInt(amount.value, 10) >= 1 ? {amount: parseInt(amount.value, 10), unit: unit.value} : null; };
+            amount.addEventListener('input', setSkip); unit.addEventListener('change', setSkip);
+            body.append(el('div', {class: 'text-sm'}, [el('div', {class: 'flex flex-wrap items-center gap-2'}, [el('span', {text: 'Skip if no reply after'}), amount, unit]),
+                el('p', {class: 'mt-0.5 text-xs text-slate-500', text: 'Only with "Wait for the reply". Empty = wait forever. Up to 23 hours; then it exits on "skipped".'})]));
             body.append(label('Save the reply into the customer field', bind(input({list: listId, maxlength: 100, placeholder: 'e.g. FORM REPLY'}, c.save_to), v => c.save_to = v)));
         }
         if (n.type === 'set') {
