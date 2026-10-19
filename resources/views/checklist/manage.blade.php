@@ -161,7 +161,7 @@
               <input type="time" name="scheduled_time"
                      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
               <input type="time" name="deadline_time" aria-label="Deadline"
-                     title="Deadline: late na pag lumampas. Blangko = oras + 15 minuto."
+                     title="Deadline: late na pag lumampas. Blangko = oras + 30 minuto."
                      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-rose-400">
               <select name="submission_type"
                       class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
@@ -582,7 +582,7 @@
                       <input type="time" name="scheduled_time" value="{{ $t->scheduled_time }}"
                              class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
                       <input type="time" name="deadline_time" value="{{ $t->deadline_time }}" aria-label="Deadline"
-                             title="Deadline: late na pag lumampas. Blangko = oras + 15 minuto."
+                             title="Deadline: late na pag lumampas. Blangko = oras + 30 minuto."
                              class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-rose-400">
                       <select name="submission_type"
                               class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">

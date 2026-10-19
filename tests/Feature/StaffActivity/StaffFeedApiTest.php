@@ -470,10 +470,10 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $b = $this->staff();
         $id = $this->checklistTask('Bilangin ang stock', [$a, $b], ['scheduled_time' => '10:00']);
 
-        $response = $this->lateAt('2026-10-16 10:16:00');
+        $response = $this->lateAt('2026-10-16 10:31:00');
         $staff = collect($response->json('staff'))->keyBy('user_id');
 
-        $entry = ['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:15', 'submitted' => false,
+        $entry = ['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:30', 'submitted' => false,
             'submitted_at' => null, 'verdict' => null, 'approval_checks' => 0,
             'rechecks' => 0, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null];
         $this->assertSame([$entry], $staff[$a->id]['checklist_late_today']);
@@ -486,7 +486,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $a = $this->staff();
         $this->checklistTask('Bilangin ang stock', [$a], ['scheduled_time' => '10:00']);
 
-        $response = $this->lateAt('2026-10-16 10:14:00');
+        $response = $this->lateAt('2026-10-16 10:29:00');
 
         $this->assertSame([], $response->json('staff.0.checklist_late_today'));
         $this->assertSame(0, $response->json('checklist_late_not_submitted'));
@@ -623,9 +623,9 @@ class StaffFeedApiTest extends StaffActivityTestCase
         ];
         $this->assertSame([
             $item($rejected, 'Hindi na-approve', '08:00', '08:45', true, '08:10', 'not_approved', 1),
-            $item($approved, 'Approved na', '09:00', '09:15', true, '09:05', 'approved', 0),
-            $item($group, 'Group: iba ang nagsumite', '10:00', '10:15', true, '10:03', null, 0),
-            $item($open, 'Wala pa', '12:00', '12:15', false, null, null, 0),
+            $item($approved, 'Approved na', '09:00', '09:30', true, '09:05', 'approved', 0),
+            $item($group, 'Group: iba ang nagsumite', '10:00', '10:30', true, '10:03', null, 0),
+            $item($open, 'Wala pa', '12:00', '12:30', false, null, null, 0),
             $item($untimed, 'Walang oras', null, null, false, null, null, 0),
         ], $today);
         foreach (['Lihim na tala', 'Paliwanag', 'notes', 'file_path', 'prompt', 'analysis'] as $private) {
@@ -636,7 +636,7 @@ class StaffFeedApiTest extends StaffActivityTestCase
     public function test_a_past_date_lists_every_due_task_with_a_deadline_and_a_future_date_none(): void
     {
         $a = $this->staff();
-        $this->checklistTask('Gabi na', [$a], ['scheduled_time' => '23:30']);
+        $this->checklistTask('Gabi na', [$a], ['scheduled_time' => '23:20']); // deadline 23:50, sa araw ding iyon
         $this->checklistTask('Lampas hatinggabi', [$a], ['scheduled_time' => '23:50']);
 
         $past = $this->feed('/api/staff-status?date=2026-10-15')->assertOk();

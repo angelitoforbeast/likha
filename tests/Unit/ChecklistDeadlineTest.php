@@ -14,20 +14,20 @@ class ChecklistDeadlineTest extends TestCase
     public static function deadlines(): array
     {
         return [
-            'S-051.5 scheduled 10:00, walang deadline' => ['10:00', null, 10 * 60 + 15],
-            'S-051.5 scheduled may segundo'           => ['10:00:00', null, 10 * 60 + 15],
+            'S-051.5 scheduled 10:00, walang deadline' => ['10:00', null, 10 * 60 + 30],
+            'S-051.5 scheduled may segundo'           => ['10:00:00', null, 10 * 60 + 30],
             'S-051.6 deadline 10:45'                  => ['10:00', '10:45', 10 * 60 + 45],
             'S-051.6 deadline lang, walang oras'      => [null, '10:45', 10 * 60 + 45],
             'S-051.7 wala pareho'                     => [null, null, null],
             'S-051.7 blangko pareho'                  => ['', '', null],
-            'S-051.8 11:50 PM → 12:05 AM kinabukasan' => ['23:50', null, 24 * 60 + 5],
+            'S-051.8 11:50 PM → 12:20 AM kinabukasan' => ['23:50', null, 24 * 60 + 20],
             'hindi oras ang scheduled'                => ['umaga', null, null],
-            'hindi oras ang deadline: scheduled + 15' => ['10:00', '25:00', 10 * 60 + 15],
+            'hindi oras ang deadline: scheduled + 30' => ['10:00', '25:00', 10 * 60 + 30],
         ];
     }
 
     #[DataProvider('deadlines')]
-    public function test_the_effective_deadline_is_the_field_else_scheduled_plus_15_minutes(?string $scheduled, ?string $deadline, ?int $expected): void
+    public function test_the_effective_deadline_is_the_field_else_scheduled_plus_30_minutes(?string $scheduled, ?string $deadline, ?int $expected): void
     {
         $this->assertSame($expected, ChecklistDueToday::deadlineMinutes($scheduled, $deadline));
     }
@@ -53,5 +53,17 @@ class ChecklistDeadlineTest extends TestCase
         $day = Carbon::parse('2026-10-16', 'Asia/Manila');
 
         $this->assertSame($late, ChecklistDueToday::isLate($deadline, $day, Carbon::parse($now, 'Asia/Manila')));
+    }
+
+    /** Ang 4PM report: naka-schedule 15:45, walang sariling deadline → late mula 16:15:01. */
+    public function test_S_079_a_task_scheduled_at_1545_is_late_only_after_1615(): void
+    {
+        $day = Carbon::parse('2026-10-16', 'Asia/Manila');
+        $deadline = ChecklistDueToday::deadlineMinutes('15:45', null);
+
+        $this->assertSame('16:15', ChecklistDueToday::hhmm($deadline));
+        foreach (['2026-10-16 16:00:00' => false, '2026-10-16 16:10:00' => false, '2026-10-16 16:15:00' => false, '2026-10-16 16:15:01' => true] as $now => $late) {
+            $this->assertSame($late, ChecklistDueToday::isLate($deadline, $day, Carbon::parse($now, 'Asia/Manila')), $now);
+        }
     }
 }

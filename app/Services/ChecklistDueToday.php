@@ -14,15 +14,15 @@ use Illuminate\Support\Facades\Schema;
  * frequency / frequency_day, at 'once' hanggang sa araw ng unang submission (kasama). Submitted:
  * group task = may submission ang kahit sino sa araw na iyon; individual = ang sariling submission.
  *
- * Deadline: ang deadline_time kung may laman, kung wala ang scheduled_time + 15 minuto, kung wala
+ * Deadline: ang deadline_time kung may laman, kung wala ang scheduled_time + 30 minuto, kung wala
  * pareho ay walang deadline. Minuto mula hatinggabi ng araw ng task; 1440 pataas ay kinabukasan
- * na (hal. 11:50 PM + 15 = 12:05 AM), kaya hindi iyon nagiging late sa araw ng task.
+ * na (hal. 11:50 PM + 30 = 12:20 AM), kaya hindi iyon nagiging late sa araw ng task.
  */
 class ChecklistDueToday
 {
     public const TZ = 'Asia/Manila';
 
-    private const GRACE_MINUTES = 15;
+    private const GRACE_MINUTES = 30;
 
     /** "H:MM" o "H:MM:SS" → minuto mula hatinggabi; null kapag blangko o hindi oras. */
     public static function minutes(?string $time): ?int

@@ -973,17 +973,17 @@ Tests: `ChecklistDeadlineFieldTest`, `ChecklistBadgeTest`, `ChecklistRecheckLimi
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-051.5 | Scheduled 10:00, no deadline → 10:15 | `ChecklistDeadlineTest` (data sets S-051.5) | Passed · 2026-10-18 · auto |
+| S-051.5 | Scheduled 10:00, no deadline → 10:30 (30 minutes since spec 079) | `ChecklistDeadlineTest` (data sets S-051.5) | Passed · 2026-10-19 · auto |
 | S-051.6 | Deadline 10:45 → 10:45 | `ChecklistDeadlineTest` (S-051.6) | Passed · 2026-10-18 · auto |
 | S-051.7 | Neither → no deadline, never late | `ChecklistDeadlineTest` (S-051.7) | Passed · 2026-10-18 · auto |
-| S-051.8 | Scheduled 11:50 PM → 12:05 AM the next day: never late on the task's day | `ChecklistDeadlineTest` (S-051.8) | Passed · 2026-10-18 · auto |
+| S-051.8 | Scheduled 11:50 PM → 12:20 AM the next day: never late on the task's day | `ChecklistDeadlineTest` (S-051.8) | Passed · 2026-10-19 · auto |
 
 ### S-051c The monitor sees late tasks in the staff feed (P1)
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-051.9 | At 10:16, a task due today with deadline 10:15 and no submission is in each assigned person's checklist_late_today with submitted false | `StaffFeedApiTest::test_S_051_9…` | Passed · 2026-10-18 · auto |
-| S-051.10 | At 10:14 it is not there | `StaffFeedApiTest::test_S_051_10…` | Passed · 2026-10-18 · auto |
+| S-051.9 | At 10:31, a task due today with deadline 10:30 and no submission is in each assigned person's checklist_late_today with submitted false | `StaffFeedApiTest::test_S_051_9…` | Passed · 2026-10-19 · auto |
+| S-051.10 | At 10:29 it is not there | `StaffFeedApiTest::test_S_051_10…` | Passed · 2026-10-19 · auto |
 | S-051.11 | Submitted at 10:20, 3 checks, latest not_approved → submitted true, submitted_at 10:20, verdict not_approved, approval_checks 3 | `StaffFeedApiTest::test_S_051_11…` | Passed · 2026-10-18 · auto |
 | S-051.12 | An inactive, deleted, other-weekday or done once-task never appears | `StaffFeedApiTest::test_S_051_12…` | Passed · 2026-10-18 · auto |
 | S-051.13 | A group task submitted by one person is submitted for everyone assigned (an individual task only for the one who submitted) | `StaffFeedApiTest::test_S_051_13…`, `…test_an_individual_task_submitted_only_by_another_person…` | Passed · 2026-10-18 · auto |
@@ -1548,3 +1548,11 @@ Spec 078. Tests are in `tests/Feature/Chatblast/ChatbotSequenceEngineTest.php` a
 | S-078.1 | Given a customer subscribed at 01:00 to a sequence whose first step waits 1 hour (old send hours 08:00–21:00 still in the table), then the step is due at 02:00 and sent at 02:00, and the next step is due 30 minutes later | `test_S_078_1…` | Passed · 2026-10-19 · auto |
 | S-078.2 | Given the customer's last message is 24 hours old or more, then the due step is skipped with "… skipped (outside 24h)" and the next step is scheduled, also for a sequence whose old column says "stop"; nothing is sent | `test_S_078_2…` | Passed · 2026-10-19 · auto |
 | S-078.3 | The sequence editor has no Send from / Send until / Outside the 24-hour window fields and says "Each step runs at its delay. A step is skipped when the customer's last message is over 24 hours old (Messenger's rule)."; the list no longer mentions send hours | `test_S_070_2…` | Passed · 2026-10-19 · auto |
+
+## S-079 A checklist task is late 30 minutes after its scheduled time
+
+Spec 079. Test in `tests/Unit/ChecklistDeadlineTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-079.1 | Given a task scheduled at 15:45 without its own deadline, then its deadline is 16:15; it is not late at 16:00, 16:10 or 16:15:00, and it is late at 16:15:01; a task with its own deadline_time keeps it | `test_S_079_a_task_scheduled_at_1545_is_late_only_after_1615` + the S-051.6 data sets | Passed · 2026-10-19 · auto |

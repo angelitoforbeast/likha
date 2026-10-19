@@ -83,7 +83,7 @@ class ChecklistBadgeTest extends ChecklistTestCase
     {
         $me = $this->user('Marketing');
         $this->task(['title' => 'Late na', 'scheduled_time' => '09:00'], [$me]);
-        $this->task(['title' => 'Malapit na', 'scheduled_time' => '10:05'], [$me]);   // deadline 10:20
+        $this->task(['title' => 'Malapit na', 'scheduled_time' => '09:50'], [$me]);   // deadline 10:20
 
         $this->assertSame([2, 'red', '1 late, 1 due soon'], $this->badge($this->page($me)));
     }
@@ -92,7 +92,7 @@ class ChecklistBadgeTest extends ChecklistTestCase
     {
         $me = $this->user('Marketing');
         $this->task(['title' => 'Malapit na', 'scheduled_time' => '09:00', 'deadline_time' => '10:20'], [$me]);
-        $this->task(['title' => 'Mamaya pa', 'scheduled_time' => '11:00'], [$me]);    // deadline 11:15: lampas 30 min
+        $this->task(['title' => 'Mamaya pa', 'scheduled_time' => '11:00'], [$me]);    // deadline 11:30: lampas 30 min
         $done = $this->task(['title' => 'Tapos na', 'scheduled_time' => '09:00'], [$me]);
         $this->submission($done, $me, '2026-10-16');
 
