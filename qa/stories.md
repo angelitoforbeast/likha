@@ -1739,3 +1739,17 @@ Spec 095. Tests in `tests/Feature/Chatblast/BotcakeMessageShapeTest.php` and `te
 |---|---|---|---|
 | S-095.1 | Given Botcake refuses a send with `message` as a string, an array, a nested array, an object, an array with no string, null, a number, missing, or a string over 150 letters, then the outcome is `failed` with a readable reason (the string, the first string inside, compact JSON, or "Botcake refused it"), capped at 150 letters, and nothing throws | `test_S_095_1…` (9 data sets) | Passed · 2026-10-20 · auto |
 | S-095.2 | Given a sequence step whose send Botcake refuses with `{"success":false,"message":{"error":"x"}}`, when the tick runs the step, then the reply is logged `failed` with `Botcake said "x"` and the job runs to the end | `test_S_095_2…` | Passed · 2026-10-20 · auto |
+
+## S-098 Page settings from the cache, one Botcake rate per page on every path, and the real reason of a failed send
+
+Spec 098. Tests in `tests/Feature/PageSettings/PageSettingsCacheTest.php`, `tests/Feature/Chatblast/BotcakeAsyncSendTest.php` and `tests/Feature/Chatblast/BotcakeFailedReasonsTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-098.1 | Given a page whose settings aren't cached, when one run reads several of its settings (any spelling of the page), then MySQL is read once; the next request reads them from the cache with no query | `test_S_098_1…` | Passed · 2026-10-21 · auto |
+| S-098.2 | Given the page's settings are cached, then the cached map holds the token encrypted, never the plain token | `test_S_098_2…` | Passed · 2026-10-21 · auto |
+| S-098.3 | Given a cached page, when a setting is written by the cell, the bulk save / paste, a deactivate, the setup check, or any model write, then the next read returns the new value | `test_S_098_3…` (5 data sets) | Passed · 2026-10-21 · auto |
+| S-098.4 | Given the send pool just sent for a page, when a sequence step and an Inbox send for the same page arrive at the same moment in two processes, and the pool sends again, then no two calls to that page are less than 1 / rate_per_page apart | `test_S_098_4…` | Passed · 2026-10-21 · auto |
+| S-098.5 | Given a refusal body from Botcake or Facebook (a string message, an error object with fbtrace_id, a trace ID before the text inside message, error_user_msg, error_description, a trace ID only, another string after a trace ID, no message), then the reason is the error text, never the trace ID; a trace ID only gives its compact JSON | `test_S_098_5…` (8 data sets) | Passed · 2026-10-21 · auto |
+| S-098.6 | Given a send that Botcake refuses, then the reply row keeps the raw answer, capped at 1,000 letters and without the token, and the Replies detail returns it | `test_S_098_6…` | Passed · 2026-10-21 · auto |
+| S-098.7 | Given failed sends with and without a stored answer, older ones and sent ones, when `chatbot:failed-reasons --since` runs, then it groups the failures in the window by the real reason, "unknown (before 098)" for a Botcake refusal with no stored answer, the error itself for failures that had no answer | `test_S_098_7…` | Passed · 2026-10-21 · auto |
