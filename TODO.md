@@ -826,3 +826,12 @@ Accepted, not fixed:
 - **The Botcake base URL, headers, 15 s timeout and 10 s Retry-After cap** are written in both `BotcakeClient::shared()` and `BotcakeSendPool`. Reason: two places, and the retry rule itself is already shared (`BotcakeClient::retryWait`).
 - **No test for the mock answering on a timer inside the pool.** Reason: the load check runs every send through it, with misrouted = 0.
 - **`BotcakeSendQueue::enabled()` runs `Schema::hasTable` on every send.** Reason: one cheap query; a static cache leaked between tests in 087.
+
+## 090: Google Sheet step picker (2026-10-20)
+
+- **A sheet shared as Viewer reads fine in the editor,** so the name, tabs and headers show, but every run then fails at append with "Google refused the row". Reason: the brief covers 403/404 only; telling Viewer from Editor needs a Drive permission call or a standing hint. A product decision for the owner.
+- **Google also answers 403 for "API not enabled" or a missing scope,** and those show the share message too. Reason: misleading but leaks nothing, and both are server setup that is already done.
+- **No test runs the real Google request** (the `spreadsheets.get` field mask, the `'<tab>'!1:1` range with an apostrophe in the tab name, `getUpdates()->getUpdatedRange()`): `fetchInfo`, `fetchHeaders` and `append` are faked. Reason: it needs a mocked Google HTTP handler for the client library; the three calls are one line each and follow the existing `append`.
+- **No test for the rate limit** on `GET /chatbot/sheet` (30 a minute) or for preview inputs like `columns` sent as a string or over 50 items. Reason: the limit is the route's standard `throttle` middleware, and the columns go through `FlowGraph::cleanConfig`, which the hardening tests already cover.
+- **The preview shows botfield values** (the page's chatbot settings) when a template names them. Reason: the Test tab builds the same variables for the same users, so this is no new exposure.
+- **"Open row" is in the reply's detail on `/chatbot/replies`, not in the list rows.** Reason: a list row opens the detail with one click; the list stays one line per reply.
