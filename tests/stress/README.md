@@ -42,7 +42,15 @@ They send chats to `/api/botcake/chat` for the stress-test page `ZZ STRESS TEST`
    - `--error-rate` runs from 0 to 0.5. A send then answers HTTP 500 at that rate, so the retry and failed paths run.
    - Only the CLI can set these; the page-settings screen refuses them.
 
-Copy the key file to the tester's machine as `key.txt`, next to these scripts.
+5. **Optional: a fake AI** (no OpenAI call or cost). Each AI step answers `MOCK AI for psid <psid> chat <chat_id>` after the delay, so `--stats` can count replies that reached the wrong customer ("misrouted", which must be 0). `--no-mock-ai` goes back to OpenAI.
+
+   ```
+   php artisan botcake:stress-page --mock-ai --ai-latency=2500
+   ```
+
+   The AI steps run in `chatbot:ai-pool` (supervisor). Without a live pool they wait for the answer in the worker, as before.
+
+Copy the key file to the tester's machine as `key.txt`, next to these scripts. For several test pages, use `--page="…" --page-id=99…` on every command, one key file per page, and `--stats --all` for all of them with totals.
 
 ## Run
 

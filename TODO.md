@@ -794,3 +794,14 @@ Accepted, not fixed:
 - **The /chatbot "+ Page" (ChatbotController) runs the same token test and setup check** after adding a page, since it calls `BotcakePageSetup::check`. Reason: unchanged call; the check is the chatblast setup of the same page.
 - **On a phone, the "+ Column" button of /chatblast/page-settings is clipped at the right edge** (it was already like that). Reason: outside this spec.
 - **The browser check's scratch app ran a real Check all once** (the queue was `sync`): five token tests to botcake.io with fake tokens, which all ended as errors and wrote nothing. Reason: my mistake; the scratch queue is now `null`, and the check no longer presses Save or Check all.
+
+## 087: async chatbot AI (2026-10-20)
+
+- **A 429 that lasts past the timeout still ends on the failed port.** The request is never lost or failed early, but `deadline_at` (`services.openai.timeout`, 60 s) keeps running during the backoff. Reason: a customer shouldn't wait longer than the timeout for an answer; "drops nothing" here means no request is lost.
+- **The misrouted count proves the ticket → resume → send leg at volume, not the HTTP pairing.** The fake AI answers from a timer keyed by request id, with no HTTP. Reason: the HTTP pairing is proven by S-087.1 (out-of-order answers through the real Guzzle path); the routing to a customer happens in the resume, which the count does cover.
+- **Missing tests (minor):** a wait-skip run (no chat) that reaches an AI node; `skip()` and a sequence step holding while `__ai` is pending; the pool's graceful stop draining its in-flight requests. Reason: each is a small branch over the same claim and lock code that the 12 tests cover; costly to set up for little extra proof.
+- **Answered rows still waiting in a busy `chatbot` queue get a duplicate resume job every 30 s.** Reason: harmless (the resume claims the row once); it adds queue rows only under overload.
+- **Two servers each running a pool with separate caches** would both send the same requests (twice the OpenAI cost, never two replies: the claim is in the shared database). Reason: production uses one queue server and a database cache.
+- **`--stats` "Flow runs" counts the part of a run after the AI answer as a run** (each AI chat counts twice). Reason: the resumed part writes its own `run_started`; the other lines are unaffected.
+- **The fake Botcake records every send in the cache** (two extra cache writes per send, test pages only). Reason: needed for the misroute count; keep it in mind when reading the numbers.
+- **Next limit after this spec: Botcake sends in the workers.** Each send holds a worker for its latency plus the 2-per-second-per-page throttle sleep. Suggestion for a later spec: send in the pool the same way, or more chatbot workers.
