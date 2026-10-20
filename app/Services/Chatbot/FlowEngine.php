@@ -75,7 +75,13 @@ class FlowEngine
             }
             $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => $port, 'note' => $r['note'] ?? null];
             // "Counts as an order": dumaan ang takbo sa node (hindi pumalya, hindi pa naghihintay ng padala sa pool).
-            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && !$run->sendPending) ChatbotTags::order($run, $node['id']);
+            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && !$run->sendPending) {
+                try {
+                    ChatbotTags::order($run, $node['id']);
+                } catch (Throwable $e) {
+                    report($e); // ang talaan ng order ay hindi pumipigil sa takbo
+                }
+            }
             if (!empty($r['stop'])) {
                 $run->stopped = $r['note'] ?? 'Stopped.';
                 Log::warning('chatbot: run stopped', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId, 'node' => $node['id'], 'note' => $run->stopped]);

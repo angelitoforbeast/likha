@@ -240,6 +240,29 @@ class ChatbotTagsTest extends ChatblastTestCase
         $this->assertSame(ChatbotTags::graphHash($graph), $h2, 'the hash is stable for the same graph');
     }
 
+    public function test_S_100_4_b_publishing_an_earlier_graph_again_gives_the_new_publish_its_own_version_id(): void
+    {
+        Http::fake([self::SEND => Http::response(['success' => true])]);
+        $this->actingAs($this->user());
+        $flow = $this->flow([], null, false);
+        $g1 = $flow->graph;
+        $g2 = $g1;
+        $g2['nodes'][1]['config']['items'][2]['value'] = '{{Main Flow 2}}!';
+        $publish = function (array $graph) use ($flow) {
+            $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $graph, 'version' => ChatbotFlow::find($flow->id)->draft_version])->assertOk();
+            $this->postJson("/chatbot/flows/{$flow->id}/publish", ['version' => ChatbotFlow::find($flow->id)->draft_version])->assertOk();
+            return (int) DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->max('id');
+        };
+        $v1 = $publish($g2);
+        $this->runChat($this->chat('Hi', '7001'));
+        $v2 = $publish($g1);
+        $this->runChat($this->chat('Hi', '7002'));
+        $v3 = $publish($g2); // published again after going back: a Publish of its own
+        $this->runChat($this->chat('Hi', '7003'));
+
+        $this->assertSame([$v1, $v2, $v3], DB::table('chatbot_replies')->orderBy('id')->pluck('flow_version_id')->map(fn ($v) => (int) $v)->all());
+    }
+
     // ---- S-100.5 ----
 
     public function test_S_100_5_the_next_chat_within_24h_marks_the_send_replied_and_nothing_else_does(): void
@@ -320,12 +343,52 @@ class ChatbotTagsTest extends ChatblastTestCase
         $this->runChat($this->chat('Order ulit', '7001'));
         $this->assertSame(2, DB::table('chatbot_events')->where('type', 'order')->count());
 
+        // Ang sequence step na lampas 92 araw na ay hindi na ang step ng customer.
+        DB::table('chatbot_replies')->insert(['page_id' => 1001, 'psid' => 7004, 'kind' => 'send', 'status' => 'sent', 'content' => '[]',
+            'sequence_id' => $seq->id, 'sequence_step' => 5, 'sent_at' => now()->subDays(100)]);
+        $this->runChat($this->chat('Order', '7004'));
+        $this->assertNull(json_decode(DB::table('chatbot_events')->where('type', 'order')->where('psid', 7004)->value('detail'), true)['sequence_id']);
+
         // Hindi naka-tick, at ang pumalyang node: walang order.
         $this->flow([], ['type' => 'set', 'config' => ['ops' => [['op' => 'set', 'field' => 'order', 'value' => 'yes']]]]);
         $this->runChat($this->chat('Order', '7002'));
         $this->flow([], ['type' => 'sheet', 'config' => ['sheet' => 'not a sheet', 'tab' => 'Orders', 'columns' => ['x'], 'counts_order' => true]]);
         $this->runChat($this->chat('Order', '7003'));
         $this->assertSame(0, DB::table('chatbot_events')->where('type', 'order')->whereIn('psid', [7002, 7003])->count());
+    }
+
+    public function test_S_100_6_c_a_ticked_send_through_the_pool_counts_once_after_it_is_sent_and_not_when_refused(): void
+    {
+        config(['services.botcake.async_sends' => true]);
+        $this->flow(['counts_order' => true]);
+        $calls = [];
+        $pool = new BotcakeSendPool(function ($req, array $options) use (&$calls) { $p = new Promise(); $calls[] = $p; return $p; }, $this->clock);
+        $this->assertTrue($pool->start());
+        $answer = function (int $status, array $body) use (&$calls, $pool) {
+            $pool->tick();
+            foreach ($calls as $p) if ($p->getState() === 'pending') $p->resolve(new Response($status, ['Content-Type' => 'application/json'], json_encode($body)));
+            $pool->tick(false);
+        };
+
+        $this->runChat($this->chat('Order', '7001'));
+        $this->assertSame(0, DB::table('chatbot_events')->where('type', 'order')->count(), 'not before the send is made');
+        $answer(200, ['success' => true]);
+        $orders = DB::table('chatbot_events')->where('type', 'order')->get();
+        $this->assertCount(1, $orders);
+        $this->assertSame(['n10', [(int) DB::table('chatbot_replies')->where('psid', 7001)->value('id')]], [$orders[0]->node_id, json_decode($orders[0]->detail, true)['sends']]);
+
+        $this->runChat($this->chat('Order', '7002'));
+        $answer(200, ['success' => false, 'message' => 'Outside the 24h window']);
+        $this->assertSame(0, DB::table('chatbot_events')->where('type', 'order')->where('psid', 7002)->count(), 'a refused send is no order');
+    }
+
+    public function test_S_100_6_d_the_daily_prune_keeps_order_events(): void
+    {
+        foreach (['order', 'run_started'] as $type) {
+            DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => 7001, 'type' => $type, 'detail' => '{}', 'created_at' => now()->subDays(40)]);
+        }
+        \App\Services\Chatbot\ChatbotEvents::prune();
+        $this->assertSame(['order'], DB::table('chatbot_events')->pluck('type')->all());
     }
 
     public function test_S_100_6_b_the_test_tab_writes_no_order(): void

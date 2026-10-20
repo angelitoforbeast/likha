@@ -75,7 +75,7 @@
         <h2 id="h-msg" class="mb-2 text-base font-semibold">By message</h2>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[56rem]">
-                <thead><tr><th>Node</th><th>Botfield</th><th>Version</th><th class="text-right">Sent</th><th class="text-right">Replied</th><th class="text-right">Median reply</th><th class="text-right">Orders after</th><th class="text-right">Delivered</th></tr></thead>
+                <thead><tr><th>Node</th><th>Botfield</th><th>Version</th><th class="!text-right">Sent</th><th class="!text-right">Replied</th><th class="!text-right">Median reply</th><th class="!text-right">Orders after</th><th class="!text-right">Delivered</th></tr></thead>
                 <tbody>
                 @forelse($by_message as $m)
                     <tr>
@@ -108,7 +108,7 @@
         <h2 id="h-seq" class="mb-2 text-base font-semibold">By sequence step</h2>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[40rem]">
-                <thead><tr><th>Sequence</th><th class="text-right">Step</th><th class="text-right">Sent</th><th class="text-right">Replied</th><th class="text-right">Unsubscribed</th><th class="text-right">Orders after</th><th class="text-right">Delivered</th></tr></thead>
+                <thead><tr><th>Sequence</th><th class="!text-right">Step</th><th class="!text-right">Sent</th><th class="!text-right">Replied</th><th class="!text-right">Unsubscribed</th><th class="!text-right">Orders after</th><th class="!text-right">Delivered</th></tr></thead>
                 <tbody>
                 @forelse($by_step as $s)
                     <tr>
@@ -133,7 +133,7 @@
         <h2 id="h-ad" class="mb-2 text-base font-semibold">By ad</h2>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[36rem]">
-                <thead><tr><th>Ad</th><th class="text-right">Chats</th><th class="text-right">Orders</th><th class="text-right">Delivered</th></tr></thead>
+                <thead><tr><th>Ad</th><th class="!text-right">Chats</th><th class="!text-right">Orders</th><th class="!text-right">Delivered</th></tr></thead>
                 <tbody>
                 @forelse($by_ad as $a)
                     <tr>
@@ -196,7 +196,7 @@
                 <table class="cb-table min-w-[32rem]">
                     <thead><tr><th></th>
                         @foreach($sides as $k => $s)
-                            <th class="normal-case">{{ strtoupper($k) }} ·
+                            <th class="!normal-case !tracking-normal">{{ strtoupper($k) }} ·
                                 @if($compare['kind'] === 'flow') v{{ $s['label']['id'] }} {{ $s['label']['at'] ?? '' }}{{ ($s['label']['by'] ?? null) ? ' · ' . $s['label']['by'] : '' }}
                                 @else {{ $s['label']['label'] ?? $s['label']['botfield'] ?? '' }} v{{ $s['label']['id'] }} ({{ $s['label']['changed_on'] ?? '?' }})
                                     @if(($s['label']['value'] ?? '') !== '')<details class="font-normal"><summary class="cursor-pointer text-xs text-slate-500">Value</summary><pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">{{ $s['label']['value'] }}</pre></details>@endif

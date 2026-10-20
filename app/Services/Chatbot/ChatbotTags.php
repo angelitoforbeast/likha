@@ -30,16 +30,18 @@ class ChatbotTags
     /** Ang mga variable ng takbo (FlowRun::vars): hindi botfield, hindi customer field. */
     private const RUN_VARS = ['last input', 'full name', 'first name', 'psid', 'page id', 'page name', 'current date', 'last interaction'];
 
-    /** @var array<int, bool> kada app instance (ang worker ay iisa; bawat test ay bago) */
+    /** @var array<int, int> kada app instance (ang worker ay iisa; bawat test ay bago): 0 = handa, iba = kailan susuriin ulit */
     private static array $ready = [];
 
     public static function ready(): bool
     {
-        // true lang ang iniimbak: ang migrate ay mano-mano pagkatapos ng deploy.
+        // Ang migrate ay mano-mano pagkatapos ng deploy: habang wala pa, sinusuri ulit kada minuto lang (hindi kada padala).
         $app = spl_object_id(app());
-        if (self::$ready[$app] ?? false) return true;
+        if (isset(self::$ready[$app]) && (self::$ready[$app] === 0 || self::$ready[$app] > time())) return self::$ready[$app] === 0;
+        $ok = Schema::hasColumn('chatbot_replies', 'tags') && Schema::hasTable('chatbot_reply_tags');
+        self::$ready[$app] = $ok ? 0 : time() + 60;
 
-        return self::$ready[$app] = Schema::hasColumn('chatbot_replies', 'tags') && Schema::hasTable('chatbot_reply_tags');
+        return $ok;
     }
 
     /** Ang hash ng published na graph (unang 12 hex ng md5): pareho ang graph, pareho ang hash. */
@@ -50,19 +52,30 @@ class ChatbotTags
 
     /**
      * Ang id ng huling Publish ng flow (chatbot_flow_versions): ang Publish ay nagsusulat ng live na graph at ng version
-     * nito sa iisang transaction, kaya ang pinakabagong row ang live. Naka-cache ayon sa hash ng graph: ang bagong Publish
-     * ay bagong key. Null kapag walang row (flow na na-publish bago nagkaroon ng versions).
+     * nito sa iisang transaction, kaya ang pinakabagong row ang live. Naka-cache ayon sa hash ng graph; binubura ng
+     * Publish ang key ng graph nito (forgetFlowVersion), kaya ang ibinalik na lumang graph ay may bagong id rin. Null
+     * kapag walang row (flow na na-publish bago nagkaroon ng versions).
      */
     public static function flowVersion(int $flowId, string $hash): ?int
     {
         try {
-            $id = Cache::remember('chatbot-flow-version:' . $flowId . ':' . $hash, 86400,
+            $id = Cache::remember(self::versionKey($flowId, $hash), 86400,
                 fn () => (int) DB::table('chatbot_flow_versions')->where('flow_id', $flowId)->max('id'));
         } catch (Throwable) {
             return null;
         }
 
         return $id ?: null;
+    }
+
+    private static function versionKey(int $flowId, string $hash): string
+    {
+        return 'chatbot-flow-version:' . $flowId . ':' . $hash;
+    }
+
+    public static function forgetFlowVersion(int $flowId, array $graph): void
+    {
+        Cache::forget(self::versionKey($flowId, self::graphHash($graph)));
     }
 
     /** Ang ad ng customer: botcake_psids ng page, kung wala ay ang ad_id ng unang chat niya. Naka-cache nang isang araw. */
@@ -228,7 +241,7 @@ class ChatbotTags
         $sends = DB::table('chatbot_replies')->where('page_id', $pageId)->where('psid', $psid)->whereIn('kind', ['send', 'manual'])->where('status', 'sent')
             ->orderByDesc('id')->limit(self::ORDER_SENDS)->pluck('id')->map(fn ($id) => (int) $id)->all();
         $seq = DB::table('chatbot_replies')->where('page_id', $pageId)->where('psid', $psid)->whereNotNull('sequence_id')
-            ->orderByDesc('id')->first(['sequence_id', 'sequence_step']);
+            ->where('sent_at', '>=', now()->subDays(ChatbotResults::MAX_DAYS))->orderByDesc('id')->first(['sequence_id', 'sequence_step']);
         $hash = self::graphHash($run->graph);
         $run->runId ??= bin2hex(random_bytes(4));
         DB::table('chatbot_events')->insert(['page_id' => $pageId, 'psid' => $psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'node_id' => $nodeId,

@@ -82,6 +82,9 @@ class ChatbotResultsTest extends ChatblastTestCase
         $send('r7', 5, $this->flowF, $this->v2, 'n10', '2026-10-19 10:00:00', null, null, $this->s2);
         $send('rf', 4, $this->flowF, $this->v2, 'n10', '2026-10-17 10:30:00', null, null, $this->s2, null, 'failed');
         $send('rx', 9, $this->flowF, $this->v1, 'n10', '2026-10-01 10:00:00', 30, 'A1', $this->s1);
+        // An Inbox manual reply: not a bot send, so in no table.
+        $manual = DB::table('chatbot_replies')->insertGetId(['page_id' => 1001, 'psid' => 2, 'kind' => 'manual', 'content' => '[]', 'status' => 'sent', 'sent_at' => '2026-10-16 10:30:00']);
+        DB::table('chatbot_reply_tags')->insert(['reply_id' => $manual, 'page_id' => 1001, 'message' => 0, 'sent_at' => '2026-10-16 10:30:00']);
 
         $order = fn (int $psid, string $at, int $version, array $sends, ?array $seq, ?string $ad) => DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => $psid,
             'flow_id' => $this->flowF, 'node_id' => 'n45', 'type' => 'order', 'created_at' => $at, 'detail' => json_encode(['run' => 'abcd1234', 'flow_version' => $version,
@@ -127,6 +130,7 @@ class ChatbotResultsTest extends ChatblastTestCase
             'no J&T row but a scan' => [[], true, 'in_transit'],
             'no J&T row, no scan' => [[], false, 'other'],
             'unknown status' => [[['Problematic', '']], false, 'other'],
+            'a blank status row does not hide In Transit' => [[['In Transit', ''], ['', '']], false, 'in_transit'],
         ];
     }
 

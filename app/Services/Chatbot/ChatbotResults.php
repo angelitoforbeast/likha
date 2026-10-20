@@ -189,7 +189,7 @@ class ChatbotResults
     private function tags(array $f, Carbon $start, Carbon $end)
     {
         return DB::table('chatbot_reply_tags as t')->join('chatbot_replies as r', 'r.id', '=', 't.reply_id')
-            ->where('t.sent_at', '>=', $start)->where('t.sent_at', '<', $end)
+            ->where('t.sent_at', '>=', $start)->where('t.sent_at', '<', $end)->where('r.kind', 'send') // ang padala ng bot lang, gaya ng funnel
             ->when($f['page_id'], fn ($q, $v) => $q->where('t.page_id', (int) $v))
             ->when($f['flow_id'], fn ($q, $v) => $q->where('t.flow_id', (int) $v))
             ->when($f['version_id'], fn ($q, $v) => $q->where('t.flow_version_id', (int) $v));
@@ -463,9 +463,11 @@ class ChatbotResults
     public static function deliveryOf(array $rows, bool $scan): string
     {
         if (!$rows) return $scan ? 'in_transit' : 'other';
+        // Gaya ng Chatblast: ang walang status ay 0, ang hindi kilala ay kapantay ng In Transit.
+        $rank = fn (array $r) => ($s = trim((string) $r['status'])) === '' ? 0 : (self::PROGRESS[$s] ?? 1);
         $top = null;
         foreach ($rows as $r) {
-            if ($top === null || (self::PROGRESS[trim((string) $r['status'])] ?? 1) >= (self::PROGRESS[trim((string) $top['status'])] ?? 1)) $top = $r;
+            if ($top === null || $rank($r) >= $rank($top)) $top = $r;
         }
         $status = trim((string) $top['status']);
         if ($status === 'Delivered') return 'delivered';
