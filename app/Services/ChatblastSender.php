@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\SendChatblastMessage;
+use App\Services\Chatbot\BotcakeSendQueue;
 use App\Models\AppSetting;
 use App\Models\BotcakeMessage;
 use App\Models\ChatblastCampaign;
@@ -296,6 +297,7 @@ class ChatblastSender
             $this->later($m);
             return;
         }
+        $handed = false;
         try {
             if (Cache::has($key . ':gap')) {
                 $this->later($m);
@@ -314,43 +316,107 @@ class ChatblastSender
                 BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
+            // Sa botcake:send-pool (kapag buhay): doon ang tatlong hakbang, at ang pool ang magtatakda ng gap at bibitaw ng
+            // lock (afterPool). Bakante agad ang worker.
+            if (BotcakeSendQueue::submitChatblast($m, $cfg, $key, (string) $lock->owner())) {
+                $handed = true;
+                return;
+            }
             try {
                 $this->sendSteps($m, $cfg);
             } finally {
                 Cache::put($key . ':gap', 1, $this->gap()); // ilang segundo pa bago ang susunod na mensahe sa customer
             }
         } finally {
-            $lock->release();
+            if (!$handed) $lock->release();
         }
     }
 
-    /** Ang tatlong hakbang: isulat ang field, basahin ulit, i-send ang flow. */
+    /** Tapos na ang pool sa mensahe: ang gap ng customer, saka ang lock na hawak mula sa job. */
+    public function afterPool(string $key, string $owner): void
+    {
+        Cache::put($key . ':gap', 1, $this->gap());
+        Cache::restoreLock($key, $owner)->release();
+    }
+
+    /**
+     * Namatay ang pool habang nagpapadala ang mensahe: unknown kapag natawag na ang send_flow (gaya ng killed), kung hindi
+     * ay uulitin ang tatlong hakbang mula sa simula (ligtas ulitin ang sulat at basa). @return bool true = uulitin
+     */
+    public function lost(int $id): bool
+    {
+        $m = BotcakeMessage::whereKey($id)->where('status', 'sending')->first();
+        if (!$m) return false;
+        if ($this->flowCalled((array) ($m->steps ?? []))) {
+            BotcakeMessage::whereKey($id)->where('status', 'sending')->update(['status' => 'unknown', 'reason' => self::UNSURE . '; the send pool stopped. Check Botcake before sending again']);
+            return false;
+        }
+        BotcakeMessage::whereKey($id)->update(['steps' => null]);
+
+        return true;
+    }
+
+    /** Pumalya ang pool sa gitna ng mensahe (hal. database): gaya ng error sa process(), unknown kapag natawag na ang send_flow. */
+    public function poolError(int $id, Throwable $e): void
+    {
+        $m = BotcakeMessage::whereKey($id)->where('status', 'sending')->first();
+        if (!$m) return;
+        $steps = (array) ($m->steps ?? []);
+        [$status, $why] = $this->flowCalled($steps) ? ['unknown', self::UNSURE] : ['failed', 'Error'];
+        $this->finish($m, $status, $why . ': ' . mb_substr($e->getMessage(), 0, 200), null, $steps);
+    }
+
+    /** Ang page settings na kailangan ng tatlong hakbang (pati ang token), o null kapag may kulang. */
+    public function config(string $page): ?array
+    {
+        $cfg = [];
+        foreach (Chatblast::REQUIRED as $key) $cfg[$key] = trim((string) $this->settings->get($page, 'botcake', $key));
+
+        return in_array('', $cfg, true) ? null : $cfg;
+    }
+
+    /** Ang tatlong hakbang, naghihintay: bawat request ng stepper ay tinatawag dito mismo. */
     private function sendSteps(BotcakeMessage $m, array $cfg): void
     {
         $client = app(BotcakeClient::class)->shared(sha1($cfg['token']));
+        $steps = $this->stepper($m, $cfg);
+        while ($steps->valid()) {
+            $q = $steps->current();
+            $steps->send($client->call($q['method'], $q['path'], $q['data'], $cfg['token'], $q['onlyRateLimit']));
+        }
+    }
+
+    /**
+     * Ang tatlong hakbang: isulat ang field, basahin ulit, i-send ang flow. Generator: nagbibigay ng bawat request
+     * (method, path, data, onlyRateLimit) at tumatanggap ng sagot nito (http, body, attempts), kaya pareho ang takbo para
+     * sa naghihintay (sendSteps) at sa botcake:send-pool. Ang mga hakbang, status at dahilan ay dito lang.
+     */
+    public function stepper(BotcakeMessage $m, array $cfg): \Generator
+    {
         $base   = '/pages/' . rawurlencode($cfg['page_id']);
         $field  = $base . '/customer/' . rawurlencode((string) $m->psid) . '/customer_fields';
         $steps  = [];
 
-        // Bawat hakbang ay itinatala bago at pagkatapos tawagin, para may bakas kahit pinatay ang job sa gitna.
-        $step = function (string $name, string $method, string $path, array $data, bool $onlyRateLimit = false) use ($client, $cfg, $m, &$steps) {
+        // Bawat hakbang ay itinatala bago at pagkatapos tawagin, para may bakas kahit pinatay ang job (o ang pool) sa gitna.
+        $call = function (string $name, string $method, string $path, array $data, bool $onlyRateLimit = false) use ($m, &$steps) {
             $steps[] = ['step' => $name, 'method' => $method, 'path' => $path, 'request' => $data, 'http' => null, 'attempts' => 0, 'response' => '', 'at' => now()->toIso8601String()];
             $this->saveSteps($m, $steps);
-            $r = $client->call($method, $path, $data, $cfg['token'], $onlyRateLimit);
+            $r = yield ['step' => $name, 'method' => $method, 'path' => $path, 'data' => $data, 'onlyRateLimit' => $onlyRateLimit];
             $steps[count($steps) - 1] = array_merge(end($steps), ['http' => $r['http'], 'attempts' => $r['attempts'], 'response' => $this->trim($r['body'])]);
             $this->saveSteps($m, $steps);
             return $r;
         };
+        $step = fn (string $name, string $method, string $path, array $data, bool $onlyRateLimit = false) => $call($name, $method, $path, $data, $onlyRateLimit);
         $authFail = fn (array $r) => in_array($r['http'], [401, 403], true);
         $ok = fn (array $r) => $r['http'] >= 200 && $r['http'] < 300 && is_array($r['body']) && ($r['body']['success'] ?? null) === true;
 
         // 1. Isulat ang custom field.
-        $w = $step('write', 'POST', $field, ['data' => [['id' => $cfg['field.message'], 'value' => (string) $m->text]]]);
+        $w = yield from $step('write', 'POST', $field, ['data' => [['id' => $cfg['field.message'], 'value' => (string) $m->text]]]);
         if ($authFail($w)) { $this->tokenInvalid($m, $w['http'], $steps); return; }
         if (!$ok($w)) { $this->finish($m, 'failed', 'The custom field was not written (HTTP ' . $w['http'] . ')', $w['http'], $steps); return; }
 
         // 2. Basahin ulit: dapat eksaktong ang text ang laman, kung hindi ay walang padala.
-        $r = $step('read', 'GET', $field, []);
+        $r = yield from $step('read', 'GET', $field, []);
         if ($authFail($r)) { $this->tokenInvalid($m, $r['http'], $steps); return; }
         $value = $this->fieldValue($r['body'], $cfg['field.message']);
         if (!$ok($r) || $value !== (string) $m->text) {
@@ -360,7 +426,7 @@ class ChatblastSender
         }
 
         // 3. I-send ang flow. Hindi ligtas ulitin: ang 429 lang ang inuulit; ang 5xx o walang sagot ay "unknown".
-        $f = $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => (int) $cfg['flow.shipping']], true);
+        $f = yield from $step('flow', 'POST', $base . '/flows/send_flow', ['psid' => (string) $m->psid, 'flow_id' => (int) $cfg['flow.shipping']], true);
         if ($authFail($f)) { $this->tokenInvalid($m, $f['http'], $steps); return; }
         // Hindi tiyak: walang sagot, 408, 5xx, o 2xx na walang malinaw na success. Ang success:false lang ang tiyak na "hindi".
         $refused = is_array($f['body']) && array_key_exists('success', $f['body']) && $f['body']['success'] === false;

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\ResumeChatbotWait;
+use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\Chatbot\ChatbotAiQueue;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,9 @@ class ResumeSkippedChatbotWaits extends Command
     {
         $ai = ChatbotAiQueue::sweep();
         if ($ai['failed'] || $ai['redispatched']) $this->info("chatbot AI: {$ai['failed']} timed out, {$ai['redispatched']} resumed again");
+        // Ang padala sa Botcake (botcake:send-pool): gaya ng AI, tapos pa rin kahit patay ang pool.
+        $send = BotcakeSendQueue::sweep();
+        if ($send['failed'] || $send['requeued'] || $send['redispatched']) $this->info("botcake sends: {$send['failed']} timed out, {$send['requeued']} chatblast queued again, {$send['redispatched']} resumed again");
         if (!Schema::hasTable('chatbot_waits')) return self::SUCCESS;
         $until = microtime(true) + self::SECONDS;
         $queued = 0;

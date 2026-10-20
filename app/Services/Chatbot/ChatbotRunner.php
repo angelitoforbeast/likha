@@ -69,7 +69,7 @@ class ChatbotRunner
                 $this->engine->run($run, $this->outbox);
                 ChatbotEvents::store($run, (int) $c->page_id, (int) $c->psid);
                 // Hinihintay ang sagot ng AI: ang mga kasunod na chat ay mamaya na (ibinabalik ang job sa queue).
-                if ($run->aiPending && $c->id !== $pending->last()->id) return 'locked';
+                if (($run->aiPending || $run->sendPending) && $c->id !== $pending->last()->id) return 'locked';
             }
 
             return 'done';
@@ -143,40 +143,64 @@ class ChatbotRunner
 
     /**
      * Ang sagot ng AI (ResumeChatbotAi, mula sa chatbot:ai-pool): itinutuloy ang takbo sa AI node, sa lock ng customer.
-     * - Isang beses lang: ang row ay kinukuha (answered|failed → resumed) bago ang takbo; ang ulit na job ay walang ginagawa.
-     * - Ang customer ay mula sa chat (kapag mayroon) o sa row; ang ticket ng job ay sinusuri ng engine bago ang bawat padala.
-     * - Luma na ang sagot (iba na ang __ai, naka-pause ang bot, nagbago ang flow): itinatapon, may event, walang padala.
      * @return string 'done' | 'locked' | 'gone' | 'dropped'
      */
     public function resumeAi(array $ticket): string
     {
-        $table = ChatbotAiQueue::TABLE;
+        return $this->resume(ChatbotAiQueue::TABLE, ['answered', 'failed'], '', ['ai'], 'ai_dropped', $ticket, function (FlowRun $run, object $row) {
+            $run->aiAnswer = ['node' => (string) $row->node_id, 'ok' => $row->status === 'answered', 'text' => (string) $row->answer,
+                'error' => $row->error ?? 'OpenAI did not answer.'];
+        });
+    }
+
+    /**
+     * Ang resulta ng padala sa Botcake (ResumeChatbotSend, mula sa botcake:send-pool): itinutuloy ang takbo sa send node (o sa
+     * AI node na nagpadala ng sagot), sa lock ng customer. Ang padala mismo ay naitala na ng pool.
+     * @return string 'done' | 'locked' | 'gone' | 'dropped'
+     */
+    public function resumeSend(array $ticket): string
+    {
+        return $this->resume(BotcakeSendQueue::TABLE, ['done', 'failed'], BotcakeSendQueue::MARK, ['send', 'ai'], 'send_dropped', $ticket, function (FlowRun $run, object $row) {
+            $r = (array) json_decode((string) $row->result, true);
+            $run->sendResult = ['node' => (string) $row->node_id, 'status' => $row->status === 'done' ? 'sent' : 'failed',
+                'error' => $r['error'] ?? $row->error ?? 'Botcake did not answer (HTTP 0)', 'messages' => (array) (json_decode((string) $row->payload, true)['messages'] ?? [])];
+        });
+    }
+
+    /**
+     * Ang pagtuloy pagkatapos ng isang ticket (AI o padala), sa lock ng customer:
+     * - Isang beses lang: ang row ay kinukuha ($finished → resumed) bago ang takbo; ang ulit na job ay walang ginagawa.
+     * - Ang customer ay mula sa chat (kapag mayroon) o sa row; ang ticket ng job ay sinusuri ng engine bago ang bawat padala.
+     * - Luma na (iba na ang __ai, naka-pause ang bot, nagbago ang flow): hindi itinutuloy, may event.
+     */
+    private function resume(string $table, array $finished, string $mark, array $nodeTypes, string $dropEvent, array $ticket, callable $apply): string
+    {
         $row = DB::table($table)->where('request_id', (string) ($ticket['request_id'] ?? ''))->first();
-        if (!$row || !in_array($row->status, ['answered', 'failed'], true)) return 'gone';
+        if (!$row || !in_array($row->status, $finished, true)) return 'gone';
 
         $lock = Cache::lock('chatbot-run:' . $row->page_id . ':' . $row->psid, self::LOCK_SECONDS);
         if (!$lock->get()) return 'locked';
 
         try {
-            if (DB::table($table)->where('id', $row->id)->whereIn('status', ['answered', 'failed'])
+            if (DB::table($table)->where('id', $row->id)->whereIn('status', $finished)
                 ->update(['status' => 'resumed', 'resumed_at' => now(), 'updated_at' => now()]) !== 1) return 'gone';
 
             $chat = $row->chat_id !== null ? BotcakeChat::find($row->chat_id) : null;
             $pageId = $chat ? (string) $chat->page_id : (string) $row->page_id;
             $psid = $chat ? (int) $chat->psid : (int) $row->psid;
             $fields = new CustomerFields((int) $pageId, $psid);
-            $drop = function (string $why, bool $clear) use ($fields, $row, $pageId, $psid) {
+            $drop = function (string $why, bool $clear) use ($fields, $row, $pageId, $psid, $dropEvent) {
                 if ($clear) $fields->clear(CustomerFields::AI);
-                ChatbotEvents::write((int) $pageId, $psid, 'ai_dropped', ['reason' => $why, 'request' => substr((string) $row->request_id, 0, 8)], (int) $row->flow_id, (string) $row->node_id);
+                ChatbotEvents::write((int) $pageId, $psid, $dropEvent, ['reason' => $why, 'request' => substr((string) $row->request_id, 0, 8)], (int) $row->flow_id, (string) $row->node_id);
 
                 return 'dropped';
             };
 
-            if ($fields->get(CustomerFields::AI) !== (string) $row->request_id) return $drop('the run moved on', false);
+            if ($fields->get(CustomerFields::AI) !== $mark . $row->request_id) return $drop('the run moved on', false);
             if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $drop('the bot paused', true);
             $flow = $this->page->flow((string) $row->page_name);
             $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
-            if (!$flow || $flow->id !== (int) $row->flow_id || ($node['type'] ?? '') !== 'ai') return $drop('the flow changed', true);
+            if (!$flow || $flow->id !== (int) $row->flow_id || !in_array($node['type'] ?? '', $nodeTypes, true)) return $drop('the flow changed', true);
             $fields->clear(CustomerFields::AI);
 
             $ctx = (array) json_decode((string) $row->context, true);
@@ -185,8 +209,7 @@ class ChatbotRunner
             $run->runId = $row->run_id ?: null;
             $run->aiCalls = (int) ($ctx['ai_calls'] ?? 1);
             $run->steps = (int) ($ctx['steps'] ?? 0);
-            $run->aiAnswer = ['node' => (string) $row->node_id, 'ok' => $row->status === 'answered', 'text' => (string) $row->answer,
-                'error' => $row->error ?? 'OpenAI did not answer.'];
+            $apply($run, $row);
             $run->ticket = $ticket;
             $this->engine->run($run, $this->outbox);
             ChatbotEvents::store($run, (int) $pageId, $psid);

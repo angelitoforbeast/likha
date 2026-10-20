@@ -112,6 +112,12 @@ return [
         // Hanggang ilang bagong PSID kada minuto kada page ang sinusuri sa Botcake (token ng page, kahati ng chatblast).
         'chat_verify_per_minute' => (int) env('BOTCAKE_CHAT_VERIFY_PER_MINUTE', 60),
         'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
+        // Ilang request kada segundo kada page (token) sa Botcake: ang pool (botcake:send-pool) ay eksakto, ang iba ay sumusunod.
+        'rate_per_page' => (float) env('BOTCAKE_RATE_PER_PAGE', 2),
+        // true = ang padala ng chatbot at chatblast ay ipinapasa sa botcake:send-pool (kapag buhay ito); false = naghihintay ang worker (ang dati).
+        'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
+        // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page).
+        'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
     ],
 
     // Kusang J&T track-sync kada oras (jnt:track-sync-auto). Ang toggle ng CEO sa /jnt/track-sync ang nananaig kapag ginamit.

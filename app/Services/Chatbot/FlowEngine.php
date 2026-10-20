@@ -31,9 +31,9 @@ class FlowEngine
 
         // Itinuloy pagkatapos ng AI: sa AI node mismo (gamit ang sagot). Ang step ng sequence ay laging mula sa Start: hindi
         // nito ipinagpapatuloy o binubura ang wait ng main flow.
-        if ($run->aiAnswer !== null) {
-            $current = $run->aiAnswer['node'];
-            $run->event('run_started', null, ['reason' => 'resumed after AI', 'flow' => $run->flowId]);
+        if ($run->aiAnswer !== null || $run->sendResult !== null) {
+            $current = ($run->aiAnswer ?? $run->sendResult)['node'];
+            $run->event('run_started', null, ['reason' => $run->aiAnswer !== null ? 'resumed after AI' : 'resumed after send', 'flow' => $run->flowId]);
         } else {
             $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
         }
@@ -87,7 +87,7 @@ class FlowEngine
 
         // Ang dahilan: ang huminto, ang naghihintay, ang End, ang pumalyang step na walang kasunod, o walang kasunod.
         $lastStep = $run->path ? end($run->path) : null;
-        $reason = $run->stopped ?? ($suspended ? ($run->aiPending ? 'waiting for the AI answer' : 'waiting for a reply') : ($lastType === 'end' ? 'end'
+        $reason = $run->stopped ?? ($suspended ? ($run->aiPending ? 'waiting for the AI answer' : ($run->sendPending ? 'sending' : 'waiting for a reply')) : ($lastType === 'end' ? 'end'
             : (($lastStep['port'] ?? null) === 'failed' ? (string) ($lastStep['note'] ?? 'a step failed') : 'no next step')));
         $run->event('run_ended', null, ['reason' => $reason, 'path' => array_slice(array_column($run->path, 'node'), 0, 100)]);
 
@@ -209,6 +209,10 @@ class FlowEngine
 
     private function send(array $node, array $c, FlowRun $run, Outbox $outbox): array
     {
+        // Itinuloy pagkatapos ng padala (botcake:send-pool): ang resulta ang ginagamit, hindi na binubuo o ipinapadala ulit.
+        if ($run->sendResult !== null && $run->sendResult['node'] === $node['id']) {
+            return $this->afterSend($node, $c, $run, $this->takeSendResult($run));
+        }
         $messages = [];
         foreach ((array) ($c['items'] ?? []) as $item) {
             $v = trim($run->text((string) ($item['value'] ?? '')));
@@ -220,10 +224,36 @@ class FlowEngine
             }
         }
 
+        if (!$messages) return $this->afterSend($node, $c, $run, null);
+        if ($stop = $this->mismatch($run, $node['id'])) return $stop;
+        // Hindi hinihintay ang Botcake: ang padala ay sa botcake:send-pool, at humihinto ang takbo hanggang sa resulta.
+        if (BotcakeSendQueue::async($run, $outbox) && BotcakeSendQueue::submitChatbot($run, $node['id'], $messages) !== null) {
+            $run->sendPending = true;
+            return ['port' => null, 'suspend' => true, 'note' => 'Sending ' . count($messages) . ' message' . (count($messages) === 1 ? '' : 's')];
+        }
+        $res = $outbox->send($run, $node['id'], $messages);
+
+        return $this->afterSend($node, $c, $run, ['messages' => $messages, 'status' => $res['status'], 'error' => $res['error']]);
+    }
+
+    /** @return array{node: string, status: string, error: ?string, messages: array} */
+    private function takeSendResult(FlowRun $run): array
+    {
+        $r = $run->sendResult;
+        $run->sendResult = null;
+
+        return $r;
+    }
+
+    /**
+     * Pagkatapos ng padala ng send node (naghintay man o itinuloy mula sa pool): ang talaan ng takbo, ang failed port, at
+     * ang "wait for reply". $res null = walang maipadala.
+     */
+    private function afterSend(array $node, array $c, FlowRun $run, ?array $res): array
+    {
         $note = 'Nothing to send';
-        if ($messages) {
-            if ($stop = $this->mismatch($run, $node['id'])) return $stop;
-            $res = $outbox->send($run, $node['id'], $messages);
+        if ($res !== null) {
+            $messages = (array) $res['messages'];
             $run->sends[] = ['node' => $node['id'], 'messages' => $messages, 'status' => $res['status'], 'error' => $res['error']];
             if ($res['status'] === 'skipped') $run->event('skipped', $node['id'], ['reason' => 'replies off']);
             if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Send failed: ' . $res['error']];
@@ -288,6 +318,12 @@ class FlowEngine
 
     private function ai(array $node, array $c, FlowRun $run, Outbox $outbox): array
     {
+        // Itinuloy pagkatapos ipadala ang sagot (botcake:send-pool): ang sagot ay nasagot at na-save na bago ang padala.
+        if ($run->sendResult !== null && $run->sendResult['node'] === $node['id']) {
+            $r = $this->takeSendResult($run);
+            $run->sends[] = ['node' => $node['id'], 'messages' => $r['messages'], 'status' => $r['status'], 'error' => $r['error']];
+            return ['port' => 'success', 'note' => 'AI answered' . (($c['save_to'] ?? '') !== '' ? ' into ' . $c['save_to'] : '')];
+        }
         if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $node['id']) {
             // Ang sagot ng pool (chatbot:ai-pool) sa tawag na nabilang na bago huminto ang takbo. Sinusuri ang ticket bago pa
             // ma-save sa field (ang sagot ng ibang customer ay hindi dapat mapunta kahit sa field).
@@ -325,6 +361,10 @@ class FlowEngine
         if (!empty($c['send'])) {
             if ($stop = $this->mismatch($run, $node['id'])) return $stop;
             $msg = [['type' => 'text', 'text' => mb_substr($res['text'], 0, 2000)]];
+            if (BotcakeSendQueue::async($run, $outbox) && BotcakeSendQueue::submitChatbot($run, $node['id'], $msg) !== null) {
+                $run->sendPending = true;
+                return ['port' => null, 'suspend' => true, 'note' => 'AI answered; sending the answer'];
+            }
             $sent = $outbox->send($run, $node['id'], $msg);
             $run->sends[] = ['node' => $node['id'], 'messages' => $msg, 'status' => $sent['status'], 'error' => $sent['error']];
         }

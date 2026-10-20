@@ -1,0 +1,285 @@
+<?php
+
+namespace App\Services\Chatbot;
+
+use App\Models\BotcakeChat;
+use App\Models\BotcakeMessage;
+use App\Services\BotcakeClient;
+use App\Services\BotcakeMock;
+use App\Services\ChatblastSender;
+use App\Services\PageSettings;
+use App\Support\BotcakeClock;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Psr\Http\Message\ResponseInterface;
+use Throwable;
+
+/**
+ * Ang pool ng padala sa Botcake (botcake:send-pool): hanggang services.botcake.send_concurrency na ticket nang sabay, sa
+ * iisang proseso (TicketPool). Bawat page (token) ay may sariling "lane": isang request lang kada 1 / rate_per_page na
+ * segundo, eksakto dahil iisang proseso ang nagpapasya (kahati ang cache key ng BotcakeClient, kaya iginagalang din ang
+ * naghihintay na padala sa ibang lugar). Sa 429 ay ang page lang na iyon ang humihinto. Ang ulit ay ang patakaran ng
+ * BotcakeClient::call. Ang send_content ng chatbot ay isang request; ang chatblast ay ang stepper ng ChatblastSender
+ * (sulat, basa, send_flow), kaya pareho ang mga hakbang at status. Ang test page (BotcakeMock) ay sumasagot sa timer.
+ */
+class BotcakeSendPool extends TicketPool
+{
+    public const BEAT = 'botcake-send-pool:beat';
+    public const TIMEOUT = 15;          // gaya ng BotcakeClient::shared()
+    public const MAX_RETRY_AFTER = 10;  // gaya ng BotcakeClient::shared()
+
+    private BotcakeClock $clock;
+    /** @var array<string, array{row: object, gen: ?\Generator, req: array, attempt: int, lane: string, token: string, notBefore: float}> */
+    private array $jobs = [];
+    /** @var array<string, array{next: float, last: float, paused: float, queue: array<int, string>}> lane (sha1 ng token) */
+    private array $lanes = [];
+    /** @var array<string, array{0: string, 1: float}> page => [token, nabasa noong] */
+    private array $tokens = [];
+    /** @var array<string, array<int, float>> lane => oras ng bawat request (para sa test at sa sukat) */
+    public array $sentAt = [];
+
+    public function __construct(mixed $handler = null, ?BotcakeClock $clock = null)
+    {
+        parent::__construct($handler);
+        $this->clock = $clock ?? app(BotcakeClock::class);
+    }
+
+    public function max(): int
+    {
+        return max(1, (int) config('services.botcake.send_concurrency', 100));
+    }
+
+    protected function nowMs(): int
+    {
+        return (int) round($this->clock->now() * 1000);
+    }
+
+    protected function recover(): void
+    {
+        BotcakeSendQueue::recover($this->owner);
+    }
+
+    protected function sweep(): void
+    {
+        BotcakeSendQueue::sweep();
+    }
+
+    public function tick(bool $claim = true): int
+    {
+        $started = 0;
+        if ($claim) {
+            foreach (BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs)) as $row) {
+                $this->take($row);
+                $started++;
+            }
+        }
+        $this->lanes();
+        $this->pump();
+        $this->lanes();
+
+        return $started;
+    }
+
+    /** Ang token ng page (page settings), nasa memory nang 10 s. */
+    private function token(string $page): string
+    {
+        $t = $this->tokens[$page] ?? null;
+        if ($t === null || $this->clock->now() - $t[1] > 10) {
+            $t = $this->tokens[$page] = [trim((string) app(PageSettings::class)->get($page, 'botcake', 'token')), $this->clock->now()];
+        }
+
+        return $t[0];
+    }
+
+    private function take(object $row): void
+    {
+        $id = (string) $row->request_id;
+        $this->inflight[$id] = true;
+        try {
+            if ($row->kind === 'chatbot') {
+                if (($why = $this->mismatch($row)) !== null) {
+                    $this->refuse($row, $why);
+                    return;
+                }
+                $token = $this->token((string) $row->page_name);
+                if ($token === '') {
+                    $this->forget($id);
+                    BotcakeSendQueue::finishChatbot($row, $this->owner, ['status' => 'failed', 'error' => BotcakeOutbox::NO_TOKEN, 'http' => null]);
+                    return;
+                }
+                $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
+                $req = ['step' => 'send', 'method' => 'POST', 'path' => '/pages/' . rawurlencode((string) $row->page_id) . '/flows/send_content',
+                    'data' => ['psid' => (string) $row->psid, 'data' => ['version' => 'v2', 'content' => ['messages' => $messages]]], 'onlyRateLimit' => true];
+                $this->queue($id, ['row' => $row, 'gen' => null, 'req' => $req, 'attempt' => 0, 'lane' => sha1($token), 'token' => $token, 'notBefore' => 0.0]);
+                return;
+            }
+
+            $sender = app(ChatblastSender::class);
+            $m = BotcakeMessage::find($row->message_id);
+            $cfg = $m ? $sender->config((string) $m->page_name) : null;
+            if (!$m || $m->status !== 'sending' || $cfg === null) {
+                if ($m && $m->status === 'sending') {
+                    BotcakeMessage::whereKey($m->id)->where('status', 'sending')->update(['status' => 'failed', 'reason' => 'The page settings changed before sending; safe to send again']);
+                }
+                $this->forget($id);
+                BotcakeSendQueue::finishChatblast($row, $this->owner);
+                return;
+            }
+            $gen = $sender->stepper($m, $cfg);
+            $this->queue($id, ['row' => $row, 'gen' => $gen, 'req' => $gen->current(), 'attempt' => 0, 'lane' => sha1($cfg['token']), 'token' => $cfg['token'], 'notBefore' => 0.0]);
+        } catch (Throwable $e) {
+            $this->failed($row, $e);
+        }
+    }
+
+    /**
+     * Bago tumawag: ang page ID ng ticket ay ang page ID ng page sa settings, at ang chat (kapag mayroon) ay sa page at PSID
+     * ng ticket (botcake_chats). Null kapag tugma.
+     */
+    private function mismatch(object $row): ?string
+    {
+        $pageId = trim((string) app(PageSettings::class)->get((string) $row->page_name, 'botcake', 'page_id'));
+        if ($pageId !== (string) $row->page_id) return 'page';
+        if ($row->chat_id !== null) {
+            $chat = BotcakeChat::find($row->chat_id);
+            if (!$chat || (string) $chat->page_id !== (string) $row->page_id || (string) $chat->psid !== (string) $row->psid) return 'chat';
+        }
+
+        return null;
+    }
+
+    /** Hindi tugma ang ticket: walang padala, hindi itinutuloy ang takbo, event send_mismatch at ERROR log (mga id lang). */
+    private function refuse(object $row, string $why): void
+    {
+        $this->forget((string) $row->request_id);
+        DB::table(BotcakeSendQueue::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $this->owner)
+            ->update(['status' => 'resumed', 'error' => 'Ticket mismatch (' . $why . '); nothing sent', 'done_at' => now(), 'resumed_at' => now(), 'updated_at' => now()]);
+        $ids = ['request' => (string) $row->request_id, 'check' => $why, 'page' => (string) $row->page_id, 'psid' => (string) $row->psid, 'chat' => (string) ($row->chat_id ?? '')];
+        Log::error('botcake send: ticket mismatch, nothing sent', $ids);
+        ChatbotEvents::write((int) $row->page_id, (int) $row->psid, 'send_mismatch', $ids, $row->flow_id === null ? null : (int) $row->flow_id, $row->node_id);
+    }
+
+    private function queue(string $id, array $job): void
+    {
+        $this->jobs[$id] = $job;
+        $this->lanes[$job['lane']] ??= ['next' => 0.0, 'last' => 0.0, 'paused' => 0.0, 'queue' => []];
+        $this->lanes[$job['lane']]['queue'][] = $id;
+    }
+
+    /** Bawat lane na puwede na: ang unang job na handa, isang request, saka ang susunod na puwede ay pagkalipas ng interval. */
+    private function lanes(): void
+    {
+        $now = $this->clock->now();
+        $interval = BotcakeClient::interval();
+        foreach ($this->lanes as $key => $lane) {
+            if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next']) continue;
+            $pick = null;
+            foreach ($lane['queue'] as $i => $id) {
+                if (($this->jobs[$id]['notBefore'] ?? 0) <= $now) { $pick = $i; break; }
+            }
+            if ($pick === null) continue;
+            // Ang naghihintay na padala sa ibang proseso (hal. setup check) ay kahati ng page: iginagalang ang huli nito.
+            $shared = Cache::get(BotcakeClient::rateCacheKey($key));
+            if (is_numeric($shared) && (float) $shared > $lane['last'] + 0.000001 && (float) $shared + $interval > $now) {
+                $this->lanes[$key]['next'] = (float) $shared + $interval;
+                continue;
+            }
+            $id = $lane['queue'][$pick];
+            array_splice($this->lanes[$key]['queue'], $pick, 1);
+            $this->lanes[$key]['next'] = $now + $interval;
+            $this->lanes[$key]['last'] = $now;
+            Cache::put(BotcakeClient::rateCacheKey($key), $now, 60);
+            $this->sentAt[$key][] = $now;
+            $this->issue($id);
+        }
+    }
+
+    private function issue(string $id): void
+    {
+        $job = $this->jobs[$id] ?? null;
+        if ($job === null) return;
+        $row = $job['row'];
+        // Ang padala ng chatbot: itinatala bago tumawag (hindi na inuulit pagkatapos ng crash).
+        if ($row->kind === 'chatbot' && $job['attempt'] === 0 && !BotcakeSendQueue::called($row, $this->owner)) {
+            $this->forget($id);
+            return;
+        }
+        $q = $job['req'];
+        $mock = BotcakeClient::mockAnswer($q['method'], $q['path'], $q['data']);
+        if ($mock !== null) {
+            $ms = (int) (BotcakeMock::pages()[(string) $row->page_id]['latency'] ?? 0);
+            $this->after($id, $ms, fn () => $this->respond($id, $mock[0], $mock[1], null));
+            return;
+        }
+        $options = ['headers' => ['access-token' => $job['token'], 'Accept' => 'application/json'], 'timeout' => self::TIMEOUT, 'connect_timeout' => 10];
+        $options[$q['method'] === 'GET' ? 'query' : 'json'] = $q['data'];
+        $this->http->requestAsync($q['method'], BotcakeClient::BASE . $q['path'], $options)->then(
+            function (ResponseInterface $res) use ($id) {
+                $text = (string) $res->getBody();
+                $this->respond($id, $res->getStatusCode(), json_decode($text, true) ?? $text, $res->getHeaderLine('Retry-After'));
+            },
+            fn ($e) => $this->respond($id, 0, null, null),
+        );
+    }
+
+    /** Ang sagot ng isang request: ulit (ayon sa BotcakeClient::retryWait), ang susunod na hakbang, o tapos na. */
+    private function respond(string $id, int $status, mixed $body, ?string $retryAfter): void
+    {
+        $job = $this->jobs[$id] ?? null;
+        if ($job === null) return;
+        $row = $job['row'];
+        try {
+            $wait = BotcakeClient::retryWait($job['attempt'], $status, $retryAfter, $job['req']['onlyRateLimit'], BotcakeClient::MAX_RETRIES, self::MAX_RETRY_AFTER);
+            if ($wait !== null) {
+                $this->jobs[$id]['attempt']++;
+                $until = $this->clock->now() + $wait;
+                // 429: ang page lang na ito ang humihinto; ang iba (5xx, walang sagot) ay ang request lang.
+                if ($status === 429) $this->lanes[$job['lane']]['paused'] = max($this->lanes[$job['lane']]['paused'], $until);
+                else $this->jobs[$id]['notBefore'] = $until;
+                array_unshift($this->lanes[$job['lane']]['queue'], $id);
+                return;
+            }
+            $r = ['http' => $status, 'body' => $body, 'attempts' => $job['attempt'] + 1];
+            if ($row->kind === 'chatbot') {
+                $this->forget($id);
+                BotcakeSendQueue::finishChatbot($row, $this->owner, BotcakeOutbox::outcome($r));
+                return;
+            }
+            $job['gen']->send($r);
+            if ($job['gen']->valid()) {
+                $this->jobs[$id]['req'] = $job['gen']->current();
+                $this->jobs[$id]['attempt'] = 0;
+                $this->jobs[$id]['notBefore'] = 0.0;
+                $this->lanes[$job['lane']]['queue'][] = $id;
+                return;
+            }
+            $this->forget($id);
+            BotcakeSendQueue::finishChatblast($row, $this->owner);
+        } catch (Throwable $e) {
+            $this->failed($row, $e);
+        }
+    }
+
+    /** Pumalya ang pool sa ticket (hal. database): chatbot → failed port; chatblast → gaya ng error ng job (unknown o failed). */
+    private function failed(object $row, Throwable $e): void
+    {
+        report($e);
+        $this->forget((string) $row->request_id);
+        try {
+            if ($row->kind === 'chatbot') {
+                BotcakeSendQueue::finishChatbot($row, $this->owner, ['status' => 'failed', 'error' => 'Error: ' . mb_substr($e->getMessage(), 0, 150), 'http' => null]);
+            } else {
+                app(ChatblastSender::class)->poolError((int) $row->message_id, $e);
+                BotcakeSendQueue::finishChatblast($row, $this->owner);
+            }
+        } catch (Throwable $again) {
+            report($again); // ang row ay sending pa: ang pagsisimula ng susunod na pool ang magtatapos
+        }
+    }
+
+    private function forget(string $id): void
+    {
+        unset($this->jobs[$id], $this->inflight[$id]);
+    }
+}

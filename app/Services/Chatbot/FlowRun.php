@@ -31,6 +31,10 @@ class FlowRun
     public ?array $ticket = null;
     /** Huminto ang takbo para hintayin ang sagot ng AI. */
     public bool $aiPending = false;
+    /** Itinuloy pagkatapos ng padala (botcake:send-pool): ['node', 'status', 'error', 'messages'], ginagamit nang isang beses. */
+    public ?array $sendResult = null;
+    /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
+    public bool $sendPending = false;
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void

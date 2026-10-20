@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Http;
 class BotcakeClient
 {
     public const BASE = 'https://botcake.io/api/public_api/v1';
-    public const MIN_INTERVAL = 0.5; // segundo sa pagitan ng mga request = max 2 kada segundo
+    public const MIN_INTERVAL = 0.5; // ang default: max 2 kada segundo (services.botcake.rate_per_page)
     public const MAX_RETRIES = 3;
 
     private ?float $lastRequestAt = null;
@@ -69,18 +69,47 @@ class BotcakeClient
                 $status = 0;
             }
 
-            $retryable = $onlyRateLimit ? $status === 429 : ($status === 0 || $status === 429 || $status >= 500);
-            if (!$retryable || $attempt >= $this->retries) {
+            $wait = self::retryWait($attempt, $status, $res?->header('Retry-After'), $onlyRateLimit, $this->retries, $this->maxRetryAfter);
+            if ($wait === null) {
                 return ['http' => $status, 'body' => $res ? ($res->json() ?? $res->body()) : null, 'attempts' => $attempt + 1];
             }
-
-            $wait = 2 ** ($attempt + 1); // 2, 4, 8
-            $after = $res?->header('Retry-After');
-            if (is_numeric($after) && (float) $after > $wait) {
-                $wait = min((float) $after, $this->maxRetryAfter);
-            }
-            $this->clock->sleep((float) $wait);
+            $this->clock->sleep($wait);
         }
+    }
+
+    /**
+     * Ang patakaran ng ulit ng call() (pareho sa botcake:send-pool): ilang segundo bago ulitin ang subok na $attempt
+     * (0 = una), o null kapag hindi na inuulit. Ang 429, 5xx at walang sagot ay inuulit (ang 429 lang kapag $onlyRateLimit),
+     * hanggang $retries: 2, 4, 8 s, o ang Retry-After kapag mas mahaba (hanggang $maxRetryAfter).
+     */
+    public static function retryWait(int $attempt, int $status, ?string $retryAfter, bool $onlyRateLimit, int $retries = self::MAX_RETRIES, float $maxRetryAfter = 10): ?float
+    {
+        $retryable = $onlyRateLimit ? $status === 429 : ($status === 0 || $status === 429 || $status >= 500);
+        if (!$retryable || $attempt >= $retries) return null;
+        $wait = 2 ** ($attempt + 1); // 2, 4, 8
+        if (is_numeric($retryAfter) && (float) $retryAfter > $wait) $wait = min((float) $retryAfter, $maxRetryAfter);
+
+        return (float) $wait;
+    }
+
+    /** Segundo sa pagitan ng mga request ng isang page (token): 1 / services.botcake.rate_per_page. */
+    public static function interval(): float
+    {
+        $rate = (float) config('services.botcake.rate_per_page', 1 / self::MIN_INTERVAL);
+
+        return $rate > 0 ? 1 / $rate : self::MIN_INTERVAL;
+    }
+
+    /** Ang cache key ng huling request ng isang page (kahati ng botcake:send-pool). */
+    public static function rateCacheKey(string $rateKey): string
+    {
+        return 'botcake-rate:' . $rateKey;
+    }
+
+    /** Ang sagot ng BotcakeMock (test page) nang walang hintay, para sa pool na may sariling timer; null = totoong Botcake. */
+    public static function mockAnswer(string $method, string $path, array $data): ?array
+    {
+        return BotcakeMock::answer($method, $path, $data, new class extends BotcakeClock { public function sleep(float $seconds): void {} });
     }
 
     /**
@@ -231,10 +260,10 @@ class BotcakeClient
     private function throttle(): void
     {
         if ($this->rateKey !== null) {
-            $key  = 'botcake-rate:' . $this->rateKey;
+            $key  = self::rateCacheKey($this->rateKey);
             $last = Cache::get($key);
             if (is_numeric($last)) {
-                $wait = (float) $last + self::MIN_INTERVAL - $this->clock->now();
+                $wait = (float) $last + self::interval() - $this->clock->now();
                 if ($wait > 0) $this->clock->sleep($wait);
             }
             Cache::put($key, $this->clock->now(), 60);
@@ -242,7 +271,7 @@ class BotcakeClient
         }
 
         if ($this->lastRequestAt !== null) {
-            $wait = $this->lastRequestAt + self::MIN_INTERVAL - $this->clock->now();
+            $wait = $this->lastRequestAt + self::interval() - $this->clock->now();
             if ($wait > 0) $this->clock->sleep($wait);
         }
         $this->lastRequestAt = $this->clock->now();

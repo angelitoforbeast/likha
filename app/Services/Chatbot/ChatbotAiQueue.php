@@ -61,7 +61,10 @@ class ChatbotAiQueue
     {
         $id = (string) $fields->get(CustomerFields::AI);
         if ($id === '') return false;
-        $status = Schema::hasTable(self::TABLE) ? DB::table(self::TABLE)->where('request_id', $id)->value('status') : null;
+        // Ang marka ay maaaring padala sa Botcake (send:<id>, botcake:send-pool) o AI step.
+        $table = str_starts_with($id, BotcakeSendQueue::MARK) ? BotcakeSendQueue::TABLE : self::TABLE;
+        if ($table === BotcakeSendQueue::TABLE) $id = substr($id, strlen(BotcakeSendQueue::MARK));
+        $status = Schema::hasTable($table) ? DB::table($table)->where('request_id', $id)->value('status') : null;
         if ($status === null || $status === 'resumed') {
             $fields->clear(CustomerFields::AI);
             return false;
