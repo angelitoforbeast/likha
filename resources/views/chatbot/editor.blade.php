@@ -141,6 +141,7 @@
     const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', sequence: 'Sequence', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], rules = {}, sequences = [];
+    const VAR_TIPS = {'ALL USER INPUT': "All the customer's messages (built in)"};
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
     // Ang draft: version (para sa check ng dalawang nag-e-edit), kalagayan, at kung may lokal na pagbabagong hindi pa naise-save.
     let version = 0, state = 'published', pages = [], dirty = false, conflict = false, leaving = false, pending = Promise.resolve();
@@ -446,6 +447,7 @@
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'Subscribing while the customer is already in it does nothing; after an unsubscribe it starts again from step 1. Sequences are made in Chatbot → Sequences.'}));
         }
         $('vars').replaceChildren(...variables.map(v => { const b = el('button', {type: 'button', class: 'rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] hover:bg-slate-200', text: OPEN + v + CLOSE});
+            if (VAR_TIPS[v]) b.title = VAR_TIPS[v];
             b.addEventListener('click', () => { if (!lastField) return; const s = lastField.selectionStart ?? lastField.value.length; lastField.value = lastField.value.slice(0, s) + OPEN + v + CLOSE + lastField.value.slice(s); lastField.dispatchEvent(new Event('input')); lastField.focus(); }); return b; }));
         $('form-box').classList.remove('hidden');
         body.querySelector('input, textarea, select')?.focus();

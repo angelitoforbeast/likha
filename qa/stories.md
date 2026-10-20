@@ -1655,3 +1655,16 @@ Spec 089. Tests in `tests/Feature/Chatblast/BotcakeAsyncSendTest.php` (fake Botc
 | S-089.11 | With no pool, the minute tick: a chatblast ticket past 240 s goes back to the queue (the job sends it, lock released, no gap); a chatbot ticket past 10 minutes takes the failed path and frees the customer; a lost resume is resumed once | `test_S_089_11…` | Passed · 2026-10-20 · auto |
 | S-089.12 | A send waiting in the page's lane checks the pause and the emergency stop before it goes out: nothing is sent, the reply is logged as skipped; a pause stops the run, the switch skips and goes on as before | `test_S_089_12…` (2 data sets) | Passed · 2026-10-20 · auto |
 | S-089.13 | Given 40 chatblast messages on one page, then the pool holds only that page's share, and a chatbot send on another page goes out at once | `test_S_089_13…` | Passed · 2026-10-20 · auto |
+
+## S-093 {{ALL USER INPUT}} holds the customer's messages, as in Chatbot Builder
+
+Spec 093. Tests in `tests/Feature/Chatblast/ChatbotAllUserInputTest.php` (fake OpenAI; the sheet row in the TestOutbox).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-093.1 | Given chats of this customer on this page, of another customer and on another page, and one after the current chat, then `{{ALL USER INPUT}}` (also `{{ all_user_input }}`) is this customer's messages on this page, oldest first, one per line, up to and including the current chat | `test_S_093_1…` | Passed · 2026-10-20 · auto |
+| S-093.2 | Given 61 messages, then only the newest 50; given more than 4,000 characters, then the newest 4,000 | `test_S_093_2…` | Passed · 2026-10-20 · auto |
+| S-093.3 | Given a botfield or customer field named ALL USER INPUT with a value, then that value; given it empty (or spaces), then the built-in | `test_S_093_3…` | Passed · 2026-10-20 · auto |
+| S-093.4 | Given an AI step with user `{{ALL USER INPUT}}` and a sheet row with it in two cells, then OpenAI gets the messages, both cells start with `'` (a message `=HYPERLINK(…)` is never a formula), and the run reads `botcake_chats` once | `test_S_093_4…` | Passed · 2026-10-20 · auto |
+| S-093.5 | Given a Test tab run, then `{{ALL USER INPUT}}` is the current test message (no test history in the code yet) | `test_S_093_5…` | Passed · 2026-10-20 · auto |
+| S-093.6 | The flow editor lists `{{ALL USER INPUT}}` in the variable chips with the tooltip "All the customer's messages (built in)" | `test_S_093_6…` | Passed · 2026-10-20 · auto |

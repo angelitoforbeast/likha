@@ -23,7 +23,7 @@ use InvalidArgumentException;
 class ChatbotFlowController extends Controller
 {
     /** Ang mga variable ng takbo (para sa listahan sa mga form ng node). */
-    public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction'];
+    public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction', 'ALL USER INPUT'];
 
     public const KEEP_VERSIONS = 50; // snapshot kada flow
     public const LIST_VERSIONS = 20; // sa History
