@@ -805,3 +805,14 @@ Accepted, not fixed:
 - **`--stats` "Flow runs" counts the part of a run after the AI answer as a run** (each AI chat counts twice). Reason: the resumed part writes its own `run_started`; the other lines are unaffected.
 - **The fake Botcake records every send in the cache** (two extra cache writes per send, test pages only). Reason: needed for the misroute count; keep it in mind when reading the numbers.
 - **Next limit after this spec: Botcake sends in the workers.** Each send holds a worker for its latency plus the 2-per-second-per-page throttle sleep. Suggestion for a later spec: send in the pool the same way, or more chatbot workers.
+
+## 088: Redis and Horizon (2026-10-20)
+
+- **One extra query per chatblast dispatch** (the message's kind, to pick the queue): `resume()` over N queued rows makes N small primary-key reads. Reason: cheap next to the three Botcake calls each send makes.
+- **The dashboard has no "Queues" link.** The main nav is database rows; a link needs a migration and a decision on placement. Reason: the brief allows none; `/horizon` is typed directly by the CEO.
+- **Cutover windows (all trusted, operator-run, nothing lost for good)**, covered as steps in the result:
+  - long-running processes keep the old config until restarted (`chatbot:ai-pool`, workers);
+  - a release on the old driver after the drain check;
+  - the chatblast build lock taken on the database store and released on Redis during the `CACHE_STORE` switch.
+- **S-088.4 on the array store tests the store more than the code.** Reason: the brief allows the array store; the Redis data set ran green against a real Redis in WSL, and the load check ran on Redis end to end.
+- **phpredis** (the PHP extension) is faster than predis; switch with `REDIS_CLIENT=phpredis` after installing `php8.4-redis`. Reason: the brief chose predis to avoid an extension install now.

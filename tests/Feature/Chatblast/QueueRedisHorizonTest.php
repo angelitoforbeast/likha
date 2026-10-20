@@ -61,7 +61,8 @@ class QueueRedisHorizonTest extends ChatblastTestCase
         $this->assertSame(['database', 'chatblast'], [Queue::pushed(SendChatblastMessage::class)->last()->connection, Queue::pushed(SendChatblastMessage::class)->last()->queue]);
 
         // Horizon's chatblast supervisor works both queues, and every timeout stays under the Redis retry_after (no job runs twice).
-        $this->assertSame(['chatblast-high,chatblast'], config('horizon.defaults.chatblast.queue'), 'one pool: every worker takes chatblast-high first');
+        $this->assertSame(['chatblast-high', 'chatblast'], config('horizon.defaults.chatblast.queue'), 'a pool per queue: Delivering has its own workers');
+        $this->assertGreaterThanOrEqual(2, config('horizon.defaults.chatblast.minProcesses'), 'per queue in balance auto');
         $this->assertSame(['chatbot'], config('horizon.defaults.chatbot.queue'));
         $retry = config('queue.connections.redis.retry_after');
         foreach ([config('horizon.defaults.chatbot.timeout'), config('horizon.defaults.chatblast.timeout'), (new SendChatblastMessage($transit->id))->timeout, (new RunChatbotFlow(1))->timeout] as $timeout) {

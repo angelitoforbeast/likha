@@ -1624,3 +1624,14 @@ Spec 087. Tests in `tests/Feature/Chatblast/ChatbotAsyncAiTest.php` (fake OpenAI
 | S-087.8 | Given `services.chatbot.ai_async=false`, or no live pool, then the AI step waits for the answer as before and no ticket is written | `test_S_087_8…` | Passed · 2026-10-20 · auto |
 | S-087.9 | Given a real page, then `botcake:stress-page --mock-ai` is refused, and even with `chatbot.mock_ai=1` written in its settings its AI step goes to OpenAI | `test_S_087_9…` | Passed · 2026-10-20 · auto |
 | S-087.10 | Given mock pages with the fake AI, then `--stats` counts its replies and `misrouted: 0`; a reply naming another PSID, or another customer's chat, counts as misrouted | `test_S_087_10…` | Passed · 2026-10-20 · auto |
+
+## S-088 Redis and Horizon for the chatbot and chatblast queues, with Delivering first
+
+Spec 088. Tests in `tests/Feature/Chatblast/QueueRedisHorizonTest.php`; the scaling, the order and the misroutes are in the local check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-088.1 | Given the chatblast queue on Redis, when a Delivering and an In transit message are queued, then Delivering goes to `chatblast-high` and In transit to `chatblast`; on the database driver both go to `chatblast` (the queue the old workers listen to); Horizon gives `chatblast-high` its own pool of at least 2 workers, and every timeout stays under the Redis `retry_after` | `test_S_088_1…` | Passed · 2026-10-20 · auto |
+| S-088.2 | `CHATBOT_QUEUE_CONNECTION` and `CHATBLAST_QUEUE_CONNECTION` set the connection of every chatbot job and every chatblast send; unset, they follow `QUEUE_CONNECTION` (database on the server) | `test_S_088_2…` | Passed · 2026-10-20 · auto |
+| S-088.3 | `/horizon` sends a guest to the login, gives 403 to a non-CEO (also its API, also with `APP_ENV=local`) and 200 to the CEO | `test_S_088_3…` | Passed · 2026-10-20 · auto |
+| S-088.4 | While a run holds a chatbot customer, that customer's chat is "locked"; one chatblast send per customer at a time; on the array store and on a real Redis | `test_S_088_4…` (2 data sets) | Passed · 2026-10-20 · auto (Redis: against a local Redis in WSL; skipped when none) |
