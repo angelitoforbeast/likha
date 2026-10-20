@@ -46,6 +46,7 @@ class BotcakeFailedReasonsTest extends ChatblastTestCase
             'error_description' => [['success' => false, 'message' => ['request_id' => 'r-1', 'error_description' => 'Page token expired']], 'Page token expired'],
             'a trace ID only' => [['success' => false, 'message' => ['fbtrace_id' => 'AKLL2dVGFxDHsoLLbpdhBlc']], '{"fbtrace_id":"AKLL2dVGFxDHsoLLbpdhBlc"}'],
             'other string after a trace ID' => [['success' => false, 'message' => ['x_fb_trace_id' => 'Aq1', 'code' => 'BLOCKED']], 'BLOCKED'],
+            'empty message, error object' => [['success' => false, 'message' => '', 'error' => ['message' => 'Invalid parameter']], 'Invalid parameter'],
             'no message' => [['success' => false], ''],
         ];
     }

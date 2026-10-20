@@ -171,7 +171,7 @@ class BotcakeClient
         if (is_object($body) || is_array($body)) $body = json_decode((string) json_encode($body, JSON_INVALID_UTF8_SUBSTITUTE), true);
         if (!is_array($body)) return '';
         $message = $body['message'] ?? null;
-        if (is_string($message)) return trim($message);
+        if (is_string($message) && trim($message) !== '') return trim($message);
         $roots = is_array($message) ? [$body, $message] : [$body];
         foreach (self::REASON_PATHS as $path) {
             foreach ($roots as $root) {

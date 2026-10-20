@@ -28,6 +28,7 @@ class BotcakeSendPool extends TicketPool
     public const BEAT = 'botcake-send-pool:beat';
     public const TIMEOUT = 15;          // gaya ng BotcakeClient::shared()
     public const MAX_RETRY_AFTER = 10;  // gaya ng BotcakeClient::shared()
+    public const LATE = 0.02;           // segundo: ang reserbang lampas dito ay hindi na ginagamit
 
     private BotcakeClock $clock;
     /** @var array<string, array{row: object, gen: ?\Generator, req: array, attempt: int, lane: string, token: string, notBefore: float}> */
@@ -216,7 +217,7 @@ class BotcakeSendPool extends TicketPool
             // Ang oras ay binabasa sa bawat lane: ang naunang padala sa loop na ito ay may mga query (owns, called), kaya ang
             // lumang "ngayon" ay magpapalapit sa dalawang padala ng iisang page nang mas maikli sa interval.
             $now = $this->clock->now();
-            if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next']) continue;
+            if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next'] - 0.000001) continue;
             // Ang handa na may pinakamataas na priority (chatbot, saka Delivering, saka ang ibang chatblast), ang pinakauna sa
             // mga kapareho; ang naghintay nang lampas 10 s sa lane ay nauuna (hawak ng chatblast ang lock ng customer).
             $pick = null;
@@ -229,12 +230,21 @@ class BotcakeSendPool extends TicketPool
                 if ($rank <= 0) break;
             }
             if ($pick === null) continue;
-            // Iisang rate ng page kasama ang ibang proseso (sequence, Inbox, setup check): ang puwesto ay kinukuha nang atomic.
-            [$ok, $free] = BotcakeClient::slot($key, $now, false);
-            if (!$ok) {
-                $this->lanes[$key]['next'] = $free;
-                continue;
+            // Iisang rate ng page kasama ang ibang proseso (sequence, Inbox, setup check): ang puwesto ay kinukuha nang atomic,
+            // at gaya nila ay nakareserba ang susunod na libre (kahit mamaya pa), para hindi maagaw ng tuloy-tuloy na padala nila.
+            $free = $lane['booked'] ?? null;
+            // Ang reserbang nalampasan (hal. bago ang pause ng 429, o walang handang job noon): ang kasunod na reserba ng iba ay
+            // binilang mula rito, kaya ang huling padala ay lalapit dito; kumuha ng bago. Ang loop ay kada 5 ms habang may hawak.
+            if ($free !== null && $now > $free + self::LATE) $free = null;
+            if ($free === null) {
+                [, $free] = BotcakeClient::slot($key, $now, true);
+                if ($free > $now + 0.000001) {
+                    $this->lanes[$key]['booked'] = $free;
+                    $this->lanes[$key]['next'] = $free;
+                    continue;
+                }
             }
+            $this->lanes[$key]['booked'] = null;
             $id = $lane['queue'][$pick];
             array_splice($this->lanes[$key]['queue'], $pick, 1);
             // Ang susunod na puwede ay mula sa oras na talagang lumabas ang tawag (hindi sa oras ng pasya): eksaktong interval.
