@@ -280,7 +280,7 @@
         const s = wires.find(w => w.i === selWire);
         if (s) {
             const [a, c1, c2, b] = ctrl(...ends(s.e)), m = {x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8, y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8};
-            const x = svgEl('g', {class: 'x', transform: `translate(${m.x},${m.y})`, role: 'button', 'aria-label': 'Remove wire'});
+            const x = svgEl('g', {class: 'x', transform: `translate(${m.x},${m.y})`}); // pang-pointer lang; sa keyboard ay ang Delete key at ang Remove wire
             x.append(svgEl('circle', {r: 9, fill: '#fff', stroke: '#2563eb', 'stroke-width': 1.5}), svgEl('path', {d: 'M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5', style: 'stroke:#2563eb; stroke-width:1.5'}));
             x.addEventListener('pointerdown', ev => { ev.stopPropagation(); $('del-wire').click(); });
             svg.append(x);
@@ -360,7 +360,12 @@
         pts.delete(ev.pointerId);
         const d = drag;
         if (!d) return;
-        if (d.kind === 'pinch') { if (!pts.size) { drag = null; cv.classList.remove('moving'); } return; }
+        if (d.kind === 'pinch') {
+            // Isang daliri ang natira: ito na ang nagpa-pan.
+            if (pts.size === 1) { const [[id, q]] = pts; drag = {kind: 'pan', id, sx: q.x - view.x, sy: q.y - view.y}; }
+            else if (!pts.size) { drag = null; cv.classList.remove('moving'); }
+            return;
+        }
         if (ev.pointerId !== d.id) return;
         if (ev.type === 'pointercancel') return endDrag();
         drag = null; cv.classList.remove('moving');
