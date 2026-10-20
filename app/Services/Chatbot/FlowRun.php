@@ -2,8 +2,6 @@
 
 namespace App\Services\Chatbot;
 
-use App\Models\BotcakeChat;
-
 /**
  * Ang isang takbo ng flow para sa isang chat: ang flow, ang page (pangalan, Botcake ID, botfields), ang customer
  * (PSID, mga field), ang chat (id, text, pangalan, oras), at ang nangyari (path, mga padala, sheet rows) para sa Test.
@@ -37,9 +35,6 @@ class FlowRun
     public ?array $sendResult = null;
     /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
     public bool $sendPending = false;
-    /** Ang {{ALL USER INPUT}} ng takbong ito: isang basa lang ng botcake_chats kahit ilang beses gamitin. */
-    private ?string $allUserInput = null;
-    private ?bool $usesAllUserInput = null;
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void
@@ -82,34 +77,9 @@ class FlowRun
             'last_interaction' => $this->receivedAt,
         ];
         $base = ChatbotVars::merge($this->botfields, $this->fields->fields(), $run);
-        // Gaya ng Chatbot Builder: built in ang ALL USER INPUT, maliban kung may laman ang field o botfield na ganoon ang pangalan.
-        if (trim($base['all user input'] ?? '') === '' && $this->usesAllUserInput()) $run['all user input'] = $this->allUserInput();
         $bot = array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $this->botfields);
 
         return ChatbotVars::merge($bot, $this->fields->fields(), $run);
-    }
-
-    /** Binabasa lang ang botcake_chats kapag ginagamit ng flow o ng botfield ang {{ALL USER INPUT}}. */
-    private function usesAllUserInput(): bool
-    {
-        return $this->usesAllUserInput ??= (bool) preg_match('/all[\s_]+user[\s_]+input/i', (string) json_encode([$this->graph, $this->botfields]));
-    }
-
-    /**
-     * Ang mga mensahe ng customer sa page na ito, pinakaluma muna, hanggang sa chat na ito: ang huling 50, hanggang 4,000
-     * letra (ang pinakabago ang natitira). Sa Test: ang test message lang (walang totoong usapan ang test customer).
-     */
-    private function allUserInput(): string
-    {
-        if ($this->allUserInput !== null) return $this->allUserInput;
-        if ($this->test) return $this->allUserInput = $this->input;
-
-        $messages = BotcakeChat::where('page_id', $this->pageId)->where('psid', (string) $this->fields->psid)
-            ->when($this->chatId, fn ($q) => $q->where('id', '<=', $this->chatId))
-            ->orderByDesc('id')->limit(50)->pluck('message')
-            ->filter(fn ($m) => trim((string) $m) !== '')->reverse()->implode("\n");
-
-        return $this->allUserInput = mb_substr($messages, -4000);
     }
 
     public function text(string $template): string
