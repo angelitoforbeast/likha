@@ -20,7 +20,6 @@ class BotcakeClient
     public const MIN_INTERVAL = 0.5; // ang default: max 2 kada segundo (services.botcake.rate_per_page)
     public const MAX_RETRIES = 3;
 
-    private ?float $lastRequestAt = null;
     private int $retries = self::MAX_RETRIES;
     private int $timeout = 30;
     private ?string $rateKey = null;
@@ -56,7 +55,7 @@ class BotcakeClient
     public function call(string $method, string $path, array $data, string $token, bool $onlyRateLimit = false): array
     {
         for ($attempt = 0; ; $attempt++) {
-            $this->throttle();
+            $this->throttle($token);
 
             try {
                 if (($res = $this->mock($method, $path, $data)) === null) {
@@ -229,7 +228,7 @@ class BotcakeClient
     protected function get(string $path, array $query, string $token): Response
     {
         for ($attempt = 0; ; $attempt++) {
-            $this->throttle();
+            $this->throttle($token);
 
             try {
                 $res = $this->mock('GET', $path, $query) ?? Http::withHeaders(['access-token' => $token])
@@ -275,23 +274,52 @@ class BotcakeClient
         return $a === null ? null : new Response(new \GuzzleHttp\Psr7\Response($a[0], ['Content-Type' => 'application/json'], json_encode($a[1])));
     }
 
-    private function throttle(): void
+    /**
+     * Isang rate kada page (token) para sa lahat ng tawag: ang pool, ang mga naghihintay na padala (sequence, Inbox),
+     * customer info at chatblast. Ang puwesto ay kinukuha sa ilalim ng lock, kaya walang dalawang proseso na nakakakuha
+     * ng parehong oras. $wait = true: laging may puwesto (ang susunod na libre, kahit mamaya pa) at itinatala na agad,
+     * bago maghintay; false (ang pool): ngayon lang, kung hindi ay hindi itinatala at ibinabalik kung kailan libre.
+     * @return array{0: bool, 1: float} [nakuha, oras ng puwesto o kailan libre]
+     */
+    public static function slot(string $rateKey, float $now, bool $wait): array
     {
-        if ($this->rateKey !== null) {
-            $key  = self::rateCacheKey($this->rateKey);
+        $key = self::rateCacheKey($rateKey);
+        $take = function () use ($key, $now, $wait) {
             $last = Cache::get($key);
-            if (is_numeric($last)) {
-                $wait = (float) $last + self::interval() - $this->clock->now();
-                if ($wait > 0) $this->clock->sleep($wait);
-            }
-            Cache::put($key, $this->clock->now(), 60);
-            return;
-        }
+            $free = is_numeric($last) ? max($now, (float) $last + self::interval()) : $now;
+            if (!$wait && $free > $now + 0.000001) return [false, $free];
+            Cache::put($key, $free, 60);
 
-        if ($this->lastRequestAt !== null) {
-            $wait = $this->lastRequestAt + self::interval() - $this->clock->now();
-            if ($wait > 0) $this->clock->sleep($wait);
+            return [true, $free];
+        };
+
+        try {
+            return Cache::lock($key . ':lock', 5)->betweenBlockedAttemptsSleepFor(5)->block(5, $take);
+        } catch (LockTimeoutException) {
+            return $take(); // hindi makuha ang lock: mas mabuting tumuloy kaysa hindi maipadala
         }
-        $this->lastRequestAt = $this->clock->now();
+    }
+
+    /** Ang tawag ng pool na lumabas nang mas huli sa puwesto nito: ang susunod na puwesto ay mula sa oras na iyon. */
+    public static function sentAt(string $rateKey, float $at): void
+    {
+        $key = self::rateCacheKey($rateKey);
+        $move = function () use ($key, $at) {
+            $last = Cache::get($key);
+            if (!is_numeric($last) || (float) $last < $at) Cache::put($key, $at, 60);
+        };
+
+        try {
+            Cache::lock($key . ':lock', 5)->betweenBlockedAttemptsSleepFor(5)->block(5, $move);
+        } catch (LockTimeoutException) {
+            $move();
+        }
+    }
+
+    private function throttle(string $token): void
+    {
+        [, $at] = self::slot($this->rateKey ?? sha1($token), $this->clock->now(), true);
+        $wait = $at - $this->clock->now();
+        if ($wait > 0) $this->clock->sleep($wait);
     }
 }

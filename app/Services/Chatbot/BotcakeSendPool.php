@@ -229,10 +229,10 @@ class BotcakeSendPool extends TicketPool
                 if ($rank <= 0) break;
             }
             if ($pick === null) continue;
-            // Ang naghihintay na padala sa ibang proseso (hal. setup check) ay kahati ng page: iginagalang ang huli nito.
-            $shared = Cache::get(BotcakeClient::rateCacheKey($key));
-            if (is_numeric($shared) && (float) $shared > $lane['last'] + 0.000001 && (float) $shared + $interval > $now) {
-                $this->lanes[$key]['next'] = (float) $shared + $interval;
+            // Iisang rate ng page kasama ang ibang proseso (sequence, Inbox, setup check): ang puwesto ay kinukuha nang atomic.
+            [$ok, $free] = BotcakeClient::slot($key, $now, false);
+            if (!$ok) {
+                $this->lanes[$key]['next'] = $free;
                 continue;
             }
             $id = $lane['queue'][$pick];
@@ -242,7 +242,7 @@ class BotcakeSendPool extends TicketPool
             if ($at === null) continue;
             $this->lanes[$key]['next'] = $at + $interval;
             $this->lanes[$key]['last'] = $at;
-            Cache::put(BotcakeClient::rateCacheKey($key), $at, 60);
+            if ($at > $free + 0.000001) BotcakeClient::sentAt($key, $at);
             $this->sentAt[$key][] = $at;
             if (count($this->sentAt[$key]) > 100) array_shift($this->sentAt[$key]);
         }

@@ -15,6 +15,9 @@ class FakeBotcakeClock extends BotcakeClock
     /** @var array<int, float> oras ng bawat request (tinatawag ng client) */
     public array $requestTimes = [];
 
+    /** Tinatawag sa simula ng bawat sleep (hal. ibang proseso na dumarating habang naghihintay ang isa). */
+    public ?\Closure $onSleep = null;
+
     public function now(): float
     {
         return $this->time;
@@ -22,6 +25,7 @@ class FakeBotcakeClock extends BotcakeClock
 
     public function sleep(float $seconds): void
     {
+        if ($this->onSleep) ($this->onSleep)();
         $this->sleeps[] = $seconds;
         $this->time += $seconds;
     }
