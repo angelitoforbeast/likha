@@ -1682,6 +1682,21 @@ Spec 091. Tests in `tests/Feature/Chatblast/ChatbotTestTabTest.php`; the page is
 | S-091.5 | An AI step in Test gets the earlier test messages and bot sends as history (same roles and order as live); Reset forgets them; a real customer's AI step never sees them | `test_S_091_5…` | Passed · 2026-10-20 · auto |
 | S-091.6 | The page has the new banner, the remembered checkbox, the countdown with "Skip now" (1366 and 390 px, no horizontal scroll; the skipped sends appear without a reload) | `test_S_091_6…` + browser | Passed · 2026-10-20 · auto + browser |
 
+## S-096 An Edit button on each page row opens that page's fields, with paste and Save
+
+Spec 096. Tests: `tests/Feature/Chatblast/ChatbotPageEditTest.php` and `tests/Feature/Chatblast/ChatbotPasteScriptTest.php` (S-096.4). The screens are checked in headless Chrome at 1366×768 and 390×844 (screenshots in `docs/specs/096-page-edit-modal/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-096.1 | Given a user with /chatblast access, when the page modal loads its data, then `/chatbot/data` gives the botfields in grid column order and the page's current values with line breaks kept; without access it is 403, signed out 401 | `test_S_096_1…` | Passed · 2026-10-20 · auto |
+| S-096.2 | Given an edit of one page, when Save sends its changed fields through `/chatbot/cells`, then only that page changes and no row is written for another page | `test_S_096_2…` | Passed · 2026-10-20 · auto |
+| S-096.3 | Given /chatbot/pages, then each row has an Edit button named "Edit <page>" and the page modal (paste box, Starting at field, Paste blanks as empty, Save, Cancel); the Paste values button, its page picker and the row checkboxes are gone | `test_S_096_3…` | Passed · 2026-10-20 · auto |
+| S-096.4 | Given a paste for one page, then only the first data row is used (the rest counted), mapped by header names when the first line names fields, otherwise by order from the chosen field | `test_S_096_4…` | Passed · 2026-10-20 · auto |
+| S-096.5 | Given the page modal, then the title is the page name with its ID muted, every botfield (not ACTIVE or FLOW) is listed one per line in grid order and scrolls, text fields grow with their line breaks, image fields show a preview next to the link | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-096.6 | Given a pasted row with a header, then the filled fields turn amber with "Was: …", a blank cell keeps the value (unless Paste blanks as empty), a non-link in an image field is flagged and not saved, and a new paste or another Starting at field replaces the previous paste; a hand edit is a change too; the button reads "Save N changes" | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-096.7 | When Save is pressed, then one request saves the changes, the modal closes, the row in the grid shows the new values and the bar offers Undo; Undo restores them. Cancel, ✕, Escape or a click outside with unsaved changes asks first; without changes they close at once | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-096.8 | At 390 px, the Edit button is the pencil only (named "Edit <page>"), the modal is full screen, the fields scroll and Save and Cancel stay on screen | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+
 ## S-092 Paste blocks of botfield values on /chatbot/pages, saved with one button
 
 Spec 092. Tests: `tests/Feature/Chatblast/ChatbotPasteTest.php` (the bulk save) and `tests/Feature/Chatblast/ChatbotPasteScriptTest.php` (`public/js/chatbot-paste.js` in node). The screens are checked in headless Chrome at 1366×768, 1920×1080 and 390 px (screenshots in `docs/specs/092-pages-copy-paste/`).
@@ -1697,7 +1712,7 @@ Spec 092. Tests: `tests/Feature/Chatblast/ChatbotPasteTest.php` (the bulk save) 
 | S-092.7 | Given blank values, then they keep the current value by default and clear it only with "blanks as empty"; ACTIVE and FLOW in the changes are skipped and counted, never changed | `test_S_092_7…` | Passed · 2026-10-20 · auto |
 | S-092.8 | Given a user without /chatblast access, then the bulk save is 403 and changes nothing; signed out it redirects to sign-in | `test_S_092_8…` | Passed · 2026-10-20 · auto |
 | S-092.9 | Given a Save, when Undo sends back the previous values it was given, then every field of that save returns to its previous value (an empty one is cleared again) | `test_S_092_9…` | Passed · 2026-10-20 · auto |
-| S-092.10 | The Paste values modal: ticked rows are the targets (a page picker when none are ticked); the preview is a vertical list per page, one line per field with the current value faded beneath, long values folded to 3 lines, unchanged fields behind "show unchanged"; Save N fields on M pages, Cancel, then Undo | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-092.10 | ~~The Paste values modal~~ Removed by spec 096: the global modal, its page picker and the row checkboxes are gone; paste is per page in the Edit modal (S-096) | — | Retired · 2026-10-20 |
 | S-092.11 | In the grid: click selects a cell, Shift+click a rectangle, Ctrl/Cmd+A all visible botfield cells, Ctrl/Cmd+C copies TSV, Ctrl/Cmd+V pastes from the selected cell (a single value fills the selection); pasted cells are pending (highlighted, old value on hover) with a bar "N cells changed on M pages · Save · Cancel"; a cell edited while changes are pending joins them; leaving with pending changes asks first | browser | Passed · 2026-10-20 · browser (headless Chrome) |
 | S-092.12 | At 1366×768, 1920×1080 and 390 px the table fills the rest of the screen: the page doesn't scroll, the table's horizontal bar is visible without scrolling, the header row and first columns stay sticky; the same on every chatbot page that used a fixed `calc(100vh - …)` height | browser | Passed · 2026-10-20 · browser (headless Chrome) |
 
