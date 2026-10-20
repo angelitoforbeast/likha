@@ -12,6 +12,7 @@ use App\Support\NavAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -23,6 +24,8 @@ use Throwable;
  */
 class ChatbotController extends Controller
 {
+    private const MAX_CELLS = 5000; // kada Paste values: 60 page × mga 52 column ay mga 3,100
+
     public function __construct(private PageSettings $settings, private ChatbotFields $fields)
     {
     }
@@ -108,17 +111,10 @@ class ChatbotController extends Controller
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
         if (in_array($key, ChatbotFields::RESERVED, true)) return response()->json(['error' => 'ACTIVE is changed with the On/Off switch.'], 422);
         if (!$this->fields->isColumn($key)) return response()->json(['error' => 'Unknown column.'], 422);
-        if (mb_strlen($value) > ChatbotFields::MAX_VALUE) return response()->json(['error' => 'At most ' . ChatbotFields::MAX_VALUE . ' characters.'], 422);
-        if (strlen($value) > ChatbotFields::MAX_BYTES) {
-            return response()->json(['error' => 'Too long: at most ' . ChatbotFields::MAX_BYTES . ' bytes. Accented letters and emoji take 2 to 4 bytes each.'], 422);
-        }
+        if ($error = $this->valueError($key, $value)) return response()->json(['error' => $error], 422);
         if ($value !== '' && $key === 'flow' && !in_array($value, $this->flowNames(), true)) {
             return response()->json(['error' => 'Pick a flow from the list.'], 422);
         }
-        if ($value !== '' && ChatbotFields::kind($key) === 'image' && !$this->isImageUrl($value)) {
-            return response()->json(['error' => 'Use an image link that starts with http:// or https://.'], 422);
-        }
-
         // FLOW: ang pinili sa dropdown ay itinatali ayon sa id (chatbot.flow_id), para ang FLOW text lang ay hindi tumakbo.
         if ($key === 'flow') {
             $had = $this->settings->get($page, ChatbotFields::PROVIDER, 'flow');
@@ -138,6 +134,64 @@ class ChatbotController extends Controller
         $res = $this->settings->set($page, ChatbotFields::PROVIDER, $key, $value, false, Auth::id());
 
         return response()->json(['status' => $res['status'], 'value' => $res['setting']->plainValue()]);
+    }
+
+    /**
+     * Paste values: maraming botfield sa isang request at isang transaction, lahat o wala (isang mali = 422, walang
+     * na-save). Bawat isa ay gaya ng isang cell (PageSettings, parehong limit at link check). Ang ACTIVE at FLOW ay
+     * nilalaktawan; ang blangko ay walang binabago maliban kung blanks_empty. Ibinabalik ang dating value ng bawat
+     * nabago ('' = wala dati), para sa Undo, na ipinapadala ulit dito na may blanks_empty.
+     */
+    public function cells(Request $request)
+    {
+        $this->checkAccess();
+        $changes = $request->input('changes');
+        if (!is_array($changes) || $changes === []) return response()->json(['error' => 'Nothing to save.'], 422);
+        if (count($changes) > self::MAX_CELLS) return response()->json(['error' => 'At most ' . self::MAX_CELLS . ' fields per save.'], 422);
+        $blanksEmpty = $request->boolean('blanks_empty');
+        $columns = array_column($this->fields->columns(), 'key');
+        $listed = [];
+        foreach ($this->pages() as $p) $listed[$this->settings->pageKey($p)] = $p;
+
+        $todo = [];
+        $errors = [];
+        $skipped = 0;
+        foreach (array_values($changes) as $c) {
+            $c = is_array($c) ? $c : [];
+            [$pageIn, $key, $value] = array_map(fn ($f) => is_scalar($c[$f] ?? null) ? trim((string) $c[$f]) : '', ['page_name', 'key', 'value']);
+            $key = strtolower($key);
+            if ($key === 'flow' || in_array($key, ChatbotFields::RESERVED, true)) { $skipped++; continue; }
+            $page = $listed[$this->settings->pageKey($pageIn)] ?? null;
+            $error = $page === null ? 'This page is not on the chatbot list.' : (in_array($key, $columns, true) ? $this->valueError($key, $value) : 'Unknown column.');
+            if ($error === null && isset($c['value']) && !is_scalar($c['value'])) $error = 'The value must be text.';
+            if ($error !== null) { $errors[] = ['page_name' => $pageIn, 'key' => $key, 'error' => $error]; continue; }
+            if ($value === '' && !$blanksEmpty) continue;
+            $todo[$this->settings->pageKey($page) . "\0" . $key] = [$page, $key, $value]; // parehong cell: ang huli ang masusunod
+        }
+        if ($errors) {
+            return response()->json(['error' => count($errors) . (count($errors) === 1 ? ' field' : ' fields') . ' cannot be saved, so nothing was saved.', 'errors' => array_slice($errors, 0, 50)], 422);
+        }
+
+        $undo = [];
+        $unchanged = 0;
+        $pages = [];
+        DB::transaction(function () use ($todo, &$undo, &$unchanged, &$pages) {
+            foreach ($todo as [$page, $key, $value]) {
+                $before = (string) $this->settings->get($page, ChatbotFields::PROVIDER, $key);
+                if ($value === '') {
+                    $actives = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key)->where('active', true)->get();
+                    foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());
+                    $changed = $actives->isNotEmpty();
+                } else {
+                    $changed = $this->settings->set($page, ChatbotFields::PROVIDER, $key, $value, false, Auth::id())['status'] !== 'unchanged';
+                }
+                if (!$changed) { $unchanged++; continue; }
+                $undo[] = ['page_name' => $page, 'key' => $key, 'value' => $before];
+                $pages[$this->settings->pageKey($page)] = true;
+            }
+        });
+
+        return response()->json(['saved' => count($undo), 'unchanged' => $unchanged, 'skipped' => $skipped, 'pages' => count($pages), 'undo' => $undo]);
     }
 
     /** "+ Column": bagong botfield para sa lahat ng page. */
@@ -264,6 +318,16 @@ class ChatbotController extends Controller
     private function flowNames(): array
     {
         return Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::orderBy('name')->pluck('name')->all() : [];
+    }
+
+    /** Ang mali sa value ng isang botfield (haba, bytes, link ng larawan), o null. Iisa para sa isang cell at sa paste. */
+    private function valueError(string $key, string $value): ?string
+    {
+        if (mb_strlen($value) > ChatbotFields::MAX_VALUE) return 'At most ' . ChatbotFields::MAX_VALUE . ' characters.';
+        if (strlen($value) > ChatbotFields::MAX_BYTES) return 'Too long: at most ' . ChatbotFields::MAX_BYTES . ' bytes. Accented letters and emoji take 2 to 4 bytes each.';
+        if ($value !== '' && ChatbotFields::kind($key) === 'image' && !$this->isImageUrl($value)) return 'Use an image link that starts with http:// or https://.';
+
+        return null;
     }
 
     private function isImageUrl(string $value): bool

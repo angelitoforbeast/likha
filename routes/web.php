@@ -338,6 +338,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/pages', [\App\Http\Controllers\ChatbotController::class, 'index'])->name('pages.index');
     Route::get('/data', [\App\Http\Controllers\ChatbotController::class, 'data'])->name('data');
     Route::post('/cell', [\App\Http\Controllers\ChatbotController::class, 'cell'])->middleware('throttle:120,1,chatbot-cell')->name('cell');
+    Route::post('/cells', [\App\Http\Controllers\ChatbotController::class, 'cells'])->middleware('throttle:30,1,chatbot-cells')->name('cells');
     Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');
     Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
     Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');

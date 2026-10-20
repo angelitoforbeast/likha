@@ -13,7 +13,8 @@
 
 @push('styles')
 <style>
-    #ss-box { max-height: calc(100vh - 19rem); min-height: 12rem; }
+    /* Ang kahon ay kasing-taas ng laman pero hanggang sa natitirang taas ng screen lang (.cb-page ng layout), kaya ang
+       horizontal bar ay laging kita at ang page ay hindi nag-i-scroll. */
     #ss-table thead th { position: sticky; top: 0; z-index: 10; background: #fff; }
 </style>
 @endpush
@@ -24,6 +25,7 @@
     $color = ['active' => 'bg-green-100 text-green-800', 'paused' => 'bg-amber-100 text-amber-900', 'completed' => 'bg-blue-100 text-blue-800',
         'unsubscribed' => 'bg-slate-200 text-slate-700', 'error' => 'bg-red-100 text-red-800'];
 @endphp
+<div class="cb-page">
 <form method="GET" class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
     <label class="flex flex-col text-xs">Status
         <select name="status" class="border px-2 py-1 text-sm text-gray-900">
@@ -43,7 +45,7 @@
 @if($rows->isEmpty())
     <p class="cb-card px-4 py-3 text-sm text-slate-600">No subscribers{{ $status || $pageId !== '' ? ' with these filters' : ' yet' }}.</p>
 @else
-    <div id="ss-box" class="cb-card overflow-auto">
+    <div id="ss-box" class="cb-card min-h-[12rem] shrink overflow-auto">
         <table id="ss-table" class="cb-table">
             <thead><tr><th>Customer</th><th>Page</th><th class="w-28">Status</th><th class="w-20">Step</th><th class="w-36">Next send</th><th class="w-36">Last sent</th><th class="w-24">Enrolled via</th><th class="w-32">Exit reason</th></tr></thead>
             <tbody>
@@ -72,6 +74,7 @@
         <div class="mt-2"><a class="cb-btn cb-btn-sm" href="{{ request()->fullUrlWithQuery(['before' => $next]) }}">Older</a></div>
     @endif
 @endif
+</div>
 
 <div id="ss-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="ss-title">
     <div class="mx-auto w-full max-w-lg rounded-xl bg-white p-5 text-sm shadow-lg">

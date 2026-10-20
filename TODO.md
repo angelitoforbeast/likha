@@ -826,3 +826,12 @@ Accepted, not fixed:
 - **The Botcake base URL, headers, 15 s timeout and 10 s Retry-After cap** are written in both `BotcakeClient::shared()` and `BotcakeSendPool`. Reason: two places, and the retry rule itself is already shared (`BotcakeClient::retryWait`).
 - **No test for the mock answering on a timer inside the pool.** Reason: the load check runs every send through it, with misrouted = 0.
 - **`BotcakeSendQueue::enabled()` runs `Schema::hasTable` on every send.** Reason: one cheap query; a static cache leaked between tests in 087.
+
+## 092: paste blocks of botfield values on /chatbot/pages (2026-10-20)
+
+- **Drag to select a rectangle in the grid is not built** (click, Shift+click and Ctrl/Cmd+A are). Reason: the grid paste was secondary in the spec, and a plain click already opens the row; drag needs care not to fight text selection and the sticky columns. Shift+click covers the same need.
+- **Undo can be refused whole** when a previous value no longer passes the rules (a legacy non-link in an image column, or a value over MAX_BYTES saved before the limit). Reason: every value in the table came through the same checks, so this needs data written outside the page; the 422 names the cell, and nothing is half-undone.
+- **No test for a failure inside the transaction rolling back** (only the checks before it are tested). Reason: every check runs before the transaction; a failure inside it would be a database error, and Laravel's `DB::transaction` rolls back on any exception.
+- **A one-cell paste whose text is a field name ("price", "flow") is read as a header line** and answered "Only a header line was pasted". Reason: it is the spec's own rule (a first line that names fields is a header); the message says what happened.
+- **The flow editor canvas (`/chatbot/flows/{id}`) still uses `height: calc(100vh - 17rem)`.** Reason: it has no scrollbar (the canvas pans and zooms inside), and another spec is changing that page now; the same `.cb-page` fix can follow there.
+- **Suggestion for the owner: map pasted rows by the PAGE column.** An LDT sheet copied with its PAGE column could fill each page by name instead of by order. Reason: not in this spec; today PAGE is listed as ignored.
