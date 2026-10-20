@@ -163,12 +163,14 @@ return [
             'database' => env('REDIS_DB', '0'),
         ],
 
+        // Ang cache data (CACHE_STORE=redis): maaaring sariling Redis instance na may eviction (LRU), hiwalay sa queue na
+        // noeviction. Ang mga lock ng cache ay nasa "default" (ang queue instance): hindi kailanman natatanggal.
         'cache' => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'url' => env('REDIS_CACHE_URL', env('REDIS_URL')),
+            'host' => env('REDIS_CACHE_HOST', env('REDIS_HOST', '127.0.0.1')),
             'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
+            'password' => env('REDIS_CACHE_PASSWORD', env('REDIS_PASSWORD')),
+            'port' => env('REDIS_CACHE_PORT', env('REDIS_PORT', '6379')),
             'database' => env('REDIS_CACHE_DB', '1'),
         ],
 

@@ -197,8 +197,8 @@ return [
     */
 
     // Ang chatbot at chatblast lang (Redis). Ang astra, default at J&T ay nasa database pa rin, sa sariling Supervisor group.
-    // Ang timeout at tries ay gaya ng dating Supervisor command; ang chatblast ay may sariling pool ang chatblast-high
-    // (balance auto: minProcesses kada queue), kaya ang Delivering ay hindi naghihintay sa In transit.
+    // Ang timeout at tries ay gaya ng dating Supervisor command. Ang chatblast ay iisang pool para sa "chatblast-high,chatblast":
+    // bawat worker ay kumukuha muna sa chatblast-high (Delivering) bago sa chatblast, at ang dami ay ayon sa kabuuang pila.
     'defaults' => [
         'chatbot' => [
             'connection' => 'redis',
@@ -218,10 +218,10 @@ return [
         ],
         'chatblast' => [
             'connection' => 'redis',
-            'queue' => ['chatblast-high', 'chatblast'],
+            'queue' => ['chatblast-high,chatblast'], // isang pool: ang high muna (hindi hiwalay na pool na hinahati ayon sa dami)
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
-            'minProcesses' => 1, // kada queue: 2 sa kabuuan
+            'minProcesses' => 2,
             'maxProcesses' => (int) env('HORIZON_CHATBLAST_MAX', 8),
             'balanceMaxShift' => 1,
             'balanceCooldown' => 3,

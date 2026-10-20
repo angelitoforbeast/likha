@@ -53,6 +53,20 @@ class QueueRedisHorizonTest extends ChatblastTestCase
         Queue::assertPushedOn('chatblast-high', SendChatblastMessage::class, fn ($job) => $job->messageId === $delivering->id);
         Queue::assertPushedOn('chatblast', SendChatblastMessage::class, fn ($job) => $job->messageId === $transit->id);
         Queue::assertNotPushed(SendChatblastMessage::class, fn ($job) => $job->messageId === $transit->id && $job->queue !== 'chatblast');
+
+        // Still on the database driver (before the cutover, or after a rollback): everything stays on "chatblast", the only
+        // queue the old worker group listens to.
+        config(['queue.chatblast_connection' => 'database']);
+        SendChatblastMessage::dispatch($delivering->id);
+        $this->assertSame(['database', 'chatblast'], [Queue::pushed(SendChatblastMessage::class)->last()->connection, Queue::pushed(SendChatblastMessage::class)->last()->queue]);
+
+        // Horizon's chatblast supervisor works both queues, and every timeout stays under the Redis retry_after (no job runs twice).
+        $this->assertSame(['chatblast-high,chatblast'], config('horizon.defaults.chatblast.queue'), 'one pool: every worker takes chatblast-high first');
+        $this->assertSame(['chatbot'], config('horizon.defaults.chatbot.queue'));
+        $retry = config('queue.connections.redis.retry_after');
+        foreach ([config('horizon.defaults.chatbot.timeout'), config('horizon.defaults.chatblast.timeout'), (new SendChatblastMessage($transit->id))->timeout, (new RunChatbotFlow(1))->timeout] as $timeout) {
+            $this->assertLessThan($retry, $timeout);
+        }
     }
 
     public function test_S_088_2_each_queue_takes_its_connection_from_env_and_falls_back_to_the_default(): void
@@ -92,6 +106,9 @@ class QueueRedisHorizonTest extends ChatblastTestCase
         $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
         $this->get('/horizon')->assertForbidden();
         $this->get('/horizon/api/stats')->assertForbidden();
+        $this->app['env'] = 'local'; // Horizon's own default opens the dashboard to everyone on "local"
+        $this->get('/horizon')->assertForbidden();
+        $this->app['env'] = 'testing';
 
         $this->actingAs($this->user());
         $this->get('/horizon')->assertOk();

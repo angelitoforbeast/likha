@@ -28,10 +28,11 @@ class SendChatblastMessage implements ShouldQueue
 
     public function __construct(public int $messageId)
     {
-        // Ang Delivering ay sa sariling queue (chatblast-high, may sariling worker sa Horizon): hindi naghihintay sa In transit.
-        $kind = BotcakeMessage::whereKey($messageId)->value('kind');
-        $this->onConnection(config('queue.chatblast_connection'))
-            ->onQueue($kind === ChatblastSender::HIGH_KIND ? ChatblastSender::HIGH_QUEUE : ChatblastSender::QUEUE);
+        // Sa Horizon (hindi database): ang Delivering ay sa sariling queue (chatblast-high, may sariling worker), kaya hindi
+        // naghihintay sa In transit. Sa database ay "chatblast" pa rin ang lahat: doon lang nakikinig ang dating worker group.
+        $connection = (string) config('queue.chatblast_connection');
+        $high = $connection !== 'database' && BotcakeMessage::whereKey($messageId)->value('kind') === ChatblastSender::HIGH_KIND;
+        $this->onConnection($connection)->onQueue($high ? ChatblastSender::HIGH_QUEUE : ChatblastSender::QUEUE);
     }
 
     public function handle(ChatblastSender $sender): void

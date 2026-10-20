@@ -155,6 +155,11 @@ Schedule::command('chatblast:auto')
 // 04:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
 // kumukuha ng oras, kaya ang simula mula sa chatblast:auto sa parehong oras ay walang ginagawa. JNT_TRACK_SYNC_AUTO o
 // ang toggle sa /jnt/track-sync ang nag-o-on.
+// Horizon: ang metrics ng dashboard (kada 5 minuto), kapag nasa Redis na ang chatbot o chatblast queue lang.
+Schedule::command('horizon:snapshot')
+    ->everyFiveMinutes()
+    ->when(fn () => config('queue.chatbot_connection') === 'redis' || config('queue.chatblast_connection') === 'redis');
+
 Schedule::command('jnt:track-sync-auto')
     ->timezone('Asia/Manila')
     ->cron('20 2,4-23 * * *')
