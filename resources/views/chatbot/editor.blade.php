@@ -38,7 +38,9 @@
 <div id="ed" data-graph-url="{{ route('chatbot.flows.graph', $flow->id) }}" data-save-url="{{ route('chatbot.flows.save', $flow->id) }}"
      data-publish-url="{{ route('chatbot.flows.publish', $flow->id) }}" data-discard-url="{{ route('chatbot.flows.discard', $flow->id) }}"
      data-versions-url="{{ route('chatbot.flows.versions', $flow->id) }}" data-restore-url="{{ route('chatbot.flows.restore', [$flow->id, 0]) }}"
-     data-test-url="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}">
+     data-test-url="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}"
+     data-sheet-url="{{ route('chatbot.sheet.info') }}" data-sheet-customers-url="{{ route('chatbot.flows.sheet-customers', $flow->id) }}"
+     data-sheet-preview-url="{{ route('chatbot.flows.sheet-preview', $flow->id) }}" data-max-columns="{{ \App\Services\Chatbot\FlowGraph::MAX_COLUMNS }}">
     {{-- Ang draft: ang mga pagbabago ay hindi live hanggang Publish. --}}
     <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span id="chip" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700" aria-live="polite">…</span>
@@ -428,11 +430,7 @@
             ]));
             body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: !!c.send}), v => c.send = v, true), 'Send the answer to the customer']));
         }
-        if (n.type === 'sheet') {
-            body.append(label('Spreadsheet link or ID', bind(input({maxlength: 300, placeholder: 'https://docs.google.com/spreadsheets/d/…'}, c.sheet), v => c.sheet = v)));
-            body.append(label('Tab', bind(input({maxlength: 100, placeholder: 'Sheet1'}, c.tab), v => c.tab = v)));
-            body.append(label('Columns: one template per line (A, B, C …). A cell with a variable is never a formula.', bind(input({tag: 'textarea', rows: 8}, (c.columns || []).join('\n')), v => c.columns = v.split(/\r?\n/))));
-        }
+        if (n.type === 'sheet') sheetForm(c, body);
         if (n.type === 'sequence') {
             const pick = el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
             const fill = () => {
@@ -449,6 +447,105 @@
             b.addEventListener('click', () => { if (!lastField) return; const s = lastField.selectionStart ?? lastField.value.length; lastField.value = lastField.value.slice(0, s) + OPEN + v + CLOSE + lastField.value.slice(s); lastField.dispatchEvent(new Event('input')); lastField.focus(); }); return b; }));
         $('form-box').classList.remove('hidden');
         body.querySelector('input, textarea, select')?.focus();
+    }
+    // ---- the Google Sheet step: ang pangalan, ang mga tab, ang row 1 bilang header, at ang preview ng row ----
+    // Ang naka-save ay ang dati pa ring listahan ng columns (A, B, C …; blangko = walang laman ang cell).
+    const MAX_COLUMNS = parseInt(ed.dataset.maxColumns, 10) || 50;
+    const colLetter = i => { let s = ''; for (let k = i + 1; k > 0; k = Math.floor((k - 1) / 26)) s = String.fromCharCode(65 + (k - 1) % 26) + s; return s; };
+    let customers = null; // isang basa kada bukas ng editor
+    function sheetForm(c, body) {
+        c.columns = Array.isArray(c.columns) ? c.columns : [];
+        let info = null, headers = [], extra = 0, cells = null, timer = null, seq = 0;
+        const box = el('div', {class: 'space-y-1'}), note = el('div', {class: 'text-xs', 'aria-live': 'polite'});
+        const link = bind(input({maxlength: 300, placeholder: 'https://docs.google.com/spreadsheets/d/…'}, c.sheet), v => { c.sheet = v; clearTimeout(timer); timer = setTimeout(() => load(false), 600); });
+        const refresh = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Refresh', title: 'Read the sheet again (skips the 5-minute cache)'});
+        refresh.addEventListener('click', () => load(true));
+        const tabBox = el('div'), table = el('div'), preview = el('div', {class: 'flex flex-wrap items-center gap-2'});
+        box.append(label('Spreadsheet link or ID', el('div', {class: 'flex gap-2'}, [link, refresh])), note);
+        body.append(box, tabBox, table, preview);
+
+        async function load(fresh) {
+            clearTimeout(timer);
+            const mine = ++seq;
+            if (!(c.sheet || '').trim()) { info = null; headers = []; note.replaceChildren(); drawTab(); drawTable(); return; }
+            note.className = 'text-xs text-slate-500'; note.textContent = 'Reading the sheet…';
+            const q = new URLSearchParams({sheet: c.sheet, tab: c.tab || ''});
+            if (fresh) q.set('refresh', '1');
+            const r = await fetch(ed.dataset.sheetUrl + '?' + q, {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, data: await r.json().catch(() => ({}))})).catch(() => ({ok: false, data: {}}));
+            if (mine !== seq || !editing || editing.c !== c) return; // may mas bagong basa, o sarado na ang form
+            if (r.ok) {
+                info = r.data; headers = r.data.tab ? r.data.tab.headers : [];
+                note.className = 'text-xs text-slate-700';
+                note.replaceChildren(el('span', {class: 'text-slate-500', text: 'Spreadsheet: '}), el('b', {class: 'break-words', text: info.title || '(no name)'}));
+            } else {
+                info = null; headers = [];
+                note.className = 'text-xs';
+                note.replaceChildren(r.data.share ? shareBox(r.data.email) : el('span', {class: 'text-red-700', text: r.data.error || 'Could not read the sheet.'}));
+            }
+            drawTab(); drawTable();
+        }
+        function shareBox(email) {
+            const copy = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Copy email'});
+            const again = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Check again'});
+            const mail = el('b', {class: 'break-all font-mono text-[11px]', text: email});
+            copy.addEventListener('click', () => {
+                const done = () => { copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy email', 1500); };
+                const fallback = () => { getSelection().selectAllChildren(mail); document.execCommand('copy'); done(); }; // http: walang navigator.clipboard
+                if (navigator.clipboard) navigator.clipboard.writeText(email).then(done, fallback); else fallback();
+            });
+            again.addEventListener('click', () => load(true));
+            return el('div', {class: 'space-y-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900', role: 'alert'}, [
+                el('div', {}, ['Google won\'t open this sheet. Share this sheet with ', mail, ' as Editor (Share → paste the email → Editor), then press Check again.']),
+                el('div', {class: 'flex flex-wrap items-center gap-2'}, [copy, again]),
+            ]);
+        }
+        function drawTab() {
+            if (!info) {
+                tabBox.replaceChildren(label('Tab', bind(input({maxlength: 100, placeholder: 'Sheet1'}, c.tab), v => c.tab = v)));
+                return;
+            }
+            const names = info.tabs.map(t => t.title), missing = !!c.tab && !names.includes(c.tab);
+            const opts = (c.tab ? [] : [['', '— Pick a tab —']]).concat(missing ? [[c.tab, c.tab + ' (missing)']] : [], names.map(t => [t, t]));
+            const sel = bind(el('select', {class: 'w-full rounded-md border px-2 py-1 text-sm ' + (missing ? 'border-red-400 text-red-700' : 'border-slate-300')},
+                opts.map(([v, t]) => el('option', {value: v, text: t, selected: v === (c.tab || '')}))), v => { c.tab = v; cells = null; load(false); });
+            tabBox.replaceChildren(...[label('Tab', sel), missing ? el('p', {class: 'mt-0.5 text-xs text-red-700', text: 'The tab "' + c.tab + '" is missing from this sheet. Pick another tab.'}) : null].filter(Boolean));
+        }
+        function drawTable() {
+            const rows = Math.min(MAX_COLUMNS, Math.max(headers.length, c.columns.length, 1) + extra);
+            const th = (t, cls = '') => el('th', {class: 'px-1 py-1 text-left font-medium ' + cls, text: t});
+            const head = el('tr', {class: 'text-xs text-slate-500'}, [th('', 'w-8'), th('Header (row 1)', 'w-[30%]'), th('Template'), cells ? th('Preview', 'w-[30%]') : null]);
+            const trs = [];
+            for (let i = 0; i < rows; i++) {
+                const tpl = bind(input({maxlength: 2000, 'aria-label': 'Column ' + colLetter(i) + ' template'}, c.columns[i]), v => { while (c.columns.length < i) c.columns.push(''); c.columns[i] = v; });
+                trs.push(el('tr', {class: 'border-t border-slate-100 align-top'}, [
+                    el('td', {class: 'px-1 py-1.5 font-mono text-xs text-slate-500', text: colLetter(i)}),
+                    el('td', {class: 'break-words px-1 py-1.5 text-xs ' + (headers[i] ? 'text-slate-800' : 'text-slate-400'), text: headers[i] || '—'}),
+                    el('td', {class: 'px-1 py-1'}, tpl),
+                    cells ? el('td', {class: 'break-words px-1 py-1.5 font-mono text-[11px] text-slate-700', text: cells[i] ?? ''}) : null,
+                ]));
+            }
+            const add = rows < MAX_COLUMNS ? el('button', {type: 'button', class: 'cb-btn cb-btn-sm mt-1', text: '+ Column'}) : null;
+            add?.addEventListener('click', () => { extra++; drawTable(); });
+            table.replaceChildren(...[el('div', {class: 'mb-0.5 text-xs text-slate-600', text: 'Columns: the template of each column (A, B, C …). A cell with a variable is never a formula; empty = the cell stays empty.'}),
+                el('table', {class: 'w-full table-fixed text-sm'}, [el('thead', {}, head), el('tbody', {}, trs)]), add].filter(Boolean));
+        }
+        function drawPreview() {
+            const btn = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Preview row', disabled: !customers || !customers.length});
+            const pick = el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm sm:w-auto sm:min-w-0 sm:flex-1', 'aria-label': 'Customer for the preview'},
+                (customers || []).map(x => el('option', {value: x.chat_id, text: x.label})));
+            const msg = el('span', {class: 'text-xs text-slate-500', 'aria-live': 'polite', text: customers === null ? 'Loading customers…' : (customers.length ? 'Preview only: nothing is written.' : 'No chats yet on the pages that use this flow.')});
+            btn.addEventListener('click', async () => {
+                msg.textContent = 'Filling…';
+                const r = await send(ed.dataset.sheetPreviewUrl, 'POST', {chat_id: parseInt(pick.value, 10), columns: c.columns}).catch(() => ({ok: false, data: {}}));
+                if (!editing || editing.c !== c) return;
+                if (!r.ok) { msg.textContent = r.data.error || 'Could not make the preview.'; return; }
+                cells = r.data.cells; msg.textContent = 'Preview only: nothing is written.'; drawTable();
+            });
+            preview.replaceChildren(...[customers && customers.length ? pick : null, btn, msg].filter(Boolean));
+        }
+        drawTab(); drawTable(); drawPreview(); load(false);
+        if (customers === null) fetch(ed.dataset.sheetCustomersUrl, {headers: {'Accept': 'application/json'}}).then(r => r.ok ? r.json() : {customers: []})
+            .then(d => { customers = d.customers || []; if (editing && editing.c === c) drawPreview(); }).catch(() => { customers = []; });
     }
     function bind(control, set, checkbox = false) {
         const fire = () => set(checkbox ? control.checked : control.value);

@@ -1655,3 +1655,18 @@ Spec 089. Tests in `tests/Feature/Chatblast/BotcakeAsyncSendTest.php` (fake Botc
 | S-089.11 | With no pool, the minute tick: a chatblast ticket past 240 s goes back to the queue (the job sends it, lock released, no gap); a chatbot ticket past 10 minutes takes the failed path and frees the customer; a lost resume is resumed once | `test_S_089_11…` | Passed · 2026-10-20 · auto |
 | S-089.12 | A send waiting in the page's lane checks the pause and the emergency stop before it goes out: nothing is sent, the reply is logged as skipped; a pause stops the run, the switch skips and goes on as before | `test_S_089_12…` (2 data sets) | Passed · 2026-10-20 · auto |
 | S-089.13 | Given 40 chatblast messages on one page, then the pool holds only that page's share, and a chatbot send on another page goes out at once | `test_S_089_13…` | Passed · 2026-10-20 · auto |
+
+## S-090 The Google Sheet step shows the spreadsheet, its tabs and its column headers
+
+Spec 090. Tests in `tests/Feature/Chatblast/ChatbotSheetPickerTest.php` (fake Google: no call leaves the test). The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-090.1 | Given a docs.google.com link, when the editor asks for it, then it gets the spreadsheet name and its tabs in sheet order (each capped at 200 letters), and no header is read yet | `test_S_090_1…` | Passed · 2026-10-20 · auto |
+| S-090.2 | Given a picked tab, then its row 1 comes back as headers (at most 100, each capped at 200 letters); a saved tab that is gone comes back as missing and is not read | `test_S_090_2…` | Passed · 2026-10-20 · auto |
+| S-090.3 | Given Google answers 403 or 404, then the editor gets "Share this sheet with gsheet-to-database@… as Editor" with the email, never Google's raw error; the refusal is not cached, so Check again works at once after sharing | `test_S_090_3…` (2 data sets) | Passed · 2026-10-20 · auto |
+| S-090.4 | Given the name, tabs and headers were read, then for 5 minutes they come from the cache; Refresh reads Google again | `test_S_090_4…` | Passed · 2026-10-20 · auto |
+| S-090.5 | Given a flow saved before this change (n43 with `columns` and empty columns), when it opens and saves, then the step config is unchanged | `test_S_090_5…` | Passed · 2026-10-20 · auto |
+| S-090.6 | Given the recent customers of the pages that use the flow (one per customer, newest first), when Preview row runs for one, then the cells are what the run would write, formula guard included, and nothing is written; a chat of another page is refused | `test_S_090_6…` | Passed · 2026-10-20 · auto |
+| S-090.7 | Given a row is written, then its `updatedRange` and the tab's gid are kept, and /chatbot/replies and the Inbox show "Open row" to `…/edit#gid=<gid>&range=A123`; rows without a range (older rows) show no link | `test_S_090_7…` | Passed · 2026-10-20 · auto |
+| S-090.8 | Given a non-Google link, a bare word, a cloud metadata URL or a too-long tab, then the endpoint answers 422 without calling Google; a user without editor access gets 403 on all three endpoints | `test_S_090_8…` | Passed · 2026-10-20 · auto |

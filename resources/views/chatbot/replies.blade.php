@@ -91,7 +91,8 @@
         if (!res.ok) return;
         const r = await res.json(), dl = $('rp-detail');
         const content = r.kind === 'sheet'
-            ? el('div', {}, [el('div', {class: 'text-xs text-slate-500', text: (r.content.sheet || '') + ' · ' + (r.content.tab || '')}), el('ol', {class: 'list-decimal pl-5'}, (r.content.row || []).map(c => el('li', {class: 'break-words', text: c})))])
+            ? el('div', {}, [el('div', {class: 'text-xs text-slate-500', text: (r.content.sheet || '') + ' · ' + (r.content.tab || '')}), el('ol', {class: 'list-decimal pl-5'}, (r.content.row || []).map(c => el('li', {class: 'break-words', text: c}))),
+                r.link ? el('a', {href: r.link, target: '_blank', rel: 'noopener noreferrer', class: 'text-sm text-blue-700 hover:underline', text: 'Open row'}) : null])
             : el('div', {class: 'space-y-1'}, (r.content || []).map(m => m.type === 'image' ? el('div', {class: 'break-all text-blue-700', text: '[image] ' + m.url}) : el('div', {class: 'whitespace-pre-line break-words rounded-lg bg-blue-50 px-2 py-1', text: m.text})));
         const rows = [['Time', r.time], ['Page', r.page + ' (' + r.page_id + ')'], ['Customer', r.psid], ['Chat', r.chat_id ?? '—'], ['Flow', (r.flow ?? '—') + ' · ' + (r.node ?? '')],
             ['Kind', r.kind], ['Status', r.status + (r.http ? ' (HTTP ' + r.http + ')' : '')], ['Error', r.error ?? '—']];
