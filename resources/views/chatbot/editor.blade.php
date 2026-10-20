@@ -22,7 +22,7 @@
     .nd-h { cursor: grab; padding: 6px 10px; border-bottom: 1px solid #e2e8f0; border-radius: 10px 10px 0 0; font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
     .nd-b { padding: 6px 10px; color: #475569; max-height: 5.5em; overflow: hidden; white-space: pre-line; word-break: break-word; }
     /* Ang Set field: ang mga linya ng value ay nakikita, hanggang 3 linya. */
-    .t-set .nd-b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+    .t-set .nd-b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; padding-bottom: 0; margin-bottom: 6px; }
     .nd-p { display: flex; justify-content: flex-end; align-items: center; gap: 6px; padding: 2px 0 2px 10px; color: #334155; }
     .dot { width: 14px; height: 14px; border-radius: 999px; border: 2px solid #64748b; background: #fff; margin-right: -8px; cursor: crosshair; flex: none; }
     .dot.on { background: #64748b; }
