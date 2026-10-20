@@ -857,3 +857,11 @@ Accepted, not fixed:
 - **A reply queued before "Clear AI memory" and sent after it stays forgotten.** The marker holds the highest `chatbot_replies` id at the clear, and a queued reply's row is older. Reason: the brief asks for a chat and reply marker, not a time window; the gap is one in-flight send, and that send was answering the conversation being forgotten.
 - **The editor test (S-094.7) only checks the rendered source.** The textarea growth and the 3-line clamp were checked once in headless Chrome, not on every run. Reason: the project has no JS test runner, and adding one is a new dependency.
 - **"Also clear these fields" is a list of text boxes with the field suggestions, not a checkbox multi-select.** Reason: the editor knows only the fields the flow already uses, so a checkbox list would hide fields that aren't used yet. This matches the Set field step's field input.
+
+## 097: grouped variable list in the flow editor (2026-10-21)
+
+- **The saved customer keys are read on every editor load** (`DISTINCT key` over the flow's pages in `chatbot_customer_values`; the unique index starts with `page_id, psid`, so the database scans those pages' rows). Reason: the read runs only when a step form's data loads (once per editor open), staff-only; at today's size it is fast. If the table grows to millions of rows, cache the list for a few minutes or add a `(page_id, key)` index.
+- **At most 320 saved keys are listed, A–Z, so keys late in the alphabet drop off past that cap** with no note. Reason: a flow's own fields (save to, Set field) are always listed; the cap only trims fields found on customers, and 320 is several times today's count.
+- **A name could get the same "Also …" line twice** if two botfield labels are the same after `ChatbotVars::norm` (e.g. "Prompt 1" and "PROMPT_1") and also a customer field. Reason: the column names are owner-made and unique in practice; the chip and the insert still work.
+- **The Sequences fold matches the labels "Seq N" and "Seq Img N"** in the editor script, not the column definitions. Reason: these labels are the fixed defaults in `ChatbotFields::defaults()`; a renamed column would only show unfolded.
+- **`$groups = $this->variableGroups($flow)` is assigned inside the response array in `graph()`.** Reason: it keeps the change to one line in a legacy method; style only.

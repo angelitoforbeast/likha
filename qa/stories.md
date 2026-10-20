@@ -1739,3 +1739,15 @@ Spec 095. Tests in `tests/Feature/Chatblast/BotcakeMessageShapeTest.php` and `te
 |---|---|---|---|
 | S-095.1 | Given Botcake refuses a send with `message` as a string, an array, a nested array, an object, an array with no string, null, a number, missing, or a string over 150 letters, then the outcome is `failed` with a readable reason (the string, the first string inside, compact JSON, or "Botcake refused it"), capped at 150 letters, and nothing throws | `test_S_095_1…` (9 data sets) | Passed · 2026-10-20 · auto |
 | S-095.2 | Given a sequence step whose send Botcake refuses with `{"success":false,"message":{"error":"x"}}`, when the tick runs the step, then the reply is logged `failed` with `Botcake said "x"` and the job runs to the end | `test_S_095_2…` | Passed · 2026-10-20 · auto |
+
+## S-097 The flow editor's variable list is grouped: System, Botfields, Customer fields
+
+Spec 097. Tests in `tests/Feature/Chatblast/ChatbotVariableGroupsTest.php`. The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-097.1 | Given a flow, when its editor loads, then every variable is in one group: the run variables in System, the `/chatbot/pages` columns in Botfields, and in Customer fields the fields the flow writes (Send "save the reply", AI "save to", Set field ops) plus the fields saved on customers of the pages that use this flow; each has a tooltip on where it comes from | `test_S_097_1…` | Passed · 2026-10-21 · auto |
+| S-097.2 | Given a customer field, then its tooltip lists the steps of this flow that write it ("set by n4 (AI), n5 (Set field)"); a field only found on customers says no step of this flow sets it | `test_S_097_2…` | Passed · 2026-10-21 · auto |
+| S-097.3 | Given saved keys starting with `__` (run state) and fields of a page that doesn't use this flow, then neither is listed | `test_S_097_3…` | Passed · 2026-10-21 · auto |
+| S-097.4 | Given a name in two groups (same after `ChatbotVars::norm`), then it is in both with an "also" flag and the real precedence: built in beats both; a customer field beats a botfield when the customer has it saved, even blank | `test_S_097_4…` | Passed · 2026-10-21 · auto |
+| S-097.5 | In every step form: three headed groups in gray, purple and teal; "!" on duplicates; Seq Img 1–20 and Seq 1–20 folded in "Sequences (40)" that opens on click; the search box filters by name; a click puts the variable in the last field; at 1366 and 390 px without sideways scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
