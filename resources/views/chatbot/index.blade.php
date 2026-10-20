@@ -571,9 +571,10 @@
     /** Bawat field: ang value ngayon, at kung binago (changed) o hindi link sa image field (flagged, hindi sine-save). */
     function peState() {
         return botCols().map(c => {
-            const value = peInput(c.key).value.trim(), old = pe.orig[c.key];
-            const flagged = value !== '' && value !== old && c.kind === 'image' && !ChatbotPaste.isImageLink(value);
-            return {c, value, old, changed: value !== old && !flagged, flagged};
+            // Ikinukumpara sa trimmed na dating value: ang lumang value na may espasyo sa dulo ay hindi "binago" pagbukas.
+            const value = peInput(c.key).value.trim(), old = pe.orig[c.key], same = value === old.trim();
+            const flagged = value !== '' && !same && c.kind === 'image' && !ChatbotPaste.isImageLink(value);
+            return {c, value, old, changed: !same && !flagged, flagged};
         });
     }
     const peDirty = () => !!pe && peState().some(x => x.changed || x.flagged);
