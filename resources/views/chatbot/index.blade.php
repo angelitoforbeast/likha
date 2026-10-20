@@ -17,8 +17,10 @@
     #cb-table td.cb-pending { background: #fef3c7; }
     #cb-table td.cb-pending.cb-sel { background: #fde68a; }
     #cb-table:focus-within td.cb-cell:focus { outline: 2px solid #3b82f6; outline-offset: -2px; }
-    #paste-preview .pv-val { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; cursor: pointer; }
-    #paste-preview .pv-open .pv-val { display: block; -webkit-line-clamp: unset; }
+    /* Edit ng isang page: ang binago (dilaw, may "Was: …") at ang hindi link sa image field (pula, hindi sine-save). */
+    #pe .pe-in { resize: none; overflow-y: auto; max-height: 20rem; }
+    #pe .pe-changed .pe-in { background: #fef3c7; border-color: #f59e0b; }
+    #pe .pe-flagged .pe-in { background: #fef2f2; border-color: #ef4444; }
     /* Text cell: buo ang line break, 3 linya kapag sarado (may fade kapag may kasunod pa). Ang click sa cell ay nagbubukas ng
        buong row: bawat cell hanggang 15rem (mga 240 px), may sariling scroll. Ang lapis lang ang nagbubukas ng editor. */
     #cb-table .cb-txt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; max-width: 14rem; white-space: pre-line; overflow-wrap: anywhere; }
@@ -58,8 +60,7 @@
         </label>
         <button id="add-column" type="button" class="cb-btn">+ Column</button>
         @if($isCeo)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
-        {{-- Paste: ang modal (sa phone, ito lang ang paraan), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
-        <button id="paste-open" type="button" class="cb-btn"><span class="sm:hidden">Paste…</span><span class="hidden sm:inline">Paste values</span><span id="paste-count"></span></button>
+        {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
         <span id="count" class="text-xs text-slate-500"></span>
     </div>
@@ -77,29 +78,28 @@
         <button id="bar-undo" type="button" class="cb-btn cb-btn-sm">Undo</button>
     </div>
 
-    {{-- Paste values: idikit ang block mula sa Google Sheets, tingnan kada field, saka i-save nang sabay. --}}
-    <div id="paste" class="fixed inset-0 z-50 hidden bg-slate-900/30 p-2 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="paste-title">
-        <div class="mx-auto flex h-full max-h-full w-full max-w-3xl flex-col rounded-xl bg-white p-4 text-sm shadow-lg sm:p-5">
-            <div class="mb-2 flex items-center justify-between gap-3">
-                <div id="paste-title" class="font-semibold">Paste values</div>
-                <button id="paste-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+    {{-- Edit ng isang page: lahat ng botfield nito, pababa at nag-i-scroll. Ang paste box sa itaas ay pumupuno sa mga field
+         mula sa isang row ng Google Sheets; isang Save para sa lahat ng binago. Sa phone, buong screen. --}}
+    <div id="pe" class="fixed inset-0 z-50 hidden bg-slate-900/30 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="pe-title">
+        <div class="mx-auto flex h-full max-h-full w-full max-w-2xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span></div>
+                <button id="pe-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
-            <details id="paste-pages-box" class="mb-2 rounded-md border border-slate-200 px-2 py-1">
-                <summary id="paste-pages-sum" class="cursor-pointer text-xs text-slate-600"></summary>
-                <div class="mt-1 flex gap-2 text-xs"><button type="button" id="paste-all" class="text-blue-700 hover:underline">All shown</button><button type="button" id="paste-none" class="text-blue-700 hover:underline">None</button></div>
-                <div id="paste-pages" class="mt-1 grid max-h-36 gap-x-4 overflow-y-auto text-xs sm:grid-cols-2"></div>
-            </details>
-            <label for="paste-text" class="text-xs text-slate-600">Paste cells copied from Google Sheets, with or without the header line. One row fills every page; several rows go one per page, in the order shown.</label>
-            <textarea id="paste-text" rows="4" class="mt-1 w-full shrink-0 rounded-md border border-slate-300 p-2 font-mono text-xs" placeholder="Ctrl/Cmd+V here"></textarea>
-            <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-                <label id="paste-start-box" class="flex items-center gap-1">Starting at field <select id="paste-start" class="rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900"></select></label>
-                <label class="flex items-center gap-1"><input id="paste-blanks" type="checkbox"> Paste blanks as empty</label>
-                <label class="flex items-center gap-1"><input id="paste-unchanged" type="checkbox"> Show unchanged</label>
+            <div class="border-b border-slate-200 px-4 py-2">
+                <label for="pe-paste" class="text-xs text-slate-600">Paste a row copied from Google Sheets (with or without the header line)</label>
+                <textarea id="pe-paste" rows="2" class="mt-1 w-full rounded-md border border-slate-300 p-2 font-mono text-xs" placeholder="Ctrl/Cmd+V here"></textarea>
+                <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                    <label id="pe-start-box" class="flex items-center gap-1">Starting at field <select id="pe-start" class="max-w-[12rem] rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900"></select></label>
+                    <label class="flex items-center gap-1"><input id="pe-blanks" type="checkbox"> Paste blanks as empty</label>
+                </div>
+                <ul id="pe-notes" class="mt-1 space-y-0.5 text-xs text-slate-600" aria-live="polite"></ul>
             </div>
-            <ul id="paste-notes" class="mt-2 space-y-0.5 text-xs text-slate-600"></ul>
-            <div id="paste-preview" class="mt-2 min-h-[6rem] flex-1 overflow-y-auto rounded-md border border-slate-200 px-3 py-2"></div>
-            <p id="paste-error" class="mt-1 min-h-[1rem] text-xs text-red-600" aria-live="polite"></p>
-            <div class="mt-1 flex flex-wrap gap-2"><button id="paste-save" type="button" class="cb-btn cb-btn-primary" disabled>Save</button><button id="paste-cancel" type="button" class="cb-btn">Cancel</button></div>
+            <div id="pe-fields" class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto px-4"></div>
+            <div class="border-t border-slate-200 px-4 py-3">
+                <p id="pe-error" class="mb-1 text-xs text-red-600 empty:hidden" aria-live="polite"></p>
+                <div class="flex flex-wrap gap-2"><button id="pe-save" type="button" class="cb-btn cb-btn-primary" disabled>Save</button><button id="pe-cancel" type="button" class="cb-btn">Cancel</button></div>
+            </div>
         </div>
     </div>
 
@@ -160,9 +160,9 @@
     let columns = [], rows = [], flows = [], editing = null;
     const marks = new Map(), seqs = new Map(), errors = new Map();
     let openRow = null; // ang page ng row na bukas (isa lang)
-    // Paste: ang hindi pa naka-save (id => {page, key, value, old}), ang mga naka-tick na page, ang napiling mga cell
-    // (dalawang sulok, {page, key}), at ang dating value ng huling Save (para sa Undo).
-    const pending = new Map(), ticked = new Set();
+    // Paste: ang hindi pa naka-save (id => {page, key, value, old}), ang napiling mga cell (dalawang sulok, {page, key}),
+    // at ang dating value ng huling Save (para sa Undo).
+    const pending = new Map();
     let sel = null, lastUndo = null;
     const botCols = () => columns.filter(c => c.key !== 'flow');
 
@@ -196,7 +196,7 @@
 
     function render() {
         const head = el('tr', {}, [
-            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, el('label', {class: 'flex items-center gap-2'}, [tickAll(), 'Page'])),
+            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, 'Page'),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Active'}),
             el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Flow'}),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
@@ -205,7 +205,7 @@
         ]);
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, el('label', {class: 'flex items-start gap-2'}, [tick(r), el('span', {}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''})])])),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}), editButton(r)]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
@@ -220,26 +220,12 @@
         requestAnimationFrame(markClamped);
     }
 
-    // ---- mga naka-tick na page (ang target ng Paste values) ----
-    function tick(r) {
-        const b = el('input', {type: 'checkbox', class: 'mt-1', 'aria-label': 'Select ' + r.page});
-        b.checked = ticked.has(r.page);
-        b.addEventListener('change', () => { b.checked ? ticked.add(r.page) : ticked.delete(r.page); syncTicks(); });
+    // Edit: binubuksan ang lahat ng botfield ng page (sa phone, lapis lang; ang pangalan ay nasa aria-label).
+    function editButton(r) {
+        const b = el('button', {type: 'button', class: 'mt-1 inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            'aria-label': 'Edit ' + r.page, title: 'Edit ' + r.page}, [el('span', {'aria-hidden': 'true', text: '✎'}), el('span', {class: 'hidden sm:inline', text: 'Edit'})]);
+        b.addEventListener('click', () => openPe(r));
         return b;
-    }
-    function tickAll() {
-        const b = el('input', {type: 'checkbox', id: 'tick-all', 'aria-label': 'Select all shown pages'});
-        const shown = visible();
-        b.checked = shown.length > 0 && shown.every(r => ticked.has(r.page));
-        b.addEventListener('change', () => { visible().forEach(r => b.checked ? ticked.add(r.page) : ticked.delete(r.page)); syncTicks(); });
-        return b;
-    }
-    function syncTicks() {
-        table.querySelectorAll('tbody tr').forEach(tr => { const b = tr.querySelector('input[type=checkbox]'); if (b) b.checked = ticked.has(tr.dataset.page); });
-        const shown = visible(), all = $('tick-all');
-        if (all) all.checked = shown.length > 0 && shown.every(r => ticked.has(r.page));
-        $('paste-count').textContent = ticked.size ? ' (' + ticked.size + ')' : '';
-        if (!$('paste').classList.contains('hidden')) { pastePages(); preview(); }
     }
 
     // Ang fade: sa text na lampas sa 3 linya ng row na sarado.
@@ -455,7 +441,7 @@
     document.addEventListener('keydown', e => {
         if (e.key !== 'Escape') return;
         if (!$('long').classList.contains('hidden')) closeLong();
-        if (!$('paste').classList.contains('hidden')) closePaste();
+        if (!$('pe').classList.contains('hidden')) closePe();
         modal('col-box', false); modal('page-box', false);
     });
     // ---- paste: hindi pa naka-save, Save, Cancel, Undo ----
@@ -510,7 +496,7 @@
         notice('Undone: ' + plural(res.saved, 'field') + ' back to the previous value.', 'text-green-700');
         load();
     });
-    window.addEventListener('beforeunload', e => { if (pending.size) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', e => { if (pending.size || peDirty()) { e.preventDefault(); e.returnValue = ''; } });
 
     // ---- pagpili, Copy at Paste sa grid ----
     /** Ang napiling rectangle sa ayos ng nakikita (mga index), o null. */
@@ -576,85 +562,112 @@
         table.querySelector('td.cb-sel')?.focus({preventScroll: true});
     });
 
-    // ---- Paste values (modal) ----
-    let lastPlan = null;
-    const targets = () => rows.filter(r => ticked.has(r.page));
-    function pastePages() {
-        $('paste-pages-sum').textContent = ticked.size ? 'Pages: ' + plural(ticked.size, 'page') + ' selected' : 'Pages: pick the pages to fill';
-        $('paste-pages').replaceChildren(...rows.map(r => {
-            const b = el('input', {type: 'checkbox'});
-            b.checked = ticked.has(r.page);
-            b.addEventListener('change', () => { b.checked ? ticked.add(r.page) : ticked.delete(r.page); syncTicks(); });
-            return el('label', {class: 'flex items-center gap-1 py-0.5'}, [b, r.page]);
+    // ---- Edit ng isang page (modal) ----
+    // pe: ang page na bukas, ang mga value nito nang buksan (orig), at ang value ng mga field bago ang huling paste
+    // (beforePaste), para ang bagong paste o ibang "Starting at field" ay pumalit sa dati at hindi magpatong.
+    let pe = null;
+    const peInput = key => $('pe-fields').querySelector('[data-key="' + CSS.escape(key) + '"] .pe-in');
+    const grow = t => { if (t.tagName === 'TEXTAREA') { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; } };
+    /** Bawat field: ang value ngayon, at kung binago (changed) o hindi link sa image field (flagged, hindi sine-save). */
+    function peState() {
+        return botCols().map(c => {
+            // Ikinukumpara sa trimmed na dating value: ang lumang value na may espasyo sa dulo ay hindi "binago" pagbukas.
+            const value = peInput(c.key).value.trim(), old = pe.orig[c.key], same = value === old.trim();
+            const flagged = value !== '' && !same && c.kind === 'image' && !ChatbotPaste.isImageLink(value);
+            return {c, value, old, changed: !same && !flagged, flagged};
+        });
+    }
+    const peDirty = () => !!pe && peState().some(x => x.changed || x.flagged);
+    function paintPe() {
+        const list = peState(), n = list.filter(x => x.changed).length;
+        for (const x of list) {
+            const row = peInput(x.c.key).closest('.pe-field');
+            row.classList.toggle('pe-changed', x.changed); row.classList.toggle('pe-flagged', x.flagged);
+            const was = row.querySelector('.pe-was');
+            was.textContent = x.flagged ? 'Not a link (http:// or https://): will not be saved.' : x.changed ? 'Was: ' + (x.old === '' ? '(empty)' : x.old) : '';
+            was.className = 'pe-was whitespace-pre-line break-words text-xs ' + (x.flagged ? 'text-red-600' : 'text-slate-500');
+            const img = row.querySelector('img');
+            if (img) { const ok = ChatbotPaste.isImageLink(x.value); img.classList.toggle('invisible', !ok); if (ok && img.getAttribute('src') !== x.value) img.src = x.value; }
+        }
+        $('pe-save').disabled = !n;
+        $('pe-save').textContent = n ? 'Save ' + plural(n, 'change') : 'Save';
+    }
+    function openPe(r) {
+        pe = {r, orig: {}, beforePaste: {}};
+        $('pe-name').textContent = r.page;
+        $('pe-id').textContent = r.page_id || '';
+        const start = $('pe-start').value;
+        $('pe-start').replaceChildren(...botCols().map(c => el('option', {value: c.key, text: c.label})));
+        if (start && botCols().some(c => c.key === start)) $('pe-start').value = start;
+        $('pe-blanks').checked = $('f-blanks').checked;
+        $('pe-paste').value = '';
+        $('pe-notes').replaceChildren();
+        $('pe-error').textContent = '';
+        $('pe-start-box').classList.remove('hidden');
+        $('pe-fields').replaceChildren(...botCols().map(c => {
+            const v = pe.orig[c.key] = String(r.cells[c.key] ?? ''), fid = 'pe-f-' + c.key;
+            // Ang image ay link (isang linya, may maliit na preview); ang iba ay textarea na lumalaki, buo ang line break.
+            const input = c.kind === 'image'
+                ? el('input', {id: fid, type: 'url', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm', placeholder: 'https://…', autocomplete: 'off'})
+                : el('textarea', {id: fid, rows: '1', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
+            input.value = v;
+            input.addEventListener('input', () => { grow(input); paintPe(); });
+            const box = c.kind === 'image'
+                ? el('div', {class: 'flex items-center gap-2'}, [el('img', {alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'invisible h-10 w-10 shrink-0 rounded border border-slate-200 object-cover'}), input])
+                : input;
+            return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [el('label', {for: fid, class: 'mb-1 block text-xs font-medium text-slate-600', text: c.label}), box, el('div', {class: 'pe-was'})]);
         }));
+        $('pe').classList.remove('hidden');
+        $('pe-fields').scrollTop = 0;
+        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        paintPe();
+        $('pe-paste').focus();
     }
-    function openPaste() {
-        const start = $('paste-start').value;
-        $('paste-start').replaceChildren(...botCols().map(c => el('option', {value: c.key, text: c.label})));
-        if (start) $('paste-start').value = start;
-        $('paste-blanks').checked = $('f-blanks').checked;
-        $('paste-error').textContent = '';
-        pastePages();
-        $('paste-pages-box').open = ticked.size === 0;
-        $('paste').classList.remove('hidden');
-        preview();
-        $('paste-text').focus();
+    function closePe(force = false) {
+        if (!pe) return;
+        if (!force && peDirty() && !confirm('Discard the changes to ' + pe.r.page + '?')) return;
+        $('pe').classList.add('hidden');
+        pe = null;
     }
-    function closePaste() { $('paste').classList.add('hidden'); }
-    function preview() {
-        const text = $('paste-text').value, showAll = $('paste-unchanged').checked;
-        const plan = lastPlan = ChatbotPaste.plan({text, columns: botCols(), targets: targets(), startKey: $('paste-start').value, blanksEmpty: $('paste-blanks').checked});
-        $('paste-start-box').classList.toggle('hidden', plan.byName);
-        const notes = [];
+    /** Ang paste box: isang row (ang una lang), ayon sa header kung mayroon, kung wala ay ayon sa ayos mula sa napiling field. */
+    function pePaste() {
+        for (const [key, v] of Object.entries(pe.beforePaste)) peInput(key).value = v;
+        pe.beforePaste = {};
+        const text = $('pe-paste').value, notes = [];
+        const current = Object.fromEntries(botCols().map(c => [c.key, peInput(c.key).value]));
+        const plan = ChatbotPaste.plan({text, columns: botCols(), targets: [{page: pe.r.page, cells: pe.orig}], startKey: $('pe-start').value, blanksEmpty: $('pe-blanks').checked, firstRowOnly: true});
+        $('pe-start-box').classList.toggle('hidden', plan.byName);
+        if (text.trim() && plan.error) notes.push(plan.error);
         if (plan.byName) notes.push('Mapped by the header names in the first line.');
         if (plan.ignored.length) notes.push('Not a field, ignored: ' + plan.ignored.join(', ') + '.');
-        if (plan.reserved) notes.push('ACTIVE and FLOW are not changed by paste.');
+        if (plan.reserved) notes.push('ACTIVE and FLOW are not in this window: they were not changed.');
         if (plan.dropped) notes.push(plural(plan.dropped, 'value') + ' past the last field were dropped.');
-        const flagged = plan.changes.filter(x => x.status === 'flagged').length;
-        if (flagged) notes.push(plural(flagged, 'value') + ' in image columns are not links (http:// or https://) and will not be saved.');
-        $('paste-notes').replaceChildren(...notes.map(n => el('li', {text: n})));
-        $('paste-error').textContent = text.trim() ? (plan.error || '') : '';
-
-        const changed = plan.changes.filter(x => x.status === 'changed');
-        const groups = new Map();
+        if (plan.extraRows) notes.push('Only the first row was used (' + plural(plan.extraRows, 'more row') + ' ignored).');
+        let filled = 0;
         for (const x of plan.changes) {
-            if (!showAll && x.status !== 'changed' && x.status !== 'flagged') continue;
-            if (!groups.has(x.page)) groups.set(x.page, []);
-            groups.get(x.page).push(x);
+            if (x.status === 'blank') continue; // blangko: naiiwan ang value
+            pe.beforePaste[x.key] = current[x.key];
+            peInput(x.key).value = x.value;
+            if (x.status !== 'unchanged') filled++;
         }
-        const hidden = plan.changes.length - [...groups.values()].reduce((n, g) => n + g.length, 0);
-        const sections = [...groups].map(([page, list]) => el('section', {class: 'mb-3'}, [
-            el('h3', {class: 'sticky top-0 bg-white py-1 text-sm font-semibold', text: page + ' · ' + plural(list.filter(x => x.status === 'changed').length, 'change')}),
-            el('ul', {class: 'divide-y divide-slate-100'}, list.map(x => el('li', {class: 'py-1' + (x.status === 'changed' ? '' : ' text-slate-400')}, [
-                el('div', {class: 'pv-val'}, [el('span', {class: 'font-medium', text: x.label + ': '}), x.value === '' ? el('em', {text: x.status === 'blank' ? '(blank: keeps the current value)' : '(empty)'}) : x.value]),
-                x.status === 'flagged' ? el('div', {class: 'text-xs text-red-600', text: 'Not a link: will not be saved.'}) : null,
-                x.status === 'unchanged' ? el('div', {class: 'text-xs', text: 'Unchanged.'}) : null,
-                x.status !== 'unchanged' && x.old !== x.value && x.old !== '' ? el('div', {class: 'pv-val text-xs text-slate-400'}, [el('span', {text: 'Now: '}), x.old]) : null,
-            ]))),
-        ]));
-        if (hidden && plan.changes.length) sections.push(el('p', {class: 'text-xs text-slate-400', text: plural(hidden, 'field') + ' unchanged or blank (tick Show unchanged to see them).'}));
-        if (!plan.changes.length) sections.push(el('p', {class: 'text-xs text-slate-400', text: 'The fields will show here, page by page.'}));
-        $('paste-preview').replaceChildren(...sections);
-        const pages = new Set(changed.map(x => x.page)).size;
-        $('paste-save').disabled = !!plan.error || !changed.length;
-        $('paste-save').textContent = changed.length ? 'Save ' + plural(changed.length, 'field') + ' on ' + plural(pages, 'page') : 'Save';
+        if (plan.changes.length) notes.unshift(plural(filled, 'field') + ' filled from the paste, not saved yet.');
+        $('pe-notes').replaceChildren(...notes.map(n => el('li', {text: n})));
+        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        paintPe();
     }
-    $('paste-preview').addEventListener('click', e => { const li = e.target.closest('li'); if (li) li.classList.toggle('pv-open'); });
-    ['paste-text', 'paste-start', 'paste-blanks', 'paste-unchanged'].forEach(i => $(i).addEventListener(i === 'paste-text' ? 'input' : 'change', preview));
-    $('paste-blanks').addEventListener('change', () => { $('f-blanks').checked = $('paste-blanks').checked; });
-    $('paste-all').addEventListener('click', () => { visible().forEach(r => ticked.add(r.page)); syncTicks(); });
-    $('paste-none').addEventListener('click', () => { ticked.clear(); syncTicks(); });
-    $('paste-open').addEventListener('click', openPaste);
-    $('paste-close').addEventListener('click', closePaste);
-    $('paste-cancel').addEventListener('click', closePaste);
-    $('paste-save').addEventListener('click', async () => {
-        const changes = (lastPlan?.changes || []).filter(x => x.status === 'changed').map(x => ({page_name: x.page, key: x.key, value: x.value}));
+    ['pe-paste', 'pe-start', 'pe-blanks'].forEach(i => $(i).addEventListener(i === 'pe-paste' ? 'input' : 'change', pePaste));
+    $('pe-blanks').addEventListener('change', () => { $('f-blanks').checked = $('pe-blanks').checked; });
+    $('pe-close').addEventListener('click', () => closePe());
+    $('pe-cancel').addEventListener('click', () => closePe());
+    $('pe').addEventListener('click', e => { if (e.target === $('pe')) closePe(); });
+    $('pe-save').addEventListener('click', async () => {
+        const changes = peState().filter(x => x.changed).map(x => ({page_name: pe.r.page, key: x.c.key, value: x.value}));
         if (!changes.length) return;
-        $('paste-save').disabled = true;
+        $('pe-save').disabled = true;
+        $('pe-error').textContent = '';
         const res = await saveCells(changes);
-        if (res.error) { $('paste-error').textContent = res.error; $('paste-save').disabled = false; return; }
-        $('paste-text').value = '';
-        closePaste();
+        if (res.error) { $('pe-error').textContent = res.error; $('pe-save').disabled = false; return; }
+        closePe(true);
         done(res);
     });
 

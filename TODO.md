@@ -844,3 +844,10 @@ Accepted, not fixed:
 - **No test for the rate limit** on `GET /chatbot/sheet` (30 a minute) or for preview inputs like `columns` sent as a string or over 50 items. Reason: the limit is the route's standard `throttle` middleware, and the columns go through `FlowGraph::cleanConfig`, which the hardening tests already cover.
 - **The preview shows botfield values** (the page's chatbot settings) when a template names them. Reason: the Test tab builds the same variables for the same users, so this is no new exposure.
 - **"Open row" is in the reply's detail on `/chatbot/replies`, not in the list rows.** Reason: a list row opens the detail with one click; the list stays one line per reply.
+
+## 096: page Edit modal on /chatbot/pages (2026-10-20)
+
+- **Editing the paste box again re-applies the paste over a field fixed by hand after the paste.** Reason: each change to the paste box replaces the previous paste as a whole, so a new "Starting at field" or a fixed typo never stacks two pastes; the field turns amber with "Was: …", so it is visible before Save.
+- **The modal works on the row as it was when it opened.** If another user saves the same page meanwhile, "Was: …" shows the older value. Reason: Save only sends fields changed in the modal, last write wins as everywhere on this page, and history rows keep every value.
+- **The image preview loads whatever http(s) link is typed or pasted** (with `referrerpolicy=no-referrer`). Reason: the grid already does the same for saved links; only staff with /chatblast access type them.
+- **The modal's behaviour (amber, flagged, re-paste, confirm on close) is checked in the browser only,** not by an automated test. Reason: the project has no JS test runner for page scripts; the parsing and mapping it relies on are tested in node (`ChatbotPasteScriptTest`).
