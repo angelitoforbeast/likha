@@ -157,7 +157,7 @@ class ChatbotInboxController extends Controller
             if ($r['http'] >= 200 && $r['http'] < 300 && ($body['success'] ?? null) !== false) {
                 [$status, $error] = ['sent', null];
             } else {
-                $msg = trim((string) ($body['message'] ?? ''));
+                $msg = BotcakeClient::messageText($body);
                 $error = ($r['http'] === 0 ? 'Botcake did not answer' : ($msg !== '' ? 'Botcake said "' . mb_substr($msg, 0, 150) . '"' : 'Botcake refused it')) . ' (HTTP ' . $r['http'] . ')';
             }
         }

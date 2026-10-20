@@ -48,7 +48,7 @@ class BotcakeOutbox implements Outbox
     {
         $body = is_array($r['body']) ? $r['body'] : [];
         if ($r['http'] >= 200 && $r['http'] < 300 && ($body['success'] ?? null) !== false) return ['status' => 'sent', 'error' => null, 'http' => $r['http']];
-        $msg = trim((string) ($body['message'] ?? ''));
+        $msg = BotcakeClient::messageText($body);
         $why = $r['http'] === 0 ? 'Botcake did not answer' : ($msg !== '' ? 'Botcake said "' . mb_substr($msg, 0, 150) . '"' : 'Botcake refused it');
 
         return ['status' => 'failed', 'error' => $why . ' (HTTP ' . $r['http'] . ')', 'http' => $r['http'] ?: null];

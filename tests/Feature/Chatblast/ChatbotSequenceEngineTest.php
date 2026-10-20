@@ -340,4 +340,20 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertContains('Unsubscribed from Preorder (reply)', $this->events());
         $this->assertSame(['Hello back'], $this->sent(), 'the bot still answers the chat');
     }
+
+    public function test_S_095_2_a_refused_step_whose_message_is_an_object_is_logged_failed_and_the_job_does_not_crash(): void
+    {
+        // Bagong fake: ang unang tumugmang stub ang nananaig, kaya hindi sapat ang dagdag na Http::fake.
+        Http::swap(new \Illuminate\Http\Client\Factory(app('events')));
+        Http::fake([self::SEND => Http::response(['success' => false, 'message' => ['error' => 'x']])]);
+        $seq = $this->sequence('Preorder', [[0, 'minutes', $this->flow('Seq 1')->id]]);
+        $this->chat();
+        $this->svc()->subscribe($seq->id, 1001, 7001, 'other');
+
+        $this->tick();
+
+        $this->assertSame(['Seq 1'], $this->sent());
+        $this->assertSame([['failed', 'Botcake said "x" (HTTP 200)']], DB::table('chatbot_replies')->where('kind', 'send')->get()->map(fn ($r) => [$r->status, $r->error])->all());
+        $this->assertSame(['Subscribed to sequence Preorder', 'Sequence Preorder step 1 ran', 'Sequence Preorder completed'], $this->events(), 'the job ran to the end');
+    }
 }

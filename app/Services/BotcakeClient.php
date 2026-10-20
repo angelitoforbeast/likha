@@ -156,6 +156,24 @@ class BotcakeClient
         ], $token, true);
     }
 
+    /**
+     * Ang "message" ng sagot bilang text para sa dahilan ng error. Minsan array o object ito sa halip na string, kaya
+     * hindi puwedeng i-(string): ang unang string sa loob, o compact JSON kapag walang string; iba pa (null, numero) = ''.
+     */
+    public static function messageText(mixed $body): string
+    {
+        $message = is_array($body) ? ($body['message'] ?? null) : null;
+        if (is_string($message)) return trim($message);
+        if (is_object($message)) $message = json_decode((string) json_encode($message), true);
+        if (!is_array($message) || $message === []) return '';
+        $first = null;
+        array_walk_recursive($message, function ($v) use (&$first) {
+            if ($first === null && is_string($v) && trim($v) !== '') $first = trim($v);
+        });
+
+        return $first ?? (string) json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
     /** Ang sagot ng Botcake kapag wala ang PSID sa page. */
     public const NOT_ON_PAGE = ['not found customer', 'psid wrong format'];
 
@@ -169,7 +187,7 @@ class BotcakeClient
         $r = $this->call('GET', '/pages/' . rawurlencode($pageId) . '/customer/' . rawurlencode($psid) . '/info', [], $token);
         $body = is_array($r['body']) ? $r['body'] : [];
         if ($r['http'] === 200 && ($body['success'] ?? null) === true) return 'found';
-        if (($body['success'] ?? null) === false && in_array(mb_strtolower(trim((string) ($body['message'] ?? ''))), self::NOT_ON_PAGE, true)) return 'not_found';
+        if (($body['success'] ?? null) === false && in_array(mb_strtolower(self::messageText($body)), self::NOT_ON_PAGE, true)) return 'not_found';
         if ($r['http'] === 0 || $r['http'] >= 500) return 'down';
 
         return 'refused';

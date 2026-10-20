@@ -1715,3 +1715,12 @@ Spec 090. Tests in `tests/Feature/Chatblast/ChatbotSheetPickerTest.php` (fake Go
 | S-090.6 | Given the recent customers of the pages that use the flow (one per customer, newest first), when Preview row runs for one, then the cells are what the run would write, formula guard included, and nothing is written; a chat of another page is refused | `test_S_090_6…` | Passed · 2026-10-20 · auto |
 | S-090.7 | Given a row is written, then its `updatedRange` and the tab's gid are kept (a tab not yet in the cached list is looked up once more; when the list can't be read the row is still sent, with no link), and /chatbot/replies and the Inbox show "Open row" to `…/edit#gid=<gid>&range=A123`; rows without a range (older rows) show no link | `test_S_090_7…` | Passed · 2026-10-20 · auto |
 | S-090.8 | Given a non-Google link, a bare word, a cloud metadata URL or a too-long tab, then the endpoint answers 422 without calling Google; a guest gets 401 and a user without editor access gets 403 on all three endpoints | `test_S_090_8…` | Passed · 2026-10-20 · auto |
+
+## S-095 A Botcake refusal whose "message" is not a string no longer throws
+
+Spec 095. Tests in `tests/Feature/Chatblast/BotcakeMessageShapeTest.php` and `tests/Feature/Chatblast/ChatbotSequenceEngineTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-095.1 | Given Botcake refuses a send with `message` as a string, an array, a nested array, an object, an array with no string, null, a number, missing, or a string over 150 letters, then the outcome is `failed` with a readable reason (the string, the first string inside, compact JSON, or "Botcake refused it"), capped at 150 letters, and nothing throws | `test_S_095_1…` (9 data sets) | Passed · 2026-10-20 · auto |
+| S-095.2 | Given a sequence step whose send Botcake refuses with `{"success":false,"message":{"error":"x"}}`, when the tick runs the step, then the reply is logged `failed` with `Botcake said "x"` and the job runs to the end | `test_S_095_2…` | Passed · 2026-10-20 · auto |

@@ -109,7 +109,7 @@ class BotcakeChatBlock
     /** Ang error sa simpleng English: ang ginawa, ang sagot ng Botcake (pinaikli), at ang HTTP. Walang token. */
     private function error(string $what, array $r): string
     {
-        $msg = is_array($r['body']) ? trim((string) ($r['body']['message'] ?? '')) : '';
+        $msg = BotcakeClient::messageText($r['body']);
         $why = $r['http'] === 0 ? 'Botcake did not answer' : ($msg !== '' ? 'Botcake said "' . mb_substr($msg, 0, 120) . '"' : 'Botcake refused it');
 
         return "Could not {$what}: {$why} (HTTP {$r['http']}).";
