@@ -9,12 +9,12 @@
 
 @push('styles')
 <style>
-    /* Tatlong column na sabay sa desktop; ang mga listahan lang sa loob ang nag-i-scroll. */
-    #ib-grid { height: calc(100vh - 15rem); min-height: 28rem; }
+    /* Tatlong column na sabay sa desktop; ang mga listahan lang sa loob ang nag-i-scroll. Ang grid ang pumupuno sa
+       natitirang taas ng screen (.cb-page ng layout), kaya ang page ay hindi nag-i-scroll. */
+    #ib-grid { min-height: 28rem; flex: 1 1 0; }
     #ib-grid > section { min-height: 0; }
     /* Sa phone: isang column lang, ayon sa data-view. */
     @media (max-width: 1023px) {
-        #ib-grid { height: calc(100vh - 12rem); }
         #ib-grid[data-view="list"] > section:not(#ib-list),
         #ib-grid[data-view="thread"] > section:not(#ib-thread),
         #ib-grid[data-view="panel"] > section:not(#ib-panel) { display: none; }
@@ -32,7 +32,7 @@
 @if(!$pages)
     <p class="cb-card px-4 py-3 text-sm text-slate-600">No page has a Botcake ID yet. Add one in <a href="{{ url('/chatblast/page-settings') }}" class="text-blue-700 hover:underline">Page settings</a>.</p>
 @else
-<div id="ib" data-list-url="{{ route('chatbot.inbox.conversations') }}" data-thread-url="{{ route('chatbot.inbox.thread') }}" data-panel-url="{{ route('chatbot.inbox.panel') }}"
+<div id="ib" class="cb-page" data-list-url="{{ route('chatbot.inbox.conversations') }}" data-thread-url="{{ route('chatbot.inbox.thread') }}" data-panel-url="{{ route('chatbot.inbox.panel') }}"
      data-send-url="{{ route('chatbot.inbox.send') }}" data-pause-url="{{ route('chatbot.inbox.pause') }}" data-roles-url="{{ route('chatbot.inbox.roles') }}" data-sequence-url="{{ route('chatbot.inbox.sequence') }}"
      data-fields-url="{{ route('chatbot.customer-fields') }}" data-pages-url="{{ route('chatbot.pages.index') }}"
      data-can-send="{{ $canSend ? '1' : '0' }}" data-user="{{ auth()->user()?->name ?: 'You' }}">

@@ -9,7 +9,8 @@
 
 @push('styles')
 <style>
-    #sq-box { max-height: calc(100vh - 19rem); min-height: 12rem; }
+    /* Ang kahon ay kasing-taas ng laman pero hanggang sa natitirang taas ng screen lang (.cb-page ng layout), kaya ang
+       horizontal bar ay laging kita at ang page ay hindi nag-i-scroll. */
     #sq-table thead th { position: sticky; top: 0; z-index: 10; background: #fff; }
 </style>
 @endpush
@@ -17,6 +18,7 @@
 @section('content')
 @include('chatbot.partials.switch', ['repliesOn' => $repliesOn])
 
+<div class="cb-page">
 <form method="POST" action="{{ route('chatbot.sequences.store') }}" class="mb-4 flex flex-wrap items-end gap-2 text-sm">
     @csrf
     <label class="flex flex-col text-xs text-slate-500">Name
@@ -29,7 +31,7 @@
 @if($sequences->isEmpty())
     <p class="cb-card px-4 py-3 text-sm text-slate-600">No sequences yet. Name one above, then add its steps.</p>
 @else
-    <div id="sq-box" class="cb-card overflow-auto">
+    <div id="sq-box" class="cb-card min-h-[12rem] shrink overflow-auto">
         <table id="sq-table" class="cb-table">
             <thead><tr><th>Sequence</th><th class="w-20">Steps</th><th class="w-24">Enrolled</th><th class="w-24">Completed</th><th class="w-24">Status</th><th class="w-48">Actions</th></tr></thead>
             <tbody>
@@ -51,4 +53,5 @@
         </table>
     </div>
 @endif
+</div>
 @endsection

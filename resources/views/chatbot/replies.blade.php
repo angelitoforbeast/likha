@@ -10,7 +10,8 @@
 @push('styles')
 <style>
     /* Ang table lang ang nag-i-scroll; ang header ng table ay nananatili sa itaas ng kahon. */
-    #rp-box { max-height: calc(100vh - 19rem); min-height: 16rem; }
+    /* Ang kahon ay kasing-taas ng laman pero hanggang sa natitirang taas ng screen lang (.cb-page ng layout), kaya ang
+       horizontal bar ay laging kita at ang page ay hindi nag-i-scroll. */
     #rp-table thead th { position: sticky; top: 0; z-index: 10; background: #fff; }
 </style>
 @endpush
@@ -18,7 +19,7 @@
 @section('content')
 @include('chatbot.partials.switch', ['repliesOn' => $repliesOn])
 
-<div id="rp" data-data-url="{{ route('chatbot.replies.data') }}" data-base-url="{{ url('/chatbot/replies') }}">
+<div id="rp" class="cb-page" data-data-url="{{ route('chatbot.replies.data') }}" data-base-url="{{ url('/chatbot/replies') }}">
     <form id="rp-filters" class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
         <label class="flex flex-col text-xs">Date<input type="date" name="date" value="{{ $today }}" class="border px-2 py-1 text-sm text-gray-900"></label>
         <label class="flex flex-col text-xs">Page
@@ -35,7 +36,7 @@
         <span id="rp-count" class="text-xs text-slate-500"></span>
     </form>
 
-    <div id="rp-box" class="cb-card overflow-auto">
+    <div id="rp-box" class="cb-card min-h-[16rem] shrink overflow-auto">
         <table id="rp-table" class="cb-table table-fixed">
             <thead><tr><th class="w-20">Time</th><th class="w-36">Page</th><th class="w-24">Status</th><th>What</th></tr></thead>
             <tbody id="rp-rows"></tbody>
