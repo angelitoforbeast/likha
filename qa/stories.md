@@ -1751,3 +1751,21 @@ Spec 097. Tests in `tests/Feature/Chatblast/ChatbotVariableGroupsTest.php`. The 
 | S-097.3 | Given saved keys starting with `__` (run state) and fields of a page that doesn't use this flow, then neither is listed | `test_S_097_3…` | Passed · 2026-10-21 · auto |
 | S-097.4 | Given a name in two groups (same after `ChatbotVars::norm`), then it is in both with an "also" flag and the real precedence: built in beats both; a customer field beats a botfield when the customer has it saved, even blank | `test_S_097_4…` | Passed · 2026-10-21 · auto |
 | S-097.5 | In every step form: three headed groups in gray, purple and teal; "!" on duplicates; Seq Img 1–20 and Seq 1–20 folded in "Sequences (40)" that opens on click; the search box filters by name; a click puts the variable in the last field; at 1366 and 390 px without sideways scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-099 /chatbot/pages checks each page's values, and shows the history of every edit
+
+Spec 099. Tests in `tests/Feature/Chatblast/ChatbotPageCheckTest.php` and `tests/Feature/Chatblast/ChatbotPageHistoryTest.php` (fake HTTP and a stub DNS resolver: no call leaves the test). The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-099.1 | Given a page whose flow's published graph uses `{{Name}}` in a send text or image, an AI prompt, a condition, a sheet column and a set-field value, and a botfield that names another botfield, when the Check runs, then every used botfield that is empty is listed in column order ("Missing: …"); customer fields and system variables are never missing; a page with no flow shows "—" | `test_S_099_1…` | Passed · 2026-10-21 · auto |
+| S-099.2 | Given image fields, then a link that answers 200 `image/*` passes; a 404 gives "Seq Img 3: link broken (404)", a non-image "PICTURE: not an image", and a host that resolves to a private, loopback or link-local IP fails without any request; a redirect is re-checked (at most 3); a URL's result is cached 24 h, and Check again asks again | `test_S_099_2…` (10 data sets and 2 more tests) | Passed · 2026-10-21 · auto |
+| S-099.3 | Given the flow or its sequences use both Seq N and Seq Img N, when a page sets one of a pair and not the other, then the reason is "Seq 5 has no Seq Img 5" (or the reverse) | `test_S_099_3…` | Passed · 2026-10-21 · auto |
+| S-099.4 | Given a botfield value with `{{X}}` where X is no system variable, botfield or customer field, then the reason is "Prompt 1 uses {{PRICEE}} (unknown)" | `test_S_099_4…` | Passed · 2026-10-21 · auto |
+| S-099.5 | Given a cached Check (10 minutes), then it is reused; when the page's settings or the flows change, the next Check recomputes | `test_S_099_5…` | Passed · 2026-10-21 · auto |
+| S-099.6 | Given a field with several versions, when its History opens, then the versions come newest first with value, who, when (Manila) and current/old; a secret value shows "(hidden)" | `test_S_099_6…` | Passed · 2026-10-21 · auto |
+| S-099.7 | Given an old version, when Restore runs, then a new active row with that value is written through PageSettings::set (the old ones stay as history); a secret, a reserved key, FLOW or a key of another provider is refused | `test_S_099_7…` | Passed · 2026-10-21 · auto |
+| S-099.8 | Given edits across pages, when the Changes log opens, then each entry pairs the old value with the new one, newest first, 50 per page; the page, user, field and date filters narrow it; secrets show "(hidden)" | `test_S_099_8…` | Passed · 2026-10-21 · auto |
+| S-099.9 | Given a guest or a user without /chatblast access, then every new endpoint answers 401 or 403 and changes nothing | `test_S_099_9…` | Passed · 2026-10-21 · auto |
+| S-099.10 | Given a page's main texts and Seq 1–20, when Preview runs, then each comes back filled for the sample customer "Juan Dela Cruz", with Seq Img N and PICTURE as images; nothing is written | `test_S_099_10…` | Passed · 2026-10-21 · auto |
+| S-099.11 | The Check column (check, X with reasons, Check again), Preview, field History with Restore and the Changes list with filters, at 1366 and 390 px, with no page-level horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |

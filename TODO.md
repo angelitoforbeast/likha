@@ -865,3 +865,14 @@ Accepted, not fixed:
 - **A name could get the same "Also …" line twice** if two botfield labels are the same after `ChatbotVars::norm` (e.g. "Prompt 1" and "PROMPT_1") and also a customer field. Reason: the column names are owner-made and unique in practice; the chip and the insert still work.
 - **The Sequences fold matches the labels "Seq N" and "Seq Img N"** in the editor script, not the column definitions. Reason: these labels are the fixed defaults in `ChatbotFields::defaults()`; a renamed column would only show unfolded.
 - **`$groups = $this->variableGroups($flow)` is assigned inside the response array in `graph()`.** Reason: it keeps the change to one line in a legacy method; style only.
+
+## 099: pages check and history on /chatbot/pages (2026-10-21)
+
+- **A field cleared to empty (the cell, or a paste with blanks as empty) does not show in History or the Changes log as its own entry.** Clearing deactivates the row without writing a new one, and the deactivation records no user. Reason: `PageSettings` was not to be changed in this work; the old value stays as an "Old" version. Suggestion for the owner: let `deactivate` record who cleared it, then list clears as "value → (empty)".
+- **One image link can still take up to about 40 s** (4 hops × HEAD and ranged GET × 5 s) after the 20 s budget for the run has started. Reason: the spec fixes the 5 s timeout and 3 redirects; the budget stops new links, and a page with that many slow hosts is unlikely. The rest show as "not checked yet".
+- **The Changes log pairs a row with the previous row of the same exact page name**, and finds it with one query per entry (50 per page). Reason: `PageSettings::set` always writes the first recorded spelling of a page, so names match; 50 small queries are fine at today's table size.
+- **The customer field names known to the Check include a distinct read of `chatbot_customer_values` keys** (cached 10 minutes, at most 5,000). Reason: it keeps fields set by the inbox or older flows from showing as unknown; at a much larger table it may need its own index or list.
+- **The Check fingerprint ignores "+ Column" additions and the customer-keys cache.** Reason: both change rarely, and the result expires after 10 minutes anyway.
+- **Preview lists the run variables by hand** instead of reusing `ChatbotFlowController::RUN_VARS` for the keys. Reason: the values differ (sample customer), and the list has eight fixed names.
+- **An IPv6-only image host** is pinned with brackets in `CURLOPT_RESOLVE` but was not tried against a real IPv6 host. Reason: the server has no known IPv6 egress, and the check then fails closed ("no answer").
+- **The screen parts (Check column, Preview, History, Restore, Changes) are checked in headless Chrome only,** not by an automated test. Reason: the project has no JS test runner for page scripts.
