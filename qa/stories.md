@@ -1751,3 +1751,21 @@ Spec 097. Tests in `tests/Feature/Chatblast/ChatbotVariableGroupsTest.php`. The 
 | S-097.3 | Given saved keys starting with `__` (run state) and fields of a page that doesn't use this flow, then neither is listed | `test_S_097_3…` | Passed · 2026-10-21 · auto |
 | S-097.4 | Given a name in two groups (same after `ChatbotVars::norm`), then it is in both with an "also" flag and the real precedence: built in beats both; a customer field beats a botfield when the customer has it saved, even blank | `test_S_097_4…` | Passed · 2026-10-21 · auto |
 | S-097.5 | In every step form: three headed groups in gray, purple and teal; "!" on duplicates; Seq Img 1–20 and Seq 1–20 folded in "Sequences (40)" that opens on click; the search box filters by name; a click puts the variable in the last field; at 1366 and 390 px without sideways scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-101 Moving around the flow editor is easy, and dragging never selects text
+
+Spec 101. Tests in `tests/Feature/Chatblast/ChatbotEditorCanvasTest.php`; the canvas cases are in the browser check of the result (headless Chrome, a 40-step piled-up fixture).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-101.1 | Given a flow, when the editor saves after a drag, a Snap drop or Arrange (positions on the grid, left of 0, far right), then the saved graph has exactly those positions and nothing else changed | `test_S_101_1…` | Passed · 2026-10-21 · auto |
+| S-101.2 | Given the editor page, then it has a Snap checkbox (checked by default), a Map button with its minimap, and the canvas turns off text selection while moving | `test_S_101_2…` | Passed · 2026-10-21 · auto |
+| S-101.3 | Given a step, when it is dragged 200 px from its text, then no text is selected during or after the drag, the step moves 200 px (screen), the form stays closed, and the card shows grab, then grabbing; text inside a step form can still be selected | browser 3, 6, 7, 8b | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.4 | Given a step, when it is clicked, or pressed and moved less than 4 px, or tapped, or focused and Enter is pressed, then its form opens | browser 1, 2, 19c, 27 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.5 | Dragging empty canvas pans by the same distance (mouse and one finger); the wheel and Ctrl+wheel zoom around the pointer, from 0.2× to 2×; "−", "+" and Fit still work and Fit shows every step; a two-finger pinch zooms and pans with the point between the fingers staying under them, and moves no step; lifting one finger lets the other pan | browser 12–16, 28, 29, 29b, 29c | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.6 | With Snap on, a dropped step lands on the 16 px grid; with Snap off it lands where it was dropped; the choice survives a reload | browser 8, 10, 11 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.7 | Dragging from a port to a step still makes a wire; wires are drawn behind the steps; hovering a step highlights its incoming and outgoing wires and dims the rest, and leaving clears it; clicking a wire selects it with a × (and Remove wire) that removes it; Undo brings it back | browser 17–19, 19b | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.8 | Given 40 piled-up steps (with a loop, a chain Start never reaches and loose Ends), when Arrange is pressed, then no two step rectangles intersect, Start is leftmost, steps run left to right in columns on the grid; Undo restores every position and Redo brings the layout back | browser 0, 4, 5 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.9 | The minimap (bottom-right) draws the flow and the view; clicking it moves the view there; Map hides it and the choice survives a reload | browser 20–22 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.10 | At 390 px: no sideways scroll, every canvas tool on screen, a usable canvas, a smaller minimap, touch drag and tap work | browser 25–28 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.11 | After a drag (also one the browser cancels) the autosave stores the positions the screen shows, as one Undo step; a drag move costs well under a frame with 40 steps | browser 19d, 23, 24 | Passed · 2026-10-21 · browser (headless Chrome) |
