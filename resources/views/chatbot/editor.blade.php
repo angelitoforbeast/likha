@@ -95,8 +95,11 @@
             </div>
             <div id="form-body" class="space-y-3"></div>
             <div class="mt-4">
-                <div class="mb-1 text-xs text-slate-500">Variables (click to put one in the last field you were in):</div>
-                <div id="vars" class="flex flex-wrap gap-1"></div>
+                <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+                    <div class="text-xs text-slate-500">Variables (click to put one in the last field you were in):</div>
+                    <input id="vars-search" type="search" placeholder="Search variables" aria-label="Search variables" class="w-full rounded-md border border-slate-300 px-2 py-1 text-xs sm:w-48">
+                </div>
+                <div id="vars" class="space-y-2"></div>
             </div>
             <div class="mt-4 flex flex-wrap gap-2">
                 <button type="button" id="form-apply" class="cb-btn cb-btn-primary">Done</button>
@@ -145,7 +148,7 @@
     const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
     const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', clear_ai: 'Clear AI memory', sheet: 'Google Sheet', sequence: 'Sequence', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
-    let graph = {nodes: [], edges: []}, variables = [], rules = {}, sequences = [];
+    let graph = {nodes: [], edges: []}, variables = [], variableGroups = [], rules = {}, sequences = [];
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
     // Ang draft: version (para sa check ng dalawang nag-e-edit), kalagayan, at kung may lokal na pagbabagong hindi pa naise-save.
     let version = 0, state = 'published', pages = [], dirty = false, conflict = false, leaving = false, pending = Promise.resolve();
@@ -455,11 +458,50 @@
             body.append(label('Sequence', bind(pick, v => c.sequence_id = parseInt(v, 10) || 0)));
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'Subscribing while the customer is already in it does nothing; after an unsubscribe it starts again from step 1. Sequences are made in Chatbot → Sequences.'}));
         }
-        $('vars').replaceChildren(...variables.map(v => { const b = el('button', {type: 'button', class: 'rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] hover:bg-slate-200', text: OPEN + v + CLOSE});
-            b.addEventListener('click', () => { if (!lastField) return; const s = lastField.selectionStart ?? lastField.value.length; lastField.value = lastField.value.slice(0, s) + OPEN + v + CLOSE + lastField.value.slice(s); lastField.dispatchEvent(new Event('input')); lastField.focus(); }); return b; }));
+        $('vars-search').value = '';
+        drawVars();
         $('form-box').classList.remove('hidden');
         body.querySelector('input, textarea, select')?.focus();
     }
+    // ---- ang listahan ng variable: System, Botfields, Customer fields; may kulay at tooltip kung saan galing, "!" kapag
+    // nasa dalawang grupo ang pangalan, at ang Seq / Seq Img ay nakatiklop sa "Sequences" ----
+    const VAR_GROUPS = [
+        ['system', 'System', 'bg-slate-100 text-slate-700 hover:bg-slate-200'],
+        ['botfield', 'Botfields · per page', 'bg-purple-100 text-purple-800 hover:bg-purple-200'],
+        ['customer', 'Customer fields · per customer', 'bg-teal-100 text-teal-800 hover:bg-teal-200'],
+    ];
+    const SEQ_VAR = /^Seq (Img )?\d+$/;
+    let seqOpen = false;
+    function putVar(v) {
+        if (!lastField) return;
+        const s = lastField.selectionStart ?? lastField.value.length;
+        lastField.value = lastField.value.slice(0, s) + OPEN + v + CLOSE + lastField.value.slice(s); lastField.dispatchEvent(new Event('input')); lastField.focus();
+    }
+    function drawVars() {
+        const q = $('vars-search').value.trim().toLowerCase();
+        const chip = (v, cls) => {
+            const b = el('button', {type: 'button', class: 'rounded px-1.5 py-0.5 font-mono text-[11px] ' + cls, title: v.tip, 'data-var': v.name},
+                [OPEN + v.name + CLOSE, v.also.length ? el('span', {class: 'ml-0.5 font-sans font-bold text-amber-600', text: '!'}) : null]);
+            b.addEventListener('click', () => putVar(v.name));
+            return b;
+        };
+        const boxes = VAR_GROUPS.map(([g, title, cls]) => {
+            const list = variableGroups.filter(v => v.group === g && (!q || v.name.toLowerCase().includes(q)));
+            if (!list.length) return null;
+            // Habang naghahanap, kita agad ang tugmang Seq; kung hindi, nakatiklop hanggang i-click.
+            const seq = q ? [] : list.filter(v => g === 'botfield' && SEQ_VAR.test(v.name));
+            const row = el('div', {class: 'flex flex-wrap gap-1'}, list.filter(v => !seq.includes(v)).map(v => chip(v, cls)));
+            if (seq.length) {
+                const t = el('button', {type: 'button', 'data-seq-toggle': true, 'aria-expanded': String(seqOpen), class: 'rounded border border-purple-200 px-1.5 py-0.5 text-[11px] text-purple-800 hover:bg-purple-50',
+                    text: (seqOpen ? '▾ ' : '▸ ') + 'Sequences (' + seq.length + ')'});
+                t.addEventListener('click', () => { seqOpen = !seqOpen; drawVars(); $('vars').querySelector('[data-seq-toggle]')?.focus(); });
+                row.append(t, ...(seqOpen ? seq.map(v => chip(v, cls)) : []));
+            }
+            return el('div', {}, [el('div', {class: 'mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500', text: title + ' (' + list.length + ')'}), row]);
+        }).filter(Boolean);
+        $('vars').replaceChildren(...(boxes.length ? boxes : [el('p', {class: 'text-xs text-slate-500', text: 'No variable matches.'})]));
+    }
+    $('vars-search').addEventListener('input', drawVars);
     // ---- the Google Sheet step: ang pangalan, ang mga tab, ang row 1 bilang header, at ang preview ng row ----
     // Ang naka-save ay ang dati pa ring listahan ng columns (A, B, C …; blangko = walang laman ang cell).
     const MAX_COLUMNS = parseInt(ed.dataset.maxColumns, 10) || 50;
@@ -730,7 +772,7 @@
     });
 
     fetch(ed.dataset.graphUrl, {headers: {'Accept': 'application/json'}}).then(r => r.json()).then(data => {
-        graph = data.graph; variables = data.variables || []; rules = data.rules || {}; sequences = data.sequences || [];
+        graph = data.graph; variables = data.variables || []; variableGroups = data.variable_groups || []; rules = data.rules || {}; sequences = data.sequences || [];
         graph.nodes.forEach(n => n.config = n.config && !Array.isArray(n.config) ? n.config : {});
         current = snapshot(); setState(data);
         applyView(); render(); fit();
