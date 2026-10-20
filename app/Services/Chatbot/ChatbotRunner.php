@@ -162,7 +162,7 @@ class ChatbotRunner
     {
         return $this->resume(BotcakeSendQueue::TABLE, ['done', 'failed'], BotcakeSendQueue::MARK, ['send', 'ai'], 'send_dropped', $ticket, function (FlowRun $run, object $row) {
             $r = (array) json_decode((string) $row->result, true);
-            $run->sendResult = ['node' => (string) $row->node_id, 'status' => $row->status === 'done' ? 'sent' : 'failed',
+            $run->sendResult = ['node' => (string) $row->node_id, 'status' => $r['status'] ?? ($row->status === 'done' ? 'sent' : 'failed'),
                 'error' => $r['error'] ?? $row->error ?? 'Botcake did not answer (HTTP 0)', 'messages' => (array) (json_decode((string) $row->payload, true)['messages'] ?? [])];
         });
     }

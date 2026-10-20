@@ -169,6 +169,7 @@ class ChatblastSender
     {
         $m = BotcakeMessage::whereKey($id)->where('status', 'sending')->first();
         if (!$m) return;
+        if (BotcakeSendQueue::holds($id)) return; // nasa botcake:send-pool na: ang pool ang magtatapos
 
         $unsure = $this->flowCalled((array) ($m->steps ?? []));
         BotcakeMessage::whereKey($id)->where('status', 'sending')->update($unsure
@@ -343,11 +344,13 @@ class ChatblastSender
      * Namatay ang pool habang nagpapadala ang mensahe: unknown kapag natawag na ang send_flow (gaya ng killed), kung hindi
      * ay uulitin ang tatlong hakbang mula sa simula (ligtas ulitin ang sulat at basa). @return bool true = uulitin
      */
-    public function lost(int $id): bool
+    public function lost(int $id, bool $flowSent): bool
     {
         $m = BotcakeMessage::whereKey($id)->where('status', 'sending')->first();
         if (!$m) return false;
-        if ($this->flowCalled((array) ($m->steps ?? []))) {
+        // Sa pool, ang "natawag na" ay kapag talagang lumabas ang send_flow (called_at ng ticket), hindi kapag naitala ang
+        // hakbang (naitatala ito habang naghihintay pa sa lane ng page).
+        if ($flowSent) {
             BotcakeMessage::whereKey($id)->where('status', 'sending')->update(['status' => 'unknown', 'reason' => self::UNSURE . '; the send pool stopped. Check Botcake before sending again']);
             return false;
         }
@@ -357,12 +360,12 @@ class ChatblastSender
     }
 
     /** Pumalya ang pool sa gitna ng mensahe (hal. database): gaya ng error sa process(), unknown kapag natawag na ang send_flow. */
-    public function poolError(int $id, Throwable $e): void
+    public function poolError(int $id, Throwable $e, bool $flowSent): void
     {
         $m = BotcakeMessage::whereKey($id)->where('status', 'sending')->first();
         if (!$m) return;
         $steps = (array) ($m->steps ?? []);
-        [$status, $why] = $this->flowCalled($steps) ? ['unknown', self::UNSURE] : ['failed', 'Error'];
+        [$status, $why] = $flowSent ? ['unknown', self::UNSURE] : ['failed', 'Error'];
         $this->finish($m, $status, $why . ': ' . mb_substr($e->getMessage(), 0, 200), null, $steps);
     }
 

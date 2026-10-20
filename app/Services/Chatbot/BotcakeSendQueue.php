@@ -22,7 +22,8 @@ class BotcakeSendQueue
 {
     public const TABLE = 'botcake_send_requests';
     public const MARK = 'send:'; // ang __ai ng customer habang hinihintay ang resulta ng padala
-    public const CHATBOT_SECONDS = 60;
+    public const CHATBOT_SECONDS = 600; // gaya ng naghihintay na worker sa matagal na pila; ang chat na lampas 30 minuto ay hindi na sinasagot
+    public const DEAD_POOL_SECONDS = 60; // ang "sending" ay ibinabalik lang kapag ganito na katagal walang heartbeat (hindi ang mabagal na pool)
     public const CHATBLAST_SECONDS = 240; // mas maikli sa lock ng customer ng chatblast (300 s)
     public const KEEP_DAYS = 2;
     public const REDISPATCH_SECONDS = 30;
@@ -88,33 +89,52 @@ class BotcakeSendQueue
             'chat_id' => $row->chat_id === null ? null : (int) $row->chat_id, 'flow_id' => (int) $row->flow_id, 'node_id' => (string) $row->node_id];
     }
 
+    /** May hawak pa bang ticket ang chatblast na mensahe (pending o sending)? */
+    public static function holds(int $messageId): bool
+    {
+        return Schema::hasTable(self::TABLE) && DB::table(self::TABLE)->where('message_id', $messageId)->whereIn('status', ['pending', 'sending'])->exists();
+    }
+
     /**
      * Kunin ang hanggang $n na pending, kondisyonal, para sa pool na $owner. Laging ang pinakaunang hindi pa tapos ng bawat
-     * customer lang: ang kasunod ay naghihintay hanggang matapos ito (ayos ng padala kada customer).
+     * customer lang: ang kasunod ay naghihintay hanggang matapos ito (ayos ng padala kada customer). Ang chatbot ay nauuna
+     * sa chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng row; ang tinanggihan ay naiiwang pending.
      * @return array<int, object>
      */
-    public static function claim(string $owner, int $n): array
+    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null): array
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
-        $ids = DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
+        $rows = DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
             ->where('t.deadline_at', '>', now())
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
-            ->orderBy('t.id')->limit($n)->pluck('t.id');
+            ->orderByRaw("CASE WHEN t.kind = 'chatbot' THEN 0 ELSE 1 END")->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind']);
         $out = [];
-        foreach ($ids as $id) {
+        foreach ($rows as $candidate) {
+            if (count($out) >= $n) break;
+            if ($accept && !$accept($candidate)) continue;
+            $id = $candidate->id;
             $ok = DB::table($t)->where('id', $id)->where('status', 'pending')
                 ->update(['status' => 'sending', 'claimed_by' => $owner, 'claimed_at' => now(), 'attempts' => DB::raw('attempts + 1'), 'updated_at' => now()]);
-            if ($ok === 1) $out[] = DB::table($t)->where('id', $id)->first();
+            if ($ok !== 1) continue;
+            $row = DB::table($t)->where('id', $id)->first();
+            if ($then) $then($row); // agad: ang susunod na $accept ay nakikita na ito
+            $out[] = $row;
         }
 
         return $out;
     }
 
+    /** May hawak pa ba ang $owner sa ticket (sending)? Sinusuri bago ang bawat tawag sa Botcake. */
+    public static function owns(object $row, string $owner): bool
+    {
+        return DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)->exists();
+    }
+
     /**
-     * Itatala bago tumawag sa Botcake: pagkatapos nito, hindi na inuulit ang padala ng chatbot kahit mag-crash. false =
-     * hindi na hawak ng $owner (hal. kinuha ng bagong pool, o natawag na): walang tawag.
+     * Itatala bago tumawag sa Botcake (ang send_content ng chatbot, o ang send_flow ng chatblast): pagkatapos nito, hindi na
+     * inuulit kahit mag-crash. false = hindi na hawak ng $owner (hal. kinuha ng bagong pool, o natawag na): walang tawag.
      */
     public static function called(object $row, string $owner): bool
     {
@@ -129,9 +149,11 @@ class BotcakeSendQueue
      */
     public static function finishChatbot(object $row, ?string $owner, array $o): bool
     {
-        $q = DB::table(self::TABLE)->where('id', $row->id)->whereIn('status', ['pending', 'sending']);
-        if ($owner !== null) $q->where('claimed_by', $owner);
-        $ok = $q->update(['status' => $o['status'] === 'sent' ? 'done' : 'failed', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
+        // Walang may hawak (sweep): ang pending lang, para hindi maagaw ang kakukuha pa lang ng pool.
+        $q = DB::table(self::TABLE)->where('id', $row->id);
+        if ($owner !== null) $q->where('status', 'sending')->where('claimed_by', $owner);
+        else $q->where('status', 'pending');
+        $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;
         $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
@@ -145,8 +167,9 @@ class BotcakeSendQueue
     /** Tapos na ang chatblast na mensahe (ang status ay naisulat na ng stepper): bitawan ang lock at itakda ang gap. */
     public static function finishChatblast(object $row, ?string $owner): bool
     {
-        $q = DB::table(self::TABLE)->where('id', $row->id)->whereIn('status', ['pending', 'sending']);
-        if ($owner !== null) $q->where('claimed_by', $owner);
+        $q = DB::table(self::TABLE)->where('id', $row->id);
+        if ($owner !== null) $q->where('status', 'sending')->where('claimed_by', $owner);
+        else $q->where('status', 'pending');
         if ($q->update(['status' => 'done', 'done_at' => now(), 'updated_at' => now()]) !== 1) return false;
         app(ChatblastSender::class)->afterPool((string) $row->customer, (string) $row->lock_owner);
 
@@ -168,7 +191,7 @@ class BotcakeSendQueue
             $back = fn () => DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)
                 ->update(['status' => 'pending', 'claimed_by' => null, 'called_at' => null, 'updated_at' => now()]);
             if ($row->kind === 'chatblast') {
-                if (app(ChatblastSender::class)->lost((int) $row->message_id)) $back();
+                if (app(ChatblastSender::class)->lost((int) $row->message_id, $row->called_at !== null)) $back();
                 else self::finishChatblast($row, $row->claimed_by);
             } elseif ($row->called_at === null) {
                 $back();
@@ -191,13 +214,14 @@ class BotcakeSendQueue
     {
         $out = ['failed' => 0, 'requeued' => 0, 'redispatched' => 0, 'pruned' => 0];
         if (!Schema::hasTable(self::TABLE)) return $out;
-        if (!BotcakeSendPool::alive()) self::recover(null);
+        if (!BotcakeSendPool::alive(self::DEAD_POOL_SECONDS)) self::recover(null);
 
         foreach (DB::table(self::TABLE)->where('status', 'pending')->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
             if ($row->kind === 'chatblast') {
                 if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['status' => 'failed', 'error' => 'Not sent in time; queued again', 'done_at' => now(), 'updated_at' => now()]) !== 1) continue;
                 BotcakeMessage::whereKey($row->message_id)->where('status', 'sending')->update(['status' => 'queued']);
-                app(ChatblastSender::class)->afterPool((string) $row->customer, (string) $row->lock_owner);
+                // Walang naipadala: ang lock lang ang binibitawan (walang gap ng customer).
+                \Illuminate\Support\Facades\Cache::restoreLock((string) $row->customer, (string) $row->lock_owner)->release();
                 SendChatblastMessage::dispatch((int) $row->message_id);
                 $out['requeued']++;
             } elseif (self::finishChatbot($row, null, ['status' => 'failed', 'error' => 'The send pool did not send it in time', 'http' => null])) {

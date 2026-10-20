@@ -56,12 +56,12 @@ abstract class TicketPool
         return (int) now()->getTimestampMs();
     }
 
-    /** May buhay na pool (heartbeat sa nakaraang BEAT_FRESH_SECONDS)? */
-    public static function alive(): bool
+    /** May buhay na pool (heartbeat sa nakaraang $seconds, BEAT_FRESH_SECONDS kapag wala)? */
+    public static function alive(?int $seconds = null): bool
     {
         $beat = Cache::get(static::BEAT);
 
-        return is_array($beat) && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - static::BEAT_FRESH_SECONDS;
+        return is_array($beat) && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - ($seconds ?? static::BEAT_FRESH_SECONDS);
     }
 
     /** Simula: tumatanggi kapag may ibang buhay na pool (heartbeat), saka ibinabalik ang naiwan ng patay na pool. */
@@ -125,6 +125,7 @@ abstract class TicketPool
                 $beatAt = microtime(true);
             }
             if (microtime(true) - $sweepAt >= 5) {
+                $this->beat(); // ang sweep ay maaaring matagal: buhay pa ang pool
                 try {
                     $this->sweep();
                 } catch (Throwable $e) {

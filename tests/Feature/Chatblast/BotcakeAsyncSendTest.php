@@ -63,7 +63,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
     {
         return new BotcakeSendPool(function (RequestInterface $req, array $options) {
             $p = new Promise();
-            $this->calls[] = ['req' => $req, 'p' => $p];
+            $this->calls[] = ['req' => $req, 'p' => $p, 't' => $this->clock->now()];
 
             return $p;
         }, $this->clock);
@@ -195,11 +195,12 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
             $this->clock->time += 0.1;
         }
 
-        $lanes = $this->pool->sentAt;
-        $uno = $lanes[sha1('tok-1001')];
+        // The times Botcake (the fake handler) received each call, per page.
+        $at = fn (string $page) => array_values(array_map(fn ($c) => $c['t'], array_filter($this->calls, fn ($c) => str_contains(self::req($c)['path'], '/pages/' . $page . '/'))));
+        $uno = $at('1001');
         $this->assertCount(6, $uno, 'all six sent');
         for ($i = 1; $i < count($uno); $i++) $this->assertGreaterThanOrEqual(0.5 - 1e-6, $uno[$i] - $uno[$i - 1], 'at most 2 per second on one page');
-        $this->assertSame($uno[0], $lanes[sha1('tok-1002')][0], 'another page does not wait for it');
+        $this->assertSame($uno[0], $at('1002')[0], 'another page does not wait for it');
         for ($i = 1; $i <= 6; $i++) $this->assertSame(['sent: You said: a' . $i], $this->replies((string) (7000 + $i)));
     }
 
@@ -230,28 +231,39 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
 
     public static function readBacks(): array
     {
+        $ok = [200, ['success' => true]];
+        $read = fn (string $text) => [200, ['success' => true, 'data' => [['id' => 123, 'custom_field_id' => 7701, 'value' => $text]]]];
+
         return [
-            'the same text: sent' => ['Hello Ana', 'sent', null, ['write', 'read', 'flow']],
-            'another text: field_mismatch, not sent' => ['Something else', 'field_mismatch', 'The field holds a different text in the read-back; not sent', ['write', 'read']],
+            'the same text: sent' => [$ok, $read('Hello Ana'), $ok, 'sent', null, ['write', 'read', 'flow']],
+            'another text: field_mismatch, not sent' => [$ok, $read('Something else'), $ok, 'field_mismatch', 'The field holds a different text in the read-back; not sent', ['write', 'read']],
+            'send_flow 5xx: unknown' => [$ok, $read('Hello Ana'), [500, ['message' => 'down']], 'unknown', 'Not sure it was sent (send_flow was called) (HTTP 500); check Botcake before sending again', ['write', 'read', 'flow']],
+            'the write refused: failed' => [[400, ['success' => false]], $read('Hello Ana'), $ok, 'failed', 'The custom field was not written (HTTP 400)', ['write']],
+            'a 401: token invalid' => [[401, ['message' => 'Unauthorized']], $read('Hello Ana'), $ok, 'failed', 'Token invalid (HTTP 401); fix the token on /page-settings', ['write']],
         ];
     }
 
     /** @dataProvider readBacks */
-    public function test_S_089_6_a_chatblast_messages_three_steps_run_in_order_with_the_same_statuses_and_steps_as_before(string $readBack, string $status, ?string $reason, array $steps): void
+    public function test_S_089_6_a_chatblast_messages_three_steps_run_in_order_with_the_same_statuses_and_steps_as_before(array $writeR, array $readR, array $flowR, string $status, ?string $reason, array $steps): void
     {
         $message = fn () => BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'JT' . uniqid(), 'kind' => 'in_transit', 'psid' => '7001',
             'text' => 'Hello Ana', 'status' => 'queued', 'is_test' => true, 'queued_at' => now()]);
-        $read = ['success' => true, 'data' => [['id' => 123, 'custom_field_id' => 7701, 'value' => $readBack]]];
+        $pick = fn (string $method, string $url) => $method === 'GET' ? $readR : (str_ends_with($url, '/send_flow') ? $flowR : $writeR);
+        $read = $readR[1];
         $normal = fn (BotcakeMessage $m) => [$m->status, $m->reason, array_map(fn ($s) => [$s['step'], $s['method'], $s['path'], $s['request'], $s['http'], $s['attempts'], $s['response']], (array) $m->steps)];
 
         // Before: the job waits for each step (no live pool).
         $this->pool->stop();
-        Http::fake(['botcake.io/*' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? $read : ['success' => true])]);
+        Http::fake(['botcake.io/*' => function (HttpRequest $r) use ($pick) {
+            [$status, $body] = $pick($r->method(), $r->url());
+            return Http::response($body, $status);
+        }]);
         $before = $message();
         app(ChatblastSender::class)->process($before->id);
         $this->assertSame(0, DB::table(BotcakeSendQueue::TABLE)->count());
 
         // Now: the job hands the message off and is free; the pool runs the three steps.
+        app(PageSettings::class)->set('Page Uno', 'botcake', 'token_status', 'ok', false, null, true); // a 401 above marked it invalid
         $this->travel(21)->seconds(); // the customer gap after the first message
         $this->assertTrue($this->pool->start());
         $now = $message();
@@ -261,7 +273,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->assertFalse(Cache::lock($key, 10)->get(), 'the customer lock is held while the pool sends');
         for ($n = 0; $n < 8; $n++) {
             $this->pool->tick();
-            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending') $this->answer($c, 200, $c['req']->getMethod() === 'GET' ? $read : ['success' => true]);
+            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending') $this->answer($c, ...$pick($c['req']->getMethod(), (string) $c['req']->getUri()));
             $this->pool->tick(false);
             $this->clock->time += 0.5;
         }
@@ -296,6 +308,12 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         }
         $this->answer($old[0]); // the dead pool's call answers late
         $this->pool->tick(false);
+        $calls = count($this->calls);
+        for ($n = 0; $n < 4; $n++) { // the old pool turns out to be alive after all: it still holds 7002 in its lane
+            $this->clock->time += 0.5;
+            $this->pool->tick();
+        }
+        $this->assertCount($calls, $this->calls, 'a pool whose tickets were taken back never calls Botcake for them');
 
         $this->assertSame(['7002'], array_map(fn ($c) => self::req($c)['psid'], $this->calls), 'the one never called is sent once; the called one is not sent again');
         $this->assertSame(['failed:  (Botcake did not answer (HTTP 0))'], array_map(fn ($r) => preg_replace('/You said: \w+/', '', $r), $this->replies('7001')));
@@ -350,5 +368,126 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->answer(end($this->calls), 500, ['success' => false]);
         $this->pool->tick(false);
         $this->assertSame('yes', (new CustomerFields(1002, 8001))->get('after ai')); // field names are stored normalised
+    }
+    private function blast(string $psid = '7001'): BotcakeMessage
+    {
+        $m = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'JT' . uniqid(), 'kind' => 'in_transit', 'psid' => $psid,
+            'text' => 'Hello ' . $psid, 'status' => 'queued', 'is_test' => true, 'queued_at' => now()]);
+        app(ChatblastSender::class)->process($m->id);
+
+        return $m;
+    }
+
+    /** Sagutin ang chatblast na tawag: GET = ang text ng mensahe pabalik, ang iba = success. */
+    private function answerBlast(array $c): void
+    {
+        $psid = (string) preg_replace('#.*/customer/([^/]+)/.*#', '$1', $c['req']->getUri()->getPath());
+        $this->answer($c, 200, $c['req']->getMethod() === 'GET' ? ['success' => true, 'data' => [['id' => 7701, 'value' => 'Hello ' . $psid]]] : ['success' => true]);
+    }
+
+    public function test_S_089_10_a_chatblast_message_cut_by_a_pool_restart_is_unknown_only_if_send_flow_went_out(): void
+    {
+        $sent = $this->blast('7001');
+        $this->travel(21)->seconds();
+        $this->pool->beat();
+        $notYet = $this->blast('7002');
+        // The pool takes both: 7001 gets to send_flow (the call goes out), 7002 only gets its write done.
+        for ($n = 0; $n < 12 && !collect($this->calls)->contains(fn ($c) => str_ends_with($c['req']->getUri()->getPath(), '/send_flow')); $n++) {
+            $this->pool->tick();
+            foreach ($this->calls as $c) {
+                if ($c['p']->getState() === 'pending' && !str_ends_with($c['req']->getUri()->getPath(), '/send_flow') && (!str_contains($c['req']->getUri()->getPath(), '/7002/') || $c['req']->getMethod() === 'POST')) $this->answerBlast($c);
+            }
+            $this->pool->tick(false);
+            $this->clock->time += 0.5;
+        }
+        $this->assertSame(1, collect($this->calls)->filter(fn ($c) => str_ends_with($c['req']->getUri()->getPath(), '/send_flow'))->count());
+
+        // The pool dies; a new one starts.
+        $this->travel(11)->seconds();
+        $before = count($this->calls);
+        $new = $this->pool();
+        $this->assertTrue($new->start());
+        $this->assertSame('unknown', $sent->fresh()->status, 'send_flow went out: not sure it arrived, never sent again');
+        $this->assertSame('sending', $notYet->fresh()->status, 'send_flow never went out: the steps start again');
+        for ($n = 0; $n < 10; $n++) {
+            $new->tick();
+            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending' && count($this->calls) > $before) $this->answerBlast($c);
+            $new->tick(false);
+            $this->clock->time += 0.5;
+        }
+        $this->assertSame('sent', $notYet->fresh()->status);
+        $this->assertSame(['write', 'read', 'flow'], array_column((array) $notYet->fresh()->steps, 'step'), 'one fresh run of the steps');
+        $flows = collect($this->calls)->filter(fn ($c) => str_ends_with($c['req']->getUri()->getPath(), '/send_flow'));
+        $this->assertSame(['7001', '7002'], $flows->map(fn ($c) => json_decode((string) $c['req']->getBody(), true)['psid'])->values()->all(), 'one send_flow per message');
+    }
+
+    public function test_S_089_11_the_sweep_ends_tickets_the_pool_never_got_to(): void
+    {
+        $this->echoFlow();
+        $this->says('hi', '7001');
+        $blast = $this->blast('7002');
+        $this->pool->stop(); // no pool takes them
+        Http::fake(['botcake.io/*' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? ['success' => true, 'data' => [['id' => 7701, 'value' => 'Hello 7002']]] : ['success' => true])]);
+
+        $this->travel(241)->seconds();
+        Artisan::call('chatbot:resume-skipped');
+        $this->assertSame('sent', $blast->fresh()->status, 'the chatblast message is queued again, and its job sends it (no live pool: waiting, as before)');
+        $this->assertSame(['write', 'read', 'flow'], array_column((array) $blast->fresh()->steps, 'step'));
+        $this->assertSame(0, collect($this->calls)->count(), 'the pool never called Botcake for it');
+
+        $this->travel(360)->seconds(); // 10 minutes after the chatbot send was handed off
+        Artisan::call('chatbot:resume-skipped');
+        $this->assertSame(['failed: You said: hi (The send pool did not send it in time)'], $this->replies('7001'));
+        $this->assertNull((new CustomerFields(1001, 7001))->get('done'), 'the run took the failed path (a send node stops)');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(CustomerFields::AI), 'and the customer is free again');
+
+        // A result whose resume job was lost is resumed by the sweep, once.
+        $this->pool->beat();
+        $this->says('again', '7003');
+        DB::table(BotcakeSendQueue::TABLE)->where('psid', '7003')->update(['status' => 'done', 'result' => json_encode(['status' => 'sent', 'error' => null, 'http' => 200])]);
+        $this->travel(31)->seconds();
+        Artisan::call('chatbot:resume-skipped');
+        Artisan::call('chatbot:resume-skipped');
+        $this->assertSame('yes', (new CustomerFields(1001, 7003))->get('done'));
+        $this->assertSame(1, DB::table('chatbot_events')->where('psid', 7003)->where('type', 'run_started')->where('detail', 'like', '%resumed after send%')->count());
+    }
+
+    public static function notNow(): array
+    {
+        return [
+            'a human paused the bot' => [fn () => (new CustomerFields(1001, 7001))->set(CustomerFields::BOT_PAUSED, '1'), 'skipped: You said: hi (The bot was paused before the send went out)', false],
+            'the emergency stop' => [fn () => config(['services.chatbot.replies_enabled' => false]), 'skipped: You said: hi (Replies are switched off)', true],
+        ];
+    }
+
+    /** @dataProvider notNow */
+    public function test_S_089_12_a_queued_send_checks_the_pause_and_the_emergency_stop_before_it_goes_out(\Closure $then, string $reply, bool $continues): void
+    {
+        $this->echoFlow();
+        $this->says('first', '7009'); // takes the page's first slot in the lane
+        $this->says('hi', '7001');
+        $this->pool->tick();
+        $this->assertCount(1, $this->calls, '7001 waits in the lane');
+
+        $then();
+        $this->clock->time += 0.5;
+        $this->pool->tick();
+
+        $this->assertCount(1, $this->calls, 'nothing goes out for 7001');
+        $this->assertSame([$reply], $this->replies('7001'));
+        $this->assertSame($continues ? 'yes' : null, (new CustomerFields(1001, 7001))->get('done'), 'a pause stops the run; the switch skips as before');
+    }
+
+    public function test_S_089_13_a_big_chatblast_on_one_page_never_holds_up_the_chatbot_on_other_pages(): void
+    {
+        for ($i = 1; $i <= 40; $i++) $this->blast((string) (7100 + $i));
+        $this->echoFlow('Page Dos');
+        $this->says('hi', '8001', '1002', 'Page Dos');
+
+        $this->pool->tick();
+
+        $held = DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->where('status', 'sending')->count();
+        $this->assertLessThanOrEqual($this->pool->perPage(), $held, 'one page holds only its share of the pool');
+        $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8001'), 'the chatbot on another page goes out at once');
     }
 }

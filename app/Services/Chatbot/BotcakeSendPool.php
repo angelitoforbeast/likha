@@ -69,16 +69,34 @@ class BotcakeSendPool extends TicketPool
     {
         $started = 0;
         if ($claim) {
-            foreach (BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs)) as $row) {
-                $this->take($row);
-                $started++;
-            }
+            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row)));
         }
         $this->lanes();
         $this->pump();
         $this->lanes();
 
         return $started;
+    }
+
+    /**
+     * May puwang pa ba ang page ng ticket: hanggang perPage() na hawak kada lane, para hindi maubos ng isang page (hal.
+     * isang chatblast campaign) ang lahat ng puwesto ng pool. Ang hawak na (ulit na kuha) ay hindi.
+     */
+    private function room(object $c): bool
+    {
+        if (isset($this->jobs[(string) $c->request_id])) return false;
+        $token = $this->token((string) $c->page_name);
+        $lane = $token === '' ? '' : sha1($token);
+        $held = 0;
+        foreach ($this->jobs as $job) if ($job['lane'] === $lane) $held++;
+
+        return $held < $this->perPage();
+    }
+
+    /** Ilang ticket kada page ang hawak: ang kayang ipadala sa mga 3 segundo (ang chatblast ay tatlong tawag bawat isa). */
+    public function perPage(): int
+    {
+        return max(2, (int) ceil(3 / BotcakeClient::interval()));
     }
 
     /** Ang token ng page (page settings), nasa memory nang 10 s. */
@@ -122,6 +140,13 @@ class BotcakeSendPool extends TicketPool
                 if ($m && $m->status === 'sending') {
                     BotcakeMessage::whereKey($m->id)->where('status', 'sending')->update(['status' => 'failed', 'reason' => 'The page settings changed before sending; safe to send again']);
                 }
+                $this->forget($id);
+                BotcakeSendQueue::finishChatblast($row, $this->owner);
+                return;
+            }
+            // Ang token na naging invalid habang naghihintay (401 sa ibang mensahe): hindi na tinatawagan, gaya ng job.
+            if (str_starts_with((string) app(PageSettings::class)->get((string) $m->page_name, 'botcake', 'token_status'), 'invalid')) {
+                BotcakeMessage::whereKey($m->id)->where('status', 'sending')->update(['status' => 'failed', 'reason' => 'Token invalid: fix it on /page-settings (Test token) before sending']);
                 $this->forget($id);
                 BotcakeSendQueue::finishChatblast($row, $this->owner);
                 return;
@@ -174,9 +199,12 @@ class BotcakeSendPool extends TicketPool
         $interval = BotcakeClient::interval();
         foreach ($this->lanes as $key => $lane) {
             if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next']) continue;
+            // Ang unang handa, ang chatbot muna (sagot sa usapan) bago ang chatblast.
             $pick = null;
             foreach ($lane['queue'] as $i => $id) {
-                if (($this->jobs[$id]['notBefore'] ?? 0) <= $now) { $pick = $i; break; }
+                if (($this->jobs[$id]['notBefore'] ?? 0) > $now) continue;
+                if ($this->jobs[$id]['row']->kind === 'chatbot') { $pick = $i; break; }
+                $pick ??= $i;
             }
             if ($pick === null) continue;
             // Ang naghihintay na padala sa ibang proseso (hal. setup check) ay kahati ng page: iginagalang ang huli nito.
@@ -191,6 +219,7 @@ class BotcakeSendPool extends TicketPool
             $this->lanes[$key]['last'] = $now;
             Cache::put(BotcakeClient::rateCacheKey($key), $now, 60);
             $this->sentAt[$key][] = $now;
+            if (count($this->sentAt[$key]) > 100) array_shift($this->sentAt[$key]);
             $this->issue($id);
         }
     }
@@ -200,12 +229,27 @@ class BotcakeSendPool extends TicketPool
         $job = $this->jobs[$id] ?? null;
         if ($job === null) return;
         $row = $job['row'];
-        // Ang padala ng chatbot: itinatala bago tumawag (hindi na inuulit pagkatapos ng crash).
-        if ($row->kind === 'chatbot' && $job['attempt'] === 0 && !BotcakeSendQueue::called($row, $this->owner)) {
+        $q = $job['req'];
+        // Bago ang bawat tawag: hawak pa ba ng pool na ito ang ticket (hindi naibalik ng sweep o kinuha ng bagong pool)?
+        if (!BotcakeSendQueue::owns($row, $this->owner)) {
             $this->forget($id);
             return;
         }
-        $q = $job['req'];
+        if ($row->kind === 'chatbot' && $job['attempt'] === 0) {
+            // Naghintay sa lane: ang pause ng tao at ang emergency stop ay sinusuri ngayon, bago lumabas ang padala.
+            if (($skip = $this->skipNow($row)) !== null) {
+                $this->forget($id);
+                BotcakeSendQueue::finishChatbot($row, $this->owner, ['status' => 'skipped', 'error' => $skip, 'http' => null]);
+                return;
+            }
+            // Itinatala bago tumawag: hindi na inuulit pagkatapos ng crash.
+            if (!BotcakeSendQueue::called($row, $this->owner)) {
+                $this->forget($id);
+                return;
+            }
+        }
+        // Ang send_flow ng chatblast: ang "natawag na" ay ngayon, kapag talagang lumabas (hindi kapag naitala ang hakbang).
+        if ($row->kind === 'chatblast' && ($q['step'] ?? '') === 'flow' && $job['attempt'] === 0) BotcakeSendQueue::called($row, $this->owner);
         $mock = BotcakeClient::mockAnswer($q['method'], $q['path'], $q['data']);
         if ($mock !== null) {
             $ms = (int) (BotcakeMock::pages()[(string) $row->page_id]['latency'] ?? 0);
@@ -261,6 +305,16 @@ class BotcakeSendPool extends TicketPool
         }
     }
 
+    /** Ang dahilan kung bakit hindi na ipapadala ngayon (naka-off ang mga sagot, o tao na ang sumasagot), o null. */
+    private function skipNow(object $row): ?string
+    {
+        if (!BotcakeOutbox::enabled()) return BotcakeOutbox::SWITCHED_OFF;
+        $paused = DB::table('chatbot_customer_values')->where('page_id', (int) $row->page_id)->where('psid', (int) $row->psid)
+            ->where('key', CustomerFields::BOT_PAUSED)->value('value');
+
+        return (string) $paused === '1' ? 'The bot was paused before the send went out' : null;
+    }
+
     /** Pumalya ang pool sa ticket (hal. database): chatbot → failed port; chatblast → gaya ng error ng job (unknown o failed). */
     private function failed(object $row, Throwable $e): void
     {
@@ -270,7 +324,8 @@ class BotcakeSendPool extends TicketPool
             if ($row->kind === 'chatbot') {
                 BotcakeSendQueue::finishChatbot($row, $this->owner, ['status' => 'failed', 'error' => 'Error: ' . mb_substr($e->getMessage(), 0, 150), 'http' => null]);
             } else {
-                app(ChatblastSender::class)->poolError((int) $row->message_id, $e);
+                $flowSent = DB::table(BotcakeSendQueue::TABLE)->where('id', $row->id)->whereNotNull('called_at')->exists();
+                app(ChatblastSender::class)->poolError((int) $row->message_id, $e, $flowSent);
                 BotcakeSendQueue::finishChatblast($row, $this->owner);
             }
         } catch (Throwable $again) {
