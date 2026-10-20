@@ -101,8 +101,10 @@ class FlowGraph
     {
         $text = fn ($v, int $max = self::MAX_TEXT) => mb_substr(is_scalar($v) ? (string) $v : '', 0, $max);
         $field = fn ($v) => ChatbotVars::norm(is_scalar($v) ? (string) $v : '');
+        // "Counts as an order" (Results): naka-save lang kapag naka-tick, kaya ang lumang graph ay hindi nagbabago.
+        $order = in_array($type, ['send', 'set', 'sheet'], true) && !empty($c['counts_order']) ? ['counts_order' => true] : [];
 
-        return match ($type) {
+        return $order + match ($type) {
             'condition' => ['rows' => array_values(array_map(fn ($r) => [
                 'variable' => $text($r['variable'] ?? '', 100),
                 'rule' => array_key_exists($r['rule'] ?? '', self::RULES) ? $r['rule'] : 'is',

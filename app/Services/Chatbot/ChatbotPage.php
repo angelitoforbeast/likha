@@ -55,18 +55,38 @@ class ChatbotPage
             ->filter(fn ($s) => (string) $s->plainValue() === (string) $flowId)->pluck('page_name')->unique()->sort()->values()->all();
     }
 
+    /** @var array<string, array<string, array{key: string, id: int}>> page key => pangalan (naka-norm) => botfield at row id */
+    private static array $ids = [];
+
     /** @return array<string, string> key at label => value */
     public function botfields(string $page): array
     {
         $labels = array_column($this->fields->columns(), 'label', 'key');
         $out = [];
+        $ids = [];
         foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get() as $s) {
             if (in_array($s->key, ChatbotFields::RESERVED, true)) continue;
             $value = (string) $s->plainValue();
             $out[$s->key] = $value;
             if (isset($labels[$s->key])) $out[$labels[$s->key]] = $value;
+            // Ang version ng botfield (Results): ang id ng row na binasa na rito, walang dagdag na query.
+            $ids[ChatbotVars::norm($s->key)] = $ids[ChatbotVars::norm($labels[$s->key] ?? $s->key)] = ['key' => $s->key, 'id' => (int) $s->id];
         }
+        self::$ids[$this->settings->pageKey($page)] = $ids;
 
         return $out;
+    }
+
+    /**
+     * Ang mga botfield ng page (pangalan o label, naka-norm => key at id ng page_settings row) mula sa huling botfields()
+     * ng page sa prosesong ito; binabasa kapag wala pa.
+     * @return array<string, array{key: string, id: int}>
+     */
+    public static function versionIds(string $page): array
+    {
+        $key = app(PageSettings::class)->pageKey($page);
+        if (!isset(self::$ids[$key])) app(self::class)->botfields($page);
+
+        return self::$ids[$key] ?? [];
     }
 }

@@ -160,6 +160,12 @@ class BotcakeChatController extends Controller
             } catch (\Throwable $e) {
                 report($e);
             }
+            // Results: ang mga padala sa customer na wala pang sagot ay sinagot ng chat na ito.
+            try {
+                if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) \App\Jobs\MarkChatbotReplied::dispatch($chat->id);
+            } catch (\Throwable $e) {
+                report($e);
+            }
             // Ang sariling chatbot: kapag may flow ang page (at naka-On), ang takbo ay sa queue na "chatbot". Ang
             // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.
             try {

@@ -96,6 +96,11 @@ Schedule::command('chatbot:sequence-tick')
     ->everyMinute()
     ->withoutOverlapping(5);
 
+// Chatbot Results: ang replied_at ng mga padalang hindi naabot ng job ng chat (huling 48 oras).
+Schedule::command('chatbot:replied-backfill')
+    ->hourlyAt(7)
+    ->withoutOverlapping(30);
+
 // Chatblast setup check (flow, field at template ayon sa Setup box ng /chatblast/page-settings): gabi-gabi, 21:30
 // Manila, pagkatapos ng In transit window. Ang delivered check ng bagong flow: kada oras sa :45, ang hindi pa kumpirmado lang.
 Schedule::command('botcake:setup-check --all')

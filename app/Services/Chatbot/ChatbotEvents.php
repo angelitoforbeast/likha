@@ -54,7 +54,8 @@ class ChatbotEvents
         if (!Schema::hasTable('chatbot_events')) return 0;
         $deleted = 0;
         do {
-            $ids = DB::table('chatbot_events')->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->orderBy('id')->limit(5000)->pluck('id');
+            // Ang order ay itinatago (kaunti lang; ang Results ay bumabalik nang lampas 30 araw).
+            $ids = DB::table('chatbot_events')->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->where('type', '<>', 'order')->orderBy('id')->limit(5000)->pluck('id');
             if ($ids->isNotEmpty()) $deleted += DB::table('chatbot_events')->whereIn('id', $ids)->delete();
         } while ($ids->count() === 5000);
 
@@ -112,6 +113,7 @@ class ChatbotEvents
             'run_ended' => 'Run ended (' . ($d['reason'] ?? 'end') . ')',
             'skipped' => 'Skipped: ' . ($d['reason'] ?? '') . ($node ? ' (' . $node . ')' : ''),
             'sequence' => self::sequenceText($d),
+            'order' => 'Counted as an order at step ' . $node,
             default => $type,
         };
     }

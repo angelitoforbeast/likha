@@ -59,7 +59,7 @@ class BotcakeSendQueue
             'request_id' => $id, 'kind' => 'chatbot', 'priority' => 0, 'customer' => self::chatbotCustomer($run->pageId, $run->fields->psid),
             'page_id' => (int) $run->pageId, 'page_name' => $run->pageName, 'psid' => (string) $run->fields->psid, 'chat_id' => $run->chatId,
             'flow_id' => $run->flowId, 'node_id' => $nodeId, 'run_id' => $run->runId,
-            'payload' => json_encode(['messages' => $messages], JSON_UNESCAPED_UNICODE),
+            'payload' => json_encode(['messages' => $messages] + ($run->tags ? ['tags' => $run->tags] : []), JSON_UNESCAPED_UNICODE),
             'context' => json_encode(['input' => $run->input, 'full_name' => $run->fullName, 'received_at' => $run->receivedAt,
                 'ai_calls' => $run->aiCalls, 'steps' => $run->steps], JSON_UNESCAPED_UNICODE),
             'status' => 'pending', 'deadline_at' => now()->addSeconds(self::CHATBOT_SECONDS), 'created_at' => now(), 'updated_at' => now(),
@@ -161,9 +161,9 @@ class BotcakeSendQueue
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
         if ($ok !== 1) return false;
-        $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
+        $payload = (array) json_decode((string) $row->payload, true);
         BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, $row->chat_id === null ? null : (int) $row->chat_id, $row->flow_id === null ? null : (int) $row->flow_id,
-            (string) $row->node_id, 'send', $messages, $o['status'], $o['error'], $o['http']);
+            (string) $row->node_id, 'send', (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], is_array($payload['tags'] ?? null) ? $payload['tags'] : null);
         ResumeChatbotSend::dispatch(self::ticket($row));
 
         return true;
