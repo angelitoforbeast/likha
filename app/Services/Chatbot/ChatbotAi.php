@@ -25,14 +25,18 @@ class ChatbotAi
         if ($key === '') return ['ok' => false, 'text' => '', 'error' => self::NO_KEY];
 
         try {
-            $res = Http::withToken($key)->acceptJson()->timeout(self::TIMEOUT)->post(self::URL, [
-                'model' => $model, 'messages' => $messages, 'max_tokens' => $maxTokens,
-            ]);
+            $res = Http::withToken($key)->acceptJson()->timeout(self::TIMEOUT)->post(self::URL, self::payload($model, $messages, $maxTokens));
         } catch (ConnectionException $e) {
             return ['ok' => false, 'text' => '', 'error' => 'OpenAI did not answer.'];
         }
 
         return self::parse($res->status(), $res->json());
+    }
+
+    /** Ang body ng request; pareho para sa naghihintay at sa chatbot:ai-pool. */
+    public static function payload(string $model, array $messages, int $maxTokens): array
+    {
+        return ['model' => $model, 'messages' => $messages, 'max_tokens' => $maxTokens];
     }
 
     /**

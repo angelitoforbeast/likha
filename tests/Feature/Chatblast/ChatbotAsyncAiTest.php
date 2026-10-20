@@ -37,6 +37,8 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
 
     /** @var array<int, array{req: RequestInterface, p: Promise}> ang mga request sa "OpenAI" na hindi pa sinasagot */
     private array $calls = [];
+    /** Ang buhay na pool (heartbeat): kailangan para hindi maghintay ang AI step. */
+    private ChatbotAiPool $pool;
 
     protected function setUp(): void
     {
@@ -54,6 +56,8 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
             'services.openai.key' => 'sk-test-not-real', 'services.openai.timeout' => 60]);
         $this->page('Page Uno', '1001');
         Http::fake([self::SEND => Http::response(['success' => true])]);
+        $this->pool = $this->pool();
+        $this->assertTrue($this->pool->start());
     }
 
     /** n2 AI (save sa answer) → success: n3 "Reply: {{answer}}", failed: n4 "Sorry". */
@@ -139,8 +143,7 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $this->assertSame([], Http::recorded(fn (HttpRequest $r) => $r->url() === self::SEND)->all(), 'nothing sent while waiting');
         $this->assertSame(['AI step n2 → waiting for the answer'], $this->events('ai_pending'));
 
-        $pool = $this->pool();
-        $this->assertTrue($pool->start());
+        $pool = $this->pool;
         $pool->tick();
         $this->assertCount(3, $this->calls, 'all three in flight at the same time');
 
@@ -182,6 +185,11 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         return [
             'a human paused the bot' => [fn () => (new CustomerFields(1001, 7001))->set(CustomerFields::BOT_PAUSED, '1'), 'AI answer at step n2 dropped: the bot paused'],
             'the run moved on to another request' => [fn () => (new CustomerFields(1001, 7001))->set(CustomerFields::AI, 'another-request'), 'AI answer at step n2 dropped: the run moved on'],
+            'the page got another flow' => [function () {
+                $other = ChatbotFlow::create(['name' => 'Other', 'graph' => FlowGraph::clean(['nodes' => [['id' => 'n1', 'type' => 'start']], 'edges' => []])]);
+                DB::table('chatbot_flows')->where('id', $other->id)->update(['published_at' => now()]);
+                app(ChatbotPage::class)->link('Page Uno', $other->fresh());
+            }, 'AI answer at step n2 dropped: the flow changed'],
         ];
     }
 
@@ -190,8 +198,7 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
     {
         $this->live();
         $this->says('hi');
-        $pool = $this->pool();
-        $pool->start();
+        $pool = $this->pool;
         $pool->tick();
 
         $moveOn();
@@ -214,8 +221,7 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $this->assertSame('locked', app(ChatbotRunner::class)->handle($second->id), 'the newer chat waits while the answer is pending');
         $this->assertSame(1, $this->rows()->count());
         $this->assertSame('locked', app(ChatbotRunner::class)->handle($second->id), 'and keeps waiting on a retry');
-        $pool = $this->pool();
-        $pool->start();
+        $pool = $this->pool;
         $pool->tick();
         $this->answerAll($pool);
         $this->assertSame(['Reply: answer to first'], $this->sent());
@@ -224,14 +230,18 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $pool->tick();
         $this->answerAll($pool);
         $this->assertSame(['Reply: answer to first', 'Reply: answer to second'], $this->sent());
+
+        // A mark left behind with no request behind it never holds a customer.
+        (new CustomerFields(1001, 7009))->set(CustomerFields::AI, 'request-that-is-gone');
+        $this->assertSame('done', app(ChatbotRunner::class)->handle($this->says('hello', '7009', false)->id));
+        $this->assertSame((string) $this->rows()->where('psid', 7009)->value('request_id'), (new CustomerFields(1001, 7009))->get(CustomerFields::AI));
     }
 
     public function test_S_087_5_no_answer_by_the_deadline_follows_the_failed_port_and_a_late_answer_is_ignored(): void
     {
         $this->live();
         $this->says('hi');
-        $pool = $this->pool();
-        $pool->start();
+        $pool = $this->pool;
         $pool->tick();
 
         $this->travel(61)->seconds();
@@ -241,6 +251,15 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
 
         $this->answerAll($pool); // the answer arrives after all
         $this->assertSame(['Sorry'], $this->sent());
+
+        // A request that errors (no connection, HTTP timeout) takes the failed port at once.
+        $pool->beat(); // the pool is alive again
+        $this->says('again', '7002');
+        $pool->tick();
+        end($this->calls)['p']->reject(new \GuzzleHttp\Exception\ConnectException('timed out', end($this->calls)['req']));
+        $pool->tick(false);
+        $this->assertSame(['Sorry'], $this->sent('7002'));
+        $this->assertSame(['AI step n2 → failed: OpenAI did not answer.'], $this->events('ai', '7002'));
     }
 
     public function test_S_087_6_a_pool_restart_with_pending_requests_gives_no_double_send(): void
@@ -248,8 +267,7 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $this->live();
         $this->says('one', '7001');
         $this->says('two', '7002');
-        $old = $this->pool();
-        $old->start();
+        $old = $this->pool;
         $old->tick();
         $this->assertSame(['sending', 'sending'], $this->rows()->pluck('status')->all());
         $oldCalls = $this->calls;
@@ -272,15 +290,27 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
 
         $this->assertSame(['Reply: answer to one'], $this->sent('7001'));
         $this->assertSame(['Reply: answer to two'], $this->sent('7002'));
+
+        // The pool stored an answer and died before queuing its resume: the sweep queues it, and only once.
+        $this->says('three', '7003');
+        $new->tick();
+        DB::table(ChatbotAiQueue::TABLE)->where('psid', 7003)->update(['status' => 'answered', 'answer' => 'stored answer']);
+        $this->travel(31)->seconds();
+        Artisan::call('chatbot:resume-skipped');
+        $this->travel(31)->seconds();
+        Artisan::call('chatbot:resume-skipped');
+        $this->assertSame(['Reply: stored answer'], $this->sent('7003'));
     }
 
     public function test_S_087_7_a_429_slows_the_pool_down_and_drops_nothing(): void
     {
         config(['services.chatbot.ai_concurrency' => 4]);
+        $this->pool->stop();
+        $this->pool = $this->pool(); // a pool that reads the setting of 4
+        $this->pool->start();
         $this->live();
         $this->says('hi');
-        $pool = $this->pool();
-        $pool->start();
+        $pool = $this->pool;
         $pool->tick();
 
         $this->calls[0]['p']->resolve(self::ai('Rate limit', 429, ['Retry-After' => '2']));
@@ -308,6 +338,13 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $this->assertSame(['Reply: Right away'], $this->sent());
         $this->assertSame(0, $this->rows()->count());
         Http::assertSent(fn (HttpRequest $r) => str_starts_with($r->url(), 'https://api.openai.com/'));
+
+        // Switched on but with no live pool (not installed yet, or dead): the step waits too, so nobody gets the failed port.
+        config(['services.chatbot.ai_async' => true]);
+        $this->pool->stop();
+        $this->says('hi', '7002');
+        $this->assertSame(['Reply: Right away'], $this->sent('7002'));
+        $this->assertSame(0, $this->rows()->count());
     }
 
     public function test_S_087_9_the_mock_ai_is_refused_on_a_real_page(): void
@@ -320,8 +357,7 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         BotcakeMock::forget();
         $this->live();
         $this->says('hi');
-        $pool = $this->pool();
-        $pool->start();
+        $pool = $this->pool;
         $pool->tick();
         $this->assertCount(1, $this->calls, 'a real HTTP request, not the fake AI');
         $this->answerAll($pool);
@@ -337,8 +373,7 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $this->live(self::MOCK_PAGE);
         $a = $this->says('hi', '9900000000000000', true, self::MOCK_ID, self::MOCK_PAGE);
         $b = $this->says('hello', '9900000000000001', true, self::MOCK_ID, self::MOCK_PAGE);
-        $pool = $this->pool();
-        $pool->start();
+        $pool = $this->pool;
         $pool->tick();
         $pool->tick();
         $this->assertSame([], $this->calls, 'the fake AI makes no HTTP call');

@@ -172,14 +172,14 @@ class BotcakeMock
         return 'botcake-mock:' . (int) Cache::get('botcake-mock:gen:' . $pageId, 0) . ':' . $pageId . ':' . $what;
     }
 
-    /** Ang natanggap ng "customer": ang PSID na pinadalhan at ang text (hanggang 200 letra), isa kada send_content. */
+    /** Ang natanggap ng "customer": ang PSID na pinadalhan at ang text (hanggang 2000 letra), isa kada send_content. */
     private static function record(string $pageId, string $psid, array $messages): void
     {
         $text = implode("\n", array_filter(array_map(fn ($m) => is_array($m) ? (string) ($m['text'] ?? '') : '', $messages)));
         $key = self::key($pageId, 'sent');
         Cache::add($key, 0, self::TTL);
         $n = Cache::increment($key);
-        Cache::put(self::key($pageId, 'sent:' . $n), [$psid, mb_substr($text, 0, 200)], self::TTL);
+        Cache::put(self::key($pageId, 'sent:' . $n), [$psid, mb_substr($text, 0, 2000)], self::TTL);
     }
 
     /** @return array<int, array{0: string, 1: string}> ang naitalang send_content ng page: [PSID na pinadalhan, text] */

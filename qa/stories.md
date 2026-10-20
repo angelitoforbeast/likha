@@ -1606,3 +1606,20 @@ Spec 082. Tests are in `tests/Feature/Chatblast/ChatblastSetupCheckTest.php` (an
 | S-082.11 | After a passed check, a flow or field ID that differs from the one the check found (e.g. picked by a person) blocks the page with "the flow ID is not the flow named …", even with a Send test; the page shows it as an X | `test_S_082_11…` + browser | Passed · 2026-10-20 · auto + browser |
 | S-082.12 | The sender skips a page with an X: no_config with the X reason, nothing sent | `test_S_082_12…` | Passed · 2026-10-20 · auto |
 | S-082.13 | The Setup routes are 404 without page-settings access; names saved during a running Check all run it again; `_all` in any spelling, `_all` on the old form, a 256-character name and deactivating a check row are refused | `test_S_082_13…` | Passed · 2026-10-20 · auto |
+
+## S-087 The chatbot doesn't block a worker while ChatGPT answers
+
+Spec 087. Tests in `tests/Feature/Chatblast/ChatbotAsyncAiTest.php` (fake OpenAI handler and fake Botcake).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-087.1 | Given three customers whose runs reach an AI step, when the pool sends all three at once and the last is answered first, then each reply goes to its own PSID, matched by the ticket only | `test_S_087_1…` | Passed · 2026-10-20 · auto |
+| S-087.2 | Given an answer whose ticket names another customer than the run it resumes, then nothing is sent or saved, the run stops, an `ai_mismatch` event is written and an ERROR log line has ids only, no text | `test_S_087_2…` | Passed · 2026-10-20 · auto |
+| S-087.3 | Given the run moved on while the answer was in flight (the bot paused, another request, the page got another flow), then the answer is dropped with an `ai_dropped` event and never sent | `test_S_087_3…` (3 data sets) | Passed · 2026-10-20 · auto |
+| S-087.4 | Given a customer's AI answer is pending, when their newer chat runs, then it waits (locked) until the answer is sent, then runs; a leftover mark with no request behind it never holds a customer | `test_S_087_4…` | Passed · 2026-10-20 · auto |
+| S-087.5 | Given no answer by `services.openai.timeout`, then the minute tick fails it and the run takes the failed port; a late answer is ignored; a request error takes the failed port at once | `test_S_087_5…` | Passed · 2026-10-20 · auto |
+| S-087.6 | Given a pool dies with requests in flight, when a new pool starts (only once the old heartbeat is stale), then the requests are sent again, the old pool's late answers are ignored, a resume job sent twice runs once, and an answer whose resume was lost is resumed by the sweep once | `test_S_087_6…` | Passed · 2026-10-20 · auto |
+| S-087.7 | Given OpenAI answers 429 with Retry-After, then the request goes back to the queue (not failed), the pool halves its limit and sends nothing new until then, then answers and grows back by one | `test_S_087_7…` | Passed · 2026-10-20 · auto |
+| S-087.8 | Given `services.chatbot.ai_async=false`, or no live pool, then the AI step waits for the answer as before and no ticket is written | `test_S_087_8…` | Passed · 2026-10-20 · auto |
+| S-087.9 | Given a real page, then `botcake:stress-page --mock-ai` is refused, and even with `chatbot.mock_ai=1` written in its settings its AI step goes to OpenAI | `test_S_087_9…` | Passed · 2026-10-20 · auto |
+| S-087.10 | Given mock pages with the fake AI, then `--stats` counts its replies and `misrouted: 0`; a reply naming another PSID, or another customer's chat, counts as misrouted | `test_S_087_10…` | Passed · 2026-10-20 · auto |

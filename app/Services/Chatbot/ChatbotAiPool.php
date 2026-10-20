@@ -38,7 +38,8 @@ class ChatbotAiPool
     public function __construct(private mixed $handler = null)
     {
         $this->owner = (string) Str::uuid();
-        $this->handler ??= new CurlMultiHandler();
+        // select_timeout: hindi naghihintay nang 1 s ang tick habang tahimik ang mga koneksyon (may bagong pending na kukunin).
+        $this->handler ??= new CurlMultiHandler(['select_timeout' => 0.01]);
         $this->http = new Client(['handler' => HandlerStack::create($this->handler), 'http_errors' => false]);
         $this->limit = $this->max();
     }
@@ -61,6 +62,14 @@ class ChatbotAiPool
     private static function nowMs(): int
     {
         return (int) now()->getTimestampMs();
+    }
+
+    /** May buhay na pool (heartbeat sa nakaraang BEAT_FRESH_SECONDS)? */
+    public static function alive(): bool
+    {
+        $beat = Cache::get(self::BEAT);
+
+        return is_array($beat) && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - self::BEAT_FRESH_SECONDS;
     }
 
     /** Simula: tumatanggi kapag may ibang buhay na pool (heartbeat), saka ibinabalik ang naiwang "sending" ng patay na pool. */
@@ -125,7 +134,7 @@ class ChatbotAiPool
         $left = max(1, now()->diffInSeconds(\Illuminate\Support\Carbon::parse($row->deadline_at), false));
         $this->http->postAsync(ChatbotAi::URL, [
             'headers' => ['Authorization' => 'Bearer ' . $key, 'Accept' => 'application/json'],
-            'json' => ['model' => $row->model, 'messages' => json_decode((string) $row->messages, true), 'max_tokens' => (int) $row->max_tokens],
+            'json' => ChatbotAi::payload((string) $row->model, (array) json_decode((string) $row->messages, true), (int) $row->max_tokens),
             'timeout' => $left, 'connect_timeout' => min(10, $left),
         ])->then(
             fn (ResponseInterface $res) => $this->answered($row, $res),
@@ -134,6 +143,17 @@ class ChatbotAiPool
     }
 
     private function answered(object $row, ResponseInterface $res): void
+    {
+        try {
+            $this->handle($row, $res);
+        } catch (Throwable $e) {
+            report($e); // ang row ay sending pa: ang sweep ang magpapalya sa deadline
+        } finally {
+            unset($this->inflight[(string) $row->request_id]); // laging bakante ang puwesto, kahit pumalya
+        }
+    }
+
+    private function handle(object $row, ResponseInterface $res): void
     {
         if ($res->getStatusCode() === 429) {
             // Bumagal: kalahati ng sabay, hinto muna ang bago, at ibalik ang request (hindi failed).

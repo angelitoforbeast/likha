@@ -19,11 +19,15 @@ class ChatbotAiQueue
     public const KEEP_DAYS = 2;
     public const REDISPATCH_SECONDS = 30; // ang answered/failed na hindi pa naituloy (nawalang job) ay ipinapadala ulit
 
-    /** Hindi naghihintay ang AI step: naka-on ang switch, may table na, live na takbo ng chat o ng wait-skip (hindi Test o sequence). */
+    /**
+     * Hindi naghihintay ang AI step: naka-on ang switch, live na takbo ng chat o ng wait-skip (hindi Test o sequence), may
+     * table na, at may buhay na chatbot:ai-pool (heartbeat). Kapag wala pa ang pool (hal. bago mailagay sa supervisor, o
+     * patay), naghihintay ang step gaya ng dati, kaya walang customer na napupunta sa failed port dahil lang walang pool.
+     */
     public static function async(FlowRun $run, Outbox $outbox): bool
     {
         return (bool) config('services.chatbot.ai_async', true) && !$run->test && $run->startedBy === null
-            && $outbox instanceof BotcakeOutbox && Schema::hasTable(self::TABLE);
+            && $outbox instanceof BotcakeOutbox && ChatbotAiPool::alive() && Schema::hasTable(self::TABLE);
     }
 
     public static function timeout(): int
@@ -153,7 +157,7 @@ class ChatbotAiQueue
             $out['redispatched']++;
         }
 
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'answered'])->limit(5000)->delete();
+        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'answered'])->orderBy('id')->limit(5000)->delete();
 
         return $out;
     }
