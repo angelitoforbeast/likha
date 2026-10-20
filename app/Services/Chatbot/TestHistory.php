@@ -18,13 +18,16 @@ class TestHistory
         return is_array($list) ? array_values(array_filter($list, fn ($m) => is_array($m) && isset($m['role'], $m['content']))) : [];
     }
 
-    /** Idagdag ang mensahe ng test customer (kapag mayroon) at ang mga naipadala ng takbo. */
+    /**
+     * Idagdag ang mensahe ng test customer (kapag mayroon) at ang mga naipadala ng takbo; kapag dumaan sa "Clear AI
+     * memory", ang mga padala pagkatapos lang (nauna roon ang mensahe).
+     */
     public static function record(CustomerFields $fields, ?string $input, FlowRun $run): void
     {
         if ($fields->psid !== CustomerFields::TEST_PSID) return; // ang test customer lang
         $list = self::read($fields);
-        if ($input !== null && trim($input) !== '') $list[] = ['role' => 'user', 'content' => $input];
-        foreach ($run->sends as $s) {
+        if ($input !== null && trim($input) !== '' && $run->aiClearedAt === null) $list[] = ['role' => 'user', 'content' => $input];
+        foreach (array_slice($run->sends, $run->aiClearedAt ?? 0) as $s) {
             $text = self::text($s['messages']);
             if (trim($text) !== '') $list[] = ['role' => 'assistant', 'content' => $text];
         }

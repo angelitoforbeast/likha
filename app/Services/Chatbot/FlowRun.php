@@ -3,6 +3,7 @@
 namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
+use App\Models\ChatbotReply;
 
 /**
  * Ang isang takbo ng flow para sa isang chat: ang flow, ang page (pangalan, Botcake ID, botfields), ang customer
@@ -40,6 +41,33 @@ class FlowRun
     /** Ang {{ALL USER INPUT}} ng takbong ito: isang basa lang ng botcake_chats kahit ilang beses gamitin. */
     private ?string $allUserInput = null;
     private ?bool $usesAllUserInput = null;
+    /** Test: ilang padala na ng takbong ito nang dumaan sa "Clear AI memory" (ang mga nauna ay hindi na alaala ng AI). */
+    public ?int $aiClearedAt = null;
+
+    /**
+     * "Clear AI memory": live, ang marker ng customer (__ai_since: oras, ang chat na ito, at ang huling padala sa kanya);
+     * sa Test, ang usapan ng test customer at ang mga padala ng takbo hanggang dito. Walang binubura sa mga chat.
+     */
+    public function forgetAi(): void
+    {
+        $this->allUserInput = null;
+        if ($this->test) {
+            $this->fields->clear(CustomerFields::TEST_HISTORY);
+            $this->aiClearedAt = count($this->sends);
+            return;
+        }
+        $chat = $this->chatId ?? (int) BotcakeChat::where('page_id', $this->pageId)->where('psid', (string) $this->fields->psid)->max('id');
+        $reply = (int) ChatbotReply::where('page_id', $this->fields->pageId)->where('psid', $this->fields->psid)->max('id');
+        $this->fields->set(CustomerFields::AI_SINCE, json_encode(['at' => now()->toIso8601String(), 'chat' => $chat, 'reply' => $reply]));
+    }
+
+    /** @return array{chat: int, reply: int}|null ang huling chat at padala na nakalimutan na ng AI (null = walang marker) */
+    public function aiSince(): ?array
+    {
+        $m = json_decode((string) $this->fields->get(CustomerFields::AI_SINCE), true);
+
+        return is_array($m) ? ['chat' => (int) ($m['chat'] ?? 0), 'reply' => (int) ($m['reply'] ?? 0)] : null;
+    }
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void
@@ -97,15 +125,18 @@ class FlowRun
 
     /**
      * Ang mga mensahe ng customer sa page na ito, pinakaluma muna, hanggang sa chat na ito: ang huling 50, hanggang 4,000
-     * letra (ang pinakabago ang natitira). Sa Test: ang test message lang (walang totoong usapan ang test customer).
+     * letra (ang pinakabago ang natitira), pagkatapos lang ng "Clear AI memory". Sa Test: ang test message lang (walang
+     * totoong usapan ang test customer), o wala kapag na-clear na sa takbong ito.
      */
     private function allUserInput(): string
     {
         if ($this->allUserInput !== null) return $this->allUserInput;
-        if ($this->test) return $this->allUserInput = $this->input;
+        if ($this->test) return $this->allUserInput = $this->aiClearedAt === null ? $this->input : '';
 
+        $since = $this->aiSince();
         $messages = BotcakeChat::where('page_id', $this->pageId)->where('psid', (string) $this->fields->psid)
             ->when($this->chatId, fn ($q) => $q->where('id', '<=', $this->chatId))
+            ->when($since, fn ($q) => $q->where('id', '>', $since['chat']))
             ->orderByDesc('id')->limit(50)->pluck('message')
             ->filter(fn ($m) => trim((string) $m) !== '')->reverse()->implode("\n");
 
