@@ -69,7 +69,7 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
         ]])]);
         app(ChatbotPage::class)->link('Page Uno', $flow);
         $this->app->instance(\App\Services\Chatbot\ChatbotSheet::class, new class extends \App\Services\Chatbot\ChatbotSheet {
-            public function append(string $spreadsheetId, string $tab, array $row): void {}
+            public function append(string $spreadsheetId, string $tab, array $row): ?string { return null; }
         });
 
         return $flow;
@@ -183,7 +183,7 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
         }]);
         $this->cbbFlow();
         $this->app->instance(\App\Services\Chatbot\ChatbotSheet::class, new class extends \App\Services\Chatbot\ChatbotSheet {
-            public function append(string $spreadsheetId, string $tab, array $row): void { \Illuminate\Support\Carbon::setTestNow(now()->addSeconds(2)); }
+            public function append(string $spreadsheetId, string $tab, array $row): ?string { \Illuminate\Support\Carbon::setTestNow(now()->addSeconds(2)); return null; }
         });
         $chat = $this->in('7001', 'what is the price ' . str_repeat('x', 300), '2026-10-19 11:50:00');
 

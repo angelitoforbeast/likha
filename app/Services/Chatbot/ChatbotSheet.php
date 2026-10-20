@@ -31,11 +31,14 @@ class ChatbotSheet
      * Isang row sa dulo ng tab. USER_ENTERED, kaya ang cell na may variable ay may apostrophe na kapag mukhang formula
      * (ChatbotVars::sheetCell). Nagtatapon kapag tumanggi ang Google.
      * @param array<int, string> $row
+     * @return string|null ang range na isinulat (hal. 'All Orders'!A42:J42), kapag sinabi ng Google
      */
-    public function append(string $spreadsheetId, string $tab, array $row): void
+    public function append(string $spreadsheetId, string $tab, array $row): ?string
     {
-        $this->service()->spreadsheets_values->append($spreadsheetId, "'" . str_replace("'", "''", $tab) . "'!A1",
+        $res = $this->service()->spreadsheets_values->append($spreadsheetId, "'" . str_replace("'", "''", $tab) . "'!A1",
             new ValueRange(['values' => [array_values($row)]]),
             ['valueInputOption' => 'USER_ENTERED', 'insertDataOption' => 'INSERT_ROWS']);
+
+        return $res->getUpdates()?->getUpdatedRange();
     }
 }

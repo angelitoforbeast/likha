@@ -45,7 +45,7 @@ class ChatbotSendingTest extends ChatblastTestCase
         $test = $this;
         $this->app->instance(ChatbotSheet::class, new class($test) extends ChatbotSheet {
             public function __construct(private $test) {}
-            public function append(string $spreadsheetId, string $tab, array $row): void { $this->test->rowWritten([$spreadsheetId, $tab, $row]); }
+            public function append(string $spreadsheetId, string $tab, array $row): ?string { $this->test->rowWritten([$spreadsheetId, $tab, $row]); return null; }
         });
     }
 

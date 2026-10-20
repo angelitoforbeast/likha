@@ -31,7 +31,7 @@ class ChatbotTabsTest extends ChatblastTestCase
         $this->page('Page Uno', '1001');
         config(['services.openai.key' => 'sk-test-not-real']);
         $this->app->instance(ChatbotSheet::class, new class extends ChatbotSheet {
-            public function append(string $spreadsheetId, string $tab, array $row): void { throw new \LogicException('No sheet write in this test'); }
+            public function append(string $spreadsheetId, string $tab, array $row): ?string { throw new \LogicException('No sheet write in this test'); }
         });
     }
 

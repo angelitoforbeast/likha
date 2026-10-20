@@ -1668,3 +1668,16 @@ Spec 093. Tests in `tests/Feature/Chatblast/ChatbotAllUserInputTest.php` (fake O
 | S-093.4 | Given an AI step with user `{{ALL USER INPUT}}` and a sheet row with it in two cells, then OpenAI gets the messages, both cells start with `'` (a message `=HYPERLINK(…)` is never a formula), and the run reads `botcake_chats` once | `test_S_093_4…` | Passed · 2026-10-20 · auto |
 | S-093.5 | Given a Test tab run, then `{{ALL USER INPUT}}` is the current test message (no test history in the code yet) | `test_S_093_5…` | Passed · 2026-10-20 · auto |
 | S-093.6 | The flow editor lists `{{ALL USER INPUT}}` in the variable chips with the tooltip "All the customer's messages (built in)" | `test_S_093_6…` | Passed · 2026-10-20 · auto |
+
+## S-091 The chatbot Test tab runs the skip timer, remembers the conversation for AI steps, and can write the sheet row for real
+
+Spec 091. Tests in `tests/Feature/Chatblast/ChatbotTestTabTest.php`; the page is checked in the browser (1366 and 390 px).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-091.1 | Given the test customer waits at a step that skips after 1 minute, then the Test tab gets "skips in 60 s"; before the time nothing runs; after it the run takes the skipped port with TestOutbox; no `chatbot_waits` row, the minute tick doesn't touch it, nothing goes to Botcake, and a real customer's fields stay as they were | `test_S_091_1…` | Passed · 2026-10-20 · auto |
+| S-091.2 | Given a reply before the time, then the reply port runs and the timer is gone | `test_S_091_2…` | Passed · 2026-10-20 · auto |
+| S-091.3 | "Skip now" fires at once; "Reset test customer" clears the timer | `test_S_091_3…` | Passed · 2026-10-20 · auto |
+| S-091.4 | With "Write sheet rows for real" off the row is only shown ("Sheet row (not written): All Orders"); on, it is appended through ChatbotSheet and the chat says "Sheet row written: All Orders, row 42 ('All Orders'!A42:B42)"; Botcake sends stay simulated; a 403 says to share the spreadsheet with the service-account email, a missing tab says so, never Google's own text | `test_S_091_4…` | Passed · 2026-10-20 · auto |
+| S-091.5 | An AI step in Test gets the earlier test messages and bot sends as history (same roles and order as live); Reset forgets them; a real customer's AI step never sees them | `test_S_091_5…` | Passed · 2026-10-20 · auto |
+| S-091.6 | The page has the new banner, the remembered checkbox, the countdown with "Skip now" (1366 and 390 px, no horizontal scroll; the skipped sends appear without a reload) | `test_S_091_6…` + browser | Passed · 2026-10-20 · auto + browser |
