@@ -83,6 +83,7 @@ class ChatbotSheetPickerTest extends ChatblastTestCase
         $this->actingAs($this->user());
 
         $data = $this->info(['sheet' => 'https://docs.google.com/spreadsheets/d/' . self::ID . '/edit#gid=0'])->assertOk()->json();
+        $this->assertSame(self::ID, $this->info(['sheet' => 'docs.google.com/spreadsheets/d/' . self::ID . '/edit'])->assertOk()->json('id'), 'link na walang https://');
 
         $this->assertSame(self::ID, $data['id']);
         $this->assertSame(str_repeat('T', 200), $data['title']);
@@ -108,20 +109,22 @@ class ChatbotSheetPickerTest extends ChatblastTestCase
 
     public static function refusals(): array
     {
-        return ['not shared' => [403], 'not found' => [404]];
+        $share = 'Share this sheet with ' . ChatbotSheet::SHARE_EMAIL . ' as Editor, then press Check again.';
+
+        return ['not shared' => [403, 422, $share], 'not found' => [404, 422, $share], 'other Google error' => [500, 502, 'Google did not answer. Try again in a minute.']];
     }
 
     /** @dataProvider refusals */
-    public function test_S_090_3_google_refusing_gives_the_share_message_with_the_email_and_no_raw_error(int $code): void
+    public function test_S_090_3_google_refusing_gives_the_share_message_with_the_email_and_no_raw_error(int $code, int $status, string $error): void
     {
         $this->refuse = $code;
         $this->actingAs($this->user());
 
-        $res = $this->info(['sheet' => self::ID, 'tab' => 'All Orders'])->assertStatus(422);
+        $res = $this->info(['sheet' => self::ID, 'tab' => 'All Orders'])->assertStatus($status);
 
-        $this->assertTrue($res->json('share'));
-        $this->assertSame(ChatbotSheet::SHARE_EMAIL, $res->json('email'));
-        $this->assertSame('Share this sheet with ' . ChatbotSheet::SHARE_EMAIL . ' as Editor, then press Check again.', $res->json('error'));
+        $this->assertSame($status === 422, (bool) $res->json('share'));
+        $this->assertSame($status === 422 ? ChatbotSheet::SHARE_EMAIL : null, $res->json('email'));
+        $this->assertSame($error, $res->json('error'));
         $this->assertStringNotContainsString('permission', $res->getContent());
         $this->assertStringNotContainsString('sa-key-secret', $res->getContent());
         // Ang pagtanggi ay hindi naka-cache: ang "Check again" pagkatapos i-share ay gumagana agad.
@@ -201,27 +204,40 @@ class ChatbotSheetPickerTest extends ChatblastTestCase
         app(BotcakeOutbox::class)->appendRow($run, 'n43', self::ID, 'All Orders', ["'Ana"]);
         $this->updatedRange = null;
         app(BotcakeOutbox::class)->appendRow($run, 'n43', self::ID, 'All Orders', ["'Ben"]);
+        // Ang tab na bago pa lang (wala pa sa naka-cache na listahan): binabasa muli ang listahan nang isang beses.
+        $this->info['tabs'][] = ['title' => 'Orders 2', 'gid' => 888, 'index' => 2];
+        $this->updatedRange = "'Orders 2'!A9:B9";
+        app(BotcakeOutbox::class)->appendRow($run, 'n43', self::ID, 'Orders 2', ["'Cy"]);
+        // Hindi mabasa ang listahan pagkatapos maisulat: naisulat pa rin, may range, walang gid (walang link).
+        $this->refuse = 500;
+        $this->updatedRange = "'Returns'!A5:B5";
+        app(BotcakeOutbox::class)->appendRow($run, 'n43', self::ID, 'Returns', ["'Di"]);
         ChatbotReply::create(['page_id' => 1001, 'psid' => 7001, 'node_id' => 'n43', 'kind' => 'sheet', 'status' => 'sent', 'sent_at' => now(),
             'content' => ['sheet' => self::ID, 'tab' => 'All Orders', 'row' => ['old']]]);
-        [$new, $noRange, $old] = ChatbotReply::orderBy('id')->get()->all();
+        [$new, $noRange, $newTab, $noGid, $old] = ChatbotReply::orderBy('id')->get()->all();
 
         $this->assertSame(['sheet' => self::ID, 'tab' => 'All Orders', 'row' => ["'Ana"], 'range' => "'All Orders'!A123:J123", 'gid' => 777], $new->content);
         $this->assertSame(['sheet' => self::ID, 'tab' => 'All Orders', 'row' => ["'Ben"]], $noRange->content);
+        $this->assertSame([888, 'sent'], [$newTab->content['gid'], $newTab->status]);
+        $this->assertSame(['sheet' => self::ID, 'tab' => 'Returns', 'row' => ["'Di"], 'range' => "'Returns'!A5:B5"], $noGid->content);
+        $this->assertSame('sent', $noGid->status);
         $link = 'https://docs.google.com/spreadsheets/d/' . self::ID . '/edit#gid=777&range=A123';
         $this->assertSame($link, ChatbotSheet::rowLink($new->content));
-        $this->assertSame([null, null, null, null], [ChatbotSheet::rowLink($noRange->content), ChatbotSheet::rowLink($old->content),
+        $this->assertSame([null, null, null, null, null], [ChatbotSheet::rowLink($noRange->content), ChatbotSheet::rowLink($old->content), ChatbotSheet::rowLink($noGid->content),
             ChatbotSheet::rowLink(['sheet' => 'x/../evil', 'range' => 'A1', 'gid' => 1]), ChatbotSheet::rowLink(['sheet' => self::ID, 'range' => '"><script>', 'gid' => 1])]);
 
         $this->actingAs($this->user());
         $this->assertSame($link, $this->getJson('/chatbot/replies/' . $new->id)->assertOk()->json('link'));
         $this->assertNull($this->getJson('/chatbot/replies/' . $old->id)->assertOk()->json('link'));
         $items = collect($this->getJson('/chatbot/inbox/thread?page_id=1001&psid=7001')->assertOk()->json('items'))->where('side', 'system')->values();
-        $this->assertSame([$link, null, null], $items->pluck('link')->all());
+        $this->assertSame([$link, null, 'https://docs.google.com/spreadsheets/d/' . self::ID . '/edit#gid=888&range=A9', null, null], $items->pluck('link')->all());
     }
 
     public function test_S_090_8_the_endpoints_refuse_a_non_google_link_and_users_without_access(): void
     {
         $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
+        $this->info(['sheet' => self::ID])->assertUnauthorized();
+        $this->postJson("/chatbot/flows/{$flow->id}/sheet-preview", ['chat_id' => 1, 'columns' => []])->assertUnauthorized();
         $this->actingAs($this->user());
         foreach (['https://evil.example/spreadsheets/d/' . self::ID . '/edit', 'http://169.254.169.254/latest', 'not a sheet', '', self::ID . '/../x'] as $bad) {
             $this->info(['sheet' => $bad])->assertStatus(422)->assertJsonMissingPath('share');

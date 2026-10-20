@@ -504,11 +504,13 @@
                 tabBox.replaceChildren(label('Tab', bind(input({maxlength: 100, placeholder: 'Sheet1'}, c.tab), v => c.tab = v)));
                 return;
             }
-            const names = info.tabs.map(t => t.title), missing = !!c.tab && !names.includes(c.tab);
-            const opts = (c.tab ? [] : [['', '— Pick a tab —']]).concat(missing ? [[c.tab, c.tab + ' (missing)']] : [], names.map(t => [t, t]));
-            const sel = bind(el('select', {class: 'w-full rounded-md border px-2 py-1 text-sm ' + (missing ? 'border-red-400 text-red-700' : 'border-slate-300')},
-                opts.map(([v, t]) => el('option', {value: v, text: t, selected: v === (c.tab || '')}))), v => { c.tab = v; cells = null; load(false); });
-            tabBox.replaceChildren(...[label('Tab', sel), missing ? el('p', {class: 'mt-0.5 text-xs text-red-700', text: 'The tab "' + c.tab + '" is missing from this sheet. Pick another tab.'}) : null].filter(Boolean));
+            // Gaya ng takbo at ng server, ang tab ay tinatanggalan ng espasyo sa dulo bago hanapin.
+            const tab = (c.tab || '').trim(), names = info.tabs.map(t => t.title), missing = !!tab && !names.includes(tab);
+            const opts = (tab ? [] : [['', '— Pick a tab —']]).concat(missing ? [[tab, tab + ' (missing)']] : [], names.map(t => [t, t]));
+            const sel = el('select', {class: 'w-full rounded-md border px-2 py-1 text-sm ' + (missing ? 'border-red-400 text-red-700' : 'border-slate-300')},
+                opts.map(([v, t]) => el('option', {value: v, text: t, selected: v === tab})));
+            sel.addEventListener('change', () => { c.tab = sel.value; cells = null; load(false); }); // change lang: isang basa kada pili
+            tabBox.replaceChildren(...[label('Tab', sel), missing ? el('p', {class: 'mt-0.5 text-xs text-red-700', text: 'The tab "' + tab + '" is missing from this sheet. Pick another tab.'}) : null].filter(Boolean));
         }
         function drawTable() {
             const rows = Math.min(MAX_COLUMNS, Math.max(headers.length, c.columns.length, 1) + extra);
@@ -527,7 +529,8 @@
             const add = rows < MAX_COLUMNS ? el('button', {type: 'button', class: 'cb-btn cb-btn-sm mt-1', text: '+ Column'}) : null;
             add?.addEventListener('click', () => { extra++; drawTable(); });
             table.replaceChildren(...[el('div', {class: 'mb-0.5 text-xs text-slate-600', text: 'Columns: the template of each column (A, B, C …). A cell with a variable is never a formula; empty = the cell stays empty.'}),
-                el('table', {class: 'w-full table-fixed text-sm'}, [el('thead', {}, head), el('tbody', {}, trs)]), add].filter(Boolean));
+                el('table', {class: 'w-full table-fixed text-sm'}, [el('thead', {}, head), el('tbody', {}, trs)]), add,
+                headers.length > MAX_COLUMNS ? el('p', {class: 'text-xs text-slate-500', text: 'This tab has ' + headers.length + ' headers; a step writes at most ' + MAX_COLUMNS + ' columns (A to ' + colLetter(MAX_COLUMNS - 1) + ').'}) : null].filter(Boolean));
         }
         function drawPreview() {
             const btn = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Preview row', disabled: !customers || !customers.length});

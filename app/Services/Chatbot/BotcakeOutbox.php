@@ -65,12 +65,14 @@ class BotcakeOutbox implements Outbox
             report($e);
             return $this->log($run, $nodeId, 'sheet', $content, 'failed', 'Google refused the row: ' . mb_substr($e->getMessage(), 0, 150));
         }
-        // Para sa "Open row": ang range ng naisulat at ang gid ng tab (mula sa naka-cache na listahan ng tab). Kapag
-        // hindi makuha ang gid, walang link, pero naisulat pa rin ang row.
+        // Para sa "Open row": ang range ng naisulat at ang gid ng tab (mula sa naka-cache na listahan ng tab; binabasa
+        // muli nang isang beses kapag wala roon ang tab, hal. bagong tab). Kapag hindi makuha ang gid, walang link, pero
+        // naisulat pa rin ang row.
         if (is_string($range) && $range !== '') {
             $content['range'] = mb_substr($range, 0, 300);
             try {
-                $gid = collect($this->sheet->info($spreadsheetId)['tabs'])->firstWhere('title', $tab)['gid'] ?? null;
+                $gid = fn (bool $refresh) => collect($this->sheet->info($spreadsheetId, $refresh)['tabs'])->firstWhere('title', $tab)['gid'] ?? null;
+                $gid = $gid(false) ?? $gid(true);
                 if ($gid !== null) $content['gid'] = $gid;
             } catch (Throwable) {
             }

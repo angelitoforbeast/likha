@@ -105,18 +105,19 @@ class ChatbotSheetController extends Controller
     }
 
     /**
-     * Ang ID mula sa link ng docs.google.com o ang ID mismo. Ang ibang link (ibang host, walang /spreadsheets/d/) ay
-     * tinatanggihan: ang ID lang ang ipinapasa sa Google API, hindi kailanman ang URL.
+     * Ang ID mula sa link ng docs.google.com (may https:// man o wala) o ang ID mismo, ayon sa FlowGraph::spreadsheetId
+     * (iisang patakaran sa takbo). Ang link sa ibang host ay tinatanggihan: ang ID lang ang ipinapasa sa Google API,
+     * hindi kailanman ang URL.
      */
     private static function spreadsheetId(mixed $v): ?string
     {
         $v = is_string($v) ? trim($v) : '';
         if ($v === '' || mb_strlen($v) > 300) return null;
-        if (preg_match('/^[a-zA-Z0-9_-]{20,100}$/', $v)) return $v;
-        $host = strtolower((string) parse_url($v, PHP_URL_HOST));
-        $scheme = strtolower((string) parse_url($v, PHP_URL_SCHEME));
-        if ($host !== 'docs.google.com' || !in_array($scheme, ['http', 'https'], true)) return null;
+        if (str_contains($v, '/')) {
+            $url = preg_match('#^[a-z][a-z0-9+.-]*://#i', $v) ? $v : 'https://' . $v;
+            if (strtolower((string) parse_url($url, PHP_URL_HOST)) !== 'docs.google.com' || !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) return null;
+        }
 
-        return preg_match('#^/spreadsheets/d/([a-zA-Z0-9_-]{20,100})(/|$)#', (string) parse_url($v, PHP_URL_PATH), $m) ? $m[1] : null;
+        return FlowGraph::spreadsheetId($v);
     }
 }
