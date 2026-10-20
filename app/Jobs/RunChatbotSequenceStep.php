@@ -23,7 +23,7 @@ class RunChatbotSequenceStep implements ShouldQueue
     /** $claim: ang dispatched_at na itinala ng tick para sa job na ito; ang naunahan ng mas bagong claim ay walang ginagawa. */
     public function __construct(public int $subscriptionId, public ?string $claim = null)
     {
-        $this->onQueue(RunChatbotFlow::QUEUE);
+        $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::QUEUE);
     }
 
     public function handle(ChatbotSequences $sequences): void

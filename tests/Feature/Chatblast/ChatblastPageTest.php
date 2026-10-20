@@ -141,7 +141,7 @@ class ChatblastPageTest extends ChatblastTestCase
         $this->postJson('/chatblast/send-filtered', ['status' => 'ready'])->assertOk()->assertJsonPath('queued', 1); // WB-001 lang; ang no_psid ay hindi
         $this->postJson('/chatblast/retry-failed', ['from' => now()->subDays(7)->toDateString()])->assertOk()->assertJsonPath('queued', 1);
         $this->assertSame(['queued', 'queued', 'no_psid'], BotcakeMessage::orderBy('waybill')->pluck('status')->all());
-        Queue::assertPushedOn('chatblast', \App\Jobs\SendChatblastMessage::class);
+        Queue::assertPushedOn('chatblast-high', \App\Jobs\SendChatblastMessage::class); // Delivering: sa chatblast-high
 
         $this->postJson('/chatblast/pause')->assertOk()->assertJsonPath('state.paused', true);
         $this->postJson('/chatblast/resume')->assertOk()->assertJsonPath('state.paused', false);

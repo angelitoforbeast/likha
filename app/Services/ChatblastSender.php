@@ -25,6 +25,8 @@ class ChatblastSender
     /** Ang mga status na maaaring ipadala (o ipadala ulit). */
     public const SENDABLE = ['ready', 'failed', 'field_mismatch', 'skipped'];
     public const QUEUE = 'chatblast';
+    public const HIGH_QUEUE = 'chatblast-high'; // nauuna: ang Delivering (ngayong araw lang ito darating sa customer)
+    public const HIGH_KIND = 'delivering';
     public const OFF = 'The sequence is off';
     public const NO_CAMPAIGN = 'This message has no sequence';
     private const PAUSED = 'chatblast.paused';

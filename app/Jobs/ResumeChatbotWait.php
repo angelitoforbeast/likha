@@ -23,7 +23,7 @@ class ResumeChatbotWait implements ShouldQueue
 
     public function __construct(public int $waitId)
     {
-        $this->onQueue(RunChatbotFlow::QUEUE);
+        $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::QUEUE);
     }
 
     public function handle(ChatbotRunner $runner): void

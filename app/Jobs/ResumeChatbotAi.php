@@ -23,7 +23,7 @@ class ResumeChatbotAi implements ShouldQueue
     /** @param array{request_id: string, page_id: int, psid: int, chat_id: ?int, flow_id: int, node_id: string} $ticket */
     public function __construct(public array $ticket)
     {
-        $this->onQueue(RunChatbotFlow::QUEUE);
+        $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::QUEUE);
     }
 
     public function retryUntil(): \DateTimeInterface

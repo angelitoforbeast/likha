@@ -24,7 +24,7 @@ class RunChatbotFlow implements ShouldQueue
 
     public function __construct(public int $chatId)
     {
-        $this->onQueue(self::QUEUE);
+        $this->onConnection(config('queue.chatbot_connection'))->onQueue(self::QUEUE);
     }
 
     public function retryUntil(): \DateTimeInterface

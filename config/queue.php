@@ -15,6 +15,11 @@ return [
 
     'default' => env('QUEUE_CONNECTION', 'database'),
 
+    // Ang connection ng queue na "chatbot" at ng "chatblast" / "chatblast-high" (Horizon sa Redis). Kapag wala, ang default
+    // (database sa server): ang paglipat at ang pagbalik ay env lang, walang deploy.
+    'chatbot_connection' => env('CHATBOT_QUEUE_CONNECTION', env('QUEUE_CONNECTION', 'database')),
+    'chatblast_connection' => env('CHATBLAST_QUEUE_CONNECTION', env('QUEUE_CONNECTION', 'database')),
+
     /*
     |--------------------------------------------------------------------------
     | Queue Connections
@@ -72,7 +77,8 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            // Mas mahaba sa pinakamahabang job ng chatbot at chatblast (300 s): ang 90 ay magpapatakbo nang dalawang beses.
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 400),
             'block_for' => null,
             'after_commit' => false,
         ],
