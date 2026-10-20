@@ -133,7 +133,7 @@ class FlowGraph
                 'send' => !empty($c['send']),
             ],
             // Ang mga customer field na binubura kasabay ng alaala ng AI (wala = wala).
-            'clear_ai' => ['fields' => array_slice(array_values(array_unique(array_filter(array_map($field, array_filter((array) ($c['fields'] ?? []), 'is_scalar')), fn ($f) => $f !== '' && !str_starts_with($f, '__')))), 0, self::MAX_ROWS)],
+            'clear_ai' => ['fields' => array_slice(array_values(array_unique(array_filter(array_map($field, array_filter((array) ($c['fields'] ?? []), 'is_scalar')), fn ($f) => $f !== ''))), 0, self::MAX_ROWS)],
             'sheet' => [
                 'sheet' => $text($c['sheet'] ?? '', 300),
                 'tab' => $text($c['tab'] ?? '', 100),

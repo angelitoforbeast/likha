@@ -87,20 +87,22 @@ class ChatbotClearAiTest extends ChatblastTestCase
     public function test_S_094_2_the_clear_step_sets_the_marker_writes_the_event_and_has_one_output(): void
     {
         $this->assertSame(['next'], FlowGraph::ports(['type' => 'clear_ai']));
-        $this->assertSame(['fields' => ['gpt input', 'cxd']], FlowGraph::cleanConfig('clear_ai', ['fields' => ['GPT INPUT', '', 'cxd', ['x']], 'other' => 1]));
+        $this->assertSame(['fields' => ['gpt input', 'cxd', 'wait']], FlowGraph::cleanConfig('clear_ai', ['fields' => ['GPT INPUT', '', 'cxd', 'CXD', '__wait', ['x']], 'other' => 1]));
         $this->chat('hi');
         $current = $this->chat('start over');
+        $set = fn (string $field) => ['type' => 'set', 'config' => ['ops' => [['op' => 'set', 'field' => $field, 'value' => '[{{ALL USER INPUT}}]']]]];
 
-        $run = $this->live(self::graph(['type' => 'clear_ai']), $current);
+        $run = $this->live(self::graph($set('before'), ['type' => 'clear_ai'], $set('after')), $current);
+        $this->live(self::graph($set('later')), $this->chat('hi again'));
 
+        $this->assertSame(['after' => '[]', 'before' => "[hi\nstart over]", 'later' => '[hi again]'], (new CustomerFields(1001, 7001))->fields(), 'forgotten in the same run too; the marker is not a customer field');
         $marker = json_decode((string) (new CustomerFields(1001, 7001))->get(CustomerFields::AI_SINCE), true);
         $this->assertSame($current->id, $marker['chat'] ?? null);
         $this->assertNotEmpty($marker['at'] ?? null);
-        $this->assertSame(['clear_ai', 'next'], [$run->path[1]['type'], $run->path[1]['port']]);
+        $this->assertSame(['clear_ai', 'next'], [$run->path[2]['type'], $run->path[2]['port']]);
         $event = collect($run->events)->firstWhere('type', 'ai_cleared');
-        $this->assertSame('n2', $event['node'] ?? null);
+        $this->assertSame('n3', $event['node'] ?? null);
         $this->assertSame('AI memory cleared', ChatbotEvents::text('ai_cleared', 'n2', $event['detail']));
-        $this->assertSame([], (new CustomerFields(1001, 7001))->fields(), 'the marker is not a customer field');
     }
 
     public function test_S_094_3_after_the_marker_live_history_and_all_user_input_only_have_newer_messages_and_sends_of_that_customer(): void
