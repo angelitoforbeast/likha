@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\BotcakeChat;
 use App\Models\PageSetting;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -177,8 +178,79 @@ class PageSettings
 
     public function get(string $page, string $provider, string $key): ?string
     {
-        return $this->pageQuery($page)->where('provider', strtolower($provider))->where('key', strtolower($key))
-            ->where('active', true)->orderByDesc('id')->first()?->plainValue();
+        $row = $this->map($page)[strtolower($provider) . '.' . strtolower($key)] ?? null;
+
+        return $row === null ? null : self::plain($row);
+    }
+
+    /**
+     * Lahat ng active na setting ng page para sa isang provider, ayon sa id (ang pinakabago ang masusunod sa parehong
+     * key), mula sa parehong cache ng get(). @return array<string, string> key => plain value
+     */
+    public function all(string $page, string $provider): array
+    {
+        $out = [];
+        $prefix = strtolower($provider) . '.';
+        foreach ($this->map($page) as $full => $row) {
+            if (str_starts_with($full, $prefix)) $out[substr($full, strlen($prefix))] = (string) self::plain($row);
+        }
+
+        return $out;
+    }
+
+    /** Ilang segundo naka-cache ang settings ng isang page, at ilang segundo ang memo sa loob ng isang proseso. */
+    public const CACHE_TTL = 600;
+    public const MEMO_TTL = 2;
+
+    /** @var array<string, array{0: float, 1: array<string, array{0: ?string, 1: bool}>}> page key => [nabasa noong, map] */
+    private array $memo = [];
+
+    public static function cacheKey(string $page): string
+    {
+        return 'page-settings:' . sha1((new self)->pageKey($page));
+    }
+
+    /**
+     * Ang mga active na setting ng page: provider.key => [value gaya ng nasa table (ang secret ay naka-encrypt pa rin, at
+     * sa memory lang binubuksan), is_secret], ayon sa id. Mula sa memo (hanggang MEMO_TTL), saka sa cache, saka sa isang query.
+     * @return array<string, array{0: ?string, 1: bool}>
+     */
+    private function map(string $page): array
+    {
+        $pk = $this->pageKey($page);
+        $hit = $this->memo[$pk] ?? null;
+        if ($hit !== null && microtime(true) - $hit[0] < self::MEMO_TTL) return $hit[1];
+
+        $map = Cache::remember(self::cacheKey($page), self::CACHE_TTL, function () use ($page) {
+            $out = [];
+            foreach ($this->pageQuery($page)->where('active', true)->orderBy('id')->get(['provider', 'key', 'value', 'is_secret']) as $s) {
+                $out[strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret];
+            }
+
+            return $out;
+        });
+        $this->memo[$pk] = [microtime(true), $map];
+
+        return $map;
+    }
+
+    /** @param array{0: ?string, 1: bool} $row */
+    private static function plain(array $row): ?string
+    {
+        $s = new PageSetting();
+        $s->value = $row[0];
+        $s->is_secret = $row[1];
+
+        return $s->plainValue();
+    }
+
+    /** Burahin ang naka-cache na settings ng page (ngayon at pagkatapos ng commit, para hindi maibalik ang luma). */
+    public static function forget(string $page): void
+    {
+        $key = self::cacheKey($page);
+        Cache::forget($key);
+        DB::afterCommit(fn () => Cache::forget($key));
+        if (app()->resolved(self::class)) unset(app(self::class)->memo[(new self)->pageKey($page)]);
     }
 
     /**

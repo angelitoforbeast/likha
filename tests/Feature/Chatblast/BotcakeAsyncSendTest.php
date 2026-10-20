@@ -513,4 +513,77 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
 
         $this->assertStringEndsWith('/pages/1001/customer/7003/customer_fields', self::req($this->calls[0])['path'], 'Delivering first, though handed off last');
     }
+
+    public function test_S_098_4_the_pool_and_the_blocking_sends_share_one_rate_per_page_even_when_they_arrive_at_once(): void
+    {
+        $times = [];
+        Http::fake(['botcake.io/*' => function () use (&$times) {
+            $times[] = $this->clock->now();
+
+            return Http::response(['success' => true]);
+        }]);
+        $this->echoFlow();
+        $this->says('a', '7001');
+        $this->pool->tick(); // the pool sends at 1000.0
+        $this->answerAll();
+
+        $blocking = fn (string $psid) => app(\App\Services\BotcakeClient::class)->shared(sha1('tok-1001'))->sendContent('1001', $psid, [['type' => 'text', 'text' => 'hi']], 'tok-1001');
+        // Another process (an Inbox send) arrives while this one (a sequence step) waits for its turn: it runs on its own
+        // clock, so the shared time goes back to where it was once it is done.
+        $once = true;
+        $this->clock->onSleep = function () use (&$once, $blocking) {
+            if (!$once) return;
+            $once = false;
+            $at = $this->clock->time;
+            $blocking('7002');
+            $this->clock->time = $at;
+        };
+        $blocking('7003');
+        $this->clock->onSleep = null;
+
+        $this->says('c', '7004');
+        for ($n = 0; $n < 30; $n++) {
+            $this->pool->tick();
+            $this->answerAll();
+            $this->clock->time += 0.1;
+        }
+
+        $all = array_merge(array_map(fn ($c) => $c['t'], $this->calls), $times);
+        sort($all);
+        $this->assertCount(4, $all, 'two from the pool, two blocking');
+        for ($i = 1; $i < count($all); $i++) $this->assertGreaterThanOrEqual(0.5 - 1e-6, $all[$i] - $all[$i - 1], 'at most 2 per second on one page, across paths: ' . json_encode($all));
+    }
+
+    public function test_S_098_8_a_steady_stream_of_blocking_sends_on_a_page_does_not_starve_the_pool(): void
+    {
+        $times = [];
+        Http::fake(['botcake.io/*' => function () use (&$times) {
+            $times[] = $this->clock->now();
+
+            return Http::response(['success' => true]);
+        }]);
+        $this->echoFlow();
+        $this->says('a', '7001'); // a chat reply waits in the pool
+
+        // A sequence backlog on the same page: each send books the next slot as soon as the last one went out. The pool
+        // keeps ticking while the sender waits.
+        $this->clock->onSleep = function (float $seconds) {
+            $end = $this->clock->time + $seconds;
+            while ($this->clock->time < $end - 1e-9) {
+                $this->clock->time = min($end, $this->clock->time + 0.005); // the pool loop: every 5 ms while it holds a send
+                $this->pool->tick();
+                $this->answerAll();
+            }
+
+            return true;
+        };
+        for ($i = 0; $i < 10; $i++) app(\App\Services\BotcakeClient::class)->shared(sha1('tok-1001'))->sendContent('1001', (string) (8000 + $i), [['type' => 'text', 'text' => 'step'], ], 'tok-1001');
+        $this->clock->onSleep = null;
+
+        $this->assertCount(1, $this->calls, 'the pool sent the chat reply');
+        $this->assertLessThan(end($times), $this->calls[0]['t'], 'before the backlog was done');
+        $all = array_merge([$this->calls[0]['t']], $times);
+        sort($all);
+        for ($i = 1; $i < count($all); $i++) $this->assertGreaterThanOrEqual(0.5 - 1e-6, $all[$i] - $all[$i - 1], 'still 2 per second: ' . json_encode($all));
+    }
 }

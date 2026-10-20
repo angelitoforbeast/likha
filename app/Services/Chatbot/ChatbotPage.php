@@ -60,11 +60,10 @@ class ChatbotPage
     {
         $labels = array_column($this->fields->columns(), 'label', 'key');
         $out = [];
-        foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get() as $s) {
-            if (in_array($s->key, ChatbotFields::RESERVED, true)) continue;
-            $value = (string) $s->plainValue();
-            $out[$s->key] = $value;
-            if (isset($labels[$s->key])) $out[$labels[$s->key]] = $value;
+        foreach ($this->settings->all($page, ChatbotFields::PROVIDER) as $key => $value) {
+            if (in_array($key, ChatbotFields::RESERVED, true)) continue;
+            $out[$key] = $value;
+            if (isset($labels[$key])) $out[$labels[$key]] = $value;
         }
 
         return $out;
