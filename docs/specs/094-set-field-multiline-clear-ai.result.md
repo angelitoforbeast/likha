@@ -36,6 +36,8 @@ Branch `feat/094-set-field-multiline-clear-ai`, cut from `release/090`. Not push
   - The card reads "Forgets the conversation so far", plus "clears …" when fields are chosen.
   - The form explains the step and has "Also clear these fields (optional)": a list of field inputs with the usual suggestions, using "+ Field".
 
+**Note (merge onto `release/094`):** the 093 built-in was reverted by the owner, so this no longer applies: Clear AI memory does not reset `{{ALL USER INPUT}}`, which is a plain customer field again, filled and cleared only by Set field steps (or the step's "Also clear these fields" option). The `forgetAi()` cache reset and the `allUserInput()` lines above are gone; S-094.1 to S-094.3 were updated to match.
+
 ## Tests
 
 New: `tests/Feature/Chatblast/ChatbotClearAiTest.php`, with 7 tests and 24 assertions. Red runs:
@@ -46,8 +48,8 @@ New: `tests/Feature/Chatblast/ChatbotClearAiTest.php`, with 7 tests and 24 asser
 | Case | Test | Result |
 |---|---|---|
 | A Set field with a multi-line template stores and interpolates line breaks | `test_S_094_1_a_set_field_value_keeps_its_line_breaks_and_interpolates_each_line` | pass |
-| The clear step sets the marker and writes the event (one output; same-run `{{ALL USER INPUT}}` emptied; config cleaning) | `test_S_094_2_the_clear_step_sets_the_marker_writes_the_event_and_has_one_output` | pass |
-| History after the marker excludes older messages and sends (live); `{{ALL USER INPUT}}` only newer; another customer unaffected; nothing deleted | `test_S_094_3_after_the_marker_live_history_and_all_user_input_only_have_newer_messages_and_sends_of_that_customer` | pass |
+| The clear step sets the marker and writes the event (one output; config cleaning) | `test_S_094_2_the_clear_step_sets_the_marker_writes_the_event_and_has_one_output` | pass |
+| History after the marker excludes older messages and sends (live); another customer unaffected; nothing deleted | `test_S_094_3_after_the_marker_live_history_only_has_newer_messages_and_sends_of_that_customer` | pass |
 | History after the marker, in Test | `test_S_094_4_in_test_the_step_forgets_the_test_conversation_and_the_sends_before_it` | pass |
 | The optional fields are cleared, the others stay | `test_S_094_5_the_step_also_empties_the_chosen_fields_only` | pass |
 | "Clear all fields" keeps the marker | `test_S_094_6_clear_all_fields_keeps_the_marker` | pass |

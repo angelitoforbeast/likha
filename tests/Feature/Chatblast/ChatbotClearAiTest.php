@@ -16,8 +16,9 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Ang multi-line na value ng Set field, at ang step na "Clear AI memory": mula roon, ang history ng AI at ang
- * {{ALL USER INPUT}} ng customer na iyon ay ang mga mensahe at padala pagkatapos lang (walang binubura). Fake na OpenAI.
+ * Ang multi-line na value ng Set field, at ang step na "Clear AI memory": mula roon, ang history ng AI ng customer
+ * na iyon ay ang mga mensahe at padala pagkatapos lang (walang binubura). Ang {{ALL USER INPUT}} ay customer field
+ * lang, hindi built-in. Fake na OpenAI.
  */
 class ChatbotClearAiTest extends ChatblastTestCase
 {
@@ -73,14 +74,14 @@ class ChatbotClearAiTest extends ChatblastTestCase
 
     public function test_S_094_1_a_set_field_value_keeps_its_line_breaks_and_interpolates_each_line(): void
     {
-        $this->chat('hi');
+        (new CustomerFields(1001, 7001))->set('all user input', 'hi');
         $current = $this->chat('order po');
         $graph = self::graph(['type' => 'set', 'config' => ['ops' => [['op' => 'set', 'field' => 'all user input', 'value' => "{{ALL USER INPUT}}\n{{last_input}}"]]]]);
         $this->assertSame("{{ALL USER INPUT}}\n{{last_input}}", $graph['nodes'][1]['config']['ops'][0]['value']);
 
         $run = $this->live($graph, $current);
 
-        $this->assertSame("hi\norder po\norder po", (new CustomerFields(1001, 7001))->get('all user input'));
+        $this->assertSame("hi\norder po", (new CustomerFields(1001, 7001))->get('all user input'));
         $this->assertSame('next', $run->path[1]['port']);
     }
 
@@ -88,24 +89,21 @@ class ChatbotClearAiTest extends ChatblastTestCase
     {
         $this->assertSame(['next'], FlowGraph::ports(['type' => 'clear_ai']));
         $this->assertSame(['fields' => ['gpt input', 'cxd', 'wait']], FlowGraph::cleanConfig('clear_ai', ['fields' => ['GPT INPUT', '', 'cxd', 'CXD', '__wait', ['x']], 'other' => 1]));
-        $this->chat('hi');
         $current = $this->chat('start over');
-        $set = fn (string $field) => ['type' => 'set', 'config' => ['ops' => [['op' => 'set', 'field' => $field, 'value' => '[{{ALL USER INPUT}}]']]]];
 
-        $run = $this->live(self::graph($set('before'), ['type' => 'clear_ai'], $set('after')), $current);
-        $this->live(self::graph($set('later')), $this->chat('hi again'));
+        $run = $this->live(self::graph(['type' => 'clear_ai']), $current);
 
-        $this->assertSame(['after' => '[]', 'before' => "[hi\nstart over]", 'later' => '[hi again]'], (new CustomerFields(1001, 7001))->fields(), 'forgotten in the same run too; the marker is not a customer field');
+        $this->assertSame([], (new CustomerFields(1001, 7001))->fields(), 'the marker is not a customer field');
         $marker = json_decode((string) (new CustomerFields(1001, 7001))->get(CustomerFields::AI_SINCE), true);
         $this->assertSame($current->id, $marker['chat'] ?? null);
         $this->assertNotEmpty($marker['at'] ?? null);
-        $this->assertSame(['clear_ai', 'next'], [$run->path[2]['type'], $run->path[2]['port']]);
+        $this->assertSame(['clear_ai', 'next'], [$run->path[1]['type'], $run->path[1]['port']]);
         $event = collect($run->events)->firstWhere('type', 'ai_cleared');
-        $this->assertSame('n3', $event['node'] ?? null);
+        $this->assertSame('n2', $event['node'] ?? null);
         $this->assertSame('AI memory cleared', ChatbotEvents::text('ai_cleared', 'n2', $event['detail']));
     }
 
-    public function test_S_094_3_after_the_marker_live_history_and_all_user_input_only_have_newer_messages_and_sends_of_that_customer(): void
+    public function test_S_094_3_after_the_marker_live_history_only_has_newer_messages_and_sends_of_that_customer(): void
     {
         $this->chat('old question');
         $this->reply('old answer');
@@ -115,15 +113,15 @@ class ChatbotClearAiTest extends ChatblastTestCase
         $this->reply('sent after the clear');
         $this->chat('new question');
         $current = $this->chat('newest');
-        $ai = ['type' => 'ai', 'config' => ['user' => '{{ALL USER INPUT}}', 'history' => 10]];
+        $ai = ['type' => 'ai', 'config' => ['user' => '{{last_input}}', 'history' => 10]];
 
         $this->live(self::graph($ai), $current);
         $this->live(self::graph($ai), $this->chat('other customer now', '7002'), '7002');
 
         $this->assertSame([['role' => 'assistant', 'content' => 'sent after the clear'], ['role' => 'user', 'content' => 'new question'],
-            ['role' => 'user', 'content' => "new question\nnewest"]], self::requests()[0]);
+            ['role' => 'user', 'content' => 'newest']], self::requests()[0]);
         $this->assertSame([['role' => 'user', 'content' => 'other customer old'], ['role' => 'assistant', 'content' => 'other answer old'],
-            ['role' => 'user', 'content' => "other customer old\nother customer now"]], self::requests()[1], 'another customer keeps the whole conversation');
+            ['role' => 'user', 'content' => 'other customer now']], self::requests()[1], 'another customer keeps the whole conversation');
         $this->assertSame(4, BotcakeChat::where('psid', '7001')->count(), 'nothing is deleted');
     }
 
