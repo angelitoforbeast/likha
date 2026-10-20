@@ -366,7 +366,13 @@
 
     async function save(r, c, value) {
         value = value.trim();
-        if (pending.size && c.kind !== 'flow') { addPending(r, c.key, value); if (!editing) render(); return; }
+        if (pending.size && c.kind !== 'flow') {
+            // Gaya ng paste: ang hindi link sa column ng larawan ay hindi isinasama (tatanggihan ng server ang buong Save).
+            if (value !== '' && c.kind === 'image' && !ChatbotPaste.isImageLink(value)) notice(r.page + ' · ' + c.label + ': use an image link that starts with http:// or https://.', 'text-red-600');
+            else addPending(r, c.key, value);
+            if (!editing) render();
+            return;
+        }
         if (value === String(r.cells[c.key] ?? '')) { if (!editing) render(); return; }
         const k = id(r.page, c.key), seq = (seqs.get(k) || 0) + 1;
         seqs.set(k, seq);

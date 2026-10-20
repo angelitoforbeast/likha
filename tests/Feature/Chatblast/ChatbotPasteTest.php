@@ -47,7 +47,8 @@ class ChatbotPasteTest extends ChatblastTestCase
         $res = $this->postJson('/chatbot/cells', ['changes' => [
             $this->change('Page Uno', 'price', ' 599 '),
             $this->change('Page Uno', 'main_flow', "Hi\nThere"),
-            $this->change('Page Dos', 'price', '599'),
+            $this->change('Page Dos', 'price', '1'),
+            $this->change('Page Dos', 'price', '599'), // parehong cell: ang huli ang masusunod
             $this->change('page dos', 'seq_img_1', 'https://img.example.test/a.jpg'),
             $this->change('Page Dos', 'quantity', ''), // blangko, walang value: walang nagbago
         ]])->assertOk()->json();
@@ -84,6 +85,7 @@ class ChatbotPasteTest extends ChatblastTestCase
             'unknown column' => $this->change('Page Dos', 'no_such_column', 'x'),
             'page not on the list' => $this->change('Page Tres', 'price', '1'),
             'no page' => $this->change('', 'price', '1'),
+            'not text' => ['page_name' => 'Page Dos', 'key' => 'price', 'value' => ['x']],
         ] as $case => $bad) {
             $res = $this->postJson('/chatbot/cells', ['changes' => [$good, $bad]])->assertStatus(422)->json();
             $this->assertSame($bad['page_name'], $res['errors'][0]['page_name'], $case);
@@ -92,6 +94,7 @@ class ChatbotPasteTest extends ChatblastTestCase
         }
         $this->postJson('/chatbot/cells', ['changes' => 'x'])->assertStatus(422);
         $this->postJson('/chatbot/cells', ['changes' => []])->assertStatus(422);
+        $this->postJson('/chatbot/cells', ['changes' => array_fill(0, 5001, $good)])->assertStatus(422); // hanggang 5000 kada save
         $this->assertNull($this->value('Page Dos', 'prompt_1'));
     }
 

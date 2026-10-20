@@ -163,6 +163,7 @@ class ChatbotController extends Controller
             if ($key === 'flow' || in_array($key, ChatbotFields::RESERVED, true)) { $skipped++; continue; }
             $page = $listed[$this->settings->pageKey($pageIn)] ?? null;
             $error = $page === null ? 'This page is not on the chatbot list.' : (in_array($key, $columns, true) ? $this->valueError($key, $value) : 'Unknown column.');
+            if ($error === null && isset($c['value']) && !is_scalar($c['value'])) $error = 'The value must be text.';
             if ($error !== null) { $errors[] = ['page_name' => $pageIn, 'key' => $key, 'error' => $error]; continue; }
             if ($value === '' && !$blanksEmpty) continue;
             $todo[$this->settings->pageKey($page) . "\0" . $key] = [$page, $key, $value]; // parehong cell: ang huli ang masusunod
