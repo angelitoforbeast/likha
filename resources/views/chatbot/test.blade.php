@@ -41,7 +41,7 @@
             </label>
         </div>
         <div id="t-log" class="mb-3 min-h-[12rem] space-y-2 overflow-y-auto rounded-md bg-slate-50 p-3 text-sm" style="max-height: 50vh" aria-live="polite"></div>
-        <div id="t-skip" class="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs text-sky-900" hidden>
+        <div id="t-skip" class="mb-3 flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs text-sky-900" style="display: none">
             <span>Skips in <strong id="t-skip-left" class="font-mono">0:00</strong> if no reply</span>
             <button type="button" id="t-skip-now" class="cb-btn cb-btn-sm">Skip now</button>
         </div>
@@ -95,12 +95,12 @@
 
     // Ang skip timer: countdown sa page, at tanong sa server kada 2 s habang may hinihintay (ang server ang nagpapasya).
     let skipAt = null, tickTimer = null, pollTimer = null, busy = false;
-    function stopSkip() { skipAt = null; clearInterval(tickTimer); clearInterval(pollTimer); $('t-skip').hidden = true; }
+    function stopSkip() { skipAt = null; clearInterval(tickTimer); clearInterval(pollTimer); $('t-skip').style.display = 'none'; }
     function startSkip(seconds) {
         stopSkip();
         if (seconds == null) return;
         skipAt = Date.now() + seconds * 1000;
-        $('t-skip').hidden = false;
+        $('t-skip').style.display = 'flex'; // the class flex would override the hidden attribute
         const show = () => { const left = Math.max(0, Math.ceil((skipAt - Date.now()) / 1000)); $('t-skip-left').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'); };
         show();
         tickTimer = setInterval(show, 1000);
