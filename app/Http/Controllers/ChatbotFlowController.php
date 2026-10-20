@@ -7,6 +7,7 @@ use App\Models\ChatbotFlow;
 use App\Models\PageSetting;
 use App\Models\User;
 use App\Services\Chatbot\BotcakeOutbox;
+use App\Services\Chatbot\ChatbotTags;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\ChatbotFields;
@@ -184,6 +185,8 @@ class ChatbotFlowController extends Controller
             DB::table('chatbot_flow_versions')->insert(['flow_id' => $flow->id, 'graph' => json_encode($graph), 'note' => $note !== '' ? $note : null, 'published_by' => Auth::id(), 'created_at' => now()]);
             $oldest = DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->orderByDesc('id')->offset(self::KEEP_VERSIONS)->limit(1)->value('id');
             if ($oldest) DB::table('chatbot_flow_versions')->where('flow_id', $flow->id)->where('id', '<=', $oldest)->delete();
+            // Results: ang naka-cache na version ng graph na ito (hal. ibinalik na lumang graph) ay ang bagong Publish na.
+            DB::afterCommit(fn () => ChatbotTags::forgetFlowVersion($flow->id, $graph));
 
             return response()->json($this->state($flow->fresh()) + ['graph' => $graph]);
         });

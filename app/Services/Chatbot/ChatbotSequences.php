@@ -290,6 +290,7 @@ class ChatbotSequences
             $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page), $fields, null,
                 '', (string) $last->name, now()->format('Y-m-d H:i'));
             $run->startedBy = 'sequence ' . $seq->name . ' step ' . $step->position;
+            [$run->sequenceId, $run->sequenceStep] = [(int) $seq->id, (int) $step->position];
             try {
                 $this->engine->run($run, $this->outbox);
                 $run->event('sequence', null, ['op' => 'ran'] + $detail);

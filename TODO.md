@@ -893,3 +893,13 @@ Accepted, not fixed:
 - **The pool spends its slot when a ticket turns out not to send** (`issue()` returns null). Reason: rare (mismatch, pause, lost ticket) and costs one interval on one page.
 - **`ChatbotFields` still reads the distinct botfield keys from `page_settings` on each chat** (the one query left per chat). Reason: not a per-page `get()`; out of this spec. Suggestion: cache it with the same forget.
 - **The Inbox thread and the Replies screen don't show the raw body yet**; `/chatbot/replies/{id}` returns it as `raw`. Reason: no UI change in this task; showing it is a small front-end follow-up.
+
+## 100: chatbot results (2026-10-21)
+
+- **The J&T ranking is a second copy of Chatblast's** (`ChatbotResults::deliveryOf`, `PROGRESS`), now matching it, blank status included. Reason: Chatblast's `latest()`/`rank()` are private, and making them public touches a working module this task doesn't need to change; both copies are small. Move them to one shared place on the next change to either.
+- **`ChatbotTags::RUN_VARS` repeats the run variable names of `FlowRun::vars()`.** A new run variable would be listed as a customer field in the tags until it is added there too. Reason: keeping `FlowRun` untouched beyond two properties keeps the merge with 098 small; the effect is a label in the JSON, not a number.
+- **`/chatbot/results.json` without a page runs over all pages for up to 92 days.** Reason: only staff with /chatblast access reach it, it is throttled (60 a minute) and cached 5 minutes per filter set, and every query is bounded by date on an index. Requiring a page would break Mira's all-pages read.
+- **Compare by botfield takes any two page_settings ids**, even two different botfields. Reason: the screen only offers versions seen in By message; a hand-made URL just compares two unrelated values, labelled as such.
+- **The `chatbot_events (type, created_at)` index is not guarded against running the migration twice.** Reason: Laravel records the migration once; the columns and the table are guarded.
+- **The AI step's sent answer is tagged (flow, version, no botfields) but has no test of its own.** Reason: it uses the same `forSend()` and record path as the Send node, which S-100.1 covers on both the waiting and the pool path.
+- **"Chats" in By ad counts the customers the bot sent to with that ad, not incoming chats.** Reason: the ad is stored on the send; counting incoming chats per ad would need the ad on `botcake_chats`, a new pipeline the brief rules out.

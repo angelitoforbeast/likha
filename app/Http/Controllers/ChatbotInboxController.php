@@ -6,6 +6,7 @@ use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
 use App\Services\BotcakeClient;
 use App\Services\Chatbot\BotcakeOutbox;
+use App\Services\Chatbot\ChatbotTags;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\Inbox;
@@ -159,7 +160,9 @@ class ChatbotInboxController extends Controller
         }
         $reply = ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
             'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]
-            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []));
+            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : [])
+            + ChatbotTags::columns($tags = ChatbotTags::manual((int) $pageId, (int) $psid, $page, count($messages))));
+        ChatbotTags::storeRows($reply, $tags);
 
         return response()->json(['item' => ['key' => 'out-' . $reply->id, 'id' => $reply->id, 'side' => 'out', 'at' => Inbox::iso($reply->sent_at),
             'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You']]);

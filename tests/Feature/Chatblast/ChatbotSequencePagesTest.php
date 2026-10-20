@@ -124,7 +124,7 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
         $this->actingAs($this->user());
         $html = $this->get('/chatbot/sequences')->assertOk()->getContent();
         preg_match_all('/data-cb-nav="([^"]+)"/', $html, $m);
-        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Test'], $m[1]); // the app switcher replaces the Chatblast tab
+        $this->assertSame(['Flow', 'Sequences', 'Page settings', 'Chats', 'Inbox', 'Replies', 'Results', 'Test'], $m[1]); // the app switcher replaces the Chatblast tab
         preg_match_all('/<tr data-sequence="(\d+)">(.*?)<\/tr>/s', $html, $rows);
         $cells = array_map(fn ($r) => array_map(fn ($c) => trim(strip_tags($c)), preg_split('/<\/td>/', $r)), $rows[2]);
         $this->assertSame(['Newsletter', '1', '0', '0', 'Paused'], array_slice(array_map(fn ($c) => preg_replace('/\s+/', ' ', $c), $cells[0]), 0, 5));

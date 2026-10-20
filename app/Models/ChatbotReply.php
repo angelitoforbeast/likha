@@ -10,9 +10,10 @@ class ChatbotReply extends Model
 {
     public $timestamps = false;
 
-    protected $fillable = ['page_id', 'psid', 'chat_id', 'flow_id', 'node_id', 'user_id', 'kind', 'content', 'status', 'error', 'raw', 'http', 'sent_at'];
+    protected $fillable = ['page_id', 'psid', 'chat_id', 'flow_id', 'node_id', 'user_id', 'kind', 'content', 'status', 'error', 'raw', 'http', 'sent_at',
+        'flow_version_id', 'sequence_id', 'sequence_step', 'ad_id', 'tags', 'replied_at', 'reply_seconds'];
 
-    protected $casts = ['content' => 'array', 'sent_at' => 'datetime'];
+    protected $casts = ['content' => 'array', 'sent_at' => 'datetime', 'tags' => 'array', 'replied_at' => 'datetime'];
 
     /** @var array{0: \WeakReference, 1: bool}|null [ang app na tumingin, may column] */
     private static ?array $hasRaw = null;

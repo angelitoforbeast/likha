@@ -189,10 +189,19 @@ class PageSettings
      */
     public function all(string $page, string $provider): array
     {
+        return array_map(fn (array $r) => $r['value'], $this->allWithIds($page, $provider));
+    }
+
+    /**
+     * Gaya ng all(), kasama ang id ng page_settings row (ang version ng botfield sa Results).
+     * @return array<string, array{value: string, id: int}> key => plain value at row id
+     */
+    public function allWithIds(string $page, string $provider): array
+    {
         $out = [];
         $prefix = strtolower($provider) . '.';
         foreach ($this->map($page) as $full => $row) {
-            if (str_starts_with($full, $prefix)) $out[substr($full, strlen($prefix))] = (string) self::plain($row);
+            if (str_starts_with($full, $prefix)) $out[substr($full, strlen($prefix))] = ['value' => (string) self::plain($row), 'id' => (int) $row[2]];
         }
 
         return $out;
@@ -202,18 +211,20 @@ class PageSettings
     public const CACHE_TTL = 600;
     public const MEMO_TTL = 2;
 
-    /** @var array<string, array{0: float, 1: array<string, array{0: ?string, 1: bool}>}> page key => [nabasa noong, map] */
+    /** @var array<string, array{0: float, 1: array<string, array{0: ?string, 1: bool, 2: int}>}> page key => [nabasa noong, map] */
     private array $memo = [];
 
     public static function cacheKey(string $page): string
     {
-        return 'page-settings:' . sha1((new self)->pageKey($page));
+        // v2: may row id na ang bawat setting; ang lumang cache (walang id) ay hindi na binabasa.
+        return 'page-settings:v2:' . sha1((new self)->pageKey($page));
     }
 
     /**
      * Ang mga active na setting ng page: provider.key => [value gaya ng nasa table (ang secret ay naka-encrypt pa rin, at
-     * sa memory lang binubuksan), is_secret], ayon sa id. Mula sa memo (hanggang MEMO_TTL), saka sa cache, saka sa isang query.
-     * @return array<string, array{0: ?string, 1: bool}>
+     * sa memory lang binubuksan), is_secret, row id], ayon sa id. Mula sa memo (hanggang MEMO_TTL), saka sa cache, saka sa
+     * isang query.
+     * @return array<string, array{0: ?string, 1: bool, 2: int}>
      */
     private function map(string $page): array
     {
@@ -223,8 +234,8 @@ class PageSettings
 
         $map = Cache::remember(self::cacheKey($page), self::CACHE_TTL, function () use ($page) {
             $out = [];
-            foreach ($this->pageQuery($page)->where('active', true)->orderBy('id')->get(['provider', 'key', 'value', 'is_secret']) as $s) {
-                $out[strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret];
+            foreach ($this->pageQuery($page)->where('active', true)->orderBy('id')->get(['id', 'provider', 'key', 'value', 'is_secret']) as $s) {
+                $out[strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret, (int) $s->id];
             }
 
             return $out;
@@ -234,7 +245,7 @@ class PageSettings
         return $map;
     }
 
-    /** @param array{0: ?string, 1: bool} $row */
+    /** @param array{0: ?string, 1: bool, 2: int} $row */
     private static function plain(array $row): ?string
     {
         $s = new PageSetting();

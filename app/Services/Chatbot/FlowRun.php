@@ -40,6 +40,11 @@ class FlowRun
     public bool $sendPending = false;
     /** Test: ilang padala na ng takbong ito nang dumaan sa "Clear AI memory" (ang mga nauna ay hindi na alaala ng AI). */
     public ?int $aiClearedAt = null;
+    /** Ang tags ng padalang ginagawa ngayon (ChatbotTags::forSend), itinatala kasama ng reply. */
+    public ?array $tags = null;
+    /** Pinatakbo ng sequence: ang sequence at ang puwesto ng step (para sa Results). */
+    public ?int $sequenceId = null;
+    public ?int $sequenceStep = null;
 
     /**
      * "Clear AI memory": live, ang marker ng customer (__ai_since: oras, ang chat na ito, at ang huling padala sa kanya);

@@ -609,6 +609,12 @@
             body.append(label('Sequence', bind(pick, v => c.sequence_id = parseInt(v, 10) || 0)));
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'Subscribing while the customer is already in it does nothing; after an unsubscribe it starts again from step 1. Sequences are made in Chatbot → Sequences.'}));
         }
+        // Results: ang order ay binibilang kapag dumaan ang takbo sa step na ito (isa kada customer kada 24 oras).
+        if (['send', 'set', 'sheet'].includes(n.type)) {
+            body.append(el('div', {class: 'border-t border-slate-200 pt-2 text-sm'}, [
+                el('label', {class: 'flex items-center gap-2'}, [bind(el('input', {type: 'checkbox', checked: !!c.counts_order}), v => c.counts_order = v, true), 'Counts as an order']),
+                el('p', {class: 'mt-0.5 text-xs text-slate-500', text: 'When a customer passes this step, Chatbot → Results counts one order (once per customer per 24 hours).'})]));
+        }
         $('vars-search').value = '';
         drawVars();
         $('form-box').classList.remove('hidden');

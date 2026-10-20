@@ -74,6 +74,14 @@ class FlowEngine
                 break;
             }
             $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => $port, 'note' => $r['note'] ?? null];
+            // "Counts as an order": dumaan ang takbo sa node (hindi pumalya, hindi pa naghihintay ng padala sa pool).
+            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && !$run->sendPending) {
+                try {
+                    ChatbotTags::order($run, $node['id']);
+                } catch (Throwable $e) {
+                    report($e); // ang talaan ng order ay hindi pumipigil sa takbo
+                }
+            }
             if (!empty($r['stop'])) {
                 $run->stopped = $r['note'] ?? 'Stopped.';
                 Log::warning('chatbot: run stopped', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId, 'node' => $node['id'], 'note' => $run->stopped]);
@@ -215,18 +223,22 @@ class FlowEngine
             return $this->afterSend($node, $c, $run, $this->takeSendResult($run));
         }
         $messages = [];
+        $templates = [];
         foreach ((array) ($c['items'] ?? []) as $item) {
             $v = trim($run->text((string) ($item['value'] ?? '')));
             if ($v === '') continue;
             if (($item['type'] ?? 'text') === 'image') {
-                if (self::isUrl($v)) $messages[] = ['type' => 'image', 'url' => $v];
+                if (!self::isUrl($v)) continue;
+                $messages[] = ['type' => 'image', 'url' => $v];
             } else {
                 $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)];
             }
+            $templates[] = (string) ($item['value'] ?? '');
         }
 
         if (!$messages) return $this->afterSend($node, $c, $run, null);
         if ($stop = $this->mismatch($run, $node['id'])) return $stop;
+        $run->tags = ChatbotTags::forSend($run, $templates);
         // Hindi hinihintay ang Botcake: ang padala ay sa botcake:send-pool, at humihinto ang takbo hanggang sa resulta.
         if (BotcakeSendQueue::async($run, $outbox) && BotcakeSendQueue::submitChatbot($run, $node['id'], $messages) !== null) {
             $run->sendPending = true;
@@ -378,6 +390,7 @@ class FlowEngine
         if (!empty($c['send'])) {
             if ($stop = $this->mismatch($run, $node['id'])) return $stop;
             $msg = [['type' => 'text', 'text' => mb_substr($res['text'], 0, 2000)]];
+            $run->tags = ChatbotTags::forSend($run, [null]);
             if (BotcakeSendQueue::async($run, $outbox) && BotcakeSendQueue::submitChatbot($run, $node['id'], $msg) !== null) {
                 $run->sendPending = true;
                 return ['port' => null, 'suspend' => true, 'note' => 'AI answered; sending the answer'];

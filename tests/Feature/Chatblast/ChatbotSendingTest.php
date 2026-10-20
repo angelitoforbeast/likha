@@ -145,7 +145,7 @@ class ChatbotSendingTest extends ChatblastTestCase
             ['page_id' => '1001', 'psid' => self::PSID, 'name' => 'Ana Cruz', 'message' => $text], ['X-Chat-Key' => 'page-key-uno-test-a1s2d3f4g5h6j7k8l9'])->assertOk();
 
         $post('no flow yet');
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(RunChatbotFlow::class); // ang MarkChatbotReplied (Results) ay laging naipapasa
 
         $this->greeting();
         $post('with a flow');

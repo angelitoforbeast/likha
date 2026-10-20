@@ -99,17 +99,23 @@ class BotcakeOutbox implements Outbox
     /** @return array{status: string, error: ?string} */
     private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null): array
     {
-        return self::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $nodeId, $kind, $content, $status, $error, $http, $raw);
+        return self::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $nodeId, $kind, $content, $status, $error, $http, $raw,
+            $kind === 'send' ? $run->tags : null);
     }
 
-    /** Ang talaan ng isang padala (chatbot_replies). @return array{status: string, error: ?string} */
-    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null): array
+    /**
+     * Ang talaan ng isang padala (chatbot_replies). $raw: ang buong sagot ng pumalyang padala. $tags: ang
+     * ChatbotTags::forSend() ng padala (Results).
+     * @return array{status: string, error: ?string}
+     */
+    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null): array
     {
-        ChatbotReply::create([
+        $reply = ChatbotReply::create([
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId,
             'node_id' => $nodeId, 'kind' => $kind, 'content' => $content, 'status' => $status, 'error' => $error === null ? null : mb_substr($error, 0, 255),
             'http' => $http, 'sent_at' => now(),
-        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []));
+        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags));
+        ChatbotTags::storeRows($reply, $tags);
 
         return ['status' => $status, 'error' => $error];
     }
