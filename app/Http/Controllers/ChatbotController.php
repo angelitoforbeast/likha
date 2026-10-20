@@ -6,6 +6,9 @@ use App\Models\BotcakeChat;
 use App\Models\PageSetting;
 use App\Services\BotcakeChatBlock;
 use App\Services\BotcakePageSetup;
+use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\ChatbotPageCheck;
+use App\Services\Chatbot\ChatbotVars;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -25,6 +28,11 @@ use Throwable;
 class ChatbotController extends Controller
 {
     private const MAX_CELLS = 5000; // kada Paste values: 60 page × mga 52 column ay mga 3,100
+    private const SAMPLE_NAME = 'Juan Dela Cruz'; // ang sample na customer ng Preview
+    private const HISTORY_LIMIT = 100;
+    private const CHANGES_PER_PAGE = 50;
+    private const HIDDEN_KEYS = ['flow_id', 'mock_ai', 'mock_ai_latency_ms']; // system lang: wala sa grid, wala sa Changes
+    private const BOTCAKE_LABELS = ['page_id' => 'Botcake ID', 'token' => 'Botcake token']; // ang mga botcake key na nasa grid
 
     public function __construct(private PageSettings $settings, private ChatbotFields $fields)
     {
@@ -70,6 +78,9 @@ class ChatbotController extends Controller
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
+        // Ang Check: ang naka-cache lang (ang wala pa ay kinukuha ng page isa-isa sa /chatbot/check).
+        $check = app(ChatbotPageCheck::class);
+        $prints = $check->prints();
 
         $rows = [];
         foreach ($pages as $page) {
@@ -95,6 +106,7 @@ class ChatbotController extends Controller
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'cells' => (object) $cells,
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
+                'check' => $check->cached($page, $prints),
             ];
         }
 
@@ -273,6 +285,170 @@ class ChatbotController extends Controller
         if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, null, true);
 
         return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
+    }
+
+    /** Ang Check ng isang page: ang naka-cache (GET), o kinukuwenta ulit kasama ang mga link ng larawan (POST, "Check again"). */
+    public function check(Request $request, ChatbotPageCheck $check)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+
+        return response()->json(['page' => $page] + $check->check($page, $request->isMethod('post')));
+    }
+
+    /**
+     * Preview: ang mga pangunahing text (Main Flow, Main Flow 2, Fill-Up Form, Loop 3 Form, Seq 1–20) gaya ng makikita ng
+     * isang sample na customer, pinupunan gaya ng FlowRun::vars (ang botfield na may variable ay isang antas lang). Walang
+     * isinusulat.
+     */
+    public function preview(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+
+        $bot = app(ChatbotPage::class)->botfields($page);
+        $run = [
+            'last_input' => '', 'full_name' => self::SAMPLE_NAME, 'first_name' => explode(' ', self::SAMPLE_NAME)[0], 'psid' => 'SAMPLE',
+            'page_id' => (string) $this->settings->get($page, 'botcake', 'page_id'), 'page_name' => $page,
+            'current_date' => now('Asia/Manila')->toDateString(), 'last_interaction' => now('Asia/Manila')->format('Y-m-d H:i'),
+        ];
+        $base = ChatbotVars::merge($bot, $run);
+        $labels = array_column($this->fields->columns(), 'label', 'key');
+        $text = fn (string $key) => trim($bot[$key] ?? '') === '' ? null : ChatbotVars::interpolate((string) $bot[$key], $base);
+        $image = fn (string $key) => $this->isImageUrl(trim($bot[$key] ?? '')) ? trim($bot[$key]) : null;
+
+        $items = [];
+        $add = function (string $label, ?string $text, ?string $image) use (&$items) {
+            if ($text !== null || $image !== null) $items[] = ['label' => $label, 'text' => $text, 'image' => $image];
+        };
+        $add($labels['picture'] ?? 'PICTURE', null, $image('picture'));
+        foreach (['main_flow', 'main_flow_2', 'fill_up_form', 'loop_3_form'] as $key) $add($labels[$key] ?? $key, $text($key), null);
+        for ($i = 1; $i <= 20; $i++) $add($labels['seq_' . $i] ?? 'Seq ' . $i, $text('seq_' . $i), $image('seq_img_' . $i));
+
+        return response()->json(['page' => $page, 'sample' => self::SAMPLE_NAME, 'items' => $items]);
+    }
+
+    /** History ng isang botfield ng page: lahat ng bersyon, bago muna. Ang secret ay "(hidden)". */
+    public function history(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        $key = strtolower($this->str($request, 'key'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        if (!$this->fields->isColumn($key) && !in_array($key, ['active', 'flow'], true)) return response()->json(['error' => 'Unknown column.'], 422);
+
+        $rows = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key)->orderByDesc('id')->limit(self::HISTORY_LIMIT)->get();
+        $names = $this->userNames($rows->pluck('created_by'));
+
+        return response()->json(['versions' => $rows->map(fn ($s) => [
+            'id' => $s->id, 'value' => $this->shown($s), 'secret' => (bool) $s->is_secret, 'current' => (bool) $s->active,
+            'by' => $this->who($s, $names), 'at' => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
+            'restorable' => !$s->active && $this->restorable($s),
+        ])->all()]);
+    }
+
+    /** Restore: ibinabalik ang lumang bersyon sa pamamagitan ng PageSettings::set (kaya bagong row din ito sa history). */
+    public function restore(Request $request)
+    {
+        $this->checkAccess();
+        $s = PageSetting::find((int) $this->str($request, 'id', 20));
+        $page = $s ? $this->listedPage((string) $s->page_name) : null;
+        if (!$s || $page === null || !$this->restorable($s)) return response()->json(['error' => 'This version cannot be restored here.'], 422);
+        $value = trim((string) $s->plainValue());
+        if ($value === '' || ($error = $this->valueError($s->key, $value))) return response()->json(['error' => $error ?? 'This version is empty.'], 422);
+
+        $res = $this->settings->set($page, ChatbotFields::PROVIDER, $s->key, $value, false, Auth::id());
+
+        return response()->json(['status' => $res['status'], 'key' => $s->key, 'value' => $res['setting']->plainValue()]);
+    }
+
+    /**
+     * Changes: ang mga pagbabago sa lahat ng chatbot page (provider chatbot, at ang Botcake ID at token ng grid), bago
+     * muna, 50 kada pahina. Bawat row ay ipinapares sa nauna nitong bersyon (parehong page, provider at key). Filter:
+     * page, user, field (key, o "botcake.page_id"), at petsa (Manila, kasama ang dulo).
+     */
+    public function changes(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->str($request, 'page');
+        $field = strtolower($this->str($request, 'field', 120));
+        $user = $this->str($request, 'user', 20);
+
+        $q = ($page !== '' ? $this->settings->pageQuery($page) : PageSetting::query())->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)
+            ->where(fn ($w) => $w->where(fn ($a) => $a->where('provider', ChatbotFields::PROVIDER)->whereNotIn('key', self::HIDDEN_KEYS))
+                ->orWhere(fn ($b) => $b->where('provider', 'botcake')->whereIn('key', array_keys(self::BOTCAKE_LABELS))));
+        $users = $this->userNames((clone $q)->whereNotNull('created_by')->distinct()->pluck('created_by'));
+
+        if ($field !== '') {
+            [$provider, $key] = str_starts_with($field, 'botcake.') ? ['botcake', substr($field, 8)] : [ChatbotFields::PROVIDER, $field];
+            $q->where('provider', $provider)->where('key', $key);
+        }
+        if (ctype_digit($user)) $q->where('created_by', (int) $user);
+        foreach (['from' => 'startOfDay', 'to' => 'endOfDay'] as $param => $edge) {
+            $day = $this->str($request, $param, 10);
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) continue;
+            try {
+                $at = \Carbon\Carbon::createFromFormat('Y-m-d', $day, 'Asia/Manila')->{$edge}()->timezone(config('app.timezone'));
+            } catch (Throwable $e) {
+                continue;
+            }
+            $q->where('created_at', $param === 'from' ? '>=' : '<=', $at);
+        }
+
+        $total = (clone $q)->count();
+        $last = max(1, (int) ceil($total / self::CHANGES_PER_PAGE));
+        $p = min($last, max(1, (int) $this->str($request, 'p', 6)));
+        $rows = $q->orderByDesc('id')->forPage($p, self::CHANGES_PER_PAGE)->get();
+        $labels = array_column($this->fields->columns(), 'label', 'key');
+
+        $entries = $rows->map(function ($s) use ($users, $labels) {
+            $before = PageSetting::where('page_name', $s->page_name)->where('provider', $s->provider)->where('key', $s->key)->where('id', '<', $s->id)->orderByDesc('id')->first();
+            return [
+                'id' => $s->id, 'at' => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'), 'by' => $this->who($s, $users),
+                'page' => $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
+                'field' => $s->provider === 'botcake' ? self::BOTCAKE_LABELS[$s->key] : ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
+                'old' => $before ? $this->shown($before) : null, 'new' => $this->shown($s),
+            ];
+        })->all();
+
+        $fields = array_merge(
+            array_map(fn ($k, $l) => ['key' => (string) $k, 'label' => $l], array_keys($labels), $labels),
+            array_map(fn ($k, $l) => ['key' => 'botcake.' . $k, 'label' => $l], array_keys(self::BOTCAKE_LABELS), self::BOTCAKE_LABELS),
+        );
+
+        return response()->json([
+            'entries' => $entries, 'total' => $total, 'page' => $p, 'last_page' => $last, 'per_page' => self::CHANGES_PER_PAGE,
+            'users' => collect($users)->map(fn ($n, $id) => ['id' => (int) $id, 'name' => $n])->values()->all(),
+            'pages' => $this->pages(), 'fields' => $fields,
+        ]);
+    }
+
+    /** Ang value na maipapakita: ang secret ay hindi kailanman. */
+    private function shown(PageSetting $s): string
+    {
+        return $s->is_secret ? '(hidden)' : (string) $s->plainValue();
+    }
+
+    private function who(PageSetting $s, array $names): string
+    {
+        return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system';
+    }
+
+    /** @return array<int, string> id => pangalan */
+    private function userNames($ids): array
+    {
+        $ids = collect($ids)->filter()->unique()->values();
+
+        return $ids->isEmpty() ? [] : \App\Models\User::whereIn('id', $ids)->pluck('name', 'id')->all();
+    }
+
+    /** Ang bersyong maibabalik: botfield ng chatbot na nae-edit sa cell (hindi ACTIVE, FLOW o secret). */
+    private function restorable(PageSetting $s): bool
+    {
+        return $s->provider === ChatbotFields::PROVIDER && !$s->is_secret && $s->key !== 'flow'
+            && !in_array($s->key, ChatbotFields::RESERVED, true) && $this->fields->isColumn($s->key);
     }
 
     /** @return array<int, string> ang mga page na may Botcake ID at token, ayon sa pangalan */

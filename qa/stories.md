@@ -1739,3 +1739,21 @@ Spec 095. Tests in `tests/Feature/Chatblast/BotcakeMessageShapeTest.php` and `te
 |---|---|---|---|
 | S-095.1 | Given Botcake refuses a send with `message` as a string, an array, a nested array, an object, an array with no string, null, a number, missing, or a string over 150 letters, then the outcome is `failed` with a readable reason (the string, the first string inside, compact JSON, or "Botcake refused it"), capped at 150 letters, and nothing throws | `test_S_095_1…` (9 data sets) | Passed · 2026-10-20 · auto |
 | S-095.2 | Given a sequence step whose send Botcake refuses with `{"success":false,"message":{"error":"x"}}`, when the tick runs the step, then the reply is logged `failed` with `Botcake said "x"` and the job runs to the end | `test_S_095_2…` | Passed · 2026-10-20 · auto |
+
+## S-099 /chatbot/pages checks each page's values, and shows the history of every edit
+
+Spec 099. Tests in `tests/Feature/Chatblast/ChatbotPageCheckTest.php` and `tests/Feature/Chatblast/ChatbotPageHistoryTest.php` (fake HTTP and a stub DNS resolver: no call leaves the test). The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-099.1 | Given a page whose flow's published graph uses `{{Name}}` in a send text or image, an AI prompt, a condition, a sheet column and a set-field value, and a botfield that names another botfield, when the Check runs, then every used botfield that is empty is listed in column order ("Missing: …"); customer fields and system variables are never missing; a page with no flow shows "—" | `test_S_099_1…` | |
+| S-099.2 | Given image fields, then a link that answers 200 `image/*` passes; a 404 gives "Seq Img 3: link broken (404)", a non-image "PICTURE: not an image", and a host that resolves to a private, loopback or link-local IP fails without any request; a redirect is re-checked (at most 3); a URL's result is cached 24 h, and Check again asks again | `test_S_099_2…` | |
+| S-099.3 | Given the flow or its sequences use both Seq N and Seq Img N, when a page sets one of a pair and not the other, then the reason is "Seq 5 has no Seq Img 5" (or the reverse) | `test_S_099_3…` | |
+| S-099.4 | Given a botfield value with `{{X}}` where X is no system variable, botfield or customer field, then the reason is "Prompt 1 uses {{PRICEE}} (unknown)" | `test_S_099_4…` | |
+| S-099.5 | Given a cached Check (10 minutes), then it is reused; when the page's settings or the flows change, the next Check recomputes | `test_S_099_5…` | |
+| S-099.6 | Given a field with several versions, when its History opens, then the versions come newest first with value, who, when (Manila) and current/old; a secret value shows "(hidden)" | `test_S_099_6…` | |
+| S-099.7 | Given an old version, when Restore runs, then a new active row with that value is written through PageSettings::set (the old ones stay as history); a secret, a reserved key, FLOW or a key of another provider is refused | `test_S_099_7…` | |
+| S-099.8 | Given edits across pages, when the Changes log opens, then each entry pairs the old value with the new one, newest first, 50 per page; the page, user, field and date filters narrow it; secrets show "(hidden)" | `test_S_099_8…` | |
+| S-099.9 | Given a guest or a user without /chatblast access, then every new endpoint answers 401 or 403 and changes nothing | `test_S_099_9…` | |
+| S-099.10 | Given a page's main texts and Seq 1–20, when Preview runs, then each comes back filled for the sample customer "Juan Dela Cruz", with Seq Img N and PICTURE as images; nothing is written | `test_S_099_10…` | |
+| S-099.11 | The Check column (check, X with reasons, Check again), Preview, field History with Restore and the Changes list with filters, at 1366 and 390 px, with no page-level horizontal scroll | browser | |
