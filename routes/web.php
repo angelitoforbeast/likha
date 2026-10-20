@@ -347,6 +347,13 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');
     Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
     Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
+    // Check, Preview, History, Restore at Changes ng /chatbot/pages (access gaya ng page; Restore gaya ng isang cell).
+    Route::get('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:240,1,chatbot-check')->name('check');
+    Route::post('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:30,1,chatbot-check-again')->name('check.again');
+    Route::get('/preview', [\App\Http\Controllers\ChatbotController::class, 'preview'])->middleware('throttle:60,1,chatbot-preview')->name('preview');
+    Route::get('/history', [\App\Http\Controllers\ChatbotController::class, 'history'])->middleware('throttle:120,1,chatbot-history')->name('history');
+    Route::post('/restore', [\App\Http\Controllers\ChatbotController::class, 'restore'])->middleware('throttle:30,1,chatbot-restore')->name('restore');
+    Route::get('/changes', [\App\Http\Controllers\ChatbotController::class, 'changes'])->middleware('throttle:60,1,chatbot-changes')->name('changes');
 });
 
 // Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings

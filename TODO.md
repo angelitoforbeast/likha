@@ -857,3 +857,28 @@ Accepted, not fixed:
 - **A reply queued before "Clear AI memory" and sent after it stays forgotten.** The marker holds the highest `chatbot_replies` id at the clear, and a queued reply's row is older. Reason: the brief asks for a chat and reply marker, not a time window; the gap is one in-flight send, and that send was answering the conversation being forgotten.
 - **The editor test (S-094.7) only checks the rendered source.** The textarea growth and the 3-line clamp were checked once in headless Chrome, not on every run. Reason: the project has no JS test runner, and adding one is a new dependency.
 - **"Also clear these fields" is a list of text boxes with the field suggestions, not a checkbox multi-select.** Reason: the editor knows only the fields the flow already uses, so a checkbox list would hide fields that aren't used yet. This matches the Set field step's field input.
+
+## 097: grouped variable list in the flow editor (2026-10-21)
+
+- **The saved customer keys are read on every editor load** (`DISTINCT key` over the flow's pages in `chatbot_customer_values`; the unique index starts with `page_id, psid`, so the database scans those pages' rows). Reason: the read runs only when a step form's data loads (once per editor open), staff-only; at today's size it is fast. If the table grows to millions of rows, cache the list for a few minutes or add a `(page_id, key)` index.
+- **At most 320 saved keys are listed, A–Z, so keys late in the alphabet drop off past that cap** with no note. Reason: a flow's own fields (save to, Set field) are always listed; the cap only trims fields found on customers, and 320 is several times today's count.
+- **A name could get the same "Also …" line twice** if two botfield labels are the same after `ChatbotVars::norm` (e.g. "Prompt 1" and "PROMPT_1") and also a customer field. Reason: the column names are owner-made and unique in practice; the chip and the insert still work.
+- **The Sequences fold matches the labels "Seq N" and "Seq Img N"** in the editor script, not the column definitions. Reason: these labels are the fixed defaults in `ChatbotFields::defaults()`; a renamed column would only show unfolded.
+- **`$groups = $this->variableGroups($flow)` is assigned inside the response array in `graph()`.** Reason: it keeps the change to one line in a legacy method; style only.
+
+## 099: pages check and history on /chatbot/pages (2026-10-21)
+
+- **A field cleared to empty (the cell, or a paste with blanks as empty) does not show in History or the Changes log as its own entry.** Clearing deactivates the row without writing a new one, and the deactivation records no user. Reason: `PageSettings` was not to be changed in this work; the old value stays as an "Old" version. Suggestion for the owner: let `deactivate` record who cleared it, then list clears as "value → (empty)".
+- **One image link can still take up to about 40 s** (4 hops × HEAD and ranged GET × 5 s) after the 20 s budget for the run has started. Reason: the spec fixes the 5 s timeout and 3 redirects; the budget stops new links, and a page with that many slow hosts is unlikely. The rest show as "not checked yet".
+- **The Changes log pairs a row with the previous row of the same exact page name**, and finds it with one query per entry (50 per page). Reason: `PageSettings::set` always writes the first recorded spelling of a page, so names match; 50 small queries are fine at today's table size.
+- **The customer field names known to the Check include a distinct read of `chatbot_customer_values` keys** (cached 10 minutes, at most 5,000). Reason: it keeps fields set by the inbox or older flows from showing as unknown; at a much larger table it may need its own index or list.
+- **The Check fingerprint ignores "+ Column" additions and the customer-keys cache.** Reason: both change rarely, and the result expires after 10 minutes anyway.
+- **Preview lists the run variables by hand** instead of reusing `ChatbotFlowController::RUN_VARS` for the keys. Reason: the values differ (sample customer), and the list has eight fixed names.
+- **An IPv6-only image host** is pinned with brackets in `CURLOPT_RESOLVE` but was not tried against a real IPv6 host. Reason: the server has no known IPv6 egress, and the check then fails closed ("no answer").
+- **The screen parts (Check column, Preview, History, Restore, Changes) are checked in headless Chrome only,** not by an automated test. Reason: the project has no JS test runner for page scripts.
+
+## 101: flow editor canvas (2026-10-21)
+
+- **The selected wire is kept as an index into `graph.edges`, which shifts when wires are removed** (a new wire from a port that already had one, a form that drops a port, a deleted step). The selection, the "×" and the Delete key can then point at another wire. Reason: this predates spec 101 (the "×" only makes it easier to see), and Undo recovers it. Fix later by storing the wire itself (from, port) instead of its index, or by clearing the selection whenever edges change.
+- **The browser check script is not in the repo** (it sits outside, with a temporary sqlite database, as in specs 092–097). Reason: the repo has no browser-test runner and adding one is a new dependency. The result lists every check and its output so it can be rebuilt.
+- **Real devices are not checked:** iOS Safari pinch and gesture events, and a mouse drag that starts on the minimap and leaves it. Reason: the headless check emulates touch through the DevTools protocol only. Try it once on a phone after deploy.
