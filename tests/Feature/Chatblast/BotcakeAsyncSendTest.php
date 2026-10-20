@@ -489,5 +489,16 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $held = DB::table(BotcakeSendQueue::TABLE)->where('kind', 'chatblast')->where('status', 'sending')->count();
         $this->assertLessThanOrEqual($this->pool->perPage(), $held, 'one page holds only its share of the pool');
         $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8001'), 'the chatbot on another page goes out at once');
+
+        // A chatbot backlog on one page bigger than the pool looks at in one go still lets another page's newer send through.
+        config(['services.botcake.send_concurrency' => 8]);
+        $this->echoFlow();
+        for ($i = 1; $i <= 50; $i++) $this->says('x', (string) (9000 + $i));
+        $this->says('late', '8002', '1002', 'Page Dos');
+        for ($n = 0; $n < 3; $n++) {
+            $this->clock->time += 0.5;
+            $this->pool->tick();
+        }
+        $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8002'), 'not hidden behind the other page\'s backlog');
     }
 }

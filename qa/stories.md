@@ -1635,3 +1635,23 @@ Spec 088. Tests in `tests/Feature/Chatblast/QueueRedisHorizonTest.php`; the scal
 | S-088.2 | `CHATBOT_QUEUE_CONNECTION` and `CHATBLAST_QUEUE_CONNECTION` set the connection of every chatbot job and every chatblast send; unset, they follow `QUEUE_CONNECTION` (database on the server) | `test_S_088_2…` | Passed · 2026-10-20 · auto |
 | S-088.3 | `/horizon` sends a guest to the login, gives 403 to a non-CEO (also its API, also with `APP_ENV=local`) and 200 to the CEO | `test_S_088_3…` | Passed · 2026-10-20 · auto |
 | S-088.4 | While a run holds a chatbot customer, that customer's chat is "locked"; one chatblast send per customer at a time; on the array store and on a real Redis | `test_S_088_4…` (2 data sets) | Passed · 2026-10-20 · auto (Redis: against a local Redis in WSL; skipped when none) |
+
+## S-089 Botcake sends don't block a worker either
+
+Spec 089. Tests in `tests/Feature/Chatblast/BotcakeAsyncSendTest.php` (fake Botcake handler and fake clock); the load numbers are in the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-089.1 | Given three customers on three pages whose sends were handed off, when the pool sends all three at once and the last is answered first, then each result continues its own customer's run | `test_S_089_1…` | Passed · 2026-10-20 · auto |
+| S-089.2 | Given a ticket whose PSID doesn't match its chat, then nothing is sent, the run doesn't continue, `send_mismatch` is written, an ERROR log has ids only, and the customer is not stuck | `test_S_089_2…` | Passed · 2026-10-20 · auto |
+| S-089.3 | Given a flow with an intro and a later AI reply, then the intro goes out and is confirmed before the AI step runs, and the AI reply goes out after it | `test_S_089_3…` | Passed · 2026-10-20 · auto |
+| S-089.4 | Given six sends on one page and one on another, then Botcake receives at most 2 per second for the page, and the other page doesn't wait | `test_S_089_4…` | Passed · 2026-10-20 · auto |
+| S-089.5 | Given a 429 with Retry-After on one page, then only that page waits; the other page's sends go on; the send goes through after Retry-After | `test_S_089_5…` | Passed · 2026-10-20 · auto |
+| S-089.6 | A chatblast message's three steps in the pool give the same status, reason and steps as the waiting path: sent, field_mismatch, unknown (send_flow 5xx), failed (write refused), token invalid (401); the lock is held during the send, then the 20 s gap is set and the lock released | `test_S_089_6…` (5 data sets) | Passed · 2026-10-20 · auto |
+| S-089.7 | Given a pool that dies, then a new pool sends the never-called send once, never re-sends the called one (failed, HTTP 0), ignores the late answer, and the old pool never calls again for taken-back tickets | `test_S_089_7…` | Passed · 2026-10-20 · auto |
+| S-089.8 | Given `async_sends=false`, or no live pool, then the send waits in the worker as before and no ticket is written | `test_S_089_8…` | Passed · 2026-10-20 · auto |
+| S-089.9 | A failed send stops the run at the send node (it has no failed port), as before, and a 5xx on send_content is not retried; the AI step's failed send of its answer still goes on "success", as before | `test_S_089_9…` | Passed · 2026-10-20 · auto |
+| S-089.10 | Given a pool restart mid-chatblast, then a message whose send_flow went out is `unknown` (never re-sent), and one whose send_flow didn't go out runs its three steps again once and is sent | `test_S_089_10…` | Passed · 2026-10-20 · auto |
+| S-089.11 | With no pool, the minute tick: a chatblast ticket past 240 s goes back to the queue (the job sends it, lock released, no gap); a chatbot ticket past 10 minutes takes the failed path and frees the customer; a lost resume is resumed once | `test_S_089_11…` | Passed · 2026-10-20 · auto |
+| S-089.12 | A send waiting in the page's lane checks the pause and the emergency stop before it goes out: nothing is sent, the reply is logged as skipped; a pause stops the run, the switch skips and goes on as before | `test_S_089_12…` (2 data sets) | Passed · 2026-10-20 · auto |
+| S-089.13 | Given 40 chatblast messages on one page, then the pool holds only that page's share, and a chatbot send on another page goes out at once | `test_S_089_13…` | Passed · 2026-10-20 · auto |

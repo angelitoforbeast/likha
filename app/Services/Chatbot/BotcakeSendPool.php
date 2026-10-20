@@ -69,7 +69,7 @@ class BotcakeSendPool extends TicketPool
     {
         $started = 0;
         if ($claim) {
-            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row)));
+            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages()));
         }
         $this->lanes();
         $this->pump();
@@ -91,6 +91,21 @@ class BotcakeSendPool extends TicketPool
         foreach ($this->jobs as $job) if ($job['lane'] === $lane) $held++;
 
         return $held < $this->perPage();
+    }
+
+    /** @return array<int, string> ang mga page na puno na ang lane (hindi na kukunan ng bago) */
+    private function fullPages(): array
+    {
+        $held = [];
+        $pages = [];
+        foreach ($this->jobs as $job) {
+            $held[$job['lane']] = ($held[$job['lane']] ?? 0) + 1;
+            $pages[$job['lane']][(string) $job['row']->page_name] = true;
+        }
+        $full = [];
+        foreach ($held as $lane => $n) if ($n >= $this->perPage()) $full = array_merge($full, array_keys($pages[$lane]));
+
+        return $full;
     }
 
     /** Ilang ticket kada page ang hawak: ang kayang ipadala sa mga 3 segundo (ang chatblast ay tatlong tawag bawat isa). */
@@ -187,6 +202,7 @@ class BotcakeSendPool extends TicketPool
 
     private function queue(string $id, array $job): void
     {
+        $job['since'] = $this->clock->now();
         $this->jobs[$id] = $job;
         $this->lanes[$job['lane']] ??= ['next' => 0.0, 'last' => 0.0, 'paused' => 0.0, 'queue' => []];
         $this->lanes[$job['lane']]['queue'][] = $id;
@@ -199,11 +215,13 @@ class BotcakeSendPool extends TicketPool
         $interval = BotcakeClient::interval();
         foreach ($this->lanes as $key => $lane) {
             if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next']) continue;
-            // Ang unang handa, ang chatbot muna (sagot sa usapan) bago ang chatblast.
+            // Ang unang handa, ang chatbot muna (sagot sa usapan) bago ang chatblast, maliban kung ang chatblast ay naghintay na
+            // nang lampas 10 s sa lane (hawak nito ang lock ng customer: hindi ito naiipit nang matagal).
             $pick = null;
             foreach ($lane['queue'] as $i => $id) {
-                if (($this->jobs[$id]['notBefore'] ?? 0) > $now) continue;
-                if ($this->jobs[$id]['row']->kind === 'chatbot') { $pick = $i; break; }
+                $job = $this->jobs[$id];
+                if ($job['notBefore'] > $now) continue;
+                if ($job['row']->kind === 'chatbot' || $now - ($job['since'] ?? $now) > 10) { $pick = $i; break; }
                 $pick ??= $i;
             }
             if ($pick === null) continue;
@@ -295,6 +313,7 @@ class BotcakeSendPool extends TicketPool
                 $this->jobs[$id]['req'] = $job['gen']->current();
                 $this->jobs[$id]['attempt'] = 0;
                 $this->jobs[$id]['notBefore'] = 0.0;
+                $this->jobs[$id]['since'] = $this->clock->now();
                 $this->lanes[$job['lane']]['queue'][] = $id;
                 return;
             }
@@ -309,10 +328,9 @@ class BotcakeSendPool extends TicketPool
     private function skipNow(object $row): ?string
     {
         if (!BotcakeOutbox::enabled()) return BotcakeOutbox::SWITCHED_OFF;
-        $paused = DB::table('chatbot_customer_values')->where('page_id', (int) $row->page_id)->where('psid', (int) $row->psid)
-            ->where('key', CustomerFields::BOT_PAUSED)->value('value');
+        $paused = (new CustomerFields((int) $row->page_id, (int) $row->psid))->get(CustomerFields::BOT_PAUSED);
 
-        return (string) $paused === '1' ? 'The bot was paused before the send went out' : null;
+        return $paused === '1' ? 'The bot was paused before the send went out' : null;
     }
 
     /** Pumalya ang pool sa ticket (hal. database): chatbot → failed port; chatblast → gaya ng error ng job (unknown o failed). */

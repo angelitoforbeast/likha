@@ -7,6 +7,7 @@ use App\Jobs\SendChatblastMessage;
 use App\Models\BotcakeMessage;
 use App\Services\ChatblastSender;
 use App\Services\PageSettings;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -101,12 +102,14 @@ class BotcakeSendQueue
      * sa chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng row; ang tinanggihan ay naiiwang pending.
      * @return array<int, object>
      */
-    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null): array
+    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = []): array
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
         $rows = DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
             ->where('t.deadline_at', '>', now())
+            // Ang page na puno na ang lane ay hindi na isinasama sa SQL: hindi nito mapupuno ang listahan ng kandidato (ang ibang page ay nakikita pa rin).
+            ->when($fullPages, fn ($q) => $q->whereNotIn('t.page_name', $fullPages))
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
             ->orderByRaw("CASE WHEN t.kind = 'chatbot' THEN 0 ELSE 1 END")->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind']);
@@ -221,7 +224,7 @@ class BotcakeSendQueue
                 if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['status' => 'failed', 'error' => 'Not sent in time; queued again', 'done_at' => now(), 'updated_at' => now()]) !== 1) continue;
                 BotcakeMessage::whereKey($row->message_id)->where('status', 'sending')->update(['status' => 'queued']);
                 // Walang naipadala: ang lock lang ang binibitawan (walang gap ng customer).
-                \Illuminate\Support\Facades\Cache::restoreLock((string) $row->customer, (string) $row->lock_owner)->release();
+                Cache::restoreLock((string) $row->customer, (string) $row->lock_owner)->release();
                 SendChatblastMessage::dispatch((int) $row->message_id);
                 $out['requeued']++;
             } elseif (self::finishChatbot($row, null, ['status' => 'failed', 'error' => 'The send pool did not send it in time', 'http' => null])) {
