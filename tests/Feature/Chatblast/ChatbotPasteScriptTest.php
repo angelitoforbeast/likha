@@ -124,4 +124,22 @@ class ChatbotPasteScriptTest extends TestCase
 
         $this->assertSame(['Page Uno|price|499|unchanged', 'Page Uno|main_flow||changed'], $this->lines($this->plan("499\t", [$uno], ['blanksEmpty' => true])));
     }
+
+    public function test_S_096_4_one_page_uses_only_the_first_data_row_by_name_or_by_order(): void
+    {
+        $uno = ['page' => 'Page Uno', 'cells' => ['price' => '499']];
+        $one = ['firstRowOnly' => true];
+
+        $byName = $this->plan("PRICE\tMain Flow\n599\t\"Hi\nThere\"\n700\tSecond row", [$uno], $one);
+        $this->assertNull($byName['error']);
+        $this->assertTrue($byName['byName']);
+        $this->assertSame(1, $byName['extraRows']);
+        $this->assertSame(['Page Uno|price|599|changed', "Page Uno|main_flow|Hi\nThere|changed"], $this->lines($byName));
+
+        $byOrder = $this->plan("Hi\thttps://img.example.test/a.jpg\nignored\tx", [$uno], $one + ['startKey' => 'main_flow']);
+        $this->assertNull($byOrder['error']);
+        $this->assertSame(['Page Uno|main_flow|Hi|changed', 'Page Uno|picture|https://img.example.test/a.jpg|changed'], $this->lines($byOrder));
+
+        $this->assertNotNull($this->plan("10\n20", [$uno])['error'], 'walang firstRowOnly: tinatanggihan pa rin gaya ng dati');
+    }
 }

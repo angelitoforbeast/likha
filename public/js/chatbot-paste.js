@@ -61,14 +61,14 @@
   /**
    * Ang plano ng isang paste. input: { text, columns: [{key, label, kind}] (ang mga botfield na puwedeng i-paste, sa
    * ayos ng grid), targets: [{page, cells: {key: value}}] (sa ayos ng grid), startKey (para sa ayon sa ayos; default
-   * ang unang column), blanksEmpty }.
+   * ang unang column), blanksEmpty, firstRowOnly (isang page lang: ang unang data row lang ang ginagamit) }.
    * Sagot: { error, byName, ignored (mga header na hindi kilala), reserved (may ACTIVE o FLOW), dropped (mga value na
-   * lampas sa huling column), changes: [{page, key, label, value, old, status}] }. Status: changed, unchanged, blank
+   * lampas sa huling column), extraRows (mga row na hindi ginamit dahil sa firstRowOnly), changes: [{page, key, label, value, old, status}] }. Status: changed, unchanged, blank
    * (walang binabago dahil hindi naka-tick ang "Paste blanks as empty") o flagged (hindi link sa column ng larawan).
    */
   function plan(input) {
     var columns = input.columns || [], targets = input.targets || [];
-    var out = { error: null, byName: false, ignored: [], reserved: false, dropped: 0, changes: [] };
+    var out = { error: null, byName: false, ignored: [], reserved: false, dropped: 0, extraRows: 0, changes: [] };
     var rows = parseTsv(input.text);
     if (!targets.length) { out.error = 'Tick at least one page.'; return out; }
     if (!rows.length) { out.error = 'Paste a block copied from Google Sheets.'; return out; }
@@ -80,9 +80,11 @@
     var first = rows[0], named = first.filter(function (v) { return norm(v) !== ''; });
     var hits = named.filter(function (v) { return byNorm[norm(v)] || RESERVED.indexOf(norm(v)) !== -1; }).length;
     var map = []; // index ng pasted na column => column (o null = laktaw)
-    if (hits > 0 && hits * 2 >= named.length) {
+    var header = hits > 0 && hits * 2 >= named.length;
+    if (header) rows = rows.slice(1);
+    if (input.firstRowOnly && rows.length > 1) { out.extraRows = rows.length - 1; rows = rows.slice(0, 1); }
+    if (header) {
       out.byName = true;
-      rows = rows.slice(1);
       first.forEach(function (v, i) {
         var k = norm(v);
         if (RESERVED.indexOf(k) !== -1) { out.reserved = true; map[i] = null; }
