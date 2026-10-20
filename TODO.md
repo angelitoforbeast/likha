@@ -876,3 +876,9 @@ Accepted, not fixed:
 - **Preview lists the run variables by hand** instead of reusing `ChatbotFlowController::RUN_VARS` for the keys. Reason: the values differ (sample customer), and the list has eight fixed names.
 - **An IPv6-only image host** is pinned with brackets in `CURLOPT_RESOLVE` but was not tried against a real IPv6 host. Reason: the server has no known IPv6 egress, and the check then fails closed ("no answer").
 - **The screen parts (Check column, Preview, History, Restore, Changes) are checked in headless Chrome only,** not by an automated test. Reason: the project has no JS test runner for page scripts.
+
+## 101: flow editor canvas (2026-10-21)
+
+- **The selected wire is kept as an index into `graph.edges`, which shifts when wires are removed** (a new wire from a port that already had one, a form that drops a port, a deleted step). The selection, the "×" and the Delete key can then point at another wire. Reason: this predates spec 101 (the "×" only makes it easier to see), and Undo recovers it. Fix later by storing the wire itself (from, port) instead of its index, or by clearing the selection whenever edges change.
+- **The browser check script is not in the repo** (it sits outside, with a temporary sqlite database, as in specs 092–097). Reason: the repo has no browser-test runner and adding one is a new dependency. The result lists every check and its output so it can be rebuilt.
+- **Real devices are not checked:** iOS Safari pinch and gesture events, and a mouse drag that starts on the minimap and leaves it. Reason: the headless check emulates touch through the DevTools protocol only. Try it once on a phone after deploy.

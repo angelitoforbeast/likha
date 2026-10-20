@@ -4,7 +4,7 @@
 @section('heading', $flow->name)
 
 @section('description')
-    Drag from a port (the dot on the right of a step) to another step to wire them. Click a step to edit it. Changes save to a draft by themselves; customers get them only after you press Publish.
+    Drag from a port (the dot on the right of a step) to another step to wire them. Click a step to edit it; drag it to move it. Drag the empty canvas to pan, scroll or pinch to zoom. Changes save to a draft by themselves; customers get them only after you press Publish.
 @endsection
 
 @section('actions')
@@ -17,7 +17,12 @@
     #cv { height: calc(100vh - 17rem); min-height: 22rem; touch-action: none; background-color: #f8fafc;
           background-image: radial-gradient(#cbd5e1 1px, transparent 1px); background-size: 20px 20px; }
     #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-    .nd { position: absolute; width: 220px; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 1px 2px rgb(0 0 0 / .06); font-size: 12px; }
+    /* Habang nagda-drag o nagpa-pan: walang napi-piling text (ang mga form sa modal ay nasa labas ng #cv, kaya pwede pa rin doon). */
+    #cv.moving, #cv.moving * { user-select: none; -webkit-user-select: none; cursor: grabbing !important; }
+    /* Ang posisyon ay transform lang (walang layout habang nagda-drag); ang buong card ang hawakan. */
+    .nd { position: absolute; left: 0; top: 0; width: 220px; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 1px 2px rgb(0 0 0 / .06); font-size: 12px; }
+    #cv .nd { cursor: grab; } /* mas tiyak kaysa sa [role=button] { cursor: pointer } ng Tailwind */
+    .nd.dragging { box-shadow: 0 8px 20px rgb(0 0 0 / .15); z-index: 1; will-change: transform; }
     .nd.sel { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
     .nd-h { cursor: grab; padding: 6px 10px; border-bottom: 1px solid #e2e8f0; border-radius: 10px 10px 0 0; font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
     .nd-b { padding: 6px 10px; color: #475569; max-height: 5.5em; overflow: hidden; white-space: pre-line; word-break: break-word; }
@@ -27,8 +32,15 @@
     .dot { width: 14px; height: 14px; border-radius: 999px; border: 2px solid #64748b; background: #fff; margin-right: -8px; cursor: crosshair; flex: none; }
     .dot.on { background: #64748b; }
     .in { position: absolute; left: -8px; top: 9px; width: 14px; height: 14px; border-radius: 999px; border: 2px solid #64748b; background: #fff; }
-    #wires path { fill: none; stroke: #64748b; stroke-width: 2; pointer-events: stroke; cursor: pointer; }
+    #wires path { fill: none; stroke: #64748b; stroke-width: 2; pointer-events: none; transition: opacity .12s; }
+    #wires path.hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
     #wires path.sel { stroke: #2563eb; stroke-width: 3; }
+    /* Naka-hover sa step: ang mga wire nito lang ang malinaw. */
+    #cv.hovering #wires path.w:not(.hl) { opacity: .15; }
+    #wires path.hl { stroke: #2563eb; stroke-width: 2.5; }
+    #wires .x { cursor: pointer; pointer-events: all; }
+    #minimap { position: absolute; right: 8px; bottom: 8px; width: 180px; height: 120px; background: rgb(255 255 255 / .92); border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; touch-action: none; }
+    @media (max-width: 640px) { #minimap { width: 120px; height: 80px; } }
     .t-start .nd-h { background: #ecfdf5; } .t-condition .nd-h { background: #fef3c7; } .t-send .nd-h { background: #eff6ff; }
     .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-clear_ai .nd-h { background: #fff1f2; } .t-sheet .nd-h { background: #f0fdf4; } .t-end .nd-h { background: #f1f5f9; }
 </style>
@@ -77,6 +89,8 @@
         <button type="button" class="cb-btn cb-btn-sm" id="zoom-out" aria-label="Zoom out">−</button>
         <button type="button" class="cb-btn cb-btn-sm" id="zoom-in" aria-label="Zoom in">+</button>
         <button type="button" class="cb-btn cb-btn-sm" id="fit">Fit</button>
+        <label class="flex items-center gap-1 text-xs text-slate-600" title="Drop steps on a 16 px grid"><input type="checkbox" id="snap" checked> Snap</label>
+        <button type="button" class="cb-btn cb-btn-sm" id="minimap-toggle" aria-pressed="true" aria-controls="minimap">Map</button>
         <button type="button" class="cb-btn cb-btn-sm hidden" id="del-wire">Remove wire</button>
     </div>
 
@@ -84,6 +98,7 @@
         <div id="world">
             <svg id="wires" style="position:absolute; left:0; top:0; overflow:visible" width="1" height="1"></svg>
         </div>
+        <canvas id="minimap" role="img" aria-label="Map of the whole flow; click to move there"></canvas>
     </div>
 
     {{-- Ang form ng isang step: modal sa gitna. --}}
@@ -208,12 +223,23 @@
     }
 
     // ---- render ----
-    function applyView() { world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.z})`; }
+    function applyView() { world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.z})`; drawMap(); }
     function nodeEl(n) { return world.querySelector(`.nd[data-id="${n.id}"]`); }
+    const place = (card, n) => card.style.transform = `translate(${n.x}px, ${n.y}px)`;
+    // Ang taas ng bawat card at ang puwesto ng mga port nito: sinusukat isang beses kada render, hindi habang nagda-drag.
+    let box = {};
+    function measure() {
+        box = {};
+        world.querySelectorAll('.nd').forEach(c => {
+            const ports = {};
+            c.querySelectorAll('.dot').forEach(d => ports[d.dataset.port] = {x: d.offsetLeft + 7, y: d.offsetTop + 7});
+            box[c.dataset.id] = {h: c.offsetHeight, ports};
+        });
+    }
     function render() {
         world.querySelectorAll('.nd').forEach(e => e.remove());
         for (const n of graph.nodes) {
-            const card = el('div', {class: 'nd t-' + n.type, 'data-id': n.id, style: `left:${n.x}px; top:${n.y}px`, tabindex: '0', role: 'button', 'aria-label': LABEL[n.type] + ' step'}, [
+            const card = el('div', {class: 'nd t-' + n.type, 'data-id': n.id, style: `transform: translate(${n.x}px, ${n.y}px)`, tabindex: '0', role: 'button', 'aria-label': LABEL[n.type] + ' step'}, [
                 n.type === 'start' ? null : el('span', {class: 'in'}),
                 el('div', {class: 'nd-h'}, [el('span', {text: LABEL[n.type]}), el('span', {class: 'font-mono text-[10px] text-slate-400', text: n.id})]),
                 summary(n) ? el('div', {class: 'nd-b', text: summary(n)}) : null,
@@ -223,6 +249,7 @@
             card.addEventListener('keydown', ev => { if (ev.key === 'Enter') openForm(n); });
             world.append(card);
         }
+        measure();
         drawWires();
     }
     function portPos(n, p) {
@@ -231,55 +258,118 @@
         return {x: n.x + W, y: n.y + dot.offsetTop + dot.offsetHeight / 2 + dot.parentElement.offsetTop - dot.parentElement.offsetTop};
     }
     function dotPos(n, p) {
-        const card = nodeEl(n), dot = card?.querySelector(`.dot[data-port="${p}"]`);
-        return dot ? {x: n.x + dot.offsetLeft + 7, y: n.y + dot.offsetTop + 7} : {x: n.x + W, y: n.y + 20};
+        const q = box[n.id]?.ports[p];
+        return q ? {x: n.x + q.x, y: n.y + q.y} : {x: n.x + W, y: n.y + 20};
     }
-    const curve = (a, b) => { const d = Math.max(40, Math.abs(b.x - a.x) / 2); return `M${a.x},${a.y} C${a.x + d},${a.y} ${b.x - d},${b.y} ${b.x},${b.y}`; };
+    // Bezier mula sa gilid ng port papunta sa input ng step; ang wire na pabalik (sa kaliwa) ay umiikot nang mas malapad.
+    const ctrl = (a, b) => { const d = b.x < a.x + 40 ? Math.max(120, Math.abs(b.y - a.y) / 2) : Math.max(40, (b.x - a.x) / 2); return [a, {x: a.x + d, y: a.y}, {x: b.x - d, y: b.y}, b]; };
+    const curve = (a, b) => { const [, c1, c2] = ctrl(a, b); return `M${a.x},${a.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${b.x},${b.y}`; };
+    const ends = e => { const a = graph.nodes.find(n => n.id === e.from), b = graph.nodes.find(n => n.id === e.to); return a && b ? [dotPos(a, e.port), {x: b.x, y: b.y + 16}] : null; };
+    const svgEl = (tag, attrs) => { const x = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v); return x; };
+    let wires = [], hoverId = null;
     function drawWires(temp) {
-        svg.replaceChildren();
+        svg.replaceChildren(); wires = [];
         graph.edges.forEach((e, i) => {
-            const a = graph.nodes.find(n => n.id === e.from), b = graph.nodes.find(n => n.id === e.to);
-            if (!a || !b) return;
-            const p = document.createElementNS(NS, 'path');
-            p.setAttribute('d', curve(dotPos(a, e.port), {x: b.x, y: b.y + 16}));
-            if (selWire === i) p.setAttribute('class', 'sel');
-            p.addEventListener('pointerdown', ev => { ev.stopPropagation(); selWire = i; $('del-wire').classList.remove('hidden'); drawWires(); });
-            svg.append(p);
+            const ab = ends(e);
+            if (!ab) return;
+            const d = curve(...ab), p = svgEl('path', {d, class: 'w' + (selWire === i ? ' sel' : ''), 'data-from': e.from, 'data-to': e.to}), hit = svgEl('path', {d, class: 'hit'});
+            hit.addEventListener('pointerdown', ev => { ev.stopPropagation(); selWire = i; $('del-wire').classList.remove('hidden'); drawWires(); });
+            svg.append(p, hit); wires.push({e, i, p, hit});
         });
-        if (temp) { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', curve(temp.a, temp.b)); p.setAttribute('stroke-dasharray', '5 4'); p.style.pointerEvents = 'none'; svg.append(p); /* hindi sasaluhin ang pagbitaw */ }
+        // Ang napiling wire: may "×" sa gitna para tanggalin (kapareho ng Remove wire).
+        const s = wires.find(w => w.i === selWire);
+        if (s) {
+            const [a, c1, c2, b] = ctrl(...ends(s.e)), m = {x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8, y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8};
+            const x = svgEl('g', {class: 'x', transform: `translate(${m.x},${m.y})`}); // pang-pointer lang; sa keyboard ay ang Delete key at ang Remove wire
+            x.append(svgEl('circle', {r: 9, fill: '#fff', stroke: '#2563eb', 'stroke-width': 1.5}), svgEl('path', {d: 'M-3.5,-3.5 L3.5,3.5 M3.5,-3.5 L-3.5,3.5', style: 'stroke:#2563eb; stroke-width:1.5'}));
+            x.addEventListener('pointerdown', ev => { ev.stopPropagation(); $('del-wire').click(); });
+            svg.append(x);
+        }
+        if (temp) { const p = svgEl('path', {d: curve(temp.a, temp.b), 'stroke-dasharray': '5 4'}); svg.append(p); /* walang pointer-events: hindi sasaluhin ang pagbitaw */ }
+        hover(); drawMap();
     }
+    /** Habang dina-drag ang isang step: ang mga wire lang nito ang ginagalaw. */
+    function moveWires(n) {
+        for (const w of wires) if (w.e.from === n.id || w.e.to === n.id) { const d = curve(...ends(w.e)); w.p.setAttribute('d', d); w.hit.setAttribute('d', d); }
+    }
+    function hover() {
+        cv.classList.toggle('hovering', !!hoverId);
+        for (const w of wires) w.p.classList.toggle('hl', !!hoverId && (w.e.from === hoverId || w.e.to === hoverId));
+    }
+    cv.addEventListener('pointerover', ev => { if (drag) return; const id = ev.target.closest('.nd')?.dataset.id || null; if (id !== hoverId) { hoverId = id; hover(); } });
+    cv.addEventListener('pointerleave', () => { if (drag) return; hoverId = null; hover(); });
 
-    // ---- pointer: pan, drag a step, wire from a port ----
-    const toWorld = (cx, cy) => { const r = cv.getBoundingClientRect(); return {x: (cx - r.left - view.x) / view.z, y: (cy - r.top - view.y) / view.z}; };
+    // ---- pointer: pan, drag a step (ang buong card), wire from a port, pinch ----
+    const ZMIN = 0.2, ZMAX = 2, GRID = 16, SLOP = 4;
+    const clampZ = z => Math.min(ZMAX, Math.max(ZMIN, z));
+    const toWorld = (cx, cy, r = cv.getBoundingClientRect()) => ({x: (cx - r.left - view.x) / view.z, y: (cy - r.top - view.y) / view.z});
+    const unselect = () => { const s = getSelection(); if (s && s.rangeCount && !s.isCollapsed) s.removeAllRanges(); };
+    const pts = new Map();
     let drag = null;
+    // Walang pagpili ng text na nagsisimula habang may hawak sa canvas (pati double-click).
+    cv.addEventListener('selectstart', ev => { if (drag) ev.preventDefault(); });
     cv.addEventListener('pointerdown', ev => {
-        const dot = ev.target.closest('.dot'), head = ev.target.closest('.nd-h'), card = ev.target.closest('.nd');
+        if (ev.pointerType === 'mouse' && ev.button !== 0) return;
         cv.setPointerCapture(ev.pointerId);
+        pts.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+        if (pts.size === 2) { endDrag(); drag = pinch(); return; }
+        if (pts.size > 2 || drag) return;
+        const dot = ev.target.closest('.dot'), card = ev.target.closest('.nd'), r = cv.getBoundingClientRect(), id = ev.pointerId;
         if (dot) {
-            const n = graph.nodes.find(x => x.id === card.dataset.id);
-            drag = {kind: 'wire', n, port: dot.dataset.port};
-        } else if (head) {
-            const n = graph.nodes.find(x => x.id === card.dataset.id), w = toWorld(ev.clientX, ev.clientY);
-            drag = {kind: 'move', n, dx: w.x - n.x, dy: w.y - n.y, moved: false};
+            drag = {kind: 'wire', id, r, n: graph.nodes.find(x => x.id === card.dataset.id), port: dot.dataset.port};
         } else if (card) {
-            drag = {kind: 'click', n: graph.nodes.find(x => x.id === card.dataset.id)};
+            const n = graph.nodes.find(x => x.id === card.dataset.id), w = toWorld(ev.clientX, ev.clientY, r);
+            drag = {kind: 'move', id, r, n, card, sx: ev.clientX, sy: ev.clientY, dx: w.x - n.x, dy: w.y - n.y, moved: false};
         } else {
-            drag = {kind: 'pan', sx: ev.clientX - view.x, sy: ev.clientY - view.y};
+            drag = {kind: 'pan', id, sx: ev.clientX - view.x, sy: ev.clientY - view.y};
+            cv.classList.add('moving');
             if (selWire !== null) { selWire = null; $('del-wire').classList.add('hidden'); drawWires(); }
         }
     });
     cv.addEventListener('pointermove', ev => {
+        if (pts.has(ev.pointerId)) pts.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
         if (!drag) return;
-        const w = toWorld(ev.clientX, ev.clientY);
-        if (drag.kind === 'pan') { view.x = ev.clientX - drag.sx; view.y = ev.clientY - drag.sy; applyView(); }
-        else if (drag.kind === 'move') { drag.n.x = Math.round(w.x - drag.dx); drag.n.y = Math.round(w.y - drag.dy); drag.moved = true; const c = nodeEl(drag.n); c.style.left = drag.n.x + 'px'; c.style.top = drag.n.y + 'px'; drawWires(); }
-        else if (drag.kind === 'wire') { drawWires({a: dotPos(drag.n, drag.port), b: w}); }
+        if (drag.kind === 'pinch') return pinchMove();
+        if (ev.pointerId !== drag.id) return;
+        if (drag.kind === 'pan') { unselect(); view.x = ev.clientX - drag.sx; view.y = ev.clientY - drag.sy; applyView(); }
+        else if (drag.kind === 'move') {
+            // Kaunting galaw muna (SLOP) bago maging drag, para ang click ay nagbubukas pa rin ng step.
+            if (!drag.moved) {
+                if (Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < SLOP) return;
+                drag.moved = true; cv.classList.add('moving'); drag.card.classList.add('dragging');
+            }
+            unselect();
+            const w = toWorld(ev.clientX, ev.clientY, drag.r);
+            drag.n.x = Math.round(w.x - drag.dx); drag.n.y = Math.round(w.y - drag.dy);
+            place(drag.card, drag.n); moveWires(drag.n); drawMap();
+        }
+        else if (drag.kind === 'wire') { drawWires({a: dotPos(drag.n, drag.port), b: toWorld(ev.clientX, ev.clientY, drag.r)}); }
     });
-    cv.addEventListener('pointerup', ev => {
-        const d = drag; drag = null;
+    /** Ibinaba ang step: sa grid kung naka-Snap, saka isang hakbang na mababawi. */
+    function drop(d) {
+        d.card.classList.remove('dragging');
+        if ($('snap').checked) { d.n.x = Math.round(d.n.x / GRID) * GRID; d.n.y = Math.round(d.n.y / GRID) * GRID; place(d.card, d.n); }
+        drawWires(); changed();
+    }
+    /** Ang hawak ay pinutol (pangalawang daliri, o kinansela ng browser): ang nagalaw na ay nananatili. */
+    function endDrag() {
+        const d = drag; drag = null; cv.classList.remove('moving');
+        if (d?.kind === 'move' && d.moved) drop(d); else if (d?.kind === 'wire') drawWires();
+    }
+    function release(ev) {
+        pts.delete(ev.pointerId);
+        const d = drag;
         if (!d) return;
-        if (d.kind === 'move') { if (d.moved) changed(); else openForm(d.n); }
-        else if (d.kind === 'click') openForm(d.n);
+        if (d.kind === 'pinch') {
+            // Isang daliri ang natira: ito na ang nagpa-pan.
+            if (pts.size === 1) { const [[id, q]] = pts; drag = {kind: 'pan', id, sx: q.x - view.x, sy: q.y - view.y}; }
+            else if (!pts.size) { drag = null; cv.classList.remove('moving'); }
+            return;
+        }
+        if (ev.pointerId !== d.id) return;
+        if (ev.type === 'pointercancel') return endDrag();
+        drag = null; cv.classList.remove('moving');
+        if (d.kind === 'move') { if (d.moved) drop(d); else openForm(d.n); }
         else if (d.kind === 'wire') {
             const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.nd');
             const to = hit && graph.nodes.find(x => x.id === hit.dataset.id);
@@ -289,25 +379,43 @@
                 render(); changed();
             } else drawWires();
         }
-    });
+    }
+    cv.addEventListener('pointerup', release);
+    cv.addEventListener('pointercancel', release);
+    // Dalawang daliri: ang puntong nasa gitna nila ay nananatili sa ilalim nila habang nag-zoom at nagpa-pan.
+    const two = () => { const [p, q] = [...pts.values()]; return {d: Math.hypot(p.x - q.x, p.y - q.y) || 1, x: (p.x + q.x) / 2, y: (p.y + q.y) / 2}; };
+    function pinch() {
+        const r = cv.getBoundingClientRect(), t = two();
+        cv.classList.add('moving');
+        return {kind: 'pinch', r, d0: t.d, z0: view.z, w: toWorld(t.x, t.y, r)};
+    }
+    function pinchMove() {
+        const t = two(), z = clampZ(drag.z0 * t.d / drag.d0);
+        view.z = z; view.x = t.x - drag.r.left - drag.w.x * z; view.y = t.y - drag.r.top - drag.w.y * z; applyView();
+    }
+    const zoomAt = (mx, my, f) => { const z = clampZ(view.z * f); view.x = mx - (mx - view.x) * z / view.z; view.y = my - (my - view.y) * z / view.z; view.z = z; applyView(); };
+    // Wheel at trackpad: zoom sa puwesto ng pointer; ang pinch ng trackpad (Ctrl+wheel) ay mas pino ang hakbang.
     cv.addEventListener('wheel', ev => {
         ev.preventDefault();
-        const r = cv.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
-        const z = Math.min(2, Math.max(0.3, view.z * (ev.deltaY < 0 ? 1.1 : 0.9)));
-        view.x = mx - (mx - view.x) * z / view.z; view.y = my - (my - view.y) * z / view.z; view.z = z; applyView();
+        const r = cv.getBoundingClientRect(), dy = ev.deltaY * (ev.deltaMode === 1 ? 33 : ev.deltaMode === 2 ? 400 : 1);
+        zoomAt(ev.clientX - r.left, ev.clientY - r.top, Math.exp(-Math.max(-100, Math.min(100, dy)) * (ev.ctrlKey ? 0.01 : 0.002)));
     }, {passive: false});
-    const zoomBy = f => { const r = cv.getBoundingClientRect(), mx = r.width / 2, my = r.height / 2, z = Math.min(2, Math.max(0.3, view.z * f));
-        view.x = mx - (mx - view.x) * z / view.z; view.y = my - (my - view.y) * z / view.z; view.z = z; applyView(); };
+    const zoomBy = f => { const r = cv.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, f); };
     $('zoom-in').addEventListener('click', () => zoomBy(1.2));
     $('zoom-out').addEventListener('click', () => zoomBy(1 / 1.2));
     function fit() {
         if (!graph.nodes.length) return;
         const xs = graph.nodes.map(n => n.x), ys = graph.nodes.map(n => n.y), r = cv.getBoundingClientRect();
-        const minX = Math.min(...xs), minY = Math.min(...ys), w = Math.max(...xs) + W - minX + 60, h = Math.max(...ys) + 200 - minY + 60;
-        view.z = Math.min(1.2, Math.max(0.3, Math.min(r.width / w, r.height / h)));
+        // 30 px na gilid sa screen sa bawat panig (hindi sa world, para kasya rin kapag maliit ang zoom).
+        const minX = Math.min(...xs), minY = Math.min(...ys), w = Math.max(...xs) + W - minX, h = Math.max(...graph.nodes.map(n => n.y + (box[n.id]?.h || 200))) - minY;
+        view.z = Math.min(1.2, clampZ(Math.min((r.width - 60) / w, (r.height - 60) / h)));
         view.x = 30 - minX * view.z; view.y = 30 - minY * view.z; applyView();
     }
     $('fit').addEventListener('click', fit);
+    // Snap at Map: naaalala ng browser.
+    const remembered = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+    $('snap').checked = remembered('chatbot.snap') !== '0';
+    $('snap').addEventListener('change', () => remembered('chatbot.snap', $('snap').checked ? '1' : '0'));
     $('del-wire').addEventListener('click', () => { if (selWire === null) return; graph.edges.splice(selWire, 1); selWire = null; $('del-wire').classList.add('hidden'); render(); changed(); });
     document.addEventListener('keydown', ev => {
         if ((ev.key === 'Delete' || ev.key === 'Backspace') && selWire !== null && !$('form-box').contains(document.activeElement) && document.activeElement?.tagName !== 'INPUT') {
@@ -325,25 +433,68 @@
         }
     });
 
-    // ---- auto-arrange: mga hanay ayon sa layo mula sa Start ----
+    // ---- auto-arrange: kaliwa pakanan ayon sa takbo mula sa Start; ang mga sanga ay patong-patong, walang nagsasapawan ----
     $('arrange').addEventListener('click', () => {
-        const start = graph.nodes.find(n => n.type === 'start'), depth = {}, order = [];
+        const start = graph.nodes.find(n => n.type === 'start');
         if (!start) return;
-        depth[start.id] = 0; order.push(start.id);
-        for (let i = 0; i < order.length; i++) {
-            const id = order[i];
-            graph.edges.filter(e => e.from === id).forEach(e => { if (!(e.to in depth)) { depth[e.to] = depth[id] + 1; order.push(e.to); } });
+        const byId = Object.fromEntries(graph.nodes.map(n => [n.id, n])), into = new Set(graph.edges.map(e => e.to));
+        const out = n => graph.edges.filter(e => e.from === n.id && byId[e.to]).sort((a, b) => ports(n).indexOf(a.port) - ports(n).indexOf(b.port));
+        const depth = {}, parent = {}, order = [];
+        // Mula sa Start muna; saka ang mga step na walang pumapasok na wire, at ang natira (mga ikot na hiwalay sa Start).
+        for (const root of [start, ...graph.nodes.filter(n => !into.has(n.id)), ...graph.nodes]) {
+            if (root.id in depth) continue;
+            depth[root.id] = 0; order.push(root.id);
+            for (let i = order.length - 1; i < order.length; i++) {
+                out(byId[order[i]]).forEach(e => { if (!(e.to in depth)) { depth[e.to] = depth[order[i]] + 1; parent[e.to] = order[i]; order.push(e.to); } });
+            }
         }
-        const maxD = Math.max(0, ...Object.values(depth));
-        graph.nodes.forEach(n => { if (!(n.id in depth)) depth[n.id] = maxD + 1; });
-        const rowsAt = {};
-        [...order, ...graph.nodes.map(n => n.id).filter(id => !order.includes(id))].forEach(id => {
-            const n = graph.nodes.find(x => x.id === id), d = depth[id];
-            rowsAt[d] = (rowsAt[d] || 0) + 1;
-            n.x = 40 + d * 300; n.y = 40 + (rowsAt[d] - 1) * 220;
-        });
+        // Bawat hanay: ang step ay kapantay ng pinanggalingan nito kung may puwang, kung wala ay sa ilalim ng huli sa hanay.
+        const COL = 20 * GRID, GAP = 2 * GRID, top = 3 * GRID, bottom = {};
+        for (const id of order) {
+            const n = byId[id], d = depth[id], want = parent[id] ? byId[parent[id]].y : top;
+            n.x = top + d * COL;
+            n.y = Math.ceil(Math.max(want, bottom[d] ?? top) / GRID) * GRID;
+            bottom[d] = n.y + (box[id]?.h || 120) + GAP;
+        }
         render(); fit(); changed();
     });
+
+    // ---- minimap: ang buong flow at ang kasalukuyang tanaw; ang click ay lilipat doon ----
+    const map = $('minimap');
+    let mapQueued = false;
+    function drawMap() { if (mapQueued) return; mapQueued = true; requestAnimationFrame(() => { mapQueued = false; paintMap(); }); }
+    function mapFrame() {
+        const vw = {x: -view.x / view.z, y: -view.y / view.z, w: cv.clientWidth / view.z, h: cv.clientHeight / view.z};
+        let x0 = vw.x, y0 = vw.y, x1 = vw.x + vw.w, y1 = vw.y + vw.h;
+        for (const n of graph.nodes) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + W); y1 = Math.max(y1, n.y + (box[n.id]?.h || 60)); }
+        const mw = map.clientWidth, mh = map.clientHeight, s = Math.min((mw - 8) / (x1 - x0), (mh - 8) / (y1 - y0));
+        return {vw, mw, mh, s, ox: (mw - (x1 - x0) * s) / 2 - x0 * s, oy: (mh - (y1 - y0) * s) / 2 - y0 * s};
+    }
+    function paintMap() {
+        if (map.classList.contains('hidden') || !map.clientWidth) return;
+        const f = mapFrame(), dpr = window.devicePixelRatio || 1, g = map.getContext('2d');
+        map.width = f.mw * dpr; map.height = f.mh * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        for (const n of graph.nodes) {
+            g.fillStyle = n.type === 'start' ? '#10b981' : '#94a3b8';
+            g.fillRect(f.ox + n.x * f.s, f.oy + n.y * f.s, Math.max(2, W * f.s), Math.max(2, (box[n.id]?.h || 60) * f.s));
+        }
+        g.fillStyle = 'rgb(37 99 235 / .08)'; g.strokeStyle = '#2563eb'; g.lineWidth = 1.5;
+        g.fillRect(f.ox + f.vw.x * f.s, f.oy + f.vw.y * f.s, f.vw.w * f.s, f.vw.h * f.s);
+        g.strokeRect(f.ox + f.vw.x * f.s, f.oy + f.vw.y * f.s, f.vw.w * f.s, f.vw.h * f.s);
+    }
+    let mapDrag = null;
+    const mapGo = ev => {
+        const r = map.getBoundingClientRect(), f = mapDrag, wx = (ev.clientX - r.left - f.ox) / f.s, wy = (ev.clientY - r.top - f.oy) / f.s;
+        view.x = cv.clientWidth / 2 - wx * view.z; view.y = cv.clientHeight / 2 - wy * view.z; applyView();
+    };
+    map.addEventListener('pointerdown', ev => { ev.stopPropagation(); map.setPointerCapture(ev.pointerId); mapDrag = mapFrame(); mapGo(ev); });
+    map.addEventListener('pointermove', ev => { if (mapDrag) mapGo(ev); });
+    map.addEventListener('pointerup', () => mapDrag = null);
+    map.addEventListener('pointercancel', () => mapDrag = null);
+    const showMap = on => { map.classList.toggle('hidden', !on); $('minimap-toggle').setAttribute('aria-pressed', String(on)); remembered('chatbot.minimap', on ? '1' : '0'); drawMap(); };
+    $('minimap-toggle').addEventListener('click', () => showMap(map.classList.contains('hidden')));
+    showMap(remembered('chatbot.minimap') !== '0');
+    window.addEventListener('resize', drawMap);
 
     // ---- add a step ----
     const DEFAULTS = {
