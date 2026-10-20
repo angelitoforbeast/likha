@@ -816,3 +816,13 @@ Accepted, not fixed:
   - the chatblast build lock taken on the database store and released on Redis during the `CACHE_STORE` switch.
 - **S-088.4 on the array store tests the store more than the code.** Reason: the brief allows the array store; the Redis data set ran green against a real Redis in WSL, and the load check ran on Redis end to end.
 - **phpredis** (the PHP extension) is faster than predis; switch with `REDIS_CLIENT=phpredis` after installing `php8.4-redis`. Reason: the brief chose predis to avoid an extension install now.
+
+## 089: async Botcake sends (2026-10-20)
+
+- **A chatbot send now waits up to 10 minutes in the pool** (was the worker's queue, with no limit but the 30-minute stale-chat rule). Past 10 minutes it takes the failed path. Reason: under a backlog the exact 2/s per page makes sends wait; 10 minutes keeps a late reply better than none. A product decision for the owner to confirm.
+- **Pages that share one token share one lane** (the per-page rate is per token, as Botcake counts it). The full-lane exclusion in the claim query lists only the page names whose tickets the pool holds, so a second page on the same token with its own large backlog can still fill the candidate window. Reason: staff set the tokens, and sharing one is rare.
+- **A token change during a backlog** makes a second lane for the same page for a moment, so up to 2 × the rate for a few seconds. Reason: rare; the old lane drains in seconds.
+- **Blocking senders outside the pool** (sequence steps, the setup check, the chat guard's verify, Test) still use the old non-atomic throttle. They honour the pool's shared rate key, so they wait for the pool's last send, but two of them can still race each other. Reason: the brief scopes exactness to the pool path.
+- **The Botcake base URL, headers, 15 s timeout and 10 s Retry-After cap** are written in both `BotcakeClient::shared()` and `BotcakeSendPool`. Reason: two places, and the retry rule itself is already shared (`BotcakeClient::retryWait`).
+- **No test for the mock answering on a timer inside the pool.** Reason: the load check runs every send through it, with misrouted = 0.
+- **`BotcakeSendQueue::enabled()` runs `Schema::hasTable` on every send.** Reason: one cheap query; a static cache leaked between tests in 087.

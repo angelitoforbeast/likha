@@ -56,7 +56,7 @@ class BotcakeSendQueue
         $id = (string) Str::uuid();
         $run->runId ??= bin2hex(random_bytes(4));
         DB::table(self::TABLE)->insert([
-            'request_id' => $id, 'kind' => 'chatbot', 'customer' => self::chatbotCustomer($run->pageId, $run->fields->psid),
+            'request_id' => $id, 'kind' => 'chatbot', 'priority' => 0, 'customer' => self::chatbotCustomer($run->pageId, $run->fields->psid),
             'page_id' => (int) $run->pageId, 'page_name' => $run->pageName, 'psid' => (string) $run->fields->psid, 'chat_id' => $run->chatId,
             'flow_id' => $run->flowId, 'node_id' => $nodeId, 'run_id' => $run->runId,
             'payload' => json_encode(['messages' => $messages], JSON_UNESCAPED_UNICODE),
@@ -74,7 +74,8 @@ class BotcakeSendQueue
     {
         if (!self::enabled() || $lockOwner === '') return false;
         DB::table(self::TABLE)->insert([
-            'request_id' => (string) Str::uuid(), 'kind' => 'chatblast', 'customer' => $lockKey,
+            // Ang Delivering ay nauuna sa ibang chatblast (gaya ng chatblast-high sa Horizon).
+            'request_id' => (string) Str::uuid(), 'kind' => 'chatblast', 'priority' => $m->kind === ChatblastSender::HIGH_KIND ? 1 : 2, 'customer' => $lockKey,
             'page_id' => (int) $cfg['page_id'], 'page_name' => $m->page_name, 'psid' => (string) $m->psid, 'message_id' => $m->id, 'lock_owner' => $lockOwner,
             'payload' => json_encode(['lock_key' => $lockKey]), // ang token at mga ID ay binabasa ng pool sa page settings
             'status' => 'pending', 'deadline_at' => now()->addSeconds(self::CHATBLAST_SECONDS), 'created_at' => now(), 'updated_at' => now(),
@@ -98,8 +99,9 @@ class BotcakeSendQueue
 
     /**
      * Kunin ang hanggang $n na pending, kondisyonal, para sa pool na $owner. Laging ang pinakaunang hindi pa tapos ng bawat
-     * customer lang: ang kasunod ay naghihintay hanggang matapos ito (ayos ng padala kada customer). Ang chatbot ay nauuna
-     * sa chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng row; ang tinanggihan ay naiiwang pending.
+     * customer lang: ang kasunod ay naghihintay hanggang matapos ito (ayos ng padala kada customer). Ayon sa priority: ang
+     * chatbot, saka ang Delivering, saka ang ibang chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng
+     * row; ang tinanggihan ay naiiwang pending.
      * @return array<int, object>
      */
     public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = []): array
@@ -112,7 +114,7 @@ class BotcakeSendQueue
             ->when($fullPages, fn ($q) => $q->whereNotIn('t.page_name', $fullPages))
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
-            ->orderByRaw("CASE WHEN t.kind = 'chatbot' THEN 0 ELSE 1 END")->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind']);
+            ->orderBy('t.priority')->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind']);
         $out = [];
         foreach ($rows as $candidate) {
             if (count($out) >= $n) break;

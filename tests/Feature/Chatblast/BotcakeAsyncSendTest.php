@@ -501,4 +501,16 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         }
         $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8002'), 'not hidden behind the other page\'s backlog');
     }
+    public function test_S_089_14_a_delivering_message_goes_before_in_transit_messages_handed_off_earlier(): void
+    {
+        foreach (['7001' => 'in_transit', '7002' => 'in_transit', '7003' => 'delivering'] as $psid => $kind) {
+            $m = BotcakeMessage::create(['page_name' => 'Page Uno', 'waybill' => 'JT' . $psid, 'kind' => $kind, 'psid' => $psid,
+                'text' => 'Hello ' . $psid, 'status' => 'queued', 'is_test' => true, 'queued_at' => now()]);
+            app(ChatblastSender::class)->process($m->id);
+        }
+
+        $this->pool->tick();
+
+        $this->assertStringEndsWith('/pages/1001/customer/7003/customer_fields', self::req($this->calls[0])['path'], 'Delivering first, though handed off last');
+    }
 }

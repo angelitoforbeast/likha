@@ -211,18 +211,22 @@ class BotcakeSendPool extends TicketPool
     /** Bawat lane na puwede na: ang unang job na handa, isang request, saka ang susunod na puwede ay pagkalipas ng interval. */
     private function lanes(): void
     {
-        $now = $this->clock->now();
         $interval = BotcakeClient::interval();
         foreach ($this->lanes as $key => $lane) {
+            // Ang oras ay binabasa sa bawat lane: ang naunang padala sa loop na ito ay may mga query (owns, called), kaya ang
+            // lumang "ngayon" ay magpapalapit sa dalawang padala ng iisang page nang mas maikli sa interval.
+            $now = $this->clock->now();
             if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next']) continue;
-            // Ang unang handa, ang chatbot muna (sagot sa usapan) bago ang chatblast, maliban kung ang chatblast ay naghintay na
-            // nang lampas 10 s sa lane (hawak nito ang lock ng customer: hindi ito naiipit nang matagal).
+            // Ang handa na may pinakamataas na priority (chatbot, saka Delivering, saka ang ibang chatblast), ang pinakauna sa
+            // mga kapareho; ang naghintay nang lampas 10 s sa lane ay nauuna (hawak ng chatblast ang lock ng customer).
             $pick = null;
+            $best = null;
             foreach ($lane['queue'] as $i => $id) {
                 $job = $this->jobs[$id];
                 if ($job['notBefore'] > $now) continue;
-                if ($job['row']->kind === 'chatbot' || $now - ($job['since'] ?? $now) > 10) { $pick = $i; break; }
-                $pick ??= $i;
+                $rank = $now - ($job['since'] ?? $now) > 10 ? -1 : (int) ($job['row']->priority ?? 2);
+                if ($best === null || $rank < $best) { $best = $rank; $pick = $i; }
+                if ($rank <= 0) break;
             }
             if ($pick === null) continue;
             // Ang naghihintay na padala sa ibang proseso (hal. setup check) ay kahati ng page: iginagalang ang huli nito.
@@ -233,46 +237,50 @@ class BotcakeSendPool extends TicketPool
             }
             $id = $lane['queue'][$pick];
             array_splice($this->lanes[$key]['queue'], $pick, 1);
-            $this->lanes[$key]['next'] = $now + $interval;
-            $this->lanes[$key]['last'] = $now;
-            Cache::put(BotcakeClient::rateCacheKey($key), $now, 60);
-            $this->sentAt[$key][] = $now;
+            // Ang susunod na puwede ay mula sa oras na talagang lumabas ang tawag (hindi sa oras ng pasya): eksaktong interval.
+            $at = $this->issue($id);
+            if ($at === null) continue;
+            $this->lanes[$key]['next'] = $at + $interval;
+            $this->lanes[$key]['last'] = $at;
+            Cache::put(BotcakeClient::rateCacheKey($key), $at, 60);
+            $this->sentAt[$key][] = $at;
             if (count($this->sentAt[$key]) > 100) array_shift($this->sentAt[$key]);
-            $this->issue($id);
         }
     }
 
-    private function issue(string $id): void
+    /** @return float|null ang oras na lumabas ang tawag, o null kapag walang tawag (hindi na hawak, o nilaktawan) */
+    private function issue(string $id): ?float
     {
         $job = $this->jobs[$id] ?? null;
-        if ($job === null) return;
+        if ($job === null) return null;
         $row = $job['row'];
         $q = $job['req'];
         // Bago ang bawat tawag: hawak pa ba ng pool na ito ang ticket (hindi naibalik ng sweep o kinuha ng bagong pool)?
         if (!BotcakeSendQueue::owns($row, $this->owner)) {
             $this->forget($id);
-            return;
+            return null;
         }
         if ($row->kind === 'chatbot' && $job['attempt'] === 0) {
             // Naghintay sa lane: ang pause ng tao at ang emergency stop ay sinusuri ngayon, bago lumabas ang padala.
             if (($skip = $this->skipNow($row)) !== null) {
                 $this->forget($id);
                 BotcakeSendQueue::finishChatbot($row, $this->owner, ['status' => 'skipped', 'error' => $skip, 'http' => null]);
-                return;
+                return null;
             }
             // Itinatala bago tumawag: hindi na inuulit pagkatapos ng crash.
             if (!BotcakeSendQueue::called($row, $this->owner)) {
                 $this->forget($id);
-                return;
+                return null;
             }
         }
         // Ang send_flow ng chatblast: ang "natawag na" ay ngayon, kapag talagang lumabas (hindi kapag naitala ang hakbang).
         if ($row->kind === 'chatblast' && ($q['step'] ?? '') === 'flow' && $job['attempt'] === 0) BotcakeSendQueue::called($row, $this->owner);
+        $at = $this->clock->now();
         $mock = BotcakeClient::mockAnswer($q['method'], $q['path'], $q['data']);
         if ($mock !== null) {
             $ms = (int) (BotcakeMock::pages()[(string) $row->page_id]['latency'] ?? 0);
             $this->after($id, $ms, fn () => $this->respond($id, $mock[0], $mock[1], null));
-            return;
+            return $at;
         }
         $options = ['headers' => ['access-token' => $job['token'], 'Accept' => 'application/json'], 'timeout' => self::TIMEOUT, 'connect_timeout' => 10];
         $options[$q['method'] === 'GET' ? 'query' : 'json'] = $q['data'];
@@ -283,6 +291,8 @@ class BotcakeSendPool extends TicketPool
             },
             fn ($e) => $this->respond($id, 0, null, null),
         );
+
+        return $at;
     }
 
     /** Ang sagot ng isang request: ulit (ayon sa BotcakeClient::retryWait), ang susunod na hakbang, o tapos na. */

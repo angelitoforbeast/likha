@@ -19,6 +19,7 @@ return new class extends Migration {
             $table->id();
             $table->string('request_id', 36)->unique();
             $table->string('kind', 10); // chatbot | chatblast
+            $table->unsignedTinyInteger('priority')->default(2); // 0 chatbot, 1 chatblast Delivering, 2 iba pang chatblast
             $table->string('customer', 80); // ayos kada customer: ang mas naunang ticket ang nauuna
             $table->unsignedBigInteger('page_id');
             $table->string('page_name');
@@ -45,6 +46,7 @@ return new class extends Migration {
             $table->timestamp('resumed_at')->nullable();
             $table->timestamps();
 
+            $table->index(['status', 'priority', 'id']);
             $table->index(['status', 'next_at']);
             $table->index(['customer', 'status', 'id']);
             $table->index('created_at');
