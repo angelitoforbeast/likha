@@ -150,19 +150,16 @@ class ChatbotInboxController extends Controller
         $status = 'failed';
         $error = 'The page has no Botcake token.';
         $http = null;
+        $raw = null;
         if ($token !== '') {
             $r = app(BotcakeClient::class)->shared(sha1($token), 15)->once(15)->sendContent($pageId, $psid, $messages, $token);
-            $body = is_array($r['body']) ? $r['body'] : [];
             $http = $r['http'] ?: null;
-            if ($r['http'] >= 200 && $r['http'] < 300 && ($body['success'] ?? null) !== false) {
-                [$status, $error] = ['sent', null];
-            } else {
-                $msg = BotcakeClient::messageText($body);
-                $error = ($r['http'] === 0 ? 'Botcake did not answer' : ($msg !== '' ? 'Botcake said "' . mb_substr($msg, 0, 150) . '"' : 'Botcake refused it')) . ' (HTTP ' . $r['http'] . ')';
-            }
+            $o = BotcakeOutbox::outcome($r, $token);
+            [$status, $error, $raw] = [$o['status'], $o['error'], $o['raw'] ?? null];
         }
         $reply = ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
-            'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]);
+            'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]
+            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []));
 
         return response()->json(['item' => ['key' => 'out-' . $reply->id, 'id' => $reply->id, 'side' => 'out', 'at' => Inbox::iso($reply->sent_at),
             'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You']]);

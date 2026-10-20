@@ -315,7 +315,7 @@ class BotcakeSendPool extends TicketPool
             $r = ['http' => $status, 'body' => $body, 'attempts' => $job['attempt'] + 1];
             if ($row->kind === 'chatbot') {
                 $this->forget($id);
-                BotcakeSendQueue::finishChatbot($row, $this->owner, BotcakeOutbox::outcome($r));
+                BotcakeSendQueue::finishChatbot($row, $this->owner, BotcakeOutbox::outcome($r, $job['token']));
                 return;
             }
             $job['gen']->send($r);

@@ -33,25 +33,40 @@ class BotcakeOutbox implements Outbox
         $token = trim((string) $this->settings->get($run->pageName, 'botcake', 'token'));
         if ($token === '') return $this->log($run, $nodeId, 'send', $messages, 'failed', self::NO_TOKEN);
 
-        $o = self::outcome(app(BotcakeClient::class)->shared(sha1($token), 15)->sendContent($run->pageId, $run->psid(), $messages, $token));
+        $o = self::outcome(app(BotcakeClient::class)->shared(sha1($token), 15)->sendContent($run->pageId, $run->psid(), $messages, $token), $token);
 
-        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http']);
+        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null);
     }
 
     /**
      * Ang sagot ng send_content bilang resulta: sent (2xx at hindi success:false) o failed na may dahilan (walang token,
-     * walang text ng Botcake na lampas 150 letra).
+     * walang text ng Botcake na lampas 150 letra). Kapag ibinigay ang $token (ang mga padala): kasama ang buong sagot ng
+     * pumalya (raw, hanggang RAW_MAX letra, nakatago ang token).
      * @param array{http: int, body: mixed} $r
-     * @return array{status: string, error: ?string, http: ?int}
+     * @return array{status: string, error: ?string, http: ?int, raw?: string}
      */
-    public static function outcome(array $r): array
+    public static function outcome(array $r, ?string $token = null): array
     {
         $body = is_array($r['body']) ? $r['body'] : [];
         if ($r['http'] >= 200 && $r['http'] < 300 && ($body['success'] ?? null) !== false) return ['status' => 'sent', 'error' => null, 'http' => $r['http']];
         $msg = BotcakeClient::messageText($body);
         $why = $r['http'] === 0 ? 'Botcake did not answer' : ($msg !== '' ? 'Botcake said "' . mb_substr($msg, 0, 150) . '"' : 'Botcake refused it');
+        $o = ['status' => 'failed', 'error' => $why . ' (HTTP ' . $r['http'] . ')', 'http' => $r['http'] ?: null];
+        if ($token !== null && ($raw = self::raw($r['body'] ?? null, $token)) !== null) $o['raw'] = $raw;
 
-        return ['status' => 'failed', 'error' => $why . ' (HTTP ' . $r['http'] . ')', 'http' => $r['http'] ?: null];
+        return $o;
+    }
+
+    public const RAW_MAX = 1000;
+
+    /** Ang sagot bilang text para sa talaan: compact JSON (o ang text), walang token, hanggang RAW_MAX letra; null kapag wala. */
+    public static function raw(mixed $body, string $token = ''): ?string
+    {
+        if ($body === null || $body === '' || $body === []) return null;
+        $text = is_string($body) ? $body : (string) json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if (trim($token) !== '') $text = str_replace(trim($token), '[token]', $text);
+
+        return mb_substr($text, 0, self::RAW_MAX);
     }
 
     public function appendRow(FlowRun $run, string $nodeId, string $spreadsheetId, string $tab, array $row): array
@@ -82,19 +97,19 @@ class BotcakeOutbox implements Outbox
     }
 
     /** @return array{status: string, error: ?string} */
-    private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null): array
+    private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null): array
     {
-        return self::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $nodeId, $kind, $content, $status, $error, $http);
+        return self::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $nodeId, $kind, $content, $status, $error, $http, $raw);
     }
 
     /** Ang talaan ng isang padala (chatbot_replies). @return array{status: string, error: ?string} */
-    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null): array
+    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null): array
     {
         ChatbotReply::create([
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId,
             'node_id' => $nodeId, 'kind' => $kind, 'content' => $content, 'status' => $status, 'error' => $error === null ? null : mb_substr($error, 0, 255),
             'http' => $http, 'sent_at' => now(),
-        ]);
+        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []));
 
         return ['status' => $status, 'error' => $error];
     }

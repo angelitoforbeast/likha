@@ -163,7 +163,7 @@ class BotcakeSendQueue
         if ($ok !== 1) return false;
         $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
         BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, $row->chat_id === null ? null : (int) $row->chat_id, $row->flow_id === null ? null : (int) $row->flow_id,
-            (string) $row->node_id, 'send', $messages, $o['status'], $o['error'], $o['http']);
+            (string) $row->node_id, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null);
         ResumeChatbotSend::dispatch(self::ticket($row));
 
         return true;

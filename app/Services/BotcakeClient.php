@@ -155,22 +155,44 @@ class BotcakeClient
         ], $token, true);
     }
 
+    /** Ang mga lugar ng text ng error sa sagot (Botcake at Facebook), ayon sa pagkakasunod na hinahanap. */
+    public const REASON_PATHS = ['error.message', 'error_user_msg', 'error.error_user_msg', 'message.message', 'error_description', 'title', 'detail'];
+
+    /** Mga key na trace ID lang (hal. fbtrace_id), hindi dahilan: hindi kinukuha bilang text. */
+    public const TRACE_KEYS = ['fbtrace_id', 'trace_id', 'request_id', 'x_fb_trace_id'];
+
     /**
-     * Ang "message" ng sagot bilang text para sa dahilan ng error. Minsan array o object ito sa halip na string, kaya
-     * hindi puwedeng i-(string): ang unang string sa loob, o compact JSON kapag walang string; iba pa (null, numero) = ''.
+     * Ang dahilan ng error mula sa sagot. Ang "message" kapag string; kung array o object: ang text sa REASON_PATHS (sa sagot
+     * mismo, saka sa loob ng message), saka ang unang string na hindi trace ID, saka compact JSON; iba pa (null, numero) = ''.
      */
     public static function messageText(mixed $body): string
     {
-        $message = is_array($body) ? ($body['message'] ?? null) : null;
+        // Array na maaaring may object sa loob (hal. ang message): iisang anyo, array lang.
+        if (is_object($body) || is_array($body)) $body = json_decode((string) json_encode($body, JSON_INVALID_UTF8_SUBSTITUTE), true);
+        if (!is_array($body)) return '';
+        $message = $body['message'] ?? null;
         if (is_string($message)) return trim($message);
-        if (is_object($message)) $message = json_decode((string) json_encode($message), true);
+        $roots = is_array($message) ? [$body, $message] : [$body];
+        foreach (self::REASON_PATHS as $path) {
+            foreach ($roots as $root) {
+                $v = data_get($root, $path);
+                if (is_string($v) && trim($v) !== '') return trim($v);
+            }
+        }
         if (!is_array($message) || $message === []) return '';
-        $first = null;
-        array_walk_recursive($message, function ($v) use (&$first) {
-            if ($first === null && is_string($v) && trim($v) !== '') $first = trim($v);
-        });
 
-        return $first ?? (string) json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        return self::firstString($message) ?? (string) json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    private static function firstString(array $a): ?string
+    {
+        foreach ($a as $k => $v) {
+            if (is_string($k) && in_array(strtolower($k), self::TRACE_KEYS, true)) continue;
+            if (is_string($v) && trim($v) !== '') return trim($v);
+            if (is_array($v) && ($s = self::firstString($v)) !== null) return $s;
+        }
+
+        return null;
     }
 
     /** Ang sagot ng Botcake kapag wala ang PSID sa page. */
