@@ -80,4 +80,20 @@ class ChatbotAiHistoryTest extends ChatblastTestCase
         for ($i = 71; $i <= 120; $i++) array_push($expected, ['role' => 'user', 'content' => "in {$i}"], ['role' => 'assistant', 'content' => "out {$i}"]);
         Http::assertSent(fn (HttpRequest $r) => $r['messages'] === array_merge([['role' => 'system', 'content' => 'Be nice']], $expected, [['role' => 'user', 'content' => 'mine now']]));
     }
+
+    public function test_S_077_4_a_new_customer_with_no_earlier_chat_but_a_reply_already_gets_the_ai_answer(): void
+    {
+        config(['services.openai.key' => 'sk-test-not-real']);
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]])]);
+        // The first chat of this customer; the flow's intro was already sent in this run, before the AI step.
+        $current = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '7001', 'name' => 'Ana Cruz', 'message' => 'hm', 'payload' => [], 'received_at' => now()]);
+        ChatbotReply::create(['page_id' => 1001, 'psid' => 7001, 'kind' => 'send', 'status' => 'sent', 'sent_at' => now(), 'content' => [['type' => 'text', 'text' => 'Hi! Salamat']]]);
+        $graph = FlowGraph::clean(['nodes' => [['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'ai', 'config' => []]], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]]);
+        $run = new FlowRun(1, $graph, 'Page Uno', '1001', [], new CustomerFields(1001, 7001), $current->id, 'hm', 'Ana Cruz', '2026-10-19 10:00');
+
+        app(FlowEngine::class)->run($run, new TestOutbox());
+
+        $this->assertSame('success', $run->path[1]['port'], (string) ($run->path[1]['note'] ?? ''));
+        Http::assertSent(fn (HttpRequest $r) => $r['messages'] === [['role' => 'assistant', 'content' => 'Hi! Salamat'], ['role' => 'user', 'content' => 'hm']]);
+    }
 }

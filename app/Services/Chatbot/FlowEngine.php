@@ -366,7 +366,7 @@ class FlowEngine
 
         $in = BotcakeChat::where('page_id', $run->pageId)->where('psid', $psid)
             ->when($run->chatId, fn ($q) => $q->where('id', '<', $run->chatId))
-            ->orderByDesc('id')->limit($n)->get(['message', 'received_at'])
+            ->orderByDesc('id')->limit($n)->get(['message', 'received_at'])->toBase() // ang walang laman na Eloquent collection ay hindi ma-merge sa mga array (getKey)
             ->map(fn ($c) => ['at' => (string) $c->received_at, 'role' => 'user', 'content' => (string) $c->message]);
         $out = ChatbotReply::where('psid', (int) $psid)->where('page_id', (int) $run->pageId)->where('kind', 'send')->where('status', 'sent')
             ->orderByDesc('id')->limit($n)->get(['content', 'sent_at'])
