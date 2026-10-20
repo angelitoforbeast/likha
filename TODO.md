@@ -851,3 +851,9 @@ Accepted, not fixed:
 - **The modal works on the row as it was when it opened.** If another user saves the same page meanwhile, "Was: …" shows the older value. Reason: Save only sends fields changed in the modal, last write wins as everywhere on this page, and history rows keep every value.
 - **The image preview loads whatever http(s) link is typed or pasted** (with `referrerpolicy=no-referrer`). Reason: the grid already does the same for saved links; only staff with /chatblast access type them.
 - **The modal's behaviour (amber, flagged, re-paste, confirm on close) is checked in the browser only,** not by an automated test. Reason: the project has no JS test runner for page scripts; the parsing and mapping it relies on are tested in node (`ChatbotPasteScriptTest`).
+
+## 094: multi-line Set field and Clear AI memory (2026-10-20)
+
+- **A reply queued before "Clear AI memory" and sent after it stays forgotten.** The marker holds the highest `chatbot_replies` id at the clear, and a queued reply's row is older. Reason: the brief asks for a chat and reply marker, not a time window; the gap is one in-flight send, and that send was answering the conversation being forgotten.
+- **The editor test (S-094.7) only checks the rendered source.** The textarea growth and the 3-line clamp were checked once in headless Chrome, not on every run. Reason: the project has no JS test runner, and adding one is a new dependency.
+- **"Also clear these fields" is a list of text boxes with the field suggestions, not a checkbox multi-select.** Reason: the editor knows only the fields the flow already uses, so a checkbox list would hide fields that aren't used yet. This matches the Set field step's field input.

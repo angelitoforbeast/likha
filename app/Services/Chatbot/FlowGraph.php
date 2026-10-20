@@ -10,7 +10,7 @@ use InvalidArgumentException;
  */
 class FlowGraph
 {
-    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'sheet', 'sequence', 'end'];
+    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'clear_ai', 'sheet', 'sequence', 'end'];
 
     public const RULES = [
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
@@ -36,7 +36,7 @@ class FlowGraph
         $config = (array) ($node['config'] ?? []);
 
         return match ($node['type'] ?? '') {
-            'start', 'set', 'sequence' => ['next'],
+            'start', 'set', 'sequence', 'clear_ai' => ['next'],
             'condition' => array_merge(array_map(fn ($i) => 'row_' . ($i + 1), array_keys(array_values((array) ($config['rows'] ?? [])))), ['no']),
             'send' => !empty($config['wait']) ? (self::skipMinutes($config) ? ['reply', 'skipped'] : ['reply']) : ['continue'],
             'ai' => ['success', 'failed'],
@@ -132,6 +132,8 @@ class FlowGraph
                 'save_to' => $field($c['save_to'] ?? ''),
                 'send' => !empty($c['send']),
             ],
+            // Ang mga customer field na binubura kasabay ng alaala ng AI (wala = wala).
+            'clear_ai' => ['fields' => array_slice(array_values(array_unique(array_filter(array_map($field, array_filter((array) ($c['fields'] ?? []), 'is_scalar')), fn ($f) => $f !== ''))), 0, self::MAX_ROWS)],
             'sheet' => [
                 'sheet' => $text($c['sheet'] ?? '', 300),
                 'tab' => $text($c['tab'] ?? '', 100),

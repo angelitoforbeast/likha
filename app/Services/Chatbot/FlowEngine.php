@@ -139,6 +139,7 @@ class FlowEngine
             'send' => $this->send($node, $c, $run, $outbox),
             'set' => $this->set($node, $c, $run),
             'ai' => $this->ai($node, $c, $run, $outbox),
+            'clear_ai' => $this->clearAi($node, $c, $run),
             'sheet' => $this->sheet($node, $c, $run, $outbox),
             'sequence' => $this->sequence($node, $c, $run),
             default => ['port' => null],
@@ -321,6 +322,17 @@ class FlowEngine
         return ['port' => 'next', 'note' => $done ? implode(', ', $done) : 'No change'];
     }
 
+    /** "Clear AI memory": nakakalimutan ng AI ang usapan hanggang dito (walang binubura), at ang mga napiling field ay binubura. */
+    private function clearAi(array $node, array $c, FlowRun $run): array
+    {
+        $run->forgetAi();
+        $fields = array_values(array_filter((array) ($c['fields'] ?? []), fn ($f) => is_string($f) && $f !== ''));
+        foreach ($fields as $f) $run->fields->clear($f);
+        $run->event('ai_cleared', $node['id'], $fields ? ['fields' => implode(', ', $fields)] : []);
+
+        return ['port' => 'next', 'note' => 'AI memory cleared' . ($fields ? '; cleared ' . implode(', ', $fields) : '')];
+    }
+
     private function ai(array $node, array $c, FlowRun $run, Outbox $outbox): array
     {
         // Itinuloy pagkatapos ipadala ang sagot (botcake:send-pool): ang sagot ay nasagot at na-save na bago ang padala.
@@ -401,26 +413,29 @@ class FlowEngine
 
     /**
      * Ang huling N mensahe ng customer (botcake_chats, bago ang chat na ito) at ng ating mga naipadalang sagot, sa
-     * ayos ng oras. Wala sa Test (walang totoong usapan ang test customer).
+     * ayos ng oras, pagkatapos lang ng "Clear AI memory" (__ai_since). Sa Test: ang usapan ng test customer.
      * @return array<int, array{role: string, content: string}>
      */
     private function history(FlowRun $run, int $n): array
     {
         if ($n <= 0) return [];
-        // Test: ang usapan ng test customer (TestHistory), at ang mga naipadala na sa takbong ito.
+        // Test: ang usapan ng test customer (TestHistory), at ang mga naipadala na sa takbong ito (pagkatapos ng clear).
         if ($run->test) {
-            $sent = array_map(fn ($s) => ['role' => 'assistant', 'content' => TestHistory::text($s['messages'])], $run->sends);
+            $sent = array_map(fn ($s) => ['role' => 'assistant', 'content' => TestHistory::text($s['messages'])], array_slice($run->sends, $run->aiClearedAt ?? 0));
             $all = array_values(array_filter(array_merge(TestHistory::read($run->fields), $sent), fn ($m) => trim($m['content']) !== ''));
 
             return array_slice($all, -$n);
         }
         $psid = (string) $run->fields->psid;
+        $since = $run->aiSince();
 
         $in = BotcakeChat::where('page_id', $run->pageId)->where('psid', $psid)
             ->when($run->chatId, fn ($q) => $q->where('id', '<', $run->chatId))
+            ->when($since, fn ($q) => $q->where('id', '>', $since['chat']))
             ->orderByDesc('id')->limit($n)->get(['message', 'received_at'])->toBase() // ang walang laman na Eloquent collection ay hindi ma-merge sa mga array (getKey)
             ->map(fn ($c) => ['at' => (string) $c->received_at, 'role' => 'user', 'content' => (string) $c->message]);
         $out = ChatbotReply::where('psid', (int) $psid)->where('page_id', (int) $run->pageId)->where('kind', 'send')->where('status', 'sent')
+            ->when($since, fn ($q) => $q->where('id', '>', $since['reply']))
             ->orderByDesc('id')->limit($n)->get(['content', 'sent_at'])
             ->map(fn ($r) => ['at' => (string) $r->sent_at, 'role' => 'assistant', 'content' => implode("\n", array_filter(array_map(fn ($m) => $m['text'] ?? '', (array) $r->content)))]);
 

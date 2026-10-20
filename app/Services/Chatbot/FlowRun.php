@@ -2,6 +2,9 @@
 
 namespace App\Services\Chatbot;
 
+use App\Models\BotcakeChat;
+use App\Models\ChatbotReply;
+
 /**
  * Ang isang takbo ng flow para sa isang chat: ang flow, ang page (pangalan, Botcake ID, botfields), ang customer
  * (PSID, mga field), ang chat (id, text, pangalan, oras), at ang nangyari (path, mga padala, sheet rows) para sa Test.
@@ -35,6 +38,32 @@ class FlowRun
     public ?array $sendResult = null;
     /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
     public bool $sendPending = false;
+    /** Test: ilang padala na ng takbong ito nang dumaan sa "Clear AI memory" (ang mga nauna ay hindi na alaala ng AI). */
+    public ?int $aiClearedAt = null;
+
+    /**
+     * "Clear AI memory": live, ang marker ng customer (__ai_since: oras, ang chat na ito, at ang huling padala sa kanya);
+     * sa Test, ang usapan ng test customer at ang mga padala ng takbo hanggang dito. Walang binubura sa mga chat.
+     */
+    public function forgetAi(): void
+    {
+        if ($this->test) {
+            $this->fields->clear(CustomerFields::TEST_HISTORY);
+            $this->aiClearedAt = count($this->sends);
+            return;
+        }
+        $chat = $this->chatId ?? (int) BotcakeChat::where('page_id', $this->pageId)->where('psid', (string) $this->fields->psid)->max('id');
+        $reply = (int) ChatbotReply::where('page_id', $this->fields->pageId)->where('psid', $this->fields->psid)->max('id');
+        $this->fields->set(CustomerFields::AI_SINCE, json_encode(['at' => now()->toIso8601String(), 'chat' => $chat, 'reply' => $reply]));
+    }
+
+    /** @return array{chat: int, reply: int}|null ang huling chat at padala na nakalimutan na ng AI (null = walang marker) */
+    public function aiSince(): ?array
+    {
+        $m = json_decode((string) $this->fields->get(CustomerFields::AI_SINCE), true);
+
+        return is_array($m) ? ['chat' => (int) ($m['chat'] ?? 0), 'reply' => (int) ($m['reply'] ?? 0)] : null;
+    }
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void

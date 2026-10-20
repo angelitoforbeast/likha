@@ -21,6 +21,8 @@
     .nd.sel { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
     .nd-h { cursor: grab; padding: 6px 10px; border-bottom: 1px solid #e2e8f0; border-radius: 10px 10px 0 0; font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
     .nd-b { padding: 6px 10px; color: #475569; max-height: 5.5em; overflow: hidden; white-space: pre-line; word-break: break-word; }
+    /* Ang Set field: ang mga linya ng value ay nakikita, hanggang 3 linya. */
+    .t-set .nd-b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; padding-bottom: 0; margin-bottom: 6px; }
     .nd-p { display: flex; justify-content: flex-end; align-items: center; gap: 6px; padding: 2px 0 2px 10px; color: #334155; }
     .dot { width: 14px; height: 14px; border-radius: 999px; border: 2px solid #64748b; background: #fff; margin-right: -8px; cursor: crosshair; flex: none; }
     .dot.on { background: #64748b; }
@@ -28,7 +30,7 @@
     #wires path { fill: none; stroke: #64748b; stroke-width: 2; pointer-events: stroke; cursor: pointer; }
     #wires path.sel { stroke: #2563eb; stroke-width: 3; }
     .t-start .nd-h { background: #ecfdf5; } .t-condition .nd-h { background: #fef3c7; } .t-send .nd-h { background: #eff6ff; }
-    .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-sheet .nd-h { background: #f0fdf4; } .t-end .nd-h { background: #f1f5f9; }
+    .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-clear_ai .nd-h { background: #fff1f2; } .t-sheet .nd-h { background: #f0fdf4; } .t-end .nd-h { background: #f1f5f9; }
 </style>
 @endpush
 
@@ -66,6 +68,7 @@
         <button type="button" class="cb-btn cb-btn-sm" data-add="send">Send message</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="set">Set field</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="ai">AI</button>
+        <button type="button" class="cb-btn cb-btn-sm" data-add="clear_ai">Clear AI memory</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sheet">Google Sheet</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sequence">Sequence</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="end">End</button>
@@ -140,7 +143,7 @@
     const cv = $('cv'), world = $('world'), svg = $('wires');
     const W = 220, NS = 'http://www.w3.org/2000/svg';
     const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
-    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', sheet: 'Google Sheet', sequence: 'Sequence', end: 'End'};
+    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', clear_ai: 'Clear AI memory', sheet: 'Google Sheet', sequence: 'Sequence', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], rules = {}, sequences = [];
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
@@ -165,7 +168,7 @@
     function ports(n) {
         const c = n.config || {};
         switch (n.type) {
-            case 'start': case 'set': case 'sequence': return ['next'];
+            case 'start': case 'set': case 'sequence': case 'clear_ai': return ['next'];
             case 'condition': return [...(c.rows || []).map((_, i) => 'row_' + (i + 1)), 'no'];
             case 'send': return c.wait ? (skipMinutes(c) ? ['reply', 'skipped'] : ['reply']) : ['continue'];
             case 'ai': return ['success', 'failed'];
@@ -189,6 +192,7 @@
             case 'send': return (c.items || []).map(i => (i.type === 'image' ? '🖼 ' : '') + (i.value || '')).join('\n') + (c.wait ? '\n⏳ waits for reply' + (c.save_to ? ' → ' + c.save_to : '') + (skipMinutes(c) ? ', skips after ' + skipLabel(skipMinutes(c)) : '') : '');
             case 'set': return (c.ops || []).map(o => o.op === 'clear_all' ? 'clear all fields' : o.op + ' ' + (o.field || '?') + (o.op === 'set' || o.op === 'append' ? ' = ' + (o.value || '') : '')).join('\n');
             case 'ai': return (c.model || 'gpt-4o-mini') + (c.save_to ? ' → ' + c.save_to : '') + (c.send ? ', sends the answer' : '');
+            case 'clear_ai': return 'Forgets the conversation so far' + ((c.fields || []).filter(Boolean).length ? '\nclears ' + c.fields.filter(Boolean).join(', ') : '');
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
             case 'sequence': {
                 const s = sequences.find(x => x.id === c.sequence_id);
@@ -342,7 +346,7 @@
     const DEFAULTS = {
         condition: {rows: [{variable: 'last_input', rule: 'contains', value: ''}]}, send: {items: [{type: 'text', value: ''}], wait: false, save_to: ''},
         set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 100, max_tokens: 250, save_to: '', send: false},
-        sheet: {sheet: '', tab: '', columns: []}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
+        clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
         const next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
@@ -354,6 +358,8 @@
     // ---- the form of a step ----
     let editing = null;
     const input = (attrs, value) => { const i = el(attrs.tag || 'input', Object.assign({class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, attrs, {tag: null})); i.value = value ?? ''; i.addEventListener('focus', () => lastField = i); return i; };
+    // Textarea na lumalaki ayon sa dami ng linya (2 hanggang 8).
+    const grow = t => { const fit = () => t.rows = Math.min(8, Math.max(2, t.value.split('\n').length)); fit(); t.addEventListener('input', fit); return t; };
     const label = (text, control) => el('label', {class: 'block text-xs text-slate-600'}, [el('span', {class: 'mb-0.5 block', text}), control]);
     const listId = 'var-list';
     function rowsEditor(items, make, max, addText) {
@@ -412,7 +418,7 @@
             const make = o => el('div', {class: 'grid gap-2 sm:grid-cols-[8rem_1fr_1fr_5rem]'}, [
                 label('Do', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, [['set', 'Set'], ['append', 'Append'], ['clear', 'Clear'], ['clear_all', 'Clear all fields']].map(([k, t]) => el('option', {value: k, text: t, selected: o.op === k}))), v => o.op = v)),
                 label('Customer field', bind(input({list: listId, maxlength: 100}, o.field), v => o.field = v)),
-                label('Value', bind(input({maxlength: 2000}, o.value), v => o.value = v)),
+                label('Value', bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, o.value)), v => o.value = v)),
                 label('Separator', bind(input({maxlength: 10}, o.separator ?? ', '), v => o.separator = v)),
             ]);
             make.blank = () => ({op: 'set', field: '', value: '', separator: ', '});
@@ -429,6 +435,12 @@
                 label('Save the answer into', bind(input({list: listId, maxlength: 100, placeholder: 'e.g. GPT INPUT'}, c.save_to), v => c.save_to = v)),
             ]));
             body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: !!c.send}), v => c.send = v, true), 'Send the answer to the customer']));
+        }
+        if (n.type === 'clear_ai') {
+            body.append(el('p', {class: 'text-slate-600', text: 'The AI forgets this customer\'s conversation so far: AI steps and ' + OPEN + 'ALL USER INPUT' + CLOSE + ' only see messages after this step. Nothing is deleted from the Inbox or Chats.'}));
+            const make = (f, i) => label('Customer field', bind(input({list: listId, maxlength: 100, placeholder: 'e.g. GPT INPUT'}, f), v => c.fields[i] = v));
+            make.blank = () => '';
+            body.append(el('p', {class: 'text-xs text-slate-500', text: 'Also clear these fields (optional):'}), rowsEditor(c.fields = c.fields || [], make, 20, '+ Field'));
         }
         if (n.type === 'sheet') sheetForm(c, body);
         if (n.type === 'sequence') {
