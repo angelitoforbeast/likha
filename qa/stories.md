@@ -1635,3 +1635,16 @@ Spec 088. Tests in `tests/Feature/Chatblast/QueueRedisHorizonTest.php`; the scal
 | S-088.2 | `CHATBOT_QUEUE_CONNECTION` and `CHATBLAST_QUEUE_CONNECTION` set the connection of every chatbot job and every chatblast send; unset, they follow `QUEUE_CONNECTION` (database on the server) | `test_S_088_2…` | Passed · 2026-10-20 · auto |
 | S-088.3 | `/horizon` sends a guest to the login, gives 403 to a non-CEO (also its API, also with `APP_ENV=local`) and 200 to the CEO | `test_S_088_3…` | Passed · 2026-10-20 · auto |
 | S-088.4 | While a run holds a chatbot customer, that customer's chat is "locked"; one chatblast send per customer at a time; on the array store and on a real Redis | `test_S_088_4…` (2 data sets) | Passed · 2026-10-20 · auto (Redis: against a local Redis in WSL; skipped when none) |
+
+## S-091 The chatbot Test tab runs the skip timer, remembers the conversation for AI steps, and can write the sheet row for real
+
+Spec 091. Tests in `tests/Feature/Chatblast/ChatbotTestTabTest.php`; the page is checked in the browser (1366 and 390 px).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-091.1 | Given the test customer waits at a step that skips after 1 minute, then the Test tab gets "skips in 60 s"; before the time nothing runs; after it the run takes the skipped port with TestOutbox; no `chatbot_waits` row, the minute tick doesn't touch it, nothing goes to Botcake, and a real customer's fields stay as they were | `test_S_091_1…` | Passed · 2026-10-20 · auto |
+| S-091.2 | Given a reply before the time, then the reply port runs and the timer is gone | `test_S_091_2…` | Passed · 2026-10-20 · auto |
+| S-091.3 | "Skip now" fires at once; "Reset test customer" clears the timer | `test_S_091_3…` | Passed · 2026-10-20 · auto |
+| S-091.4 | With "Write sheet rows for real" off the row is only shown ("Sheet row (not written): All Orders"); on, it is appended through ChatbotSheet and the chat says "Sheet row written: All Orders, row 42 ('All Orders'!A42:B42)"; Botcake sends stay simulated; a 403 says to share the spreadsheet with the service-account email, a missing tab says so, never Google's own text | `test_S_091_4…` | Passed · 2026-10-20 · auto |
+| S-091.5 | An AI step in Test gets the earlier test messages and bot sends as history (same roles and order as live); Reset forgets them; a real customer's AI step never sees them | `test_S_091_5…` | Passed · 2026-10-20 · auto |
+| S-091.6 | The page has the new banner, the remembered checkbox, the countdown with "Skip now" (1366 and 390 px, no horizontal scroll; the skipped sends appear without a reload) | `test_S_091_6…` + browser | Passed · 2026-10-20 · auto + browser |
