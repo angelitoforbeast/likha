@@ -255,6 +255,7 @@ class BotcakeStressPage extends Command
         }
         $counts['botcake_messages'] = Schema::hasTable('botcake_messages') ? $byName('botcake_messages', 'page_name')->delete() : 0;
         $counts['page_settings'] = $settings->pageQuery($page)->delete();
+        PageSettings::forget($page);
 
         BotcakeChat::forgetPageMap();
         BotcakeMock::reset($pageId);
