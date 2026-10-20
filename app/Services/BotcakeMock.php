@@ -94,6 +94,7 @@ class BotcakeMock
         if ($page === null) return null;
         $pageId = $m[1];
         $rest = $m[2] ?? '';
+        self::perSecond($pageId);
         if ($page['latency'] > 0) $clock->sleep($page['latency'] / 1000);
 
         // Ang padala (POST) ay pumapalya sa error rate: 500, para tumakbo ang retry at ang failed na daan.
@@ -191,6 +192,21 @@ class BotcakeMock
         }
 
         return $out;
+    }
+
+    /** Ilang tawag sa page sa segundong ito; ang pinakamarami ay itinatala (ang rate kada page na nakita, para sa --stats). */
+    private static function perSecond(string $pageId): void
+    {
+        $key = self::key($pageId, 'sec:' . time());
+        Cache::add($key, 0, 120);
+        $n = (int) Cache::increment($key);
+        if ($n > (int) Cache::get(self::key($pageId, 'max_per_second'), 0)) Cache::put(self::key($pageId, 'max_per_second'), $n, self::TTL);
+    }
+
+    /** Ang pinakamaraming tawag sa isang segundo sa page (lahat ng uri). */
+    public static function maxPerSecond(string $pageId): int
+    {
+        return (int) Cache::get(self::key($pageId, 'max_per_second'), 0);
     }
 
     /** @return array<string, int> uri ng tawag => bilang (ang may bilang lang) */

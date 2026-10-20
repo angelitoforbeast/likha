@@ -234,6 +234,7 @@ class BotcakeStressPage extends Command
         $line('Chat to first reply', $timing($times));
         $line('Chat to last reply', $timing($aiTimes));
         $line('Mock AI replies', $aiReplies);
+        $line('Max calls/s (one page)', max(array_map(fn ($id) => BotcakeMock::maxPerSecond((string) $id), array_keys($pages)) ?: [0]));
         $this->line('misrouted: ' . $misrouted);
 
         return self::SUCCESS;
