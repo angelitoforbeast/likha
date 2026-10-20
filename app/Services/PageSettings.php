@@ -21,7 +21,8 @@ class PageSettings
      */
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
         'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
-        'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate'];
+        'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate',
+        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -142,7 +143,7 @@ class PageSettings
             // Ang naka-cache ng /api/botcake/chat (page_id => page, mga hash ng chat.key): binubura ngayon at pagkatapos ng commit.
             if ($provider === 'botcake' && in_array($key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
             // Ang listahan ng mock page (BotcakeMock): binubura kapag nagbago ang flag, ang page_id o ang bagal at error.
-            if ($provider === 'botcake' && in_array($key, BotcakeMock::KEYS, true)) {
+            if (($provider === 'botcake' && in_array($key, BotcakeMock::KEYS, true)) || ($provider === 'chatbot' && in_array($key, BotcakeMock::AI_KEYS, true))) {
                 BotcakeMock::forget();
                 DB::afterCommit(fn () => BotcakeMock::forget());
             }

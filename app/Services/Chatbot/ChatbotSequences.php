@@ -232,6 +232,11 @@ class ChatbotSequences
         try {
             $sub->refresh();
             if ($sub->status !== 'active') return 'gone';
+            // Hinihintay pa ang sagot ng AI ng customer (chatbot:ai-pool): parang hawak ang lock, mamaya na ang step.
+            if (ChatbotAiQueue::pending(new CustomerFields($sub->page_id, $sub->psid))) {
+                $release(['next_send_at' => now()->addMinutes(self::LOCKED_RETRY_MINUTES)]);
+                return 'locked';
+            }
             // Ang job na naunahan ng mas bagong claim (naipon ang queue nang lampas 10 minuto) ay walang ginagawa.
             if ($claim !== null && $sub->dispatched_at?->format('Y-m-d H:i:s') !== $claim) return 'gone';
             if (!$sub->next_send_at || $sub->next_send_at->gt(now())) {

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\ResumeChatbotWait;
+use App\Services\Chatbot\ChatbotAiQueue;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -10,7 +11,8 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Ang "wait for reply" na lampas na sa skip_after: isang job kada hinihintay sa queue na "chatbot" (kada minuto, via
  * scheduler), ayon sa due_at (index), 500 kada batch, hanggang 50 segundo. Ang naipadala na ay hindi ipinapadala ulit
- * hangga't hindi lumilipas ang REDISPATCH_MINUTES (ang naiwan o nawalang job ay sinusubukan ulit).
+ * hangga't hindi lumilipas ang REDISPATCH_MINUTES (ang naiwan o nawalang job ay sinusubukan ulit). Kasabay: ang sweep ng
+ * AI step (ChatbotAiQueue), para tapos pa rin sa failed port ang walang sagot kahit patay ang chatbot:ai-pool.
  */
 class ResumeSkippedChatbotWaits extends Command
 {
@@ -23,6 +25,8 @@ class ResumeSkippedChatbotWaits extends Command
 
     public function handle(): int
     {
+        $ai = ChatbotAiQueue::sweep();
+        if ($ai['failed'] || $ai['redispatched']) $this->info("chatbot AI: {$ai['failed']} timed out, {$ai['redispatched']} resumed again");
         if (!Schema::hasTable('chatbot_waits')) return self::SUCCESS;
         $until = microtime(true) + self::SECONDS;
         $queued = 0;

@@ -23,6 +23,14 @@ class FlowRun
     public ?string $skippedAfter = null;
     /** Pinatakbo ng sequence (hal. "sequence X step 2"): mula sa Start, at ang __wait ng customer ay hindi ginagalaw. */
     public ?string $startedBy = null;
+    /** Ilang hakbang na (ang takbong itinuloy pagkatapos ng AI ay nagpapatuloy sa bilang, para sa MAX_STEPS). */
+    public int $steps = 0;
+    /** Itinuloy pagkatapos ng AI (chatbot:ai-pool): ['node', 'ok', 'text', 'error'], ginagamit nang isang beses sa node na iyon. */
+    public ?array $aiAnswer = null;
+    /** Ang ticket ng sagot (ResumeChatbotAi): bawat padala ng takbong ito ay sinusuri muna laban dito. */
+    public ?array $ticket = null;
+    /** Huminto ang takbo para hintayin ang sagot ng AI. */
+    public bool $aiPending = false;
 
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void

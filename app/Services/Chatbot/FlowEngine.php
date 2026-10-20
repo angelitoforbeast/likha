@@ -29,8 +29,14 @@ class FlowEngine
         $edges = [];
         foreach ($run->graph['edges'] ?? [] as $e) $edges[$e['from'] . ':' . $e['port']] = $e['to'];
 
-        // Ang step ng sequence ay laging mula sa Start: hindi nito ipinagpapatuloy o binubura ang wait ng main flow.
-        $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
+        // Itinuloy pagkatapos ng AI: sa AI node mismo (gamit ang sagot). Ang step ng sequence ay laging mula sa Start: hindi
+        // nito ipinagpapatuloy o binubura ang wait ng main flow.
+        if ($run->aiAnswer !== null) {
+            $current = $run->aiAnswer['node'];
+            $run->event('run_started', null, ['reason' => 'resumed after AI', 'flow' => $run->flowId]);
+        } else {
+            $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
+        }
         if ($current === false) {
             $start = collect($nodes)->firstWhere('type', 'start');
             $current = $start['id'] ?? null;
@@ -39,7 +45,8 @@ class FlowEngine
         $suspended = false;
         $lastType = null;
 
-        for ($steps = 0; $current !== null; $steps++) {
+        for ($steps = $run->steps; $current !== null; $steps++) {
+            $run->steps = $steps;
             if ($steps >= self::MAX_STEPS) {
                 $run->stopped = 'Stopped after ' . self::MAX_STEPS . ' steps (a loop in the flow?).';
                 Log::warning('chatbot: step limit', ['flow' => $run->flowId, 'page' => $run->pageName, 'chat' => $run->chatId]);
@@ -80,7 +87,7 @@ class FlowEngine
 
         // Ang dahilan: ang huminto, ang naghihintay, ang End, ang pumalyang step na walang kasunod, o walang kasunod.
         $lastStep = $run->path ? end($run->path) : null;
-        $reason = $run->stopped ?? ($suspended ? 'waiting for a reply' : ($lastType === 'end' ? 'end'
+        $reason = $run->stopped ?? ($suspended ? ($run->aiPending ? 'waiting for the AI answer' : 'waiting for a reply') : ($lastType === 'end' ? 'end'
             : (($lastStep['port'] ?? null) === 'failed' ? (string) ($lastStep['note'] ?? 'a step failed') : 'no next step')));
         $run->event('run_ended', null, ['reason' => $reason, 'path' => array_slice(array_column($run->path, 'node'), 0, 100)]);
 
@@ -215,6 +222,7 @@ class FlowEngine
 
         $note = 'Nothing to send';
         if ($messages) {
+            if ($stop = $this->mismatch($run, $node['id'])) return $stop;
             $res = $outbox->send($run, $node['id'], $messages);
             $run->sends[] = ['node' => $node['id'], 'messages' => $messages, 'status' => $res['status'], 'error' => $res['error']];
             if ($res['status'] === 'skipped') $run->event('skipped', $node['id'], ['reason' => 'replies off']);
@@ -280,16 +288,33 @@ class FlowEngine
 
     private function ai(array $node, array $c, FlowRun $run, Outbox $outbox): array
     {
-        // Hangganan ng gastos: ang loop na may AI ay hihinto pagkatapos ng ilang tawag sa isang takbo.
-        if ($run->aiCalls >= self::MAX_AI_CALLS) return ['port' => null, 'stop' => true, 'note' => 'Stopped: more than ' . self::MAX_AI_CALLS . ' AI calls in one run.'];
-        $run->aiCalls++;
-        $messages = [];
-        $system = trim($run->text((string) ($c['system'] ?? '')));
-        if ($system !== '') $messages[] = ['role' => 'system', 'content' => $system];
-        foreach ($this->history($run, (int) ($c['history'] ?? 0)) as $m) $messages[] = $m;
-        $messages[] = ['role' => 'user', 'content' => $run->text((string) ($c['user'] ?? '{{last_input}}'))];
+        if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $node['id']) {
+            // Ang sagot ng pool (chatbot:ai-pool) sa tawag na nabilang na bago huminto ang takbo. Sinusuri ang ticket bago pa
+            // ma-save sa field (ang sagot ng ibang customer ay hindi dapat mapunta kahit sa field).
+            if ($stop = $this->mismatch($run, $node['id'])) return $stop;
+            $res =['ok' => (bool) $run->aiAnswer['ok'], 'text' => (string) ($run->aiAnswer['text'] ?? ''), 'error' => $run->aiAnswer['error'] ?? null];
+            $run->aiAnswer = null;
+        } else {
+            // Hangganan ng gastos: ang loop na may AI ay hihinto pagkatapos ng ilang tawag sa isang takbo.
+            if ($run->aiCalls >= self::MAX_AI_CALLS) return ['port' => null, 'stop' => true, 'note' => 'Stopped: more than ' . self::MAX_AI_CALLS . ' AI calls in one run.'];
+            $run->aiCalls++;
+            $messages = [];
+            $system = trim($run->text((string) ($c['system'] ?? '')));
+            if ($system !== '') $messages[] = ['role' => 'system', 'content' => $system];
+            foreach ($this->history($run, (int) ($c['history'] ?? 0)) as $m) $messages[] = $m;
+            $messages[] = ['role' => 'user', 'content' => $run->text((string) ($c['user'] ?? '{{last_input}}'))];
+            $model = (string) ($c['model'] ?? 'gpt-4o-mini');
+            $maxTokens = (int) ($c['max_tokens'] ?? 250);
 
-        $res = $this->ai->complete((string) ($c['model'] ?? 'gpt-4o-mini'), $messages, (int) ($c['max_tokens'] ?? 250));
+            // Hindi hinihintay ang sagot: ang ticket ay sa pool, at humihinto ang takbo (bakante agad ang worker).
+            if (ChatbotAiQueue::async($run, $outbox)) {
+                $id = ChatbotAiQueue::submit($run, $node['id'], $model, $messages, $maxTokens);
+                $run->aiPending = true;
+                $run->event('ai_pending', $node['id'], ['model' => $model, 'request' => substr($id, 0, 8)]);
+                return ['port' => null, 'suspend' => true, 'note' => 'Waiting for the AI answer'];
+            }
+            $res = ChatbotMockAi::answer($run) ?? $this->ai->complete($model, $messages, $maxTokens);
+        }
         if (!$res['ok']) {
             $run->event('ai', $node['id'], ['result' => 'failed', 'model' => (string) ($c['model'] ?? 'gpt-4o-mini'), 'error' => (string) $res['error']]);
             return ['port' => 'failed', 'note' => 'AI failed: ' . $res['error']];
@@ -298,12 +323,35 @@ class FlowEngine
 
         if (($c['save_to'] ?? '') !== '') $run->fields->set($c['save_to'], $res['text']);
         if (!empty($c['send'])) {
+            if ($stop = $this->mismatch($run, $node['id'])) return $stop;
             $msg = [['type' => 'text', 'text' => mb_substr($res['text'], 0, 2000)]];
             $sent = $outbox->send($run, $node['id'], $msg);
             $run->sends[] = ['node' => $node['id'], 'messages' => $msg, 'status' => $sent['status'], 'error' => $sent['error']];
         }
 
         return ['port' => 'success', 'note' => 'AI answered' . (($c['save_to'] ?? '') !== '' ? ' into ' . $c['save_to'] : '')];
+    }
+
+    /**
+     * Bago ang padala ng takbong itinuloy pagkatapos ng AI: ang page, PSID at chat ng takbo ay dapat kapareho ng ticket ng
+     * sagot. Kapag hindi: walang padala, hihinto ang takbo, event ai_mismatch at ERROR log (mga id lang, walang text).
+     * @return array|null ang resulta ng node na humihinto, o null kapag tugma (o hindi itinuloy na takbo)
+     */
+    private function mismatch(FlowRun $run, string $nodeId): ?array
+    {
+        $t = $run->ticket;
+        if ($t === null) return null;
+        $same = (string) $t['page_id'] === (string) $run->pageId && (int) $t['page_id'] === $run->fields->pageId
+            && (int) $t['psid'] === $run->fields->psid && (string) $t['psid'] === $run->psid()
+            && ($t['chat_id'] === null || (int) $t['chat_id'] === (int) $run->chatId);
+        if ($same) return null;
+
+        $ids = ['request' => (string) $t['request_id'], 'ticket_page' => (string) $t['page_id'], 'ticket_psid' => (string) $t['psid'], 'ticket_chat' => (string) ($t['chat_id'] ?? ''),
+            'run_page' => (string) $run->pageId, 'run_psid' => (string) $run->fields->psid, 'run_chat' => (string) ($run->chatId ?? '')];
+        Log::error('chatbot: AI answer ticket mismatch, nothing sent', $ids + ['flow' => $run->flowId, 'node' => $nodeId]);
+        $run->event('ai_mismatch', $nodeId, $ids);
+
+        return ['port' => null, 'stop' => true, 'note' => 'Stopped: the AI answer belongs to another customer (nothing sent).'];
     }
 
     /**

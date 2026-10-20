@@ -182,7 +182,7 @@ class BotcakeMockTest extends ChatblastTestCase
         $this->assertSame(0, Artisan::call('botcake:stress-page', ['--seed' => 3, '--key-file' => $key]));
         $out = Artisan::output();
         $s = app(PageSettings::class);
-        $this->assertSame([self::MOCK_ID, 'mock', '1'], [$s->get(self::PAGE, 'botcake', 'page_id'), $s->get(self::PAGE, 'botcake', 'token'), $s->get(self::PAGE, 'botcake', 'mock')]);
+        $this->assertSame([self::MOCK_ID, 'mock-' . self::MOCK_ID, '1'], [$s->get(self::PAGE, 'botcake', 'page_id'), $s->get(self::PAGE, 'botcake', 'token'), $s->get(self::PAGE, 'botcake', 'mock')]);
         $stored = trim((string) file_get_contents($key));
         $this->assertSame($stored, $s->get(self::PAGE, 'botcake', 'chat.key'));
         $this->assertGreaterThanOrEqual(32, strlen($stored));
@@ -263,7 +263,7 @@ class BotcakeMockTest extends ChatblastTestCase
         $key = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'stress-key-' . uniqid() . '.txt';
         Artisan::call('botcake:stress-page', ['--seed' => 0, '--key-file' => $key]);
         $this->assertSame(0, Artisan::call('botcake:stress-page', ['--latency' => 1500, '--error-rate' => 0.2]));
-        $this->assertSame(['latency' => 1500, 'error' => 0.2], BotcakeMock::pages()[self::MOCK_ID]);
+        $this->assertSame(['latency' => 1500, 'error' => 0.2, 'ai' => null], BotcakeMock::pages()[self::MOCK_ID]);
         $this->assertSame(1, Artisan::call('botcake:stress-page', ['--latency' => 6000]), 'over 5000 ms');
         $this->assertSame(1, Artisan::call('botcake:stress-page', ['--error-rate' => 0.6]), 'over 0.5');
 

@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\DB;
  * - Sunod-sunod: lahat ng hindi pa natatakbong chat ng customer hanggang sa chat na ito, ayon sa id.
  * - Isang beses lang: ang __last_chat ng customer ay itinatala BAGO patakbuhin ang chat, kaya ang ulit na job (retry,
  *   o ang job ng mas naunang chat) ay walang ginagawa. Ang chat na naputol sa gitna ay hindi inuulit (at most once).
+ * - Habang hinihintay ang sagot ng AI (__ai, chatbot:ai-pool), "locked" pa rin ang customer kahit bitaw na ang cache
+ *   lock: ang bagong chat ay naghihintay, at ang sagot ay itinutuloy ng resumeAi sa parehong lock.
  */
 class ChatbotRunner
 {
@@ -37,6 +39,7 @@ class ChatbotRunner
             $fields = new CustomerFields((int) $chat->page_id, (int) $chat->psid);
             $last = (int) $fields->get(CustomerFields::LAST_CHAT);
             if ($chatId <= $last) return 'done';
+            if (ChatbotAiQueue::pending($fields)) return 'locked';
             // Unang takbo para sa customer na ito: ang chat na ito lang. Ang mga naunang chat (bago naitali ang flow, o
             // habang walang flow) ay hindi na sinasagot.
             if ($last === 0) $last = $chatId - 1;
@@ -65,6 +68,8 @@ class ChatbotRunner
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
                 $this->engine->run($run, $this->outbox);
                 ChatbotEvents::store($run, (int) $c->page_id, (int) $c->psid);
+                // Hinihintay ang sagot ng AI: ang mga kasunod na chat ay mamaya na (ibinabalik ang job sa queue).
+                if ($run->aiPending && $c->id !== $pending->last()->id) return 'locked';
             }
 
             return 'done';
@@ -89,6 +94,7 @@ class ChatbotRunner
 
         try {
             $fields = new CustomerFields((int) $wait->page_id, (int) $wait->psid);
+            if (ChatbotAiQueue::pending($fields)) return 'waiting';
             $unrun = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)
                 ->where('id', '>', (int) $fields->get(CustomerFields::LAST_CHAT));
             // Ang sagot na tatakbo pa ang nananaig. Ang luma na (hindi na tatakbo, hal. lampas sa retry ng job) ay hindi
@@ -128,6 +134,62 @@ class ChatbotRunner
             $run->skippedAfter = $after;
             $this->engine->run($run, $this->outbox);
             ChatbotEvents::store($run, (int) $wait->page_id, (int) $wait->psid);
+
+            return 'done';
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Ang sagot ng AI (ResumeChatbotAi, mula sa chatbot:ai-pool): itinutuloy ang takbo sa AI node, sa lock ng customer.
+     * - Isang beses lang: ang row ay kinukuha (answered|failed → resumed) bago ang takbo; ang ulit na job ay walang ginagawa.
+     * - Ang customer ay mula sa chat (kapag mayroon) o sa row; ang ticket ng job ay sinusuri ng engine bago ang bawat padala.
+     * - Luma na ang sagot (iba na ang __ai, naka-pause ang bot, nagbago ang flow): itinatapon, may event, walang padala.
+     * @return string 'done' | 'locked' | 'gone' | 'dropped'
+     */
+    public function resumeAi(array $ticket): string
+    {
+        $table = ChatbotAiQueue::TABLE;
+        $row = DB::table($table)->where('request_id', (string) ($ticket['request_id'] ?? ''))->first();
+        if (!$row || !in_array($row->status, ['answered', 'failed'], true)) return 'gone';
+
+        $lock = Cache::lock('chatbot-run:' . $row->page_id . ':' . $row->psid, self::LOCK_SECONDS);
+        if (!$lock->get()) return 'locked';
+
+        try {
+            if (DB::table($table)->where('id', $row->id)->whereIn('status', ['answered', 'failed'])
+                ->update(['status' => 'resumed', 'resumed_at' => now(), 'updated_at' => now()]) !== 1) return 'gone';
+
+            $chat = $row->chat_id !== null ? BotcakeChat::find($row->chat_id) : null;
+            $pageId = $chat ? (string) $chat->page_id : (string) $row->page_id;
+            $psid = $chat ? (int) $chat->psid : (int) $row->psid;
+            $fields = new CustomerFields((int) $pageId, $psid);
+            $drop = function (string $why, bool $clear) use ($fields, $row, $pageId, $psid) {
+                if ($clear) $fields->clear(CustomerFields::AI);
+                ChatbotEvents::write((int) $pageId, $psid, 'ai_dropped', ['reason' => $why, 'request' => substr((string) $row->request_id, 0, 8)], (int) $row->flow_id, (string) $row->node_id);
+
+                return 'dropped';
+            };
+
+            if ($fields->get(CustomerFields::AI) !== (string) $row->request_id) return $drop('the run moved on', false);
+            if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $drop('the bot paused', true);
+            $flow = $this->page->flow((string) $row->page_name);
+            $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
+            if (!$flow || $flow->id !== (int) $row->flow_id || ($node['type'] ?? '') !== 'ai') return $drop('the flow changed', true);
+            $fields->clear(CustomerFields::AI);
+
+            $ctx = (array) json_decode((string) $row->context, true);
+            $run = new FlowRun($flow->id, $flow->graph, (string) $row->page_name, $pageId, $this->page->botfields((string) $row->page_name), $fields,
+                $row->chat_id !== null ? (int) $row->chat_id : null, (string) ($ctx['input'] ?? ''), (string) ($ctx['full_name'] ?? ''), (string) ($ctx['received_at'] ?? ''));
+            $run->runId = $row->run_id ?: null;
+            $run->aiCalls = (int) ($ctx['ai_calls'] ?? 1);
+            $run->steps = (int) ($ctx['steps'] ?? 0);
+            $run->aiAnswer = ['node' => (string) $row->node_id, 'ok' => $row->status === 'answered', 'text' => (string) $row->answer,
+                'error' => $row->error ?? 'OpenAI did not answer.'];
+            $run->ticket = $ticket;
+            $this->engine->run($run, $this->outbox);
+            ChatbotEvents::store($run, (int) $pageId, $psid);
 
             return 'done';
         } finally {

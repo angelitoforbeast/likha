@@ -100,6 +100,9 @@ class ChatbotEvents
             'ai' => 'AI step ' . $node . ' → ' . (($d['result'] ?? '') === 'success'
                 ? 'success' . (($d['saved_to'] ?? '') !== '' ? ' (saved to ' . mb_strtoupper($d['saved_to']) . ')' : '')
                 : 'failed: ' . ($d['error'] ?? '')),
+            'ai_pending' => 'AI step ' . $node . ' → waiting for the answer',
+            'ai_dropped' => 'AI answer at step ' . $node . ' dropped: ' . ($d['reason'] ?? ''),
+            'ai_mismatch' => 'AI answer at step ' . $node . ' stopped: it belongs to another customer (nothing sent)',
             'sheet' => 'Sheet row ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
             'waiting' => 'Waiting for reply at step ' . $node . (($d['skip_after'] ?? '') !== '' ? ' (skips after ' . $d['skip_after'] . ')' : ''),
             'wait_skipped' => 'No reply in ' . ($d['after'] ?? '?') . ' → skipped at step ' . $node,

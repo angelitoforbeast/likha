@@ -44,6 +44,8 @@ return [
 
     'openai' => [
     'key'   => env('OPENAI_API_KEY'),
+    // Chatbot AI step (chatbot:ai-pool): ilang segundo bago ituring na walang sagot (failed port).
+    'timeout' => (int) env('OPENAI_TIMEOUT', 60),
     'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
     // /astra chat: default model (verified accessible sa account) + optional allowed-list
     // override — ASTRA_MODELS="gpt-6-astra,gpt-5.5,o3" (comma-separated ids).
@@ -121,6 +123,11 @@ return [
     // lang: false = tumatakbo ang mga flow pero walang padala sa Botcake at walang sheet row (itinatala bilang skipped).
     'chatbot' => [
         'replies_enabled' => (bool) env('CHATBOT_REPLIES_ENABLED', true),
+        // AI step: true = hindi naghihintay ang worker (chatbot:ai-pool ang nagpapadala at nagtutuloy); false = naghihintay
+        // ang takbo sa sagot (ang dati), pang-rollback nang walang deploy.
+        'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),
+        // Ilang request sa OpenAI nang sabay sa chatbot:ai-pool (kahati ng Astra ang rate limit ng OpenAI).
+        'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 50),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

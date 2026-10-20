@@ -14,6 +14,7 @@ class CustomerFields
     public const WAIT = '__wait';
     public const LAST_CHAT = '__last_chat';
     public const BOT_PAUSED = '__bot_paused'; // '1' = tao ang sumasagot sa customer na ito (/chatbot/inbox): walang takbo ang bot
+    public const AI = '__ai'; // request_id ng AI step na hinihintay pa ang sagot (chatbot:ai-pool): naghihintay ang mga bagong chat
     public const TEST_PSID = 0; // ang test customer ng Test tab
 
     /** @var array<string, string> */

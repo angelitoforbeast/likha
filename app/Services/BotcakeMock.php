@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\PageSetting;
+use App\Services\Chatbot\ChatbotMockAi;
 use App\Support\BotcakeClock;
 use Closure;
 use Illuminate\Support\Facades\Cache;
@@ -13,13 +14,16 @@ use Illuminate\Support\Facades\Log;
  * web route. Para lang sa page na may botcake.mock = 1 AT botcake.page_id na nagsisimula sa 99 (ang test range); ang page
  * na may totoong ID ay hindi kailanman pinepeke. Ang bawat tawag ay naghihintay nang botcake.mock_latency_ms (400, hanggang
  * 5000) at sumasagot sa hugis ng Botcake; ang padala (POST) ay 500 sa botcake.mock_error_rate (0–0.5). Ang mga field na
- * isinulat, ang statistics ng flow at ang bilang ng bawat uri ng tawag ay nasa cache kada page.
+ * isinulat, ang statistics ng flow at ang bilang ng bawat uri ng tawag ay nasa cache kada page. Ang bawat send_content ay
+ * itinatala (PSID na pinadalhan at text) para mabilang ng --stats ang naligaw na sagot ng pekeng AI (ChatbotMockAi:
+ * chatbot.mock_ai = 1 sa parehong mock page).
  */
 class BotcakeMock
 {
     public const PREFIX = '99';
     public const PAGES_CACHE = 'botcake-mock:pages';
     public const KEYS = ['page_id', 'mock', 'mock_latency_ms', 'mock_error_rate'];
+    public const AI_KEYS = ['mock_ai', 'mock_ai_latency_ms']; // provider chatbot (ChatbotMockAi)
     public const KINDS = ['send_content', 'customer_fields', 'send_flow', 'customer_info', 'flows', 'custom_fields', 'message_templates', 'statistics', 'customers', 'other', 'error'];
     public const DEFAULT_LATENCY_MS = 400;
     public const MAX_LATENCY_MS = 5000;
@@ -40,9 +44,9 @@ class BotcakeMock
     }
 
     /**
-     * Ang mga mock page: page_id => [latency_ms, error_rate], naka-cache nang 60 s (binubura ng PageSettings kapag nagbago
-     * ang alinman sa KEYS). Isang query.
-     * @return array<string, array{latency: int, error: float}>
+     * Ang mga mock page: page_id => [latency_ms, error_rate, ai: bagal ng pekeng AI o null], naka-cache nang 60 s
+     * (binubura ng PageSettings kapag nagbago ang alinman sa KEYS o AI_KEYS). Isang query.
+     * @return array<string, array{latency: int, error: float, ai: ?int}>
      */
     public static function pages(): array
     {
@@ -52,8 +56,10 @@ class BotcakeMock
 
         return self::$memo = Cache::remember(self::PAGES_CACHE, 60, function () {
             $by = [];
-            foreach (PageSetting::where('provider', 'botcake')->whereIn('key', self::KEYS)->where('active', true)->orderBy('id')->get(['page_name', 'key', 'value', 'is_secret']) as $s) {
-                $by[mb_strtolower(trim((string) $s->page_name))][$s->key] = trim((string) $s->plainValue());
+            $rows = PageSetting::where('active', true)->where(fn ($q) => $q->where(fn ($b) => $b->where('provider', 'botcake')->whereIn('key', self::KEYS))
+                ->orWhere(fn ($c) => $c->where('provider', 'chatbot')->whereIn('key', self::AI_KEYS)))->orderBy('id')->get(['page_name', 'provider', 'key', 'value', 'is_secret']);
+            foreach ($rows as $s) {
+                $by[mb_strtolower(trim((string) $s->page_name))][$s->provider === 'chatbot' ? 'chatbot.' . $s->key : $s->key] = trim((string) $s->plainValue());
             }
             $out = [];
             foreach ($by as $v) {
@@ -61,6 +67,8 @@ class BotcakeMock
                 $out[$v['page_id']] = [
                     'latency' => max(0, min(self::MAX_LATENCY_MS, is_numeric($v['mock_latency_ms'] ?? null) ? (int) $v['mock_latency_ms'] : self::DEFAULT_LATENCY_MS)),
                     'error' => max(0.0, min(self::MAX_ERROR_RATE, is_numeric($v['mock_error_rate'] ?? null) ? (float) $v['mock_error_rate'] : 0.0)),
+                    'ai' => ($v['chatbot.mock_ai'] ?? '') !== '1' ? null : max(0, min(ChatbotMockAi::MAX_LATENCY_MS,
+                        is_numeric($v['chatbot.mock_ai_latency_ms'] ?? null) ? (int) $v['chatbot.mock_ai_latency_ms'] : ChatbotMockAi::DEFAULT_LATENCY_MS)),
                 ];
             }
 
@@ -95,7 +103,10 @@ class BotcakeMock
         }
 
         $ok = ['success' => true];
-        if ($method !== 'GET' && $rest === '/flows/send_content') return self::hit($pageId, 'send_content', [200, $ok]);
+        if ($method !== 'GET' && $rest === '/flows/send_content') {
+            self::record($pageId, (string) ($data['psid'] ?? ''), (array) ($data['data']['content']['messages'] ?? []));
+            return self::hit($pageId, 'send_content', [200, $ok]);
+        }
         if ($method !== 'GET' && $rest === '/flows/send_flow') {
             Cache::add(self::key($pageId, 'stats'), 0, self::TTL);
             Cache::increment(self::key($pageId, 'stats'));
@@ -159,6 +170,27 @@ class BotcakeMock
     private static function key(string $pageId, string $what): string
     {
         return 'botcake-mock:' . (int) Cache::get('botcake-mock:gen:' . $pageId, 0) . ':' . $pageId . ':' . $what;
+    }
+
+    /** Ang natanggap ng "customer": ang PSID na pinadalhan at ang text (hanggang 200 letra), isa kada send_content. */
+    private static function record(string $pageId, string $psid, array $messages): void
+    {
+        $text = implode("\n", array_filter(array_map(fn ($m) => is_array($m) ? (string) ($m['text'] ?? '') : '', $messages)));
+        $key = self::key($pageId, 'sent');
+        Cache::add($key, 0, self::TTL);
+        $n = Cache::increment($key);
+        Cache::put(self::key($pageId, 'sent:' . $n), [$psid, mb_substr($text, 0, 200)], self::TTL);
+    }
+
+    /** @return array<int, array{0: string, 1: string}> ang naitalang send_content ng page: [PSID na pinadalhan, text] */
+    public static function sent(string $pageId): array
+    {
+        $out = [];
+        for ($i = 1, $n = (int) Cache::get(self::key($pageId, 'sent'), 0); $i <= $n; $i++) {
+            if (is_array($r = Cache::get(self::key($pageId, 'sent:' . $i)))) $out[] = $r;
+        }
+
+        return $out;
     }
 
     /** @return array<string, int> uri ng tawag => bilang (ang may bilang lang) */
