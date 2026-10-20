@@ -844,3 +844,9 @@ Accepted, not fixed:
 - **No test for the rate limit** on `GET /chatbot/sheet` (30 a minute) or for preview inputs like `columns` sent as a string or over 50 items. Reason: the limit is the route's standard `throttle` middleware, and the columns go through `FlowGraph::cleanConfig`, which the hardening tests already cover.
 - **The preview shows botfield values** (the page's chatbot settings) when a template names them. Reason: the Test tab builds the same variables for the same users, so this is no new exposure.
 - **"Open row" is in the reply's detail on `/chatbot/replies`, not in the list rows.** Reason: a list row opens the detail with one click; the list stays one line per reply.
+
+## 094: multi-line Set field and Clear AI memory (2026-10-20)
+
+- **A reply queued before "Clear AI memory" and sent after it stays forgotten.** The marker holds the highest `chatbot_replies` id at the clear, and a queued reply's row is older. Reason: the brief asks for a chat and reply marker, not a time window; the gap is one in-flight send, and that send was answering the conversation being forgotten.
+- **The editor test (S-094.7) only checks the rendered source.** The textarea growth and the 3-line clamp were checked once in headless Chrome, not on every run. Reason: the project has no JS test runner, and adding one is a new dependency.
+- **"Also clear these fields" is a list of text boxes with the field suggestions, not a checkbox multi-select.** Reason: the editor knows only the fields the flow already uses, so a checkbox list would hide fields that aren't used yet. This matches the Set field step's field input.
