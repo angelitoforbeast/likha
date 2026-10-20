@@ -35,7 +35,7 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $this->page('Page Dos', '2002');
         // Ang inside.test ay nasa private na IP; ang iba ay pampubliko.
         $this->app->instance(ImageLinkCheck::class, new ImageLinkCheck(fn (string $host) => match ($host) {
-            'inside.test' => ['10.0.0.5'], 'loop.test' => ['127.0.0.1'], 'meta.test' => ['169.254.169.254'], default => ['93.184.216.34'],
+            'inside.test' => ['10.0.0.5'], 'loop.test' => ['127.0.0.1'], 'mixed.test' => ['93.184.216.34', '192.168.1.10'], 'meta.test' => ['169.254.169.254'], default => ['93.184.216.34'],
         }));
         Http::fake([self::IMG . '*' => Http::response('', 200, ['Content-Type' => 'image/jpeg'])]);
     }
@@ -108,6 +108,10 @@ class ChatbotPageCheckTest extends ChatblastTestCase
             'private IP' => ['https://inside.test/a.jpg', null, 'Seq Img 3: link not allowed'],
             'loopback IP literal' => ['http://127.0.0.1/a.jpg', null, 'Seq Img 3: link not allowed'],
             'link-local' => ['http://meta.test/latest', null, 'Seq Img 3: link not allowed'],
+            'one private IP among public ones' => ['https://mixed.test/a.jpg', null, 'Seq Img 3: link not allowed'],
+            'IPv4 inside IPv6' => ['http://[::ffff:10.0.0.1]/a.jpg', null, 'Seq Img 3: link not allowed'],
+            'carrier-grade NAT' => ['http://100.64.1.1/a.jpg', null, 'Seq Img 3: link not allowed'],
+            'not http' => ['ftp://img.example.test/a.jpg', null, 'Seq Img 3: link not allowed'],
         ];
     }
 
@@ -121,9 +125,18 @@ class ChatbotPageCheckTest extends ChatblastTestCase
 
         $res = $this->check();
         $this->assertSame($reason ? ['x', [$reason]] : ['ok', []], [$res['status'], $res['reasons']]);
-        if (in_array($url, ['https://inside.test/a.jpg', 'http://127.0.0.1/a.jpg', 'http://meta.test/latest'], true)) {
-            Http::assertNotSent(fn ($r) => true);
-        }
+        if (str_ends_with((string) $reason, 'not allowed')) Http::assertNothingSent();
+    }
+
+    public function test_S_099_2_at_most_20_links_are_asked_per_run_and_the_rest_wait(): void
+    {
+        $this->link('Page Uno', $this->flow('Main', [$this->send('{{PICTURE}}')]));
+        $this->settings()->set('Page Uno', 'chatbot', 'picture', self::IMG . 'p.jpg');
+        for ($i = 1; $i <= 20; $i++) $this->settings()->set('Page Uno', 'chatbot', 'seq_img_' . $i, self::IMG . $i . '.jpg');
+
+        $res = $this->check();
+        $this->assertSame(['ok', 1], [$res['status'], $res['unchecked']]);
+        $this->assertCount(20, Http::recorded());
     }
 
     public function test_S_099_2_redirects_are_rechecked_and_head_falls_back_to_a_ranged_get_and_urls_are_cached(): void

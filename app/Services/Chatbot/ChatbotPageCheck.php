@@ -25,6 +25,7 @@ class ChatbotPageCheck
 {
     public const CACHE_SECONDS = 600;
     public const MAX_URL_CHECKS = 20;
+    public const URL_SECONDS = 20; // ang kabuuang oras ng mga tawag sa link kada takbo: ang lampas ay "not checked yet", hindi timeout ng request
     private const MAX_FLOWS = 50; // ang flow at ang mga flow ng sequence nito
 
     public function __construct(private PageSettings $settings, private ChatbotFields $fields, private ImageLinkCheck $images)
@@ -117,12 +118,13 @@ class ChatbotPageCheck
         if ($missing) $reasons[] = 'Missing: ' . implode(', ', array_map(fn ($k) => $labels[$k], $missing));
 
         $calls = 0;
+        $started = microtime(true);
         foreach ($columns as $c) {
             $url = $values[$c['key']] ?? '';
             if ($c['kind'] !== 'image' || $url === '') continue;
             $res = $fresh ? null : $this->images->cached($url);
             if ($res === null) {
-                if ($calls >= self::MAX_URL_CHECKS) { $out['unchecked']++; continue; }
+                if ($calls >= self::MAX_URL_CHECKS || microtime(true) - $started > self::URL_SECONDS) { $out['unchecked']++; continue; }
                 $calls++;
                 $res = $this->images->check($url);
             }

@@ -43,7 +43,8 @@ class ImageLinkCheck
     public function check(string $url): array
     {
         $res = $this->run($url);
-        Cache::put(self::cacheKey($url), $res, self::CACHE_SECONDS);
+        // Ang hindi naabot (DNS o koneksyon) ay maaaring saglit lang: 10 minuto lang naka-cache, ang sagot ng server ay 24 oras.
+        Cache::put(self::cacheKey($url), $res, in_array($res['reason'], ['no answer', 'link not allowed'], true) ? 600 : self::CACHE_SECONDS);
 
         return $res;
     }
@@ -87,7 +88,8 @@ class ImageLinkCheck
         $host = trim($parts['host'], '[]');
 
         return Http::timeout(self::TIMEOUT)->connectTimeout(self::TIMEOUT)->withHeaders($headers)
-            ->withOptions(['allow_redirects' => false, 'curl' => [CURLOPT_RESOLVE => [$host . ':' . $port . ':' . $ip]]])
+            // stream: ang katawan ay hindi binabasa (ang server na hindi pinapansin ang Range ay hindi buong naida-download).
+            ->withOptions(['allow_redirects' => false, 'stream' => true, 'curl' => [CURLOPT_RESOLVE => [$host . ':' . $port . ':' . (str_contains($ip, ':') ? '[' . $ip . ']' : $ip)]]])
             ->send($method, $url);
     }
 
@@ -111,6 +113,8 @@ class ImageLinkCheck
         // Ang hindi saklaw ng mga flag: carrier-grade NAT (100.64.0.0/10) at ang IPv4 sa loob ng IPv6 (::ffff:10.0.0.1).
         if (preg_match('/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./', $ip)) return false;
         if (stripos($ip, '::ffff:') === 0) return self::isPublic(substr($ip, 7));
+        // 6to4 (2002::/16) at NAT64 (64:ff9b::/96): may IPv4 sa loob, kaya hindi pinapayagan.
+        if (preg_match('/^(2002:|64:ff9b:)/i', $ip)) return false;
 
         return true;
     }
