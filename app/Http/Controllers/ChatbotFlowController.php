@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BotcakeChat;
 use App\Models\ChatbotFlow;
 use App\Models\PageSetting;
 use App\Models\User;
 use App\Services\Chatbot\BotcakeOutbox;
+use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
@@ -14,6 +16,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
 /**
@@ -24,6 +27,13 @@ class ChatbotFlowController extends Controller
 {
     /** Ang mga variable ng takbo (para sa listahan sa mga form ng node). */
     public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction'];
+
+    /** Ang tooltip ng bawat variable ng takbo ("Built in: …"). */
+    private const RUN_VAR_INFO = [
+        'last_input' => 'what the customer just typed', 'full_name' => 'the customer\'s name on Facebook', 'first_name' => 'the first word of the customer\'s name',
+        'psid' => 'the customer\'s ID on this page', 'page_id' => 'the Facebook ID of the page', 'page_name' => 'the name of the page',
+        'current_date' => 'today\'s date in Manila (YYYY-MM-DD)', 'last_interaction' => 'when the customer\'s last chat came in',
+    ];
 
     public const KEEP_VERSIONS = 50; // snapshot kada flow
     public const LIST_VERSIONS = 20; // sa History
@@ -128,7 +138,7 @@ class ChatbotFlowController extends Controller
 
         return response()->json($this->state($flow) + [
             'id' => $flow->id, 'name' => $flow->name, 'graph' => $flow->draft() ?? FlowGraph::blank(),
-            'variables' => $this->variables($flow), 'rules' => FlowGraph::RULES, 'pages' => $this->pagesUsing($flow->id),
+            'variables' => $this->variables($groups = $this->variableGroups($flow)), 'variable_groups' => $groups, 'rules' => FlowGraph::RULES, 'pages' => $this->pagesUsing($flow->id),
             // Para sa step na Sequence (wala pang table = walang listahan).
             'sequences' => \Illuminate\Support\Facades\Schema::hasTable('chatbot_sequences')
                 ? \App\Models\ChatbotSequence::orderBy('name')->limit(500)->get(['id', 'name'])->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])->all() : [],
@@ -267,20 +277,67 @@ class ChatbotFlowController extends Controller
 
     /**
      * Ang mga variable para sa listahan sa form: ang sa takbo, ang mga botfield (label ng column), at ang mga customer
-     * field na ginagamit ng mga node ng flow na ito.
+     * field na ginagamit ng mga node ng flow na ito o naka-save sa mga customer ng mga page nito.
      * @return array<int, string>
      */
-    private function variables(ChatbotFlow $flow): array
+    private function variables(array $groups): array
     {
-        $customer = [];
+        return array_values(array_unique(array_column($groups, 'name')));
+    }
+
+    /**
+     * Ang listahan, hinati: system (takbo), botfield (kada page), customer (kada customer). Ang tip ay kung saan galing;
+     * ang pangalang nasa dalawang grupo (pareho sa ChatbotVars::norm) ay may "also" at ang patakaran ng merge:
+     * botfield, saka customer field, saka ang takbo (ang huli ang nananaig).
+     * @return array<int, array{name: string, group: string, tip: string, also: array<int, string>}>
+     */
+    private function variableGroups(ChatbotFlow $flow): array
+    {
+        $writers = []; // norm => pangalan at mga node na nagsusulat
         foreach ((array) ($flow->draft()['nodes'] ?? []) as $n) {
             $c = (array) ($n['config'] ?? []);
-            foreach ([$c['save_to'] ?? '', ...array_column((array) ($c['ops'] ?? []), 'field')] as $f) {
-                if (is_string($f) && $f !== '') $customer[] = mb_strtoupper($f);
+            $label = ['send' => 'Send message', 'ai' => 'AI', 'set' => 'Set field'][$n['type'] ?? ''] ?? null;
+            $fields = [[$c['save_to'] ?? '', true]];
+            foreach ((array) ($c['ops'] ?? []) as $op) $fields[] = [$op['field'] ?? '', in_array($op['op'] ?? 'set', ['set', 'append'], true)];
+            foreach ($fields as [$f, $writes]) {
+                if (!is_string($f) || ($key = ChatbotVars::norm($f)) === '' || str_starts_with($key, '__')) continue;
+                $writers[$key] ??= ['name' => mb_strtoupper($key), 'by' => []];
+                if ($writes && $label && !in_array($by = "{$n['id']} ({$label})", $writers[$key]['by'], true)) $writers[$key]['by'][] = $by;
             }
         }
+        foreach ($this->savedCustomerKeys($flow) as $key) $writers[$key] ??= ['name' => mb_strtoupper($key), 'by' => []];
 
-        return array_values(array_unique(array_merge(self::RUN_VARS, array_column($this->fields->columns(), 'label'), $customer)));
+        $rows = [];
+        foreach (self::RUN_VARS as $v) $rows[] = ['name' => $v, 'group' => 'system', 'tip' => 'Built in: ' . self::RUN_VAR_INFO[$v]];
+        foreach (array_column($this->fields->columns(), 'label') as $v) $rows[] = ['name' => $v, 'group' => 'botfield', 'tip' => 'Botfield: set per page on /chatbot/pages'];
+        foreach ($writers as $w) $rows[] = ['name' => $w['name'], 'group' => 'customer', 'tip' => 'Customer field: ' . ($w['by']
+            ? 'set by ' . implode(', ', $w['by']) : 'saved on customers of this flow\'s pages; no step of this flow sets it')];
+
+        $in = [];
+        foreach ($rows as $r) $in[ChatbotVars::norm($r['name'])][$r['group']] = true;
+        $rule = [
+            'system' => ['customer' => 'Also a customer field; the built-in value always wins', 'botfield' => 'Also a botfield; the built-in value always wins'],
+            'botfield' => ['system' => 'Also a system variable; the built-in value always wins, so this botfield can\'t be read', 'customer' => 'Also a customer field; the customer field wins when the customer has it saved (even blank)'],
+            'customer' => ['system' => 'Also a system variable; the built-in value always wins, so this field can\'t be read', 'botfield' => 'Also a botfield; the customer field wins when the customer has it saved (even blank)'],
+        ];
+        foreach ($rows as &$r) {
+            $r['also'] = array_values(array_diff(array_keys($in[ChatbotVars::norm($r['name'])]), [$r['group']]));
+            foreach ($r['also'] as $g) $r['tip'] .= '. ' . $rule[$r['group']][$g];
+        }
+
+        return $rows;
+    }
+
+    /** @return array<int, string> ang mga customer field (naka-norm, walang "__") na naka-save sa mga page ng flow na ito */
+    private function savedCustomerKeys(ChatbotFlow $flow): array
+    {
+        if (!Schema::hasTable('chatbot_customer_values')) return [];
+        $pages = array_map(fn ($p) => $this->settings->pageKey($p), $this->pagesUsing($flow->id));
+        $ids = array_keys(array_filter(BotcakeChat::pageMap(), fn ($name, $id) => ctype_digit((string) $id) && in_array($this->settings->pageKey($name), $pages, true), ARRAY_FILTER_USE_BOTH));
+        if (!$ids) return [];
+
+        return DB::table('chatbot_customer_values')->whereIn('page_id', array_map('intval', $ids))
+            ->distinct()->orderBy('key')->limit(320)->pluck('key')->filter(fn ($k) => !str_starts_with((string) $k, '__'))->map(fn ($k) => (string) $k)->values()->all();
     }
 
     /** @return array<int, string> ang mga page na nakatali sa flow na ito (ayon sa id, gaya ng takbo) */
