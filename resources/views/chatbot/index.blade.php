@@ -27,6 +27,9 @@
     #cb-table .cb-txt.cb-clamped { -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
     #cb-table tr.cb-open .cb-txt { display: block; -webkit-line-clamp: unset; max-height: 15rem; overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
     #cb-table td.cb-cell { cursor: pointer; }
+    /* History at Changes: ang value ay 3 linya kapag sarado ("Show all" para sa buo). */
+    .cb-fold { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
+    .cb-fold.cb-unfold { display: block; -webkit-line-clamp: unset; }
     #cb-table .cb-edit { opacity: 0; }
     #cb-table td.cb-cell:hover .cb-edit, #cb-table td.cb-cell:focus-within .cb-edit, #cb-table .cb-edit:focus { opacity: 1; }
     @media (hover: none), (max-width: 639px) { #cb-table .cb-edit { opacity: 1; } }
@@ -47,6 +50,11 @@
      data-cell-url="{{ route('chatbot.cell') }}"
      data-cells-url="{{ route('chatbot.cells') }}"
      data-column-url="{{ route('chatbot.column') }}"
+     data-check-url="{{ route('chatbot.check') }}"
+     data-preview-url="{{ route('chatbot.preview') }}"
+     data-history-url="{{ route('chatbot.history') }}"
+     data-restore-url="{{ route('chatbot.restore') }}"
+     data-changes-url="{{ route('chatbot.changes') }}"
      @if($isCeo) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}" @endif>
 
     <div class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
@@ -59,6 +67,7 @@
             </select>
         </label>
         <button id="add-column" type="button" class="cb-btn">+ Column</button>
+        <button id="changes-open" type="button" class="cb-btn">Changes</button>
         @if($isCeo)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
@@ -84,6 +93,7 @@
         <div class="mx-auto flex h-full max-h-full w-full max-w-2xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
                 <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span></div>
+                <button id="pe-preview" type="button" class="cb-btn cb-btn-sm ml-auto shrink-0">Preview</button>
                 <button id="pe-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <div class="border-b border-slate-200 px-4 py-2">
@@ -99,6 +109,49 @@
             <div class="border-t border-slate-200 px-4 py-3">
                 <p id="pe-error" class="mb-1 text-xs text-red-600 empty:hidden" aria-live="polite"></p>
                 <div class="flex flex-wrap gap-2"><button id="pe-save" type="button" class="cb-btn cb-btn-primary" disabled>Save</button><button id="pe-cancel" type="button" class="cb-btn">Cancel</button></div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Preview, History ng isang field, at Changes: mga modal na nasa ibabaw ng Edit (z-index 60). Basa lang, maliban sa
+         Restore. Sa phone, buong screen. --}}
+    <div id="pv" class="fixed inset-0 hidden bg-slate-900/30 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="pv-title">
+        <div class="mx-auto flex h-full max-h-full w-full max-w-lg flex-col bg-white text-sm shadow-lg sm:rounded-xl">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div class="min-w-0"><div id="pv-title" class="break-words font-semibold"></div><div id="pv-sub" class="text-xs text-slate-500"></div></div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <div id="pv-list" class="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50 px-4 py-3"></div>
+        </div>
+    </div>
+    <div id="hist" class="fixed inset-0 hidden bg-slate-900/30 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="hist-title">
+        <div class="mx-auto flex h-full max-h-full w-full max-w-lg flex-col bg-white text-sm shadow-lg sm:rounded-xl">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div class="min-w-0"><div id="hist-title" class="break-words font-semibold"></div><div id="hist-sub" class="break-words text-xs text-slate-500"></div></div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <p id="hist-note" class="px-4 pt-2 text-xs empty:hidden" aria-live="polite"></p>
+            <ol id="hist-list" class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto px-4"></ol>
+        </div>
+    </div>
+    <div id="chg" class="fixed inset-0 hidden bg-slate-900/30 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="chg-title">
+        <div class="mx-auto flex h-full max-h-full w-full max-w-4xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div id="chg-title" class="font-semibold">Changes on chatbot pages</div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <form id="chg-filters" class="grid grid-cols-2 gap-2 border-b border-slate-200 px-4 py-2 text-xs sm:grid-cols-5">
+                <label class="flex min-w-0 flex-col">Page<select name="page" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"><option value="">All pages</option></select></label>
+                <label class="flex min-w-0 flex-col">User<select name="user" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"><option value="">Everyone</option></select></label>
+                <label class="flex min-w-0 flex-col">Field<select name="field" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"><option value="">All fields</option></select></label>
+                <label class="flex min-w-0 flex-col">From<input name="from" type="date" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+                <label class="flex min-w-0 flex-col">To<input name="to" type="date" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+            </form>
+            <ol id="chg-list" class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto px-4" aria-live="polite"></ol>
+            <div class="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-2 text-xs">
+                <button id="chg-prev" type="button" class="cb-btn cb-btn-sm">Newer</button>
+                <span id="chg-count" class="text-slate-600"></span>
+                <button id="chg-next" type="button" class="cb-btn cb-btn-sm">Older</button>
             </div>
         </div>
     </div>
@@ -186,7 +239,11 @@
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
         columns = data.columns; rows = data.rows; flows = data.flows || [];
+        // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha isa-isa pagkatapos ng render.
+        checks.clear();
+        for (const r of rows) if (r.check) checks.set(r.page, r.check);
         render();
+        queueChecks(rows.filter(r => !checks.has(r.page)).map(r => r.page));
     }
 
     function visible() {
@@ -199,15 +256,18 @@
             el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, 'Page'),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Active'}),
             el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Flow'}),
+            el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Check', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
             ...columns.filter(c => c.key !== 'flow').map(c => el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-500', text: c.label})),
         ]);
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}), editButton(r)]),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
+                el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r)])]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
+            checkCell(r),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', text: r.last_chat || '—'}),
             ...columns.filter(c => c.key !== 'flow').map(c => cell(r, c)),
@@ -227,6 +287,178 @@
         b.addEventListener('click', () => openPe(r));
         return b;
     }
+
+    function previewButton(r) {
+        const b = el('button', {type: 'button', class: 'mt-1 inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            'aria-label': 'Preview ' + r.page, title: 'Preview what a customer sees'}, [el('span', {'aria-hidden': 'true', text: '👁'}), el('span', {class: 'hidden sm:inline', text: 'Preview'})]);
+        b.addEventListener('click', () => openPreview(r.page));
+        return b;
+    }
+
+    // ---- Check column ----
+    // Ang mga icon na gamit sa Likha (gaya ng Check sa page settings): bilog na may check, o bilog na may X.
+    const ICON_PATHS = {ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>', x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'};
+    function icon(kind, label) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        for (const [k, v] of Object.entries({viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+            class: 'h-4 w-4 shrink-0 ' + (kind === 'ok' ? 'text-green-600' : 'text-red-600'), role: 'img', 'aria-label': label})) svg.setAttribute(k, v);
+        svg.innerHTML = ICON_PATHS[kind]; // nakapirming SVG, walang data mula sa labas
+        return svg;
+    }
+    const checks = new Map(), checking = new Set();
+    function checkCell(r) {
+        const td = el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs', 'data-check': r.page});
+        fillCheck(td, r.page);
+        return td;
+    }
+    function fillCheck(td, page) {
+        const c = checks.get(page), out = [];
+        if (checking.has(page) || !c) out.push(el('span', {class: 'text-slate-400', text: c?.error || 'Checking…'}));
+        else if (c.status === 'none') out.push(el('span', {class: 'text-slate-400', text: '—', title: 'No flow picked'}));
+        else if (c.status === 'ok') out.push(el('div', {class: 'flex items-start gap-1'}, [icon('ok', 'Check passed'), el('span', {class: 'text-green-700', text: 'All values pass'})]));
+        else out.push(el('div', {class: 'flex items-start gap-1'}, [icon('x', 'Check failed'), el('ul', {class: 'min-w-0 space-y-0.5 text-red-700'}, c.reasons.map(t => el('li', {class: 'break-words', text: t})))]));
+        if (c?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.unchecked + ' image link' + (c.unchecked === 1 ? '' : 's') + ' not checked yet'}));
+        if (c && !checking.has(page) && c.status) {
+            const again = el('button', {type: 'button', class: 'text-blue-700 underline hover:text-blue-900', text: 'Check again', 'aria-label': 'Check ' + page + ' again'});
+            again.addEventListener('click', ev => { ev.stopPropagation(); runCheck(page, true); });
+            out.push(el('div', {class: 'mt-1 flex flex-wrap items-center gap-x-2 text-slate-400'}, [c.checked_at ? el('span', {text: c.checked_at}) : null, again]));
+        }
+        td.replaceChildren(...out);
+    }
+    function paintCheck(page) {
+        table.querySelectorAll('td[data-check]').forEach(td => { if (td.dataset.check === page) fillCheck(td, page); });
+    }
+    async function runCheck(page, again = false) {
+        checking.add(page); paintCheck(page);
+        try {
+            const res = again ? await post(url.checkUrl, {page_name: page})
+                : await fetch(url.checkUrl + '?page_name=' + encodeURIComponent(page), {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
+            checks.set(page, res.ok ? res.data : {error: 'Could not check (' + res.status + ')'});
+        } catch (e) {
+            checks.set(page, {error: 'Could not check: no connection'});
+        }
+        checking.delete(page); paintCheck(page);
+    }
+    // Tatlo nang sabay: ang Check ng page na may larawan ay maaaring ilang segundo (HEAD ng bawat link).
+    function queueChecks(pages) {
+        const todo = [...pages];
+        const next = () => { const p = todo.shift(); return p === undefined ? null : runCheck(p).then(next); };
+        for (let i = 0; i < 3; i++) next();
+    }
+
+    // ---- Preview, History, Changes (mga modal sa ibabaw) ----
+    function dialog(boxId, show) {
+        $(boxId).classList.toggle('hidden', !show);
+        if (show) $(boxId).querySelector('[data-close-dialog]').focus();
+    }
+    document.querySelectorAll('[data-close-dialog]').forEach(b => b.addEventListener('click', () => dialog(b.closest('[role="dialog"]').id, false)));
+    ['pv', 'hist', 'chg'].forEach(d => $(d).addEventListener('click', e => { if (e.target === $(d)) dialog(d, false); }));
+    const getJson = u => fetch(u, {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
+    /** Ang value na 3 linya kapag sarado, may "Show all" kapag may kasunod pa. */
+    function folded(text, cls = '') {
+        const box = el('div', {class: 'cb-fold ' + cls, text: text === '' ? '(empty)' : text});
+        const wrap = el('div', {class: 'min-w-0'}, box);
+        requestAnimationFrame(() => {
+            if (box.scrollHeight <= box.clientHeight + 1) return;
+            const more = el('button', {type: 'button', class: 'text-xs text-blue-700 underline', text: 'Show all'});
+            more.addEventListener('click', () => { const open = box.classList.toggle('cb-unfold'); more.textContent = open ? 'Show less' : 'Show all'; });
+            wrap.append(more);
+        });
+        return wrap;
+    }
+
+    async function openPreview(page) {
+        $('pv-title').textContent = 'Preview · ' + page;
+        $('pv-sub').textContent = 'Loading…';
+        $('pv-list').replaceChildren();
+        dialog('pv', true);
+        const {ok, status, data} = await getJson(url.previewUrl + '?page_name=' + encodeURIComponent(page));
+        if (!ok) { $('pv-sub').textContent = data.error || 'Could not load (' + status + ').'; return; }
+        $('pv-sub').textContent = 'As the customer "' + data.sample + '" would see it. Read-only.';
+        if (!data.items.length) { $('pv-list').append(el('p', {class: 'text-slate-500', text: 'No main texts or Seq values yet.'})); return; }
+        $('pv-list').replaceChildren(...data.items.map(it => el('section', {}, [
+            el('div', {class: 'mb-1 text-xs font-medium text-slate-500', text: it.label}),
+            it.image ? el('img', {src: it.image, alt: it.label, loading: 'lazy', referrerpolicy: 'no-referrer', class: 'mb-1 max-h-48 max-w-[80%] rounded-2xl border border-slate-200 object-contain'}) : null,
+            it.text !== null ? el('div', {class: 'max-w-[85%] whitespace-pre-line break-words rounded-2xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200', text: it.text}) : null,
+        ])));
+    }
+    $('pe-preview').addEventListener('click', () => pe && openPreview(pe.r.page));
+
+    let hist = null; // {page, key, label}
+    async function openHistory(page, c) {
+        hist = {page, key: c.key, label: c.label};
+        $('hist-title').textContent = 'History · ' + c.label;
+        $('hist-sub').textContent = page;
+        $('hist-note').textContent = '';
+        dialog('hist', true);
+        await loadHistory();
+    }
+    async function loadHistory() {
+        $('hist-list').replaceChildren(el('li', {class: 'py-2 text-slate-500', text: 'Loading…'}));
+        const {ok, status, data} = await getJson(url.historyUrl + '?page_name=' + encodeURIComponent(hist.page) + '&key=' + encodeURIComponent(hist.key));
+        if (!ok) { $('hist-list').replaceChildren(el('li', {class: 'py-2 text-red-600', text: data.error || 'Could not load (' + status + ').'})); return; }
+        if (!data.versions.length) { $('hist-list').replaceChildren(el('li', {class: 'py-2 text-slate-500', text: 'No versions yet.'})); return; }
+        $('hist-list').replaceChildren(...data.versions.map(v => {
+            const restore = v.restorable ? el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Restore', 'aria-label': 'Restore the version of ' + v.at}) : null;
+            restore?.addEventListener('click', () => restoreVersion(v, restore));
+            return el('li', {class: 'py-2'}, [
+                el('div', {class: 'mb-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500'}, [
+                    el('span', {class: 'rounded px-1.5 py-0.5 font-medium ' + (v.current ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'), text: v.current ? 'Current' : 'Old'}),
+                    el('span', {text: v.by}), el('span', {text: v.at || ''}), restore ? el('span', {class: 'ml-auto'}, restore) : null,
+                ]),
+                folded(v.value, v.secret ? 'italic text-slate-400' : ''),
+            ]);
+        }));
+    }
+    async function restoreVersion(v, btn) {
+        if (!confirm('Restore this ' + hist.label + ' value for ' + hist.page + '? The current value stays in the history.')) return;
+        btn.disabled = true;
+        const {ok, status, data} = await post(url.restoreUrl, {id: v.id});
+        if (!ok) { btn.disabled = false; $('hist-note').className = 'px-4 pt-2 text-xs text-red-600'; $('hist-note').textContent = data.error || 'Not restored (' + status + ').'; return; }
+        $('hist-note').className = 'px-4 pt-2 text-xs text-green-700';
+        $('hist-note').textContent = data.status === 'unchanged' ? 'That is already the current value.' : 'Restored. It is now the current value.';
+        // Ang bukas na Edit ng page: ang field na ito ay ang naibalik na ngayon (hindi "binago").
+        const r = rows.find(x => x.page === hist.page);
+        if (r) r.cells[data.key] = data.value;
+        if (pe && pe.r.page === hist.page && peInput(data.key)) { pe.orig[data.key] = data.value; peInput(data.key).value = data.value; grow(peInput(data.key)); paintPe(); }
+        render();
+        await loadHistory();
+    }
+
+    let chgPage = 1, chgLists = false;
+    async function loadChanges() {
+        const f = new FormData($('chg-filters')), q = new URLSearchParams();
+        for (const [k, v] of f.entries()) if (v) q.set(k, v);
+        q.set('p', chgPage);
+        $('chg-list').replaceChildren(el('li', {class: 'py-2 text-slate-500', text: 'Loading…'}));
+        const {ok, status, data} = await getJson(url.changesUrl + '?' + q);
+        if (!ok) { $('chg-list').replaceChildren(el('li', {class: 'py-2 text-red-600', text: data.error || 'Could not load (' + status + ').'})); return; }
+        if (!chgLists) {
+            const fill = (name, items) => $('chg-filters').elements[name].append(...items.map(([v, t]) => el('option', {value: v, text: t})));
+            fill('page', data.pages.map(p => [p, p]));
+            fill('user', data.users.map(u => [u.id, u.name]));
+            fill('field', data.fields.map(x => [x.key, x.label]));
+            chgLists = true;
+        }
+        chgPage = data.page;
+        $('chg-count').textContent = data.total ? 'Page ' + data.page + ' of ' + data.last_page + ' · ' + plural(data.total, 'change') : 'No changes match.';
+        $('chg-prev').disabled = data.page <= 1;
+        $('chg-next').disabled = data.page >= data.last_page;
+        $('chg-list').replaceChildren(...data.entries.map(e => el('li', {class: 'py-2'}, [
+            el('div', {class: 'mb-1 flex flex-wrap gap-x-2 text-xs text-slate-500'}, [el('span', {text: e.at || ''}), el('span', {text: e.by}), el('span', {class: 'font-medium text-slate-800', text: e.page}), el('span', {class: 'font-medium text-slate-700', text: e.field})]),
+            el('div', {class: 'grid gap-1 sm:grid-cols-[1fr_auto_1fr] sm:gap-2'}, [
+                e.old === null ? el('div', {class: 'text-xs italic text-slate-400', text: '(new)'}) : folded(e.old, 'text-slate-500 line-through decoration-slate-300'),
+                el('span', {class: 'text-slate-400', 'aria-label': 'changed to', text: '→'}),
+                folded(e.new, e.new === '(hidden)' ? 'italic text-slate-400' : 'text-slate-900'),
+            ]),
+        ])));
+        $('chg-list').scrollTop = 0;
+    }
+    $('changes-open').addEventListener('click', () => { dialog('chg', true); chgPage = 1; loadChanges(); });
+    $('chg-filters').addEventListener('change', () => { chgPage = 1; loadChanges(); });
+    $('chg-filters').addEventListener('submit', e => e.preventDefault());
+    $('chg-prev').addEventListener('click', () => { chgPage--; loadChanges(); });
+    $('chg-next').addEventListener('click', () => { chgPage++; loadChanges(); });
 
     // Ang fade: sa text na lampas sa 3 linya ng row na sarado.
     function markClamped() {
@@ -440,6 +672,9 @@
 
     document.addEventListener('keydown', e => {
         if (e.key !== 'Escape') return;
+        // Ang modal sa ibabaw (Preview, History, Changes) muna; ang Edit sa ilalim ay naiiwang bukas.
+        const top = ['hist', 'pv', 'chg'].find(d => !$(d).classList.contains('hidden'));
+        if (top) { dialog(top, false); return; }
         if (!$('long').classList.contains('hidden')) closeLong();
         if (!$('pe').classList.contains('hidden')) closePe();
         modal('col-box', false); modal('page-box', false);
@@ -615,7 +850,11 @@
             const box = c.kind === 'image'
                 ? el('div', {class: 'flex items-center gap-2'}, [el('img', {alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'invisible h-10 w-10 shrink-0 rounded border border-slate-200 object-cover'}), input])
                 : input;
-            return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [el('label', {for: fid, class: 'mb-1 block text-xs font-medium text-slate-600', text: c.label}), box, el('div', {class: 'pe-was'})]);
+            const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': 'History of ' + c.label});
+            history.addEventListener('click', () => openHistory(r.page, c));
+            return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
+                el('div', {class: 'mb-1 flex items-center justify-between gap-2'}, [el('label', {for: fid, class: 'text-xs font-medium text-slate-600', text: c.label}), history]),
+                box, el('div', {class: 'pe-was'})]);
         }));
         $('pe').classList.remove('hidden');
         $('pe-fields').scrollTop = 0;
