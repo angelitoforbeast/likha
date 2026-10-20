@@ -242,6 +242,11 @@ class FlowEngine
             if (!$run->test) {
                 if ($minutes) ChatbotWaits::park($run->fields->pageId, $run->fields->psid, $run->flowId, $node['id'], now()->addMinutes($minutes));
                 else ChatbotWaits::forget($run->fields->pageId, $run->fields->psid);
+            } elseif ($minutes) {
+                // Test: ang deadline ay field ng test customer (hindi chatbot_waits, kaya hindi ito naaabot ng tick ng live).
+                $run->fields->set(CustomerFields::TEST_SKIP, now()->addMinutes($minutes)->toIso8601String());
+            } else {
+                $run->fields->clear(CustomerFields::TEST_SKIP);
             }
             $run->event('waiting', $node['id'], $minutes ? ['skip_after' => FlowGraph::skipLabel($minutes)] : []);
             return ['port' => 'reply', 'note' => $note . '; waiting for the reply', 'suspend' => true];
@@ -361,7 +366,14 @@ class FlowEngine
      */
     private function history(FlowRun $run, int $n): array
     {
-        if ($n <= 0 || $run->test) return [];
+        if ($n <= 0) return [];
+        // Test: ang usapan ng test customer (TestHistory), at ang mga naipadala na sa takbong ito.
+        if ($run->test) {
+            $sent = array_map(fn ($s) => ['role' => 'assistant', 'content' => TestHistory::text($s['messages'])], $run->sends);
+            $all = array_values(array_filter(array_merge(TestHistory::read($run->fields), $sent), fn ($m) => trim($m['content']) !== ''));
+
+            return array_slice($all, -$n);
+        }
         $psid = (string) $run->fields->psid;
 
         $in = BotcakeChat::where('page_id', $run->pageId)->where('psid', $psid)
@@ -385,7 +397,7 @@ class FlowEngine
         $vars = $run->vars();
         $row = array_map(fn ($t) => ChatbotVars::sheetCell((string) $t, $vars), (array) ($c['columns'] ?? []));
         $res = $outbox->appendRow($run, $node['id'], $id, $tab, $row);
-        $run->sheetRows[] = ['node' => $node['id'], 'sheet' => $id, 'tab' => $tab, 'row' => $row, 'status' => $res['status'], 'error' => $res['error']];
+        $run->sheetRows[] = ['node' => $node['id'], 'sheet' => $id, 'tab' => $tab, 'row' => $row, 'status' => $res['status'], 'error' => $res['error']] + array_filter(['note' => $res['note'] ?? null]);
         $run->event('sheet', $node['id'], ['result' => ['sent' => 'written', 'failed' => 'failed', 'skipped' => 'skipped'][$res['status']] ?? $res['status'], 'error' => (string) $res['error']]);
         if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Sheet failed: ' . $res['error']];
 

@@ -16,6 +16,8 @@ class CustomerFields
     public const BOT_PAUSED = '__bot_paused'; // '1' = tao ang sumasagot sa customer na ito (/chatbot/inbox): walang takbo ang bot
     public const AI = '__ai'; // request_id ng AI step na hinihintay pa ang sagot (chatbot:ai-pool): naghihintay ang mga bagong chat
     public const TEST_PSID = 0; // ang test customer ng Test tab
+    public const TEST_SKIP = '__test_skip_at'; // Test tab: kailan lalaktawan ang hinihintay (ang Test page ang nagpapatakbo, hindi ang tick)
+    public const TEST_HISTORY = '__test_history'; // Test tab: ang usapan ng test customer (JSON) para sa AI step
 
     /** @var array<string, string> */
     private array $values;
@@ -64,14 +66,17 @@ class CustomerFields
         unset($this->values[$key]);
         DB::table('chatbot_customer_values')->where('page_id', $this->pageId)->where('psid', $this->psid)->where('key', $key)->delete();
         // Ang timer ng skip ay kasabay ng __wait: tapos na ang paghihintay (sagot, skip, "clear all fields").
-        if ($key === self::WAIT) ChatbotWaits::forget($this->pageId, $this->psid);
+        if ($key === self::WAIT) {
+            ChatbotWaits::forget($this->pageId, $this->psid);
+            $this->clear(self::TEST_SKIP);
+        }
     }
 
     /** "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat at ang pause ng tao. */
     public function clearAll(): void
     {
         foreach (array_keys($this->values) as $key) {
-            if (!in_array($key, [self::LAST_CHAT, self::BOT_PAUSED], true)) $this->clear((string) $key);
+            if (!in_array($key, [self::LAST_CHAT, self::BOT_PAUSED, self::TEST_HISTORY], true)) $this->clear((string) $key);
         }
     }
 }

@@ -12,6 +12,9 @@ use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\FlowRun;
 use App\Services\Chatbot\TestOutbox;
+use App\Services\Chatbot\FlowGraph;
+use App\Services\Chatbot\ChatbotSheet;
+use App\Services\Chatbot\TestHistory;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
 use Carbon\Carbon;
@@ -167,17 +170,75 @@ class ChatbotTabsController extends Controller
         if (!is_array($graph)) return response()->json(['error' => 'This page has no flow. Pick one.'], 422);
 
         $fields = new CustomerFields((int) $pageId, CustomerFields::TEST_PSID);
+        $message = $this->str($request, 'message', 2000);
         $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page), $fields, null,
-            $this->str($request, 'message', 2000), 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
-        $engine->run($run, new TestOutbox());
+            $message, 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
+        $engine->run($run, $this->testOutbox($request));
+        TestHistory::record($fields, $message, $run);
+
+        return response()->json($this->testResult($flow, $version, $run, $fields));
+    }
+
+    /**
+     * Ang skip timer ng test customer (ang Test page ang nagtatanong habang may hinihintay): kapag lampas na sa oras, o
+     * "Skip now", nagpapatuloy ang takbo sa port na skipped, sa parehong engine at TestOutbox (walang Botcake, walang
+     * chatbot_waits). ran = false kapag wala pa o walang hinihintay.
+     */
+    public function testSkip(Request $request, ChatbotPage $chatbotPage, FlowEngine $engine)
+    {
+        $this->checkAccess();
+        [$page, $pageId] = $this->testPage($request);
+        if ($page === null) return response()->json(['error' => 'Pick a page that has a Botcake ID.'], 422);
+        $fields = new CustomerFields((int) $pageId, CustomerFields::TEST_PSID);
+        $due = $fields->get(CustomerFields::TEST_SKIP);
+        $wait = (string) $fields->get(CustomerFields::WAIT);
+        if ($due === null || $wait === '') return response()->json(['ran' => false, 'skip_in' => null]);
+        if (!$request->boolean('now') && Carbon::parse($due)->isFuture()) return response()->json(['ran' => false, 'skip_in' => $this->skipIn($fields)]);
+
+        [$flowId, $nodeId] = array_pad(explode(':', $wait, 2), 2, '');
+        $flow = ChatbotFlow::find((int) $flowId);
+        $version = $this->str($request, 'version', 10) === 'published' ? 'published' : 'draft';
+        $graph = $flow ? ($version === 'published' ? $flow->graph : $flow->draft()) : null;
+        $node = collect(is_array($graph) ? $graph['nodes'] ?? [] : [])->firstWhere('id', $nodeId);
+        $fields->clear(CustomerFields::TEST_SKIP);
+        if (!$node) return response()->json(['ran' => false, 'skip_in' => null, 'error' => 'The waiting step is not in this flow any more.']);
+
+        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page), $fields, null,
+            '', 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
+        $run->skippedAfter = FlowGraph::skipLabel((int) FlowGraph::skipMinutes((array) ($node['config'] ?? [])));
+        $engine->run($run, $this->testOutbox($request));
+        TestHistory::record($fields, null, $run);
+
+        return response()->json(['ran' => true] + $this->testResult($flow, $version, $run, $fields));
+    }
+
+    /** Ang outbox ng Test: ang sheet ay isinusulat lang kapag naka-on ang "Write sheet rows for real". */
+    private function testOutbox(Request $request): TestOutbox
+    {
+        return new TestOutbox($request->boolean('write_sheet') ? app(ChatbotSheet::class) : null);
+    }
+
+    /** Ilang segundo pa bago lumaktaw ang hinihintay ng test customer, o null. */
+    private function skipIn(CustomerFields $fields): ?int
+    {
+        $due = $fields->get(CustomerFields::TEST_SKIP);
+        if ($due === null || $fields->get(CustomerFields::WAIT) === null) return null;
+
+        return max(0, (int) ceil(now()->diffInSeconds(Carbon::parse($due), false)));
+    }
+
+    private function testResult(ChatbotFlow $flow, string $version, FlowRun $run, CustomerFields $fields): array
+    {
         $now = $fields->fields();
         ksort($now);
 
-        return response()->json([
-            'flow' => $flow->name, 'version' => $version, 'path' => $run->path, 'sends' => $run->sends, 'sheet_rows' => $run->sheetRows,
+        return [
+            'flow' => $flow->name, 'version' => $version, 'path' => $run->path, 'sends' => $run->sends,
+            // Ang linya sa Test chat: ang naisulat (TestOutbox) o "not written" kapag ipinapakita lang.
+            'sheet_rows' => array_map(fn ($r) => $r + ['note' => $r['status'] === 'test' ? 'Sheet row (not written): ' . $r['tab'] : null], $run->sheetRows),
             'changes' => $fields->changes, 'fields' => (object) $now, 'stopped' => $run->stopped,
-            'waiting' => $fields->get(CustomerFields::WAIT) !== null,
-        ]);
+            'waiting' => $fields->get(CustomerFields::WAIT) !== null, 'skip_in' => $this->skipIn($fields),
+        ];
     }
 
     public function testReset(Request $request)
