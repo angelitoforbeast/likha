@@ -220,7 +220,8 @@
         if (x.side === 'system' || x.side === 'event') {
             const icon = x.side === 'system' ? '▤' : ({run_started: '▶', run_ended: '■', condition: '◇', field: '✎', ai: '✦', sheet: '▤', waiting: '⏳', skipped: '⤼', sequence: '↻'}[x.type] || '•');
             return el('li', {class: 'ib-bubble mx-auto flex flex-col items-center text-center', tabindex: '0'}, [
-                el('span', {class: 'rounded-full px-2 py-0.5 text-xs ' + (x.side === 'system' && x.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'), text: icon + ' ' + x.text}), time]);
+                el('span', {class: 'rounded-full px-2 py-0.5 text-xs ' + (x.side === 'system' && x.status === 'failed' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'), text: icon + ' ' + x.text}),
+                x.link ? el('a', {href: x.link, target: '_blank', rel: 'noopener noreferrer', class: 'mt-0.5 text-xs text-blue-700 hover:underline', text: 'Open row'}) : null, time]);
         }
         if (x.side === 'in') {
             let body;

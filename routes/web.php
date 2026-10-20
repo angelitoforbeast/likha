@@ -310,6 +310,9 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/flows/{id}/rename', [\App\Http\Controllers\ChatbotFlowController::class, 'rename'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.rename');
     Route::post('/flows/{id}/duplicate', [\App\Http\Controllers\ChatbotFlowController::class, 'duplicate'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.duplicate');
     Route::delete('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'destroy'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.destroy');
+    Route::get('/sheet', [\App\Http\Controllers\ChatbotSheetController::class, 'info'])->middleware('throttle:30,1,chatbot-sheet')->name('sheet.info');
+    Route::get('/flows/{id}/sheet-customers', [\App\Http\Controllers\ChatbotSheetController::class, 'customers'])->whereNumber('id')->middleware('throttle:30,1,chatbot-sheet-customers')->name('flows.sheet-customers');
+    Route::post('/flows/{id}/sheet-preview', [\App\Http\Controllers\ChatbotSheetController::class, 'preview'])->whereNumber('id')->middleware('throttle:60,1,chatbot-sheet-preview')->name('flows.sheet-preview');
 
     Route::get('/chats', [ChatblastChatController::class, 'index'])->name('chats');
     Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');

@@ -118,6 +118,7 @@ class ChatbotTabsController extends Controller
             'page' => BotcakeChat::pageMap()[(string) $r->page_id] ?? ('Page ' . $r->page_id), 'page_id' => (string) $r->page_id, 'psid' => (string) $r->psid,
             'chat_id' => $r->chat_id, 'flow' => $r->flow_id ? ChatbotFlow::whereKey($r->flow_id)->value('name') : null, 'node' => $r->node_id,
             'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'http' => $r->http, 'content' => $r->content,
+            'link' => $r->kind === 'sheet' ? \App\Services\Chatbot\ChatbotSheet::rowLink((array) $r->content) : null,
         ]);
     }
 

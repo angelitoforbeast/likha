@@ -223,7 +223,7 @@ class Inbox
                 'status' => $r->status, 'error' => $r->error];
             if ($r->kind === 'sheet') {
                 $text = match ($r->status) { 'sent' => 'Order row written to sheet', 'failed' => 'Order row failed: ' . $r->error, default => 'Order row skipped: ' . $r->error };
-                $items[] = $base + ['side' => 'system', 'text' => $text];
+                $items[] = $base + ['side' => 'system', 'text' => $text, 'link' => ChatbotSheet::rowLink((array) $r->content)];
                 continue;
             }
             $messages = array_values(array_filter(array_map(fn ($m) => ($m['type'] ?? '') === 'image'

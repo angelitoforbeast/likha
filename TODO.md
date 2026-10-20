@@ -835,3 +835,12 @@ Accepted, not fixed:
 - **A one-cell paste whose text is a field name ("price", "flow") is read as a header line** and answered "Only a header line was pasted". Reason: it is the spec's own rule (a first line that names fields is a header); the message says what happened.
 - **The flow editor canvas (`/chatbot/flows/{id}`) still uses `height: calc(100vh - 17rem)`.** Reason: it has no scrollbar (the canvas pans and zooms inside), and another spec is changing that page now; the same `.cb-page` fix can follow there.
 - **Suggestion for the owner: map pasted rows by the PAGE column.** An LDT sheet copied with its PAGE column could fill each page by name instead of by order. Reason: not in this spec; today PAGE is listed as ignored.
+
+## 090: Google Sheet step picker (2026-10-20)
+
+- **A sheet shared as Viewer reads fine in the editor,** so the name, tabs and headers show, but every run then fails at append with "Google refused the row". Reason: the brief covers 403/404 only; telling Viewer from Editor needs a Drive permission call or a standing hint. A product decision for the owner.
+- **Google also answers 403 for "API not enabled" or a missing scope,** and those show the share message too. Reason: misleading but leaks nothing, and both are server setup that is already done.
+- **No test runs the real Google request** (the `spreadsheets.get` field mask, the `'<tab>'!1:1` range with an apostrophe in the tab name, `getUpdates()->getUpdatedRange()`): `fetchInfo`, `fetchHeaders` and `append` are faked. Reason: it needs a mocked Google HTTP handler for the client library; the three calls are one line each and follow the existing `append`.
+- **No test for the rate limit** on `GET /chatbot/sheet` (30 a minute) or for preview inputs like `columns` sent as a string or over 50 items. Reason: the limit is the route's standard `throttle` middleware, and the columns go through `FlowGraph::cleanConfig`, which the hardening tests already cover.
+- **The preview shows botfield values** (the page's chatbot settings) when a template names them. Reason: the Test tab builds the same variables for the same users, so this is no new exposure.
+- **"Open row" is in the reply's detail on `/chatbot/replies`, not in the list rows.** Reason: a list row opens the detail with one click; the list stays one line per reply.
