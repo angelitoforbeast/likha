@@ -333,6 +333,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/replies', [\App\Http\Controllers\ChatbotTabsController::class, 'replies'])->name('replies');
     Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->middleware('throttle:60,1,chatbot-replies')->name('replies.data');
     Route::get('/replies/{id}', [\App\Http\Controllers\ChatbotTabsController::class, 'reply'])->whereNumber('id')->name('replies.show');
+    Route::get('/results', [\App\Http\Controllers\ChatbotResultsController::class, 'index'])->middleware('throttle:60,1,chatbot-results')->name('results');
+    Route::get('/results.json', [\App\Http\Controllers\ChatbotResultsController::class, 'json'])->middleware('throttle:60,1,chatbot-results-json')->name('results.json');
     Route::get('/test', [\App\Http\Controllers\ChatbotTabsController::class, 'test'])->name('test');
     Route::post('/test/send', [\App\Http\Controllers\ChatbotTabsController::class, 'testSend'])->middleware('throttle:30,1,chatbot-test')->name('test.send');
     Route::post('/test/reset', [\App\Http\Controllers\ChatbotTabsController::class, 'testReset'])->middleware('throttle:30,1,chatbot-test')->name('test.reset');

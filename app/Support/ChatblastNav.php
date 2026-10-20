@@ -44,7 +44,7 @@ class ChatblastNav
     }
 
     /**
-     * Ang nav ng /chatbot (Flow, Sequences, Page settings, Chats, Inbox, Replies, Test). Access gaya ng /chatblast.
+     * Ang nav ng /chatbot (Flow, Sequences, Page settings, Chats, Inbox, Replies, Results, Test). Access gaya ng /chatblast.
      * @return array<int, array{label: string, url: string, active: bool}>
      */
     public static function chatbotItems(?string $role): array
@@ -58,6 +58,7 @@ class ChatblastNav
             ['label' => 'Chats', 'url' => '/chatbot/chats', 'active' => request()->is('chatbot/chats*')],
             ['label' => 'Inbox', 'url' => '/chatbot/inbox', 'active' => request()->is('chatbot/inbox*')],
             ['label' => 'Replies', 'url' => '/chatbot/replies', 'active' => request()->is('chatbot/replies*')],
+            ['label' => 'Results', 'url' => '/chatbot/results', 'active' => request()->is('chatbot/results*')],
             ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
         ];
     }
