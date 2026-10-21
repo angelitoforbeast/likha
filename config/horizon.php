@@ -202,7 +202,7 @@ return [
     'defaults' => [
         'chatbot' => [
             'connection' => 'redis',
-            'queue' => ['chatbot'],
+            'queue' => ['chatbot-high', 'chatbot'], // balance auto: isang pool kada queue, kaya ang unang sagot ay may sariling workers
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'minProcesses' => 2,

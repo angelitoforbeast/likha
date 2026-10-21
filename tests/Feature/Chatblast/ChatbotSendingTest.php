@@ -149,7 +149,7 @@ class ChatbotSendingTest extends ChatblastTestCase
 
         $this->greeting();
         $post('with a flow');
-        Queue::assertPushedOn('chatbot', RunChatbotFlow::class, fn ($job) => $job->chatId === BotcakeChat::where('message', 'with a flow')->value('id'));
+        Queue::assertPushedOn('chatbot-high', RunChatbotFlow::class, fn ($job) => $job->chatId === BotcakeChat::where('message', 'with a flow')->value('id'));
 
         app(ChatbotPage::class)->link('Page Uno', null);
         $s->set('Page Uno', 'chatbot', 'flow', 'No Such Flow'); // FLOW text lang, walang flow_id: walang takbo
