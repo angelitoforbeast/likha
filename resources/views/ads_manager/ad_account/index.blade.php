@@ -150,7 +150,7 @@
                   {{ $e->ad_account_id }}
                 @endif
               </td>
-              <td class="p-2 border-b">
+              <td class="p-2 border-b min-w-[14rem]">
                 @if ($e->old_name !== null && $e->old_name !== $e->name)
                   <span class="text-gray-500">{{ $e->old_name }}</span> → {{ $e->name }}
                 @elseif ($e->action === 'deleted')
