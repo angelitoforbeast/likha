@@ -941,3 +941,10 @@ Accepted, not fixed:
   - a Marketing - OIC viewer of a delete row
 
   Reason: each is the plain path of existing code (preview returns before the delete; `DB::transaction`; the existing `isCeoView` gate) and none is on an untrusted path with a realistic failure.
+
+- Spec 107 accepted review minors (promo delete):
+  - The breakdown matrix list (`OwnerPrivateController` ~4049) now returns `'NONE'` instead of null for a legacy NULL promo; that is the "NULL reads as NONE" decision, and the matrix shows the value as is.
+  - Deleting a promo that is already NONE or '' writes no log row, the same as S-104.2 for an empty RTS.
+  - An RTS-only save with no promo to carry writes `'NONE'`, which ends an older promo added later with an earlier date; this follows the "one meaning for no promo" decision.
+
+  Reason: each one follows a fixed decision of the spec or an existing rule, and none is on an untrusted path with a realistic failure.
