@@ -205,14 +205,19 @@ class ChatbotSequences
         $this->resumePaused();
         $until = microtime(true) + self::SECONDS;
         $queued = 0;
+        $after = null; // ang huling row ng nakaraang batch: ang nilaktawan (naghihintay pa ang job) ay hindi binabasa ulit
         do {
             // Walang row lock: ang kondisyonal na claim (isa-isa) ang nagsisiguro na isang beses lang.
-            $ids = DB::table('chatbot_sequence_subscriptions as s')
+            $rows = DB::table('chatbot_sequence_subscriptions as s')
                 ->join('chatbot_sequences as q', 'q.id', '=', 's.sequence_id')
                 ->where('s.status', 'active')->where('q.active', true)->where('s.next_send_at', '<=', now())
                 ->where(fn ($w) => $w->whereNull('s.dispatched_at')->orWhere('s.dispatched_at', '<', now()->subMinutes(self::REDISPATCH_MINUTES)))
-                ->orderBy('s.next_send_at')->limit(self::BATCH)->pluck('s.id')->map(fn ($id) => (int) $id)->all();
-            if (!$ids) break;
+                ->when($after, fn ($q) => $q->where(fn ($w) => $w->where('s.next_send_at', '>', $after->next_send_at)
+                    ->orWhere(fn ($x) => $x->where('s.next_send_at', $after->next_send_at)->where('s.id', '>', $after->id))))
+                ->orderBy('s.next_send_at')->orderBy('s.id')->limit(self::BATCH)->get(['s.id', 's.next_send_at']);
+            if ($rows->isEmpty()) break;
+            $after = $rows->last();
+            $ids = $rows->pluck('id')->map(fn ($id) => (int) $id)->all();
             $stamp = now()->format('Y-m-d H:i:s');
             foreach ($this->claim($ids, $stamp) as $id) {
                 RunChatbotSequenceStep::dispatch($id, $stamp);

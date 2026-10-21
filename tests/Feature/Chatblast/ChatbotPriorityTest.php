@@ -47,7 +47,7 @@ class ChatbotPriorityTest extends ChatblastTestCase
     /** Isang sequence na may isang step na due na agad, at ang subscription ng customer. */
     private function due(string $psid = '7001'): int
     {
-        $flow = ChatbotFlow::create(['name' => 'Flow', 'graph' => FlowGraph::clean(['nodes' => [
+        $flow = ChatbotFlow::firstOrCreate(['name' => 'Flow'], ['graph' => FlowGraph::clean(['nodes' => [
             ['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'Seq 1']]]],
         ], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]])]);
         $seq = ChatbotSequence::firstOrCreate(['name' => 'Preorder'], ['active' => true, 'exit_on_reply' => true]);
@@ -154,5 +154,31 @@ class ChatbotPriorityTest extends ChatblastTestCase
         $real->tick();
         Queue::assertPushed(RunChatbotSequenceStep::class, fn ($j) => $j->subscriptionId === $id);
         $this->assertFalse(Cache::lock(UniqueLock::getKey(new RunChatbotSequenceStep($id)), 1)->get(), 'the new job holds the lock');
+    }
+
+    public function test_S_108_6_a_full_batch_of_waiting_jobs_does_not_hide_the_due_rows_behind_it(): void
+    {
+        Queue::fake();
+        $first = $this->due();
+        $seq = DB::table('chatbot_sequence_subscriptions')->where('id', $first)->value('sequence_id');
+        // Isang buong batch na naghihintay pa sa queue (hawak ang lock, claim na lampas 10 minuto), at sa likod nila ay
+        // isang due na walang job.
+        $rows = [];
+        for ($k = 1; $k < ChatbotSequences::BATCH; $k++) {
+            $rows[] = ['sequence_id' => $seq, 'page_id' => 1001, 'psid' => 8000 + $k, 'status' => 'active', 'current_step' => 1, 'next_send_at' => now()->subHours(2),
+                'dispatched_at' => null, 'enrolled_via' => 'other', 'created_at' => now(), 'updated_at' => now()];
+        }
+        DB::table('chatbot_sequence_subscriptions')->insert($rows);
+        DB::table('chatbot_sequence_subscriptions')->update(['next_send_at' => now()->subHours(2), 'dispatched_at' => now()->subMinutes(11)]);
+        foreach (DB::table('chatbot_sequence_subscriptions')->pluck('id') as $id) {
+            $this->assertTrue((new UniqueLock(app('cache.store')))->acquire(new RunChatbotSequenceStep((int) $id)));
+        }
+        $behind = $this->due('7999');
+        DB::table('chatbot_sequence_subscriptions')->where('id', $behind)->update(['next_send_at' => now()->subHour()]);
+
+        $start = microtime(true);
+        $this->assertSame(1, app(ChatbotSequences::class)->tick());
+        Queue::assertPushed(RunChatbotSequenceStep::class, fn ($j) => $j->subscriptionId === $behind);
+        $this->assertLessThan(ChatbotSequences::SECONDS / 2, microtime(true) - $start, 'one pass over the waiting rows, not a 50 s spin');
     }
 }
