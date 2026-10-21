@@ -949,3 +949,9 @@ Accepted, not fixed:
 - **A seller's text can close the `<<<TEXT … TEXT>>>` marker and steer the AI's verdict.** Reason: botfields are written by staff, and the worst effect is a wrong pass or X in the Check column; nothing is written or sent.
 - **An image answer is keyed by its URL: a picture replaced behind the same URL keeps its old answer** until the URL or the expected item changes. Reason: Facebook/CDN picture URLs change when the picture changes; hashing the image would mean downloading it on our server.
 - **Untested here:** the pgsql and mysql runs of the grouped orders query (quoted `PAGE`, `ITEM_NAME`, `COD`; `BTRIM`), the tie-break between two equally common pairs, the 6,000-character cut of a long text, and the job's time budget. Reason: the test DB is sqlite; the others are simple guards and the suite stays small.
+- Spec 107 accepted review minors (promo delete):
+  - The breakdown matrix list (`OwnerPrivateController` ~4049) now returns `'NONE'` instead of null for a legacy NULL promo; that is the "NULL reads as NONE" decision, and the matrix shows the value as is.
+  - Deleting a promo that is already NONE or '' writes no log row, the same as S-104.2 for an empty RTS.
+  - An RTS-only save with no promo to carry writes `'NONE'`, which ends an older promo added later with an earlier date; this follows the "one meaning for no promo" decision.
+
+  Reason: each one follows a fixed decision of the spec or an existing rule, and none is on an untrusted path with a realistic failure.

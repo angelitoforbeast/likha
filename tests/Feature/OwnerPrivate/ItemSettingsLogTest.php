@@ -95,8 +95,8 @@ class ItemSettingsLogTest extends OwnerPrivateTestCase
     {
         return [
             'rts'   => ['rts',   'old_rts_pct',    25.0,   []],
-            // NOT NULL ang promo column: walang RTS ang row, kaya buong row ang nabubura
-            'promo' => ['promo', 'old_promo',      'B1T1', ['rts_pct' => null]],
+            // may RTS pa ang row: nananatili ito, promo → 'NONE'
+            'promo' => ['promo', 'old_promo',      'B1T1', []],
             'cogs'  => ['cogs',  'old_item_value', 120.0,  []],
         ];
     }
@@ -122,11 +122,112 @@ class ItemSettingsLogTest extends OwnerPrivateTestCase
         $this->assertSame('ceo@example.test', $row['user_email']);
         $this->assertSame(['Page One', 'Item A', '2026-10-05'], [$row['page_name'], $row['item_name'], $row['effective_date']]);
         is_float($old) ? $this->assertEquals($old, (float) $row[$oldCol]) : $this->assertSame($old, $row[$oldCol]);
-        $this->assertNull($row['new' . substr($oldCol, 3)]);
+        $field === 'promo'
+            ? $this->assertSame('NONE', $row['new_promo'])
+            : $this->assertNull($row['new' . substr($oldCol, 3)]);
         if ($field === 'cogs') {
             $this->assertEquals(90.0, (float) $row['old_item_value_ceo']);
             $this->assertNull($row['new_item_value_ceo']);
         }
+    }
+
+    private function deleteField(string $field)
+    {
+        return $this->postJson('/owner/private/item-setting/delete', [
+            'page_name' => 'Page One', 'item_name' => 'Item A', 'effective_date' => '2026-10-05',
+            'mode_cod_int' => 499, 'field' => $field,
+        ]);
+    }
+
+    private function settingRow(): ?array
+    {
+        $r = DB::table('page_item_settings')->first(['rts_pct', 'promo', 'comment']);
+        return $r ? ['rts_pct' => $r->rts_pct === null ? null : (float) $r->rts_pct, 'promo' => $r->promo, 'comment' => $r->comment] : null;
+    }
+
+    public static function promoDeletes(): array
+    {
+        return [
+            'S-107.1 row with RTS: kept, promo NONE'   => [['rts_pct' => 25],                     ['rts_pct' => 25.0, 'promo' => 'NONE', 'comment' => null]],
+            'S-107.2 no RTS, no comment: row removed'  => [['rts_pct' => null],                   null],
+            'S-107.2 no RTS, with comment: kept, NONE' => [['rts_pct' => null, 'comment' => 'x'], ['rts_pct' => null, 'promo' => 'NONE', 'comment' => 'x']],
+        ];
+    }
+
+    #[DataProvider('promoDeletes')]
+    public function test_S_107_1_2_delete_promo_writes_none_or_removes_the_empty_row_and_logs_it(array $row, ?array $after): void
+    {
+        $this->setting($row);
+        $this->ceo();
+
+        $this->deleteField('promo')->assertOk()->assertJson(['ok' => true]);
+
+        $this->assertSame($after, $this->settingRow());
+        $logs = $this->logs();
+        $this->assertCount(1, $logs);
+        $this->assertSame(['B1T1', 'NONE'], [$logs[0]['old_promo'], $logs[0]['new_promo']]);
+        // edit-logs: struck through pa rin bilang "deleted", hindi "cleared"
+        $this->assertStringContainsString(
+            '<span class="delta-old delta-text">B1T1</span><span class="delta-arrow">→</span><span class="delta-deleted">deleted</span>',
+            $this->get('/owner/private/edit-logs')->assertOk()->getContent()
+        );
+    }
+
+    public function test_S_107_3_delete_rts_on_a_row_with_promo_keeps_the_row_with_rts_null(): void
+    {
+        $this->setting();
+        $this->ceo();
+
+        $this->deleteField('rts')->assertOk();
+
+        $this->assertSame(['rts_pct' => null, 'promo' => 'B1T1', 'comment' => null], $this->settingRow());
+    }
+
+    public static function bothDeleted(): array
+    {
+        return [
+            'rts then promo'               => [['rts', 'promo'], []],
+            'promo then rts'               => [['promo', 'rts'], []],
+            // promo NONE na: walang natitira pagka-delete ng RTS → burado ang row
+            'rts on a row with promo NONE' => [['rts'],          ['promo' => 'NONE']],
+        ];
+    }
+
+    #[DataProvider('bothDeleted')]
+    public function test_S_107_4_deleting_both_removes_the_row(array $fields, array $row): void
+    {
+        $this->setting($row);
+        $this->ceo();
+
+        foreach ($fields as $f) $this->deleteField($f)->assertOk();
+
+        $this->assertNull($this->settingRow());
+    }
+
+    public function test_S_107_5_saving_rts_with_no_promo_anywhere_writes_none(): void
+    {
+        $this->ceo();
+
+        $this->postJson('/owner/private/item-setting', [
+            'page_name' => 'Page One', 'item_name' => 'Item A', 'effective_date' => '2026-10-05',
+            'mode_cod_int' => 499, 'scope' => 'rts', 'rts_pct' => 30, 'comment' => 'bagong RTS',
+        ])->assertOk();
+
+        $this->assertSame('NONE', DB::table('page_item_settings')->value('promo'));
+    }
+
+    public function test_S_107_7_a_failed_delete_gives_a_readable_message_without_sql(): void
+    {
+        $this->setting();
+        $this->ceo();
+        Schema::drop('page_item_settings');
+
+        $res = $this->deleteField('rts')->assertStatus(500)->assertJson(['ok' => false]);
+
+        $msg = (string) $res->json('message');
+        $this->assertNotSame('', $msg);
+        $this->assertStringNotContainsStringIgnoringCase('sql', $msg);
+        $this->assertStringNotContainsString('page_item_settings', $msg);
     }
 
     public function test_S_104_2_owner_private_delete_of_a_field_with_no_value_writes_no_row(): void

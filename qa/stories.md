@@ -1883,3 +1883,16 @@ Spec 106. As the owner, I want the Check column of `/chatbot/pages` to tell me w
 | S-106.9 | The check JSON has `warnings` and `content {expected {item, price, source}, findings [{kind, field, level, reason}], unchecked}`; `chatbot:content-check --json` prints `{pages: [{page, expected, findings, unchecked}]}` | `test_S_106_9…` | Passed · 2026-10-21 · auto |
 | S-106.10 | Each AI answer stores its model, tokens and cost_usd; a failed or invalid AI answer stores nothing and stays not checked yet; a string "true" or "false" is accepted | `test_S_106_10…` | Passed · 2026-10-21 · auto |
 | S-106.11 | At 1366 and 390 px the Check column shows content X reasons in red, warnings in amber and "not checked yet" in grey, with no page-level horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+## S-107 Deleting a promo (or an RTS) on /owner/private always works and leaves a clean row
+
+Spec 107. As the owner, I want the delete control for RTS and promo on the /owner/private breakdown to always work, so that a promo can be removed from a row that still has an RTS, and no empty rows are left behind. "No promo" is `'NONE'` everywhere. Tests: `tests/Feature/OwnerPrivate/ItemSettingsLogTest.php`, `tests/Feature/OwnerPrivate/ItemSummaryProfitMTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-107.1 | Given a row with RTS 25 and promo B1T1, when the CEO deletes the promo, then the row stays with RTS 25 and promo 'NONE', and one delete log row has B1T1 → 'NONE', shown on edit-logs as "B1T1 → deleted" | `test_S_107_1_2…` (row with RTS) | Passed · 2026-10-21 · auto |
+| S-107.2 | Given a row with no RTS and promo B1T1, when the promo is deleted, then the row is removed when it has no comment, and kept with promo 'NONE' when it has one; the log row is written either way | `test_S_107_1_2…` (no RTS, with and without comment) | Passed · 2026-10-21 · auto |
+| S-107.3 | Given a row with RTS and promo, when the RTS is deleted, then the row stays with RTS NULL and the promo unchanged | `test_S_107_3…` | Passed · 2026-10-21 · auto |
+| S-107.4 | When both RTS and promo are deleted (either order), or the RTS is deleted on a row whose promo is already 'NONE', then the row is removed | `test_S_107_4…` (3 sets) | Passed · 2026-10-21 · auto |
+| S-107.5 | Given no promo anywhere before the date, when an RTS-only save creates the row, then its promo is 'NONE' (not '') | `test_S_107_5…` | Passed · 2026-10-21 · auto |
+| S-107.6 | Given an older row with promo B1T1 and a later legacy row with promo NULL, when the page summary is read, then the promo is 'NONE' (NULL reads like 'NONE') | `test_S_107_6…` | Passed · 2026-10-21 · auto |
+| S-107.7 | When a delete fails on the server, then the response is 500 with ok false and a readable message without SQL; the breakdown page shows it in a red notice, and a success shows a green "Nabura ang …" notice | `test_S_107_7…` (server); notice: not browser-checked | Passed · 2026-10-21 · auto |
