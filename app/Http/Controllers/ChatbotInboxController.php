@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
-use App\Services\BotcakeClient;
 use App\Services\Chatbot\BotcakeOutbox;
+use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotTags;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
@@ -147,17 +147,9 @@ class ChatbotInboxController extends Controller
 
         // Pause muna bago ipadala: ang chat na dumating habang naghihintay sa Botcake ay hindi na sasagutin ng bot.
         if ($request->boolean('pause')) (new CustomerFields((int) $pageId, (int) $psid))->set(CustomerFields::BOT_PAUSED, '1');
-        $token = trim((string) $this->settings->get($page, 'botcake', 'token'));
-        $status = 'failed';
-        $error = 'The page has no Botcake token.';
-        $http = null;
-        $raw = null;
-        if ($token !== '') {
-            $r = app(BotcakeClient::class)->shared(sha1($token), 15)->once(15)->sendContent($pageId, $psid, $messages, $token);
-            $http = $r['http'] ?: null;
-            $o = BotcakeOutbox::outcome($r, $token);
-            [$status, $error, $raw] = [$o['status'], $o['error'], $o['raw'] ?? null];
-        }
+        // Ang daan ng page (Botcake o ang Forbeast Gateway), isang subok lang.
+        $o = ChatbotProvider::for($page, true)->send($page, $pageId, $psid, $messages, ChatbotProvider::ref());
+        [$status, $error, $http, $raw] = [$o['status'], $o['error'], $o['http'], $o['raw'] ?? null];
         $reply = ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
             'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]
             + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : [])

@@ -19,7 +19,7 @@ class BotcakeChatGuard
     /** Dahilan => label sa Setup box. */
     public const REASONS = [
         'bad_ip' => 'IP not on the list', 'bad_key' => 'Bad key', 'unknown_page' => 'Unknown page', 'psid_not_found' => 'PSID not on the page',
-        'psid_unchecked' => 'PSID could not be checked', 'bot_off' => 'Bot off',
+        'psid_unchecked' => 'PSID could not be checked', 'bot_off' => 'Bot off', 'gateway_page' => 'Page uses the gateway',
     ];
     public const VERIFY_TIMEOUT = 5;      // segundo: naghihintay ang Botcake sa sagot
     public const NOT_ON_PAGE_SECONDS = 3600;

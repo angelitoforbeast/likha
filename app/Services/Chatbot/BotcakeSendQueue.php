@@ -35,10 +35,14 @@ class BotcakeSendQueue
         return (bool) config('services.botcake.async_sends', true) && BotcakeSendPool::alive() && Schema::hasTable(self::TABLE);
     }
 
-    /** Ipapasa ba ang padala ng takbong ito: live (hindi Test o sequence), sa Botcake, at naka-on ang mga sagot. */
+    /**
+     * Ipapasa ba ang padala ng takbong ito: live (hindi Test o sequence), sa Botcake, at naka-on ang mga sagot. Ang page na
+     * nasa Forbeast Gateway ay diretso (ang gateway ang may pila at rate kada page).
+     */
     public static function async(FlowRun $run, Outbox $outbox): bool
     {
-        return !$run->test && $run->startedBy === null && $outbox instanceof BotcakeOutbox && BotcakeOutbox::enabled() && self::enabled();
+        return !$run->test && $run->startedBy === null && $outbox instanceof BotcakeOutbox && BotcakeOutbox::enabled() && self::enabled()
+            && ChatbotProvider::name($run->pageName) === ChatbotProvider::BOTCAKE;
     }
 
     public static function chatbotCustomer(int|string $pageId, int|string $psid): string

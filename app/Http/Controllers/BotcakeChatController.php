@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\RunChatbotFlow;
 use App\Models\BotcakeChat;
 use App\Services\BotcakeChatGuard;
-use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\ChatbotInbound;
+use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
@@ -124,6 +124,13 @@ class BotcakeChatController extends Controller
             return response()->json(['ok' => true]);
         }
 
+        // (6c) Ang page ay nasa Forbeast Gateway: doon nanggagaling ang chat, kaya walang iniimbak dito (walang dobleng sagot).
+        if (ChatbotProvider::name($pageName) === ChatbotProvider::GATEWAY) {
+            $guard->count('gateway_page');
+            Log::info('botcake chat: skipped, the page uses the gateway', ['page' => $pageName]);
+            return response()->json(['ok' => true]);
+        }
+
         // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
         // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
         // Ang ad ID ng Facebook ay numero lang: ang iba ay hindi itinatala sa botcake_psids (nasa payload pa rin).
@@ -152,27 +159,8 @@ class BotcakeChatController extends Controller
 
         if (!$this->isDuplicate($f)) {
             $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
-            // Sumagot ang customer: alisin sa mga sequence ng page na may "exit when the customer replies".
-            try {
-                if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) {
-                    app(\App\Services\Chatbot\ChatbotSequences::class)->exitOnReply((int) $chat->page_id, (int) $chat->psid);
-                }
-            } catch (\Throwable $e) {
-                report($e);
-            }
-            // Results: ang mga padala sa customer na wala pang sagot ay sinagot ng chat na ito.
-            try {
-                if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) \App\Jobs\MarkChatbotReplied::dispatch($chat->id);
-            } catch (\Throwable $e) {
-                report($e);
-            }
-            // Ang sariling chatbot: kapag may flow ang page (at naka-On), ang takbo ay sa queue na "chatbot". Ang
-            // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.
-            try {
-                if (app(ChatbotPage::class)->flow($pageName)) RunChatbotFlow::dispatch($chat->id);
-            } catch (\Throwable $e) {
-                report($e);
-            }
+            // Ang sequence, Results at takbo ng flow: iisang daan kasama ng Forbeast Gateway.
+            ChatbotInbound::afterStore($chat, $pageName);
         }
 
         return response()->json(['ok' => true]);

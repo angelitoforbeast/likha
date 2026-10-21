@@ -139,6 +139,16 @@ return [
         'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 50),
     ],
 
+    // Forbeast Gateway: ang sariling daan ng mensahe papunta at mula sa Messenger, pinipili kada page (chatbot.provider).
+    // Walang url = hindi mapipili ang gateway at ang padala ay failed na may dahilan. Ang webhook_secret ang pumipirma sa
+    // /api/gateway/events; walang laman = 503 (walang tinatanggap).
+    'gateway' => [
+        'url' => rtrim((string) env('GATEWAY_URL', ''), '/'),
+        'key' => env('GATEWAY_KEY'),
+        'webhook_secret' => env('GATEWAY_WEBHOOK_SECRET'),
+        'timeout' => (int) env('GATEWAY_TIMEOUT', 10),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),

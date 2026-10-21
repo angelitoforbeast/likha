@@ -8,6 +8,7 @@ use App\Services\BotcakeChatBlock;
 use App\Services\BotcakePageSetup;
 use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotPageCheck;
+use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
@@ -74,7 +75,7 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id'], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider'], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
@@ -88,6 +89,7 @@ class ChatbotController extends Controller
             $pageId = null;
             $active = true;
             $flowId = null;
+            $provider = ChatbotProvider::BOTCAKE;
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
@@ -95,6 +97,7 @@ class ChatbotController extends Controller
                 }
                 if ($s->key === 'active') $active = $s->plainValue() !== '0';
                 elseif ($s->key === 'flow_id') $flowId = (int) $s->plainValue();
+                elseif ($s->key === 'provider') $provider = $s->plainValue() === ChatbotProvider::GATEWAY ? ChatbotProvider::GATEWAY : ChatbotProvider::BOTCAKE;
                 else $cells[$s->key] = $s->plainValue();
             }
             // FLOW: ang flow na talagang nakatali (ayon sa id). Ang lumang text na hindi nakatali ay hiwalay, para
@@ -103,14 +106,14 @@ class ChatbotController extends Controller
             $linked = $flowId ? ($flowNames[$flowId] ?? null) : null;
             if ($linked !== null) $cells['flow'] = $linked; else unset($cells['flow']);
             $rows[] = [
-                'page' => $page, 'page_id' => $pageId, 'active' => $active, 'cells' => (object) $cells,
+                'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints),
             ];
         }
 
-        return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames()]);
+        return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady()]);
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */
@@ -214,6 +217,25 @@ class ChatbotController extends Controller
         if ($col === null) return response()->json(['error' => 'Use letters or numbers (ACTIVE is taken); at most ' . ChatbotFields::MAX_ADDED . ' added columns.'], 422);
 
         return response()->json($col + ['kind' => ChatbotFields::kind($col['key'])]);
+    }
+
+    /**
+     * Ang daan ng chatbot ng page: Botcake o ang Forbeast Gateway (chatbot.provider, may history). Access gaya ng isang cell;
+     * ang gateway ay mapipili lang kapag naka-set up (GATEWAY_URL).
+     */
+    public function provider(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        $provider = strtolower($this->str($request, 'provider', 20));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        if (!in_array($provider, ChatbotProvider::ALL, true)) return response()->json(['error' => 'Pick Botcake or Forbeast Gateway.'], 422);
+        if ($provider === ChatbotProvider::GATEWAY && !ChatbotProvider::gatewayReady()) {
+            return response()->json(['error' => 'The Forbeast Gateway is not set up yet.'], 422);
+        }
+        $res = $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id());
+
+        return response()->json(['status' => $res['status'], 'provider' => $provider]);
     }
 
     /** ACTIVE On (isulat ang block at i-publish) o Off (i-unpublish lang). Ang error ng Botcake ay walang binabago dito. */

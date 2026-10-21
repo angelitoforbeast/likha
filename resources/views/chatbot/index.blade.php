@@ -55,6 +55,7 @@
      data-history-url="{{ route('chatbot.history') }}"
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
+     data-provider-url="{{ route('chatbot.provider') }}"
      @if($isCeo) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}" @endif>
 
     <div class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
@@ -210,7 +211,7 @@
     const box = document.getElementById('cbot'), url = box.dataset, $ = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
-    let columns = [], rows = [], flows = [], editing = null;
+    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false;
     const marks = new Map(), seqs = new Map(), errors = new Map();
     let openRow = null; // ang page ng row na bukas (isa lang)
     // Paste: ang hindi pa naka-save (id => {page, key, value, old}), ang napiling mga cell (dalawang sulok, {page, key}),
@@ -238,7 +239,7 @@
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
-        columns = data.columns; rows = data.rows; flows = data.flows || [];
+        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready;
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha isa-isa pagkatapos ng render.
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -489,10 +490,30 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b);
+        td.append(b, providerSelect(r));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
         return td;
+    }
+
+    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast Gateway (hindi mapipili kapag hindi pa naka-set up).
+    function providerSelect(r) {
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via, ' + r.page, title: 'Replies via'}, [
+            el('option', {value: 'botcake', text: 'Botcake'}),
+            el('option', {value: 'gateway', text: 'Forbeast Gateway' + (gatewayReady ? '' : ' (not set up)'), disabled: gatewayReady ? null : ''}),
+        ]);
+        sel.value = r.provider || 'botcake';
+        sel.addEventListener('change', async () => {
+            const want = sel.value;
+            if (!confirm('Send and receive ' + r.page + "'s chats through " + (want === 'gateway' ? 'the Forbeast Gateway' : 'Botcake') + '?')) { sel.value = r.provider; return; }
+            sel.disabled = true;
+            try {
+                const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
+                if (ok) { r.provider = data.provider; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+            } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
+            render();
+        });
+        return sel;
     }
 
     function paintSwitch(b, on) {

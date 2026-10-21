@@ -1896,3 +1896,19 @@ Spec 107. As the owner, I want the delete control for RTS and promo on the /owne
 | S-107.5 | Given no promo anywhere before the date, when an RTS-only save creates the row, then its promo is 'NONE' (not '') | `test_S_107_5…` | Passed · 2026-10-21 · auto |
 | S-107.6 | Given an older row with promo B1T1 and a later legacy row with promo NULL, when the page summary is read, then the promo is 'NONE' (NULL reads like 'NONE') | `test_S_107_6…` | Passed · 2026-10-21 · auto |
 | S-107.7 | When a delete fails on the server, then the response is 500 with ok false and a readable message without SQL; the breakdown page shows it in a red notice, and a success shows a green "Nabura ang …" notice | `test_S_107_7…` (server); notice: not browser-checked | Passed · 2026-10-21 · auto |
+
+## S-111 Each chatbot page runs through Botcake or the Forbeast Gateway, chosen per page
+
+Spec 111. As the owner, I want to choose per page whether the chatbot receives and sends through Botcake or through our own Forbeast Gateway, so that Likha keeps working if Botcake fails, without a page ever getting two replies. Test: `tests/Feature/Chatblast/ChatbotProviderTest.php` (gateway and Botcake HTTP faked).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-111.1 | Given a page on `gateway`, when its flow sends, then one POST goes to `{GATEWAY_URL}/v1/pages/{page_id}/messages` with the bearer key and `{psid, messages, messaging_type: RESPONSE, client_ref: likha-…}`, nothing goes to Botcake, and the reply row is sent; a Botcake page sends as before | `test_S_111_1…` | Passed · 2026-10-22 · auto |
+| S-111.2 | Given a page on `gateway`, when the gateway answers 422, then the reply row is failed with `Gateway said "…" (HTTP 422)`; with `GATEWAY_URL` empty nothing is sent and the row is failed "…not set up…" | `test_S_111_2…` | Passed · 2026-10-22 · auto |
+| S-111.3 | Given a live send pool, when a gateway page's flow sends, then no `botcake_send_requests` ticket is made and the send goes straight to the gateway | `test_S_111_3…` | Passed · 2026-10-22 · auto |
+| S-111.4 | Given a page on `gateway`, when a signed `message` event arrives, then one chat is stored (name from botcake_psids, message_id = mid, payload source gateway) and one run and one replied-marking are queued; the same mid again, or a mid already stored by a Botcake push, stores and queues nothing | `test_S_111_4…` | Passed · 2026-10-22 · auto |
+| S-111.5 | Given a page on `botcake`, when a signed `message` event arrives, then nothing is stored or queued and `botcake_page` is counted; echo and read only count | `test_S_111_5…` | Passed · 2026-10-22 · auto |
+| S-111.6 | When the signature is wrong, missing or empty → 401; when no webhook secret is configured → 503; nothing is queued or stored either way | `test_S_111_6…` | Passed · 2026-10-22 · auto |
+| S-111.7 | Given a page on `gateway`, when Botcake pushes a chat for it, then the answer is 200 `{ok: true}`, no chat is stored, no run is queued, and `gateway_page` is counted | `test_S_111_7…` | Passed · 2026-10-22 · auto |
+| S-111.8 | When staff pick Forbeast Gateway in a row, then `chatbot.provider` is saved (old value kept as history), shows in Changes as "Provider", and is not a botfield column; another value or a page off the list → 422; with `GATEWAY_URL` empty, `data` says `gateway_ready: false` and `gateway` is refused | `test_S_111_8…` | Passed · 2026-10-22 · auto |
+| S-111.9 | Given a page on `gateway`, when staff send from the Inbox, then it goes through the gateway with a client_ref and is logged as manual | `test_S_111_9…` | Passed · 2026-10-22 · auto |

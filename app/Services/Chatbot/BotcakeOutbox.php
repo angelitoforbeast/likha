@@ -30,10 +30,8 @@ class BotcakeOutbox implements Outbox
     {
         if (!self::enabled()) return $this->log($run, $nodeId, 'send', $messages, 'skipped', self::SWITCHED_OFF);
 
-        $token = trim((string) $this->settings->get($run->pageName, 'botcake', 'token'));
-        if ($token === '') return $this->log($run, $nodeId, 'send', $messages, 'failed', self::NO_TOKEN);
-
-        $o = self::outcome(app(BotcakeClient::class)->shared(sha1($token), 15)->sendContent($run->pageId, $run->psid(), $messages, $token), $token);
+        // Ang daan ng page (Botcake o ang Forbeast Gateway): ChatbotProvider.
+        $o = ChatbotProvider::for($run->pageName)->send($run->pageName, $run->pageId, $run->psid(), $messages, ChatbotProvider::ref());
 
         return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null);
     }
