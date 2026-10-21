@@ -4,18 +4,36 @@ namespace App\Http\Controllers;
 
 use App\Models\AdAccount;
 use App\Models\User;
+use App\Support\NavAccess;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class AdAccountController extends Controller
 {
+    /** Walang sariling nav link: kasama ng Ad Payment (/owner/nav-settings), kaya ang access ng link na iyon ang sinusunod. */
+    public const NAV_URL = '/ads_manager/payment/upload';
+
+    private function getNormalizedRole(): string
+    {
+        $raw = Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '';
+        return preg_replace('/\s+/u', ' ', trim((string) $raw));
+    }
+
+    private function checkAccess(): void
+    {
+        // CEO, o ang role na naka-check sa Ad Payment link (404 sa iba).
+        if (!NavAccess::allows($this->getNormalizedRole(), self::NAV_URL)) abort(404);
+    }
+
     /**
      * One page handles: list + add + (optional) edit if {ad_account_id} is present.
      * History: ang pinalitan o binurang row ay naiiwan na active = false; active rows lang ang listahan.
      */
     public function index(Request $request, ?string $ad_account_id = null)
     {
+        $this->checkAccess();
         $rows = AdAccount::where('active', true)->orderBy('name')->get();
 
         $editing = null;
@@ -88,6 +106,7 @@ class AdAccountController extends Controller
      */
     public function store(Request $request)
     {
+        $this->checkAccess();
         $data = $request->validate([
             'ad_account_id' => ['required', 'string', 'max:191'],
             'name'          => ['required', 'string', 'max:191'],
@@ -156,6 +175,7 @@ class AdAccountController extends Controller
      */
     public function destroy(Request $request, string $ad_account_id)
     {
+        $this->checkAccess();
         AdAccount::where('active', true)->where('ad_account_id', $ad_account_id)->update([
             'active'      => false,
             'action'      => 'deleted',
