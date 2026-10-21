@@ -193,6 +193,22 @@ class AdAccountHistoryTest extends OwnerPrivateTestCase
         ]);
     }
 
+    public function test_S_103_7_two_renames_by_one_user_in_the_same_second_keep_their_own_old_names(): void
+    {
+        $ana = $this->staff();
+        $this->actingAs($ana)->post('/ads_manager/ad_account', ['ad_account_id' => '1001', 'name' => 'Uno Luma']);
+        $this->actingAs($ana)->post('/ads_manager/ad_account', ['ad_account_id' => '2002', 'name' => 'Dos Luma']);
+        Carbon::setTestNow('2026-10-21 10:00:00');
+        $this->actingAs($ana)->post('/ads_manager/ad_account', ['ad_account_id' => '1001', 'name' => 'Uno Bago']);
+        $this->actingAs($ana)->post('/ads_manager/ad_account', ['ad_account_id' => '2002', 'name' => 'Dos Bago']);
+
+        $log = $this->actingAs($ana)->get('/ads_manager/ad_account')->assertOk()->viewData('log');
+
+        $changed = collect($log->items())->where('action', 'changed')
+            ->map(fn ($e) => [$e->old_ad_account_id, $e->old_name, $e->ad_account_id, $e->name])->values()->all();
+        $this->assertSame([['2002', 'Dos Luma', '2002', 'Dos Bago'], ['1001', 'Uno Luma', '1001', 'Uno Bago']], $changed);
+    }
+
     public function test_S_103_8_change_log_pages_by_50(): void
     {
         $ana = $this->staff();

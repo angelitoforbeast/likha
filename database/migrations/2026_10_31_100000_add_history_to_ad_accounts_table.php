@@ -27,7 +27,6 @@ return new class extends Migration {
             $table->string('action', 16)->nullable()->after('replaced_by'); // added | changed | deleted
 
             $table->index(['ad_account_id', 'active']);
-            $table->index('active');
         });
     }
 
@@ -37,7 +36,6 @@ return new class extends Migration {
 
         Schema::table('ad_accounts', function (Blueprint $table) {
             $table->dropIndex(['ad_account_id', 'active']);
-            $table->dropIndex(['active']);
             $table->dropColumn(['created_by', 'active', 'replaced_at', 'replaced_by', 'action']);
         });
         // Ang unique ay hindi ibinabalik: babagsak ito kapag may lumang rows na. Burahin muna ang inactive rows kung kailangan.

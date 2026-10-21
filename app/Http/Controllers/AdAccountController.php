@@ -67,10 +67,12 @@ class AdAccountController extends Controller
                 $e->action = 'deleted';
                 continue;
             }
-            $prev = $row->action === 'changed' || $row->action === 'deleted'
-                ? $replaced->first(fn ($p) => $p->id < $row->id && $p->replaced_by === $row->created_by
+            $candidates = $row->action === 'changed' || $row->action === 'deleted'
+                ? $replaced->filter(fn ($p) => $p->id < $row->id && $p->replaced_by === $row->created_by
                     && $p->replaced_at?->equalTo($row->created_at))
-                : null;
+                : collect();
+            // Parehong ID muna (rename); ibang ID lang kapag ID ang pinalitan.
+            $prev = $candidates->firstWhere('ad_account_id', $row->ad_account_id) ?? $candidates->first();
             $e->action = $prev ? 'changed' : 'added';
             if ($prev) {
                 $e->old_ad_account_id = $prev->ad_account_id;
@@ -93,7 +95,7 @@ class AdAccountController extends Controller
             'original_ad_account_id' => ['nullable', 'string', 'max:191'], // for edit where ID might change
         ]);
 
-        $saved = DB::transaction(function () use ($data, $request) {
+        $status = DB::transaction(function () use ($data, $request) {
             // If editing and user changes the ad_account_id, handle it properly.
             if (($data['mode'] ?? null) === 'update' && !empty($data['original_ad_account_id'])) {
                 $row = $this->activeRow($data['original_ad_account_id']);
@@ -101,17 +103,19 @@ class AdAccountController extends Controller
                     if ($data['ad_account_id'] !== $row->ad_account_id && $this->activeRow($data['ad_account_id'])) {
                         throw ValidationException::withMessages(['ad_account_id' => 'May ad account na may ganyang Ad Account ID.']);
                     }
-                    return $this->write($row, $data, $request->user()?->id);
+                    $this->write($row, $data, $request->user()?->id);
+                    return 'Ad account updated.';
                 }
             }
 
             // Default: create/update by ad_account_id (idempotent)
-            return $this->write($this->activeRow($data['ad_account_id']), $data, $request->user()?->id);
+            $this->write($this->activeRow($data['ad_account_id']), $data, $request->user()?->id);
+            return 'Ad account saved.';
         });
 
         return redirect()
             ->route('ad_accounts.index')
-            ->with('status', $saved === 'changed' ? 'Ad account updated.' : 'Ad account saved.');
+            ->with('status', $status);
     }
 
     /** Ang nag-iisang active row ng ID, naka-lock hanggang matapos ang transaction. */
