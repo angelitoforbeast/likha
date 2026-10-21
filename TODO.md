@@ -920,3 +920,24 @@ Accepted, not fixed:
 - **Log pairing by time and user** can still pick the wrong old row when one user changes an ID of one account and renames another in the same second. Reason: same-ID renames are now paired correctly (S-103.7); an ID change plus another change in one second by one person through the form is not realistic.
 - **No tests for:** re-adding a deleted ID, changing an ID onto an inactive (deleted) ID, deleting twice or an unknown ID. Reason: each is the plain path of `write()`/`destroy()` (no active row → added; update only touches active rows), already covered by S-103.1 and S-103.5.
 - **`write()` returns added/changed/unchanged but store() no longer uses it.** Reason: harmless; kept for the reader of the method.
+
+## 104: item settings log gaps (2026-10-21)
+
+- **`/item/cogs` routes (`index`, `grid`, `update`, `delete`, `clean-redundant`) have no `auth` middleware** (`routes/web.php:686-690`). Anyone who can load a page can post a COGS edit with a CSRF token. Since spec 104 such an edit is logged, with "— anonymous —" as the user. Reason: auth and permissions are out of this spec and the owner's call. Suggestion: put the routes in the `web, auth, allowed_ip` group with a role check.
+- **Deleting promo on `/owner/private` while RTS is still set sets `promo = NULL` on a NOT NULL column** (`deleteItemSetting`). On MySQL strict mode that is a 500, and nothing changes. Reason: this was already true before spec 104, and the spec forbids changing how values are saved. Now the log row rolls back with it, so no false trace. Suggestion: write '' instead of NULL, as `saveItemSetting` does.
+- **The `cogs` → `cogs_ceo` auto-mirror (`mirrorMissingCogsToCogsCeo`) writes no log row.** Reason: it only copies missing (item, date) pairs after a logged `/owner/private` COGS save, and never overwrites a value.
+- **`DailyPrimaryItemService::backfillSettingsPrices` sets `page_item_settings.mode_cod_int` with no log row.** Reason: it fills the price tag only where it is NULL, and touches no RTS, promo or COGS value.
+- **`rtsSetByMap` ignores delete rows.** If RTS is deleted and later set back to the same value by someone else, the "set by" name stays with the first person. Reason: the same was already true for an RTS clear (rts = 0) through `saveItemSetting`; display only.
+- **Small inconsistencies:**
+  - `/item/cogs` delete of a cell whose value is NULL logs a row that shows "—". `/owner/private` skips a NULL old value.
+  - An `/item/cogs` edit to the same price writes a no-op row ("Changed only" hides it).
+  - A `/owner/private` delete without a price tag writes one row per matched price row.
+
+  Reason: cosmetic; each row is true.
+- **No tests for:**
+  - `clean-redundant` preview (writes nothing)
+  - the transaction rollback when the log insert fails
+  - a CEO-COGS-only delete
+  - a Marketing - OIC viewer of a delete row
+
+  Reason: each is the plain path of existing code (preview returns before the delete; `DB::transaction`; the existing `isCeoView` gate) and none is on an untrusted path with a realistic failure.

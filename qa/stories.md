@@ -1864,4 +1864,4 @@ Spec 104. As the owner, I want every write to RTS %, promo and COGS in `/owner/p
 | S-104.5 | When cogs sync inserts rows, then only rows that got a value (NULL → carry) are logged, with no user and source cogs_sync; skipped rows and NULL rows write nothing | `test_S_104_5…` | Passed · 2026-10-21 · auto |
 | S-104.6 | Given delete, /item/cogs and sync rows, then edit-logs shows DELETE, the source label, "system (cogs sync)", deleted values struck through, and filters by source and item; the global '' page is not a Page option | `test_S_104_6…` | Passed · 2026-10-21 · auto |
 | S-104.7 | Given old rows (no source), then they show as before, labelled /owner/private, and the owner_private filter includes them | `test_S_104_7…` | Passed · 2026-10-21 · auto |
-| S-104.8 | At 1366 and 390 px the edit-logs page is readable; the table scrolls inside its box, the page has no horizontal scroll | browser | pending |
+| S-104.8 | At 1366 and 390 px the edit-logs page is readable; the table scrolls inside its box, the page has no horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
