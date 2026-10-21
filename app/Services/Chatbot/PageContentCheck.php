@@ -139,6 +139,7 @@ TXT;
     private static function clean(array $a): ?array
     {
         $same = $a['same_product'] ?? null;
+        if ($same === 'true' || $same === 'false') $same = $same === 'true'; // ang string ay tinatanggap, para hindi itanong ulit gabi-gabi
         if (!is_bool($same)) return null;
         $num = fn ($v) => is_numeric($v) && (float) $v >= 0 && (float) $v < 10000000 ? round((float) $v, 2) : null;
         $prices = [];

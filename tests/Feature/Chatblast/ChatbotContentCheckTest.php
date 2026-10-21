@@ -154,10 +154,12 @@ class ChatbotContentCheckTest extends ChatblastTestCase
         $this->orders(' page  uno ', 'SEAT COVER', '299', 1, 2);
         $this->orders('Page Uno', 'SEAT COVER', '499', 2, 0);
         $this->orders('Page Uno', 'PHONE HOLDER', '199', 5, 3); // apat na araw na: hindi kasama
-        $this->orders('Page Dos', 'NIGHT LAMP', '99', 4, 0);
+        $this->orders('Page Dos', 'NIGHT LAMP', '₱1,299.00', 4, 0);
+        $this->orders('Page Tres', 'GIFT', '0', 2, 0); // walang COD (hal. bayad na): walang presyong ihahambing
 
         $this->assertSame(['item' => 'SEAT COVER', 'price' => 299, 'source' => 'orders', 'orders' => 5], app(PageExpectedItem::class)->for('Page Uno'));
-        $this->assertSame(['item' => 'NIGHT LAMP', 'price' => 99, 'source' => 'orders', 'orders' => 4], app(PageExpectedItem::class)->for('Page Dos'));
+        $this->assertSame(['item' => 'NIGHT LAMP', 'price' => 1299, 'source' => 'orders', 'orders' => 4], app(PageExpectedItem::class)->for('Page Dos'));
+        $this->assertSame(['item' => 'GIFT', 'price' => null, 'source' => 'orders', 'orders' => 2], app(PageExpectedItem::class)->for('Page Tres'));
     }
 
     public function test_S_106_2_without_recent_orders_the_latest_ads_item_then_the_item_settings_are_used_and_with_none_nothing_is_asked(): void
@@ -361,12 +363,16 @@ class ChatbotContentCheckTest extends ChatblastTestCase
         $this->settings()->set('Page Uno', 'chatbot', 'main_flow', 'Good text');
         $this->settings()->set('Page Uno', 'chatbot', 'main_flow_2', 'Down text');
         $this->settings()->set('Page Uno', 'chatbot', 'fill_up_form', 'Broken text');
-        $this->answers = ['Good text' => $this->answer('SEAT COVER', true, 95), 'Down text' => 503, 'Broken text' => 'not json at all'];
+        $this->settings()->set('Page Uno', 'chatbot', 'picture', self::IMG . 'pic.jpg');
+        // Ang "true" na string ay tinatanggap (hindi itinatanong ulit gabi-gabi).
+        $this->answers = ['Good text' => $this->answer('SEAT COVER', true, 95), 'Down text' => 503, 'Broken text' => 'not json at all',
+            self::IMG . 'pic.jpg' => ['found_item' => 'SEAT COVER', 'same_product' => 'true', 'confidence' => '90']];
 
         $res = $this->content();
         $this->assertSame(2, $res['unchecked']);
         $rows = DB::table('chatbot_content_answers')->get();
-        $this->assertCount(1, $rows);
+        $this->assertCount(2, $rows);
+        $this->assertSame('ok', collect($res['findings'])->firstWhere('kind', 'image')['level']);
         $this->assertSame(['gpt-4o-mini', 1000, 100, 0.00021], [$rows[0]->model, (int) $rows[0]->tokens_in, (int) $rows[0]->tokens_out, round((float) $rows[0]->cost_usd, 6)]);
     }
 }

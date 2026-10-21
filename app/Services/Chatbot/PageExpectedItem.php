@@ -73,7 +73,7 @@ class PageExpectedItem
             $name = self::norm((string) $r->item);
             if ($name === '') continue;
             $digits = preg_replace('/[^0-9.]/', '', (string) $r->cod);
-            $price = is_numeric($digits) ? (int) round((float) $digits) : null;
+            $price = is_numeric($digits) && (float) $digits > 0 ? (int) round((float) $digits) : null; // 0 = walang COD (hal. bayad na)
             $pk = $this->settings->pageKey((string) $r->page);
             $key = $name . '|' . $price;
             $cur = $this->orders[$pk][$key] ?? ['item' => $name, 'price' => $price, 'count' => 0, 'last' => ''];

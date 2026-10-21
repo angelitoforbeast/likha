@@ -24,7 +24,7 @@ class RunChatbotContentCheck implements ShouldQueue, ShouldBeUnique
     public int $timeout = 1800; // mas maikli sa retry_after ng database queue (1900)
     public int $tries = 1;
     public int $uniqueFor = 3600;
-    private const BUDGET_SECONDS = 1700; // ang hindi naabot ay sa susunod na takbo
+    private const BUDGET_SECONDS = 1300; // isang page ay hanggang ~440 s (11 tanong × 40 s); ang hindi naabot ay sa susunod na takbo
 
     public function __construct(public ?string $page = null)
     {
