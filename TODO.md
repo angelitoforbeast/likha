@@ -910,3 +910,13 @@ Accepted, not fixed:
 - **`CHATBOT_POOL_IDLE_MS=0` turns an idle pool into a busy loop.** Reason: trusted env only, the default is 200, and 0 is a deliberate choice someone would make while watching it.
 - **`block_for` blocks on the first queue of a worker**, so a supervisor with several queues per process (balance `false` or `simple`) would delay its later queues up to `block_for`. Reason: chatbot and chatblast both use balance `auto` (one queue per process) and S-102.2 pins that; whoever changes the balance must lower `REDIS_QUEUE_BLOCK_FOR` or set it to 0.
 - **The pools still poll their tables (200 ms idle) rather than waking on a Redis signal.** Reason: the idle tick costs about half a percent of one core per pool and adds 100 ms on average; a wake signal is more moving parts for that 100 ms.
+
+## 103: ad account history (2026-10-21)
+
+- **One active row per ad_account_id is enforced in code only** (transaction + `lockForUpdate`), not by a unique index. Under MySQL's default REPEATABLE READ a double submit of a brand-new ID should deadlock one request (a 500, as the old unique did); under READ COMMITTED or on pgsql two active rows for one new ID are possible, which would double that account's payment rows. Reason: a few staff edit this page by hand; a generated-column unique needs three dialects. Check production's isolation level, or add a generated-column unique if it ever happens.
+- **Stale edit form:** if the edited account was deleted or renamed since the form loaded, saving with an ID that is already active updates that other account (the old `updateOrCreate` did the same). Reason: not a regression; needs two people editing the same account at once.
+- **ID change differing only in case** (MySQL case-insensitive collation) is refused as a duplicate. Reason: Facebook ad account IDs are numeric.
+- **pgsql puts NULL `created_at` first** in the change log (`orderByDesc`). Reason: production is MySQL, where NULLs sort last; old rows have timestamps.
+- **Log pairing by time and user** can still pick the wrong old row when one user changes an ID of one account and renames another in the same second. Reason: same-ID renames are now paired correctly (S-103.7); an ID change plus another change in one second by one person through the form is not realistic.
+- **No tests for:** re-adding a deleted ID, changing an ID onto an inactive (deleted) ID, deleting twice or an unknown ID. Reason: each is the plain path of `write()`/`destroy()` (no active row → added; update only touches active rows), already covered by S-103.1 and S-103.5.
+- **`write()` returns added/changed/unchanged but store() no longer uses it.** Reason: harmless; kept for the reader of the method.
