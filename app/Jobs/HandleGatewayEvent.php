@@ -84,6 +84,11 @@ class HandleGatewayEvent implements ShouldQueue
             return;
         }
 
+        // Walang mid at walang event_id: hindi masusuri kung ulit, kaya hindi iniimbak (walang dobleng sagot).
+        if (!$e['mid'] && (string) $e['event_id'] === '') {
+            self::count('no_id');
+            return;
+        }
         $ref = $e['mid'] ?: 'gw-event-' . $e['event_id'];
         if (!Cache::add('gateway-events:seen:' . sha1($ref), 1, self::DEDUPE_SECONDS) || BotcakeChat::where('message_id', $ref)->exists()) {
             self::count('duplicate');

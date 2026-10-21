@@ -181,6 +181,58 @@ class ChatbotProviderTest extends ChatblastTestCase
         Queue::assertPushed(MarkChatbotReplied::class, 1);
     }
 
+    /** Ang ibang anyo ng event: [ang event, ang message, ang payload na inaasahan]. */
+    public static function shapes(): array
+    {
+        return [
+            'referral without mid, from an ad' => [['type' => 'referral', 'mid' => null, 'text' => null, 'referral' => ['ad_id' => '6045246247433', 'ref' => null, 'source' => 'ADS']],
+                null, ['source' => 'gateway', 'ad_id' => '6045246247433'], 'gw-event-18342'],
+            'postback' => [['type' => 'postback', 'mid' => null, 'text' => null, 'postback' => ['title' => 'Order now', 'payload' => 'ORDER']],
+                'Order now', ['source' => 'gateway', 'postback' => 'ORDER'], 'gw-event-18342'],
+            'photo' => [['text' => null, 'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg']]],
+                '[Photo]', ['source' => 'gateway', 'image_url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'm_AbC1'],
+            'like sticker' => [['text' => null, 'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/851587_369239346556147_162929011_n.png']]],
+                '👍', ['source' => 'gateway'], 'm_AbC1'],
+            'video, ad id not digits' => [['text' => null, 'attachments' => [['type' => 'video', 'url' => 'https://v.example.test/v.mp4']], 'referral' => ['ad_id' => 'x<1>']],
+                '[Video]', ['source' => 'gateway'], 'm_AbC1'],
+        ];
+    }
+
+    /** @dataProvider shapes */
+    public function test_S_111_4b_referral_postback_and_attachments_are_stored_like_a_botcake_chat_once(array $event, ?string $message, array $payload, string $ref): void
+    {
+        Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);
+        $this->greeting();
+        $this->useGateway();
+
+        $this->event($event)->assertOk();
+        $this->event($event + ['attempt' => 2])->assertOk(); // ang ulit: parehong mid o event_id
+
+        $chat = BotcakeChat::sole();
+        $this->assertSame([$message, $payload, $ref], [$chat->message, $chat->payload, $chat->message_id]);
+        Queue::assertPushed(RunChatbotFlow::class, 1);
+    }
+
+    public function test_S_111_4c_bot_off_no_ids_bad_json_or_a_big_body_store_nothing(): void
+    {
+        Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);
+        $this->greeting();
+        $this->useGateway();
+
+        $this->event(['mid' => null, 'event_id' => null])->assertOk();
+        $this->event(['mid' => null, 'event_id' => null, 'text' => 'second'])->assertOk();
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
+        $this->event()->assertOk();
+        $sign = fn (string $b) => ['CONTENT_TYPE' => 'application/json', 'HTTP_X_GATEWAY_SIGNATURE' => 'sha256=' . hash_hmac('sha256', $b, self::SECRET)];
+        $this->call('POST', '/api/gateway/events', [], [], [], $sign('not json'), 'not json')->assertStatus(400);
+        $big = json_encode(['text' => str_repeat('a', 70000)]);
+        $this->call('POST', '/api/gateway/events', [], [], [], $sign($big), $big)->assertStatus(413);
+
+        $this->assertSame(0, BotcakeChat::count());
+        Queue::assertNothingPushed();
+        $this->assertSame([2, 1], [$this->counted('no_id'), $this->counted('bot_off')]);
+    }
+
     public function test_S_111_5_a_gateway_event_for_a_botcake_page_or_an_echo_only_counts(): void
     {
         Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);

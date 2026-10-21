@@ -3,6 +3,7 @@
 namespace App\Services\Chatbot;
 
 use App\Services\BotcakeClient;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -27,7 +28,10 @@ class GatewayProvider implements MessagingProvider
                 ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/messages',
                     ['psid' => $psid, 'messages' => $messages, 'messaging_type' => 'RESPONSE', 'client_ref' => $clientRef]);
             $r = ['http' => $res->status(), 'body' => $res->json() ?? $res->body()];
-        } catch (Throwable) {
+        } catch (ConnectionException) {
+            $r = ['http' => 0, 'body' => null];
+        } catch (Throwable $e) {
+            report($e); // hindi koneksyon (hal. sirang code): nakikita sa log, failed pa rin ang padala
             $r = ['http' => 0, 'body' => null];
         }
 

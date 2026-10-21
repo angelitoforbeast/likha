@@ -961,3 +961,12 @@ Accepted, not fixed:
   - An RTS-only save with no promo to carry writes `'NONE'`, which ends an older promo added later with an earlier date; this follows the "one meaning for no promo" decision.
 
   Reason: each one follows a fixed decision of the spec or an existing rule, and none is on an untrusted path with a realistic failure.
+
+## 111: per-page messaging provider (2026-10-22)
+
+- **`/api/gateway/events` has no throttle**, and a chunked body without `Content-Length` is read before the 64 KB check. Reason: the gateway forwards bursts (up to 40/s per page) and a throttle would turn them into retries; an unsigned request costs one HMAC and is refused. Revisit with a limiter sized from live gateway traffic.
+- **Switch window:** the Botcake push checks the provider when it arrives, the gateway job when it runs. A message in the seconds between a staff switch from gateway to Botcake can be skipped by both. Reason: rare and staff-made; automatic switching (next spec) should hand over with an overlap.
+- **Dedupe against a Botcake push assumes Botcake's `message_id` is the Facebook `mid`.** Not checked on live data. Only matters during a switch from Botcake to gateway (each side ignores the other's pages otherwise). Suggestion: compare one stored Botcake row with the gateway's mid before the first live switch.
+- **`botcake.page_id` = Facebook page id** is read from code only. Suggestion: compare with the gateway's `GET /v1/pages` before switching a page.
+- **PSID `(int)` casts stay** where they feed integer columns or signatures (`ChatbotInboxController::send` reply row and `CustomerFields`, `ChatbotInbound::afterStore` sequence exit, `BotcakeOutbox::record`). Columns that would break for non-numeric ids: `chatbot_replies.psid`, `chatbot_customer_values.psid`, `botcake_send_requests.psid`/`page_id` (big integers). Facebook PSIDs are numeric; `botcake_chats.psid` is a string. Reason: changing columns is a migration outside this spec.
+- **A queued Botcake send-pool ticket created just before a switch to gateway still goes out through Botcake.** Reason: seconds-long window, and the message still reaches the customer once.
