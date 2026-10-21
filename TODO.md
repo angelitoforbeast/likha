@@ -903,3 +903,10 @@ Accepted, not fixed:
 - **The `chatbot_events (type, created_at)` index is not guarded against running the migration twice.** Reason: Laravel records the migration once; the columns and the table are guarded.
 - **The AI step's sent answer is tagged (flow, version, no botfields) but has no test of its own.** Reason: it uses the same `forSend()` and record path as the Send node, which S-100.1 covers on both the waiting and the pool path.
 - **"Chats" in By ad counts the customers the bot sent to with that ad, not incoming chats.** Reason: the ad is stored on the send; counting incoming chats per ad would need the ad on `botcake_chats`, a new pipeline the brief rules out.
+
+## 102: queue pickup (2026-10-21)
+
+- **Nothing checks that `REDIS_READ_WRITE_TIMEOUT` stays above `REDIS_QUEUE_BLOCK_FOR`** when both are set by hand. Reason: both are owner-set env values with safe defaults (60 against 5), and the comments beside them say so; a lower timeout only cuts an idle blocked pop, which the worker retries.
+- **`CHATBOT_POOL_IDLE_MS=0` turns an idle pool into a busy loop.** Reason: trusted env only, the default is 200, and 0 is a deliberate choice someone would make while watching it.
+- **`block_for` blocks on the first queue of a worker**, so a supervisor with several queues per process (balance `false` or `simple`) would delay its later queues up to `block_for`. Reason: chatbot and chatblast both use balance `auto` (one queue per process) and S-102.2 pins that; whoever changes the balance must lower `REDIS_QUEUE_BLOCK_FOR` or set it to 0.
+- **The pools still poll their tables (200 ms idle) rather than waking on a Redis signal.** Reason: the idle tick costs about half a percent of one core per pool and adds 100 ms on average; a wake signal is more moving parts for that 100 ms.
