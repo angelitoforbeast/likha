@@ -161,6 +161,9 @@ return [
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_DB', '0'),
+            // predis: ilang segundo ng walang sagot bago putulin ang koneksyon. Ang queue ay naghihintay sa blpop nang
+            // REDIS_QUEUE_BLOCK_FOR segundo (queue.php), kaya laging mas mataas ito (60 laban sa 5), o napuputol ang worker.
+            'read_write_timeout' => (float) env('REDIS_READ_WRITE_TIMEOUT', 60),
         ],
 
         // Ang cache data (CACHE_STORE=redis): maaaring sariling Redis instance na may eviction (LRU), hiwalay sa queue na

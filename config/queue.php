@@ -79,7 +79,9 @@ return [
             'queue' => env('REDIS_QUEUE', 'default'),
             // Mas mahaba sa pinakamahabang job ng chatbot at chatblast (300 s): ang 90 ay magpapatakbo nang dalawang beses.
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 400),
-            'block_for' => null,
+            // Blocking pop: kinukuha ng worker ang job sa loob ng ms, hindi pagkatapos ng sleep. 0 = polling gaya ng dati (null,
+            // dahil ang 0 sa blpop ay naghihintay nang walang hanggan). Ang read_write_timeout (database.php) ay laging mas mataas.
+            'block_for' => max(0, (int) env('REDIS_QUEUE_BLOCK_FOR', 5)) ?: null,
             'after_commit' => false,
         ],
 
@@ -113,6 +115,13 @@ return [
     | Supported drivers: "database-uuids", "dynamodb", "file", "null"
     |
     */
+
+    // Ang loop ng chatbot:ai-pool at botcake:send-pool (TicketPool): ilang ms ang tulog kada ikot kapag walang ginagawa (idle)
+    // at kapag may hawak o bagong kuha (busy). Ang idle na ikot ay ang claim query lang.
+    'pools' => [
+        'idle_ms' => (int) env('CHATBOT_POOL_IDLE_MS', 200),
+        'busy_ms' => (int) env('CHATBOT_POOL_BUSY_MS', 5),
+    ],
 
     'failed' => [
         'driver' => env('QUEUE_FAILED_DRIVER', 'database-uuids'),

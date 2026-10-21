@@ -215,6 +215,8 @@ return [
             'tries' => 1,
             'timeout' => 300,
             'nice' => 0,
+            // Walang tulog kapag blocking pop (queue.php block_for): ang blpop na ang naghihintay. Polling (0): 3 s gaya ng dati.
+            'sleep' => (int) env('REDIS_QUEUE_BLOCK_FOR', 5) > 0 ? 0 : 3,
         ],
         'chatblast' => [
             'connection' => 'redis',
@@ -231,6 +233,7 @@ return [
             'tries' => 1,
             'timeout' => 320,
             'nice' => 0,
+            'sleep' => (int) env('REDIS_QUEUE_BLOCK_FOR', 5) > 0 ? 0 : 3, // gaya ng chatbot
         ],
     ],
 

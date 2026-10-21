@@ -133,8 +133,14 @@ abstract class TicketPool
                 }
                 $sweepAt = microtime(true);
             }
-            usleep($started || $this->inflight ? 5_000 : 200_000);
+            usleep(static::pause($started || $this->inflight));
         }
         $this->stop();
+    }
+
+    /** Ang tulog kada ikot sa µs (queue.pools): maikli kapag may ginagawa, mas mahaba kapag idle. */
+    public static function pause(bool $busy): int
+    {
+        return max(0, (int) config($busy ? 'queue.pools.busy_ms' : 'queue.pools.idle_ms', $busy ? 5 : 200)) * 1000;
     }
 }
