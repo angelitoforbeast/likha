@@ -941,3 +941,10 @@ Accepted, not fixed:
   - a Marketing - OIC viewer of a delete row
 
   Reason: each is the plain path of existing code (preview returns before the delete; `DB::transaction`; the existing `isCeoView` gate) and none is on an untrusted path with a realistic failure.
+
+## 108: chatbot reply priority (2026-10-21)
+
+- **A sequence step job lost after its unique lock was taken holds that subscription for up to 3 hours** (`RunChatbotSequenceStep::$uniqueFor`). It happens on a queue flush, `horizon:clear`, or a Redis push that fails after the lock. Remedy by hand: delete the cache lock `laravel_unique_job:App\Jobs\RunChatbotSequenceStep:<subscription id>` (or wait out the 3 hours); the next tick then queues it again. Reason: all of these are operator actions or Redis failures on a trusted path. A shorter `uniqueFor` would let a long backlog grow copies again, which is the fault this fixes.
+- **`botcake:stress-page --stats` counts database `jobs` on `chatbot` only**, so with `CHATBOT_QUEUE_CONNECTION=database` it leaves out the reply path on `chatbot-high`. Reason: a test-page diagnostic on a trusted path. Production runs on Redis, where the number is 0 either way. The fix is `whereIn('queue', ['chatbot-high', 'chatbot'])`.
+- **No Horizon long-wait alert for `chatbot-high`** (`waits` lists only `redis:default`). Reason: `chatbot` had none either, and nothing reads Horizon's notifications today.
+- **The reply path only gets two workers of its own until the auto-balancer moves more** (every 3 s, up to 2 at a time). Reason: with the AI and the sends in their pools, a reply-path job takes milliseconds. In the local proof, with 5,000 steps queued, pickup averaged 1 ms (max 19 ms) at 5 chats/s. Raise `minProcesses` only if Horizon shows `chatbot-high` waiting.
