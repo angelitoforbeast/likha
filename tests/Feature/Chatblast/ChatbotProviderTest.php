@@ -308,6 +308,64 @@ class ChatbotProviderTest extends ChatblastTestCase
         $this->get('/chatbot/pages')->assertOk()->assertSee('data-provider-url', false);
     }
 
+    public function test_S_111_10_a_bulk_switch_saves_every_page_with_its_own_history_and_changes_entry_or_nothing(): void
+    {
+        Queue::fake();
+        $this->page('Page Dos', '2002');
+        $this->page('Page Tres', '3003');
+        $this->actingAs($this->user());
+
+        $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'page dos'], 'provider' => 'gateway'])
+            ->assertOk()->assertJson(['provider' => 'gateway', 'pages' => ['Page Uno', 'Page Dos']]);
+        $providers = fn () => collect($this->getJson('/chatbot/data')->json('rows'))->pluck('provider', 'page')->all();
+        $this->assertSame(['Page Dos' => 'gateway', 'Page Tres' => 'botcake', 'Page Uno' => 'gateway'], $providers());
+
+        // Isang page na wala sa listahan: wala ni isa ang nabago. Lampas sa 200: 422.
+        $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Tres', 'No Such Page'], 'provider' => 'botcake'])->assertStatus(422);
+        $this->postJson('/chatbot/provider', ['page_names' => array_map(fn ($i) => "P$i", range(1, 201)), 'provider' => 'botcake'])->assertStatus(422);
+        $this->assertSame(['Page Dos' => 'gateway', 'Page Tres' => 'botcake', 'Page Uno' => 'gateway'], $providers());
+
+        $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Dos'], 'provider' => 'botcake'])->assertOk();
+        $this->assertSame(['botcake', 'botcake', 'botcake'], array_values($providers()));
+        $entries = collect($this->getJson('/chatbot/changes')->json('entries'))->where('key', 'provider');
+        $this->assertSame(['Page Dos' => 2, 'Page Uno' => 2], $entries->countBy('page')->sortKeys()->all()); // isang entry kada page kada pagbabago
+
+        config(['services.gateway.url' => '']);
+        $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Dos'], 'provider' => 'gateway'])->assertStatus(422);
+    }
+
+    public function test_S_111_11_the_page_shows_bulk_controls_and_labels_the_option_forbeast(): void
+    {
+        $this->actingAs($this->user());
+
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+
+        foreach (['sel-all', 'id="bulk-provider"', 'id="bulk-apply"'] as $needle) $this->assertStringContainsString($needle, $html);
+        $this->assertStringContainsString("text: 'Forbeast'", $html);
+        $this->assertStringNotContainsString('Forbeast Gateway', $html);
+    }
+
+    /** @dataProvider prefixes */
+    public function test_S_111_12_a_gateway_url_with_a_path_prefix_gets_v1_appended_once(string $configured): void
+    {
+        config(['services.gateway.url' => $configured]);
+        $send = 'https://app.forbeast.app/api/v1/pages/1001/messages';
+        Http::fake([$send => Http::response(['id' => '01k84x', 'status' => 'queued'], 202)]);
+        $this->useGateway();
+        $this->actingAs($this->user());
+        $this->chat('Hi');
+
+        $this->postJson('/chatbot/inbox/send', ['page_id' => '1001', 'psid' => self::PSID, 'text' => 'Hello'])->assertOk();
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn (HttpRequest $r) => $r->url() === $send);
+    }
+
+    public static function prefixes(): array
+    {
+        return ['prefix' => ['https://app.forbeast.app/api'], 'prefix with a trailing slash' => ['https://app.forbeast.app/api/']];
+    }
+
     public function test_S_111_9_an_inbox_manual_send_on_a_gateway_page_goes_through_the_gateway(): void
     {
         Http::fake([self::GW_SEND => Http::response(['id' => '01k84x', 'status' => 'queued'], 202)]);

@@ -73,6 +73,13 @@
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
         <span id="count" class="text-xs text-slate-500"></span>
+        {{-- Bulk "Replies via": ang mga page na may check (o lahat ng nakikita) sa isang kilos. --}}
+        <span class="flex items-end gap-1 text-xs">
+            <label class="flex flex-col">Replies via
+                <select id="bulk-provider" class="border px-2 py-1 text-sm text-gray-900"><option value="botcake">Botcake</option><option value="gateway">Forbeast</option></select>
+            </label>
+            <button id="bulk-apply" type="button" class="cb-btn" disabled>Apply to selected</button>
+        </span>
     </div>
     <p id="notice" class="mb-2 min-h-[1rem] text-xs" aria-live="polite"></p>
 
@@ -212,6 +219,7 @@
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
     let columns = [], rows = [], flows = [], editing = null, gatewayReady = false;
+    const picked = new Set(); // mga page na may check (bulk "Replies via")
     const marks = new Map(), seqs = new Map(), errors = new Map();
     let openRow = null; // ang page ng row na bukas (isa lang)
     // Paste: ang hindi pa naka-save (id => {page, key, value, old}), ang napiling mga cell (dalawang sulok, {page, key}),
@@ -254,7 +262,7 @@
 
     function render() {
         const head = el('tr', {}, [
-            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, 'Page'),
+            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page']),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Active'}),
             el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Flow'}),
             el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Check', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}),
@@ -264,7 +272,7 @@
         ]);
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r)])]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
@@ -278,6 +286,8 @@
         if (!rows.length) table.append(el('tbody', {}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '5', text: 'No page has a Botcake ID and token yet.'}))));
         paintSel();
         paintBar();
+        paintPicked();
+        $('sel-all').addEventListener('change', ev => { for (const r of visible()) { if (ev.target.checked) picked.add(r.page); else picked.delete(r.page); } render(); });
         requestAnimationFrame(markClamped);
     }
 
@@ -496,16 +506,44 @@
         return td;
     }
 
-    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast Gateway (hindi mapipili kapag hindi pa naka-set up).
+    function pickBox(r) {
+        const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'aria-label': 'Select ' + r.page});
+        c.checked = picked.has(r.page);
+        c.addEventListener('change', () => { if (c.checked) picked.add(r.page); else picked.delete(r.page); paintPicked(); });
+        return c;
+    }
+    function paintPicked() {
+        const list = visible();
+        const all = $('sel-all'), n = list.filter(r => picked.has(r.page)).length;
+        if (all) { all.checked = list.length > 0 && n === list.length; all.indeterminate = n > 0 && n < list.length; }
+        const sel = [...picked].filter(p => rows.some(r => r.page === p));
+        $('bulk-apply').disabled = !sel.length || !url.providerUrl;
+        $('bulk-apply').textContent = sel.length ? 'Apply to ' + sel.length + ' selected' : 'Apply to selected';
+    }
+    $('bulk-apply').addEventListener('click', async () => {
+        const names = [...picked].filter(p => rows.some(r => r.page === p)), want = $('bulk-provider').value;
+        if (!names.length) return;
+        const label = want === 'gateway' ? 'Forbeast' : 'Botcake';
+        if (!confirm('Send and receive the chats of these ' + names.length + ' page' + (names.length === 1 ? '' : 's') + ' through ' + label + '?\n\n' + names.join('\n'))) return;
+        $('bulk-apply').disabled = true;
+        try {
+            const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want});
+            if (ok) { rows.forEach(r => { if (names.includes(r.page)) r.provider = data.provider; }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
+            else notice(data.error || data.message || 'Not changed.', 'text-red-600');
+        } catch (e) { notice('No connection: not changed.', 'text-red-600'); }
+        render();
+    });
+
+    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast (hindi mapipili kapag hindi pa naka-set up).
     function providerSelect(r) {
         const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via, ' + r.page, title: 'Replies via'}, [
             el('option', {value: 'botcake', text: 'Botcake'}),
-            el('option', {value: 'gateway', text: 'Forbeast Gateway' + (gatewayReady ? '' : ' (not set up)'), disabled: gatewayReady ? null : ''}),
+            el('option', {value: 'gateway', text: 'Forbeast' + (gatewayReady ? '' : ' (not set up)'), disabled: gatewayReady ? null : ''}),
         ]);
         sel.value = r.provider || 'botcake';
         sel.addEventListener('change', async () => {
             const want = sel.value;
-            if (!confirm('Send and receive ' + r.page + "'s chats through " + (want === 'gateway' ? 'the Forbeast Gateway' : 'Botcake') + '?')) { sel.value = r.provider; return; }
+            if (!confirm('Send and receive ' + r.page + "'s chats through " + (want === 'gateway' ? 'Forbeast' : 'Botcake') + '?')) { sel.value = r.provider; return; }
             sel.disabled = true;
             try {
                 const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});

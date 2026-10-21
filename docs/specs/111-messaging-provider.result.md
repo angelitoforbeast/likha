@@ -69,6 +69,16 @@ One `skeptic-reviewer` pass at adversarial depth over the whole diff (one pass i
 - Story changes: none. The stories were written from the spec in `qa/stories.md` (S-111), since the spec brought none, without a separate story-writer run.
 - Conflict with the local CLAUDE.md: the plan was committed and work started without a separate "go", because the brief said "Start now".
 
+## Amendments
+
+**111-1 (the owner, 2026-10-22), applied:**
+
+1. **Bulk switch.** `/chatbot/pages` has a checkbox per row, "select all" in the Page header (only the rows the search and Bot filter show), a "Replies via" select and "Apply to N selected" in the toolbar. The confirm lists the count and the page names. `POST /chatbot/provider` now takes `page_names[]` (still `page_name` for one): all pages must be on the list, 1 to 200, otherwise 422 and nothing is saved; each page goes through `PageSettings::set` in one transaction, so every page has its own history row and its own Changes entry. Same access as a cell. (`ChatbotController.php` `provider`.)
+2. **Placement.** The "Replies via" select stays in the Active cell, directly under the On/Off switch and beside the Flow column (adjacent sticky columns).
+3. **Label.** The UI says "Forbeast" (option, confirms, errors, the failed-reply reason "Forbeast is not set up…"); backend names (`gateway`, `GatewayProvider`) are unchanged.
+4. **Forbeast app URL.** `GATEWAY_URL` may carry a path prefix, e.g. `https://app.forbeast.app/api`; the client trims a trailing slash and appends `/v1/pages/{id}/messages` (`GatewayProvider.php`). Signed events stay on `/api/gateway/events`. Case table additions: S-111.10 bulk switch, S-111.11 page controls and label, S-111.12 URL prefix (tests `test_S_111_10…`, `_11…`, `_12…` in `ChatbotProviderTest.php`; all pass).
+
+Suites after the amendment: `tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake` OK, 888 tests, 1 skipped. The bulk JS and the checkbox layout were not browser-checked (no browser tools); the test proves the markup is on the page. An existing test forbids the text "Select all shown pages" on this page, so the select-all label reads "Select every page in the list".
 ## Commits
 
 - `8c25bc54` docs: spec and plan for per-page messaging provider (spec 111)

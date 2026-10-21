@@ -31,6 +31,7 @@ class ChatbotController extends Controller
     private const MAX_CELLS = 5000; // kada Paste values: 60 page × mga 52 column ay mga 3,100
     private const SAMPLE_NAME = 'Juan Dela Cruz'; // ang sample na customer ng Preview
     private const HISTORY_LIMIT = 100;
+    private const MAX_BULK_PAGES = 200; // ang bulk na "Replies via"
     private const CHANGES_PER_PAGE = 50;
     private const HIDDEN_KEYS = ['flow_id', 'mock_ai', 'mock_ai_latency_ms']; // system lang: wala sa grid, wala sa Changes
     private const BOTCAKE_LABELS = ['page_id' => 'Botcake ID', 'token' => 'Botcake token']; // ang mga botcake key na nasa grid
@@ -226,16 +227,24 @@ class ChatbotController extends Controller
     public function provider(Request $request)
     {
         $this->checkAccess();
-        $page = $this->listedPage($this->str($request, 'page_name'));
+        $names = $request->input('page_names');
+        $names = is_array($names) ? array_values($names) : [$request->input('page_name')];
         $provider = strtolower($this->str($request, 'provider', 20));
-        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
-        if (!in_array($provider, ChatbotProvider::ALL, true)) return response()->json(['error' => 'Pick Botcake or Forbeast Gateway.'], 422);
-        if ($provider === ChatbotProvider::GATEWAY && !ChatbotProvider::gatewayReady()) {
-            return response()->json(['error' => 'The Forbeast Gateway is not set up yet.'], 422);
+        if (count($names) < 1 || count($names) > self::MAX_BULK_PAGES) return response()->json(['error' => 'Pick 1 to ' . self::MAX_BULK_PAGES . ' pages.'], 422);
+        // Lahat o wala: isang page na wala sa listahan ay walang binabago.
+        $pages = [];
+        foreach ($names as $name) {
+            $page = is_scalar($name) ? $this->listedPage(mb_substr(trim((string) $name), 0, 255)) : null;
+            if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+            $pages[$page] = $page;
         }
-        $res = $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id());
+        if (!in_array($provider, ChatbotProvider::ALL, true)) return response()->json(['error' => 'Pick Botcake or Forbeast.'], 422);
+        if ($provider === ChatbotProvider::GATEWAY && !ChatbotProvider::gatewayReady()) {
+            return response()->json(['error' => 'Forbeast is not set up yet.'], 422);
+        }
+        $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'], $pages));
 
-        return response()->json(['status' => $res['status'], 'provider' => $provider]);
+        return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)]);
     }
 
     /** ACTIVE On (isulat ang block at i-publish) o Off (i-unpublish lang). Ang error ng Botcake ay walang binabago dito. */

@@ -14,11 +14,11 @@ use Throwable;
  */
 class GatewayProvider implements MessagingProvider
 {
-    public const NOT_SET_UP = 'The Forbeast Gateway is not set up (GATEWAY_URL or GATEWAY_KEY is empty).';
+    public const NOT_SET_UP = 'Forbeast is not set up (GATEWAY_URL or GATEWAY_KEY is empty).';
 
     public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef): array
     {
-        $url = (string) config('services.gateway.url');
+        $url = rtrim((string) config('services.gateway.url'), '/'); // may carry a path prefix (e.g. https://host/api)
         $key = trim((string) config('services.gateway.key'));
         if ($url === '' || $key === '') return ['status' => 'failed', 'error' => self::NOT_SET_UP, 'http' => null];
 
