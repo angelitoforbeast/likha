@@ -941,3 +941,11 @@ Accepted, not fixed:
   - a Marketing - OIC viewer of a delete row
 
   Reason: each is the plain path of existing code (preview returns before the delete; `DB::transaction`; the existing `isCeoView` gate) and none is on an untrusted path with a realistic failure.
+
+## 106: page content check (2026-10-21)
+
+- **A COD written as free text with two numbers ("299 + 50") parses as one number (29950).** Reason: the COD column comes from the order import (trusted), and the mode of the 3 days drowns one odd row; changing the import's COD format is outside the task.
+- **The ads and item settings fallbacks match the page name with SQL `LOWER(TRIM())`, so a name with an inner double space misses them** (the orders step matches in PHP and handles it). Reason: trusted tables whose page names are typed through the app; matching in PHP would read every row.
+- **A seller's text can close the `<<<TEXT … TEXT>>>` marker and steer the AI's verdict.** Reason: botfields are written by staff, and the worst effect is a wrong pass or X in the Check column; nothing is written or sent.
+- **An image answer is keyed by its URL: a picture replaced behind the same URL keeps its old answer** until the URL or the expected item changes. Reason: Facebook/CDN picture URLs change when the picture changes; hashing the image would mean downloading it on our server.
+- **Untested here:** the pgsql and mysql runs of the grouped orders query (quoted `PAGE`, `ITEM_NAME`, `COD`; `BTRIM`), the tie-break between two equally common pairs, the 6,000-character cut of a long text, and the job's time budget. Reason: the test DB is sqlite; the others are simple guards and the suite stays small.
