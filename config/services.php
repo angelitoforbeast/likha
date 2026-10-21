@@ -67,11 +67,14 @@ return [
     'astra_encoder_max_web_first' => (int) env('ASTRA_ENCODER_MAX_WEB_FIRST', 5),   // ang parehong cap kapag "web search muna" ang mode ng address rules
     // Aling buttons ang nakikita sa /encoder/checker_1: both | astra | classic
     'ai_checker_ui' => env('AI_CHECKER_UI', 'both'),
+    // Content check ng /chatbot/pages (item, presyo, larawan, ad video): murang model na may vision.
+    'content_check_model' => env('CHATBOT_CONTENT_MODEL', 'gpt-4o-mini'),
     // USD kada 1M tokens [input, output] + kada web search call — para sa cost_usd sa ai_checker_logs (estimate).
     'ai_checker_prices' => [
         'gpt-5.2'     => [1.75, 14.0],
         'gpt-6-astra' => [10.0, 50.0],
         'gpt-6-luna'  => [0.10, 0.50],
+        'gpt-4o-mini' => [0.15, 0.60],
         'web_search'  => 0.01,
     ],
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.

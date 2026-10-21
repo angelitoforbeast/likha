@@ -96,6 +96,13 @@ Schedule::command('chatbot:sequence-tick')
     ->everyMinute()
     ->withoutOverlapping(5);
 
+// Chatbot content check (/chatbot/pages Check: item, presyo, larawan, ad video laban sa orders): naka-queue ang takbo,
+// gabi-gabi 02:40 Manila. Ang bago o nabagong value lang ang itinatanong sa AI.
+Schedule::command('chatbot:content-check')
+    ->timezone('Asia/Manila')
+    ->dailyAt('02:40')
+    ->withoutOverlapping();
+
 // Chatbot Results: ang replied_at ng mga padalang hindi naabot ng job ng chat (huling 48 oras).
 Schedule::command('chatbot:replied-backfill')
     ->hourlyAt(7)

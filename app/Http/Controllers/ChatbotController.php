@@ -287,12 +287,16 @@ class ChatbotController extends Controller
         return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
     }
 
-    /** Ang Check ng isang page: ang naka-cache (GET), o kinukuwenta ulit kasama ang mga link ng larawan (POST, "Check again"). */
+    /**
+     * Ang Check ng isang page: ang naka-cache (GET), o kinukuwenta ulit kasama ang mga link ng larawan (POST, "Check
+     * again"; naka-queue rin ang content check ng page, dahil may tanong ito sa AI).
+     */
     public function check(Request $request, ChatbotPageCheck $check)
     {
         $this->checkAccess();
         $page = $this->listedPage($this->str($request, 'page_name'));
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        if ($request->isMethod('post')) \App\Jobs\RunChatbotContentCheck::dispatch($page);
 
         return response()->json(['page' => $page] + $check->check($page, $request->isMethod('post')));
     }

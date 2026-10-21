@@ -19,7 +19,10 @@ use Illuminate\Support\Facades\Schema;
  * - Larawan: bawat image field na may value ay link na sumasagot ng larawan (ImageLinkCheck, hanggang 20 tawag kada takbo).
  * - Pares: kapag gamit ng flow ang Seq N at Seq Img N, ang may isa pero wala ang kapares.
  * - Hindi kilala: ang {{X}} sa isang botfield na hindi system variable, botfield o customer field.
- * Naka-cache 10 minuto kada page, sa key na may bakas ng settings ng page at ng mga flow: ang anumang sulat ay bagong key.
+ * - Content (PageContentCheck): ang item, presyo, larawan at ad video laban sa item na ino-order; ang naitalang sagot ng AI
+ *   lang (walang tawag dito). Ang tiyak na mali ay reason (X); ang hindi sigurado ay warning (amber).
+ * Naka-cache 10 minuto kada page, sa key na may bakas ng settings ng page, ng mga flow at ng mga sagot ng content check:
+ * ang anumang sulat ay bagong key.
  */
 class ChatbotPageCheck
 {
@@ -28,7 +31,7 @@ class ChatbotPageCheck
     public const URL_SECONDS = 20; // ang kabuuang oras ng mga tawag sa link kada takbo: ang lampas ay "not checked yet", hindi timeout ng request
     private const MAX_FLOWS = 50; // ang flow at ang mga flow ng sequence nito
 
-    public function __construct(private PageSettings $settings, private ChatbotFields $fields, private ImageLinkCheck $images)
+    public function __construct(private PageSettings $settings, private ChatbotFields $fields, private ImageLinkCheck $images, private PageContentCheck $content)
     {
     }
 
@@ -41,7 +44,7 @@ class ChatbotPageCheck
     }
 
     /**
-     * @return array{status: string, reasons: array<int, string>, unchecked: int, checked_at: string} status: ok | x | none (walang flow)
+     * @return array{status: string, reasons: array<int, string>, warnings: array<int, string>, content: ?array, unchecked: int, checked_at: string} status: ok | x | none (walang flow)
      */
     public function check(string $page, bool $fresh = false): array
     {
@@ -66,7 +69,7 @@ class ChatbotPageCheck
             $pages[$pk] = max($pages[$pk] ?? '', sprintf('%012d|%s', (int) $r->max_id, (string) $r->max_replaced));
         }
         $flows = [];
-        foreach (['chatbot_flows', 'chatbot_sequences', 'chatbot_sequence_steps'] as $t) {
+        foreach (['chatbot_flows', 'chatbot_sequences', 'chatbot_sequence_steps', 'chatbot_content_answers'] as $t) {
             if (Schema::hasTable($t)) $flows[] = DB::table($t)->max('updated_at') . '#' . DB::table($t)->count();
         }
 
@@ -83,7 +86,7 @@ class ChatbotPageCheck
 
     private function run(string $page, bool $fresh): array
     {
-        $out = ['status' => 'none', 'reasons' => [], 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
+        $out = ['status' => 'none', 'reasons' => [], 'warnings' => [], 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
         $flow = ctype_digit($flowId) && Schema::hasTable('chatbot_flows') ? ChatbotFlow::find((int) $flowId) : null;
         if ($flow === null) return $out;
@@ -155,7 +158,14 @@ class ChatbotPageCheck
             }
         }
 
-        return ['status' => $reasons ? 'x' : 'ok', 'reasons' => $reasons] + $out;
+        $content = $this->content->run($page, false);
+        $warnings = [];
+        foreach ($content['findings'] as $f) {
+            if ($f['level'] === 'x') $reasons[] = $f['reason'];
+            elseif ($f['level'] === 'warn') $warnings[] = $f['reason'];
+        }
+
+        return ['status' => $reasons ? 'x' : 'ok', 'reasons' => $reasons, 'warnings' => $warnings, 'content' => $content] + $out;
     }
 
     /** @return array<int, array> ang published na graph ng flow at ng mga flow ng sequence na sinu-subscribe nito */

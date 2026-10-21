@@ -24,7 +24,7 @@
 - **Check column:** `ChatbotPageCheck::run` appends the content X reasons to `reasons`, adds `warnings` (amber) and `content: {expected, findings[], unchecked}` to the JSON. `status` stays ok | x | none. The fingerprint (`prints()`) also covers `chatbot_content_answers`, so a finished job shows on the next read. "Check again" (POST) also queues the content job for that page.
 - **Job and command:** `App\Jobs\RunChatbotContentCheck` (queue `default`, unique per page or all, 1800 s timeout, stops at 1700 s and leaves the rest for the next run) calls `run($page, true)` for each chatbot page. `chatbot:content-check {--page=} {--sync} {--json}`: queues the job, or runs it in-process with `--sync`; `--json` prints `{pages:[{page, expected, findings, unchecked}]}` from the cached answers (after the run when `--sync`). Nightly at 02:40 Manila (`routes/console.php`).
 - **View:** amber icon + warnings list (status ok with warnings), warnings under the red list when X, and "N content checks not done yet" in grey.
-- **Migration:** `2026_11_02_100000_create_chatbot_content_answers_table.php`, guarded with `Schema::hasTable`. Its release needs the owner's yes.
+- **Migration:** `2026_11_02_106000_create_chatbot_content_answers_table.php`, guarded with `Schema::hasTable`. Its release needs the owner's yes.
 
 Threat model: botfield text and image URLs are stored staff input (untrusted text): it goes to the AI only as data inside the prompt, and the answer is validated in PHP (types, lengths, confidence 0–100) and shown escaped (`textContent`). The image URL goes to OpenAI, never fetched by our server. Orders, ads and item settings are trusted app data. The OpenAI key comes from config and is never logged or returned.
 
