@@ -84,4 +84,5 @@ Suites after the amendment: `tests/Feature/Chatblast tests/Feature/PageSettings 
 - `8c25bc54` docs: spec and plan for per-page messaging provider (spec 111)
 - `d90ebec9` feat: choose Botcake or the Forbeast Gateway per chatbot page (spec 111)
 - `9c358ffd` fix: gateway events without an id are not stored; inbound shapes tested (spec 111)
-- this commit: docs: result (spec 111)
+- `ec64c6cf` docs: result for per-page messaging provider (spec 111)
+- `d3e9bf3f` feat: bulk Replies via switch, Forbeast label and URL path prefix (spec 111)
