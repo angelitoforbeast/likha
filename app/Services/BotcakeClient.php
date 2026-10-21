@@ -11,15 +11,15 @@ use Illuminate\Support\Facades\Http;
 /**
  * Botcake public API. Hanggang 2 request kada segundo (kasama ang retry); sa 429, 5xx o putol na koneksyon:
  * hintay 2, 4, 8 segundo (max 3 retry), saka BotcakeException. Ang token ay nasa header lang: hindi ito
- * kasama sa anumang mensahe ng error o log.
+ * kasama sa anumang mensahe ng error o log. Ang test page (BotcakeMock: botcake.mock = 1 at page_id na 99…) ay sinasagot
+ * dito mismo, walang HTTP, pero dumadaan pa rin sa parehong throttle, retry at mga failed na daan.
  */
 class BotcakeClient
 {
     public const BASE = 'https://botcake.io/api/public_api/v1';
-    public const MIN_INTERVAL = 0.5; // segundo sa pagitan ng mga request = max 2 kada segundo
+    public const MIN_INTERVAL = 0.5; // ang default: max 2 kada segundo (services.botcake.rate_per_page)
     public const MAX_RETRIES = 3;
 
-    private ?float $lastRequestAt = null;
     private int $retries = self::MAX_RETRIES;
     private int $timeout = 30;
     private ?string $rateKey = null;
@@ -55,29 +55,60 @@ class BotcakeClient
     public function call(string $method, string $path, array $data, string $token, bool $onlyRateLimit = false): array
     {
         for ($attempt = 0; ; $attempt++) {
-            $this->throttle();
+            $this->throttle($token);
 
             try {
-                $req = Http::withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout);
-                $res = $method === 'GET' ? $req->get(self::BASE . $path, $data) : $req->post(self::BASE . $path, $data);
+                if (($res = $this->mock($method, $path, $data)) === null) {
+                    $req = Http::withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout);
+                    $res = $method === 'GET' ? $req->get(self::BASE . $path, $data) : $req->post(self::BASE . $path, $data);
+                }
                 $status = $res->status();
             } catch (ConnectionException $e) {
                 $res = null;
                 $status = 0;
             }
 
-            $retryable = $onlyRateLimit ? $status === 429 : ($status === 0 || $status === 429 || $status >= 500);
-            if (!$retryable || $attempt >= $this->retries) {
+            $wait = self::retryWait($attempt, $status, $res?->header('Retry-After'), $onlyRateLimit, $this->retries, $this->maxRetryAfter);
+            if ($wait === null) {
                 return ['http' => $status, 'body' => $res ? ($res->json() ?? $res->body()) : null, 'attempts' => $attempt + 1];
             }
-
-            $wait = 2 ** ($attempt + 1); // 2, 4, 8
-            $after = $res?->header('Retry-After');
-            if (is_numeric($after) && (float) $after > $wait) {
-                $wait = min((float) $after, $this->maxRetryAfter);
-            }
-            $this->clock->sleep((float) $wait);
+            $this->clock->sleep($wait);
         }
+    }
+
+    /**
+     * Ang patakaran ng ulit ng call() (pareho sa botcake:send-pool): ilang segundo bago ulitin ang subok na $attempt
+     * (0 = una), o null kapag hindi na inuulit. Ang 429, 5xx at walang sagot ay inuulit (ang 429 lang kapag $onlyRateLimit),
+     * hanggang $retries: 2, 4, 8 s, o ang Retry-After kapag mas mahaba (hanggang $maxRetryAfter).
+     */
+    public static function retryWait(int $attempt, int $status, ?string $retryAfter, bool $onlyRateLimit, int $retries = self::MAX_RETRIES, float $maxRetryAfter = 10): ?float
+    {
+        $retryable = $onlyRateLimit ? $status === 429 : ($status === 0 || $status === 429 || $status >= 500);
+        if (!$retryable || $attempt >= $retries) return null;
+        $wait = 2 ** ($attempt + 1); // 2, 4, 8
+        if (is_numeric($retryAfter) && (float) $retryAfter > $wait) $wait = min((float) $retryAfter, $maxRetryAfter);
+
+        return (float) $wait;
+    }
+
+    /** Segundo sa pagitan ng mga request ng isang page (token): 1 / services.botcake.rate_per_page. */
+    public static function interval(): float
+    {
+        $rate = (float) config('services.botcake.rate_per_page', 1 / self::MIN_INTERVAL);
+
+        return $rate > 0 ? 1 / $rate : self::MIN_INTERVAL;
+    }
+
+    /** Ang cache key ng huling request ng isang page (kahati ng botcake:send-pool). */
+    public static function rateCacheKey(string $rateKey): string
+    {
+        return 'botcake-rate:' . $rateKey;
+    }
+
+    /** Ang sagot ng BotcakeMock (test page) nang walang hintay, para sa pool na may sariling timer; null = totoong Botcake. */
+    public static function mockAnswer(string $method, string $path, array $data): ?array
+    {
+        return BotcakeMock::answer($method, $path, $data, new class extends BotcakeClock { public function sleep(float $seconds): void {} });
     }
 
     /**
@@ -109,6 +140,78 @@ class BotcakeClient
         }
 
         return $body;
+    }
+
+    /**
+     * Ang sagot ng chatbot sa customer (send_content, sa loob ng 24 oras ng Messenger, walang message tag). Ang 429 lang
+     * ang inuulit: ang 5xx o walang sagot ay maaaring natanggap na, kaya hindi inuulit (walang dobleng sagot).
+     * @param array<int, array{type: string, text?: string, url?: string}> $messages
+     * @return array{http: int, body: mixed, attempts: int}
+     */
+    public function sendContent(string $pageId, string $psid, array $messages, string $token): array
+    {
+        return $this->call('POST', '/pages/' . rawurlencode($pageId) . '/flows/send_content', [
+            'psid' => $psid, 'data' => ['version' => 'v2', 'content' => ['messages' => $messages]],
+        ], $token, true);
+    }
+
+    /** Ang mga lugar ng text ng error sa sagot (Botcake at Facebook), ayon sa pagkakasunod na hinahanap. */
+    public const REASON_PATHS = ['error.message', 'error_user_msg', 'error.error_user_msg', 'message.message', 'error_description', 'title', 'detail'];
+
+    /** Mga key na trace ID lang (hal. fbtrace_id), hindi dahilan: hindi kinukuha bilang text. */
+    public const TRACE_KEYS = ['fbtrace_id', 'trace_id', 'request_id', 'x_fb_trace_id'];
+
+    /**
+     * Ang dahilan ng error mula sa sagot. Ang "message" kapag string; kung array o object: ang text sa REASON_PATHS (sa sagot
+     * mismo, saka sa loob ng message), saka ang unang string na hindi trace ID, saka compact JSON; iba pa (null, numero) = ''.
+     */
+    public static function messageText(mixed $body): string
+    {
+        // Array na maaaring may object sa loob (hal. ang message): iisang anyo, array lang.
+        if (is_object($body) || is_array($body)) $body = json_decode((string) json_encode($body, JSON_INVALID_UTF8_SUBSTITUTE), true);
+        if (!is_array($body)) return '';
+        $message = $body['message'] ?? null;
+        if (is_string($message) && trim($message) !== '') return trim($message);
+        $roots = is_array($message) ? [$body, $message] : [$body];
+        foreach (self::REASON_PATHS as $path) {
+            foreach ($roots as $root) {
+                $v = data_get($root, $path);
+                if (is_string($v) && trim($v) !== '') return trim($v);
+            }
+        }
+        if (!is_array($message) || $message === []) return '';
+
+        return self::firstString($message) ?? (string) json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    private static function firstString(array $a): ?string
+    {
+        foreach ($a as $k => $v) {
+            if (is_string($k) && in_array(strtolower($k), self::TRACE_KEYS, true)) continue;
+            if (is_string($v) && trim($v) !== '') return trim($v);
+            if (is_array($v) && ($s = self::firstString($v)) !== null) return $s;
+        }
+
+        return null;
+    }
+
+    /** Ang sagot ng Botcake kapag wala ang PSID sa page. */
+    public const NOT_ON_PAGE = ['not found customer', 'psid wrong format'];
+
+    /**
+     * Nasa page ba ang PSID (customer info)? 'found'; 'not_found' ("Not found customer" o "psid wrong format"); 'down'
+     * (walang koneksyon, timeout o 5xx: hindi nalaman); 'refused' (anumang ibang sagot: token, 429, 404, iba). Gamitin
+     * kasama ang shared() at once() para sa web.
+     */
+    public function customerInfo(string $pageId, string $psid, string $token): string
+    {
+        $r = $this->call('GET', '/pages/' . rawurlencode($pageId) . '/customer/' . rawurlencode($psid) . '/info', [], $token);
+        $body = is_array($r['body']) ? $r['body'] : [];
+        if ($r['http'] === 200 && ($body['success'] ?? null) === true) return 'found';
+        if (($body['success'] ?? null) === false && in_array(mb_strtolower(self::messageText($body)), self::NOT_ON_PAGE, true)) return 'not_found';
+        if ($r['http'] === 0 || $r['http'] >= 500) return 'down';
+
+        return 'refused';
     }
 
     /** Isang mababang tawag (custom_fields) para subukan ang token. False = invalid. */
@@ -147,10 +250,10 @@ class BotcakeClient
     protected function get(string $path, array $query, string $token): Response
     {
         for ($attempt = 0; ; $attempt++) {
-            $this->throttle();
+            $this->throttle($token);
 
             try {
-                $res = Http::withHeaders(['access-token' => $token])
+                $res = $this->mock('GET', $path, $query) ?? Http::withHeaders(['access-token' => $token])
                     ->acceptJson()
                     ->connectTimeout(10)
                     ->timeout($this->timeout)
@@ -185,23 +288,60 @@ class BotcakeClient
         }
     }
 
-    private function throttle(): void
+    /** Ang sagot ng BotcakeMock bilang totoong Response (test page lang), o null para sa totoong Botcake. */
+    private function mock(string $method, string $path, array $data): ?Response
     {
-        if ($this->rateKey !== null) {
-            $key  = 'botcake-rate:' . $this->rateKey;
-            $last = Cache::get($key);
-            if (is_numeric($last)) {
-                $wait = (float) $last + self::MIN_INTERVAL - $this->clock->now();
-                if ($wait > 0) $this->clock->sleep($wait);
-            }
-            Cache::put($key, $this->clock->now(), 60);
-            return;
-        }
+        $a = BotcakeMock::answer($method, $path, $data, $this->clock);
 
-        if ($this->lastRequestAt !== null) {
-            $wait = $this->lastRequestAt + self::MIN_INTERVAL - $this->clock->now();
-            if ($wait > 0) $this->clock->sleep($wait);
+        return $a === null ? null : new Response(new \GuzzleHttp\Psr7\Response($a[0], ['Content-Type' => 'application/json'], json_encode($a[1])));
+    }
+
+    /**
+     * Isang rate kada page (token) para sa lahat ng tawag: ang pool, ang mga naghihintay na padala (sequence, Inbox),
+     * customer info at chatblast. Ang puwesto ay kinukuha sa ilalim ng lock, kaya walang dalawang proseso na nakakakuha
+     * ng parehong oras. $wait = true: laging may puwesto (ang susunod na libre, kahit mamaya pa) at itinatala na agad,
+     * bago maghintay; false (ang pool): ngayon lang, kung hindi ay hindi itinatala at ibinabalik kung kailan libre.
+     * @return array{0: bool, 1: float} [nakuha, oras ng puwesto o kailan libre]
+     */
+    public static function slot(string $rateKey, float $now, bool $wait): array
+    {
+        $key = self::rateCacheKey($rateKey);
+        $take = function () use ($key, $now, $wait) {
+            $last = Cache::get($key);
+            $free = is_numeric($last) ? max($now, (float) $last + self::interval()) : $now;
+            if (!$wait && $free > $now + 0.000001) return [false, $free];
+            Cache::put($key, $free, 60);
+
+            return [true, $free];
+        };
+
+        try {
+            return Cache::lock($key . ':lock', 5)->betweenBlockedAttemptsSleepFor(5)->block(5, $take);
+        } catch (LockTimeoutException) {
+            return $take(); // hindi makuha ang lock: mas mabuting tumuloy kaysa hindi maipadala
         }
-        $this->lastRequestAt = $this->clock->now();
+    }
+
+    /** Ang tawag ng pool na lumabas nang mas huli sa puwesto nito: ang susunod na puwesto ay mula sa oras na iyon. */
+    public static function sentAt(string $rateKey, float $at): void
+    {
+        $key = self::rateCacheKey($rateKey);
+        $move = function () use ($key, $at) {
+            $last = Cache::get($key);
+            if (!is_numeric($last) || (float) $last < $at) Cache::put($key, $at, 60);
+        };
+
+        try {
+            Cache::lock($key . ':lock', 5)->betweenBlockedAttemptsSleepFor(5)->block(5, $move);
+        } catch (LockTimeoutException) {
+            $move();
+        }
+    }
+
+    private function throttle(string $token): void
+    {
+        [, $at] = self::slot($this->rateKey ?? sha1($token), $this->clock->now(), true);
+        $wait = $at - $this->clock->now();
+        if ($wait > 0) $this->clock->sleep($wait);
     }
 }

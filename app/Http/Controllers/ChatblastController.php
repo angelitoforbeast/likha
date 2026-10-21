@@ -26,7 +26,6 @@ use Illuminate\Support\Facades\DB;
 class ChatblastController extends Controller
 {
     public const PER_PAGE = 100;
-    public const WEB_TRACK_BUDGET = 20; // segundo ng J&T tracking ng "Refresh now" (ChatblastBuildJob), gaya ng dati sa web
     public const STATUSES = ['ready', 'no_psid', 'no_config', 'queued', 'sending', 'sent', 'failed', 'field_mismatch', 'skipped', 'unknown'];
     // "To send": ang ipapadala pa, anuman ang petsa. "History": ang naproseso na, ayon sa From/To (pagtingin lang).
     public const TO_SEND = ['ready', 'queued', 'sending'];
@@ -76,6 +75,15 @@ class ChatblastController extends Controller
         return $this->page('send');
     }
 
+    /** Ang "Needs setup" (ChatblastNeedsSetup) bilang JSON, para sa susunod na alert (Slack). */
+    public function needsSetup(\App\Services\ChatblastNeedsSetup $needs)
+    {
+        $this->checkAccess();
+        $list = $needs->list();
+
+        return response()->json(['window_days' => \App\Services\ChatblastNeedsSetup::DAYS, 'pages' => \App\Services\ChatblastNeedsSetup::pageCount($list), 'rows' => $list]);
+    }
+
     /** "History" (/chatblast/history). */
     public function history()
     {
@@ -92,6 +100,10 @@ class ChatblastController extends Controller
             'statuses'  => self::STATUSES,
             'pages'     => BotcakeMessage::query()->distinct()->orderBy('page_name')->pluck('page_name')->all(),
             'today'     => Carbon::now('Asia/Manila')->toDateString(),
+            // Walang tumatakbong J&T track-sync dito: ang Delivering ay ayon sa status ng upload (paalala sa To send).
+            'jntOff'    => $view === 'send' && !\App\Services\Jnt\JntAutoTrackSync::active(),
+            // Ang "Needs setup" sa itaas ng To send.
+            'needsSetup' => $view === 'send' ? app(\App\Services\ChatblastNeedsSetup::class)->list() : [],
         ]);
     }
 

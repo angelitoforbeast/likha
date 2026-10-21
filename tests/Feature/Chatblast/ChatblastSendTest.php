@@ -122,7 +122,7 @@ class ChatblastSendTest extends ChatblastTestCase
     {
         Queue::fake();
         app(ChatblastSender::class)->queue([$this->row()->id, $this->row('WB-002')->id], 1);
-        Queue::assertPushedOn('chatblast', SendChatblastMessage::class);
+        Queue::assertPushedOn('chatblast-high', SendChatblastMessage::class); // Delivering: sa chatblast-high
         $this->botcake(['write' => Http::response(['message' => 'Unauthorized'], 401)]);
 
         app(ChatblastSender::class)->process($this->row()->id);

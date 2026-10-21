@@ -29,6 +29,9 @@
     .pill.user   { background:#f1f5f9; color:#475569; }
     .pill.action-create { background:#dcfce7; color:#166534; }
     .pill.action-update { background:#dbeafe; color:#1e40af; }
+    .pill.action-delete { background:#fee2e2; color:#991b1b; }
+    .log-src { font-size:10px; color:#64748b; margin-top:3px; white-space:nowrap; }
+    .delta-deleted { color:#dc2626; font-weight:600; }
     /* Scope pills — match modal section colors for visual continuity */
     .pill.scope-rts      { background:#fef3c7; color:#92400e; }
     .pill.scope-promo    { background:#fae8ff; color:#86198f; }
@@ -92,6 +95,17 @@
             </select>
           </div>
         @endif
+        @if (!empty($hasSourceCol))
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Source</label>
+            <select name="source" class="ct-select">
+              <option value="">All sources</option>
+              <option value="owner_private" @selected(($sourceFilter ?? '') === 'owner_private')>/owner/private</option>
+              <option value="item_cogs"     @selected(($sourceFilter ?? '') === 'item_cogs')>/item/cogs</option>
+              <option value="cogs_sync"     @selected(($sourceFilter ?? '') === 'cogs_sync')>cogs sync</option>
+            </select>
+          </div>
+        @endif
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">From</label>
           <input type="date" name="from_date" value="{{ $fromDate }}" class="ct-input" />
@@ -139,6 +153,11 @@
           </thead>
           <tbody>
             @forelse ($rows as $r)
+              @php
+                // NULL source = lumang row, galing /owner/private (doon lang dati nagsusulat).
+                $src   = (string) ($r->source ?? '') ?: 'owner_private';
+                $isDel = $r->action === 'delete';
+              @endphp
               <tr>
                 <td>
                   <div style="font-weight:600;">{{ \Carbon\Carbon::parse($r->created_at)->format('M j, Y') }}</div>
@@ -150,12 +169,15 @@
                     @if ($r->user_name && $r->user_email)
                       <div style="font-size:10px;color:#94a3b8;margin-top:2px;">{{ $r->user_email }}</div>
                     @endif
+                  @elseif ($src === 'cogs_sync')
+                    <span class="pill user">system (cogs sync)</span>
                   @else
                     <span style="color:#cbd5e1;">— anonymous —</span>
                   @endif
                 </td>
                 <td>
                   <span class="pill action-{{ $r->action }}">{{ strtoupper($r->action) }}</span>
+                  <div class="log-src">{{ ['owner_private' => '/owner/private', 'item_cogs' => '/item/cogs', 'cogs_sync' => 'cogs sync'][$src] ?? $src }}</div>
                 </td>
                 @if (!empty($hasScopeCol))
                   <td>
@@ -167,7 +189,12 @@
                     @endif
                   </td>
                 @endif
-                <td style="font-weight:600;">{{ $r->page_name }}</td>
+                @if ((string) $r->page_name === '')
+                  {{-- Global ang COGS sa /item/cogs at cogs sync --}}
+                  <td style="color:#94a3b8;font-size:11px;">— lahat ng page —</td>
+                @else
+                  <td style="font-weight:600;">{{ $r->page_name }}</td>
+                @endif
                 <td>{{ $r->item_name }}</td>
                 <td style="font-family:monospace;font-size:11px;">{{ $r->effective_date }}</td>
                 <td>
@@ -177,6 +204,8 @@
                   @endphp
                   @if ($oldR === null && $newR === null)
                     <span class="delta-eq">—</span>
+                  @elseif ($isDel)
+                    <span class="delta"><span class="delta-old">{{ number_format($oldR, 1) }}%</span><span class="delta-arrow">→</span><span class="delta-deleted">deleted</span></span>
                   @elseif ($oldR === null)
                     <span class="delta"><span class="delta-arrow">+</span><span class="delta-new">{{ number_format($newR, 1) }}%</span></span>
                   @elseif ($newR === null)
@@ -201,6 +230,8 @@
                   @endphp
                   @if ($oldP === null && $newP === null)
                     <span class="delta-eq">—</span>
+                  @elseif ($isDel)
+                    <span class="delta"><span class="delta-old delta-text">{{ $oldP }}</span><span class="delta-arrow">→</span><span class="delta-deleted">deleted</span></span>
                   @elseif ($oldP === null || $isEmptyish($oldP))
                     @if ($isEmptyish($newP))
                       <span class="delta-eq">— (still empty)</span>
@@ -222,6 +253,8 @@
                   @endphp
                   @if ($oldV === null && $newV === null)
                     <span class="delta-eq">—</span>
+                  @elseif ($isDel)
+                    <span class="delta"><span class="delta-old">₱{{ number_format($oldV, 2) }}</span><span class="delta-arrow">→</span><span class="delta-deleted">deleted</span></span>
                   @elseif ($oldV === null)
                     <span class="delta"><span class="delta-arrow">+</span><span class="delta-new">₱{{ number_format($newV, 2) }}</span></span>
                   @elseif ($newV === null)
@@ -242,6 +275,8 @@
                     @endphp
                     @if ($oldVC === null && $newVC === null)
                       <span class="delta-eq">—</span>
+                    @elseif ($isDel)
+                      <span class="delta"><span class="delta-old">₱{{ number_format($oldVC, 2) }}</span><span class="delta-arrow">→</span><span class="delta-deleted">deleted</span></span>
                     @elseif ($oldVC === null)
                       <span class="delta"><span class="delta-arrow">+</span><span class="delta-new">₱{{ number_format($newVC, 2) }}</span></span>
                     @elseif ($newVC === null)

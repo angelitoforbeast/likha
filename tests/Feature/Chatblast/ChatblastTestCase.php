@@ -34,6 +34,8 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2026_04_10_000003_create_app_settings_table.php',
             'database/migrations/2026_10_18_300000_create_botcake_messages_table.php',
+            'database/migrations/2026_09_16_100000_create_jnt_track_sync_runs_table.php',
+            'database/migrations/2026_10_21_100000_create_jnt_latest_scans_table.php',
         ]]);
         if ($this->withCampaigns) $this->migrateCampaigns();
     }
@@ -85,7 +87,18 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
             'ts_date' => now('Asia/Manila')->subDays($daysAgo)->toDateString(), 'ITEM_NAME' => 'Item A', 'COD' => '499',
         ], $extra));
         DB::table('from_jnts')->insert(['waybill_number' => $waybill, 'status' => $jnt, 'receiver' => $receiver]);
+        // Delivering: ang kusang track-sync ay may On Delivery scan ngayong araw, nasuri ngayon (ang kailangan ng chatblast).
+        if ($jnt === 'Delivering') $this->scan($waybill);
 
         return $order;
+    }
+
+    /** Ang pinakabagong scan ng waybill na isinulat ng track-sync (jnt_latest_scans). */
+    protected function scan(string $waybill, string $type = 'On Delivery', ?string $time = null, ?string $checkedAt = null, ?string $rider = null, ?string $phone = null): void
+    {
+        DB::table('jnt_latest_scans')->updateOrInsert(['waybill' => $waybill], [
+            'scan_type' => $type, 'scan_time' => $time ?? now('Asia/Manila')->format('Y-m-d H:i:s'),
+            'rider_name' => $rider, 'rider_phone' => $phone, 'checked_at' => $checkedAt ?? now()->format('Y-m-d H:i:s'),
+        ]);
     }
 }

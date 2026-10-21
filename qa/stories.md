@@ -956,6 +956,66 @@ non-CEO render pass without being edited.
 | S-049.19 | (amendment 1) Given the statement view, then the summary bar has matched, card-only, Meta-only (count and amount), untallied groups and the overall difference, each chip a filter link; card-only rows are tinted red and Meta-only amber; the Meta side shows date, transaction id (shortened, full on hover), ad account and amount; a 1,200-line statement renders one page of days with a pager, and the edit form 200 lines a page; a bad status or page in the URL still shows the page | `CardReconcilePageTest::test_S_049_16…`, `CardReconcilePageTest::test_S_049_19…` | Passed · 2026-10-18 · auto |
 | S-049.20 | (amendment 2) Given a screenshot read that times out (5 s connect, 45 s answer, inside nginx's 60 s), then "Hindi natapos basahin ang screenshot…" and nothing is saved; given the same file from the same user again within 10 minutes, then the earlier statement opens with no new read; after 10 minutes it is a new statement; only the file's sha256 is kept | `CardReconcilePageTest::test_S_049_20…` | Passed · 2026-10-18 · auto |
 
+## Slice 051 – Checklist deadlines, late tasks in the staff feed, Checklist badge, re-check limit
+
+Tests: `ChecklistDeadlineFieldTest`, `ChecklistBadgeTest`, `ChecklistRecheckLimitTest` (tests/Feature/Checklist), `ChecklistDeadlineTest` (tests/Unit), `StaffFeedApiTest` (tests/Feature/StaffActivity).
+
+### S-051a A task has a deadline (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.1 | Given a CEO, when they set a task's deadline to 10:30 in manage, then it is saved, shown ("⏰ 10:30 AM", the edit field) and one checklist_task_changes row records null → 10:30 | `ChecklistDeadlineFieldTest::test_S_051_1…` | Passed · 2026-10-18 · auto |
+| S-051.2 | Given a Marketing user without edit rights on the task, when they send a deadline, then 403 and nothing changes | `ChecklistDeadlineFieldTest::test_S_051_2…` | Passed · 2026-10-18 · auto |
+| S-051.3 | Given a deadline, when it is cleared, then null is saved and logged | `ChecklistDeadlineFieldTest::test_S_051_3…` | Passed · 2026-10-18 · auto |
+| S-051.4 | Given "25:00", "bukas" or other text, then the form refuses it with "Ang Deadline ay dapat oras, hal. 10:30." (edit and add) | `ChecklistDeadlineFieldTest::test_S_051_4…` | Passed · 2026-10-18 · auto |
+
+### S-051b The effective deadline (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.5 | Scheduled 10:00, no deadline → 10:30 (30 minutes since spec 079) | `ChecklistDeadlineTest` (data sets S-051.5) | Passed · 2026-10-19 · auto |
+| S-051.6 | Deadline 10:45 → 10:45 | `ChecklistDeadlineTest` (S-051.6) | Passed · 2026-10-18 · auto |
+| S-051.7 | Neither → no deadline, never late | `ChecklistDeadlineTest` (S-051.7) | Passed · 2026-10-18 · auto |
+| S-051.8 | Scheduled 11:50 PM → 12:20 AM the next day: never late on the task's day | `ChecklistDeadlineTest` (S-051.8) | Passed · 2026-10-19 · auto |
+
+### S-051c The monitor sees late tasks in the staff feed (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.9 | At 10:31, a task due today with deadline 10:30 and no submission is in each assigned person's checklist_late_today with submitted false | `StaffFeedApiTest::test_S_051_9…` | Passed · 2026-10-19 · auto |
+| S-051.10 | At 10:29 it is not there | `StaffFeedApiTest::test_S_051_10…` | Passed · 2026-10-19 · auto |
+| S-051.11 | Submitted at 10:20, 3 checks, latest not_approved → submitted true, submitted_at 10:20, verdict not_approved, approval_checks 3 | `StaffFeedApiTest::test_S_051_11…` | Passed · 2026-10-18 · auto |
+| S-051.12 | An inactive, deleted, other-weekday or done once-task never appears | `StaffFeedApiTest::test_S_051_12…` | Passed · 2026-10-18 · auto |
+| S-051.13 | A group task submitted by one person is submitted for everyone assigned (an individual task only for the one who submitted) | `StaffFeedApiTest::test_S_051_13…`, `…test_an_individual_task_submitted_only_by_another_person…` | Passed · 2026-10-18 · auto |
+| S-051.14 | No note, photo path, prompt, reason or AI text anywhere in the response | `StaffFeedApiTest::test_S_051_14…`, `…test_S_051_29…` | Passed · 2026-10-18 · auto |
+| S-051.15 | The existing fields keep their values and meaning next to the late list | `StaffFeedApiTest::test_S_051_15…`, `…test_status_has_exactly_the_documented_keys…` | Passed · 2026-10-18 · auto |
+
+### S-051d Everyone sees what they still have to do on the Checklist link (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.16 | One late task and one due in 20 minutes → 2, red, "1 late, 1 due soon" | `ChecklistBadgeTest::test_S_051_16…` | Passed · 2026-10-18 · auto |
+| S-051.17 | Only one due in 20 minutes → 1, neutral | `ChecklistBadgeTest::test_S_051_17…` | Passed · 2026-10-18 · auto |
+| S-051.18 | One not_approved submission today → 1 | `ChecklistBadgeTest::test_S_051_18…` | Passed · 2026-10-18 · auto |
+| S-051.19 | Nothing open → no badge | `ChecklistBadgeTest::test_S_051_19…` | Passed · 2026-10-18 · auto |
+| S-051.20 | Shown on /checklist and on a page that is not a checklist page, desktop and mobile nav | `ChecklistBadgeTest::test_S_051_20…` | Passed · 2026-10-18 · auto |
+| S-051.21 | A Marketing - OIC sees a second number for their department's late tasks (profile department, else role); a Marketing user does not | `ChecklistBadgeTest::test_S_051_21…` | Passed · 2026-10-18 · auto |
+| S-051.22 | The CEO's second number covers all active staff | `ChecklistBadgeTest::test_S_051_22…` | Passed · 2026-10-18 · auto |
+| S-051.23 | Two page loads within 60 s run the badge queries once; after 60 s again | `ChecklistBadgeTest::test_S_051_23…` | Passed · 2026-10-18 · auto |
+| — | A failing badge query → no badge, the class logged, the page still renders | `ChecklistBadgeTest::test_a_failing_badge_query…` | Passed · 2026-10-18 · auto |
+
+### S-051e Three approval checks, then the OIC or CEO (amendments 1 and 2, P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-051.24 | After the automatic check at submit, a Marketing user's 2nd and 3rd checks run, the 4th is refused (403 with the message, no AI call; the page marks it locked); a concurrent limited check gets 409 | `ChecklistRecheckLimitTest::test_S_051_24…`, `…test_a_limited_check_is_refused_while…` | Passed · 2026-10-18 · auto |
+| S-051.25 | The CEO's 4th and 10th checks run | `ChecklistRecheckLimitTest::test_S_051_25…` | Passed · 2026-10-18 · auto |
+| S-051.26 | The department's OIC runs a 4th check and overrides with a reason; no reason or a bad verdict is refused | `ChecklistRecheckLimitTest::test_S_051_26…` | Passed · 2026-10-18 · auto |
+| S-051.27 | An OIC of another department, or a staff member, cannot override | `ChecklistRecheckLimitTest::test_S_051_27…` | Passed · 2026-10-18 · auto |
+| S-051.28 | The override row is in the approval logs (is_override, who, reason) and the latest verdict follows it | `ChecklistRecheckLimitTest::test_S_051_28…` | Passed · 2026-10-18 · auto |
+| S-051.29 | The feed item shows rechecks and overridden (by, at), without the reason | `StaffFeedApiTest::test_S_051_29…` | Passed · 2026-10-18 · auto |
+| S-051.30 | (amendment 2) Two checks plus an override, then the limited user's check runs (overrides are not counted) and the next is refused | `ChecklistRecheckLimitTest::test_S_051_30…` | Passed · 2026-10-18 · auto |
+| S-051.31 | (amendment 3) For one person, checklist_today lists every task due today, earliest scheduled time first (untimed last, then task id): approved, not_approved (rechecks 1), not submitted (submitted false, submitted_at and verdict null), a group task submitted by another person (submitted true, that time); inactive and not-due tasks absent; no note, photo path, prompt or AI text | `StaffFeedApiTest::test_S_051_31…` | Passed · 2026-10-18 · auto |
 ## Slice 052 – What each Botcake flow ID is, on /page-settings
 
 Slice 052: 9 passed, 0 failed, 0 blocked, 0 skipped, 1 not run (owner check)
@@ -1120,7 +1180,7 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | S-059.2 | Given the right key in the `X-Chat-Key` header or the `key` param, when Botcake sends JSON, a form, GET query params, or JSON as text/plain (key in the header or in the body), then it gets `{"ok":true}` and one row is stored with page id, PSID, name and message | `test_S_059_2…` (5 data sets) | Passed · 2026-10-18 · auto |
 | S-059.3 | Given params named in any case or with an alias (`user_id`/`fb_id`, `text`/`last_input`/`last_user_input`, `full_name`) and unknown extra params, then the known fields are filled and the full payload is kept, without the key | `test_S_059_3…` | Passed · 2026-10-18 · auto |
 | S-059.4 | Given a stored message, when the same message_id comes again, or the same page + PSID + message within 10 seconds, then it is not stored again (still `{"ok":true}`); after 10 seconds the same text is stored | `test_S_059_4…` | Passed · 2026-10-18 · auto |
-| S-059.5 | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | Passed · 2026-10-18 · auto |
+| S-059.5 (changed by S-067: an unknown page id is refused with 401) | Given a page whose page settings have `botcake.page_id` = the page id, then the row's page name is that page; an unknown page id leaves it empty | `test_S_059_5…` | Passed · 2026-10-18 · auto |
 | S-059.6 | Given the per-IP limit, when one IP sends more than the limit in a minute, then it gets 429 | `test_S_059_6…` | Passed · 2026-10-18 · auto |
 | S-059.7 | Given a request with neither PSID nor message (e.g. an empty test Send), then it gets `{"ok":true}` and nothing is stored | `test_S_059_7…` | Passed · 2026-10-18 · auto |
 | S-059.13 | Given a message over 5000 characters, a name over 255, a PSID over 64, a nested param, 60 params and invalid UTF-8, then it gets `{"ok":true}` and is stored cut to the column sizes (payload: at most 50 params, 2000 characters each, arrays as JSON, bytes made valid) | `test_S_059_13…` | Passed · 2026-10-18 · auto |
@@ -1132,7 +1192,7 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | S-059.8 | Given a role with /chatblast access, then /chatblast/chats lists the latest messages (time, page, customer, message) newest first and the Chatblast nav has "Chats"; a role without access gets 404 | `test_S_059_8…` | Passed · 2026-10-18 · auto |
 | S-059.9 | Given messages on two pages and two days, when filtering by page, by date, or searching a name or a word of the text, then only the matching messages show | `test_S_059_9…` | Passed · 2026-10-18 · auto |
 | S-059.10 | Given a customer, when their name is clicked, then their messages show oldest first, and no other customer's | `test_S_059_10…` | Passed · 2026-10-18 · auto |
-| S-059.11 | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | Passed · 2026-10-18 · auto |
+| S-059.11 (replaced by S-067.11) | Given the Setup box, then it shows Method POST, the URL `{APP_URL}/api/botcake/chat`, header `X-Chat-Key` masked, and the params page_id, psid, name, message; the full key is in the page (copy button) for CEO only | `test_S_059_11…` | Passed · 2026-10-18 · auto |
 | S-059.14 | Given a stored name and message with HTML, then the Chats list and the customer view show it as text | `test_S_059_14…` | Passed · 2026-10-18 · auto |
 
 ### S-059C Retention (P2)
@@ -1146,8 +1206,8 @@ Spec 059. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
 | S-059.3 (extended) | Given Botcake's variables `user.id` (or `id`), `user.full_name` and `last_text_input`, in JSON (with the dot) or GET (PHP turns the dot into `_`), then they fill psid, name and message | `test_S_059_3…` | Passed · 2026-10-18 · auto |
-| S-059.15 | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
-| S-059.16 | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
+| S-059.15 (changed by S-067: an unknown page name is refused with 401; old rows still show "Unknown page") | Given no page_id and a `page` param naming a page in page settings (any case, extra spaces), then the row gets that page's name and Botcake ID; a page that matches nothing is stored with no page name and shows "Unknown page" | `test_S_059_15…` | Passed · 2026-10-18 · auto |
+| S-059.16 (replaced by S-065.1) | Given the Setup box, then it shows (a) POST with the JSON body `{"page_id":"<this page's Botcake ID>","psid":"{{user.id}}","name":"{{user.full_name}}","message":"{{last_text_input}}"}` and the header, recommended, and (b) GET with Params rows key, page_id, psid, name, message; with a page selected in the filter (any page with a Botcake ID in page settings, even before its first chat), its Botcake ID is filled in | `test_S_059_16…` | Passed · 2026-10-18 · auto |
 | S-059.17 | Given a customer message with no text (a sticker or photo), then the row is kept with an empty message and shows "no text (sticker or photo?)" in the list and the customer view | `test_S_059_17…` | Passed · 2026-10-18 · auto |
 
 ### S-059E Fixes from the independent review: fast at millions of rows (P1)
@@ -1188,6 +1248,25 @@ Amendment 2. Test in `tests/Feature/Chatblast/ChatblastToSendTest.php`.
 |---|---|---|---|
 | S-060.7 | Given History > Sent, when a row built earlier was sent later than another, then it is listed first (sent_at descending, then id descending; a row without sent_at goes last); on the other chips the order is the time the row was processed (updated_at) descending, then id descending; To send keeps its order | `test_S_060_7…` (sent, failed) | Passed · 2026-10-18 · auto |
 
+## Slice 061 – One J&T source: the hourly track-sync, chatblast reads the database
+
+### S-061 The latest J&T scan of every open waybill is in the database every hour, and chatblast uses only that (P1)
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-061.1 | Given the setting on, when it is 02:20 or 04:20–23:20 Manila (or later in that hour), then one run starts per hour: the Likha scheduler runs `jnt:track-sync-auto` at :20 of 2 and 4–23, and `chatblast:auto` starts it in the background; whichever comes second in the same hour does nothing (the claim); before :20, at 03–05 and with the setting off nothing runs | `test_S_061_1…` | Passed · 2026-10-18 · auto |
+| S-061.2 | Given a run in progress (the lock), when another start comes, then it does not track (no overlap) and gives the hour back, so a later start in the same hour retries | `test_S_061_2…` | Passed · 2026-10-18 · auto |
+| S-061.3 | Given non-final waybills with submission_time in the last 60 days, then they are tracked Delivering first, then In Transit not checked in the last 55 minutes, then the rest, each group newest first, 20 per call, at most 2 calls per second across all processes (manual and automatic runs share the limit); Delivered/Returned rows and older ones are not; the run is recorded with kind auto | `test_S_061_3…` | Passed · 2026-10-18 · auto |
+| S-061.4 | Given more waybills than fit in 40 minutes, then the run stops calling J&T at the cap and records where it stopped; the next run starts with the waybills not reached, then the newest | `test_S_061_4…` | Passed · 2026-10-18 · auto |
+| S-061.5 | Given a Problematic latest scan, then jnt_latest_scans has scan_type Problematic, its time and place, and from_jnts.status is unchanged; a mapped scan (e.g. Delivered) changes the status with a status log | `test_S_061_5…` | Passed · 2026-10-18 · auto |
+| S-061.6 | Given an On Delivery scan with a rider, then jnt_latest_scans and every non-final from_jnts row of the waybill get the rider name and phone; a J&T failure leaves the old scan row as it was | `test_S_061_6…` | Passed · 2026-10-18 · auto |
+| S-061.7 | Given a Delivering campaign that requires On Delivery, when the list is built, then only waybills whose stored scan is On Delivery with a scan time today (Manila) get a row; no scan, an older On Delivery or another scan type gets none; an unsent row whose scan is no longer On Delivery today is skipped | `test_S_061_7…` | Passed · 2026-10-18 · auto |
+| S-061.8 | Given any build, refresh or send, then no HTTP call goes to J&T | `test_S_061_8…` | Passed · 2026-10-18 · auto |
+| S-061.9 | Given a ready Delivering row whose scan was checked more than 90 minutes ago (or has no scan row), when it is sent, then it is not sent and stays ready with "J&T data is stale; waiting for the next track-sync" | `test_S_061_9…` | Passed · 2026-10-18 · auto |
+| S-061.10 | Given a rider in jnt_latest_scans, then {rider} and {rider_phone} come from it (cleaned); the waybill's from_jnts rider columns only when it has no jnt_latest_scans row at all; a scan without a rider leaves both empty (a version without them, or no_config "no rider info"), never an earlier day's rider | `test_S_061_10…` | Passed · 2026-10-18 · auto |
+| S-061.12 | Given the track-sync is not running here (switched off by env or by the CEO switch, not migrated, or no J&T client), when Delivering is built and sent, then it follows from_jnts.status Delivering (no "today", no stale check) unless a stored scan is not On Delivery; To send shows "J&T track-sync is off: Delivering uses the J&T upload status only" | `test_without_a_running_track_sync…` | Passed · 2026-10-18 · auto |
+| S-061.11 | Given /jnt/track-sync, then it shows the automatic runs (kind, start, done, counts, errors), the next run time and On/Off; the CEO can switch it on or off (stored in app_settings, overriding the env default); Marketing and Marketing-OIC get 403 on the toggle and see no button; other roles 404 | `test_S_061_11…` | Passed · 2026-10-18 · auto |
+
 ## Slice 062 – Flow ID and Message field are picked from a dropdown
 
 ### S-062 Staff pick the Chatblast flow and the message field from Botcake's lists (P1)
@@ -1200,3 +1279,589 @@ Tests are in `tests/Feature/PageSettings/FlowFieldDropdownTest.php`.
 | S-062.2 | Given a pick in the dropdown, then its ID is saved through the cell save, with the same history and Ready reset as a typed ID; a typed ID that is not in the list still saves | `test_S_062_2…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
 | S-062.3 | Given an edit of the Flow ID or Message field, then a dropdown opens ("name · id", "(recommended)", a saved ID not in the list as "(not in Botcake list)"), ending with "Type an ID…" which switches to the text input; with no stored list it shows "No list yet: press Test" and "Type an ID…" | `test_S_062_3…` and the browser check | Passed · 2026-10-18 · auto + headless browser |
 | S-062.4 | Given the page and the grid poll, then no Botcake call is made; the lists come from the stored keys | `test_S_062_4…` | Passed · 2026-10-18 · auto |
+
+## Slice 063 – Meta payment import reads dates correctly, and the swapped rows get fixed
+
+### S-063 The payment import decides the date order once per file and never guesses (P1)
+
+Tests are in `tests/Feature/PaymentActivity/PaymentDateOrderTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-063.1 | Given a number above 12 in the billing line or in any data row, when the file is imported, then that decides the order for every row (first place > 12 = D/M, second place > 12 = M/D), over the filename and the header wording | `test_S_063_1…` | Passed · 2026-10-18 · auto |
+| S-063.2 | Given every number 12 or less and an ISO range in the filename (`2026-10-02--2026-10-10` or single dash), then the order whose billing-line dates equal that range is used | `test_S_063_2…` | Passed · 2026-10-18 · auto |
+| S-063.3 | Given no number above 12 and no filename range, then "Billing Report:" (capital R) means M/D and "Billing report:" (lowercase r) means D/M | `test_S_063_3…` | Passed · 2026-10-18 · auto |
+| S-063.4 | Given a file whose order can't be told (no billing line, or rows that contradict each other), then nothing is written and the upload log is failed with "Cannot tell the date order of this file" | `test_S_063_4…` | Passed · 2026-10-18 · auto |
+| S-063.5 | Given a row that is not a real date in the file's order (2/30/2026), then it is refused and counted in error_rows, never rolled over into another date | `test_S_063_5…` | Passed · 2026-10-18 · auto |
+| S-063.6 | Given a row dated more than one day outside the filename's ISO range, or more than one day after the upload date (from the stored name), then it is refused and counted in error_rows with a message; rows inside are imported | `test_S_063_6…` | Passed · 2026-10-18 · auto |
+| S-063.7 | Given a stored row with the correct date, when an ambiguous capital-R file with it (and the usual Total and VAT footer) is imported again, then its date stays correct and nothing is counted as refused | `test_S_063_7…` | Passed · 2026-10-18 · auto |
+| S-063.8 | Given a failed or partly refused file, then the upload page shows its error message under the status | `test_S_063_8…` | Passed · 2026-10-18 · auto |
+
+### S-063A `payments:fix-swapped-dates` fixes the swapped rows, with a backup first (P1)
+
+Tests are in `tests/Feature/PaymentActivity/FixSwappedDatesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-063.9 | Given rows stored Jan 10 / Mar 10 / Apr 10 (created Oct 9), 2028-07-05 (created 2026-06-05), 2027-01-02 (created 2026-02-20), 2027-04-12 (created 2026-01-05, the year-before rollover → 2025-12-28), 2025-12-11 (created 2025-12-12), 2026-02-03 (created 2026-03-04) and a day-above-12 row, when it runs without options, then it prints 7 rows, their total and examples (id, stored → corrected, amount, card last 4), writes a CSV of every change (with source_filename) to `storage/app/private/payment_date_fixes/`, and changes nothing; the Dec 11 and day-above-12 rows are kept | `test_S_063_9…` | Passed · 2026-10-18 · auto |
+| S-063.10 | Given the same rows, when it runs with `--apply`, then `payment_activity_ads_manager_bak_YYYYMMDD_HHMM` holds a copy of every row first, and only `date` changes on the 7 rows (Oct 1/3/4, 2026-05-31, 2026-02-13, 2025-12-28, 2026-03-02) | `test_S_063_10…` | Passed · 2026-10-18 · auto |
+| S-063.11 | Given `--expect=N` that differs from the count found, then it refuses: no backup, nothing changed, a failed exit | `test_S_063_11…` | Passed · 2026-10-18 · auto |
+
+## Slice 064 – The Message field shows its custom field name
+
+### S-064 Staff see which Botcake custom field the Message field ID is (P2)
+
+Test in `tests/Feature/PageSettings/FieldNameTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-064.1 | Given a saved Message field ID, then its line shows "ID · name" from the stored `botcake.field.message.options`; an ID not in the list shows "ID · (not in Botcake list)" in amber; with no list stored, the ID plus a grey "press Test for the name". No Botcake call; editing, saves, history and Ready unchanged | `test_S_064_1…` (3 data sets) and the browser check | Passed · 2026-10-19 · auto + headless browser |
+
+## S-065 The Chats setup box gives the Botcake variables that work
+
+Spec 065. Tests are in `tests/Feature/Chatblast/BotcakeChatTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-065.1 (replaced by S-067.11) | Given /chatblast/chats with or without a page selected, when the Botcake setup box opens, then it shows one body `{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}"}`, the GET Params rows with the same four values, and "The same block works on any page"; it never shows `user.id`, `user.full_name` or the selected page's ID; the filter still lists pages from page settings | `test_S_065_1…` | Passed · 2026-10-19 · auto |
+| S-065.2 | Given a block that sends `user_full_name`, then it is stored as the name | `test_S_065_2…` | Passed · 2026-10-19 · auto |
+
+## S-067 The chat endpoint only accepts real chats from our own pages
+
+Spec 067. Tests are in `tests/Feature/Chatblast/BotcakeChatSecurityTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-067.1 | Given the IP allowlist (IPs or CIDRs), when a request comes from an IP off the list, then in log mode it is accepted, logged (IP, no key) and counted; in enforce mode it gets 403 and nothing is stored | `test_S_067_1…` | Passed · 2026-10-19 · auto |
+| S-067.2 | Given pages with their own keys, when a key is used with another page's page_id or page name, a key of no page is sent, the page_id is not ours, or no key is sent, then 401, nothing stored, counted as bad key or unknown page | `test_S_067_2…` | Passed · 2026-10-19 · auto |
+| S-067.3 | Given the shared key, then it is accepted while BOTCAKE_CHAT_SHARED_KEY_OK is on and refused when it is off, also for a page with no own key | `test_S_067_3…` | Passed · 2026-10-19 · auto |
+| S-067.4 | Given a PSID already in botcake_psids for that page, then the chat is stored with no call to Botcake | `test_S_067_4…` | Passed · 2026-10-19 · auto |
+| S-067.5 | Given a PSID not in botcake_psids, then one customer-info call with the page token; on success a chat_verify row is inserted and the next chat makes no call | `test_S_067_5…` | Passed · 2026-10-19 · auto |
+| S-067.6 | Given Botcake answers "Not found customer" or "psid wrong format", then the chat is not stored, answered {"ok":true}, counted, and no call is made again for an hour | `test_S_067_6…` (2 data sets) | Passed · 2026-10-19 · auto |
+| S-067.7 | Given Botcake times out or answers 5xx, then one try only, the chat is stored, nothing is remembered, and a warning is logged without key or token | `test_S_067_7…` (2 data sets) | Passed · 2026-10-19 · auto |
+| S-067.8 | Given `botcake:chat-setup --all --dry-run`, then nothing is written or sent and no key is printed; `--all` without `--confirm` is refused | `test_S_067_8…` | Passed · 2026-10-19 · auto |
+| S-067.9 | Given `botcake:chat-setup "page"`, then a key of 32+ characters is created, the exact block (body as in S-072.1) is posted to default_reply/content with that key, the settings update publishes it unlimited, the output names the page but not the key; a rerun keeps the key and --rotate changes it | `test_S_067_9…` | Passed · 2026-10-19 · auto |
+| S-067.10 | Given Botcake refuses the block write during --rotate, then the old key is kept and the command reports the failure | `test_S_067_10…` | Passed · 2026-10-19 · auto |
+| S-067.11 | Given the Chats Setup box, then it shows the block body, the command, each page with "yes"/"no" for its own key, and today's refusals per reason; no key (shared, page, or masked) appears | `test_S_067_11…` | Passed · 2026-10-19 · auto |
+| S-067.12 | Given Botcake refuses the check (token, 429, any other answer) or the page has no token, then the chat is not kept, answered {"ok":true}, counted as "PSID could not be checked", and logged without key or token | `test_S_067_12…` (4 data sets) | Passed · 2026-10-19 · auto |
+| S-067.13 | Given more new PSIDs on one page in a minute than BOTCAKE_CHAT_VERIFY_PER_MINUTE, then the extra ones make no Botcake call and are not kept (counted); known PSIDs are not affected | `test_S_067_13…` | Passed · 2026-10-19 · auto |
+| S-067.14 | Given enforce mode, when a request comes from an IP off the list with `X-Forwarded-For` set to the Botcake IP, then 403: the connecting address is checked | `test_S_067_14…` | Passed · 2026-10-19 · auto |
+| S-067.15 | Given a page key that was rotated by the command or deactivated, then the old key gets 401 at once and the new key works | `test_S_067_15…` | Passed · 2026-10-19 · auto |
+
+## S-068 /chatbot: the page list for our own chatbot
+
+Spec 068. Tests are in `tests/Feature/Chatblast/ChatbotPagesTest.php` (S-068.8 in `BotcakeChatSecurityTest.php`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-068.1 | Given pages with a Botcake ID and token, then /chatbot lists them (not a page without a token) with ACTIVE (no row = On), FLOW, the default botfield columns in the sheet's order, today's chats and the last chat time; signed out → 302, no /chatblast access → 403, a role with /chatblast access → 200; no token in the page or the data | `test_S_068_1…` | Passed · 2026-10-19 · auto |
+| S-068.2 | Given the CEO, when a page is added with a name, Botcake ID and token, or a page already in page settings is completed with what it lacks, then both are saved as page settings saves them (token secret) and the page joins the list (and is switched On, S-072.5); a bad ID or a missing token → 422; a non-CEO → 403 | `test_S_068_2…` | Passed · 2026-10-19 · auto |
+| S-068.3 | Given a page that is Off, when the CEO switches it On, then the exact "Chat to site" block (body as in S-072.1) is written (content), then published (settings, unlimit_default_reply), a key is created, and ACTIVE becomes On; a non-CEO → 403 | `test_S_068_3…` | Passed · 2026-10-19 · auto |
+| S-068.4 | Given a page that is On, when the CEO switches it Off, then only the settings update with is_published:false is sent; the key is kept and ACTIVE becomes Off | `test_S_068_4…` | Passed · 2026-10-19 · auto |
+| S-068.5 | Given Botcake refuses, when On or Off is switched, then the answer carries the error in plain English for the row, and no key, ACTIVE or other row changes | `test_S_068_5…` | Passed · 2026-10-19 · auto |
+| S-068.6 | Given a botfield cell, when a value is typed, then one page_settings row (provider chatbot) is written and the same value again changes nothing; long text keeps its lines; an image column takes only http(s) links; ACTIVE, an unknown column or a page not on the list → 422; blank clears the value | `test_S_068_6…` | Passed · 2026-10-19 · auto |
+| S-068.7 | Given "+ Column", when a name is added, then its key appears as a column for every page (no duplicate; ACTIVE or no letters → 422); a key already used under provider chatbot is a column too | `test_S_068_7…` | Passed · 2026-10-19 · auto |
+| S-068.8 | Given a page whose bot is Off, then its chats are answered but not kept and counted as "Bot off"; a page with no ACTIVE row and a page switched back On keep their chats | `BotcakeChatSecurityTest::test_S_068_8…` | Passed · 2026-10-19 · auto |
+| S-068.9 | Given anyone, including the CEO, when `chatbot.active` is written through Page settings, then 422 (only the switch writes it); a role without /chatblast access gets 403 on /chatbot/cell and /chatbot/column | `test_S_068_9…` | Passed · 2026-10-19 · auto |
+| S-068.10 | Given "+ Page" with a Botcake ID another page already uses, or a page already on the list, then 422 and nothing is written | `test_S_068_10…` | Passed · 2026-10-19 · auto |
+| S-068.11 | Given On fails at the publish step, then the error names publishing, ACTIVE is unchanged, and the new key is kept (the block on Botcake holds it) | `test_S_068_11…` | Passed · 2026-10-19 · auto |
+| S-068.12 | Given botfield values and columns, then 50,000 characters (and 60,000 bytes, S-073.3) is the most a value takes, at most 200 columns can be added, and a column named "Token" never reads the Botcake token | `test_S_068_12…` | Passed · 2026-10-19 · auto |
+| S-068.13 | Given a page switched Off, when `botcake:chat-setup --all` runs (dry run or real), then that page is skipped and stays Off | `test_S_068_13…` | Passed · 2026-10-19 · auto |
+
+## S-069 Our own chatbot flow builder (replies through Botcake send_content)
+
+Spec 069. Tests are in `tests/Feature/Chatblast/Chatbot{Engine,Sending,Editor,Tabs,Hardening}Test.php`.
+
+### S-069E The engine
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.E1 | Given the owner's Main Flow rebuilt in nodes, when a customer chats "Hi", answers the form with a phone number, says "2 pcs", then "exitloop", then the image and texts go out, LOOP 1 waits for the form, the phone is thanked and extracted by AI, LOOP 2 asks the AI with Prompt 1, the order sends one sheet row, LOOP 3, and exitloop clears every field | `ChatbotEngineTest::test_S_069_E1…` | Passed · 2026-10-19 · auto |
+| S-069.E2 | Given a customer waiting in another flow or at a removed step, then the run starts from Start and the wait is dropped | `…E2…` | Passed · 2026-10-19 · auto |
+| S-069.E3 | Every Condition rule (is, is not, contains, contains any of by line or comma, not contains, starts with, regex incl. a bad pattern, is empty, is not empty, greater than, less than) | `…E3…` (17 data sets) | Passed · 2026-10-19 · auto |
+| S-069.E4 | The first matching row wins; no match exits on "no"; the variable name may be written with braces or any case | `…E4…` | Passed · 2026-10-19 · auto |
+| S-069.E5 | Every Set field operation (set, append with a separator, clear, clear all fields keeps only the run marker) | `…E5…` | Passed · 2026-10-19 · auto |
+| S-069.E6 | The AI step follows success (saves and sends the answer) or failed (HTTP error, no key) | `…E6…` | Passed · 2026-10-19 · auto |
+| S-069.E7 / H3 | A sheet cell built from a variable is always text (leading ' : no formula, no lost leading zero, no date); a template with no variable stays as written | `…E7…`, `ChatbotHardeningTest::…H3…` | Passed · 2026-10-19 · auto |
+| S-069.E8 | Variables ignore case, spaces and _; unknown ones are empty; botfields may hold variables (one level) | `…E8…` | Passed · 2026-10-19 · auto |
+| S-069.E9 | A loop stops after 100 steps | `…E9…` | Passed · 2026-10-19 · auto |
+| S-069.E10 | A failed send without a failed port stops the run | `…E10…` | Passed · 2026-10-19 · auto |
+| S-069.H4 | Customer text that contains {{…}} is never read as a variable, also through a botfield | `ChatbotHardeningTest::…H4…` | Passed · 2026-10-19 · auto |
+| S-069.H5 | The AI history holds only this customer's chats on this page and our sent replies | `…H5…` | Passed · 2026-10-19 · auto |
+| S-069.H6 | Config caps (10 messages, 20 rows, 50 columns, 2000/10000 characters, 4000 tokens, 20 history, safe model name), field values at most 16000 characters, at most 10 AI calls per run, OpenAI errors without detail | `…H6…` | Passed · 2026-10-19 · auto |
+
+### S-069S Sending and the runtime
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.S1 | Given replies on, then a Send message node calls send_content with the exact body and logs page, PSID, chat, flow, node, content and status | `ChatbotSendingTest::…S1…` | Passed · 2026-10-19 · auto |
+| S-069.S2 | Given replies off, then the run happens (fields change) but nothing is sent or written; both are logged "skipped" | `…S2…` | Passed · 2026-10-19 · auto |
+| S-069.S3 | A failed send is logged with Botcake's reason and stops the run; a live sheet row is written as text | `…S3…` | Passed · 2026-10-19 · auto |
+| S-069.S4 | A stored chat queues a run on the "chatbot" queue only for a page linked to a flow | `…S4…` | Passed · 2026-10-19 · auto |
+| S-069.S5 | A chat runs at most once (retries and earlier jobs do nothing) and one customer's chats run in order | `…S5…` | Passed · 2026-10-19 · auto |
+| S-069.S6 | A customer already running waits (lock); a page switched Off since does not run | `…S6…` | Passed · 2026-10-19 · auto |
+| S-069.H1 | A customer's first chat after a flow is linked runs once, not their older chats; a chat older than 30 minutes is not answered | `ChatbotHardeningTest::…H1…` | Passed · 2026-10-19 · auto |
+| S-069.H2 | A page runs only the flow picked in the dropdown (by id); leftover FLOW text never runs; rename and delete go by id | `…H2…` | Passed · 2026-10-19 · auto |
+
+### S-069D The editor
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.D1 | The graph saves cleaned and loads with the variables and rules for the forms | `ChatbotEditorTest::…D1…` | Passed · 2026-10-19 · auto |
+| S-069.D2 | A wire on a port the step does not have, a node of another flow, a self-loop, two wires on one port, two or no Starts, an unknown type, a bad id, more than 200 steps or 1000 wires: 422, and the saved graph stays | `…D2…` (12 data sets) | Passed · 2026-10-19 · auto |
+| S-069.D3 | Flows are created (unique names), renamed (linked pages follow), duplicated, and not deleted while a page uses them | `…D3…` | Passed · 2026-10-19 · auto |
+| S-069.D4 | The Flow pages need /chatblast access (302 / 403); the editor's script is not broken by Blade | `…D4…` | Passed · 2026-10-19 · auto + browser |
+| S-069.D5 | FLOW on the page list is a dropdown of flows; a name that is not a flow is refused | `…D5…` | Passed · 2026-10-19 · auto + browser |
+
+### S-069T The tabs
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.T1 | /chatbot has its own nav (Flow, Page settings, Chats, Replies, Test, Chatblast); Chatblast links back | `ChatbotTabsTest::…T1…` | Passed · 2026-10-19 · auto + browser |
+| S-069.T2 | Chats show under /chatbot; the customer view shows the customer's fields (no run state); the CEO edits or clears them; others only see them | `…T2…` | Passed · 2026-10-19 · auto |
+| S-069.T3 | Replies list one date with page, status and search filters, and a row's details | `…T3…` | Passed · 2026-10-19 · auto + browser |
+| S-069.T4 | Test runs the page's flow for a test customer: no Botcake, no sheet write (the row is shown), the AI step calls OpenAI, real customers untouched, the reply resumes, reset clears | `…T4…` | Passed · 2026-10-19 · auto + browser |
+| S-069.T5 | Every tab and write needs /chatblast access (302 / 403) | `…T5…` | Passed · 2026-10-19 · auto |
+
+## S-072 The chat block sends the ad and the page name; "+ Page" sets the page up
+
+Spec 072 and its amendment 1. Tests are in `tests/Feature/Chatblast/BotcakeChatAdTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-072.1 | Given a page, when the CEO switches it On or `botcake:chat-setup` runs, then the block body is exactly `{"page_id":"{{page_id}}","psid":"{{psid}}","name":"{{user_full_name}}","message":"{{last_text_input}}","source":"default_reply","ad_id":"{{ad_id}}","page_name":"{{page_name}}"}` (and the same in body_preview) | `test_S_072_1…` | Passed · 2026-10-19 · auto |
+| S-072.2 | Given a page that already has a key, when `botcake:chat-setup` runs again, then the block is rewritten with the new body and the same key, and the output shows no key | `test_S_072_2…` | Passed · 2026-10-19 · auto |
+| S-072.3 | Given a chat with an `ad_id`, then a new `chat_verify` row gets it, an existing row of that page and PSID with an empty `ad_id` is filled, a row with an `ad_id` keeps it, a row of another page with the same PSID is not touched, an `ad_id` that is not digits is not written to botcake_psids, and the chat's payload keeps the `ad_id` | `test_S_072_3…` | Passed · 2026-10-19 · auto |
+| S-072.4 | Given a chat whose `ad_id` and `page_name` are unfilled (`{{ad_id}}`), empty or blank, then neither is in the payload, no `ad_id` is written to botcake_psids, and the chat is still kept | `test_S_072_4…` (3 data sets) | Passed · 2026-10-19 · auto |
+| S-072.5 | Given the CEO, when "+ Page" has no page name, then 422 and nothing is sent or saved; when it has the name, Botcake ID and token and the token test passes, then a key is created, the exact block is written and published, and the row shows On; a page already in page settings completed with only its token is switched On too | `test_S_072_5…` | Passed · 2026-10-19 · auto |
+| S-072.6 | Given "+ Page" where Botcake refuses the block write or the token test fails, then the page is saved, ACTIVE is Off, the answer carries the error for the row (no token), and after a failed token test nothing is written to the Default Reply | `test_S_072_6…` (3 data sets: block write, publish, token test) | Passed · 2026-10-19 · auto |
+
+### S-069A Amendment 1: the page switch answers, and Likes and photos are cleaned
+
+Tests are in `tests/Feature/Chatblast/ChatbotAmendmentOneTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-069.A1 | Given CHATBOT_REPLIES_ENABLED not set (true), then a page On without a flow only receives chats, On + a flow answers, Off keeps nothing; with the emergency stop (false) the reply is logged "skipped" | `test_S_069_A1…` | Passed · 2026-10-19 · auto |
+| S-069.A2 | The page list says "On + a flow = the bot answers. On without a flow = chats are only received."; Flow and Replies say the same, or "Emergency stop is on" when the setting is false | `test_S_069_A2…` | Passed · 2026-10-19 · auto + browser |
+| S-069.A3 | Given a message that is only a link on fbcdn.net, then the Like sticker (two file names, four sticker ids) is stored as 👍 with no link, any other one as [Photo] with the link in payload.image_url; other hosts, look-alike hosts, text with a link and plain text are kept as sent | `test_S_069_A3…` (8 data sets) | Passed · 2026-10-19 · auto |
+| S-069.A4 | The flow's {{last_input}} sees 👍 / [Photo]; Chats and the customer view show [Photo] with a small "open" link | `test_S_069_A4…` | Passed · 2026-10-19 · auto |
+| S-069.A5 | `botcake:chats-normalize` counts like / photo / untouched without changing anything; --apply needs --expect equal to the count; it changes the rows once (photo link kept in payload.image_url), and a second run finds nothing | `test_S_069_A5…` | Passed · 2026-10-19 · auto |
+
+## S-073 Botfields hold long AI prompts
+
+Spec 073. Tests are in `tests/Feature/Chatblast/ChatbotLongPromptTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-073.1 | Given a 14,113-character prompt with line breaks, ñ and emoji, when it is saved in a botfield cell, then page settings and /chatbot/data give it back unchanged; 50,000 plain characters are accepted | `test_S_073_1…` | Passed · 2026-10-19 · auto |
+| S-073.2 | Given that prompt in Prompt 2 and an AI step whose system prompt is `{{Prompt 2}}` plus more text, then the OpenAI request's system message is the whole expanded text, uncut | `test_S_073_2…` | Passed · 2026-10-19 · auto |
+| S-073.3 | Given a value over 50,000 characters, or within 50,000 characters but over 60,000 bytes, then 422 with a clear message and the old value stays; exactly 60,000 bytes is accepted | `test_S_073_3…` (2 data sets) | Passed · 2026-10-19 · auto |
+
+## S-074 /chatbot/inbox: a Pancake-style inbox for the chatbot
+
+Spec 074 with amendments 1 and 2. Tests are in `tests/Feature/Chatblast/ChatbotInboxTest.php` (S-074.1–6) and `tests/Feature/Chatblast/ChatbotInboxActionsTest.php` (R1–R4, E1–E3).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-074.1 | Given chats and bot replies on a page, when the list opens (7 days by default), then conversations are newest activity first, the preview is the last message ("Bot: " / "You: " for ours), and the dot shows when the customer's message is last or our last reply was not sent; 24h / 30d bound the list; search matches a name or a PSID prefix; an unknown page → 422 | `test_S_074_1…` | Passed · 2026-10-19 · auto |
+| S-074.2 | Given chats, sent, failed and skipped replies, sheet rows, a photo and a Like, when the thread opens, then they are merged in time order: customer left, ours right with the reason when failed or skipped, sheet rows as a system line ("Order row written to sheet" / "Order row failed: …") | `test_S_074_2…` | Passed · 2026-10-19 · auto |
+| S-074.3 | Given more than 50 items, when the thread opens, then the newest 50 come with "Load older" (50 at a time, no gaps or repeats); polling with the newer cursor returns only newer items | `test_S_074_3…` | Passed · 2026-10-19 · auto |
+| S-074.4 | The panel shows name, PSID, ad_id, source, first seen, CHAT STATUS, "Waiting for reply at step nX" (from __wait), the fields without the reserved __ keys, the page's botfields and a link to the flow | `test_S_074_4…` | Passed · 2026-10-19 · auto |
+| S-074.5 | A role without Chatblast access gets 403 on every inbox route; the nav shows Inbox after Chats; only the CEO can edit or clear fields | `test_S_074_5…` | Passed · 2026-10-19 · auto |
+| S-074.6 | Every list query names the page and a start time (or ids) and has a limit; every thread query names the page and the customer and has a limit; the (page_id, psid, id) indexes exist | `test_S_074_6…` | Passed · 2026-10-19 · auto |
+| S-074.R1 | Given a customer who wrote within 24 hours, when an allowed user sends text and an image link, then send_content gets exactly the bot's body (text, then image), the send is logged as kind manual with the user, the thread shows it by the user's name, and Replies shows "Manual by …" | `test_S_074_R1…` | Passed · 2026-10-19 · auto |
+| S-074.R2 | Given the last customer message is over 24 hours old (or there is none), or the image link is not http/https, or the message is empty or over 2,000 characters, then 422 and nothing is sent or logged | `test_S_074_R2…` | Passed · 2026-10-19 · auto |
+| S-074.R3 | A role outside chatbot.reply_roles gets 403 on send and pause; only the CEO sets the roles (CEO always included); the 31st send in a minute → 429 | `test_S_074_R3…` | Passed · 2026-10-19 · auto |
+| S-074.R4 | Given the bot is paused for a customer, then new chats are marked handled with a "bot paused" event and nothing is sent; after unpausing, the bot answers again | `test_S_074_R4…` | Passed · 2026-10-19 · auto |
+| S-074.E1 | Given a CBB-like flow (fields, condition, AI, sheet, wait), when it runs, then its events are written in one insert without the prompt text, and with "View executed actions" the thread shows them as lines after the chat, in order | `test_S_074_E1…` | Passed · 2026-10-19 · auto |
+| S-074.E2 | The panel lists executed runs (flow, path, result), error logs (failed sends, failed AI steps) and the customer's images | `test_S_074_E2…` | Passed · 2026-10-19 · auto |
+| S-074.E3 | The Human tab lists paused customers and the Bot tab the others; events older than 30 days are pruned | `test_S_074_E3…` | Passed · 2026-10-19 · auto |
+## S-075 The flow editor gets a draft, Undo/Redo, Save and Publish
+
+Spec 075. Tests are in `tests/Feature/Chatblast/ChatbotDraftPublishTest.php`; S-075.10 is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-075.1 | Given a published flow linked to a page, when the editor saves a change, then a live chat still gets the published reply; after Publish the next chat gets the new one | `test_S_075_1…` | Passed · 2026-10-19 · auto |
+| S-075.2 | Given a stored draft that does not pass `FlowGraph::clean`, when Publish is pressed, then 422 "This flow cannot be published: …", the published graph stays and no version is kept; Publish with no unpublished changes on a published flow is refused too | `test_S_075_2…` | Passed · 2026-10-19 · auto |
+| S-075.3 | Given a draft, when Discard is pressed, then the editor gets the published graph back, the status is Published, and the live graph is untouched; on a never-published flow Discard is refused (422, the button is disabled) and the draft stays | `test_S_075_3…` | Passed · 2026-10-19 · auto |
+| S-075.4 | Given publishes with notes, then History lists the last 20, newest first, with who, when and the note, and at most 50 are kept per flow; Restore puts that version in the draft (status Draft, live graph unchanged); a version of another flow is 404 | `test_S_075_4…` | Passed · 2026-10-19 · auto |
+| S-075.5 | Given a draft at version N, when a save, Publish, Discard or Restore sends another version (or none), then 409 "This draft changed since you opened it. Reload, or overwrite?" and nothing changes; a save with overwrite goes through | `test_S_075_5…` | Passed · 2026-10-19 · auto |
+| S-075.6 | Given a flow with a draft, the Test tab runs the draft by default and the published version when asked | `test_S_075_6…` | Passed · 2026-10-19 · auto |
+| S-075.7 | Given a flow saved before the migration, when the migration runs, then it is Published (no draft) and a live chat runs it as before | `test_S_075_7…` | Passed · 2026-10-19 · auto |
+| S-075.8 | The status is "Never published" for a new flow until its first Publish, "Draft (unpublished changes)" after a change, and "Published" after Publish, after Discard, or when the saved draft is exactly the published graph ("1" → "01" is a change); the editor gets the number of pages using the flow | `test_S_075_8…` | Passed · 2026-10-19 · auto |
+| S-075.9 | Duplicate copies the published graph and the draft; the copy is "Never published"; deleting a flow deletes its history | `test_S_075_9…` | Passed · 2026-10-19 · auto |
+| S-075.10 | In the editor: Undo/Redo (buttons, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, at least 50 steps) cover add, move, delete, duplicate, wire, unwire and form edits; Save draft, Publish (confirm with page count and note), Discard (confirm), History with Restore, Preview / Test, the status chip; leaving with unsaved changes warns; a conflict shows Reload / Overwrite; no page-level horizontal scroll at phone width | browser check | Passed · 2026-10-19 · browser |
+
+## S-076 "Wait for reply" can skip after a set time
+
+Spec 076. Tests are in `tests/Feature/Chatblast/ChatbotWaitSkipTest.php`; S-076.8 is also checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-076.1 | Given a Send step with wait and `skip_after`, when a live run reaches it, then `__wait` and a `chatbot_waits` row (due = now + skip_after) are stored and the event reads "Waiting for reply at step nX (skips after 2 h)"; when the customer replies before the deadline, the run goes on through `reply` and the row is gone | `test_S_076_1…` | Passed · 2026-10-19 · auto |
+| S-076.2 | Given a wait past its deadline, when `chatbot:resume-skipped` runs, then the run goes on through `skipped` (no field saved) and the event reads "No reply in 2 h → skipped at step nX"; each due wait is one job on the `chatbot` queue (a second tick does not queue it again), the row is claimed once so a second run sends nothing more; a row not yet due is left; a customer whose lock is held is tried again after 5 minutes | `test_S_076_2…` | Passed · 2026-10-19 · auto |
+| S-076.3 | Given a due wait whose published flow changed (another flow on the page, the step removed, or `skip_after` removed), a page that is Off or has no flow, or a paused bot, when the tick runs, then nothing is sent, the timer is dropped and a "skipped" event says why | `test_S_076_3…` | Passed · 2026-10-19 · auto |
+| S-076.4 | Given a due wait whose customer's last message is 24 hours old or more, when the tick runs, then nothing is sent, the wait ends and the event says the 24-hour window has closed | `test_S_076_4…` | Passed · 2026-10-19 · auto |
+| S-076.5 | `skip_after` is kept only with wait on and an amount of 1 or more; up to 23 hours (1380 minutes) is allowed and more is refused with a clear message; the `skipped` port is refused unless `skip_after` is set | `test_S_076_5…` | Passed · 2026-10-19 · auto |
+| S-076.6 | Given a chat of the customer that has not run yet and can still run (under 30 minutes old), when the tick runs, then the wait is left for the reply; when that chat can no longer run, the timer ends with a "skipped" event, nothing is sent, `__wait` stays, and other customers are not held up | `test_S_076_6…` | Passed · 2026-10-19 · auto |
+| S-076.7 | A wait without `skip_after`, a "Clear all fields" or a reply removes the customer's timer; the Test tab never writes a timer | `test_S_076_7…` | Passed · 2026-10-19 · auto |
+| S-076.8 | The editor's Send form has "Skip if no reply after [amount] [minutes / hours]" under the wait box; the step shows a `skipped` port; the setting saves and loads | `test_S_076_8…` + browser | Passed · 2026-10-19 · auto + browser |
+
+## S-070 Chatbot sequences: timed follow-ups (drip)
+
+Spec 070. Tests are in `tests/Feature/Chatblast/ChatbotSequenceEngineTest.php` (engine cases) and `tests/Feature/Chatblast/ChatbotSequencePagesTest.php` (pages, flow step, inbox).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-070.1 | Given Chatblast access, the /chatbot nav shows Sequences after Flow; the list shows name, steps, enrolled (active), completed and Active/Paused, with "+ New sequence"; signed out → 302, no access → 403 on every sequence route | `test_S_070_1…` | Passed · 2026-10-19 · auto |
+| S-070.2 | Given the editor, when a sequence is saved with name, description, Active, exit on reply and steps (delay, unit, flow, active), then it is stored and steps are renumbered 1..n in the order sent; a duplicate name, an unknown flow, a unit outside minutes/hours/days or more than 50 steps → 422 and nothing changes | `test_S_070_2…` | Passed · 2026-10-19 · auto |
+| S-070.3a | Given a published flow with a Sequence step (subscribe X), when it runs for a customer, then the customer is active in X at step 1 with next send = window(now + step 1 delay), enrolled via flow, and the run shows "Subscribed to sequence X"; running it again while active changes nothing; after an unsubscribe it restarts at step 1; an unsubscribe step (one sequence or all) unsubscribes; the Test tab changes nothing | `test_S_070_3a…` | Passed · 2026-10-19 · auto |
+| S-070.3b | Given the inbox panel, then it lists the customer's subscriptions with status, step and next send; a user who can reply subscribes and unsubscribes (enrolled via inbox); others get 403 | `test_S_070_3b…` | Passed · 2026-10-19 · auto |
+| S-070.4a | Given due subscriptions, when the tick runs twice (and when two claims race for the same rows), then each row is queued once on the chatbot queue, and a row whose dispatched_at is older than 10 minutes is queued again; a job overtaken by a newer claim, or run before the step is due, sends nothing | `test_S_070_4a…` | Passed · 2026-10-19 · auto |
+| S-070.4b | Given a 3-step sequence, when each step comes due, then the step's published flow runs from its Start (send_content, replies log, events), the pointer advances, next send = window(last run + delay), and after the last step the subscription is completed with "Sequence X completed"; a step flow whose send waits for a reply sends and ends, leaving the main flow's wait and timer as they were | `test_S_070_4b…` | Passed · 2026-10-19 · auto |
+| S-070.4c | Replaced by S-078.1 (no send hours since spec 078) | — | Removed · 2026-10-19 |
+| S-070.5a | Replaced by S-078.2 (outside 24 hours always skips since spec 078) | — | Removed · 2026-10-19 |
+| S-070.5b | Given the page is Off, then the due subscription is paused (page off) with nothing sent; when the page is On again, the next tick resumes it and the step runs | `test_S_070_5b…` | Passed · 2026-10-19 · auto |
+| S-070.5c | Given the bot is paused for the customer, then the step is held: nothing sent, next send = now + 1 hour, same step | `test_S_070_5c…` | Passed · 2026-10-19 · auto |
+| S-070.5d | Given the step's flow was deleted or never published, or the run throws, then an error event is written (shown in the inbox's Error logs), nothing is sent, and the pointer advances | `test_S_070_5d…` | Passed · 2026-10-19 · auto |
+| S-070.5e | Given the customer is busy (another run holds the lock), the step is retried in 1 minute; a page with no Botcake ID is an error (page not set up); a paused sequence or one with no active steps refuses to subscribe, with an event | `test_S_070_5e…` | Passed · 2026-10-19 · auto |
+| S-070.6 | Given exit on reply is on, when the customer sends a chat on that page, then their active subscriptions on that page are unsubscribed (reply) with an event, subscriptions on other pages and in sequences with exit off stay, and the bot's flow still runs for that chat | `test_S_070_6…` | Passed · 2026-10-19 · auto |
+| S-070.7 | The subscribers page lists customer, page, status, current step, next send, last sent, enrolled via and exit reason, filtered by status and page, newest first with "Older"; queries name the sequence and have a limit | `test_S_070_7…` | Passed · 2026-10-19 · auto |
+## S-077 AI steps remember up to 100 messages, 100 by default
+
+Spec 077. Tests are in `tests/Feature/Chatblast/ChatbotAiHistoryTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-077.1 | Given a new AI step (no `history` key, or added in the editor), then it remembers 100 messages; an explicit 0 stays 0 and a saved value stays as it is; the form says "Remember the last N messages of this customer on this page (0 = off, max 100)" | `test_S_077_1…` | Passed · 2026-10-19 · auto |
+| S-077.2 | 100 is accepted; 101 or more is clamped to 100 and below 0 to 0 (as before for out-of-range values) | `test_S_077_2…` | Passed · 2026-10-19 · auto |
+| S-077.3 | Given 120 chats and 120 sent replies of this customer on this page, plus chats and replies of other customers and pages, when an AI step with history 100 runs, then the request carries the newest 100 of this customer's messages on this page, oldest first, between the system prompt and the current message | `test_S_077_3…` | Passed · 2026-10-19 · auto |
+| S-077.4 | Given a customer's first chat (no earlier chat) and a reply already sent in this run (the intro), when the AI step runs, then it gets the answer (success), with that reply as the history; before, it crashed (`getKey() on array`) and took the failed port without an `ai` event. Added in spec 087 | `test_S_077_4…` | Passed · 2026-10-20 · auto |
+
+## S-078 Sequences send at any hour and always skip outside 24 hours
+
+Spec 078. Tests are in `tests/Feature/Chatblast/ChatbotSequenceEngineTest.php` and `ChatbotSequencePagesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-078.1 | Given a customer subscribed at 01:00 to a sequence whose first step waits 1 hour (old send hours 08:00–21:00 still in the table), then the step is due at 02:00 and sent at 02:00, and the next step is due 30 minutes later | `test_S_078_1…` | Passed · 2026-10-19 · auto |
+| S-078.2 | Given the customer's last message is 24 hours old or more, then the due step is skipped with "… skipped (outside 24h)" and the next step is scheduled, also for a sequence whose old column says "stop"; nothing is sent | `test_S_078_2…` | Passed · 2026-10-19 · auto |
+| S-078.3 | The sequence editor has no Send from / Send until / Outside the 24-hour window fields and says "Each step runs at its delay. A step is skipped when the customer's last message is over 24 hours old (Messenger's rule)."; the list no longer mentions send hours | `test_S_070_2…` | Passed · 2026-10-19 · auto |
+
+## S-079 A checklist task is late 30 minutes after its scheduled time
+
+Spec 079. Test in `tests/Unit/ChecklistDeadlineTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-079.1 | Given a task scheduled at 15:45 without its own deadline, then its deadline is 16:15; it is not late at 16:00, 16:10 or 16:15:00, and it is late at 16:15:01; a task with its own deadline_time keeps it | `test_S_079_a_task_scheduled_at_1545_is_late_only_after_1615` + the S-051.6 data sets | Passed · 2026-10-19 · auto |
+
+## S-080 Botfield cells on /chatbot/pages keep line breaks; a click opens the row; a pencil edits
+
+Spec 080 and amendment 1. Test in `tests/Feature/Chatblast/ChatbotPagesTest.php` (the markup); the behaviour is checked in the browser at 1366 and 390 px.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-080.1 | Given a multi-line value (Main Flow, Fill-Up Form, a Prompt), then the cell shows it with its line breaks, long words wrap inside the cell, and a closed row shows at most 3 lines per cell with a fade when there is more; there is no "See more" link | `test_S_080…` + browser | Passed · 2026-10-19 · auto + browser |
+| S-080.2 | When a cell is clicked (or focused and Enter / Space pressed), then the whole row opens: every text cell shows its full text, up to about 240 px with its own scroll; clicking a cell of the open row closes it back to 3 lines; opening another row closes the first | browser | Passed · 2026-10-19 · browser |
+| S-080.3 | Each editable cell has a pencil ("Edit <column>"), shown on hover and focus on desktop and always on a phone or touch screen, as its own tab stop; it is the only way to open the editor and does not open the row; a text cell opens the modal textarea with its line breaks, an image cell the URL editor | `test_S_080…` + browser | Passed · 2026-10-19 · auto + browser |
+| S-080.4 | No page-level horizontal scroll at 1366 and 390 px; the switch, FLOW and the sticky columns are unchanged | browser | Passed · 2026-10-19 · browser |
+
+## S-081 Each Seq N sits right after its Seq Img N
+
+Spec 081. Test in `tests/Feature/Chatblast/ChatbotPagesTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-081.1 | The /chatbot/pages columns after PICTURE are Seq Img 1, Seq 1, Seq Img 2, Seq 2, …, Seq Img 20, Seq 20 (keys and labels unchanged); a column added with "+ Column" comes after them | `test_S_081_each_seq_sits_right_after_its_seq_img` | Passed · 2026-10-19 · auto |
+
+## S-083 The chat endpoint never rate-limits Botcake's IP
+
+Spec 083. Tests in `tests/Feature/Chatblast/BotcakeChatLimitTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-083.1 | Given chats from an IP in `services.botcake.chat_ips` (REMOTE_ADDR), when it sends more than `chat_rate` in a minute, then all are accepted and the limiter writes nothing to the cache | `test_S_083_1…` | Passed · 2026-10-20 · auto |
+| S-083.2 | Given any other IP, then it gets 429 after `chat_rate` in a minute, as before | `test_S_083_2…` | Passed · 2026-10-20 · auto |
+| S-083.3 | Given `botcake:chat-test-ip {ip} --hours=2`, then that IP is unlimited until it expires, then limited again; `--list` shows it with its expiry | `test_S_083_3…` | Passed · 2026-10-20 · auto |
+| S-083.4 | `--remove` takes the IP off; a bad IP, or `--hours` outside 1–12, is refused and adds nothing | `test_S_083_4…` | Passed · 2026-10-20 · auto |
+
+## S-082 Chatblast flow and message field set by fixed names, with a check per page
+
+Spec 082. Tests are in `tests/Feature/Chatblast/ChatblastSetupCheckTest.php` (and the updated `tests/Feature/PageSettings` tests); S-082.10 is checked in the browser.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-082.1 | Given a flow "  update   SHIPPING status 2026 ", a removed flow and a "… (copy)" flow, and a field " MESSAGE", when the check runs, then the one live exact match (trim, case, inner spaces) is written as a system write to flow.shipping and field.message, replacing a person's value (kept as history), and the template name is written | `test_S_082_1…` | Passed · 2026-10-20 · auto |
+| S-082.2 | Given no match or two matches for the flow or the field, then an X ("No flow named … in Botcake", "2 flows named …", and the same for custom fields), the stored value stays, and the page is not Ready (sends skip with that reason) even if it was tested on the old flow | `test_S_082_2…` (4 data sets) | Passed · 2026-10-20 · auto |
+| S-082.3 | The template passes only when an APPROVED template has the exact name and its BODY has {{1}}; not approved, no {{1}}, or only another name is an X and the page is not Ready | `test_S_082_3…` (4 data sets) | Passed · 2026-10-20 · auto |
+| S-082.4 | When the check sets the flow and field and passes, the page is Ready without a Send test; when a person then changes the flow or field, it needs a test again; the next check sets it back and it is Ready again | `test_S_082_4…` | Passed · 2026-10-20 · auto |
+| S-082.5 | When Botcake can't be reached (flows HTTP 500, or the token test itself fails), then nothing changes, the last result stays, a grey "Check failed: <reason>" is recorded, and Ready stays as it was | `test_S_082_5…` | Passed · 2026-10-20 · auto |
+| S-082.6 | When the check sets a new flow ID, its statistics are the baseline; a send via that flow under 60 minutes old waits (no statistics call); after 60 minutes, delivery above the baseline is Delivered (no more checks), otherwise "Sent N, none delivered (Botcake)" and the page is not Ready; sends via another flow don't count | `test_S_082_6…` | Passed · 2026-10-20 · auto |
+| S-082.7 | The Setup box names are stored on the reserved page `_all`; `_all` is not in the grid rows or columns, the poll, Ready, `pagesWith`, chatblast's missing setup, or the /chatbot "+ Page" dropdown; the page can't write `_all`; an empty name is refused | `test_S_082_7…` | Passed · 2026-10-20 · auto |
+| S-082.8 | `botcake:setup-check --all --dry-run` prints each page's current → found IDs, the result and whether Ready would change, and writes nothing | `test_S_082_8…` | Passed · 2026-10-20 · auto |
+| S-082.9 | Check all is one queued job on `default` (a second press while it runs adds none), with progress (done of total, X count, could not be checked, finish time); the page has the Setup box and the Check column | `test_S_082_9…` | Passed · 2026-10-20 · auto |
+| S-082.10 | On /chatblast/page-settings at 1366 and 390 px: the Setup box, the Check column with a check icon and an X icon (reasons under it, "Checked …", delivered or not, grey "Check failed"), no text glyphs, no page-level horizontal scroll | browser | Passed · 2026-10-20 · browser |
+| S-082.11 | After a passed check, a flow or field ID that differs from the one the check found (e.g. picked by a person) blocks the page with "the flow ID is not the flow named …", even with a Send test; the page shows it as an X | `test_S_082_11…` + browser | Passed · 2026-10-20 · auto + browser |
+| S-082.12 | The sender skips a page with an X: no_config with the X reason, nothing sent | `test_S_082_12…` | Passed · 2026-10-20 · auto |
+| S-082.13 | The Setup routes are 404 without page-settings access; names saved during a running Check all run it again; `_all` in any spelling, `_all` on the old form, a 256-character name and deactivating a check row are refused | `test_S_082_13…` | Passed · 2026-10-20 · auto |
+
+## S-087 The chatbot doesn't block a worker while ChatGPT answers
+
+Spec 087. Tests in `tests/Feature/Chatblast/ChatbotAsyncAiTest.php` (fake OpenAI handler and fake Botcake).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-087.1 | Given three customers whose runs reach an AI step, when the pool sends all three at once and the last is answered first, then each reply goes to its own PSID, matched by the ticket only | `test_S_087_1…` | Passed · 2026-10-20 · auto |
+| S-087.2 | Given an answer whose ticket names another customer than the run it resumes, then nothing is sent or saved, the run stops, an `ai_mismatch` event is written and an ERROR log line has ids only, no text | `test_S_087_2…` | Passed · 2026-10-20 · auto |
+| S-087.3 | Given the run moved on while the answer was in flight (the bot paused, another request, the page got another flow), then the answer is dropped with an `ai_dropped` event and never sent | `test_S_087_3…` (3 data sets) | Passed · 2026-10-20 · auto |
+| S-087.4 | Given a customer's AI answer is pending, when their newer chat runs, then it waits (locked) until the answer is sent, then runs; a leftover mark with no request behind it never holds a customer | `test_S_087_4…` | Passed · 2026-10-20 · auto |
+| S-087.5 | Given no answer by `services.openai.timeout`, then the minute tick fails it and the run takes the failed port; a late answer is ignored; a request error takes the failed port at once | `test_S_087_5…` | Passed · 2026-10-20 · auto |
+| S-087.6 | Given a pool dies with requests in flight, when a new pool starts (only once the old heartbeat is stale), then the requests are sent again, the old pool's late answers are ignored, a resume job sent twice runs once, and an answer whose resume was lost is resumed by the sweep once | `test_S_087_6…` | Passed · 2026-10-20 · auto |
+| S-087.7 | Given OpenAI answers 429 with Retry-After, then the request goes back to the queue (not failed), the pool halves its limit and sends nothing new until then, then answers and grows back by one | `test_S_087_7…` | Passed · 2026-10-20 · auto |
+| S-087.8 | Given `services.chatbot.ai_async=false`, or no live pool, then the AI step waits for the answer as before and no ticket is written | `test_S_087_8…` | Passed · 2026-10-20 · auto |
+| S-087.9 | Given a real page, then `botcake:stress-page --mock-ai` is refused, and even with `chatbot.mock_ai=1` written in its settings its AI step goes to OpenAI | `test_S_087_9…` | Passed · 2026-10-20 · auto |
+| S-087.10 | Given mock pages with the fake AI, then `--stats` counts its replies and `misrouted: 0`; a reply naming another PSID, or another customer's chat, counts as misrouted | `test_S_087_10…` | Passed · 2026-10-20 · auto |
+
+## S-088 Redis and Horizon for the chatbot and chatblast queues, with Delivering first
+
+Spec 088. Tests in `tests/Feature/Chatblast/QueueRedisHorizonTest.php`; the scaling, the order and the misroutes are in the local check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-088.1 | Given the chatblast queue on Redis, when a Delivering and an In transit message are queued, then Delivering goes to `chatblast-high` and In transit to `chatblast`; on the database driver both go to `chatblast` (the queue the old workers listen to); Horizon gives `chatblast-high` its own pool of at least 2 workers, and every timeout stays under the Redis `retry_after` | `test_S_088_1…` | Passed · 2026-10-20 · auto |
+| S-088.2 | `CHATBOT_QUEUE_CONNECTION` and `CHATBLAST_QUEUE_CONNECTION` set the connection of every chatbot job and every chatblast send; unset, they follow `QUEUE_CONNECTION` (database on the server) | `test_S_088_2…` | Passed · 2026-10-20 · auto |
+| S-088.3 | `/horizon` sends a guest to the login, gives 403 to a non-CEO (also its API, also with `APP_ENV=local`) and 200 to the CEO | `test_S_088_3…` | Passed · 2026-10-20 · auto |
+| S-088.4 | While a run holds a chatbot customer, that customer's chat is "locked"; one chatblast send per customer at a time; on the array store and on a real Redis | `test_S_088_4…` (2 data sets) | Passed · 2026-10-20 · auto (Redis: against a local Redis in WSL; skipped when none) |
+
+## S-089 Botcake sends don't block a worker either
+
+Spec 089. Tests in `tests/Feature/Chatblast/BotcakeAsyncSendTest.php` (fake Botcake handler and fake clock); the load numbers are in the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-089.1 | Given three customers on three pages whose sends were handed off, when the pool sends all three at once and the last is answered first, then each result continues its own customer's run | `test_S_089_1…` | Passed · 2026-10-20 · auto |
+| S-089.2 | Given a ticket whose PSID doesn't match its chat, then nothing is sent, the run doesn't continue, `send_mismatch` is written, an ERROR log has ids only, and the customer is not stuck | `test_S_089_2…` | Passed · 2026-10-20 · auto |
+| S-089.3 | Given a flow with an intro and a later AI reply, then the intro goes out and is confirmed before the AI step runs, and the AI reply goes out after it | `test_S_089_3…` | Passed · 2026-10-20 · auto |
+| S-089.4 | Given six sends on one page and one on another, then Botcake receives at most 2 per second for the page, and the other page doesn't wait | `test_S_089_4…` | Passed · 2026-10-20 · auto |
+| S-089.5 | Given a 429 with Retry-After on one page, then only that page waits; the other page's sends go on; the send goes through after Retry-After | `test_S_089_5…` | Passed · 2026-10-20 · auto |
+| S-089.6 | A chatblast message's three steps in the pool give the same status, reason and steps as the waiting path: sent, field_mismatch, unknown (send_flow 5xx), failed (write refused), token invalid (401); the lock is held during the send, then the 20 s gap is set and the lock released | `test_S_089_6…` (5 data sets) | Passed · 2026-10-20 · auto |
+| S-089.7 | Given a pool that dies, then a new pool sends the never-called send once, never re-sends the called one (failed, HTTP 0), ignores the late answer, and the old pool never calls again for taken-back tickets | `test_S_089_7…` | Passed · 2026-10-20 · auto |
+| S-089.8 | Given `async_sends=false`, or no live pool, then the send waits in the worker as before and no ticket is written | `test_S_089_8…` | Passed · 2026-10-20 · auto |
+| S-089.9 | A failed send stops the run at the send node (it has no failed port), as before, and a 5xx on send_content is not retried; the AI step's failed send of its answer still goes on "success", as before | `test_S_089_9…` | Passed · 2026-10-20 · auto |
+| S-089.10 | Given a pool restart mid-chatblast, then a message whose send_flow went out is `unknown` (never re-sent), and one whose send_flow didn't go out runs its three steps again once and is sent | `test_S_089_10…` | Passed · 2026-10-20 · auto |
+| S-089.11 | With no pool, the minute tick: a chatblast ticket past 240 s goes back to the queue (the job sends it, lock released, no gap); a chatbot ticket past 10 minutes takes the failed path and frees the customer; a lost resume is resumed once | `test_S_089_11…` | Passed · 2026-10-20 · auto |
+| S-089.12 | A send waiting in the page's lane checks the pause and the emergency stop before it goes out: nothing is sent, the reply is logged as skipped; a pause stops the run, the switch skips and goes on as before | `test_S_089_12…` (2 data sets) | Passed · 2026-10-20 · auto |
+| S-089.13 | Given 40 chatblast messages on one page, then the pool holds only that page's share, and a chatbot send on another page goes out at once | `test_S_089_13…` | Passed · 2026-10-20 · auto |
+
+## S-093 {{ALL USER INPUT}} holds the customer's messages, as in Chatbot Builder
+
+Spec 093. Tests in `tests/Feature/Chatblast/ChatbotAllUserInputTest.php` (fake OpenAI; the sheet row in the TestOutbox).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-093.1 | Given chats of this customer on this page, of another customer and on another page, and one after the current chat, then `{{ALL USER INPUT}}` (also `{{ all_user_input }}`) is this customer's messages on this page, oldest first, one per line, up to and including the current chat | `test_S_093_1…` | Passed · 2026-10-20 · auto |
+| S-093.2 | Given 61 messages, then only the newest 50; given more than 4,000 characters, then the newest 4,000 | `test_S_093_2…` | Passed · 2026-10-20 · auto |
+| S-093.3 | Given a botfield or customer field named ALL USER INPUT with a value, then that value; given it empty (or spaces), then the built-in | `test_S_093_3…` | Passed · 2026-10-20 · auto |
+| S-093.4 | Given an AI step with user `{{ALL USER INPUT}}` and a sheet row with it in two cells, then OpenAI gets the messages, both cells start with `'` (a message `=HYPERLINK(…)` is never a formula), and the run reads `botcake_chats` once | `test_S_093_4…` | Passed · 2026-10-20 · auto |
+| S-093.5 | Given a Test tab run, then `{{ALL USER INPUT}}` is the current test message (no test history in the code yet) | `test_S_093_5…` | Passed · 2026-10-20 · auto |
+| S-093.6 | The flow editor lists `{{ALL USER INPUT}}` in the variable chips with the tooltip "All the customer's messages (built in)" | `test_S_093_6…` | Passed · 2026-10-20 · auto |
+
+## S-091 The chatbot Test tab runs the skip timer, remembers the conversation for AI steps, and can write the sheet row for real
+
+Spec 091. Tests in `tests/Feature/Chatblast/ChatbotTestTabTest.php`; the page is checked in the browser (1366 and 390 px).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-091.1 | Given the test customer waits at a step that skips after 1 minute, then the Test tab gets "skips in 60 s"; before the time nothing runs; after it the run takes the skipped port with TestOutbox; no `chatbot_waits` row, the minute tick doesn't touch it, nothing goes to Botcake, and a real customer's fields stay as they were | `test_S_091_1…` | Passed · 2026-10-20 · auto |
+| S-091.2 | Given a reply before the time, then the reply port runs and the timer is gone | `test_S_091_2…` | Passed · 2026-10-20 · auto |
+| S-091.3 | "Skip now" fires at once; "Reset test customer" clears the timer | `test_S_091_3…` | Passed · 2026-10-20 · auto |
+| S-091.4 | With "Write sheet rows for real" off the row is only shown ("Sheet row (not written): All Orders"); on, it is appended through ChatbotSheet and the chat says "Sheet row written: All Orders, row 42 ('All Orders'!A42:B42)"; Botcake sends stay simulated; a 403 says to share the spreadsheet with the service-account email, a missing tab says so, never Google's own text | `test_S_091_4…` | Passed · 2026-10-20 · auto |
+| S-091.5 | An AI step in Test gets the earlier test messages and bot sends as history (same roles and order as live); Reset forgets them; a real customer's AI step never sees them | `test_S_091_5…` | Passed · 2026-10-20 · auto |
+| S-091.6 | The page has the new banner, the remembered checkbox, the countdown with "Skip now" (1366 and 390 px, no horizontal scroll; the skipped sends appear without a reload) | `test_S_091_6…` + browser | Passed · 2026-10-20 · auto + browser |
+
+## S-096 An Edit button on each page row opens that page's fields, with paste and Save
+
+Spec 096. Tests: `tests/Feature/Chatblast/ChatbotPageEditTest.php` and `tests/Feature/Chatblast/ChatbotPasteScriptTest.php` (S-096.4). The screens are checked in headless Chrome at 1366×768 and 390×844 (screenshots in `docs/specs/096-page-edit-modal/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-096.1 | Given a user with /chatblast access, when the page modal loads its data, then `/chatbot/data` gives the botfields in grid column order and the page's current values with line breaks kept; without access it is 403, signed out 401 | `test_S_096_1…` | Passed · 2026-10-20 · auto |
+| S-096.2 | Given an edit of one page, when Save sends its changed fields through `/chatbot/cells`, then only that page changes and no row is written for another page | `test_S_096_2…` | Passed · 2026-10-20 · auto |
+| S-096.3 | Given /chatbot/pages, then each row has an Edit button named "Edit <page>" and the page modal (paste box, Starting at field, Paste blanks as empty, Save, Cancel); the Paste values button, its page picker and the row checkboxes are gone | `test_S_096_3…` | Passed · 2026-10-20 · auto |
+| S-096.4 | Given a paste for one page, then only the first data row is used (the rest counted), mapped by header names when the first line names fields, otherwise by order from the chosen field | `test_S_096_4…` | Passed · 2026-10-20 · auto |
+| S-096.5 | Given the page modal, then the title is the page name with its ID muted, every botfield (not ACTIVE or FLOW) is listed one per line in grid order and scrolls, text fields grow with their line breaks, image fields show a preview next to the link | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-096.6 | Given a pasted row with a header, then the filled fields turn amber with "Was: …", a blank cell keeps the value (unless Paste blanks as empty), a non-link in an image field is flagged and not saved, and a new paste or another Starting at field replaces the previous paste; a hand edit is a change too; the button reads "Save N changes" | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-096.7 | When Save is pressed, then one request saves the changes, the modal closes, the row in the grid shows the new values and the bar offers Undo; Undo restores them. Cancel, ✕, Escape or a click outside with unsaved changes asks first; without changes they close at once | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-096.8 | At 390 px, the Edit button is the pencil only (named "Edit <page>"), the modal is full screen, the fields scroll and Save and Cancel stay on screen | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+
+## S-092 Paste blocks of botfield values on /chatbot/pages, saved with one button
+
+Spec 092. Tests: `tests/Feature/Chatblast/ChatbotPasteTest.php` (the bulk save) and `tests/Feature/Chatblast/ChatbotPasteScriptTest.php` (`public/js/chatbot-paste.js` in node). The screens are checked in headless Chrome at 1366×768, 1920×1080 and 390 px (screenshots in `docs/specs/092-pages-copy-paste/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-092.1 | Given text copied from Google Sheets, when it is parsed, then tabs split cells and line breaks split rows; a quoted cell keeps its tabs, line breaks and doubled quotes; CRLF and one trailing newline add no empty row; copying cells back as TSV quotes them the same way, so a round trip keeps them | `test_S_092_1…` | Passed · 2026-10-20 · auto |
+| S-092.2 | Given a pasted block whose first line names fields, then columns map by name (case and spaces ignored); unknown names are listed and ignored; ACTIVE and FLOW are skipped with the note "ACTIVE and FLOW are not changed by paste". Without such a line, columns map by order from the chosen field, and values past the last column are dropped with a count | `test_S_092_2…` | Passed · 2026-10-20 · auto |
+| S-092.3 | Given N target pages, then one pasted row applies to every page, N rows go one per page in grid order, and any other count is refused with the reason | `test_S_092_3…` | Passed · 2026-10-20 · auto |
+| S-092.4 | Given an image column, then a non-link pasted value is flagged and left out; a blank pasted cell keeps the value unless "Paste blanks as empty" is ticked; a value equal to the current one is listed as unchanged | `test_S_092_4…` | Passed · 2026-10-20 · auto |
+| S-092.5 | Given changes on several pages, when Save is pressed, then all are written in one request and one transaction through page settings (the old value stays as an inactive history row), the answer counts the changed fields and pages, and gives the previous value of each changed field | `test_S_092_5…` | Passed · 2026-10-20 · auto |
+| S-092.6 | Given one bad change among good ones (over MAX_VALUE letters, over MAX_BYTES bytes, a non-link in an image column, an unknown column, a page not on the list), when Save is pressed, then 422 names the cell and nothing is saved | `test_S_092_6…` | Passed · 2026-10-20 · auto |
+| S-092.7 | Given blank values, then they keep the current value by default and clear it only with "blanks as empty"; ACTIVE and FLOW in the changes are skipped and counted, never changed | `test_S_092_7…` | Passed · 2026-10-20 · auto |
+| S-092.8 | Given a user without /chatblast access, then the bulk save is 403 and changes nothing; signed out it redirects to sign-in | `test_S_092_8…` | Passed · 2026-10-20 · auto |
+| S-092.9 | Given a Save, when Undo sends back the previous values it was given, then every field of that save returns to its previous value (an empty one is cleared again) | `test_S_092_9…` | Passed · 2026-10-20 · auto |
+| S-092.10 | ~~The Paste values modal~~ Removed by spec 096: the global modal, its page picker and the row checkboxes are gone; paste is per page in the Edit modal (S-096) | — | Retired · 2026-10-20 |
+| S-092.11 | In the grid: click selects a cell, Shift+click a rectangle, Ctrl/Cmd+A all visible botfield cells, Ctrl/Cmd+C copies TSV, Ctrl/Cmd+V pastes from the selected cell (a single value fills the selection); pasted cells are pending (highlighted, old value on hover) with a bar "N cells changed on M pages · Save · Cancel"; a cell edited while changes are pending joins them; leaving with pending changes asks first | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+| S-092.12 | At 1366×768, 1920×1080 and 390 px the table fills the rest of the screen: the page doesn't scroll, the table's horizontal bar is visible without scrolling, the header row and first columns stay sticky; the same on every chatbot page that used a fixed `calc(100vh - …)` height | browser | Passed · 2026-10-20 · browser (headless Chrome) |
+
+## S-090 The Google Sheet step shows the spreadsheet, its tabs and its column headers
+
+Spec 090. Tests in `tests/Feature/Chatblast/ChatbotSheetPickerTest.php` (fake Google: no call leaves the test). The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-090.1 | Given a docs.google.com link (with or without https://), when the editor asks for it, then it gets the spreadsheet name and its tabs in sheet order (each capped at 200 letters), and no header is read yet | `test_S_090_1…` | Passed · 2026-10-20 · auto |
+| S-090.2 | Given a picked tab, then its row 1 comes back as headers (at most 100, each capped at 200 letters); a saved tab that is gone comes back as missing and is not read | `test_S_090_2…` | Passed · 2026-10-20 · auto |
+| S-090.3 | Given Google answers 403 or 404, then the editor gets "Share this sheet with gsheet-to-database@… as Editor" with the email, never Google's raw error; the refusal is not cached, so Check again works at once after sharing; any other Google error gives "Google did not answer" (502), also without the raw error | `test_S_090_3…` (3 data sets) | Passed · 2026-10-20 · auto |
+| S-090.4 | Given the name, tabs and headers were read, then for 5 minutes they come from the cache; Refresh reads Google again | `test_S_090_4…` | Passed · 2026-10-20 · auto |
+| S-090.5 | Given a flow saved before this change (n43 with `columns` and empty columns), when it opens and saves, then the step config is unchanged | `test_S_090_5…` | Passed · 2026-10-20 · auto |
+| S-090.6 | Given the recent customers of the pages that use the flow (one per customer, newest first), when Preview row runs for one, then the cells are what the run would write, formula guard included, and nothing is written; a chat of another page is refused | `test_S_090_6…` | Passed · 2026-10-20 · auto |
+| S-090.7 | Given a row is written, then its `updatedRange` and the tab's gid are kept (a tab not yet in the cached list is looked up once more; when the list can't be read the row is still sent, with no link), and /chatbot/replies and the Inbox show "Open row" to `…/edit#gid=<gid>&range=A123`; rows without a range (older rows) show no link | `test_S_090_7…` | Passed · 2026-10-20 · auto |
+| S-090.8 | Given a non-Google link, a bare word, a cloud metadata URL or a too-long tab, then the endpoint answers 422 without calling Google; a guest gets 401 and a user without editor access gets 403 on all three endpoints | `test_S_090_8…` | Passed · 2026-10-20 · auto |
+
+## S-095 A Botcake refusal whose "message" is not a string no longer throws
+
+Spec 095. Tests in `tests/Feature/Chatblast/BotcakeMessageShapeTest.php` and `tests/Feature/Chatblast/ChatbotSequenceEngineTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-095.1 | Given Botcake refuses a send with `message` as a string, an array, a nested array, an object, an array with no string, null, a number, missing, or a string over 150 letters, then the outcome is `failed` with a readable reason (the string, the first string inside, compact JSON, or "Botcake refused it"), capped at 150 letters, and nothing throws | `test_S_095_1…` (9 data sets) | Passed · 2026-10-20 · auto |
+| S-095.2 | Given a sequence step whose send Botcake refuses with `{"success":false,"message":{"error":"x"}}`, when the tick runs the step, then the reply is logged `failed` with `Botcake said "x"` and the job runs to the end | `test_S_095_2…` | Passed · 2026-10-20 · auto |
+
+## S-097 The flow editor's variable list is grouped: System, Botfields, Customer fields
+
+Spec 097. Tests in `tests/Feature/Chatblast/ChatbotVariableGroupsTest.php`. The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-097.1 | Given a flow, when its editor loads, then every variable is in one group: the run variables in System, the `/chatbot/pages` columns in Botfields, and in Customer fields the fields the flow writes (Send "save the reply", AI "save to", Set field ops) plus the fields saved on customers of the pages that use this flow; each has a tooltip on where it comes from | `test_S_097_1…` | Passed · 2026-10-21 · auto |
+| S-097.2 | Given a customer field, then its tooltip lists the steps of this flow that write it ("set by n4 (AI), n5 (Set field)"); a field only found on customers says no step of this flow sets it | `test_S_097_2…` | Passed · 2026-10-21 · auto |
+| S-097.3 | Given saved keys starting with `__` (run state) and fields of a page that doesn't use this flow, then neither is listed | `test_S_097_3…` | Passed · 2026-10-21 · auto |
+| S-097.4 | Given a name in two groups (same after `ChatbotVars::norm`), then it is in both with an "also" flag and the real precedence: built in beats both; a customer field beats a botfield when the customer has it saved, even blank | `test_S_097_4…` | Passed · 2026-10-21 · auto |
+| S-097.5 | In every step form: three headed groups in gray, purple and teal; "!" on duplicates; Seq Img 1–20 and Seq 1–20 folded in "Sequences (40)" that opens on click; the search box filters by name; a click puts the variable in the last field; at 1366 and 390 px without sideways scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-099 /chatbot/pages checks each page's values, and shows the history of every edit
+
+Spec 099. Tests in `tests/Feature/Chatblast/ChatbotPageCheckTest.php` and `tests/Feature/Chatblast/ChatbotPageHistoryTest.php` (fake HTTP and a stub DNS resolver: no call leaves the test). The screens are in the browser check of the result.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-099.1 | Given a page whose flow's published graph uses `{{Name}}` in a send text or image, an AI prompt, a condition, a sheet column and a set-field value, and a botfield that names another botfield, when the Check runs, then every used botfield that is empty is listed in column order ("Missing: …"); customer fields and system variables are never missing; a page with no flow shows "—" | `test_S_099_1…` | Passed · 2026-10-21 · auto |
+| S-099.2 | Given image fields, then a link that answers 200 `image/*` passes; a 404 gives "Seq Img 3: link broken (404)", a non-image "PICTURE: not an image", and a host that resolves to a private, loopback or link-local IP fails without any request; a redirect is re-checked (at most 3); a URL's result is cached 24 h, and Check again asks again | `test_S_099_2…` (10 data sets and 2 more tests) | Passed · 2026-10-21 · auto |
+| S-099.3 | Given the flow or its sequences use both Seq N and Seq Img N, when a page sets one of a pair and not the other, then the reason is "Seq 5 has no Seq Img 5" (or the reverse) | `test_S_099_3…` | Passed · 2026-10-21 · auto |
+| S-099.4 | Given a botfield value with `{{X}}` where X is no system variable, botfield or customer field, then the reason is "Prompt 1 uses {{PRICEE}} (unknown)" | `test_S_099_4…` | Passed · 2026-10-21 · auto |
+| S-099.5 | Given a cached Check (10 minutes), then it is reused; when the page's settings or the flows change, the next Check recomputes | `test_S_099_5…` | Passed · 2026-10-21 · auto |
+| S-099.6 | Given a field with several versions, when its History opens, then the versions come newest first with value, who, when (Manila) and current/old; a secret value shows "(hidden)" | `test_S_099_6…` | Passed · 2026-10-21 · auto |
+| S-099.7 | Given an old version, when Restore runs, then a new active row with that value is written through PageSettings::set (the old ones stay as history); a secret, a reserved key, FLOW or a key of another provider is refused | `test_S_099_7…` | Passed · 2026-10-21 · auto |
+| S-099.8 | Given edits across pages, when the Changes log opens, then each entry pairs the old value with the new one, newest first, 50 per page; the page, user, field and date filters narrow it; secrets show "(hidden)" | `test_S_099_8…` | Passed · 2026-10-21 · auto |
+| S-099.9 | Given a guest or a user without /chatblast access, then every new endpoint answers 401 or 403 and changes nothing | `test_S_099_9…` | Passed · 2026-10-21 · auto |
+| S-099.10 | Given a page's main texts and Seq 1–20, when Preview runs, then each comes back filled for the sample customer "Juan Dela Cruz", with Seq Img N and PICTURE as images; nothing is written | `test_S_099_10…` | Passed · 2026-10-21 · auto |
+| S-099.11 | The Check column (check, X with reasons, Check again), Preview, field History with Restore and the Changes list with filters, at 1366 and 390 px, with no page-level horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-101 Moving around the flow editor is easy, and dragging never selects text
+
+Spec 101. Tests in `tests/Feature/Chatblast/ChatbotEditorCanvasTest.php`; the canvas cases are in the browser check of the result (headless Chrome, a 40-step piled-up fixture).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-101.1 | Given a flow, when the editor saves after a drag, a Snap drop or Arrange (positions on the grid, left of 0, far right), then the saved graph has exactly those positions and nothing else changed | `test_S_101_1…` | Passed · 2026-10-21 · auto |
+| S-101.2 | Given the editor page, then it has a Snap checkbox (checked by default), a Map button with its minimap, and the canvas turns off text selection while moving | `test_S_101_2…` | Passed · 2026-10-21 · auto |
+| S-101.3 | Given a step, when it is dragged 200 px from its text, then no text is selected during or after the drag, the step moves 200 px (screen), the form stays closed, and the card shows grab, then grabbing; text inside a step form can still be selected | browser 3, 6, 7, 8b | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.4 | Given a step, when it is clicked, or pressed and moved less than 4 px, or tapped, or focused and Enter is pressed, then its form opens | browser 1, 2, 19c, 27 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.5 | Dragging empty canvas pans by the same distance (mouse and one finger); the wheel and Ctrl+wheel zoom around the pointer, from 0.2× to 2×; "−", "+" and Fit still work and Fit shows every step; a two-finger pinch zooms and pans with the point between the fingers staying under them, and moves no step; lifting one finger lets the other pan | browser 12–16, 28, 29, 29b, 29c | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.6 | With Snap on, a dropped step lands on the 16 px grid; with Snap off it lands where it was dropped; the choice survives a reload | browser 8, 10, 11 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.7 | Dragging from a port to a step still makes a wire; wires are drawn behind the steps; hovering a step highlights its incoming and outgoing wires and dims the rest, and leaving clears it; clicking a wire selects it with a × (and Remove wire) that removes it; Undo brings it back | browser 17–19, 19b | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.8 | Given 40 piled-up steps (with a loop, a chain Start never reaches and loose Ends), when Arrange is pressed, then no two step rectangles intersect, Start is leftmost, steps run left to right in columns on the grid; Undo restores every position and Redo brings the layout back | browser 0, 4, 5 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.9 | The minimap (bottom-right) draws the flow and the view; clicking it moves the view there; Map hides it and the choice survives a reload | browser 20–22 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.10 | At 390 px: no sideways scroll, every canvas tool on screen, a usable canvas, a smaller minimap, touch drag and tap work | browser 25–28 | Passed · 2026-10-21 · browser (headless Chrome) |
+| S-101.11 | After a drag (also one the browser cancels) the autosave stores the positions the screen shows, as one Undo step; a drag move costs well under a frame with 40 steps | browser 19d, 23, 24 | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-098 Page settings from the cache, one Botcake rate per page on every path, and the real reason of a failed send
+
+Spec 098. Tests in `tests/Feature/PageSettings/PageSettingsCacheTest.php`, `tests/Feature/Chatblast/BotcakeAsyncSendTest.php` and `tests/Feature/Chatblast/BotcakeFailedReasonsTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-098.1 | Given a page whose settings aren't cached, when one run reads several of its settings (any spelling of the page), then MySQL is read once; the next request reads them from the cache with no query | `test_S_098_1…` | Passed · 2026-10-21 · auto |
+| S-098.2 | Given the page's settings are cached, then the cached map holds the token encrypted, never the plain token | `test_S_098_2…` | Passed · 2026-10-21 · auto |
+| S-098.3 | Given a cached page, when a setting is written by the cell, the bulk save / paste, a deactivate, the setup check, or any model write, then the next read returns the new value | `test_S_098_3…` (5 data sets) | Passed · 2026-10-21 · auto |
+| S-098.4 | Given the send pool just sent for a page, when a sequence step and an Inbox send for the same page arrive at the same moment in two processes, and the pool sends again, then no two calls to that page are less than 1 / rate_per_page apart | `test_S_098_4…` | Passed · 2026-10-21 · auto |
+| S-098.5 | Given a refusal body from Botcake or Facebook (a string message, an error object with fbtrace_id, a trace ID before the text inside message, error_user_msg, error_description, a trace ID only, another string after a trace ID, no message), then the reason is the error text, never the trace ID; a trace ID only gives its compact JSON | `test_S_098_5…` (8 data sets) | Passed · 2026-10-21 · auto |
+| S-098.6 | Given a send that Botcake refuses, then the reply row keeps the raw answer, capped at 1,000 letters and without the token, and the Replies detail returns it | `test_S_098_6…` | Passed · 2026-10-21 · auto |
+| S-098.7 | Given failed sends with and without a stored answer, older ones and sent ones, when `chatbot:failed-reasons --since` runs, then it groups the failures in the window by the real reason, "unknown (before 098)" for a Botcake refusal with no stored answer, the error itself for failures that had no answer | `test_S_098_7…` | Passed · 2026-10-21 · auto |
+
+## S-100 Chatbot results: which value was sent, replied, ordered and delivered, per flow version
+
+Spec 100. As the owner, I change the flow and its page values and see per version whether more customers reply, order and get their parcel. Tests: `tests/Feature/Chatblast/ChatbotTagsTest.php` (tagging, replied, orders) and `tests/Feature/Chatblast/ChatbotResultsTest.php` (report, JSON, command, access). The page is checked in headless Chrome at 1366 and 390 px (screenshots in `docs/specs/100-chatbot-results/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-100.1 | Given a send node with {{PICTURE}}, {{Main Flow}}, {{Main Flow 2}} and {{Fill-Up Form}}, when a live chat runs it (waiting send, and through the send pool), then its reply row has 4 message tags, each naming its botfield and the id of the active page_settings row; a template's customer fields are listed too; the reply also has the flow id, node id, flow version and ad_id | `test_S_100_1…` (2 data sets) | Passed · 2026-10-21 · auto |
+| S-100.2 | Given a sequence step and an Inbox manual send, then the step's reply has the sequence id and step position (and its botfield tags), and the manual reply has no flow, no botfields, and the customer's ad_id | `test_S_100_2…` | Passed · 2026-10-21 · auto |
+| S-100.3 | Given a botfield is edited between two sends, then the second send's tag has the new page_settings id and the first keeps the old one | `test_S_100_3…` | Passed · 2026-10-21 · auto |
+| S-100.4 | Given a flow published twice (and again back to an earlier graph), then sends after each Publish carry that Publish's chatbot_flow_versions id; a flow with no version row gets a null id and a stable graph hash | `test_S_100_4…` | Passed · 2026-10-21 · auto |
+| S-100.5 | Given a sent group, when the customer's next chat arrives within 24 h, then replied_at is that chat's time and reply_seconds the gap; every still-unreplied group sent in the 24 h before that chat gets it (two nodes sent before one answer are both answered); a chat after 24 h, a chat on another page and the bot's own later sends leave it empty; the hourly backfill fills a group the job missed; the chat endpoint queues the job | `test_S_100_5…` | Passed · 2026-10-21 · auto |
+| S-100.6 | Given a Send, Set field or Sheet node with "Counts as an order", when a live run passes it, then one chatbot_events row of type order holds the run, flow version, the customer's last 5 send ids and the sequence step they were on; a second pass within 24 h writes nothing; a failed node, an unticked node and the Test tab write nothing; a ticked Send through the send pool counts once after Botcake accepts it and never when refused; a sequence send older than 92 days is not the customer's step; the 30-day prune keeps order events | `test_S_100_6…` (a–d) | Passed · 2026-10-21 · auto |
+| S-100.7 | Given a saved graph, then counts_order is kept only when ticked (true), so graphs saved before this change are unchanged; the editor form shows the checkbox with a help line on Send, Set field and Sheet | `test_S_100_7…` + browser | Passed · 2026-10-21 · auto + browser (headless Chrome) |
+| S-100.8 | Given an order event, then it links to the macro_output row of the same page and botcake_psid with ts_date from 1 day before to 3 days after (the closest wins), and the waybill maps to delivered, rts (Returned, For Return, or an RTS reason), in transit, or other; no row in that window is unmatched | `test_S_100_8…` (data sets) | Passed · 2026-10-21 · auto |
+| S-100.9 | Given seeded chats, sends, replies, orders and deliveries, then the funnel shows chats, sent, replied %, orders %, delivered % and RTS %; By message groups by node, botfield and version (with changed-on date and value), with sent, replied %, median reply time, orders after and delivered | `test_S_100_9…` | Passed · 2026-10-21 · auto |
+| S-100.10 | Given sequence sends and unsubscribes, then By sequence step shows step, sent, replied %, unsubscribed, orders after and delivered; By ad shows ad_id, the ads_manager_reports name when there is one, chats, orders and delivered | `test_S_100_10…` | Passed · 2026-10-21 · auto |
+| S-100.11 | Given two flow versions (or two versions of one botfield), when compared, then the same metrics show side by side with their counts | `test_S_100_11…` | Passed · 2026-10-21 · auto |
+| S-100.12 | Given the same filters, then /chatbot/results.json and `chatbot:results --page= --from= --to= --json` give the same JSON shape, with no customer message text, names or PSIDs; bad filters fall back to defaults (no error, no raw SQL) | `test_S_100_12…` | Passed · 2026-10-21 · auto |
+| S-100.13 | Given a user without /chatblast access, then the page and the JSON are 403; a guest is sent to sign-in; the Chatbot nav shows a Results tab to those with access | `test_S_100_13…` | Passed · 2026-10-21 · auto |
+| S-100.14 | At 1366 and 390 px: filters, funnel, the four tables and compare are readable; wide tables scroll inside their box, the page has no horizontal scroll; a version's value is folded and opens on click | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-102 Chatbot jobs are picked up at once, not after an idle sleep
+
+Spec 102. As the owner, I want the first AI reply sooner: a chatbot or chatblast job is taken by a Horizon worker as soon as it is queued, and the pools keep their short idle tick. Test: `tests/Feature/Chatblast/QueuePickupConfigTest.php`. The before and after numbers are in `docs/specs/102-queue-pickup.result.md`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-102.1 | Given no override, then the Redis queue blocks for 5 s on an empty queue, and the predis read-write timeout of its connection is 60 s, at least twice block_for, so a blocked worker's connection is never cut | `test_S_102_1…` | Passed · 2026-10-21 · auto |
+| S-102.2 | Given block_for > 0, then the chatbot and chatblast supervisors are on the redis connection with sleep 0 and balance auto (one queue per process, so a block on one queue never delays the other) | `test_S_102_2…` | Passed · 2026-10-21 · auto |
+| S-102.3 | Given REDIS_QUEUE_BLOCK_FOR=0, then block_for is null (polling as before, never a blpop of 0 that waits forever) and both supervisors sleep 3 s | `test_S_102_3…` | Passed · 2026-10-21 · auto |
+| S-102.4 | Given no override, the pools sleep 200 ms per idle tick and 5 ms per busy tick; CHATBOT_POOL_IDLE_MS and CHATBOT_POOL_BUSY_MS override them, and the pool loop uses the configured values | `test_S_102_4…` | Passed · 2026-10-21 · auto |
+
+## S-103 Ad Accounts: who added or changed each ad account, with a change log
+
+Spec 103. As the owner, I want to see who added, renamed or deleted each ad account on `/ads_manager/ad_account`, and every change in a log. The old row stays in `ad_accounts` (active = false); readers see active rows only. Test: `tests/Feature/AdAccount/AdAccountHistoryTest.php`. The page is checked in headless Chrome at 1366 and 390 px (screenshots in `docs/specs/103-ad-accounts-history/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-103.1 | Given a signed-in staff user, when they add an ad account, then its row has created_by = their id, action added, active | `test_S_103_1…` | Passed · 2026-10-21 · auto |
+| S-103.2 | Given an active ad account, when another user renames it, changes its ID (edit form), or saves a new name for the same ID (add form), then the old row stays with active = false, replaced_at and replaced_by, and a new active row has the new values, created_by and action changed | `test_S_103_2…` (3 data sets) | Passed · 2026-10-21 · auto |
+| S-103.3 | Given an active ad account, when the same ID and name are saved again (edit or add form), then no history row is written | `test_S_103_3…` | Passed · 2026-10-21 · auto |
+| S-103.4 | Given two active ad accounts, when one's ID is changed to the other's, then the form shows an error and nothing changes (one active row per ID) | `test_S_103_4…` | Passed · 2026-10-21 · auto |
+| S-103.5 | Given an active ad account, when a user deletes it, then the row stays in the table, inactive, with action deleted, replaced_by and replaced_at | `test_S_103_5…` | Passed · 2026-10-21 · auto |
+| S-103.6 | Given old rows (no created_by), changed rows and a deleted row, then the list shows active rows only, with "Added by" (the name, or "unknown" for old rows) and "Last change" (Manila date-time) | `test_S_103_6…` | Passed · 2026-10-21 · auto |
+| S-103.7 | Given an add, an ID-and-name change and a delete by two users, then the change log lists them newest first with when (Manila), who, action, ID (old → new) and name (old → new); an old row shows as added by "unknown"; two renames by one user in the same second each show their own old name | `test_S_103_7…` (2 tests) | Passed · 2026-10-21 · auto |
+| S-103.8 | Given 51 log entries, then the change log shows 50 per page, newest first, and page 2 has the oldest | `test_S_103_8…` | Passed · 2026-10-21 · auto |
+| S-103.9 | Given an ad account with an inactive old name and a deleted ad account, then payment records and the ad account dropdown show the active name once per payment and the raw ID for the deleted one, and the total is unchanged; campaign data names the account from the active row | `test_S_103_9…` (2 tests) | Passed · 2026-10-21 · auto |
+| S-103.10 | At 1366 and 390 px: the table with "Added by" and "Last change" and the change log are readable; wide tables scroll inside their box, the page has no horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-104 Every change to RTS, promo and COGS is in the one edit log, deletes and /item/cogs included
+
+Spec 104. As the owner, I want every write to RTS %, promo and COGS in `/owner/private/edit-logs`, with who did it and where (/owner/private, /item/cogs, cogs sync), so that no value changes or vanishes without a trace. Test: `tests/Feature/OwnerPrivate/ItemSettingsLogTest.php`. The page is checked in headless Chrome at 1366 and 390 px (screenshots in `docs/specs/104-item-settings-log-gaps/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-104.1 | Given a set RTS, promo or COGS (+ CEO COGS), when the CEO deletes that field on /owner/private, then one log row has action delete, source owner_private, the user, page/item/date, and old value → NULL | `test_S_104_1…` (rts, promo, cogs) | Passed · 2026-10-21 · auto |
+| S-104.2 | Given a field with no value, when it is deleted on /owner/private, then no log row is written | `test_S_104_2…` | Passed · 2026-10-21 · auto |
+| S-104.3 | Given a COGS cell, when a user edits it (existing → update, new → create) or deletes it on /item/cogs, then a log row has old → new, the user, item, date, source item_cogs; deleting a cell with no row writes nothing | `test_S_104_3…` | Passed · 2026-10-21 · auto |
+| S-104.4 | Given a redundant COGS anchor, when "clean redundant" removes it on /item/cogs, then a delete row is logged per removed cell | `test_S_104_4…` | Passed · 2026-10-21 · auto |
+| S-104.5 | When cogs sync inserts rows, then only rows that got a value (NULL → carry) are logged, with no user and source cogs_sync; skipped rows and NULL rows write nothing | `test_S_104_5…` | Passed · 2026-10-21 · auto |
+| S-104.6 | Given delete, /item/cogs and sync rows, then edit-logs shows DELETE, the source label, "system (cogs sync)", deleted values struck through, and filters by source and item; the global '' page is not a Page option | `test_S_104_6…` | Passed · 2026-10-21 · auto |
+| S-104.7 | Given old rows (no source), then they show as before, labelled /owner/private, and the owner_private filter includes them | `test_S_104_7…` | Passed · 2026-10-21 · auto |
+| S-104.8 | At 1366 and 390 px the edit-logs page is readable; the table scrolls inside its box, the page has no horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |

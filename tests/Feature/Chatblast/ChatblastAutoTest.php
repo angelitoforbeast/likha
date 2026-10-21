@@ -259,12 +259,13 @@ class ChatblastAutoTest extends ChatblastTestCase
         $this->campaign(['mode' => 'manual']);
         $seen = (object) ['tracks' => 0, 'refresh' => 'not run', 'build' => 'not run'];
         // Habang tumatakbo pa ang unang refresh (lampas na sa 5 minuto), dumating ang susunod na chatblast:auto at isang build.
-        $this->mock(\App\Services\Jnt\JntTracker::class, fn ($m) => $m->shouldReceive('refresh')->andReturnUsing(function () use ($seen) {
-            if ($seen->tracks++ > 0) return null;
+        // Ang pagsuri ng Ready sa loob ng pagkuha ang pinto: dito dumarating ang mga kasabay habang tumatakbo pa ito.
+        $this->partialMock(\App\Services\ChatblastReady::class, fn ($m) => $m->shouldReceive('states')->andReturnUsing(function () use ($seen) {
+            if ($seen->tracks++ > 0) return [];
             $this->travelTo('2026-10-18 06:21:00');
             $seen->refresh = app(Chatblast::class)->refreshIfDue();
             $seen->build = app(Chatblast::class)->build('c-auto', 1);
-            return null;
+            return [];
         }));
 
         $this->tick('2026-10-18 06:15:00');

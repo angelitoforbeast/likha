@@ -525,6 +525,17 @@ Accepted, not fixed:
 - **(amendment 2) A card number glued to cents ("…5003.50", "…5003,12") is read as an amount and not masked as a card.** Reason: the same guard keeps amounts whole; no statement layout prints a card number glued to cents.
 - **(amendment 2) The double-submit guard needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
 
+## 051: checklist deadlines, late tasks in the staff feed, Checklist badge (2026-10-18)
+
+- **An OIC can override their own submission** when their department key matches their own (a Marketing - OIC's own Marketing task). Reason: the amendment names the department OIC as the override without an exception; ask the owner whether the submitter should be left out.
+- **The department rule exists twice:** `ChecklistController::oicDepartment` (OICs only) and `ChecklistBadge::departmentKey` (any user: profile department, else the role without "- OIC"). Reason: legacy rule, no refactor of the existing method; they agree for every OIC role.
+- **A deadline set earlier than the scheduled time is taken as is** (scheduled 23:50, deadline 00:05 → late from 00:05 the same day). Reason: only task editors set it, and the field means "late after this time"; a warning in the form would be a separate change.
+- **The check-limit lock needs a cache store with locks** (database, file or redis; the `array` store only locks within one request). Reason: the server's cache setting, to confirm on deploy.
+- **The automatic approval check at submit counts as check 1 of 3** (amendment 2), so a staff member gets two manual re-checks. The automatic check itself is not limited. Reason: as decided.
+- **Untested here:** the `selectSub` override join and both migrations on MySQL (sqlite only), the badge and the override form in a browser. Reason: no MySQL or browser in this session.
+- **When a submission is locked, the Analyze button stays enabled** (relabelled "↻ Analysis lang", runs the analysis only, the limit text shows under it). Reason: the one button runs both the analysis and the approval check; the analysis has no limit.
+- **The race test holds the lock itself** instead of running two real requests at once, so it proves the 409 path, not the order of lock and count. Reason: PHPUnit runs requests one at a time; the order is read in review.
+- **A single-process PHPUnit run can stop at a 55 s time limit on Windows:** controllers call `set_time_limit` (e.g. `ChatblastCampaignController` 55 s), and on Windows the limit counts wall-clock time for the whole process. Reason: not this spec's code; the suite was run one folder per process. Suggestion for the owner: skip or reset the limit when running tests.
 ## 050: chatblast messages and sequences (2026-10-19)
 
 - **Adding a send time that has already passed stamps the auto run at that time,** which also skips an earlier time of today that was due but had not run yet. Reason: narrow (two times minutes apart, edited in between); the next time runs as usual.
@@ -650,7 +661,283 @@ Accepted, not fixed:
 - **(independent review) A page id first seen in chats appears in the Chats page filter up to 10 minutes late** (the distinct list is cached). Reason: asked for; its rows show in the unfiltered list at once.
 - **(independent review) The Chats list shows "Page N · X messages" instead of a total;** no COUNT over the table. Reason: asked for (simplePaginate).
 
+## 061: hourly J&T track-sync, chatblast reads the database (2026-10-18)
+
+- **A crashed run stays "running" on /jnt/track-sync and drops its resume point** (the next run starts from the newest). Reason: rare; the hour claim already stops repeats. Mark leftover running rows failed at the next start if it shows up.
+- **The build-time skip of unsent requires-On-Delivery rows has no window limit** (two indexed queries per 500 unsent rows per build). Reason: the unsent set is small; limit it to the campaign window if it grows.
+- **"Delivered/Returned are final" is now in three places** (JntTracker, JntAutoTrackSync, the manual job). Reason: legacy minimal touches; share one constant when this area changes again.
+- **Missing small tests:** the stop waybill of a capped run became final (the code handles it), a stale row sent at the next due time once fresh, the Off state of the page, a guest POST to the toggle. Reason: each path is a one-line branch next to a covered one.
+- **The background start uses its own command string** instead of Laravel's `Application::formatCommandString()`. Reason: works on Linux; the test asserts the trailing `&`.
+- **jnt_latest_scans has no timestamps** (the plan said it would); `checked_at` is the only time needed.
+
 ## 062: Flow ID and Message field dropdowns (2026-10-18)
 
 - **The page-script tests for the edit dropdown find literals only;** the browser check proves the behaviour. Reason: no JS test harness.
 - **A list stored before 062 holds the CHATBLAST / "GPT Input" candidates only** until the page's next Test or Botcake ID / token save, so its dropdown lists only those. Reason: the next Test refreshes it; "Test all tokens" refreshes every page at once.
+
+## 063: Meta payment dates (2026-10-18)
+
+- **The importer holds the whole file in memory before writing** (it decides the date order from every row first, so it no longer streams 2,000 rows at a time). Reason: the date order rule needs a first pass over the rows, and real Meta invoice summaries are a few dozen rows; the upload limit is 50 MB.
+- **Text dates that aren't plain slash or ISO (e.g. `03/10/2026 00:00`, `Feb 30, 2026`) still fall to the loose `Carbon::parse`.** Reason: already true before; Meta files today have plain dates, and the range guard catches far-off results.
+- **Untested here:** xlsx uploads (DateTime cells and numeric serials skip the order rule), D/M decided by a data row alone, 2-digit years, the backfill's equal-distance and "row changed while running" guards, `--dry-run` with `--apply`, and the MySQL/pgsql backup statements (sqlite only in tests). Reason: on the owner's command path, or branches read by the reviewer; the suite stays small.
+- **Two small additions beyond the brief:** `.` is accepted as a date separator, and the command refuses `--dry-run` together with `--apply`. Reason: harmless, kept.
+- **The backfill can flag a correct row** when its day is 12 or less and above its month, and it was first imported about a month or more after the payment (the swapped reading is then closer to `created_at`). Reason: the rule is decided in the spec; none of the stored sample files is that late. The owner can check the dry-run CSV: rows whose `source_filename` was a "Billing report" (lowercase) file should not appear.
+- **A row with a transaction id or amount but an empty date cell is skipped without being counted as refused.** Reason: already true before; Meta exports have no such rows.
+
+## 067: chat endpoint security (2026-10-19)
+
+- **The IP allowlist checks REMOTE_ADDR.** If the site sits behind a proxy or CDN, REMOTE_ADDR is the proxy's address and enforce mode would refuse every chat. Reason: the forwarded header is client-written while the app trusts every proxy. Check the `ip` / `forwarded_ip` pair in the log (log mode) before switching to enforce.
+- **The per-IP rate limit (`throttle:botcake-chat`) still keys on `ip()`,** which a forged `X-Forwarded-For` can change. Reason: the limiter was asked to stay as it is; the key, the per-page PSID-check cap and the PSID check carry the protection.
+- **Command: a block write that times out after Botcake applied it** reports "key unchanged", while Botcake now holds a key that was never saved; that page's chats get 401 until the command is run again. Reason: owner-run (trusted) and fixed by a rerun.
+- **Command: if saving the key throws after the block was written,** the loop stops with a block whose key is unsaved. Reason: trusted path; rerun fixes it.
+- **Command tests not written:** publish failing after the write (key saved, exit 1), `--all --confirm` with one page failing, choosing a page by its Botcake ID. Reason: trusted, owner-run paths.
+- **Two first chats of the same new PSID at the same moment insert two `chat_verify` rows** (no unique index on page + psid). Reason: harmless duplicates; the lookup only checks existence.
+- **A page in page settings without a `botcake.page_id` keeps the page_id the request sent** (name lookup fallback from 059). Reason: such a page has no token for the PSID check either, so its chats are not kept now ("PSID could not be checked").
+- **The active `chat.key` query is written twice** (`BotcakeChat::keyHashes` and the Chats setup box). Reason: second copy, not the third (DRY rule).
+- **The PSID-check cap drops real new customers above 60 a minute on one page.** Reason: a key holder must not be able to drain the page's Botcake budget; the count shows it, and `BOTCAKE_CHAT_VERIFY_PER_MINUTE` can be raised.
+- **(re-check) Failing closed can drop real chats:** a page whose token expired keeps no chats from new customers, and a page above the per-minute cap drops the extra new-customer chats. Reason: the trade-off for not letting an attacker force the accept path; both show as "PSID could not be checked" in the Setup box, and the cap is in config.
+- **(re-check) In enforce mode, `bad_ip` and `bad_key` refusals still write a database cache counter** for requests that never showed a valid key. Reason: counting refusals is asked for; the per-IP limiter bounds it.
+- **(re-check) A crafted PSID that made Botcake answer 5xx would count as "down" and be kept** (not verified to happen). Reason: unproven; the fix (refuse PSIDs that are not digits before calling Botcake) would change many test fixtures. Suggestion for a later small change.
+
+## 068: /chatbot page list (2026-10-19)
+
+- **At phone width the page scrolls vertically a little,** so the filters can scroll out of view: the table box keeps a minimum height of 18rem under a taller header. Reason: nothing scrolls sideways and the table header and PAGE column stay sticky inside the box; the brief's "only the data scrolls" holds on desktop.
+- **"+ Column" has no way to remove or rename a column on screen.** Reason: not asked; the list is one `app_settings` row (`chatbot.columns`) the owner can edit, capped at 200.
+- **Auto-save writes a history row at every typing pause** (up to 10,000 characters for long text). Reason: same behaviour as page settings; the history is how page settings keeps old values.
+- **Image previews load the URL in the viewer's browser** (with no referrer). Reason: the owner's own links; any role with access can set them, but only http(s) is accepted and nothing is rendered as HTML.
+- **The "Chats today" count reads today's rows of botcake_chats on a cache miss (once a minute).** Reason: fine at today's volume; the 1M-a-day storage work is out of scope.
+- **The ACTIVE column's sticky offsets assume a fixed width;** a long Botcake error under the switch wraps inside 12rem. Reason: checked in the browser at 1366 px with no overlap; an unusually long single word could still overlap.
+- **Two tabs, or the command and the switch at the same moment,** can leave ACTIVE and the Botcake publish state out of step. Reason: CEO-only actions behind a confirm; the next switch fixes it.
+- **The helper in ChatbotController is called `role()`,** not the house `getNormalizedRole()`. Reason: cosmetic; same logic.
+- **The scratch app of the browser check left gitignored files** (two session files and a few cache files in this worktree's `storage/framework`, and `%TEMP%\cb068`). Reason: the project guard blocks deleting files from the session; they hold only scratch data and no real key or token.
+- **(re-check) The duplicate Botcake ID check in "+ Page" compares the stored text;** a `botcake.page_id` row someone marked secret in Page settings (encrypted) would slip past it. Reason: only trusted users can mark it secret, and page IDs are never secret in practice.
+
+## 069: chatbot flow builder (2026-10-19)
+
+- **The "chatbot" queue needs its own worker** (`php artisan queue:work --queue=chatbot`, under supervisor). Without it no customer gets a reply and the jobs wait in `jobs`; after 30 minutes a run gives up and its chat is passed over. Reason: production setup, done at deploy.
+- **With the replies switch off, runs still call OpenAI and still change real customer fields** (only sends and sheet rows are skipped). Reason: the brief's choice ("runs still happen"); flip the switch only after testing, or keep pages unlinked until then.
+- **A customer's first burst:** when the very first two chats of a customer arrive together and the second one's job runs first, the first chat is marked done without a run (there is no marker yet). Reason: only the first contact; later chats always run in order.
+- **Model names are free text** (a safe pattern, any model) and max tokens go up to 4000. Reason: staff with /chatblast access author flows; a model allowlist can come with cost tracking.
+- **The Test tab calls OpenAI for any role with /chatblast access** (30 a minute, the throttle). Reason: the brief asks for real AI in Test.
+- **The Google Sheet step can append to any spreadsheet the service account can edit,** and a column template without a variable can be a formula. Reason: flows are authored by staff; this is the TeleSMS rule the brief asked to port.
+- **A regex value may contain variables,** so customer text can become part of a pattern. Reason: PCRE's backtrack limit bounds it, and a failed match is "no match".
+- **Chatbot replies share each page's Botcake rate (2 a second) with chatblast,** and the throttle is not atomic across workers. Reason: the real limit is per token; a busy page plus a campaign backs up rather than failing at once.
+- **Per-run caching is light:** each stored chat costs a few page-settings lookups and a flow query in the trigger, the runner reads the flow per chat, and the outbox reads the page token per send. Reason: indexed lookups; measure at volume before adding caches.
+- **The Replies search is a LIKE over one day's rows.** Reason: date-bound as asked; at full volume it is slow but never a full scan.
+- **Editor autosave is last-write-wins** between two people editing the same flow. Reason: one owner edits flows today.
+- **Customer field keys are compared exactly in memory but by collation in MySQL** ("café" and "cafe" are one row there). Reason: field names are staff-authored.
+- **An append past 16,000 characters keeps the oldest text** (ALL USER INPUT stops growing). Reason: the TEXT column limit; the owner's loop clears it on exitloop.
+- **The second fix loop (FLOW dropdown shows the linked flow) got no reviewer re-check** (the 2-loop cap). Reason: pinned by S-069.H7.
+- **Engine slice 1 was written before its tests** (the tests came right after, in the same slice). Reason: noted in the result; slices 2–4 and both fix loops were test-first.
+
+### Spec 072 (accepted review minors)
+
+- **"+ Page" marks a page Off when the publish step fails,** although the block is already written and an earlier published Default Reply may still be live (chats are then dropped as "Bot off" until the switch is turned On). Reason: the spec asks for "saved but Off" on any Botcake failure; switching On fixes it, and the row shows the error.
+- **A non-fatal token-test note (e.g. the flow list) shows in red on a row that is On.** Reason: it is the same text the notice showed before; cosmetic.
+- **The path where `turnOn` throws during "+ Page" has no test.** Reason: same fixed message as the token test's catch; `BotcakeClient` returns errors as arrays, so a throw is a bug path only.
+- **Two "+ Page" requests at once could each create a key.** Reason: CEO-only, the button is disabled while sending, and the On switch has the same race today; the next On fixes it.
+- **The chat's `ad_id` on a `source=api` row can be replaced by the customer sync** (`BotcakeCustomerSync::store` rewrites `ad_id` from the API, to null when the API has none). Reason: outside this change; whether a chat's `ad_id` should win over the sync is an owner decision.
+
+## 074: chatbot inbox (2026-10-19)
+
+- **Run the two new migrations on deploy** (`2026_10_24_100000_add_inbox_indexes`, `2026_10_24_100100_create_chatbot_events_and_reply_user`). The `(page_id, psid, id)` index on `botcake_chats` (about 90 days of rows) is a long ALTER on MySQL; run it at a quiet hour. Until `chatbot_replies.user_id` exists, a manual send reaches the customer and then fails to log with a 500. Reason: migrations run by hand on deploy.
+- **The list regroups the whole window every 5 seconds** (two GROUP BY psid queries, bounded by page, window and LIMIT). With 30d on a busy page that reads 30 days of rows per refresh. Reason: the brief asks the list to refresh every 5 s; the queries use the (page_id, received_at) and (page_id, sent_at) indexes. Measure on production before caching the list or grouping on MAX(id) only.
+- **The Human/Bot tabs filter after the 500-customer group limit,** and the chat and reply groups are limited separately. A paused customer outside the 500 most recent is not under Human, and a customer ranked high in chats but past 500 in replies shows a wrong dot. Reason: only for pages with more than 500 active customers in the window; 24h narrows it.
+- **Manual sends share the page's Botcake rate key with chatblast and the bot.** Reason: the real limit is per token; 30 sends a minute per user bounds it.
+- **A double submit of Send** (two quick Enters) can send twice. Reason: the button is disabled while sending; the server has no idempotency key.
+- **Manual sends ignore the emergency stop** (CHATBOT_REPLIES_ENABLED=false). Reason: a person chose to send; the switch stops the bot.
+- **Events in the same second sort chat, then event, then reply,** so a run's last events can show just above the reply they came with. Reason: timestamps are whole seconds; each event now keeps its own time, so only same-second items tie.
+## 075: flow draft, Undo/Redo, Save and Publish (2026-10-19)
+
+- **Deploy order:** run the migration (`2026_10_24_100000_add_draft_to_chatbot_flows.php`) together with the code. Until it runs, the editor's save, Publish and History return 500 (unknown column `draft_version`, missing `chatbot_flow_versions`); live runs are unaffected because they read only `graph`. There is no `Schema::hasTable` guard on the new table. Reason: the editor needs the new columns anyway, so a guard would only hide a missed migration.
+- **Overwrite vs. Publish at the same moment:** an Overwrite skips the version check and compares with the published graph read just before its update. If someone publishes in those milliseconds, the overwritten draft may be judged against the old published graph. Reason: it needs a deliberate Overwrite click in a window of milliseconds, and the worst case is a wrong status chip, not lost data.
+- **"Duplicate step" copies the step as last applied,** not unsaved edits still open in its form (those are dropped with the form). Reason: same as Cancel; cosmetic.
+- **A duplicated flow is "Never published" but carries the source's published graph,** so if a page is linked to the copy before its first Publish, customers get that graph. Reason: this is what the spec asks ("Duplicate copies the published graph and the draft") and the story's choice; whether the copy should count as published is a question for the owner.
+- **Untested small paths:** Restore of a stored version that no longer passes `FlowGraph::clean` (422), and the publish note trimmed to 200 characters or sent as an array. Reason: trusted stored data and a defensive cut; each is one line.
+- **Supersedes the 069 entry "Editor autosave is last-write-wins":** saves now carry `draft_version` and a stale one gets 409 with Reload / Overwrite.
+- **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only, no real key or token.
+
+## 076: wait for reply can skip after a set time (2026-10-19)
+
+- **Deploy:** run `2026_10_25_100000_create_chatbot_waits_table.php` with the code, and make sure `schedule:run` (cron) and the `chatbot` queue worker run. Without the table, waits work as before, with no timer. Without the scheduler, nothing skips. If both `vps` and `vps2` run the scheduler, each queues the same rows, which is harmless: the one-row claim lets only one job act.
+- **An AI step on the skipped branch sees the customer's last message twice:** once as `{{last_input}}` and once in its history, because the skipped run has no chat id. Reason: rare (AI right after a skip), and the extra line is the same text.
+- **The tick reads due rows by `due_at` and skips the ones queued in the last 5 minutes in the same scan.** With a very large queue backlog, it reads past those rows. Reason: bounded by the backlog, and the `chatbot` queue drains it; measure before adding an index on `dispatched_at`.
+- **A wait whose customer has no `botcake_chats` row is dropped as "page is off or has no flow".** Reason: practically unreachable (a wait is always set by a chat), so the wording does not matter.
+- **The editor's amount field caps at 23 hours only as a hint.** Typing 24 hours makes every autosave fail with "Skip after can be at most 23 hours." until it is fixed. Reason: the message is shown, and the server refuses it.
+- **A "Clear all fields" on the skipped branch removes the deadline with `__wait`.** Reason: the intended sync; noted for whoever builds on it.
+- **While the chatbot worker is down, the tick queues each due wait again every 5 minutes.** The extra jobs end at once (no row, or the claim fails). Reason: a little queue churn during an outage only.
+- **The scratch app of the browser check left gitignored session and cache files** in this worktree's `storage/framework` and `%TEMP%\likha075`. Reason: scratch data only.
+
+## 070: chatbot sequences (2026-10-19)
+
+- **Run the migration on deploy** (`2026_10_26_100000_create_chatbot_sequence_tables`) and keep the scheduler and the `chatbot` queue worker running. Until the tables exist, the tick does nothing and exit on reply is skipped. Reason: migrations run by hand.
+- **The tick walks overdue rows of paused (inactive) sequences** before reaching due rows of active ones (no row lock any more, so no blocking). If the owner pauses a sequence with many overdue subscribers, each tick re-reads them. Reason: bounded by the 500 batch and the (status, next_send_at) index; measure before adding a sequence-active column to the index.
+- **`resumePaused` reads up to 500 paused pages per tick** with no progress marker. Reason: far above today's page count.
+- **While the bot is paused for a customer, a "held" event is written every hour** per subscription. Reason: it makes the hold visible in executed actions; events are pruned after 30 days.
+- **Replies sent while a page is Off are not stored** (the intake drops chats for an Off page), so they don't trigger exit on reply, and the 24-hour check later reads an older chat. Reason: the intake's Off rule predates sequences; after the page is On, the 24-hour guard still applies.
+- **No test for exit on reply failing** (a database error during the intake). Reason: the call is wrapped in try/catch twice and reports; a forced DB error in the intake test is costly to set up.
+- **A step flow's "Clear all fields" also clears the customer's wait in the main flow.** Reason: step flows act on the same customer fields by design (the brief allows set-field steps); only waits are protected.
+- **A reordered or edited sequence moves in-flight customers by position:** a customer at step 3 runs whatever step is third after the edit. Reason: steps are replaced on save (one JSON save); keeping step ids would need a stable-id editor.
+- **With replies switched off, a step still counts as ran** ("Last sent" is set, and the pointer advances) although Botcake was not called. Reason: the emergency stop logs every send as skipped; a run is still a run.
+- **The inbox sequence endpoint accepts a 19-digit PSID above PHP's integer limit**, which saturates when cast. Reason: only staff send it, and real PSIDs are 16–17 digits.
+- **Unsubscribe and re-subscribe in the inbox while a step is running** can move the restarted subscription past step 1. Reason: the window is the length of one step run; staff can unsubscribe and subscribe again.
+## 077: AI history up to 100 (2026-10-19)
+
+- **100 messages can be a large prompt.** Each sent reply is up to 2,000 characters, and a customer chat has no cap of its own, so 100 messages can reach roughly 50,000 tokens per AI call, paid on every call, up to 10 calls per run. Reason: the owner's choice. `ChatbotAi` sends the messages as they are, with no character budget. Suggestion for the owner: a total character cap on the history if OpenAI costs rise.
+- **Manual replies from the inbox (`kind = manual`) are not in the AI history,** only the bot's sent replies (`kind = send`). Reason: the brief says to keep the history as it is. Including the staff's own replies is a question for the owner.
+
+## 082: chatblast setup check by fixed names (2026-10-20)
+
+- **First run on live:** run `php artisan botcake:setup-check --all --dry-run` first (it writes nothing), then a real Check all. About 40 pages switch to the new flow and field, and the 16 that are Ready today stay Ready through the check. The ~20 pages without the flow get an X and stop sending until the staff add the flow in Botcake. Reason: the brief's intent; listed here so the switch is planned.
+- **A Setup-box save during a running Check all can wait for the nightly run** when the save reads "running" just as the job finishes, or when a worker was killed while "running" (under 60 minutes): the "run again" flag is then never picked up. Reason: a narrow race; the 21:30 run covers it.
+- **The chatblast build's no_config rows say "needs a test send"** even when the page's real blocker is an X. The sender, where a send is actually skipped, writes the exact reason. Reason: the build only marks rows not ready; changing its marker is outside this spec.
+- **The /chatbot "+ Page" (ChatbotController) runs the same token test and setup check** after adding a page, since it calls `BotcakePageSetup::check`. Reason: unchanged call; the check is the chatblast setup of the same page.
+- **On a phone, the "+ Column" button of /chatblast/page-settings is clipped at the right edge** (it was already like that). Reason: outside this spec.
+- **The browser check's scratch app ran a real Check all once** (the queue was `sync`): five token tests to botcake.io with fake tokens, which all ended as errors and wrote nothing. Reason: my mistake; the scratch queue is now `null`, and the check no longer presses Save or Check all.
+
+## 087: async chatbot AI (2026-10-20)
+
+- **A 429 that lasts past the timeout still ends on the failed port.** The request is never lost or failed early, but `deadline_at` (`services.openai.timeout`, 60 s) keeps running during the backoff. Reason: a customer shouldn't wait longer than the timeout for an answer; "drops nothing" here means no request is lost.
+- **The misrouted count proves the ticket → resume → send leg at volume, not the HTTP pairing.** The fake AI answers from a timer keyed by request id, with no HTTP. Reason: the HTTP pairing is proven by S-087.1 (out-of-order answers through the real Guzzle path); the routing to a customer happens in the resume, which the count does cover.
+- **Missing tests (minor):** a wait-skip run (no chat) that reaches an AI node; `skip()` and a sequence step holding while `__ai` is pending; the pool's graceful stop draining its in-flight requests. Reason: each is a small branch over the same claim and lock code that the 12 tests cover; costly to set up for little extra proof.
+- **Answered rows still waiting in a busy `chatbot` queue get a duplicate resume job every 30 s.** Reason: harmless (the resume claims the row once); it adds queue rows only under overload.
+- **Two servers each running a pool with separate caches** would both send the same requests (twice the OpenAI cost, never two replies: the claim is in the shared database). Reason: production uses one queue server and a database cache.
+- **`--stats` "Flow runs" counts the part of a run after the AI answer as a run** (each AI chat counts twice). Reason: the resumed part writes its own `run_started`; the other lines are unaffected.
+- **The fake Botcake records every send in the cache** (two extra cache writes per send, test pages only). Reason: needed for the misroute count; keep it in mind when reading the numbers.
+- **Next limit after this spec: Botcake sends in the workers.** Each send holds a worker for its latency plus the 2-per-second-per-page throttle sleep. Suggestion for a later spec: send in the pool the same way, or more chatbot workers.
+
+## 088: Redis and Horizon (2026-10-20)
+
+- **One extra query per chatblast dispatch** (the message's kind, to pick the queue): `resume()` over N queued rows makes N small primary-key reads. Reason: cheap next to the three Botcake calls each send makes.
+- **The dashboard has no "Queues" link.** The main nav is database rows; a link needs a migration and a decision on placement. Reason: the brief allows none; `/horizon` is typed directly by the CEO.
+- **Cutover windows (all trusted, operator-run, nothing lost for good)**, covered as steps in the result:
+  - long-running processes keep the old config until restarted (`chatbot:ai-pool`, workers);
+  - a release on the old driver after the drain check;
+  - the chatblast build lock taken on the database store and released on Redis during the `CACHE_STORE` switch.
+- **S-088.4 on the array store tests the store more than the code.** Reason: the brief allows the array store; the Redis data set ran green against a real Redis in WSL, and the load check ran on Redis end to end.
+- **phpredis** (the PHP extension) is faster than predis; switch with `REDIS_CLIENT=phpredis` after installing `php8.4-redis`. Reason: the brief chose predis to avoid an extension install now.
+
+## 089: async Botcake sends (2026-10-20)
+
+- **A chatbot send now waits up to 10 minutes in the pool** (was the worker's queue, with no limit but the 30-minute stale-chat rule). Past 10 minutes it takes the failed path. Reason: under a backlog the exact 2/s per page makes sends wait; 10 minutes keeps a late reply better than none. A product decision for the owner to confirm.
+- **Pages that share one token share one lane** (the per-page rate is per token, as Botcake counts it). The full-lane exclusion in the claim query lists only the page names whose tickets the pool holds, so a second page on the same token with its own large backlog can still fill the candidate window. Reason: staff set the tokens, and sharing one is rare.
+- **A token change during a backlog** makes a second lane for the same page for a moment, so up to 2 × the rate for a few seconds. Reason: rare; the old lane drains in seconds.
+- **Blocking senders outside the pool** (sequence steps, the setup check, the chat guard's verify, Test) still use the old non-atomic throttle. They honour the pool's shared rate key, so they wait for the pool's last send, but two of them can still race each other. Reason: the brief scopes exactness to the pool path.
+- **The Botcake base URL, headers, 15 s timeout and 10 s Retry-After cap** are written in both `BotcakeClient::shared()` and `BotcakeSendPool`. Reason: two places, and the retry rule itself is already shared (`BotcakeClient::retryWait`).
+- **No test for the mock answering on a timer inside the pool.** Reason: the load check runs every send through it, with misrouted = 0.
+- **`BotcakeSendQueue::enabled()` runs `Schema::hasTable` on every send.** Reason: one cheap query; a static cache leaked between tests in 087.
+
+## 092: paste blocks of botfield values on /chatbot/pages (2026-10-20)
+
+- **Drag to select a rectangle in the grid is not built** (click, Shift+click and Ctrl/Cmd+A are). Reason: the grid paste was secondary in the spec, and a plain click already opens the row; drag needs care not to fight text selection and the sticky columns. Shift+click covers the same need.
+- **Undo can be refused whole** when a previous value no longer passes the rules (a legacy non-link in an image column, or a value over MAX_BYTES saved before the limit). Reason: every value in the table came through the same checks, so this needs data written outside the page; the 422 names the cell, and nothing is half-undone.
+- **No test for a failure inside the transaction rolling back** (only the checks before it are tested). Reason: every check runs before the transaction; a failure inside it would be a database error, and Laravel's `DB::transaction` rolls back on any exception.
+- **A one-cell paste whose text is a field name ("price", "flow") is read as a header line** and answered "Only a header line was pasted". Reason: it is the spec's own rule (a first line that names fields is a header); the message says what happened.
+- **The flow editor canvas (`/chatbot/flows/{id}`) still uses `height: calc(100vh - 17rem)`.** Reason: it has no scrollbar (the canvas pans and zooms inside), and another spec is changing that page now; the same `.cb-page` fix can follow there.
+- **Suggestion for the owner: map pasted rows by the PAGE column.** An LDT sheet copied with its PAGE column could fill each page by name instead of by order. Reason: not in this spec; today PAGE is listed as ignored.
+
+## 090: Google Sheet step picker (2026-10-20)
+
+- **A sheet shared as Viewer reads fine in the editor,** so the name, tabs and headers show, but every run then fails at append with "Google refused the row". Reason: the brief covers 403/404 only; telling Viewer from Editor needs a Drive permission call or a standing hint. A product decision for the owner.
+- **Google also answers 403 for "API not enabled" or a missing scope,** and those show the share message too. Reason: misleading but leaks nothing, and both are server setup that is already done.
+- **No test runs the real Google request** (the `spreadsheets.get` field mask, the `'<tab>'!1:1` range with an apostrophe in the tab name, `getUpdates()->getUpdatedRange()`): `fetchInfo`, `fetchHeaders` and `append` are faked. Reason: it needs a mocked Google HTTP handler for the client library; the three calls are one line each and follow the existing `append`.
+- **No test for the rate limit** on `GET /chatbot/sheet` (30 a minute) or for preview inputs like `columns` sent as a string or over 50 items. Reason: the limit is the route's standard `throttle` middleware, and the columns go through `FlowGraph::cleanConfig`, which the hardening tests already cover.
+- **The preview shows botfield values** (the page's chatbot settings) when a template names them. Reason: the Test tab builds the same variables for the same users, so this is no new exposure.
+- **"Open row" is in the reply's detail on `/chatbot/replies`, not in the list rows.** Reason: a list row opens the detail with one click; the list stays one line per reply.
+
+## 096: page Edit modal on /chatbot/pages (2026-10-20)
+
+- **Editing the paste box again re-applies the paste over a field fixed by hand after the paste.** Reason: each change to the paste box replaces the previous paste as a whole, so a new "Starting at field" or a fixed typo never stacks two pastes; the field turns amber with "Was: …", so it is visible before Save.
+- **The modal works on the row as it was when it opened.** If another user saves the same page meanwhile, "Was: …" shows the older value. Reason: Save only sends fields changed in the modal, last write wins as everywhere on this page, and history rows keep every value.
+- **The image preview loads whatever http(s) link is typed or pasted** (with `referrerpolicy=no-referrer`). Reason: the grid already does the same for saved links; only staff with /chatblast access type them.
+- **The modal's behaviour (amber, flagged, re-paste, confirm on close) is checked in the browser only,** not by an automated test. Reason: the project has no JS test runner for page scripts; the parsing and mapping it relies on are tested in node (`ChatbotPasteScriptTest`).
+
+## 094: multi-line Set field and Clear AI memory (2026-10-20)
+
+- **A reply queued before "Clear AI memory" and sent after it stays forgotten.** The marker holds the highest `chatbot_replies` id at the clear, and a queued reply's row is older. Reason: the brief asks for a chat and reply marker, not a time window; the gap is one in-flight send, and that send was answering the conversation being forgotten.
+- **The editor test (S-094.7) only checks the rendered source.** The textarea growth and the 3-line clamp were checked once in headless Chrome, not on every run. Reason: the project has no JS test runner, and adding one is a new dependency.
+- **"Also clear these fields" is a list of text boxes with the field suggestions, not a checkbox multi-select.** Reason: the editor knows only the fields the flow already uses, so a checkbox list would hide fields that aren't used yet. This matches the Set field step's field input.
+
+## 097: grouped variable list in the flow editor (2026-10-21)
+
+- **The saved customer keys are read on every editor load** (`DISTINCT key` over the flow's pages in `chatbot_customer_values`; the unique index starts with `page_id, psid`, so the database scans those pages' rows). Reason: the read runs only when a step form's data loads (once per editor open), staff-only; at today's size it is fast. If the table grows to millions of rows, cache the list for a few minutes or add a `(page_id, key)` index.
+- **At most 320 saved keys are listed, A–Z, so keys late in the alphabet drop off past that cap** with no note. Reason: a flow's own fields (save to, Set field) are always listed; the cap only trims fields found on customers, and 320 is several times today's count.
+- **A name could get the same "Also …" line twice** if two botfield labels are the same after `ChatbotVars::norm` (e.g. "Prompt 1" and "PROMPT_1") and also a customer field. Reason: the column names are owner-made and unique in practice; the chip and the insert still work.
+- **The Sequences fold matches the labels "Seq N" and "Seq Img N"** in the editor script, not the column definitions. Reason: these labels are the fixed defaults in `ChatbotFields::defaults()`; a renamed column would only show unfolded.
+- **`$groups = $this->variableGroups($flow)` is assigned inside the response array in `graph()`.** Reason: it keeps the change to one line in a legacy method; style only.
+
+## 099: pages check and history on /chatbot/pages (2026-10-21)
+
+- **A field cleared to empty (the cell, or a paste with blanks as empty) does not show in History or the Changes log as its own entry.** Clearing deactivates the row without writing a new one, and the deactivation records no user. Reason: `PageSettings` was not to be changed in this work; the old value stays as an "Old" version. Suggestion for the owner: let `deactivate` record who cleared it, then list clears as "value → (empty)".
+- **One image link can still take up to about 40 s** (4 hops × HEAD and ranged GET × 5 s) after the 20 s budget for the run has started. Reason: the spec fixes the 5 s timeout and 3 redirects; the budget stops new links, and a page with that many slow hosts is unlikely. The rest show as "not checked yet".
+- **The Changes log pairs a row with the previous row of the same exact page name**, and finds it with one query per entry (50 per page). Reason: `PageSettings::set` always writes the first recorded spelling of a page, so names match; 50 small queries are fine at today's table size.
+- **The customer field names known to the Check include a distinct read of `chatbot_customer_values` keys** (cached 10 minutes, at most 5,000). Reason: it keeps fields set by the inbox or older flows from showing as unknown; at a much larger table it may need its own index or list.
+- **The Check fingerprint ignores "+ Column" additions and the customer-keys cache.** Reason: both change rarely, and the result expires after 10 minutes anyway.
+- **Preview lists the run variables by hand** instead of reusing `ChatbotFlowController::RUN_VARS` for the keys. Reason: the values differ (sample customer), and the list has eight fixed names.
+- **An IPv6-only image host** is pinned with brackets in `CURLOPT_RESOLVE` but was not tried against a real IPv6 host. Reason: the server has no known IPv6 egress, and the check then fails closed ("no answer").
+- **The screen parts (Check column, Preview, History, Restore, Changes) are checked in headless Chrome only,** not by an automated test. Reason: the project has no JS test runner for page scripts.
+
+## 101: flow editor canvas (2026-10-21)
+
+- **The selected wire is kept as an index into `graph.edges`, which shifts when wires are removed** (a new wire from a port that already had one, a form that drops a port, a deleted step). The selection, the "×" and the Delete key can then point at another wire. Reason: this predates spec 101 (the "×" only makes it easier to see), and Undo recovers it. Fix later by storing the wire itself (from, port) instead of its index, or by clearing the selection whenever edges change.
+- **The browser check script is not in the repo** (it sits outside, with a temporary sqlite database, as in specs 092–097). Reason: the repo has no browser-test runner and adding one is a new dependency. The result lists every check and its output so it can be rebuilt.
+- **Real devices are not checked:** iOS Safari pinch and gesture events, and a mouse drag that starts on the minimap and leaves it. Reason: the headless check emulates touch through the DevTools protocol only. Try it once on a phone after deploy.
+
+## 098: load fixes (2026-10-21)
+
+- **The send pool drops a booking it reaches more than 20 ms late and books again** (`BotcakeSendPool::LATE`). If a pool tick regularly took longer than that, a busy page's lane could keep rebooking behind blocking senders. Reason: the pool loop ticks every 5 ms while it holds sends, and the local load check (20 pages, chats + 8 sequence processes + 4 Inbox processes) drained every chat with no stall. Suggestion: before dropping, check whether the cached slot still equals the booking; if nobody booked after it, send late and move the slot (`sentAt`).
+- **No test for the stale-booking drop or the rebook after a 429 pause.** Reason: the reviewer traced both as correct; keep the suite small.
+- **`ChatbotReply::hasRaw()` is checked once per process.** A worker or the send pool that started before the `raw` migration keeps not storing raw bodies until it restarts. Reason: deploy order is trusted; the result's deploy steps run the migration before `horizon:terminate` and the send-pool restart.
+- **Other processes may read a changed setting from their memo for up to 2 s** (`PageSettings::MEMO_TTL`), and a cache miss right after a write lets concurrent requests each run the one page query. Reason: bounded and cheap (one query per page per miss).
+- **A raw SQL or query-builder write to `page_settings` skips the cache forget** (only the model events and the stress-page cleanup forget). Reason: none exists in `app/` today; a future data migration should call `PageSettings::forget()` or wait 10 minutes.
+- **The pool spends its slot when a ticket turns out not to send** (`issue()` returns null). Reason: rare (mismatch, pause, lost ticket) and costs one interval on one page.
+- **`ChatbotFields` still reads the distinct botfield keys from `page_settings` on each chat** (the one query left per chat). Reason: not a per-page `get()`; out of this spec. Suggestion: cache it with the same forget.
+- **The Inbox thread and the Replies screen don't show the raw body yet**; `/chatbot/replies/{id}` returns it as `raw`. Reason: no UI change in this task; showing it is a small front-end follow-up.
+
+## 100: chatbot results (2026-10-21)
+
+- **The J&T ranking is a second copy of Chatblast's** (`ChatbotResults::deliveryOf`, `PROGRESS`), now matching it, blank status included. Reason: Chatblast's `latest()`/`rank()` are private, and making them public touches a working module this task doesn't need to change; both copies are small. Move them to one shared place on the next change to either.
+- **`ChatbotTags::RUN_VARS` repeats the run variable names of `FlowRun::vars()`.** A new run variable would be listed as a customer field in the tags until it is added there too. Reason: keeping `FlowRun` untouched beyond two properties keeps the merge with 098 small; the effect is a label in the JSON, not a number.
+- **`/chatbot/results.json` without a page runs over all pages for up to 92 days.** Reason: only staff with /chatblast access reach it, it is throttled (60 a minute) and cached 5 minutes per filter set, and every query is bounded by date on an index. Requiring a page would break Mira's all-pages read.
+- **Compare by botfield takes any two page_settings ids**, even two different botfields. Reason: the screen only offers versions seen in By message; a hand-made URL just compares two unrelated values, labelled as such.
+- **The `chatbot_events (type, created_at)` index is not guarded against running the migration twice.** Reason: Laravel records the migration once; the columns and the table are guarded.
+- **The AI step's sent answer is tagged (flow, version, no botfields) but has no test of its own.** Reason: it uses the same `forSend()` and record path as the Send node, which S-100.1 covers on both the waiting and the pool path.
+- **"Chats" in By ad counts the customers the bot sent to with that ad, not incoming chats.** Reason: the ad is stored on the send; counting incoming chats per ad would need the ad on `botcake_chats`, a new pipeline the brief rules out.
+
+## 102: queue pickup (2026-10-21)
+
+- **Nothing checks that `REDIS_READ_WRITE_TIMEOUT` stays above `REDIS_QUEUE_BLOCK_FOR`** when both are set by hand. Reason: both are owner-set env values with safe defaults (60 against 5), and the comments beside them say so; a lower timeout only cuts an idle blocked pop, which the worker retries.
+- **`CHATBOT_POOL_IDLE_MS=0` turns an idle pool into a busy loop.** Reason: trusted env only, the default is 200, and 0 is a deliberate choice someone would make while watching it.
+- **`block_for` blocks on the first queue of a worker**, so a supervisor with several queues per process (balance `false` or `simple`) would delay its later queues up to `block_for`. Reason: chatbot and chatblast both use balance `auto` (one queue per process) and S-102.2 pins that; whoever changes the balance must lower `REDIS_QUEUE_BLOCK_FOR` or set it to 0.
+- **The pools still poll their tables (200 ms idle) rather than waking on a Redis signal.** Reason: the idle tick costs about half a percent of one core per pool and adds 100 ms on average; a wake signal is more moving parts for that 100 ms.
+
+## 103: ad account history (2026-10-21)
+
+- **One active row per ad_account_id is enforced in code only** (transaction + `lockForUpdate`), not by a unique index. Under MySQL's default REPEATABLE READ a double submit of a brand-new ID should deadlock one request (a 500, as the old unique did); under READ COMMITTED or on pgsql two active rows for one new ID are possible, which would double that account's payment rows. Reason: a few staff edit this page by hand; a generated-column unique needs three dialects. Check production's isolation level, or add a generated-column unique if it ever happens.
+- **Stale edit form:** if the edited account was deleted or renamed since the form loaded, saving with an ID that is already active updates that other account (the old `updateOrCreate` did the same). Reason: not a regression; needs two people editing the same account at once.
+- **ID change differing only in case** (MySQL case-insensitive collation) is refused as a duplicate. Reason: Facebook ad account IDs are numeric.
+- **pgsql puts NULL `created_at` first** in the change log (`orderByDesc`). Reason: production is MySQL, where NULLs sort last; old rows have timestamps.
+- **Log pairing by time and user** can still pick the wrong old row when one user changes an ID of one account and renames another in the same second. Reason: same-ID renames are now paired correctly (S-103.7); an ID change plus another change in one second by one person through the form is not realistic.
+- **No tests for:** re-adding a deleted ID, changing an ID onto an inactive (deleted) ID, deleting twice or an unknown ID. Reason: each is the plain path of `write()`/`destroy()` (no active row → added; update only touches active rows), already covered by S-103.1 and S-103.5.
+- **`write()` returns added/changed/unchanged but store() no longer uses it.** Reason: harmless; kept for the reader of the method.
+
+## 104: item settings log gaps (2026-10-21)
+
+- **`/item/cogs` routes (`index`, `grid`, `update`, `delete`, `clean-redundant`) have no `auth` middleware** (`routes/web.php:686-690`). Anyone who can load a page can post a COGS edit with a CSRF token. Since spec 104 such an edit is logged, with "— anonymous —" as the user. Reason: auth and permissions are out of this spec and the owner's call. Suggestion: put the routes in the `web, auth, allowed_ip` group with a role check.
+- **Deleting promo on `/owner/private` while RTS is still set sets `promo = NULL` on a NOT NULL column** (`deleteItemSetting`). On MySQL strict mode that is a 500, and nothing changes. Reason: this was already true before spec 104, and the spec forbids changing how values are saved. Now the log row rolls back with it, so no false trace. Suggestion: write '' instead of NULL, as `saveItemSetting` does.
+- **The `cogs` → `cogs_ceo` auto-mirror (`mirrorMissingCogsToCogsCeo`) writes no log row.** Reason: it only copies missing (item, date) pairs after a logged `/owner/private` COGS save, and never overwrites a value.
+- **`DailyPrimaryItemService::backfillSettingsPrices` sets `page_item_settings.mode_cod_int` with no log row.** Reason: it fills the price tag only where it is NULL, and touches no RTS, promo or COGS value.
+- **`rtsSetByMap` ignores delete rows.** If RTS is deleted and later set back to the same value by someone else, the "set by" name stays with the first person. Reason: the same was already true for an RTS clear (rts = 0) through `saveItemSetting`; display only.
+- **Small inconsistencies:**
+  - `/item/cogs` delete of a cell whose value is NULL logs a row that shows "—". `/owner/private` skips a NULL old value.
+  - An `/item/cogs` edit to the same price writes a no-op row ("Changed only" hides it).
+  - A `/owner/private` delete without a price tag writes one row per matched price row.
+
+  Reason: cosmetic; each row is true.
+- **No tests for:**
+  - `clean-redundant` preview (writes nothing)
+  - the transaction rollback when the log insert fails
+  - a CEO-COGS-only delete
+  - a Marketing - OIC viewer of a delete row
+
+  Reason: each is the plain path of existing code (preview returns before the delete; `DB::transaction`; the existing `isCeoView` gate) and none is on an untrusted path with a realistic failure.

@@ -44,6 +44,8 @@ return [
 
     'openai' => [
     'key'   => env('OPENAI_API_KEY'),
+    // Chatbot AI step (chatbot:ai-pool): ilang segundo bago ituring na walang sagot (failed port).
+    'timeout' => (int) env('OPENAI_TIMEOUT', 60),
     'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
     // /astra chat: default model (verified accessible sa account) + optional allowed-list
     // override — ASTRA_MODELS="gpt-6-astra,gpt-5.5,o3" (comma-separated ids).
@@ -102,7 +104,36 @@ return [
         // /api/botcake/chat (JSON API block ng Botcake): ang shared key (header X-Chat-Key o param key); walang laman = 401
         // sa lahat. chat_rate: ilang request kada minuto kada IP (iilang IP ng Botcake para sa ~170 page).
         'chat_key'  => env('BOTCAKE_CHAT_KEY'),
+        // Ang lumang shared key ay tinatanggap lang habang true (habang wala pang sariling botcake.chat.key ang lahat ng page).
+        'chat_shared_key_ok' => (bool) env('BOTCAKE_CHAT_SHARED_KEY_OK', true),
+        // Mga IP/CIDR ng Botcake (kuwit ang hati). log = tinatanggap pero itinatala at binibilang ang iba; enforce = 403.
+        'chat_ips'     => array_values(array_filter(array_map('trim', explode(',', (string) env('BOTCAKE_CHAT_IPS', '203.171.22.6'))))),
+        'chat_ip_mode' => env('BOTCAKE_CHAT_IP_MODE', 'log'),
+        // Hanggang ilang bagong PSID kada minuto kada page ang sinusuri sa Botcake (token ng page, kahati ng chatblast).
+        'chat_verify_per_minute' => (int) env('BOTCAKE_CHAT_VERIFY_PER_MINUTE', 60),
         'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
+        // Ilang request kada segundo kada page (token) sa Botcake: ang pool (botcake:send-pool) ay eksakto, ang iba ay sumusunod.
+        'rate_per_page' => (float) env('BOTCAKE_RATE_PER_PAGE', 2),
+        // true = ang padala ng chatbot at chatblast ay ipinapasa sa botcake:send-pool (kapag buhay ito); false = naghihintay ang worker (ang dati).
+        'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
+        // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page).
+        'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
+    ],
+
+    // Kusang J&T track-sync kada oras (jnt:track-sync-auto). Ang toggle ng CEO sa /jnt/track-sync ang nananaig kapag ginamit.
+    'jnt' => [
+        'track_sync_auto' => (bool) env('JNT_TRACK_SYNC_AUTO', false),
+    ],
+
+    // Sariling chatbot (/chatbot): ang On/Off ng bawat page (kasama ang flow) ang nagpapasya kung sumasagot. Ito ay emergency stop
+    // lang: false = tumatakbo ang mga flow pero walang padala sa Botcake at walang sheet row (itinatala bilang skipped).
+    'chatbot' => [
+        'replies_enabled' => (bool) env('CHATBOT_REPLIES_ENABLED', true),
+        // AI step: true = hindi naghihintay ang worker (chatbot:ai-pool ang nagpapadala at nagtutuloy); false = naghihintay
+        // ang takbo sa sagot (ang dati), pang-rollback nang walang deploy.
+        'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),
+        // Ilang request sa OpenAI nang sabay sa chatbot:ai-pool (kahati ng Astra ang rate limit ng OpenAI).
+        'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 50),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

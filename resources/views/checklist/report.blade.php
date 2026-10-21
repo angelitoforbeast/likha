@@ -266,6 +266,9 @@
                       $approvalLogsUrl  = $done ? '/checklist/submission/'.$sub->id.'/approval-logs' : '';
                       $savedApproval    = $done ? $sub->latestApproval : null;
                       $approvalCount    = $done ? ($sub->approval_logs_count ?? 0) : 0;
+                      $canBypass        = $done && $canBypassChecks($sub);
+                      $overrideUrl      = $canBypass ? '/checklist/submission/'.$sub->id.'/approval-override' : '';
+                      $checkCount       = $done ? ($sub->approval_checks_count ?? $approvalCount) : 0;
                   }
                 @endphp
 
@@ -296,17 +299,40 @@
                     approvalCheckedBy: {!! $savedApproval ? \Illuminate\Support\Js::from($savedApproval->user?->name ?? 'Unknown') : 'null' !!},
                     approvalCheckedAt: {!! $savedApproval ? \Illuminate\Support\Js::from($savedApproval->created_at->format('M j, g:i A')) : 'null' !!},
                     approvalCount: {{ $approvalCount }},
+                    checkCount: {{ $checkCount }},
                     approvalError: null,
                     approvalExpanded: false,
                     showApprovalPrompt: false,
                     showApprovalHistory: false,
                     approvalHistoryLogs: [],
                     approvalHistoryLoading: false,
+                    canBypassChecks: {{ $canBypass ? 'true' : 'false' }},
+                    overrideUrl: '{{ $overrideUrl }}',
+                    overrideOpen: false,
+                    overrideVerdict: 'approved',
+                    overrideReason: '',
+                    overrideSaving: false,
                     async runAll() {
+                      // Lampas na sa limit ng check: analysis lang ang tatakbo
+                      const locked = !this.canBypassChecks && this.checkCount >= {{ $checkLimit }};
                       await Promise.all([
                         this.analyzeUrl  ? this.analyze()       : Promise.resolve(),
-                        this.approvalUrl ? this.checkApproval() : Promise.resolve(),
+                        this.approvalUrl && !locked ? this.checkApproval() : Promise.resolve(),
                       ]);
+                    },
+                    async saveOverride() {
+                      this.overrideSaving = true; this.approvalError = null;
+                      try {
+                        const res = await fetch(this.overrideUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || '' }, body: JSON.stringify({ verdict: this.overrideVerdict, reason: this.overrideReason }) });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) { this.approvalError = data.message || ('Server error (' + res.status + ').'); }
+                        else {
+                          this.approval = data.analysis; this.approvalVerdict = data.verdict; this.approvalPromptUsed = null;
+                          this.approvalCheckedBy = data.checked_by; this.approvalCheckedAt = data.checked_at;
+                          this.approvalCount += 1; this.approvalHistoryLogs = []; this.overrideOpen = false; this.overrideReason = '';
+                        }
+                      } catch(e) { this.approvalError = 'Request failed: ' + e.message; }
+                      this.overrideSaving = false;
                     },
                     async analyze() {
                       this.analyzing    = true;
@@ -364,7 +390,8 @@
                           }
                         });
                         if (!res.ok) {
-                          this.approvalError = 'Server error (' + res.status + '). Please try again.';
+                          const err = res.status === 403 ? await res.json().catch(() => ({})) : {};
+                          this.approvalError = err.message || ('Server error (' + res.status + '). Please try again.');
                           this.approving = false; return;
                         }
                         const data = await res.json();
@@ -374,7 +401,7 @@
                         this.approvalCheckedBy  = data.checked_by  ?? null;
                         this.approvalCheckedAt  = data.checked_at  ?? null;
                         this.approvalError      = data.error       ?? null;
-                        this.approvalCount     += 1;
+                        this.approvalCount     += 1; this.checkCount += 1;
                         this.approvalHistoryLogs = [];
                       } catch(e) {
                         this.approvalError = 'Request failed: ' + e.message;
@@ -632,6 +659,7 @@
                         <div x-show="!approving && approvalError" class="flex items-center gap-1 text-xs text-red-500">
                           <span>⚠</span><span x-text="approvalError"></span>
                         </div>
+                        @include('checklist.partials.approval-limit', ['lockedNow' => !$canBypass && $checkCount >= $checkLimit])
                         {{-- Empty --}}
                         <span x-show="!approving && !approval && !approvalError" class="text-gray-200 text-xs">—</span>
                       @endif
@@ -645,7 +673,7 @@
                                 :class="(analyzing || approving) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'"
                                 class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white transition font-medium whitespace-nowrap">
                           <span x-show="!analyzing && !approving"
-                                x-text="(analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze'"></span>
+                                x-text="(!canBypassChecks && checkCount >= {{ $checkLimit }}) ? '↻ Analysis lang' : ((analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze')"></span>
                           <span x-show="analyzing || approving" class="flex items-center gap-1">
                             <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
                               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
@@ -706,6 +734,9 @@
                     $userApprovalLogsUrl = '/checklist/submission/'.$userSub->id.'/approval-logs';
                     $userSavedApproval   = $userSub->latestApproval;
                     $userApprovalCount   = $userSub->approval_logs_count ?? 0;
+                    $canBypass           = $canBypassChecks($userSub);
+                    $overrideUrl         = $canBypass ? '/checklist/submission/'.$userSub->id.'/approval-override' : '';
+                    $checkCount          = $userSub->approval_checks_count ?? $userApprovalCount;
                     $userEditLogs        = $userSub->logs->where('action', 'updated');
                     $userLastEdit        = $userEditLogs->first();
                     $userEditCount       = $userEditLogs->count();
@@ -737,17 +768,40 @@
                       approvalCheckedBy: {!! $userSavedApproval ? \Illuminate\Support\Js::from($userSavedApproval->user?->name ?? 'Unknown') : 'null' !!},
                       approvalCheckedAt: {!! $userSavedApproval ? \Illuminate\Support\Js::from($userSavedApproval->created_at->format('M j, g:i A')) : 'null' !!},
                       approvalCount: {{ $userApprovalCount }},
+                      checkCount: {{ $checkCount }},
                       approvalError: null,
                       approvalExpanded: false,
                       showApprovalPrompt: false,
                       showApprovalHistory: false,
                       approvalHistoryLogs: [],
                       approvalHistoryLoading: false,
+                      canBypassChecks: {{ $canBypass ? 'true' : 'false' }},
+                      overrideUrl: '{{ $overrideUrl }}',
+                      overrideOpen: false,
+                      overrideVerdict: 'approved',
+                      overrideReason: '',
+                      overrideSaving: false,
                       async runAll() {
+                        // Lampas na sa limit ng check: analysis lang ang tatakbo
+                        const locked = !this.canBypassChecks && this.checkCount >= {{ $checkLimit }};
                         await Promise.all([
                           this.analyzeUrl  ? this.analyze()       : Promise.resolve(),
-                          this.approvalUrl ? this.checkApproval() : Promise.resolve(),
+                          this.approvalUrl && !locked ? this.checkApproval() : Promise.resolve(),
                         ]);
+                      },
+                      async saveOverride() {
+                        this.overrideSaving = true; this.approvalError = null;
+                        try {
+                          const res = await fetch(this.overrideUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || '' }, body: JSON.stringify({ verdict: this.overrideVerdict, reason: this.overrideReason }) });
+                          const data = await res.json().catch(() => ({}));
+                          if (!res.ok) { this.approvalError = data.message || ('Server error (' + res.status + ').'); }
+                          else {
+                            this.approval = data.analysis; this.approvalVerdict = data.verdict; this.approvalPromptUsed = null;
+                            this.approvalCheckedBy = data.checked_by; this.approvalCheckedAt = data.checked_at;
+                            this.approvalCount += 1; this.approvalHistoryLogs = []; this.overrideOpen = false; this.overrideReason = '';
+                          }
+                        } catch(e) { this.approvalError = 'Request failed: ' + e.message; }
+                        this.overrideSaving = false;
                       },
                       async analyze() {
                         this.analyzing    = true; this.analysis = null; this.analysisError = null; this.showHistory = false;
@@ -773,12 +827,12 @@
                         this.approving = true; this.approval = null; this.approvalError = null; this.showApprovalHistory = false;
                         try {
                           const res = await fetch(this.approvalUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || '' } });
-                          if (!res.ok) { this.approvalError = 'Server error (' + res.status + '). Please try again.'; this.approving = false; return; }
+                          if (!res.ok) { const err = res.status === 403 ? await res.json().catch(() => ({})) : {}; this.approvalError = err.message || ('Server error (' + res.status + '). Please try again.'); this.approving = false; return; }
                           const data = await res.json();
                           this.approval = data.analysis ?? null; this.approvalVerdict = data.verdict ?? null;
                           this.approvalPromptUsed = data.prompt_used ?? null; this.approvalCheckedBy = data.checked_by ?? null;
                           this.approvalCheckedAt = data.checked_at ?? null; this.approvalError = data.error ?? null;
-                          this.approvalCount += 1; this.approvalHistoryLogs = [];
+                          this.approvalCount += 1; this.checkCount += 1; this.approvalHistoryLogs = [];
                         } catch(e) { this.approvalError = 'Request failed: ' + e.message; }
                         this.approving = false;
                       },
@@ -944,6 +998,7 @@
                           </div>
                         </div>
                         <div x-show="!approving && approvalError" class="flex items-center gap-1 text-xs text-red-500"><span>⚠</span><span x-text="approvalError"></span></div>
+                        @include('checklist.partials.approval-limit', ['lockedNow' => !$canBypass && $checkCount >= $checkLimit])
                         <span x-show="!approving && !approval && !approvalError" class="text-gray-200 text-xs">—</span>
                       </td>
                       {{-- Analyze button --}}
@@ -952,7 +1007,7 @@
                                 :disabled="analyzing || approving"
                                 :class="(analyzing || approving) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'"
                                 class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white transition font-medium whitespace-nowrap">
-                          <span x-show="!analyzing && !approving" x-text="(analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze'"></span>
+                          <span x-show="!analyzing && !approving" x-text="(!canBypassChecks && checkCount >= {{ $checkLimit }}) ? '↻ Analysis lang' : ((analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze')"></span>
                           <span x-show="analyzing || approving" class="flex items-center gap-1">
                             <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
                             Analyzing…

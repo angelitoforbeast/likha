@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use App\Models\Cogs;
+use App\Services\ItemSettingsLog;
 use Carbon\Carbon;
 
 class CogsSyncFromMacro extends Command
@@ -54,12 +55,27 @@ class CogsSyncFromMacro extends Command
                         ->first();
             $carry = $prev?->unit_cost;
 
-            Cogs::create([
-                'item_name'   => $item,
-                'date'        => $d,
-                'unit_cost'   => $carry,   // same as kahapon (null if none yet)
-                'history_logs'=> null,
-            ]);
+            DB::transaction(function () use ($item, $d, $carry) {
+                Cogs::create([
+                    'item_name'   => $item,
+                    'date'        => $d,
+                    'unit_cost'   => $carry,   // same as kahapon (null if none yet)
+                    'history_logs'=> null,
+                ]);
+
+                // Edit log kapag may value ang bagong row (wala → carry). NULL → NULL = walang nagbago.
+                if ($carry !== null) {
+                    ItemSettingsLog::write([
+                        'user_email'     => null, // system (cogs sync)
+                        'action'         => 'create',
+                        'item_name'      => $item,
+                        'effective_date' => $d,
+                        'new_item_value' => $carry,
+                        'scope'          => 'cogs',
+                        'source'         => 'cogs_sync',
+                    ]);
+                }
+            });
 
             $inserted++;
         }
@@ -83,6 +99,9 @@ class CogsSyncFromMacro extends Command
                 DATE(STR_TO_DATE(`{$col}`, '%d-%m-%Y %H:%i')),
                 DATE(STR_TO_DATE(`{$col}`, '%Y-%m-%d %H:%i:%s'))
             )";
+        } elseif ($driver === 'sqlite') {
+            // Tests lang (sqlite in-memory): 'YYYY-MM-DD HH:MM:SS' ang fixtures.
+            return "DATE(\"{$col}\")";
         } else {
             // Postgres/Heroku: handle real timestamp/date or text with to_date()
             return "COALESCE(

@@ -191,6 +191,7 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::get('/submission/{submission}/analysis-logs', [\App\Http\Controllers\ChecklistController::class, 'getAnalysisLogs'])->name('analysis-logs');
     Route::post('/submission/{submission}/approval-check', [\App\Http\Controllers\ChecklistController::class, 'approvalCheck'])->name('approval-check');
     Route::get('/submission/{submission}/approval-logs', [\App\Http\Controllers\ChecklistController::class, 'getApprovalLogs'])->name('approval-logs');
+    Route::post('/submission/{submission}/approval-override', [\App\Http\Controllers\ChecklistController::class, 'approvalOverride'])->name('approval-override');
 });
 
 // Allow any authenticated user to view the Allowed IPs page (no IP check)
@@ -247,6 +248,7 @@ Route::get('/encoder/tools/ai/health', [AiController::class, 'health'])->middlew
 // /chatblast: order updates sa customer sa Botcake. Access ayon sa /owner/nav-settings (NavAccess, sa controller).
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('chatblast.')->group(function () {
     Route::get('/', [ChatblastController::class, 'index'])->name('index');            // To send
+    Route::get('/needs-setup.json', [ChatblastController::class, 'needsSetup'])->name('needs-setup');
     Route::get('/history', [ChatblastController::class, 'history'])->name('history'); // History (naproseso na)
     Route::get('/list', [ChatblastController::class, 'list'])->name('list');
     Route::get('/messages/{id}', [ChatblastController::class, 'show'])->whereNumber('id')->name('show');
@@ -293,6 +295,67 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast')->name('cha
     });
 });
 
+// /chatbot: ang sariling chatbot. Flow (/chatbot, ang editor), Page settings (/chatbot/pages: On/Off, FLOW, botfields),
+// Chats, Replies at Test. Access gaya ng /chatblast (403 sa iba); ang On/Off at ang pagdagdag ng page ay CEO lang.
+Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatbot.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\ChatbotFlowController::class, 'index'])->name('index');
+    Route::post('/flows', [\App\Http\Controllers\ChatbotFlowController::class, 'store'])->middleware('throttle:30,1,chatbot-flows')->name('flows.store');
+    Route::get('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'edit'])->whereNumber('id')->name('flows.edit');
+    Route::get('/flows/{id}/graph', [\App\Http\Controllers\ChatbotFlowController::class, 'graph'])->whereNumber('id')->name('flows.graph');
+    Route::put('/flows/{id}/graph', [\App\Http\Controllers\ChatbotFlowController::class, 'saveGraph'])->whereNumber('id')->middleware('throttle:120,1,chatbot-graph')->name('flows.save');
+    Route::post('/flows/{id}/publish', [\App\Http\Controllers\ChatbotFlowController::class, 'publish'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.publish');
+    Route::post('/flows/{id}/discard', [\App\Http\Controllers\ChatbotFlowController::class, 'discard'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.discard');
+    Route::get('/flows/{id}/versions', [\App\Http\Controllers\ChatbotFlowController::class, 'versions'])->whereNumber('id')->name('flows.versions');
+    Route::post('/flows/{id}/versions/{version}/restore', [\App\Http\Controllers\ChatbotFlowController::class, 'restore'])->whereNumber(['id', 'version'])->middleware('throttle:30,1,chatbot-flows')->name('flows.restore');
+    Route::post('/flows/{id}/rename', [\App\Http\Controllers\ChatbotFlowController::class, 'rename'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.rename');
+    Route::post('/flows/{id}/duplicate', [\App\Http\Controllers\ChatbotFlowController::class, 'duplicate'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.duplicate');
+    Route::delete('/flows/{id}', [\App\Http\Controllers\ChatbotFlowController::class, 'destroy'])->whereNumber('id')->middleware('throttle:30,1,chatbot-flows')->name('flows.destroy');
+    Route::get('/sheet', [\App\Http\Controllers\ChatbotSheetController::class, 'info'])->middleware('throttle:30,1,chatbot-sheet')->name('sheet.info');
+    Route::get('/flows/{id}/sheet-customers', [\App\Http\Controllers\ChatbotSheetController::class, 'customers'])->whereNumber('id')->middleware('throttle:30,1,chatbot-sheet-customers')->name('flows.sheet-customers');
+    Route::post('/flows/{id}/sheet-preview', [\App\Http\Controllers\ChatbotSheetController::class, 'preview'])->whereNumber('id')->middleware('throttle:60,1,chatbot-sheet-preview')->name('flows.sheet-preview');
+
+    Route::get('/chats', [ChatblastChatController::class, 'index'])->name('chats');
+    Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');
+    Route::get('/inbox', [\App\Http\Controllers\ChatbotInboxController::class, 'index'])->name('inbox');
+    Route::get('/inbox/conversations', [\App\Http\Controllers\ChatbotInboxController::class, 'conversations'])->middleware('throttle:120,1,chatbot-inbox-list')->name('inbox.conversations');
+    Route::get('/inbox/thread', [\App\Http\Controllers\ChatbotInboxController::class, 'thread'])->middleware('throttle:240,1,chatbot-inbox-thread')->name('inbox.thread');
+    Route::get('/inbox/panel', [\App\Http\Controllers\ChatbotInboxController::class, 'panel'])->middleware('throttle:120,1,chatbot-inbox-panel')->name('inbox.panel');
+    Route::post('/inbox/send', [\App\Http\Controllers\ChatbotInboxController::class, 'send'])->middleware('throttle:30,1,chatbot-inbox-send')->name('inbox.send');
+    Route::post('/inbox/pause', [\App\Http\Controllers\ChatbotInboxController::class, 'pause'])->middleware('throttle:60,1,chatbot-inbox-pause')->name('inbox.pause');
+    Route::post('/inbox/roles', [\App\Http\Controllers\ChatbotInboxController::class, 'roles'])->middleware('throttle:30,1,chatbot-inbox-roles')->name('inbox.roles');
+    Route::post('/inbox/sequence', [\App\Http\Controllers\ChatbotInboxController::class, 'sequence'])->middleware('throttle:60,1,chatbot-inbox-sequence')->name('inbox.sequence');
+    Route::get('/sequences', [\App\Http\Controllers\ChatbotSequenceController::class, 'index'])->name('sequences.index');
+    Route::post('/sequences', [\App\Http\Controllers\ChatbotSequenceController::class, 'store'])->middleware('throttle:30,1,chatbot-sequences')->name('sequences.store');
+    Route::get('/sequences/{id}', [\App\Http\Controllers\ChatbotSequenceController::class, 'edit'])->whereNumber('id')->name('sequences.edit');
+    Route::put('/sequences/{id}', [\App\Http\Controllers\ChatbotSequenceController::class, 'update'])->whereNumber('id')->middleware('throttle:60,1,chatbot-sequences-save')->name('sequences.update');
+    Route::get('/sequences/{id}/subscribers', [\App\Http\Controllers\ChatbotSequenceController::class, 'subscribers'])->whereNumber('id')->middleware('throttle:120,1,chatbot-sequences-subs')->name('sequences.subscribers');
+    Route::post('/customer-fields', [\App\Http\Controllers\ChatbotTabsController::class, 'customerFields'])->middleware('throttle:60,1,chatbot-customer-fields')->name('customer-fields');
+    Route::get('/replies', [\App\Http\Controllers\ChatbotTabsController::class, 'replies'])->name('replies');
+    Route::get('/replies/data', [\App\Http\Controllers\ChatbotTabsController::class, 'repliesData'])->middleware('throttle:60,1,chatbot-replies')->name('replies.data');
+    Route::get('/replies/{id}', [\App\Http\Controllers\ChatbotTabsController::class, 'reply'])->whereNumber('id')->name('replies.show');
+    Route::get('/results', [\App\Http\Controllers\ChatbotResultsController::class, 'index'])->middleware('throttle:60,1,chatbot-results')->name('results');
+    Route::get('/results.json', [\App\Http\Controllers\ChatbotResultsController::class, 'json'])->middleware('throttle:60,1,chatbot-results-json')->name('results.json');
+    Route::get('/test', [\App\Http\Controllers\ChatbotTabsController::class, 'test'])->name('test');
+    Route::post('/test/send', [\App\Http\Controllers\ChatbotTabsController::class, 'testSend'])->middleware('throttle:30,1,chatbot-test')->name('test.send');
+    Route::post('/test/reset', [\App\Http\Controllers\ChatbotTabsController::class, 'testReset'])->middleware('throttle:30,1,chatbot-test')->name('test.reset');
+    Route::post('/test/skip', [\App\Http\Controllers\ChatbotTabsController::class, 'testSkip'])->middleware('throttle:60,1,chatbot-test-skip')->name('test.skip');
+
+    Route::get('/pages', [\App\Http\Controllers\ChatbotController::class, 'index'])->name('pages.index');
+    Route::get('/data', [\App\Http\Controllers\ChatbotController::class, 'data'])->name('data');
+    Route::post('/cell', [\App\Http\Controllers\ChatbotController::class, 'cell'])->middleware('throttle:120,1,chatbot-cell')->name('cell');
+    Route::post('/cells', [\App\Http\Controllers\ChatbotController::class, 'cells'])->middleware('throttle:30,1,chatbot-cells')->name('cells');
+    Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');
+    Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
+    Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
+    // Check, Preview, History, Restore at Changes ng /chatbot/pages (access gaya ng page; Restore gaya ng isang cell).
+    Route::get('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:240,1,chatbot-check')->name('check');
+    Route::post('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:30,1,chatbot-check-again')->name('check.again');
+    Route::get('/preview', [\App\Http\Controllers\ChatbotController::class, 'preview'])->middleware('throttle:60,1,chatbot-preview')->name('preview');
+    Route::get('/history', [\App\Http\Controllers\ChatbotController::class, 'history'])->middleware('throttle:120,1,chatbot-history')->name('history');
+    Route::post('/restore', [\App\Http\Controllers\ChatbotController::class, 'restore'])->middleware('throttle:30,1,chatbot-restore')->name('restore');
+    Route::get('/changes', [\App\Http\Controllers\ChatbotController::class, 'changes'])->middleware('throttle:60,1,chatbot-changes')->name('changes');
+});
+
 // Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings
 // (NavAccess, sa controller): 404 sa iba.
 Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-settings')->name('page-settings.')->group(function () {
@@ -300,6 +363,9 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-setting
     Route::post('/', [PageSettingController::class, 'store'])->name('store');
     Route::get('/grid', [PageSettingController::class, 'grid'])->name('grid');
     Route::post('/cell', [PageSettingController::class, 'saveCell'])->middleware('throttle:120,1')->name('cell');
+    Route::post('/setup', [PageSettingController::class, 'saveSetup'])->middleware('throttle:10,1,page-settings-setup')->name('setup');
+    Route::post('/setup/check-all', [PageSettingController::class, 'checkAll'])->middleware('throttle:10,1,page-settings-setup')->name('setup.check-all');
+    Route::get('/setup/progress', [PageSettingController::class, 'setupProgress'])->name('setup.progress');
     Route::get('/history', [PageSettingController::class, 'history'])->name('history');
     Route::get('/page-check', [PageSettingController::class, 'pageCheck'])->middleware('throttle:30,1')->name('page-check');
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
@@ -1064,6 +1130,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/jnt/track-sync/start',        [\App\Http\Controllers\JntTrackSyncController::class, 'start'])  ->middleware('throttle:30,1')->name('jnt.track-sync.start');
     Route::get ('/jnt/track-sync/status/{run}', [\App\Http\Controllers\JntTrackSyncController::class, 'status']) ->whereNumber('run')->name('jnt.track-sync.status');
     Route::get ('/jnt/track-sync/history',      [\App\Http\Controllers\JntTrackSyncController::class, 'history'])->name('jnt.track-sync.history');
+    Route::post('/jnt/track-sync/auto',         [\App\Http\Controllers\JntTrackSyncController::class, 'auto'])   ->middleware('throttle:30,1')->name('jnt.track-sync.auto');
 
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');

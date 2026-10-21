@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\BotcakeChat;
 use App\Models\PageSetting;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -20,7 +21,9 @@ class PageSettings
      * DETAIL_PATTERN: ang pangalan ng bawat flow (botcake.flow.<x>.name) at ang body ng shipping template.
      */
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
-        'botcake.flow.shipping.options', 'botcake.field.message.options'];
+        'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
+        'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate',
+        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -29,7 +32,7 @@ class PageSettings
     public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/';
 
     /** Mga key na laging secret. */
-    public const SECRET_KEYS = ['botcake.token'];
+    public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key'];
 
     public static function isSystemKey(string $full): bool
     {
@@ -69,6 +72,8 @@ class PageSettings
         $full     = $provider . '.' . $key;
 
         if ($this->normPage($page) === '') return ['page_name' => 'The page is required.'];
+        // Ang "_all" ay ang mga pangalan ng Setup box (ChatblastSetupCheck), hindi page: isinusulat lang ng Setup box.
+        if (!$system && $this->pageKey($page) === ChatblastSetupCheck::ALL_PAGE) return ['page_name' => '"' . ChatblastSetupCheck::ALL_PAGE . '" is reserved for the Setup box.'];
         if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: 255 characters at most.'];
         if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: lowercase letters, digits and _ only.'];
         if (strlen($key) > 100 || !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key)) {
@@ -136,8 +141,13 @@ class PageSettings
                 'page' => $name, 'key' => $provider . '.' . $key, 'setting_id' => $setting->id, 'by' => $userId,
             ]);
 
-            // Ang mapa ng page_id => page ng /api/botcake/chat ay naka-cache: binubura ngayon at pagkatapos ng commit.
-            if ($provider === 'botcake' && $key === 'page_id') $this->forgetChatPageMap();
+            // Ang naka-cache ng /api/botcake/chat (page_id => page, mga hash ng chat.key): binubura ngayon at pagkatapos ng commit.
+            if ($provider === 'botcake' && in_array($key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
+            // Ang listahan ng mock page (BotcakeMock): binubura kapag nagbago ang flag, ang page_id o ang bagal at error.
+            if (($provider === 'botcake' && in_array($key, BotcakeMock::KEYS, true)) || ($provider === 'chatbot' && in_array($key, BotcakeMock::AI_KEYS, true))) {
+                BotcakeMock::forget();
+                DB::afterCommit(fn () => BotcakeMock::forget());
+            }
 
             return ['status' => $status, 'setting' => $setting];
         });
@@ -159,7 +169,8 @@ class PageSettings
 
         $setting->update(['active' => false, 'replaced_at' => now()]);
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
-        if ($setting->provider === 'botcake' && $setting->key === 'page_id') $this->forgetChatPageMap();
+        if ($setting->provider === 'botcake' && in_array($setting->key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
+        if ($setting->provider === 'botcake' && in_array($setting->key, BotcakeMock::KEYS, true)) BotcakeMock::forget();
         Log::info('PageSettings: deactivated', [
             'page' => $setting->page_name, 'key' => $setting->fullKey(), 'setting_id' => $setting->id, 'by' => $userId,
         ]);
@@ -167,8 +178,90 @@ class PageSettings
 
     public function get(string $page, string $provider, string $key): ?string
     {
-        return $this->pageQuery($page)->where('provider', strtolower($provider))->where('key', strtolower($key))
-            ->where('active', true)->orderByDesc('id')->first()?->plainValue();
+        $row = $this->map($page)[strtolower($provider) . '.' . strtolower($key)] ?? null;
+
+        return $row === null ? null : self::plain($row);
+    }
+
+    /**
+     * Lahat ng active na setting ng page para sa isang provider, ayon sa id (ang pinakabago ang masusunod sa parehong
+     * key), mula sa parehong cache ng get(). @return array<string, string> key => plain value
+     */
+    public function all(string $page, string $provider): array
+    {
+        return array_map(fn (array $r) => $r['value'], $this->allWithIds($page, $provider));
+    }
+
+    /**
+     * Gaya ng all(), kasama ang id ng page_settings row (ang version ng botfield sa Results).
+     * @return array<string, array{value: string, id: int}> key => plain value at row id
+     */
+    public function allWithIds(string $page, string $provider): array
+    {
+        $out = [];
+        $prefix = strtolower($provider) . '.';
+        foreach ($this->map($page) as $full => $row) {
+            if (str_starts_with($full, $prefix)) $out[substr($full, strlen($prefix))] = ['value' => (string) self::plain($row), 'id' => (int) $row[2]];
+        }
+
+        return $out;
+    }
+
+    /** Ilang segundo naka-cache ang settings ng isang page, at ilang segundo ang memo sa loob ng isang proseso. */
+    public const CACHE_TTL = 600;
+    public const MEMO_TTL = 2;
+
+    /** @var array<string, array{0: float, 1: array<string, array{0: ?string, 1: bool, 2: int}>}> page key => [nabasa noong, map] */
+    private array $memo = [];
+
+    public static function cacheKey(string $page): string
+    {
+        // v2: may row id na ang bawat setting; ang lumang cache (walang id) ay hindi na binabasa.
+        return 'page-settings:v2:' . sha1((new self)->pageKey($page));
+    }
+
+    /**
+     * Ang mga active na setting ng page: provider.key => [value gaya ng nasa table (ang secret ay naka-encrypt pa rin, at
+     * sa memory lang binubuksan), is_secret, row id], ayon sa id. Mula sa memo (hanggang MEMO_TTL), saka sa cache, saka sa
+     * isang query.
+     * @return array<string, array{0: ?string, 1: bool, 2: int}>
+     */
+    private function map(string $page): array
+    {
+        $pk = $this->pageKey($page);
+        $hit = $this->memo[$pk] ?? null;
+        if ($hit !== null && microtime(true) - $hit[0] < self::MEMO_TTL) return $hit[1];
+
+        $map = Cache::remember(self::cacheKey($page), self::CACHE_TTL, function () use ($page) {
+            $out = [];
+            foreach ($this->pageQuery($page)->where('active', true)->orderBy('id')->get(['id', 'provider', 'key', 'value', 'is_secret']) as $s) {
+                $out[strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret, (int) $s->id];
+            }
+
+            return $out;
+        });
+        $this->memo[$pk] = [microtime(true), $map];
+
+        return $map;
+    }
+
+    /** @param array{0: ?string, 1: bool, 2: int} $row */
+    private static function plain(array $row): ?string
+    {
+        $s = new PageSetting();
+        $s->value = $row[0];
+        $s->is_secret = $row[1];
+
+        return $s->plainValue();
+    }
+
+    /** Burahin ang naka-cache na settings ng page (ngayon at pagkatapos ng commit, para hindi maibalik ang luma). */
+    public static function forget(string $page): void
+    {
+        $key = self::cacheKey($page);
+        Cache::forget($key);
+        DB::afterCommit(fn () => Cache::forget($key));
+        if (app()->resolved(self::class)) unset(app(self::class)->memo[(new self)->pageKey($page)]);
     }
 
     /**
@@ -178,7 +271,7 @@ class PageSettings
     public function pagesWith(string $provider, array $keys): array
     {
         $keys = array_values(array_unique($keys));
-        $rows = PageSetting::where('provider', $provider)->whereIn('key', $keys)->where('active', true)
+        $rows = PageSetting::where('provider', $provider)->whereIn('key', $keys)->where('active', true)->where('page_name', '!=', ChatblastSetupCheck::ALL_PAGE)
             ->orderBy('id')->get(['page_name', 'key']);
 
         return $rows->groupBy(fn ($r) => $this->pageKey($r->page_name))

@@ -60,22 +60,22 @@ class FlowFieldDropdownTest extends BotcakeApiTestCase
         $this->cell('page_id', '3003')->assertOk();
         $this->cell('token', self::TOKEN)->assertOk();
 
-        // CHATBLAST muna (ang post_order ang recommended), saka ang iba ayon sa pangalan; ang binura ay wala.
+        // Ang may pangalang tugma sa Setup box muna (recommended), saka ang iba ayon sa pangalan; ang binura ay wala. Walang
+        // flow na "UPDATE SHIPPING STATUS 2026" dito, kaya walang recommended na flow.
         $this->assertSame([
-            ['id' => '502', 'name' => 'CHATBLAST - SHIPPING STATUS (post_order)', 'candidate' => true, 'recommended' => true],
-            ['id' => '501', 'name' => 'CHATBLAST - SHIPPING STATUS', 'candidate' => true, 'recommended' => false],
             ['id' => '505', 'name' => 'alpha promo', 'candidate' => false, 'recommended' => false],
+            ['id' => '501', 'name' => 'CHATBLAST - SHIPPING STATUS', 'candidate' => false, 'recommended' => false],
+            ['id' => '502', 'name' => 'CHATBLAST - SHIPPING STATUS (post_order)', 'candidate' => false, 'recommended' => false],
             ['id' => '503', 'name' => 'Welcome', 'candidate' => false, 'recommended' => false],
         ], $this->list('flow.shipping'));
-        // Ang "GPT Input" at "message" muna (recommended), saka ang iba ayon sa pangalan.
         $this->assertSame([
-            ['id' => '801', 'name' => 'GPT Input', 'candidate' => true, 'recommended' => true],
             ['id' => '804', 'name' => 'message', 'candidate' => true, 'recommended' => true],
             ['id' => '803', 'name' => 'address', 'candidate' => false, 'recommended' => false],
+            ['id' => '801', 'name' => 'GPT Input', 'candidate' => false, 'recommended' => false],
             ['id' => '802', 'name' => 'Phone', 'candidate' => false, 'recommended' => false],
         ], $this->list('field.message'));
-        // Ang auto-fill ay ayon pa rin sa mga kandidato lang: ang post_order na flow; dalawang field kaya walang napili.
-        $this->assertSame(['502', null], [app(PageSettings::class)->get('Page Tres', 'botcake', 'flow.shipping'), app(PageSettings::class)->get('Page Tres', 'botcake', 'field.message')]);
+        // Ayon sa eksaktong pangalan lang: ang field "message" ay naisulat; walang flow na tugma, kaya walang flow.
+        $this->assertSame([null, '804'], [app(PageSettings::class)->get('Page Tres', 'botcake', 'flow.shipping'), app(PageSettings::class)->get('Page Tres', 'botcake', 'field.message')]);
     }
 
     public function test_S_062_2_picking_an_item_saves_its_id_through_the_cell_save_with_history_and_a_ready_reset(): void

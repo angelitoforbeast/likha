@@ -19,6 +19,7 @@
 @endpush
 
 @section('content')
+@include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? []])
 <div id="cb" class="cb-page"
      data-view="{{ $view }}"
      data-list-url="{{ route('chatblast.list') }}"
@@ -89,6 +90,10 @@
             <button id="test-psid-open" type="button" class="cb-btn cb-btn-sm" aria-haspopup="dialog">Test PSID</button>
         </span>
     </div>
+
+    @if($jntOff)
+    <p class="mb-2 text-xs text-amber-700">J&amp;T track-sync is off: Delivering uses the J&amp;T upload status only</p>
+    @endif
 
     {{-- Ang table lang ang nag-i-scroll; nakadikit ang header row nito sa taas --}}
     <div class="cb-card cb-scroll">
@@ -297,7 +302,7 @@
         if (b.status === 'done') {
             const r = b.result;
             notice(fmt(r.added) + ' new (' + fmt(r.ready) + ' ready, ' + fmt(r.no_psid) + ' no PSID, ' + fmt(r.no_config) + ' no config); ' + fmt(r.updated) + ' updated; J&T: '
-                + fmt(r.tracked) + ' tracked' + (r.rider_pending ? ', ' + fmt(r.rider_pending) + ' rider pending (next fetch or before sending)' : '') + '.', 'text-green-700');
+                + fmt(r.tracked) + ' with a scan from the track-sync.', 'text-green-700');
             countsAt = 0;
             load();
         } else {

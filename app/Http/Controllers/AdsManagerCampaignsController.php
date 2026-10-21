@@ -527,6 +527,8 @@ class AdsManagerCampaignsController extends Controller
         $accountNameMap = [];
         if (!empty($accountByCampaign) && Schema::hasTable('ad_accounts')) {
             $accountNameMap = DB::table('ad_accounts')
+                // Active rows lang: ang lumang pangalan ay naiiwan sa table bilang history.
+                ->when(Schema::hasColumn('ad_accounts', 'active'), fn ($q) => $q->where('active', true))
                 ->whereIn('ad_account_id', array_values($accountByCampaign))
                 ->pluck('name', 'ad_account_id')
                 ->all();
@@ -946,6 +948,8 @@ class AdsManagerCampaignsController extends Controller
         $accountNameMap = [];
         if (!empty($accountByCampaign) && Schema::hasTable('ad_accounts')) {
             $accountNameMap = DB::table('ad_accounts')
+                // Active rows lang: ang lumang pangalan ay naiiwan sa table bilang history.
+                ->when(Schema::hasColumn('ad_accounts', 'active'), fn ($q) => $q->where('active', true))
                 ->whereIn('ad_account_id', array_values($accountByCampaign))
                 ->pluck('name', 'ad_account_id')
                 ->all();
@@ -1734,6 +1738,8 @@ class AdsManagerCampaignsController extends Controller
         $accountNameMap = [];
         if (!empty($accountByCampaign) && Schema::hasTable('ad_accounts')) {
             $accountNameMap = DB::table('ad_accounts')
+                // Active rows lang: ang lumang pangalan ay naiiwan sa table bilang history.
+                ->when(Schema::hasColumn('ad_accounts', 'active'), fn ($q) => $q->where('active', true))
                 ->whereIn('ad_account_id', array_values($accountByCampaign))
                 ->pluck('name', 'ad_account_id')
                 ->all();

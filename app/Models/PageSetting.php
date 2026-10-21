@@ -32,6 +32,13 @@ class PageSetting extends Model
         'replaced_at' => 'datetime',
     ];
 
+    /** Anumang sulat o bura ng row: ang naka-cache na settings ng page (PageSettings::get) ay binubura. */
+    protected static function booted(): void
+    {
+        static::saved(fn (self $s) => \App\Services\PageSettings::forget((string) $s->page_name));
+        static::deleted(fn (self $s) => \App\Services\PageSettings::forget((string) $s->page_name));
+    }
+
     public function plainValue(): ?string
     {
         if ($this->value === null) return null;

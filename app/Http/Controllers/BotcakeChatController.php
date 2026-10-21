@@ -2,15 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunChatbotFlow;
 use App\Models\BotcakeChat;
+use App\Services\BotcakeChatGuard;
+use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * /api/botcake/chat: ang JSON API block ng Botcake (sa Default reply flow ng page) ay nagpapasa ng mensahe ng customer.
- * JSON, form o query params; ang pangalan ng param ay case-insensitive at may mga alias, dahil hindi pa tiyak ang mga
- * variable ng Botcake. Iniimbak lang: walang tawag sa Botcake o J&T, at walang ipinapadala pabalik sa customer.
+ * JSON, form o query params; ang pangalan ng param ay case-insensitive at may mga alias (para sa lumang block). Ang
+ * harang ay sa BotcakeChatGuard (IP, key kada page, PSID); ang tanging tawag sa Botcake ay ang isang beses na pagsuri ng
+ * bagong PSID (5 s). Walang ipinapadala pabalik sa customer.
  */
 class BotcakeChatController extends Controller
 {
@@ -38,15 +44,36 @@ class BotcakeChatController extends Controller
     /** Ang mga field na may sariling column at hindi inuulit sa payload. */
     private const COLUMN_FIELDS = ['page_id', 'psid', 'name', 'message'];
 
-    public function receive(Request $request): JsonResponse
-    {
-        $expected = (string) config('services.botcake.chat_key');
-        $refuse = fn () => response()->json(['ok' => false], 401);
-        // Ang header key muna, bago basahin ang body.
-        $given = (string) $request->header('X-Chat-Key');
-        if ($given !== '' && ($expected === '' || !hash_equals($expected, $given))) return $refuse();
+    /** Mga field na nasa payload lang kapag may laman (hindi blangko at hindi ang {{variable}} na hindi napunan). */
+    private const FILLED_ONLY = ['ad_id', 'page_name'];
 
-        // Ang body na lampas 64 KB ay hindi binabasa (ang isang mensahe ng customer ay mas maliit nang malayo).
+    /**
+     * Ang pagkakasunod: (1) IP ng Botcake, ang REMOTE_ADDR (enforce: 403; log: itinatala at binibilang pagkatapos ng (4)); (2) ang header key ay kilala (ang
+     * chat.key ng isang page, o ang shared habang naka-on), bago basahin ang body; (3) body hanggang 64 KB (413); (4) ang
+     * key mula sa param kung walang header; (5) ang page ay atin (page_id o pangalan), kung hindi 401; (6) ang key ay sa
+     * page na iyon (hash_equals), kung hindi 401; (7) ang PSID ay nasa page (botcake_psids o Botcake; tinatanggap din kapag
+     * hindi sumagot ang Botcake), kung hindi (wala sa page, walang token, lampas sa cap, ibang sagot):
+     * {"ok":true} at walang iniimbak. Ang bawat pagtanggi ay binibilang (BotcakeChatGuard).
+     */
+    public function receive(Request $request, BotcakeChatGuard $guard): JsonResponse
+    {
+        $refuse = function (string $reason, int $status = 401) use ($guard) {
+            $guard->count($reason);
+            return response()->json(['ok' => false], $status);
+        };
+
+        // (1) Ang IP: ang kumokonektang address (REMOTE_ADDR), hindi ang X-Forwarded-For na kayang isulat ng kliyente
+        // (pinagkakatiwalaan ng app ang lahat ng proxy). Enforce: 403 agad. Log: itinatala pagkatapos ng key (sa ibaba),
+        // para ang log ay ang mga IP ng totoong may key lang.
+        $ip = (string) $request->server('REMOTE_ADDR');
+        $listed = $guard->ipListed($ip);
+        if (!$listed && $guard->enforcesIp()) return $refuse('bad_ip', 403);
+
+        // (2) Ang header key muna, bago basahin ang body.
+        $given = (string) $request->header('X-Chat-Key');
+        if ($given !== '' && !$guard->knownKey($given)) return $refuse('bad_key');
+
+        // (3) Ang body na lampas 64 KB ay hindi binabasa (ang isang mensahe ng customer ay mas maliit nang malayo).
         if ((int) $request->server('CONTENT_LENGTH') > self::MAX_BODY || strlen((string) $request->getContent()) > self::MAX_BODY) {
             return response()->json(['ok' => false], 413);
         }
@@ -55,7 +82,7 @@ class BotcakeChatController extends Controller
         // Ang JSON na hindi application/json ang Content-Type (hal. text/plain) ay binabasa rin; maaaring nandito ang key.
         if (!$request->isJson() && is_array($raw = json_decode((string) $request->getContent(), true))) $data = $raw + $data;
 
-        // Walang header: ang param na "key" (anuman ang laki ng titik).
+        // (4) Walang header: ang param na "key" (anuman ang laki ng titik), para sa lumang GET block.
         if ($given === '') {
             foreach ($data as $k => $v) {
                 if (mb_strtolower(trim((string) $k)) === 'key' && is_string($v)) {
@@ -63,7 +90,11 @@ class BotcakeChatController extends Controller
                     break;
                 }
             }
-            if ($expected === '' || $given === '' || !hash_equals($expected, $given)) return $refuse();
+            if (!$guard->knownKey($given)) return $refuse('bad_key');
+        }
+        if (!$listed) {
+            Log::warning('botcake chat: IP not on the list', ['ip' => $ip, 'forwarded_ip' => (string) $request->ip(), 'mode' => 'log']);
+            $guard->count('bad_ip');
         }
 
         $values = [];
@@ -77,25 +108,82 @@ class BotcakeChatController extends Controller
         }
 
         $f = $this->fields($byName, $used);
-        // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak. Ang mensahe
-        // na walang text (sticker o larawan) pero may PSID ay iniimbak.
+        // Walang PSID at walang mensahe (hal. ang Send ng Botcake na walang laman): sumasagot, walang iniimbak.
         if ($f['psid'] === null && $f['message'] === null) return response()->json(['ok' => true]);
+
+        // (5) Ang page: page_id ({{page_id}} ng Botcake, o fixed text sa lumang block) o page (pangalan). Atin lang.
+        [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
+        if ($pageName === null || $f['page_id'] === null) return $refuse('unknown_page');
+
+        // (6) Ang key ay dapat sa page na ito.
+        if (!$guard->keyFitsPage($pageName, $given)) return $refuse('bad_key');
+
+        // (6b) Naka-Off ang bot ng page sa /chatbot: sumasagot pero walang iniimbak (binibilang).
+        if ($guard->botOff($pageName)) {
+            $guard->count('bot_off');
+            return response()->json(['ok' => true]);
+        }
+
+        // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
+        // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
+        // Ang ad ID ng Facebook ay numero lang: ang iba ay hindi itinatala sa botcake_psids (nasa payload pa rin).
+        $adId = $this->filled($byName['ad_id'] ?? null);
+        $adId = $adId !== null && preg_match('/^\d{1,64}$/', $adId) ? $adId : null;
+        $check = $f['psid'] === null ? 'unchecked' : $guard->checkPsid($pageName, $f['page_id'], $f['psid'], $f['name'], $adId);
+        if ($check === 'not_on_page' || $check === 'unchecked') {
+            $guard->count($check === 'not_on_page' ? 'psid_not_found' : 'psid_unchecked');
+            return response()->json(['ok' => true]);
+        }
 
         // Ang payload: ang ibang param lang; ang page_id, psid, name at message ay nasa sariling column na (hindi inuulit).
         $payload = [];
         foreach ($values as [$k, $name, $s]) {
             if (isset($used[$name]) || count($payload) >= self::PAYLOAD_KEYS) continue;
+            if (in_array($name, self::FILLED_ONLY, true) && $this->filled($s) === null) continue;
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
         }
 
-        // Ang page: page_id ({{page_id}} ng Botcake, o fixed text sa lumang block) o page (pangalan).
-        [$f['page_id'], $pageName] = $this->page($f['page_id'], trim((string) ($byName['page'] ?? '')));
+        // Ang Like (link ng sticker) ay "👍" at ang larawan mula sa Facebook ay "[Photo]" (ang link ay nasa payload).
+        if ($f['message'] !== null) {
+            $clean = ChatMessageCleaner::clean($f['message']);
+            $f['message'] = $clean['message'];
+            if ($clean['image_url'] !== null) $payload['image_url'] = $clean['image_url'];
+        }
 
         if (!$this->isDuplicate($f)) {
-            BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
+            $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
+            // Sumagot ang customer: alisin sa mga sequence ng page na may "exit when the customer replies".
+            try {
+                if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) {
+                    app(\App\Services\Chatbot\ChatbotSequences::class)->exitOnReply((int) $chat->page_id, (int) $chat->psid);
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
+            // Results: ang mga padala sa customer na wala pang sagot ay sinagot ng chat na ito.
+            try {
+                if (ctype_digit((string) $chat->page_id) && ctype_digit((string) $chat->psid)) \App\Jobs\MarkChatbotReplied::dispatch($chat->id);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+            // Ang sariling chatbot: kapag may flow ang page (at naka-On), ang takbo ay sa queue na "chatbot". Ang
+            // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.
+            try {
+                if (app(ChatbotPage::class)->flow($pageName)) RunChatbotFlow::dispatch($chat->id);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return response()->json(['ok' => true]);
+    }
+
+    /** Ang value kapag may laman: null kapag blangko o ang {{variable}} na hindi pinunan ng Botcake. */
+    private function filled(?string $v): ?string
+    {
+        $v = trim((string) $v);
+
+        return $v === '' || preg_match('/^\{\{.*\}\}$/s', $v) ? null : $v;
     }
 
     /** Ang value bilang wastong UTF-8 na string: ang array ay JSON; ang sirang byte ay pinapalitan (hindi 500 sa pag-imbak). */

@@ -242,6 +242,7 @@ class ChatblastScheduleTest extends ChatblastTestCase
 
         $this->travelTo('2026-10-18 14:00:00');
         DB::table('from_jnts')->where('waybill_number', 'WB-1')->update(['status' => 'Delivering']);
+        $this->scan('WB-1'); // ang On Delivery scan ng track-sync
         $this->campaign(['kind' => 'c-dlv2', 'statuses' => ['Delivering'], 'mode' => 'manual']); // isa pang sequence ng Delivering
         app(\App\Services\Chatblast::class)->build(null, 1);
         $delivering = BotcakeMessage::where('kind', 'delivering')->sole();

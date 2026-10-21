@@ -3,6 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
+use App\Models\PageSetting;
+use App\Services\BotcakeChatBlock;
+use App\Services\BotcakeChatGuard;
+use App\Services\PageSettings;
 use App\Support\NavAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -11,13 +15,17 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * /chatblast/chats: ang mga mensahe ng customer na ipinasa ng Botcake (/api/botcake/chat), pagtingin lang, at ang
- * Setup box na may mga value na ilalagay sa JSON API block ng Botcake. Access gaya ng /chatblast (NavAccess; 404 sa
- * iba). Ang buong key ay nasa page para sa CEO lang.
+ * Setup box (ang block na isinusulat ng botcake:chat-setup, kung may key ang bawat page, at ang mga tinanggihan).
+ * Access gaya ng /chatblast (NavAccess; 404 sa iba). Walang key na ipinapakita kaninuman.
  */
 class ChatblastChatController extends Controller
 {
     public const PER_PAGE = 100;
     public const CUSTOMER_MAX = 500; // pinakahuling mensahe ng isang customer na ipinapakita
+
+    public function __construct(private PageSettings $settings, private BotcakeChatGuard $guard)
+    {
+    }
 
     private function getNormalizedRole(): string
     {
@@ -27,7 +35,7 @@ class ChatblastChatController extends Controller
 
     private function checkAccess(): void
     {
-        if (!NavAccess::allows($this->getNormalizedRole(), '/chatblast')) abort(404);
+        if (!NavAccess::allows($this->getNormalizedRole(), '/chatblast')) abort(request()->is('chatbot', 'chatbot/*') ? 403 : 404); // /chatbot: 403, gaya ng ibang tab nito
     }
 
     /** Ang query param bilang string ('' kapag wala o hindi string). */
@@ -63,7 +71,7 @@ class ChatblastChatController extends Controller
                 })
                 ->orderByDesc('received_at')->orderByDesc('id')
                 // Walang COUNT(*) sa buong table: Newer/Older lang.
-                ->simplePaginate(self::PER_PAGE, ['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'received_at'])
+                ->simplePaginate(self::PER_PAGE, ['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'payload', 'received_at'])
                 ->withQueryString();
             // Ang mga page: may Botcake ID sa page settings (mapipili na bago pa dumating ang unang chat, para sa Setup
             // box), at ang ibang page_id na nasa chats na (Unknown page). Parehong naka-cache.
@@ -75,8 +83,14 @@ class ChatblastChatController extends Controller
 
         return view('chatblast.chats', [
             'ready' => $ready, 'chats' => $chats, 'pages' => $pages, 'filters' => compact('page', 'date', 'q'),
-            'setup' => $this->setup(),
+            'setup' => $this->setup(), 'chatsRoute' => $this->chatsRoute(),
         ]);
+    }
+
+    /** Ang Chats ay nasa /chatblast at /chatbot: ang mga link ay nananatili sa seksyong binuksan. */
+    private function chatsRoute(): string
+    {
+        return request()->is('chatbot', 'chatbot/*') ? 'chatbot.chats' : 'chatblast.chats';
     }
 
     /** Ang mga mensahe ng isang customer (page + PSID), pinakaluma muna. */
@@ -91,33 +105,42 @@ class ChatblastChatController extends Controller
             ->when($pageId !== '', fn ($w) => $w->where('page_id', $pageId), fn ($w) => $w->whereNull('page_id'))
             ->where('psid', $psid)
             ->orderByDesc('received_at')->orderByDesc('id')->limit(self::CUSTOMER_MAX)
-            ->get(['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'received_at'])
+            ->get(['id', 'page_id', 'page_name', 'psid', 'name', 'message', 'payload', 'received_at'])
             ->reverse()->values();
 
-        return view('chatblast.chats-customer', ['chats' => $chats, 'psid' => $psid, 'pageId' => $pageId, 'max' => self::CUSTOMER_MAX]);
+        // Ang customer fields ng chatbot (walang run state na "__"); ang CEO ang nakakapagbago (ChatbotTabsController).
+        $fields = ctype_digit($pageId) && ctype_digit($psid) && Schema::hasTable('chatbot_customer_values')
+            ? (new \App\Services\Chatbot\CustomerFields((int) $pageId, (int) $psid))->fields() : null;
+        if ($fields !== null) ksort($fields);
+
+        return view('chatblast.chats-customer', ['chats' => $chats, 'psid' => $psid, 'pageId' => $pageId, 'max' => self::CUSTOMER_MAX,
+            'chatsRoute' => $this->chatsRoute(), 'fields' => $fields, 'canEditFields' => $this->getNormalizedRole() === 'CEO']);
     }
 
     /**
-     * Ang mga value para sa JSON API block ng Botcake: POST na may JSON body (inirerekomenda) o GET na may Params. Iisa
-     * para sa lahat ng page. Ang buong key ay para sa CEO lang (copy button).
+     * Ang Setup box: ang block na isinusulat ng botcake:chat-setup (walang key), kung may sariling chat.key ang bawat page
+     * (oo/hindi, hindi kailanman ang value), at ang mga tinanggihan ngayong araw.
      */
     private function setup(): array
     {
-        $key = (string) config('services.botcake.chat_key');
-        // Mga variable na pinupunan ng Botcake (subok sa live na page), pati ang page: iisang block sa bawat page.
-        $values = [
-            'page_id' => '{{page_id}}',
-            'psid'    => '{{psid}}',
-            'name'    => '{{user_full_name}}',
-            'message' => '{{last_text_input}}',
-        ];
+        $withKey = [];
+        foreach (PageSetting::where('provider', 'botcake')->where('key', 'chat.key')->where('active', true)->pluck('page_name') as $name) {
+            $withKey[$this->settings->pageKey((string) $name)] = true;
+        }
+        $pages = [];
+        foreach (BotcakeChat::pageMap() as $id => $name) {
+            $pages[] = ['name' => $name, 'page_id' => (string) $id, 'has_key' => isset($withKey[$this->settings->pageKey($name)])];
+        }
+        usort($pages, fn ($a, $b) => strcasecmp($a['name'], $b['name']));
+
+        $refused = [];
+        foreach ($this->guard->counts() as $reason => $n) $refused[BotcakeChatGuard::REASONS[$reason]] = $n;
 
         return [
-            'url'    => rtrim((string) config('app.url'), '/') . '/api/botcake/chat',
-            'masked' => $key === '' ? null : '••••' . (mb_strlen($key) > 8 ? mb_substr($key, -4) : ''),
-            'key'    => $key !== '' && $this->getNormalizedRole() === 'CEO' ? $key : null,
-            'body'   => json_encode($values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-            'params' => $values,
+            'url'     => rtrim((string) config('app.url'), '/') . '/api/botcake/chat',
+            'body'    => json_encode(BotcakeChatBlock::BODY, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'pages'   => $pages,
+            'refused' => $refused,
         ];
     }
 }

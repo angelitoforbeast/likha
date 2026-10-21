@@ -146,7 +146,7 @@ return [
 
     'redis' => [
 
-        'client' => env('REDIS_CLIENT', 'phpredis'),
+        'client' => env('REDIS_CLIENT', 'predis'), // predis: walang PHP extension na kailangan; phpredis sa env kapag naka-install
 
         'options' => [
             'cluster' => env('REDIS_CLUSTER', 'redis'),
@@ -161,14 +161,19 @@ return [
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
             'database' => env('REDIS_DB', '0'),
+            // predis: ilang segundo ng walang sagot bago putulin ang koneksyon. Ang queue ay naghihintay sa blpop nang
+            // REDIS_QUEUE_BLOCK_FOR segundo (queue.php), kaya laging mas mataas ito (60 laban sa 5), o napuputol ang worker.
+            'read_write_timeout' => (float) env('REDIS_READ_WRITE_TIMEOUT', 60),
         ],
 
+        // Ang cache data (CACHE_STORE=redis): maaaring sariling Redis instance na may eviction (LRU), hiwalay sa queue na
+        // noeviction. Ang mga lock ng cache ay nasa "default" (ang queue instance): hindi kailanman natatanggal.
         'cache' => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'url' => env('REDIS_CACHE_URL', env('REDIS_URL')),
+            'host' => env('REDIS_CACHE_HOST', env('REDIS_HOST', '127.0.0.1')),
             'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
+            'password' => env('REDIS_CACHE_PASSWORD', env('REDIS_PASSWORD')),
+            'port' => env('REDIS_CACHE_PORT', env('REDIS_PORT', '6379')),
             'database' => env('REDIS_CACHE_DB', '1'),
         ],
 

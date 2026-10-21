@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\BotcakeMessage;
 use App\Services\ChatblastSender;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -11,7 +12,8 @@ use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 /**
- * Isang mensahe ng /chatblast, sa queue na "chatblast" (sariling worker; ang default ay hawak ng Botcake sync).
+ * Isang mensahe ng /chatblast, sa queue na "chatblast" (o "chatblast-high" para sa Delivering), sa sariling worker (ang
+ * default ay hawak ng Botcake sync).
  * Timeout 300 s: isang J&T track para sa delivering (hanggang 10 s), at tatlong hakbang, bawat isa hanggang 4 na subok na 15 s at backoff na hanggang 10 s bawat isa (Retry-After
  * hanggang 10 s sa chatblast), mga 270 s sa pinakamasama. Isang subok lang:
  * ang hindi natapos ay failed (bago ang send_flow) o unknown (pagkatawag nito), at ang pagpapadala ulit ay pinipindot ng
@@ -26,7 +28,11 @@ class SendChatblastMessage implements ShouldQueue
 
     public function __construct(public int $messageId)
     {
-        $this->onQueue(ChatblastSender::QUEUE);
+        // Sa Horizon (hindi database): ang Delivering ay sa sariling queue (chatblast-high, may sariling worker), kaya hindi
+        // naghihintay sa In transit. Sa database ay "chatblast" pa rin ang lahat: doon lang nakikinig ang dating worker group.
+        $connection = (string) config('queue.chatblast_connection');
+        $high = $connection !== 'database' && BotcakeMessage::whereKey($messageId)->value('kind') === ChatblastSender::HIGH_KIND;
+        $this->onConnection($connection)->onQueue($high ? ChatblastSender::HIGH_QUEUE : ChatblastSender::QUEUE);
     }
 
     public function handle(ChatblastSender $sender): void

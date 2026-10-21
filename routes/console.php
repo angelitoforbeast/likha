@@ -85,6 +85,33 @@ Schedule::command('staff-events:prune')
     ->dailyAt('04:20')
     ->withoutOverlapping();
 
+// Chatbot: ang "wait for reply" na lampas na sa skip_after ay nagpapatuloy sa port na skipped.
+// Ang tick ay nagpapadala lang ng mga job sa queue na "chatbot" (doon ang padala).
+Schedule::command('chatbot:resume-skipped')
+    ->everyMinute()
+    ->withoutOverlapping(5); // 5 min: ang tick na nag-crash ay hindi haharang nang isang araw
+
+// Chatbot sequences (drip): ang mga due na step ay ipinapadala bilang job sa queue na "chatbot".
+Schedule::command('chatbot:sequence-tick')
+    ->everyMinute()
+    ->withoutOverlapping(5);
+
+// Chatbot Results: ang replied_at ng mga padalang hindi naabot ng job ng chat (huling 48 oras).
+Schedule::command('chatbot:replied-backfill')
+    ->hourlyAt(7)
+    ->withoutOverlapping(30);
+
+// Chatblast setup check (flow, field at template ayon sa Setup box ng /chatblast/page-settings): gabi-gabi, 21:30
+// Manila, pagkatapos ng In transit window. Ang delivered check ng bagong flow: kada oras sa :45, ang hindi pa kumpirmado lang.
+Schedule::command('botcake:setup-check --all')
+    ->timezone('Asia/Manila')
+    ->dailyAt('21:30')
+    ->withoutOverlapping(120)
+    ->runInBackground(); // ilang minuto (60 page, 2 tawag kada segundo): hindi pinaghihintay ang ibang 21:30
+Schedule::command('botcake:setup-delivered')
+    ->hourlyAt(45)
+    ->withoutOverlapping(30);
+
 // Mga chat ng customer mula sa Botcake (/api/botcake/chat): 90 araw lang ang itinatago.
 Schedule::command('botcake:prune-chats')
     ->timezone('Asia/Manila')
@@ -128,3 +155,18 @@ Schedule::command('chatblast:auto')
     ->timezone('Asia/Manila')
     ->everyFiveMinutes()
     ->withoutOverlapping(30);
+
+// Kusang J&T track-sync (JntAutoTrackSync): kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload),
+// 04:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
+// kumukuha ng oras, kaya ang simula mula sa chatblast:auto sa parehong oras ay walang ginagawa. JNT_TRACK_SYNC_AUTO o
+// ang toggle sa /jnt/track-sync ang nag-o-on.
+// Horizon: ang metrics ng dashboard (kada 5 minuto), kapag nasa Redis na ang chatbot o chatblast queue lang.
+Schedule::command('horizon:snapshot')
+    ->everyFiveMinutes()
+    ->when(fn () => config('queue.chatbot_connection') === 'redis' || config('queue.chatblast_connection') === 'redis');
+
+Schedule::command('jnt:track-sync-auto')
+    ->timezone('Asia/Manila')
+    ->cron('20 2,4-23 * * *')
+    ->withoutOverlapping(60)
+    ->runInBackground();

@@ -189,8 +189,8 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     public function test_S_054_9_the_page_cell_border_shows_the_row_state_and_the_legend_explains_it(): void
     {
         $this->get('/chatblast/page-settings')->assertOk()
-            ->assertSee("!r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template ? 'border-l-red-500' : st.incomplete || st.needsTest ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
-            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete or needs a test send'], ['bg-red-500', 'Token invalid, last sync failed or template not approved']", false);
+            ->assertSee("!r.info.orders ? 'border-l-transparent' : st.invalid || st.failed || st.template || st.checkX ? 'border-l-red-500' : st.incomplete || st.needsTest ? 'border-l-amber-400' : st.ok ? 'border-l-green-500' : 'border-l-transparent'", false)
+            ->assertSee("['bg-green-500', 'Ready'], ['bg-amber-400', 'Setup incomplete or needs a test send'], ['bg-red-500', 'Token invalid, last sync failed, template not approved or an X in Check']", false);
     }
 
     public function test_S_054_10_each_flow_block_is_id_name_and_content_with_no_placeholder_and_the_lines_stay_outside_the_edited_value(): void

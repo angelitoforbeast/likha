@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Http\Controllers\ChatblastController;
 use App\Services\Chatblast;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -72,7 +71,7 @@ class ChatblastBuildJob implements ShouldQueue
 
         try {
             $this->update(['status' => 'running', 'started_at' => time()]);
-            $result = $chatblast->build($this->kind, $this->userId, ChatblastController::WEB_TRACK_BUDGET, null, $this->token);
+            $result = $chatblast->build($this->kind, $this->userId, null, $this->token);
             $this->update(!empty($result['busy'])
                 ? ['status' => 'busy', 'error' => 'A fetch is already running; try again after it.', 'finished_at' => time()]
                 : ['status' => 'done', 'result' => $result, 'finished_at' => time()]);

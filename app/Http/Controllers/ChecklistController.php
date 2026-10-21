@@ -10,9 +10,11 @@ use App\Models\ChecklistAnalysisLog;
 use App\Models\ChecklistTaskChange;
 use App\Models\ChecklistSubmissionValue;
 use App\Models\User;
+use App\Services\ChecklistBadge;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -220,6 +222,8 @@ class ChecklistController extends Controller
         // Submissions for this date — load all that the user is allowed to see.
         $subQuery = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user', 'values'])
             ->withCount(['analysisLogs', 'approvalLogs'])
+            // Para sa limit ng approval check sa page: ang override ay hindi check
+            ->withCount(['approvalLogs as approval_checks_count' => fn ($q) => \App\Services\ChecklistDueToday::schema()['override'] ? $q->where('is_override', false) : $q])
             ->where('date', $dateObj->toDateString());
 
         if (!$isCEO && $userId) {
@@ -259,11 +263,14 @@ class ChecklistController extends Controller
 
         $prevDate = $dateObj->copy()->subDay()->toDateString();
         $nextDate = $dateObj->copy()->addDay()->toDateString();
+        // Kung puwede kang lumampas sa limit ng approval check (at mag-override) sa isang submission
+        $canBypassChecks = fn (ChecklistSubmission $s) => $this->canBypassCheckLimit($s);
+        $checkLimit      = self::CHECK_LIMIT;
 
         return view('checklist.report', compact(
             'tasks', 'submissionsByTask', 'submissionsGroupedByTask',
             'doneCount', 'totalTasks',
-            'dateObj', 'prevDate', 'nextDate', 'isToday'
+            'dateObj', 'prevDate', 'nextDate', 'isToday', 'canBypassChecks', 'checkLimit'
         ));
     }
 
@@ -805,6 +812,7 @@ class ChecklistController extends Controller
             'description'     => 'nullable|string|max:1000',
             'type'            => 'required|in:photo,note,any,both',
             'scheduled_time'  => 'nullable|string|max:20',
+            'deadline_time'   => self::DEADLINE_RULE,
             'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
@@ -857,6 +865,7 @@ class ChecklistController extends Controller
             'type'            => 'required|in:photo,note,any,both',
             'is_active'       => 'boolean',
             'scheduled_time'  => 'nullable|string|max:20',
+            'deadline_time'   => self::DEADLINE_RULE,
             'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
@@ -917,6 +926,7 @@ class ChecklistController extends Controller
                 'description'     => $task->description,
                 'type'            => $task->type,
                 'scheduled_time'  => $task->scheduled_time,
+                'deadline_time'   => $task->deadline_time,
                 'submission_type' => $task->submission_type,
                 'ai_prompt'       => $task->ai_prompt,
                 'approval_prompt' => $task->approval_prompt,
@@ -1122,6 +1132,29 @@ class ChecklistController extends Controller
     {
         $this->authorizeReviewSubmission($submission);
 
+        // May limit: isang check lang kada submission ang tumatakbo, para hindi malampasan ng sabay-sabay na
+        // request ang bilang habang naghihintay pa sa AI ang nauna.
+        $lock = null;
+        if (!$this->canBypassCheckLimit($submission)) {
+            $lock = Cache::lock('checklist-approval:' . $submission->id, 60);
+            if (!$lock->get()) {
+                throw new HttpResponseException(response()->json(['ok' => false, 'message' => 'May approval check pang tumatakbo dito; hintayin munang matapos.'], 409));
+            }
+            if ($this->approvalCheckCount($submission) >= self::CHECK_LIMIT) {
+                $lock->release();
+                $this->refuse(self::CHECK_LIMIT_MESSAGE, true);
+            }
+        }
+
+        try {
+            return $this->runApprovalCheck($submission);
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    private function runApprovalCheck(ChecklistSubmission $submission)
+    {
         $submission->load(['task', 'files']);
         $task     = $submission->task;
         $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
@@ -1189,6 +1222,40 @@ class ChecklistController extends Controller
         ], 500);
     }
 
+    /**
+     * Override ng approval verdict sa kamay (walang AI call): CEO o OIC ng department ng nagsumite lang,
+     * may maikling dahilan. Isang approval row na may is_override, kaya ito na ang pinakahuling verdict.
+     */
+    public function approvalOverride(Request $request, ChecklistSubmission $submission)
+    {
+        if (!$this->canBypassCheckLimit($submission)) {
+            $this->refuse('CEO o OIC ng department ng nagsumite lang ang puwedeng mag-override.', true);
+        }
+        $validated = $request->validate([
+            'verdict' => 'required|in:approved,not_approved',
+            'reason'  => 'required|string|max:500',
+        ]);
+
+        $log = ChecklistAnalysisLog::create([
+            'submission_id'   => $submission->id,
+            'user_id'         => Auth::id(),
+            'log_type'        => 'approval',
+            'prompt_used'     => null,
+            'analysis_result' => trim($validated['reason']),
+            'verdict'         => $validated['verdict'],
+            'is_override'     => true,
+        ]);
+
+        return response()->json([
+            'verdict'     => $log->verdict,
+            'analysis'    => $log->analysis_result,
+            'prompt_used' => null,
+            'is_override' => true,
+            'checked_by'  => Auth::user()?->name,
+            'checked_at'  => now()->format('M j, g:i A'),
+        ]);
+    }
+
     public function getApprovalLogs(ChecklistSubmission $submission)
     {
         $this->authorizeReviewSubmission($submission);
@@ -1200,6 +1267,7 @@ class ChecklistController extends Controller
             'prompt_used' => $log->prompt_used,
             'user'        => $log->user?->name ?? 'Unknown',
             'created_at'  => $log->created_at->format('M j, Y g:i A'),
+            'is_override' => (bool) ($log->is_override ?? false),
         ]);
 
         return response()->json(['logs' => $logs]);
@@ -1350,6 +1418,46 @@ class ChecklistController extends Controller
         }
     }
 
+    /**
+     * Ilang approval check (kahit sino ang nagpatakbo, pati ang awtomatiko sa pagsumite; hindi bilang ang
+     * override) bago kailangan ang CEO o OIC: ang awtomatiko at 2 re-check.
+     */
+    public const CHECK_LIMIT = 3;
+
+    public const CHECK_LIMIT_MESSAGE = 'Naka-3 check na; OIC o CEO na lang ang pwedeng mag-check o mag-override.';
+
+    /** Bilang ng approval check ng submission, hindi kasama ang override. */
+    private function approvalCheckCount(ChecklistSubmission $submission): int
+    {
+        $query = $submission->approvalLogs();
+        if (\App\Services\ChecklistDueToday::schema()['override']) {
+            $query->where('is_override', false);
+        }
+
+        return $query->count();
+    }
+
+    /**
+     * Lampas sa CHECK_LIMIT at override: CEO, o OIC na ang department ay ang department ng nagsumite
+     * (parehong grouping ng Checklist badge) o ang department ng task.
+     */
+    public function canBypassCheckLimit(ChecklistSubmission $submission): bool
+    {
+        if ($this->isCeo()) {
+            return true;
+        }
+        if (!$this->isOic() || ($mine = $this->oicDepartment()) === '') {
+            return false;
+        }
+        $task = ChecklistTask::withTrashed()->find($submission->checklist_task_id);
+        if ($task && $this->isOicOf($task->department)) {
+            return true;
+        }
+        $profile = $submission->user?->employeeProfile;
+
+        return $profile !== null && ChecklistBadge::departmentKey($profile->department, $profile->role) === $mine;
+    }
+
     /** 403: JSON {"ok":false,...} para sa fetch() ng page, HTML 403 para sa mga form. */
     private function refuse(string $message, bool $json = false): never
     {
@@ -1363,7 +1471,7 @@ class ChecklistController extends Controller
 
     /** Ang mga field ng task na sinusulat sa checklist_task_changes kapag nagbago. */
     private const LOGGED_TASK_FIELDS = [
-        'title', 'description', 'type', 'is_active', 'scheduled_time', 'submission_type', 'ai_prompt',
+        'title', 'description', 'type', 'is_active', 'scheduled_time', 'deadline_time', 'submission_type', 'ai_prompt',
         'approval_prompt', 'required_photos', 'frequency', 'frequency_day', 'department', 'extract_fields',
     ];
 
@@ -1389,7 +1497,7 @@ class ChecklistController extends Controller
             $before = $task->getOriginal($field);
             $after  = $task->getAttribute($field);
             // "08:00" at "08:00:00" ay iisang oras (time input vs TIME column)
-            if ($field === 'scheduled_time' && substr((string) $before, 0, 5) === substr((string) $after, 0, 5)) {
+            if (in_array($field, ['scheduled_time', 'deadline_time'], true) && substr((string) $before, 0, 5) === substr((string) $after, 0, 5)) {
                 continue;
             }
             // Iba ang ayos ng keys na ibinabalik ng JSON column ng MySQL; ang laman ang ikinukumpara
@@ -1437,7 +1545,11 @@ class ChecklistController extends Controller
         'extract_fields.*.key.regex'    => 'Ang key ng field ay snake_case lang (a-z, 0-9, _), hal. total_sticker.',
         'extract_fields.*.key.distinct' => 'Dalawang field ang may parehong key; dapat iba-iba.',
         'extract_fields.*.type.in'      => 'Ang type ng field ay number, money, percent, text, date o yes_no lang.',
+        'deadline_time.date_format'     => 'Ang Deadline ay dapat oras, hal. 10:30.',
     ];
+
+    /** Oras mula sa <input type="time">: "10:30", o "10:30:00" kapag may segundo. */
+    private const DEADLINE_RULE = 'nullable|date_format:H:i,H:i:s';
 
     private function extractFieldRules(): array
     {

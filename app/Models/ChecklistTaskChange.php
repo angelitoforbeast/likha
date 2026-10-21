@@ -36,6 +36,7 @@ class ChecklistTaskChange extends Model
         'type'            => 'Type',
         'is_active'       => 'Active',
         'scheduled_time'  => 'Time',
+        'deadline_time'   => 'Deadline',
         'submission_type' => 'Submission',
         'ai_prompt'       => 'AI prompt',
         'approval_prompt' => 'Approval prompt',
