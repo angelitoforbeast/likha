@@ -1833,3 +1833,20 @@ Spec 102. As the owner, I want the first AI reply sooner: a chatbot or chatblast
 | S-102.2 | Given block_for > 0, then the chatbot and chatblast supervisors are on the redis connection with sleep 0 and balance auto (one queue per process, so a block on one queue never delays the other) | `test_S_102_2…` | Passed · 2026-10-21 · auto |
 | S-102.3 | Given REDIS_QUEUE_BLOCK_FOR=0, then block_for is null (polling as before, never a blpop of 0 that waits forever) and both supervisors sleep 3 s | `test_S_102_3…` | Passed · 2026-10-21 · auto |
 | S-102.4 | Given no override, the pools sleep 200 ms per idle tick and 5 ms per busy tick; CHATBOT_POOL_IDLE_MS and CHATBOT_POOL_BUSY_MS override them, and the pool loop uses the configured values | `test_S_102_4…` | Passed · 2026-10-21 · auto |
+
+## S-103 Ad Accounts: who added or changed each ad account, with a change log
+
+Spec 103. As the owner, I want to see who added, renamed or deleted each ad account on `/ads_manager/ad_account`, and every change in a log. The old row stays in `ad_accounts` (active = false); readers see active rows only. Test: `tests/Feature/AdAccount/AdAccountHistoryTest.php`. The page is checked in headless Chrome at 1366 and 390 px (screenshots in `docs/specs/103-ad-accounts-history/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-103.1 | Given a signed-in staff user, when they add an ad account, then its row has created_by = their id, action added, active | `test_S_103_1…` | Passed · 2026-10-21 · auto |
+| S-103.2 | Given an active ad account, when another user renames it, changes its ID (edit form), or saves a new name for the same ID (add form), then the old row stays with active = false, replaced_at and replaced_by, and a new active row has the new values, created_by and action changed | `test_S_103_2…` (3 data sets) | Passed · 2026-10-21 · auto |
+| S-103.3 | Given an active ad account, when the same ID and name are saved again (edit or add form), then no history row is written | `test_S_103_3…` | Passed · 2026-10-21 · auto |
+| S-103.4 | Given two active ad accounts, when one's ID is changed to the other's, then the form shows an error and nothing changes (one active row per ID) | `test_S_103_4…` | Passed · 2026-10-21 · auto |
+| S-103.5 | Given an active ad account, when a user deletes it, then the row stays in the table, inactive, with action deleted, replaced_by and replaced_at | `test_S_103_5…` | Passed · 2026-10-21 · auto |
+| S-103.6 | Given old rows (no created_by), changed rows and a deleted row, then the list shows active rows only, with "Added by" (the name, or "unknown" for old rows) and "Last change" (Manila date-time) | `test_S_103_6…` | Passed · 2026-10-21 · auto |
+| S-103.7 | Given an add, an ID-and-name change and a delete by two users, then the change log lists them newest first with when (Manila), who, action, ID (old → new) and name (old → new); an old row shows as added by "unknown" | `test_S_103_7…` | Passed · 2026-10-21 · auto |
+| S-103.8 | Given 51 log entries, then the change log shows 50 per page, newest first, and page 2 has the oldest | `test_S_103_8…` | Passed · 2026-10-21 · auto |
+| S-103.9 | Given an ad account with an inactive old name and a deleted ad account, then payment records and the ad account dropdown show the active name once per payment and the raw ID for the deleted one, and the total is unchanged | `test_S_103_9…` | Passed · 2026-10-21 · auto |
+| S-103.10 | At 1366 and 390 px: the table with "Added by" and "Last change" and the change log are readable; wide tables scroll inside their box, the page has no horizontal scroll | browser | see result |

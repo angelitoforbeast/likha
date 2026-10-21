@@ -98,8 +98,15 @@ class PaymentActivityController extends Controller
     $adAccountSel     = trim((string) $request->input('ad_account', ''));
     $paymentMethodSel = trim((string) $request->input('payment_method', ''));
 
+    // Active ad_accounts row lang: ang lumang pangalan ay naiiwan bilang history (hindi dapat dumoble ang payment row).
+    $aaActiveOnly = \Schema::hasColumn('ad_accounts', 'active');
+    $joinAdAccount = function ($j) use ($aaActiveOnly) {
+        $j->on('aa.ad_account_id', '=', 'pa.ad_account');
+        if ($aaActiveOnly) $j->where('aa.active', '=', true);
+    };
+
     $base = \DB::table('payment_activity_ads_manager as pa')
-        ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account');
+        ->leftJoin('ad_accounts as aa', $joinAdAccount);
 
     $applyFilters = function ($q) use ($start, $end, $adAccountSel, $paymentMethodSel) {
         $q->whereBetween('pa.date', [$start, $end]);
@@ -141,7 +148,7 @@ class PaymentActivityController extends Controller
 
     // ✅ Ad Account dropdown options (dependent on payment method + date)
     $adOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
-        ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account')
+        ->leftJoin('ad_accounts as aa', $joinAdAccount)
         ->whereBetween('pa.date', [$start, $end]);
 
     if ($paymentMethodSel !== '') {

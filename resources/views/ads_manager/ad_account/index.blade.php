@@ -78,6 +78,8 @@
           <tr>
             <th class="text-left p-2 border-b">Ad Account ID</th>
             <th class="text-left p-2 border-b">Name</th>
+            <th class="text-left p-2 border-b">Added by</th>
+            <th class="text-left p-2 border-b">Last change</th>
             <th class="text-left p-2 border-b w-40">Actions</th>
           </tr>
         </thead>
@@ -86,6 +88,8 @@
             <tr class="hover:bg-gray-50">
               <td class="p-2 border-b font-mono text-sm">{{ $r->ad_account_id }}</td>
               <td class="p-2 border-b">{{ $r->name }}</td>
+              <td class="p-2 border-b text-sm {{ $r->created_by ? '' : 'text-gray-400' }}">{{ $r->added_by_name }}</td>
+              <td class="p-2 border-b text-sm whitespace-nowrap">{{ $r->updated_at?->timezone('Asia/Manila')->format('M j, Y g:i A') }}</td>
               <td class="p-2 border-b">
                 <a
                   href="{{ route('ad_accounts.edit', ['ad_account_id' => $r->ad_account_id]) }}"
@@ -108,11 +112,64 @@
             </tr>
           @empty
             <tr>
-              <td colspan="3" class="p-4 text-center text-gray-500">No ad accounts yet.</td>
+              <td colspan="5" class="p-4 text-center text-gray-500">No ad accounts yet.</td>
             </tr>
           @endforelse
         </tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Change log: bawat dagdag, palit at bura, pinakabago muna -->
+  <div class="bg-white rounded shadow mt-4">
+    <h2 class="font-semibold text-lg p-4 pb-2">Change log</h2>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="text-left p-2 border-b">When</th>
+            <th class="text-left p-2 border-b">Who</th>
+            <th class="text-left p-2 border-b">Action</th>
+            <th class="text-left p-2 border-b">Ad Account ID</th>
+            <th class="text-left p-2 border-b">Name</th>
+          </tr>
+        </thead>
+        <tbody>
+          @forelse ($log as $e)
+            <tr class="hover:bg-gray-50 align-top">
+              <td class="p-2 border-b whitespace-nowrap">{{ $e->at ? \Illuminate\Support\Carbon::parse($e->at)->timezone('Asia/Manila')->format('M j, Y g:i A') : '—' }}</td>
+              <td class="p-2 border-b {{ $e->user_id ? '' : 'text-gray-400' }}">{{ $e->who }}</td>
+              <td class="p-2 border-b">
+                <span class="inline-block px-2 py-0.5 rounded text-xs
+                  {{ $e->action === 'deleted' ? 'bg-red-100 text-red-800' : ($e->action === 'changed' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800') }}">{{ $e->action }}</span>
+              </td>
+              <td class="p-2 border-b font-mono whitespace-nowrap">
+                @if ($e->old_ad_account_id !== null && $e->old_ad_account_id !== $e->ad_account_id)
+                  <span class="text-gray-500">{{ $e->old_ad_account_id }}</span> → {{ $e->ad_account_id }}
+                @else
+                  {{ $e->ad_account_id }}
+                @endif
+              </td>
+              <td class="p-2 border-b">
+                @if ($e->old_name !== null && $e->old_name !== $e->name)
+                  <span class="text-gray-500">{{ $e->old_name }}</span> → {{ $e->name }}
+                @elseif ($e->action === 'deleted')
+                  <span class="line-through text-gray-500">{{ $e->name }}</span>
+                @else
+                  {{ $e->name }}
+                @endif
+              </td>
+            </tr>
+          @empty
+            <tr>
+              <td colspan="5" class="p-4 text-center text-gray-500">Wala pang pagbabago.</td>
+            </tr>
+          @endforelse
+        </tbody>
+      </table>
+    </div>
+    @if ($log->hasPages())
+      <div class="p-3">{{ $log->links() }}</div>
+    @endif
   </div>
 </x-layout>
