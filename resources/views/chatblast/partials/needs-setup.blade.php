@@ -16,3 +16,16 @@
         </ul>
     </section>
 @endif
+{{-- Hindi maabot ang customer (Facebook #551/#100: na-block, deactivated): impormasyon lang, hindi setup, kaya walang Fix. --}}
+@if(!empty($unreachable))
+    @php($unreachTotal = array_sum(array_column($unreachable, 'count')))
+    <p id="unreachable-info" class="mb-3 text-xs text-gray-500">
+        Hindi na maabot ang customer (na-block / deactivated), {{ number_format($unreachTotal) }} sa huling {{ \App\Services\ChatblastNeedsSetup::DAYS }} araw:
+        @foreach(array_slice($unreachable, 0, 5) as $u){{ $u['page'] }} {{ number_format($u['count']) }}{{ !$loop->last ? ',' : '' }} @endforeach
+        @if(count($unreachable) > 5)
+            <details class="inline"><summary class="inline cursor-pointer underline">+{{ count($unreachable) - 5 }} pa</summary>
+                @foreach(array_slice($unreachable, 5) as $u){{ $u['page'] }} {{ number_format($u['count']) }}{{ !$loop->last ? ',' : '' }} @endforeach
+            </details>
+        @endif
+    </p>
+@endif

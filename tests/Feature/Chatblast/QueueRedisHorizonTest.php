@@ -63,7 +63,7 @@ class QueueRedisHorizonTest extends ChatblastTestCase
         // Horizon's chatblast supervisor works both queues, and every timeout stays under the Redis retry_after (no job runs twice).
         $this->assertSame(['chatblast-high', 'chatblast'], config('horizon.defaults.chatblast.queue'), 'a pool per queue: Delivering has its own workers');
         $this->assertGreaterThanOrEqual(2, config('horizon.defaults.chatblast.minProcesses'), 'per queue in balance auto');
-        $this->assertSame(['chatbot'], config('horizon.defaults.chatbot.queue'));
+        $this->assertSame(['chatbot-high', 'chatbot'], config('horizon.defaults.chatbot.queue'));
         $retry = config('queue.connections.redis.retry_after');
         foreach ([config('horizon.defaults.chatbot.timeout'), config('horizon.defaults.chatblast.timeout'), (new SendChatblastMessage($transit->id))->timeout, (new RunChatbotFlow(1))->timeout] as $timeout) {
             $this->assertLessThan($retry, $timeout);
@@ -94,8 +94,8 @@ class QueueRedisHorizonTest extends ChatblastTestCase
         ResumeChatbotWait::dispatch(1);
         RunChatbotSequenceStep::dispatch(1);
         SendChatblastMessage::dispatch($this->message('in_transit')->id);
-        foreach ([RunChatbotFlow::class, ResumeChatbotAi::class, ResumeChatbotWait::class, RunChatbotSequenceStep::class] as $job) {
-            $this->assertSame(['redis', 'chatbot'], [Queue::pushed($job)->first()->connection, Queue::pushed($job)->first()->queue], $job);
+        foreach ([RunChatbotFlow::class => 'chatbot-high', ResumeChatbotAi::class => 'chatbot-high', ResumeChatbotWait::class => 'chatbot', RunChatbotSequenceStep::class => 'chatbot'] as $job => $queue) {
+            $this->assertSame(['redis', $queue], [Queue::pushed($job)->first()->connection, Queue::pushed($job)->first()->queue], $job);
         }
         $this->assertSame(['redis-chatblast', 'chatblast'], [Queue::pushed(SendChatblastMessage::class)->first()->connection, Queue::pushed(SendChatblastMessage::class)->first()->queue]);
     }
