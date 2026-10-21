@@ -1822,3 +1822,14 @@ Spec 100. As the owner, I change the flow and its page values and see per versio
 | S-100.12 | Given the same filters, then /chatbot/results.json and `chatbot:results --page= --from= --to= --json` give the same JSON shape, with no customer message text, names or PSIDs; bad filters fall back to defaults (no error, no raw SQL) | `test_S_100_12…` | Passed · 2026-10-21 · auto |
 | S-100.13 | Given a user without /chatblast access, then the page and the JSON are 403; a guest is sent to sign-in; the Chatbot nav shows a Results tab to those with access | `test_S_100_13…` | Passed · 2026-10-21 · auto |
 | S-100.14 | At 1366 and 390 px: filters, funnel, the four tables and compare are readable; wide tables scroll inside their box, the page has no horizontal scroll; a version's value is folded and opens on click | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-102 Chatbot jobs are picked up at once, not after an idle sleep
+
+Spec 102. As the owner, I want the first AI reply sooner: a chatbot or chatblast job is taken by a Horizon worker as soon as it is queued, and the pools keep their short idle tick. Test: `tests/Feature/Chatblast/QueuePickupConfigTest.php`. The before and after numbers are in `docs/specs/102-queue-pickup.result.md`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-102.1 | Given no override, then the Redis queue blocks for 5 s on an empty queue, and the predis read-write timeout of its connection is 60 s, at least twice block_for, so a blocked worker's connection is never cut | `test_S_102_1…` | Passed · 2026-10-21 · auto |
+| S-102.2 | Given block_for > 0, then the chatbot and chatblast supervisors are on the redis connection with sleep 0 and balance auto (one queue per process, so a block on one queue never delays the other) | `test_S_102_2…` | Passed · 2026-10-21 · auto |
+| S-102.3 | Given REDIS_QUEUE_BLOCK_FOR=0, then block_for is null (polling as before, never a blpop of 0 that waits forever) and both supervisors sleep 3 s | `test_S_102_3…` | Passed · 2026-10-21 · auto |
+| S-102.4 | Given no override, the pools sleep 200 ms per idle tick and 5 ms per busy tick; CHATBOT_POOL_IDLE_MS and CHATBOT_POOL_BUSY_MS override them, and the pool loop uses the configured values | `test_S_102_4…` | Passed · 2026-10-21 · auto |
