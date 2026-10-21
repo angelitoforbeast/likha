@@ -948,3 +948,9 @@ Accepted, not fixed:
 - **`botcake:stress-page --stats` counts database `jobs` on `chatbot` only**, so with `CHATBOT_QUEUE_CONNECTION=database` it leaves out the reply path on `chatbot-high`. Reason: a test-page diagnostic on a trusted path. Production runs on Redis, where the number is 0 either way. The fix is `whereIn('queue', ['chatbot-high', 'chatbot'])`.
 - **No Horizon long-wait alert for `chatbot-high`** (`waits` lists only `redis:default`). Reason: `chatbot` had none either, and nothing reads Horizon's notifications today.
 - **The reply path only gets two workers of its own until the auto-balancer moves more** (every 3 s, up to 2 at a time). Reason: with the AI and the sends in their pools, a reply-path job takes milliseconds. In the local proof, with 5,000 steps queued, pickup averaged 1 ms (max 19 ms) at 5 chats/s. Raise `minProcesses` only if Horizon shows `chatbot-high` waiting.
+- Spec 107 accepted review minors (promo delete):
+  - The breakdown matrix list (`OwnerPrivateController` ~4049) now returns `'NONE'` instead of null for a legacy NULL promo; that is the "NULL reads as NONE" decision, and the matrix shows the value as is.
+  - Deleting a promo that is already NONE or '' writes no log row, the same as S-104.2 for an empty RTS.
+  - An RTS-only save with no promo to carry writes `'NONE'`, which ends an older promo added later with an earlier date; this follows the "one meaning for no promo" decision.
+
+  Reason: each one follows a fixed decision of the spec or an existing rule, and none is on an untrusted path with a realistic failure.

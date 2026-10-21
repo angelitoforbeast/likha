@@ -30,38 +30,122 @@ class ChatblastNeedsSetup
     {
     }
 
+    /** Ang mga dahilan ng failed na maaaring sagot ng Facebook na hindi maabot ang customer (hindi setup). */
+    private const CANDIDATE_REASONS = ['The flow was not sent (HTTP%', 'The custom field was not written%'];
+    /** Ang bahagi ng mga subok ng page na setup-side ang bagsak na nagpapasok sa kanya sa listahan. */
+    public const FAIL_RATE = 0.10;
+
     /**
-     * Pinakamaraming hindi naipadala muna.
+     * Pinakamaraming hindi naipadala muna. Ang page na bagsak lang dahil hindi maabot ang customer ay wala dito (nasa
+     * unreachable()); ang "Send failed" ay nakalista lang kapag ≥10% ng subok ng page ay setup-side ang bagsak sa 3 araw, o
+     * bagsak lahat ng subok sa huling oras.
      * @return array<int, array{page: string, group: string, count: int, latest: string}>
      */
     public function list(): array
     {
+        return $this->compute()['list'];
+    }
+
+    /**
+     * Ang mga page na may failed na sagot ng Facebook na hindi maabot ang customer (#551, #100): impormasyon lang.
+     * @return array<int, array{page: string, count: int}> pinakamarami muna
+     */
+    public function unreachable(): array
+    {
+        return $this->compute()['unreachable'];
+    }
+
+    /** Hindi maabot ang customer ang sagot ng Botcake sa flow o field step (#551 "isn't available", #100 "No matching user")? */
+    public static function isUnreachable(?array $steps): bool
+    {
+        foreach ((array) $steps as $s) {
+            if (!is_array($s) || !in_array($s['step'] ?? '', ['flow', 'write'], true)) continue;
+            $resp = is_string($s['response'] ?? null) ? $s['response'] : (string) json_encode($s['response'] ?? '');
+            if (preg_match('/\(#(551|100)\)/', $resp)) return true;
+        }
+
+        return false;
+    }
+
+    private function compute(): array
+    {
         return Cache::remember(self::CACHE, self::TTL, function () {
-            if (!Schema::hasTable('botcake_messages')) return [];
-            $rows = BotcakeMessage::where('created_at', '>=', now()->subDays(self::DAYS))->whereIn('status', self::STATUSES)->where('is_test', false)
-                ->selectRaw('page_name, status, reason, COUNT(*) AS n, MAX(created_at) AS latest')->groupBy('page_name', 'status', 'reason')->get();
+            if (!Schema::hasTable('botcake_messages')) return ['list' => [], 'unreachable' => []];
+            $since = now()->subDays(self::DAYS);
+            $hour = now()->subHour();
+            $candidate = function ($q) {
+                foreach (self::CANDIDATE_REASONS as $i => $like) $i ? $q->orWhere('reason', 'like', $like) : $q->where('reason', 'like', $like);
+            };
+
+            $rows = [];
+            foreach (BotcakeMessage::where('created_at', '>=', $since)->whereIn('status', self::STATUSES)->where('is_test', false)
+                ->where(fn ($q) => $q->where('status', '!=', 'failed')->orWhereNull('reason')->orWhereNot($candidate))
+                ->selectRaw('page_name, status, reason, COUNT(*) AS n, MAX(created_at) AS latest')->groupBy('page_name', 'status', 'reason')->get() as $r) {
+                $rows[] = ['page_name' => (string) $r->page_name, 'status' => (string) $r->status, 'reason' => (string) $r->reason, 'n' => (int) $r->n, 'latest' => $r->latest];
+            }
+
+            // Ang failed ng flow/field: tingnan sa steps kung hindi maabot ang customer ang sagot ng Botcake.
+            $unreach = []; $unreachHour = []; $unreachNames = [];
+            foreach (BotcakeMessage::where('created_at', '>=', $since)->where('status', 'failed')->where('is_test', false)->where($candidate)
+                ->get(['id', 'page_name', 'reason', 'steps', 'created_at']) as $m) {
+                $pk = $this->settings->pageKey((string) $m->page_name);
+                if (!self::isUnreachable($m->steps)) {
+                    $rows[] = ['page_name' => (string) $m->page_name, 'status' => 'failed', 'reason' => (string) $m->reason, 'n' => 1, 'latest' => $m->created_at];
+                    continue;
+                }
+                $unreach[$pk] = ($unreach[$pk] ?? 0) + 1;
+                if ($m->created_at >= $hour) $unreachHour[$pk] = ($unreachHour[$pk] ?? 0) + 1;
+                $name = $this->settings->normPage((string) $m->page_name);
+                $unreachNames[$pk][$name] = ($unreachNames[$pk][$name] ?? 0) + 1;
+            }
+
+            // Ilan ang subok ng bawat page at ilan ang bagsak na setup-side (hindi kasama ang hindi maabot ang customer).
+            $count = function ($from, array $unreachable) {
+                $tried = []; $bad = [];
+                $q = BotcakeMessage::where('created_at', '>=', $from)->where('is_test', false)->whereIn('status', ['sent', 'failed', 'field_mismatch', 'unknown'])
+                    ->selectRaw('page_name, status, COUNT(*) AS n')->groupBy('page_name', 'status')->get();
+                foreach ($q as $r) {
+                    $pk = $this->settings->pageKey((string) $r->page_name);
+                    $tried[$pk] = ($tried[$pk] ?? 0) + (int) $r->n;
+                    if (in_array($r->status, ['failed', 'field_mismatch'], true)) $bad[$pk] = ($bad[$pk] ?? 0) + (int) $r->n;
+                }
+                foreach ($unreachable as $pk => $n) $bad[$pk] = ($bad[$pk] ?? 0) - $n;
+
+                return [$tried, $bad];
+            };
+            [$tried, $bad] = $count($since, $unreach);
+            [$triedHour, $badHour] = $count($hour, $unreachHour);
+            $failing = fn (string $pk) => (($tried[$pk] ?? 0) > 0 && ($bad[$pk] ?? 0) / $tried[$pk] >= self::FAIL_RATE)
+                || (($triedHour[$pk] ?? 0) > 0 && ($badHour[$pk] ?? 0) >= $triedHour[$pk]);
 
             // Ang baybay ng page na ipinapakita: ang may pinakamaraming row (iba-iba ang baybay ng PAGE sa mga order).
-            $names = [];
+            $names = $unreachNames;
             foreach ($rows as $r) {
-                $pk = $this->settings->pageKey((string) $r->page_name);
-                $name = $this->settings->normPage((string) $r->page_name);
-                $names[$pk][$name] = ($names[$pk][$name] ?? 0) + (int) $r->n;
+                $pk = $this->settings->pageKey($r['page_name']);
+                $name = $this->settings->normPage($r['page_name']);
+                $names[$pk][$name] = ($names[$pk][$name] ?? 0) + $r['n'];
             }
             $names = array_map(function ($spellings) { arsort($spellings); return array_key_first($spellings); }, $names);
 
             $out = [];
             foreach ($rows as $r) {
-                $group = self::group((string) $r->status, (string) $r->reason);
-                $k = $this->settings->pageKey((string) $r->page_name) . '|' . $group;
-                $out[$k] ??= ['page' => $names[$this->settings->pageKey((string) $r->page_name)], 'group' => $group, 'count' => 0, 'latest' => ''];
-                $out[$k]['count'] += (int) $r->n;
-                $out[$k]['latest'] = max($out[$k]['latest'], Carbon::parse($r->latest)->timezone('Asia/Manila')->format('Y-m-d H:i'));
+                $pk = $this->settings->pageKey($r['page_name']);
+                $group = self::group($r['status'], $r['reason']);
+                // Ang invalid na token ay laging setup; ang ibang "Send failed" ay kapag ang setup-side na ang bagsak ng page.
+                if ($group === self::SEND_FAILED && !preg_match('/^(Token invalid|Stopped: token invalid)/', $r['reason']) && !$failing($pk)) continue;
+                $k = $pk . '|' . $group;
+                $out[$k] ??= ['page' => $names[$pk], 'group' => $group, 'count' => 0, 'latest' => ''];
+                $out[$k]['count'] += $r['n'];
+                $out[$k]['latest'] = max($out[$k]['latest'], Carbon::parse($r['latest'])->timezone('Asia/Manila')->format('Y-m-d H:i'));
             }
             $out = array_values($out);
             usort($out, fn ($a, $b) => [$b['count'], $a['page'], $a['group']] <=> [$a['count'], $b['page'], $b['group']]);
 
-            return $out;
+            $info = [];
+            foreach ($unreach as $pk => $n) $info[] = ['page' => $names[$pk], 'count' => $n];
+            usort($info, fn ($a, $b) => [$b['count'], $a['page']] <=> [$a['count'], $b['page']]);
+
+            return ['list' => $out, 'unreachable' => $info];
         });
     }
 

@@ -227,4 +227,16 @@ class ItemSummaryProfitMTest extends OwnerPrivateTestCase
         $this->assertNull($a['projected_profit_last_day']);
         $this->assertNull($a['projected_profit_last_day_m']);
     }
+
+    public function test_S_107_6_a_legacy_null_promo_reads_as_none_and_ends_the_earlier_promo(): void
+    {
+        $this->pageA();
+        DB::table('page_item_settings')->update(['promo' => null]);
+        DB::table('page_item_settings')->insert([
+            'page_name' => 'Pahina Alpha', 'item_name' => '1 x Zorblat Lamp', 'rts_pct' => 30, 'effective_date' => '2026-09-25',
+            'promo' => 'B1T1', 'mode_cod_int' => 599,
+        ]);
+
+        $this->assertSame('NONE', $this->rows()['pahina alpha']['promo']);
+    }
 }

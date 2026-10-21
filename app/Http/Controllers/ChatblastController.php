@@ -81,7 +81,7 @@ class ChatblastController extends Controller
         $this->checkAccess();
         $list = $needs->list();
 
-        return response()->json(['window_days' => \App\Services\ChatblastNeedsSetup::DAYS, 'pages' => \App\Services\ChatblastNeedsSetup::pageCount($list), 'rows' => $list]);
+        return response()->json(['window_days' => \App\Services\ChatblastNeedsSetup::DAYS, 'pages' => \App\Services\ChatblastNeedsSetup::pageCount($list), 'rows' => $list, 'unreachable' => $needs->unreachable()]);
     }
 
     /** "History" (/chatblast/history). */
@@ -104,6 +104,7 @@ class ChatblastController extends Controller
             'jntOff'    => $view === 'send' && !\App\Services\Jnt\JntAutoTrackSync::active(),
             // Ang "Needs setup" sa itaas ng To send.
             'needsSetup' => $view === 'send' ? app(\App\Services\ChatblastNeedsSetup::class)->list() : [],
+            'unreachable' => $view === 'send' ? app(\App\Services\ChatblastNeedsSetup::class)->unreachable() : [],
         ]);
     }
 

@@ -49,11 +49,13 @@
           View Records
         </a>
 
-        {{-- NEW: Ad Account ID button --}}
+        {{-- NEW: Ad Account ID button (kapareho ng access ng /ads_manager/ad_account) --}}
+        @if (\App\Support\NavAccess::allows(auth()->user()?->employeeProfile?->role ?? auth()->user()?->role, \App\Http\Controllers\AdAccountController::NAV_URL))
         <a href="{{ url('/ads_manager/ad_account') }}"
            class="px-4 py-2 rounded border border-gray-300 text-gray-800 hover:bg-gray-100">
           Ad Account ID
         </a>
+        @endif
       </div>
     </form>
   </div>

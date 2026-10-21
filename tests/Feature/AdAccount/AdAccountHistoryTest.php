@@ -23,6 +23,7 @@ class AdAccountHistoryTest extends OwnerPrivateTestCase
             'database/migrations/2025_10_19_131712_create_payment_activity_ads_manager_table.php',
             'database/migrations/2026_01_29_195919_add_remarks_to_payment_activity_ads_manager_table.php',
             'database/migrations/2026_10_31_100000_add_history_to_ad_accounts_table.php',
+            'database/migrations/2026_05_18_140000_create_nav_links_and_visibility_tables.php', // Ad Payment access
         ]);
     }
 
@@ -40,7 +41,10 @@ class AdAccountHistoryTest extends OwnerPrivateTestCase
 
     private function staff(string $name = 'Ana Marketing', string $email = 'ana@example.test'): User
     {
-        return User::create(['name' => $name, 'email' => $email, 'password' => 'secret-password'])->fresh();
+        $user = User::create(['name' => $name, 'email' => $email, 'password' => 'secret-password']);
+        $user->employeeProfile()->update(['role' => 'Marketing']); // nakikita ang Ad Payment, kaya pasok
+
+        return $user->fresh();
     }
 
     private function rows(string $adAccountId)

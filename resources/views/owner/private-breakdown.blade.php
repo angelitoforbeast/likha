@@ -382,6 +382,11 @@
     </span>
   </div>
 
+  {{-- Resulta ng delete: success o nababasang error --}}
+  <div x-show="notice" x-cloak role="status" aria-live="polite"
+       class="fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 rounded-lg px-4 py-2 text-sm font-medium text-white shadow-lg"
+       :class="noticeErr ? 'bg-red-600' : 'bg-emerald-600'" x-text="notice"></div>
+
   {{-- ── Edit modal (Set RTS% / Promo / Item Value) — malaki, hindi sikip ── --}}
   <div x-show="editField" x-cloak @keydown.escape.window="cancelEdit()" @click.self="cancelEdit()"
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -456,6 +461,8 @@
       editRow:   null,   // ang row na ine-edit
       editVal:   '',
       saving:    false,
+      notice:    '',     // toast pagkatapos ng delete
+      noticeErr: false,
 
       async init(){ await this.reload(); },
 
@@ -537,7 +544,10 @@
       async deleteEdit(){
         if (!this.editField || !this.canDeleteAnchor()) return;
         const f = this.editField, r = this.editRow;
-        if (!confirm('Burahin ang effective '+this.fieldLabel(f)+' anchor sa '+r.date+'?\nBabalik ito sa naunang value (inheritance).')) return;
+        const hint = f==='promo'
+          ? 'Kung may RTS pa sa date na ito, magiging NONE (walang promo) ang promo; kung wala, babalik sa naunang value.'
+          : 'Babalik ito sa naunang value (inheritance).';
+        if (!confirm('Burahin ang effective '+this.fieldLabel(f)+' anchor sa '+r.date+'?\n'+hint)) return;
         this.saving = true;
         try {
           const fd = new FormData();
@@ -551,10 +561,21 @@
             method:'POST', headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}, body: fd,
           });
           const j = await res.json().catch(()=>({}));
-          if (!res.ok || j.ok===false){ alert(j.message || 'Delete failed'); }
-          else { this.cancelEdit(); await this.reload(); }
-        } catch(e){ console.error(e); alert('Network error'); }
+          if (!res.ok || j.ok===false){
+            // 422 (validation) at ang sariling {ok:false} ng server ay nababasa; iba pa (hal. "Server Error") → generic.
+            const readable = (res.status===422 || j.ok===false) && j.message;
+            this.flash(readable ? j.message : 'Hindi nabura ang '+this.fieldLabel(f)+'. Subukan ulit.', true);
+          } else {
+            this.cancelEdit(); await this.reload();
+            this.flash('Nabura ang '+this.fieldLabel(f)+' sa '+r.date+'.', false);
+          }
+        } catch(e){ console.error(e); this.flash('Walang koneksyon — hindi nabura. Subukan ulit.', true); }
         finally { this.saving=false; }
+      },
+      flash(msg, isErr){
+        this.notice = msg; this.noticeErr = isErr;
+        clearTimeout(this._noticeT);
+        this._noticeT = setTimeout(()=>{ this.notice=''; }, isErr ? 6000 : 3000);
       },
 
       // ── Column visibility ────────────────────────────────────────────────
