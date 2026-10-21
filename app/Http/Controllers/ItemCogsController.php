@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use App\Models\Cogs;
+use App\Services\ItemSettingsLog;
 use Carbon\Carbon;
 
 class ItemCogsController extends Controller
@@ -160,11 +162,20 @@ class ItemCogsController extends Controller
             ], 422);
         }
 
-        // Upsert exact day in COGS
-        Cogs::updateOrCreate(
-            ['item_name' => $item, 'date' => $date],
-            ['unit_cost' => $data['price'], 'history_logs' => null]
-        );
+        // Upsert exact day in COGS — kasabay ang row sa edit log (old → new, sino)
+        DB::transaction(function () use ($item, $date, $data) {
+            $old = Cogs::where('item_name', $item)->whereDate('date', $date)->first(['unit_cost']);
+
+            Cogs::updateOrCreate(
+                ['item_name' => $item, 'date' => $date],
+                ['unit_cost' => $data['price'], 'history_logs' => null]
+            );
+
+            ItemSettingsLog::write($this->logRow($old ? 'update' : 'create', $item, $date) + [
+                'old_item_value' => $old?->unit_cost,
+                'new_item_value' => $data['price'],
+            ]);
+        });
 
         return response()->json(['ok' => true]);
     }
@@ -186,7 +197,15 @@ class ItemCogsController extends Controller
             return response()->json(['ok' => false, 'error' => 'Blank item name not allowed.'], 422);
         }
 
-        $deleted = Cogs::where('item_name', $item)->whereDate('date', $date)->delete();
+        $deleted = DB::transaction(function () use ($item, $date) {
+            $old = Cogs::where('item_name', $item)->whereDate('date', $date)->first(['unit_cost']);
+            $deleted = Cogs::where('item_name', $item)->whereDate('date', $date)->delete();
+
+            if ($deleted > 0) {
+                ItemSettingsLog::write($this->logRow('delete', $item, $date) + ['old_item_value' => $old?->unit_cost]);
+            }
+            return $deleted;
+        });
 
         return response()->json([
             'ok'      => true,
@@ -222,6 +241,7 @@ class ItemCogsController extends Controller
             ->select('item_name')->distinct()->pluck('item_name');
 
         $toDelete = [];
+        $logRows  = [];
         foreach ($items as $item) {
             // Baseline = latest cogs row BEFORE the month — yan ang inheritance
             // value coming into the month. Used to detect first-day redundancy.
@@ -235,11 +255,12 @@ class ItemCogsController extends Controller
             $rows = Cogs::where('item_name', $item)
                 ->whereBetween('date', [$start, $end])
                 ->orderBy('date')
-                ->get(['id', 'unit_cost']);
+                ->get(['id', 'unit_cost', 'date']);
 
             foreach ($rows as $r) {
                 if ($prev !== null && abs($prev - (float)$r->unit_cost) < 0.001) {
                     $toDelete[] = $r->id;
+                    $logRows[]  = $this->logRow('delete', $item, $r->date->toDateString()) + ['old_item_value' => $r->unit_cost];
                     // prev stays same — the value didn't actually change
                 } else {
                     $prev = (float) $r->unit_cost;
@@ -249,7 +270,10 @@ class ItemCogsController extends Controller
 
         $count = count($toDelete);
         if (!$preview && $count > 0) {
-            Cogs::whereIn('id', $toDelete)->delete();
+            DB::transaction(function () use ($toDelete, $logRows) {
+                Cogs::whereIn('id', $toDelete)->delete();
+                foreach ($logRows as $row) ItemSettingsLog::write($row);
+            });
         }
 
         return response()->json([
@@ -260,6 +284,19 @@ class ItemCogsController extends Controller
             'items_scanned'  => $items->count(),
             'month'          => $month->format('Y-m'),
         ]);
+    }
+
+    /** Edit log row ng isang COGS cell dito sa /item/cogs (global ang COGS, kaya walang page). */
+    private function logRow(string $action, string $item, string $date): array
+    {
+        return [
+            'user_email'     => Auth::user()?->email,
+            'action'         => $action,
+            'item_name'      => $item,
+            'effective_date' => $date,
+            'scope'          => 'cogs',
+            'source'         => 'item_cogs',
+        ];
     }
 
     /**
@@ -277,6 +314,9 @@ class ItemCogsController extends Controller
                 DATE(STR_TO_DATE(`{$col}`, '%d-%m-%Y %H:%i')),
                 DATE(STR_TO_DATE(`{$col}`, '%Y-%m-%d %H:%i:%s'))
             )";
+        } elseif ($driver === 'sqlite') {
+            // Tests lang (sqlite in-memory): 'YYYY-MM-DD HH:MM:SS' ang fixtures.
+            return "DATE(\"{$col}\")";
         } else {
             return "COALESCE(
                 (CASE WHEN pg_typeof(\"{$col}\")::text IN ('timestamp without time zone','timestamp with time zone','date')

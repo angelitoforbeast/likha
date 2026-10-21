@@ -3141,11 +3141,36 @@ class OwnerPrivateController extends Controller
         $cod   = isset($data['mode_cod_int']) ? (int) $data['mode_cod_int'] : null;
         $field = $data['field'];
 
+        // Edit log: isang 'delete' row kada nabura na field (old → NULL), kasabay ng delete.
+        $log = [
+            'user_email'     => Auth::user()?->email,
+            'action'         => 'delete',
+            'page_name'      => $page,
+            'item_name'      => $item,
+            'effective_date' => $eff,
+            'scope'          => $field,
+            'source'         => 'owner_private',
+        ];
+
         if ($field === 'cogs') {
-            DB::table('cogs')->where('item_name', $item)->where('date', $eff)->delete();
-            if (Schema::hasTable('cogs_ceo')) {
-                DB::table('cogs_ceo')->where('item_name', $item)->where('date', $eff)->delete();
-            }
+            DB::transaction(function () use ($item, $eff, $log) {
+                $oldCogs = DB::table('cogs')->where('item_name', $item)->where('date', $eff)->value('unit_cost');
+                $oldCeo  = Schema::hasTable('cogs_ceo')
+                    ? DB::table('cogs_ceo')->where('item_name', $item)->where('date', $eff)->value('unit_cost')
+                    : null;
+
+                DB::table('cogs')->where('item_name', $item)->where('date', $eff)->delete();
+                if (Schema::hasTable('cogs_ceo')) {
+                    DB::table('cogs_ceo')->where('item_name', $item)->where('date', $eff)->delete();
+                }
+
+                if ($oldCogs !== null || $oldCeo !== null) {
+                    \App\Services\ItemSettingsLog::write($log + [
+                        'old_item_value'     => $oldCogs,
+                        'old_item_value_ceo' => $oldCeo,
+                    ]);
+                }
+            });
         } else {
             $hasPromoCol = Schema::hasColumn('page_item_settings', 'promo');
             if ($field === 'promo' && !$hasPromoCol) {
@@ -3158,18 +3183,27 @@ class OwnerPrivateController extends Controller
                 ->where('effective_date', $eff);
             if ($cod !== null) $q->where('mode_cod_int', $cod);
 
-            foreach ($q->get() as $r) {
-                $newRts     = $field === 'rts'   ? null : ($r->rts_pct ?? null);
-                $newPromo   = $field === 'promo' ? null : ($hasPromoCol ? ($r->promo ?? null) : null);
-                $promoEmpty = ($newPromo === null || $newPromo === '');
-                if ($newRts === null && $promoEmpty) {
-                    DB::table('page_item_settings')->where('id', $r->id)->delete();
-                } else {
-                    DB::table('page_item_settings')->where('id', $r->id)->update([
-                        ($field === 'rts' ? 'rts_pct' : 'promo') => null,
-                    ]);
+            DB::transaction(function () use ($q, $field, $hasPromoCol, $log) {
+                foreach ($q->get() as $r) {
+                    $newRts     = $field === 'rts'   ? null : ($r->rts_pct ?? null);
+                    $newPromo   = $field === 'promo' ? null : ($hasPromoCol ? ($r->promo ?? null) : null);
+                    $promoEmpty = ($newPromo === null || $newPromo === '');
+                    if ($newRts === null && $promoEmpty) {
+                        DB::table('page_item_settings')->where('id', $r->id)->delete();
+                    } else {
+                        DB::table('page_item_settings')->where('id', $r->id)->update([
+                            ($field === 'rts' ? 'rts_pct' : 'promo') => null,
+                        ]);
+                    }
+
+                    $old = $field === 'rts' ? ($r->rts_pct ?? null) : ($r->promo ?? null);
+                    if ($old !== null && $old !== '') {
+                        \App\Services\ItemSettingsLog::write($log + [
+                            ($field === 'rts' ? 'old_rts_pct' : 'old_promo') => $old,
+                        ]);
+                    }
                 }
-            }
+            });
         }
 
         self::bumpCacheVersion();
@@ -3214,6 +3248,15 @@ class OwnerPrivateController extends Controller
             $query->where('l.scope', $scopeFilter);
         }
 
+        // Source filter: owner_private | item_cogs | cogs_sync. NULL (lumang row) = owner_private.
+        $sourceFilter = strtolower(trim((string) $request->query('source', '')));
+        $hasSourceCol = Schema::hasColumn('page_item_settings_log', 'source');
+        if ($hasSourceCol && $sourceFilter === 'owner_private') {
+            $query->where(fn ($q) => $q->whereNull('l.source')->orWhere('l.source', 'owner_private'));
+        } elseif ($hasSourceCol && in_array($sourceFilter, ['item_cogs', 'cogs_sync'], true)) {
+            $query->where('l.source', $sourceFilter);
+        }
+
         // Optional: only rows where SOMETHING actually changed (skip no-ops).
         // A "change" = any of rts/promo/cogs/cogs_ceo old != new.
         if ($changedOnly) {
@@ -3234,7 +3277,7 @@ class OwnerPrivateController extends Controller
         $allUsers = DB::table('page_item_settings_log')
             ->whereNotNull('user_email')->distinct()->orderBy('user_email')->pluck('user_email');
         $allPages = DB::table('page_item_settings_log')
-            ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
+            ->whereNotNull('page_name')->where('page_name', '<>', '')->distinct()->orderBy('page_name')->pluck('page_name');
 
         return view('owner.edit_logs', [
             'rows'         => $rows,
@@ -3248,6 +3291,8 @@ class OwnerPrivateController extends Controller
             'scopeFilter'  => $scopeFilter,
             'changedOnly'  => $changedOnly,
             'hasScopeCol'  => $hasScopeCol,
+            'sourceFilter' => $sourceFilter,
+            'hasSourceCol' => $hasSourceCol,
             // CEO-only column gate. Non-CEO viewers (e.g., Marketing-OIC) never
             // see cogs_ceo deltas — they exist sa row pero hindi nire-render.
             'isCeoView'    => $this->isCEO(),

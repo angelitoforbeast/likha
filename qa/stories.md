@@ -1850,3 +1850,18 @@ Spec 103. As the owner, I want to see who added, renamed or deleted each ad acco
 | S-103.8 | Given 51 log entries, then the change log shows 50 per page, newest first, and page 2 has the oldest | `test_S_103_8…` | Passed · 2026-10-21 · auto |
 | S-103.9 | Given an ad account with an inactive old name and a deleted ad account, then payment records and the ad account dropdown show the active name once per payment and the raw ID for the deleted one, and the total is unchanged; campaign data names the account from the active row | `test_S_103_9…` (2 tests) | Passed · 2026-10-21 · auto |
 | S-103.10 | At 1366 and 390 px: the table with "Added by" and "Last change" and the change log are readable; wide tables scroll inside their box, the page has no horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-104 Every change to RTS, promo and COGS is in the one edit log, deletes and /item/cogs included
+
+Spec 104. As the owner, I want every write to RTS %, promo and COGS in `/owner/private/edit-logs`, with who did it and where (/owner/private, /item/cogs, cogs sync), so that no value changes or vanishes without a trace. Test: `tests/Feature/OwnerPrivate/ItemSettingsLogTest.php`. The page is checked in headless Chrome at 1366 and 390 px (screenshots in `docs/specs/104-item-settings-log-gaps/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-104.1 | Given a set RTS, promo or COGS (+ CEO COGS), when the CEO deletes that field on /owner/private, then one log row has action delete, source owner_private, the user, page/item/date, and old value → NULL | `test_S_104_1…` (rts, promo, cogs) | Passed · 2026-10-21 · auto |
+| S-104.2 | Given a field with no value, when it is deleted on /owner/private, then no log row is written | `test_S_104_2…` | Passed · 2026-10-21 · auto |
+| S-104.3 | Given a COGS cell, when a user edits it (existing → update, new → create) or deletes it on /item/cogs, then a log row has old → new, the user, item, date, source item_cogs; deleting a cell with no row writes nothing | `test_S_104_3…` | Passed · 2026-10-21 · auto |
+| S-104.4 | Given a redundant COGS anchor, when "clean redundant" removes it on /item/cogs, then a delete row is logged per removed cell | `test_S_104_4…` | Passed · 2026-10-21 · auto |
+| S-104.5 | When cogs sync inserts rows, then only rows that got a value (NULL → carry) are logged, with no user and source cogs_sync; skipped rows and NULL rows write nothing | `test_S_104_5…` | Passed · 2026-10-21 · auto |
+| S-104.6 | Given delete, /item/cogs and sync rows, then edit-logs shows DELETE, the source label, "system (cogs sync)", deleted values struck through, and filters by source and item; the global '' page is not a Page option | `test_S_104_6…` | Passed · 2026-10-21 · auto |
+| S-104.7 | Given old rows (no source), then they show as before, labelled /owner/private, and the owner_private filter includes them | `test_S_104_7…` | Passed · 2026-10-21 · auto |
+| S-104.8 | At 1366 and 390 px the edit-logs page is readable; the table scrolls inside its box, the page has no horizontal scroll | browser | pending |
