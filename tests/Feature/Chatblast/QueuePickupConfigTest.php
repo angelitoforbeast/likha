@@ -32,6 +32,11 @@ class QueuePickupConfigTest extends TestCase
     {
         foreach ($vars as $key => $value) {
             if (!array_key_exists($key, $this->saved)) $this->saved[$key] = getenv($key);
+            if ($value === null) {
+                putenv($key);
+                unset($_ENV[$key], $_SERVER[$key]);
+                continue;
+            }
             putenv("$key=$value");
             $_ENV[$key] = $_SERVER[$key] = $value;
         }
@@ -44,6 +49,8 @@ class QueuePickupConfigTest extends TestCase
 
     public function test_S_102_1_redis_queue_blocks_and_the_predis_timeout_is_safely_above_it(): void
     {
+        // Ang defaults, hindi ang env ng makina.
+        $this->env(['REDIS_QUEUE_BLOCK_FOR' => null, 'REDIS_CLIENT' => null, 'REDIS_READ_WRITE_TIMEOUT' => null, 'REDIS_QUEUE_CONNECTION' => null]);
         $queue = $this->load('queue.php')['connections']['redis'];
         $redis = $this->load('database.php')['redis'];
         $conn = $redis[$queue['connection']];
@@ -68,13 +75,15 @@ class QueuePickupConfigTest extends TestCase
 
     public function test_S_102_3_block_for_zero_restores_polling(): void
     {
-        $this->env(['REDIS_QUEUE_BLOCK_FOR' => '0']);
+        foreach (['0', '-1'] as $value) {
+            $this->env(['REDIS_QUEUE_BLOCK_FOR' => $value]);
 
-        // null, hindi 0: ang 0 sa blpop ay naghihintay nang walang hanggan.
-        $this->assertNull($this->load('queue.php')['connections']['redis']['block_for']);
-        $horizon = $this->load('horizon.php')['defaults'];
-        $this->assertSame(3, $horizon['chatbot']['sleep']);
-        $this->assertSame(3, $horizon['chatblast']['sleep']);
+            // null, hindi 0: ang 0 sa blpop ay naghihintay nang walang hanggan.
+            $this->assertNull($this->load('queue.php')['connections']['redis']['block_for'], $value);
+            $horizon = $this->load('horizon.php')['defaults'];
+            $this->assertSame(3, $horizon['chatbot']['sleep'], $value);
+            $this->assertSame(3, $horizon['chatblast']['sleep'], $value);
+        }
     }
 
     public function test_S_102_4_pool_intervals_come_from_config_with_env_overrides(): void
