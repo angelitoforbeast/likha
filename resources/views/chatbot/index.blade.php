@@ -296,12 +296,15 @@
     }
 
     // ---- Check column ----
-    // Ang mga icon na gamit sa Likha (gaya ng Check sa page settings): bilog na may check, o bilog na may X.
-    const ICON_PATHS = {ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>', x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'};
+    // Ang mga icon na gamit sa Likha (gaya ng Check sa page settings): bilog na may check, bilog na may X, o tatsulok na
+    // babala (amber: ang content check na hindi sigurado).
+    const ICON_PATHS = {ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>', x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+        warn: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'};
+    const ICON_COLORS = {ok: 'text-green-600', x: 'text-red-600', warn: 'text-amber-600'};
     function icon(kind, label) {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         for (const [k, v] of Object.entries({viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-            class: 'h-4 w-4 shrink-0 ' + (kind === 'ok' ? 'text-green-600' : 'text-red-600'), role: 'img', 'aria-label': label})) svg.setAttribute(k, v);
+            class: 'h-4 w-4 shrink-0 ' + ICON_COLORS[kind], role: 'img', 'aria-label': label})) svg.setAttribute(k, v);
         svg.innerHTML = ICON_PATHS[kind]; // nakapirming SVG, walang data mula sa labas
         return svg;
     }
@@ -315,9 +318,15 @@
         const c = checks.get(page), out = [];
         if (checking.has(page) || !c) out.push(el('span', {class: 'text-slate-400', text: c?.error || 'Checking…'}));
         else if (c.status === 'none') out.push(el('span', {class: 'text-slate-400', text: '—', title: 'No flow picked'}));
-        else if (c.status === 'ok') out.push(el('div', {class: 'flex items-start gap-1'}, [icon('ok', 'Check passed'), el('span', {class: 'text-green-700', text: 'All values pass'})]));
-        else out.push(el('div', {class: 'flex items-start gap-1'}, [icon('x', 'Check failed'), el('ul', {class: 'min-w-0 space-y-0.5 text-red-700'}, c.reasons.map(t => el('li', {class: 'break-words', text: t})))]));
+        else if (c.status === 'ok' && !c.warnings?.length) out.push(el('div', {class: 'flex items-start gap-1'}, [icon('ok', 'Check passed'), el('span', {class: 'text-green-700', text: 'All values pass'})]));
+        else if (c.status !== 'ok') out.push(el('div', {class: 'flex items-start gap-1'}, [icon('x', 'Check failed'), el('ul', {class: 'min-w-0 space-y-0.5 text-red-700'}, c.reasons.map(t => el('li', {class: 'break-words', text: t})))]));
+        // Ang content check na hindi sigurado: babala (amber), hindi X.
+        if (c?.warnings?.length) out.push(el('div', {class: 'flex items-start gap-1' + (c.status === 'ok' ? '' : ' mt-1')}, [icon('warn', 'Check warning'), el('ul', {class: 'min-w-0 space-y-0.5 text-amber-700'}, c.warnings.map(t => el('li', {class: 'break-words', text: t})))]));
         if (c?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.unchecked + ' image link' + (c.unchecked === 1 ? '' : 's') + ' not checked yet'}));
+        if (c?.content?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.content.unchecked + ' content check' + (c.content.unchecked === 1 ? '' : 's') + ' not done yet'}));
+        // Ang item na pinagkukumparahan at kung saan galing (orders, ads o item settings).
+        const exp = c?.content?.expected;
+        if (exp) out.push(el('div', {class: 'text-slate-500 break-words', text: 'Item: ' + exp.item + (exp.price !== null ? ' ₱' + exp.price : '') + ' (' + ({orders: 'orders, 3 days', ads: 'ads', item_settings: 'item settings'}[exp.source] || exp.source) + ')'}));
         if (c && !checking.has(page) && c.status) {
             const again = el('button', {type: 'button', class: 'text-blue-700 underline hover:text-blue-900', text: 'Check again', 'aria-label': 'Check ' + page + ' again'});
             again.addEventListener('click', ev => { ev.stopPropagation(); runCheck(page, true); });
