@@ -195,7 +195,10 @@ class ChatbotContentCheckTest extends ChatblastTestCase
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Uno', 'chatbot', 'main_flow', 'Text about a clip holder');
         $this->settings()->set('Page Uno', 'chatbot', 'main_flow_2', 'Text about a cushion cover');
-        $this->settings()->set('Page Uno', 'chatbot', 'fill_up_form', 'Text about a light');
+        $this->settings()->set('Page Uno', 'chatbot', 'fill_up_form', "Name:
+Phone:
+Address:
+Landmark:");
         $this->answers = [
             'Text about a clip holder' => $this->answer('FLEXIBLE CLIP PHONE HOLDER', false, 90),
             'Text about a cushion cover' => $this->answer('Car seat cushion cover', true, 85),
@@ -206,13 +209,16 @@ class ChatbotContentCheckTest extends ChatblastTestCase
         $res = $this->check();
         $this->assertSame('x', $res['status']);
         $this->assertSame(['Main Flow: FLEXIBLE CLIP PHONE HOLDER ≠ orders: SEAT COVER (90%)'], $res['reasons']);
-        $this->assertSame(['Fill-Up Form: maybe LED STRIP, orders: SEAT COVER (55%)'], $res['warnings']);
+        $this->assertSame([], $res['warnings']);
 
         // Mababang kumpiyansa lang: babala, hindi X.
         $this->orders('Page Dos', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Dos', 'chatbot', 'main_flow', 'Text about a light');
         $this->settings()->set('Page Dos', 'chatbot', 'main_flow_2', 'Text about a cushion cover');
-        $this->settings()->set('Page Dos', 'chatbot', 'fill_up_form', 'Text about a cushion cover');
+        $this->settings()->set('Page Dos', 'chatbot', 'fill_up_form', "Name:
+Phone:
+Address:
+Landmark:");
         $this->content('Page Dos');
         $dos = $this->check('Page Dos');
         $this->assertSame(['ok', [], ['Main Flow: maybe LED STRIP, orders: SEAT COVER (55%)']], [$dos['status'], $dos['reasons'], $dos['warnings']]);
@@ -224,10 +230,12 @@ class ChatbotContentCheckTest extends ChatblastTestCase
             'total equals the COD' => [[['total' => 299]], 299, []],
             'item price plus shipping equals the COD' => [[['item_price' => 249, 'shipping' => 50]], 299, []],
             'item price plus shipping and insurance' => [[['item_price' => 199, 'shipping' => 50, 'insurance' => 50]], 299, []],
+            'item price plus a list of fees (S-114.1)' => [[['item_price' => 199, 'fees' => [60, 40], 'total' => null]], 299, []],
+            'stated total with fees (S-114.3)' => [[['item_price' => 199, 'fees' => [], 'total' => 299]], 299, []],
             'item price alone equals the COD' => [[['item_price' => 299]], 299, []],
             'one of several options matches' => [[['total' => 499], ['total' => 299]], 299, []],
-            'item price alone differs' => [[['item_price' => 199]], 299, ['Main Flow: price ₱199 ≠ orders ₱299 COD']],
-            'item price plus shipping differs' => [[['item_price' => 199, 'shipping' => 50]], 299, ['Main Flow: price ₱199 + ₱50 shipping = ₱249 ≠ orders ₱299 COD']],
+            'item price alone differs (S-114.2)' => [[['item_price' => 199, 'fees' => []]], 299, ['Main Flow: price ₱199 ≠ orders ₱299 COD']],
+            'item price plus shipping differs' => [[['item_price' => 199, 'shipping' => 50]], 299, ['Main Flow: price ₱199 + ₱50 = ₱249 ≠ orders ₱299 COD']],
             'total differs' => [[['total' => 350]], 299, ['Main Flow: price ₱350 ≠ orders ₱299 COD']],
             'no price stated' => [[], 299, []],
             'no expected price (ads source)' => [[['item_price' => 199]], null, []],
@@ -247,6 +255,36 @@ class ChatbotContentCheckTest extends ChatblastTestCase
         $this->assertSame($x, $this->reasons($this->content(), 'x'));
     }
 
+    public function test_S_114_4_the_fill_up_form_is_checked_for_its_fields_without_ai_and_a_missing_one_warns(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'fill_up_form', "Pangalan:\nCellphone Number:\nComplete Address:\nLandmark:\nQuantity:");
+
+        $res = $this->content();
+        $this->assertSame([], $res['findings']);
+        $this->assertSame(0, $this->aiCalls());
+
+        $this->settings()->set('Page Uno', 'chatbot', 'fill_up_form', "Full Name:\nPhone Number:\nAddress:");
+        $this->assertSame(['Fill-Up Form: walang Landmark'], $this->reasons($this->content(), 'warn'));
+        $this->assertSame(0, $this->aiCalls());
+    }
+
+    public function test_S_114_5_an_old_cached_text_answer_without_the_fees_shape_is_asked_again_once(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'main_flow', 'Seat cover text');
+        $row = $this->settings()->allWithIds('Page Uno', 'chatbot')['main_flow'];
+        $old = sha1("text\0v" . $row['id'] . ':' . sha1('Seat cover text') . "\0SEAT COVER");
+        DB::table('chatbot_content_answers')->insert(['cache_key' => $old, 'kind' => 'text', 'page_name' => 'Page Uno', 'field' => 'Main Flow',
+            'expected_item' => 'SEAT COVER', 'answer' => json_encode($this->answer('SEAT COVER', true, 95, [['item_price' => 199, 'shipping' => null, 'insurance' => null, 'total' => null]])),
+            'created_at' => now(), 'updated_at' => now()]);
+        $this->answers = ['Seat cover text' => $this->answer('SEAT COVER', true, 95, [['item_price' => 199, 'fees' => [60, 40], 'total' => null]])];
+
+        $this->assertSame(1, $this->content('Page Uno', false)['unchecked']);
+        $this->assertSame([], $this->reasons($this->content(), 'x'));
+        $this->content();
+        $this->assertSame(1, $this->aiCalls());
+    }
     public function test_S_106_5_at_most_5_images_are_asked_picture_first_and_another_item_is_a_reason(): void
     {
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
@@ -362,10 +400,10 @@ class ChatbotContentCheckTest extends ChatblastTestCase
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Uno', 'chatbot', 'main_flow', 'Good text');
         $this->settings()->set('Page Uno', 'chatbot', 'main_flow_2', 'Down text');
-        $this->settings()->set('Page Uno', 'chatbot', 'fill_up_form', 'Broken text');
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_img_1', self::IMG . 'seq.jpg');
         $this->settings()->set('Page Uno', 'chatbot', 'picture', self::IMG . 'pic.jpg');
         // Ang "true" na string ay tinatanggap (hindi itinatanong ulit gabi-gabi).
-        $this->answers = ['Good text' => $this->answer('SEAT COVER', true, 95), 'Down text' => 503, 'Broken text' => 'not json at all',
+        $this->answers = ['Good text' => $this->answer('SEAT COVER', true, 95), 'Down text' => 503, self::IMG . 'seq.jpg' => 'not json at all',
             self::IMG . 'pic.jpg' => ['found_item' => 'SEAT COVER', 'same_product' => 'true', 'confidence' => '90']];
 
         $res = $this->content();
