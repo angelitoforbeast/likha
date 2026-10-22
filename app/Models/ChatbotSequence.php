@@ -9,12 +9,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class ChatbotSequence extends Model
 {
     public const MAX_STEPS = 50;
+    public const START_ORDER = 'order_uploaded'; // starts_on: kusang nagsisimula kapag na-upload ang order ng customer
 
     /**
      * Ang send_from, send_to at outside_window ay nasa table pa pero hindi na ginagamit: ang step ay sa delay nito, anumang
-     * oras, at laging nilalaktawan kapag lampas 24 oras mula sa huling mensahe ng customer.
+     * oras, at tinatapos ang subscription (outside 24h) kapag lampas 24 oras mula sa huling mensahe ng customer.
      */
-    protected $fillable = ['name', 'description', 'active', 'exit_on_reply'];
+    protected $fillable = ['name', 'description', 'active', 'exit_on_reply', 'starts_on'];
 
     protected $casts = ['active' => 'boolean', 'exit_on_reply' => 'boolean'];
 

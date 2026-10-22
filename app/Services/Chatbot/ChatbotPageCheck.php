@@ -29,6 +29,7 @@ class ChatbotPageCheck
     public const CACHE_SECONDS = 600;
     public const MAX_URL_CHECKS = 20;
     public const URL_SECONDS = 20; // ang kabuuang oras ng mga tawag sa link kada takbo: ang lampas ay "not checked yet", hindi timeout ng request
+    private const OPTIONAL = '/^(seq_(img_)?(1[1-9]|20)|after_order_(img_)?\d+)$/'; // hindi kailanman Missing: walang laman = walang ipapadala
     private const MAX_FLOWS = 50; // ang flow at ang mga flow ng sequence nito
 
     public function __construct(private PageSettings $settings, private ChatbotFields $fields, private ImageLinkCheck $images, private PageContentCheck $content)
@@ -117,7 +118,7 @@ class ChatbotPageCheck
         unset($used['flow']);
 
         $reasons = [];
-        $missing = array_values(array_filter(array_keys($labels), fn ($k) => isset($used[$k]) && ($values[$k] ?? '') === ''));
+        $missing = array_values(array_filter(array_keys($labels), fn ($k) => isset($used[$k]) && ($values[$k] ?? '') === '' && !preg_match(self::OPTIONAL, $k)));
         if ($missing) $reasons[] = 'Missing: ' . implode(', ', array_map(fn ($k) => $labels[$k], $missing));
 
         $calls = 0;

@@ -26,6 +26,7 @@
         <div class="flex flex-col gap-2">
             <label class="flex items-center gap-2"><input type="checkbox" name="active" @checked($sequence->active)> Active (sends steps)</label>
             <label class="flex items-center gap-2"><input type="checkbox" name="exit_on_reply" @checked($sequence->exit_on_reply)> Exit when the customer replies</label>
+            <label class="flex items-center gap-2"><input type="checkbox" name="starts_on" @checked($sequence->starts_on === \App\Models\ChatbotSequence::START_ORDER)> Start by itself when the customer's order is uploaded</label>
         </div>
     </section>
 
@@ -108,7 +109,7 @@
         e.preventDefault();
         if (steps.some(s => !s.flow_id)) return note('Pick a flow for every step.', 'text-red-700');
         const f = new FormData(form);
-        const body = {name: f.get('name'), description: f.get('description'), active: form.active.checked, exit_on_reply: form.exit_on_reply.checked,
+        const body = {name: f.get('name'), description: f.get('description'), active: form.active.checked, exit_on_reply: form.exit_on_reply.checked, starts_on: form.starts_on.checked ? 'order_uploaded' : null,
             steps: steps.map(s => ({delay_amount: s.delay_amount === '' ? null : s.delay_amount, delay_unit: s.delay_unit, flow_id: s.flow_id, active: !!s.active}))};
         $('sq-save').disabled = true; note('Saving…', 'text-slate-500');
         const res = await fetch(form.dataset.url, {method: 'PUT', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify(body)});
