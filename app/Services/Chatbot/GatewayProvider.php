@@ -10,16 +10,18 @@ use Throwable;
 /**
  * Ang padala sa Forbeast Gateway: POST /v1/pages/{page_id}/messages (Bearer key). Ang 2xx ay tinanggap ng gateway (siya
  * ang nag-aayos ng pagkakasunod kada PSID at ng rate kada page). Walang retry dito: ang parehong client_ref ay hindi
- * nadodoble sa gateway. Walang URL o key: failed, walang tawag.
+ * nadodoble sa gateway. Ang key ay ang Forbeast token ng page, o ang global GATEWAY_KEY. Walang URL o key: failed, walang tawag.
  */
 class GatewayProvider implements MessagingProvider
 {
-    public const NOT_SET_UP = 'Forbeast is not set up (GATEWAY_URL or GATEWAY_KEY is empty).';
+    public const NOT_SET_UP = 'Forbeast is not set up (GATEWAY_URL is empty, or no Forbeast token and no GATEWAY_KEY).';
 
     public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef): array
     {
         $url = rtrim((string) config('services.gateway.url'), '/'); // may carry a path prefix (e.g. https://host/api)
-        $key = trim((string) config('services.gateway.key'));
+        // Ang Forbeast token ng page (sariling page lang ang sakop); kung wala, ang global GATEWAY_KEY.
+        $key = app(ForbeastPageSetup::class)->token($pageName);
+        if ($key === '') $key = trim((string) config('services.gateway.key'));
         if ($url === '' || $key === '') return ['status' => 'failed', 'error' => self::NOT_SET_UP, 'http' => null];
 
         $timeout = max(1, (int) config('services.gateway.timeout', 10));

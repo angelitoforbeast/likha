@@ -12,7 +12,7 @@ Route::post('/automation/macro-import', [AutomationController::class, 'macroImpo
 // naiwang GET ang block.
 Route::match(['get', 'post'], '/botcake/chat', [BotcakeChatController::class, 'receive'])->middleware('throttle:botcake-chat');
 
-// Mga event ng Forbeast Gateway (pinirmahan ng GATEWAY_WEBHOOK_SECRET, walang session o CSRF).
+// Mga event ng Forbeast Gateway (pinirmahan ng webhook secret ng page, o ng GATEWAY_WEBHOOK_SECRET; walang session o CSRF).
 Route::post('/gateway/events', [\App\Http\Controllers\GatewayEventController::class, 'receive']);
 
 // Read-only staff feed para sa assistant ng owner (header X-STAFF-FEED-KEY, sariling key).

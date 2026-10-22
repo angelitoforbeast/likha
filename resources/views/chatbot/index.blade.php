@@ -56,6 +56,8 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
+     data-forbeast-token-url="{{ route('chatbot.forbeast-token') }}"
+     data-needs-token="{{ \App\Services\Chatbot\ForbeastPageSetup::NEEDS_TOKEN }}"
      @if($isCeo) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}" @endif>
 
     <div class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
@@ -219,6 +221,7 @@
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
     let columns = [], rows = [], flows = [], editing = null, gatewayReady = false;
+    const NEEDS_TOKEN = url.needsToken; // ang dahilan kapag hindi mapipili ang Forbeast
     const picked = new Set(); // mga page na may check (bulk "Replies via")
     const marks = new Map(), seqs = new Map(), errors = new Map();
     let openRow = null; // ang page ng row na bukas (isa lang)
@@ -500,10 +503,43 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r));
+        td.append(b, providerSelect(r), forbeastBox(r));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
         return td;
+    }
+
+    // Ang Forbeast token ng page (gaya ng Botcake token): "Forbeast connected" o ang status, saka Add/New token (i-paste),
+    // Test at Clear. Huling 4 lang ng token ang galing sa server.
+    function forbeastBox(r) {
+        const f = r.forbeast || {}, box = el('div', {class: 'mt-1 max-w-[12rem] text-xs'});
+        const bad = f.status && !f.status.startsWith('ok');
+        box.append(el('div', {class: 'break-words ' + (f.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500')),
+            text: (f.connected ? 'Forbeast connected' : (f.status || (f.token ? 'Forbeast: not tested' : 'No Forbeast token'))) + (f.token ? ' (' + f.token + ')' : ''), title: f.status || ''}));
+        const btn = (text, label, fn) => {
+            const b = el('button', {type: 'button', class: 'mr-1 mt-0.5 rounded border border-slate-300 px-1 text-[11px] text-slate-600 hover:bg-slate-50', text, 'aria-label': label + ', ' + r.page});
+            b.addEventListener('click', () => fn(b));
+            return b;
+        };
+        box.append(btn(f.token ? 'New token' : 'Add token', 'Forbeast token', b => {
+            const token = (prompt('Paste the Forbeast token of ' + r.page + ' (starts with fbp_). It is tested and the page is connected right away.') || '').trim();
+            if (token) forbeastSave(r, b, {token});
+        }));
+        if (f.token) {
+            box.append(btn('Test', 'Test the Forbeast token', b => forbeastSave(r, b, {})));
+            box.append(btn('Clear', 'Clear the Forbeast token', b => { if (confirm('Remove the Forbeast token of ' + r.page + ' and disconnect the page from Forbeast?')) forbeastSave(r, b, {clear: true}); }));
+        }
+        return box;
+    }
+    async function forbeastSave(r, b, body) {
+        b.disabled = true; b.textContent = '…';
+        try {
+            const {ok, data} = await post(url.forbeastTokenUrl, Object.assign({page_name: r.page}, body));
+            if (!ok) errors.set(r.page, data.error || data.message || 'Not changed.');
+            else if (data.forbeast?.error) errors.set(r.page, data.forbeast.error);
+            else errors.delete(r.page);
+        } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
+        load(); // ang bagong token, status at "Replies via" ng row mula sa server
     }
 
     function pickBox(r) {
@@ -523,6 +559,8 @@
     $('bulk-apply').addEventListener('click', async () => {
         const names = [...picked].filter(p => rows.some(r => r.page === p)), want = $('bulk-provider').value;
         if (!names.length) return;
+        const notReady = want === 'gateway' ? names.filter(p => !rows.find(r => r.page === p)?.forbeast?.ready) : [];
+        if (notReady.length) { notice(NEEDS_TOKEN + ': ' + notReady.join(', '), 'text-red-600'); return; }
         const label = want === 'gateway' ? 'Forbeast' : 'Botcake';
         if (!confirm('Send and receive the chats of these ' + names.length + ' page' + (names.length === 1 ? '' : 's') + ' through ' + label + '?\n\n' + names.join('\n'))) return;
         $('bulk-apply').disabled = true;
@@ -534,11 +572,13 @@
         render();
     });
 
-    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast (hindi mapipili kapag hindi pa naka-set up).
+    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast (hindi mapipili kapag hindi pa naka-set up, o
+    // walang gumaganang Forbeast token ang page at walang global key).
     function providerSelect(r) {
-        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via, ' + r.page, title: 'Replies via'}, [
+        const ready = gatewayReady && !!r.forbeast?.ready;
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via, ' + r.page, title: ready ? 'Replies via' : NEEDS_TOKEN}, [
             el('option', {value: 'botcake', text: 'Botcake'}),
-            el('option', {value: 'gateway', text: 'Forbeast' + (gatewayReady ? '' : ' (not set up)'), disabled: gatewayReady ? null : ''}),
+            el('option', {value: 'gateway', text: 'Forbeast' + (!gatewayReady ? ' (not set up)' : (ready ? '' : ' (add the token first)')), disabled: ready ? null : ''}),
         ]);
         sel.value = r.provider || 'botcake';
         sel.addEventListener('change', async () => {

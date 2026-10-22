@@ -10,6 +10,7 @@ use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotPageCheck;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
+use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -83,6 +84,7 @@ class ChatbotController extends Controller
         // Ang Check: ang naka-cache lang (ang wala pa ay kinukuha ng page isa-isa sa /chatbot/check).
         $check = app(ChatbotPageCheck::class);
         $prints = $check->prints();
+        $forbeast = app(ForbeastPageSetup::class);
 
         $rows = [];
         foreach ($pages as $page) {
@@ -110,7 +112,7 @@ class ChatbotController extends Controller
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
-                'check' => $check->cached($page, $prints),
+                'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
             ];
         }
 
@@ -222,7 +224,7 @@ class ChatbotController extends Controller
 
     /**
      * Ang daan ng chatbot ng page: Botcake o ang Forbeast Gateway (chatbot.provider, may history). Access gaya ng isang cell;
-     * ang gateway ay mapipili lang kapag naka-set up (GATEWAY_URL).
+     * ang gateway ay mapipili lang kapag naka-set up (GATEWAY_URL) at may gumaganang Forbeast token ang bawat page (o GATEWAY_KEY).
      */
     public function provider(Request $request)
     {
@@ -242,9 +244,34 @@ class ChatbotController extends Controller
         if ($provider === ChatbotProvider::GATEWAY && !ChatbotProvider::gatewayReady()) {
             return response()->json(['error' => 'Forbeast is not set up yet.'], 422);
         }
+        // Forbeast: ang bawat page ay may gumaganang token (o may global GATEWAY_KEY).
+        $missing = $provider === ChatbotProvider::GATEWAY ? array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->ready($p)) : [];
+        if ($missing) return response()->json(['error' => ForbeastPageSetup::NEEDS_TOKEN . ': ' . implode(', ', array_slice(array_values($missing), 0, 10))], 422);
         $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'], $pages));
 
         return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)]);
+    }
+
+    /**
+     * Ang Forbeast token ng page mula sa row (access gaya ng isang cell): may token = i-save, saka Test at webhook; clear =
+     * DELETE ng webhook at tanggal ang token at secret; wala sa dalawa = Test ulit. Ang sagot ay ang info lang (huling 4).
+     */
+    public function forbeastToken(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        $setup = app(ForbeastPageSetup::class);
+
+        if ($request->boolean('clear')) {
+            $setup->disconnect($page, Auth::id());
+            return response()->json(['status' => 'cleared', 'forbeast' => $setup->info($page)]);
+        }
+        $token = trim($this->str($request, 'token', 500));
+        if ($token !== '') $this->settings->set($page, ForbeastPageSetup::PROVIDER, 'token', $token, true, Auth::id());
+        $res = $setup->connect($page);
+
+        return response()->json(['status' => $res['status'], 'forbeast' => ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error']] + $setup->info($page)]);
     }
 
     /** ACTIVE On (isulat ang block at i-publish) o Off (i-unpublish lang). Ang error ng Botcake ay walang binabago dito. */

@@ -140,8 +140,9 @@ return [
     ],
 
     // Forbeast Gateway: ang sariling daan ng mensahe papunta at mula sa Messenger, pinipili kada page (chatbot.provider).
-    // Walang url = hindi mapipili ang gateway at ang padala ay failed na may dahilan. Ang webhook_secret ang pumipirma sa
-    // /api/gateway/events; walang laman = 503 (walang tinatanggap).
+    // Walang url = hindi mapipili ang gateway at ang padala ay failed na may dahilan. Ang key at webhook_secret ay pang-lahat:
+    // ang page na may sariling Forbeast token (forbeast.token at forbeast.webhook_secret) ay iyon ang gamit. Ang webhook_secret ang pumipirma sa
+    // /api/gateway/events ng page na walang sariling secret; walang laman = 503 (walang tinatanggap).
     'gateway' => [
         'url' => rtrim((string) env('GATEWAY_URL', ''), '/'),
         'key' => env('GATEWAY_KEY'),

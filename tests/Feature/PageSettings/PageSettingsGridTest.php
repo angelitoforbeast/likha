@@ -20,7 +20,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
     private const KNOWN = [
         'botcake.page_id', 'botcake.token', 'botcake.flow.shipping', 'botcake.flow.on_delivery',
         'botcake.flow.in_transit', 'botcake.flow.broadcast', 'botcake.template.shipping', 'botcake.field.message', 'botcake.test_psid', 'botcake.test_ok',
-        'botcake.token_status',
+        'botcake.token_status', 'forbeast.token', 'forbeast.token_status',
     ];
 
     protected function setUp(): void
@@ -80,7 +80,7 @@ class PageSettingsGridTest extends BotcakeApiTestCase
             'botcake.page_id' => 'botcake', 'botcake.token' => 'botcake', 'botcake.flow.shipping' => 'flows',
             'botcake.flow.on_delivery' => 'flows', 'botcake.flow.in_transit' => 'flows', 'botcake.flow.broadcast' => 'flows',
             'botcake.template.shipping' => 'template', 'botcake.field.message' => 'botcake', 'botcake.test_psid' => 'botcake', 'botcake.test_ok' => 'botcake',
-            'botcake.token_status' => 'botcake', 'sms.sender' => 'other',
+            'botcake.token_status' => 'botcake', 'forbeast.token' => 'botcake', 'forbeast.token_status' => 'botcake', 'sms.sender' => 'other',
         ], $groups);
     }
 

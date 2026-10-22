@@ -1915,3 +1915,19 @@ Spec 111. As the owner, I want to choose per page whether the chatbot receives a
 | S-111.10 | Given several pages ticked (or "select all" on the filtered list), when "Replies via" is applied, then every page is saved through PageSettings with its own history and Changes entry; one page off the list, more than 200 pages, or Forbeast not set up → 422 and nothing changes | `test_S_111_10…` | Passed · 2026-10-22 · auto |
 | S-111.11 | The page has the select-all box, the bulk select and "Apply to selected"; the option reads "Forbeast", never "Forbeast Gateway" | `test_S_111_11…` | Passed · 2026-10-22 · auto |
 | S-111.12 | Given `GATEWAY_URL` with a path prefix (with or without a trailing slash), then the send goes to `<prefix>/v1/pages/{id}/messages` | `test_S_111_12…` (2 sets) | Passed · 2026-10-22 · auto |
+
+## S-113 Forbeast is set up per page with a token, like Botcake
+
+Spec 113. As the owner, I want to paste a Forbeast page token per page in Likha (page settings or the chatbot page row) and have the page tested and connected at once, so that nothing has to be set on the Forbeast side and each page has its own key. Test: `tests/Feature/Chatblast/ForbeastPageTokenTest.php` (Forbeast HTTP faked).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-113.1 | Given a page with a Botcake ID, when staff save a Forbeast token in page settings, then `GET /v1/pages/{id}` is called with that token, a 64-character page secret is stored (secret) and `PUT /v1/pages/{id}/webhook` gets `{APP_URL}/api/gateway/events` and that secret; the status reads "ok · Forbeast connected (name)"; neither the token nor the secret is in the answer | `test_S_113_1…` | Passed · 2026-10-22 · auto |
+| S-113.2 | When the token is refused (401), then the status shows `invalid · Forbeast said "…" (HTTP 401)`, no webhook is registered and no secret is stored | `test_S_113_2…` | Passed · 2026-10-22 · auto |
+| S-113.3 | When staff press Test (page settings or the chatbot row), then the token is tested again and a new secret is registered; a page without a token is skipped with no call | `test_S_113_3…` | Passed · 2026-10-22 · auto |
+| S-113.4 | When staff add the token from the `/chatbot/pages` row, then it is saved and connected like in page settings; a page off the list → 422; a role without chatbot access → 403 and nothing changes | `test_S_113_4…` | Passed · 2026-10-22 · auto |
+| S-113.5 | Given a page with its own secret, an event signed with it → 200 and with the global secret → 401; a page without its own secret is verified with the global secret; an unknown page id → 401 | `test_S_113_5…` | Passed · 2026-10-22 · auto |
+| S-113.6 | When a Forbeast page sends, then it uses the page's token; a page without one uses the global key; with neither, nothing is sent and the reply fails | `test_S_113_6…` | Passed · 2026-10-22 · auto |
+| S-113.7 | "Replies via: Forbeast" (single and bulk) is refused with "Add the Forbeast token first: <pages>" until the page has a working token or the global key is set; the row says `forbeast.ready` and the option reads "(add the token first)" | `test_S_113_7…` | Passed · 2026-10-22 · auto |
+| S-113.8 | When staff clear the token, then `DELETE /v1/pages/{id}/webhook` is sent with the old token and the token, secret and status are removed, also when Forbeast answers 500 | `test_S_113_8…`, `test_S_113_8b…` | Passed · 2026-10-22 · auto |
+| S-113.9 | The page settings page, its grid JSON and `/chatbot/data` never contain the token or the secret; the token shows as •••• + last 4; the secret is no column | `test_S_113_9…` | Passed · 2026-10-22 · auto |

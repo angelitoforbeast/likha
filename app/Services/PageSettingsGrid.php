@@ -32,6 +32,8 @@ class PageSettingsGrid
         'botcake.test_psid'        => 'Test PSID',
         'botcake.test_ok'          => 'Test send', // system: huling matagumpay na Send test (ChatblastReady)
         'botcake.token_status'     => 'Token status',
+        'forbeast.token'           => 'Forbeast token',
+        'forbeast.token_status'    => 'Forbeast status', // system: ang Test ng Forbeast token (ForbeastPageSetup)
     ];
 
     /** Ang resulta ng setup check at ng delivered check: nasa Check column (mula sa cells ng row), hindi sariling column. */
@@ -236,7 +238,8 @@ class PageSettingsGrid
         ];
 
         $other = $active->map(fn ($s) => $s->fullKey())->unique()
-            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k) || in_array($k, self::CHECK_CELLS, true))->sort()->values();
+            // Ang webhook secret ng Forbeast ay hindi column: system lang ang gumagamit nito.
+            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k) || in_array($k, [...self::CHECK_CELLS, 'forbeast.webhook_secret'], true))->sort()->values();
 
         return array_merge(
             array_map($col, array_keys(self::KNOWN), array_values(self::KNOWN)),

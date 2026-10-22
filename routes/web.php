@@ -347,6 +347,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');
     Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
     Route::post('/provider', [\App\Http\Controllers\ChatbotController::class, 'provider'])->middleware('throttle:30,1,chatbot-provider')->name('provider');
+    Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
     Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
     // Check, Preview, History, Restore at Changes ng /chatbot/pages (access gaya ng page; Restore gaya ng isang cell).
     Route::get('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:240,1,chatbot-check')->name('check');
@@ -372,6 +373,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatblast/page-setting
     Route::post('/{id}/deactivate', [PageSettingController::class, 'deactivate'])->whereNumber('id')->name('deactivate');
     Route::post('/test-token', [PageSettingController::class, 'testToken'])->middleware('throttle:20,1,page-settings-test-token')->name('test-token');
     Route::post('/test-token/one', [PageSettingController::class, 'testTokenJson'])->middleware('throttle:120,1,page-settings-test-one')->name('test-token-one');
+    Route::post('/forbeast-test', [PageSettingController::class, 'forbeastTest'])->middleware('throttle:30,1,page-settings-forbeast-test')->name('forbeast-test');
     Route::post('/sync', [PageSettingController::class, 'sync'])->middleware('throttle:10,1,page-settings-sync')->name('sync');
     Route::post('/send-test', [PageSettingController::class, 'sendTest'])->middleware('throttle:20,1,page-settings-send-test')->name('send-test');
     Route::post('/mark-tested', [PageSettingController::class, 'markTested'])->middleware('throttle:20,1,page-settings-mark-tested')->name('mark-tested');

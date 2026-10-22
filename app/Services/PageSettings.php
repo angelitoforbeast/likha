@@ -23,7 +23,7 @@ class PageSettings
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
         'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
         'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate',
-        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms'];
+        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms', 'forbeast.token_status', 'forbeast.webhook_secret'];
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -32,7 +32,7 @@ class PageSettings
     public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/';
 
     /** Mga key na laging secret. */
-    public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key'];
+    public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key', 'forbeast.token', 'forbeast.webhook_secret'];
 
     public static function isSystemKey(string $full): bool
     {
