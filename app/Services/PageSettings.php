@@ -167,7 +167,8 @@ class PageSettings
     {
         if (!$setting->active) return;
 
-        $setting->update(['active' => false, 'replaced_at' => now()]);
+        // Ang nag-clear ay itinatala (replaced_by) para sa Changes; ang walang user ay null.
+        $setting->update(['active' => false, 'replaced_at' => now()] + ($userId && \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'replaced_by') ? ['replaced_by' => $userId] : []));
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
         if ($setting->provider === 'botcake' && in_array($setting->key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
         if ($setting->provider === 'botcake' && in_array($setting->key, BotcakeMock::KEYS, true)) BotcakeMock::forget();

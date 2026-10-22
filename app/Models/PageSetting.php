@@ -21,6 +21,7 @@ class PageSetting extends Model
         'is_secret',
         'active',
         'replaced_at',
+        'replaced_by',
         'created_by',
     ];
 

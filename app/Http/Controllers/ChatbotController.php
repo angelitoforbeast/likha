@@ -450,13 +450,23 @@ class ChatbotController extends Controller
         $q = ($page !== '' ? $this->settings->pageQuery($page) : PageSetting::query())->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)
             ->where(fn ($w) => $w->where(fn ($a) => $a->where('provider', ChatbotFields::PROVIDER)->whereNotIn('key', self::HIDDEN_KEYS))
                 ->orWhere(fn ($b) => $b->where('provider', 'botcake')->whereIn('key', array_keys(self::BOTCAKE_LABELS))));
-        $users = $this->userNames((clone $q)->whereNotNull('created_by')->distinct()->pluck('created_by'));
+        $hasBy = Schema::hasColumn('page_settings', 'replaced_by');
+        // Ang na-clear na value (inactive, walang mas bago sa page + provider + key) ay isang event sa oras ng replaced_at.
+        $cleared = (clone $q)->where('active', false)->whereNotNull('replaced_at')->where('key', '!=', ForbeastWatch::KEY)
+            ->whereNotExists(fn ($n) => $n->from('page_settings as newer')->whereColumn('newer.page_name', 'page_settings.page_name')
+                ->whereColumn('newer.provider', 'page_settings.provider')->whereColumn('newer.key', 'page_settings.key')->whereColumn('newer.id', '>', 'page_settings.id'));
+        $users = $this->userNames((clone $q)->whereNotNull('created_by')->distinct()->pluck('created_by')
+            ->merge($hasBy ? (clone $cleared)->whereNotNull('replaced_by')->distinct()->pluck('replaced_by') : []));
 
         if ($field !== '') {
             [$provider, $key] = str_starts_with($field, 'botcake.') ? ['botcake', substr($field, 8)] : [ChatbotFields::PROVIDER, $field];
             $q->where('provider', $provider)->where('key', $key);
+            $cleared->where('provider', $provider)->where('key', $key);
         }
-        if (ctype_digit($user)) $q->where('created_by', (int) $user);
+        if (ctype_digit($user)) {
+            $q->where('created_by', (int) $user);
+            $cleared->where($hasBy ? 'replaced_by' : 'id', $hasBy ? (int) $user : 0);
+        }
         foreach (['from' => 'startOfDay', 'to' => 'endOfDay'] as $param => $edge) {
             $day = $this->str($request, $param, 10);
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) continue;
@@ -466,23 +476,31 @@ class ChatbotController extends Controller
                 continue;
             }
             $q->where('created_at', $param === 'from' ? '>=' : '<=', $at);
+            $cleared->where('replaced_at', $param === 'from' ? '>=' : '<=', $at);
         }
 
-        $total = (clone $q)->count();
+        if (!$hasBy) $cleared->whereRaw('1 = 0');
+        $total = (clone $q)->count() + (clone $cleared)->count();
         $last = max(1, (int) ceil($total / self::CHANGES_PER_PAGE));
         $p = min($last, max(1, (int) $this->str($request, 'p', 6)));
-        $rows = $q->orderByDesc('id')->forPage($p, self::CHANGES_PER_PAGE)->get();
+        // Bagong-una sa oras: ang mga sulat (created_at) at ang mga clear (replaced_at) ay pinagsasama, saka hinihiwa.
+        $take = $p * self::CHANGES_PER_PAGE;
+        $events = $q->orderByDesc('id')->limit($take)->get()->map(fn ($s) => [$s->created_at, $s->id, $s, false])
+            ->concat((clone $cleared)->orderByDesc('id')->limit($take)->get()->map(fn ($s) => [$s->replaced_at, $s->id, $s, true]))
+            ->sort(fn ($a, $b) => [$b[0], $b[1]] <=> [$a[0], $a[1]])->slice(($p - 1) * self::CHANGES_PER_PAGE, self::CHANGES_PER_PAGE);
         $labels = array_column($this->fields->columns(), 'label', 'key');
 
-        $entries = $rows->map(function ($s) use ($users, $labels) {
-            $before = PageSetting::where('page_name', $s->page_name)->where('provider', $s->provider)->where('key', $s->key)->where('id', '<', $s->id)->orderByDesc('id')->first();
+        $entries = $events->map(function ($ev) use ($users, $labels, $hasBy) {
+            [$when, , $s, $clear] = $ev;
+            $before = $clear ? $s : PageSetting::where('page_name', $s->page_name)->where('provider', $s->provider)->where('key', $s->key)->where('id', '<', $s->id)->orderByDesc('id')->first();
             return [
-                'id' => $s->id, 'at' => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'), 'by' => $this->who($s, $users),
+                'id' => $s->id, 'at' => $when?->timezone('Asia/Manila')->format('Y-m-d H:i'),
+                'by' => $clear ? ($s->replaced_by ? ($users[$s->replaced_by] ?? 'user #' . $s->replaced_by) : 'system') : $this->who($s, $users),
                 'page' => $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
                 'field' => $s->provider === 'botcake' ? self::BOTCAKE_LABELS[$s->key] : ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
-                'old' => $before ? $this->shown($before) : null, 'new' => $this->shown($s),
+                'old' => $before ? $this->shown($before) : null, 'new' => $clear ? '(none)' : $this->shown($s),
             ];
-        })->all();
+        })->values()->all();
 
         $fields = array_merge(
             array_map(fn ($k, $l) => ['key' => (string) $k, 'label' => $l], array_keys($labels), $labels),
@@ -508,8 +526,11 @@ class ChatbotController extends Controller
 
     private function who(PageSetting $s, array $names): string
     {
-        // Ang provider na walang user ay ang kusang lipat lang ang sumusulat (ForbeastWatch).
-        if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && in_array($s->key, ['provider', ForbeastWatch::KEY], true)) return ForbeastWatch::WHO;
+        // Ang kusang lipat lang ang sumusulat ng event; ang provider row na walang user ay "auto-switch" kapag may event ng page sa oras na iyon (sabay silang sinusulat), kung hindi, system.
+        if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && $s->key === ForbeastWatch::KEY) return ForbeastWatch::WHO;
+        if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && $s->key === 'provider'
+            && PageSetting::where('page_name', $s->page_name)->where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)
+                ->whereBetween('created_at', [$s->created_at?->copy()->subMinute(), $s->created_at?->copy()->addMinute()])->exists()) return ForbeastWatch::WHO;
 
         return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system';
     }

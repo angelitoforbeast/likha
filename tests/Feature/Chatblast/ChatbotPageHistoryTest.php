@@ -165,4 +165,22 @@ class ChatbotPageHistoryTest extends ChatblastTestCase
         $this->assertSame($before, PageSetting::count());
         $this->getJson('/chatbot/preview?page_name=Nope')->assertStatus(422);
     }
+
+    public function test_S_120_2_a_cleared_value_shows_in_changes_with_who_and_when(): void
+    {
+        $ana = $this->user('CEO', 'ana@example.test');
+        DB::table('users')->where('id', $ana->id)->update(['name' => 'Ana']);
+        $this->settings()->set('Page Uno', 'chatbot', 'price', '399', false, $ana->id);
+        $this->travel(5)->minutes();
+        $this->settings()->deactivate(PageSetting::where('key', 'price')->where('active', true)->first(), $ana->id);
+        $this->settings()->set('Page Dos', 'chatbot', 'price', '1');
+        $this->settings()->set('Page Dos', 'chatbot', 'price', '2'); // replaced, not cleared
+        $this->actingAs($ana);
+
+        $res = $this->getJson('/chatbot/changes?page=page%20uno&field=price')->assertOk();
+        $this->assertSame([['399', '(none)', 'Ana', '2026-10-21 10:05'], [null, '399', 'Ana', '2026-10-21 10:00']],
+            collect($res->json('entries'))->map(fn ($x) => [$x['old'], $x['new'], $x['by'], $x['at']])->all());
+        $this->assertSame(2, $res->json('total'));
+        $this->assertCount(2, $this->getJson('/chatbot/changes?page=page%20dos&field=price')->json('entries'), 'a replaced value is not a clear');
+    }
 }
