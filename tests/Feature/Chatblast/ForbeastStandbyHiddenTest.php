@@ -96,9 +96,12 @@ class ForbeastStandbyHiddenTest extends ChatblastTestCase
         $this->chat('Old standby', true, '7001', now()->subMinutes(21));
         $this->chat('Fresh standby', true, '7001', now()->subMinutes(19));
         $this->chat('Old real', false, '7001', now()->subMinutes(30));
+        // Lampas isang araw: hindi na ginagalaw ng bantay (ang bawat minuto ay hindi dapat mag-scan ng 90 araw ng table);
+        // ang 90-araw na prune ang kukuha nito.
+        $this->chat('Ancient standby', true, '7001', now()->subDays(3));
 
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
 
-        $this->assertSame(['Fresh standby', 'Old real'], BotcakeChat::orderBy('id')->get()->pluck('message')->sort()->values()->all());
+        $this->assertSame(['Ancient standby', 'Fresh standby', 'Old real'], BotcakeChat::orderBy('id')->get()->pluck('message')->sort()->values()->all());
     }
 }

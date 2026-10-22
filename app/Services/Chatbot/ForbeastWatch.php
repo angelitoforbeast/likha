@@ -221,7 +221,12 @@ class ForbeastWatch
     {
         if (!Schema::hasTable('botcake_chats')) return 0;
 
-        return BotcakeChat::whereNotNull('payload->_standby')->where('received_at', '<', now()->subMinutes(self::limit('standby_minutes') + 5))->delete();
+        // Sa isang araw lang ang saklaw (index ng received_at), at burahin ayon sa id: tumatakbo ito kada minuto, kaya hindi
+        // dapat mag-scan at mag-lock ng 90 araw ng table. Ang mas luma pa ay kukunin ng 90-araw na prune (BotcakeChat::prune).
+        $cutoff = now()->subMinutes(self::limit('standby_minutes') + 5);
+        $ids = BotcakeChat::whereNotNull('payload->_standby')->where('received_at', '<', $cutoff)->where('received_at', '>=', $cutoff->copy()->subDay())->pluck('id');
+
+        return $ids->isEmpty() ? 0 : BotcakeChat::whereIn('id', $ids)->delete();
     }
 
     /**

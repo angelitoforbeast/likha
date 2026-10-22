@@ -207,3 +207,11 @@ None. The standby marker uses the existing `botcake_chats.payload` JSON, and the
 Red run before the code: S-117.13 "Failed asserting that false is true" (the history held both copies), S-117.14 "two arrays are identical", S-117.15 "2 is identical to 1", S-117.16 "two arrays are identical" (nothing deleted). The first run of S-117.13 errored on a missing import in the test, fixed before counting it as red.
 
 `vendor/bin/phpunit tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake` → **Tests: 936, Assertions: 6487, Skipped: 1**, no failures; the existing 117 tests pass. Not run on mysql or pgsql (sqlite only): the JSON path comes from Laravel's compiler, as `payload->source` already does in `ChatbotResults`.
+
+### Amendment 1 review
+
+One `skeptic-reviewer` pass, standard depth. Two majors:
+- **Fixed (`prune` locked the table):** the every-minute delete had no lower time bound, so it scanned the 90 days of rows. It now looks at one day (`standby_minutes + 5` back, then a day further), selects the ids and deletes by id. A standby row older than that is left to the 90-day prune. S-117.16 now also asserts that a 3-day-old standby row stays.
+- **Open, for the reviewer's decision:** a standby row whose Forbeast copy never arrived (Forbeast missed 1–2 messages on a quiet page, below the inbound condition) is now hidden and deleted after 20 minutes, so that message is never answered. The code does what the amendment says. Details and options are in `TODO.md` under "117 amendment 1".
+
+The minors are accepted in `TODO.md` with their reasons. The spec's three folders: **Tests: 936, Assertions: 6487, Skipped: 1**, no failures.
