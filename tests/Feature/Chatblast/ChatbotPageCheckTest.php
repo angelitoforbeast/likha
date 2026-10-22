@@ -253,4 +253,23 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $res = $this->check();
         $this->assertSame(['ok', [], []], [$res['status'], $res['reasons'], $res['warnings']], 'published main flow: nothing');
     }
+
+    public function test_S_120_4_a_link_in_a_text_column_and_plain_text_in_an_image_column_are_reported(): void
+    {
+        $this->link('Page Uno', $this->flow('Main', [$this->send('Hi')]));
+        $s = $this->settings();
+        $this->assertSame(['ok', []], [$this->check()['status'], $this->check()['reasons']], 'empty optional fields: nothing');
+
+        $s->set('Page Uno', 'chatbot', 'seq_11', "  https://botcake.pro/i/abc.jpg \n");
+        $s->set('Page Uno', 'chatbot', 'seq_12', 'See https://botcake.pro/i/abc.jpg for the photo');
+        $s->set('Page Uno', 'chatbot', 'seq_img_13', 'not a link');
+        $s->set('Page Uno', 'chatbot', 'seq_img_14', self::IMG . '14.jpg');
+        $s->set('Page Uno', 'chatbot', 'prompt_1', 'https://example.test/rules');
+        $res = $this->check();
+        $this->assertSame(['x', [
+            'Prompt 1 is a link: this column needs text',
+            'Seq 11 is an image link: put it in Seq Img 11',
+            'Seq Img 13 is not an image link',
+        ]], [$res['status'], $res['reasons']]);
+    }
 }

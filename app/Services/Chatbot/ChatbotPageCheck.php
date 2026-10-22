@@ -134,7 +134,16 @@ class ChatbotPageCheck
         $started = microtime(true);
         foreach ($columns as $c) {
             $url = $values[$c['key']] ?? '';
-            if ($c['kind'] !== 'image' || $url === '') continue;
+            if ($url === '') continue;
+            // Maling uri ng value (kasama ang opsyonal na Seq 11-20): link lang sa text column, o hindi link sa image column.
+            if ($c['kind'] !== 'image') {
+                if ($c['kind'] !== 'flow' && preg_match('~^https?://\S+$~i', $url)) {
+                    $img = preg_replace('/^(seq|after_order)_(\d+)$/', '$1_img_$2', $c['key']);
+                    $reasons[] = $img !== $c['key'] && isset($labels[$img]) ? $c['label'] . ' is an image link: put it in ' . $labels[$img] : $c['label'] . ' is a link: this column needs text';
+                }
+                continue;
+            }
+            if (!preg_match('~^[a-z][a-z0-9+.-]*://\S+$~i', $url)) { $reasons[] = $c['label'] . ' is not an image link'; continue; }
             $res = $fresh ? null : $this->images->cached($url);
             if ($res === null) {
                 if ($calls >= self::MAX_URL_CHECKS || microtime(true) - $started > self::URL_SECONDS) { $out['unchecked']++; continue; }

@@ -16,3 +16,8 @@ app/Services/Chatbot/ChatbotPageCheck.php, app/Http/Controllers/ChatbotControlle
 
 ## Suggestions (not done)
 Pre-migration clears have no "who"; the frontend needs no change (it renders `(none)` as the new value).
+
+## Amendment 1: wrong kind of value
+- Check column (`ChatbotPageCheck`): for every botfield with a value, including the optional Seq 11-20 and After Order fields, a text/long column (kind not `image`/`flow`) whose value is only one http(s) link gives `Seq 11 is an image link: put it in Seq Img 11` (the matching `seq_img_N` / `after_order_img_N` label when that column exists), else `<Label> is a link: this column needs text`. An image column whose value is not a link at all gives `Seq Img 11 is not an image link`; a non-http link (ftp) keeps the old "link not allowed". Kinds come from `ChatbotFields::kind`; no names are hard-coded except the Seq/After Order to image pairing. A link inside a sentence is not reported; empty fields are not reported.
+- Grid: `public/js/chatbot-paste.js` gets `isLinkOnly` and `linkWarning`. The page edit panel and the long-text editor show the same message inline in amber (saving still allowed); paste counts such values in its notice (they are still pasted).
+- Tests: S-120.4 (ChatbotPageCheckTest, red first: only "link not allowed" was reported), S-120.5 (ChatbotPasteScriptTest, node). `phpunit tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake`: OK, 940 tests, 1 skipped (existing). Ran `npm run build`; the inline warning was not checked in a browser.
