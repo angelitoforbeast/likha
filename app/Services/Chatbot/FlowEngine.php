@@ -227,13 +227,15 @@ class FlowEngine
         foreach ((array) ($c['items'] ?? []) as $item) {
             $v = trim($run->text((string) ($item['value'] ?? '')));
             if ($v === '') continue;
-            // Ang "Visible to AI" na naka-uncheck ay itinatala kasama ng mensahe; hindi ito ipinapadala sa Botcake/Forbeast (BotcakeOutbox::wire).
-            $hidden = ($item['ai'] ?? true) === false ? ['ai' => false] : [];
+            // Ang alaala ng AI: ang sariling sagot lang nito (ai_text) sa mensaheng may AI variable; ang ibang mensahe ay nakatago
+            // maliban kung "Show this message to the AI" (ai: true). Hindi ito ipinapadala sa Botcake/Forbeast (BotcakeOutbox::wire).
+            $aiText = ($item['ai'] ?? null) === false ? null : $this->aiText($run, (string) ($item['value'] ?? ''));
+            $mark = $aiText !== null ? ['ai_text' => $aiText] : ['ai' => ($item['ai'] ?? null) === true];
             if (($item['type'] ?? 'text') === 'image') {
                 if (!self::isUrl($v)) continue;
-                $messages[] = ['type' => 'image', 'url' => $v] + $hidden;
+                $messages[] = ['type' => 'image', 'url' => $v] + $mark;
             } else {
-                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)] + $hidden;
+                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)] + $mark;
             }
             $templates[] = (string) ($item['value'] ?? '');
         }
@@ -249,6 +251,30 @@ class FlowEngine
         $res = $outbox->send($run, $node['id'], $messages);
 
         return $this->afterSend($node, $c, $run, ['messages' => $messages, 'status' => $res['status'], 'error' => $res['error']]);
+    }
+
+    /**
+     * Ang sariling sagot ng AI sa isang template: ang value ng mga AI-output variable (save_to ng mga AI step ng flow) sa
+     * ayos ng template, pinagdugtong ng blangkong linya. null = walang AI variable ang template.
+     */
+    private function aiText(FlowRun $run, string $template): ?string
+    {
+        $outputs = [];
+        foreach ((array) ($run->graph['nodes'] ?? []) as $n) {
+            if (($n['type'] ?? '') === 'ai' && ($n['config']['save_to'] ?? '') !== '') $outputs[ChatbotVars::norm((string) $n['config']['save_to'])] = true;
+        }
+        if (!$outputs || !preg_match_all(ChatbotVars::PATTERN, $template, $m)) return null;
+        $vars = $run->vars();
+        $found = false;
+        $parts = [];
+        foreach ($m[1] as $name) {
+            $name = ChatbotVars::norm($name);
+            if (!isset($outputs[$name])) continue;
+            $found = true;
+            if (trim((string) ($vars[$name] ?? '')) !== '') $parts[] = trim((string) $vars[$name]);
+        }
+
+        return $found ? mb_substr(implode("\n\n", $parts), 0, 2000) : null;
     }
 
     /** @return array{node: string, status: string, error: ?string, messages: array} */
@@ -391,7 +417,7 @@ class FlowEngine
         if (($c['save_to'] ?? '') !== '') $run->fields->set($c['save_to'], $res['text']);
         if (!empty($c['send'])) {
             if ($stop = $this->mismatch($run, $node['id'])) return $stop;
-            $msg = [['type' => 'text', 'text' => mb_substr($res['text'], 0, 2000)]];
+            $msg = [['type' => 'text', 'text' => mb_substr($res['text'], 0, 2000), 'ai_text' => mb_substr($res['text'], 0, 2000)]];
             $run->tags = ChatbotTags::forSend($run, [null]);
             if (BotcakeSendQueue::async($run, $outbox) && BotcakeSendQueue::submitChatbot($run, $node['id'], $msg) !== null) {
                 $run->sendPending = true;

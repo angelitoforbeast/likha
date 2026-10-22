@@ -29,55 +29,81 @@ class ChatbotSendItemAiVisibleTest extends ChatblastTestCase
         ]]);
     }
 
-    public function test_the_ai_flag_is_kept_by_the_graph_cleaner_only_when_unchecked(): void
+    private function runAi(array $fields = []): FlowRun
+    {
+        $graph = FlowGraph::clean(['nodes' => [['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'ai', 'config' => ['save_to' => 'GPT INPUT']]], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]]);
+        $current = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '7001', 'name' => 'Ana Cruz', 'message' => 'hm', 'payload' => [], 'received_at' => now()]);
+
+        return new FlowRun(1, $graph, 'Page Uno', '1001', [], new CustomerFields(1001, 7001), $current->id, 'hm', 'Ana Cruz', '2026-10-19 10:00');
+    }
+
+    public function test_the_ai_flag_is_kept_by_the_graph_cleaner_only_when_checked(): void
     {
         $c = FlowGraph::cleanConfig('send', ['items' => [
             ['type' => 'text', 'value' => 'a', 'ai' => false], ['type' => 'text', 'value' => 'b'], ['type' => 'text', 'value' => 'c', 'ai' => true]]]);
-        $this->assertSame([false, null, null], array_map(fn ($i) => $i['ai'] ?? null, $c['items']));
+        $this->assertSame([null, null, true], array_map(fn ($i) => $i['ai'] ?? null, $c['items']));
     }
 
-    public function test_history_leaves_out_hidden_messages_and_a_fully_hidden_send_adds_nothing(): void
+    public function test_one_bubble_with_the_ai_answer_and_a_form_gives_the_ai_only_its_answer_in_history(): void
     {
         config(['services.openai.key' => 'sk-test-not-real']);
         Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]])]);
-        $current = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '7001', 'name' => 'Ana Cruz', 'message' => 'hm', 'payload' => [], 'received_at' => now()]);
-        $reply = fn (array $content, int $ago) => ChatbotReply::create(['page_id' => 1001, 'psid' => 7001, 'kind' => 'send', 'status' => 'sent', 'sent_at' => now()->subMinutes($ago), 'content' => $content]);
-        $reply([['type' => 'text', 'text' => 'AI answer'], ['type' => 'text', 'text' => 'Fill-up form', 'ai' => false]], 3);
-        $reply([['type' => 'text', 'text' => 'Only hidden', 'ai' => false]], 2);
-        $reply([['type' => 'text', 'text' => 'Old row, no flag']], 1);
-        $graph = FlowGraph::clean(['nodes' => [['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'ai', 'config' => []]], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]]);
-        $run = new FlowRun(1, $graph, 'Page Uno', '1001', [], new CustomerFields(1001, 7001), $current->id, 'hm', 'Ana Cruz', '2026-10-19 10:00');
+        $send = fn (array $items) => FlowGraph::clean(['nodes' => [['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'ai', 'config' => ['save_to' => 'GPT INPUT']], ['id' => 'n3', 'type' => 'send', 'config' => ['items' => $items]]],
+            'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n3']]]);
+        $run = $this->runAi();
+        $run->fields->set('gpt input', 'Opo, 500 po.');
+        $run->fields->set('fill-up form', 'Pangalan:');
+        $engine = app(FlowEngine::class);
+        // Ang tunay na send ng engine (hindi pa naka-queue): ilagay sa talaan ng padala gaya ng ginagawa ng Outbox.
+        $graph = $send([
+            ['type' => 'text', 'value' => "{{GPT INPUT}}\n\n{{Fill-Up Form}}"],
+            ['type' => 'text', 'value' => 'Plain flow text'],
+            ['type' => 'text', 'value' => 'Shown on purpose', 'ai' => true],
+            ['type' => 'text', 'value' => 'Hidden {{GPT INPUT}}'],
+        ]);
+        $graph['nodes'][2]['config']['items'][3]['ai'] = false; // graph na naka-save bago ang release: ang ai: false ay nababasa pa
+        $run2 = new FlowRun(1, $graph, 'Page Uno', '1001', [], $run->fields, null, 'hm', 'Ana Cruz', '2026-10-19 10:00', true);
+        $engine->run($run2, new TestOutbox());
 
-        app(FlowEngine::class)->run($run, new TestOutbox());
-
-        Http::assertSent(fn (HttpRequest $r) => array_slice($r['messages'], -3) === [
-            ['role' => 'assistant', 'content' => 'AI answer'], ['role' => 'assistant', 'content' => 'Old row, no flag'], ['role' => 'user', 'content' => 'hm']]);
+        $m = $run2->sends[0]['messages'];
+        $this->assertSame('Opo, 500 po.', $m[0]['ai_text']);
+        $this->assertSame([false, true, false], [$m[1]['ai'], $m[2]['ai'], $m[3]['ai']]);
+        $this->assertSame("Opo, 500 po.\nShown on purpose", TestHistory::text($m), 'test path: own answer + explicit message only, form never');
+        $this->assertStringNotContainsString('Pangalan', TestHistory::text($m));
+        $this->assertSame(['type' => 'text', 'text' => 'Plain flow text'], BotcakeOutbox::wire([$m[1]])[0]);
     }
 
-    public function test_test_path_follows_the_same_rule_and_the_send_records_the_flag(): void
+    public function test_live_history_has_ai_answers_as_assistant_turns_and_old_rows_keep_full_text(): void
     {
-        $graph = FlowGraph::clean(['nodes' => [['id' => 'n1', 'type' => 'start'], ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [
-            ['type' => 'text', 'value' => 'AI answer'], ['type' => 'text', 'value' => 'Fill-up form', 'ai' => false]]]]],
-            'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2']]]);
-        $run = new FlowRun(1, $graph, 'Page Uno', '1001', [], new CustomerFields(1001, CustomerFields::TEST_PSID), null, 'hi', 'Ana Cruz', '2026-10-19 10:00', true);
+        config(['services.openai.key' => 'sk-test-not-real']);
+        Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]])]);
+        $run = $this->runAi();
+        $reply = fn (array $content, int $ago) => ChatbotReply::create(['page_id' => 1001, 'psid' => 7001, 'kind' => 'send', 'status' => 'sent', 'sent_at' => now()->subMinutes($ago), 'content' => $content]);
+        $reply([['type' => 'text', 'text' => "Answer one\n\nFORM", 'ai_text' => 'Answer one']], 5);
+        $reply([['type' => 'text', 'text' => 'Flow text', 'ai' => false]], 4);
+        $reply([['type' => 'text', 'text' => 'Shown', 'ai' => true]], 3);
+        $reply([['type' => 'text', 'text' => 'Old row, no flag']], 2);
+        $reply([['type' => 'text', 'text' => 'Answer two', 'ai_text' => 'Answer two']], 1);
 
         app(FlowEngine::class)->run($run, new TestOutbox());
 
-        $this->assertFalse($run->sends[0]['messages'][1]['ai']);
-        $this->assertSame('AI answer', TestHistory::text($run->sends[0]['messages']));
+        Http::assertSent(fn (HttpRequest $r) => array_slice($r['messages'], -5) === [
+            ['role' => 'assistant', 'content' => 'Answer one'], ['role' => 'assistant', 'content' => 'Shown'],
+            ['role' => 'assistant', 'content' => 'Old row, no flag'], ['role' => 'assistant', 'content' => 'Answer two'], ['role' => 'user', 'content' => 'hm']]);
     }
 
-    public function test_the_payload_to_botcake_and_the_gateway_has_no_ai_key(): void
+    public function test_the_payload_to_botcake_and_the_gateway_has_no_ai_keys(): void
     {
         $this->assertSame([['type' => 'text', 'text' => 'a'], ['type' => 'text', 'text' => 'b']],
-            BotcakeOutbox::wire([['type' => 'text', 'text' => 'a', 'ai' => false], ['type' => 'text', 'text' => 'b']]));
+            BotcakeOutbox::wire([['type' => 'text', 'text' => 'a', 'ai' => false], ['type' => 'text', 'text' => 'b', 'ai_text' => 'x']]));
     }
 
-    public function test_the_editor_has_the_checkbox_per_message(): void
+    public function test_the_editor_has_the_checkbox_and_the_note(): void
     {
         $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
         $this->actingAs($this->user());
         $html = $this->get("/chatbot/flows/{$flow->id}")->assertOk()->getContent();
-        $this->assertStringContainsString('Visible to AI', $html);
+        $this->assertStringContainsString('Show this message to the AI', $html);
+        $this->assertStringContainsString('The AI remembers only its own answer here', $html);
     }
 }

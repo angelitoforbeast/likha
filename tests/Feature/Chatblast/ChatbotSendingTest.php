@@ -91,7 +91,7 @@ class ChatbotSendingTest extends ChatblastTestCase
             ]]]]);
         $reply = ChatbotReply::sole();
         $this->assertSame([1001, 7001, $chat->id, $flow->id, 'n2', 'send', 'sent', null], [$reply->page_id, $reply->psid, $reply->chat_id, $reply->flow_id, $reply->node_id, $reply->kind, $reply->status, $reply->error]);
-        $this->assertSame([['type' => 'image', 'url' => 'https://img.example.test/p.jpg'], ['type' => 'text', 'text' => 'You said: Hello']], $reply->content);
+        $this->assertSame([['type' => 'image', 'url' => 'https://img.example.test/p.jpg', 'ai' => false], ['type' => 'text', 'text' => 'You said: Hello', 'ai' => false]], $reply->content);
         $this->assertStringNotContainsString(self::TOKEN, json_encode($reply->toArray()));
     }
 

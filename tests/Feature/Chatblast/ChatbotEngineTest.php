@@ -124,8 +124,8 @@ class ChatbotEngineTest extends ChatblastTestCase
         // 1. Bagong chat: larawan at dalawang text, LOOP 1, saka ang form at naghihintay.
         $r = $this->go($flow, 'Hi', 11);
         $this->assertSame([
-            [['type' => 'image', 'url' => 'https://img.example.test/product.jpg'], ['type' => 'text', 'text' => 'Hello! This is our product.'], ['type' => 'text', 'text' => 'Only 499 pesos.']],
-            [['type' => 'text', 'text' => 'Please send: name, phone, address.']],
+            [['type' => 'image', 'url' => 'https://img.example.test/product.jpg', 'ai' => false], ['type' => 'text', 'text' => 'Hello! This is our product.', 'ai' => false], ['type' => 'text', 'text' => 'Only 499 pesos.', 'ai' => false]],
+            [['type' => 'text', 'text' => 'Please send: name, phone, address.', 'ai' => false]],
         ], array_column($r->sends, 'messages'));
         $this->assertSame(['all user input' => 'Hi', 'chat status' => 'LOOP 1', 'user input' => 'Hi'], $this->fields());
         $this->assertSame('1:n6', (new CustomerFields(1001, self::PSID))->get(CustomerFields::WAIT));
