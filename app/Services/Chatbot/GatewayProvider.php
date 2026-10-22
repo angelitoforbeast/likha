@@ -16,7 +16,7 @@ class GatewayProvider implements MessagingProvider
 {
     public const NOT_SET_UP = 'Forbeast is not set up (GATEWAY_URL is empty, or no Forbeast token and no GATEWAY_KEY).';
 
-    public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef): array
+    public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef, string $messagingType = self::RESPONSE): array
     {
         $url = rtrim((string) config('services.gateway.url'), '/'); // may carry a path prefix (e.g. https://host/api)
         // Ang Forbeast token ng page (sariling page lang ang sakop); kung wala, ang global GATEWAY_KEY.
@@ -28,7 +28,7 @@ class GatewayProvider implements MessagingProvider
         try {
             $res = Http::withToken($key)->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout)
                 ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/messages',
-                    ['psid' => $psid, 'messages' => BotcakeOutbox::wire($messages), 'messaging_type' => 'RESPONSE', 'client_ref' => $clientRef]);
+                    ['psid' => $psid, 'messages' => BotcakeOutbox::wire($messages), 'messaging_type' => $messagingType === self::UPDATE ? self::UPDATE : self::RESPONSE, 'client_ref' => $clientRef]);
             $r = ['http' => $res->status(), 'body' => $res->json() ?? $res->body()];
         } catch (ConnectionException) {
             $r = ['http' => 0, 'body' => null];
@@ -37,6 +37,20 @@ class GatewayProvider implements MessagingProvider
             $r = ['http' => 0, 'body' => null];
         }
 
+        $o = $this->outcome($r, $key);
+        // Ang bantay ng Forbeast (kusang lipat sa Botcake): hindi kailanman humaharang sa padala.
+        try {
+            app(ForbeastWatch::class)->afterSend($pageName, $o, $r['body']);
+        } catch (Throwable $e) {
+            report($e);
+        }
+
+        return $o;
+    }
+
+    /** @param array{http: int, body: mixed} $r */
+    private function outcome(array $r, string $key): array
+    {
         if ($r['http'] >= 200 && $r['http'] < 300) return ['status' => 'sent', 'error' => null, 'http' => $r['http']];
         $msg = BotcakeClient::messageText(is_array($r['body']) ? $r['body'] : []);
         $why = $r['http'] === 0 ? 'Gateway did not answer' : ($msg !== '' ? 'Gateway said "' . mb_substr($msg, 0, 150) . '"' : 'Gateway refused it');

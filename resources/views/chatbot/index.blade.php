@@ -503,7 +503,9 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r), forbeastBox(r));
+        td.append(b, providerSelect(r));
+        if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
+        td.append(forbeastBox(r));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
         return td;
@@ -566,11 +568,20 @@
         $('bulk-apply').disabled = true;
         try {
             const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want});
-            if (ok) { rows.forEach(r => { if (names.includes(r.page)) r.provider = data.provider; }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
+            if (ok) { rows.forEach(r => { if (names.includes(r.page)) { r.provider = data.provider; r.auto_switched = null; } }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
             else notice(data.error || data.message || 'Not changed.', 'text-red-600');
         } catch (e) { notice('No connection: not changed.', 'text-red-600'); }
         render();
     });
+
+    // Kusang lumipat sa Botcake dahil pumalya ang Forbeast: ang oras, at ang dahilan sa loob (keyboard din). Nawawala kapag
+    // may nagpalit nang mano-mano.
+    function autoSwitchNote(a) {
+        return el('details', {class: 'mt-1 max-w-[12rem] text-[11px] text-amber-700'}, [
+            el('summary', {class: 'cursor-pointer', text: 'Auto-switched ' + a.at, title: a.reason}),
+            el('div', {class: 'break-words text-slate-600', text: a.reason}),
+        ]);
+    }
 
     // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast (hindi mapipili kapag hindi pa naka-set up, o
     // walang gumaganang Forbeast token ang page at walang global key).
@@ -587,7 +598,7 @@
             sel.disabled = true;
             try {
                 const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
-                if (ok) { r.provider = data.provider; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+                if (ok) { r.provider = data.provider; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             render();
         });

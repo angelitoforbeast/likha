@@ -238,8 +238,8 @@ class PageSettingsGrid
         ];
 
         $other = $active->map(fn ($s) => $s->fullKey())->unique()
-            // Ang webhook secret ng Forbeast ay hindi column: system lang ang gumagamit nito.
-            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k) || in_array($k, [...self::CHECK_CELLS, 'forbeast.webhook_secret'], true))->sort()->values();
+            // Ang webhook secret ng Forbeast at ang talaan ng kusang lipat ay hindi column: system lang ang gumagamit nito.
+            ->reject(fn ($k) => isset(self::KNOWN[$k]) || PageSettings::isDetailKey($k) || in_array($k, [...self::CHECK_CELLS, 'forbeast.webhook_secret', 'chatbot.auto_switch'], true))->sort()->values();
 
         return array_merge(
             array_map($col, array_keys(self::KNOWN), array_values(self::KNOWN)),

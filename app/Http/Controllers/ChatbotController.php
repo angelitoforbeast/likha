@@ -11,6 +11,7 @@ use App\Services\Chatbot\ChatbotPageCheck;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\ForbeastPageSetup;
+use App\Services\Chatbot\ForbeastWatch;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -77,7 +78,7 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider'], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider', ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
@@ -93,6 +94,7 @@ class ChatbotController extends Controller
             $active = true;
             $flowId = null;
             $provider = ChatbotProvider::BOTCAKE;
+            $providerRow = $autoSwitch = null;
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
@@ -100,7 +102,10 @@ class ChatbotController extends Controller
                 }
                 if ($s->key === 'active') $active = $s->plainValue() !== '0';
                 elseif ($s->key === 'flow_id') $flowId = (int) $s->plainValue();
-                elseif ($s->key === 'provider') $provider = $s->plainValue() === ChatbotProvider::GATEWAY ? ChatbotProvider::GATEWAY : ChatbotProvider::BOTCAKE;
+                elseif ($s->key === 'provider') {
+                    $provider = $s->plainValue() === ChatbotProvider::GATEWAY ? ChatbotProvider::GATEWAY : ChatbotProvider::BOTCAKE;
+                    $providerRow = $s;
+                } elseif ($s->key === ForbeastWatch::KEY) $autoSwitch = $s;
                 else $cells[$s->key] = $s->plainValue();
             }
             // FLOW: ang flow na talagang nakatali (ayon sa id). Ang lumang text na hindi nakatali ay hiwalay, para
@@ -110,6 +115,8 @@ class ChatbotController extends Controller
             if ($linked !== null) $cells['flow'] = $linked; else unset($cells['flow']);
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
+                // Kusang lumipat sa Botcake (ForbeastWatch), hanggang may magpalit nang mano-mano.
+                'auto_switched' => $provider === ChatbotProvider::BOTCAKE ? ForbeastWatch::note($autoSwitch, $providerRow) : null,
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
@@ -492,11 +499,18 @@ class ChatbotController extends Controller
     /** Ang value na maipapakita: ang secret ay hindi kailanman. */
     private function shown(PageSetting $s): string
     {
+        if ($s->key === ForbeastWatch::KEY && is_array($e = json_decode((string) $s->plainValue(), true))) {
+            return (($e['result'] ?? '') === ForbeastWatch::SWITCHED ? 'Switched to Botcake' : 'Cannot switch: no Botcake') . ' · ' . ForbeastWatch::reason($e);
+        }
+
         return $s->is_secret ? '(hidden)' : (string) $s->plainValue();
     }
 
     private function who(PageSetting $s, array $names): string
     {
+        // Ang provider na walang user ay ang kusang lipat lang ang sumusulat (ForbeastWatch).
+        if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && in_array($s->key, ['provider', ForbeastWatch::KEY], true)) return ForbeastWatch::WHO;
+
         return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system';
     }
 

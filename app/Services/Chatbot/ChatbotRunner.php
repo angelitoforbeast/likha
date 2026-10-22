@@ -45,7 +45,8 @@ class ChatbotRunner
             if ($last === 0) $last = $chatId - 1;
 
             $pending = BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)
-                ->where('id', '>', $last)->where('id', '<=', $chatId)->orderBy('id')->get();
+                ->where('id', '>', $last)->where('id', '<=', $chatId)->orderBy('id')->get()
+                ->reject(fn ($c) => ForbeastWatch::standby($c)); // standby: tumatakbo lang kapag lumipat sa Botcake (bagong chat)
             $botfields = null;
             $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {

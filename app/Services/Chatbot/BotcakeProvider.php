@@ -12,7 +12,7 @@ class BotcakeProvider implements MessagingProvider
     {
     }
 
-    public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef): array
+    public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef, string $messagingType = self::RESPONSE): array
     {
         $token = trim((string) $this->settings->get($pageName, 'botcake', 'token'));
         if ($token === '') return ['status' => 'failed', 'error' => BotcakeOutbox::NO_TOKEN, 'http' => null];

@@ -137,6 +137,8 @@ return [
         'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),
         // Ilang request sa OpenAI nang sabay sa chatbot:ai-pool (kahati ng Astra ang rate limit ng OpenAI).
         'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 50),
+        // Read-only feed ng auto-switch events (/api/chatbot/provider-events, header X-CHATBOT-EVENTS-KEY); walang laman = 401.
+        'events_key' => env('CHATBOT_EVENTS_KEY'),
     ],
 
     // Forbeast Gateway: ang sariling daan ng mensahe papunta at mula sa Messenger, pinipili kada page (chatbot.provider).
@@ -148,6 +150,15 @@ return [
         'key' => env('GATEWAY_KEY'),
         'webhook_secret' => env('GATEWAY_WEBHOOK_SECRET'),
         'timeout' => (int) env('GATEWAY_TIMEOUT', 10),
+        // Kusang lipat sa Botcake kapag pumapalya ang Forbeast (ForbeastWatch): ilang sunod na palya, at ang mga window.
+        'auto_switch' => [
+            'failed_sends' => (int) env('GATEWAY_SWITCH_FAILED_SENDS', 5),
+            'no_answer' => (int) env('GATEWAY_SWITCH_NO_ANSWER', 3),
+            'health_fails' => (int) env('GATEWAY_SWITCH_HEALTH_FAILS', 3),
+            'inbound_chats' => (int) env('GATEWAY_SWITCH_INBOUND_CHATS', 3),
+            'inbound_minutes' => (int) env('GATEWAY_SWITCH_INBOUND_MINUTES', 5),
+            'standby_minutes' => (int) env('GATEWAY_SWITCH_STANDBY_MINUTES', 15),
+        ],
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

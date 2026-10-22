@@ -1909,7 +1909,7 @@ Spec 111. As the owner, I want to choose per page whether the chatbot receives a
 | S-111.4 | Given a page on `gateway`, when a signed `message` event arrives, then one chat is stored (name from botcake_psids, message_id = mid, payload source gateway) and one run and one replied-marking are queued; the same mid again, or a mid already stored by a Botcake push, stores and queues nothing | `test_S_111_4…` | Passed · 2026-10-22 · auto |
 | S-111.5 | Given a page on `botcake`, when a signed `message` event arrives, then nothing is stored or queued and `botcake_page` is counted; echo and read only count | `test_S_111_5…` | Passed · 2026-10-22 · auto |
 | S-111.6 | When the signature is wrong, missing or empty → 401; when no webhook secret is configured → 503; nothing is queued or stored either way | `test_S_111_6…` | Passed · 2026-10-22 · auto |
-| S-111.7 | Given a page on `gateway`, when Botcake pushes a chat for it, then the answer is 200 `{ok: true}`, no chat is stored, no run is queued, and `gateway_page` is counted | `test_S_111_7…` | Passed · 2026-10-22 · auto |
+| S-111.7 | Given a page on `gateway`, when Botcake pushes a chat for it, then the answer is 200 `{ok: true}`, the chat is stored on standby (spec 117), no run is queued, and `gateway_page` is counted | `test_S_111_7…` | Passed · 2026-10-22 · auto |
 | S-111.8 | When staff pick Forbeast Gateway in a row, then `chatbot.provider` is saved (old value kept as history), shows in Changes as "Provider", and is not a botfield column; another value or a page off the list → 422; with `GATEWAY_URL` empty, `data` says `gateway_ready: false` and `gateway` is refused | `test_S_111_8…` | Passed · 2026-10-22 · auto |
 | S-111.9 | Given a page on `gateway`, when staff send from the Inbox, then it goes through the gateway with a client_ref and is logged as manual | `test_S_111_9…` | Passed · 2026-10-22 · auto |
 | S-111.10 | Given several pages ticked (or "select all" on the filtered list), when "Replies via" is applied, then every page is saved through PageSettings with its own history and Changes entry; one page off the list, more than 200 pages, or Forbeast not set up → 422 and nothing changes | `test_S_111_10…` | Passed · 2026-10-22 · auto |
@@ -1931,3 +1931,21 @@ Spec 113. As the owner, I want to paste a Forbeast page token per page in Likha 
 | S-113.7 | "Replies via: Forbeast" (single and bulk) is refused with "Add the Forbeast token first: <pages>" until the page has a working token or the global key is set; the row says `forbeast.ready` and the option reads "(add the token first)" | `test_S_113_7…` | Passed · 2026-10-22 · auto |
 | S-113.8 | When staff clear the token, then `DELETE /v1/pages/{id}/webhook` is sent with the old token and the token, secret and status are removed, also when Forbeast answers 500 | `test_S_113_8…`, `test_S_113_8b…` | Passed · 2026-10-22 · auto |
 | S-113.9 | The page settings page, its grid JSON and `/chatbot/data` never contain the token or the secret; the token shows as •••• + last 4; the secret is no column | `test_S_113_9…` | Passed · 2026-10-22 · auto |
+
+## S-117 A Forbeast page switches itself to Botcake when Forbeast fails
+
+Spec 117. As the owner, I want a page on Forbeast to move to Botcake by itself when Forbeast fails (and stay there until I move it back), with the chats Botcake got during the outage answered and an event I am told about, so that no customer is left unanswered. Test: `tests/Feature/Chatblast/ForbeastAutoSwitchTest.php` (Forbeast HTTP faked).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-117.1 | Given a Forbeast page, when 5 sends in a row fail, then the page is on Botcake once, with a `switched` event (condition `failed_sends`, the last error); a sent message in between resets the count | `test_S_117_1…`, `test_S_117_1b…` | Passed · 2026-10-23 · auto |
+| S-117.2 | When a send fails with a Meta connection error (#190, #200, #2022, #613, #4, #32), then the page switches at once (`connection_error`) | `test_S_117_2…` | Passed · 2026-10-23 · auto |
+| S-117.3 | When Forbeast does not answer (timeout or 5xx) 3 times in a row, then the page switches (`no_answer`) | `test_S_117_3…` | Passed · 2026-10-23 · auto |
+| S-117.4 | When Botcake delivers 3 chats for the page in 5 minutes and Forbeast none, then the page switches (`inbound`); one Forbeast chat in the window keeps it on Forbeast | `test_S_117_4…`, `test_S_117_4b…` | Passed · 2026-10-23 · auto |
+| S-117.5 | When the every-minute health check (`GET /v1/pages/{id}`) fails 3 times in a row, or answers `can_send=false` / `connected=false`, then the page switches (`health`) | `test_S_117_5…` | Passed · 2026-10-23 · auto |
+| S-117.6 | When sends fail with customer-side errors (#551, #10), then they never count toward a switch | `test_S_117_6…` | Passed · 2026-10-23 · auto |
+| S-117.7 | Given a page without a Botcake token, when Forbeast fails, then the page stays on Forbeast and gets one `cannot_switch` event (no repeat within the hour) | `test_S_117_7…` | Passed · 2026-10-23 · auto |
+| S-117.8 | After an auto-switch, nothing moves the page back by itself; `/chatbot/pages` shows "Auto-switched <time>" with the reason, Changes shows who "auto-switch"; a manual switch clears the note | `test_S_117_8…` | Passed · 2026-10-23 · auto |
+| S-117.9 | Given a Forbeast page, a Botcake chat is stored on standby and runs nothing; after a switch, the standby chats of the last 15 minutes that are not answered and not received from Forbeast run once, oldest first; a Forbeast event for a standby mid runs once and drops the standby copy | `test_S_117_9…`, `test_S_117_9b…` | Passed · 2026-10-23 · auto |
+| S-117.10 | `GET /api/chatbot/provider-events?since=<id>` without the key, with a wrong key, or with no key configured → 401; with the key → the events after the id (id, Manila time, page, result, from, to, condition, error), no secrets | `test_S_117_10…` | Passed · 2026-10-23 · auto |
+| S-117.11 | A reply to a customer's chat goes to Forbeast with `messaging_type: RESPONSE`; a sequence step with `UPDATE`; no message tag | `test_S_117_11…` | Passed · 2026-10-23 · auto |

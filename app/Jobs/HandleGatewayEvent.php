@@ -8,6 +8,7 @@ use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
+use App\Services\Chatbot\ForbeastWatch;
 use App\Services\PageSettings;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -90,7 +91,9 @@ class HandleGatewayEvent implements ShouldQueue
             return;
         }
         $ref = $e['mid'] ?: 'gw-event-' . $e['event_id'];
-        if (!Cache::add('gateway-events:seen:' . sha1($ref), 1, self::DEDUPE_SECONDS) || BotcakeChat::where('message_id', $ref)->exists()) {
+        // Ang standby na kopya ng Botcake (hindi tumakbo) ay hindi ulit: ang Forbeast ang sasagot.
+        $stored = BotcakeChat::where('message_id', $ref)->get(['id', 'payload'])->contains(fn ($c) => !ForbeastWatch::standby($c));
+        if (!Cache::add('gateway-events:seen:' . sha1($ref), 1, self::DEDUPE_SECONDS) || $stored) {
             self::count('duplicate');
             return;
         }
@@ -106,6 +109,15 @@ class HandleGatewayEvent implements ShouldQueue
             throw $ex;
         }
         self::count((string) $e['type']);
+        // Ang standby na kopya ng Botcake ng parehong mensahe (parehong mid, o parehong text sa huling 15 minuto) ay hindi
+        // na kailangan: hawak na ng Forbeast. Isa lang, para ang kaparehong text na hindi dumating sa Forbeast ay maiwan.
+        try {
+            BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)->where('id', '<', $chat->id)
+                ->where('received_at', '>=', now()->subMinutes(15))->orderBy('id')->get()
+                ->first(fn ($c) => ForbeastWatch::standby($c) && ($c->message_id === $ref || $c->message === $message))?->delete();
+        } catch (\Throwable $ex) {
+            report($ex);
+        }
         ChatbotInbound::afterStore($chat, $pageName);
     }
 

@@ -263,7 +263,7 @@ class ChatbotProviderTest extends ChatblastTestCase
         $this->assertSame(0, BotcakeChat::count());
     }
 
-    public function test_S_111_7_a_botcake_push_for_a_gateway_page_is_accepted_but_stores_and_runs_nothing(): void
+    public function test_S_111_7_a_botcake_push_for_a_gateway_page_is_accepted_and_kept_on_standby_without_running(): void
     {
         Queue::fake();
         Http::fake();
@@ -273,7 +273,7 @@ class ChatbotProviderTest extends ChatblastTestCase
 
         $this->botcakePush()->assertOk()->assertExactJson(['ok' => true]);
 
-        $this->assertSame(0, BotcakeChat::count());
+        $this->assertTrue(\App\Services\Chatbot\ForbeastWatch::standby(BotcakeChat::sole()));
         Queue::assertNothingPushed();
         $this->assertSame(['gateway_page' => 1], array_filter(app(BotcakeChatGuard::class)->counts()));
     }

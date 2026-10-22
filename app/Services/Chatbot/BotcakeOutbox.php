@@ -36,8 +36,10 @@ class BotcakeOutbox implements Outbox
     {
         if (!self::enabled()) return $this->log($run, $nodeId, 'send', $messages, 'skipped', self::SWITCHED_OFF);
 
-        // Ang daan ng page (Botcake o ang Forbeast Gateway): ChatbotProvider.
-        $o = ChatbotProvider::for($run->pageName)->send($run->pageName, $run->pageId, $run->psid(), $messages, ChatbotProvider::ref());
+        // Ang daan ng page (Botcake o ang Forbeast Gateway): ChatbotProvider. RESPONSE lang ang sagot sa chat ng customer;
+        // ang sequence at ang takbong walang chat (hal. ang wait na lumampas) ay UPDATE.
+        $type = $run->chatId !== null && $run->startedBy === null ? MessagingProvider::RESPONSE : MessagingProvider::UPDATE;
+        $o = ChatbotProvider::for($run->pageName)->send($run->pageName, $run->pageId, $run->psid(), $messages, ChatbotProvider::ref(), $type);
 
         return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null);
     }

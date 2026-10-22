@@ -7,6 +7,7 @@ use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
+use App\Services\Chatbot\ForbeastWatch;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -124,12 +125,10 @@ class BotcakeChatController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        // (6c) Ang page ay nasa Forbeast Gateway: doon nanggagaling ang chat, kaya walang iniimbak dito (walang dobleng sagot).
-        if (ChatbotProvider::name($pageName) === ChatbotProvider::GATEWAY) {
-            $guard->count('gateway_page');
-            Log::info('botcake chat: skipped, the page uses the gateway', ['page' => $pageName]);
-            return response()->json(['ok' => true]);
-        }
+        // (6c) Ang page ay nasa Forbeast Gateway: doon nanggagaling ang takbo. Ang chat ay iniimbak bilang standby (walang
+        // takbo): binibilang ng ForbeastWatch (may chat ang Botcake, wala ang Forbeast) at sinasagot kapag lumipat sa Botcake.
+        $standby = ChatbotProvider::name($pageName) === ChatbotProvider::GATEWAY;
+        if ($standby) $guard->count('gateway_page');
 
         // (7) Ang PSID ay dapat nasa page: ang key na kinopya sa ibang Botcake account ay may PSID na wala sa atin.
         // Tinatanggap lang ang 'ok' at 'unverified' (hindi sumagot ang Botcake); walang PSID ay hindi masusuri.
@@ -157,10 +156,15 @@ class BotcakeChatController extends Controller
             if ($clean['image_url'] !== null) $payload['image_url'] = $clean['image_url'];
         }
 
+        // Ang marka ng standby ay sa system lang (hindi galing sa param ng Botcake).
+        unset($payload['_standby']);
+        if ($standby) $payload['_standby'] = true;
+
         if (!$this->isDuplicate($f)) {
             $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
             // Ang sequence, Results at takbo ng flow: iisang daan kasama ng Forbeast Gateway.
-            ChatbotInbound::afterStore($chat, $pageName);
+            if (!$standby) ChatbotInbound::afterStore($chat, $pageName);
+            else app(ForbeastWatch::class)->inbound($pageName, (string) $f['page_id']);
         }
 
         return response()->json(['ok' => true]);
