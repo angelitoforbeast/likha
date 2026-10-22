@@ -27,13 +27,14 @@ use InvalidArgumentException;
 class ChatbotFlowController extends Controller
 {
     /** Ang mga variable ng takbo (para sa listahan sa mga form ng node). */
-    public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction'];
+    public const RUN_VARS = ['last_input', 'full_name', 'first_name', 'psid', 'page_id', 'page_name', 'current_date', 'last_interaction', 'replies_via'];
 
     /** Ang tooltip ng bawat variable ng takbo ("Built in: …"). */
     private const RUN_VAR_INFO = [
         'last_input' => 'what the customer just typed', 'full_name' => 'the customer\'s name on Facebook', 'first_name' => 'the first word of the customer\'s name',
         'psid' => 'the customer\'s ID on this page', 'page_id' => 'the Facebook ID of the page', 'page_name' => 'the name of the page',
         'current_date' => 'today\'s date in Manila (YYYY-MM-DD)', 'last_interaction' => 'when the customer\'s last chat came in',
+        'replies_via' => 'which bot carries this chat: Botcake or Forbeast',
     ];
 
     public const KEEP_VERSIONS = 50; // snapshot kada flow

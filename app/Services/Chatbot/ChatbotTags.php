@@ -28,7 +28,7 @@ class ChatbotTags
     public const BACKFILL_HOURS = 48;
 
     /** Ang mga variable ng takbo (FlowRun::vars): hindi botfield, hindi customer field. */
-    private const RUN_VARS = ['last input', 'full name', 'first name', 'psid', 'page id', 'page name', 'current date', 'last interaction'];
+    private const RUN_VARS = ['last input', 'full name', 'first name', 'psid', 'page id', 'page name', 'current date', 'last interaction', 'replies via'];
 
     /** @var array<int, int> kada app instance (ang worker ay iisa; bawat test ay bago): 0 = handa, iba = kailan susuriin ulit */
     private static array $ready = [];
@@ -130,7 +130,7 @@ class ChatbotTags
             'flow_version_id' => $run->test ? null : self::flowVersion($run->flowId, $hash),
             'sequence_id' => $run->sequenceId, 'sequence_step' => $run->sequenceStep,
             'ad_id' => $run->test ? null : self::adId((int) $run->pageId, $run->fields->psid, $run->pageName),
-            'tags' => ['v' => 1, 'flow_hash' => $hash, 'messages' => $messages],
+            'tags' => ['v' => 1, 'flow_hash' => $hash, 'via' => $run->via(), 'messages' => $messages],
         ];
     }
 
@@ -138,7 +138,7 @@ class ChatbotTags
     public static function manual(int $pageId, int $psid, string $pageName, int $messages): array
     {
         return ['ad_id' => self::adId($pageId, $psid, $pageName),
-            'tags' => ['v' => 1, 'messages' => array_fill(0, $messages, ['botfields' => [], 'fields' => []])]];
+            'tags' => ['v' => 1, 'via' => ChatbotProvider::via($pageName, null), 'messages' => array_fill(0, $messages, ['botfields' => [], 'fields' => []])]];
     }
 
     /** @return array<int, string> ang mga {{pangalan}} ng template, naka-norm */
@@ -248,7 +248,7 @@ class ChatbotTags
             'type' => 'order', 'detail' => json_encode([
                 'run' => $run->runId, 'flow_version' => self::flowVersion($run->flowId, $hash), 'flow_hash' => $hash, 'sends' => $sends,
                 'sequence_id' => $seq ? (int) $seq->sequence_id : null, 'sequence_step' => $seq ? (int) $seq->sequence_step : null,
-                'ad_id' => self::adId($pageId, $psid, $run->pageName),
+                'ad_id' => self::adId($pageId, $psid, $run->pageName), 'via' => $run->via(),
             ]), 'created_at' => now()]);
 
         return true;

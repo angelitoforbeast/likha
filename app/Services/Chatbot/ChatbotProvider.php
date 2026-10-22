@@ -2,6 +2,7 @@
 
 namespace App\Services\Chatbot;
 
+use App\Models\BotcakeChat;
 use App\Services\PageSettings;
 use Illuminate\Support\Str;
 
@@ -13,11 +14,29 @@ class ChatbotProvider
 {
     public const BOTCAKE = 'botcake';
     public const GATEWAY = 'gateway';
+    public const FORBEAST = 'forbeast'; // ang via ng chat na galing sa gateway
     public const ALL = [self::BOTCAKE, self::GATEWAY];
 
     public static function name(string $pageName): string
     {
         return app(PageSettings::class)->get($pageName, 'chatbot', 'provider') === self::GATEWAY ? self::GATEWAY : self::BOTCAKE;
+    }
+
+    /**
+     * Aling bot ang may dala ng chat: botcake o forbeast. Ang chat na galing sa gateway (payload source gateway) ay forbeast,
+     * ang ibang chat ay botcake; walang chat (hal. sequence) = ang provider ng page.
+     */
+    public static function via(string $pageName, ?BotcakeChat $chat): string
+    {
+        if ($chat === null) return self::name($pageName) === self::GATEWAY ? self::FORBEAST : self::BOTCAKE;
+
+        return ($chat->payload['source'] ?? null) === 'gateway' ? self::FORBEAST : self::BOTCAKE;
+    }
+
+    /** Ang pangalan sa screen ng via: Botcake o Forbeast. */
+    public static function viaLabel(string $via): string
+    {
+        return $via === self::FORBEAST ? 'Forbeast' : 'Botcake';
     }
 
     /** $once: isang subok lang sa Botcake (web request, hal. ang Inbox). */

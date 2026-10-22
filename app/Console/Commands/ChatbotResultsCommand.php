@@ -14,7 +14,7 @@ use Illuminate\Console\Command;
 class ChatbotResultsCommand extends Command
 {
     protected $signature = 'chatbot:results {--page= : Page name or Botcake page ID (empty = all pages)} {--from= : Y-m-d (Manila)} {--to= : Y-m-d (Manila)}
-        {--flow= : Flow ID} {--flow-version= : Flow version ID} {--compare= : flow or botfield} {--a=} {--b=} {--json : Print the full JSON}';
+        {--flow= : Flow ID} {--flow-version= : Flow version ID} {--via= : botcake or forbeast} {--compare= : flow or botfield} {--a=} {--b=} {--json : Print the full JSON}';
 
     protected $description = 'Chatbot results (funnel, by message, by sequence step, by ad) as JSON';
 
@@ -31,7 +31,7 @@ class ChatbotResultsCommand extends Command
             }
         }
         $out = $results->output(array_filter(['page_id' => $pageId === null ? null : (string) $pageId, 'from' => $this->option('from'), 'to' => $this->option('to'),
-            'flow_id' => $this->option('flow'), 'version_id' => $this->option('flow-version'), 'compare' => $this->option('compare'), 'a' => $this->option('a'), 'b' => $this->option('b')],
+            'flow_id' => $this->option('flow'), 'version_id' => $this->option('flow-version'), 'via' => $this->option('via'), 'compare' => $this->option('compare'), 'a' => $this->option('a'), 'b' => $this->option('b')],
             fn ($v) => $v !== null));
 
         if ($this->option('json')) {

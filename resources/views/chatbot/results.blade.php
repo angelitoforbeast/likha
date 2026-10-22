@@ -16,7 +16,7 @@
         return intdiv($s, 3600) . ' h ' . intdiv($s % 3600, 60) . ' min';
     };
     $f = $filters;
-    $keep = array_filter(['page_id' => $f['page_id'], 'from' => $f['from'], 'to' => $f['to'], 'flow_id' => $f['flow_id'], 'version_id' => $f['version_id']], fn ($v) => $v !== null);
+    $keep = array_filter(['page_id' => $f['page_id'], 'from' => $f['from'], 'to' => $f['to'], 'flow_id' => $f['flow_id'], 'version_id' => $f['version_id'], 'via' => $f['via']], fn ($v) => $v !== null);
     $botVersions = collect($by_message)->filter(fn ($m) => $m['version'] !== null)->unique('version')->values();
     $versionName = fn ($v) => 'v' . $v['id'] . ' · ' . $v['at'] . ($v['by'] ? ' · ' . $v['by'] : '') . ($v['note'] ? ' · ' . $v['note'] : '');
 @endphp
@@ -45,6 +45,13 @@
                 @foreach($versions as $v)<option value="{{ $v['id'] }}" @selected((string) $f['version_id'] === (string) $v['id'])>{{ $versionName($v) }}</option>@endforeach
             </select>
         </label>
+        <label class="flex flex-col text-xs">Replies via
+            <select name="via" class="border px-2 py-1 text-sm text-gray-900">
+                <option value="">Both</option>
+                <option value="botcake" @selected($f['via'] === 'botcake')>Botcake</option>
+                <option value="forbeast" @selected($f['via'] === 'forbeast')>Forbeast</option>
+            </select>
+        </label>
         <button class="cb-btn cb-btn-primary">Show</button>
         <a href="{{ route('chatbot.results.json', $keep) }}" class="text-xs text-blue-700 hover:underline">JSON</a>
     </form>
@@ -67,6 +74,28 @@
                     <div class="text-xs text-slate-500">{{ $sub }}</div>
                 </div>
             @endforeach
+        </div>
+    </section>
+
+    {{-- By bot --}}
+    <section aria-labelledby="h-via">
+        <h2 id="h-via" class="mb-2 text-base font-semibold">By bot</h2>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[32rem]">
+                <thead><tr><th>Replies via</th><th class="!text-right">Chats</th><th class="!text-right">Sent</th><th class="!text-right">Replied</th><th class="!text-right">Orders</th><th class="!text-right">Delivered</th></tr></thead>
+                <tbody>
+                @foreach($by_via as $via => $s)
+                    <tr>
+                        <td>{{ $via === 'forbeast' ? 'Forbeast' : 'Botcake' }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($s['chats']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($s['sent']) }}</td>
+                        <td class="text-right tabular-nums">{{ $pct($s['replied_pct']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($s['orders']) }}</td>
+                        <td class="text-right tabular-nums">{{ number_format($s['delivered']) }}</td>
+                    </tr>
+                @endforeach
+                </tbody>
+            </table>
         </div>
     </section>
 

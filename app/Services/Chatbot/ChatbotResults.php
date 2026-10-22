@@ -28,7 +28,8 @@ class ChatbotResults
     public const MAX_ROWS = 300;        // kada table
     public const MEDIAN_ROWS = 200000;  // ilang reply_seconds ang binabasa para sa median
     public const VALUE_MAX = 20000;     // letra ng value ng botfield sa output
-    public const VERSIONS = 50;         // gaya ng KEEP_VERSIONS ng flow
+    public const VIA = ['botcake', 'forbeast'];
+    public const VERSIONS = 50;        // gaya ng KEEP_VERSIONS ng flow
     public const ORDER_WINDOW = [-1, 3]; // ts_date ng macro_output: mula 1 araw bago hanggang 3 araw pagkatapos ng order
 
     /** Gaano kalayo na ang J&T status (gaya ng Chatblast): ang pinakamalayong row ng waybill ang totoo. */
@@ -43,7 +44,8 @@ class ChatbotResults
     /**
      * Ang malinis na filter mula sa query string o sa command: page_id, flow_id at version_id ay digits lang (kung hindi,
      * null); from at to ay Y-m-d (Manila; default ang huling 7 araw, hanggang 92 araw).
-     * @return array{page_id: ?string, from: string, to: string, flow_id: ?string, version_id: ?string}
+     * via ay botcake o forbeast (ang bot na may dala ng chat), kung hindi ay null.
+     * @return array{page_id: ?string, from: string, to: string, flow_id: ?string, version_id: ?string, via: ?string}
      */
     public static function filters(array $in): array
     {
@@ -60,7 +62,10 @@ class ChatbotResults
         if ($from > $to) [$from, $to] = [$to, $from];
         if (Carbon::parse($from)->diffInDays(Carbon::parse($to)) >= self::MAX_DAYS) $from = Carbon::parse($to)->subDays(self::MAX_DAYS - 1)->toDateString();
 
-        return ['page_id' => $id('page_id'), 'from' => $from, 'to' => $to, 'flow_id' => $id('flow_id'), 'version_id' => $id('version_id')];
+        $via = $str('via', 10);
+
+        return ['page_id' => $id('page_id'), 'from' => $from, 'to' => $to, 'flow_id' => $id('flow_id'), 'version_id' => $id('version_id'),
+            'via' => in_array($via, self::VIA, true) ? $via : null];
     }
 
     /** Ang paghahambing sa query: compare=flow|botfield at a, b (digits). @return array{0: string, 1: int, 2: int}|null */
@@ -116,8 +121,9 @@ class ChatbotResults
     {
         [$start, $end] = $this->bounds($f);
         $names = BotcakeChat::pageMap();
-        $orders = $this->orders($f, $start, $end);
-        $delivery = $this->deliveries($orders);
+        $allOrders = $this->orders($f, $start, $end);
+        $orders = $allOrders->filter(fn ($o) => $f['via'] === null || self::orderVia($o) === $f['via']);
+        $delivery = $this->deliveries($allOrders);
         $flowOrders = $orders->filter(fn ($o) => ($f['flow_id'] === null || (int) $o->flow_id === (int) $f['flow_id'])
             && ($f['version_id'] === null || (int) ($o->detail['flow_version'] ?? 0) === (int) $f['version_id']));
 
@@ -125,6 +131,7 @@ class ChatbotResults
             'filters' => $f + ['page' => $f['page_id'] !== null ? ($names[$f['page_id']] ?? null) : null,
                 'flow' => $f['flow_id'] !== null ? DB::table('chatbot_flows')->where('id', (int) $f['flow_id'])->value('name') : null],
             'funnel' => ['chats' => $this->chats($f, $start, $end)] + $this->metrics($this->sends($f, $start, $end, true), $flowOrders, $delivery, true),
+            'by_via' => $this->byVia($f, $start, $end, $allOrders, $delivery),
             'by_message' => $this->byMessage($f, $start, $end, $flowOrders, $delivery),
             'by_step' => $this->bySequenceStep($f, $start, $end, $orders, $delivery),
             'by_ad' => $this->byAd($f, $start, $end, $orders, $delivery),
@@ -138,15 +145,49 @@ class ChatbotResults
         return DB::table('chatbot_replies')->where('sent_at', '>=', $start)->where('sent_at', '<', $end)->where('kind', 'send')->where('status', 'sent')
             ->when($f['page_id'], fn ($q, $v) => $q->where('page_id', (int) $v))
             ->when($flow && $f['flow_id'], fn ($q) => $q->where('flow_id', (int) $f['flow_id']))
-            ->when($flow && $f['version_id'], fn ($q) => $q->where('flow_version_id', (int) $f['version_id']));
+            ->when($flow && $f['version_id'], fn ($q) => $q->where('flow_version_id', (int) $f['version_id']))
+            ->when($f['via'], fn ($q, $v) => self::whereVia($q, 'tags->via', $v));
     }
 
-    /** Ilang customer (page + PSID) ang nag-chat sa range. */
+    /**
+     * Ang hanay na sa bot na ito: ang forbeast ay ang may tanda; ang botcake ay ang may tanda o wala (ang mga luma).
+     * $column ay ang JSON path (hal. tags->via, payload->source).
+     */
+    private static function whereVia($q, string $column, string $via)
+    {
+        return $q->where(fn ($w) => $column === 'payload->source'
+            ? ($via === 'forbeast' ? $w->where($column, 'gateway') : $w->whereNull($column)->orWhere($column, '<>', 'gateway'))
+            : ($via === 'forbeast' ? $w->where($column, 'forbeast') : $w->whereNull($column)->orWhere($column, '<>', 'forbeast')));
+    }
+
+    /** Ang via ng isang order; ang wala (luma) ay botcake. */
+    private static function orderVia(object $o): string
+    {
+        return ($o->detail['via'] ?? null) === 'forbeast' ? 'forbeast' : 'botcake';
+    }
+
+    /** Ilang customer (page + PSID) ang nag-chat sa range; ang chat na galing sa gateway ay forbeast. */
     private function chats(array $f, Carbon $start, Carbon $end): int
     {
         return (int) DB::table('botcake_chats')->where('received_at', '>=', $start)->where('received_at', '<', $end)
             ->when($f['page_id'], fn ($q, $v) => $q->where('page_id', (string) $v))
+            ->when($f['via'], fn ($q, $v) => self::whereVia($q, 'payload->source', $v))
             ->groupBy('page_id')->selectRaw('COUNT(DISTINCT psid) AS n')->pluck('n')->sum();
+    }
+
+    /** Ang funnel ng bawat bot (botcake, forbeast) sa range, kahit anong filter ng via. */
+    private function byVia(array $f, Carbon $start, Carbon $end, Collection $allOrders, array $delivery): array
+    {
+        $out = [];
+        foreach (self::VIA as $via) {
+            $g = ['via' => $via] + $f;
+            $orders = $allOrders->filter(fn ($o) => self::orderVia($o) === $via
+                && ($f['flow_id'] === null || (int) $o->flow_id === (int) $f['flow_id'])
+                && ($f['version_id'] === null || (int) ($o->detail['flow_version'] ?? 0) === (int) $f['version_id']));
+            $out[$via] = ['chats' => $this->chats($g, $start, $end)] + $this->metrics($this->sends($g, $start, $end, true), $orders, $delivery, true);
+        }
+
+        return $out;
     }
 
     /**
@@ -192,7 +233,8 @@ class ChatbotResults
             ->where('t.sent_at', '>=', $start)->where('t.sent_at', '<', $end)->where('r.kind', 'send') // ang padala ng bot lang, gaya ng funnel
             ->when($f['page_id'], fn ($q, $v) => $q->where('t.page_id', (int) $v))
             ->when($f['flow_id'], fn ($q, $v) => $q->where('t.flow_id', (int) $v))
-            ->when($f['version_id'], fn ($q, $v) => $q->where('t.flow_version_id', (int) $v));
+            ->when($f['version_id'], fn ($q, $v) => $q->where('t.flow_version_id', (int) $v))
+            ->when($f['via'], fn ($q, $v) => self::whereVia($q, 'r.tags->via', $v));
     }
 
     private static function tagKey(object $t): string

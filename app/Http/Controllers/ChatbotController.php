@@ -348,6 +348,7 @@ class ChatbotController extends Controller
             'last_input' => '', 'full_name' => self::SAMPLE_NAME, 'first_name' => explode(' ', self::SAMPLE_NAME)[0], 'psid' => 'SAMPLE',
             'page_id' => (string) $this->settings->get($page, 'botcake', 'page_id'), 'page_name' => $page,
             'current_date' => now('Asia/Manila')->toDateString(), 'last_interaction' => now('Asia/Manila')->format('Y-m-d H:i'),
+            'replies_via' => ChatbotProvider::viaLabel(ChatbotProvider::via($page, null)),
         ];
         $base = ChatbotVars::merge($bot, $run);
         $labels = array_column($this->fields->columns(), 'label', 'key');

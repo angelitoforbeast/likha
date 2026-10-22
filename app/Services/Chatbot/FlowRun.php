@@ -93,6 +93,14 @@ class FlowRun
     ) {
     }
 
+    private ?string $via = null;
+
+    /** Ang bot na may dala ng chat na nagsimula ng takbo (botcake o forbeast); naka-memo, isang basa lang. */
+    public function via(): string
+    {
+        return $this->via ??= ChatbotProvider::via($this->pageName, $this->chatId ? BotcakeChat::find($this->chatId) : null);
+    }
+
     public function psid(): string
     {
         return $this->test ? 'TEST' : (string) $this->fields->psid;
@@ -108,7 +116,7 @@ class FlowRun
         $run = [
             'last_input' => $this->input, 'full_name' => $this->fullName, 'first_name' => $first, 'psid' => $this->psid(),
             'page_id' => $this->pageId, 'page_name' => $this->pageName, 'current_date' => now('Asia/Manila')->toDateString(),
-            'last_interaction' => $this->receivedAt,
+            'last_interaction' => $this->receivedAt, 'replies_via' => ChatbotProvider::viaLabel($this->via()),
         ];
         $base = ChatbotVars::merge($this->botfields, $this->fields->fields(), $run);
         $bot = array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $this->botfields);
