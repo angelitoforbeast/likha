@@ -57,7 +57,7 @@ class FlowRun
             $this->aiClearedAt = count($this->sends);
             return;
         }
-        $chat = $this->chatId ?? (int) BotcakeChat::where('page_id', $this->pageId)->where('psid', (string) $this->fields->psid)->max('id');
+        $chat = $this->chatId ?? (int) BotcakeChat::active()->where('page_id', $this->pageId)->where('psid', (string) $this->fields->psid)->max('id');
         $reply = (int) ChatbotReply::where('page_id', $this->fields->pageId)->where('psid', $this->fields->psid)->max('id');
         $this->fields->set(CustomerFields::AI_SINCE, json_encode(['at' => now()->toIso8601String(), 'chat' => $chat, 'reply' => $reply]));
     }

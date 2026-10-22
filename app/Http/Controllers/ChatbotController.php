@@ -557,11 +557,11 @@ class ChatbotController extends Controller
         if (!Schema::hasTable('botcake_chats')) return ['today' => [], 'last' => []];
 
         return Cache::remember('chatbot:chat-stats', 60, function () {
-            $today = BotcakeChat::where('received_at', '>=', now('Asia/Manila')->startOfDay()->timezone(config('app.timezone')))
+            $today = BotcakeChat::active()->where('received_at', '>=', now('Asia/Manila')->startOfDay()->timezone(config('app.timezone')))
                 ->whereNotNull('page_id')->selectRaw('page_id, COUNT(*) AS n')->groupBy('page_id')->pluck('n', 'page_id')->map(fn ($n) => (int) $n)->all();
             $last = [];
             foreach (array_keys(BotcakeChat::pageMap()) as $id) {
-                $at = BotcakeChat::where('page_id', (string) $id)->max('received_at');
+                $at = BotcakeChat::active()->where('page_id', (string) $id)->max('received_at');
                 if ($at) $last[(string) $id] = \Carbon\Carbon::parse($at)->timezone('Asia/Manila')->format('Y-m-d H:i');
             }
             return ['today' => $today, 'last' => $last];

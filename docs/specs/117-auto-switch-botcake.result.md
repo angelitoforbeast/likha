@@ -173,3 +173,37 @@ None. The standby marker uses the existing `botcake_chats.payload` JSON, and the
 - **Behaviour change for gateway pages:** Botcake pushes are now stored (standby) instead of dropped, so they show in the chats and Inbox screens until their Forbeast reply is sent.
 - **The feed returns 401 until `CHATBOT_EVENTS_KEY` is set** on the server.
 - **Forbeast's error body format is unverified.** If it reports Meta codes differently, condition 2 falls back to conditions 1 and 3, and customer errors could count toward condition 1 (see TODO).
+
+## Amendment 1: standby chats are invisible outside the watcher and the switch
+
+- **One shared scope:** `BotcakeChat::active()` (`app/Models/BotcakeChat.php`) is `whereNull('payload->_standby')`. Laravel compiles the JSON path per driver (mysql, pgsql, sqlite). The two readers that use `DB::table` write the same `whereNull('payload->_standby')` inline.
+- **Readers changed** (each reads real chats only now):
+  - `FlowEngine::history`: the AI history, so the customer's message is not seen twice.
+  - `Inbox::conversations`, `Inbox::thread` (the in and out queries), the "last activity" lookup (~L249), the first/last chat lookups (~L267–268) and the photo lookup (~L350).
+  - `ChatbotResults::chats`: the Results funnel chat count (a `DB::table` query). The "response rate" and "replied" counts come from `chatbot_replies`, which has no standby rows, so they follow.
+  - `ChatbotController::chatStats`: "today" and "last chat" on `/chatbot/pages`.
+  - `ChatblastChatController`: the `/chatblast/chats` list and the per-customer page.
+  - `ChatbotSheetController`: the recent-customers picker and the chat lookup of the test.
+  - `ChatbotSequences`: the last chat used for the 24-hour window of a step.
+  - `ChatbotTags`: the first chat for the ad id, and the replied-backfill (the next chat after a send).
+  - `FlowRun::forgetAi`: the chat id stored as the "Clear AI memory" marker.
+- **Left as they are, on purpose:**
+  - `ChatbotRunner` and `HandleGatewayEvent`: they already skip standby rows in memory.
+  - `ForbeastWatch`: it needs the standby rows.
+  - `BotcakeChatController::isDuplicate`: Botcake's own retry of a chat must still be seen as a duplicate.
+  - Name and page-id lookups (`HandleGatewayEvent::name`, `ChatbotSequenceController`, `BotcakeChat::pageIds`): they only read a name or a page id, which a standby row carries truthfully.
+  - `BotcakeStressPage`, `NormalizeBotcakeChats`, `BotcakeChat::prune` (CLI, normalising and the 90-day delete).
+- **`{{ALL USER INPUT}}`:** no variable of the chatbot is built from `botcake_chats` other than the AI history above (`all_user_input` belongs to the orders table). Nothing else needed a filter.
+- **Prune:** `ForbeastWatch::prune()`, called first by `chatbot:forbeast-watch` (also when `GATEWAY_URL` is empty), deletes standby rows older than `standby_minutes + 5` (20 minutes by default). The scheduled command runs it every minute.
+- **No migration, no new config key.**
+
+| Case | Test | Result |
+|---|---|---|
+| S-117.13 | `ForbeastStandbyHiddenTest::test_S_117_13_a_standby_twin_is_not_in_the_ai_history` | pass |
+| S-117.14 | `…::test_S_117_14_a_standby_twin_is_not_in_the_inbox_list_nor_the_thread` | pass |
+| S-117.15 | `…::test_S_117_15_a_standby_twin_is_not_counted_in_results_nor_the_chat_stats` | pass |
+| S-117.16 | `…::test_S_117_16_the_watcher_prunes_standby_older_than_twenty_minutes_and_keeps_the_rest` | pass |
+
+Red run before the code: S-117.13 "Failed asserting that false is true" (the history held both copies), S-117.14 "two arrays are identical", S-117.15 "2 is identical to 1", S-117.16 "two arrays are identical" (nothing deleted). The first run of S-117.13 errored on a missing import in the test, fixed before counting it as red.
+
+`vendor/bin/phpunit tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake` → **Tests: 936, Assertions: 6487, Skipped: 1**, no failures; the existing 117 tests pass. Not run on mysql or pgsql (sqlite only): the JSON path comes from Laravel's compiler, as `payload->source` already does in `ChatbotResults`.

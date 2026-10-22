@@ -11,6 +11,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
@@ -210,6 +211,17 @@ class ForbeastWatch
         $chat = BotcakeChat::find($chatId);
         if ($chat === null || self::standby($chat) || ($chat->payload['source'] ?? null) !== 'gateway') return;
         self::twin($chat, true)?->delete();
+    }
+
+    /**
+     * Binubura ang standby na mas luma sa standby_minutes + 5 (ang lipat ay hindi na ito kukuha): ang kopya ng chat na
+     * walang naipadalang sagot (hal. wait step) ay hindi mananatili habambuhay. @return int ilang row ang nabura
+     */
+    public function prune(): int
+    {
+        if (!Schema::hasTable('botcake_chats')) return 0;
+
+        return BotcakeChat::whereNotNull('payload->_standby')->where('received_at', '<', now()->subMinutes(self::limit('standby_minutes') + 5))->delete();
     }
 
     /**

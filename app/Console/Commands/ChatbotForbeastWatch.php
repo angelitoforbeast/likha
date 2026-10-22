@@ -12,7 +12,8 @@ use Throwable;
 
 /**
  * Kada minuto: ang bawat page na nasa Forbeast ay sinusuri (health check at ang mga chat ng Botcake laban sa Forbeast); ang
- * pumapalya ay kusang inililipat sa Botcake (ForbeastWatch). Walang GATEWAY_URL: walang ginagawa.
+ * pumapalya ay kusang inililipat sa Botcake (ForbeastWatch). Binubura rin ang luma nang standby. Walang GATEWAY_URL: walang
+ * sinusuri.
  */
 class ChatbotForbeastWatch extends Command
 {
@@ -22,6 +23,12 @@ class ChatbotForbeastWatch extends Command
 
     public function handle(ForbeastWatch $watch, PageSettings $settings): int
     {
+        // Ang luma nang standby ay binubura kahit walang page sa Forbeast (ang natira pagkatapos ng lipat).
+        try {
+            $watch->prune();
+        } catch (Throwable $e) {
+            report($e);
+        }
         if (!ChatbotProvider::gatewayReady()) return self::SUCCESS;
 
         $pages = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)->orderBy('id')->get()

@@ -27,6 +27,16 @@ class BotcakeChat extends Model
     ];
 
     /**
+     * Ang mga chat na totoo: walang marka ng standby (payload._standby, ang kopya ng Botcake habang nasa Forbeast ang page;
+     * ForbeastWatch lang ang gumagamit nito). Gamitin sa bawat basa na nagbibilang o nagpapakita ng chat. Gumagana rin sa
+     * DB::table (ang parehong column): Laravel ang bahala sa JSON path ng mysql, pgsql at sqlite.
+     */
+    public function scopeActive($query)
+    {
+        return $query->whereNull('payload->_standby');
+    }
+
+    /**
      * botcake.page_id => pangalan ng page, mula sa active na page_settings (naka-cache 10 minuto; binubura ng
      * PageSettings kapag may nagbago na botcake.page_id).
      * @return array<string, string>

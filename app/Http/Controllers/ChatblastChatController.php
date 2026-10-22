@@ -58,7 +58,7 @@ class ChatblastChatController extends Controller
         $chats = null;
         $pages = [];
         if ($ready) {
-            $chats = BotcakeChat::query()
+            $chats = BotcakeChat::active()
                 ->when($page !== '', fn ($w) => $w->where('page_id', $page))
                 ->when($date !== '', function ($w) use ($date) {
                     $day = Carbon::parse($date, config('app.timezone'))->startOfDay();
@@ -101,7 +101,7 @@ class ChatblastChatController extends Controller
         $psid = $this->str($request, 'psid', 64);
         abort_if($psid === '' || !Schema::hasTable('botcake_chats'), 404);
 
-        $chats = BotcakeChat::query()
+        $chats = BotcakeChat::active()
             ->when($pageId !== '', fn ($w) => $w->where('page_id', $pageId), fn ($w) => $w->whereNull('page_id'))
             ->where('psid', $psid)
             ->orderByDesc('received_at')->orderByDesc('id')->limit(self::CUSTOMER_MAX)

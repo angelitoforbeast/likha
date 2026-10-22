@@ -72,7 +72,7 @@ class ChatbotSheetController extends Controller
         $this->checkAccess();
         $flow = ChatbotFlow::findOrFail($id);
         $ids = $this->pageIds($flow);
-        $chats = $ids ? BotcakeChat::whereIn('page_id', $ids)->orderByDesc('received_at')->orderByDesc('id')->limit(self::RECENT_CHATS)
+        $chats = $ids ? BotcakeChat::active()->whereIn('page_id', $ids)->orderByDesc('received_at')->orderByDesc('id')->limit(self::RECENT_CHATS)
             ->get(['id', 'page_id', 'page_name', 'psid', 'name', 'received_at'])->unique(fn ($c) => $c->page_id . ':' . $c->psid)->take(self::CUSTOMERS) : collect();
 
         return response()->json(['customers' => $chats->map(fn ($c) => ['chat_id' => $c->id,
@@ -84,7 +84,7 @@ class ChatbotSheetController extends Controller
     {
         $this->checkAccess();
         $flow = ChatbotFlow::findOrFail($id);
-        $chat = BotcakeChat::whereKey((int) $request->input('chat_id'))->whereIn('page_id', $this->pageIds($flow))->first();
+        $chat = BotcakeChat::active()->whereKey((int) $request->input('chat_id'))->whereIn('page_id', $this->pageIds($flow))->first();
         if (!$chat) abort(404);
 
         $columns = FlowGraph::cleanConfig('sheet', ['columns' => $request->input('columns')])['columns'];

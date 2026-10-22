@@ -444,7 +444,7 @@ class FlowEngine
         $psid = (string) $run->fields->psid;
         $since = $run->aiSince();
 
-        $in = BotcakeChat::where('page_id', $run->pageId)->where('psid', $psid)
+        $in = BotcakeChat::active()->where('page_id', $run->pageId)->where('psid', $psid)
             ->when($run->chatId, fn ($q) => $q->where('id', '<', $run->chatId))
             ->when($since, fn ($q) => $q->where('id', '>', $since['chat']))
             ->orderByDesc('id')->limit($n)->get(['message', 'received_at'])->toBase() // ang walang laman na Eloquent collection ay hindi ma-merge sa mga array (getKey)
