@@ -12,6 +12,7 @@ use App\Models\PageSetting;
 use App\Services\Chatbot\BotcakeOutbox;
 use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotProvider;
+use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\Chatbot\FlowRun;
@@ -184,6 +185,13 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
 
     public function test_S_117_5_the_health_check_switches_after_three_failures_or_at_once_when_not_connected(): void
     {
+        // Walang sariling token ang page: walang health check (ang system key ay 404 sa /v1/pages/{id}).
+        Http::fake([self::GW_PAGE => Http::response('', 500)]);
+        for ($i = 0; $i < 4; $i++) $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('gateway', $this->provider());
+        Http::assertNotSent(fn (HttpRequest $r) => $r->url() === self::GW_PAGE);
+
+        app(PageSettings::class)->set('Page Uno', ForbeastPageSetup::PROVIDER, 'token', 'fbp_page_uno_token', true, null, true);
         Http::fake([self::GW_PAGE => Http::sequence()->push('', 500)->push('', 500)->push('', 500)]);
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
@@ -191,11 +199,12 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('botcake', $this->provider());
         $this->assertSame('health', $this->events()[0]['condition']);
-        Http::assertSent(fn (HttpRequest $r) => $r->url() === self::GW_PAGE && $r->method() === 'GET' && $r->hasHeader('Authorization', 'Bearer ' . self::GW_KEY));
+        Http::assertSent(fn (HttpRequest $r) => $r->url() === self::GW_PAGE && $r->method() === 'GET' && $r->hasHeader('Authorization', 'Bearer fbp_page_uno_token'));
 
         // Ibang page: sumagot pero hindi makapagpadala.
         $this->page('Page Dos', '2002');
         app(PageSettings::class)->set('Page Dos', 'chatbot', 'provider', 'gateway');
+        app(PageSettings::class)->set('Page Dos', ForbeastPageSetup::PROVIDER, 'token', 'fbp_page_dos_token', true, null, true);
         Http::fake([self::GW . '/v1/pages/2002' => Http::response(['id' => '2002', 'connected' => true, 'can_send' => false])]);
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('botcake', ChatbotProvider::name('Page Dos'));

@@ -89,8 +89,8 @@ class ForbeastWatch
     {
         $url = rtrim((string) config('services.gateway.url'), '/');
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
+        // Sariling token lang ng page: ang system key (GATEWAY_KEY, fbs_) ay 404 sa /v1/pages/{id}, kaya hindi ito sukatan.
         $key = app(ForbeastPageSetup::class)->token($page);
-        if ($key === '') $key = trim((string) config('services.gateway.key'));
         if ($url === '' || $pageId === '' || $key === '') return;
 
         try {
