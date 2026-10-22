@@ -142,4 +142,13 @@ class ChatbotPasteScriptTest extends TestCase
 
         $this->assertNotNull($this->plan("10\n20", [$uno])['error'], 'walang firstRowOnly: tinatanggihan pa rin gaya ng dati');
     }
+
+    public function test_S_120_5_a_text_column_holding_only_a_link_gets_the_warning_naming_its_image_column(): void
+    {
+        $cols = [['key' => 'seq_11', 'label' => 'Seq 11', 'kind' => 'long'], ['key' => 'seq_img_11', 'label' => 'Seq Img 11', 'kind' => 'image'], ['key' => 'main_flow', 'label' => 'Main Flow', 'kind' => 'text']];
+        $this->assertTrue($this->call('isLinkOnly', " https://botcake.pro/i/a.jpg \n"));
+        $this->assertFalse($this->call('isLinkOnly', 'See https://botcake.pro/i/a.jpg here'));
+        $this->assertSame('Seq 11 is an image link: put it in Seq Img 11. You can still save it.', $this->call('linkWarning', $cols[0], $cols));
+        $this->assertSame('Main Flow is a link: this column needs text. You can still save it.', $this->call('linkWarning', $cols[2], $cols));
+    }
 }

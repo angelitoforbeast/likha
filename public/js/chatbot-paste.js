@@ -58,6 +58,17 @@
     return /^https?:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d+)?([\/?#][\x21-\x7e]*)?$/i.test(v);
   }
 
+  // Ang value na link lang (isang http(s) URL) sa text column: malamang larawan na nailagay sa maling column.
+  function isLinkOnly(v) {
+    return /^https?:\/\/\S+$/i.test(String(v).trim());
+  }
+
+  // Ang babala para sa link sa text column; ang image column na katapat (Seq 11 -> Seq Img 11) ay pinapangalanan kung meron.
+  function linkWarning(c, columns) {
+    const img = c.key.replace(/^(seq|after_order)_(\d+)$/, '$1_img_$2'), m = img !== c.key && columns.find(x => x.key === img);
+    return c.label + ' is ' + (m ? 'an image link: put it in ' + m.label : 'a link: this column needs text') + '. You can still save it.';
+  }
+
   /**
    * Ang plano ng isang paste. input: { text, columns: [{key, label, kind}] (ang mga botfield na puwedeng i-paste, sa
    * ayos ng grid), targets: [{page, cells: {key: value}}] (sa ayos ng grid), startKey (para sa ayon sa ayos; default
@@ -124,5 +135,5 @@
     return out;
   }
 
-  root.ChatbotPaste = { parseTsv: parseTsv, toTsv: toTsv, plan: plan, isImageLink: isImageLink };
+  root.ChatbotPaste = { parseTsv: parseTsv, toTsv: toTsv, plan: plan, isImageLink: isImageLink, isLinkOnly: isLinkOnly, linkWarning: linkWarning };
 })(typeof self !== 'undefined' ? self : globalThis);

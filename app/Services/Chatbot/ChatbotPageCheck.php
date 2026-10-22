@@ -90,6 +90,12 @@ class ChatbotPageCheck
         $out = ['status' => 'none', 'reasons' => [], 'warnings' => [], 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
         $flow = ctype_digit($flowId) && Schema::hasTable('chatbot_flows') ? ChatbotFlow::find((int) $flowId) : null;
+        // Ang FLOW (kapag On ang bot): walang flow = babala lang (valid na setup); wala o hindi published = mali.
+        $on = $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0';
+        if ($on && $flowId === '') $out['warnings'][] = 'No flow: the bot only receives chats';
+        if ($on && $flowId !== '' && ($flow === null || $flow->published_at === null)) {
+            return ['status' => 'x', 'reasons' => ['Flow not found / not published']] + $out;
+        }
         if ($flow === null) return $out;
 
         $columns = $this->fields->columns();
@@ -118,6 +124,9 @@ class ChatbotPageCheck
         unset($used['flow']);
 
         $reasons = [];
+        if ($on && Schema::hasTable('chatbot_sequence_steps') && ChatbotSequenceStep::where('flow_id', $flow->id)->exists()) {
+            $reasons[] = 'Flow "' . $flow->name . '" is a sequence step, not a main flow';
+        }
         $missing = array_values(array_filter(array_keys($labels), fn ($k) => isset($used[$k]) && ($values[$k] ?? '') === '' && !preg_match(self::OPTIONAL, $k)));
         if ($missing) $reasons[] = 'Missing: ' . implode(', ', array_map(fn ($k) => $labels[$k], $missing));
 
@@ -125,7 +134,16 @@ class ChatbotPageCheck
         $started = microtime(true);
         foreach ($columns as $c) {
             $url = $values[$c['key']] ?? '';
-            if ($c['kind'] !== 'image' || $url === '') continue;
+            if ($url === '') continue;
+            // Maling uri ng value (kasama ang opsyonal na Seq 11-20): link lang sa text column, o hindi link sa image column.
+            if ($c['kind'] !== 'image') {
+                if ($c['kind'] !== 'flow' && preg_match('~^https?://\S+$~i', $url)) {
+                    $img = preg_replace('/^(seq|after_order)_(\d+)$/', '$1_img_$2', $c['key']);
+                    $reasons[] = $img !== $c['key'] && isset($labels[$img]) ? $c['label'] . ' is an image link: put it in ' . $labels[$img] : $c['label'] . ' is a link: this column needs text';
+                }
+                continue;
+            }
+            if (!preg_match('~^[a-z][a-z0-9+.-]*://\S+$~i', $url)) { $reasons[] = $c['label'] . ' is not an image link'; continue; }
             $res = $fresh ? null : $this->images->cached($url);
             if ($res === null) {
                 if ($calls >= self::MAX_URL_CHECKS || microtime(true) - $started > self::URL_SECONDS) { $out['unchecked']++; continue; }
@@ -160,7 +178,7 @@ class ChatbotPageCheck
         }
 
         $content = $this->content->run($page, false);
-        $warnings = [];
+        $warnings = $out['warnings'];
         foreach ($content['findings'] as $f) {
             if ($f['level'] === 'x') $reasons[] = $f['reason'];
             elseif ($f['level'] === 'warn') $warnings[] = $f['reason'];

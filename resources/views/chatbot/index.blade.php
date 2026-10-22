@@ -175,6 +175,7 @@
             </div>
             <textarea id="long-text" rows="12" class="w-full rounded-md border border-slate-300 p-2 font-mono text-sm"></textarea>
             <p id="long-mark" class="mt-1 min-h-[1rem] text-xs" aria-live="polite"></p>
+            <p id="long-warn" class="min-h-[1rem] text-xs text-amber-700" aria-live="polite"></p>
         </div>
     </div>
 
@@ -749,6 +750,7 @@
         $('long-text').value = r.cells[c.key] ?? '';
         $('long').dataset.key = id(r.page, c.key);
         $('long-mark').textContent = '';
+        longWarn();
         $('long').classList.remove('hidden');
         $('long-text').focus();
     }
@@ -759,7 +761,12 @@
         delete $('long').dataset.key;
         longRow = null;
     }
-    $('long-text').addEventListener('input', () => { clearTimeout(longTimer); longTimer = setTimeout(() => save(longRow, longCol, $('long-text').value), PAUSE_MS); });
+    // Ang link lang sa text column: babala (amber), pero nase-save pa rin.
+    function longWarn() {
+        const v = $('long-text').value;
+        $('long-warn').textContent = longCol && ChatbotPaste.isLinkOnly(v) ? ChatbotPaste.linkWarning(longCol, botCols()) : '';
+    }
+    $('long-text').addEventListener('input', () => { longWarn(); clearTimeout(longTimer); longTimer = setTimeout(() => save(longRow, longCol, $('long-text').value), PAUSE_MS); });
     $('long-close').addEventListener('click', closeLong);
     $('long').addEventListener('click', e => { if (e.target === $('long')) closeLong(); });
 
@@ -906,12 +913,13 @@
         let block = ChatbotPaste.parseTsv(e.clipboardData.getData('text/plain'));
         if (!block.length) return;
         if (block.length === 1 && block[0].length === 1) block = Array.from({length: b.bottom - b.top + 1}, () => Array(b.right - b.left + 1).fill(block[0][0]));
-        let dropped = 0, flagged = 0, added = 0;
+        let dropped = 0, flagged = 0, added = 0, linked = 0;
         block.forEach((line, i) => line.forEach((raw, j) => {
             const r = b.list[b.top + i], c = b.cols[b.left + j], value = raw.trim();
             if (!r || !c) { if (value !== '') dropped++; return; }
             if (value === '' && !$('f-blanks').checked) return;
             if (value !== '' && c.kind === 'image' && !ChatbotPaste.isImageLink(value)) { flagged++; return; }
+            if (value !== '' && c.kind !== 'image' && c.kind !== 'flow' && ChatbotPaste.isLinkOnly(value)) linked++;
             addPending(r, c.key, value); added++;
         }));
         const width = Math.max(...block.map(l => l.length));
@@ -919,8 +927,9 @@
             b: {page: b.list[Math.min(b.top + block.length, b.list.length) - 1].page, key: b.cols[Math.min(b.left + width, b.cols.length) - 1].key}};
         const notes = [plural(added, 'cell') + ' pasted, not saved yet'];
         if (flagged) notes.push(plural(flagged, 'value') + ' in image columns are not links and were left out');
+        if (linked) notes.push(plural(linked, 'value') + ' in text columns are only a link (check the image columns)');
         if (dropped) notes.push(plural(dropped, 'value') + ' past the last column or row were dropped');
-        notice(notes.join(' · ') + '.', flagged || dropped ? 'text-amber-700' : 'text-slate-600');
+        notice(notes.join(' · ') + '.', flagged || dropped || linked ? 'text-amber-700' : 'text-slate-600');
         render();
         table.querySelector('td.cb-sel')?.focus({preventScroll: true});
     });
@@ -937,7 +946,8 @@
             // Ikinukumpara sa trimmed na dating value: ang lumang value na may espasyo sa dulo ay hindi "binago" pagbukas.
             const value = peInput(c.key).value.trim(), old = pe.orig[c.key], same = value === old.trim();
             const flagged = value !== '' && !same && c.kind === 'image' && !ChatbotPaste.isImageLink(value);
-            return {c, value, old, changed: !same && !flagged, flagged};
+            const linked = value !== '' && c.kind !== 'image' && c.kind !== 'flow' && ChatbotPaste.isLinkOnly(value);
+            return {c, value, old, changed: !same && !flagged, flagged, linked};
         });
     }
     const peDirty = () => !!pe && peState().some(x => x.changed || x.flagged);
@@ -947,8 +957,8 @@
             const row = peInput(x.c.key).closest('.pe-field');
             row.classList.toggle('pe-changed', x.changed); row.classList.toggle('pe-flagged', x.flagged);
             const was = row.querySelector('.pe-was');
-            was.textContent = x.flagged ? 'Not a link (http:// or https://): will not be saved.' : x.changed ? 'Was: ' + (x.old === '' ? '(empty)' : x.old) : '';
-            was.className = 'pe-was whitespace-pre-line break-words text-xs ' + (x.flagged ? 'text-red-600' : 'text-slate-500');
+            was.textContent = x.flagged ? 'Not a link (http:// or https://): will not be saved.' : x.linked ? ChatbotPaste.linkWarning(x.c, botCols()) : x.changed ? 'Was: ' + (x.old === '' ? '(empty)' : x.old) : '';
+            was.className = 'pe-was whitespace-pre-line break-words text-xs ' + (x.flagged ? 'text-red-600' : x.linked ? 'text-amber-700' : 'text-slate-500');
             const img = row.querySelector('img');
             if (img) { const ok = ChatbotPaste.isImageLink(x.value); img.classList.toggle('invisible', !ok); if (ok && img.getAttribute('src') !== x.value) img.src = x.value; }
         }

@@ -80,6 +80,7 @@ abstract class BotcakeApiTestCase extends TestCase
             'database/migrations/2026_10_16_400000_create_botcake_psids_table.php',
             'database/migrations/2026_10_16_400100_add_pending_counts_to_botcake_psid_import_runs.php',
             'database/migrations/2026_10_17_100000_create_page_settings_table.php',
+            'database/migrations/2026_11_03_100000_add_replaced_by_to_page_settings.php',
             'database/migrations/2026_10_17_100100_add_api_columns_to_botcake_psids.php',
             'database/migrations/2026_10_17_100200_add_last_seen_and_stop_reason_for_botcake_sync.php',
             'database/migrations/2026_10_17_100300_add_ad_and_match_keys_to_botcake_psids.php',
