@@ -26,6 +26,12 @@ class BotcakeOutbox implements Outbox
         return (bool) config('services.chatbot.replies_enabled');
     }
 
+    /** Ang mga mensahe bilang ipinapadala sa Botcake/Forbeast: walang "ai" na marka (sa ating talaan lang iyon). */
+    public static function wire(array $messages): array
+    {
+        return array_map(fn ($m) => is_array($m) ? array_diff_key($m, ['ai' => 1]) : $m, array_values($messages));
+    }
+
     public function send(FlowRun $run, string $nodeId, array $messages): array
     {
         if (!self::enabled()) return $this->log($run, $nodeId, 'send', $messages, 'skipped', self::SWITCHED_OFF);
