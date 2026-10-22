@@ -89,13 +89,19 @@ class ForbeastPageTokenTest extends ChatblastTestCase
 
     public function test_S_113_2_a_bad_token_shows_the_error_and_registers_nothing(): void
     {
-        Http::fake([self::PAGE => Http::response(['error' => ['code' => 'unauthorized', 'message' => 'Invalid page token.']], 401)]);
+        Http::fake([self::PAGE => Http::sequence()->push(['error' => ['code' => 'unauthorized', 'message' => 'Invalid page token.']], 401)->push(['id' => '1001', 'name' => 'Tech Flask']),
+            self::HOOK => Http::response(['error' => ['message' => 'Bad url.']], 422)]);
 
         $this->saveToken()->assertOk()->assertJson(['forbeast' => ['status' => 'invalid', 'connected' => false]]);
 
         $this->assertSame('invalid · Forbeast said "Invalid page token." (HTTP 401)', $this->setting('token_status'));
         $this->assertNull($this->setting('webhook_secret'));
         Http::assertNotSent(fn (HttpRequest $r) => $r->method() === 'PUT');
+
+        // Tinanggap ang token pero hindi ang webhook: walang secret na naitala, at hindi ok ang status.
+        $this->saveToken('fbp_page_uno_token_second_9k8j')->assertOk()->assertJson(['forbeast' => ['status' => 'error', 'connected' => false]]);
+        $this->assertSame('error · Webhook not set: Forbeast said "Bad url." (HTTP 422)', $this->setting('token_status'));
+        $this->assertNull($this->setting('webhook_secret'));
     }
 
     public function test_S_113_3_the_test_button_retests_and_reconnects_from_page_settings_and_from_the_chatbot_row(): void
@@ -134,6 +140,7 @@ class ForbeastPageTokenTest extends ChatblastTestCase
         $this->event('1002', self::GLOBAL_SECRET)->assertOk();
         $this->event('1002', 'page-uno-own-secret')->assertStatus(401);
         $this->event('9999', self::GLOBAL_SECRET)->assertStatus(401);
+        $this->event('', self::GLOBAL_SECRET)->assertStatus(401); // walang page_id
 
         Queue::assertPushed(HandleGatewayEvent::class, 2);
     }
