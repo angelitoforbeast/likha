@@ -90,6 +90,12 @@ class ChatbotPageCheck
         $out = ['status' => 'none', 'reasons' => [], 'warnings' => [], 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
         $flow = ctype_digit($flowId) && Schema::hasTable('chatbot_flows') ? ChatbotFlow::find((int) $flowId) : null;
+        // Ang FLOW (kapag On ang bot): walang flow = babala lang (valid na setup); wala o hindi published = mali.
+        $on = $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0';
+        if ($on && $flowId === '') $out['warnings'][] = 'No flow: the bot only receives chats';
+        if ($on && $flowId !== '' && ($flow === null || $flow->published_at === null)) {
+            return ['status' => 'x', 'reasons' => ['Flow not found / not published']] + $out;
+        }
         if ($flow === null) return $out;
 
         $columns = $this->fields->columns();
@@ -118,6 +124,9 @@ class ChatbotPageCheck
         unset($used['flow']);
 
         $reasons = [];
+        if ($on && Schema::hasTable('chatbot_sequence_steps') && ChatbotSequenceStep::where('flow_id', $flow->id)->exists()) {
+            $reasons[] = 'Flow "' . $flow->name . '" is a sequence step, not a main flow';
+        }
         $missing = array_values(array_filter(array_keys($labels), fn ($k) => isset($used[$k]) && ($values[$k] ?? '') === '' && !preg_match(self::OPTIONAL, $k)));
         if ($missing) $reasons[] = 'Missing: ' . implode(', ', array_map(fn ($k) => $labels[$k], $missing));
 
@@ -160,7 +169,7 @@ class ChatbotPageCheck
         }
 
         $content = $this->content->run($page, false);
-        $warnings = [];
+        $warnings = $out['warnings'];
         foreach ($content['findings'] as $f) {
             if ($f['level'] === 'x') $reasons[] = $f['reason'];
             elseif ($f['level'] === 'warn') $warnings[] = $f['reason'];

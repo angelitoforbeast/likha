@@ -222,4 +222,35 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $this->assertSame(['Missing: Prompt 3'], $row['check']['reasons']);
         $this->assertNull(collect($this->getJson('/chatbot/data')->json('rows'))->firstWhere('page', 'Page Dos')['check']);
     }
+
+    public function test_S_120_1_flow_rules_warn_on_no_flow_and_fail_on_missing_unpublished_or_sequence_step_flows(): void
+    {
+        $s = $this->settings();
+        $res = $this->check();
+        $this->assertSame(['none', ['No flow: the bot only receives chats']], [$res['status'], $res['warnings']], 'FLOW empty, bot On');
+        $s->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
+        $res = $this->check('Page Uno');
+        $this->assertSame(['none', []], [$res['status'], $res['warnings']], 'bot Off: no rule');
+        $s->set('Page Uno', 'chatbot', 'active', '1', false, null, true);
+
+        $s->set('Page Uno', 'chatbot', 'flow_id', '9999', false, null, true);
+        $res = $this->check();
+        $this->assertSame(['x', ['Flow not found / not published']], [$res['status'], $res['reasons']]);
+
+        $draft = ChatbotFlow::create(['name' => 'Draft', 'graph' => FlowGraph::clean(['nodes' => [['id' => 'n0', 'type' => 'start']], 'edges' => []])]);
+        $s->set('Page Uno', 'chatbot', 'flow_id', (string) $draft->id, false, null, true);
+        $res = $this->check();
+        $this->assertSame(['x', ['Flow not found / not published']], [$res['status'], $res['reasons']]);
+
+        $step = $this->flow('Preorder step', [$this->send('Hi')]);
+        $seq = ChatbotSequence::create(['name' => 'Preorder', 'active' => true, 'exit_on_reply' => true]);
+        $seq->steps()->create(['position' => 5, 'delay_amount' => 1, 'delay_unit' => 'hours', 'flow_id' => $step->id, 'active' => true]);
+        $this->link('Page Uno', $step);
+        $res = $this->check();
+        $this->assertSame(['x', ['Flow "Preorder step" is a sequence step, not a main flow']], [$res['status'], $res['reasons']]);
+
+        $this->link('Page Uno', $this->flow('Main', [$this->send('Hi')]));
+        $res = $this->check();
+        $this->assertSame(['ok', [], []], [$res['status'], $res['reasons'], $res['warnings']], 'published main flow: nothing');
+    }
 }

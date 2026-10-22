@@ -362,4 +362,16 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertSame(['Reply' => 'RESPONSE', 'Step' => 'UPDATE'], $types);
         $this->assertStringNotContainsString('tag', json_encode(Http::recorded()->map(fn ($p) => array_keys($p[0]->data()))->all()));
     }
+
+    public function test_S_120_3_only_a_provider_row_with_a_matching_event_is_labelled_auto_switch(): void
+    {
+        $this->actingAs($this->user());
+        $this->travel(1)->days(); // ang provider row ng setUp ay luma na, walang event
+        Http::fake([self::GW_SEND => Http::response($this->metaError(190), 400)]);
+        $this->send();
+        $this->assertSame('botcake', $this->provider());
+
+        $by = collect($this->getJson('/chatbot/changes')->assertOk()->json('entries'))->where('key', 'provider')->pluck('by', 'new')->all();
+        $this->assertSame(['botcake' => 'auto-switch', 'gateway' => 'system'], $by);
+    }
 }
