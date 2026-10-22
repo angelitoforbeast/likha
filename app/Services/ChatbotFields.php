@@ -33,6 +33,11 @@ class ChatbotFields
             $cols['seq_img_' . $i] = 'Seq Img ' . $i;
             $cols['seq_' . $i] = 'Seq ' . $i;
         }
+        // Ang After Order Sequence (nagsisimula kapag na-upload ang order): larawan muna, gaya ng Seq.
+        for ($i = 1; $i <= 4; $i++) {
+            $cols['after_order_img_' . $i] = 'After Order Img ' . $i;
+            $cols['after_order_' . $i] = 'After Order ' . $i;
+        }
 
         return $cols;
     }
@@ -41,8 +46,8 @@ class ChatbotFields
     public static function kind(string $key): string
     {
         if ($key === 'flow') return 'flow'; // dropdown ng mga flow (/chatbot)
-        if ($key === 'picture' || preg_match('/^seq_img_\d+$/', $key)) return 'image';
-        if (preg_match('/^(prompt|seq)_\d+$/', $key)) return 'long';
+        if ($key === 'picture' || preg_match('/^(seq|after_order)_img_\d+$/', $key)) return 'image';
+        if (preg_match('/^(prompt|seq|after_order)_\d+$/', $key)) return 'long';
 
         return 'text';
     }

@@ -389,6 +389,7 @@ class ChatbotController extends Controller
         $add($labels['picture'] ?? 'PICTURE', null, $image('picture'));
         foreach (['main_flow', 'main_flow_2', 'fill_up_form', 'loop_3_form'] as $key) $add($labels[$key] ?? $key, $text($key), null);
         for ($i = 1; $i <= 20; $i++) $add($labels['seq_' . $i] ?? 'Seq ' . $i, $text('seq_' . $i), $image('seq_img_' . $i));
+        for ($i = 1; $i <= 4; $i++) $add($labels['after_order_' . $i] ?? 'After Order ' . $i, $text('after_order_' . $i), $image('after_order_img_' . $i));
 
         return response()->json(['page' => $page, 'sample' => self::SAMPLE_NAME, 'items' => $items]);
     }

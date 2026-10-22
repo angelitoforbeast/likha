@@ -37,6 +37,6 @@ class TestHistory
     /** Ang text ng mga mensahe ng isang padala (gaya ng history ng live: text lang). */
     public static function text(array $messages): string
     {
-        return implode("\n", array_filter(array_map(fn ($m) => is_array($m) ? (string) ($m['text'] ?? '') : '', $messages)));
+        return implode("\n", array_filter(array_map(fn ($m) => is_array($m) && ($m['ai'] ?? true) !== false ? (string) ($m['text'] ?? '') : '', $messages)));
     }
 }

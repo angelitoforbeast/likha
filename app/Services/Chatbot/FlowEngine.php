@@ -227,11 +227,13 @@ class FlowEngine
         foreach ((array) ($c['items'] ?? []) as $item) {
             $v = trim($run->text((string) ($item['value'] ?? '')));
             if ($v === '') continue;
+            // Ang "Visible to AI" na naka-uncheck ay itinatala kasama ng mensahe; hindi ito ipinapadala sa Botcake/Forbeast (BotcakeOutbox::wire).
+            $hidden = ($item['ai'] ?? true) === false ? ['ai' => false] : [];
             if (($item['type'] ?? 'text') === 'image') {
                 if (!self::isUrl($v)) continue;
-                $messages[] = ['type' => 'image', 'url' => $v];
+                $messages[] = ['type' => 'image', 'url' => $v] + $hidden;
             } else {
-                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)];
+                $messages[] = ['type' => 'text', 'text' => mb_substr($v, 0, 2000)] + $hidden;
             }
             $templates[] = (string) ($item['value'] ?? '');
         }
@@ -450,7 +452,7 @@ class FlowEngine
         $out = ChatbotReply::where('psid', (int) $psid)->where('page_id', (int) $run->pageId)->where('kind', 'send')->where('status', 'sent')
             ->when($since, fn ($q) => $q->where('id', '>', $since['reply']))
             ->orderByDesc('id')->limit($n)->get(['content', 'sent_at'])
-            ->map(fn ($r) => ['at' => (string) $r->sent_at, 'role' => 'assistant', 'content' => implode("\n", array_filter(array_map(fn ($m) => $m['text'] ?? '', (array) $r->content)))]);
+            ->map(fn ($r) => ['at' => (string) $r->sent_at, 'role' => 'assistant', 'content' => TestHistory::text((array) $r->content)]);
 
         return $in->merge($out)->filter(fn ($m) => trim($m['content']) !== '')->sortBy('at')->values()->take(-$n)
             ->map(fn ($m) => ['role' => $m['role'], 'content' => $m['content']])->all();

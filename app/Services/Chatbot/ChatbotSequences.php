@@ -294,10 +294,11 @@ class ChatbotSequences
                 return 'held';
             }
             $last = BotcakeChat::where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
-            // Lampas 24 oras mula sa huling mensahe ng customer: laging nilalaktawan ang step at nagpapatuloy ang sequence.
+            // Lampas 24 oras mula sa huling mensahe ng customer: walang ipapadala at tapos na ang subscription.
             if (!$last || !$last->received_at || $last->received_at->lte(now()->subHours(self::WINDOW_HOURS))) {
+                $release(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null]);
                 $this->event($sub->page_id, $sub->psid, ['op' => 'skipped', 'reason' => 'outside 24h'] + $detail);
-                return $this->advance($sub, $seq, $step, false);
+                return 'skipped';
             }
             $flow = $step->flow_id ? ChatbotFlow::find($step->flow_id) : null;
             $why = !$flow ? 'the flow was deleted' : ($flow->published_at === null || !is_array($flow->graph) ? 'the flow is not published' : null);

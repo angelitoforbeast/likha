@@ -12,7 +12,7 @@ class ChatbotSequence extends Model
 
     /**
      * Ang send_from, send_to at outside_window ay nasa table pa pero hindi na ginagamit: ang step ay sa delay nito, anumang
-     * oras, at laging nilalaktawan kapag lampas 24 oras mula sa huling mensahe ng customer.
+     * oras, at tinatapos ang subscription (outside 24h) kapag lampas 24 oras mula sa huling mensahe ng customer.
      */
     protected $fillable = ['name', 'description', 'active', 'exit_on_reply'];
 
