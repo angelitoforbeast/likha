@@ -12,7 +12,6 @@ use App\Support\NavAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 
 /**
@@ -72,7 +71,6 @@ class ChatbotSequenceController extends Controller
             'description' => ['nullable', 'string', 'max:1000'],
             'active' => ['required', 'boolean'],
             'exit_on_reply' => ['required', 'boolean'],
-            'starts_on' => ['nullable', Rule::in([ChatbotSequence::START_ORDER])],
             'steps' => ['present', 'array', 'max:' . ChatbotSequence::MAX_STEPS],
             'steps.*' => ['array'],
             'steps.*.delay_amount' => ['required', 'integer', 'min:0', 'max:999'],
@@ -82,8 +80,7 @@ class ChatbotSequenceController extends Controller
         ]);
 
         DB::transaction(function () use ($seq, $data) {
-            $seq->update(['name' => $data['name'], 'description' => $data['description'] ?? null, 'active' => $data['active'], 'exit_on_reply' => $data['exit_on_reply']]
-                + (Schema::hasColumn('chatbot_sequences', 'starts_on') ? ['starts_on' => $data['starts_on'] ?? null] : [])); // hindi pa na-migrate: walang column
+            $seq->update(['name' => $data['name'], 'description' => $data['description'] ?? null, 'active' => $data['active'], 'exit_on_reply' => $data['exit_on_reply']]);
             $seq->steps()->delete();
             foreach (array_values($data['steps']) as $i => $s) {
                 $seq->steps()->create(['position' => $i + 1, 'delay_amount' => (int) $s['delay_amount'], 'delay_unit' => $s['delay_unit'],

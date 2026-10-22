@@ -3,7 +3,6 @@
 namespace App\Services\Chatbot;
 
 use App\Jobs\RunChatbotSequenceStep;
-use App\Models\AppSetting;
 use App\Models\BotcakeChat;
 use App\Models\ChatbotFlow;
 use App\Models\ChatbotSequence;
@@ -15,7 +14,6 @@ use Carbon\CarbonInterface;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
@@ -33,7 +31,6 @@ class ChatbotSequences
     public const HOLD_MINUTES = 60;       // naka-pause ang bot para sa customer: subukan ulit pagkalipas nito
     public const LOCKED_RETRY_MINUTES = 1;
     public const WINDOW_HOURS = 24;       // Messenger: send_content sa loob ng 24 oras mula sa huling mensahe ng customer
-    public const ORDER_MARK = 'chatbot.sequence_order_mark'; // app_settings: ang huling macro_output id na naproseso
 
     private static ?bool $tables = null; // kada proseso: true lang ang iniimbak (sa ibaba)
 
@@ -142,45 +139,6 @@ class ChatbotSequences
         } catch (Throwable $e) {
             report($e);
         }
-    }
-
-    // ---- Order uploaded ----
-
-    /**
-     * Ang mga bagong row ng macro_output (mula sa huling marka) na may botcake_psid at page na On ang bot: isasama ang
-     * customer sa mga active na sequence na starts_on = order_uploaded, isang beses kada row. Ang unang takbo ay
-     * nagmamarka lang (hindi isinasama ang mga lumang order), at ang order na lampas isang araw ay hindi na rin.
-     * @return int ilang order ang naproseso
-     */
-    public function subscribeNewOrders(): int
-    {
-        if (!Schema::hasTable('macro_output') || !Schema::hasColumn('chatbot_sequences', 'starts_on')) return 0;
-        $mark = AppSetting::get(self::ORDER_MARK);
-        if ($mark === null) {
-            AppSetting::set(self::ORDER_MARK, (int) DB::table('macro_output')->max('id'));
-            return 0;
-        }
-
-        $seqIds = ChatbotSequence::where('active', true)->where('starts_on', ChatbotSequence::START_ORDER)->pluck('id');
-        $pages = [];
-        foreach (BotcakeChat::pageMap() as $pageId => $name) $pages[$this->settings->pageKey($name)] = [(int) $pageId, $name];
-        $until = microtime(true) + self::SECONDS;
-        $done = 0;
-        do {
-            $rows = DB::table('macro_output')->where('id', '>', (int) $mark)->orderBy('id')->limit(self::BATCH)->get(['id', 'PAGE', 'botcake_psid', 'created_at']);
-            foreach ($rows as $row) {
-                $mark = $row->id;
-                $psid = trim((string) $row->botcake_psid);
-                $page = $pages[$this->settings->pageKey((string) $row->PAGE)] ?? null;
-                if ($seqIds->isEmpty() || $page === null || !ctype_digit($psid) || !$this->pageOn($page[1])) continue;
-                if ($row->created_at && Carbon::parse($row->created_at)->lt(now()->subDay())) continue;
-                foreach ($seqIds as $id) $this->subscribe($id, $page[0], (int) $psid, 'order');
-                $done++;
-            }
-            AppSetting::set(self::ORDER_MARK, $mark);
-        } while ($rows->count() === self::BATCH && microtime(true) < $until);
-
-        return $done;
     }
 
     // ---- Tick ----
