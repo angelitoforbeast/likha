@@ -52,7 +52,8 @@ class PageSettingController extends Controller
         $this->checkAccess();
 
         return view('page_settings.index', ['grid' => $grid->build(), 'isCeo' => $this->getNormalizedRole() === 'CEO',
-            'needsSetup' => app(\App\Services\ChatblastNeedsSetup::class)->list()]);
+            'needsSetup' => app(\App\Services\ChatblastNeedsSetup::class)->list(),
+            'unreachable' => app(\App\Services\ChatblastNeedsSetup::class)->unreachable()]);
     }
 
     /**

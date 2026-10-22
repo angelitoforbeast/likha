@@ -95,10 +95,88 @@ class ChatblastNeedsSetupTest extends ChatblastTestCase
 
         $this->getJson('/chatblast/needs-setup.json')->assertOk()->assertExactJson([
             'window_days' => 3, 'pages' => 1,
-            'rows' => [['page' => 'Karla Chavez', 'group' => 'Needs a test send', 'count' => 1, 'latest' => '2026-10-20 11:30']],
+            'rows' => [['page' => 'Karla Chavez', 'group' => 'Needs a test send', 'count' => 1, 'latest' => '2026-10-20 11:30']], 'unreachable' => [],
         ]);
 
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->getJson('/chatblast/needs-setup.json')->assertNotFound();
+    }
+
+    private function failedFlow(string $page, string $response, $at = null): BotcakeMessage
+    {
+        $m = $this->row($page, 'failed', 'The flow was not sent (HTTP 200)', $at);
+        $m->update(['steps' => [['step' => 'write', 'http' => 200, 'response' => '{"success":true}'], ['step' => 'flow', 'http' => 200, 'response' => $response]]]);
+
+        return $m;
+    }
+
+    private function sent(string $page, int $times, $at = null): void
+    {
+        for ($i = 0; $i < $times; $i++) $this->row($page, 'sent', null, $at);
+    }
+
+    private const E551 = '{"success":false,"message":"(#551) This person isn\'t available right now."}';
+
+    public function test_S_110_1_a_page_with_only_551_failures_is_unreachable_info_not_needs_setup(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+        $this->sent('Kylene Dellamas', 50, now()->subHours(2));
+        for ($i = 0; $i < 7; $i++) $this->failedFlow('Kylene Dellamas', self::E551, now()->subHours(2));
+
+        $this->assertSame([], $this->list());
+        $this->assertSame([['page' => 'Kylene Dellamas', 'count' => 7]], app(ChatblastNeedsSetup::class)->unreachable());
+    }
+
+    public function test_S_110_2_error_100_no_matching_user_counts_as_unreachable(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+        $this->failedFlow('Grace Bernardo', '{"success":false,"message":"(#100) No matching user found"}', now()->subHours(2));
+
+        $this->assertSame([], $this->list());
+        $this->assertSame(1, app(ChatblastNeedsSetup::class)->unreachable()[0]['count']);
+    }
+
+    public function test_S_110_3_a_page_missing_its_flow_stays_in_needs_setup(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+        $this->row('Beatrice Dizon', 'no_config', 'missing flow.shipping, field.message', now()->subHours(2));
+
+        $this->assertSame([['Beatrice Dizon', 'Missing flow or message field', 1]], array_map(fn ($r) => [$r['page'], $r['group'], $r['count']], $this->list()));
+    }
+
+    public function test_S_110_4_ten_percent_of_attempts_failing_for_setup_reasons_lists_the_page_below_that_it_does_not(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+        $this->sent('Flaky Page', 9, now()->subHours(5));
+        $this->failedFlow('Flaky Page', '{"success":false,"message":"Something else"}', now()->subHours(5));
+        $this->sent('Fine Page', 10, now()->subHours(5));
+        $this->failedFlow('Fine Page', '{"success":false,"message":"Something else"}', now()->subHours(5));
+
+        $this->assertSame([['Flaky Page', 'Send failed', 1]], array_map(fn ($r) => [$r['page'], $r['group'], $r['count']], $this->list()));
+    }
+
+    public function test_S_110_5_a_page_whose_last_hour_attempts_all_failed_is_listed_even_below_ten_percent(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+        $this->sent('Down Page', 100, now()->subHours(5));
+        $this->failedFlow('Down Page', '{"success":false,"message":"Something else"}', now()->subMinutes(10));
+
+        $this->assertSame(['Down Page'], array_column($this->list(), 'page'));
+    }
+
+    public function test_S_110_6_title_counts_only_pages_that_need_setup_and_the_box_hides_when_none(): void
+    {
+        $this->travelTo('2026-10-20 12:00:00');
+        $this->actingAs($this->user());
+        $this->sent('Kylene Dellamas', 50, now()->subHours(5));
+        $this->failedFlow('Kylene Dellamas', self::E551, now()->subHours(5));
+        foreach (['/chatblast', '/chatblast/page-settings'] as $url) {
+            $this->get($url)->assertOk()->assertDontSee('Needs setup (', false)->assertSee('Hindi na maabot ang customer')->assertSee('Kylene Dellamas 1');
+        }
+
+        $this->row('Beatrice Dizon', 'no_config', 'missing flow.shipping');
+        $this->row('Tracy Velasquez', 'no_config', 'missing field.message');
+        $this->travel(61)->seconds();
+        $this->get('/chatblast')->assertSee('Needs setup (2 pages)')->assertSee('Kylene Dellamas 1');
     }
 }

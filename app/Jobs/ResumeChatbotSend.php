@@ -10,7 +10,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Ang resulta ng padala sa Botcake (botcake:send-pool) para sa isang ticket, sa queue na "chatbot": itinutuloy ang takbo
+ * Ang resulta ng padala sa Botcake (botcake:send-pool) para sa isang ticket, sa queue na "chatbot-high": itinutuloy ang takbo
  * ng customer na pinadalhan. Kapag hawak pa ang lock ng customer, bumabalik pagkalipas ng 1 s. Ang ulit na job ay walang
  * ginagawa (ChatbotRunner::resumeSend: isang beses lang).
  */
@@ -23,7 +23,7 @@ class ResumeChatbotSend implements ShouldQueue
     /** @param array{request_id: string, page_id: int, psid: int, chat_id: ?int, flow_id: int, node_id: string} $ticket */
     public function __construct(public array $ticket)
     {
-        $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::QUEUE);
+        $this->onConnection(config('queue.chatbot_connection'))->onQueue(RunChatbotFlow::HIGH_QUEUE);
     }
 
     public function retryUntil(): \DateTimeInterface

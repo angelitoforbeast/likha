@@ -1865,3 +1865,53 @@ Spec 104. As the owner, I want every write to RTS %, promo and COGS in `/owner/p
 | S-104.6 | Given delete, /item/cogs and sync rows, then edit-logs shows DELETE, the source label, "system (cogs sync)", deleted values struck through, and filters by source and item; the global '' page is not a Page option | `test_S_104_6…` | Passed · 2026-10-21 · auto |
 | S-104.7 | Given old rows (no source), then they show as before, labelled /owner/private, and the owner_private filter includes them | `test_S_104_7…` | Passed · 2026-10-21 · auto |
 | S-104.8 | At 1366 and 390 px the edit-logs page is readable; the table scrolls inside its box, the page has no horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+
+## S-106 The page check also catches the wrong item, the wrong price and the wrong ad video
+
+Spec 106. As the owner, I want the Check column of `/chatbot/pages` to tell me when a page's Main Flow, picture or ad video is about another item than the one customers order, or when its price is not the order COD, so that a wrong page is found before it sells the wrong thing. Test: `tests/Feature/Chatblast/ChatbotContentCheckTest.php` (AI faked). The column is checked in headless Chrome at 1366 and 390 px (screenshots in `docs/specs/106-page-content-check/`).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-106.1 | Given orders of a page in the last 3 days, then the expected item and price are the most common ITEM_NAME + COD pair, with source "orders"; older orders and other pages don't count; a COD of 0 means no price | `test_S_106_1…` | Passed · 2026-10-21 · auto |
+| S-106.2 | Given no recent orders, then the expected item is the latest ads item_name (source "ads", no price), else the latest effective page_item_settings row (source "item_settings", price = mode_cod_int); with none of them the content check is skipped | `test_S_106_2…` | Passed · 2026-10-21 · auto |
+| S-106.3 | Given a Main Flow answer: another item with confidence ≥ 70 → X reason "Main Flow: SEAT COVER ≠ orders: PHONE HOLDER (90%)"; the same product under another name → no reason; another item below 70 → amber warning, status not X | `test_S_106_3…` | Passed · 2026-10-21 · auto |
+| S-106.4 | Given an expected COD, then a stated total compares with the COD, and a stated item price plus stated shipping and insurance compares with the COD; any matching option passes; no match → X "Main Flow: price …≠ orders ₱299 COD"; no expected price → no price check | `test_S_106_4…` | Passed · 2026-10-21 · auto |
+| S-106.5 | Given PICTURE and Seq Img values, then at most 5 images are asked (PICTURE first); one showing another item gives "PICTURE: looks like LED STRIP, orders: SEAT COVER" | `test_S_106_5…` | Passed · 2026-10-21 · auto |
+| S-106.6 | Given a video analysis whose ad copy was written for the page (gpt_ad_generations.page_filter), then its item is compared: "Ad video 'xyz.mp4': NIGHT LAMP ≠ SEAT COVER"; a page with no such link gets no video reason and no AI call | `test_S_106_6…` | Passed · 2026-10-21 · auto |
+| S-106.7 | Given a stored answer, then the same value version and expected item ask no AI again; a new version or a new expected item asks again; a page view (/chatbot/check, /chatbot/data) never calls the AI and counts what has no answer as not checked yet | `test_S_106_7…` | Passed · 2026-10-21 · auto |
+| S-106.8 | When `chatbot:content-check` runs, then it queues the job (or runs it with --sync), the job asks every chatbot page, it is scheduled nightly at 02:40 Manila, and Check again queues it for that page | `test_S_106_8…` | Passed · 2026-10-21 · auto |
+| S-106.9 | The check JSON has `warnings` and `content {expected {item, price, source}, findings [{kind, field, level, reason}], unchecked}`; `chatbot:content-check --json` prints `{pages: [{page, expected, findings, unchecked}]}` | `test_S_106_9…` | Passed · 2026-10-21 · auto |
+| S-106.10 | Each AI answer stores its model, tokens and cost_usd; a failed or invalid AI answer stores nothing and stays not checked yet; a string "true" or "false" is accepted | `test_S_106_10…` | Passed · 2026-10-21 · auto |
+| S-106.11 | At 1366 and 390 px the Check column shows content X reasons in red, warnings in amber and "not checked yet" in grey, with no page-level horizontal scroll | browser | Passed · 2026-10-21 · browser (headless Chrome) |
+## S-107 Deleting a promo (or an RTS) on /owner/private always works and leaves a clean row
+
+Spec 107. As the owner, I want the delete control for RTS and promo on the /owner/private breakdown to always work, so that a promo can be removed from a row that still has an RTS, and no empty rows are left behind. "No promo" is `'NONE'` everywhere. Tests: `tests/Feature/OwnerPrivate/ItemSettingsLogTest.php`, `tests/Feature/OwnerPrivate/ItemSummaryProfitMTest.php`.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-107.1 | Given a row with RTS 25 and promo B1T1, when the CEO deletes the promo, then the row stays with RTS 25 and promo 'NONE', and one delete log row has B1T1 → 'NONE', shown on edit-logs as "B1T1 → deleted" | `test_S_107_1_2…` (row with RTS) | Passed · 2026-10-21 · auto |
+| S-107.2 | Given a row with no RTS and promo B1T1, when the promo is deleted, then the row is removed when it has no comment, and kept with promo 'NONE' when it has one; the log row is written either way | `test_S_107_1_2…` (no RTS, with and without comment) | Passed · 2026-10-21 · auto |
+| S-107.3 | Given a row with RTS and promo, when the RTS is deleted, then the row stays with RTS NULL and the promo unchanged | `test_S_107_3…` | Passed · 2026-10-21 · auto |
+| S-107.4 | When both RTS and promo are deleted (either order), or the RTS is deleted on a row whose promo is already 'NONE', then the row is removed | `test_S_107_4…` (3 sets) | Passed · 2026-10-21 · auto |
+| S-107.5 | Given no promo anywhere before the date, when an RTS-only save creates the row, then its promo is 'NONE' (not '') | `test_S_107_5…` | Passed · 2026-10-21 · auto |
+| S-107.6 | Given an older row with promo B1T1 and a later legacy row with promo NULL, when the page summary is read, then the promo is 'NONE' (NULL reads like 'NONE') | `test_S_107_6…` | Passed · 2026-10-21 · auto |
+| S-107.7 | When a delete fails on the server, then the response is 500 with ok false and a readable message without SQL; the breakdown page shows it in a red notice, and a success shows a green "Nabura ang …" notice | `test_S_107_7…` (server); notice: not browser-checked | Passed · 2026-10-21 · auto |
+
+## S-111 Each chatbot page runs through Botcake or the Forbeast Gateway, chosen per page
+
+Spec 111. As the owner, I want to choose per page whether the chatbot receives and sends through Botcake or through our own Forbeast Gateway, so that Likha keeps working if Botcake fails, without a page ever getting two replies. Test: `tests/Feature/Chatblast/ChatbotProviderTest.php` (gateway and Botcake HTTP faked).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-111.1 | Given a page on `gateway`, when its flow sends, then one POST goes to `{GATEWAY_URL}/v1/pages/{page_id}/messages` with the bearer key and `{psid, messages, messaging_type: RESPONSE, client_ref: likha-…}`, nothing goes to Botcake, and the reply row is sent; a Botcake page sends as before | `test_S_111_1…` | Passed · 2026-10-22 · auto |
+| S-111.2 | Given a page on `gateway`, when the gateway answers 422, then the reply row is failed with `Gateway said "…" (HTTP 422)`; with `GATEWAY_URL` empty nothing is sent and the row is failed "…not set up…" | `test_S_111_2…` | Passed · 2026-10-22 · auto |
+| S-111.3 | Given a live send pool, when a gateway page's flow sends, then no `botcake_send_requests` ticket is made and the send goes straight to the gateway | `test_S_111_3…` | Passed · 2026-10-22 · auto |
+| S-111.4 | Given a page on `gateway`, when a signed `message` event arrives, then one chat is stored (name from botcake_psids, message_id = mid, payload source gateway) and one run and one replied-marking are queued; the same mid again, or a mid already stored by a Botcake push, stores and queues nothing | `test_S_111_4…` | Passed · 2026-10-22 · auto |
+| S-111.5 | Given a page on `botcake`, when a signed `message` event arrives, then nothing is stored or queued and `botcake_page` is counted; echo and read only count | `test_S_111_5…` | Passed · 2026-10-22 · auto |
+| S-111.6 | When the signature is wrong, missing or empty → 401; when no webhook secret is configured → 503; nothing is queued or stored either way | `test_S_111_6…` | Passed · 2026-10-22 · auto |
+| S-111.7 | Given a page on `gateway`, when Botcake pushes a chat for it, then the answer is 200 `{ok: true}`, no chat is stored, no run is queued, and `gateway_page` is counted | `test_S_111_7…` | Passed · 2026-10-22 · auto |
+| S-111.8 | When staff pick Forbeast Gateway in a row, then `chatbot.provider` is saved (old value kept as history), shows in Changes as "Provider", and is not a botfield column; another value or a page off the list → 422; with `GATEWAY_URL` empty, `data` says `gateway_ready: false` and `gateway` is refused | `test_S_111_8…` | Passed · 2026-10-22 · auto |
+| S-111.9 | Given a page on `gateway`, when staff send from the Inbox, then it goes through the gateway with a client_ref and is logged as manual | `test_S_111_9…` | Passed · 2026-10-22 · auto |
+| S-111.10 | Given several pages ticked (or "select all" on the filtered list), when "Replies via" is applied, then every page is saved through PageSettings with its own history and Changes entry; one page off the list, more than 200 pages, or Forbeast not set up → 422 and nothing changes | `test_S_111_10…` | Passed · 2026-10-22 · auto |
+| S-111.11 | The page has the select-all box, the bulk select and "Apply to selected"; the option reads "Forbeast", never "Forbeast Gateway" | `test_S_111_11…` | Passed · 2026-10-22 · auto |
+| S-111.12 | Given `GATEWAY_URL` with a path prefix (with or without a trailing slash), then the send goes to `<prefix>/v1/pages/{id}/messages` | `test_S_111_12…` (2 sets) | Passed · 2026-10-22 · auto |

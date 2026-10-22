@@ -941,3 +941,32 @@ Accepted, not fixed:
   - a Marketing - OIC viewer of a delete row
 
   Reason: each is the plain path of existing code (preview returns before the delete; `DB::transaction`; the existing `isCeoView` gate) and none is on an untrusted path with a realistic failure.
+
+## 106: page content check (2026-10-21)
+
+- **A COD written as free text with two numbers ("299 + 50") parses as one number (29950).** Reason: the COD column comes from the order import (trusted), and the mode of the 3 days drowns one odd row; changing the import's COD format is outside the task.
+- **The ads and item settings fallbacks match the page name with SQL `LOWER(TRIM())`, so a name with an inner double space misses them** (the orders step matches in PHP and handles it). Reason: trusted tables whose page names are typed through the app; matching in PHP would read every row.
+- **A seller's text can close the `<<<TEXT … TEXT>>>` marker and steer the AI's verdict.** Reason: botfields are written by staff, and the worst effect is a wrong pass or X in the Check column; nothing is written or sent.
+- **An image answer is keyed by its URL: a picture replaced behind the same URL keeps its old answer** until the URL or the expected item changes. Reason: Facebook/CDN picture URLs change when the picture changes; hashing the image would mean downloading it on our server.
+- **Untested here:** the pgsql and mysql runs of the grouped orders query (quoted `PAGE`, `ITEM_NAME`, `COD`; `BTRIM`), the tie-break between two equally common pairs, the 6,000-character cut of a long text, and the job's time budget. Reason: the test DB is sqlite; the others are simple guards and the suite stays small.
+## 108: chatbot reply priority (2026-10-21)
+
+- **A sequence step job lost after its unique lock was taken holds that subscription for up to 3 hours** (`RunChatbotSequenceStep::$uniqueFor`). It happens on a queue flush, `horizon:clear`, or a Redis push that fails after the lock. Remedy by hand: delete the cache lock `laravel_unique_job:App\Jobs\RunChatbotSequenceStep:<subscription id>` (or wait out the 3 hours); the next tick then queues it again. Reason: all of these are operator actions or Redis failures on a trusted path. A shorter `uniqueFor` would let a long backlog grow copies again, which is the fault this fixes.
+- **`botcake:stress-page --stats` counts database `jobs` on `chatbot` only**, so with `CHATBOT_QUEUE_CONNECTION=database` it leaves out the reply path on `chatbot-high`. Reason: a test-page diagnostic on a trusted path. Production runs on Redis, where the number is 0 either way. The fix is `whereIn('queue', ['chatbot-high', 'chatbot'])`.
+- **No Horizon long-wait alert for `chatbot-high`** (`waits` lists only `redis:default`). Reason: `chatbot` had none either, and nothing reads Horizon's notifications today.
+- **The reply path only gets two workers of its own until the auto-balancer moves more** (every 3 s, up to 2 at a time). Reason: with the AI and the sends in their pools, a reply-path job takes milliseconds. In the local proof, with 5,000 steps queued, pickup averaged 1 ms (max 19 ms) at 5 chats/s. Raise `minProcesses` only if Horizon shows `chatbot-high` waiting.
+- Spec 107 accepted review minors (promo delete):
+  - The breakdown matrix list (`OwnerPrivateController` ~4049) now returns `'NONE'` instead of null for a legacy NULL promo; that is the "NULL reads as NONE" decision, and the matrix shows the value as is.
+  - Deleting a promo that is already NONE or '' writes no log row, the same as S-104.2 for an empty RTS.
+  - An RTS-only save with no promo to carry writes `'NONE'`, which ends an older promo added later with an earlier date; this follows the "one meaning for no promo" decision.
+
+  Reason: each one follows a fixed decision of the spec or an existing rule, and none is on an untrusted path with a realistic failure.
+
+## 111: per-page messaging provider (2026-10-22)
+
+- **`/api/gateway/events` has no throttle**, and a chunked body without `Content-Length` is read before the 64 KB check. Reason: the gateway forwards bursts (up to 40/s per page) and a throttle would turn them into retries; an unsigned request costs one HMAC and is refused. Revisit with a limiter sized from live gateway traffic.
+- **Switch window:** the Botcake push checks the provider when it arrives, the gateway job when it runs. A message in the seconds between a staff switch from gateway to Botcake can be skipped by both. Reason: rare and staff-made; automatic switching (next spec) should hand over with an overlap.
+- **Dedupe against a Botcake push assumes Botcake's `message_id` is the Facebook `mid`.** Not checked on live data. Only matters during a switch from Botcake to gateway (each side ignores the other's pages otherwise). Suggestion: compare one stored Botcake row with the gateway's mid before the first live switch.
+- **`botcake.page_id` = Facebook page id** is read from code only. Suggestion: compare with the gateway's `GET /v1/pages` before switching a page.
+- **PSID `(int)` casts stay** where they feed integer columns or signatures (`ChatbotInboxController::send` reply row and `CustomerFields`, `ChatbotInbound::afterStore` sequence exit, `BotcakeOutbox::record`). Columns that would break for non-numeric ids: `chatbot_replies.psid`, `chatbot_customer_values.psid`, `botcake_send_requests.psid`/`page_id` (big integers). Facebook PSIDs are numeric; `botcake_chats.psid` is a string. Reason: changing columns is a migration outside this spec.
+- **A queued Botcake send-pool ticket created just before a switch to gateway still goes out through Botcake.** Reason: seconds-long window, and the message still reaches the customer once.

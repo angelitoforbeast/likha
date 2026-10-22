@@ -15,6 +15,7 @@ use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\PageSettings;
 use Carbon\Carbon;
+use Illuminate\Bus\UniqueLock;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -141,6 +142,8 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
 
         // Dalawang tick na sabay na nakakita ng parehong mga row: isa lang ang nakakakuha.
         $ids = DB::table('chatbot_sequence_subscriptions')->where('sequence_id', $seq->id)->pluck('id')->all();
+        // Nagsimula na ang mga job (binibitawan ng Laravel ang unique lock bago ang handle), saka namatay.
+        foreach (Queue::pushed(RunChatbotSequenceStep::class) as $job) (new UniqueLock(app('cache.store')))->release($job);
         DB::table('chatbot_sequence_subscriptions')->whereIn('id', $ids)->update(['dispatched_at' => null]);
         $this->assertSame($ids, $this->svc()->claim($ids));
         $this->assertSame([], $this->svc()->claim($ids));

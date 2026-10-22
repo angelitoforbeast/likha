@@ -210,7 +210,7 @@ class ChatbotResultsTest extends ChatblastTestCase
     {
         $this->actingAs($this->user('CEO', 'ceo2@example.test'));
         $json = $this->getJson('/chatbot/results.json?' . http_build_query(self::RANGE + ['compare' => 'flow', 'flow_id' => $this->flowF, 'a' => $this->v1, 'b' => $this->v2]))->assertOk()->json();
-        $this->assertSame(['filters', 'funnel', 'by_message', 'by_step', 'by_ad', 'versions', 'compare'], array_keys($json));
+        $this->assertSame(['filters', 'funnel', 'by_via', 'by_message', 'by_step', 'by_ad', 'versions', 'compare'], array_keys($json));
         $this->assertSame(['a', 'b', 'kind'], collect(array_keys($json['compare']))->sort()->values()->all());
         $raw = json_encode($json);
         foreach (['secret customer text', 'Customer Name', '"psid"'] as $never) $this->assertStringNotContainsString($never, $raw);

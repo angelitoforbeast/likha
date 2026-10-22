@@ -2052,7 +2052,7 @@ class OwnerPrivateController extends Controller
                     'effective_date'     => (string)$s->effective_date,
                     'comment'            => (string)($s->comment ?? ''),
                     'item_value_comment' => (string)($s->item_value_comment ?? ''),
-                    'promo'              => (string)($s->promo ?? ''),
+                    'promo'              => (string)($s->promo ?? 'NONE'),
                     'cod'                => $codInt,
                 ];
                 // Pre-migration / orphan rows na walang price tag → skipped sa exact map.
@@ -2070,7 +2070,7 @@ class OwnerPrivateController extends Controller
                         'effective_date'       => (string)$s->effective_date,
                         'comment'              => (string)($s->comment ?? ''),
                         'item_value_comment'   => (string)($s->item_value_comment ?? ''),
-                        'promo'                => (string)($s->promo ?? ''),
+                        'promo'                => (string)($s->promo ?? 'NONE'),
                         'mode_cod_int'         => $codInt,
                     ];
                 }
@@ -2848,7 +2848,7 @@ class OwnerPrivateController extends Controller
                 ->first(['unit_cost'])
             : null;
         $oldRts     = $oldRtsRow     ? (float) $oldRtsRow->rts_pct      : null;
-        $oldPromo   = $oldRtsRow     ? (string)($oldRtsRow->promo ?? '') : null;
+        $oldPromo   = $oldRtsRow     ? (string)($oldRtsRow->promo ?? 'NONE') : null;
         $oldCogs    = $oldCogsRow    ? (float) $oldCogsRow->unit_cost   : null;
         $oldCogsCeo = $oldCogsCeoRow ? (float) $oldCogsCeoRow->unit_cost : null;
 
@@ -2878,8 +2878,8 @@ class OwnerPrivateController extends Controller
                 if (!$foundRts && $h->rts_pct !== null) {
                     $carryRts = (float) $h->rts_pct; $foundRts = true;
                 }
-                if (!$foundPromo && ($h->promo ?? '') !== '') {
-                    $carryPromo = (string) $h->promo; $foundPromo = true;
+                if (!$foundPromo && ($h->promo ?? 'NONE') !== '') {
+                    $carryPromo = (string) ($h->promo ?? 'NONE'); $foundPromo = true;
                 }
             }
         }
@@ -2944,7 +2944,7 @@ class OwnerPrivateController extends Controller
 
                 $promoToSave = in_array($scope, ['all', 'promo'], true)
                     ? trim((string) ($validated['promo'] ?? ''))
-                    : ($carryPromo ?? ''); // carry-forward last-effective promo; '' (NOT NULL col) when wala — was hardcoded 'NONE'
+                    : ($carryPromo ?? 'NONE'); // carry-forward last-effective promo; 'NONE' kapag wala (iisang ibig sabihin ng "walang promo")
 
                 $commentToSave = in_array($scope, ['all', 'rts'], true)
                     ? ($validated['comment'] ?? null)
@@ -3120,8 +3120,10 @@ class OwnerPrivateController extends Controller
      * ang value sa naunang effective (inheritance/back-fill). CEO + Marketing-OIC.
      *
      * - cogs  → delete ang cogs (+ cogs_ceo) row sa item+date.
-     * - rts/promo → null-out ang field sa page_item_settings row; burahin ang buong
-     *   row kapag pareho nang wala (rts + promo) para malinis.
+     * - rts   → rts_pct = NULL; promo → 'NONE' (NOT NULL ang column). Burahin ang
+     *   buong row kapag wala nang RTS, promo at comment para malinis; kung may
+     *   natitira pa, ang promo na 'NONE' ay "walang promo" mula sa date na ito.
+     * - Kapag pumalya: JSON {ok:false, message} na nababasa, walang SQL.
      */
     public function deleteItemSetting(Request $request)
     {
@@ -3183,27 +3185,38 @@ class OwnerPrivateController extends Controller
                 ->where('effective_date', $eff);
             if ($cod !== null) $q->where('mode_cod_int', $cod);
 
-            DB::transaction(function () use ($q, $field, $hasPromoCol, $log) {
-                foreach ($q->get() as $r) {
-                    $newRts     = $field === 'rts'   ? null : ($r->rts_pct ?? null);
-                    $newPromo   = $field === 'promo' ? null : ($hasPromoCol ? ($r->promo ?? null) : null);
-                    $promoEmpty = ($newPromo === null || $newPromo === '');
-                    if ($newRts === null && $promoEmpty) {
-                        DB::table('page_item_settings')->where('id', $r->id)->delete();
-                    } else {
-                        DB::table('page_item_settings')->where('id', $r->id)->update([
-                            ($field === 'rts' ? 'rts_pct' : 'promo') => null,
-                        ]);
-                    }
+            // "Walang promo" = 'NONE' (NOT NULL ang column); NULL / '' ng lumang row ay pareho.
+            $noPromo = fn ($v) => $v === null || trim((string) $v) === '' || strtoupper(trim((string) $v)) === 'NONE';
 
-                    $old = $field === 'rts' ? ($r->rts_pct ?? null) : ($r->promo ?? null);
-                    if ($old !== null && $old !== '') {
-                        \App\Services\ItemSettingsLog::write($log + [
-                            ($field === 'rts' ? 'old_rts_pct' : 'old_promo') => $old,
-                        ]);
+            try {
+                DB::transaction(function () use ($q, $field, $hasPromoCol, $log, $noPromo) {
+                    foreach ($q->get() as $r) {
+                        $newRts   = $field === 'rts'   ? null : ($r->rts_pct ?? null);
+                        $newPromo = $field === 'promo' ? 'NONE' : ($hasPromoCol ? ($r->promo ?? null) : null);
+                        // Burahin lang ang row kapag wala nang natitira (RTS, promo, comment) — walang mawawala.
+                        if ($newRts === null && $noPromo($newPromo) && trim((string) ($r->comment ?? '')) === '') {
+                            DB::table('page_item_settings')->where('id', $r->id)->delete();
+                        } else {
+                            DB::table('page_item_settings')->where('id', $r->id)->update(
+                                $field === 'rts' ? ['rts_pct' => null] : ['promo' => 'NONE']
+                            );
+                        }
+
+                        if ($field === 'rts' && $r->rts_pct !== null) {
+                            \App\Services\ItemSettingsLog::write($log + ['old_rts_pct' => $r->rts_pct]);
+                        } elseif ($field === 'promo' && !$noPromo($r->promo ?? null)) {
+                            \App\Services\ItemSettingsLog::write($log + ['old_promo' => $r->promo, 'new_promo' => 'NONE']);
+                        }
                     }
-                }
-            });
+                });
+            } catch (\Throwable $e) {
+                // Huwag ipakita ang SQL error sa user; nasa log ang detalye.
+                \Log::error('deleteItemSetting failed', ['field' => $field, 'error' => $e->getMessage()]);
+                return response()->json([
+                    'ok'      => false,
+                    'message' => 'Hindi nabura ang ' . strtoupper($field) . '. Subukan ulit; kung ayaw pa rin, i-report sa admin.',
+                ], 500);
+            }
         }
 
         self::bumpCacheVersion();
@@ -3481,7 +3494,7 @@ class OwnerPrivateController extends Controller
             $rtsIdx[$pk][$ik][] = [
                 'date'    => (string)$r->effective_date,
                 'rts_pct' => $r->rts_pct !== null ? (float)$r->rts_pct : null,
-                'promo'   => $hasPromoCol ? (string)($r->promo ?? '') : '',
+                'promo'   => $hasPromoCol ? (string)($r->promo ?? 'NONE') : '',
                 'cod'     => $codInt,
             ];
         }
@@ -4033,7 +4046,7 @@ class OwnerPrivateController extends Controller
                     // for the frontend's effective-date-row highlighting.
                     'eff'   => substr((string)$s->effective_date, 0, 10),
                     'rts'   => $s->rts_pct !== null ? (float)$s->rts_pct : null,
-                    'promo' => $hasPromoCol ? (($s->promo ?? '') !== '' ? (string)$s->promo : null) : null,
+                    'promo' => $hasPromoCol ? (($s->promo ?? 'NONE') !== '' ? (string)($s->promo ?? 'NONE') : null) : null,
                     'cod'   => ($hasCodInt && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null,
                 ];
             }

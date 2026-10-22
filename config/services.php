@@ -67,11 +67,14 @@ return [
     'astra_encoder_max_web_first' => (int) env('ASTRA_ENCODER_MAX_WEB_FIRST', 5),   // ang parehong cap kapag "web search muna" ang mode ng address rules
     // Aling buttons ang nakikita sa /encoder/checker_1: both | astra | classic
     'ai_checker_ui' => env('AI_CHECKER_UI', 'both'),
+    // Content check ng /chatbot/pages (item, presyo, larawan, ad video): murang model na may vision.
+    'content_check_model' => env('CHATBOT_CONTENT_MODEL', 'gpt-4o-mini'),
     // USD kada 1M tokens [input, output] + kada web search call — para sa cost_usd sa ai_checker_logs (estimate).
     'ai_checker_prices' => [
         'gpt-5.2'     => [1.75, 14.0],
         'gpt-6-astra' => [10.0, 50.0],
         'gpt-6-luna'  => [0.10, 0.50],
+        'gpt-4o-mini' => [0.15, 0.60],
         'web_search'  => 0.01,
     ],
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.
@@ -134,6 +137,16 @@ return [
         'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),
         // Ilang request sa OpenAI nang sabay sa chatbot:ai-pool (kahati ng Astra ang rate limit ng OpenAI).
         'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 50),
+    ],
+
+    // Forbeast Gateway: ang sariling daan ng mensahe papunta at mula sa Messenger, pinipili kada page (chatbot.provider).
+    // Walang url = hindi mapipili ang gateway at ang padala ay failed na may dahilan. Ang webhook_secret ang pumipirma sa
+    // /api/gateway/events; walang laman = 503 (walang tinatanggap).
+    'gateway' => [
+        'url' => rtrim((string) env('GATEWAY_URL', ''), '/'),
+        'key' => env('GATEWAY_KEY'),
+        'webhook_secret' => env('GATEWAY_WEBHOOK_SECRET'),
+        'timeout' => (int) env('GATEWAY_TIMEOUT', 10),
     ],
 
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.

@@ -55,6 +55,7 @@
      data-history-url="{{ route('chatbot.history') }}"
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
+     data-provider-url="{{ route('chatbot.provider') }}"
      @if($isCeo) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}" @endif>
 
     <div class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
@@ -72,6 +73,13 @@
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
         <span id="count" class="text-xs text-slate-500"></span>
+        {{-- Bulk "Replies via": ang mga page na may check (o lahat ng nakikita) sa isang kilos. --}}
+        <span class="flex items-end gap-1 text-xs">
+            <label class="flex flex-col">Replies via
+                <select id="bulk-provider" class="border px-2 py-1 text-sm text-gray-900"><option value="botcake">Botcake</option><option value="gateway">Forbeast</option></select>
+            </label>
+            <button id="bulk-apply" type="button" class="cb-btn" disabled>Apply to selected</button>
+        </span>
     </div>
     <p id="notice" class="mb-2 min-h-[1rem] text-xs" aria-live="polite"></p>
 
@@ -210,7 +218,8 @@
     const box = document.getElementById('cbot'), url = box.dataset, $ = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
-    let columns = [], rows = [], flows = [], editing = null;
+    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false;
+    const picked = new Set(); // mga page na may check (bulk "Replies via")
     const marks = new Map(), seqs = new Map(), errors = new Map();
     let openRow = null; // ang page ng row na bukas (isa lang)
     // Paste: ang hindi pa naka-save (id => {page, key, value, old}), ang napiling mga cell (dalawang sulok, {page, key}),
@@ -238,7 +247,7 @@
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
-        columns = data.columns; rows = data.rows; flows = data.flows || [];
+        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready;
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha isa-isa pagkatapos ng render.
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -253,7 +262,7 @@
 
     function render() {
         const head = el('tr', {}, [
-            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, 'Page'),
+            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page']),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Active'}),
             el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Flow'}),
             el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Check', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}),
@@ -263,7 +272,7 @@
         ]);
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r)])]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
@@ -277,6 +286,8 @@
         if (!rows.length) table.append(el('tbody', {}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '5', text: 'No page has a Botcake ID and token yet.'}))));
         paintSel();
         paintBar();
+        paintPicked();
+        $('sel-all').addEventListener('change', ev => { for (const r of visible()) { if (ev.target.checked) picked.add(r.page); else picked.delete(r.page); } render(); });
         requestAnimationFrame(markClamped);
     }
 
@@ -296,12 +307,15 @@
     }
 
     // ---- Check column ----
-    // Ang mga icon na gamit sa Likha (gaya ng Check sa page settings): bilog na may check, o bilog na may X.
-    const ICON_PATHS = {ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>', x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>'};
+    // Ang mga icon na gamit sa Likha (gaya ng Check sa page settings): bilog na may check, bilog na may X, o tatsulok na
+    // babala (amber: ang content check na hindi sigurado).
+    const ICON_PATHS = {ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>', x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+        warn: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'};
+    const ICON_COLORS = {ok: 'text-green-600', x: 'text-red-600', warn: 'text-amber-600'};
     function icon(kind, label) {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         for (const [k, v] of Object.entries({viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-            class: 'h-4 w-4 shrink-0 ' + (kind === 'ok' ? 'text-green-600' : 'text-red-600'), role: 'img', 'aria-label': label})) svg.setAttribute(k, v);
+            class: 'h-4 w-4 shrink-0 ' + ICON_COLORS[kind], role: 'img', 'aria-label': label})) svg.setAttribute(k, v);
         svg.innerHTML = ICON_PATHS[kind]; // nakapirming SVG, walang data mula sa labas
         return svg;
     }
@@ -315,9 +329,15 @@
         const c = checks.get(page), out = [];
         if (checking.has(page) || !c) out.push(el('span', {class: 'text-slate-400', text: c?.error || 'Checking…'}));
         else if (c.status === 'none') out.push(el('span', {class: 'text-slate-400', text: '—', title: 'No flow picked'}));
-        else if (c.status === 'ok') out.push(el('div', {class: 'flex items-start gap-1'}, [icon('ok', 'Check passed'), el('span', {class: 'text-green-700', text: 'All values pass'})]));
-        else out.push(el('div', {class: 'flex items-start gap-1'}, [icon('x', 'Check failed'), el('ul', {class: 'min-w-0 space-y-0.5 text-red-700'}, c.reasons.map(t => el('li', {class: 'break-words', text: t})))]));
+        else if (c.status === 'ok' && !c.warnings?.length) out.push(el('div', {class: 'flex items-start gap-1'}, [icon('ok', 'Check passed'), el('span', {class: 'text-green-700', text: 'All values pass'})]));
+        else if (c.status !== 'ok') out.push(el('div', {class: 'flex items-start gap-1'}, [icon('x', 'Check failed'), el('ul', {class: 'min-w-0 space-y-0.5 text-red-700'}, c.reasons.map(t => el('li', {class: 'break-words', text: t})))]));
+        // Ang content check na hindi sigurado: babala (amber), hindi X.
+        if (c?.warnings?.length) out.push(el('div', {class: 'flex items-start gap-1' + (c.status === 'ok' ? '' : ' mt-1')}, [icon('warn', 'Check warning'), el('ul', {class: 'min-w-0 space-y-0.5 text-amber-700'}, c.warnings.map(t => el('li', {class: 'break-words', text: t})))]));
         if (c?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.unchecked + ' image link' + (c.unchecked === 1 ? '' : 's') + ' not checked yet'}));
+        if (c?.content?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.content.unchecked + ' content check' + (c.content.unchecked === 1 ? '' : 's') + ' not done yet'}));
+        // Ang item na pinagkukumparahan at kung saan galing (orders, ads o item settings).
+        const exp = c?.content?.expected;
+        if (exp) out.push(el('div', {class: 'text-slate-500 break-words', text: 'Item: ' + exp.item + (exp.price !== null ? ' ₱' + exp.price : '') + ' (' + ({orders: 'orders, 3 days', ads: 'ads', item_settings: 'item settings'}[exp.source] || exp.source) + ')'}));
         if (c && !checking.has(page) && c.status) {
             const again = el('button', {type: 'button', class: 'text-blue-700 underline hover:text-blue-900', text: 'Check again', 'aria-label': 'Check ' + page + ' again'});
             again.addEventListener('click', ev => { ev.stopPropagation(); runCheck(page, true); });
@@ -480,10 +500,58 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b);
+        td.append(b, providerSelect(r));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
         return td;
+    }
+
+    function pickBox(r) {
+        const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'aria-label': 'Select ' + r.page});
+        c.checked = picked.has(r.page);
+        c.addEventListener('change', () => { if (c.checked) picked.add(r.page); else picked.delete(r.page); paintPicked(); });
+        return c;
+    }
+    function paintPicked() {
+        const list = visible();
+        const all = $('sel-all'), n = list.filter(r => picked.has(r.page)).length;
+        if (all) { all.checked = list.length > 0 && n === list.length; all.indeterminate = n > 0 && n < list.length; }
+        const sel = [...picked].filter(p => rows.some(r => r.page === p));
+        $('bulk-apply').disabled = !sel.length || !url.providerUrl;
+        $('bulk-apply').textContent = sel.length ? 'Apply to ' + sel.length + ' selected' : 'Apply to selected';
+    }
+    $('bulk-apply').addEventListener('click', async () => {
+        const names = [...picked].filter(p => rows.some(r => r.page === p)), want = $('bulk-provider').value;
+        if (!names.length) return;
+        const label = want === 'gateway' ? 'Forbeast' : 'Botcake';
+        if (!confirm('Send and receive the chats of these ' + names.length + ' page' + (names.length === 1 ? '' : 's') + ' through ' + label + '?\n\n' + names.join('\n'))) return;
+        $('bulk-apply').disabled = true;
+        try {
+            const {ok, data} = await post(url.providerUrl, {page_names: names, provider: want});
+            if (ok) { rows.forEach(r => { if (names.includes(r.page)) r.provider = data.provider; }); picked.clear(); notice(names.length + ' page' + (names.length === 1 ? '' : 's') + ' now reply via ' + label + '.', 'text-green-700'); }
+            else notice(data.error || data.message || 'Not changed.', 'text-red-600');
+        } catch (e) { notice('No connection: not changed.', 'text-red-600'); }
+        render();
+    });
+
+    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast (hindi mapipili kapag hindi pa naka-set up).
+    function providerSelect(r) {
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via, ' + r.page, title: 'Replies via'}, [
+            el('option', {value: 'botcake', text: 'Botcake'}),
+            el('option', {value: 'gateway', text: 'Forbeast' + (gatewayReady ? '' : ' (not set up)'), disabled: gatewayReady ? null : ''}),
+        ]);
+        sel.value = r.provider || 'botcake';
+        sel.addEventListener('change', async () => {
+            const want = sel.value;
+            if (!confirm('Send and receive ' + r.page + "'s chats through " + (want === 'gateway' ? 'Forbeast' : 'Botcake') + '?')) { sel.value = r.provider; return; }
+            sel.disabled = true;
+            try {
+                const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
+                if (ok) { r.provider = data.provider; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+            } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
+            render();
+        });
+        return sel;
     }
 
     function paintSwitch(b, on) {
