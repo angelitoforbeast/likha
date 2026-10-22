@@ -642,7 +642,16 @@
             ]);
             sel.value = value || (r.flow_text ? UNLINKED : '');
             if (!value && r.flow_text) sel.classList.add('border-amber-500', 'text-amber-800');
-            sel.addEventListener('change', () => { if (sel.value === UNLINKED) return; r.flow_text = null; save(r, c, sel.value); });
+            // Ang pagpalit ng flow ay nagbabago ng sagot ng bot sa page: kumpirmahin muna; kapag Cancel, ibalik ang dati.
+            let before = sel.value;
+            sel.addEventListener('change', () => {
+                if (sel.value === UNLINKED) return;
+                const from = before === '' ? '— none —' : (before === UNLINKED ? 'Not linked: ' + r.flow_text : before);
+                const to = sel.value === '' ? '— none —' : sel.value;
+                if (!confirm('Change the flow of ' + r.page + '?\n\nFrom: ' + from + '\nTo: ' + to)) { sel.value = before; return; }
+                before = sel.value;
+                r.flow_text = null; save(r, c, sel.value);
+            });
             td.append(sel);
             if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
             return td;
