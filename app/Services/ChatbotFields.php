@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Schema;
 class ChatbotFields
 {
     public const PROVIDER = 'chatbot';
-    public const RESERVED = ['active', 'flow_id', 'mock_ai', 'mock_ai_latency_ms', 'provider']; // flow_id: ang flow na pinili sa dropdown (id), system lang; mock_ai: pekeng AI ng stress-test page (CLI lang); provider: ang select na Botcake / Forbeast Gateway
+    public const RESERVED = ['active', 'flow_id', 'mock_ai', 'mock_ai_latency_ms', 'provider', 'auto_switch']; // flow_id: ang flow na pinili sa dropdown (id), system lang; mock_ai: pekeng AI ng stress-test page (CLI lang); provider: ang select na Botcake / Forbeast Gateway; auto_switch: ang talaan ng kusang lipat (ForbeastWatch)
     public const ADDED_SETTING = 'chatbot.columns'; // app_settings: JSON {key: label}
     public const MAX_VALUE = 50000; // letra: ang mahahabang AI prompt (hal. 14,113)
     public const MAX_BYTES = 60000; // ang TEXT ng MySQL ay 65,535 bytes: ang ñ at emoji ay 2-4 bytes, kaya may sariling check (hindi pinuputol)

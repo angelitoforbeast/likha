@@ -263,7 +263,7 @@ class ChatbotProviderTest extends ChatblastTestCase
         $this->assertSame(0, BotcakeChat::count());
     }
 
-    public function test_S_111_7_a_botcake_push_for_a_gateway_page_is_accepted_but_stores_and_runs_nothing(): void
+    public function test_S_111_7_a_botcake_push_for_a_gateway_page_is_accepted_and_kept_on_standby_without_running(): void
     {
         Queue::fake();
         Http::fake();
@@ -273,7 +273,7 @@ class ChatbotProviderTest extends ChatblastTestCase
 
         $this->botcakePush()->assertOk()->assertExactJson(['ok' => true]);
 
-        $this->assertSame(0, BotcakeChat::count());
+        $this->assertTrue(\App\Services\Chatbot\ForbeastWatch::standby(BotcakeChat::sole()));
         Queue::assertNothingPushed();
         $this->assertSame(['gateway_page' => 1], array_filter(app(BotcakeChatGuard::class)->counts()));
     }
@@ -284,6 +284,8 @@ class ChatbotProviderTest extends ChatblastTestCase
         Http::fake();
         $ceo = $this->user();
         $this->actingAs($ceo);
+        // Forbeast needs the page's own working token (spec 113, no global-key shortcut).
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'token', 'fbp_test_token_PageUno', true, null, true); app(PageSettings::class)->set('Page Uno', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
 
         $row = fn () => collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Uno');
         $this->assertSame('botcake', $row()['provider']);
@@ -314,6 +316,8 @@ class ChatbotProviderTest extends ChatblastTestCase
         $this->page('Page Dos', '2002');
         $this->page('Page Tres', '3003');
         $this->actingAs($this->user());
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'token', 'fbp_test_token_PageUno', true, null, true); app(PageSettings::class)->set('Page Uno', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
+        app(PageSettings::class)->set('Page Dos', 'forbeast', 'token', 'fbp_test_token_PageDos', true, null, true); app(PageSettings::class)->set('Page Dos', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
 
         $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'page dos'], 'provider' => 'gateway'])
             ->assertOk()->assertJson(['provider' => 'gateway', 'pages' => ['Page Uno', 'Page Dos']]);

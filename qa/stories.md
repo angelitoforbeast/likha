@@ -1909,9 +1909,48 @@ Spec 111. As the owner, I want to choose per page whether the chatbot receives a
 | S-111.4 | Given a page on `gateway`, when a signed `message` event arrives, then one chat is stored (name from botcake_psids, message_id = mid, payload source gateway) and one run and one replied-marking are queued; the same mid again, or a mid already stored by a Botcake push, stores and queues nothing | `test_S_111_4…` | Passed · 2026-10-22 · auto |
 | S-111.5 | Given a page on `botcake`, when a signed `message` event arrives, then nothing is stored or queued and `botcake_page` is counted; echo and read only count | `test_S_111_5…` | Passed · 2026-10-22 · auto |
 | S-111.6 | When the signature is wrong, missing or empty → 401; when no webhook secret is configured → 503; nothing is queued or stored either way | `test_S_111_6…` | Passed · 2026-10-22 · auto |
-| S-111.7 | Given a page on `gateway`, when Botcake pushes a chat for it, then the answer is 200 `{ok: true}`, no chat is stored, no run is queued, and `gateway_page` is counted | `test_S_111_7…` | Passed · 2026-10-22 · auto |
+| S-111.7 | Given a page on `gateway`, when Botcake pushes a chat for it, then the answer is 200 `{ok: true}`, the chat is stored on standby (spec 117), no run is queued, and `gateway_page` is counted | `test_S_111_7…` | Passed · 2026-10-22 · auto |
 | S-111.8 | When staff pick Forbeast Gateway in a row, then `chatbot.provider` is saved (old value kept as history), shows in Changes as "Provider", and is not a botfield column; another value or a page off the list → 422; with `GATEWAY_URL` empty, `data` says `gateway_ready: false` and `gateway` is refused | `test_S_111_8…` | Passed · 2026-10-22 · auto |
 | S-111.9 | Given a page on `gateway`, when staff send from the Inbox, then it goes through the gateway with a client_ref and is logged as manual | `test_S_111_9…` | Passed · 2026-10-22 · auto |
 | S-111.10 | Given several pages ticked (or "select all" on the filtered list), when "Replies via" is applied, then every page is saved through PageSettings with its own history and Changes entry; one page off the list, more than 200 pages, or Forbeast not set up → 422 and nothing changes | `test_S_111_10…` | Passed · 2026-10-22 · auto |
 | S-111.11 | The page has the select-all box, the bulk select and "Apply to selected"; the option reads "Forbeast", never "Forbeast Gateway" | `test_S_111_11…` | Passed · 2026-10-22 · auto |
 | S-111.12 | Given `GATEWAY_URL` with a path prefix (with or without a trailing slash), then the send goes to `<prefix>/v1/pages/{id}/messages` | `test_S_111_12…` (2 sets) | Passed · 2026-10-22 · auto |
+
+## S-113 Forbeast is set up per page with a token, like Botcake
+
+Spec 113. As the owner, I want to paste a Forbeast page token per page in Likha (page settings or the chatbot page row) and have the page tested and connected at once, so that nothing has to be set on the Forbeast side and each page has its own key. Test: `tests/Feature/Chatblast/ForbeastPageTokenTest.php` (Forbeast HTTP faked).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-113.1 | Given a page with a Botcake ID, when staff save a Forbeast token in page settings, then `GET /v1/pages/{id}` is called with that token, a 64-character page secret is stored (secret) and `PUT /v1/pages/{id}/webhook` gets `{APP_URL}/api/gateway/events` and that secret; the status reads "ok · Forbeast connected (name)"; neither the token nor the secret is in the answer | `test_S_113_1…` | Passed · 2026-10-22 · auto |
+| S-113.2 | When the token is refused (401), then the status shows `invalid · Forbeast said "…" (HTTP 401)`, no webhook is registered and no secret is stored | `test_S_113_2…` | Passed · 2026-10-22 · auto |
+| S-113.3 | When staff press Test (page settings or the chatbot row), then the token is tested again and a new secret is registered; a page without a token is skipped with no call | `test_S_113_3…` | Passed · 2026-10-22 · auto |
+| S-113.4 | When staff add the token from the `/chatbot/pages` row, then it is saved and connected like in page settings; a page off the list → 422; a role without chatbot access → 403 and nothing changes | `test_S_113_4…` | Passed · 2026-10-22 · auto |
+| S-113.5 | Given a page with its own secret, an event signed with it → 200 and with the global secret → 401; a page without its own secret is verified with the global secret; an unknown page id → 401 | `test_S_113_5…` | Passed · 2026-10-22 · auto |
+| S-113.6 | When a Forbeast page sends, then it uses the page's token; a page without one uses the global key; with neither, nothing is sent and the reply fails | `test_S_113_6…` | Passed · 2026-10-22 · auto |
+| S-113.7 | "Replies via: Forbeast" (single and bulk) is refused with "Add the Forbeast token first: <pages>" until the page has a working token or the global key is set; the row says `forbeast.ready` and the option reads "(add the token first)" | `test_S_113_7…` | Passed · 2026-10-22 · auto |
+| S-113.8 | When staff clear the token, then `DELETE /v1/pages/{id}/webhook` is sent with the old token and the token, secret and status are removed, also when Forbeast answers 500 | `test_S_113_8…`, `test_S_113_8b…` | Passed · 2026-10-22 · auto |
+| S-113.9 | The page settings page, its grid JSON and `/chatbot/data` never contain the token or the secret; the token shows as •••• + last 4; the secret is no column | `test_S_113_9…` | Passed · 2026-10-22 · auto |
+
+## S-117 A Forbeast page switches itself to Botcake when Forbeast fails
+
+Spec 117. As the owner, I want a page on Forbeast to move to Botcake by itself when Forbeast fails (and stay there until I move it back), with the chats Botcake got during the outage answered and an event I am told about, so that no customer is left unanswered. Test: `tests/Feature/Chatblast/ForbeastAutoSwitchTest.php` (Forbeast HTTP faked).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-117.1 | Given a Forbeast page, when 5 sends in a row fail, then the page is on Botcake once, with a `switched` event (condition `failed_sends`, the last error as HTTP status and Meta code only, no response text); a sent message in between resets the count | `test_S_117_1…`, `test_S_117_1b…` | Passed · 2026-10-23 · auto |
+| S-117.2 | When a send fails with a Meta connection error (#190, #200, #2022, #613, #4, #32), then the page switches at once (`connection_error`) | `test_S_117_2…` | Passed · 2026-10-23 · auto |
+| S-117.3 | When Forbeast does not answer (timeout or 5xx) 3 times in a row, then the page switches (`no_answer`) | `test_S_117_3…` | Passed · 2026-10-23 · auto |
+| S-117.4 | When Botcake delivers 3 chats for the page in 5 minutes and Forbeast none, then the every-minute check switches the page (`inbound`), but not while the chats are under a minute old (the Forbeast copies may still be queued); one Forbeast chat in the window keeps it on Forbeast | `test_S_117_4…`, `test_S_117_4b…` | Passed · 2026-10-23 · auto |
+| S-117.5 | When the every-minute health check (`GET /v1/pages/{id}`) fails 3 times in a row, or answers `can_send=false` / `connected=false`, then the page switches (`health`) | `test_S_117_5…` | Passed · 2026-10-23 · auto |
+| S-117.6 | When sends fail with customer-side errors (#551, #10), then they never count toward a switch | `test_S_117_6…` | Passed · 2026-10-23 · auto |
+| S-117.7 | Given a page without a Botcake token, when Forbeast fails, then the page stays on Forbeast and gets one `cannot_switch` event (no repeat within the hour) | `test_S_117_7…` | Passed · 2026-10-23 · auto |
+| S-117.8 | After an auto-switch, nothing moves the page back by itself; `/chatbot/pages` shows "Auto-switched <time>" with the reason, Changes shows who "auto-switch"; a manual switch clears the note | `test_S_117_8…` | Passed · 2026-10-23 · auto |
+| S-117.9 | Given a Forbeast page, a Botcake chat is stored on standby and runs nothing; after a switch, the standby chats of the last 15 minutes run once, oldest first, except those whose Forbeast copy (same mid, or same text within 2 min) already got a sent reply; a Forbeast event for a standby mid runs once, and the standby copy is removed when the Forbeast reply is sent | `test_S_117_9…`, `test_S_117_9b…` | Passed · 2026-10-23 · auto |
+| S-117.10 | `GET /api/chatbot/provider-events?since=<id>` without the key, with a wrong key, or with no key configured → 401; with the key → the events after the id (id, Manila time, page, result, from, to, condition, error), no secrets | `test_S_117_10…` | Passed · 2026-10-23 · auto |
+| S-117.11 | A reply to a customer's chat goes to Forbeast with `messaging_type: RESPONSE`; a sequence step with `UPDATE`; no message tag | `test_S_117_11…` | Passed · 2026-10-23 · auto |
+| S-117.12 | Given a customer waiting at a step with "no reply in …", when a standby Botcake copy arrives after the wait, then the skip still goes through (the standby is not a reply) | `ChatbotWaitSkipTest::test_S_117_12…` | Passed · 2026-10-23 · auto |
+| S-117.13 | Given a standby twin of a customer's message, when the AI step builds its history, then the message appears once (the twin is left out) | `ForbeastStandbyHiddenTest::test_S_117_13…` | Passed · 2026-10-23 · auto |
+| S-117.14 | Given standby chats, then the Inbox list leaves out a customer who has only standby chats, and the thread shows the real chat once | `test_S_117_14…` | Passed · 2026-10-23 · auto |
+| S-117.15 | Given standby chats, then Results (chats in the funnel) and the "today" count on `/chatbot/pages` do not count them | `test_S_117_15…` | Passed · 2026-10-23 · auto |
+| S-117.16 | When `chatbot:forbeast-watch` runs, then standby rows older than 20 minutes (`standby_minutes` + 5) are deleted and newer standby rows and real chats stay | `test_S_117_16…` | Passed · 2026-10-23 · auto |

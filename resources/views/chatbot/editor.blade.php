@@ -551,11 +551,19 @@
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'The first row that matches wins; none matches → "no match".'}), rowsEditor(c.rows = c.rows || [], make, 20, '+ Row'));
         }
         if (n.type === 'send') {
-            const make = it => el('div', {class: 'grid gap-2 sm:grid-cols-[8rem_1fr]'}, [
-                label('Type', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, [el('option', {value: 'text', text: 'Text', selected: it.type !== 'image'}), el('option', {value: 'image', text: 'Image link', selected: it.type === 'image'})]), v => it.type = v)),
-                label('Text or image link (variables allowed)', bind(input({tag: 'textarea', rows: 3, maxlength: 2000}, it.value), v => it.value = v)),
-                el('label', {class: 'flex items-center gap-2 text-xs text-slate-600 sm:col-span-2'}, [bind(el('input', {type: 'checkbox', checked: it.ai !== false}), v => { if (v) delete it.ai; else it.ai = false; }, true), 'Visible to AI']),
-            ]);
+            // Ang AI-output variable: ang save_to ng mga AI step; ang mensaheng may ganito ay sariling sagot ng AI ang naaalala nito.
+            const aiOutputIn = text => { const outs = graph.nodes.filter(x => x.type === 'ai' && x.config?.save_to).map(x => x.config.save_to.toLowerCase().replace(/[\s_]+/g, ' ').trim()); return [...String(text || '').matchAll(/\{\{\s*([^{}]{1,100}?)\s*\}\}/g)].some(m => outs.includes(m[1].toLowerCase().replace(/[\s_]+/g, ' ').trim())); };
+            const make = it => {
+                const note = el('p', {class: 'text-xs text-slate-500 sm:col-span-2', text: 'The AI remembers only its own answer here'});
+                const box = el('label', {class: 'flex items-center gap-2 text-xs text-slate-600 sm:col-span-2'}, [bind(el('input', {type: 'checkbox', checked: it.ai === true}), v => { if (v) it.ai = true; else delete it.ai; }, true), 'Show this message to the AI']);
+                const sync = () => { const own = aiOutputIn(it.value); note.classList.toggle('hidden', !own); box.classList.toggle('hidden', own); };
+                sync();
+                return el('div', {class: 'grid gap-2 sm:grid-cols-[8rem_1fr]'}, [
+                    label('Type', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, [el('option', {value: 'text', text: 'Text', selected: it.type !== 'image'}), el('option', {value: 'image', text: 'Image link', selected: it.type === 'image'})]), v => it.type = v)),
+                    label('Text or image link (variables allowed)', bind(input({tag: 'textarea', rows: 3, maxlength: 2000}, it.value), v => { it.value = v; sync(); })),
+                    note, box,
+                ]);
+            };
             make.blank = () => ({type: 'text', value: ''});
             body.append(rowsEditor(c.items = c.items || [], make, 10, '+ Message'));
             body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: !!c.wait}), v => c.wait = v, true), 'Wait for the reply (exits on "reply")']));

@@ -16,6 +16,7 @@ use App\Services\ChatblastSetupCheck;
 use App\Jobs\RunChatblastSetupCheck;
 use App\Services\ChatblastSender;
 use App\Services\BotcakeSyncAll;
+use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\PageSettings;
 use App\Services\PageSettingsGrid;
 use Illuminate\Http\Request;
@@ -159,6 +160,11 @@ class PageSettingController extends Controller
             if (PageSettings::isSystemKey($provider . '.' . $key)) {
                 return response()->json(['error' => $provider . '.' . $key . ' is written by the system.'], 422);
             }
+            // Binurang Forbeast token: DELETE ng webhook, at kasama ang secret at status nito.
+            if ($provider . '.' . $key === 'forbeast.token') {
+                app(ForbeastPageSetup::class)->disconnect($page, Auth::id());
+                return response()->json(['status' => 'cleared', 'cell' => null, 'cells' => ['forbeast.token_status' => null]]);
+            }
             foreach ($actives as $s) $this->settings->deactivate($s, Auth::id());
             // Ang binurang template ay pinipili ulit ng system (kapag may iisang malinaw na template).
             if ($provider . '.' . $key === 'botcake.template.shipping') {
@@ -209,6 +215,12 @@ class PageSettingController extends Controller
             }
         }
 
+        // Bagong Forbeast token (o ibang Botcake ID ng page na may token): Test, saka ang webhook ng page.
+        if ($res['status'] !== 'unchanged' && ($provider . '.' . $key === 'forbeast.token'
+            || ($provider . '.' . $key === 'botcake.page_id' && app(ForbeastPageSetup::class)->token($page) !== ''))) {
+            $out = $this->forbeast($page, $grid, $out);
+        }
+
         return response()->json($out);
     }
 
@@ -221,6 +233,26 @@ class PageSettingController extends Controller
         $res = app(BotcakeFlowNames::class)->afterSave($page, $full);
         $out = ['cells' => $this->cells($res['written'], $grid), 'refresh_error' => $res['error']];
         if (isset($res['written'][$full])) $out['cell'] = $grid->cell($res['written'][$full]);
+
+        return $out;
+    }
+
+    /** "Test" ng Forbeast token ng row: GET ng page, saka bagong webhook secret at PUT kapag ok. */
+    public function forbeastTest(Request $request, PageSettingsGrid $grid)
+    {
+        $this->checkAccess();
+
+        return response()->json($this->forbeast((string) $request->input('page_name', ''), $grid));
+    }
+
+    /** Ang resulta ng ForbeastPageSetup::connect sa sagot: forbeast (status, pangalan, error, konektado) at ang status cell. */
+    private function forbeast(string $page, PageSettingsGrid $grid, array $out = []): array
+    {
+        $setup = app(ForbeastPageSetup::class);
+        $res = $setup->connect($page);
+        $out['forbeast'] = ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error'], 'connected' => $setup->info($page)['connected']];
+        $cells = $this->cells(array_diff_key($res['written'], ['forbeast.webhook_secret' => true]), $grid);
+        if ($cells) $out['cells'] = array_merge($out['cells'] ?? [], $cells);
 
         return $out;
     }
@@ -432,7 +464,8 @@ class PageSettingController extends Controller
         if (in_array($setting->fullKey(), [...PageSettingsGrid::CHECK_CELLS, 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate', 'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms'], true)) {
             return redirect()->route('page-settings.index')->withErrors(['value' => $setting->fullKey() . ' is written by the system, not here.']);
         }
-        $this->settings->deactivate($setting, Auth::id());
+        if ($setting->fullKey() === 'forbeast.token') app(ForbeastPageSetup::class)->disconnect($setting->page_name, Auth::id());
+        else $this->settings->deactivate($setting, Auth::id());
 
         return redirect()->route('page-settings.index')->with('success', 'Deactivated: ' . $setting->page_name . ' · ' . $setting->fullKey());
     }

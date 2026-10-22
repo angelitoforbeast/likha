@@ -146,7 +146,7 @@ class ChatbotTabsTest extends ChatblastTestCase
 
         $this->assertSame('Main COD', $res['flow']);
         $this->assertSame(['n1', 'n2', 'n3', 'n4', 'n5'], array_column($res['path'], 'node'));
-        $this->assertSame([[['type' => 'text', 'text' => 'AI says hi']], [['type' => 'text', 'text' => 'Status LOOP 1']]], array_column($res['sends'], 'messages'));
+        $this->assertSame([[['type' => 'text', 'text' => 'AI says hi', 'ai_text' => 'AI says hi']], [['type' => 'text', 'text' => 'Status LOOP 1', 'ai' => false]]], array_column($res['sends'], 'messages'));
         $this->assertSame([["'TEST", "'AI says hi"]], array_column($res['sheet_rows'], 'row'));
         $this->assertSame(['chat status' => 'LOOP 1', 'gpt input' => 'AI says hi'], $res['fields']);
         Http::assertSentCount(1);

@@ -78,7 +78,7 @@ class Inbox
         $q = trim($q);
         $like = '%' . strtr(mb_strtolower($q), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
 
-        $in = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', $since)
+        $in = BotcakeChat::active()->where('page_id', $pageId)->where('received_at', '>=', $since)
             ->when($q !== '', fn ($w) => $w->where(fn ($o) => $o->whereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$like])->orWhere('psid', 'like', strtr($q, ['%' => '', '_' => '']) . '%')))
             ->selectRaw('psid, MAX(id) AS last_id, MAX(received_at) AS last_at')->groupBy('psid')
             ->orderByDesc('last_at')->limit(self::GROUP_LIMIT)->get()->keyBy(fn ($r) => (string) $r->psid);
@@ -144,7 +144,7 @@ class Inbox
     public function thread(string $pageId, string $psid, ?array $before = null, ?array $after = null, bool $events = false): array
     {
         $events = $events && $this->hasEvents();
-        $inQ = fn () => BotcakeChat::where('page_id', $pageId)->where('psid', $psid);
+        $inQ = fn () => BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid);
         $outQ = fn () => ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $psid);
         $evQ = fn () => DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid);
 
@@ -246,7 +246,7 @@ class Inbox
     /** Ang huling mensahe ng customer sa page na ito (para sa 24 oras ng Messenger), o null. */
     public function lastIncomingAt(string $pageId, string $psid): ?Carbon
     {
-        $at = BotcakeChat::where('page_id', $pageId)->where('psid', $psid)->orderByDesc('id')->value('received_at');
+        $at = BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid)->orderByDesc('id')->value('received_at');
 
         return $at ? Carbon::parse($at) : null;
     }
@@ -264,8 +264,8 @@ class Inbox
      */
     public function panel(string $pageId, string $page, string $psid): array
     {
-        $first = BotcakeChat::where('page_id', $pageId)->where('psid', $psid)->orderBy('id')->first(['name', 'payload', 'received_at']);
-        $last = BotcakeChat::where('page_id', $pageId)->where('psid', $psid)->orderByDesc('id')->first(['name', 'payload', 'received_at']);
+        $first = BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid)->orderBy('id')->first(['name', 'payload', 'received_at']);
+        $last = BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid)->orderByDesc('id')->first(['name', 'payload', 'received_at']);
         $record = BotcakePsid::where('psid', $psid)->get(['page', 'fb_name', 'source', 'ad_id', 'first_seen_at', 'subscribed_at'])
             ->first(fn ($p) => $this->settings->pageKey((string) $p->page) === $this->settings->pageKey($page));
         $fields = new CustomerFields((int) $pageId, (int) $psid);
@@ -347,7 +347,7 @@ class Inbox
     /** Ang mga larawang ipinadala ng customer (payload.image_url ng [Photo]), pinakabago muna. */
     private function media(string $pageId, string $psid): array
     {
-        return BotcakeChat::where('page_id', $pageId)->where('psid', $psid)->where('message', ChatMessageCleaner::PHOTO)->orderByDesc('id')->limit(30)
+        return BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid)->where('message', ChatMessageCleaner::PHOTO)->orderByDesc('id')->limit(30)
             ->get(['payload', 'received_at'])->map(fn ($c) => ['url' => $c->payload['image_url'] ?? null, 'at' => self::iso($c->received_at)])
             ->filter(fn ($m) => is_string($m['url']) && preg_match('#^https?://#i', $m['url']))->values()->all();
     }

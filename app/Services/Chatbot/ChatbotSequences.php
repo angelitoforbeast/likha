@@ -293,7 +293,7 @@ class ChatbotSequences
                 $this->event($sub->page_id, $sub->psid, ['op' => 'held', 'reason' => 'bot paused'] + $detail);
                 return 'held';
             }
-            $last = BotcakeChat::where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
+            $last = BotcakeChat::active()->where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
             // Lampas 24 oras mula sa huling mensahe ng customer: walang ipapadala at tapos na ang subscription.
             if (!$last || !$last->received_at || $last->received_at->lte(now()->subHours(self::WINDOW_HOURS))) {
                 $release(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null]);

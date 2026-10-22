@@ -169,7 +169,7 @@ class ChatbotResults
     /** Ilang customer (page + PSID) ang nag-chat sa range; ang chat na galing sa gateway ay forbeast. */
     private function chats(array $f, Carbon $start, Carbon $end): int
     {
-        return (int) DB::table('botcake_chats')->where('received_at', '>=', $start)->where('received_at', '<', $end)
+        return (int) DB::table('botcake_chats')->whereNull('payload->_standby')->where('received_at', '>=', $start)->where('received_at', '<', $end)
             ->when($f['page_id'], fn ($q, $v) => $q->where('page_id', (string) $v))
             ->when($f['via'], fn ($q, $v) => self::whereVia($q, 'payload->source', $v))
             ->groupBy('page_id')->selectRaw('COUNT(DISTINCT psid) AS n')->pluck('n')->sum();

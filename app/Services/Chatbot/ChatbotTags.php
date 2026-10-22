@@ -87,7 +87,7 @@ class ChatbotTags
                 $fromPsid = BotcakePsid::where('psid', (string) $psid)->where('ad_id', '<>', '')->whereNotNull('ad_id')->get(['page', 'ad_id'])
                     ->first(fn ($r) => $settings->pageKey((string) $r->page) === $settings->pageKey($pageName))?->ad_id;
                 if ($fromPsid) return (string) $fromPsid;
-                $first = BotcakeChat::where('page_id', (string) $pageId)->where('psid', (string) $psid)->orderBy('id')->first(['payload']);
+                $first = BotcakeChat::active()->where('page_id', (string) $pageId)->where('psid', (string) $psid)->orderBy('id')->first(['payload']);
                 $ad = trim((string) ($first?->payload['ad_id'] ?? ''));
 
                 return preg_match('/^\d{1,64}$/', $ad) ? $ad : '';
@@ -210,7 +210,7 @@ class ChatbotTags
             ->chunkById(1000, function ($rows) use (&$n) {
                 foreach ($rows as $r) {
                     $sent = Carbon::parse($r->sent_at);
-                    $chat = BotcakeChat::where('page_id', (string) $r->page_id)->where('psid', (string) $r->psid)
+                    $chat = BotcakeChat::active()->where('page_id', (string) $r->page_id)->where('psid', (string) $r->psid)
                         ->where('received_at', '>', $sent)->where('received_at', '<=', $sent->copy()->addHours(self::REPLY_HOURS))
                         ->orderBy('received_at')->value('received_at');
                     if ($chat === null) continue;

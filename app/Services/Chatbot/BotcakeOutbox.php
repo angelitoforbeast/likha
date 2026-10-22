@@ -26,18 +26,29 @@ class BotcakeOutbox implements Outbox
         return (bool) config('services.chatbot.replies_enabled');
     }
 
-    /** Ang mga mensahe bilang ipinapadala sa Botcake/Forbeast: walang "ai" na marka (sa ating talaan lang iyon). */
+    /** Ang mga mensahe bilang ipinapadala sa Botcake/Forbeast: walang "ai" at "ai_text" na marka (sa ating talaan lang iyon). */
     public static function wire(array $messages): array
     {
-        return array_map(fn ($m) => is_array($m) ? array_diff_key($m, ['ai' => 1]) : $m, array_values($messages));
+        return array_map(fn ($m) => is_array($m) ? array_diff_key($m, ['ai' => 1, 'ai_text' => 1]) : $m, array_values($messages));
     }
 
     public function send(FlowRun $run, string $nodeId, array $messages): array
     {
         if (!self::enabled()) return $this->log($run, $nodeId, 'send', $messages, 'skipped', self::SWITCHED_OFF);
 
-        // Ang daan ng page (Botcake o ang Forbeast Gateway): ChatbotProvider.
-        $o = ChatbotProvider::for($run->pageName)->send($run->pageName, $run->pageId, $run->psid(), $messages, ChatbotProvider::ref());
+        // Ang daan ng page (Botcake o ang Forbeast Gateway): ChatbotProvider. RESPONSE lang ang sagot sa chat ng customer;
+        // ang sequence at ang takbong walang chat (hal. ang wait na lumampas) ay UPDATE.
+        $type = $run->chatId !== null && $run->startedBy === null ? MessagingProvider::RESPONSE : MessagingProvider::UPDATE;
+        $provider = ChatbotProvider::for($run->pageName);
+        $o = $provider->send($run->pageName, $run->pageId, $run->psid(), $messages, ChatbotProvider::ref(), $type);
+        // Nasagot ng Forbeast ang chat: ang standby na kopya ng Botcake ay hindi na kailangan (ForbeastWatch).
+        if ($o['status'] === 'sent' && $run->chatId !== null && !$run->test && $provider instanceof GatewayProvider) {
+            try {
+                app(ForbeastWatch::class)->answered($run->chatId);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
 
         return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null);
     }

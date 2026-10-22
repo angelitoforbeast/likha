@@ -163,6 +163,13 @@ Schedule::command('chatblast:auto')
     ->everyFiveMinutes()
     ->withoutOverlapping(30);
 
+// Ang bantay ng Forbeast: kada minuto, ang health check at ang paghahambing ng chat ng bawat page na nasa Forbeast; ang
+// pumapalya ay kusang lumilipat sa Botcake (ForbeastWatch). Sa background, para hindi maantala ang ibang naka-schedule.
+Schedule::command('chatbot:forbeast-watch')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 // Kusang J&T track-sync (JntAutoTrackSync): kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload),
 // 04:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
 // kumukuha ng oras, kaya ang simula mula sa chatblast:auto sa parehong oras ay walang ginagawa. JNT_TRACK_SYNC_AUTO o

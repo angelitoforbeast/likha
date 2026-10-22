@@ -10,6 +10,8 @@ use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotPageCheck;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
+use App\Services\Chatbot\ForbeastPageSetup;
+use App\Services\Chatbot\ForbeastWatch;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -76,13 +78,14 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider'], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider', ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
         // Ang Check: ang naka-cache lang (ang wala pa ay kinukuha ng page isa-isa sa /chatbot/check).
         $check = app(ChatbotPageCheck::class);
         $prints = $check->prints();
+        $forbeast = app(ForbeastPageSetup::class);
 
         $rows = [];
         foreach ($pages as $page) {
@@ -91,6 +94,7 @@ class ChatbotController extends Controller
             $active = true;
             $flowId = null;
             $provider = ChatbotProvider::BOTCAKE;
+            $providerRow = $autoSwitch = null;
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
@@ -98,7 +102,10 @@ class ChatbotController extends Controller
                 }
                 if ($s->key === 'active') $active = $s->plainValue() !== '0';
                 elseif ($s->key === 'flow_id') $flowId = (int) $s->plainValue();
-                elseif ($s->key === 'provider') $provider = $s->plainValue() === ChatbotProvider::GATEWAY ? ChatbotProvider::GATEWAY : ChatbotProvider::BOTCAKE;
+                elseif ($s->key === 'provider') {
+                    $provider = $s->plainValue() === ChatbotProvider::GATEWAY ? ChatbotProvider::GATEWAY : ChatbotProvider::BOTCAKE;
+                    $providerRow = $s;
+                } elseif ($s->key === ForbeastWatch::KEY) $autoSwitch = $s;
                 else $cells[$s->key] = $s->plainValue();
             }
             // FLOW: ang flow na talagang nakatali (ayon sa id). Ang lumang text na hindi nakatali ay hiwalay, para
@@ -108,9 +115,11 @@ class ChatbotController extends Controller
             if ($linked !== null) $cells['flow'] = $linked; else unset($cells['flow']);
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
+                // Kusang lumipat sa Botcake (ForbeastWatch), hanggang may magpalit nang mano-mano.
+                'auto_switched' => $provider === ChatbotProvider::BOTCAKE ? ForbeastWatch::note($autoSwitch, $providerRow) : null,
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
-                'check' => $check->cached($page, $prints),
+                'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
             ];
         }
 
@@ -222,7 +231,7 @@ class ChatbotController extends Controller
 
     /**
      * Ang daan ng chatbot ng page: Botcake o ang Forbeast Gateway (chatbot.provider, may history). Access gaya ng isang cell;
-     * ang gateway ay mapipili lang kapag naka-set up (GATEWAY_URL).
+     * ang gateway ay mapipili lang kapag naka-set up (GATEWAY_URL) at may gumaganang Forbeast token ang bawat page (o GATEWAY_KEY).
      */
     public function provider(Request $request)
     {
@@ -242,9 +251,34 @@ class ChatbotController extends Controller
         if ($provider === ChatbotProvider::GATEWAY && !ChatbotProvider::gatewayReady()) {
             return response()->json(['error' => 'Forbeast is not set up yet.'], 422);
         }
+        // Forbeast: ang bawat page ay may gumaganang token (o may global GATEWAY_KEY).
+        $missing = $provider === ChatbotProvider::GATEWAY ? array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->ready($p)) : [];
+        if ($missing) return response()->json(['error' => ForbeastPageSetup::NEEDS_TOKEN . ': ' . implode(', ', array_slice(array_values($missing), 0, 10))], 422);
         $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'], $pages));
 
         return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)]);
+    }
+
+    /**
+     * Ang Forbeast token ng page mula sa row (access gaya ng isang cell): may token = i-save, saka Test at webhook; clear =
+     * DELETE ng webhook at tanggal ang token at secret; wala sa dalawa = Test ulit. Ang sagot ay ang info lang (huling 4).
+     */
+    public function forbeastToken(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        $setup = app(ForbeastPageSetup::class);
+
+        if ($request->boolean('clear')) {
+            $setup->disconnect($page, Auth::id());
+            return response()->json(['status' => 'cleared', 'forbeast' => $setup->info($page)]);
+        }
+        $token = trim($this->str($request, 'token', 500));
+        if ($token !== '') $this->settings->set($page, ForbeastPageSetup::PROVIDER, 'token', $token, true, Auth::id());
+        $res = $setup->connect($page);
+
+        return response()->json(['status' => $res['status'], 'forbeast' => ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error']] + $setup->info($page)]);
     }
 
     /** ACTIVE On (isulat ang block at i-publish) o Off (i-unpublish lang). Ang error ng Botcake ay walang binabago dito. */
@@ -465,11 +499,18 @@ class ChatbotController extends Controller
     /** Ang value na maipapakita: ang secret ay hindi kailanman. */
     private function shown(PageSetting $s): string
     {
+        if ($s->key === ForbeastWatch::KEY && is_array($e = json_decode((string) $s->plainValue(), true))) {
+            return (($e['result'] ?? '') === ForbeastWatch::SWITCHED ? 'Switched to Botcake' : 'Cannot switch: no Botcake') . ' · ' . ForbeastWatch::reason($e);
+        }
+
         return $s->is_secret ? '(hidden)' : (string) $s->plainValue();
     }
 
     private function who(PageSetting $s, array $names): string
     {
+        // Ang provider na walang user ay ang kusang lipat lang ang sumusulat (ForbeastWatch).
+        if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && in_array($s->key, ['provider', ForbeastWatch::KEY], true)) return ForbeastWatch::WHO;
+
         return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system';
     }
 
@@ -516,11 +557,11 @@ class ChatbotController extends Controller
         if (!Schema::hasTable('botcake_chats')) return ['today' => [], 'last' => []];
 
         return Cache::remember('chatbot:chat-stats', 60, function () {
-            $today = BotcakeChat::where('received_at', '>=', now('Asia/Manila')->startOfDay()->timezone(config('app.timezone')))
+            $today = BotcakeChat::active()->where('received_at', '>=', now('Asia/Manila')->startOfDay()->timezone(config('app.timezone')))
                 ->whereNotNull('page_id')->selectRaw('page_id, COUNT(*) AS n')->groupBy('page_id')->pluck('n', 'page_id')->map(fn ($n) => (int) $n)->all();
             $last = [];
             foreach (array_keys(BotcakeChat::pageMap()) as $id) {
-                $at = BotcakeChat::where('page_id', (string) $id)->max('received_at');
+                $at = BotcakeChat::active()->where('page_id', (string) $id)->max('received_at');
                 if ($at) $last[(string) $id] = \Carbon\Carbon::parse($at)->timezone('Asia/Manila')->format('Y-m-d H:i');
             }
             return ['today' => $today, 'last' => $last];

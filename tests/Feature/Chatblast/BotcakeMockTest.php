@@ -170,7 +170,7 @@ class BotcakeMockTest extends ChatblastTestCase
         $chat = BotcakeChat::where('page_id', self::MOCK_ID)->firstOrFail();
         app(\App\Services\Chatbot\ChatbotRunner::class)->handle($chat->id); // the job (sync queue may have run it already: once only)
         $reply = ChatbotReply::where('chat_id', $chat->id)->firstOrFail();
-        $this->assertSame(['sent', [['type' => 'text', 'text' => 'Opo, available pa po!']]], [$reply->status, $reply->content]);
+        $this->assertSame(['sent', [['type' => 'text', 'text' => 'Opo, available pa po!', 'ai_text' => 'Opo, available pa po!']]], [$reply->status, $reply->content]);
         Http::assertNotSent(fn (HttpRequest $r) => str_contains($r->url(), 'botcake.io'));
         Http::assertSent(fn (HttpRequest $r) => str_contains($r->url(), 'api.openai.com'));
     }

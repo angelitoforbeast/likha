@@ -34,9 +34,12 @@ class TestHistory
         $fields->set(CustomerFields::TEST_HISTORY, json_encode(array_slice($list, -self::MAX), JSON_UNESCAPED_UNICODE));
     }
 
-    /** Ang text ng mga mensahe ng isang padala (gaya ng history ng live: text lang). */
+    /**
+     * Ang nakikita ng AI sa isang padala: wala kapag ai: false, ang ai_text kapag mayroon (ang sariling sagot ng AI), at
+     * ang buong text kapag ai: true o kapag lumang row na walang marka.
+     */
     public static function text(array $messages): string
     {
-        return implode("\n", array_filter(array_map(fn ($m) => is_array($m) && ($m['ai'] ?? true) !== false ? (string) ($m['text'] ?? '') : '', $messages)));
+        return implode("\n", array_filter(array_map(fn ($m) => !is_array($m) || ($m['ai'] ?? true) === false ? '' : (string) ($m['ai_text'] ?? $m['text'] ?? ''), $messages), fn ($t) => $t !== ''));
     }
 }

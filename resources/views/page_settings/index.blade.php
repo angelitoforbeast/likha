@@ -135,6 +135,7 @@
          data-page-check-url="{{ route('page-settings.page-check') }}"
          data-test-token-url="{{ route('page-settings.test-token') }}"
          data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
+         data-forbeast-test-url="{{ route('page-settings.forbeast-test') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
          data-send-test-url="{{ route('page-settings.send-test') }}"
          @if ($isCeo ?? false) data-mark-tested-url="{{ route('page-settings.mark-tested') }}" @endif
@@ -372,11 +373,11 @@
     const GROUPS = [['botcake', 'Botcake'], ['flows', 'Chatblast flow']];
     const WIDTHS = ['12%', '13%', '19%', '24%', '7%', '15%', '10%']; // Page, Check, Botcake, Flows, Orders / Customers, Sync, actions
     // Maikling label sa loob ng cell; ang buong label at key ay nasa hover.
-    // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID.
-    const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid', 'botcake.test_ok'];
+    // Ayos ng mga linya sa Botcake cell: ID, token, status, saka ang message field at test PSID, saka ang Forbeast token at status.
+    const LINE_ORDER = ['botcake.page_id', 'botcake.token', 'botcake.token_status', 'botcake.field.message', 'botcake.test_psid', 'botcake.test_ok', 'forbeast.token', 'forbeast.token_status'];
     const inGroup = group => columns.filter(c => c.group === group)
         .sort((a, b) => (LINE_ORDER.indexOf(a.key) + 1 || 99) - (LINE_ORDER.indexOf(b.key) + 1 || 99));
-    const SHORT = {'botcake.page_id': 'ID', 'botcake.token': 'Token', 'botcake.token_status': 'Status', 'botcake.field.message': 'Message field',
+    const SHORT = {'botcake.page_id': 'ID', 'botcake.token': 'Token', 'botcake.token_status': 'Status', 'botcake.field.message': 'Message field', 'forbeast.token': 'Forbeast', 'forbeast.token_status': 'Forbeast st.',
         'botcake.test_psid': 'Test PSID', 'botcake.test_ok': 'Test send', 'botcake.flow.shipping': 'Flow ID', 'botcake.flow.on_delivery': 'Delivering',
         'botcake.flow.in_transit': 'In transit', 'botcake.flow.broadcast': 'Broadcast', 'botcake.template.shipping': 'Template'};
 
@@ -770,6 +771,13 @@
 
     // Ang mga button ng row ay fetch (walang reload: hindi bumabalik sa itaas, nananatiling bukas ang ▸). Ang Cust. at
     // Orders ay link sa ibang page.
+    // Ang resulta ng Test ng Forbeast token: "Forbeast connected" at ang pangalan ng page, o ang error.
+    function forbeastNotice(r, f) {
+        if (f.status === 'skipped') { notice(r.name + ': the page needs a Botcake ID and a Forbeast token first.', 'text-red-600'); return; }
+        notice(r.name + (f.connected ? ' · Forbeast connected' + (f.name ? ' (' + f.name + ')' : '') : ' · Forbeast: ' + f.status + (f.error ? ' · ' + f.error : '')),
+            f.connected ? 'text-green-700' : 'text-red-600');
+    }
+
     function actions(r) {
         const out = [];
         const btn = (act, text, title) => el('button', {type: 'button', class: 'cb-btn cb-btn-sm', 'data-act': act, 'data-pk': r.key, title, text});
@@ -777,6 +785,7 @@
             out.push(btn('test', 'Test', 'Test token, then read the flow, field and template from Botcake'));
             out.push(btn('sync', 'Sync', 'Sync now'));
         }
+        if (r.cells['forbeast.token']) out.push(btn('forbeast-test', 'Test Forbeast', 'Test the Forbeast token, then connect the page (webhook) to Likha'));
         if (complete(r)) {
             out.push(r.cells['botcake.test_psid'] ? btn('send-test', 'Send test', 'Send a test message to the Test PSID')
                 : el('a', {class: 'text-xs text-amber-700 hover:underline', href: url.testPsidPickerUrl, title: 'Pick the Test PSID of the page on To send', text: 'Set a Test PSID first'}));
@@ -800,6 +809,12 @@
                 const status = applyTest(r, data);
                 notice(r.name + ' · Token: ' + status + (data.error ? ' · ' + data.error : '') + (data.refresh_error ? ' · flow, field and template not checked: ' + data.refresh_error : ''),
                     status === 'ok' ? 'text-green-700' : 'text-red-600');
+            } else if (b.dataset.act === 'forbeast-test') {
+                notice('Testing the Forbeast token of ' + r.name + '…');
+                const res = await fetch(url.forbeastTestUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
+                const data = await res.json().catch(() => ({}));
+                applyCells(r, data.cells);
+                if (res.ok) forbeastNotice(r, data.forbeast); else notice(data.error || ('HTTP ' + res.status), 'text-red-600');
             } else if (b.dataset.act === 'sync') {
                 const res = await fetch(url.syncUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
                 const data = await res.json().catch(() => ({}));
@@ -954,6 +969,7 @@
                         : (data.refresh_error ? ' · ' + data.refresh_error : '')),
                         data.token_test === 'ok' ? 'text-green-700' : 'text-red-600');
                 }
+                if (data.forbeast) forbeastNotice(row, data.forbeast); // bagong Forbeast token: sinubukan at ikinonekta na
                 refreshActions(ed.pk); // ang Send test ay lumalabas kapag kumpleto na ang setup
                 marks.set(id, {text: data.status === 'unchanged' ? '✓' : 'Saved', cls: 'text-green-600'});
                 setTimeout(() => { if (marks.get(id)?.cls === 'text-green-600') { marks.delete(id); repaint(ed.pk, ed.key); } }, 2500);
