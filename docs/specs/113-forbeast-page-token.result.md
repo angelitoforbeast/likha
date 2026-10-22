@@ -118,5 +118,5 @@ Two of the tests it said were missing are added: an event without a `page_id` ge
 
 - `0a0deafc` docs: save spec 113 (Forbeast page token)
 - `a523014a` feat: Forbeast token per page, tested and connected on save (spec 113)
-- the following `test:` commit adds the two review cases and the TODO entries
-- the following `docs:` commit adds this result
+- `f6da0a2c` test: Forbeast webhook refused and event without page id; accepted review minors (spec 113)
+- `c0a422f6` docs: result for Forbeast page token (spec 113), plus this commit list
