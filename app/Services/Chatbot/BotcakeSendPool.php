@@ -144,7 +144,7 @@ class BotcakeSendPool extends TicketPool
                 }
                 $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
                 $req = ['step' => 'send', 'method' => 'POST', 'path' => '/pages/' . rawurlencode((string) $row->page_id) . '/flows/send_content',
-                    'data' => ['psid' => (string) $row->psid, 'data' => ['version' => 'v2', 'content' => ['messages' => $messages]]], 'onlyRateLimit' => true];
+                    'data' => ['psid' => (string) $row->psid, 'data' => ['version' => 'v2', 'content' => ['messages' => BotcakeOutbox::wire($messages)]]], 'onlyRateLimit' => true];
                 $this->queue($id, ['row' => $row, 'gen' => null, 'req' => $req, 'attempt' => 0, 'lane' => sha1($token), 'token' => $token, 'notBefore' => 0.0]);
                 return;
             }

@@ -211,7 +211,7 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertCount(3, $this->sent(), 'tapos na: wala nang padala');
     }
 
-    public function test_S_078_2_outside_24_hours_the_step_is_always_skipped(): void
+    public function test_S_078_2_outside_24_hours_nothing_is_sent_and_the_subscription_ends(): void
     {
         $skip = $this->sequence('Skipper', [[0, 'minutes', $this->flow('Seq 1')->id], [1, 'hours', $this->flow('Seq 2')->id]]);
         $stop = $this->sequence('Stopper', [[0, 'minutes', $this->flow('Stop 1')->id], [2, 'hours', $this->flow('Stop 2')->id]]);
@@ -225,9 +225,9 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->tick();
 
         $this->assertSame([[], []], [$this->sent('7001'), $this->sent('7002')]);
-        $this->assertSame(['active', 2, '2026-10-20 11:00'], [$this->sub($skip)->status, (int) $this->sub($skip)->current_step, substr($this->sub($skip)->next_send_at, 0, 16)]);
+        $this->assertSame(['unsubscribed', 'outside 24h', null], [$this->sub($skip)->status, $this->sub($skip)->exit_reason, $this->sub($skip)->next_send_at]);
         $this->assertSame('Sequence Skipper step 1 skipped (outside 24h)', last($this->events('7001')));
-        $this->assertSame(['active', 2, '2026-10-20 12:00'], [$this->sub($stop, '7002')->status, (int) $this->sub($stop, '7002')->current_step, substr($this->sub($stop, '7002')->next_send_at, 0, 16)]);
+        $this->assertSame(['unsubscribed', 'outside 24h'], [$this->sub($stop, '7002')->status, $this->sub($stop, '7002')->exit_reason]);
         $this->assertSame('Sequence Stopper step 1 skipped (outside 24h)', last($this->events('7002')));
     }
 

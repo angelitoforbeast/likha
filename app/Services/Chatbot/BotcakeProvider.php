@@ -20,6 +20,6 @@ class BotcakeProvider implements MessagingProvider
         $client = app(BotcakeClient::class)->shared(sha1($token), 15);
         if ($this->once) $client = $client->once(15);
 
-        return BotcakeOutbox::outcome($client->sendContent($pageId, $psid, $messages, $token), $token);
+        return BotcakeOutbox::outcome($client->sendContent($pageId, $psid, BotcakeOutbox::wire($messages), $token), $token);
     }
 }

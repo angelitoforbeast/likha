@@ -554,6 +554,7 @@
             const make = it => el('div', {class: 'grid gap-2 sm:grid-cols-[8rem_1fr]'}, [
                 label('Type', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, [el('option', {value: 'text', text: 'Text', selected: it.type !== 'image'}), el('option', {value: 'image', text: 'Image link', selected: it.type === 'image'})]), v => it.type = v)),
                 label('Text or image link (variables allowed)', bind(input({tag: 'textarea', rows: 3, maxlength: 2000}, it.value), v => it.value = v)),
+                el('label', {class: 'flex items-center gap-2 text-xs text-slate-600 sm:col-span-2'}, [bind(el('input', {type: 'checkbox', checked: it.ai !== false}), v => { if (v) delete it.ai; else it.ai = false; }, true), 'Visible to AI']),
             ]);
             make.blank = () => ({type: 'text', value: ''});
             body.append(rowsEditor(c.items = c.items || [], make, 10, '+ Message'));

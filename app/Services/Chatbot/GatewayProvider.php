@@ -26,7 +26,7 @@ class GatewayProvider implements MessagingProvider
         try {
             $res = Http::withToken($key)->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout)
                 ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/messages',
-                    ['psid' => $psid, 'messages' => $messages, 'messaging_type' => 'RESPONSE', 'client_ref' => $clientRef]);
+                    ['psid' => $psid, 'messages' => BotcakeOutbox::wire($messages), 'messaging_type' => 'RESPONSE', 'client_ref' => $clientRef]);
             $r = ['http' => $res->status(), 'body' => $res->json() ?? $res->body()];
         } catch (ConnectionException) {
             $r = ['http' => 0, 'body' => null];

@@ -180,6 +180,14 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $this->assertSame(['x', ['Seq 5 has no Seq Img 5', 'Seq Img 6 has no Seq 6']], [$res['status'], $res['reasons']]);
     }
 
+    public function test_S_115_7_seq_11_to_20_and_after_order_fields_are_optional_but_seq_10_is_not(): void
+    {
+        $this->link('Page Uno', $this->flow('Main', [$this->send('{{Seq 10}} {{Seq 11}} {{Seq Img 20}} {{After Order 1}} {{After Order Img 4}}')]));
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_img_10', self::IMG . '10.jpg');
+
+        $this->assertSame(['Missing: Seq 10'], $this->check()['reasons']);
+    }
+
     public function test_S_099_4_an_unknown_variable_inside_a_botfield_is_a_reason(): void
     {
         $this->link('Page Uno', $this->flow('Main', [$this->send('{{Prompt 1}}'), ['set', ['ops' => [['op' => 'set', 'field' => 'order note', 'value' => 'x']]]]]));

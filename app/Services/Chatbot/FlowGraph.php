@@ -114,7 +114,7 @@ class FlowGraph
                 'items' => array_values(array_map(fn ($i) => [
                     'type' => ($i['type'] ?? '') === 'image' ? 'image' : 'text',
                     'value' => $text($i['value'] ?? ''),
-                ], array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))),
+                ] + (($i['ai'] ?? true) === false ? ['ai' => false] : []), array_slice(array_filter((array) ($c['items'] ?? []), 'is_array'), 0, self::MAX_ITEMS))),
                 'wait' => !empty($c['wait']),
                 'save_to' => $field($c['save_to'] ?? ''),
             ] + (!empty($c['wait']) && ($skip = self::cleanSkip($c['skip_after'] ?? null)) ? ['skip_after' => $skip] : []),
