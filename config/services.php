@@ -155,7 +155,7 @@ return [
             'failed_sends' => (int) env('GATEWAY_SWITCH_FAILED_SENDS', 5),
             'no_answer' => (int) env('GATEWAY_SWITCH_NO_ANSWER', 3),
             'health_fails' => (int) env('GATEWAY_SWITCH_HEALTH_FAILS', 3),
-            'inbound_chats' => (int) env('GATEWAY_SWITCH_INBOUND_CHATS', 3),
+            'inbound_chats' => (int) env('GATEWAY_SWITCH_INBOUND_CHATS', 1),
             'inbound_minutes' => (int) env('GATEWAY_SWITCH_INBOUND_MINUTES', 5),
             'standby_minutes' => (int) env('GATEWAY_SWITCH_STANDBY_MINUTES', 15),
         ],

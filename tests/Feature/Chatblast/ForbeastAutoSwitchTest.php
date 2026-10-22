@@ -173,14 +173,23 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
     {
         Queue::fake();
         Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
-        foreach (['Una', 'Pangalawa', 'Pangatlo', 'Pang-apat'] as $m) $this->botcakePush($m)->assertOk();
+        $messages = ['Una', 'Pangalawa', 'Pangatlo', 'Pang-apat'];
+        foreach ($messages as $m) $this->botcakePush($m)->assertOk();
         $this->travel(2)->minutes();
-        BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'message' => 'Una',
-            'message_id' => 'm_fb1', 'payload' => ['source' => 'gateway'], 'received_at' => now()->subMinute()]);
+        // Every Botcake chat has its Forbeast copy: the page stays.
+        foreach ($messages as $i => $m) BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'message' => $m,
+            'message_id' => 'm_fb' . $i, 'payload' => ['source' => 'gateway'], 'received_at' => now()->subMinute()]);
 
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
-
         $this->assertSame('gateway', $this->provider());
+
+        // One Botcake chat with no Forbeast copy after two minutes is enough (a quiet page).
+        $this->botcakePush('Panglima')->assertOk();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('gateway', $this->provider());
+        $this->travel(2)->minutes();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('botcake', $this->provider());
     }
 
     public function test_S_117_5_the_health_check_switches_after_three_failures_or_at_once_when_not_connected(): void
@@ -258,6 +267,7 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertStringStartsWith('Switched to Botcake · Meta connection error', $changes->firstWhere('key', 'auto_switch')['new']);
         $this->assertStringContainsString("'Auto-switched '", $this->get('/chatbot/pages')->assertOk()->getContent());
 
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'token', 'fbp_test_token_PageUno', true, null, true); app(PageSettings::class)->set('Page Uno', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
         $this->postJson('/chatbot/provider', ['page_name' => 'Page Uno', 'provider' => 'gateway'])->assertOk();
         $row = collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Uno');
         $this->assertSame(['gateway', null], [$row['provider'], $row['auto_switched']]);

@@ -162,7 +162,7 @@ class ForbeastPageTokenTest extends ChatblastTestCase
         Http::assertSent(fn (HttpRequest $r) => str_contains($r->url(), '/1002/') && $r->hasHeader('Authorization', 'Bearer gw_global_key_9z8x'));
     }
 
-    public function test_S_113_7_replies_via_forbeast_needs_a_working_token_or_the_global_key(): void
+    public function test_S_113_7_replies_via_forbeast_needs_a_working_token_of_the_page(): void
     {
         Http::fake([self::PAGE => Http::sequence()->push(['error' => ['message' => 'Invalid page token.']], 401)
             ->push(['id' => '1001', 'name' => 'Tech Flask']), self::HOOK => Http::response(['ok' => true])]);
@@ -179,8 +179,10 @@ class ForbeastPageTokenTest extends ChatblastTestCase
         $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Dos'], 'provider' => 'gateway'])->assertStatus(422)->assertJson(['error' => 'Add the Forbeast token first: Page Dos']);
         $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Dos'], 'provider' => 'botcake'])->assertOk();
 
+        // The global key is no proof that a page is set up (Alexa Angeles, 2026-10-23): Page Dos still needs its own token.
         config(['services.gateway.key' => 'gw_global_key_9z8x']);
-        $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Dos'], 'provider' => 'gateway'])->assertOk();
+        $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'Page Dos'], 'provider' => 'gateway'])->assertStatus(422)->assertJson(['error' => 'Add the Forbeast token first: Page Dos']);
+        $this->assertFalse($ready()['Page Dos']);
         $this->get('/chatbot/pages')->assertOk()->assertSee('Add the Forbeast token first', false);
     }
 

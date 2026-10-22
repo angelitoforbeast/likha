@@ -74,7 +74,7 @@ class ForbeastPageSetup
 
     /**
      * Ang ipinapakita sa row (walang secret): huling 4 ng token, ang status, kung konektado (ok + may secret), at kung
-     * mapipili ang "Replies via: Forbeast" (may GATEWAY_URL, at gumaganang token o ang global GATEWAY_KEY).
+     * mapipili ang "Replies via: Forbeast" (may GATEWAY_URL at gumaganang token ng page).
      * @return array{token: ?string, status: ?string, connected: bool, ready: bool}
      */
     public function info(string $page): array
@@ -91,8 +91,8 @@ class ForbeastPageSetup
     public function ready(string $page): bool
     {
         if ($this->baseUrl() === '') return false;
-        if (trim((string) config('services.gateway.key')) !== '') return true;
-
+        // Sariling gumaganang token lang ng page: ang global GATEWAY_KEY ay para sa mga page na ikinabit sa Forbeast
+        // system noon (Tech Flask), kaya hindi ito patunay na handa ang ibang page (Alexa Angeles, 2026-10-23).
         return $this->token($page) !== '' && $this->ok($page);
     }
 

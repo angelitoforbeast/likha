@@ -49,7 +49,7 @@ class ForbeastWatch
     /** Ilang segundo itinatago ang bilang ng palya, at ang "naitala na" ng hindi makalipat (isang event kada oras). */
     private const COUNT_TTL = 86400;
     private const CANNOT_TTL = 3600;
-    private const INBOUND_GRACE = 60;
+    private const INBOUND_GRACE = 120;
     /** Ilang minuto ang layo ng standby at ng kopya ng Forbeast na may parehong text (walang parehong mid). */
     private const TWIN_MINUTES = 2;
 
@@ -123,12 +123,16 @@ class ForbeastWatch
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
         $minutes = self::limit('inbound_minutes');
-        $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes($minutes))->get(['payload', 'received_at']);
+        $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes($minutes))->get(['psid', 'message', 'message_id', 'payload', 'received_at']);
         $settled = now()->subSeconds(self::INBOUND_GRACE);
-        $standby = $chats->filter(fn ($c) => self::standby($c) && $c->received_at?->lte($settled))->count();
-        $forbeast = $chats->filter(fn ($c) => ($c->payload['source'] ?? null) === 'gateway')->count();
-        if ($standby >= self::limit('inbound_chats') && $forbeast === 0) {
-            $this->switch($page, 'inbound', $standby . ' Botcake chats and no Forbeast chat in ' . $minutes . ' minutes');
+        $forbeast = $chats->filter(fn ($c) => ($c->payload['source'] ?? null) === 'gateway');
+        // Bawat standby (kopya ng Botcake) na walang kapares mula sa Forbeast (parehong mid, o parehong customer at text)
+        // pagkalipas ng INBOUND_GRACE: sira ang pagtanggap ng Forbeast. Kahit iisang chat ay sapat (page na kaunti ang chat).
+        $orphans = $chats->filter(fn ($c) => self::standby($c) && $c->received_at?->lte($settled) && !$forbeast->contains(
+            fn ($f) => ($c->message_id && $f->message_id === $c->message_id) || ((string) $f->psid === (string) $c->psid && trim((string) $f->message) === trim((string) $c->message))
+        ))->count();
+        if ($orphans >= self::limit('inbound_chats')) {
+            $this->switch($page, 'inbound', $orphans . ' Botcake chat(s) with no Forbeast copy after ' . self::INBOUND_GRACE . ' seconds');
         }
     }
 

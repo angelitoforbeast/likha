@@ -284,6 +284,8 @@ class ChatbotProviderTest extends ChatblastTestCase
         Http::fake();
         $ceo = $this->user();
         $this->actingAs($ceo);
+        // Forbeast needs the page's own working token (spec 113, no global-key shortcut).
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'token', 'fbp_test_token_PageUno', true, null, true); app(PageSettings::class)->set('Page Uno', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
 
         $row = fn () => collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Uno');
         $this->assertSame('botcake', $row()['provider']);
@@ -314,6 +316,8 @@ class ChatbotProviderTest extends ChatblastTestCase
         $this->page('Page Dos', '2002');
         $this->page('Page Tres', '3003');
         $this->actingAs($this->user());
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'token', 'fbp_test_token_PageUno', true, null, true); app(PageSettings::class)->set('Page Uno', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
+        app(PageSettings::class)->set('Page Dos', 'forbeast', 'token', 'fbp_test_token_PageDos', true, null, true); app(PageSettings::class)->set('Page Dos', 'forbeast', 'token_status', 'ok · Forbeast connected', false, null, true);
 
         $this->postJson('/chatbot/provider', ['page_names' => ['Page Uno', 'page dos'], 'provider' => 'gateway'])
             ->assertOk()->assertJson(['provider' => 'gateway', 'pages' => ['Page Uno', 'Page Dos']]);
