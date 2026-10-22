@@ -48,6 +48,9 @@ class ForbeastWatch
     /** Ilang segundo itinatago ang bilang ng palya, at ang "naitala na" ng hindi makalipat (isang event kada oras). */
     private const COUNT_TTL = 86400;
     private const CANNOT_TTL = 3600;
+    private const INBOUND_GRACE = 60;
+    /** Ilang minuto ang layo ng standby at ng kopya ng Forbeast na may parehong text (walang parehong mid). */
+    private const TWIN_MINUTES = 2;
 
     public function __construct(private PageSettings $settings)
     {
@@ -65,13 +68,14 @@ class ForbeastWatch
 
         [$code, $sub] = self::metaCode($body);
         if (in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
-        $error = (string) $outcome['error'] . ($code !== null ? ' (Meta #' . $code . ')' : '');
+        // Ang HTTP at ang code lang: ang text ng sagot ng Forbeast ay maaaring may laman ng mensahe (napupunta sa feed at sa screen).
+        $http = (int) ($outcome['http'] ?? 0);
+        $error = ($http === 0 ? 'Forbeast did not answer' : 'HTTP ' . $http) . ($code !== null ? ' (Meta #' . $code . ')' : '');
         if (in_array($code, self::CONNECTION_CODES, true)) {
             $this->switch($page, 'connection_error', $error);
             return;
         }
 
-        $http = (int) ($outcome['http'] ?? 0);
         $noAnswer = $http === 0 || $http >= 500;
         $fails = $this->bump($page, 'fails');
         if ($noAnswer && $this->bump($page, 'no_answer') >= self::limit('no_answer')) $this->switch($page, 'no_answer', $error);
@@ -89,7 +93,7 @@ class ForbeastWatch
         if ($url === '' || $pageId === '' || $key === '') return;
 
         try {
-            $res = Http::withToken($key)->acceptJson()->connectTimeout(5)->timeout(10)->get($url . '/v1/pages/' . rawurlencode($pageId));
+            $res = Http::withToken($key)->acceptJson()->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
         } catch (ConnectionException) {
             $res = null;
         } catch (Throwable $e) {
@@ -109,13 +113,18 @@ class ForbeastWatch
         }
     }
 
-    /** May chat ang Botcake (standby) sa huling ilang minuto pero wala ang Forbeast: sira ang pagtanggap ng Forbeast. */
+    /**
+     * May chat ang Botcake (standby) sa huling ilang minuto pero wala ang Forbeast: sira ang pagtanggap ng Forbeast. Ang
+     * standby na kararating lang (wala pang INBOUND_GRACE segundo) ay hindi binibilang: ang kopya ng Forbeast ay maaaring
+     * nasa queue pa. Sa scheduled command lang.
+     */
     public function inbound(string $page, string $pageId): void
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
         $minutes = self::limit('inbound_minutes');
-        $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes($minutes))->get(['payload']);
-        $standby = $chats->filter(fn ($c) => self::standby($c))->count();
+        $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes($minutes))->get(['payload', 'received_at']);
+        $settled = now()->subSeconds(self::INBOUND_GRACE);
+        $standby = $chats->filter(fn ($c) => self::standby($c) && $c->received_at?->lte($settled))->count();
         $forbeast = $chats->filter(fn ($c) => ($c->payload['source'] ?? null) === 'gateway')->count();
         if ($standby >= self::limit('inbound_chats') && $forbeast === 0) {
             $this->switch($page, 'inbound', $standby . ' Botcake chats and no Forbeast chat in ' . $minutes . ' minutes');
@@ -178,22 +187,45 @@ class ForbeastWatch
     }
 
     /**
-     * Ang mga standby chat ng huling ilang minuto, luma muna, na wala pang naipadalang sagot sa customer at hindi pa
-     * natanggap mula sa Forbeast (parehong message_id): bagong chat (para sa takbo ayon sa id), at ang standby ay tinatanggal,
-     * kaya isang beses lang.
+     * Ang kopya ng parehong mensahe sa kabila: ang chat ng Forbeast ng isang standby, o ang standby ng isang chat ng
+     * Forbeast. Parehong message_id (mid), o parehong customer at text sa loob ng TWIN_MINUTES.
+     */
+    private static function twin(BotcakeChat $chat, bool $wantStandby): ?BotcakeChat
+    {
+        $at = $chat->received_at ?? now();
+
+        return BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)->where('id', '!=', $chat->id)
+            ->whereBetween('received_at', [$at->copy()->subMinutes(self::TWIN_MINUTES), $at->copy()->addMinutes(self::TWIN_MINUTES)])
+            ->orderBy('id')->get()
+            ->first(fn ($c) => self::standby($c) === $wantStandby
+                && (($chat->message_id !== null && $c->message_id === $chat->message_id) || $c->message === $chat->message));
+    }
+
+    /**
+     * Naipadala ang sagot ng Forbeast sa chat na ito: ang standby na kopya nito (kung mayroon) ay hindi na kailangan. Habang
+     * walang naipadalang sagot, naiiwan ang standby para masagot ito kapag lumipat sa Botcake.
+     */
+    public function answered(int $chatId): void
+    {
+        $chat = BotcakeChat::find($chatId);
+        if ($chat === null || self::standby($chat) || ($chat->payload['source'] ?? null) !== 'gateway') return;
+        self::twin($chat, true)?->delete();
+    }
+
+    /**
+     * Ang mga standby chat ng huling ilang minuto, luma muna, maliban sa may kopya sa Forbeast na may naipadala nang sagot:
+     * bagong chat (para sa takbo ayon sa id), at ang standby ay tinatanggal, kaya isang beses lang.
      */
     private function runStandby(string $page): void
     {
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         if ($pageId === '') return;
         $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes(self::limit('standby_minutes')))
-            ->orderBy('id')->get()->filter(fn ($c) => self::standby($c));
+            ->orderBy('id')->get()->filter(fn ($c) => self::standby($c))->values();
         foreach ($chats as $c) {
             try {
-                $handled = $c->message_id !== null && BotcakeChat::where('message_id', $c->message_id)->where('id', '!=', $c->id)->exists();
-                $replied = ctype_digit((string) $c->psid) && ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $c->psid)
-                    ->where('kind', 'send')->where('status', 'sent')->where('sent_at', '>=', $c->received_at)->exists();
-                if ($handled || $replied) continue;
+                $twin = self::twin($c, false);
+                if ($twin !== null && ChatbotReply::where('chat_id', $twin->id)->where('kind', 'send')->where('status', 'sent')->exists()) continue;
                 $chat = DB::transaction(function () use ($c) {
                     $new = $c->replicate();
                     $payload = (array) $c->payload;

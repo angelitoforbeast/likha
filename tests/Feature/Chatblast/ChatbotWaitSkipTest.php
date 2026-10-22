@@ -266,6 +266,21 @@ class ChatbotWaitSkipTest extends ChatblastTestCase
             'edges' => [['from' => 'n2', 'port' => 'skipped', 'to' => 'n3']]]);
     }
 
+    public function test_S_117_12_a_standby_botcake_chat_after_the_wait_does_not_hold_the_skip(): void
+    {
+        $this->live();
+        $this->says('Hi');
+        $this->travel(119)->minutes();
+        // Ang kopya ng Botcake habang nasa Forbeast ang page: hindi sagot ng customer na tatakbo.
+        BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '7001', 'name' => 'Ana Cruz', 'message' => 'Hi',
+            'payload' => ['_standby' => true], 'received_at' => now()]);
+
+        $this->travel(2)->minutes();
+        $this->tick();
+
+        $this->assertSame(['Want to order?', 'Still there?'], $this->sent());
+    }
+
     public function test_S_076_6_a_reply_waiting_in_the_queue_wins_over_the_tick(): void
     {
         $this->live();

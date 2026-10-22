@@ -7,7 +7,6 @@ use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
-use App\Services\Chatbot\ForbeastWatch;
 use App\Services\PageSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -164,7 +163,6 @@ class BotcakeChatController extends Controller
             $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
             // Ang sequence, Results at takbo ng flow: iisang daan kasama ng Forbeast Gateway.
             if (!$standby) ChatbotInbound::afterStore($chat, $pageName);
-            else app(ForbeastWatch::class)->inbound($pageName, (string) $f['page_id']);
         }
 
         return response()->json(['ok' => true]);

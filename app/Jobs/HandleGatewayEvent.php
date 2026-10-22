@@ -109,15 +109,6 @@ class HandleGatewayEvent implements ShouldQueue
             throw $ex;
         }
         self::count((string) $e['type']);
-        // Ang standby na kopya ng Botcake ng parehong mensahe (parehong mid, o parehong text sa huling 15 minuto) ay hindi
-        // na kailangan: hawak na ng Forbeast. Isa lang, para ang kaparehong text na hindi dumating sa Forbeast ay maiwan.
-        try {
-            BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)->where('id', '<', $chat->id)
-                ->where('received_at', '>=', now()->subMinutes(15))->orderBy('id')->get()
-                ->first(fn ($c) => ForbeastWatch::standby($c) && ($c->message_id === $ref || $c->message === $message))?->delete();
-        } catch (\Throwable $ex) {
-            report($ex);
-        }
         ChatbotInbound::afterStore($chat, $pageName);
     }
 

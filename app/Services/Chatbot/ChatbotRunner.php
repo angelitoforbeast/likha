@@ -96,17 +96,20 @@ class ChatbotRunner
         try {
             $fields = new CustomerFields((int) $wait->page_id, (int) $wait->psid);
             if (ChatbotAiQueue::pending($fields)) return 'waiting';
+            // Ang standby (kopya ng Botcake habang nasa Forbeast) ay hindi sagot na tatakbo.
             $unrun = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)
-                ->where('id', '>', (int) $fields->get(CustomerFields::LAST_CHAT));
+                ->where('id', '>', (int) $fields->get(CustomerFields::LAST_CHAT))->get(['id', 'payload', 'received_at'])
+                ->reject(fn ($c) => ForbeastWatch::standby($c));
             // Ang sagot na tatakbo pa ang nananaig. Ang luma na (hindi na tatakbo, hal. lampas sa retry ng job) ay hindi
             // humaharang: sumagot ang customer, kaya walang skip (sa ibaba).
-            if ((clone $unrun)->where('received_at', '>=', now()->subMinutes(self::STALE_MINUTES))->exists()) return 'waiting';
-            $replied = $unrun->exists();
+            if ($unrun->contains(fn ($c) => $c->received_at && $c->received_at->gte(now()->subMinutes(self::STALE_MINUTES)))) return 'waiting';
+            $replied = $unrun->isNotEmpty();
             if (DB::table('chatbot_waits')->where('id', $waitId)->where('due_at', '<=', now())->delete() !== 1) return 'gone';
             // Natapos na ang paghihintay sa ibang paraan (sagot, "clear all fields", ibang wait): wala nang gagawin.
             if ($fields->get(CustomerFields::WAIT) !== $wait->flow_id . ':' . $wait->node_id) return 'gone';
 
-            $last = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)->orderByDesc('id')->first();
+            $last = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)->orderByDesc('id')->limit(50)->get()
+                ->first(fn ($c) => !ForbeastWatch::standby($c));
             $flow = $last && $last->page_name !== null ? $this->page->flow((string) $last->page_name) : null;
             $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $wait->node_id);
             $drop = function (string $why, bool $endWait) use ($wait, $fields) {
