@@ -25,12 +25,12 @@ class TextAndParseTest extends TestCase
     }
 
     #[DataProvider('phones')]
-    public function test_phone_forms_in_the_extracted_details(string $given, string $expected): void
+    public function test_S_130_40_phone_forms_in_the_extracted_details(string $given, string $expected): void
     {
         $this->assertSame($expected, Parse::addressParts("- Phone Number: {$given}")['phone']);
     }
 
-    public function test_the_extracted_details_give_name_and_place_words_stripped(): void
+    public function test_S_130_40_the_extracted_details_give_name_and_place_words_stripped(): void
     {
         $p = Parse::addressParts("- Name: Ana Cruz\n- Phone Number: 09171234567\n- Province: Province of Cebu.\n- City: Cebu City\n- Brgy: Barangay Lahug (Pob.)");
 
@@ -41,7 +41,7 @@ class TextAndParseTest extends TestCase
     }
 
     #[DataProvider('notProvided')]
-    public function test_na_and_not_provided_leave_the_place_blank(string $value): void
+    public function test_S_130_40_na_and_not_provided_leave_the_place_blank(string $value): void
     {
         $p = Parse::addressParts("Province: {$value}\nCity: {$value}\nBarangay: {$value}");
 
@@ -53,7 +53,7 @@ class TextAndParseTest extends TestCase
         return [['NA'], ['n/a'], ['N/A'], ['Not Provided'], ['not provided']];
     }
 
-    public function test_a_line_with_other_text_is_ignored_and_the_label_may_have_a_dash(): void
+    public function test_S_130_40_a_line_with_other_text_is_ignored_and_the_label_may_have_a_dash(): void
     {
         $p = Parse::addressParts("Address: somewhere\n  - name:  Ben  \nBrgy: x");
 
@@ -61,14 +61,14 @@ class TextAndParseTest extends TestCase
         $this->assertSame('X', $p['barangay']);
     }
 
-    public function test_item_quantity_and_price_with_and_without_the_peso_sign(): void
+    public function test_S_130_41_item_quantity_and_price_with_and_without_the_peso_sign(): void
     {
         $this->assertSame(['item' => '2 x GLOW SERUM', 'price' => '1,299.00'], Parse::itemPrice("ITEM: GLOW SERUM\nQUANTITY: 2\nPRICE: ₱1,299.00\n"));
         $this->assertSame(['item' => '1 x TEA', 'price' => '499'], Parse::itemPrice("ITEM: TEA\r\nQUANTITY: 1\r\nPRICE: 499"));
         $this->assertSame(['item' => '', 'price' => ''], Parse::itemPrice("ITEM: TEA\nPRICE: free"));
     }
 
-    public function test_a_quantity_of_zero_still_counts_as_a_value(): void
+    public function test_S_130_41_a_quantity_of_zero_still_counts_as_a_value(): void
     {
         $this->assertSame('0 x TEA', Parse::itemPrice("ITEM: TEA\nQUANTITY: 0")['item']);
     }
@@ -79,12 +79,12 @@ class TextAndParseTest extends TestCase
     }
 
     #[DataProvider('provinces')]
-    public function test_province_normalising_makes_ncr_one_key(string $given, string $expected): void
+    public function test_S_130_42_province_normalising_makes_ncr_one_key(string $given, string $expected): void
     {
         $this->assertSame($expected, Text::normProv($given));
     }
 
-    public function test_place_normalising(): void
+    public function test_S_130_42_place_normalising(): void
     {
         $this->assertSame('manila', Text::normPlace('City of Manila'));
         $this->assertSame('abra dolores', Text::normPlace('ABRA-DOLORES'));
@@ -107,7 +107,7 @@ class TextAndParseTest extends TestCase
     }
 
     #[DataProvider('fuzzy')]
-    public function test_fuzzy_match(string $word, string $message, bool $expected): void
+    public function test_S_130_43_fuzzy_match(string $word, string $message, bool $expected): void
     {
         $this->assertSame($expected, Text::isFuzzyMatch($word, $message));
     }
@@ -125,12 +125,12 @@ class TextAndParseTest extends TestCase
     }
 
     #[DataProvider('cities')]
-    public function test_city_normalising_for_the_check(string $city, string $province, string $expected): void
+    public function test_S_130_42_city_normalising_for_the_check(string $city, string $province, string $expected): void
     {
         $this->assertSame($expected, Text::normalizeCityForCheck($city, $province));
     }
 
-    public function test_list_membership_and_canonical_province(): void
+    public function test_S_130_42_list_membership_and_canonical_province(): void
     {
         $this->assertTrue(Text::cityInList('Cebu-City', 'Mandaue City, CEBU CITY'));
         $this->assertFalse(Text::cityInList('Lapu-Lapu', 'Mandaue City, CEBU CITY'));
@@ -142,7 +142,7 @@ class TextAndParseTest extends TestCase
         $this->assertFalse(Text::brgyInList('', 'BANILAD'));
     }
 
-    public function test_the_sheet_turns_numbers_written_as_text_into_numbers(): void
+    public function test_S_130_42_the_sheet_turns_numbers_written_as_text_into_numbers(): void
     {
         $this->assertSame('9171234567', Text::sheetValue('09171234567'));
         $this->assertSame('1299', Text::sheetValue('1,299.00'));
@@ -151,7 +151,7 @@ class TextAndParseTest extends TestCase
         $this->assertSame('2 x TEA', Text::sheetValue('2 x TEA'));
     }
 
-    public function test_the_row_is_read_by_header_names_and_otherwise_by_position(): void
+    public function test_S_130_44_the_row_is_read_by_header_names_and_otherwise_by_position(): void
     {
         $row = ['10:00 23-10-2026', 'Page Uno', 'Ana', '0917', 'input', 'shop', 'cxd', '499', 'DONE'];
 

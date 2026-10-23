@@ -14,7 +14,7 @@ class MacroTest extends TestCase
         return new Macro($rows ?? Fixtures::macroRows());
     }
 
-    public function test_the_cebu_cebu_example_takes_the_first_candidate_in_list_order(): void
+    public function test_S_130_45_the_cebu_cebu_example_takes_the_first_candidate_in_list_order(): void
     {
         $r = $this->macro()->run('CEBU', 'CEBU', '');
 
@@ -24,7 +24,7 @@ class MacroTest extends TestCase
         $this->assertSame([3, 'Barangay', '❌'], [$r['points'], $r['remark'], $r['icon']]);
     }
 
-    public function test_a_full_unique_match_is_seven_points_and_a_check(): void
+    public function test_S_130_45_a_full_unique_match_is_seven_points_and_a_check(): void
     {
         $r = $this->macro()->run('Metro-Manila', 'Quezon City', 'Bagumbayan');
 
@@ -32,7 +32,7 @@ class MacroTest extends TestCase
         $this->assertSame('QUEZON-CITY', $r['city']);
     }
 
-    public function test_seven_points_with_more_than_one_candidate_is_multiple_suggested_address(): void
+    public function test_S_130_45_seven_points_with_more_than_one_candidate_is_multiple_suggested_address(): void
     {
         $rows = array_merge(Fixtures::macroRows(), [Fixtures::macroRows()[6]]);
 
@@ -41,7 +41,7 @@ class MacroTest extends TestCase
         $this->assertSame([7, 'MULTIPLE SUGGESTED ADDRESS', '', 2], [$r['points'], $r['remark'], $r['icon'], $r['candidates']]);
     }
 
-    public function test_a_word_the_first_candidate_does_not_contain_is_dropped_from_the_query(): void
+    public function test_S_130_45_a_word_the_first_candidate_does_not_contain_is_dropped_from_the_query(): void
     {
         $r = $this->macro()->run('NARNIA', 'CEBU CITY', 'LAHUG');
 
@@ -64,14 +64,14 @@ class MacroTest extends TestCase
     }
 
     #[DataProvider('points')]
-    public function test_points_one_two_four_and_their_remarks(array $in, int $points, string $remark): void
+    public function test_S_130_45_points_one_two_four_and_their_remarks(array $in, int $points, string $remark): void
     {
         $r = $this->macro()->run(...$in);
 
         $this->assertSame([$points, $remark, '❌'], [$r['points'], $r['remark'], $r['icon']]);
     }
 
-    public function test_no_match_gives_na_and_blank_input_writes_nothing(): void
+    public function test_S_130_45_no_match_gives_na_and_blank_input_writes_nothing(): void
     {
         $r = $this->macro()->run('NARNIA', '', '');
         $this->assertSame(['#N/A', '#N/A', '#N/A', 0], [$r['province'], $r['city'], $r['barangay'], $r['candidates']]);
@@ -79,7 +79,7 @@ class MacroTest extends TestCase
         $this->assertNull($this->macro()->run('', ' ', ''));
     }
 
-    public function test_only_the_first_six_words_of_the_query_count(): void
+    public function test_S_130_45_only_the_first_six_words_of_the_query_count(): void
     {
         $this->assertSame(7, $this->macro()->filter('a a a a a a zzzz')['count']);
         $this->assertSame(0, $this->macro()->filter('a a a a a zzzz')['count']);

@@ -49,7 +49,7 @@ class CheckerTest extends TestCase
         return array_column($this->steps->log, 'status', 'step');
     }
 
-    public function test_a_row_that_matches_the_chat_is_a_check_and_needs_no_gpt(): void
+    public function test_S_130_47_a_row_that_matches_the_chat_is_a_check_and_needs_no_gpt(): void
     {
         $c = $this->check($this->row());
 
@@ -58,7 +58,7 @@ class CheckerTest extends TestCase
         $this->assertSame('SKIP:ALREADY_FILLED', $this->statuses()['name_addr']);
     }
 
-    public function test_a_filled_n_forces_full_address_without_the_fuzzy_match(): void
+    public function test_S_130_47_a_filled_n_forces_full_address_without_the_fuzzy_match(): void
     {
         $this->answers([['province' => 'CEBU'], ['city' => 'CEBU CITY'], ['barangay' => 'LAHUG']]);
 
@@ -86,7 +86,7 @@ class CheckerTest extends TestCase
     }
 
     #[DataProvider('rScores')]
-    public function test_page_price_quantity_checker_reads_the_old_columns(string $m, string $expected, array $over = []): void
+    public function test_S_130_46_page_price_quantity_checker_reads_the_old_columns(string $m, string $expected, array $over = []): void
     {
         $this->answers([]);
         Http::fake(['*' => Http::response(Fixtures::responses('{"province_ok":true,"city_ok":true,"barangay_ok":true}'))]);
@@ -109,7 +109,7 @@ class CheckerTest extends TestCase
     }
 
     #[DataProvider('sValues')]
-    public function test_s_is_classified_from_the_three_fuzzy_matches(array $over, string $expected): void
+    public function test_S_130_47_s_is_classified_from_the_three_fuzzy_matches(array $over, string $expected): void
     {
         // Walang sagot ang OpenAI (500), kaya walang naisusulat na pagbabago: ang S ay ang unang klase.
         Http::fake(['*' => Http::response('{}', 500)]);
@@ -117,7 +117,7 @@ class CheckerTest extends TestCase
         $this->assertSame($expected, $this->check($this->row($over))->cells['S']);
     }
 
-    public function test_barangay_chain_writes_a_barangay_that_is_in_the_list_and_rechecks(): void
+    public function test_S_130_48_barangay_chain_writes_a_barangay_that_is_in_the_list_and_rechecks(): void
     {
         $this->answers([['barangay' => 'BANILAD'], ['province_ok' => true, 'city_ok' => true, 'barangay_ok' => true]]);
 
@@ -140,7 +140,7 @@ class CheckerTest extends TestCase
     }
 
     #[DataProvider('barangayAnswers')]
-    public function test_barangay_chain_does_not_write_when_the_answer_is_not_usable(array $answer, string $status): void
+    public function test_S_130_48_barangay_chain_does_not_write_when_the_answer_is_not_usable(array $answer, string $status): void
     {
         $this->answers([$answer, ['province_ok' => true, 'city_ok' => true, 'barangay_ok' => false]]);
 
@@ -151,7 +151,7 @@ class CheckerTest extends TestCase
         $this->assertSame('Barangay', $c->cells['W']);
     }
 
-    public function test_a_gpt_http_error_is_logged_like_the_script_and_the_row_stays(): void
+    public function test_S_130_49_a_gpt_http_error_is_logged_like_the_script_and_the_row_stays(): void
     {
         Http::fake(['*' => Http::response('{"error":{"message":"Incorrect API key provided: ' . Fixtures::KEY . '"}}', 401)]);
 
@@ -164,7 +164,7 @@ class CheckerTest extends TestCase
         $this->assertStringNotContainsString(Fixtures::KEY, json_encode($this->steps->log));
     }
 
-    public function test_the_responses_api_failing_falls_back_to_chat_completions(): void
+    public function test_S_130_49_the_responses_api_failing_falls_back_to_chat_completions(): void
     {
         Http::fake([
             'api.openai.com/v1/responses' => Http::response('nope', 400),
@@ -177,7 +177,7 @@ class CheckerTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/chat/completions') && str_ends_with($r['messages'][1]['content'], "\nReturn JSON only.") && $r['temperature'] === 0);
     }
 
-    public function test_city_chain_picks_a_city_from_the_list_then_checks_the_barangay_belongs(): void
+    public function test_S_130_48_city_chain_picks_a_city_from_the_list_then_checks_the_barangay_belongs(): void
     {
         $this->answers([['city' => 'CEBU CITY']]);
 
@@ -189,7 +189,7 @@ class CheckerTest extends TestCase
         $this->assertSame(1, $this->steps->requests());
     }
 
-    public function test_city_chain_stops_when_the_city_is_not_in_the_list(): void
+    public function test_S_130_48_city_chain_stops_when_the_city_is_not_in_the_list(): void
     {
         $this->answers([['city' => 'ATLANTIS'], ['province_ok' => true, 'city_ok' => false, 'barangay_ok' => true]]);
 
@@ -198,7 +198,7 @@ class CheckerTest extends TestCase
         $this->assertSame('CITY_NOT_IN_LIST', $this->statuses()['city_fix']);
     }
 
-    public function test_city_and_barangay_chain_fixes_the_city_then_the_barangay(): void
+    public function test_S_130_48_city_and_barangay_chain_fixes_the_city_then_the_barangay(): void
     {
         $this->answers([['city' => 'MANDAUE CITY'], ['barangay' => 'BAKILID']]);
 
@@ -208,7 +208,7 @@ class CheckerTest extends TestCase
         $this->assertSame('BAKILID, BARANGAY 5', $c->cells['T']);
     }
 
-    public function test_full_address_chain_fixes_province_city_and_barangay(): void
+    public function test_S_130_48_full_address_chain_fixes_province_city_and_barangay(): void
     {
         $this->answers([['province' => 'Metro Manila'], ['city' => 'QUEZON CITY'], ['barangay' => 'BAGUMBAYAN']]);
 
@@ -220,7 +220,7 @@ class CheckerTest extends TestCase
         $this->assertSame(3, $this->steps->requests());
     }
 
-    public function test_full_address_chain_stops_when_the_province_is_not_in_the_list(): void
+    public function test_S_130_48_full_address_chain_stops_when_the_province_is_not_in_the_list(): void
     {
         $this->answers([['province' => 'NARNIA'], ['city' => 'ATLANTIS']]);
 
@@ -233,7 +233,7 @@ class CheckerTest extends TestCase
         $this->assertSame('', $c->cells['W']);
     }
 
-    public function test_w_province_is_turned_into_a_check_like_the_script_does(): void
+    public function test_S_130_50_w_province_is_turned_into_a_check_like_the_script_does(): void
     {
         $this->answers([['province_ok' => false, 'city_ok' => true, 'barangay_ok' => true]]);
 
@@ -244,7 +244,7 @@ class CheckerTest extends TestCase
         $this->assertSame('WROTE_W_PROVINCE_THEN_CHECKMARK', $this->statuses()['verify_w']);
     }
 
-    public function test_the_implied_city_patch_turns_a_missing_city_into_ok_when_the_barangay_has_one_city(): void
+    public function test_S_130_50_the_implied_city_patch_turns_a_missing_city_into_ok_when_the_barangay_has_one_city(): void
     {
         $this->answers([['province_ok' => true, 'city_ok' => false, 'barangay_ok' => true]]);
 
@@ -254,7 +254,7 @@ class CheckerTest extends TestCase
         $this->assertSame('✅', $c->cells['W']);
     }
 
-    public function test_without_the_patch_the_missing_city_is_written(): void
+    public function test_S_130_50_without_the_patch_the_missing_city_is_written(): void
     {
         $this->answers([['province_ok' => true, 'city_ok' => false, 'barangay_ok' => true]]);
         $rows = array_merge(Fixtures::checkerRows(), [['ABRA', 'LAGAYAN', 'BAYAAN']]); // dalawang city ang may BAYAAN: walang isahang hula
@@ -271,12 +271,12 @@ class CheckerTest extends TestCase
     }
 
     #[DataProvider('wMap')]
-    public function test_w_mapping(bool $p, bool $c, bool $b, string $expected): void
+    public function test_S_130_50_w_mapping(bool $p, bool $c, bool $b, string $expected): void
     {
         $this->assertSame($expected, Checker::computeW($p, $c, $b));
     }
 
-    public function test_a_blank_name_and_address_are_filled_by_gpt_and_stripped_of_places(): void
+    public function test_S_130_51_a_blank_name_and_address_are_filled_by_gpt_and_stripped_of_places(): void
     {
         $this->answers([['full_name' => 'Juan  Dela Cruz', 'address_line1' => 'Blk 5 Lot 3, Lahug']]);
 
@@ -287,7 +287,7 @@ class CheckerTest extends TestCase
         $this->assertSame('WROTE_NAMEADDR', $this->statuses()['name_addr']);
     }
 
-    public function test_an_unknown_name_is_not_written_and_a_name_without_letters_is_not_either(): void
+    public function test_S_130_51_an_unknown_name_is_not_written_and_a_name_without_letters_is_not_either(): void
     {
         $this->answers([['full_name' => '12345', 'address_line1' => '']]);
 
@@ -297,7 +297,7 @@ class CheckerTest extends TestCase
         $this->assertSame('NO_CHANGE', $this->statuses()['name_addr']);
     }
 
-    public function test_an_empty_chat_skips_the_gpt_steps(): void
+    public function test_S_130_49_an_empty_chat_skips_the_gpt_steps(): void
     {
         Http::fake(['*' => Http::response('{}', 500)]);
 
@@ -308,7 +308,7 @@ class CheckerTest extends TestCase
         $this->assertSame('', $c->cells['W']);
     }
 
-    public function test_a_missing_key_stops_the_row_but_the_name_step_still_runs_and_logs(): void
+    public function test_S_130_49_a_missing_key_stops_the_row_but_the_name_step_still_runs_and_logs(): void
     {
         $c = new Checker($this->row(['M' => 'Cebu City, Cebu', 'B' => '']), Fixtures::locations(), Fixtures::gpt($this->steps, ''), $this->steps);
 

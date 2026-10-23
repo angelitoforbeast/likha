@@ -1954,3 +1954,60 @@ Spec 117. As the owner, I want a page on Forbeast to move to Botcake by itself w
 | S-117.14 | Given standby chats, then the Inbox list leaves out a customer who has only standby chats, and the thread shows the real chat once | `test_S_117_14…` | Passed · 2026-10-23 · auto |
 | S-117.15 | Given standby chats, then Results (chats in the funnel) and the "today" count on `/chatbot/pages` do not count them | `test_S_117_15…` | Passed · 2026-10-23 · auto |
 | S-117.16 | When `chatbot:forbeast-watch` runs, then standby rows older than 20 minutes (`standby_minutes` + 5) are deleted and newer standby rows and real chats stay | `test_S_117_16…` | Passed · 2026-10-23 · auto |
+
+## S-130 Likha encodes and checks its own chatbot orders, first in shadow beside the Google Sheets
+
+Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded and checked by Likha itself, an exact copy of the two Google scripts, running in shadow with a compare page so I can judge whether it matches the sheet, and a per-page switch to go live later. Tests: `tests/Feature/OrderEncode/` (OpenAI and Google faked; no real key or sheet).
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-130.1 | Given a page in `shadow`, when its Sheet step writes a row, then one `EncodeOrder` is queued (connection `database`, queue `encode`) with the spreadsheet id, tab and row number of the append result, and the flow's path and sheet reply are the same as for a page without encode | `OrderEncodeFlowTest::test_S_130_1…` | pending |
+| S-130.2 | Given a page with mode `off` (or none) or a Test run, then nothing is queued and no `order_encodes` row is made | `test_S_130_2…` | pending |
+| S-130.3 | Given the row was not written (failed or skipped) or the append result has no row number, then nothing is queued | `test_S_130_3…` | pending |
+| S-130.4 | Given the encode row cannot be created, then the flow still runs to the end with its sheet row `sent` | `test_S_130_4…` | pending |
+| S-130.5 | Given a page in `live`, then the step does not append, records a sheet reply `skipped` with the note "encoded in Likha", continues on `next` and queues the encode | `test_S_130_5…` | pending |
+| S-130.6 | Given a live page whose encode cannot be queued, then the row is appended to the sheet as before | `test_S_130_6…` | pending |
+| S-130.7 | Page settings for provider `order_encode` take only `mode` (off/shadow/live), `compare_sheet` and `macro_sheet` (a Google Sheets link or ID); anything else is refused; other providers are unchanged | `ConfigTest::test_S_130_7…` | pending |
+| S-130.8 | The models default to `gpt-4o-mini` / `gpt-5.2` and follow `app_settings`; the key comes from `services.openai.order_encode_key` | `test_S_130_8…` | pending |
+| S-130.9 | A shadow job writes `order_encodes` (outputs, steps, usage) and never `macro_output` | `EncodeOrderTest::test_S_130_9…` | pending |
+| S-130.10 | The API key and any `sk-…` text never appear in the stored record; the key is only in the request header | `test_S_130_10…` | pending |
+| S-130.11 | A GPT HTTP error is recorded in the steps as the script records it (empty answer, `ERR_…`), and the job does not fail or retry | `test_S_130_11…` | pending |
+| S-130.12 | A missing location list marks the row failed with a message that names `order-encode:sync-locations`; no GPT call | `test_S_130_12…` | pending |
+| S-130.13 | A row already done is not run again | `test_S_130_13…` | pending |
+| S-130.14 | The row is read by the header names of the tab when they are known | `test_S_130_14…` | pending |
+| S-130.15 | A live job creates one `macro_output` row with the Likha-import fields and the Macro-import fields from the encode | `test_S_130_15…` | pending |
+| S-130.16 | A live order already in `macro_output` is never inserted twice | `test_S_130_16…` | pending |
+| S-130.17 | Live keeps the chat name and phone first, fills the rest from the encode, STATUS stays blank unless the final check is ✅ | `test_S_130_17…` | pending |
+| S-130.18 | The OpenAI request uses the extract model from `app_settings` | `test_S_130_18…` | pending |
+| S-130.19 | Given a done shadow row older than 15 minutes and the same DATABASE row, `order-encode:compare` marks every field `same` | `CompareTest::test_S_130_19…` | pending |
+| S-130.20 | Each field is compared after trim with its own rule (case, phone digits, number) and reports same / different / sheet_blank / likha_blank | `test_S_130_20…` | pending |
+| S-130.21 | It waits while the sheet's R or S is blank, then compares | `test_S_130_21…` | pending |
+| S-130.22 | A row the sheet has not written yet waits | `test_S_130_22…` | pending |
+| S-130.23 | Another order on that row (timestamp or page differ) is `row_mismatch` | `test_S_130_23…` | pending |
+| S-130.24 | The timestamp matches in the other formats the imports accept | `test_S_130_24…` | pending |
+| S-130.25 | After 48 hours an uncompared row is `sheet_not_done`, without reading the sheet | `test_S_130_25…` | pending |
+| S-130.26 | Rows younger than 15 minutes, failed encodes and live rows are left alone | `test_S_130_26…` | pending |
+| S-130.27 | The rows of one sheet are read in one batch | `test_S_130_27…` | pending |
+| S-130.28 | When Google refuses, nothing changes and the command fails | `test_S_130_28…` | pending |
+| S-130.29 | `order-encode:sync-locations` stores both lists in sheet order and says when they are identical | `SyncLocationsTest::test_S_130_29…` | pending |
+| S-130.30 | It says when the lists are NOT identical | `test_S_130_30…` | pending |
+| S-130.31 | Pages that are off, and empty or failed reads, never overwrite a file | `test_S_130_31…` | pending |
+| S-130.32 | The sync runs daily at 04:10 Manila and the compare every 10 minutes | `test_S_130_32…` | pending |
+| S-130.33 | `/order-encode` opens for CEO, Marketing - OIC and Marketing; 404 for other roles; guests are sent to login | `ComparePageTest::test_S_130_33…` | pending |
+| S-130.34 | The top shows orders, compared, % fully equal, % same per field, waiting / sheet not done / row mismatch / failed, GPT calls and estimated cost per order | `test_S_130_34…` | pending |
+| S-130.35 | The table shows both values per field side by side, differences highlighted, and the steps log on hover | `test_S_130_35…` | pending |
+| S-130.36 | Chat text (names, step statuses) is escaped | `test_S_130_36…` | pending |
+| S-130.37 | Filters: date range, page, only differences, by field | `test_S_130_37…` | pending |
+| S-130.38 | The page is read-only (no POST) | `test_S_130_38…` | pending |
+| S-130.40 | EXTRACTED DETAILS: name, phone forms (09, +63, 63, invalid → blank), NA / N/A / NOT PROVIDED, "province/brgy/barangay/city" words stripped | `TextAndParseTest::test_S_130_40…` | pending |
+| S-130.41 | SHOP DETAILS: "qty x ITEM" and the price with or without ₱ | `test_S_130_41…` | pending |
+| S-130.42 | Place, province (NCR → manila) and city normalisers, list membership, the sheet's number coercion | `test_S_130_42…` | pending |
+| S-130.43 | Fuzzy match: ≥ 0.7, under 3 characters false, 0/o and 1/i/l | `test_S_130_43…` | pending |
+| S-130.44 | The sheet row is read by header names, else by column order | `test_S_130_44…` | pending |
+| S-130.45 | Macro: P1 built word by word, FILTER first candidate and count (the "cebu cebu" → CEBULAN example), points 1/2/4 and remarks, #N/A, six-word limit | `MacroTest::test_S_130_45…` | pending |
+| S-130.46 | R: page/price/quantity score table, read from the old columns | `CheckerTest::test_S_130_46…` | pending |
+| S-130.47 | S classification from three fuzzy matches; a filled N forces Full Address | `test_S_130_47…` | pending |
+| S-130.48 | GPT chains per S: in the list → written, not in the list → not written, UNKNOWN, recompute of S | `test_S_130_48…` | pending |
+| S-130.49 | GPT HTTP error logged like the script, Responses → chat fallback, missing key, empty chat | `test_S_130_49…` | pending |
+| S-130.50 | W mapping, the implied-city patch, the Province → ✅ quirk | `test_S_130_50…` | pending |
+| S-130.51 | Name / Address Line 1 finalize: skip rule, strip of places, unknown not written | `test_S_130_51…` | pending |
