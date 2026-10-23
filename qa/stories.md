@@ -2006,6 +2006,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.56 | A formula date (`=TODAY()`) is not compared for the row check, the page still is | `CompareTest::test_S_130_56…` | pending |
 | S-130.57 | Without the `order_encodes` table the compare command does nothing and the page is a 404 | `test_S_130_57…` | pending |
 | S-130.58 | The steps record which fields of the row were blank | `EncodeOrderTest::test_S_130_58…` | pending |
+| S-130.59 | Given a live order whose `macro_output` row already exists and the job fails afterwards, the retry reuses that row and the last failure does not also write the sheet | `test_S_130_59…` | pending |
 | S-130.40 | EXTRACTED DETAILS: name, phone forms (09, +63, 63, invalid → blank), NA / N/A / NOT PROVIDED, "province/brgy/barangay/city" words stripped | `TextAndParseTest::test_S_130_40…` | pending |
 | S-130.41 | SHOP DETAILS: "qty x ITEM" and the price with or without ₱ | `test_S_130_41…` | pending |
 | S-130.42 | Place, province (NCR → manila) and city normalisers, list membership, the sheet's number coercion | `test_S_130_42…` | pending |

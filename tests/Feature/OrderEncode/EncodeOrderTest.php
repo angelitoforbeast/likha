@@ -232,6 +232,25 @@ class EncodeOrderTest extends OrderEncodeTestCase
         $this->assertCount(1, $this->google->appended);
     }
 
+    public function test_S_130_59_a_live_order_whose_macro_row_already_exists_is_neither_inserted_again_nor_written_to_the_sheet(): void
+    {
+        $this->configurePage('live');
+        $this->openAi();
+        $o = $this->makeOrder('live', array_merge($this->orderRow(), []));
+        $existing = MacroOutput::create(['PAGE' => 'Page Uno', 'fb_name' => 'someone else', 'TIMESTAMP' => '01:00 01-01-2026']);
+        $o->update(['macro_output_id' => $existing->id, 'status' => 'queued']); // ang row ay nagawa na, saka pumalya ang job
+
+        // retry: walang bagong row kahit ibang oras ang makuha ng retry
+        $this->assertSame($existing->id, app(LiveOrder::class)->create($o->fresh())->id);
+        $this->assertSame(1, MacroOutput::count());
+
+        // huling subok na pumalya: ang order ay nasa macro_output na, kaya hindi isinusulat sa sheet
+        (new EncodeOrder($o->id))->failed(new \RuntimeException('timeout'));
+
+        $this->assertSame([], $this->google->appended);
+        $this->assertSame('done', $o->fresh()->status);
+    }
+
     public function test_S_130_58_the_steps_say_which_fields_of_the_row_were_blank(): void
     {
         $this->configurePage('shadow');

@@ -17,6 +17,9 @@ class LiveOrder
 {
     public function create(OrderEncode $o): ?MacroOutput
     {
+        // Ang retry pagkatapos ng row na nagawa na: ang row na iyon, hindi bagong hanap (maaaring ibang oras ang makuha).
+        if ($o->macro_output_id && ($made = MacroOutput::find($o->macro_output_id))) return $made;
+
         $f = (array) ($o->input['fields'] ?? []);
         $out = (array) ($o->outputs ?? []);
         $in = new Input($f);

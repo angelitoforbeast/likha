@@ -54,6 +54,12 @@ class Runner
     public function fail(OrderEncode $o, string $why): void
     {
         $why = preg_replace('/sk-[A-Za-z0-9_\-]{8,}/', '[key]', $why) ?? '';
+        if ($o->macro_output_id) {
+            // Nasa macro_output na ang order: hindi na isusulat sa sheet (doble).
+            $o->update(['status' => 'done', 'error' => mb_substr($why . ' The order is already in macro_output.', 0, 500)]);
+
+            return;
+        }
         if ($o->mode === 'live' && $o->status !== 'done') {
             try {
                 $this->sheets->append($o->spreadsheet_id, $o->tab, (array) ($o->input['row'] ?? []));
