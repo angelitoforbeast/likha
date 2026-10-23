@@ -2867,7 +2867,7 @@
 
       // Mira RTS: ang paliwanag sa title ng cell.
       miraTip(row){
-        return 'Mira RTS ' + Number(row.mira_rts_pct).toFixed(1) + '% = projected RTS ng huling 21 araw: '
+        return 'Mira RTS ' + Number(row.mira_rts_pct).toFixed(1) + '% = projected RTS ng mga order sa napiling date range: '
           + row.projected_rts_orders + ' matched orders, ' + Number(row.projected_rts_transit_pct).toFixed(0)
           + '% still in transit. Inaasahang error (edad at dami ng order): ~' + row.mira_rts_error_pts + ' puntos.';
       },

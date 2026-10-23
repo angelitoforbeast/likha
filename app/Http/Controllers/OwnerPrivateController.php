@@ -185,17 +185,16 @@ class OwnerPrivateController extends Controller
     }
 
     /**
-     * Projected RTS% bawat page+item (order ng huling 21 araw). Best effort: kapag pumalya o wala pang J&T table,
+     * Projected RTS% bawat page+item (mga order sa date range ng page). Best effort: kapag pumalya o wala pang J&T table,
      * [] — hindi dapat masira ang page.
      */
-    protected function projectedRtsRows(): array
+    protected function projectedRtsRows(string $from, string $to): array
     {
         if (!Schema::hasTable('from_jnts') || !Schema::hasTable('macro_output')) return [];
 
         try {
-            $today = now('Asia/Manila');
-
-            return (new \App\Services\RtsProjection())->rows($today->copy()->subDays(21)->toDateString(), $today->toDateString());
+            // Ang date range ng page (order date), para pareho ang panahon ng Set RTS at ng ibang column.
+            return (new \App\Services\RtsProjection())->rows($from, $to);
         } catch (\Throwable $e) {
             \Log::warning('projectedRtsRows failed: '.$e->getMessage());
             return [];
@@ -1819,7 +1818,7 @@ class OwnerPrivateController extends Controller
         // on hosts with zero mappings, canonical == raw normalized key → unchanged.
         $aliases = new \App\Services\ItemAliasResolver();
         $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
-        $rtsProj = $this->projectedRtsRows();
+        $rtsProj = $this->projectedRtsRows($startDate, $endDate);
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
