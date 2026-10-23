@@ -56,11 +56,10 @@ class ProjectedRtsCellTest extends RtsProjectionTestCase
         return array_column($res->json('rows'), null, 'page_key');
     }
 
-    public function test_row_carries_projected_rts_and_red_flag_beyond_five_points_with_enough_orders(): void
+    public function test_row_carries_projected_rts_and_the_gap_columns_the_conditional_formatting_reads(): void
     {
         $this->page('Pahina Alpha', 30);   // projected 55.11 → gap −25.11
-        $this->page('Pahina Beta', 55);    // gap −0.11
-        $this->page('Pahina Gamma', 30, 20);   // 20 order lang → walang flag
+        $this->page('Pahina Gamma', 30, 20);   // 20 order lang → walang ratio
 
         $rows = $this->rows();
 
@@ -68,9 +67,13 @@ class ProjectedRtsCellTest extends RtsProjectionTestCase
         $this->assertEqualsWithDelta(55.11, $a['projected_rts_pct'], 0.01);
         $this->assertSame(100, $a['projected_rts_orders']);
         $this->assertEqualsWithDelta(51.0, $a['projected_rts_transit_pct'], 0.01);
-        $this->assertTrue($a['projected_rts_flag']);
-        $this->assertFalse($rows['pahina beta']['projected_rts_flag']);
-        $this->assertFalse($rows['pahina gamma']['projected_rts_flag']);
+        $this->assertSame(100, $a['mira_rts_matched']);
+        $this->assertEqualsWithDelta(-25.1, $a['rts_gap_pts'], 0.001);   // Set 30 − Mira 55.1
+        $this->assertEqualsWithDelta(25.1, $a['rts_gap_abs'], 0.001);
+        $this->assertEqualsWithDelta(5.81, $a['mira_rts_error_pts'], 0.02);   // sqrt(3² + 4.97²)
+        $this->assertEqualsWithDelta(4.32, $a['rts_gap_ratio'], 0.05);
+        $this->assertArrayNotHasKey('projected_rts_flag', $a);
+        $this->assertNull($rows['pahina gamma']['rts_gap_ratio']);   // kulang sa order = walang ratio, walang kulay
         $this->assertEqualsWithDelta(30.0, $a['rts_pct'], 0.001);   // ang Set RTS% ay hindi nagbago
     }
 
@@ -84,8 +87,7 @@ class ProjectedRtsCellTest extends RtsProjectionTestCase
         $b = $rows['pahina beta'];
 
         $this->assertEqualsWithDelta(55.1, $a['mira_rts_pct'], 0.0001);
-        $this->assertSame(3, $a['mira_rts_error_pts']);   // edad 3 araw ang mga in transit
-        $this->assertNotNull($a['projected_profit']);
+                $this->assertNotNull($a['projected_profit']);
         $this->assertNotEquals($a['projected_profit'], $a['projected_profit_mira']);
         $this->assertEqualsWithDelta($b['projected_profit'], $a['projected_profit_mira'], 0.01);
         $this->assertEqualsWithDelta($b['projected_profit'], $b['projected_profit_mira'], 0.01);
@@ -128,10 +130,11 @@ class ProjectedRtsCellTest extends RtsProjectionTestCase
 
         foreach ([
             "id:'mira_rts'", "label:'Mira RTS'", "id:'proj_profit_mira'", "label:'Profit (Mira RTS)'",
-            'row.projected_rts_pct != null', 'row.projected_rts_flag', 'still in transit', 'typical error',
+            'row.projected_rts_pct != null', 'still in transit', 'Inaasahang error',
             'Use Mira RTS', "source', 'mira_rts'", 'tot().projected_profit_mira',
         ] as $needle) {
             $this->assertStringContainsString($needle, $html, $needle);
         }
+        $this->assertStringNotContainsString('projected_rts_flag', $html);   // walang hard-coded na kulay: CF lang
     }
 }

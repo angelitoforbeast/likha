@@ -21,8 +21,7 @@ class RtsProjection
     public const MAX_AGE = 14;            // edad (araw) na may sariling p; mas matanda = p ng 14
     public const MIN_ITEM_SAMPLES = 30;   // sample ng isang item sa isang edad bago gamitin ang sariling p
     public const LEARN_WEEKS = 8;
-    public const MIN_MATCHED_FLAG = 30;   // kulang sa order = walang flag/feed
-    public const FLAG_POINTS = 5;
+    public const MIN_MATCHED_FLAG = 30;   // kulang sa order = walang ratio (kaya walang kulay ng CF) at wala sa feed
     private const TZ = 'Asia/Manila';
     private const MAX_JSON = 60000;       // app_settings.value ay TEXT (64 KB sa MySQL)
 
@@ -174,10 +173,12 @@ class RtsProjection
                 ? round(($r['returned'] + $r['for_return'] + $r['transit_rts']) / $m * 100, 2) : null;
             $r['in_transit_pct'] = $m > 0 ? round($r['in_transit'] / $m * 100, 2) : null;
             $r['actual_rts'] = $r['resolved_old'] > 0 ? round($r['returned_old'] / $r['resolved_old'] * 100, 2) : null;
-            $r['error_pts'] = self::errorPts($r['in_transit'] > 0 ? $r['transit_age_sum'] / $r['in_transit'] : self::MAX_AGE);
+            $r['error_pts'] = $r['projected_rts'] !== null
+                ? self::expectedError($r['in_transit'] > 0 ? $r['transit_age_sum'] / $r['in_transit'] : self::MAX_AGE, $r['projected_rts'], $m) : null;
             $r['set_rts'] = $set[$key] ?? null;
             $r['gap'] = ($r['set_rts'] !== null && $r['projected_rts'] !== null) ? round($r['set_rts'] - $r['projected_rts'], 2) : null;
-            $r['flag'] = $r['gap'] !== null && abs($r['gap']) > self::FLAG_POINTS && $m >= self::MIN_MATCHED_FLAG;
+            $r['gap_abs'] = $r['gap'] !== null ? abs($r['gap']) : null;
+            $r['gap_ratio'] = self::gapRatio($r['gap_abs'], $r['error_pts'], $m);
             $r['set_by'] = $by[$key]['by'] ?? null;
             $r['set_at'] = $by[$key]['at'] ?? null;
             unset($r['transit_age_sum'], $r['resolved_old'], $r['returned_old'], $r['transit_rts'], $r['no_rate']);
@@ -191,6 +192,26 @@ class RtsProjection
     public static function errorPts(float $meanAge): float
     {
         return $meanAge <= 4 ? 3.0 : ($meanAge <= 6 ? 1.0 : 0.5);
+    }
+
+    /**
+     * Inaasahang error (puntos) ng projection: sqrt(e_edad² + (100·sqrt(p(1−p)/matched))²) — ang edad ng mga in transit
+     * at ang kulang na sample (mas kaunting order = mas malaki).
+     */
+    public static function expectedError(float $meanAge, float $projectedPct, int $matched): float
+    {
+        $p = min(max($projectedPct / 100, 0.0), 1.0);
+        $sampling = $matched > 0 ? 100 * sqrt($p * (1 - $p) / $matched) : 100.0;
+
+        return round(sqrt(self::errorPts($meanAge) ** 2 + $sampling ** 2), 2);
+    }
+
+    /** gap_abs ÷ error; null kapag kulang ang data o wala pang MIN_MATCHED_FLAG na order (para hindi tamaan ng CF rule). */
+    public static function gapRatio(?float $gapAbs, ?float $errorPts, int $matched): ?float
+    {
+        if ($gapAbs === null || !$errorPts || $matched < self::MIN_MATCHED_FLAG) return null;
+
+        return round($gapAbs / $errorPts, 2);
     }
 
     /** p ng RTS para sa In Transit na order na $age araw na: rate ng item, kung wala ay pooled (pinakamalapit na mas bata). */

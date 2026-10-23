@@ -2383,6 +2383,11 @@ class OwnerPrivateController extends Controller
             // Mira RTS = Projected RTS na naka-round sa 0.1; ito rin ang kokopyahin ng Use Mira RTS button.
             $miraRts         = ($proj && $proj['projected_rts'] !== null) ? round($proj['projected_rts'], 1) : null;
             $rtsComment      = $settings ? $settings['comment'] : null;
+            // Mga column para sa Conditional Formatting ng Mira RTS: gap = Set − Mira, error galing sa edad at laki ng sample.
+            $miraGap         = ($rtsPct !== null && $miraRts !== null) ? round($rtsPct - $miraRts, 2) : null;
+            $miraGapAbs      = $miraGap !== null ? abs($miraGap) : null;
+            $miraError       = $miraRts !== null ? ($proj['error_pts'] ?? null) : null;
+            $miraMatched     = $miraRts !== null ? (int) ($proj['matched'] ?? 0) : null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
             // alias-aware aggregation sa jntStatsMap builder above).
@@ -2748,9 +2753,12 @@ class OwnerPrivateController extends Controller
                 'projected_rts_pct'         => $proj['projected_rts'] ?? null,
                 'projected_rts_orders'      => $proj['matched'] ?? null,
                 'projected_rts_transit_pct' => $proj['in_transit_pct'] ?? null,
-                'projected_rts_flag'        => (bool) ($proj['flag'] ?? false),
                 'mira_rts_pct'              => $miraRts,
-                'mira_rts_error_pts'        => $miraRts !== null ? ($proj['error_pts'] ?? null) : null,
+                'rts_gap_pts'               => $miraGap,
+                'rts_gap_abs'               => $miraGapAbs,
+                'mira_rts_error_pts'        => $miraError,
+                'rts_gap_ratio'             => \App\Services\RtsProjection::gapRatio($miraGapAbs, $miraError, (int) $miraMatched),
+                'mira_rts_matched'          => $miraMatched,
                 'projected_profit_mira'     => $projProfitMira,
                 'rts_set_by'            => ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null,
                 'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,

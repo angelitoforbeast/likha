@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -92,6 +93,12 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'jnt_transit',   'label' => 'Transit%'],
             ['id' => 'rts_set',       'label' => 'Set RTS%'],
             ['id' => 'mira_rts',      'label' => 'Mira RTS'],
+            // Para sa Conditional Formatting ng Mira RTS (target o compare_col); nakatago hanggang buksan.
+            ['id' => 'rts_gap_pts',   'label' => 'RTS Gap (Set − Mira)'],
+            ['id' => 'rts_gap_abs',   'label' => 'RTS Gap (abs)'],
+            ['id' => 'mira_rts_error_pts', 'label' => 'Mira RTS Error (pts)'],
+            ['id' => 'rts_gap_ratio', 'label' => 'RTS Gap ÷ Error'],
+            ['id' => 'mira_rts_matched', 'label' => 'Mira RTS Orders'],
             ['id' => 'promo',         'label' => 'Promo'],
             ['id' => 'price',         'label' => 'Price'],
             ['id' => 'item_val',      'label' => 'Item Val.'],
@@ -408,6 +415,7 @@ class OwnerColumnSettingsController extends Controller
     {
         $empty = ['groups' => [], 'byCol' => []];
         if (!array_key_exists($table, self::CATALOG)) return $empty;
+        if ($table === 'owner_private') $this->seedMiraRtsRules();
 
         $key = $this->colFormatKey($table);
         $row = DB::table('app_settings')->where('key', $key)->first(['value']);
@@ -534,6 +542,44 @@ class OwnerColumnSettingsController extends Controller
         return ['groups' => $groups, 'byCol' => $byCol];
     }
 
+    /**
+     * Isang beses lang: idagdag ang default na dalawang rule ng Mira RTS (pula kapag gap ÷ error > 2, amber kapag > 1;
+     * ang ratio ay null kapag <30 order kaya walang kulay). Hindi ginagalaw kung may rule na ang owner sa column,
+     * at hindi na ibabalik kapag binura niya (may marker). Walang AND ang CF engine, kaya ang 30-order gate ay nasa ratio
+     * mismo at ang ≥5 puntos na floor ng pula ay hindi na ipinapataw.
+     */
+    private function seedMiraRtsRules(): void
+    {
+        if (!Schema::hasTable('app_settings')) return;
+        $marker = self::KEY_COL_FORMAT . '_mira_rts_seeded';
+        if (DB::table('app_settings')->where('key', $marker)->exists()) return;
+
+        $row  = DB::table('app_settings')->where('key', self::KEY_COL_FORMAT)->first(['value']);
+        $data = ($row && $row->value) ? json_decode($row->value, true) : null;
+        $legacy = is_array($data) && $data !== [] && !isset($data['groups']);   // lumang {col: [rules]} na shape: huwag galawin
+        if (!is_array($data) || !isset($data['groups']) || !is_array($data['groups'])) $data = ['groups' => []];
+
+        $has = false;
+        foreach ($data['groups'] as $g) {
+            if (in_array('mira_rts', (array) ($g['cols'] ?? []), true)) $has = true;
+        }
+        if (!$has && !$legacy) {
+            $rule = fn (float $v, string $bg, string $color, bool $bold, string $label) => [
+                'op' => '>', 'value' => $v, 'bg' => $bg, 'color' => $color, 'bold' => $bold, 'label' => $label,
+                'compare_col' => 'rts_gap_ratio', 'active_state' => 'any',
+            ];
+            // ORDER MATTERS — first hit wins.
+            $data['groups'][] = ['cols' => ['mira_rts'], 'rules' => [
+                $rule(2, '#fecaca', '#b91c1c', true, 'Gap > 2× error'),
+                $rule(1, '#fde68a', '#92400e', false, 'Gap > 1× error'),
+            ]];
+            DB::table('app_settings')->updateOrInsert(
+                ['key' => self::KEY_COL_FORMAT],
+                ['value' => json_encode($data, JSON_UNESCAPED_SLASHES), 'updated_at' => now(), 'created_at' => now()]
+            );
+        }
+        DB::table('app_settings')->updateOrInsert(['key' => $marker], ['value' => '1', 'updated_at' => now(), 'created_at' => now()]);
+    }
     private function colFormatKey(string $table): string
     {
         if ($table === 'campaigns')     return self::KEY_CAMPAIGNS_COL_FORMAT;

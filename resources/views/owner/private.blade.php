@@ -1050,13 +1050,12 @@
                     </span>
                   </template>
 
-                  <!-- mira_rts — Projected RTS% (kasama ang nasa biyahe pa); pula kapag lampas 5 puntos sa Set RTS% at ≥30 order -->
+                  <!-- mira_rts — Projected RTS% (kasama ang nasa biyahe pa); ang kulay ay galing sa Conditional Formatting ng column na ito -->
                   <template x-if="col.id==='mira_rts'">
                     <span>
                       <template x-if="row.projected_rts_pct != null">
                         <div>
-                          <span :title="miraTip(row)" style="font-weight:700;border-radius:3px;padding:0 3px;"
-                                :style="row.projected_rts_flag ? 'color:#b91c1c;background:#fee2e2;' : 'color:#000;'"
+                          <span :title="miraTip(row)" style="font-weight:700;"
                                 x-text="Number(row.mira_rts_pct).toFixed(1)+'%'"></span>
                           <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
                                x-text="row.projected_rts_orders+' orders · '+Number(row.projected_rts_transit_pct).toFixed(0)+'% in transit'"></div>
@@ -1068,6 +1067,14 @@
                         <span style="color:#cbd5e1;">—</span>
                       </template>
                     </span>
+                  </template>
+
+                  <!-- Mga column na pang-Conditional Formatting lang ng Mira RTS (nakatago bilang default) -->
+                  <template x-if="['rts_gap_pts','rts_gap_abs','mira_rts_error_pts','rts_gap_ratio'].includes(col.id)">
+                    <span style="color:#111;font-size:12px;" x-text="row[col.id] != null ? Number(row[col.id]).toFixed(1) : '—'"></span>
+                  </template>
+                  <template x-if="col.id==='mira_rts_matched'">
+                    <span style="color:#111;font-size:12px;" x-text="row.mira_rts_matched != null ? row.mira_rts_matched : '—'"></span>
                   </template>
 
                   <!-- proj_profit_mira — parehong formula ng Prof.Profit pero Mira RTS ang gamit -->
@@ -2170,6 +2177,11 @@
           { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
           { id:'mira_rts',   label:'Mira RTS',   sort:'mira_rts_pct',         align:'center', minw:120 },
+          { id:'rts_gap_pts',   label:'RTS Gap (Set − Mira)', sort:'rts_gap_pts',   align:'center', minw:90 },
+          { id:'rts_gap_abs',   label:'RTS Gap (abs)',        sort:'rts_gap_abs',   align:'center', minw:80 },
+          { id:'mira_rts_error_pts', label:'Mira RTS Error (pts)', sort:'mira_rts_error_pts', align:'center', minw:95 },
+          { id:'rts_gap_ratio', label:'RTS Gap ÷ Error',      sort:'rts_gap_ratio', align:'center', minw:90 },
+          { id:'mira_rts_matched', label:'Mira RTS Orders',   sort:'mira_rts_matched', align:'center', minw:90 },
           { id:'promo',      label:'Promo',      sort:'promo',                align:'center', minw:90  },
           { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
           { id:'item_val',     label:'Item Val.',       sort:'item_value',     align:'center', minw:80  },
@@ -2853,7 +2865,7 @@
       miraTip(row){
         return 'Mira RTS ' + Number(row.mira_rts_pct).toFixed(1) + '% = projected RTS ng huling 21 araw: '
           + row.projected_rts_orders + ' matched orders, ' + Number(row.projected_rts_transit_pct).toFixed(0)
-          + '% still in transit. Karaniwang typical error ng edad na ito: ~' + row.mira_rts_error_pts + ' puntos.';
+          + '% still in transit. Inaasahang error (edad at dami ng order): ~' + row.mira_rts_error_pts + ' puntos.';
       },
 
       // Use Mira RTS: ang rounded Mira RTS ang isi-save sa Set RTS% sa parehong save ng RTS edit (scope=rts), source mira_rts.
