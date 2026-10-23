@@ -7,6 +7,7 @@ use App\Services\OrderEncode\Comparer;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * /order-encode (spec 130): ang paghahambing ng sariling encode ng Likha sa DATABASE row ng Google Sheet. Read-only.
@@ -37,6 +38,7 @@ class OrderEncodeController extends Controller
     public function index(Request $request)
     {
         $this->checkAccess();
+        if (!Schema::hasTable('order_encodes')) abort(404);
 
         $to = $this->date($request->query('to'), now()->startOfDay());
         $from = $this->date($request->query('from'), $to->copy()->subDays(6));

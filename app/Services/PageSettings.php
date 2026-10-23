@@ -90,7 +90,7 @@ class PageSettings
         if ($provider === OrderEncode\Settings::PROVIDER) {
             if (!in_array($key, OrderEncode\Settings::KEYS, true)) return ['key' => 'order_encode takes only: ' . implode(', ', OrderEncode\Settings::KEYS) . '.'];
             if ($key === 'mode' && !in_array(strtolower($value), OrderEncode\Settings::MODES, true)) return ['value' => 'order_encode.mode is off, shadow or live.'];
-            if ($key !== 'mode' && $value !== '' && Chatbot\FlowGraph::spreadsheetId($value) === null) return ['value' => 'order_encode.' . $key . ' takes a Google Sheets link or ID.'];
+            if ($key !== 'mode' && Chatbot\FlowGraph::spreadsheetId($value) === null) return ['value' => 'order_encode.' . $key . ' takes a Google Sheets link or ID.'];
         }
 
         $digits = $full === 'botcake.page_id'

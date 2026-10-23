@@ -1999,6 +1999,13 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.36 | Chat text (names, step statuses) is escaped | `test_S_130_36…` | pending |
 | S-130.37 | Filters: date range, page, only differences, by field | `test_S_130_37…` | pending |
 | S-130.38 | The page is read-only (no POST) | `test_S_130_38…` | pending |
+| S-130.52 | Given a page in `shadow` or `live`, a second Sheet node of the flow on another tab is neither encoded nor skipped | `OrderEncodeFlowTest::test_S_130_52…` | pending |
+| S-130.53 | Given a live page that is not ready (no location files, no `macro_sheet`, no `compare_sheet`, no key), the row is written to the sheet as before | `test_S_130_53…` | pending |
+| S-130.54 | A live job is `done` only after the `macro_output` row exists; if that write fails the job is retried and finishes it once | `EncodeOrderTest::test_S_130_54…` | pending |
+| S-130.55 | A live encode that ends `failed` (no lists, or the last try failed) writes the row to the sheet instead; a shadow row is only marked | `test_S_130_55…` | pending |
+| S-130.56 | A formula date (`=TODAY()`) is not compared for the row check, the page still is | `CompareTest::test_S_130_56…` | pending |
+| S-130.57 | Without the `order_encodes` table the compare command does nothing and the page is a 404 | `test_S_130_57…` | pending |
+| S-130.58 | The steps record which fields of the row were blank | `EncodeOrderTest::test_S_130_58…` | pending |
 | S-130.40 | EXTRACTED DETAILS: name, phone forms (09, +63, 63, invalid → blank), NA / N/A / NOT PROVIDED, "province/brgy/barangay/city" words stripped | `TextAndParseTest::test_S_130_40…` | pending |
 | S-130.41 | SHOP DETAILS: "qty x ITEM" and the price with or without ₱ | `test_S_130_41…` | pending |
 | S-130.42 | Place, province (NCR → manila) and city normalisers, list membership, the sheet's number coercion | `test_S_130_42…` | pending |

@@ -16,6 +16,17 @@ class FakeSheets extends Sheets
     public array $calls = [];
     public bool $fail = false;
 
+    /** @var array<int, array{0: string, 1: string, 2: array}> ang mga row na isinulat sa sheet */
+    public array $appended = [];
+
+    public function append(string $spreadsheetId, string $tab, array $row)
+    {
+        if ($this->fail) throw new \RuntimeException('Google said no');
+        $this->appended[] = [$spreadsheetId, $tab, $row];
+
+        return "'" . $tab . "'!A9:H9";
+    }
+
     public function put(string $id, string $range, array $rows): void
     {
         $this->data[$id . '|' . $range] = $rows;

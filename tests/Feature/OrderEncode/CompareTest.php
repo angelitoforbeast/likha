@@ -190,4 +190,26 @@ class CompareTest extends OrderEncodeTestCase
 
         $this->assertNull($o->fresh()->compare_state);
     }
+
+    public function test_S_130_56_a_formula_date_is_not_compared_but_the_page_still_is(): void
+    {
+        $a = $this->done();
+        $a->update(['input' => ['row' => [], 'fields' => ['date' => '=TODAY()', 'page' => 'Page Uno']]]);
+        $b = $this->done(23824);
+        $b->update(['input' => ['row' => [], 'fields' => ['date' => '=TODAY()', 'page' => 'Page Uno']]]);
+        $this->sheetRow(['A' => '2026-10-23']);
+        $this->sheetRow(['J' => 'Page Dos'], 23824);
+
+        $this->compare();
+
+        $this->assertSame(['done', 'row_mismatch'], [$a->fresh()->compare_state, $b->fresh()->compare_state]);
+    }
+
+    public function test_S_130_57_without_the_table_the_command_and_the_page_do_nothing_instead_of_failing(): void
+    {
+        \Illuminate\Support\Facades\Schema::drop('order_encodes');
+
+        $this->assertSame(0, $this->compare());
+        $this->actingAs($this->user('CEO'))->get('/order-encode')->assertNotFound();
+    }
 }

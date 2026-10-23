@@ -41,9 +41,10 @@ class EncodeOrder implements ShouldQueue
         if ($o) $runner->run($o);
     }
 
+    /** Pagkatapos ng huling subok: failed; ang live na order ay isinusulat sa sheet (Runner::fail). */
     public function failed(Throwable $e): void
     {
-        OrderEncode::where('id', $this->orderEncodeId)->where('status', '!=', 'done')
-            ->update(['status' => 'failed', 'error' => mb_substr(preg_replace('/sk-[A-Za-z0-9_\-]{8,}/', '[key]', $e->getMessage()) ?? '', 0, 500)]);
+        $o = OrderEncode::find($this->orderEncodeId);
+        if ($o && $o->status !== 'done') app(Runner::class)->fail($o, $e->getMessage());
     }
 }

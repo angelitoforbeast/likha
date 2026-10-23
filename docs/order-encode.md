@@ -19,7 +19,8 @@ Global (`app_settings`): `order_encode_model_extract` (default `gpt-4o-mini`), `
 
 ## How it runs
 
-1. The flow's Sheet step appends the row (as before). For a `shadow` page it then creates one `order_encodes` row
+1. The flow's Sheet step appends the row (as before). Only the Sheet step that writes to the tab **All Orders** takes part; any other
+   Sheet step of the flow is left alone. For a `shadow` page it then creates one `order_encodes` row
    (spreadsheet id + tab + the row number of the append result) and queues `EncodeOrder` on queue `encode`.
    The flow never waits for it and never fails because of it. Test runs never encode.
 2. `EncodeOrder` reads the row (by the header names of the tab when it can, else the column order A date · B page ·
@@ -38,7 +39,9 @@ Global (`app_settings`): `order_encode_model_extract` (default `gpt-4o-mini`), `
 
 **Live** (`mode = live`, built, not switched on): the Sheet step records a sheet reply with status `skipped` and the note
 "encoded in Likha", continues on its normal port, and `EncodeOrder` creates the `macro_output` row the two imports would
-have made (`OrderIdentity` prevents a duplicate). If the encode cannot be queued, the row is written to the sheet as before.
+have made (`OrderIdentity` prevents a duplicate). The job is `done` only after that row exists, so a failed write is retried. If the page is
+not ready (no `macro_sheet` / `compare_sheet`, no location files, no key), or the encode cannot be queued, or it ends `failed`, the row is
+written to the sheet as before. The `encode` worker must be running before any page goes live.
 
 ## Deploy checklist (by hand, after the owner's yes)
 

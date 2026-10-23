@@ -11,19 +11,21 @@ use Throwable;
 /**
  * Ang tulay ng sheet step ng flow papunta sa order encode. Hindi kailanman nagpapabagsak ng flow: anumang error ay itinatala sa log
  * at ang flow ay nagpapatuloy (shadow: wala lang encode; live: ang row ay isusulat sa sheet gaya ng dati).
+ * Mga order lang ang ine-encode: ang Sheet step na sumusulat sa tab na "All Orders". Ang ibang Sheet step ng flow ay hindi ginagalaw.
  */
 class FlowHook
 {
     public const NOTE = 'encoded in Likha';
+    public const TAB = 'All Orders';
 
-    public function __construct(private Settings $settings)
+    public function __construct(private Settings $settings, private LocationStore $store)
     {
     }
 
-    /** off / shadow / live ng page ng takbo. Ang Test tab ay laging off: walang order na nagagawa roon. */
-    public function mode(FlowRun $run): string
+    /** off / shadow / live ng page ng takbo. Ang Test tab at ang ibang tab ay laging off: walang order na nagagawa roon. */
+    public function mode(FlowRun $run, string $tab): string
     {
-        if ($run->test) return 'off';
+        if ($run->test || mb_strtolower(trim($tab)) !== mb_strtolower(self::TAB)) return 'off';
         try {
             return $this->settings->mode($run->pageName);
         } catch (Throwable $e) {
@@ -45,10 +47,35 @@ class FlowHook
         $this->queue($run, 'shadow', $sheetId, $tab, $row, $number);
     }
 
-    /** Live: bago ang sheet. @return bool true kapag naka-queue na ang encode (hindi na isusulat sa sheet) */
+    /**
+     * Live: bago ang sheet. Hindi ito sumasalo ng order kung hindi handa ang page (sheet ng macro at ng compare, ang dalawang
+     * listahan ng lugar, ang key): saka isinusulat ang row sa sheet gaya ng dati.
+     * @return bool true kapag naka-queue na ang encode (hindi na isusulat sa sheet)
+     */
     public function live(FlowRun $run, string $sheetId, string $tab, array $row): bool
     {
+        if (!$this->ready($run->pageName)) {
+            Log::warning('order-encode: live page is not ready, the row goes to the sheet', ['page' => $run->pageName]);
+
+            return false;
+        }
+
         return $this->queue($run, 'live', $sheetId, $tab, $row, null);
+    }
+
+    private function ready(string $page): bool
+    {
+        try {
+            $macro = $this->settings->sheetId($page, 'macro_sheet');
+            $after = $this->settings->sheetId($page, 'compare_sheet');
+
+            return $macro !== null && $after !== null && $this->settings->key() !== ''
+                && $this->store->has(LocationStore::MACRO, $macro) && $this->store->has(LocationStore::AFTER, $after);
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
     }
 
     private function queue(FlowRun $run, string $mode, string $sheetId, string $tab, array $row, ?int $number): bool

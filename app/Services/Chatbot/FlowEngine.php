@@ -498,7 +498,7 @@ class FlowEngine
 
         // Order encode (spec 130): live = hindi isinusulat sa sheet, ine-encode ng Likha; shadow = isinusulat gaya ng dati at may kasamang encode.
         $encode = app(FlowHook::class);
-        $mode = $encode->mode($run);
+        $mode = $encode->mode($run, $tab);
         if ($mode === 'live' && BotcakeOutbox::enabled() && $encode->live($run, $id, $tab, $row)) {
             BotcakeOutbox::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $node['id'], 'sheet',
                 ['sheet' => $id, 'tab' => $tab, 'row' => $row, 'note' => FlowHook::NOTE], 'skipped');

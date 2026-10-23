@@ -173,4 +173,74 @@ class EncodeOrderTest extends OrderEncodeTestCase
         Http::assertSent(fn ($r) => $r['model'] === 'gpt-4.1-nano' && $r['temperature'] === 0.2);
         $this->assertArrayHasKey('gpt-4.1-nano', $o->usage);
     }
+
+    public function test_S_130_54_a_live_job_is_not_done_until_the_macro_output_row_exists_and_a_retry_finishes_it(): void
+    {
+        $this->configurePage('live');
+        $this->openAi();
+        $boom = new class extends LiveOrder {
+            public bool $fail = true;
+
+            public function create(OrderEncode $o): ?MacroOutput
+            {
+                if ($this->fail) throw new \RuntimeException('database is down');
+
+                return parent::create($o);
+            }
+        };
+        $this->app->instance(LiveOrder::class, $boom);
+        $o = $this->makeOrder('live');
+
+        try {
+            $this->runJob($o);
+            $this->fail('the job must fail so that it is retried');
+        } catch (\RuntimeException) {
+        }
+        $this->assertSame('queued', $o->fresh()->status);
+        $this->assertSame(0, MacroOutput::count());
+
+        $boom->fail = false;
+        $done = $this->runJob($o);
+
+        $this->assertSame('done', $done->status);
+        $this->assertSame(1, MacroOutput::count());
+    }
+
+    public function test_S_130_55_when_a_live_encode_ends_failed_the_row_is_written_to_the_sheet_instead(): void
+    {
+        $this->configurePage('live', lists: false);
+        $o = $this->makeOrder('live');
+
+        $o = $this->runJob($o); // walang listahan: failed
+
+        $this->assertSame('failed', $o->status);
+        $this->assertSame([[self::ORDERS, 'All Orders', array_map(fn ($v) => "'" . $v, $this->orderRow())]], $this->google->appended);
+        $this->assertStringContainsString('written to the sheet instead', $o->error);
+    }
+
+    public function test_S_130_55_a_job_that_fails_for_good_does_the_same_and_a_shadow_row_is_only_marked(): void
+    {
+        $this->configurePage('live');
+        $live = $this->makeOrder('live');
+        $shadow = $this->makeOrder('shadow', null, 1);
+
+        (new EncodeOrder($live->id))->failed(new \RuntimeException('boom sk-abcdefghij12345'));
+        (new EncodeOrder($shadow->id))->failed(new \RuntimeException('boom'));
+
+        $this->assertSame(['failed', 'failed'], [$live->fresh()->status, $shadow->fresh()->status]);
+        $this->assertStringNotContainsString('sk-abcdefghij12345', (string) $live->fresh()->error);
+        $this->assertCount(1, $this->google->appended);
+    }
+
+    public function test_S_130_58_the_steps_say_which_fields_of_the_row_were_blank(): void
+    {
+        $this->configurePage('shadow');
+        $this->openAi();
+
+        $o = $this->runJob($this->makeOrder('shadow'));
+        $this->assertSame([], collect($o->steps)->firstWhere('step', 'input')['blank']);
+
+        $o2 = $this->runJob($this->makeOrder('shadow', ['', 'Page Uno', '', '', '', '', '', ''], 7));
+        $this->assertSame(['date', 'name', 'phone', 'input', 'shop', 'cxd', 'price'], collect($o2->steps)->firstWhere('step', 'input')['blank']);
+    }
 }

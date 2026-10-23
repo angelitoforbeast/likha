@@ -45,8 +45,10 @@ class Comparer
     public static function sameOrder(OrderEncode $o, array $db): bool
     {
         $f = (array) ($o->input['fields'] ?? []);
+        // Ang petsa na formula (hal. =TODAY()) ay hindi mababasa ng Likha; ang page na lang ang titingnan.
+        $date = trim((string) ($f['date'] ?? ''));
 
-        return self::sameStamp((string) ($f['date'] ?? ''), (string) ($db[0] ?? ''))
+        return ($date === '' || str_starts_with($date, '=') || self::sameStamp($date, (string) ($db[0] ?? '')))
             && mb_strtolower(trim((string) ($f['page'] ?? $o->page))) === mb_strtolower(trim((string) ($db[9] ?? '')));
     }
 

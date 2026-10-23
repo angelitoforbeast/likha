@@ -30,6 +30,11 @@ class LocationStore
         unset(self::$memo[$path]);
     }
 
+    public function has(string $kind, string $sheetId): bool
+    {
+        return is_file($this->path($kind, $sheetId));
+    }
+
     /** @return array<int, array<int, string>>|null null kapag wala pang file */
     public function read(string $kind, string $sheetId): ?array
     {

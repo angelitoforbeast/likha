@@ -41,11 +41,11 @@ class OrderEncodeFlowTest extends OrderEncodeTestCase
         };
     }
 
-    private function go(Outbox $outbox, bool $test = false, string $page = self::PAGE): FlowRun
+    private function go(Outbox $outbox, bool $test = false, string $page = self::PAGE, string $tab = 'All Orders'): FlowRun
     {
         $graph = ['nodes' => [
             ['id' => 'n1', 'type' => 'start', 'x' => 0, 'y' => 0, 'config' => []],
-            ['id' => 'n2', 'type' => 'sheet', 'x' => 0, 'y' => 0, 'config' => ['sheet' => self::ORDERS, 'tab' => 'All Orders',
+            ['id' => 'n2', 'type' => 'sheet', 'x' => 0, 'y' => 0, 'config' => ['sheet' => self::ORDERS, 'tab' => $tab,
                 'columns' => "{{current_date}}\n{{page_name}}\n{{full_name}}\nstatic"]],
             ['id' => 'n3', 'type' => 'end', 'x' => 0, 'y' => 0, 'config' => []],
         ], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2'], ['from' => 'n2', 'port' => 'next', 'to' => 'n3'], ['from' => 'n2', 'port' => 'failed', 'to' => 'n3']]];
@@ -139,6 +139,53 @@ class OrderEncodeFlowTest extends OrderEncodeTestCase
         config(['services.chatbot.replies_enabled' => true]);
         $this->configurePage('live');
         Schema::drop('order_encodes');
+        $outbox = $this->outbox();
+
+        $run = $this->go($outbox);
+
+        $this->assertSame(1, $outbox->appends);
+        $this->assertSame('sent', $run->sheetRows[0]['status']);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_S_130_52_a_second_sheet_node_on_another_tab_is_never_encoded_or_skipped(): void
+    {
+        Queue::fake();
+        config(['services.chatbot.replies_enabled' => true]);
+
+        foreach (['shadow', 'live'] as $mode) {
+            $this->configurePage($mode);
+            $outbox = $this->outbox();
+
+            $run = $this->go($outbox, false, self::PAGE, 'Leads');
+
+            $this->assertSame(1, $outbox->appends, $mode);
+            $this->assertSame('sent', $run->sheetRows[0]['status']);
+        }
+        Queue::assertNothingPushed();
+        $this->assertSame(0, OrderEncode::count());
+    }
+
+    public static function notReady(): array
+    {
+        return [
+            'no location files yet' => [['lists' => false]],
+            'no macro_sheet' => [['drop' => 'macro_sheet']],
+            'no compare_sheet' => [['drop' => 'compare_sheet']],
+            'no key' => [['key' => '']],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('notReady')]
+    public function test_S_130_53_a_live_page_that_is_not_ready_still_writes_the_sheet(array $case): void
+    {
+        Queue::fake();
+        config(['services.chatbot.replies_enabled' => true, 'services.openai.order_encode_key' => $case['key'] ?? Fixtures::KEY]);
+        $this->configurePage('live', lists: $case['lists'] ?? true);
+        if (isset($case['drop'])) {
+            \App\Models\PageSetting::where('provider', 'order_encode')->where('key', $case['drop'])->delete();
+            \App\Services\PageSettings::forget(self::PAGE);
+        }
         $outbox = $this->outbox();
 
         $run = $this->go($outbox);

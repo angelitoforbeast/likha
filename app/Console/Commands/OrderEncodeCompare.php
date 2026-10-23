@@ -7,6 +7,7 @@ use App\Services\OrderEncode\Comparer;
 use App\Services\OrderEncode\Settings;
 use App\Services\OrderEncode\Sheets;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
@@ -21,6 +22,12 @@ class OrderEncodeCompare extends Command
 
     public function handle(Settings $settings, Sheets $sheets): int
     {
+        if (!Schema::hasTable('order_encodes')) {
+            $this->warn('order_encodes does not exist yet (run the migration). Nothing to compare.');
+
+            return self::SUCCESS;
+        }
+
         $after = (int) config('order_encode.compare_after_minutes', 15);
         $giveUp = (int) config('order_encode.compare_give_up_hours', 48);
 
