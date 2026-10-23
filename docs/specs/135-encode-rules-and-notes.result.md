@@ -104,3 +104,9 @@ skeptic-reviewer, standard depth, on `e717c969..HEAD`: no blocker, no major. Fix
 Accepted, in `TODO.md` terms: R5's phone pre-filter matches `9xxxxxxxxx` and `09xxxxxxxxx` only (rows stored as `+63…` are missed); `Written::brgy` folds "Poblacion 4" and "Barangay 4" to the same `4` (rare, R4 still validates); two paths without their own test (the `parse_parts` fallback of the build, the delivered-later ledger upgrade beyond S-135.26); MySQL and PostgreSQL SQL was read, not run (tests are sqlite).
 
 Final run of `tests/Feature/OrderEncode`: 261 tests, only the date test red.
+
+## Amendment 135-1 (`docs/specs/135-encode-rules-and-notes.amendment-1.md`)
+
+- **J&T list de-duplicated on load**, in both rule modes: `LocationList::load` keeps the first of identical `PROVINCE|CITY|BARANGAY` lines (trimmed) in its position, so the macro/FILTER list, the checker's lists, the notes build and `hasCombination` all see each address once. `jnt_address.txt` is not edited. Test S-135.60 (`RulesTest`): a list with the San Isidro (POB.) line twice gives `candidates = 1`, no remark, no GPT barangay call and PROCEED, in `sheet` and in `improved`; the loaded list has the 2 distinct lines.
+- **Date-dependent test fixed:** `OrderEncodeFlowTest::test_S_130_1` froze no clock while the flow's `{{current_date}}` is today; it now sets `Carbon::setTestNow('2026-10-23 10:15:00')` and resets it. No other test in the folder depended on today's date (the whole folder passes).
+- **Re-run after this change and after the two earlier commits (live `TO FIX`, review follow-ups):** `tests/Feature/OrderEncode tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake tests/Feature/NightRun`: 1,544 tests, 1 error, the known local-only `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` (`storage/app/credentials.json` missing). Everything else is green, including `OrderEncodeFlowTest::test_S_130_1`.

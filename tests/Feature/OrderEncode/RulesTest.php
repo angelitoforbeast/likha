@@ -305,6 +305,23 @@ class RulesTest extends EncodeRunTestCase
         $this->assertSame('Possible duplicate: e' . $first->id, $second->outputs['hold']['reason']);
     }
 
+    public function test_S_135_60_a_line_repeated_in_the_jnt_file_counts_once_so_san_isidro_in_antipolo_is_not_multiple_suggested_address(): void
+    {
+        $rows = [['RIZAL', 'RIZAL-ANTIPOLO-CITY', 'SAN ISIDRO (POB.)'], ['RIZAL', 'RIZAL-ANTIPOLO-CITY', 'SAN ISIDRO (POB.)'], ['RIZAL', 'RIZAL-ANTIPOLO-CITY', 'CALAWIS']];
+        $cxd = $this->cxd('Rizal', 'Antipolo', 'San Isidro');
+
+        foreach (['sheet', 'improved'] as $mode) {
+            $o = $this->runOrder($cxd, $rows, ['barangay' => ['barangay' => 'CALAWIS']], $mode);
+
+            $this->assertSame('', $o->outputs['remark'], $mode);
+            $this->assertSame(1, $o->outputs['candidates'], $mode);
+            $this->assertSame('SAN ISIDRO (POB.)', $o->outputs['barangay'], $mode);
+            $this->assertNotContains('barangay', $this->tasks, $mode);
+            $this->assertTrue($o->outputs['proceed'], $mode);
+        }
+        $this->assertCount(2, (new \App\Services\OrderEncode\LocationList($this->addressFile))->rows()); // ang 3 linya ay 2 ang magkaiba
+    }
+
     public function test_S_135_36_a_held_live_order_is_written_to_macro_output_as_to_fix_so_validate_cannot_make_it_proceed(): void
     {
         $earlier = $this->earlier();

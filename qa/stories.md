@@ -2125,3 +2125,4 @@ Tests: `tests/Feature/OrderEncode/{RulesTest,NotesBuildTest,NotesUseTest,NotesPa
 | S-135.50 | Given stored inputs of an earlier test, then the backtest re-encodes them into `backtest-<time>` and reports orders, PROCEED, correct, wrong, pending, blank address for Likha and the sheet, after the Validate rules | `BacktestTest::test_S_135_50…` | passed 2026-10-24 |
 | S-135.51 | Given no `tmp_sheet_out`, then the sheet column is skipped; `--limit` cuts the run | `test_S_135_51…` | passed 2026-10-24 |
 | S-135.52 | Given no stored inputs, then it says so; a run reads no Google sheet | `test_S_135_52…` | passed 2026-10-24 |
+| S-135.60 | Given a J&T list that repeats a line (San Isidro (POB.), Antipolo), then it counts once: one candidate, no MULTIPLE SUGGESTED ADDRESS and no GPT fix, in both rule modes | `RulesTest::test_S_135_60…` | passed 2026-10-24 |

@@ -72,12 +72,15 @@ class LocationList
         if ((self::$memo[$path][0] ?? null) === $mtime) return self::$memo[$path];
 
         $rows = [];
+        $seen = [];
         foreach (preg_split('/\r\n|\n|\r/', (string) file_get_contents($path)) as $line) {
             $line = trim($line);
             if ($line === '') continue;
             $p = explode('|', $line);
             if (count($p) < 3) continue;
-            $rows[] = [trim($p[0]), trim($p[1]), trim($p[2])];
+            $row = [trim($p[0]), trim($p[1]), trim($p[2])];
+            // Magkaparehong linya = isa lang (ang LocationData ng sheet ay walang doble); ang una ang nananatili sa pwesto nito.
+            $seen[implode('|', $row)] ??= $rows[] = $row;
         }
 
         return self::$memo[$path] = [$mtime, $rows, null, null, null];

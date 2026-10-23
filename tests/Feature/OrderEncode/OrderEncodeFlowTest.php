@@ -57,6 +57,7 @@ class OrderEncodeFlowTest extends OrderEncodeTestCase
     public function test_S_130_1_a_shadow_page_queues_one_encode_after_the_row_is_written_and_the_flow_is_unchanged(): void
     {
         Queue::fake();
+        \Carbon\Carbon::setTestNow('2026-10-23 10:15:00'); // ang {{current_date}} ng flow ay ang oras ngayon
         $this->configurePage('shadow');
 
         $with = $this->go($this->outbox());
@@ -73,6 +74,7 @@ class OrderEncodeFlowTest extends OrderEncodeTestCase
         $this->assertSame(array_column($without->path, 'node'), array_column($with->path, 'node'));
         $this->assertSame(array_column($without->sheetRows, 'status'), array_column($with->sheetRows, 'status'));
         Queue::assertPushed(EncodeOrder::class, 1);
+        \Carbon\Carbon::setTestNow();
     }
 
     public function test_S_130_2_a_page_with_encode_off_or_a_test_run_queues_nothing(): void
