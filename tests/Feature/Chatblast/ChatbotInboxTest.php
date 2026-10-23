@@ -30,6 +30,7 @@ class ChatbotInboxTest extends ChatblastTestCase
             'database/migrations/2026_10_22_100000_widen_source_on_botcake_psids.php',
             'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
             'database/migrations/2026_10_24_100000_add_inbox_indexes.php',
+            'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
         ]]);
         $this->page('Page Uno', '1001');
         $this->page('Page Dos', '2002');
@@ -226,6 +227,54 @@ class ChatbotInboxTest extends ChatblastTestCase
         $indexes = fn (string $t) => array_map(fn ($i) => $i['columns'], Schema::getIndexes($t));
         $this->assertContains(['page_id', 'psid', 'id'], $indexes('botcake_chats'));
         $this->assertContains(['page_id', 'psid', 'id'], $indexes('chatbot_replies'));
+    }
+
+    private function ev(string $psid, string $type, string $at): void
+    {
+        DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => (int) $psid, 'type' => $type, 'detail' => '{}', 'created_at' => $at]);
+    }
+
+    private function field(string $psid, string $key, string $value): void
+    {
+        DB::table('chatbot_customer_values')->insert(['page_id' => 1001, 'psid' => (int) $psid, 'key' => $key, 'value' => $value, 'updated_at' => now()]);
+    }
+
+    public function test_S_126_1_status_filter_returns_the_right_customers_with_matching_counts(): void
+    {
+        foreach (['8001' => 'Ana', '8002' => 'Ben', '8003' => 'Cai', '8004' => 'Dee', '8005' => 'Eli', '8006' => 'Fay'] as $psid => $n) $this->in($psid, 'hi', '2026-10-19 10:00:0' . substr($psid, -1), '1001', $n);
+        $this->ev('8001', 'order', '2026-10-19 09:00:00');
+        $this->ev('8002', 'order', '2026-10-01 09:00:00');                       // order labas ng window: hindi Ordered
+        $this->field('8001', 'chat status', 'LOOP 1');
+        $this->field('8002', 'chat status', 'loop  2');
+        $this->field('8003', 'chat status', 'Loop3');
+        $this->field('8001', 'gpt phone number', '0917');                         // may order: wala sa Phone
+        $this->field('8004', 'gpt phone number', '0918');
+        $this->field('8005', 'gpt phone number', '  ');                           // blangko: wala
+        $this->out('8003', [['type' => 'text', 'text' => 'x']], '2026-10-19 10:30:00', 'failed', 'no');
+        $this->out('8003', [['type' => 'text', 'text' => 'y']], '2026-10-19 10:40:00', 'sent');
+        $this->out('8003', [['type' => 'text', 'text' => 'z']], '2026-10-19 10:50:00', 'failed', 'no');  // huli ay failed
+        $this->out('8004', [['type' => 'text', 'text' => 'x']], '2026-10-19 10:30:00', 'failed', 'no');
+        $this->out('8004', [['type' => 'text', 'text' => 'y']], '2026-10-19 10:40:00', 'sent');            // may sumunod na sent: hindi failed
+        $this->actingAs($this->user());
+
+        $get = fn (string $qs) => $this->getJson('/chatbot/inbox/conversations?page_id=1001&' . $qs)->assertOk()->json();
+        $psids = fn (array $r) => collect($r['rows'])->pluck('psid')->sort()->values()->all();
+        $this->assertSame(['8001'], $psids($get('status=ordered')));
+        $this->assertSame(['8001'], $psids($get('status=loop1')));
+        $this->assertSame(['8002'], $psids($get('status=loop2')));
+        $this->assertSame(['8003'], $psids($get('status=loop3')));
+        $this->assertSame(['8003'], $psids($get('status=failed')));
+        $this->assertSame(['8004'], $psids($get('status=phone')));
+        $this->assertCount(6, $get('status=')['rows']);
+        $this->assertSame(['ordered' => 1, 'loop1' => 1, 'loop2' => 1, 'loop3' => 1, 'failed' => 1, 'phone' => 1], $get('status=ordered')['counts']);
+
+        // Kasama ang tab at hanap: bumababa ang listahan at ang bilang.
+        $this->field('8004', '__bot_paused', '1');
+        $this->assertSame(['8004'], $psids($get('status=phone&tab=human')));
+        $this->assertSame([], $psids($get('status=phone&tab=bot')));
+        $this->assertSame(0, $get('tab=bot')['counts']['phone']);
+        $this->assertSame([], $psids($get('status=phone&q=Ana')));
+        $this->assertSame(['8001'], $psids($get('status=ordered&q=8001')));
     }
 
     /** @return array<int, array{query: string}> ang mga query sa botcake_chats at chatbot_replies */

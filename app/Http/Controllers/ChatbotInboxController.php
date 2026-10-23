@@ -100,7 +100,9 @@ class ChatbotInboxController extends Controller
         $window = array_key_exists($this->str($request, 'window', 5), Inbox::WINDOWS) ? $this->str($request, 'window', 5) : '7d';
         $tab = in_array($this->str($request, 'tab', 10), ['bot', 'human'], true) ? $this->str($request, 'tab', 10) : '';
 
-        return response()->json(['rows' => $this->inbox->conversations($pageId, $window, $this->str($request, 'q', 100), $tab)]);
+        $status = in_array($this->str($request, 'status', 10), Inbox::STATUSES, true) ? $this->str($request, 'status', 10) : '';
+
+        return response()->json($this->inbox->listWithCounts($pageId, $window, $this->str($request, 'q', 100), $tab, $status));
     }
 
     public function thread(Request $request)

@@ -58,6 +58,13 @@
                         <option value="24h">24h</option><option value="7d" selected>7d</option><option value="30d">30d</option>
                     </select>
                 </div>
+                <div class="flex items-center gap-2">
+                    <label class="sr-only" for="ib-status">Status</label>
+                    <select id="ib-status" class="w-full rounded-md border border-slate-300 px-1 py-1 text-sm">
+                        <option value="">All</option><option value="ordered">Ordered</option><option value="loop1">Loop 1</option><option value="loop2">Loop 2</option>
+                        <option value="loop3">Loop 3</option><option value="failed">Reply failed</option><option value="phone">Phone, no order</option>
+                    </select>
+                </div>
                 <div class="flex gap-1 text-xs" role="tablist" aria-label="Who answers">
                     <button type="button" role="tab" data-tab="" class="ib-tab rounded-md px-2 py-1" aria-selected="true">All</button>
                     <button type="button" role="tab" data-tab="human" class="ib-tab rounded-md px-2 py-1" aria-selected="false">Human</button>
@@ -190,7 +197,8 @@
     async function loadList() {
         if (!S.page) return;
         try {
-            const data = await getJson(D.listUrl, {page_id: S.page, window: $('ib-window').value, tab: S.tab, q: $('ib-q').value.trim()});
+            const data = await getJson(D.listUrl, {page_id: S.page, window: $('ib-window').value, tab: S.tab, status: $('ib-status').value, q: $('ib-q').value.trim()});
+            paintCounts(data.counts || {});
             const rows = data.rows.map(r => {
                 const li = el('li', {}, el('button', {type: 'button', class: 'flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50' + (r.psid === S.psid ? ' bg-blue-50' : ''), 'aria-current': r.psid === S.psid ? 'true' : null}, [
                     el('span', {class: 'mt-1.5 h-2 w-2 shrink-0 rounded-full ' + (r.waiting ? 'bg-blue-600' : 'bg-transparent'), title: r.waiting ? 'Waiting for an answer' : null}, r.waiting ? el('span', {class: 'sr-only', text: 'Unanswered'}) : null),
@@ -211,6 +219,8 @@
     const reloadList = () => { clearTimeout(listTimer); listTimer = setTimeout(loadList, 250); };
     $('ib-q').addEventListener('input', reloadList);
     $('ib-window').addEventListener('change', loadList);
+    $('ib-status').addEventListener('change', loadList);
+    function paintCounts(c) { root.querySelectorAll('#ib-status option').forEach(o => { if (!o.value) return; o.dataset.label ??= o.textContent; o.textContent = o.dataset.label + ' (' + (c[o.value] ?? 0) + ')'; }); }
     root.querySelectorAll('.ib-tab').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; paintTabs(); loadList(); }));
     function paintTabs() { root.querySelectorAll('.ib-tab').forEach(b => { const on = b.dataset.tab === S.tab; b.setAttribute('aria-selected', on ? 'true' : 'false'); b.className = 'ib-tab rounded-md px-2 py-1 ' + (on ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'); }); }
 
