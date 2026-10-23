@@ -8,6 +8,18 @@
     <style>
       [x-cloak]{display:none!important}
       th, td { vertical-align: middle; }
+      /* Pivot: sariling scroll box sa loob ng screen, kaya laging kita ang horizontal scroll;
+         nakapirmi ang header, Totals, Item Name at Total habang nag-i-scroll. */
+      .hold-scroll { max-height: calc(100vh - 150px); overflow: auto; border: 1px solid #e5e7eb; border-radius: .5rem; }
+      .hold-scroll table { border-collapse: separate; border-spacing: 0; }
+      .hold-scroll thead { position: sticky; top: 0; z-index: 3; }
+      .hold-scroll tfoot { position: sticky; bottom: 0; z-index: 3; }
+      .hold-scroll thead th, .hold-scroll tfoot th { background: #f9fafb; }
+      .hold-scroll tbody td { background: inherit; }
+      .hold-scroll .hold-c1 { position: sticky; left: 0; z-index: 2; width: 220px; min-width: 220px; max-width: 220px; }
+      .hold-scroll .hold-c2 { position: sticky; left: 220px; z-index: 2; min-width: 72px; box-shadow: inset -1px 0 0 #d1d5db; }
+      .hold-scroll thead .hold-c1, .hold-scroll thead .hold-c2, .hold-scroll tfoot .hold-c1, .hold-scroll tfoot .hold-c2 { z-index: 4; }
+      .hold-scroll tbody tr:hover td { background: #eef2ff; }
     </style>
   @endonce
 
@@ -94,7 +106,7 @@
 
   @if($perDate)
     <!-- PIVOT TABLE -->
-    <div class="bg-white rounded-xl shadow p-4 overflow-auto">
+    <div class="bg-white rounded-xl shadow p-4">
       <div class="flex justify-end mb-2">
         <button type="button" id="copyBtn" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50">
           Copy table
@@ -107,16 +119,17 @@
         @else By Item Name (Hold Count) — Per Date @endif
       </div>
 
+      <div class="hold-scroll">
       <table id="holdTable" class="min-w-full text-sm">
         <thead>
           <tr class="bg-gray-50">
-            <th class="text-left p-2 border-b align-bottom hold-sortable" data-sort-col="label" rowspan="2" style="position: sticky; left: 0; background: #f9fafb; cursor:pointer; user-select:none;">
+            <th class="hold-c1 text-left p-2 border-b align-bottom hold-sortable" data-sort-col="label" rowspan="2" style="cursor:pointer; user-select:none;">
               @if($group === 'item') Item
               @elseif($group === 'page') Page
               @else Item Name @endif
               <span class="hold-sort-indicator" style="font-size:10px;color:#94a3b8;"></span>
             </th>
-            <th class="text-right p-2 border-b align-bottom hold-sortable" data-sort-col="total" rowspan="2" style="cursor:pointer; user-select:none;">
+            <th class="hold-c2 text-right p-2 border-b align-bottom hold-sortable" data-sort-col="total" rowspan="2" style="cursor:pointer; user-select:none;">
               Total
               <span class="hold-sort-indicator" style="font-size:10px;color:#94a3b8;"></span>
             </th>
@@ -146,8 +159,8 @@
                 data-label="{{ $rowLabel }}"
                 data-total="{{ $rowTotal }}"
                 data-recent="{{ $rowRecent }}">
-              <td class="p-2 border-b" style="position: sticky; left: 0; background: white;">{{ $rowLabel }}</td>
-              <td class="p-2 border-b text-right font-semibold">{{ number_format($rowTotal) }}</td>
+              <td class="hold-c1 p-2 border-b">{{ $rowLabel }}</td>
+              <td class="hold-c2 p-2 border-b text-right font-semibold">{{ number_format($rowTotal) }}</td>
               @foreach($dateKeys as $dk)
                 @php $v = isset($row['dates'][$dk]) ? (int)$row['dates'][$dk] : 0; @endphp
                 <td class="p-2 border-b text-right">{{ $v ? number_format($v) : '' }}</td>
@@ -161,8 +174,8 @@
 
         <tfoot class="bg-gray-50">
           <tr>
-            <th class="text-left p-2 border-t" style="position: sticky; left: 0; background: #f9fafb;">Totals</th>
-            <th class="text-right p-2 border-t">{{ number_format($grandTotal ?? 0) }}</th>
+            <th class="hold-c1 text-left p-2 border-t">Totals</th>
+            <th class="hold-c2 text-right p-2 border-t">{{ number_format($grandTotal ?? 0) }}</th>
             @foreach($dateKeys as $dk)
               @php $cv = (int)($colTotals[$dk] ?? 0); @endphp
               <th class="text-right p-2 border-t">{{ $cv ? number_format($cv) : '' }}</th>
@@ -171,6 +184,7 @@
           </tr>
         </tfoot>
       </table>
+      </div>
       <div class="text-xs text-gray-500 mt-2">
         Within {{ $lookbackDays }} day(s) as of <strong>{{ $asOfDateStr }}</strong>.
       </div>
@@ -190,19 +204,20 @@
         @else By Item Name (Hold Count) @endif
       </div>
 
-      <table id="holdTable" class="min-w-full text-sm">
+      <div class="hold-scroll" style="display:inline-block; max-width:100%;">
+      <table id="holdTable" class="text-sm">
         <thead class="bg-gray-50">
           <tr>
-            <th class="text-left p-2 border-b">
+            <th class="text-left p-2 border-b" style="min-width:260px;">
               @if($group === 'item') Item
               @elseif($group === 'page') Page
               @else Item Name @endif
             </th>
-            <th class="text-right p-2 border-b">
+            <th class="text-right p-2 border-b" style="min-width:110px;">
               @if($group === 'item') Needed Units
               @else Hold Count @endif
             </th>
-            <th class="text-right p-2 border-b">Within {{ $lookbackDays }}d</th>
+            <th class="text-right p-2 border-b" style="min-width:110px;">Within {{ $lookbackDays }}d</th>
           </tr>
         </thead>
         <tbody>
@@ -241,6 +256,7 @@
           @endif
         </tbody>
       </table>
+      </div>
       <div class="text-xs text-gray-500 mt-2">
         Within {{ $lookbackDays }} day(s) as of <strong>{{ $asOfDateStr }}</strong>.
       </div>
