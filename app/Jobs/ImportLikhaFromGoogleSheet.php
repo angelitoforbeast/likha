@@ -40,6 +40,8 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
     public function __construct(int $runId)
     {
         $this->runId = $runId;
+        // Sariling worker ang mga import ng orders (Likha at Macro): sunud-sunod, hindi kasabay ng ibang trabaho.
+        $this->onConnection('database')->onQueue('orders');
     }
 
     public function handle()

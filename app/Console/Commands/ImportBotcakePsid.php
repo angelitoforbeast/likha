@@ -27,7 +27,7 @@ class ImportBotcakePsid extends Command
         dispatch(
             (new ImportBotcakePsidFromGoogleSheet(null, $run->id, $clean))
                 ->onConnection('database')
-                ->onQueue('default')
+                ->onQueue('psid')
         );
 
         $this->info("PSID import queued (run #{$run->id}).");

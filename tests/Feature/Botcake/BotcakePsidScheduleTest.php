@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 namespace Tests\Feature\Botcake;
 
@@ -38,7 +38,7 @@ class BotcakePsidScheduleTest extends BotcakePsidTestCase
 
         $run = BotcakePsidImportRun::sole();
         $this->assertSame('running', $run->status);
-        Queue::assertPushedOn('default', ImportBotcakePsidFromGoogleSheet::class, function ($job) use ($run) {
+        Queue::assertPushedOn('psid', ImportBotcakePsidFromGoogleSheet::class, function ($job) use ($run) {
             $p = (fn () => [$this->runId, $this->cleanSheet, $this->cutoffDateTime])->call($job);
             return $p === [$run->id, true, null];
         });
