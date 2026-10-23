@@ -31,9 +31,14 @@ class AddressQuestion
             if (!$row || trim((string) $row->STATUS) !== '') return;
             if ($this->settings->spotAstra()) {
                 $o->update(['input' => array_merge((array) $o->input, ['astra' => ['status' => 'queued']])]);
-                RunSpotAstra::dispatch($o->id);
+                try {
+                    RunSpotAstra::dispatch($o->id);
 
-                return;
+                    return;
+                } catch (Throwable $e) {
+                    report($e); // hindi na-queue si Astra: ang tanong ay hindi naiiwang nakabitin
+                    $o->update(['input' => array_merge((array) $o->input, ['astra' => ['status' => 'not_queued']])]);
+                }
             }
             $this->ask($o, null);
         } catch (Throwable $e) {

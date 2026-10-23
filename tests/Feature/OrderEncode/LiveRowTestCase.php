@@ -27,6 +27,8 @@ abstract class LiveRowTestCase extends EncodeRunTestCase
             'database/migrations/2026_10_26_100000_create_chatbot_sequence_tables.php',
             'database/migrations/2026_06_23_120000_create_ai_checker_logs_table.php',
             'database/migrations/2026_06_23_130000_widen_ai_checker_logs_final_code.php',
+            // ang detail columns din: ang AiCheckerRowRunner ay nagta-cache (static) kung naroon ang mga ito, para sa buong proseso ng test
+            'database/migrations/2026_09_26_210000_add_detail_columns_to_ai_checker_logs.php',
         ]]);
         Schema::table('macro_output', function (Blueprint $t) {
             foreach (['edited_full_name', 'edited_address', 'edited_province', 'edited_city', 'edited_barangay', 'edited_item_name', 'edited_cod'] as $c) $t->boolean($c)->default(false);

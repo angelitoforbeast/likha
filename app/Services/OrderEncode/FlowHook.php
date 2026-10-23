@@ -3,6 +3,7 @@
 namespace App\Services\OrderEncode;
 
 use App\Jobs\EncodeOrder;
+use App\Models\MacroOutput;
 use App\Models\OrderEncode;
 use App\Services\Chatbot\FlowRun;
 use Illuminate\Support\Facades\Log;
@@ -78,12 +79,30 @@ class FlowHook
         }
     }
 
-    /** Naisulat na ba sa sheet ang order ng customer na ito sa huling 24 oras? Isang sheet row lang kada customer kada araw. */
+    /**
+     * Naisulat na ba sa sheet ang order na tatamaan ng takbong ito? Oo kapag ang customer ay may naisulat nang order na naka-queue pa
+     * (double tap), o naka-link sa bukas na row niya, o sa final na row niya ngayong araw (hindi tatanggapin ang order). Ang bagong row
+     * (kinabukasan, pagkatapos ng CANNOT PROCEED) ay may sariling sheet row at fallback.
+     */
     public function sheetDone(FlowRun $run): bool
     {
         try {
-            return OrderEncode::where('mode', 'live')->where('page', $run->pageName)->where('psid', (int) $run->fields->psid)->where('created_at', '>=', now()->subDay())
-                ->orderByDesc('id')->limit(20)->get(['input'])->contains(fn (OrderEncode $o) => !empty($o->input['sheet_written']));
+            $today = now('Asia/Manila')->toDateString();
+            $written = OrderEncode::where('mode', 'live')->where('page', $run->pageName)->where('psid', (int) $run->fields->psid)->where('created_at', '>=', now()->subDays(2))
+                ->orderByDesc('id')->limit(20)->get(['id', 'status', 'macro_output_id', 'input'])->filter(fn (OrderEncode $o) => !empty($o->input['sheet_written']));
+            foreach ($written as $o) {
+                if (!$o->macro_output_id) {
+                    if ($o->status === 'queued') return true;
+                    continue;
+                }
+                $row = MacroOutput::find($o->macro_output_id);
+                if (!$row) continue;
+                $status = strtoupper(trim((string) $row->STATUS));
+                if ($status === '' && trim((string) $row->waybill) === '') return true;
+                if ($status !== 'CANNOT PROCEED' && substr((string) $row->ts_date, 0, 10) === $today) return true;
+            }
+
+            return false;
         } catch (Throwable $e) {
             report($e);
 
@@ -142,7 +161,7 @@ class FlowHook
             $attrs = ['spreadsheet_id' => $sheetId, 'tab' => $tab, 'row_number' => $number];
             $values = [
                 'page' => $run->pageName, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'run_id' => $run->runId,
-                'mode' => $mode, 'status' => 'queued', 'input' => ['row' => array_values($row)],
+                'mode' => $mode, 'status' => 'queued', 'input' => ['row' => array_values($row)] + ($mode === 'live' ? ['page_id' => $run->pageId] : []),
             ];
             // Shadow: ang parehong row ng sheet ay isang beses lang. Live: bawat takbo ng step ay sariling order.
             $order = $number === null ? OrderEncode::create($attrs + $values) : OrderEncode::firstOrCreate($attrs, $values);

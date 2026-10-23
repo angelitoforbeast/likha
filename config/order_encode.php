@@ -12,10 +12,10 @@ return [
     'compare_give_up_hours' => 48,
     // Ilang oras bago sabihing "sheet never finished" sa paghahambing sa final na order (macro_output).
     'final_give_up_hours' => 72,
-    // Live (spec 136): ilang segundo hinihintay ng encode ang naunang encode ng parehong customer bago ulitin ng queue ang job.
-    'customer_lock_wait' => 300,
+    // Live: ilang segundo hinihintay ng encode ang naunang encode ng parehong customer bago ulitin ng queue ang job.
+    'customer_lock_wait' => 240,
     // Ilang segundo hinihintay ng encode ang Astra (o ang night run) na may hawak ng row bago ito isulat.
-    'row_lock_wait' => 300,
+    'row_lock_wait' => 180,
     // Ang night run: ilang segundo hinihintay ang Astra on the spot sa row bago ito laktawan ("Row busy").
     'night_row_lock_wait' => 200,
 ];

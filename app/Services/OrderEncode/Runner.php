@@ -35,7 +35,7 @@ class Runner
         }
         // Ang dalawang takbo ng isang customer (double tap, dalawang worker) ay hindi sabay: ang ikalawa ay naghihintay at
         // nakikita ang row ng una. Lampas sa hintay: ang job ay inuulit ng queue.
-        Cache::lock(self::customerKey($o), self::CUSTOMER_LOCK_SECONDS)->block((int) config('order_encode.customer_lock_wait', 300), fn () => $this->live($o));
+        Cache::lock(self::customerKey($o), self::CUSTOMER_LOCK_SECONDS)->block((int) config('order_encode.customer_lock_wait', 240), fn () => $this->live($o));
     }
 
     public static function customerKey(OrderEncode $o): string
@@ -62,9 +62,15 @@ class Runner
         if (!$this->encode($o, $in)) return;
 
         $o->refresh();
+        // Ang re-encode na huminto sa gitna (error ng encoder) ay hindi isinusulat: ang row ay nananatili gaya ng dati.
+        if (!empty($o->input['linked']) && $o->error) {
+            $this->fail($o, 'The encode stopped: ' . $o->error);
+
+            return;
+        }
         if (!empty($o->input['linked'])) {
             $id = (int) $o->macro_output_id;
-            $updated = RowLock::hold($id, (int) config('order_encode.row_lock_wait', 300), fn () => ($row = MacroOutput::find($id)) && $this->live->update($row, $o));
+            $updated = RowLock::hold($id, (int) config('order_encode.row_lock_wait', 180), fn () => ($row = MacroOutput::find($id)) && $this->live->update($row, $o));
             if (!$updated) $this->note($o, 'row ' . $id . ' got a status meanwhile: not changed');
         } else {
             $this->live->create($o);

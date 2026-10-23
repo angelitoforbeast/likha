@@ -105,7 +105,8 @@ class LiveOrder
         foreach (self::UPDATABLE as $col => $flag) {
             $new = $v[$col];
             $old = $row->{$col};
-            if ((string) $new === (string) $old) continue;
+            // Ang blangkong sagot (hal. GPT timeout) ay hindi nagbubura ng may lamang column.
+            if ((string) $new === (string) $old || (trim((string) $new) === '' && trim((string) $old) !== '')) continue;
             if (($flag && !empty($row->{$flag})) || in_array($col, $staff, true)) {
                 if (in_array($col, self::PLACES, true)) $keptPlace = true;
                 continue;

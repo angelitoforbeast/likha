@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Cache;
  */
 final class RowLock
 {
-    /** Ang pinakamatagal na may hawak: ang Astra job (timeout 540 s). Ang lock ng namatay na worker ay nawawala pagkalipas nito. */
-    public const SECONDS = 900;
+    /** Ang pinakamatagal na may hawak: ang Astra job (timeout 540 s) at ang encode (600 s). Ang lock ng namatay na worker ay nawawala pagkalipas nito. */
+    public const SECONDS = 600;
 
     public static function key(int $id): string
     {

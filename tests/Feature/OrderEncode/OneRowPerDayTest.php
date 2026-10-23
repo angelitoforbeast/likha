@@ -180,6 +180,19 @@ class OneRowPerDayTest extends LiveRowTestCase
         $this->assertStringNotContainsString('|Likha encode|BARANGAY|', $m->{'HISTORICAL LOGS'});
     }
 
+    public function test_S_136_42_a_re_encode_whose_gpt_answers_come_back_blank_never_blanks_the_row(): void
+    {
+        $row = $this->existing(['ADDRESS' => 'Blk 9 Lot 1 Purok 2', 'PROVINCE' => 'METRO-MANILA']);
+        \Illuminate\Support\Facades\Http::swap(new \Illuminate\Http\Client\Factory(app('events')));
+        \Illuminate\Support\Facades\Http::fake(['api.openai.com/v1/chat/completions' => \Illuminate\Support\Facades\Http::response(Fixtures::chat('')),
+            'api.openai.com/v1/responses' => \Illuminate\Support\Facades\Http::response(Fixtures::responses('{}'))]);
+
+        $o = $this->liveOrder($this->details());
+
+        $this->assertSame($row->id, $o->macro_output_id);
+        $this->assertSame(['Blk 9 Lot 1 Purok 2', 'METRO-MANILA'], [$row->fresh()->ADDRESS, $row->fresh()->PROVINCE]);
+    }
+
     public function test_S_136_41_a_failed_first_encode_writes_the_fallback_sheet_and_no_row(): void
     {
         @unlink($this->addressFile);
