@@ -10,10 +10,12 @@ use App\Services\Chatbot\ChatbotTags;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\Inbox;
+use App\Services\Chatbot\InboxFilters;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -102,7 +104,24 @@ class ChatbotInboxController extends Controller
 
         $status = in_array($this->str($request, 'status', 10), Inbox::STATUSES, true) ? $this->str($request, 'status', 10) : '';
 
-        return response()->json($this->inbox->listWithCounts($pageId, $window, $this->str($request, 'q', 100), $tab, $status));
+        try {
+            $conditions = InboxFilters::parse($request->query('conditions'));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json($this->inbox->listWithCounts($pageId, $window, $this->str($request, 'q', 100), $tab, $status, $conditions));
+    }
+
+    /** Ang mga customer field ng page para sa filter builder (key at pangalang ipapakita), walang panloob na key (__). */
+    public function fieldKeys(Request $request)
+    {
+        $this->checkAccess();
+        [$pageId] = $this->target($request, false);
+        $keys = Cache::remember('chatbot.inbox.field-keys.' . $pageId, 60, fn () => DB::table('chatbot_customer_values')->where('page_id', (int) $pageId)
+            ->distinct()->limit(400)->pluck('key')->filter(fn ($k) => !str_starts_with((string) $k, '__'))->sort()->values()->all());
+
+        return response()->json(['keys' => array_map(fn ($k) => ['key' => $k, 'label' => mb_strtoupper($k)], $keys)]);
     }
 
     public function thread(Request $request)

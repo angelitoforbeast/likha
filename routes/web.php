@@ -318,6 +318,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/chats/customer', [ChatblastChatController::class, 'customer'])->name('chats.customer');
     Route::get('/inbox', [\App\Http\Controllers\ChatbotInboxController::class, 'index'])->name('inbox');
     Route::get('/inbox/conversations', [\App\Http\Controllers\ChatbotInboxController::class, 'conversations'])->middleware('throttle:120,1,chatbot-inbox-list')->name('inbox.conversations');
+    Route::get('/inbox/field-keys', [\App\Http\Controllers\ChatbotInboxController::class, 'fieldKeys'])->middleware('throttle:60,1,chatbot-inbox-fields')->name('inbox.field-keys');
     Route::get('/inbox/thread', [\App\Http\Controllers\ChatbotInboxController::class, 'thread'])->middleware('throttle:240,1,chatbot-inbox-thread')->name('inbox.thread');
     Route::get('/inbox/panel', [\App\Http\Controllers\ChatbotInboxController::class, 'panel'])->middleware('throttle:120,1,chatbot-inbox-panel')->name('inbox.panel');
     Route::post('/inbox/send', [\App\Http\Controllers\ChatbotInboxController::class, 'send'])->middleware('throttle:30,1,chatbot-inbox-send')->name('inbox.send');
