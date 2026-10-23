@@ -1022,3 +1022,5 @@ Accepted, not fixed:
 - **The models are shown read-only but there is no screen to change them** (`app_settings` keys only). Reason: no settings screen exists for them in 130; adding one is a new feature.
 - **The step prefill looks only at the Sheet step "All Orders" of the same flow**, not at other flows of the page. Reason: the builder has no cross-flow data; the fields stay editable.
 - **A concurrent double run of the same step (two workers, same run id) could pass the "already queued" check together.** Reason: runs of one customer are serial; the macro_output dedupe still stops a second order row.
+- **"Continue without saving" when the encode could not even be queued still counts as an order if "Counts as an order" is ticked** (the step leaves on `next`). Reason: the customer did order; the warning is in the run path and the event is `not_saved`.
+- **`order_encodes` has no index on `run_id`/`flow_id`** for the "already queued" check. Reason: the check is also narrowed by `psid`; an index needs a migration, which this spec does not have.

@@ -787,6 +787,7 @@
         const cols = Array.isArray(s.config.columns) ? s.config.columns : [];
         ENCODE_FIELDS.forEach(([k], i) => c[k] = cols[i] || '');
         c.sheet = s.config.sheet || ''; c.tab = s.config.tab || '';
+        if (s.config.counts_order) c.counts_order = true; // Results ay patuloy na nagbibilang kapag ito ang pumalit sa Sheet step
     }
     function encodeForm(c, body) {
         body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.'}));

@@ -69,7 +69,8 @@ class FlowHook
     public function hasNode(FlowRun $run, string $nodeId): bool
     {
         try {
-            return $run->runId !== null && OrderEncode::where('mode', 'live')->where('run_id', $run->runId)->where('flow_id', $run->flowId)->where('input->node', $nodeId)->exists();
+            return $run->runId !== null && OrderEncode::where('mode', 'live')->where('psid', (int) $run->fields->psid)->where('run_id', $run->runId)->where('flow_id', $run->flowId)
+                ->where('input->node', $nodeId)->exists(); // ang psid: ang run id ay 8 hex lang, hindi dapat magkabanggaan ang dalawang customer
         } catch (Throwable $e) {
             report($e);
 
@@ -94,7 +95,12 @@ class FlowHook
                 'spreadsheet_id' => $sheetId, 'tab' => $tab, 'row_number' => null, 'mode' => 'live', 'status' => 'queued',
                 'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten],
             ]);
-            EncodeOrder::dispatch($order->id);
+            try {
+                EncodeOrder::dispatch($order->id);
+            } catch (Throwable $e) {
+                $order->update(['status' => 'failed', 'error' => 'The encode could not be queued.']); // walang naiwang queued na hindi tatakbo kailanman
+                throw $e;
+            }
 
             return true;
         } catch (Throwable $e) {

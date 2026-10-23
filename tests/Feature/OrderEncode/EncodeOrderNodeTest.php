@@ -323,6 +323,8 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
 
         Queue::assertNothingPushed();
         $this->assertSame(['n1', 'n2', 'n3'], array_column($run->path, 'node'));
+        $this->assertSame(0, $outbox->appends);
+        $this->assertSame(0, OrderEncode::count());
     }
 
     public function test_S_132_12_the_order_event_is_the_same_as_for_a_sheet_step_order(): void
@@ -386,5 +388,50 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         // lahat ng mode = hindi lumalabas ang sobrang filter na value
         $this->actingAs($ceo)->get('/order-encode?mode=nonsense')->assertOk()->assertSee('row 77', false);
         Carbon::setTestNow();
+    }
+
+    public function test_S_132_15_another_customer_with_the_same_run_id_is_a_new_order(): void
+    {
+        Queue::fake();
+        $this->go($this->config(), $this->outbox(), false, 'abcd1234');
+        $run = new FlowRun(5, $this->graph($this->config()), self::PAGE, '1001', [], new CustomerFields(1001, 7002), 14, 'hi po', 'Ben Reyes', '2026-10-23 10:16', false);
+        $run->runId = 'abcd1234'; // ang 8-hex na run id ay maaaring magkapareho ng luma
+
+        app(FlowEngine::class)->run($run, $this->outbox());
+
+        $this->assertSame([self::PSID, 7002], OrderEncode::orderBy('id')->pluck('psid')->all());
+        Queue::assertPushed(EncodeOrder::class, 2);
+    }
+
+    public function test_S_132_16_without_a_key_the_order_goes_to_the_fallback_sheet_and_no_row_is_left_behind(): void
+    {
+        Queue::fake();
+        config(['services.openai.order_encode_key' => '']);
+        $outbox = $this->outbox();
+
+        $run = $this->go($this->config(['sheet' => self::ORDERS]), $outbox);
+
+        $this->assertSame(1, $outbox->appends);
+        $this->assertSame('n3', end($run->path)['node']);
+        $this->assertSame(0, OrderEncode::count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_S_132_17_when_the_dispatch_throws_the_row_is_marked_failed_and_the_sheet_gets_the_row_once(): void
+    {
+        $this->mock(\Illuminate\Contracts\Bus\Dispatcher::class, fn ($m) => $m->shouldReceive('dispatch')->andThrow(new \RuntimeException('queue is down')));
+        $outbox = $this->outbox();
+
+        $run = $this->go($this->config(['sheet' => self::ORDERS]), $outbox);
+
+        $this->assertSame(1, $outbox->appends);
+        $this->assertSame('n3', end($run->path)['node']);
+        $this->assertSame('failed', OrderEncode::sole()->status);
+    }
+
+    public function test_S_132_18_the_page_settings_say_to_use_the_step_instead_of_live(): void
+    {
+        $this->actingAs($this->user('CEO'))->get('/chatblast/page-settings')->assertOk()
+            ->assertSee('Use the Encode order step in the flow instead of live.');
     }
 }

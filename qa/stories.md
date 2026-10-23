@@ -2040,3 +2040,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-132.12 | Given "Counts as an order", then the `order` event is the same as for a Sheet step (once per customer per 24 hours) and absent when not ticked | `test_S_132_12…` | pending |
 | S-132.13 | Given a graph with only the old steps, then it is cleaned and its ports are exactly as before | `test_S_132_13…` | pending |
 | S-132.14 | Given `/order-encode`, then the Mode filter shows shadow (default) or live orders, and a live order links to its `macro_output` row | `test_S_132_14…` | pending |
+| S-132.15 | Given two customers whose runs happen to share a run id, then each gets its own order (the "already queued" check includes the customer) | `test_S_132_15…` | pending |
+| S-132.16 | Given no OpenAI key (or no address file), the order goes to the fallback sheet and no `order_encodes` row is left | `test_S_132_16…` | pending |
+| S-132.17 | Given the queue refuses the job, the row is marked failed (not left queued) and the sheet gets the row once | `test_S_132_17…` | pending |
+| S-132.18 | The Page settings cell of `order_encode.mode` tells the owner to use the Encode order step instead of live | `test_S_132_18…` | pending |

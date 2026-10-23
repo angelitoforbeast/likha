@@ -180,7 +180,7 @@ class FlowGraph
     }
 
     /**
-     * Ang skip_after ng isang wait:{amount, unit} kapag may amount na 1 o higit pa, null kapag wala (walang key sa
+     * Ang skip_after ng isang wait: {amount, unit} kapag may amount na 1 o higit pa, null kapag wala (walang key sa
      * config, kaya ang lumang graph ay hindi nagbabago). Lampas sa 23 oras: InvalidArgumentException.
      */
     private static function cleanSkip(mixed $v): ?array

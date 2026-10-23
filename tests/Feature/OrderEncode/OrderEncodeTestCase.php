@@ -52,6 +52,8 @@ abstract class OrderEncodeTestCase extends ChatblastTestCase
     protected function tearDown(): void
     {
         @unlink($this->addressFile);
+        // Ang "handa na ang tags" ay naka-cache kada app object id; ang susunod na test na may kaparehong id ay hindi dapat magmana nito.
+        (new \ReflectionProperty(\App\Services\Chatbot\ChatbotTags::class, 'ready'))->setValue(null, []);
         parent::tearDown();
     }
 
