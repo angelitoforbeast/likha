@@ -119,7 +119,11 @@ class Rules
         if (trim($text) === '') return [];
         $chosen = Written::brgy($barangay);
         $cityKey = Written::city($city, $province);
-        $skip = fn (string $k) => $k === '' || mb_strlen($k) < 4 || preg_match('/^(\d+|[ivxlc]+)$/u', $k) || $k === $cityKey || $k === Written::prov($province);
+        // Ang mga salitang bahagi na ng napiling lugar ("davao" sa Davao del Sur, "princesa" sa Puerto Princesa) at ang mga
+        // pangkaraniwang salita (poblacion, zone, purok) ay hindi binibilang na ibang lugar (2026-10-24, ikaapat na test).
+        $own = ' ' . self::words($province . ' ' . str_replace('-', ' ', $city) . ' ' . $barangay) . ' ';
+        $skip = fn (string $k) => $k === '' || mb_strlen($k) < 4 || preg_match('/^(\d+|[ivxlc]+)$/u', $k) || $k === $cityKey || $k === Written::prov($province)
+            || str_contains($own, ' ' . $k . ' ') || preg_match('/^(poblacion|zone|purok|sitio|district|dist|proper|centro|ilaya|ibaba)\b/u', $k);
 
         $longer = null;
         $others = [];
