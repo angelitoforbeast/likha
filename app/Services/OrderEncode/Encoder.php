@@ -106,7 +106,7 @@ final class Encoder
         if ($this->rules) {
             // R2 at R4: ang ✅ ay hold kapag iba ang province sa isinulat o ang kombinasyon ay wala sa J&T file.
             $hold = $outputs['proceed'] ? $this->rules->checkFinal($db['E'], $db['F'], $db['G']) : null;
-            if ($final === 'Province' && ($why = $this->rules->provinceContradiction($db['E'])) !== null) $hold = ['rule' => 'R2', 'reason' => $why]; // ang checker ay hindi ginawang ✅
+            if ($final === 'Province' && !$this->rules->noteHit && ($why = $this->rules->provinceContradiction($db['E'])) !== null) $hold = ['rule' => 'R2', 'reason' => $why]; // ang checker ay hindi ginawang ✅
             if ($hold) {
                 $outputs['proceed'] = false;
                 $this->steps->add('rule_hold', 'HOLD:' . $hold['rule'], ['rule' => $hold['rule'], 'reason' => $hold['reason']]);

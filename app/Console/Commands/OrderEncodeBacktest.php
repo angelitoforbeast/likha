@@ -77,7 +77,7 @@ class OrderEncodeBacktest extends Command
 
         foreach (OrderEncode::whereIn('id', $ids)->orderBy('id')->cursor() as $o) {
             $final = $macro[$o->macro_output_id] ?? null;
-            if ($o->status !== 'done') {
+            if ($o->status !== 'done' || $o->outputs === null) {
                 $failed++;
                 continue;
             }

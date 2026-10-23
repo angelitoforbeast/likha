@@ -106,6 +106,7 @@ class OrderEncodeNotesController extends Controller
     {
         $this->checkAccess();
         $request->validate(['scope' => ['required', 'in:selected,filtered'], 'ids' => ['nullable', 'array', 'max:500'], 'ids.*' => ['integer']]);
+        if ($request->input('scope') === 'filtered' && !$this->filters($request)) return back()->withErrors(['bulk' => 'Choose a filter first.']);
         $query = $request->input('scope') === 'selected'
             ? AddressNote::query()->whereIn('id', array_map('intval', (array) $request->input('ids')))
             : NoteFilter::query($this->filters($request));

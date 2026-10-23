@@ -120,6 +120,16 @@ class NotesPageTest extends FinalTestCase
         $this->as()->get('/order-encode/notes?delivered=3')->assertSee('Approve all 0 pending'); // ang bilang sa button
     }
 
+    public function test_S_135_48_a_percent_in_the_search_is_literal_and_a_filtered_bulk_needs_a_filter(): void
+    {
+        $this->note('Lahug');
+        $this->note('Banilad');
+
+        $this->assertSame([], $this->as()->get('/order-encode/notes?status=all&q=%25')->viewData('notes')->pluck('id')->all());
+        $this->as()->post('/order-encode/notes/bulk', ['scope' => 'filtered'])->assertSessionHasErrors('bulk');
+        $this->assertSame(0, AddressNote::where('status', 'approved')->count());
+    }
+
     public function test_S_135_45_text_from_customers_is_escaped(): void
     {
         $this->note('Lahug', ['written_example' => 'Brgy: <script>alert(1)</script> | City: <img src=x onerror=1>', 'review_note' => '<b>bold</b>']);

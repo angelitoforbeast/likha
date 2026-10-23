@@ -81,6 +81,15 @@ class NotesUseTest extends EncodeRunTestCase
         $this->assertSame('R4', $o->outputs['hold']['rule']);
     }
 
+    public function test_S_135_37_a_note_hit_is_not_held_by_the_written_province_but_still_by_r4(): void
+    {
+        $this->note(['province' => 'LA UNION', 'city' => '', 'barangay' => 'BUNGAD'], ['METRO-MANILA', 'QUEZON-CITY', 'BUNGAD']);
+
+        $o = $this->runOrder($this->cxd('La Union', '', 'Bungad'), self::bungadRows(), $this->gptAnswers());
+
+        $this->assertSame([true, true, null], [$o->outputs['note_hit'], $o->outputs['proceed'], $o->outputs['hold']]);
+    }
+
     public function test_S_135_33_at_most_five_closest_approved_notes_go_to_the_gpt_prompts_as_past_corrections(): void
     {
         // pitong approved na note na may parehong isinulat na province; ang dalawa ay mas malapit (parehong city)

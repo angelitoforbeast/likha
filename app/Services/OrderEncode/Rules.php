@@ -111,7 +111,8 @@ class Rules
     /** @return array{rule: string, reason: string}|null ang unang hold sa R2 at R4 para sa huling E/F/G */
     public function checkFinal(string $province, string $city, string $barangay): ?array
     {
-        if (($why = $this->provinceContradiction($province)) !== null) return ['rule' => 'R2', 'reason' => $why];
+        // Tumama ang note: ang approved na sagot ay ang pagtatama sa isinulat na province, kaya R4 lang.
+        if (!$this->noteHit && ($why = $this->provinceContradiction($province)) !== null) return ['rule' => 'R2', 'reason' => $why];
         if (($why = $this->combinationProblem($province, $city, $barangay)) !== null) return ['rule' => 'R4', 'reason' => $why];
 
         return null;

@@ -21,9 +21,9 @@ final class NoteFilter
     {
         $text = Text::lower(Text::jsTrim((string) ($f['q'] ?? '')));
         if ($text !== '') {
-            $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $text) . '%';
+            $like ='%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $text) . '%'; // ! ang escape: pareho sa MySQL, PostgreSQL at SQLite
             $q->where(function ($w) use ($like) {
-                foreach (['written_key', 'written_example', 'province', 'city', 'barangay'] as $col) $w->orWhereRaw('LOWER(' . $col . ') LIKE ?', [$like]);
+                foreach (['written_key', 'written_example', 'province', 'city', 'barangay'] as $col) $w->orWhereRaw('LOWER(' . $col . ") LIKE ? ESCAPE '!'", [$like]);
             });
         }
         if (in_array($f['status'] ?? '', self::STATUSES, true)) $q->where('status', $f['status']);
