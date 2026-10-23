@@ -2432,6 +2432,7 @@ class OwnerPrivateController extends Controller
             // ending at $endDate (inclusive). 1D = end_date strictly.
             // Strict — if a window has no slice for this page+item, the % is null.
             $projProfitLastDay   = null; $grossSalesLastDay   = 0.0; $ordersLastDay   = 0; $procOrdersLastDay   = 0;
+            $projProfitLastDayMira = null;   // Prof 1D (Mira): PROF(1D) na Mira RTS ang gamit sa halip na Set RTS
             $projProfitLastDayM  = null;   // PROF(1D)-M — end-date slice lang, ProfitDayM formula
             $projProfitLast3Day  = null; $grossSalesLast3Day  = 0.0; $ordersLast3Day  = 0; $procOrdersLast3Day  = 0;
             $projProfitLast7Day  = null; $grossSalesLast7Day  = 0.0; $ordersLast7Day  = 0; $procOrdersLast7Day  = 0;
@@ -2484,6 +2485,7 @@ class OwnerPrivateController extends Controller
                 $sumProfitMira = 0.0;
                 $anyPrice  = false;
                 $sumProfitLastDay  = 0.0; $anyPriceLastDay  = false;
+                $sumProfitLastDayMira = 0.0;
                 $sumProfitLast3Day = 0.0; $anyPriceLast3Day = false;
                 $sumProfitLast7Day = 0.0; $anyPriceLast7Day = false;
                 foreach ($includedDatesArr as $d => $slice) {
@@ -2532,6 +2534,7 @@ class OwnerPrivateController extends Controller
                         $sumProfit -= $adsDay;
                         $sumProfitMira -= $adsDay;
                         if ($isLastDay) $sumProfitLastDay  -= $adsDay;
+                        if ($isLastDay) $sumProfitLastDayMira -= $adsDay;
                         if ($inLast3D)  $sumProfitLast3Day -= $adsDay;
                         if ($inLast7D)  $sumProfitLast7Day -= $adsDay;
                         continue;
@@ -2560,12 +2563,14 @@ class OwnerPrivateController extends Controller
                     $sumProfit += $sliceProfit;
                     if ($miraRts !== null) {
                         $deliverFactorM = 1.0 - $miraRts / 100.0;
-                        $sumProfitMira +=
+                        $sliceProfitMira =
                             $proceedDay * $pDay * $deliverFactorM
                             - $proceedDay * $dayShip
                             - $proceedDay * $deliverFactorM * $dayCost
                             - $adsDay
                             - $proceedDay * $deliverFactorM * $codFeeDay;
+                        $sumProfitMira += $sliceProfitMira;
+                        if ($isLastDay) $sumProfitLastDayMira += $sliceProfitMira;
                     }
                     $anyPrice = true;
                     if ($isLastDay) { $anyPriceLastDay  = true; $sumProfitLastDay  += $sliceProfit; }
@@ -2578,6 +2583,7 @@ class OwnerPrivateController extends Controller
                     if ($miraRts !== null) $projProfitMira = $sumProfitMira;
                 }
                 if ($anyPriceLastDay)  $projProfitLastDay  = $sumProfitLastDay;
+                if ($anyPriceLastDay && $miraRts !== null) $projProfitLastDayMira = $sumProfitLastDayMira;
                 if ($anyPriceLast3Day) $projProfitLast3Day = $sumProfitLast3Day;
                 if ($anyPriceLast7Day) $projProfitLast7Day = $sumProfitLast7Day;
             }
@@ -2639,6 +2645,15 @@ class OwnerPrivateController extends Controller
                             - $pdAdspent                                              // adspent
                             - $projectedProceedPd * $deliverFactor * $codFeeDay;     // COD fee
                         $grossSalesLastDay = $pdModeCod * $pdOrders;
+                        // Mira: parehong projection, Mira RTS ang deliver factor.
+                        $deliverFactorMira = $miraRts !== null ? 1.0 - $miraRts / 100.0 : null;
+                        $projProfitLastDayMira = $deliverFactorMira !== null ? (
+                            $projectedProceedPd * $pdModeCod * $deliverFactorMira
+                            - $projectedProceedPd * $shippingFee
+                            - $projectedProceedPd * $deliverFactorMira * $itemValue
+                            - $pdAdspent
+                            - $projectedProceedPd * $deliverFactorMira * $codFeeDay
+                        ) : null;
                         // -M: parehong projection; SF_M as-of end_date (gaya ng $shippingFee).
                         $projProfitLastDayM = ProfitDayM::compute(
                             $projectedProceedPd, $pdModeCod, $rtsPct, $itemValue, $pdAdspent,
@@ -2647,6 +2662,7 @@ class OwnerPrivateController extends Controller
                     } else {
                         // Missing inputs — null out profit projection but keep orders display
                         $projProfitLastDay = null;
+                        $projProfitLastDayMira = null;
                         $projProfitLastDayM = null;
                         $grossSalesLastDay = $pdModeCod > 0 ? $pdModeCod * $pdOrders : 0.0;
                     }
@@ -2656,6 +2672,7 @@ class OwnerPrivateController extends Controller
                     $ordersLastDay     = 0;
                     $procOrdersLastDay = 0;
                     $projProfitLastDay = null;
+                    $projProfitLastDayMira = null;
                     $projProfitLastDayM = null;
                     $grossSalesLastDay = 0.0;
                 }
@@ -2710,6 +2727,7 @@ class OwnerPrivateController extends Controller
                 'projected_profit_last_day' => $projProfitLastDay,
                 // PROF(1D)-M — same day, stricter rules (App\Support\ProfitDayM).
                 'projected_profit_last_day_m' => $projProfitLastDayM,
+                'projected_profit_last_day_mira' => $projProfitLastDayMira,
                 'proj_pct_last_day'         => $projPctLastDay,
                 'orders_last_day'           => $ordersLastDay,
                 'proceed_last_day'          => $procOrdersLastDay,

@@ -94,6 +94,42 @@ class ProjectedRtsCellTest extends RtsProjectionTestCase
         $this->assertEqualsWithDelta(30.0, $a['rts_pct'], 0.001);   // Set RTS% at ang profit niya ay hindi nagbago
     }
 
+    public function test_prof_1d_mira_is_prof_1d_computed_with_the_mira_rts(): void
+    {
+        $this->page('Pahina Alpha', 30);
+        $this->page('Pahina Beta', 55.1);   // Set RTS = Mira RTS ng Alpha
+
+        $rows = $this->rows();
+        $a = $rows['pahina alpha'];
+        $b = $rows['pahina beta'];
+
+        $this->assertNotNull($a['projected_profit_last_day']);
+        $this->assertNotNull($a['projected_profit_last_day_mira']);
+        $this->assertNotEquals($a['projected_profit_last_day'], $a['projected_profit_last_day_mira']);
+        $this->assertLessThan($a['projected_profit_last_day'], $a['projected_profit_last_day_mira']);   // mas mataas ang RTS = mas mababa ang kita
+        $this->assertEqualsWithDelta($b['projected_profit_last_day'], $a['projected_profit_last_day_mira'], 0.01);
+        $this->assertEqualsWithDelta($b['projected_profit_last_day'], $b['projected_profit_last_day_mira'], 0.01);   // Mira = Set → pareho
+    }
+
+    public function test_prof_1d_mira_is_null_without_a_mira_rts(): void
+    {
+        $this->page('Pahina Gamma', 30, 20);
+        DB::table('from_jnts')->delete();   // walang J&T = walang projection
+
+        $this->assertNull($this->rows()['pahina gamma']['projected_profit_last_day_mira']);
+    }
+
+    public function test_page_renders_the_prof_1d_mira_column(): void
+    {
+        $html = $this->actingAs($this->user())->get('/owner/private')->assertOk()->getContent();
+
+        foreach (["id:'proj_prof_1d_mira'", "label:'Prof 1D (Mira)'", "pbStyleN(row.projected_profit_last_day_mira,1)",
+            'tot().projected_profit_last_day_mira'] as $needle) {
+            $this->assertStringContainsString($needle, $html, $needle);
+        }
+        $this->assertContains('proj_prof_1d_mira', array_column(\App\Http\Controllers\OwnerColumnSettingsController::CATALOG['owner_private'], 'id'));
+        $this->assertContains('proj_prof_1d_mira', \App\Http\Controllers\OwnerColumnSettingsController::DEFAULT_VISIBLE['owner_private']);
+    }
     public function test_use_mira_rts_saves_into_set_rts_with_a_log_row(): void
     {
         $this->page('Pahina Alpha', 30);
