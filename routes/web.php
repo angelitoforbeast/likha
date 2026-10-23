@@ -694,6 +694,9 @@ Route::post('/item/cogs/delete', [ItemCogsController::class, 'delete'])->name('i
 Route::post('/item/cogs/clean-redundant', [ItemCogsController::class, 'cleanRedundant'])->name('item.cogs.clean-redundant'); // bulk-delete redundant anchors (same value as prior inheritance) sa visible month
 
 Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('owner.private');
+
+// Order encode (spec 130): ang encode ng Likha laban sa DATABASE row ng Google Sheet. Parehong access ng /owner/private; read-only.
+Route::middleware(['web', 'auth'])->get('/order-encode', [\App\Http\Controllers\OrderEncodeController::class, 'index'])->name('order-encode.index');
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
 // Delivery status kada campaign / ad set / ad para sa expand (CEO + Marketing-OIC + Marketing, read-only).
 Route::get('/owner/private/ad-delivery', [OwnerPrivateController::class, 'adDelivery'])->name('owner.private.ad-delivery');
