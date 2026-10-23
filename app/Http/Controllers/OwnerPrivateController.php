@@ -184,6 +184,24 @@ class OwnerPrivateController extends Controller
         }
     }
 
+    /**
+     * Projected RTS% bawat page+item (order ng huling 21 araw). Best effort: kapag pumalya o wala pang J&T table,
+     * [] — hindi dapat masira ang page.
+     */
+    protected function projectedRtsRows(): array
+    {
+        if (!Schema::hasTable('from_jnts') || !Schema::hasTable('macro_output')) return [];
+
+        try {
+            $today = now('Asia/Manila');
+
+            return (new \App\Services\RtsProjection())->rows($today->copy()->subDays(21)->toDateString(), $today->toDateString());
+        } catch (\Throwable $e) {
+            \Log::warning('projectedRtsRows failed: '.$e->getMessage());
+            return [];
+        }
+    }
+
     /** Current version sentinel (lazy-init kung blank pa). */
     private function cacheVersion(): string
     {
@@ -1801,6 +1819,7 @@ class OwnerPrivateController extends Controller
         // on hosts with zero mappings, canonical == raw normalized key → unchanged.
         $aliases = new \App\Services\ItemAliasResolver();
         $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
+        $rtsProj = $this->projectedRtsRows();
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
@@ -2360,6 +2379,7 @@ class OwnerPrivateController extends Controller
             // rts_pct can be NULL (promo-only saves walang RTS pa) — preserve null
             // para sa profit calc downstream (null → no profit shown, hindi 0%).
             $rtsPct          = ($settings && $settings['rts_pct'] !== null) ? (float)$settings['rts_pct'] : null;
+            $proj            = $rtsProj[$pk.'||'.$dominantKey] ?? null;
             $rtsComment      = $settings ? $settings['comment'] : null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
@@ -2709,6 +2729,11 @@ class OwnerPrivateController extends Controller
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
                 'has_settings'          => $settings !== null,
                 'rts_comment'           => $rtsComment,
+                // Projected RTS% (order ng huling 21 araw, kasama ang nasa biyahe pa) katabi ng Set RTS%; display lang.
+                'projected_rts_pct'         => $proj['projected_rts'] ?? null,
+                'projected_rts_orders'      => $proj['matched'] ?? null,
+                'projected_rts_transit_pct' => $proj['in_transit_pct'] ?? null,
+                'projected_rts_flag'        => (bool) ($proj['flag'] ?? false),
                 'rts_set_by'            => ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null,
                 'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,
                 'promo'                 => $settings ? ($settings['promo'] ?: null) : null,

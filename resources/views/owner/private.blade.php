@@ -1044,6 +1044,12 @@
                         <template x-if="row.rts_pct === null">
                           <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
                         </template>
+                        <!-- Projected RTS% (kasama ang nasa biyahe pa); pula kapag lampas 5 puntos sa Set RTS% at ≥30 order -->
+                        <template x-if="row.projected_rts_pct != null">
+                          <div :title="'Projected RTS: '+row.projected_rts_orders+' orders, '+Number(row.projected_rts_transit_pct).toFixed(0)+'% still in transit'"
+                               :style="'font-size:10px;margin-top:2px;'+(row.projected_rts_flag?'color:#b91c1c;font-weight:700;background:#fee2e2;border-radius:3px;padding:0 3px;':'color:#475569;')"
+                               x-text="'Proj. '+Number(row.projected_rts_pct).toFixed(1)+'%'"></div>
+                        </template>
                       </div>
                       <button type="button" class="cell-edit-icon" @click="openEditModal(row, 'rts')"
                               title="Edit RTS%">✎</button>
@@ -2502,7 +2508,8 @@
       owTip(colId, row){
         const L = [];
         if (colId === 'rts_set') {
-          if (row.rts_pct === null || row.rts_pct === undefined) return null;
+          if (row.projected_rts_pct != null) L.push('Projected RTS ' + Number(row.projected_rts_pct).toFixed(1) + '% (' + row.projected_rts_orders + ' orders, ' + Number(row.projected_rts_transit_pct).toFixed(0) + '% still in transit)');
+          if (row.rts_pct === null || row.rts_pct === undefined) return L.length ? L.join('\n') : null;
           if (row.settings_date) L.push('from ' + row.settings_date);
           if (row.rts_comment)   L.push('💬 ' + row.rts_comment);
           if (row.rts_set_by)    L.push('Set by ' + row.rts_set_by);
