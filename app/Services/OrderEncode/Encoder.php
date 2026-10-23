@@ -60,7 +60,7 @@ final class Encoder
 
             // STEP 6: Macro
             $this->rules?->begin($parts);
-            $m = $this->macro->run($cell['M'], $cell['N'], $cell['O'], $this->rules?->prefer());
+            $m = $this->macro->run($cell['M'], $cell['N'], $cell['O'], null); // R3 (unahin ang isinulat sa unang candidate) ay tinanggal: nalilito kapag napagpalit ang mga field
             $this->steps->add('macro', $m === null ? 'SKIP:NO_PLACE' : 'OK', $m === null ? [] : [
                 'p1' => $m['p1'], 'points' => $m['points'], 'candidates' => $m['candidates'], 'remark' => $m['remark'], 'icon' => $m['icon']]);
             $m ??= ['remark' => '', 'icon' => '', 'province' => '', 'city' => '', 'barangay' => ''];
