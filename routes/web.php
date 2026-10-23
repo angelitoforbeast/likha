@@ -700,6 +700,12 @@ Route::middleware(['web', 'auth'])->get('/order-encode', [\App\Http\Controllers\
 // Ang lahat ng page (galing sa Likha import) laban sa final na order; ang tatlong setting ng import shadow ay CEO lang.
 Route::middleware(['web', 'auth'])->get('/order-encode/final', [\App\Http\Controllers\OrderEncodeFinalController::class, 'index'])->name('order-encode.final');
 Route::middleware(['web', 'auth'])->post('/order-encode/import-settings', [\App\Http\Controllers\OrderEncodeFinalController::class, 'save'])->name('order-encode.import-settings');
+// Ang natutunang address ng encoder (address_notes): CEO lang. Hanapin, aprubahan, tanggihan, palitan ang sagot, bulk approve.
+Route::middleware(['web', 'auth'])->get('/order-encode/notes', [\App\Http\Controllers\OrderEncodeNotesController::class, 'index'])->name('order-encode.notes');
+Route::middleware(['web', 'auth'])->post('/order-encode/notes/bulk', [\App\Http\Controllers\OrderEncodeNotesController::class, 'bulk'])->name('order-encode.notes.bulk');
+Route::middleware(['web', 'auth'])->post('/order-encode/notes/{note}/approve', [\App\Http\Controllers\OrderEncodeNotesController::class, 'approve'])->name('order-encode.notes.approve');
+Route::middleware(['web', 'auth'])->post('/order-encode/notes/{note}/reject', [\App\Http\Controllers\OrderEncodeNotesController::class, 'reject'])->name('order-encode.notes.reject');
+Route::middleware(['web', 'auth'])->post('/order-encode/notes/{note}/edit', [\App\Http\Controllers\OrderEncodeNotesController::class, 'edit'])->name('order-encode.notes.edit');
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
 // Delivery status kada campaign / ad set / ad para sa expand (CEO + Marketing-OIC + Marketing, read-only).
 Route::get('/owner/private/ad-delivery', [OwnerPrivateController::class, 'adDelivery'])->name('owner.private.ad-delivery');
