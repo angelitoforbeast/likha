@@ -51,6 +51,19 @@ class AmbiguityRuleTest extends TestCase
         $this->assertSame(['hold' => 'Another city of the province is also in the chat: INDANAN'], $r);
     }
 
+    public function test_words_that_are_part_of_the_chosen_place_or_common_words_do_not_hold(): void
+    {
+        $rules = new Rules(new Locations([
+            ['DAVAO-DEL-SUR', 'DIGOS-CITY', 'ZONE 1 (POB.)'], ['DAVAO-DEL-SUR', 'DIGOS-CITY', 'SAN JOSE (BALUTAKAY)'], ['DAVAO-DEL-SUR', 'DAVAO-CITY', 'AGDAO'],
+            ['PALAWAN', 'PUERTO-PRINCESA-CITY', 'PRINCESA'], ['PALAWAN', 'PUERTO-PRINCESA-CITY', 'SAN PEDRO'],
+        ], true));
+
+        // "Davao del Sur" ay hindi ang Davao City; ang "Zone 1" ay purok/zone, hindi barangay na tinutukoy.
+        $this->assertSame([], $rules->ambiguity('DAVAO-DEL-SUR', 'DIGOS-CITY', 'SAN JOSE (BALUTAKAY)', 'zone 1 san jose digos city davao del sur'));
+        // "Princesa" ay bahagi ng Puerto Princesa City.
+        $this->assertSame([], $rules->ambiguity('PALAWAN', 'PUERTO-PRINCESA-CITY', 'SAN PEDRO', 'brgy san pedro puerto princesa city palawan'));
+    }
+
     public function test_a_loose_written_province_does_not_hold_but_a_real_contradiction_does(): void
     {
         $rules = $this->rules();
