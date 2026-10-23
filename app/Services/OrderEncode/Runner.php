@@ -21,7 +21,7 @@ class Runner
     /** Ang lock ng customer: mas mahaba sa timeout ng job (600 s), para hindi ito mawala habang tumatakbo ang encode. */
     public const CUSTOMER_LOCK_SECONDS = 660;
 
-    public function __construct(private Settings $settings, private LocationList $list, private Sheets $sheets, private LiveOrder $live)
+    public function __construct(private Settings $settings, private LocationList $list, private Sheets $sheets, private LiveOrder $live, private Conversation $conversation)
     {
     }
 
@@ -58,6 +58,7 @@ class Runner
             // Ang bukas na row ng customer: naka-link bago ang encode, kaya hindi ito binibilang ng R5 at hindi ito nadodoble ng fallback.
             if (isset($found['open'])) $o->update(['macro_output_id' => $found['open']->id, 'input' => array_merge((array) $o->input, ['linked' => true])]);
         }
+        $in = $this->conversation->build($o, $in); // ang mga mensahe ng order na ito lang (at ang orihinal na order kapag sagot)
         if (!$this->encode($o, $in)) return;
 
         $o->refresh();

@@ -70,6 +70,7 @@ Review: `skeptic-reviewer` (standard depth) on the whole diff after G5; fix loop
 
 - G0: brief and plan committed.
 - G1 done: customer lock, find (final / open / new), update with staff edits kept, not-accepted note, R5 after the link, re-encode failure without sheet. `OneRowPerDayTest` 23 green; S-130.16 test amended (the second order now meets a PROCEED row).
+- G2 done: `Conversation` builds the text per order (lines after the previous run of the customer; a linked run adds to the row's earlier conversation; extracted details merged; input cut to 8,000 characters). `ConversationTest` 4 green; OrderEncode suite 296 green.
 
 ## Files
 
