@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Pancake;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class RetrieveOrdersController extends Controller
 {
@@ -43,12 +44,22 @@ class RetrieveOrdersController extends Controller
         $existing = [];
         $pages    = [];
         $shops    = [];
+        $matched  = [];
 
-        foreach ($rows as $row) {
+        // Ang linya na 10-25 digits ay PSID din: tugma sa botcake_psid ng order (bukod sa fb_name na rule).
+        $psids = Schema::hasColumn('macro_output', 'botcake_psid')
+            ? array_values(array_unique(array_filter(array_map('trim', $senders), fn ($s) => preg_match('/^\d{10,25}$/', $s) === 1)))
+            : [];
+        $psidRows = $psids
+            ? DB::table('macro_output')->select('botcake_psid as fb_name', 'PAGE', 'SHOP DETAILS')->whereIn('botcake_psid', $psids)->get()
+            : collect();
+
+        foreach ($rows->map(fn ($r) => [$r, 'name'])->concat($psidRows->map(fn ($r) => [$r, 'psid'])) as [$row, $how]) {
             $name = $row->fb_name;
 
-            // mark as existing
+            // mark as existing, at kung paano tumugma (PSID ang nananaig)
             $existing[$name] = true;
+            $matched[$name]  = ($matched[$name] ?? null) === 'psid' ? 'psid' : $how;
 
             if (!isset($pages[$name])) {
                 $pages[$name] = [];
@@ -73,6 +84,7 @@ class RetrieveOrdersController extends Controller
             'existing' => array_keys($existing),
             'pages'    => $pages,
             'shops'    => $shops,
+            'matched'  => $matched,
         ]);
     }
 }

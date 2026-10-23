@@ -92,6 +92,10 @@
       white-space: pre-wrap;
       line-height: 1.25rem;
     }
+    .pancake-match {
+      font-size: 0.7rem;
+      color: #6b7280; /* gray-500 */
+    }
     .see-more-link {
       display: inline-block;
       margin-top: .25rem;
@@ -656,11 +660,13 @@
               data-city='@json($record->city_tokens ?? [])'
               data-prov='@json($record->prov_tokens ?? [])'
               data-fbname="{{ $record->fb_name ?? '' }}"
+              data-orderid="{{ $record->id }}"
             >
               <span class="all-user-input-text">{{ $record['all_user_input'] }}</span>
 
               {{-- ✅ Pancake extra area (filled by JS) --}}
               <div class="pancake-extra hidden"></div>
+              <div class="pancake-match hidden"></div>
 
               {{-- ✅ See more link (only if exists in pancake_conversations) --}}
               @if(!empty($record->has_pancake))
@@ -1115,6 +1121,7 @@
     // ✅ Pancake: See more loader (customers_chat only, NOT appended)
     async function loadPancakeMore(cell, linkEl) {
       const fbName = (cell.dataset.fbname || '').trim();
+      const orderId = parseInt(cell.dataset.orderid || '', 10);
 
       // ✅ load once guard (NEW FLAG)
       if (cell.dataset.pancakeLoaded === '1') {
@@ -1133,7 +1140,8 @@
             'X-CSRF-TOKEN': getCsrfToken(),
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ fb_name: fbName })
+          // Order id ang ipinapadala: ang server ang kumukuha ng page, pangalan at PSID ng order.
+          body: JSON.stringify(orderId ? { id: orderId } : { fb_name: fbName })
         });
 
         const data = await res.json();
@@ -1145,6 +1153,13 @@
         if (extraDiv) {
           extraDiv.classList.remove('hidden');
           extraDiv.textContent = chatOnly; // ✅ ONLY customers_chat
+        }
+
+        // Maliit na grey label kung paano tumugma ang chat (textContent, hindi HTML)
+        const matchDiv = cell.querySelector('.pancake-match');
+        if (matchDiv && data && data.found && typeof data.label === 'string') {
+          matchDiv.classList.remove('hidden');
+          matchDiv.textContent = data.label;
         }
 
         // ✅ mark loaded

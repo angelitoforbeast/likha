@@ -527,7 +527,7 @@ SYS;
         if ($webFirst) $system .= self::WEB_FIRST_PROMPT;
 
         $customerForms = AstraAddressRules::customerBlocks((string) $row->CXD);
-        $history       = self::pancakeHistory((string) ($row->fb_name ?? ''));
+        $history       = self::pancakeHistory((string) ($row->fb_name ?? ''), (string) ($row->PAGE ?? ''), (string) ($row->botcake_psid ?? ''));
         $this->lastHistory = $history;
         $this->evidence[] = 'PANCAKE: ' . ($history === '' ? 'walang history' : mb_strlen($history) . ' chars, kasama sa input');
         $prompt = "CHAT (raw customer conversation):\n<<<\n" . $chat . "\n>>>\n\n"
@@ -733,7 +733,7 @@ SYS;
             ];
         }
         if ($name === 'get_chat_history') {
-            $hist = (new MacroChecker())->fetchPancakeChat((string) ($this->row?->fb_name ?? ''));
+            $hist = (new MacroChecker())->fetchPancakeChat((string) ($this->row?->fb_name ?? ''), (string) ($this->row?->PAGE ?? ''), (string) ($this->row?->botcake_psid ?? ''));
             $this->evidence[] = 'PANCAKE: ' . ($hist === '' ? 'walang history' : mb_strlen($hist) . ' chars');
             return ['found' => $hist !== '', 'chat_history' => $hist !== '' ? mb_substr($hist, 0, 12000) : 'No earlier conversation found.'];
         }
@@ -830,13 +830,13 @@ SYS;
         return $new;
     }
 
-    /** Pancake history ng customer (by fb_name). Pinakabago ang mahalaga: kung mahaba, ang HULING 7000 chars ang isasama. */
-    public static function pancakeHistory(string $fbName): string
+    /** Pancake history ng customer (PSID muna, saka page + fb_name, saka fb_name lang). Pinakabago ang mahalaga: kung mahaba, ang HULING 7000 chars ang isasama. */
+    public static function pancakeHistory(string $fbName, ?string $pageName = null, ?string $psid = null): string
     {
         $fbName = trim($fbName);
-        if ($fbName === '') return '';
+        if ($fbName === '' && trim((string) $psid) === '') return '';
         try {
-            $chat = trim((string) (DB::table('pancake_conversations')->where('full_name', $fbName)->orderByDesc('id')->value('customers_chat') ?? ''));
+            $chat = app(PancakeChat::class)->forOrder($pageName, $fbName, $psid)['chat'] ?? '';
         } catch (\Throwable $e) { return ''; }
         return AstraAddressRules::cutHistory($chat);
     }

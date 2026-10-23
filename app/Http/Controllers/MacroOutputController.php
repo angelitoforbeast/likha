@@ -15,6 +15,7 @@ use App\Models\KeywordBlacklist;
 use App\Models\AddressKeywordBlacklist;
 use App\Support\NightStepFilter;
 use App\Support\StaffEvents;
+use App\Services\PancakeChat;
 
 class MacroOutputController extends Controller
 {
@@ -38,38 +39,30 @@ class MacroOutputController extends Controller
         OwnerPrivateController::bumpCacheVersion();
     }
 
-    // ✅ Replace ENTIRE pancakeMore() with this (returns customers_chat ONLY)
+    // Returns customers_chat ONLY, plus kung paano ito tumugma (PSID / page + name / name lang)
     public function pancakeMore(Request $request)
     {
         $request->validate([
-            'fb_name' => 'required|string|max:255',
+            'id'      => 'required_without:fb_name|nullable|integer',
+            'fb_name' => 'required_without:id|nullable|string|max:255',
         ]);
 
-        $fbName = trim((string) $request->fb_name);
-        if ($fbName === '') {
-            return response()->json([
-                'status'  => 'error',
-                'message' => 'fb_name is empty',
-            ], 422);
+        // May order id: ang page, fb_name at PSID ng order ang gamit (galing sa DB, hindi sa client).
+        $pageName = null;
+        $fbName   = trim((string) $request->input('fb_name'));
+        $psid     = null;
+        if ($request->filled('id')) {
+            $order = MacroOutput::query()->find((int) $request->input('id'));
+            if (!$order) {
+                return response()->json(['status' => 'success', 'found' => false, 'text' => '']);
+            }
+            $pageName = (string) $order->PAGE;
+            $fbName   = trim((string) $order->fb_name);
+            $psid     = Schema::hasColumn('macro_output', 'botcake_psid') ? (string) $order->botcake_psid : null;
         }
 
-        // table exists?
-        if (!Schema::hasTable('pancake_conversations')) {
-            return response()->json([
-                'status' => 'success',
-                'found'  => false,
-                'text'   => '',
-            ]);
-        }
-
-        // ✅ exact match: pancake_conversations.full_name = fb_name
-        $row = DB::table('pancake_conversations')
-            ->select('id', 'full_name', 'customers_chat', 'created_at')
-            ->where('full_name', '=', $fbName)
-            ->orderByDesc('id')
-            ->first();
-
-        if (!$row) {
+        $hit = app(PancakeChat::class)->forOrder($pageName, $fbName, $psid);
+        if (!$hit) {
             return response()->json([
                 'status' => 'success',
                 'found'  => false,
@@ -77,7 +70,7 @@ class MacroOutputController extends Controller
             ]);
         }
 
-        $chat = trim((string)($row->customers_chat ?? ''));
+        $chat = $hit['chat'];
 
         // optional cap to protect UI
         $max = 8000;
@@ -89,6 +82,12 @@ class MacroOutputController extends Controller
             'status' => 'success',
             'found'  => true,
             'text'   => $chat, // ✅ customers_chat ONLY
+            'match'  => $hit['match'],
+            'label'  => [
+                PancakeChat::MATCH_PSID      => 'Matched by PSID',
+                PancakeChat::MATCH_PAGE_NAME => 'Matched by page and name',
+                PancakeChat::MATCH_NAME_ONLY => 'Matched by name only — may be another customer',
+            ][$hit['match']],
         ]);
     }
 
@@ -1280,7 +1279,14 @@ class MacroOutputController extends Controller
         $hasPancakeTable = Schema::hasTable('pancake_conversations');
         $FB = $wrap('fb_name');
 
-        $hasPancakeExpr = "CASE WHEN EXISTS (
+        // Dalawang EXISTS (bawat isa ay may sariling index): PSID ng order, o pangalan. Wala nang PSID column
+        // (hindi pa na-migrate) = pangalan lang gaya ng dati.
+        $psidExists = ($hasPancakeTable
+            && Schema::hasColumn('pancake_conversations', 'psid') && Schema::hasColumn('macro_output', 'botcake_psid'))
+            ? "EXISTS (SELECT 1 FROM pancake_conversations pc2 WHERE pc2.psid = " . $wrap('botcake_psid') . ") OR "
+            : "";
+
+        $hasPancakeExpr = "CASE WHEN {$psidExists}EXISTS (
             SELECT 1 FROM pancake_conversations pc
             WHERE pc.full_name = {$FB}
         ) THEN 1 ELSE 0 END";

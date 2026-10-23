@@ -23,7 +23,7 @@
 
     <div class="text-sm text-gray-600">
       Shows rows from <b>pancake_conversations</b> that <b>do NOT</b> exist in <b>macro_output</b>,
-      comparing <b>(pancake_page_name + full_name)</b> vs <b>(PAGE + fb_name)</b>.
+      comparing <b>botcake_psid</b> (kung may PSID ang conversation) o <b>(pancake_page_name + full_name)</b> vs <b>(PAGE + fb_name)</b> (kung wala).
       Matching is <b>trimmed</b> + <b>case-insensitive</b>.
       <br>
       Date filter uses <b>{{ $tz }}</b> day (created_at is converted from UTC).
@@ -117,6 +117,7 @@
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Date Created</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Page</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Full Name</th>
+            <th class="text-left px-3 py-2 border-b whitespace-nowrap">PSID</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Phone Number</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">customers_chat</th>
 <th class="text-left px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS</th>
@@ -130,6 +131,7 @@
               <td class="px-3 py-2 border-b whitespace-nowrap">{{ $r->date_created }}</td>
               <td class="px-3 py-2 border-b whitespace-nowrap">{{ $r->page }}</td>
               <td class="px-3 py-2 border-b whitespace-nowrap">{{ $r->full_name }}</td>
+              <td class="px-3 py-2 border-b whitespace-nowrap font-mono text-xs">{{ $r->psid ?? '—' }}</td>
 
               <td class="px-3 py-2 border-b whitespace-nowrap">
                 @if (!empty($r->phone_number))
@@ -159,7 +161,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="6" class="px-3 py-6 text-center text-gray-500">
+              <td colspan="7" class="px-3 py-6 text-center text-gray-500">
                 No results for the selected range/filters.
               </td>
             </tr>
