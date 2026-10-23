@@ -89,7 +89,7 @@ class FlowHook
         try {
             $today = now('Asia/Manila')->toDateString();
             $written = OrderEncode::where('mode', 'live')->where('page', $run->pageName)->where('psid', (int) $run->fields->psid)->where('created_at', '>=', now()->subDays(2))
-                ->orderByDesc('id')->limit(20)->get(['id', 'status', 'macro_output_id', 'input'])->filter(fn (OrderEncode $o) => !empty($o->input['sheet_written']));
+                ->orderByDesc('id')->limit(20)->get(['id', 'status', 'macro_output_id', 'input', 'created_at'])->filter(fn (OrderEncode $o) => !empty($o->input['sheet_written']));
             foreach ($written as $o) {
                 if (!$o->macro_output_id) {
                     if ($o->status === 'queued') return true;
@@ -98,7 +98,8 @@ class FlowHook
                 $row = MacroOutput::find($o->macro_output_id);
                 if (!$row) continue;
                 $status = strtoupper(trim((string) $row->STATUS));
-                if ($status === '' && trim((string) $row->waybill) === '') return true;
+                // Ang bukas na row ay tatamaan lang sa loob ng 24 oras (gaya ng LiveOrder::find); lampas doon, bagong row at sariling sheet row.
+                if ($status === '' && trim((string) $row->waybill) === '' && $o->created_at?->gte(now()->subDay())) return true;
                 if ($status !== 'CANNOT PROCEED' && substr((string) $row->ts_date, 0, 10) === $today) return true;
             }
 

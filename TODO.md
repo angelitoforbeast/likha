@@ -1049,3 +1049,18 @@ Accepted, not fixed:
 - **Tests were written after the first slice of code (rules R1 to R5) instead of before it**; the sheet-mode assertions inside each test show the old behaviour. Reason: see the result file.
 - **`/chatbot/health` accepts any digit string as `page_id`, and each (page, range) makes a 5-minute cache entry.** Reason: only chatbot roles or the events-key holder can call it, and the JSON route is throttled. Suggestion: check `page_id` against the page map.
 - **Failure reason order is unreachable, window (#10), HTTP 5xx, timeout, other.** Reason: a 5xx whose body contains "(#10)" counts as window; narrow edge.
+
+## 136: one encode row per customer per day (2026-10-24)
+
+Minor review findings, accepted (none is on a new untrusted path, and no page uses the live path yet):
+
+- **A STATUS change by the encode goes into HISTORICAL LOGS** (`time|Likha encode|STATUS||PROCEED`), not `status_logs`. Reason: the spec asks for one HISTORICAL LOGS line per changed field, and `status_logs` feeds the encoder idle report, which must not count the encode as a person. Suggestion for the owner: decide whether the idle report should read a non-person line in `status_logs`.
+- **A PROCEED import row of another person with the same FB name on the same page and day blocks the order ("not accepted").** Reason: the settled decision is to match import rows without a PSID by PAGE + fb_name. Rare, and the note on /order-encode shows the row id.
+- **Lines from "Night run" (or any user other than "Likha encode") in HISTORICAL LOGS count as staff edits for the update**, while Astra's fixes leave no line, so a later re-encode may replace a spot-Astra place with its own. Reason: Astra writes no HISTORICAL LOGS line today, and changing Astra is out of scope. Blank answers never overwrite (fix loop 1).
+- **When staff edited ADDRESS, ITEM_NAME or COD, the kept value can still go PROCEED** (only kept places block PROCEED). Reason: the encode's PROCEED is the address checker's ✅ on province/city/barangay, which those fields don't change; Validate checks item and COD as before.
+- **A staff edit landing between the update's read and its write can lose that edit's HISTORICAL LOGS line** (milliseconds; staff edits don't take `RowLock`). Reason: closing it means changing `MacroOutputController::updateField`, out of scope.
+- **DRY:** `RunSpotAstra::transient` repeats `RunNightAstraRow::classify`'s 429 code list, and the `live_notes` append appears in three classes. Reason: the second copy only; abstract on the third (kit rule).
+- **S-136.38 (P2) is not tested:** a sequence send that fails outside the 24-hour window is recorded by the sequence engine (subscription and chat event), not on the order. Reason: the send happens later in the sequence engine; the order records only the subscribe result.
+- **Untested here because sqlite can't run them:** the cache locks across two real workers (redis/database store), and the MySQL/pgsql `ts_date` trigger next to `LiveOrder` writing `ts_date` itself (same value). Reason: the test DB is sqlite in memory with the array cache.
+- **No test makes the encoder itself stop with an error on a linked re-encode** (the `Runner::live()` branch that sends it to `fail()`); blank GPT answers are tested. Reason: the encoder catches its own errors per step, so a test needs a fake that throws inside `Encoder::run`, which is more test code than the two-line branch warrants. The same `fail()` path is tested by S-136.42.
+- **The page id test of the live Sheet step only checks that the id is stored**; the event and the question that use it are tested on the Encode order step path. Reason: both read the same `input.page_id`.

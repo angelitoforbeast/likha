@@ -322,6 +322,13 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         $this->go($c, $outbox, false, 'aaaa0005');
         $this->assertSame(3, $outbox->appends);
         $this->assertTrue(OrderEncode::orderByDesc('id')->first()->input['sheet_written']);
+
+        // ang bukas na row na lampas 24 oras: bagong row ang order, kaya may sariling sheet row
+        OrderEncode::query()->update(['macro_output_id' => $row->id, 'status' => 'done', 'created_at' => '2026-10-24 06:00:00']); // 30 oras bago
+        $row->update(['STATUS' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-10-25 12:00', 'Asia/Manila'));
+        $this->go($c, $outbox, false, 'aaaa0006');
+        $this->assertSame(4, $outbox->appends);
         Carbon::setTestNow();
     }
 
