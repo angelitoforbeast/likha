@@ -115,6 +115,8 @@ class OrderEncodeFinalController extends Controller
                 'on' => $shadow->on(), 'cap' => $shadow->cap(), 'skip_pages' => $shadow->skipPagesText(), 'encoded_today' => $shadow->encodedToday(),
                 'skipped_cap' => $shadow->skippedToday()['cap'], 'skipped_pages' => $shadow->skippedToday()['pages'], 'cost' => $t['cost'],
                 'can_edit' => $this->getNormalizedRole() === 'CEO', 'rules' => app(Settings::class)->rules(),
+                'spot_astra' => app(Settings::class)->spotAstra(), 'address_sequence' => app(Settings::class)->addressSequence(),
+                'sequences' => \Illuminate\Support\Facades\Schema::hasTable('chatbot_sequences') ? \App\Models\ChatbotSequence::orderBy('name')->get(['id', 'name', 'active']) : collect(),
             ],
             'ruleHolds' => $ruleHolds,
             'filters' => ['from' => $from->toDateString(), 'to' => $to->toDateString(), 'page' => $page, 'sort' => $sort, 'dir' => $dir],
@@ -131,11 +133,16 @@ class OrderEncodeFinalController extends Controller
             'cap' => ['required', 'integer', 'min:0', 'max:100000'],
             'skip_pages' => ['nullable', 'string', 'max:2000'],
             'rules' => ['nullable', 'in:' . implode(',', Settings::RULE_SETS)],
+            'spot_astra' => ['nullable', 'in:on,off'],
+            // ang sequence ng tanong sa address: dapat totoong sequence; blangko = walang tanong
+            'address_sequence' => ['nullable', 'integer', 'exists:chatbot_sequences,id'],
         ]);
         \App\Models\AppSetting::set(ImportShadow::SWITCH, $data['switch']);
         \App\Models\AppSetting::set(ImportShadow::CAP, (string) $data['cap']);
         \App\Models\AppSetting::set(ImportShadow::SKIP_PAGES, trim((string) ($data['skip_pages'] ?? '')));
         if (!empty($data['rules'])) \App\Models\AppSetting::set(Settings::RULES, $data['rules']);
+        if (!empty($data['spot_astra'])) \App\Models\AppSetting::set(Settings::SPOT_ASTRA, $data['spot_astra']);
+        if ($request->has('address_sequence')) \App\Models\AppSetting::set(Settings::ADDRESS_SEQUENCE, (string) ($data['address_sequence'] ?? ''));
 
         return redirect()->route('order-encode.final')->with('status', 'Saved.');
     }

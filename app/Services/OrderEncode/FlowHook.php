@@ -78,6 +78,19 @@ class FlowHook
         }
     }
 
+    /** Naisulat na ba sa sheet ang order ng customer na ito sa huling 24 oras? Isang sheet row lang kada customer kada araw. */
+    public function sheetDone(FlowRun $run): bool
+    {
+        try {
+            return OrderEncode::where('mode', 'live')->where('page', $run->pageName)->where('psid', (int) $run->fields->psid)->where('created_at', '>=', now()->subDay())
+                ->orderByDesc('id')->limit(20)->get(['input'])->contains(fn (OrderEncode $o) => !empty($o->input['sheet_written']));
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
+    }
+
     /**
      * Encode order step: naka-queue ba ang order? Hindi kailangan ang compare_sheet at ang mode ng page; ang kailangan ay ang
      * key at ang address file. $sheetWritten: naisulat na ang row sa sheet (kasabay na sulat), kaya hindi na ito isusulat ng fallback.

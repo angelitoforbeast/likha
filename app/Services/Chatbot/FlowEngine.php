@@ -563,8 +563,10 @@ class FlowEngine
             return ['port' => 'next', 'note' => 'Already encoded in this run'];
         }
 
-        $wrote = $also && $append()['status'] === 'sent';
-        if ($encode->node($run, $id, $instead ? $sheet : FlowHook::NODE_SHEET, $tab, $row, $wrote)) {
+        // Isang sheet row kada customer kada araw: ang sagot o ulit na order ay hindi na isinusulat (pati ng fallback).
+        $done = $also && $encode->sheetDone($run);
+        $wrote = $also && !$done && $append()['status'] === 'sent';
+        if ($encode->node($run, $id, $instead ? $sheet : FlowHook::NODE_SHEET, $tab, $row, $wrote || $done)) {
             BotcakeOutbox::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $id, 'sheet',
                 ['sheet' => $sheet, 'tab' => $tab, 'row' => $row, 'note' => FlowHook::NOTE], 'skipped');
             $log('skipped', null, FlowHook::NOTE);
@@ -574,7 +576,7 @@ class FlowEngine
         }
 
         // Hindi na-queue: ang row ay nasa sheet na, o isusulat doon ("Write to Google Sheet instead"), o sasabihin na hindi nai-save.
-        if ($wrote || ($instead && ($res = $append())['status'] === 'sent')) {
+        if ($wrote || $done || ($instead && ($res = $append())['status'] === 'sent')) {
             $run->event('encode_order', $id, ['result' => 'sheet_instead']);
 
             return ['port' => 'next', 'note' => 'Encode could not be queued: the row was written to the sheet instead'];

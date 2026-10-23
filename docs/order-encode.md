@@ -38,7 +38,7 @@ Global (`app_settings`): `order_encode_model_extract` (default `gpt-4o-mini`), `
 
 **Live** (`mode = live`, built, not switched on): the Sheet step records a sheet reply with status `skipped` and the note
 "encoded in Likha", continues on its normal port, and `EncodeOrder` creates the `macro_output` row the two imports would
-have made (`OrderIdentity` prevents a duplicate). The job is `done` only after that row exists, so a failed write is retried. If the page is
+have made (one row per customer per day, see spec 136 below). The job is `done` only after that row exists, so a failed write is retried. If the page is
 not ready (no `compare_sheet`, no address file, no key), or the encode cannot be queued, or it ends `failed`, the row is
 written to the sheet as before. The `encode` worker must be running before any page goes live.
 
@@ -129,3 +129,49 @@ The backtest of 1,487 orders showed where the copy of the two scripts goes wrong
 - `/order-encode/final` shows the rules switch, the NOTE_HIT and "held by R…" counts, and both on each disagreement.
 
 **Backtest.** `php artisan order-encode:backtest --source-mode=backtest2 [--limit=N]` re-encodes the stored inputs of an earlier test (rows with that mode) under the current rules into a new mode `backtest-<time>` (`tab` = the new mode, so the unique key does not clash), reading the cells A to H as an import row (no Google read). It prints, for Likha and for `tmp_sheet_out` (skipped if the table is missing): orders, PROCEED, correct, wrong, pending and blank address, all after `MacroChecker::validateRow` (the same arguments as the Validate button, phone as 10 digits). Real GPT calls happen only where the OpenAI key is set (the server).
+
+## One row per customer per day, Astra on the spot, the address question (spec 136)
+
+Applies to `live` orders (the Encode order step, and a `live` page's Sheet step). Shadow, import and Test-tab orders are unchanged.
+
+**The customer's row.** A customer is PAGE + PSID (`macro_output.botcake_psid`); an imported row without a PSID matches on PAGE + fb_name
+on the same `ts_date`. Before the encode (and so before R5), `EncodeOrder` looks for the customer's row:
+
+| Row found | What happens |
+|---|---|
+| final on the order's day: STATUS set and not CANNOT PROCEED, or a waybill | **Not accepted.** The row is not touched; the order is `done` with the note "second order not accepted: row <id>" (on `/order-encode`, and an `encode_order` chat event `not_accepted`). No GPT, Astra, sequence or sheet. |
+| open (STATUS blank) with an order time within 24 hours of this one (also across midnight) | **Linked** (`order_encodes.macro_output_id`, `input.linked`) and re-encoded into that row. TIMESTAMP and ts_date stay as they were. |
+| none, or only CANNOT PROCEED rows | A new row; `ts_date` is the day of the order time (cell A, Manila). |
+
+Runs of one customer never run side by side: `EncodeOrder` holds a cache lock per page + PSID (`order_encode.customer_lock_wait`, 300 s, then the
+job retries). R5 skips the customer's own rows and encodes (same page + PSID) and uses the linked row's day.
+
+**What an update changes.** ADDRESS, PROVINCE, CITY, BARANGAY, ITEM_NAME, COD, all_user_input, extracted_details / CXD, AI ANALYZE, APP SCRIPT CHECKER, and
+STATUS to PROCEED when the encode PROCEEDs, in one UPDATE that only applies while STATUS is blank. A field with its `edited_*` flag or a person's line in
+HISTORICAL LOGS is kept (and then no PROCEED for a place the encode did not check). Each changed field gets one HISTORICAL LOGS line `time|Likha encode|FIELD|old|new`;
+the Checker 1 summary and `order-encode:notes-build` skip the user "Likha encode". A failed re-encode leaves the row as it was, writes no sheet row and ends
+`failed` ("The re-encode left row <id> unchanged."). A failed first encode keeps the sheet fallback of spec 132.
+
+**The conversation.** The input cell may be `{{ALL USER INPUT}}` (the customer's last 50 messages), so it can still hold an earlier order. Each run keeps what it
+read (`input.row`). The encode reads the lines after the longest overlap with the previous run of the customer; a run linked to an open row adds them to that
+row's earlier conversation (`input.fields.input`), and its extracted details to the earlier ones. The text is cut to the newest 8,000 characters.
+
+**Astra on the spot.** A live order that ends without PROCEED queues `RunSpotAstra` (queue `astra`): the night run's `AiCheckerRowRunner` with Astra's own prompt and
+rules, `only_when_status_blank`, source `spot`, user "Likha encode", one `ai_checker_logs` row. Transient OpenAI errors are retried (3 tries); the result is on the
+order (`input.astra`, note "Astra on the spot: …"). A **row lock** (`macro-row:<id>`, cache) is held by it, by the encode's update and by `RunNightAstraRow`; the
+night job waits up to `order_encode.night_row_lock_wait` (200 s), then ends the row `skipped` "Row busy". The night run still runs Astra on these rows.
+
+**The address question.** After Astra (or right after the encode when Astra is off, or when Astra fails), a row still held **because of the address** (R2, R4, R6,
+the address checker not ✅, Astra's final code not ✅, or a blank PROVINCE, CITY, BARANGAY or ADDRESS; never R5, never a PROCEED row) subscribes the customer to the
+chosen sequence through `ChatbotSequences::subscribe` (via `order-encode`), at most once per row (`input.asked` on any order of the row). `already` counts as asked;
+`refused` or no sequence leaves the row for staff with the reason as a note. The subscribe writes the `sequence` chat event.
+
+| Setting (`app_settings`, `/order-encode/final`, CEO only) | Default | Meaning |
+|---|---|---|
+| `order_encode_spot_astra` | `on` | `off` = no Astra on the spot (kill switch); the question is decided from the encode's hold |
+| `order_encode_address_sequence` | empty | chatbot sequence id of the address question; empty = no question; an id that is not a sequence is refused |
+
+**Sheet.** With "Also write to Google Sheet" the step writes one sheet row per customer per 24 hours: a later run of the customer is marked `sheet_written` and
+neither the step nor the fallback writes it again.
+
+No migration. Deploy: the `astra` worker (already running for the night run) also takes `RunSpotAstra`.

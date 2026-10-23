@@ -1976,7 +1976,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.13 | A row already done is not run again | `test_S_130_13…` | pending |
 | S-130.14 | The row is read by the header names of the tab when they are known | `test_S_130_14…` | pending |
 | S-130.15 | A live job creates one `macro_output` row with the Likha-import fields and the Macro-import fields from the encode | `test_S_130_15…` | pending |
-| S-130.16 | A live order already in `macro_output` is never inserted twice | `test_S_130_16…` | pending |
+| S-130.16 | A live order already in `macro_output` is never inserted twice; a second order of the same customer that day meets the PROCEED row and is not accepted (amended by S-136: one row per customer per day) | `test_S_130_16…` | passed 2026-10-24 |
 | S-130.17 | Live keeps the chat name and phone first, fills the rest from the encode, STATUS stays blank unless the final check is ✅ | `test_S_130_17…` | pending |
 | S-130.18 | The OpenAI request uses the extract model from `app_settings` | `test_S_130_18…` | pending |
 | S-130.19 | Given a done shadow row older than 15 minutes and the same DATABASE row, `order-encode:compare` marks every field `same` | `CompareTest::test_S_130_19…` | pending |
@@ -2034,7 +2034,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-132.6 | Given an encode that fails, then the row is written to the fallback sheet once, however many times the failed order is run again | `test_S_132_6…` | pending |
 | S-132.7 | Given "Continue without saving", a failed encode writes no sheet | `test_S_132_7…` | pending |
 | S-132.8 | Given a retry after the `macro_output` row was made, then no second row is made | `test_S_132_8…` | pending |
-| S-132.9 | Given the same run reaches the step twice, then one order, one job and one sheet row; a different run is a new order | `test_S_132_9…` | pending |
+| S-132.9 | Given the same run reaches the step twice, then one order, one job and one sheet row; a different run is a new encode (`order_encodes` row) that is linked to the customer's row of the day, not a second `macro_output` row (amended by S-136) | `test_S_132_9…` | passed 2026-10-24 |
 | S-132.10 | Given the encode cannot be queued, then "Write to Google Sheet instead" writes the row and continues, a failing sheet leaves on `failed`, and "Continue without saving" continues with a warning | `test_S_132_10…` | pending |
 | S-132.11 | Given replies are switched off, then nothing is queued or written | `test_S_132_11…` | pending |
 | S-132.12 | Given "Counts as an order", then the `order` event is the same as for a Sheet step (once per customer per 24 hours) and absent when not ticked | `test_S_132_12…` | pending |
@@ -2092,8 +2092,8 @@ Tests: `tests/Feature/OrderEncode/{RulesTest,NotesBuildTest,NotesUseTest,NotesPa
 | S-135.12 | Given the J&T label "POBLACION BARANGAY 4", then the output is that label and not "BARANGAY POBLACION 4"; a GPT answer in other letters is written as the list label | `test_S_135_12…` | passed 2026-10-24 |
 | S-135.13 | Given Burauen/Bayog or Laguna Santa Cruz/Inalmasinan (not in the J&T list), then the order is held with R4 (the script PROCEEDs it) | `test_S_135_13…` | passed 2026-10-24 |
 | S-135.14 | Given a real combination, then nothing is held and the outputs say `rules: improved` | `test_S_135_14…` | passed 2026-10-24 |
-| S-135.15 | Given three orders of one phone on the same day, then the next one is held with "Possible duplicate: <ids>" | `test_S_135_15…` | passed 2026-10-24 |
-| S-135.16 | Given the same name, barangay and city with another phone, then it is a duplicate | `test_S_135_16…` | passed 2026-10-24 |
+| S-135.15 | Given three orders of one phone on the same day from other customers (another PSID, or rows without one), then the next one is held with "Possible duplicate: <ids>"; the customer's own row (same page + PSID, also from yesterday) never counts (amended by S-136) | `test_S_135_15…`, `OneRowPerDayTest::test_S_136_8…` | passed 2026-10-24 |
+| S-135.16 | Given the same name, barangay and city with another phone on another customer's row (another PSID), then it is a duplicate (amended by S-136: never the customer's own row) | `test_S_135_16…` | passed 2026-10-24 |
 | S-135.17 | Given another day, the same name in another barangay, a CANNOT PROCEED row or a whitelisted phone, then no duplicate | `test_S_135_17…` | passed 2026-10-24 |
 | S-135.18 | Given an encode not yet in macro_output, then it counts for the same day ("e<id>") | `test_S_135_18…` | passed 2026-10-24 |
 | S-135.19 | Given rules `sheet`, then duplicates are not checked | `test_S_135_19…` | passed 2026-10-24 |
@@ -2126,3 +2126,69 @@ Tests: `tests/Feature/OrderEncode/{RulesTest,NotesBuildTest,NotesUseTest,NotesPa
 | S-135.51 | Given no `tmp_sheet_out`, then the sheet column is skipped; `--limit` cuts the run | `test_S_135_51…` | passed 2026-10-24 |
 | S-135.52 | Given no stored inputs, then it says so; a run reads no Google sheet | `test_S_135_52…` | passed 2026-10-24 |
 | S-135.60 | Given a J&T list that repeats a line (San Isidro (POB.), Antipolo), then it counts once: one candidate, no MULTIPLE SUGGESTED ADDRESS and no GPT fix, in both rule modes | `RulesTest::test_S_135_60…` | passed 2026-10-24 |
+
+## S-136 One macro_output row per customer per day through the Encode order step; Astra on the spot and the address question
+
+Slice 136. Threat model: customer chat text (encode input, GPT prompt, notes on /order-encode: escaped), GPT and Astra output and the sequence id in the setting (validated) are untrusted; the CEO's settings actions and the J&T list are trusted. Risk tier: medium.
+Tests: `tests/Feature/OrderEncode/{OneRowPerDayTest,ConversationTest,SpotAstraTest,AddressQuestionTest,LiveSettingsTest}.php` (base class `LiveRowTestCase`), plus single cases in `EncodeOrderNodeTest`, `NotesBuildTest` and `tests/Feature/NightRun/NightAstraRowJobTest.php`. P1 unless marked.
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-136.1 | Given no row of the customer today, when the step's order is encoded, then one row with TIMESTAMP, ts_date, botcake_psid and PAGE | `OneRowPerDayTest::test_S_136_1…` | passed 2026-10-24 |
+| S-136.2 | Given an open row at 10:00, when the same customer orders at 14:00, then the same row is updated and no second row is made | `test_S_136_2…` | passed 2026-10-24 |
+| S-136.3 | Given two orders of one customer in the same minute, then one row | `test_S_136_3…` | passed 2026-10-24 |
+| S-136.4 | Given two people with the same FB name in the same minute on one page, then two rows (different PSID) and neither is overwritten | `test_S_136_4…` | passed 2026-10-24 |
+| S-136.5 (P2) | Given the same person on two pages with the same phone, then two rows (Validate, unchanged, refuses the second phone) | `test_S_136_5…` (rows only; Validate not re-tested) | passed 2026-10-24 |
+| S-136.6 (P2) | Given an imported row (no PSID) of this customer today, then the order is linked to it by PAGE + fb_name | `test_S_136_6…` | passed 2026-10-24 |
+| S-136.7 (P2) | Given "Niño Peña 😀" twice, then one row with the name intact | `test_S_136_7…` | passed 2026-10-24 |
+| S-136.8 | Given the customer's open row, then the link is set before R5 and R5 never counts the customer's own row; another PSID with the same phone is still held by R5 | `test_S_136_8…` | passed 2026-10-24 |
+| S-136.9 | Given two runs of one customer at once, then the second waits for the customer lock (or retries) and updates the same row; no unique-key error | `test_S_136_9…` | passed 2026-10-24 |
+| S-136.10 | Given the row is PROCEED, then a later order leaves every column unchanged, the order has the note "second order not accepted: row <id>" (shown on /order-encode) and an `encode_order` chat event | `test_S_136_10_11_12…` (PROCEED), `test_S_136_10_the_not_accepted_note…` | passed 2026-10-24 |
+| S-136.11 | Given the row has a waybill (courier), then it is unchanged and the order is not accepted | `test_S_136_10_11_12…` (waybill) | passed 2026-10-24 |
+| S-136.12 | Given a not-accepted order, then no Astra, no subscribe, no sheet write, no GPT call | `test_S_136_10_11_12…` | passed 2026-10-24 |
+| S-136.13 (P2) | Given the row is CANNOT PROCEED, then a new order that day makes a new row | `test_S_136_13…` | passed 2026-10-24 |
+| S-136.14 | Given staff edited a field while STATUS was blank (`edited_*` or a person's HISTORICAL LOGS line), then the update keeps it (and does not PROCEED a place it did not check) | `test_S_136_14_16…` | passed 2026-10-24 |
+| S-136.15 | Given an open held row and the customer sends the missing detail, then the address fields are filled and all_user_input holds the conversation | `ConversationTest::test_S_136_15_19…` | passed 2026-10-24 |
+| S-136.16 | Given an update, then TIMESTAMP, ts_date, botcake_psid, PAGE and fb_name never change, and each changed field has one "Likha encode" line in HISTORICAL LOGS | `OneRowPerDayTest::test_S_136_14_16…` | passed 2026-10-24 |
+| S-136.17 | Given the second order of the day, then it reads only its own messages | `ConversationTest::test_S_136_17_18…` | passed 2026-10-24 |
+| S-136.18 | Given the input cell still holds the previous order's messages, then they never enter all_user_input or a GPT prompt | `test_S_136_17_18…` | passed 2026-10-24 |
+| S-136.19 | Given a reply of only "Brgy. Bungad, Quezon City", then the re-encode reads the original order text plus the reply | `test_S_136_15_19…` | passed 2026-10-24 |
+| S-136.20 (P2) | Given an empty or 20,000-character input, then the encode ends `done` with no error and every GPT request stays under 12,000 characters | `test_S_136_20…` (table) | passed 2026-10-24 |
+| S-136.21 | Given a held live order, then one `RunSpotAstra` is queued at once | `SpotAstraTest::test_S_136_21…` | passed 2026-10-24 |
+| S-136.22 | Given Astra fixes the row, then STATUS PROCEED and no subscribe | `test_S_136_22_28…` | passed 2026-10-24 |
+| S-136.23 | Given the encode already PROCEEDs, then no Astra | `test_S_136_23…` | passed 2026-10-24 |
+| S-136.24 | Given a shadow page or the Test tab, then no Astra and no row | `test_S_136_24…`, `EncodeOrderNodeTest::test_S_132_4…` | passed 2026-10-24 |
+| S-136.25 | Given an Astra error or a rejected key, then the row stays held, the address question still runs, the order is not lost | `test_S_136_25_46…` (table) | passed 2026-10-24 |
+| S-136.26 | Given another run holds the row, then the spot Astra is released for later and does not write | `test_S_136_26…` | passed 2026-10-24 |
+| S-136.27 | Given the kill switch off, then no on-the-spot Astra and the question is decided from the encode's hold | `test_S_136_27…` | passed 2026-10-24 |
+| S-136.28 (P2) | Given an Astra fix or an encode update, then Astra writes its `ai_checker_logs` row (source `spot`, user "Likha encode"), the update writes "Likha encode" lines, and the Checker 1 summary and the notes build do not count them as staff | `test_S_136_22_28…`, `test_S_136_28…`, `NotesBuildTest::test_S_135_27…` (variant) | passed 2026-10-24 |
+| S-136.29 | Given an address hold after Astra, then the customer is subscribed once to the chosen sequence (via `order-encode`), with the `sequence` chat event and the note | `AddressQuestionTest::test_S_136_29…` | passed 2026-10-24 |
+| S-136.30 | Given an R5 hold (even when Astra leaves the address open), or Astra leaves the address ✅ but holds for name, phone or price, then no subscribe | `test_S_136_30_a_duplicate…`, `test_S_136_30_31…` | passed 2026-10-24 |
+| S-136.31 | Given a PROCEED row, then no subscribe | `SpotAstraTest::test_S_136_22_28…`, `AddressQuestionTest::test_S_136_35_36…` | passed 2026-10-24 |
+| S-136.32 | Given no sequence chosen, or it is paused, deleted or has no steps, then the row stays held for staff with the reason on /order-encode | `test_S_136_32…` (table) | passed 2026-10-24 |
+| S-136.33 | Given the customer is already in the sequence, then no second subscribe | `test_S_136_33…` | passed 2026-10-24 |
+| S-136.34 | Given a row already asked, then never a second question | `test_S_136_34_35_37_39…` | passed 2026-10-24 |
+| S-136.35 | Given the reply runs the flow again, then the same row is updated and Astra runs again | `test_S_136_35…`, `test_S_136_34_35_37_39…` | passed 2026-10-24 |
+| S-136.36 | Given the reply completes the address, then PROCEED and no further Astra or question | `test_S_136_35_36…` | passed 2026-10-24 |
+| S-136.37 | Given the reply is still incomplete, then no second question; the row stays for staff | `test_S_136_34_35_37_39…` | passed 2026-10-24 |
+| S-136.38 (P2) | Given the sequence send fails (24-hour window), then it is recorded and nothing retries in a loop | not covered: the send and its error belong to the sequence engine (recorded on the subscription and as a chat event there); the order records the subscribe result and `asked`, so no second subscribe follows | not run |
+| S-136.39 (P2) | Given a sequence with "exit on reply", then the reply unsubscribes and the customer is not re-subscribed | `test_S_136_34_35_37_39…` | passed 2026-10-24 |
+| S-136.40 (P2) | Given the settings on /order-encode/final, then only the CEO saves them, a non-existent sequence id is refused, empty = no question; defaults on / none | `LiveSettingsTest::test_S_136_40…` | passed 2026-10-24 |
+| S-136.41 | Given a first encode fails, then the sheet fallback as S-132.6/.10/.16 and no row | `OneRowPerDayTest::test_S_136_41…` | passed 2026-10-24 |
+| S-136.42 | Given a re-encode of an existing row fails, then the row is unchanged, no sheet row, the encode is `failed` with a note | `test_S_136_42…` | passed 2026-10-24 |
+| S-136.43 (P2) | Given "Also write to Google Sheet", then one sheet row per customer per day | `EncodeOrderNodeTest::test_S_136_43_44…` | passed 2026-10-24 |
+| S-136.44 (P2) | Given `sheet_written` from an earlier trigger, then the later order's fallback never writes again | `test_S_136_43_44…` | passed 2026-10-24 |
+| S-136.45 | Given the same run twice, then one order and one job; a new run is a new `order_encodes` row linked to the day's row | `EncodeOrderNodeTest::test_S_132_9…`, `OneRowPerDayTest::test_S_136_2…` | passed 2026-10-24 |
+| S-136.46 (P2) | Given a slow or failed Astra network, then it is retried within the limit and ends done or failed, never left queued | `SpotAstraTest::test_S_136_46…`, `test_S_136_25_46…` (last try) | passed 2026-10-24 |
+| S-136.47 | Given an open row at 23:59 and a re-trigger at 00:01, then the same row; TIMESTAMP and ts_date stay on the 23:59 day | `OneRowPerDayTest::test_S_136_47_48_49…` | passed 2026-10-24 |
+| S-136.48 | Given the question at 23:59 and the reply at 00:01, then the same row | `test_S_136_47_48_49…` | passed 2026-10-24 |
+| S-136.49 | Given any message while an open row from the last 24 h exists, then that row is updated | `test_S_136_47_48_49…`, `test_S_136_50_52…` (20 h) | passed 2026-10-24 |
+| S-136.50 | Given the 23:59 row is PROCEED or CANNOT PROCEED, then a 00:01 order makes a new row for the new date | `test_S_136_50_52…` (table) | passed 2026-10-24 |
+| S-136.51 | Given the job runs after midnight for a 23:59 order, then the day comes from the order time | `test_S_136_51_55…` | passed 2026-10-24 |
+| S-136.52 (P2) | Given an open row 25 h old, then a new row | `test_S_136_50_52…` | passed 2026-10-24 |
+| S-136.53 (P2) | Given R5 at 00:01, then the customer's own linked row from yesterday does not count | `test_S_136_53…` | passed 2026-10-24 |
+| S-136.54 (P2) | Given the night run and an after-midnight update on yesterday's row, then the row keeps its ts_date (the night run still picks it) and the night job waits for the row lock, else skips "Row busy" | `NightAstraRowJobTest::test_a_row_held_by_another_astra_run…`, `OneRowPerDayTest::test_S_136_47_48_49…` | passed 2026-10-24 |
+| S-136.55 (P2) | Given the server in UTC, then 23:59 Manila gives the right day | `test_S_136_51_55…` | passed 2026-10-24 |
+| S-136.56 | Given a shadow page's Sheet-step order, then only `order_encodes` (S-130.1 unchanged) | `EncodeOrderTest::test_S_130_1…`, `SpotAstraTest::test_S_136_24…` | passed 2026-10-24 |
+| S-136.57 | Given the Test tab, then nothing is queued, linked or subscribed (S-132.4) | `EncodeOrderNodeTest::test_S_132_4…` | passed 2026-10-24 |
+| S-136.58 (P2) | Given replies switched off, then nothing is linked, queued or subscribed | `EncodeOrderNodeTest::test_S_132_11…` | passed 2026-10-24 |

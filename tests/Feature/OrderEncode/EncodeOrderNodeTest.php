@@ -287,6 +287,22 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         $this->assertSame(2, OrderEncode::count());
     }
 
+    public function test_S_136_43_44_also_write_to_google_sheet_writes_one_sheet_row_per_customer_per_day(): void
+    {
+        Queue::fake();
+        $outbox = $this->outbox();
+        $c = $this->config(['also_sheet' => true, 'sheet' => 'https://docs.google.com/spreadsheets/d/' . self::ORDERS . '/edit']);
+
+        $this->go($c, $outbox, false, 'aaaa0001');
+        $this->go($c, $outbox, false, 'aaaa0002'); // bagong takbo ng parehong customer (sagot o ulit na order)
+
+        $this->assertSame(1, $outbox->appends);
+        $this->assertSame([true, true], OrderEncode::orderBy('id')->get()->map(fn ($o) => $o->input['sheet_written'])->all());
+        // ang pumalyang encode ng ikalawa ay hindi na sumusulat sa sheet
+        app(Runner::class)->fail(OrderEncode::orderByDesc('id')->first(), 'boom');
+        $this->assertSame([], $this->google->appended);
+    }
+
     public static function cannotQueue(): array
     {
         $link = 'https://docs.google.com/spreadsheets/d/' . self::ORDERS . '/edit';
