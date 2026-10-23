@@ -2069,3 +2069,59 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-133.23 | The page shows the switch, cap, skip list, today's counts and the estimated cost | `test_S_133_23…` | pending |
 | S-133.24 | Only the CEO saves the three settings; bad values are refused | `test_S_133_24…` | pending |
 | S-133.25 | Marketing roles read the tab without the form; other roles get 404 | `test_S_133_25…` | pending |
+
+
+## S-135 The Likha encoder gets safer rules and learns from past corrections
+
+Slice 135. Threat model: customer text, GPT output and the note examples shown on the page are untrusted (escaped on the page); the CEO's review actions are trusted. Risk tier: medium.
+Tests: `tests/Feature/OrderEncode/{RulesTest,NotesBuildTest,NotesUseTest,NotesPageTest,BacktestTest}.php` (base class `EncodeRunTestCase`).
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-135.1 | Given no `order_encode_rules` setting (or a wrong value), then the rules are `improved`; `sheet` is read case-insensitively | `RulesTest::test_S_135_1…` | passed 2026-10-24 |
+| S-135.2 | Given rules `sheet`, then the outputs and steps have no `rules`, `hold` or `rule_hold` (the spec-130 result is unchanged) | `test_S_135_2…` | passed 2026-10-24 |
+| S-135.3 | Given the customer wrote "Brgy: Bungad" and the encode left a remark, then GPT does not replace it with Project 7 (sheet mode does) | `test_S_135_3…` | passed 2026-10-24 |
+| S-135.4 | Given "San Isidro" in Antipolo and a remark, then it stays "SAN ISIDRO (POB.)" and is not replaced by Calawis | `test_S_135_4…` | passed 2026-10-24 |
+| S-135.5 | Given a written barangay that is not in the current city's list, then the GPT fix still runs | `test_S_135_5…` | passed 2026-10-24 |
+| S-135.6 | Given a written city that is in the province's city list, then the GPT city fix is skipped | `test_S_135_6…` | passed 2026-10-24 |
+| S-135.7 | Given "Brgy. Bungad", "Poblacion 4", "Pob. 4", "POBLACION BARANGAY 4", "Barangay IV (POB.)", "Parañaque", then each is compared in one form | `test_S_135_7…` (table) | passed 2026-10-24 |
+| S-135.8 | Given the customer wrote La Union and the result is Pampanga, then "Province only → ✅" does not apply (the script still turns it into ✅) | `test_S_135_8…` | passed 2026-10-24 |
+| S-135.9 | Given a written province that resolves to nothing ("[Please confirm]", "N/A", blank), then it does not count | `test_S_135_9…` | passed 2026-10-24 |
+| S-135.10 | Given a province different from the written one, then the order is held with R2 and the reason | `test_S_135_10…` | passed 2026-10-24 |
+| S-135.11 | Given several J&T candidates, then the written barangay wins, then the written city, then list order (the sheet takes Cebulan) | `test_S_135_11…` | passed 2026-10-24 |
+| S-135.12 | Given the J&T label "POBLACION BARANGAY 4", then the output is that label and not "BARANGAY POBLACION 4"; a GPT answer in other letters is written as the list label | `test_S_135_12…` | passed 2026-10-24 |
+| S-135.13 | Given Burauen/Bayog or Laguna Santa Cruz/Inalmasinan (not in the J&T list), then the order is held with R4 (the script PROCEEDs it) | `test_S_135_13…` | passed 2026-10-24 |
+| S-135.14 | Given a real combination, then nothing is held and the outputs say `rules: improved` | `test_S_135_14…` | passed 2026-10-24 |
+| S-135.15 | Given three orders of one phone on the same day, then the next one is held with "Possible duplicate: <ids>" | `test_S_135_15…` | passed 2026-10-24 |
+| S-135.16 | Given the same name, barangay and city with another phone, then it is a duplicate | `test_S_135_16…` | passed 2026-10-24 |
+| S-135.17 | Given another day, the same name in another barangay, a CANNOT PROCEED row or a whitelisted phone, then no duplicate | `test_S_135_17…` | passed 2026-10-24 |
+| S-135.18 | Given an encode not yet in macro_output, then it counts for the same day ("e<id>") | `test_S_135_18…` | passed 2026-10-24 |
+| S-135.19 | Given rules `sheet`, then duplicates are not checked | `test_S_135_19…` | passed 2026-10-24 |
+| S-135.20 | Given a staff fix, then notes-build makes a pending note with the J&T answer, the example and the order id | `NotesBuildTest::test_S_135_20…` | passed 2026-10-24 |
+| S-135.21 | Given an Astra/AI Fix (`fixed`, not `partial`) and a delivered order, then each makes its own source | `test_S_135_21…` | passed 2026-10-24 |
+| S-135.22 | Given one order both fixed and delivered, then it counts once with both sources | `test_S_135_22…` | passed 2026-10-24 |
+| S-135.23 | Given another answer for the same written place, then the note has a conflict with the counts | `test_S_135_23…` | passed 2026-10-24 |
+| S-135.24 | Given delivered ≥ 2, no conflict and a fix, then the note is approved by `auto`; otherwise it stays pending | `test_S_135_24…` | passed 2026-10-24 |
+| S-135.25 | Given a reviewed note, then the build keeps its status and answer (a new answer goes to conflict) | `test_S_135_25…` | passed 2026-10-24 |
+| S-135.26 | Given the build runs again (also `--days=3`), then no order is counted twice; a later delivery adds to delivered only | `test_S_135_26…` | passed 2026-10-24 |
+| S-135.27 | Given a fix before the window, no written place, an answer off the J&T list or a name-only fix, then no note | `test_S_135_27…` | passed 2026-10-24 |
+| S-135.28 | Given a note, then it holds no name, phone or staff name | `test_S_135_28…` | passed 2026-10-24 |
+| S-135.29 | Given `notes-review --approve-where`, then it approves the pending notes without a conflict; `--dry-run` changes nothing; a bad filter or a missing reviewer fails | `test_S_135_29…` | passed 2026-10-24 |
+| S-135.30 | Given an approved note for the written key, then the place comes from it, the GPT location fixes are skipped, `NOTE_HIT` is logged and the checker still runs | `NotesUseTest::test_S_135_30…` | passed 2026-10-24 |
+| S-135.31 | Given pending/rejected notes or another written place, then no note hit | `test_S_135_31…` | passed 2026-10-24 |
+| S-135.32 | Given a note whose answer is not a J&T combination, then the order is held by R4 | `test_S_135_32…` | passed 2026-10-24 |
+| S-135.33 | Given many approved notes with the same city or province, then at most five (closest first, approved only) are in the GPT prompts as past corrections | `test_S_135_33…` | passed 2026-10-24 |
+| S-135.34 | Given no notes, or rules `sheet`, then the prompts have no past corrections | `test_S_135_34…` | passed 2026-10-24 |
+| S-135.35 | Given the lookups, then every query on `address_notes` uses an index (no scan) | `test_S_135_35…` | passed 2026-10-24 |
+| S-135.36 | Given a held order in `live` mode, then its `macro_output` row has APP SCRIPT CHECKER `TO FIX`, no STATUS and the rule and reason in AI ANALYZE (so Validate cannot turn it into PROCEED) | `RulesTest::test_S_135_36…` | passed 2026-10-24 |
+| S-135.40 | Given a guest or any role but CEO, then the notes page and every action give 404 / redirect | `NotesPageTest::test_S_135_40…` | passed 2026-10-24 |
+| S-135.41 | Given the page, then it shows pending first, counts per status, and the filters (status, source, conflict, delivered, search) work | `test_S_135_41…` | passed 2026-10-24 |
+| S-135.42 | Given approve or reject, then the reviewer, time and note are saved | `test_S_135_42…` | passed 2026-10-24 |
+| S-135.43 | Given an edit, then only a J&T combination is accepted (saved with the J&T labels) and the old answer is kept in the conflict | `test_S_135_43…` | passed 2026-10-24 |
+| S-135.44 | Given bulk approve (ticked or the filter), then pending notes without a conflict are approved and conflicts are left | `test_S_135_44…` | passed 2026-10-24 |
+| S-135.45 | Given customer text with HTML in an example, then the page escapes it | `test_S_135_45…` | passed 2026-10-24 |
+| S-135.46 | Given orders with NOTE_HIT or a rule hold, then `/order-encode/final` shows NOTE_HIT, the rule and the reason, and the counts | `test_S_135_46…` | passed 2026-10-24 |
+| S-135.47 | Given the CEO saves the rules switch on `/order-encode/final`, then it is stored; a wrong value is refused; leaving it out changes nothing | `test_S_135_47…` | passed 2026-10-24 |
+| S-135.50 | Given stored inputs of an earlier test, then the backtest re-encodes them into `backtest-<time>` and reports orders, PROCEED, correct, wrong, pending, blank address for Likha and the sheet, after the Validate rules | `BacktestTest::test_S_135_50…` | passed 2026-10-24 |
+| S-135.51 | Given no `tmp_sheet_out`, then the sheet column is skipped; `--limit` cuts the run | `test_S_135_51…` | passed 2026-10-24 |
+| S-135.52 | Given no stored inputs, then it says so; a run reads no Google sheet | `test_S_135_52…` | passed 2026-10-24 |

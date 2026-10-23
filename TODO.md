@@ -1034,3 +1034,16 @@ Accepted, not fixed:
 - **Orders whose `macro_output` row is deleted before compare-final wait 72 h, then show as "sheet never finished".** Reason: rare and harmless.
 - **The cap is not atomic if two import jobs ran at once.** Reason: the `orders` queue runs one import at a time.
 - **Reviewer minors:** `Schema::hasTable` and the skipped-counter read/write run per created order once the switch is on or the cap is hit; the counter is not atomic. Reason: small, display-only.
+
+## 135: encoder rules and address notes (2026-10-24)
+
+- **`tmp_sheet_out` has no known schema in the repo.** The backtest reads it by guessed column names (`macro_output_id` or `order_id`, `province`, `city`, `barangay`, `address`, and `final` / `checker` / `status`, optional `name`, `phone`, `item`, `cod`) and skips the sheet column if they are missing. Reason: the table lives outside the repo; if its columns differ, only the names in `OrderEncodeBacktest::sheetOutput` need changing.
+- **R5 matches names with `LOWER(TRIM(name)) = lowercase name with Ñ folded`**, so a customer whose name has an Ñ is matched by phone only. Reason: the phone is the main key; a SQL fold of Ñ differs between MySQL and PostgreSQL.
+- **R5 looks at the encodes of the day by `created_at`, only those not yet in `macro_output` (max 500).** Reason: encodes that are in `macro_output` are counted there; the flow-shadow rows are few.
+- **The notes build window for staff fixes is the order date minus 7 days** (a fix made more than 7 days after the order is missed by `--days=3`, caught by a manual `--days=60` run only if the order is still inside that padding). Reason: HISTORICAL LOGS has no index; the daily run must stay small.
+- **A written barangay that is a substring of a longer J&T name ("Isidro" vs "SAN ISIDRO") is not an R1 match.** Reason: R1 is whole-value on purpose (substring is the bug it fixes).
+- **R1 cannot see a wrong city that the customer also wrote** ("Q.city" is read as "Q" by the spec-130 parser). Reason: the parser is a copy of the script; changing it changes sheet mode.
+- **One note per written key; when answers differ, the one with most deliveries (then most sightings) is the main answer.** An order keeps the answer it was first counted under, even if staff change it later. Reason: simple and idempotent; a later change shows up as a conflict only for new orders.
+- **`/order-encode/notes` has no export and no history of past answers of a note** besides the conflict list. Reason: not in the brief.
+- **The rules switch is global** (all pages, all encode modes including `live`). Reason: as written in the brief.
+- **Tests were written after the first slice of code (rules R1 to R5) instead of before it**; the sheet-mode assertions inside each test show the old behaviour. Reason: see the result file.
