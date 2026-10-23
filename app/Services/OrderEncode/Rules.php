@@ -170,16 +170,16 @@ class Rules
     /** Bawat salita ng $needle (3+ letra) ay nasa text, eksakto o halos pareho ang baybay ("propir" = "proper"). */
     private static function wordsIn(string $needle, string $text): bool
     {
+        // Bawat salita ay 4+ letra (ang "A" ng 587-A, ang "I" ng Balagtasin I, ang "B" ng 59-B ay hindi patunay), at halos
+        // eksakto: hanggang 1 letrang iba ("propir" = "proper"; 2026-10-24, simulation sa ikatlong test).
+        $words = array_values(array_filter(explode(' ', $needle), fn ($w) => $w !== ''));
+        if ($words === []) return false;
         $tokens = explode(' ', trim($text));
-        foreach (explode(' ', $needle) as $w) {
-            if (mb_strlen($w) < 3) continue;
+        foreach ($words as $w) {
+            if (mb_strlen($w) < 4) return false;
             $ok = false;
             foreach ($tokens as $t) {
-                if ($t === $w) { $ok = true; break; }
-                if (strlen($w) >= 4 && abs(strlen($t) - strlen($w)) <= 2) {
-                    similar_text($t, $w, $p);
-                    if ($p >= 70) { $ok = true; break; }
-                }
+                if ($t === $w || (strlen($w) >= 5 && abs(strlen($t) - strlen($w)) <= 1 && levenshtein($t, $w) <= 1)) { $ok = true; break; }
             }
             if (!$ok) return false;
         }

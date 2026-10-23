@@ -39,6 +39,17 @@ class AmbiguityRuleTest extends TestCase
         $this->assertSame(['barangay' => 'NOVALICHES PROPER'], $r);
     }
 
+    public function test_a_one_letter_suffix_is_not_taken_as_the_longer_label(): void
+    {
+        $rules = new Rules(new Locations([
+            ['METRO-MANILA', 'METRO-MANILA-SANTA-MESA', 'BARANGAY 587'], ['METRO-MANILA', 'METRO-MANILA-SANTA-MESA', 'BARANGAY 587-A'],
+            ['BATANGAS', 'BATANGAS-SAN-JOSE', 'BALAGTASIN'], ['BATANGAS', 'BATANGAS-SAN-JOSE', 'BALAGTASIN I'],
+        ], true));
+
+        $this->assertSame([], $rules->ambiguity('METRO-MANILA', 'METRO-MANILA-SANTA-MESA', 'BARANGAY 587', 'brgy 587 a. bonifacio st sta mesa manila'));
+        $this->assertSame([], $rules->ambiguity('BATANGAS', 'BATANGAS-SAN-JOSE', 'BALAGTASIN', 'balagtasin san jose batangas i love it'));
+    }
+
     public function test_a_street_named_like_another_barangay_does_not_hold(): void
     {
         $this->assertSame([], $this->rules()->ambiguity('PALAWAN', 'PUERTO-PRINCESA-CITY', 'MILAGROSA', 'cherry pention house manalo extention barangay milagrosa pueryoprinsessa city palawan'));
