@@ -70,6 +70,7 @@ class Runner
             $this->live->create($o);
         }
         $o->update(['status' => 'done']);
+        app(AddressQuestion::class)->afterEncode($o->fresh()); // hindi PROCEED: Astra on the spot, saka ang tanong sa address
     }
 
     /** Ang final na row ng customer ngayong araw: walang ginagalaw; ang order ay may tala at chat event. */

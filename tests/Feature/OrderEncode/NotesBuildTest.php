@@ -176,6 +176,7 @@ class NotesBuildTest extends OrderEncodeTestCase
         $this->staffFixed('Lahug', ['extracted_details' => null, 'CXD' => null]);                         // walang isinulat na lugar
         $this->staffFixed('Lahug', ['BARANGAY' => 'WALANG-GANITO']);                                      // sagot na wala sa J&T list
         $this->placed('Lahug', ['HISTORICAL LOGS' => now('Asia/Manila')->format('Y-m-d H:i:s') . '|Staff|FULL NAME|A|B']); // pagtatama ng pangalan lang
+        $this->placed('Lahug', ['HISTORICAL LOGS' => now('Asia/Manila')->format('Y-m-d H:i:s') . '|Likha encode|BARANGAY|LAHOG|LAHUG']); // ang encode ng Likha, hindi staff
 
         $this->build(10);
 

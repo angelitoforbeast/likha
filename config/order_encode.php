@@ -16,4 +16,6 @@ return [
     'customer_lock_wait' => 300,
     // Ilang segundo hinihintay ng encode ang Astra (o ang night run) na may hawak ng row bago ito isulat.
     'row_lock_wait' => 300,
+    // Ang night run: ilang segundo hinihintay ang Astra on the spot sa row bago ito laktawan ("Row busy").
+    'night_row_lock_wait' => 200,
 ];

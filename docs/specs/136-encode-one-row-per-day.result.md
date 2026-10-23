@@ -71,6 +71,7 @@ Review: `skeptic-reviewer` (standard depth) on the whole diff after G5; fix loop
 - G0: brief and plan committed.
 - G1 done: customer lock, find (final / open / new), update with staff edits kept, not-accepted note, R5 after the link, re-encode failure without sheet. `OneRowPerDayTest` 23 green; S-130.16 test amended (the second order now meets a PROCEED row).
 - G2 done: `Conversation` builds the text per order (lines after the previous run of the customer; a linked run adds to the row's earlier conversation; extracted details merged; input cut to 8,000 characters). `ConversationTest` 4 green; OrderEncode suite 296 green.
+- G3 + G4 done (one commit, they share `AddressQuestion`): `RunSpotAstra` (queue astra, the night run's `AiCheckerRowRunner`, source `spot`, user `Likha encode`), `RowLock` held by it, by the encode update and by `RunNightAstraRow` ("Row busy" when still held), kill switch `order_encode_spot_astra`; `AddressQuestion` (address holds only, once per row, `order_encode_address_sequence`); "Likha encode" lines skipped by the Checker 1 summary and the notes build. `SpotAstraTest` 11, `AddressQuestionTest` 11, night-row lock test green. The G3 red run caught a real bug (the Astra closure missed `$o`). The G4 tests passed at once because the code was written first; I checked them by breaking the R5 and once-per-row guards, and each break was caught.
 
 ## Files
 

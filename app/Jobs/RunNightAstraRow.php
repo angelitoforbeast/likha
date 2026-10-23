@@ -7,6 +7,8 @@ use App\Models\NightRunStep;
 use App\Services\AiCheckerRowRunner;
 use App\Services\AstraEncoder;
 use App\Services\NightAstraRun;
+use App\Services\OrderEncode\RowLock;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -129,15 +131,23 @@ class RunNightAstraRow implements ShouldQueue
         }
 
         // 5. Ang parehong run-one-row function ng browser. Ang buong app.url ang host (str_contains ang scope rule).
-        $out = app(AiCheckerRowRunner::class)->run((int) $row->macro_output_id, 'astra', (string) config('app.url'), [
-            'source'                 => 'night',
-            'user_id'                => null,
-            'user_name'              => 'Night run',
-            'batch_id'               => 'night-' . NightAstraRun::ordersDate(substr((string) $step->night_date, 0, 10)),
-            'batch_total'            => max(0, (int) $step->rows_found - (int) $step->rows_over_max),
-            'http_timeout'           => self::HTTP_TIMEOUT_S,
-            'only_when_status_blank' => true,
-        ]);
+        // Hawak ang lock ng row: walang ibang Astra (on the spot ng live na order) o update ng encode na sabay sumusulat.
+        try {
+            $out = RowLock::hold((int) $row->macro_output_id, (int) config('order_encode.night_row_lock_wait', 200), fn () => app(AiCheckerRowRunner::class)->run((int) $row->macro_output_id, 'astra', (string) config('app.url'), [
+                'source'                 => 'night',
+                'user_id'                => null,
+                'user_name'              => 'Night run',
+                'batch_id'               => 'night-' . NightAstraRun::ordersDate(substr((string) $step->night_date, 0, 10)),
+                'batch_total'            => max(0, (int) $step->rows_found - (int) $step->rows_over_max),
+                'http_timeout'           => self::HTTP_TIMEOUT_S,
+                'only_when_status_blank' => true,
+            ]));
+        } catch (LockTimeoutException) {
+            $this->finish('skipped', ['reason' => 'Row busy']);
+            $night->settle($step);
+
+            return;
+        }
 
         // 6. Uriin ang resulta. Ang gastos ng attempt na ito ay idinadagdag sa bawat attempt na may resulta.
         $result = is_array($out['result'] ?? null) ? $out['result'] : null;

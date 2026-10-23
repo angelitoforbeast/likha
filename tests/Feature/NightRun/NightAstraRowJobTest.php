@@ -68,6 +68,23 @@ class NightAstraRowJobTest extends NightAstraTestCase
         $this->assertSame(self::NIGHT . ' 03:00:00', $step->finished_at->toDateTimeString());
     }
 
+    public function test_a_row_held_by_another_astra_run_is_skipped_as_busy_without_an_engine_call(): void
+    {
+        config(['order_encode.night_row_lock_wait' => 0]);
+        $order = $this->order();
+        $this->runningStep([$order->id]);
+        $before = $this->orderAsStored($order->id);
+        $lock = \Illuminate\Support\Facades\Cache::lock(\App\Services\OrderEncode\RowLock::key($order->id), 60);
+        $lock->get();
+
+        $row = $this->work($order->id);
+
+        $lock->release();
+        $this->assertSame(['skipped', 'Row busy'], [$row->state, $row->reason]);
+        $this->assertSame($before, $this->orderAsStored($order->id));
+        Http::assertNothingSent();
+    }
+
     public function test_a_status_set_during_the_call_leaves_the_order_as_the_person_left_it(): void
     {
         $order = $this->order();
