@@ -48,3 +48,23 @@ written to the sheet as before. The `encode` worker must be running before any p
 2. Supervisor program `deploy/supervisor/likha-encode.conf`: `php artisan queue:work database --queue=encode --sleep=3 --tries=2 --timeout=600 --max-time=3600`.
 3. `php artisan config:clear` so `services.openai.order_encode_key` is read; set `ORDER_ENCODE_OPENAI_KEY` (or rely on `OPENAI_API_KEY`).
 4. Set `compare_sheet` for the page, then set `mode` = `shadow`.
+
+## The Encode order step (spec 132)
+
+The way to go live is a step in the bot flow: **Encode order** (flow builder → Add → Encode order). It replaces the Google Sheet step for
+orders. It works whatever the page's `order_encode.mode` is (the page setting stays `off` or `shadow`; `live` is still accepted but
+means nothing for the step). No flow uses it until someone adds it and publishes.
+
+Config (all in the step's panel): the order fields `date, page, name, phone, input, shop, extracted, price` (A to H of the row; the same
+variables as the Sheet step; I is left empty), `also_sheet` (write the row to the Google Sheet too, default off) with `sheet` and `tab`,
+`on_failure` = `sheet` (write the row to `sheet` instead; needs a link, checked at Publish) or `continue` (go on without saving, with a warning),
+and "Counts as an order". The models in use are shown read-only (`app_settings` keys above).
+
+Run: the step builds the row, optionally appends it to the sheet (same Outbox call as the Sheet step), creates an `order_encodes` row
+(mode `live`, `run_id`, `input.node`, `spreadsheet_id` = the fallback sheet or `flow-node`, `row_number` empty), queues `EncodeOrder` and
+continues on **next**. The same run reaching the step again does nothing. If the order cannot be queued (no key, no address file, no table) it
+writes the row to the fallback sheet and continues; with `continue` it continues with a warning; if that sheet also fails the step leaves on
+**failed**. The Test tab never encodes. Reply log: kind `sheet`, status `skipped`, note "encoded in Likha" (as in 130 live); events:
+`encode_order` (result `queued`, `already_queued`, `sheet_instead`, `not_saved`, `failed`, `test`, `skipped`) and, when ticked, `order`.
+Results and the Inbox count orders from the `order` event only, so nothing changes there. `/order-encode?mode=live` lists these orders
+with a link to their `macro_output` row.

@@ -2021,3 +2021,22 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.62 | A sheet with no match where Likha has one is labelled a possible newer entry of the address file | `test_S_130_62…` | pending |
 | S-130.63 | The real `jnt_address.txt` is read in file order and is not changed | `LocationListTest::test_S_130_63…` | pending |
 | S-130.64 | The parsed list is cached until the file's mtime changes; a missing file is an empty list | `test_S_130_64…` | pending |
+
+## S-132 An "Encode order" step in the bot flow
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-132.1 | Given the flow builder, when I open it, then "Encode order" is in the palette with its help text, and its config (the A–H templates, also-write sheet, on failure) saves and reloads cleaned | `EncodeOrderNodeTest::test_S_132_1…` | pending |
+| S-132.2 | Given an Encode order step set to "Write to Google Sheet instead" or "Also write", when the flow is published without a valid sheet link, then Publish is refused with a message naming the step; "Continue without saving" needs no sheet; the draft still saves | `test_S_132_2…` | pending |
+| S-132.3 | Given a run that reaches the step, then one `EncodeOrder` (mode live, queue `encode`) is queued with the A–I row, the flow continues on `next` at once, and a `sheet` reply (skipped, "encoded in Likha") and an `encode_order` event are recorded | `test_S_132_3…` | pending |
+| S-132.4 | Given the Test tab, then nothing is queued, the row it would send is shown with "Test: would encode the order" | `test_S_132_4…` | pending |
+| S-132.5 | Given "Also write to Google Sheet", then the row is appended once, and a later failed encode does not append it again | `test_S_132_5…` | pending |
+| S-132.6 | Given an encode that fails, then the row is written to the fallback sheet once, however many times the failed order is run again | `test_S_132_6…` | pending |
+| S-132.7 | Given "Continue without saving", a failed encode writes no sheet | `test_S_132_7…` | pending |
+| S-132.8 | Given a retry after the `macro_output` row was made, then no second row is made | `test_S_132_8…` | pending |
+| S-132.9 | Given the same run reaches the step twice, then one order, one job and one sheet row; a different run is a new order | `test_S_132_9…` | pending |
+| S-132.10 | Given the encode cannot be queued, then "Write to Google Sheet instead" writes the row and continues, a failing sheet leaves on `failed`, and "Continue without saving" continues with a warning | `test_S_132_10…` | pending |
+| S-132.11 | Given replies are switched off, then nothing is queued or written | `test_S_132_11…` | pending |
+| S-132.12 | Given "Counts as an order", then the `order` event is the same as for a Sheet step (once per customer per 24 hours) and absent when not ticked | `test_S_132_12…` | pending |
+| S-132.13 | Given a graph with only the old steps, then it is cleaned and its ports are exactly as before | `test_S_132_13…` | pending |
+| S-132.14 | Given `/order-encode`, then the Mode filter shows shadow (default) or live orders, and a live order links to its `macro_output` row | `test_S_132_14…` | pending |

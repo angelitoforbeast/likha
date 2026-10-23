@@ -10,7 +10,10 @@ use InvalidArgumentException;
  */
 class FlowGraph
 {
-    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'clear_ai', 'sheet', 'sequence', 'end'];
+    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'clear_ai', 'sheet', 'encode_order', 'sequence', 'end'];
+
+    /** Ang mga cell A..H ng Encode order (ang I ay status, laging blangko): ang pangalan sa config. */
+    public const ENCODE_FIELDS = ['date', 'page', 'name', 'phone', 'input', 'shop', 'extracted', 'price'];
 
     public const RULES = [
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
@@ -41,7 +44,7 @@ class FlowGraph
             'condition' => array_merge(array_map(fn ($i) => 'row_' . ($i + 1), array_keys(array_values((array) ($config['rows'] ?? [])))), ['no']),
             'send' => !empty($config['wait']) ? (self::skipMinutes($config) ? ['reply', 'skipped'] : ['reply']) : ['continue'],
             'ai' => ['success', 'failed'],
-            'sheet' => ['next', 'failed'],
+            'sheet', 'encode_order' => ['next', 'failed'],
             default => [],
         };
     }
@@ -103,7 +106,7 @@ class FlowGraph
         $text = fn ($v, int $max = self::MAX_TEXT) => mb_substr(is_scalar($v) ? (string) $v : '', 0, $max);
         $field = fn ($v) => ChatbotVars::norm(is_scalar($v) ? (string) $v : '');
         // "Counts as an order" (Results): naka-save lang kapag naka-tick, kaya ang lumang graph ay hindi nagbabago.
-        $order = in_array($type, ['send', 'set', 'sheet'], true) && !empty($c['counts_order']) ? ['counts_order' => true] : [];
+        $order = in_array($type, ['send', 'set', 'sheet', 'encode_order'], true) && !empty($c['counts_order']) ? ['counts_order' => true] : [];
 
         return $order + match ($type) {
             'condition' => ['rows' => array_values(array_map(fn ($r) => [
@@ -143,6 +146,13 @@ class FlowGraph
                 'columns' => array_slice(array_values(array_map(fn ($l) => $text($l), is_array($c['columns'] ?? null)
                     ? $c['columns'] : preg_split('/\r\n|\r|\n/', (string) ($c['columns'] ?? '')))), 0, self::MAX_COLUMNS),
             ],
+            // Encode order: ang mga template ng order (A..H), ang kasabay na sulat sa sheet at ang gagawin kapag pumalya.
+            'encode_order' => array_combine(self::ENCODE_FIELDS, array_map(fn ($k) => $text($c[$k] ?? ''), self::ENCODE_FIELDS)) + [
+                'also_sheet' => !empty($c['also_sheet']),
+                'sheet' => $text($c['sheet'] ?? '', 300),
+                'tab' => $text($c['tab'] ?? '', 100),
+                'on_failure' => ($c['on_failure'] ?? '') === 'continue' ? 'continue' : 'sheet',
+            ],
             // sequence_id 0 = lahat (unsubscribe lang)
             'sequence' => [
                 'action' => ($c['action'] ?? '') === 'unsubscribe' ? 'unsubscribe' : 'subscribe',
@@ -153,7 +163,24 @@ class FlowGraph
     }
 
     /**
-     * Ang skip_after ng isang wait: {amount, unit} kapag may amount na 1 o higit pa, null kapag wala (walang key sa
+     * Ang kulang na hindi hinaharang ng pag-save ng draft pero hinaharang ng Publish: ang Encode order na gagamit ng sheet
+     * (kasabay na sulat o "Write to Google Sheet instead") na walang tamang link. Null kapag wala.
+     */
+    public static function publishProblems(array $graph): ?string
+    {
+        foreach ($graph['nodes'] ?? [] as $n) {
+            if (($n['type'] ?? '') !== 'encode_order') continue;
+            $c = (array) ($n['config'] ?? []);
+            if ((($c['on_failure'] ?? 'sheet') === 'sheet' || !empty($c['also_sheet'])) && self::spreadsheetId((string) ($c['sheet'] ?? '')) === null) {
+                return 'Encode order step ' . $n['id'] . ' needs a Google Sheet link (for "Write to Google Sheet instead" or "Also write to Google Sheet"), or choose "Continue without saving".';
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Ang skip_after ng isang wait:{amount, unit} kapag may amount na 1 o higit pa, null kapag wala (walang key sa
      * config, kaya ang lumang graph ay hindi nagbabago). Lampas sa 23 oras: InvalidArgumentException.
      */
     private static function cleanSkip(mixed $v): ?array

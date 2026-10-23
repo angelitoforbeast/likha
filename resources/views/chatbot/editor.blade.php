@@ -42,7 +42,7 @@
     #minimap { position: absolute; right: 8px; bottom: 8px; width: 180px; height: 120px; background: rgb(255 255 255 / .92); border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; touch-action: none; }
     @media (max-width: 640px) { #minimap { width: 120px; height: 80px; } }
     .t-start .nd-h { background: #ecfdf5; } .t-condition .nd-h { background: #fef3c7; } .t-send .nd-h { background: #eff6ff; }
-    .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-clear_ai .nd-h { background: #fff1f2; } .t-sheet .nd-h { background: #f0fdf4; } .t-end .nd-h { background: #f1f5f9; }
+    .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-clear_ai .nd-h { background: #fff1f2; } .t-sheet .nd-h { background: #f0fdf4; } .t-encode_order .nd-h { background: #ecfeff; } .t-end .nd-h { background: #f1f5f9; }
 </style>
 @endpush
 
@@ -54,7 +54,8 @@
      data-versions-url="{{ route('chatbot.flows.versions', $flow->id) }}" data-restore-url="{{ route('chatbot.flows.restore', [$flow->id, 0]) }}"
      data-test-url="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}"
      data-sheet-url="{{ route('chatbot.sheet.info') }}" data-sheet-customers-url="{{ route('chatbot.flows.sheet-customers', $flow->id) }}"
-     data-sheet-preview-url="{{ route('chatbot.flows.sheet-preview', $flow->id) }}" data-max-columns="{{ \App\Services\Chatbot\FlowGraph::MAX_COLUMNS }}">
+     data-sheet-preview-url="{{ route('chatbot.flows.sheet-preview', $flow->id) }}" data-max-columns="{{ \App\Services\Chatbot\FlowGraph::MAX_COLUMNS }}"
+     data-encode-models="{{ json_encode($encodeModels) }}" data-encode-url="{{ \Illuminate\Support\Facades\Route::has('order-encode.index') ? route('order-encode.index') : '' }}">
     {{-- Ang draft: ang mga pagbabago ay hindi live hanggang Publish. --}}
     <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span id="chip" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700" aria-live="polite">…</span>
@@ -82,6 +83,7 @@
         <button type="button" class="cb-btn cb-btn-sm" data-add="ai">AI</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="clear_ai">Clear AI memory</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sheet">Google Sheet</button>
+        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_order" title="Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.">Encode order</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sequence">Sequence</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="end">End</button>
         <span class="mx-1 text-slate-300">|</span>
@@ -161,7 +163,7 @@
     const cv = $('cv'), world = $('world'), svg = $('wires');
     const W = 220, NS = 'http://www.w3.org/2000/svg';
     const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
-    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', clear_ai: 'Clear AI memory', sheet: 'Google Sheet', sequence: 'Sequence', end: 'End'};
+    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', clear_ai: 'Clear AI memory', sheet: 'Google Sheet', encode_order: 'Encode order', sequence: 'Sequence', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], variableGroups = [], rules = {}, sequences = [];
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
@@ -190,7 +192,7 @@
             case 'condition': return [...(c.rows || []).map((_, i) => 'row_' + (i + 1)), 'no'];
             case 'send': return c.wait ? (skipMinutes(c) ? ['reply', 'skipped'] : ['reply']) : ['continue'];
             case 'ai': return ['success', 'failed'];
-            case 'sheet': return ['next', 'failed'];
+            case 'sheet': case 'encode_order': return ['next', 'failed'];
             default: return [];
         }
     }
@@ -212,6 +214,7 @@
             case 'ai': return (c.model || 'gpt-4o-mini') + (c.save_to ? ' → ' + c.save_to : '') + (c.send ? ', sends the answer' : '');
             case 'clear_ai': return 'Forgets the conversation so far' + ((c.fields || []).filter(Boolean).length ? '\nclears ' + c.fields.filter(Boolean).join(', ') : '');
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
+            case 'encode_order': return 'Encodes the order in Likha' + (c.also_sheet ? ' + writes the sheet' : '') + '\nOn failure: ' + (c.on_failure === 'continue' ? 'continue without saving' : 'write to the sheet');
             case 'sequence': {
                 const s = sequences.find(x => x.id === c.sequence_id);
                 const name = c.sequence_id ? (s ? s.name : 'a deleted sequence') : (c.action === 'unsubscribe' ? 'all sequences' : 'Pick a sequence');
@@ -500,12 +503,14 @@
     const DEFAULTS = {
         condition: {rows: [{variable: 'last_input', rule: 'contains', value: ''}]}, send: {items: [{type: 'text', value: ''}], wait: false, save_to: ''},
         set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 100, max_tokens: 250, save_to: '', send: false},
-        clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
+        clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []},
+        encode_order: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', also_sheet: false, sheet: '', tab: '', on_failure: 'sheet'}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
         const next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
         const r = cv.getBoundingClientRect(), c = toWorld(r.left + r.width / 2, r.top + r.height / 3);
         const n = {id: 'n' + next, type: b.dataset.add, x: Math.round(c.x - W / 2), y: Math.round(c.y), config: JSON.parse(JSON.stringify(DEFAULTS[b.dataset.add]))};
+        if (n.type === 'encode_order') prefillEncode(n.config);
         graph.nodes.push(n); render(); changed(); openForm(n);
     }));
 
@@ -606,6 +611,7 @@
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'Also clear these fields (optional):'}), rowsEditor(c.fields = c.fields || [], make, 20, '+ Field'));
         }
         if (n.type === 'sheet') sheetForm(c, body);
+        if (n.type === 'encode_order') encodeForm(c, body);
         if (n.type === 'sequence') {
             const pick = el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
             const fill = () => {
@@ -619,7 +625,7 @@
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'Subscribing while the customer is already in it does nothing; after an unsubscribe it starts again from step 1. Sequences are made in Chatbot → Sequences.'}));
         }
         // Results: ang order ay binibilang kapag dumaan ang takbo sa step na ito (isa kada customer kada 24 oras).
-        if (['send', 'set', 'sheet'].includes(n.type)) {
+        if (['send', 'set', 'sheet', 'encode_order'].includes(n.type)) {
             body.append(el('div', {class: 'border-t border-slate-200 pt-2 text-sm'}, [
                 el('label', {class: 'flex items-center gap-2'}, [bind(el('input', {type: 'checkbox', checked: !!c.counts_order}), v => c.counts_order = v, true), 'Counts as an order']),
                 el('p', {class: 'mt-0.5 text-xs text-slate-500', text: 'When a customer passes this step, Chatbot → Results counts one order (once per customer per 24 hours).'})]));
@@ -769,6 +775,42 @@
         drawTab(); drawTable(); drawPreview(); load(false);
         if (customers === null) fetch(ed.dataset.sheetCustomersUrl, {headers: {'Accept': 'application/json'}}).then(r => r.ok ? r.json() : {customers: []})
             .then(d => { customers = d.customers || []; if (editing && editing.c === c) drawPreview(); }).catch(() => { customers = []; });
+    }
+    // ---- the Encode order step: ang mga cell A..H ng order (parehong variable chips ng Sheet step), ang kasabay na sulat sa sheet at ang gagawin kapag pumalya ----
+    const ENCODE_FIELDS = [['date', 'Date (A)'], ['page', 'Page (B)'], ['name', 'Name: FB name (C)'], ['phone', 'Phone (D)'], ['input', 'All user input (E)'],
+        ['shop', 'Shop details (F)'], ['extracted', 'Extracted details (G)'], ['price', 'Price (H)']];
+    const SHEET_OK = s => /^[a-zA-Z0-9_-]{20,}$/.test((s || '').trim()) || /\/spreadsheets\/d\/[a-zA-Z0-9_-]{20,}/.test(s || '');
+    // Ang bagong step ay may laman na ang mga variable ng Sheet step ng "All Orders" ng flow na ito (A..H), kung may ganoon; kung wala, blangko.
+    function prefillEncode(c) {
+        const s = graph.nodes.find(x => x.type === 'sheet' && ((x.config || {}).tab || '').trim().toLowerCase() === 'all orders');
+        if (!s) return;
+        const cols = Array.isArray(s.config.columns) ? s.config.columns : [];
+        ENCODE_FIELDS.forEach(([k], i) => c[k] = cols[i] || '');
+        c.sheet = s.config.sheet || ''; c.tab = s.config.tab || '';
+    }
+    function encodeForm(c, body) {
+        body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.'}));
+        body.append(el('p', {class: 'text-xs text-slate-500', text: 'The order (A to H of the row the Google Sheet step would write). The flow goes on at once; the encode runs in the background.'}));
+        body.append(el('div', {class: 'grid gap-2 sm:grid-cols-2'}, ENCODE_FIELDS.map(([k, t]) => label(t, bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, c[k])), v => c[k] = v)))));
+        const m = JSON.parse(ed.dataset.encodeModels || '{}');
+        body.append(el('div', {class: 'rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600'}, [
+            el('div', {text: 'Models in use (read only): extract ' + (m.extract || '?') + ', checker ' + (m.checker || '?')}),
+            el('div', {}, ['Set in app_settings (order_encode_model_extract, order_encode_model_checker). Watch the results on ', el('a', {href: ed.dataset.encodeUrl, class: 'text-blue-700 underline', target: '_blank', rel: 'noopener', text: 'Order encode'}), '.'])]));
+        const sheetBox = el('div', {class: 'space-y-1'}), hint = el('p', {class: 'text-xs text-red-700', role: 'alert'});
+        const need = () => c.on_failure !== 'continue' || !!c.also_sheet;
+        const drawHint = () => { hint.textContent = need() && !SHEET_OK(c.sheet) ? 'A Google Sheet link is needed here, or the flow cannot be published. Pick "Continue without saving" and leave "Also write" off to go without a sheet.' : ''; };
+        const drawSheet = () => {
+            sheetBox.replaceChildren(...(need() ? [
+                label('Google Sheet link or ID', bind(input({maxlength: 300, placeholder: 'https://docs.google.com/spreadsheets/d/…'}, c.sheet), v => { c.sheet = v; drawHint(); })),
+                label('Tab', bind(input({maxlength: 100, placeholder: 'All Orders'}, c.tab), v => c.tab = v)),
+            ] : []));
+            drawHint();
+        };
+        body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: !!c.also_sheet}), v => { c.also_sheet = v; drawSheet(); }, true), 'Also write to Google Sheet (while changing over)']));
+        body.append(label('If the encode fails', bind(el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'},
+            [['sheet', 'Write to Google Sheet instead'], ['continue', 'Continue without saving (shows a warning)']].map(([k, t]) => el('option', {value: k, text: t, selected: (c.on_failure || 'sheet') === k}))), v => { c.on_failure = v; drawSheet(); })));
+        body.append(sheetBox, hint);
+        drawSheet();
     }
     function bind(control, set, checkbox = false) {
         const fire = () => set(checkbox ? control.checked : control.value);

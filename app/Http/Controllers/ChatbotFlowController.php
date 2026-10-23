@@ -126,7 +126,9 @@ class ChatbotFlowController extends Controller
         $this->checkAccess();
         $flow = ChatbotFlow::findOrFail($id);
 
-        return view('chatbot.editor', ['flow' => $flow, 'repliesOn' => BotcakeOutbox::enabled()]);
+        $encode = app(\App\Services\OrderEncode\Settings::class);
+
+        return view('chatbot.editor', ['flow' => $flow, 'repliesOn' => BotcakeOutbox::enabled(), 'encodeModels' => ['extract' => $encode->modelExtract(), 'checker' => $encode->modelChecker()]]);
     }
 
     /**
@@ -179,6 +181,7 @@ class ChatbotFlowController extends Controller
             if ($flow->published_at !== null && $flow->draft_graph === null) return response()->json(['error' => 'There are no unpublished changes.'], 422);
             try {
                 $graph = FlowGraph::clean($flow->draft());
+                if ($problem = FlowGraph::publishProblems($graph)) throw new InvalidArgumentException($problem);
             } catch (InvalidArgumentException $e) {
                 return response()->json(['error' => 'This flow cannot be published: ' . $e->getMessage()], 422);
             }

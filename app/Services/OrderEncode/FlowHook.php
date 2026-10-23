@@ -62,6 +62,48 @@ class FlowHook
         return $this->queue($run, 'live', $sheetId, $tab, $row, null);
     }
 
+    /** Ang order_encodes.spreadsheet_id ng order ng Encode order step na walang sheet na mapagsusulatan kapag pumalya. */
+    public const NODE_SHEET = 'flow-node';
+
+    /** Naka-queue na ba ang step na ito sa takbong ito? (ulit na takbo ng parehong run = parehong order) */
+    public function hasNode(FlowRun $run, string $nodeId): bool
+    {
+        try {
+            return $run->runId !== null && OrderEncode::where('mode', 'live')->where('run_id', $run->runId)->where('flow_id', $run->flowId)->where('input->node', $nodeId)->exists();
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
+    }
+
+    /**
+     * Encode order step: naka-queue ba ang order? Hindi kailangan ang compare_sheet at ang mode ng page; ang kailangan ay ang
+     * key at ang address file. $sheetWritten: naisulat na ang row sa sheet (kasabay na sulat), kaya hindi na ito isusulat ng fallback.
+     */
+    public function node(FlowRun $run, string $nodeId, string $sheetId, string $tab, array $row, bool $sheetWritten): bool
+    {
+        try {
+            if ($this->settings->key() === '' || !$this->list->has()) {
+                Log::warning('order-encode: the Encode order step is not ready (key or address file)', ['page' => $run->pageName]);
+
+                return false;
+            }
+            $order = OrderEncode::create([
+                'page' => $run->pageName, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'run_id' => $run->runId,
+                'spreadsheet_id' => $sheetId, 'tab' => $tab, 'row_number' => null, 'mode' => 'live', 'status' => 'queued',
+                'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten],
+            ]);
+            EncodeOrder::dispatch($order->id);
+
+            return true;
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
+    }
+
     private function ready(string $page): bool
     {
         try {

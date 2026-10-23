@@ -1014,3 +1014,11 @@ Accepted, not fixed:
 - **Tests not added:** `Locations`/`compareLocale` ordering with digits and punctuation; `/order-encode?from[]=x` (the code ignores non-strings). Reason: no data can be lost; the suite is kept small.
 - **No automatic re-drive of a live order if the `encode` worker is not running** (nothing runs the job, so nothing writes the sheet either). Reason: no page is live in this spec; before any page goes live, the Supervisor program must be running, or a re-drive command added (suggestion for the go-live spec).
 - **Suggestions for the owner (not done, legacy rule):** the script quirks listed in `docs/specs/130-order-encode-shadow.result.md`.
+
+## 132: Encode order step (2026-10-23)
+
+- **"Continue without saving" with an encode that fails later loses the order** (only the `order_encodes` row, status `failed`, remains). Reason: it is the owner's explicit choice on the step; the compare page lists failed orders.
+- **No automatic re-drive of a live order if the `encode` worker is not running** (same as 130). Reason: the step is not used by any flow yet; the worker is a go-live prerequisite.
+- **The models are shown read-only but there is no screen to change them** (`app_settings` keys only). Reason: no settings screen exists for them in 130; adding one is a new feature.
+- **The step prefill looks only at the Sheet step "All Orders" of the same flow**, not at other flows of the page. Reason: the builder has no cross-flow data; the fields stay editable.
+- **A concurrent double run of the same step (two workers, same run id) could pass the "already queued" check together.** Reason: runs of one customer are serial; the macro_output dedupe still stops a second order row.
