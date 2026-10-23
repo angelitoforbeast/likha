@@ -55,3 +55,13 @@ Sample from the test fixture (`rates_learned_at` is the fixture's):
 - The item-summary payload is cached until the next save or upload (existing behaviour), so the projected values refresh with the page's other numbers; "refresh" forces it.
 - Orders whose J&T row has no `status_logs` are skipped when learning (the age-N state is unknown).
 - The first learning pass reads about 8 weeks of joined rows (~100k) in chunks; it runs at night.
+
+## Amendment 1: Mira RTS column, Use Mira RTS button, Profit (Mira RTS)
+
+- **Column "Mira RTS"** on /owner/private, right after Set RTS% (sortable, in the column-settings catalog). Its value is the Projected RTS rounded to 0.1 (`mira_rts_pct`). The earlier "Proj." line inside the Set RTS cell is removed. The cell shows "n orders · x% in transit" and goes red on the same flag (|set − projected| > 5 points, matched ≥ 30). The cell title explains: projected %, matched orders, % still in transit, and the typical error for that age: about 3 points when the in-transit orders average 4 days or less, about 1 up to 6 days, about 0.5 after (`mira_rts_error_pts`, from the mean age of the in-transit orders). The compact hover shows the same text.
+- **"Use Mira RTS" button** in that cell. It asks for a confirm showing `Set RTS: old → new`, then posts to the existing RTS save (`scope=rts`, same effective-date/apply-through handling as the modal, comment "Mira RTS x% (n orders)"). The only addition to that save is an optional `source` field accepted only as `mira_rts` (422 otherwise). The log row gets `source = mira_rts`, with who, old and new as for any RTS save. Permission is unchanged (`checkWriteAccess`). The page reloads its data after the save. Nothing is applied automatically.
+- **"Profit (Mira RTS)"** (`projected_profit_mira`) column right after Prof.Profit, with a total in the totals row. It uses the same per-day formula as Prof.Profit with the Mira value in place of the Set RTS; the existing sum and every other number are untouched. Null when there is no Mira RTS or no profit inputs.
+- Log viewer: `mira_rts` rows show in the unfiltered log, not under the "owner_private" source filter.
+- Tests added in `ProjectedRtsCellTest`: Mira value, error band and profit equal to the existing profit of a page whose Set RTS equals the Mira value (Set RTS and its profit unchanged); the button's save writes Set RTS plus a log row (user, old 30, new 55.1, source `mira_rts`); unknown source is 422; markup for both columns, the button, the totals and the explanation. `SharedPagesBasePinTest` re-pinned for both pages (new columns only).
+- Run: `tests/Feature/RtsProjection OwnerPrivate Rts Chatblast PageSettings Botcake`: 1182 tests, OK (1 skipped).
+- Story changes: none.

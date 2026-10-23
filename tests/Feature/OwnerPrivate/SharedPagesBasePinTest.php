@@ -14,10 +14,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SharedPagesBasePinTest extends OwnerPrivateTestCase
 {
-    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute, at ang limang delivery column ng campaigns (ad_delivered … ad_rts_pct) kasama ang "Walang ad id" at "Total ng page (ayon sa order)" na linya ng expand, ang POST at tanda ng delivery-only na campaign, at ang RTS / DEL / INT (orders) na cell na pumalit sa lima, at ang Projected RTS na linya sa Set RTS% cell. */
+    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute, at ang limang delivery column ng campaigns (ad_delivered … ad_rts_pct) kasama ang "Walang ad id" at "Total ng page (ayon sa order)" na linya ng expand, ang POST at tanda ng delivery-only na campaign, at ang RTS / DEL / INT (orders) na cell na pumalit sa lima, at ang Mira RTS at Profit (Mira RTS) na column (cell, totals at ang dalawang bagong entry sa column settings). */
     private const BASE = [
-        '/owner/private' => '9d98188b89e64b9c1433f3e5fc7248818e010998',
-        '/owner/column-settings/owner-private' => 'df98ac26ebd3b76caabcae0a554ed41cbc23fcd7',
+        '/owner/private' => '9f655c8bd70f38009b408bb75240c665d09e9c26',
+        '/owner/column-settings/owner-private' => 'de3011505badfb959a9f61af8d106788239c083a',
     ];
 
     protected function setUp(): void

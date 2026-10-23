@@ -138,7 +138,7 @@ class RtsProjection
             $r ??= [
                 'page' => trim((string) $o->PAGE), 'item' => trim((string) $o->ITEM_NAME),
                 'orders' => 0, 'unmatched' => 0, 'matched' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0,
-                'in_transit' => 0, 'resolved_old' => 0, 'returned_old' => 0, 'transit_rts' => 0.0, 'no_rate' => false,
+                'in_transit' => 0, 'transit_age_sum' => 0, 'resolved_old' => 0, 'returned_old' => 0, 'transit_rts' => 0.0, 'no_rate' => false,
             ];
             $r['orders']++;
 
@@ -155,6 +155,7 @@ class RtsProjection
             if ($class === 'F') $r['for_return']++;
             if ($class === 'T') {
                 $r['in_transit']++;
+                $r['transit_age_sum'] += $age;
                 $p = $this->p($rates, $key, $age);
                 if ($p === null) $r['no_rate'] = true; else $r['transit_rts'] += $p;
             }
@@ -173,16 +174,23 @@ class RtsProjection
                 ? round(($r['returned'] + $r['for_return'] + $r['transit_rts']) / $m * 100, 2) : null;
             $r['in_transit_pct'] = $m > 0 ? round($r['in_transit'] / $m * 100, 2) : null;
             $r['actual_rts'] = $r['resolved_old'] > 0 ? round($r['returned_old'] / $r['resolved_old'] * 100, 2) : null;
+            $r['error_pts'] = self::errorPts($r['in_transit'] > 0 ? $r['transit_age_sum'] / $r['in_transit'] : self::MAX_AGE);
             $r['set_rts'] = $set[$key] ?? null;
             $r['gap'] = ($r['set_rts'] !== null && $r['projected_rts'] !== null) ? round($r['set_rts'] - $r['projected_rts'], 2) : null;
             $r['flag'] = $r['gap'] !== null && abs($r['gap']) > self::FLAG_POINTS && $m >= self::MIN_MATCHED_FLAG;
             $r['set_by'] = $by[$key]['by'] ?? null;
             $r['set_at'] = $by[$key]['at'] ?? null;
-            unset($r['resolved_old'], $r['returned_old'], $r['transit_rts'], $r['no_rate']);
+            unset($r['transit_age_sum'], $r['resolved_old'], $r['returned_old'], $r['transit_rts'], $r['no_rate']);
         }
         unset($r);
 
         return $rows;
+    }
+
+    /** Karaniwang error (puntos) ng projection ayon sa average na edad ng mga in transit, mula sa backtest: ~3 sa day 3, ~1 sa day 5, ~0.5 sa day 7 pataas. */
+    public static function errorPts(float $meanAge): float
+    {
+        return $meanAge <= 4 ? 3.0 : ($meanAge <= 6 ? 1.0 : 0.5);
     }
 
     /** p ng RTS para sa In Transit na order na $age araw na: rate ng item, kung wala ay pooled (pinakamalapit na mas bata). */

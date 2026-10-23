@@ -41,6 +41,8 @@ abstract class RtsProjectionTestCase extends MacroOutputTestCase
     {
         return array_merge(parent::migrationPaths(), [
             'database/migrations/2026_05_04_000001_create_page_item_settings_log_table.php',
+            'database/migrations/2026_05_15_140000_add_cogs_ceo_columns_to_page_item_settings_log.php',
+            'database/migrations/2026_11_01_100000_add_source_to_page_item_settings_log.php',
         ]);
     }
 
