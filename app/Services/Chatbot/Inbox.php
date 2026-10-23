@@ -72,7 +72,17 @@ class Inbox
      * Ang mga usapan ng page sa loob ng window, pinakabagong galaw muna. tab: '' (lahat), 'bot' o 'human' (naka-pause).
      * @return array<int, array{psid: string, name: string, preview: string, from: string, at: ?string, waiting: bool, human: bool}>
      */
-    public function conversations(string $pageId, string $window = '7d', string $q = '', string $tab = ''): array
+    public function conversations(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = ''): array
+    {
+        return $this->listWithCounts($pageId, $window, $q, $tab, $status)['rows'];
+    }
+
+    /**
+     * Ang listahan at ang bilang ng bawat status (Ordered, Loop 1-3, Reply failed, Phone no order) sa parehong page, window,
+     * tab at hanap. Isang query kada uri ng status para sa mga customer ng listahan (hanggang GROUP_LIMIT x 2), walang N+1.
+     * @return array{rows: array<int, array>, counts: array<string, int>}
+     */
+    public function listWithCounts(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = ''): array
     {
         $since = now()->subHours(self::WINDOWS[$window] ?? 168);
         $q = trim($q);
@@ -96,6 +106,9 @@ class Inbox
             if (($tab === 'human' && !$human) || ($tab === 'bot' && $human)) continue;
             $rows[$psid] = ['in' => $in[$psid] ?? null, 'out' => $out[$psid] ?? null, 'human' => $human];
         }
+        $sets = $this->statusSets((int) $pageId, array_map('strval', array_keys($rows)), $since);
+        $counts = array_map('count', $sets);
+        if (isset($sets[$status])) $rows = array_intersect_key($rows, $sets[$status]);
         uasort($rows, fn ($a, $b) => strcmp((string) max($b['in']->last_at ?? '', $b['out']->last_at ?? ''), (string) max($a['in']->last_at ?? '', $a['out']->last_at ?? '')));
         $rows = array_slice($rows, 0, self::LIST_LIMIT, true);
 
@@ -127,7 +140,45 @@ class Inbox
             ];
         }
 
-        return $list;
+        return ['rows' => $list, 'counts' => $counts];
+    }
+
+    public const STATUSES = ['ordered', 'loop1', 'loop2', 'loop3', 'failed', 'phone'];
+
+    /**
+     * Alin sa mga customer na ito ang pasok sa bawat status (key = psid). Ordered: may chatbot_events type order sa window
+     * (gaya ng Results). Loop: ang CHAT STATUS field. Failed: ang huling padala ng bot sa window ay pumalya. Phone: may GPT PHONE
+     * NUMBER at hindi Ordered.
+     * @param array<int, string> $psids
+     * @return array<string, array<string, true>>
+     */
+    private function statusSets(int $pageId, array $psids, Carbon $since): array
+    {
+        $sets = array_fill_keys(self::STATUSES, []);
+        $psids = array_values(array_filter($psids, 'ctype_digit'));
+        $chatKey = ChatbotVars::norm('CHAT STATUS');
+        $phoneKey = ChatbotVars::norm('GPT PHONE NUMBER');
+        $phones = [];
+        foreach (array_chunk($psids, 500) as $chunk) {
+            $ids = array_map('intval', $chunk);
+            if ($this->hasEvents()) {
+                foreach (DB::table('chatbot_events')->where('page_id', $pageId)->whereIn('psid', $ids)->where('type', 'order')->where('created_at', '>=', $since)->distinct()->pluck('psid') as $p) $sets['ordered'][(string) $p] = true;
+            }
+            foreach (DB::table('chatbot_customer_values')->where('page_id', $pageId)->whereIn('psid', $ids)->whereIn('key', [$chatKey, $phoneKey])->get(['psid', 'key', 'value']) as $v) {
+                if ($v->key === $phoneKey) {
+                    if (trim((string) $v->value) !== '') $phones[(string) $v->psid] = true;
+                } else {
+                    $loop = preg_replace('/\s+/u', '', mb_strtolower((string) $v->value));
+                    if (in_array($loop, ['loop1', 'loop2', 'loop3'], true)) $sets[$loop][(string) $v->psid] = true;
+                }
+            }
+            $last = ChatbotReply::where('page_id', $pageId)->whereIn('psid', $ids)->where('kind', 'send')->where('sent_at', '>=', $since)
+                ->selectRaw('MAX(id) AS last_id')->groupBy('psid')->limit(500)->pluck('last_id')->all();
+            if ($last) foreach (ChatbotReply::where('page_id', $pageId)->whereIn('id', $last)->where('status', 'failed')->pluck('psid') as $p) $sets['failed'][(string) $p] = true;
+        }
+        $sets['phone'] = array_diff_key($phones, $sets['ordered']);
+
+        return $sets;
     }
 
     private static function outPreview(array $content): string
