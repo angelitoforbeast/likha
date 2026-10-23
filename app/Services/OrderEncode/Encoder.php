@@ -95,7 +95,7 @@ final class Encoder
                 'name' => $db['B'], 'phone' => $cell['K'] ?? '', 'address_line' => $db['D'], 'province' => $db['E'], 'city' => $db['F'], 'barangay' => $db['G'],
                 'item' => $db['H'], 'cod' => $db['I'], 'remark' => $db['N'], 'icon' => $m['icon'],
                 'r' => $db['R'], 's' => $db['S'], 't' => $db['T'], 'u' => $db['U'], 'v' => $db['V'], 'w' => $db['W'],
-                'final' => $final, 'proceed' => $final === '✅', 'phone_ok' => $checker->phoneOk,
+                'final' => $final, 'proceed' => $final === '✅', 'candidates' => $m['candidates'] ?? null, 'phone_ok' => $checker->phoneOk,
             ],
             'db' => $db,
             'error' => $error,

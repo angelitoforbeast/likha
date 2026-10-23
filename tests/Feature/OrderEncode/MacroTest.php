@@ -11,7 +11,7 @@ class MacroTest extends TestCase
 {
     private function macro(?array $rows = null): Macro
     {
-        return new Macro($rows ?? Fixtures::macroRows());
+        return new Macro($rows ?? Fixtures::rows());
     }
 
     public function test_S_130_45_the_cebu_cebu_example_takes_the_first_candidate_in_list_order(): void
@@ -20,7 +20,7 @@ class MacroTest extends TestCase
 
         $this->assertSame('cebu cebu', $r['p1']);
         $this->assertSame(['AGUSAN-DEL-SUR', 'AGUSAN-DEL-SUR-ESPERANZA', 'CEBULAN'], [$r['province'], $r['city'], $r['barangay']]);
-        $this->assertSame(4, $r['candidates']);
+        $this->assertSame(5, $r['candidates']);
         $this->assertSame([3, 'Barangay', '❌'], [$r['points'], $r['remark'], $r['icon']]);
     }
 
@@ -34,7 +34,7 @@ class MacroTest extends TestCase
 
     public function test_S_130_45_seven_points_with_more_than_one_candidate_is_multiple_suggested_address(): void
     {
-        $rows = array_merge(Fixtures::macroRows(), [Fixtures::macroRows()[6]]);
+        $rows = array_merge(Fixtures::rows(), [Fixtures::rows()[7]]);
 
         $r = $this->macro($rows)->run('ABRA', 'ABRA DOLORES', 'BAYAAN');
 
@@ -79,9 +79,21 @@ class MacroTest extends TestCase
         $this->assertNull($this->macro()->run('', ' ', ''));
     }
 
+    public function test_S_130_60_a_customer_text_with_enye_matches_an_n_label_and_the_output_is_the_files(): void
+    {
+        $parts = \App\Services\OrderEncode\Parse::addressParts("Province: Camarines Sur
+City: Naga City
+Brgy: Peñafrancia");
+        $this->assertSame('PENAFRANCIA', $parts['barangay']);
+
+        $r = $this->macro()->run('Camariñes Sur', 'Naga City', 'PEÑAFRANCIA');
+
+        $this->assertSame([7, 'CAMARINES-SUR', 'NAGA-CITY', 'PENAFRANCIA'], [$r['points'], $r['province'], $r['city'], $r['barangay']]);
+    }
+
     public function test_S_130_45_only_the_first_six_words_of_the_query_count(): void
     {
-        $this->assertSame(7, $this->macro()->filter('a a a a a a zzzz')['count']);
+        $this->assertSame(9, $this->macro()->filter('a a a a a a zzzz')['count']);
         $this->assertSame(0, $this->macro()->filter('a a a a a zzzz')['count']);
     }
 }

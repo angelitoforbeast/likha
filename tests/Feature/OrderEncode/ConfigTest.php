@@ -16,7 +16,6 @@ class ConfigTest extends OrderEncodeTestCase
             'unknown key' => ['model', 'gpt-5'],
             'mode with a typo' => ['mode', 'shadw'],
             'compare sheet that is not a sheet' => ['compare_sheet', 'not a sheet'],
-            'macro sheet that is not a sheet' => ['macro_sheet', 'https://example.com/x'],
         ];
     }
 
@@ -35,7 +34,6 @@ class ConfigTest extends OrderEncodeTestCase
 
         $this->assertSame('shadow', $s->mode(self::PAGE));
         $this->assertSame(self::AFTER, $s->sheetId(self::PAGE, 'compare_sheet'));
-        $this->assertSame(self::MACRO, $s->sheetId(self::PAGE, 'macro_sheet'));
         $this->assertSame('off', $s->mode('Page Without Settings'));
     }
 

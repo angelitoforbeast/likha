@@ -16,9 +16,16 @@ final class Text
         return preg_replace('/^[\s\x{FEFF}]+|[\s\x{FEFF}]+$/u', '', $s) ?? trim($s);
     }
 
+    /** Ang ñ/Ñ ay n/N (sa nakasulat at sa decomposed na anyo): ang listahan ng lugar ay N ang baybay. */
+    public static function foldN(?string $s): string
+    {
+        return str_replace(["ñ", "Ñ", 'ñ', 'Ñ'], ['n', 'N', 'n', 'N'], (string) $s);
+    }
+
+    /** Lowercase na tiklop na ang Ñ: lahat ng paghahambing ng lugar ay dumadaan dito. */
     public static function lower(?string $s): string
     {
-        return mb_strtolower((string) $s, 'UTF-8');
+        return mb_strtolower(self::foldN($s), 'UTF-8');
     }
 
     /** JS str.replace("text", "") — ang una lang. */

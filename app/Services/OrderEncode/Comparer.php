@@ -70,6 +70,43 @@ class Comparer
         return $out;
     }
 
+    /** Ang mga kilalang dahilan ng pagkakaiba na hindi tunay na mali (ipinapakita sa /order-encode). */
+    public const NOTES = [
+        'n_tilde' => 'Ñ vs N: counted as the same',
+        'list_order' => 'Several list matches: the file order may differ from the sheet',
+        'newer_entry' => 'Sheet has no match: the address file may have a newer entry',
+        'model' => 'GPT model changed (gpt-3.5-turbo in the sheet, gpt-4o-mini here)',
+    ];
+
+    /**
+     * @param array<string, mixed> $outputs
+     * @param array<int, string>   $db
+     * @param array<int, string>   $mirror
+     * @param array<string, string> $fields ang resulta ng fields()
+     * @return array<int, string> mga susi ng NOTES
+     */
+    public static function notes(array $outputs, array $db, array $mirror, array $fields): array
+    {
+        $notes = [];
+        foreach (['name', 'address_line', 'province', 'city', 'barangay', 'item'] as $f) {
+            [$key, $at] = self::FIELDS[$f];
+            $a = trim((string) ($outputs[$key] ?? ''));
+            $b = trim((string) ($db[$at] ?? ''));
+            if ($a !== '' && $b !== '' && $a !== $b && ($fields[$f] ?? '') === 'same') $notes['n_tilde'] = true;
+        }
+        foreach (['province', 'city', 'barangay'] as $f) {
+            $sheet = trim((string) ($db[self::FIELDS[$f][1]] ?? ''));
+            if (($fields[$f] ?? 'same') === 'same') continue;
+            if ((int) ($outputs['candidates'] ?? 0) > 1) $notes['list_order'] = true;
+            if (trim((string) ($outputs[$f] ?? '')) !== '' && ($sheet === '' || $sheet === '#N/A')) $notes['newer_entry'] = true;
+        }
+        foreach (['name', 'phone', 'address_line'] as $f) {
+            if (($fields[$f] ?? 'same') !== 'same') $notes['model'] = true;
+        }
+
+        return array_keys($notes);
+    }
+
     private static function one(string $ours, string $sheet, string $type): string
     {
         [$a, $b] = [self::norm($ours, $type), self::norm($sheet, $type)];
@@ -91,7 +128,7 @@ class Comparer
 
                 return is_numeric($n) ? Text::sheetValue((string) $n) : $v;
             case 'text':
-                return mb_strtolower(Text::collapse($v));
+                return Text::lower(Text::collapse($v));
             default:
                 return $v;
         }

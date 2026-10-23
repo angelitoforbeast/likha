@@ -79,7 +79,7 @@ class OrderEncodeCompare extends Command
 
         $fields = Comparer::fields((array) $o->outputs, $db, $mirror);
 
-        return $this->save($o, 'done', ['sheet' => $sheet, 'compare' => $fields, 'compare_equal' => count(array_unique($fields)) === 1 && reset($fields) === 'same']);
+        return $this->save($o, 'done', ['sheet' => $sheet + ['notes' => Comparer::notes((array) $o->outputs, $db, $mirror, $fields)], 'compare' => $fields, 'compare_equal' => count(array_unique($fields)) === 1 && reset($fields) === 'same']);
     }
 
     private function save(OrderEncode $o, string $state, array $more = []): string

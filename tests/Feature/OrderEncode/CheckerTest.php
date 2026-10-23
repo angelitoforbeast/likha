@@ -184,7 +184,7 @@ class CheckerTest extends TestCase
         $c = $this->check($this->row(['M' => 'Lahug, Cebu', 'F' => 'MANDAUE CITY']));
 
         $this->assertSame(['CEBU CITY', '✅', ''], [$c->cells['F'], $c->cells['S'], $c->cells['W']]);
-        $this->assertSame('CEBU CITY, MANDAUE CITY', $c->cells['U']);
+        $this->assertSame('CEBU-CITY, MANDAUE-CITY', $c->cells['U']);
         $this->assertSame('BANILAD, LAHUG', $c->cells['T']);
         $this->assertSame(1, $this->steps->requests());
     }
@@ -214,9 +214,9 @@ class CheckerTest extends TestCase
 
         $c = $this->check($this->row(['M' => 'Bagumbayan, Quezon City, NCR', 'E' => 'CEBU', 'F' => 'X', 'G' => 'Y']));
 
-        $this->assertSame(['METRO MANILA', 'QUEZON CITY', 'BAGUMBAYAN', '✅'], [$c->cells['E'], $c->cells['F'], $c->cells['G'], $c->cells['S']]);
-        $this->assertSame('QUEZON CITY, MAKATI CITY' === $c->cells['U'] || 'MAKATI CITY, QUEZON CITY' === $c->cells['U'], true);
-        $this->assertStringContainsString('ABRA, CEBU, METRO MANILA', $c->cells['V']);
+        $this->assertSame(['METRO-MANILA', 'QUEZON CITY', 'BAGUMBAYAN', '✅'], [$c->cells['E'], $c->cells['F'], $c->cells['G'], $c->cells['S']]);
+        $this->assertSame('MAKATI-CITY, QUEZON-CITY', $c->cells['U']);
+        $this->assertStringContainsString('ABRA, AGUSAN-DEL-SUR, CAMARINES-SUR, CEBU, METRO-MANILA', $c->cells['V']);
         $this->assertSame(3, $this->steps->requests());
     }
 
@@ -248,7 +248,7 @@ class CheckerTest extends TestCase
     {
         $this->answers([['province_ok' => true, 'city_ok' => false, 'barangay_ok' => true]]);
 
-        $c = $this->check($this->row(['M' => 'Bayaan, Dolores', 'E' => 'ABRA', 'F' => 'DOLORES', 'G' => 'BAYAAN']));
+        $c = $this->check($this->row(['M' => 'Bayaan, Dolores', 'E' => 'ABRA', 'F' => 'ABRA-DOLORES', 'G' => 'BAYAAN']));
 
         $this->assertSame('Province', $c->cells['S']);
         $this->assertSame('✅', $c->cells['W']);
@@ -257,8 +257,8 @@ class CheckerTest extends TestCase
     public function test_S_130_50_without_the_patch_the_missing_city_is_written(): void
     {
         $this->answers([['province_ok' => true, 'city_ok' => false, 'barangay_ok' => true]]);
-        $rows = array_merge(Fixtures::checkerRows(), [['ABRA', 'LAGAYAN', 'BAYAAN']]); // dalawang city ang may BAYAAN: walang isahang hula
-        $c = new Checker($this->row(['M' => 'Bayaan, Dolores', 'E' => 'ABRA', 'F' => 'DOLORES', 'G' => 'BAYAAN']), new \App\Services\OrderEncode\Locations($rows), Fixtures::gpt($this->steps), $this->steps);
+        $rows = array_merge(Fixtures::rows(), [['ABRA', 'LAGAYAN', 'BAYAAN']]); // dalawang city ang may BAYAAN: walang isahang hula
+        $c = new Checker($this->row(['M' => 'Bayaan, Dolores', 'E' => 'ABRA', 'F' => 'ABRA-DOLORES', 'G' => 'BAYAAN']), new \App\Services\OrderEncode\Locations($rows), Fixtures::gpt($this->steps), $this->steps);
         $c->run();
 
         $this->assertSame('City', $c->cells['W']);
@@ -274,6 +274,18 @@ class CheckerTest extends TestCase
     public function test_S_130_50_w_mapping(bool $p, bool $c, bool $b, string $expected): void
     {
         $this->assertSame($expected, Checker::computeW($p, $c, $b));
+    }
+
+    public function test_S_130_60_enye_is_n_in_the_fuzzy_match_the_list_checks_and_the_gpt_in_list_guard(): void
+    {
+        $this->answers([['barangay' => 'Peñafrancia'], ['province_ok' => true, 'city_ok' => true, 'barangay_ok' => true]]);
+
+        $c = $this->check($this->row(['E' => 'CAMARINES-SUR', 'F' => 'NAGA-CITY', 'G' => 'BAGUMBAYAN', 'M' => 'Peñafrancia, Naga City, Camariñes Sur']));
+
+        // ang Ñ ng customer ay tugma sa N ng file; ang isinusulat ay ang baybay ng file (N)
+        $this->assertSame('Penafrancia', $c->cells['G']); // N ang baybay (ang laki ng letra ay ng GPT, gaya ng script)
+        $this->assertSame('✅', $c->cells['S']);
+        $this->assertTrue(\App\Services\OrderEncode\Text::brgyInList('PEÑAFRANCIA', 'PENAFRANCIA'));
     }
 
     public function test_S_130_51_a_blank_name_and_address_are_filled_by_gpt_and_stripped_of_places(): void

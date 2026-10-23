@@ -4,7 +4,7 @@ namespace App\Services\OrderEncode;
 
 /**
  * STEP 6 ng auto-encode.gs (Macro()) at ang mga formula ng ENCODER (encoder-formulas.md): ang LocationData ng macro sheet
- * (A = "PROVINCE CITY BARANGAY", B province, C city, D barangay, ayon sa ayos ng sheet) at ang pagbuo ng P1 salita por salita.
+ * (ang J&T address file; A = "PROVINCE CITY BARANGAY" (binubuo dito), ayon sa ayos ng file) at ang pagbuo ng P1 salita por salita.
  */
 final class Macro
 {
@@ -13,16 +13,17 @@ final class Macro
     /** @var array<int, string> ang A ng bawat row, lowercase (para sa FILTER) */
     private array $hay;
 
-    /** @param array<int, array<int, mixed>> $rows A, B, C, D ng LocationData (A2:D) */
+    /** @param array<int, array<int, mixed>> $rows PROVINCE, CITY, BARANGAY ng bawat linya ng listahan, ayon sa ayos nito */
     public function __construct(array $rows)
     {
         $this->rows = [];
         $this->hay = [];
         foreach ($rows as $r) {
-            $r = array_pad(array_values((array) $r), 4, '');
-            $a = (string) $r[0] !== '' ? (string) $r[0] : trim($r[1] . ' ' . $r[2] . ' ' . $r[3]);
+            $r = array_pad(array_values((array) $r), 3, '');
+            // Ang column A ng sheet: "PROVINCE CITY BARANGAY" na may isang espasyo, binubuo dito.
+            $a = Text::collapse(trim($r[0] . ' ' . $r[1] . ' ' . $r[2]));
             if ($a === '') continue;
-            $this->rows[] = [$a, (string) $r[1], (string) $r[2], (string) $r[3]];
+            $this->rows[] = [$a, (string) $r[0], (string) $r[1], (string) $r[2]];
             $this->hay[] = Text::lower($a);
         }
     }

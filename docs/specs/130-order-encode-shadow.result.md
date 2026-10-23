@@ -8,13 +8,13 @@ Status: done, not pushed. Branch `feat/130-order-encode-shadow` (cut from `7a7ef
 |---|---|---|
 | 1 Port of the two scripts | medium | `App\Services\OrderEncode\*`: one service, step by step. `Parse` (EXTRACTED DETAILS, item/price), `Macro` (P1 build, FILTER, points, remarks), `Locations` (the checker's LocationData maps), `Checker` (phone, R, S, T/U/V, the GPT chains, W, name/address finalize), `Gpt` (prompts and system texts word for word, Responses API then chat fallback), `Encoder` (the order of both scripts), `Text` (the small functions: normalisers, fuzzy match, list checks), `Input`, `Steps` |
 | 2 Storage, job, flow hook | medium | `order_encodes` table, `EncodeOrder` job (queue `encode`), `FlowHook` (called from `FlowEngine::sheet`), `Runner`, `LiveOrder`, `Settings`, `LocationStore`, page-settings key validation |
-| 3 Commands and schedule | medium | `order-encode:sync-locations`, `order-encode:compare`, `Comparer`, `Sheets` (read-only Google reads through the chatbot's existing client) |
+| 3 Compare command and schedule | medium | `order-encode:compare`, `Comparer`, `Sheets` (read-only Google reads through the chatbot's existing client) |
 | 4 Compare page | medium | `GET /order-encode` (`OrderEncodeController`, `resources/views/order-encode/index.blade.php`) |
 | 5 Docs, deploy reference, stories | low | `docs/order-encode.md`, `deploy/supervisor/likha-encode.conf`, `qa/stories.md` S-130, `TODO.md` section 130 |
 
 ## Files
 
-New: `app/Services/OrderEncode/{Checker,Comparer,Encoder,FlowHook,Gpt,Input,LiveOrder,LocationStore,Locations,Macro,Parse,Runner,Settings,Sheets,Steps,Text}.php`, `app/Jobs/EncodeOrder.php`, `app/Models/OrderEncode.php`, `app/Console/Commands/{OrderEncodeCompare,OrderEncodeSyncLocations}.php`, `app/Http/Controllers/OrderEncodeController.php`, `resources/views/order-encode/index.blade.php`, `config/order_encode.php`, `database/migrations/2026_11_04_100000_create_order_encodes_table.php`, `deploy/supervisor/likha-encode.conf`, `docs/order-encode.md`, `tests/Feature/OrderEncode/*` (13 files).
+New: `app/Services/OrderEncode/{Checker,Comparer,Encoder,FlowHook,Gpt,Input,LiveOrder,LocationList,Locations,Macro,Parse,Runner,Settings,Sheets,Steps,Text}.php`, `app/Jobs/EncodeOrder.php`, `app/Models/OrderEncode.php`, `app/Console/Commands/OrderEncodeCompare.php`, `app/Http/Controllers/OrderEncodeController.php`, `resources/views/order-encode/index.blade.php`, `config/order_encode.php`, `database/migrations/2026_11_04_100000_create_order_encodes_table.php`, `deploy/supervisor/likha-encode.conf`, `docs/order-encode.md`, `tests/Feature/OrderEncode/*` (13 files).
 
 Changed (small, additive): `app/Services/Chatbot/FlowEngine.php` (+15 lines in `sheet()`), `app/Services/Chatbot/BotcakeOutbox.php` (the append result now also carries `range`), `app/Services/PageSettings.php` (+7: the `order_encode` key rule), `config/services.php` (+2: `openai.order_encode_key`), `.env.example` (+2: `ORDER_ENCODE_OPENAI_KEY=`), `routes/web.php` (+3), `routes/console.php` (+10), `qa/stories.md`, `TODO.md`.
 
@@ -26,7 +26,7 @@ Not touched (checked with `git diff --stat 7a7ef4b2..HEAD`): Astra*, MacroChecke
 
 ## Settings
 
-- `page_settings`, provider `order_encode` (only these three keys are accepted; `mode` must be off/shadow/live, the two sheets a Google Sheets link or ID): `mode` (default off), `compare_sheet` (AFTER MACRO), `macro_sheet`.
+- `page_settings`, provider `order_encode` (only these two keys are accepted; `mode` must be off/shadow/live, `compare_sheet` a Google Sheets link or ID): `mode` (default off), `compare_sheet` (AFTER MACRO). The key `macro_sheet` of the brief was removed by amendment 1.
 - `app_settings`: `order_encode_model_extract` (default `gpt-4o-mini`), `order_encode_model_checker` (default `gpt-5.2`).
 - Key: `config('services.openai.order_encode_key')` = env `ORDER_ENCODE_OPENAI_KEY`, else `OPENAI_API_KEY`. Not logged, not stored (the stored raw answers and errors are redacted, exact key and any `sk-…`).
 - Prices for the cost estimate: `config/order_encode.php`.
@@ -39,9 +39,8 @@ Queue `encode` on the `database` connection, job `EncodeOrder` (timeout 600, tri
 
 ## Scheduled commands
 
-- `order-encode:sync-locations`: daily 04:10 Asia/Manila, also by hand.
 - `order-encode:compare`: every 10 minutes (`withoutOverlapping(30)`).
-Both do nothing when no page is in `shadow`/`live` (sync) or no row is due (compare).
+Does nothing when no row is due. (`order-encode:sync-locations` and its 04:10 schedule were removed by amendment 1.)
 
 ## Input mapping
 
@@ -78,8 +77,29 @@ The Sheet step writes the cells in the order of its `columns` setting. Order enc
 - **A GPT connection error in steps 3 and 5** is logged and the row goes on; in the script it aborts the whole row (nothing written). A non-JSON error body is not an exception here.
 - **`candidates` is 0 on no match** where the sheet's `COUNTA` would count the `#N/A` as 1 (cannot change the result).
 - **Live mode:** the `#N/A` values of quirk 5 go into `macro_output` as the imports would bring them.
-- **The location lists:** I could not read the real sheets, so I cannot say whether the macro sheet's LocationData and AFTER MACRO's are identical. `order-encode:sync-locations` prints "identical" or "NOT identical" on its first real run: please look at that line.
+- **The location list** is now the J&T file for both steps (amendment 1); see "Where Likha can differ from the sheet".
 - **Real-world formats not verifiable offline:** the exact layout of the real All Orders tab (the compare relies on the header names, else A..H), whether DATABASE column A is text or a date (the row check accepts both), and the real `gpt-5.2` behaviour with `temperature: 0`.
+
+## Amendment 1 (applied on the same branch)
+
+Amendment text: `docs/specs/130-order-encode-shadow.amendment-1.md` (saved verbatim). Applied:
+
+- **One address list = `resources/views/macro_output/jnt_address.txt`**, read only, in file order, for both steps. New `LocationList` reads it (cached by the file's mtime, with the parsed `Macro` and `Locations` objects cached beside it); the sheet's column A key ("PROVINCE CITY BARANGAY", single spaces) is built in `Macro`. Only the file is used: Astra, MacroChecker and their readers are not called or changed, and the file is not edited.
+- **Removed:** the `order-encode:sync-locations` command and its schedule, `LocationStore` and the `storage/app/order-encode/` files, the page key `macro_sheet` (validation now accepts `mode` and `compare_sheet` only), and every read of LocationData from Google Sheets (`Sheets::values` is gone). `compare_sheet` and the DATABASE / MIRRORED reads stay. `git grep -n "sync-locations\|macro_sheet\|LocationStore" -- app routes config tests` is empty.
+- **Ñ = N:** `Text::foldN` (also the decomposed form) is applied in `Text::lower`, so the FILTER substring rule, the normalisers, list membership, fuzzy match and the GPT in-list guards compare with ñ/Ñ folded on both sides; the parsing of EXTRACTED DETAILS folds Ñ before it strips symbols (the sheet's strip would turn "Peñafrancia" into "PEAFRANCIA"); a city or barangay the GPT writes gets the N spelling; labels from the list are the file's. The compare treats Ñ and N as equal.
+- **Compare page labels** (new): each row can carry yellow notes for known causes (list in the next section), stored in `order_encodes.sheet.notes` by the compare command, plus a summary tile "Different, with a known cause".
+- Tests: fixtures are a small file in the file's format; Ñ matches an N label (S-130.60); no test or code reads LocationData from Sheets; the real `jnt_address.txt` is read in a test (S-130.63).
+
+## Where Likha can differ from the sheet
+
+| Cause | What happens | Does the compare page label it? |
+|---|---|---|
+| **Order of the list ("first candidate")** | The match takes the first row in list order. The file starts ABRA / ABRA-DOLORES / BAYAAN, CABAROAN, … like the sheet. The file is **not** in plain byte order (1,064 lines differ from `sort`; e.g. `BADAS` is followed by `BA-UG`), so it looks sorted the way a sheet sorts (hyphens ignored), but I cannot read the sheet, so I cannot say the whole order is identical. Only orders with more than one candidate are affected. | Yes, partly: a differing province / city / barangay on an order with more than one list match carries the note "Several list matches: the file order may differ from the sheet". |
+| **The 5 newer barangays** | The file has 5 barangays the AFTER MACRO list does not. An order for one of them matches in Likha and finds nothing in the sheet (`#N/A` or blank). I cannot tell which 5 they are offline. | Yes, by symptom: a differing place field where the sheet is blank or `#N/A` and Likha has a value carries "Sheet has no match: the address file may have a newer entry". |
+| **Ñ vs N** | The sheet list has Ñ on 131 rows, the file has N. Likha matches both spellings and writes N (the file's). | Yes: Ñ vs N is counted as the same, with the note "Ñ vs N: counted as the same". |
+| **Model change gpt-3.5-turbo → gpt-4o-mini** | The address line (step 3), the blank-field fills (name, phone, address, province, city, barangay) and so name, phone and address line can read differently. The checker's `gpt-5.2` is unchanged. | Yes: a differing name, phone or address line carries "GPT model changed (gpt-3.5-turbo in the sheet, gpt-4o-mini here)". Not labelled: the checker steps, because their model is the same. |
+
+A difference that has none of these notes is a real mismatch to look at. Notes are hints from the symptom, not proof: an order can have a note and still be wrong.
 
 ## Estimated GPT calls per order
 
@@ -87,7 +107,7 @@ A clean order (the address check passes, name and address filled): **1** (addres
 
 ## Cases
 
-All S-130 cases are in `qa/stories.md`. Final run of `tests/Feature/OrderEncode`: **162 tests, 363 assertions, all pass.** Cases S-130.1 to .59 map one-to-one to the tests named `test_S_130_<n>_…` in `tests/Feature/OrderEncode/` (the port cases .40 to .51 in `TextAndParseTest`, `MacroTest`, `CheckerTest`).
+All S-130 cases are in `qa/stories.md`. Final run of `tests/Feature/OrderEncode`: **162 tests, 367 assertions, all pass** (after amendment 1). Cases S-130.1 to .59 map one-to-one to the tests named `test_S_130_<n>_…` in `tests/Feature/OrderEncode/` (the port cases .40 to .51 in `TextAndParseTest`, `MacroTest`, `CheckerTest`).
 
 | Cases | Test file | Result |
 |---|---|---|
@@ -95,7 +115,8 @@ All S-130 cases are in `qa/stories.md`. Final run of `tests/Feature/OrderEncode`
 | S-130.7, .8 (config) | `ConfigTest` | pass |
 | S-130.9–.18, .54, .55, .58, .59 (job, shadow/live, key, errors) | `EncodeOrderTest` | pass |
 | S-130.19–.28, .56, .57 (compare) | `CompareTest` | pass |
-| S-130.29–.32 (sync, schedule) | `SyncLocationsTest` | pass |
+| S-130.29–.32 (sync command, removed by amendment 1) | – | removed |
+| S-130.60–.64 (Ñ = N, compare labels, the real address file and its cache) | `MacroTest`, `CheckerTest`, `CompareTest`, `LocationListTest` | pass |
 | S-130.33–.38 (page) | `ComparePageTest` | pass |
 | S-130.40–.44 (parsing, normalisers, fuzzy, input) | `TextAndParseTest` | pass |
 | S-130.45 (macro) | `MacroTest` | pass |
@@ -138,7 +159,7 @@ This session had no way to ask the reviewer for the plan "go"; the decisions tab
 - `FlowEngine::sheet` is on the hot path of every order; the added code runs only for tab "All Orders" on a page with mode `shadow`/`live` and is wrapped so it cannot fail the flow. A page with no `order_encode` setting costs one cached page-settings lookup.
 - `BotcakeOutbox::appendRow` now returns an extra `range` key; nothing else reads it.
 - `PageSettings::validate` now refuses unknown keys for provider `order_encode` only.
-- Deploy order: migrate, Supervisor program, `config:clear`, set `compare_sheet` and `macro_sheet`, run `order-encode:sync-locations`, then `mode = shadow` on one page.
+- Deploy order: migrate, Supervisor program, `config:clear`, set `compare_sheet`, then `mode = shadow` on one page (no sync step; the address list is the J&T file already in the repo).
 
 ## Commits
 

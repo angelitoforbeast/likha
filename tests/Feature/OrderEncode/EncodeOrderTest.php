@@ -89,7 +89,7 @@ class EncodeOrderTest extends OrderEncodeTestCase
         $o = $this->runJob($this->makeOrder());
 
         $this->assertSame('failed', $o->status);
-        $this->assertStringContainsString('order-encode:sync-locations', $o->error);
+        $this->assertStringContainsString('address list', $o->error);
         Http::assertNothingSent();
     }
 

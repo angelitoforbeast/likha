@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\OrderEncode;
 
-use App\Services\OrderEncode\LocationStore;
 use App\Services\OrderEncode\Sheets;
 
 /** Ang Google sheet ng order encode sa test: ang mga range ay galing sa $data, bawat tawag ay naitatala. Walang tawag sa Google. */
@@ -30,14 +29,6 @@ class FakeSheets extends Sheets
     public function put(string $id, string $range, array $rows): void
     {
         $this->data[$id . '|' . $range] = $rows;
-    }
-
-    public function values(string $spreadsheetId, string $range): array
-    {
-        $this->calls[] = 'values ' . $range;
-        if ($this->fail) throw new \RuntimeException('Google said no');
-
-        return $this->data[$spreadsheetId . '|' . $range] ?? [];
     }
 
     public function batchValues(string $spreadsheetId, array $ranges): array

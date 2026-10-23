@@ -350,7 +350,7 @@ final class Checker
 
         $status = 'CITY_NO_CHANGE';
         if ($newCity !== '' && $newCity !== 'UNKNOWN' && $newCity !== $cityOld && Text::cityInList($newCity, $cityList)) {
-            $this->put('F', $newCity);
+            $this->put('F', Text::foldN($newCity));
             $status = 'WROTE_CITY';
         } elseif ($newCity !== '' && $newCity !== 'UNKNOWN' && !Text::cityInList($newCity, $cityList)) {
             $status = 'CITY_NOT_IN_LIST';
@@ -401,7 +401,7 @@ final class Checker
         $status = 'NO_CHANGE';
         if ($newBrgy !== '' && $newBrgy !== $brgy) {
             if (Text::brgyInList($newBrgy, $brgyList)) {
-                $this->put('G', $newBrgy);
+                $this->put('G', Text::foldN($newBrgy));
                 $status = 'WROTE_BRGY';
             } else {
                 $status = 'BRGY_NOT_IN_LIST';

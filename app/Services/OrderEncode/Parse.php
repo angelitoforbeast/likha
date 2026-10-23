@@ -38,7 +38,7 @@ final class Parse
     /** NA / N/A / NOT PROVIDED = null (hindi ginagalaw ang value); kung hindi, tinatanggal ang "province/brgy/barangay/city" at ang simbolo. */
     private static function place(string $raw): ?string
     {
-        $raw = Text::jsTrim($raw);
+        $raw = Text::jsTrim(Text::foldN($raw)); // Ñ = N: hindi tinatanggal ng strip ang Ñ
         if (preg_match('/^(NA|N\/A|NOT PROVIDED)$/i', $raw)) return null;
         $s = preg_replace('/\b(province|brgy|barangay|city)[\.\s]*/i', '', $raw);
         $s = preg_replace('/[^A-Za-z0-9 ]/', '', $s);

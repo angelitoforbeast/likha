@@ -39,6 +39,7 @@
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Orders</div><div class="text-xl font-semibold">{{ $stats['orders'] }}</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Compared</div><div class="text-xl font-semibold">{{ $stats['compared'] }}</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Fully equal</div><div class="text-xl font-semibold">{{ $fmt($stats['equal_pct']) }}</div><div class="text-xs text-gray-500">{{ $stats['equal'] }} of {{ $stats['compared'] }}</div></div>
+    <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Different, with a known cause</div><div class="text-xl font-semibold">{{ $stats['with_notes'] }}</div><div class="text-xs text-gray-500">of {{ $stats['compared'] - $stats['equal'] }} different; see the yellow notes</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Waiting</div><div class="text-xl font-semibold">{{ $stats['waiting'] }}</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Sheet not done</div><div class="text-xl font-semibold">{{ $stats['sheet_not_done'] }}</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Row mismatch</div><div class="text-xl font-semibold">{{ $stats['row_mismatch'] }}</div></div>
@@ -69,7 +70,7 @@
             <td class="px-2 py-1 whitespace-nowrap" title="{{ $r['title'] }}">
               #{{ $r['id'] }} · row {{ $r['row'] }}<br>{{ $r['page'] }}<br><span class="text-gray-500">{{ $r['at'] }}</span>
             </td>
-            <td class="px-2 py-1 whitespace-nowrap" @if($r['error']) title="{{ $r['error'] }}" @endif>{{ $r['state'] }}</td>
+            <td class="px-2 py-1" @if($r['error']) title="{{ $r['error'] }}" @endif>{{ $r['state'] }}@foreach ($r['notes'] as $n)<div class="mt-1 rounded bg-yellow-100 px-1 text-yellow-800">{{ $n }}</div>@endforeach</td>
             @foreach ($r['cells'] as $f => $c)
               @php($bad = in_array($c['result'], ['different', 'sheet_blank', 'likha_blank'], true))
               <td class="px-2 py-1 {{ $bad ? 'bg-red-100' : '' }}" title="{{ $c['result'] }}">

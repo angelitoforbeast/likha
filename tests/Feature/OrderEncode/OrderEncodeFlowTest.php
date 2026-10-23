@@ -169,8 +169,7 @@ class OrderEncodeFlowTest extends OrderEncodeTestCase
     public static function notReady(): array
     {
         return [
-            'no location files yet' => [['lists' => false]],
-            'no macro_sheet' => [['drop' => 'macro_sheet']],
+            'no address file' => [['lists' => false]],
             'no compare_sheet' => [['drop' => 'compare_sheet']],
             'no key' => [['key' => '']],
         ];

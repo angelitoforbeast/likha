@@ -11,8 +11,7 @@ Checker 1, the night run, MacroChecker, the imports or the J&T list.
 | Key | Value |
 |---|---|
 | `mode` | `off` (default) · `shadow` · `live` |
-| `compare_sheet` | the AFTER MACRO spreadsheet (link or ID): the DATABASE tab to compare with, and its LocationData |
-| `macro_sheet` | the macro spreadsheet (link or ID): its LocationData |
+| `compare_sheet` | the AFTER MACRO spreadsheet (link or ID): the DATABASE and DATABASE - MIRRORED tabs to compare with |
 
 Global (`app_settings`): `order_encode_model_extract` (default `gpt-4o-mini`), `order_encode_model_checker`
 (default `gpt-5.2`). Key: env `ORDER_ENCODE_OPENAI_KEY`, else `OPENAI_API_KEY`. Prices for the cost estimate: `config/order_encode.php`.
@@ -33,14 +32,14 @@ Global (`app_settings`): `order_encode_model_extract` (default `gpt-4o-mini`), `
    when the row holds another order (timestamp or page differ), and `sheet_not_done` after 48 hours.
 4. `/order-encode` (CEO, Marketing - OIC, Marketing; read-only) shows the counts, % equal per field, GPT calls and
    estimated cost per order, and one line per order with both values side by side.
-5. `php artisan order-encode:sync-locations` (daily 04:10 Manila, or by hand) stores the LocationData of the macro
-   sheet (A2:D) and of AFTER MACRO (B2:D) as files in `storage/app/order-encode/`, in sheet order. It says whether the
-   two lists are identical. An empty or failed read never overwrites a file. Run it once before the first shadow order.
+5. The address list is Likha's own J&T file `resources/views/macro_output/jnt_address.txt` (`PROVINCE|CITY|BARANGAY`, one per line), read
+   only, in file order, for both steps (the match and the checker's lists); the sheet's column A key is built in code and Ñ = N in all
+   matching. Nothing is read from Google Sheets for it, and nothing needs syncing.
 
 **Live** (`mode = live`, built, not switched on): the Sheet step records a sheet reply with status `skipped` and the note
 "encoded in Likha", continues on its normal port, and `EncodeOrder` creates the `macro_output` row the two imports would
 have made (`OrderIdentity` prevents a duplicate). The job is `done` only after that row exists, so a failed write is retried. If the page is
-not ready (no `macro_sheet` / `compare_sheet`, no location files, no key), or the encode cannot be queued, or it ends `failed`, the row is
+not ready (no `compare_sheet`, no address file, no key), or the encode cannot be queued, or it ends `failed`, the row is
 written to the sheet as before. The `encode` worker must be running before any page goes live.
 
 ## Deploy checklist (by hand, after the owner's yes)
@@ -48,4 +47,4 @@ written to the sheet as before. The `encode` worker must be running before any p
 1. `php artisan migrate --force` (adds `order_encodes`; nothing existing changes).
 2. Supervisor program `deploy/supervisor/likha-encode.conf`: `php artisan queue:work database --queue=encode --sleep=3 --tries=2 --timeout=600 --max-time=3600`.
 3. `php artisan config:clear` so `services.openai.order_encode_key` is read; set `ORDER_ENCODE_OPENAI_KEY` (or rely on `OPENAI_API_KEY`).
-4. Set `compare_sheet` and `macro_sheet` for the page, run `php artisan order-encode:sync-locations`, then set `mode` = `shadow`.
+4. Set `compare_sheet` for the page, then set `mode` = `shadow`.

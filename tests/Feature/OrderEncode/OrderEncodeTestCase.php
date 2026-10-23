@@ -3,7 +3,7 @@
 namespace Tests\Feature\OrderEncode;
 
 use App\Services\Chatbot\ChatbotSheet;
-use App\Services\OrderEncode\LocationStore;
+use App\Services\OrderEncode\LocationList;
 use App\Services\OrderEncode\Sheets;
 use App\Services\PageSettings;
 use Illuminate\Database\Schema\Blueprint;
@@ -18,7 +18,6 @@ use Tests\Feature\Chatblast\ChatblastTestCase;
 abstract class OrderEncodeTestCase extends ChatblastTestCase
 {
     protected const AFTER = '1AfterMacroSheetIdAbCdEfGhIjKlMnOp';
-    protected const MACRO = '1MacroSheetIdAbCdEfGhIjKlMnOpQrSt';
     protected const ORDERS = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
     protected const PAGE = 'Page Uno';
 
@@ -42,16 +41,17 @@ abstract class OrderEncodeTestCase extends ChatblastTestCase
         $this->app->instance(Sheets::class, $this->google);
         $this->app->instance(ChatbotSheet::class, $this->google);
 
-        // Ang LocationData ay file sa storage/app/order-encode; sa test, nasa sariling folder.
-        $this->store = new FakeLocationStore();
-        $this->app->instance(LocationStore::class, $this->store);
+        // Ang address file: maliit na kopya sa sariling folder ng test, hindi ang totoong jnt_address.txt.
+        $this->addressFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'order-encode-addr-' . bin2hex(random_bytes(4)) . '.txt';
+        file_put_contents($this->addressFile, Fixtures::fileText());
+        $this->app->instance(LocationList::class, new LocationList($this->addressFile));
     }
 
-    protected FakeLocationStore $store;
+    protected string $addressFile;
 
     protected function tearDown(): void
     {
-        $this->store->cleanup();
+        @unlink($this->addressFile);
         parent::tearDown();
     }
 
@@ -61,11 +61,7 @@ abstract class OrderEncodeTestCase extends ChatblastTestCase
         $s = app(PageSettings::class);
         $s->set($page, 'order_encode', 'mode', $mode);
         $s->set($page, 'order_encode', 'compare_sheet', 'https://docs.google.com/spreadsheets/d/' . self::AFTER . '/edit');
-        $s->set($page, 'order_encode', 'macro_sheet', self::MACRO);
-        if ($lists) {
-            $this->store->write(LocationStore::MACRO, self::MACRO, Fixtures::macroRows());
-            $this->store->write(LocationStore::AFTER, self::AFTER, Fixtures::checkerRows());
-        }
+        if (!$lists) @unlink($this->addressFile);
     }
 
     /** Ang row ng sheet step (All Orders A..H), gaya ng isinusulat ng flow, may apostrophe sa unahan. */

@@ -75,17 +75,18 @@ class OrderEncodeController extends Controller
     /** @return array<string, mixed> */
     private function stats($query): array
     {
-        $s = ['orders' => 0, 'compared' => 0, 'equal' => 0, 'waiting' => 0, 'sheet_not_done' => 0, 'row_mismatch' => 0, 'failed' => 0,
+        $s = ['orders' => 0, 'compared' => 0, 'equal' => 0, 'with_notes' => 0, 'waiting' => 0, 'sheet_not_done' => 0, 'row_mismatch' => 0, 'failed' => 0,
             'gpt_requests' => 0, 'with_usage' => 0, 'cost' => 0.0];
         $same = array_fill_keys(array_keys(Comparer::FIELDS), 0);
         $prices = (array) config('order_encode.prices');
 
-        foreach ($query->get(['id', 'status', 'compare_state', 'compare_equal', 'compare', 'usage']) as $o) {
+        foreach ($query->get(['id', 'status', 'compare_state', 'compare_equal', 'compare', 'usage', 'sheet']) as $o) {
             $s['orders']++;
             if ($o->status === 'failed') $s['failed']++;
             elseif ($o->compare_state === 'done') {
                 $s['compared']++;
                 $s['equal'] += $o->compare_equal ? 1 : 0;
+                if (!$o->compare_equal && !empty($o->sheet['notes'])) $s['with_notes']++;
                 foreach ((array) $o->compare as $f => $r) if ($r === 'same' && isset($same[$f])) $same[$f]++;
             } elseif ($o->compare_state === 'sheet_not_done') $s['sheet_not_done']++;
             elseif ($o->compare_state === 'row_mismatch') $s['row_mismatch']++;
@@ -131,7 +132,8 @@ class OrderEncodeController extends Controller
 
         return [
             'id' => $o->id, 'page' => $o->page, 'row' => $o->row_number, 'at' => $o->created_at?->format('Y-m-d H:i'), 'state' => $state,
-            'error' => $o->error, 'cells' => $cells, 'title' => $this->title((array) $o->steps),
+            'error' => $o->error, 'cells' => $cells,
+            'notes' => array_values(array_intersect_key(Comparer::NOTES, array_flip((array) ($o->sheet['notes'] ?? [])))), 'title' => $this->title((array) $o->steps),
         ];
     }
 

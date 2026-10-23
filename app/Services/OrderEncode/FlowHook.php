@@ -18,7 +18,7 @@ class FlowHook
     public const NOTE = 'encoded in Likha';
     public const TAB = 'All Orders';
 
-    public function __construct(private Settings $settings, private LocationStore $store)
+    public function __construct(private Settings $settings, private LocationList $list)
     {
     }
 
@@ -48,8 +48,7 @@ class FlowHook
     }
 
     /**
-     * Live: bago ang sheet. Hindi ito sumasalo ng order kung hindi handa ang page (sheet ng macro at ng compare, ang dalawang
-     * listahan ng lugar, ang key): saka isinusulat ang row sa sheet gaya ng dati.
+     * Live: bago ang sheet. Hindi ito sumasalo ng order kung hindi handa ang page (compare_sheet, ang address file, ang key): saka isinusulat ang row sa sheet gaya ng dati.
      * @return bool true kapag naka-queue na ang encode (hindi na isusulat sa sheet)
      */
     public function live(FlowRun $run, string $sheetId, string $tab, array $row): bool
@@ -66,11 +65,9 @@ class FlowHook
     private function ready(string $page): bool
     {
         try {
-            $macro = $this->settings->sheetId($page, 'macro_sheet');
             $after = $this->settings->sheetId($page, 'compare_sheet');
 
-            return $macro !== null && $after !== null && $this->settings->key() !== ''
-                && $this->store->has(LocationStore::MACRO, $macro) && $this->store->has(LocationStore::AFTER, $after);
+            return $after !== null && $this->settings->key() !== '' && $this->list->has();
         } catch (Throwable $e) {
             report($e);
 

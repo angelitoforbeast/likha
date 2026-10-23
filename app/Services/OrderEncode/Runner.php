@@ -13,7 +13,7 @@ use Throwable;
  */
 class Runner
 {
-    public function __construct(private Settings $settings, private LocationStore $store, private Sheets $sheets, private LiveOrder $live)
+    public function __construct(private Settings $settings, private LocationList $list, private Sheets $sheets, private LiveOrder $live)
     {
     }
 
@@ -21,12 +21,10 @@ class Runner
     {
         if ($o->status === 'done') return; // ang ulit na job ay walang ginagawa
 
-        $macroId = $this->settings->sheetId($o->page, 'macro_sheet');
-        $afterId = $this->settings->sheetId($o->page, 'compare_sheet');
-        $macroRows = $macroId ? $this->store->read(LocationStore::MACRO, $macroId) : null;
-        $afterRows = $afterId ? $this->store->read(LocationStore::AFTER, $afterId) : null;
-        if (!$macroRows || !$afterRows) {
-            $this->fail($o, 'No location list yet. Set macro_sheet and compare_sheet for the page, then run order-encode:sync-locations.');
+        $macro = $this->list->macro();
+        $locations = $this->list->locations();
+        if (!$macro || !$locations) {
+            $this->fail($o, 'The address list (jnt_address.txt) is missing or empty.');
 
             return;
         }
@@ -37,7 +35,7 @@ class Runner
 
         $in = $this->input($o);
         $steps->add('input', 'OK', ['blank' => array_values(array_filter(Input::FIELDS, fn ($f) => trim($in->get($f)) === ''))]);
-        $res = (new Encoder(new Macro($macroRows), new Locations($afterRows), $gpt, $steps))->run($in);
+        $res = (new Encoder($macro, $locations, $gpt, $steps))->run($in);
 
         $o->update([
             'input' => ['row' => $o->input['row'] ?? [], 'fields' => $in->v],

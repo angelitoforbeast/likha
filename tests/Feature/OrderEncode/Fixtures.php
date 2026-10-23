@@ -6,42 +6,36 @@ use App\Services\OrderEncode\Gpt;
 use App\Services\OrderEncode\Locations;
 use App\Services\OrderEncode\Steps;
 
-/** Maliit na LocationData para sa tests (ayon sa ayos ng sheet) at ang mga fake na sagot ng OpenAI. */
+/** Maliit na address file (parehong anyo ng jnt_address.txt) at ang mga fake na sagot ng OpenAI. */
 final class Fixtures
 {
     public const KEY = 'sk-test-secret-key-0000';
 
-    /** @return array<int, array{0: string, 1: string, 2: string, 3: string}> A, B, C, D ng macro sheet */
-    public static function macroRows(): array
+    /** @return array<int, array{0: string, 1: string, 2: string}> PROVINCE, CITY, BARANGAY ayon sa ayos ng file */
+    public static function rows(): array
     {
-        return array_map(fn ($r) => [$r[0] . ' ' . $r[1] . ' ' . $r[2], $r[0], $r[1], $r[2]], [
+        return [
             ['AGUSAN-DEL-SUR', 'AGUSAN-DEL-SUR-ESPERANZA', 'CEBULAN'],
             ['CEBU', 'CEBU-CITY', 'LAHUG'],
             ['CEBU', 'CEBU-CITY', 'BANILAD'],
             ['CEBU', 'MANDAUE-CITY', 'BAKILID'],
+            ['CEBU', 'MANDAUE-CITY', 'BARANGAY 5'],
             ['METRO-MANILA', 'QUEZON-CITY', 'BAGUMBAYAN'],
             ['METRO-MANILA', 'MAKATI-CITY', 'POBLACION'],
             ['ABRA', 'ABRA-DOLORES', 'BAYAAN'],
-        ]);
+            ['CAMARINES-SUR', 'NAGA-CITY', 'PENAFRANCIA'],
+        ];
     }
 
-    /** @return array<int, array{0: string, 1: string, 2: string}> B, C, D ng AFTER MACRO */
-    public static function checkerRows(): array
+    /** Ang laman ng file: isang PROVINCE|CITY|BARANGAY kada linya. */
+    public static function fileText(): string
     {
-        return [
-            ['CEBU', 'CEBU CITY', 'LAHUG'],
-            ['CEBU', 'CEBU CITY', 'BANILAD'],
-            ['CEBU', 'MANDAUE CITY', 'BAKILID'],
-            ['CEBU', 'MANDAUE CITY', 'BARANGAY 5'],
-            ['METRO MANILA', 'QUEZON CITY', 'BAGUMBAYAN'],
-            ['METRO MANILA', 'MAKATI CITY', 'POBLACION'],
-            ['ABRA', 'DOLORES', 'BAYAAN'],
-        ];
+        return implode("\n", array_map(fn ($r) => implode('|', $r), self::rows())) . "\n";
     }
 
     public static function locations(): Locations
     {
-        return new Locations(self::checkerRows());
+        return new Locations(self::rows());
     }
 
     public static function gpt(?Steps $steps = null, string $key = self::KEY): Gpt

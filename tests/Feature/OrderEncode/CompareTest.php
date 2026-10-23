@@ -191,6 +191,30 @@ class CompareTest extends OrderEncodeTestCase
         $this->assertNull($o->fresh()->compare_state);
     }
 
+    public function test_S_130_61_enye_against_n_is_the_same_and_the_known_causes_are_labelled_for_the_page(): void
+    {
+        $o = $this->done(outputs: ['barangay' => 'PENAFRANCIA', 'province' => 'CEBU', 'candidates' => 3, 'address_line' => 'Blk 9']);
+        $this->sheetRow(['G' => 'PEÑAFRANCIA', 'E' => 'ABRA', 'D' => 'Block 9', 'F' => '#N/A']);
+
+        $this->compare();
+
+        $o->refresh();
+        $this->assertSame(['same', 'different', 'different'], [$o->compare['barangay'], $o->compare['province'], $o->compare['address_line']]);
+        $this->assertEqualsCanonicalizing(['n_tilde', 'list_order', 'model', 'newer_entry'], $o->sheet['notes']);
+        $labels = $this->actingAs($this->user('CEO'))->get('/order-encode')->assertSee('Ñ vs N: counted as the same')->viewData('rows')[0]['notes'];
+        $this->assertContains(\App\Services\OrderEncode\Comparer::NOTES['model'], $labels);
+    }
+
+    public function test_S_130_62_a_sheet_that_has_no_match_while_likha_has_one_is_labelled_a_possible_newer_entry(): void
+    {
+        $o = $this->done();
+        $this->sheetRow(['G' => '#N/A']);
+
+        $this->compare();
+
+        $this->assertContains('newer_entry', $o->fresh()->sheet['notes']);
+    }
+
     public function test_S_130_56_a_formula_date_is_not_compared_but_the_page_still_is(): void
     {
         $a = $this->done();

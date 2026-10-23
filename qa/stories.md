@@ -1967,7 +1967,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.4 | Given the encode row cannot be created, then the flow still runs to the end with its sheet row `sent` | `test_S_130_4…` | pending |
 | S-130.5 | Given a page in `live`, then the step does not append, records a sheet reply `skipped` with the note "encoded in Likha", continues on `next` and queues the encode | `test_S_130_5…` | pending |
 | S-130.6 | Given a live page whose encode cannot be queued, then the row is appended to the sheet as before | `test_S_130_6…` | pending |
-| S-130.7 | Page settings for provider `order_encode` take only `mode` (off/shadow/live), `compare_sheet` and `macro_sheet` (a Google Sheets link or ID); anything else is refused; other providers are unchanged | `ConfigTest::test_S_130_7…` | pending |
+| S-130.7 | Page settings for provider `order_encode` take only `mode` (off/shadow/live) and `compare_sheet` (a Google Sheets link or ID); anything else is refused; other providers are unchanged | `ConfigTest::test_S_130_7…` | pending |
 | S-130.8 | The models default to `gpt-4o-mini` / `gpt-5.2` and follow `app_settings`; the key comes from `services.openai.order_encode_key` | `test_S_130_8…` | pending |
 | S-130.9 | A shadow job writes `order_encodes` (outputs, steps, usage) and never `macro_output` | `EncodeOrderTest::test_S_130_9…` | pending |
 | S-130.10 | The API key and any `sk-…` text never appear in the stored record; the key is only in the request header | `test_S_130_10…` | pending |
@@ -1989,10 +1989,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.26 | Rows younger than 15 minutes, failed encodes and live rows are left alone | `test_S_130_26…` | pending |
 | S-130.27 | The rows of one sheet are read in one batch | `test_S_130_27…` | pending |
 | S-130.28 | When Google refuses, nothing changes and the command fails | `test_S_130_28…` | pending |
-| S-130.29 | `order-encode:sync-locations` stores both lists in sheet order and says when they are identical | `SyncLocationsTest::test_S_130_29…` | pending |
-| S-130.30 | It says when the lists are NOT identical | `test_S_130_30…` | pending |
-| S-130.31 | Pages that are off, and empty or failed reads, never overwrite a file | `test_S_130_31…` | pending |
-| S-130.32 | The sync runs daily at 04:10 Manila and the compare every 10 minutes | `test_S_130_32…` | pending |
+| S-130.29–.32 | (removed by amendment 1: the address list is the J&T file, there is no sync command or schedule for it) | – | removed |
 | S-130.33 | `/order-encode` opens for CEO, Marketing - OIC and Marketing; 404 for other roles; guests are sent to login | `ComparePageTest::test_S_130_33…` | pending |
 | S-130.34 | The top shows orders, compared, % fully equal, % same per field, waiting / sheet not done / row mismatch / failed, GPT calls and estimated cost per order | `test_S_130_34…` | pending |
 | S-130.35 | The table shows both values per field side by side, differences highlighted, and the steps log on hover | `test_S_130_35…` | pending |
@@ -2000,7 +1997,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.37 | Filters: date range, page, only differences, by field | `test_S_130_37…` | pending |
 | S-130.38 | The page is read-only (no POST) | `test_S_130_38…` | pending |
 | S-130.52 | Given a page in `shadow` or `live`, a second Sheet node of the flow on another tab is neither encoded nor skipped | `OrderEncodeFlowTest::test_S_130_52…` | pending |
-| S-130.53 | Given a live page that is not ready (no location files, no `macro_sheet`, no `compare_sheet`, no key), the row is written to the sheet as before | `test_S_130_53…` | pending |
+| S-130.53 | Given a live page that is not ready (no address file, no `compare_sheet`, no key), the row is written to the sheet as before | `test_S_130_53…` | pending |
 | S-130.54 | A live job is `done` only after the `macro_output` row exists; if that write fails the job is retried and finishes it once | `EncodeOrderTest::test_S_130_54…` | pending |
 | S-130.55 | A live encode that ends `failed` (no lists, or the last try failed) writes the row to the sheet instead; a shadow row is only marked | `test_S_130_55…` | pending |
 | S-130.56 | A formula date (`=TODAY()`) is not compared for the row check, the page still is | `CompareTest::test_S_130_56…` | pending |
@@ -2019,3 +2016,8 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.49 | GPT HTTP error logged like the script, Responses → chat fallback, missing key, empty chat | `test_S_130_49…` | pending |
 | S-130.50 | W mapping, the implied-city patch, the Province → ✅ quirk | `test_S_130_50…` | pending |
 | S-130.51 | Name / Address Line 1 finalize: skip rule, strip of places, unknown not written | `test_S_130_51…` | pending |
+| S-130.60 | Ñ = N: a customer's Ñ matches the file's N label in the match, the fuzzy match, the list checks and the GPT in-list guard; what is written has the N spelling | `MacroTest/CheckerTest::test_S_130_60…` | pending |
+| S-130.61 | The compare treats Ñ and N as equal and labels known causes (Ñ vs N, several list matches, GPT model change) on the page | `CompareTest::test_S_130_61…` | pending |
+| S-130.62 | A sheet with no match where Likha has one is labelled a possible newer entry of the address file | `test_S_130_62…` | pending |
+| S-130.63 | The real `jnt_address.txt` is read in file order and is not changed | `LocationListTest::test_S_130_63…` | pending |
+| S-130.64 | The parsed list is cached until the file's mtime changes; a missing file is an empty list | `test_S_130_64…` | pending |
