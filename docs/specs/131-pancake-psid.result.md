@@ -28,7 +28,7 @@
 - `has_pancake`: still one select. `CASE WHEN EXISTS(psid = botcake_psid) OR EXISTS(full_name = fb_name)`. The PSID part is skipped if either column is missing. The test checks that the list runs one query containing `has_pancake`.
 - Known gap: the PSID `EXISTS` in the list is not scoped to the page, so on an order whose page is mapped and whose PSID exists only under another page, the link shows and then finds nothing. PSIDs are page-scoped, so this should be rare.
 
-## Where others read by name (not changed)
+## Where others read by name (as of the brief; superseded by Amendment 1 below)
 - `AstraEncoder::pancakeHistory($fbName)`, `app/Services/AstraEncoder.php` ~line 839: `where('full_name', $fbName)->orderByDesc('id')`. Called at ~530 with `$row->fb_name`.
 - `MacroChecker::fetchPancakeChat($fbName)`, `app/Services/MacroChecker.php` ~line 492; called from `MacroChecker` ~185 and `AstraEncoder` ~736.
 - One-line switch for both: replace the query with `app(PancakeChat::class)->forOrder($row->PAGE, $row->fb_name, $row->botcake_psid)['chat'] ?? ''` (it also needs the `$row`, not only the name, passed in).
@@ -63,3 +63,19 @@
 - `feat: pancake import keys conversations by Sender ID (PSID) and adopts old name-only rows (spec 131)`
 - `feat: See more and has_pancake use one lookup, PSID first, with a match label (spec 131)`
 - the result file commit below.
+
+## Amendment 1 (`docs/specs/131-pancake-psid.amendment-1.md`)
+Every reader now follows the PSID rule. This replaces the brief's "Retrieve2 only if small" and "do not change Astra / MacroChecker".
+
+- **/pancake/retrieve2** (`index` and `export`): a conversation is already an order when it has a PSID and a `macro_output` row has that `botcake_psid` (and the same page by the `pancake_id` mapping when it resolves, else PSID alone), or when it has no PSID and the old page + name rule matches. Done as one `NOT EXISTS` inside the existing query, so still one query per page load, 200-row pagination, filters and phone extraction unchanged. A PSID column was added to the page table and to the export JSON (`psid`). The copy-to-sheet TSV was left as it was so the pasted columns do not shift. With no PSID column yet (migration not run) it falls back to the old name rule. The index on `macro_output.botcake_psid` already exists (`2026_10_17_110000_add_botcake_psid_index_to_macro_output`), so no new index.
+- **/pancake/retrieve-orders** (`check`): a pasted line of 10–25 digits is also looked up by `botcake_psid`; names keep the `fb_name` rule. The response has a new `matched` map (`psid` / `name`) and the page shows "(matched by PSID)" or "(matched by name)" next to EXISTING.
+- **Conversations list** (`/pancake/index`): PSID column; the search box also matches a PSID exactly (the other columns keep their LIKE search).
+- **AstraEncoder::pancakeHistory** and **MacroChecker::fetchPancakeChat** take optional `$pageName` and `$psid` and use `PancakeChat::forOrder`. Callers pass the order's `PAGE` and `botcake_psid`: `AstraEncoder` (2 call sites), `MacroChecker::processRow`, and `AstraReplayAddressRules` (passes them to `pancakeHistory`). The 7000 and 8000 char cuts are unchanged. Called with the name only, they give today's result.
+- **One difference to know:** with a page, the lookup tries page + name before name only, so a same-name conversation on another page with a higher id no longer wins over the one on the order's own page.
+- **Other readers of `pancake_conversations`:** `PancakePageIdMappingController` reads only distinct page ids (no name, no change). `ProcessPancakeConversationsUpload` is the writer (brief). `PancakeConversationController` only reads upload logs. No other reader by name remains.
+
+Tests added: `tests/Feature/PancakePsid/PancakeReadersPsidTest.php` (retrieve2 export and page, retrieve-orders, list search) and `PancakeAstraCheckerPsidTest.php` (PSID row wins over a newer same-name row; no PSID gives today's result; checker cap kept).
+Run: PancakePsid folder OK (21 tests, 62 assertions). Chatblast, PageSettings, Botcake, NightRun: 1,282 tests, 1 error, the known credentials one (`NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`). Existing Astra / MacroChecker tests pass unchanged.
+Test note: the retrieve2 SQL uses MySQL `CONVERT_TZ`, so the test registers a pass-through `CONVERT_TZ` on the sqlite connection.
+
+Commit: `feat: retrieve2, retrieve orders, conversations list, Astra and MacroChecker read Pancake chats by PSID (spec 131 amendment 1)`.

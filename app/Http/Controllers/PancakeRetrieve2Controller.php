@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class PancakeRetrieve2Controller extends Controller
@@ -135,7 +136,7 @@ class PancakeRetrieve2Controller extends Controller
                 $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
                      ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
             })
-            ->whereNull('mp.name_key')
+            ->where(fn ($w) => $this->notYetAnOrder($w))
             ->whereRaw("$convDateExpr >= ?", [$dateFrom])
             ->whereRaw("$convDateExpr <= ?", [$dateTo]);
 
@@ -152,6 +153,7 @@ class PancakeRetrieve2Controller extends Controller
             $pageNameExpr as page,
             sm.shop_details as shop_details,
             pc.full_name,
+            {$this->psidSelect()},
             pc.customers_chat
         ");
 
@@ -274,7 +276,7 @@ class PancakeRetrieve2Controller extends Controller
                 $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
                      ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
             })
-            ->whereNull('mp.name_key')
+            ->where(fn ($w) => $this->notYetAnOrder($w))
             ->whereRaw("$convDateExpr >= ?", [$dateFrom])
             ->whereRaw("$convDateExpr <= ?", [$dateTo]);
 
@@ -291,6 +293,7 @@ class PancakeRetrieve2Controller extends Controller
             $pageNameExpr as page,
             sm.shop_details as shop_details,
             pc.full_name,
+            {$this->psidSelect()},
             pc.customers_chat
         ");
 
@@ -301,6 +304,7 @@ class PancakeRetrieve2Controller extends Controller
                 'date_created'   => (string) ($r->date_created ?? ''),
                 'page'           => (string) ($r->page ?? ''),
                 'full_name'      => (string) ($r->full_name ?? ''),
+                'psid'           => $r->psid !== null ? (string) $r->psid : null,
                 'phone_number'   => (string) ($this->extractPhoneNumber((string) ($r->customers_chat ?? '')) ?? ''),
                 'shop_details'   => (string) ($r->shop_details ?? ''),
                 'customers_chat' => (string) ($r->customers_chat ?? ''),
@@ -313,6 +317,39 @@ class PancakeRetrieve2Controller extends Controller
             'count'     => $rows->count(),
             'rows'      => $rows,
         ]);
+    }
+
+    /** May PSID ba ang conversations at macro_output? Kung wala pa (hindi pa na-migrate), pangalan lang ang rule gaya ng dati. */
+    private function psidRuleAvailable(): bool
+    {
+        return Schema::hasColumn('pancake_conversations', 'psid') && Schema::hasColumn('macro_output', 'botcake_psid');
+    }
+
+    private function psidSelect(): string
+    {
+        return Schema::hasColumn('pancake_conversations', 'psid') ? 'pc.psid as psid' : 'NULL as psid';
+    }
+
+    /**
+     * Hindi pa order ang conversation: may PSID -> walang macro_output row na may ganoong botcake_psid
+     * (at sa parehong page kung alam ang page ayon sa mapping); walang PSID -> walang (PAGE + fb_name) na tugma.
+     * Isang query pa rin: ang EXISTS ay gumagamit ng index ng macro_output.botcake_psid.
+     */
+    private function notYetAnOrder($w): void
+    {
+        if (!$this->psidRuleAvailable()) {
+            $w->whereNull('mp.name_key');
+            return;
+        }
+
+        $w->whereRaw("(
+            (pc.psid IS NULL AND mp.name_key IS NULL)
+            OR (pc.psid IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM macro_output mo
+                WHERE mo.botcake_psid = pc.psid
+                  AND (pi.pancake_page_name IS NULL OR LOWER(TRIM(mo.`PAGE`)) = LOWER(TRIM(pi.pancake_page_name)))
+            ))
+        )");
     }
 
     private function extractPhoneNumber(string $text): ?string

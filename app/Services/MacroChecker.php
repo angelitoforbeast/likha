@@ -182,7 +182,7 @@ class MacroChecker
 
         // Alamin agad kung may extended chat (Pancake): ang escalation sa mas malalim na model ay
         // sa HULING pass lang (pass 2 kung meron, kung wala pass 1) at isang beses lang kada row.
-        $extendedChat = $this->fetchPancakeChat((string) ($row->fb_name ?? ''));
+        $extendedChat = $this->fetchPancakeChat((string) ($row->fb_name ?? ''), (string) ($row->PAGE ?? ''), (string) ($row->botcake_psid ?? ''));
         $hasPass2     = ($extendedChat !== '' && $extendedChat !== $chat);
 
         // ── PASS 1: short chat (all_user_input only) ─────────────────────
@@ -489,18 +489,14 @@ class MacroChecker
      *
      * Returns trimmed chat string, or '' kung walang match.
      */
-    public function fetchPancakeChat(string $fbName): string
+    public function fetchPancakeChat(string $fbName, ?string $pageName = null, ?string $psid = null): string
     {
         $fbName = trim($fbName);
-        if ($fbName === '') return '';
+        if ($fbName === '' && trim((string) $psid) === '') return '';
         if (!Schema::hasTable('pancake_conversations')) return '';
 
-        $chat = DB::table('pancake_conversations')
-            ->where('full_name', '=', $fbName)
-            ->orderByDesc('id')
-            ->value('customers_chat');
-
-        $chat = trim((string) ($chat ?? ''));
+        // Parehong lookup ng "See more": PSID muna, saka page + fb_name, saka fb_name lang.
+        $chat = app(\App\Services\PancakeChat::class)->forOrder($pageName, $fbName, $psid)['chat'] ?? '';
 
         // Cap at 8000 chars — same safety limit as MacroOutputController::pancakeMore()
         $max = 8000;

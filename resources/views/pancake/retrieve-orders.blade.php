@@ -247,6 +247,7 @@
             let existingNames = new Set();   // fb_name na meron sa macro_output
             let pagesByName   = {};          // { fb_name: [PAGE1, PAGE2] }
             let shopsByName   = {};          // { fb_name: [SHOP1, SHOP2] }
+            let matchedBy     = {};          // { sender: 'psid' | 'name' }
 
             // Per-file overrides (mode per file)
             // { fileLabel: "MostCommonPage" }
@@ -319,6 +320,7 @@
                 existingNames = new Set();
                 pagesByName   = {};
                 shopsByName   = {};
+                matchedBy     = {};
                 overridePageByFile = {};
                 overrideShopByFile = {};
                 filePageMatches = {};
@@ -424,7 +426,7 @@
 
                     if (existingNames.size > 0) {
                         if (existingNames.has(item.senderName)) {
-                            statusHtml = '<span class="badge badge-existing">EXISTING</span>';
+                            statusHtml = '<span class="badge badge-existing">EXISTING</span>' + (matchedBy[item.senderName] === 'psid' ? ' <small>(matched by PSID)</small>' : ' <small>(matched by name)</small>');
 
                             const pages = pagesByName[item.senderName] || [];
                             const shops = shopsByName[item.senderName] || [];
@@ -507,6 +509,7 @@
                     existingNames = new Set(json.existing || []);
                     pagesByName   = json.pages || {};
                     shopsByName   = json.shops || {};
+                    matchedBy     = json.matched || {};
 
                     // Enable override button only if we actually have some data from macro_output
                     const hasAnyRefData =

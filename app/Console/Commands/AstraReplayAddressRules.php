@@ -146,7 +146,7 @@ class AstraReplayAddressRules extends Command
                 // Ang tatlong text ay binabasa NGAYON: ang replay ay hindi nakakakita ng text gaya noong gabi.
                 $texts = [
                     'chat'    => trim((string) $order->all_user_input),
-                    'history' => AstraEncoder::pancakeHistory((string) ($order->fb_name ?? '')),
+                    'history' => AstraEncoder::pancakeHistory((string) ($order->fb_name ?? ''), (string) ($order->PAGE ?? ''), (string) ($order->botcake_psid ?? '')),
                     'cxd'     => AstraAddressRules::customerBlocks((string) ($order->CXD ?? '')),
                 ];
                 $this->noteInexact($ids, $oid, $stored, $texts);

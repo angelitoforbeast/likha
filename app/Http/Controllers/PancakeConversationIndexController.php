@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\PancakeConversation;
 use App\Models\PancakeId;
+use Illuminate\Support\Facades\Schema;
 
 class PancakeConversationIndexController extends Controller
 {
@@ -47,11 +48,13 @@ class PancakeConversationIndexController extends Controller
             });
         }
 
-        // general search
+        // general search (puwede ring eksaktong PSID)
         if ($search !== '') {
-            $query->where(function ($qq) use ($search) {
+            $hasPsid = Schema::hasColumn('pancake_conversations', 'psid');
+            $query->where(function ($qq) use ($search, $hasPsid) {
                 $qq->where('full_name', 'like', "%{$search}%")
                    ->orWhere('customers_chat', 'like', "%{$search}%");
+                if ($hasPsid) $qq->orWhere('psid', $search);
             });
         }
 

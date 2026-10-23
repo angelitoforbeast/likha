@@ -136,6 +136,7 @@
               <th class="px-4 py-3 text-left font-semibold w-[90px]">ID</th>
               <th class="px-4 py-3 text-left font-semibold w-[240px]">Page</th>
               <th class="px-4 py-3 text-left font-semibold w-[220px]">Full Name</th>
+              <th class="px-4 py-3 text-left font-semibold w-[190px]">PSID</th>
               <th class="px-4 py-3 text-left font-semibold">Customers Chat</th>
               <th class="px-4 py-3 text-left font-semibold w-[190px]">Created</th>
               <th class="px-4 py-3 text-left font-semibold w-[190px]">Updated</th>
@@ -171,6 +172,8 @@
                 <td class="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                   {{ $r->full_name }}
                 </td>
+
+                <td class="px-4 py-3 font-mono text-xs text-gray-700 whitespace-nowrap">{{ $r->psid ?? '—' }}</td>
 
                 <td class="px-4 py-3">
                   <div class="space-y-2">
@@ -222,7 +225,7 @@
               </tr>
             @empty
               <tr>
-                <td colspan="6" class="px-6 py-12 text-center text-gray-500">
+                <td colspan="7" class="px-6 py-12 text-center text-gray-500">
                   No records found for the current filters.
                 </td>
               </tr>
