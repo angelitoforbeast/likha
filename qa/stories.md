@@ -2138,6 +2138,7 @@ Tests: `tests/Feature/OrderEncode/{OneRowPerDayTest,ConversationTest,SpotAstraTe
 | S-136.2 | Given an open row at 10:00, when the same customer orders at 14:00, then the same row is updated and no second row is made | `test_S_136_2…` | passed 2026-10-24 |
 | S-136.3 | Given two orders of one customer in the same minute, then one row | `test_S_136_3…` | passed 2026-10-24 |
 | S-136.4 | Given two people with the same FB name in the same minute on one page, then two rows (different PSID) and neither is overwritten | `test_S_136_4…` | passed 2026-10-24 |
+| S-136.4a | Given an order with no PSID and a blank FB name next to another customer's open row on the same page, then it makes its own row and the other row is untouched | `test_S_136_4a…` | passed 2026-10-24 |
 | S-136.5 (P2) | Given the same person on two pages with the same phone, then two rows (Validate, unchanged, refuses the second phone) | `test_S_136_5…` (rows only; Validate not re-tested) | passed 2026-10-24 |
 | S-136.6 (P2) | Given an imported row (no PSID) of this customer today, then the order is linked to it by PAGE + fb_name | `test_S_136_6…` | passed 2026-10-24 |
 | S-136.7 (P2) | Given "Niño Peña 😀" twice, then one row with the name intact | `test_S_136_7…` | passed 2026-10-24 |

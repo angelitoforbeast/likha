@@ -131,6 +131,11 @@ Review: `skeptic-reviewer` (standard depth) on the whole diff after G5; fix loop
 
 The full case table with test names is in `qa/stories.md` § S-136: all 57 tested cases pass on 2026-10-24, and .38 is not run.
 
+Fix round 1 (review):
+- **S-136.4a** (added): an order with no PSID and a blank FB name made the identity condition empty, so `LiveOrder::find` matched every row of the page in the date window. It now returns no match (a new row). Test `OneRowPerDayTest::test_S_136_4a_an_order_without_psid_and_fb_name_makes_its_own_row_next_to_a_strangers_open_row`: red first ("Failed asserting that 1 is identical to 2"), then green.
+- `docs/order-encode.md`: the customer-lock wait now says 240 s, as in `config/order_encode.php`.
+- `tests/Feature/OrderEncode` after the fix: **323 tests, 1002 assertions, no failures**.
+
 Final verification (`php vendor/phpunit/phpunit/phpunit tests/Feature/OrderEncode tests/Feature/StaffActivity tests/Feature/NightRun tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake`), after fix loop 1 and its re-check: **1685 tests, 13762 assertions, 1 error, 1 skipped**.
 
 Baseline at 1cf0de5d: 1631 tests, 1 error. The error, the same in both runs, is `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`, the known local-only missing Google credentials file.

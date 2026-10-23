@@ -143,7 +143,7 @@ on the same `ts_date`. Before the encode (and so before R5), `EncodeOrder` looks
 | open (STATUS blank) with an order time within 24 hours of this one (also across midnight) | **Linked** (`order_encodes.macro_output_id`, `input.linked`) and re-encoded into that row. TIMESTAMP and ts_date stay as they were. |
 | none, or only CANNOT PROCEED rows | A new row; `ts_date` is the day of the order time (cell A, Manila). |
 
-Runs of one customer never run side by side: `EncodeOrder` holds a cache lock per page + PSID (`order_encode.customer_lock_wait`, 300 s, then the
+Runs of one customer never run side by side: `EncodeOrder` holds a cache lock per page + PSID (`order_encode.customer_lock_wait`, 240 s, then the
 job retries). R5 skips the customer's own rows and encodes (same page + PSID) and uses the linked row's day.
 
 **What an update changes.** ADDRESS, PROVINCE, CITY, BARANGAY, ITEM_NAME, COD, all_user_input, extracted_details / CXD, AI ANALYZE, APP SCRIPT CHECKER, and

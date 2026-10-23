@@ -51,6 +51,18 @@ class OneRowPerDayTest extends LiveRowTestCase
         $this->assertSame([['7001', null], ['7002', null]], $rows->map(fn ($m) => [$m->botcake_psid, $m->{'HISTORICAL LOGS'}])->all()); // walang update sa row ng iba
     }
 
+    public function test_S_136_4a_an_order_without_psid_and_fb_name_makes_its_own_row_next_to_a_strangers_open_row(): void
+    {
+        $stranger = $this->existing(['botcake_psid' => '9999', 'fb_name' => 'Other', 'PHONE NUMBER' => '09180000000']);
+        $before = $this->columns($stranger);
+
+        $o = $this->liveOrder($this->details(), [2 => ''], 0);
+
+        $this->assertSame(2, MacroOutput::count());
+        $this->assertNotSame($stranger->id, $o->macro_output_id);
+        $this->assertSame($before, $this->columns($stranger));
+    }
+
     public function test_S_136_5_the_same_phone_on_two_pages_makes_two_rows(): void
     {
         $this->liveOrder($this->details(), [], 7001, null, 'Page Uno');

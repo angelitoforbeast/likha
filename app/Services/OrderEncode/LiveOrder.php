@@ -66,8 +66,10 @@ class LiveOrder
         $page = $in->get('page');
         $fbName = $in->get('name');
         $psid = $o->psid ? (string) $o->psid : '';
+        // Walang PSID at walang fb_name: walang makikilalang customer (ang blangkong kondisyon ay tutugma sa lahat ng row ng page).
+        if ($psid === '' && trim($fbName) === '') return [];
 
-        $rows = MacroOutput::query()->where('PAGE', $page)
+        $rows =MacroOutput::query()->where('PAGE', $page)
             ->where('ts_date', '>=', Carbon::parse($day)->subDay()->toDateString())->where('ts_date', '<=', $day . ' 23:59:59')
             ->where(function ($q) use ($psid, $fbName, $day) {
                 if ($psid !== '') $q->where('botcake_psid', $psid);
