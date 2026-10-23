@@ -54,7 +54,7 @@ class RtsCheckFeedTest extends RtsProjectionTestCase
         $this->assertEqualsWithDelta(-25.11, $rows[0]['gap'], 0.01);
         $this->assertEqualsWithDelta(55.11, $rows[0]['projected_rts'], 0.01);
         $this->assertSame(['page', 'item', 'orders', 'unmatched', 'matched', 'delivered', 'returned', 'for_return',
-            'in_transit', 'in_transit_pct', 'projected_rts', 'actual_rts', 'set_rts', 'gap', 'error_pts', 'gap_ratio', 'level', 'flag', 'set_by', 'set_at'],
+            'in_transit', 'in_transit_pct', 'projected_rts', 'actual_rts', 'set_rts', 'gap', 'error_pts', 'gap_ratio', 'level', 'flag', 'set_by', 'set_at', 'analyst_rts', 'analyst_reason', 'analyst_at'],
             array_keys($rows[0]));
         $this->assertStringNotContainsString('WB', $res->getContent());
     }

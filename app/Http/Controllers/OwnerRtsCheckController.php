@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\AnalystRts;
 use App\Services\ColFormatRules;
 use App\Services\RtsProjection;
 use Carbon\Carbon;
@@ -19,7 +20,8 @@ class OwnerRtsCheckController extends Controller
     private const TZ = 'Asia/Manila';
     private const DEFAULT_DAYS = 21;
     private const FIELDS = ['page', 'item', 'orders', 'unmatched', 'matched', 'delivered', 'returned', 'for_return',
-        'in_transit', 'in_transit_pct', 'projected_rts', 'actual_rts', 'set_rts', 'gap', 'error_pts', 'gap_ratio', 'level', 'flag', 'set_by', 'set_at'];
+        'in_transit', 'in_transit_pct', 'projected_rts', 'actual_rts', 'set_rts', 'gap', 'error_pts', 'gap_ratio', 'level', 'flag', 'set_by', 'set_at',
+        'analyst_rts', 'analyst_reason', 'analyst_at'];
     private const LEVEL_RANK = ['red' => 0, 'yellow' => 1, 'none' => 2];
 
     public function index(Request $request, RtsProjection $projection): JsonResponse
@@ -38,8 +40,9 @@ class OwnerRtsCheckController extends Controller
         }
 
         $rules = (new OwnerColumnSettingsController())->loadColFormat('owner_private')['byCol']['mira_rts'] ?? [];
+        $analyst = (new AnalystRts())->all();
         $rows = [];
-        foreach ($projection->rows($from, $to) as $r) {
+        foreach ($projection->rows($from, $to) as $key => $r) {
             if ($r['matched'] < RtsProjection::MIN_MATCHED_FLAG) continue;
             // Parehong pangalan ng column id ng Page Summary para tumama ang compare_col ng rules.
             $hit = ColFormatRules::firstHit($rules, 'mira_rts', [
@@ -48,6 +51,9 @@ class OwnerRtsCheckController extends Controller
             ]);
             $r['level'] = ColFormatRules::level($hit['bg'] ?? null);
             $r['flag'] = $r['level'] === 'red';
+            $r['analyst_rts'] = $analyst[$key]['pct'] ?? null;
+            $r['analyst_reason'] = $analyst[$key]['reason'] ?? null;
+            $r['analyst_at'] = $analyst[$key]['at'] ?? null;
             $rows[] = $r;
         }
         usort($rows, fn ($a, $b) => [self::LEVEL_RANK[$a['level']], -abs($a['gap'] ?? 0), -$a['matched']] <=> [self::LEVEL_RANK[$b['level']], -abs($b['gap'] ?? 0), -$b['matched']]);

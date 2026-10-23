@@ -76,7 +76,9 @@ class PageSettings
         if (!$system && $this->pageKey($page) === ChatblastSetupCheck::ALL_PAGE) return ['page_name' => '"' . ChatblastSetupCheck::ALL_PAGE . '" is reserved for the Setup box.'];
         if (mb_strlen($this->normPage($page)) > 255) return ['page_name' => 'Page: 255 characters at most.'];
         if (!preg_match('/^[a-z0-9_]{1,50}$/', $provider)) return ['provider' => 'Provider: lowercase letters, digits and _ only.'];
-        if (strlen($key) > 100 || !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key)) {
+        // Ang key ng analyst (rts_pct:<item>) ay may pangalan ng item sa dulo, kaya system lang at hindi sa karaniwang key rule.
+        $analyst = $system && AnalystRts::isKey($provider, $key);
+        if (strlen($key) > 100 || (!$analyst && !preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+)*$/', $key))) {
             return ['key' => 'Key: lowercase letters, digits, _ and . only (e.g. flow.on_delivery).'];
         }
 

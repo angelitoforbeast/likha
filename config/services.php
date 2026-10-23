@@ -166,6 +166,11 @@ return [
         'key' => env('RTS_CHECK_KEY'),
     ],
 
+    // Sulatan ng analyst ng Mira RTS (/api/owner/analyst-rts); walang laman = 401 sa lahat.
+    'analyst_rts' => [
+        'key' => env('ANALYST_RTS_KEY'),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),

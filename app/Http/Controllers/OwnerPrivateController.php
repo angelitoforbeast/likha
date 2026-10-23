@@ -185,17 +185,16 @@ class OwnerPrivateController extends Controller
     }
 
     /**
-     * Projected RTS% bawat page+item (order ng huling 21 araw). Best effort: kapag pumalya o wala pang J&T table,
+     * Projected RTS% bawat page+item (mga order sa date range ng page). Best effort: kapag pumalya o wala pang J&T table,
      * [] — hindi dapat masira ang page.
      */
-    protected function projectedRtsRows(): array
+    protected function projectedRtsRows(string $from, string $to): array
     {
         if (!Schema::hasTable('from_jnts') || !Schema::hasTable('macro_output')) return [];
 
         try {
-            $today = now('Asia/Manila');
-
-            return (new \App\Services\RtsProjection())->rows($today->copy()->subDays(21)->toDateString(), $today->toDateString());
+            // Ang date range ng page (order date), para pareho ang panahon ng Set RTS at ng ibang column.
+            return (new \App\Services\RtsProjection())->rows($from, $to);
         } catch (\Throwable $e) {
             \Log::warning('projectedRtsRows failed: '.$e->getMessage());
             return [];
@@ -1819,7 +1818,8 @@ class OwnerPrivateController extends Controller
         // on hosts with zero mappings, canonical == raw normalized key → unchanged.
         $aliases = new \App\Services\ItemAliasResolver();
         $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
-        $rtsProj = $this->projectedRtsRows();
+        $rtsProj = $this->projectedRtsRows($startDate, $endDate);
+        $analystRts = (new \App\Services\AnalystRts())->all();
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
@@ -2388,6 +2388,9 @@ class OwnerPrivateController extends Controller
             $miraGapAbs      = $miraGap !== null ? abs($miraGap) : null;
             $miraError       = $miraRts !== null ? ($proj['error_pts'] ?? null) : null;
             $miraMatched     = $miraRts !== null ? (int) ($proj['matched'] ?? 0) : null;
+            // Mira RTS ng analyst (tinype niya, may dahilan) at ang gap nito sa Set RTS.
+            $analyst         = $analystRts[$pk.'||'.$dominantKey] ?? null;
+            $analystGap      = ($rtsPct !== null && $analyst) ? round($rtsPct - $analyst['pct'], 2) : null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
             // alias-aware aggregation sa jntStatsMap builder above).
@@ -2771,6 +2774,12 @@ class OwnerPrivateController extends Controller
                 'projected_rts_pct'         => $proj['projected_rts'] ?? null,
                 'projected_rts_orders'      => $proj['matched'] ?? null,
                 'projected_rts_transit_pct' => $proj['in_transit_pct'] ?? null,
+                'analyst_rts_pct'           => $analyst['pct'] ?? null,
+                'analyst_rts_reason'        => $analyst['reason'] ?? null,
+                'analyst_rts_at'            => $analyst['at'] ?? null,
+                'analyst_rts_prev'          => $analyst['prev'] ?? null,
+                'analyst_gap_pts'           => $analystGap,
+                'analyst_gap_abs'           => $analystGap !== null ? abs($analystGap) : null,
                 'mira_rts_pct'              => $miraRts,
                 'rts_gap_pts'               => $miraGap,
                 'rts_gap_abs'               => $miraGapAbs,
