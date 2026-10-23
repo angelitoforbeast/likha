@@ -36,6 +36,8 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
         $this->cutoffDateTime = $cutoffDateTime;
         $this->runId = $runId;
         $this->cleanSheet = $cleanSheet;
+        // Sariling worker: hanggang 20 minuto ito, kaya hindi nito maiipit (o madadamay sa timeout) ang import ng orders.
+        $this->onConnection('database')->onQueue('psid');
     }
 
     public function handle(): void

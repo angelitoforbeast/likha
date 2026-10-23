@@ -43,7 +43,7 @@ class BotcakePsidGsheetController extends Controller
             dispatch(
                 (new ImportBotcakePsidFromGoogleSheet($cutoff, $run->id))
                     ->onConnection('database')
-                    ->onQueue('default')
+                    ->onQueue('psid')
             );
 
             return redirect()

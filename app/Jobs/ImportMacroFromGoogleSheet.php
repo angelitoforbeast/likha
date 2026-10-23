@@ -28,7 +28,10 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
     public function __construct(
         public int $runId,
         public ?int $userId = null
-    ) {}
+    ) {
+        // Sariling worker ang mga import ng orders (Likha at Macro): sunud-sunod, hindi kasabay ng ibang trabaho.
+        $this->onConnection('database')->onQueue('orders');
+    }
 
     public function handle()
     {
