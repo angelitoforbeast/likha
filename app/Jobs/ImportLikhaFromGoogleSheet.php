@@ -447,9 +447,10 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             'extracted_details'  => $row[6] ?? null,
             'ITEM_NAME'          => $extractedItemName ?: null,
             'COD'                => $extractedCOD ?: null,
+        ]
             // Nakikita ng staff sa AI ANALYZE: walang pangalan at walang phone, kaya hindi ito maiuugnay sa customer.
-            'AI ANALYZE'         => trim($fbName) === '' && $namePhone === '' ? OrderIdentity::NO_NAME_NO_PHONE : null,
-        ]);
+            // Isinusulat lang kapag may flag, para hindi magalaw ang column sa ibang order.
+            + (trim($fbName) === '' && $namePhone === '' ? ['AI ANALYZE' => OrderIdentity::NO_NAME_NO_PHONE] : []));
         return 'inserted';
     }
 }
