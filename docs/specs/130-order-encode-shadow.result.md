@@ -101,7 +101,7 @@ All S-130 cases are in `qa/stories.md`. Final run of `tests/Feature/OrderEncode`
 | S-130.45 (macro) | `MacroTest` | pass |
 | S-130.46–.51 (checker) | `CheckerTest` | pass |
 
-Required suites, one run on the final tree: `php vendor\phpunit\phpunit\phpunit tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake tests/Feature/NightRun tests/Feature/OrderEncode` gave 1,432 tests, **1 error**: `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`, "file …storage\app/credentials.json does not exist" (the known local-only failure, a missing Google credentials file; unrelated to this spec). Everything else passed.
+Required suites, one run on the final tree: `php vendor\phpunit\phpunit\phpunit tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake tests/Feature/NightRun tests/Feature/OrderEncode` gave 1,444 tests, **1 error**: `NightRun\ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`, "file …storage\app/credentials.json does not exist" (the known local-only failure, a missing Google credentials file; unrelated to this spec). Everything else passed.
 
 ## Red runs (first failure line per slice)
 
@@ -150,5 +150,6 @@ e06ec775 docs: spec 130 order encode shadow with the reference scripts
 4d770c18 feat: /order-encode compare page, read-only, with counts, cost and side-by-side values (spec 130)
 3ab19386 docs: order encode guide, supervisor reference, stories for spec 130
 aafdab44 fix: order encode only takes the All Orders step, live falls back to the sheet when not ready or failed, done only after the macro row exists (spec 130)
+8bcaf8b7 fix: a live retry reuses the macro row it already made and does not also write the sheet (spec 130)
 ```
 (plus the commit that adds this result.)
