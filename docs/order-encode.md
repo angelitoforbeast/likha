@@ -68,3 +68,37 @@ writes the row to the fallback sheet and continues; with `continue` it continues
 `encode_order` (result `queued`, `already_queued`, `sheet_instead`, `not_saved`, `failed`, `test`, `skipped`) and, when ticked, `order`.
 Results and the Inbox count orders from the `order` event only, so nothing changes there. `/order-encode?mode=live` lists these orders
 with a link to their `macro_output` row.
+
+## Shadow for every page, judged against the final order (spec 133)
+
+The flow shadow of 130 only sees pages whose orders pass through the bot's Sheet step. This part covers **every page**: the Likha import
+(`ImportLikhaFromGoogleSheet`, tab TO WEBSITE A2:I) already receives all orders, so when it **creates** a new `macro_output` row it also
+queues a shadow encode of that row. The import never waits for it and never fails because of it (dispatch only, errors are reported and
+the import goes on). Updates of existing rows encode nothing.
+
+| Setting (`app_settings`) | Default | Meaning |
+|---|---|---|
+| `order_encode_import_shadow` | `off` | `on` turns the import hook on (global; Incepxion runs the same code and stays off until the owner says) |
+| `order_encode_import_daily_cap` | 2000 | most import encodes queued per day; past it orders are skipped and counted (`order_encode_import_skipped` keeps today's counts) |
+| `order_encode_import_skip_pages` | empty | comma list of page names (case-insensitive) that are never encoded |
+
+All three are edited on `/order-encode/final` by the CEO only (no history: the project has no history table for app settings).
+
+**The row.** `order_encodes` with `mode = import`, `spreadsheet_id` = the order spreadsheet, `tab` = `All Orders`, `row_number` = the sheet row (TO WEBSITE row =
+All Orders row), `macro_output_id` = the new row, `input.row` = the raw cells A to H exactly as read, `input.source = import`. If an `order_encodes` row with
+that key exists already (the flow hook of 130 got there first) nothing is encoded again; only its `macro_output_id` is set. `EncodeOrder` reads
+import rows by column order A to H (no header read) and writes `order_encodes` only, never `macro_output`.
+
+**Compare with the final order.** `php artisan order-encode:compare-final` (every 15 minutes) takes `import` rows and `shadow` rows with a
+`macro_output_id` that are `done` and not yet compared. It waits until the `macro_output` row is filled by the Macro import (STATUS, APP SCRIPT CHECKER or
+PROVINCE not blank), or marks it `sheet_never_finished` after 72 hours (`order_encode.final_give_up_hours`). Per field it stores `same | different | final_blank | likha_blank`
+for province, city, barangay (Ñ = N, case and spaces ignored), address line (lowercase, punctuation and repeated spaces folded), item, COD, `proceed` (Likha's final O = ✅
+against `STATUS` = PROCEED) and `checker` (Likha's final O against APP SCRIPT CHECKER); it records `edited` and the `edited_*` flags set, and the STATUS at compare time.
+Storage: the one nullable JSON column `order_encodes.final_compare` (migration `2026_11_05_100000_add_final_compare_to_order_encodes_table.php`, additive). The sheet compare's
+`compare` / `compare_state` are not touched, so a flow shadow row can have both.
+
+**Page.** `GET /order-encode/final` (tab "All pages (vs final order)" next to the sheet compare; CEO, Marketing - OIC, Marketing read it): the switch, cap, skip list, today's encoded and
+skipped counts and the estimated GPT cost; date range and page filter; tiles (orders, % location equal, % address equal, % item and COD equal); the PROCEED table (final: PROCEED untouched /
+PROCEED after staff edit / not PROCEED, against Likha would PROCEED / would hold); the per-page table (sortable); and the disagreements, Likha value (L) over the final value (F), the steps log on hover.
+
+**Queue.** Same `encode` queue. A burst (an import can create hundreds of rows) just waits in the queue; the backlog estimate is in `docs/specs/133-encode-shadow-all-pages.result.md`.

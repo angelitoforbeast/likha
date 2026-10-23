@@ -1024,3 +1024,12 @@ Accepted, not fixed:
 - **A concurrent double run of the same step (two workers, same run id) could pass the "already queued" check together.** Reason: runs of one customer are serial; the macro_output dedupe still stops a second order row.
 - **"Continue without saving" when the encode could not even be queued still counts as an order if "Counts as an order" is ticked** (the step leaves on `next`). Reason: the customer did order; the warning is in the run path and the event is `not_saved`.
 - **`order_encodes` has no index on `run_id`/`flow_id`** for the "already queued" check. Reason: the check is also narrowed by `psid`; an index needs a migration, which this spec does not have.
+
+## 133: shadow for every page (2026-10-23)
+
+- **No history for the three import-shadow settings.** Reason: the project has no history table for `app_settings`; adding one is a new feature.
+- **The import hook reads `app_settings` and counts today's encodes with a few queries per created order.** Reason: small next to the row's own insert; cache it per import run if a big import ever shows it.
+- **`/order-encode/final` loads every order of the range in one pass (cursor) and paginates the disagreements in memory.** Reason: a week is a few thousand rows; a 30-day range of the whole company may be slow. Suggestion: a rollup table per page and day if the owner wants long ranges.
+- **A flow shadow row compared by the sheet compare and by compare-final shows in both tabs.** Reason: intended; the two answers differ (sheet DATABASE row vs final order).
+- **Orders whose `macro_output` row is deleted before compare-final wait 72 h, then show as "sheet never finished".** Reason: rare and harmless.
+- **The cap is not atomic if two import jobs ran at once.** Reason: the `orders` queue runs one import at a time.

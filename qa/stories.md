@@ -2044,3 +2044,27 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-132.16 | Given no OpenAI key (or no address file), the order goes to the fallback sheet and no `order_encodes` row is left | `test_S_132_16…` | pending |
 | S-132.17 | Given the queue refuses the job, the row is marked failed (not left queued) and the sheet gets the row once | `test_S_132_17…` | pending |
 | S-132.18 | The Page settings cell of `order_encode.mode` tells the owner to use the Encode order step instead of live | `test_S_132_18…` | pending |
+
+## S-133 Shadow-encode every page's orders from the Likha import and compare with the final order
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-133.1 | Given the switch is off, when the import creates an order, then it behaves as before and no `order_encodes` row or job exists | `ImportShadowTest::test_S_133_1…` | pending |
+| S-133.2 | Given the switch is on, when the import creates an order, then one `import` encode is queued on `encode` with the raw A–H cells, the row key and the `macro_output_id` | `test_S_133_2…` | pending |
+| S-133.3 | Given an order the import only updates, then nothing is encoded | `test_S_133_3…` | pending |
+| S-133.4 | Given the flow hook already encoded that sheet row, then no second encode is made and only `macro_output_id` is set | `test_S_133_4…` | pending |
+| S-133.5 | Given a daily cap and a skip list, then orders past the cap or on a skipped page are not encoded and are counted for today | `test_S_133_5…` | pending |
+| S-133.6 | Given the queue is down or the table is missing, then the import still creates the `macro_output` row | `test_S_133_6…` | pending |
+| S-133.7 | Given an import encode runs, then it uses the cells by column order, reads no sheet and never writes `macro_output` | `test_S_133_7…` | pending |
+| S-133.10 | Given the Macro import has not filled the order, then compare-final waits; once STATUS, APP SCRIPT CHECKER or PROVINCE is filled it compares | `CompareFinalTest::test_S_133_10…` | pending |
+| S-133.11 | Given a filled order, then each field, PROCEED and the checker are marked, with the edited flags and the STATUS | `test_S_133_11…` | pending |
+| S-133.12 | Given a blank on one side, then it is `final_blank` / `likha_blank`, not `same` | `test_S_133_12…` | pending |
+| S-133.13 | Given an order never filled after 72 hours, then it is `sheet_never_finished` (not before) | `test_S_133_13…` | pending |
+| S-133.14 | Only finished import rows and linked flow shadow rows are compared, once | `test_S_133_14…` | pending |
+| S-133.15 | The sheet compare state of a flow shadow row is not changed | `test_S_133_15…` | pending |
+| S-133.20 | The tab shows the tiles, the PROCEED table and the sortable per-page table | `FinalPageTest::test_S_133_20…` | pending |
+| S-133.21 | The date range and page filters apply | `test_S_133_21…` | pending |
+| S-133.22 | Disagreements show Likha and final values side by side with the steps on hover, and escape the text | `test_S_133_22…` | pending |
+| S-133.23 | The page shows the switch, cap, skip list, today's counts and the estimated cost | `test_S_133_23…` | pending |
+| S-133.24 | Only the CEO saves the three settings; bad values are refused | `test_S_133_24…` | pending |
+| S-133.25 | Marketing roles read the tab without the form; other roles get 404 | `test_S_133_25…` | pending |

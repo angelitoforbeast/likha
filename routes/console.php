@@ -197,3 +197,8 @@ Schedule::command('rts:learn')
 Schedule::command('order-encode:compare')
     ->everyTenMinutes()
     ->withoutOverlapping(30);
+
+// Order encode: ang paghahambing ng encode ng mga imported na order sa final na order sa macro_output, kada 15 minuto.
+Schedule::command('order-encode:compare-final')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping(30);

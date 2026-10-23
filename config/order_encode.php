@@ -10,4 +10,6 @@ return [
     // Hanggang kailan (minuto) bago hintayin ng compare ang checker ng sheet, at ilang oras bago sabihing "sheet not done".
     'compare_after_minutes' => 15,
     'compare_give_up_hours' => 48,
+    // Ilang oras bago sabihing "sheet never finished" sa paghahambing sa final na order (macro_output).
+    'final_give_up_hours' => 72,
 ];

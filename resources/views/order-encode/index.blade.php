@@ -6,6 +6,11 @@
     $label = fn ($f) => ucwords(str_replace('_', ' ', $f));
   @endphp
 
+  <div class="mb-4 flex gap-2 text-sm">
+    <a href="{{ route('order-encode.index') }}" class="rounded bg-blue-500 px-3 py-1 text-white">Sheet compare</a>
+    <a href="{{ route('order-encode.final') }}" class="rounded border px-3 py-1 text-gray-700">All pages (vs final order)</a>
+  </div>
+
   {{-- Filters --}}
   <form method="GET" action="{{ route('order-encode.index') }}" class="mb-4 flex flex-wrap items-end gap-3 text-sm">
     <label class="flex flex-col">From
