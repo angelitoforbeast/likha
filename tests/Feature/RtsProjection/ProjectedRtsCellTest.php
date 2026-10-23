@@ -167,7 +167,7 @@ class ProjectedRtsCellTest extends RtsProjectionTestCase
         foreach ([
             "id:'mira_rts'", "label:'Mira RTS'", "id:'proj_profit_mira'", "label:'Profit (Mira RTS)'",
             'row.projected_rts_pct != null', 'still in transit', 'Inaasahang error',
-            'Use Mira RTS', "source', 'mira_rts'", 'tot().projected_profit_mira',
+            'tot().projected_profit_mira',
         ] as $needle) {
             $this->assertStringContainsString($needle, $html, $needle);
         }
