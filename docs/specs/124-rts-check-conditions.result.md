@@ -67,3 +67,11 @@ First red lines: "Call to undefined method RtsProjection::expectedError()", "Cla
 ## Not done / for the owner
 - `npm run build` not run (only Blade changed, no JS/CSS assets). No browser check (no browser session).
 - Production `owner_private_col_format` gets the seed on its first read after deploy; there is no migration to run.
+
+## Amendment 1: Prof 1D (Mira)
+- New Page Summary column `proj_prof_1d_mira` ("Prof 1D (Mira)"), placed after PROF(1D)-M in the catalog and in `DEFAULT_VISIBLE`. Row field `projected_profit_last_day_mira`.
+- It is PROF(1D) with the Mira RTS in place of the Set RTS. In the day loop the end-date slice adds the same formula as `projected_profit_mira` (same day, same COGS, COD fee, shipping fee and ads). In the 1D partial-date override it uses the same projected proceed with the Mira deliver factor. It is null without a Mira RTS (and where PROF(1D) is null).
+- Cell: same colour helper as PROF(1D) (`pbStyleN(…,1)` on the td, `pbColor` on the number), a total in the totals row, an entry in the totals exclusion list, and a `cellValueFor` case, so a CF rule can target it or use it as `compare_col`.
+- PROF(1D), PROF(1D)-M and every other number are unchanged.
+- Tests (`ProjectedRtsCellTest`): Mira RTS equal to Set RTS gives the same value as PROF(1D); a higher Mira RTS gives a lower value while PROF(1D) is unchanged; null without a Mira RTS; catalog, default-visible and markup render.
+- Re-pinned both `SharedPagesBasePinTest` hashes (new column and catalog entry only). The same five test directories: 1175 tests, 8304 assertions, 1 skipped, 0 failures.
