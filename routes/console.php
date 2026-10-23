@@ -184,3 +184,10 @@ Schedule::command('jnt:track-sync-auto')
     ->cron('20 2,4-23 * * *')
     ->withoutOverlapping(60)
     ->runInBackground();
+
+// Projected RTS% (/owner/private, /api/owner/rts-check): ang p(edad) ng RTS ay natututunan mula sa mga order na tapos na
+// (huling 8 linggo). 04:40 Manila: tahimik na oras, pagkatapos ng night step at ng mga 03:50–04:25 na trabaho.
+Schedule::command('rts:learn')
+    ->timezone('Asia/Manila')
+    ->dailyAt('04:40')
+    ->withoutOverlapping();

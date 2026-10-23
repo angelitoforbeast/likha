@@ -184,6 +184,24 @@ class OwnerPrivateController extends Controller
         }
     }
 
+    /**
+     * Projected RTS% bawat page+item (order ng huling 21 araw). Best effort: kapag pumalya o wala pang J&T table,
+     * [] — hindi dapat masira ang page.
+     */
+    protected function projectedRtsRows(): array
+    {
+        if (!Schema::hasTable('from_jnts') || !Schema::hasTable('macro_output')) return [];
+
+        try {
+            $today = now('Asia/Manila');
+
+            return (new \App\Services\RtsProjection())->rows($today->copy()->subDays(21)->toDateString(), $today->toDateString());
+        } catch (\Throwable $e) {
+            \Log::warning('projectedRtsRows failed: '.$e->getMessage());
+            return [];
+        }
+    }
+
     /** Current version sentinel (lazy-init kung blank pa). */
     private function cacheVersion(): string
     {
@@ -1801,6 +1819,7 @@ class OwnerPrivateController extends Controller
         // on hosts with zero mappings, canonical == raw normalized key → unchanged.
         $aliases = new \App\Services\ItemAliasResolver();
         $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
+        $rtsProj = $this->projectedRtsRows();
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
@@ -2360,7 +2379,15 @@ class OwnerPrivateController extends Controller
             // rts_pct can be NULL (promo-only saves walang RTS pa) — preserve null
             // para sa profit calc downstream (null → no profit shown, hindi 0%).
             $rtsPct          = ($settings && $settings['rts_pct'] !== null) ? (float)$settings['rts_pct'] : null;
+            $proj            = $rtsProj[$pk.'||'.$dominantKey] ?? null;
+            // Mira RTS = Projected RTS na naka-round sa 0.1; ito rin ang kokopyahin ng Use Mira RTS button.
+            $miraRts         = ($proj && $proj['projected_rts'] !== null) ? round($proj['projected_rts'], 1) : null;
             $rtsComment      = $settings ? $settings['comment'] : null;
+            // Mga column para sa Conditional Formatting ng Mira RTS: gap = Set − Mira, error galing sa edad at laki ng sample.
+            $miraGap         = ($rtsPct !== null && $miraRts !== null) ? round($rtsPct - $miraRts, 2) : null;
+            $miraGapAbs      = $miraGap !== null ? abs($miraGap) : null;
+            $miraError       = $miraRts !== null ? ($proj['error_pts'] ?? null) : null;
+            $miraMatched     = $miraRts !== null ? (int) ($proj['matched'] ?? 0) : null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
             // alias-aware aggregation sa jntStatsMap builder above).
@@ -2400,10 +2427,12 @@ class OwnerPrivateController extends Controller
             // Projected Profit — per-slice compute summed across INCLUDED dates.
             // Uses each day's own mode_cod & adspent; rts_pct/item_value/fees anchored at end_date.
             $projProfit = $projProfitPerOrder = null;
+            $projProfitMira = null;   // Profit (Mira RTS): parehong formula ng projProfit, Mira RTS ang gamit sa halip na Set RTS
             // Trailing-N-day variants: same formula, but only the last N days
             // ending at $endDate (inclusive). 1D = end_date strictly.
             // Strict — if a window has no slice for this page+item, the % is null.
             $projProfitLastDay   = null; $grossSalesLastDay   = 0.0; $ordersLastDay   = 0; $procOrdersLastDay   = 0;
+            $projProfitLastDayMira = null;   // Prof 1D (Mira): PROF(1D) na Mira RTS ang gamit sa halip na Set RTS
             $projProfitLastDayM  = null;   // PROF(1D)-M — end-date slice lang, ProfitDayM formula
             $projProfitLast3Day  = null; $grossSalesLast3Day  = 0.0; $ordersLast3Day  = 0; $procOrdersLast3Day  = 0;
             $projProfitLast7Day  = null; $grossSalesLast7Day  = 0.0; $ordersLast7Day  = 0; $procOrdersLast7Day  = 0;
@@ -2453,8 +2482,10 @@ class OwnerPrivateController extends Controller
 
             if ($hasRtsHist && $hasCostHist && !empty($includedDatesArr)) {
                 $sumProfit = 0.0;
+                $sumProfitMira = 0.0;
                 $anyPrice  = false;
                 $sumProfitLastDay  = 0.0; $anyPriceLastDay  = false;
+                $sumProfitLastDayMira = 0.0;
                 $sumProfitLast3Day = 0.0; $anyPriceLast3Day = false;
                 $sumProfitLast7Day = 0.0; $anyPriceLast7Day = false;
                 foreach ($includedDatesArr as $d => $slice) {
@@ -2501,7 +2532,9 @@ class OwnerPrivateController extends Controller
                     if ($dayRts === null || $dayCost === null || $dayCodR === null
                         || $dayVat === null || $dayShip === null || $pDay <= 0) {
                         $sumProfit -= $adsDay;
+                        $sumProfitMira -= $adsDay;
                         if ($isLastDay) $sumProfitLastDay  -= $adsDay;
+                        if ($isLastDay) $sumProfitLastDayMira -= $adsDay;
                         if ($inLast3D)  $sumProfitLast3Day -= $adsDay;
                         if ($inLast7D)  $sumProfitLast7Day -= $adsDay;
                         continue;
@@ -2528,6 +2561,17 @@ class OwnerPrivateController extends Controller
                         - $adsDay                                                 // adspent
                         - $proceedDay * $deliverFactor * $codFeeDay;              // COD fee (delivered)
                     $sumProfit += $sliceProfit;
+                    if ($miraRts !== null) {
+                        $deliverFactorM = 1.0 - $miraRts / 100.0;
+                        $sliceProfitMira =
+                            $proceedDay * $pDay * $deliverFactorM
+                            - $proceedDay * $dayShip
+                            - $proceedDay * $deliverFactorM * $dayCost
+                            - $adsDay
+                            - $proceedDay * $deliverFactorM * $codFeeDay;
+                        $sumProfitMira += $sliceProfitMira;
+                        if ($isLastDay) $sumProfitLastDayMira += $sliceProfitMira;
+                    }
                     $anyPrice = true;
                     if ($isLastDay) { $anyPriceLastDay  = true; $sumProfitLastDay  += $sliceProfit; }
                     if ($inLast3D)  { $anyPriceLast3Day = true; $sumProfitLast3Day += $sliceProfit; }
@@ -2536,8 +2580,10 @@ class OwnerPrivateController extends Controller
                 if ($anyPrice) {
                     $projProfit = $sumProfit;
                     $projProfitPerOrder = $totalOrders > 0 ? $projProfit / $totalOrders : null;
+                    if ($miraRts !== null) $projProfitMira = $sumProfitMira;
                 }
                 if ($anyPriceLastDay)  $projProfitLastDay  = $sumProfitLastDay;
+                if ($anyPriceLastDay && $miraRts !== null) $projProfitLastDayMira = $sumProfitLastDayMira;
                 if ($anyPriceLast3Day) $projProfitLast3Day = $sumProfitLast3Day;
                 if ($anyPriceLast7Day) $projProfitLast7Day = $sumProfitLast7Day;
             }
@@ -2599,6 +2645,15 @@ class OwnerPrivateController extends Controller
                             - $pdAdspent                                              // adspent
                             - $projectedProceedPd * $deliverFactor * $codFeeDay;     // COD fee
                         $grossSalesLastDay = $pdModeCod * $pdOrders;
+                        // Mira: parehong projection, Mira RTS ang deliver factor.
+                        $deliverFactorMira = $miraRts !== null ? 1.0 - $miraRts / 100.0 : null;
+                        $projProfitLastDayMira = $deliverFactorMira !== null ? (
+                            $projectedProceedPd * $pdModeCod * $deliverFactorMira
+                            - $projectedProceedPd * $shippingFee
+                            - $projectedProceedPd * $deliverFactorMira * $itemValue
+                            - $pdAdspent
+                            - $projectedProceedPd * $deliverFactorMira * $codFeeDay
+                        ) : null;
                         // -M: parehong projection; SF_M as-of end_date (gaya ng $shippingFee).
                         $projProfitLastDayM = ProfitDayM::compute(
                             $projectedProceedPd, $pdModeCod, $rtsPct, $itemValue, $pdAdspent,
@@ -2607,6 +2662,7 @@ class OwnerPrivateController extends Controller
                     } else {
                         // Missing inputs — null out profit projection but keep orders display
                         $projProfitLastDay = null;
+                        $projProfitLastDayMira = null;
                         $projProfitLastDayM = null;
                         $grossSalesLastDay = $pdModeCod > 0 ? $pdModeCod * $pdOrders : 0.0;
                     }
@@ -2616,6 +2672,7 @@ class OwnerPrivateController extends Controller
                     $ordersLastDay     = 0;
                     $procOrdersLastDay = 0;
                     $projProfitLastDay = null;
+                    $projProfitLastDayMira = null;
                     $projProfitLastDayM = null;
                     $grossSalesLastDay = 0.0;
                 }
@@ -2670,6 +2727,7 @@ class OwnerPrivateController extends Controller
                 'projected_profit_last_day' => $projProfitLastDay,
                 // PROF(1D)-M — same day, stricter rules (App\Support\ProfitDayM).
                 'projected_profit_last_day_m' => $projProfitLastDayM,
+                'projected_profit_last_day_mira' => $projProfitLastDayMira,
                 'proj_pct_last_day'         => $projPctLastDay,
                 'orders_last_day'           => $ordersLastDay,
                 'proceed_last_day'          => $procOrdersLastDay,
@@ -2709,6 +2767,17 @@ class OwnerPrivateController extends Controller
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
                 'has_settings'          => $settings !== null,
                 'rts_comment'           => $rtsComment,
+                // Projected RTS% (order ng huling 21 araw, kasama ang nasa biyahe pa) katabi ng Set RTS%; display lang.
+                'projected_rts_pct'         => $proj['projected_rts'] ?? null,
+                'projected_rts_orders'      => $proj['matched'] ?? null,
+                'projected_rts_transit_pct' => $proj['in_transit_pct'] ?? null,
+                'mira_rts_pct'              => $miraRts,
+                'rts_gap_pts'               => $miraGap,
+                'rts_gap_abs'               => $miraGapAbs,
+                'mira_rts_error_pts'        => $miraError,
+                'rts_gap_ratio'             => \App\Services\RtsProjection::gapRatio($miraGapAbs, $miraError, (int) $miraMatched),
+                'mira_rts_matched'          => $miraMatched,
+                'projected_profit_mira'     => $projProfitMira,
                 'rts_set_by'            => ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null,
                 'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,
                 'promo'                 => $settings ? ($settings['promo'] ?: null) : null,
@@ -2793,6 +2862,8 @@ class OwnerPrivateController extends Controller
             // + price — tuloy-tuloy ang effectivity, walang kailangang bagong value.
             $rules['rts_pct'] = 'nullable|numeric|min:0|max:100';
             $rules['comment'] = 'required|string|min:1|max:500';
+            // 'mira_rts' = galing sa Use Mira RTS button; nakatala sa log.
+            $rules['source']  = 'nullable|in:mira_rts';
         }
         if (in_array($scope, ['all', 'cogs'], true)) {
             $rules['item_value']         = 'required|numeric|min:0';
@@ -3093,6 +3164,9 @@ class OwnerPrivateController extends Controller
             }
             if (Schema::hasColumn('page_item_settings_log', 'scope')) {
                 $logRow['scope'] = $scope;
+            }
+            if (($validated['source'] ?? null) === 'mira_rts' && Schema::hasColumn('page_item_settings_log', 'source')) {
+                $logRow['source'] = 'mira_rts';
             }
             DB::table('page_item_settings_log')->insert($logRow);
         } catch (\Throwable $e) {

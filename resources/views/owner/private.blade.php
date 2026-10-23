@@ -760,7 +760,7 @@
                     :data-ow-tip="owCompact ? owTip(col.id, row) : null"
                     :title="owCompact ? owTip(col.id, row) : null"
                     @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
-                    :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_1d_m'?pbStyleN(row.projected_profit_last_day_m,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
+                    :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_1d_m'?pbStyleN(row.projected_profit_last_day_m,1):'')+(col.id==='proj_prof_1d_mira'?pbStyleN(row.projected_profit_last_day_mira,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -931,6 +931,12 @@
                           x-text="md(row.projected_profit_last_day)"
                           :title="row.projected_profit_last_day!==null ? '1D profit (end_date only) · orders '+(row.orders_last_day||0)+' · proceed '+(row.proceed_last_day||0) : 'No slice on end_date'"></span>
                   </template>
+                  <!-- proj_prof_1d_mira — Prof 1D (Mira): PROF(1D) na Mira RTS ang gamit -->
+                  <template x-if="col.id==='proj_prof_1d_mira'">
+                    <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit_last_day_mira)"
+                          x-text="md(row.projected_profit_last_day_mira)"
+                          :title="row.projected_profit_last_day_mira!=null ? '1D profit kung Mira RTS '+Number(row.mira_rts_pct).toFixed(1)+'% ang RTS (end_date only)' : 'Walang Mira RTS o walang slice sa end_date'"></span>
+                  </template>
                   <!-- proj_prof_1d_m — PROF(1D)-M: parehong araw, SF_M + COGS sa lahat ng proceed + ads × 1.12. -->
                   <template x-if="col.id==='proj_prof_1d_m'">
                     <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit_last_day_m)"
@@ -1048,6 +1054,40 @@
                       <button type="button" class="cell-edit-icon" @click="openEditModal(row, 'rts')"
                               title="Edit RTS%">✎</button>
                     </span>
+                  </template>
+
+                  <!-- mira_rts — Projected RTS% (kasama ang nasa biyahe pa); ang kulay ay galing sa Conditional Formatting ng column na ito -->
+                  <template x-if="col.id==='mira_rts'">
+                    <span>
+                      <template x-if="row.projected_rts_pct != null">
+                        <div>
+                          <span :title="miraTip(row)" style="font-weight:700;"
+                                x-text="Number(row.mira_rts_pct).toFixed(1)+'%'"></span>
+                          <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                               x-text="row.projected_rts_orders+' orders · '+Number(row.projected_rts_transit_pct).toFixed(0)+'% in transit'"></div>
+                          <button type="button" class="cell-edit-icon" style="font-size:10px;margin-top:2px;" @click="useMiraRts(row)"
+                                  :disabled="miraSaving" title="Kopyahin ang Mira RTS sa Set RTS%">Use Mira RTS</button>
+                        </div>
+                      </template>
+                      <template x-if="row.projected_rts_pct == null">
+                        <span style="color:#cbd5e1;">—</span>
+                      </template>
+                    </span>
+                  </template>
+
+                  <!-- Mga column na pang-Conditional Formatting lang ng Mira RTS (nakatago bilang default) -->
+                  <template x-if="['rts_gap_pts','rts_gap_abs','mira_rts_error_pts','rts_gap_ratio'].includes(col.id)">
+                    <span style="color:#111;font-size:12px;" x-text="row[col.id] != null ? Number(row[col.id]).toFixed(1) : '—'"></span>
+                  </template>
+                  <template x-if="col.id==='mira_rts_matched'">
+                    <span style="color:#111;font-size:12px;" x-text="row.mira_rts_matched != null ? row.mira_rts_matched : '—'"></span>
+                  </template>
+
+                  <!-- proj_profit_mira — parehong formula ng Prof.Profit pero Mira RTS ang gamit -->
+                  <template x-if="col.id==='proj_profit_mira'">
+                    <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit_mira)"
+                          :title="row.projected_profit_mira != null ? 'Profit kung Mira RTS '+Number(row.mira_rts_pct).toFixed(1)+'% ang RTS' : ''"
+                          x-text="md(row.projected_profit_mira)"></span>
                   </template>
 
                   <!-- promo — per-date inherited; click ✎ to edit via modal -->
@@ -1357,7 +1397,7 @@
               <template x-for="col in cols" :key="col.id">
                 <td :data-col="owCompact ? col.id : null"
                     @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
-                    :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_1d_m'?pbStyleN(tot().projected_profit_last_day_m,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
+                    :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_1d_m'?pbStyleN(tot().projected_profit_last_day_m,1):'')+(col.id==='proj_prof_1d_mira'?pbStyleN(tot().projected_profit_last_day_mira,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">
                     <span x-text="money(tot().adspent)"></span>
                   </template>
@@ -1384,6 +1424,9 @@
                   </template>
                   <template x-if="col.id==='proj_profit'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit)"></span>
+                  </template>
+                  <template x-if="col.id==='proj_profit_mira'">
+                    <span style="font-weight:700;" x-text="md(tot().projected_profit_mira)"></span>
                   </template>
                   <template x-if="col.id==='per_order'">
                     <span style="color:#111;" x-text="md(tot().proj_profit_per_order)"></span>
@@ -1430,13 +1473,16 @@
                   <template x-if="col.id==='proj_prof_1d_m'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit_last_day_m)"></span>
                   </template>
+                  <template x-if="col.id==='proj_prof_1d_mira'">
+                    <span style="font-weight:700;" x-text="md(tot().projected_profit_last_day_mira)"></span>
+                  </template>
                   <template x-if="col.id==='proj_prof_3d'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit_last_3d)"></span>
                   </template>
                   <template x-if="col.id==='proj_prof_7d'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit_last_7d)"></span>
                   </template>
-                  <template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_1d_m','proj_prof_3d','proj_prof_7d'].includes(col.id)">
+                  <template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_1d_m','proj_prof_3d','proj_prof_7d','proj_prof_1d_mira'].includes(col.id)">
                     <span></span>
                   </template>
                 </td>
@@ -2121,6 +2167,7 @@
           { id:'tcpr',          label:'TCPR',           sort:'tcpr_computed',               align:'center', minw:65  },
           { id:'breakeven_cpp', label:this._breakevenLabel(), sort:'breakeven_cpp_computed', align:'center', minw:115 },
           { id:'proj_profit',label:'Prof.Profit',sort:'projected_profit',     align:'center', minw:95  },
+          { id:'proj_profit_mira', label:'Profit (Mira RTS)', sort:'projected_profit_mira', align:'center', minw:105 },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
           { id:'np_per_order',    label:'NP/O',     sort:'np_per_order_computed',    align:'center', minw:75  },
           { id:'np_per_order_3d', label:'NP/O(3D)', sort:'np_per_order_3d_computed', align:'center', minw:80  },
@@ -2132,12 +2179,19 @@
           { id:'proj_pct_7d',  label:'Prof.%(7D)',     sort:'proj_pct_last_7d',            align:'center', minw:75  },
           { id:'proj_prof_1d', label:'Prof.Profit(1D)',sort:'projected_profit_last_day',   align:'center', minw:105 },
           { id:'proj_prof_1d_m', label:'PROF(1D)-M',  sort:'projected_profit_last_day_m', align:'center', minw:105 },
+          { id:'proj_prof_1d_mira', label:'Prof 1D (Mira)', sort:'projected_profit_last_day_mira', align:'center', minw:105 },
           { id:'proj_prof_3d', label:'Prof.Profit(3D)',sort:'projected_profit_last_3d',    align:'center', minw:105 },
           { id:'proj_prof_7d', label:'Prof.Profit(7D)',sort:'projected_profit_last_7d',    align:'center', minw:105 },
           { id:'jnt_rts',      label:'RTS%',           sort:'jnt_rts_pct',                 align:'center', minw:100 },
           { id:'jnt_del',    label:'Del%',       sort:'jnt_del_pct',          align:'center', minw:90  },
           { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
+          { id:'mira_rts',   label:'Mira RTS',   sort:'mira_rts_pct',         align:'center', minw:120 },
+          { id:'rts_gap_pts',   label:'RTS Gap (Set − Mira)', sort:'rts_gap_pts',   align:'center', minw:90 },
+          { id:'rts_gap_abs',   label:'RTS Gap (abs)',        sort:'rts_gap_abs',   align:'center', minw:80 },
+          { id:'mira_rts_error_pts', label:'Mira RTS Error (pts)', sort:'mira_rts_error_pts', align:'center', minw:95 },
+          { id:'rts_gap_ratio', label:'RTS Gap ÷ Error',      sort:'rts_gap_ratio', align:'center', minw:90 },
+          { id:'mira_rts_matched', label:'Mira RTS Orders',   sort:'mira_rts_matched', align:'center', minw:90 },
           { id:'promo',      label:'Promo',      sort:'promo',                align:'center', minw:90  },
           { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
           { id:'item_val',     label:'Item Val.',       sort:'item_value',     align:'center', minw:80  },
@@ -2506,6 +2560,9 @@
           if (row.settings_date) L.push('from ' + row.settings_date);
           if (row.rts_comment)   L.push('💬 ' + row.rts_comment);
           if (row.rts_set_by)    L.push('Set by ' + row.rts_set_by);
+        } else if (colId === 'mira_rts') {
+          if (row.projected_rts_pct == null) return null;
+          L.push(this.miraTip(row));
         } else if (colId === 'item_val') {
           if (row.item_value === null || row.item_value === undefined) return null;
           if (row.item_value_source === 'cogs') L.push('cogs');
@@ -2814,6 +2871,51 @@
         }
       },
 
+      // Mira RTS: ang paliwanag sa title ng cell.
+      miraTip(row){
+        return 'Mira RTS ' + Number(row.mira_rts_pct).toFixed(1) + '% = projected RTS ng huling 21 araw: '
+          + row.projected_rts_orders + ' matched orders, ' + Number(row.projected_rts_transit_pct).toFixed(0)
+          + '% still in transit. Inaasahang error (edad at dami ng order): ~' + row.mira_rts_error_pts + ' puntos.';
+      },
+
+      // Use Mira RTS: ang rounded Mira RTS ang isi-save sa Set RTS% sa parehong save ng RTS edit (scope=rts), source mira_rts.
+      miraSaving: false,
+      async useMiraRts(row){
+        if (this.miraSaving || row.mira_rts_pct == null) return;
+        const cellPriceInt = (row.price != null && row.price > 0) ? Math.round(Number(row.price)) : null;
+        if (cellPriceInt === null) { alert('No price detected for this cell. Cannot save.'); return; }
+        const old = row.rts_pct != null ? Number(row.rts_pct).toFixed(1)+'%' : '—';
+        const neu = Number(row.mira_rts_pct).toFixed(1)+'%';
+        if (!confirm(row.page_name + ' · ' + row.item_name + '\nSet RTS: ' + old + ' → ' + neu + '\nGamitin ang Mira RTS?')) return;
+        const eff = row.settings_date || this.endDate;
+        const fd = new FormData();
+        fd.append('scope', 'rts');
+        fd.append('page_name', row.page_name);
+        fd.append('item_name', row.item_name);
+        fd.append('rts_pct', row.mira_rts_pct);
+        fd.append('comment', 'Mira RTS ' + neu + ' (' + row.projected_rts_orders + ' orders)');
+        fd.append('mode_cod_int', cellPriceInt);
+        fd.append('effective_date', eff);
+        if (eff !== this.endDate) fd.append('apply_through', this.endDate);
+        fd.append('source', 'mira_rts');
+        this.miraSaving = true;
+        try {
+          const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
+            method:'POST',
+            headers:{'X-CSRF-TOKEN':'{{ csrf_token() }}', 'Accept':'application/json'},
+            body: fd,
+          });
+          let j;
+          try { j = await r.json(); } catch { alert('Server returned non-JSON (HTTP '+r.status+')'); return; }
+          if (!r.ok || !j.ok) { alert(j.message || (j.errors ? Object.values(j.errors).flat().join('\n') : ('HTTP '+r.status))); return; }
+          await this.load(true);
+        } catch (ex) {
+          alert('Network error: ' + ex.message);
+        } finally {
+          this.miraSaving = false;
+        }
+      },
+
       _setScopeError(scope, msg){
         const e = this.edit;
         if (scope === 'rts')   e.rtsError = msg;
@@ -2890,10 +2992,10 @@
       tot() {
         const t = { adspent:0, orders:0, orders_last_day:0, orders_last_3d:0, orders_last_7d:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null,
                     projected_profit_last_day:null, gross_sales_last_day:0, proj_pct_1d:null,
-                    projected_profit_last_day_m:null,
+                    projected_profit_last_day_m:null, projected_profit_last_day_mira:null, projected_profit_mira:null,
                     projected_profit_last_3d:null, gross_sales_last_3d:0, proj_pct_3d:null,
                     projected_profit_last_7d:null, gross_sales_last_7d:0, proj_pct_7d:null };
-        let hasP=false, hasG=false, hasP1=false, hasP1M=false, hasP3=false, hasP7=false;
+        let hasP=false, hasG=false, hasP1=false, hasP1M=false, hasP1Mira=false, hasP3=false, hasP7=false;
         for (const r of this.filteredRows()) {
           t.adspent         += Number(r.adspent         ||0);
           t.orders          += Number(r.orders          ||0);
@@ -2906,7 +3008,9 @@
           // Trailing-window totals — only sum rows that had any slice in that window.
           if (r.projected_profit_last_day!=null){ t.projected_profit_last_day=(t.projected_profit_last_day||0)+Number(r.projected_profit_last_day); hasP1=true; }
           if (r.gross_sales_last_day!=null) t.gross_sales_last_day += Number(r.gross_sales_last_day);
+          if (r.projected_profit_mira!=null){ t.projected_profit_mira=(t.projected_profit_mira||0)+Number(r.projected_profit_mira); }
           if (r.projected_profit_last_day_m!=null){ t.projected_profit_last_day_m=(t.projected_profit_last_day_m||0)+Number(r.projected_profit_last_day_m); hasP1M=true; }
+          if (r.projected_profit_last_day_mira!=null){ t.projected_profit_last_day_mira=(t.projected_profit_last_day_mira||0)+Number(r.projected_profit_last_day_mira); hasP1Mira=true; }
           if (r.projected_profit_last_3d!=null){ t.projected_profit_last_3d=(t.projected_profit_last_3d||0)+Number(r.projected_profit_last_3d); hasP3=true; }
           if (r.gross_sales_last_3d!=null)  t.gross_sales_last_3d += Number(r.gross_sales_last_3d);
           if (r.projected_profit_last_7d!=null){ t.projected_profit_last_7d=(t.projected_profit_last_7d||0)+Number(r.projected_profit_last_7d); hasP7=true; }
@@ -2916,6 +3020,7 @@
         if(!hasG) t.gross_sales=null;
         if(!hasP1) t.projected_profit_last_day=null;
         if(!hasP1M) t.projected_profit_last_day_m=null;
+        if(!hasP1Mira) t.projected_profit_last_day_mira=null;
         if(!hasP3) t.projected_profit_last_3d=null;
         if(!hasP7) t.projected_profit_last_7d=null;
         t.cpp                  = t.orders>0         ? t.adspent/t.orders         : null;
@@ -3059,9 +3164,12 @@
           case 'proj_profit':   return row.projected_profit;
           case 'proj_prof_1d':  return row.projected_profit_last_day;
           case 'proj_prof_1d_m': return row.projected_profit_last_day_m;
+          case 'proj_prof_1d_mira': return row.projected_profit_last_day_mira;
           case 'proj_prof_3d':  return row.projected_profit_last_3d;
           case 'proj_prof_7d':  return row.projected_profit_last_7d;
           case 'rts_set':       return row.rts_pct;
+          case 'mira_rts':      return row.mira_rts_pct;
+          case 'proj_profit_mira': return row.projected_profit_mira;
           case 'hold':          return row.hold_units ?? null;
           case 'action':        return row.action_comment ?? null;
           case 'jnt_rts':       return row.jnt_rts_pct;
