@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\MacroOutput;
+use App\Services\OrderIdentity;
+use App\Services\OrderPhone;
 use App\Models\LikhaOrderSetting;
 use App\Models\LikhaImportRun;
 use App\Models\LikhaImportRunSheet;
@@ -398,12 +400,10 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             $this->touchedDates[$dm[3] . '-' . $dm[2] . '-' . $dm[1]] = true;
         }
 
-        // Match existing by TIMESTAMP + PAGE + fb_name
-        $existing = MacroOutput::where([
-            ['TIMESTAMP', '=', $timestamp],
-            ['PAGE', '=', $page],
-            ['fb_name', '=', $fbName],
-        ])->first();
+        // Match existing by TIMESTAMP + PAGE + fb_name. Walang fb_name: TIMESTAMP + PAGE + phone (D, o iisang numero
+        // sa E / G). Walang pangalan at walang phone: laging bagong row, hindi kailanman nagsasama.
+        $namePhone = trim($fbName) === '' ? OrderPhone::forOrder($row[3] ?? null, $row[4] ?? null, $row[6] ?? null) : '';
+        $existing = OrderIdentity::find($timestamp, $page, $fbName, $namePhone);
 
         if ($existing) {
             $updateData = [
@@ -416,7 +416,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             }
 
             if ($existing->{'PHONE NUMBER'} === null || $existing->{'PHONE NUMBER'} === '') {
-                $updateData['PHONE NUMBER'] = preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null;
+                $updateData['PHONE NUMBER'] = $namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null);
             }
 
             if (($existing->{'ITEM_NAME'} ?? null) === null || trim((string)$existing->{'ITEM_NAME'}) === '') {
@@ -441,12 +441,14 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             'PAGE'               => $page,
             'FULL NAME'          => $row[2] ?? null,
             'fb_name'            => $row[2] ?? null,
-            'PHONE NUMBER'       => preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null,
+            'PHONE NUMBER'       => $namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null),
             'all_user_input'     => 'FB NAME: ' . ($row[2] ?? '') . "\n" . ($row[4] ?? ''),
             'shop_details'       => $row[5] ?? null,
             'extracted_details'  => $row[6] ?? null,
             'ITEM_NAME'          => $extractedItemName ?: null,
             'COD'                => $extractedCOD ?: null,
+            // Nakikita ng staff sa AI ANALYZE: walang pangalan at walang phone, kaya hindi ito maiuugnay sa customer.
+            'AI ANALYZE'         => trim($fbName) === '' && $namePhone === '' ? OrderIdentity::NO_NAME_NO_PHONE : null,
         ]);
         return 'inserted';
     }

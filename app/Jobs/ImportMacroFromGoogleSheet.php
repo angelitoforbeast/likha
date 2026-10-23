@@ -131,6 +131,7 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
             $inserted  = 0;
             $updated   = 0;
             $skipped   = 0;
+            $noKey     = 0;
 
             try {
                 $spreadsheetId = $this->extractSpreadsheetId($setting->sheet_url);
@@ -209,11 +210,7 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
 
                         $data['PHONE NUMBER'] = Str::limit((string)($data['PHONE NUMBER'] ?? ''), 50);
 
-                        $fbName = null;
-                        if (!empty($data['all_user_input'])) {
-                            preg_match('/FB\s*NAME:\s*(.*?)\r?\n/i', (string)$data['all_user_input'], $m);
-                            $fbName = $m[1] ?? null;
-                        }
+                        $fbName = OrderIdentity::fbNameFromInput((string)($data['all_user_input'] ?? ''));
                         $data['fb_name'] = $fbName;
 
                         if (empty($data['PAGE']) && !empty($data['all_user_input'])) {
@@ -246,11 +243,15 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                             }
                         }
 
-                        $existing = MacroOutput::where([
-                            ['TIMESTAMP', '=', $timestamp],
-                            ['PAGE', '=', $data['PAGE']],
-                            ['fb_name', '=', $fbName],
-                        ])->first();
+                        // Walang fb_name: TIMESTAMP + PAGE + phone; walang phone din: kapareho lang ang all_user_input.
+                        // Kapag walang tugma, bagong row ang papasok at walang umiiral na order na ginagalaw.
+                        $namePhone = trim($fbName) === ''
+                            ? OrderPhone::forOrder($data['PHONE NUMBER'] ?? null, $data['all_user_input'] ?? null, null)
+                            : '';
+                        $existing = OrderIdentity::find($timestamp, $data['PAGE'], $fbName, $namePhone, (string)($data['all_user_input'] ?? ''));
+                        if (!$existing && trim($fbName) === '' && $namePhone === '') {
+                            $noKey++;
+                        }
 
                         // Track ts_date for primary-item recompute hook.
                         // TIMESTAMP format: "H:i d-m-Y" → extract Y-m-d.
@@ -314,7 +315,8 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                     'inserted'   => $inserted,
                     'updated'    => $updated,
                     'skipped'    => $skipped,
-                    'message'    => $processed > 0 ? 'Imported successfully.' : 'No eligible rows (blank status + valid data).',
+                    'message'    => ($processed > 0 ? 'Imported successfully.' : 'No eligible rows (blank status + valid data).')
+                        . ($noKey > 0 ? " {$noKey} row(s) walang pangalan at phone: bagong row, walang ginalaw na umiiral na order." : ''),
                     'finished_at'=> now(),
                 ]);
 

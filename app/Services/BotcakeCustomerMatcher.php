@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\BotcakeChat;
 use App\Models\BotcakePsid;
 use App\Models\MacroOutput;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Schema;
  * pangalan: ang phone ang nagpapasya kung iisa sa kanila ang may phone na iyon; walang kandidato sa pangalan: ang phone
  * na iisang customer lang ang may-ari; (3) kung hindi: ambiguous o no_match, walang isusulat. Hindi kailanman pumapalit
  * ang phone ng ibang tao sa ambiguous na pangalan: mas masama ang waybill / COD sa maling tao kaysa walang mensahe.
+ * Order na walang pangalan at walang tugma: ang phone nito ang hinahanap sa customer values ng page, saka sa chat text (psidsByOrderPhone).
  * Kasabay ng PSID, isinusulat ang ad_id ng customer sa macro_output.botcake_ad_id, isang beses lang: ang ad na
  * nagdala ng customer bago umorder ang may kredito, kahit magbago pa ang ads niya.
  */
@@ -75,6 +77,7 @@ class BotcakeCustomerMatcher
         $since = now('Asia/Manila')->subDays(self::DAYS)->toDateString();
         $phoneCol = $this->col('PHONE NUMBER');
         $hasAdCol = Schema::hasColumn('macro_output', 'botcake_ad_id');
+        $noName = [];
 
         MacroOutput::query()
             ->whereRaw('LOWER(' . $trim . '(' . $this->col('PAGE') . ')) = ?', [$key])
@@ -82,7 +85,7 @@ class BotcakeCustomerMatcher
             ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
             ->selectRaw("id, ts_date, fb_name, $phoneCol AS phone")
             ->orderBy('id')
-            ->chunkById(1000, function ($orders) use (&$out, $byName, $byPhone, $adOf, $hasAdCol) {
+            ->chunkById(1000, function ($orders) use (&$out, &$noName, $byName, $byPhone, $adOf, $hasAdCol) {
                 foreach ($orders as $o) {
                     [$psid, $how] = $this->decide(
                         array_keys($byName[$this->normName($o->fb_name)] ?? []),
@@ -90,23 +93,26 @@ class BotcakeCustomerMatcher
                     );
 
                     if ($psid === null) {
+                        // Walang pangalan at walang tugma sa mga Botcake customer: susubukan sa phone (customer values, chat text).
+                        if ($how === 'no_match' && trim((string) $o->fb_name) === '' && $phone !== '') {
+                            $noName[$o->id] = [$phone, (string) $o->ts_date];
+                            continue;
+                        }
                         $out[$how]++;
                         continue;
                     }
 
-                    // Muling sinusuri ang laman sa mismong update: hindi kailanman pinapalitan ang may PSID na.
-                    // Ang botcake_ad_id ay naitatala isang beses lang (COALESCE): hindi napapalitan kahit ma-match ulit.
-                    $written = $hasAdCol
-                        ? DB::update(
-                            "UPDATE macro_output SET botcake_psid = ?, botcake_ad_id = COALESCE(botcake_ad_id, ?) WHERE id = ? AND (botcake_psid IS NULL OR botcake_psid = '')",
-                            [$psid, $adOf[$psid] ?? null, $o->id]
-                        )
-                        : MacroOutput::whereKey($o->id)
-                            ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
-                            ->update(['botcake_psid' => $psid]);
-                    if ($written) $out[$how]++;
+                    if ($this->writePsid($o->id, $psid, $adOf, $hasAdCol)) $out[$how]++;
                 }
             }, 'id');
+
+        if ($noName) {
+            $found = $this->psidsByOrderPhone($key, $noName);
+            foreach ($noName as $id => $_) {
+                if (isset($found[$id]) && $this->writePsid($id, $found[$id], $adOf, $hasAdCol)) $out['by_phone']++;
+                else $out['no_match']++;
+            }
+        }
 
         // Ang may PSID na pero walang ad id (hal. PSID mula sa lumang sheet, na walang ad id): kunin ang ad_id ng API
         // customer ng parehong page at PSID. Kailangan ito ng per-ad na report. Plain SELECT muna ng mga id (walang lock),
@@ -137,6 +143,75 @@ class BotcakeCustomerMatcher
         return $out;
     }
 
+    /**
+     * Muling sinusuri ang laman sa mismong update: hindi kailanman pinapalitan ang may PSID na.
+     * Ang botcake_ad_id ay naitatala isang beses lang (COALESCE): hindi napapalitan kahit ma-match ulit.
+     */
+    private function writePsid(int $id, string $psid, array $adOf, bool $hasAdCol): bool
+    {
+        return (bool) ($hasAdCol
+            ? DB::update(
+                "UPDATE macro_output SET botcake_psid = ?, botcake_ad_id = COALESCE(botcake_ad_id, ?) WHERE id = ? AND (botcake_psid IS NULL OR botcake_psid = '')",
+                [$psid, $adOf[$psid] ?? null, $id]
+            )
+            : MacroOutput::whereKey($id)
+                ->where(fn ($w) => $w->whereNull('botcake_psid')->orWhere('botcake_psid', ''))
+                ->update(['botcake_psid' => $psid]));
+    }
+
+    /**
+     * Para sa mga order na walang pangalan: ang PSID ayon sa phone, sa pagkakasunod (1) GPT PHONE NUMBER sa customer values
+     * ng page, (2) mensahe ng customer ng page (active lang) na may phone na iyon. Iisang PSID lang ang tinatanggap sa bawat
+     * hakbang; kapag dalawa o higit pa sa (1), humihinto na: hindi na bumababa sa chat text. Walang kandidato = walang sagot.
+     * @param array<int, array{0:string, 1:string}> $orders order id => [phone, ts_date]
+     * @return array<int, string> order id => psid
+     */
+    private function psidsByOrderPhone(string $pageKey, array $orders): array
+    {
+        $pageId = null;
+        foreach (BotcakeChat::pageMap() as $id => $name) {
+            if ($this->settings->pageKey($name) === $pageKey) { $pageId = (string) $id; break; }
+        }
+        if ($pageId === null) return [];
+
+        $phones = array_values(array_unique(array_column($orders, 0)));
+        $byValue = [];
+        if (Schema::hasTable('chatbot_customer_values')) {
+            DB::table('chatbot_customer_values')->where('page_id', (int) $pageId)->where('key', 'gpt phone number')
+                ->whereNotNull('value')->select('id', 'psid', 'value')
+                ->chunkById(2000, function ($rows) use (&$byValue, $phones) {
+                    foreach ($rows as $r) {
+                        $p = $this->normPhone((string) $r->value);
+                        if ($p !== '' && in_array($p, $phones, true)) $byValue[$p][(string) $r->psid] = true;
+                    }
+                }, 'id');
+        }
+
+        $dates = array_filter(array_column($orders, 1));
+        $from = $dates ? \Carbon\Carbon::parse(min($dates))->subDays(3)->startOfDay() : null;
+        $to = $dates ? \Carbon\Carbon::parse(max($dates))->addDays(2)->startOfDay() : null;
+        $byChat = [];
+        foreach ($phones as $phone) {
+            if (isset($byValue[$phone]) || !$from || !Schema::hasTable('botcake_chats')) continue;
+            // Unang salaan sa huling 4 na digit ng phone; ang eksaktong pagsusuri ay sa PHP (OrderPhone::numbers).
+            BotcakeChat::active()->where('page_id', $pageId)->whereBetween('received_at', [$from, $to])
+                ->where('message', 'like', '%' . substr($phone, -4) . '%')
+                ->select('id', 'psid', 'message')
+                ->chunkById(1000, function ($rows) use (&$byChat, $phone) {
+                    foreach ($rows as $r) {
+                        if (in_array($phone, OrderPhone::numbers($r->message), true)) $byChat[$phone][(string) $r->psid] = true;
+                    }
+                }, 'id');
+        }
+
+        $out = [];
+        foreach ($orders as $id => [$phone]) {
+            $hits = array_keys($byValue[$phone] ?? $byChat[$phone] ?? []);
+            if (count($hits) === 1 && $hits[0] !== '') $out[$id] = $hits[0];
+        }
+
+        return $out;
+    }
     /**
      * @param array<int, string> $nameHits mga psid na may parehong pangalan
      * @param array<int, string> $phoneHits mga psid na may parehong phone

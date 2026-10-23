@@ -16,6 +16,7 @@ class FlowGraph
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
         'not_contains' => 'does not contain', 'starts_with' => 'starts with', 'regex' => 'matches regex',
         'is_empty' => 'is empty', 'is_not_empty' => 'is not empty', 'gt' => 'greater than', 'lt' => 'less than',
+        'has_phone' => 'has a phone number',
     ];
 
     public const SET_OPS = ['set', 'append', 'clear', 'clear_all'];
