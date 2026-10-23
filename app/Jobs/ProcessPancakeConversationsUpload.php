@@ -10,6 +10,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 // OpenSpout (v3 or v4 supported)
@@ -30,6 +31,12 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
     private int $skipped   = 0;  // raw rows skipped (missing key) + aggregates filtered (no phone)
     private int $inserted  = 0;  // new unique key inserted
     private int $updated   = 0;  // existing key updated
+    private int $withPsid  = 0;  // aggregates na may PSID (Sender ID); nasa Log lang, walang column sa upload_logs
+
+    /** @var array<string,int> page||lower(name) => ilang magkakaibang PSID ang may ganoong pangalan sa file na ito */
+    private array $namePsidCount = [];
+
+    private ?bool $hasPsidColumn = null;
 
     private const ROW_CHUNK_SIZE = 4000;
 
@@ -99,6 +106,8 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                 $this->touchProgress($log);
             }
 
+            Log::info('[Pancake Import] done', ['with_psid' => $this->withPsid, 'inserted' => $this->inserted, 'updated' => $this->updated, 'skipped' => $this->skipped]);
+
             if ($log) {
                 $log->update([
                     'status'         => 'done',
@@ -139,6 +148,8 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
             return;
         }
 
+        $this->namePsidCount = $this->scanNamePsidCounts($path, $ext);
+
         $reader->open($path);
 
         try {
@@ -152,6 +163,7 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                 $msgIdx = null;
                 $nameIdx = null;
                 $pageIdx = null;
+                $psidIdx = null;
 
                 foreach ($sheet->getRowIterator() as $row) {
                     $cells = $row->toArray();
@@ -169,6 +181,8 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                         $pageIdx = $this->findHeaderIndexContains($headerIndex, [
                             'page id', 'page_id',
                         ]);
+
+                        $psidIdx = $this->findHeaderIndexContains($headerIndex, ['sender id']);
 
                         if ($msgIdx === null || $nameIdx === null || $pageIdx === null) {
                             Log::error('[Pancake Import] Required headers not found', [
@@ -198,15 +212,24 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                         continue;
                     }
 
-                    $key = $pageId . '||' . mb_strtolower($name);
+                    $psid = $psidIdx !== null ? $this->cleanPsid($cells[$psidIdx] ?? null) : null;
+
+                    // May PSID = ang customer mismo ang susi; kung wala, page + name gaya ng dati.
+                    $key = $psid !== null
+                        ? $pageId . '||psid:' . $psid
+                        : $pageId . '||' . mb_strtolower($name);
 
                     if (!isset($agg[$key])) {
                         $agg[$key] = [
                             'pancake_page_id' => $pageId,
                             'full_name'       => $name,
+                            'psid'            => $psid,
                             'chat'            => '',
                         ];
                     }
+
+                    // Pinakahuling pangalan ng PSID ang itatago.
+                    $agg[$key]['full_name'] = $name;
 
                     if ($msg !== '') {
                         $agg[$key]['chat'] = ($agg[$key]['chat'] === '')
@@ -247,6 +270,7 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                 $pageId = (string) ($item['pancake_page_id'] ?? '');
                 $name   = (string) ($item['full_name'] ?? '');
                 $chat   = (string) ($item['chat'] ?? '');
+                $psid   = $this->hasPsidColumn() ? ($item['psid'] ?? null) : null;
 
                 if ($pageId === '' || $name === '') {
                     $this->skipped++;
@@ -259,21 +283,51 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                     continue;
                 }
 
-                // 1) Update (append) if exists
-                $affected = $this->updateChatIfExists($pageId, $name, $chat, $now);
-                if ($affected > 0) {
-                    $this->updated++;
-                    continue;
+                if ($psid !== null) {
+                    $this->withPsid++;
+
+                    // 1) Parehong page + PSID: i-update ang chat at ang pangalan (pinakabago)
+                    $affected = DB::update(
+                        "UPDATE pancake_conversations
+                         SET customers_chat = ?, full_name = ?, updated_at = ?
+                         WHERE pancake_page_id = ? AND psid = ?",
+                        [$chat, mb_substr($name, 0, 255), $now, $pageId, $psid]
+                    );
+
+                    // 2) Lumang row na pangalan lang ang alam: kunin (adopt) kung iisang PSID lang ang may ganoong pangalan sa file
+                    if ($affected === 0 && ($this->namePsidCount[$pageId . '||' . mb_strtolower($name)] ?? 0) === 1) {
+                        $affected = DB::update(
+                            "UPDATE pancake_conversations
+                             SET psid = ?, customers_chat = ?, updated_at = ?
+                             WHERE pancake_page_id = ? AND full_name = ? AND psid IS NULL",
+                            [$psid, $chat, $now, $pageId, $name]
+                        );
+                    }
+
+                    if ($affected > 0) {
+                        $this->updated++;
+                        continue;
+                    }
+                } else {
+                    // 1) Update (append) if exists
+                    $affected = $this->updateChatIfExists($pageId, $name, $chat, $now);
+                    if ($affected > 0) {
+                        $this->updated++;
+                        continue;
+                    }
                 }
 
                 // 2) Insert new
-                DB::table('pancake_conversations')->insert([
+                $row = [
                     'pancake_page_id' => $pageId,
                     'full_name'       => mb_substr($name, 0, 255),
                     'customers_chat'  => $chat,
                     'created_at'      => $now,
                     'updated_at'      => $now,
-                ]);
+                ];
+                if ($this->hasPsidColumn()) $row['psid'] = $psid;
+
+                DB::table('pancake_conversations')->insert($row);
 
                 $this->inserted++;
             }
@@ -290,13 +344,86 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
 
     private function updateChatIfExists(string $pageId, string $name, string $chat, string $now): int
 {
+    // Walang PSID sa row ng file: ang row lang na walang PSID ang ina-update (hindi ang chat ng ibang customer na may PSID).
+    $psidFilter = $this->hasPsidColumn() ? ' AND psid IS NULL' : '';
+
     return DB::update(
         "UPDATE pancake_conversations
          SET customers_chat = ?, updated_at = ?
-         WHERE pancake_page_id = ? AND full_name = ?",
+         WHERE pancake_page_id = ? AND full_name = ?" . $psidFilter,
         [$chat, $now, $pageId, $name]
     );
 }
+
+    private function hasPsidColumn(): bool
+    {
+        return $this->hasPsidColumn ??= Schema::hasColumn('pancake_conversations', 'psid');
+    }
+
+    /**
+     * Sender ID ng export = PSID. Text lang ang tinatanggap (o int na galing sa number cell): ang float ay nawawalan
+     * ng digits sa 17-digit na ID, kaya itinuturing na wala. Digits lang ang itinatago, 10-25 digits.
+     */
+    private function cleanPsid(mixed $cell): ?string
+    {
+        if (is_int($cell)) {
+            $text = (string) $cell;
+        } elseif (is_string($cell)) {
+            $text = $cell;
+        } else {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $text) ?? '';
+
+        return (strlen($digits) >= 10 && strlen($digits) <= 25) ? $digits : null;
+    }
+
+    /**
+     * Unang pasada sa file: ilang magkakaibang PSID ang may bawat page + pangalan. Kailangan bago ang pagsusulat
+     * dahil nahahati sa chunks ang file, at ang adoption ng lumang row ay para lang sa pangalang iisa ang PSID.
+     *
+     * @return array<string,int>
+     */
+    private function scanNamePsidCounts(string $path, string $ext): array
+    {
+        $reader = $this->createReader($ext);
+        if (!$reader) return [];
+
+        $seen = [];
+        $reader->open($path);
+
+        try {
+            foreach ($reader->getSheetIterator() as $sheet) {
+                $headerIndex = null;
+                $nameIdx = $pageIdx = $psidIdx = null;
+
+                foreach ($sheet->getRowIterator() as $row) {
+                    $cells = $row->toArray();
+
+                    if ($headerIndex === null) {
+                        $headerIndex = $this->buildHeaderIndex($cells);
+                        $nameIdx = $this->findHeaderIndexContains($headerIndex, ['sender name', 'customer_name', 'customer name']);
+                        $pageIdx = $this->findHeaderIndexContains($headerIndex, ['page id', 'page_id']);
+                        $psidIdx = $this->findHeaderIndexContains($headerIndex, ['sender id']);
+                        if ($nameIdx === null || $pageIdx === null || $psidIdx === null) break;
+                        continue;
+                    }
+
+                    $pageId = trim((string) ($cells[$pageIdx] ?? ''));
+                    $name   = $this->normalizeName(trim((string) ($cells[$nameIdx] ?? '')));
+                    $psid   = $this->cleanPsid($cells[$psidIdx] ?? null);
+                    if ($pageId === '' || $name === '' || $psid === null) continue;
+
+                    $seen[$pageId . '||' . mb_strtolower($name)][$psid] = true;
+                }
+            }
+        } finally {
+            try { $reader->close(); } catch (\Throwable $e) {}
+        }
+
+        return array_map('count', $seen);
+    }
 
     /**
      * ✅ Blade-aligned + robust PH mobile detection.
