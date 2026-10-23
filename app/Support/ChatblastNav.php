@@ -59,6 +59,7 @@ class ChatblastNav
             ['label' => 'Inbox', 'url' => '/chatbot/inbox', 'active' => request()->is('chatbot/inbox*')],
             ['label' => 'Replies', 'url' => '/chatbot/replies', 'active' => request()->is('chatbot/replies*')],
             ['label' => 'Results', 'url' => '/chatbot/results', 'active' => request()->is('chatbot/results*')],
+            ['label' => 'Health', 'url' => '/chatbot/health', 'active' => request()->is('chatbot/health*')],
             ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
         ];
     }

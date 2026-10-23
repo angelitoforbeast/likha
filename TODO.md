@@ -1047,3 +1047,5 @@ Accepted, not fixed:
 - **`/order-encode/notes` has no export and no history of past answers of a note** besides the conflict list. Reason: not in the brief.
 - **The rules switch is global** (all pages, all encode modes including `live`). Reason: as written in the brief.
 - **Tests were written after the first slice of code (rules R1 to R5) instead of before it**; the sheet-mode assertions inside each test show the old behaviour. Reason: see the result file.
+- **`/chatbot/health` accepts any digit string as `page_id`, and each (page, range) makes a 5-minute cache entry.** Reason: only chatbot roles or the events-key holder can call it, and the JSON route is throttled. Suggestion: check `page_id` against the page map.
+- **Failure reason order is unreachable, window (#10), HTTP 5xx, timeout, other.** Reason: a 5xx whose body contains "(#10)" counts as window; narrow edge.
