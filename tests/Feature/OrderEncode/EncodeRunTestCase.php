@@ -27,6 +27,20 @@ abstract class EncodeRunTestCase extends OrderEncodeTestCase
     {
         $this->writeList($rows);
         AppSetting::set(Settings::RULES, $rules);
+        $this->fakeGpt($answers);
+
+        $o = OrderEncode::create([
+            'page' => self::PAGE, 'spreadsheet_id' => self::ORDERS, 'tab' => 'All Orders', 'row_number' => random_int(1000, 999999), 'mode' => 'import', 'status' => 'queued',
+            'input' => ['source' => 'import', 'row' => $this->withCxd($cxd, $over)],
+        ]);
+        app(Runner::class)->run($o);
+
+        return $o->fresh();
+    }
+
+    /** Ang fake na OpenAI: ang sagot ng checker ayon sa gawain (province, city, barangay, verify, name_addr). */
+    protected function fakeGpt(array $answers = []): void
+    {
         $this->tasks = [];
         $answers += ['verify' => ['province_ok' => true, 'city_ok' => true, 'barangay_ok' => true], 'name_addr' => ['full_name' => 'Ana Cruz', 'address_line1' => 'Blk 5']];
 
@@ -47,14 +61,6 @@ abstract class EncodeRunTestCase extends OrderEncodeTestCase
                 return Http::response(Fixtures::responses(json_encode($answers[$task] ?? new \stdClass())));
             },
         ]);
-
-        $o = OrderEncode::create([
-            'page' => self::PAGE, 'spreadsheet_id' => self::ORDERS, 'tab' => 'All Orders', 'row_number' => random_int(1000, 999999), 'mode' => 'import', 'status' => 'queued',
-            'input' => ['source' => 'import', 'row' => $this->withCxd($cxd, $over)],
-        ]);
-        app(Runner::class)->run($o);
-
-        return $o->fresh();
     }
 
     /** @var array<string, string> */
