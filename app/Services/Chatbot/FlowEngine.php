@@ -150,6 +150,7 @@ class FlowEngine
             'ai' => $this->ai($node, $c, $run, $outbox),
             'clear_ai' => $this->clearAi($node, $c, $run),
             'sheet' => $this->sheet($node, $c, $run, $outbox),
+            'encode_order' => $this->encodeOrder($node, $c, $run, $outbox),
             'sequence' => $this->sequence($node, $c, $run),
             default => ['port' => null],
         };
@@ -515,6 +516,77 @@ class FlowEngine
         if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Sheet failed: ' . $res['error']];
 
         return ['port' => 'next', 'note' => 'Row ' . $res['status']];
+    }
+
+    /**
+     * Encode order (spec 132): ang order ay ine-encode ng Likha mismo. Gagawa ng A..I row gaya ng Sheet step, ila-queue ang
+     * EncodeOrder (mode live) at tuloy agad sa next; hindi hinihintay ang GPT. Pumapalya lang (failed) kapag hindi na maisulat
+     * kahit saan ("Write to Google Sheet instead" na pumalya rin). Ang Test tab ay hindi nag-e-encode.
+     */
+    private function encodeOrder(array $node, array $c, FlowRun $run, Outbox $outbox): array
+    {
+        $vars = $run->vars();
+        $row = array_map(fn ($k) => ChatbotVars::sheetCell((string) ($c[$k] ?? ''), $vars), FlowGraph::ENCODE_FIELDS);
+        $row[] = ''; // I = status, binubuo ng sheet
+        $sheet = FlowGraph::spreadsheetId((string) ($c['sheet'] ?? ''));
+        $tab = trim((string) ($c['tab'] ?? '')) ?: FlowHook::TAB;
+        $also = !empty($c['also_sheet']) && $sheet !== null;
+        $instead = ($c['on_failure'] ?? 'sheet') !== 'continue' && $sheet !== null;
+        $id = $node['id'];
+        $log = fn (string $status, ?string $error, string $note) => $run->sheetRows[] = ['node' => $id, 'sheet' => $sheet ?? '', 'tab' => $tab, 'row' => $row, 'status' => $status, 'error' => $error, 'note' => $note];
+        $append = function () use ($outbox, $run, $id, $sheet, $tab, $row, $log) {
+            $res = $outbox->appendRow($run, $id, $sheet, $tab, $row);
+            $log($res['status'], $res['error'], $res['note'] ?? 'Sheet row ' . $res['status']);
+
+            return $res;
+        };
+
+        if ($run->test) {
+            $log('test', null, 'Test: would encode the order');
+            if ($also) $append();
+            $run->event('encode_order', $id, ['result' => 'test']);
+
+            return ['port' => 'next', 'note' => 'Test: would encode the order'];
+        }
+        if (!BotcakeOutbox::enabled()) {
+            BotcakeOutbox::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $id, 'sheet', ['sheet' => $sheet, 'tab' => $tab, 'row' => $row], 'skipped', BotcakeOutbox::SWITCHED_OFF);
+            $run->event('encode_order', $id, ['result' => 'skipped']);
+
+            return ['port' => 'next', 'note' => BotcakeOutbox::SWITCHED_OFF];
+        }
+
+        $encode = app(FlowHook::class);
+        $run->runId ??= bin2hex(random_bytes(4));
+        if ($encode->hasNode($run, $id)) {
+            $run->event('encode_order', $id, ['result' => 'already_queued']);
+
+            return ['port' => 'next', 'note' => 'Already encoded in this run'];
+        }
+
+        $wrote = $also && $append()['status'] === 'sent';
+        if ($encode->node($run, $id, $instead ? $sheet : FlowHook::NODE_SHEET, $tab, $row, $wrote)) {
+            BotcakeOutbox::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $id, 'sheet',
+                ['sheet' => $sheet, 'tab' => $tab, 'row' => $row, 'note' => FlowHook::NOTE], 'skipped');
+            $log('skipped', null, FlowHook::NOTE);
+            $run->event('encode_order', $id, ['result' => 'queued']);
+
+            return ['port' => 'next', 'note' => 'Order queued: ' . FlowHook::NOTE];
+        }
+
+        // Hindi na-queue: ang row ay nasa sheet na, o isusulat doon ("Write to Google Sheet instead"), o sasabihin na hindi nai-save.
+        if ($wrote || ($instead && ($res = $append())['status'] === 'sent')) {
+            $run->event('encode_order', $id, ['result' => 'sheet_instead']);
+
+            return ['port' => 'next', 'note' => 'Encode could not be queued: the row was written to the sheet instead'];
+        }
+        if ($instead) {
+            $run->event('encode_order', $id, ['result' => 'failed', 'error' => (string) $res['error']]);
+
+            return ['port' => 'failed', 'note' => 'Encode could not be queued and the sheet failed: ' . $res['error']];
+        }
+        $run->event('encode_order', $id, ['result' => 'not_saved']);
+
+        return ['port' => 'next', 'note' => 'Warning: the order was NOT saved (the encode could not be queued)'];
     }
 
     public static function isUrl(string $v): bool

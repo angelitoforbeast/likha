@@ -1014,3 +1014,23 @@ Accepted, not fixed:
 - **Tests not added:** `Locations`/`compareLocale` ordering with digits and punctuation; `/order-encode?from[]=x` (the code ignores non-strings). Reason: no data can be lost; the suite is kept small.
 - **No automatic re-drive of a live order if the `encode` worker is not running** (nothing runs the job, so nothing writes the sheet either). Reason: no page is live in this spec; before any page goes live, the Supervisor program must be running, or a re-drive command added (suggestion for the go-live spec).
 - **Suggestions for the owner (not done, legacy rule):** the script quirks listed in `docs/specs/130-order-encode-shadow.result.md`.
+
+## 132: Encode order step (2026-10-23)
+
+- **"Continue without saving" with an encode that fails later loses the order** (only the `order_encodes` row, status `failed`, remains). Reason: it is the owner's explicit choice on the step; the compare page lists failed orders.
+- **No automatic re-drive of a live order if the `encode` worker is not running** (same as 130). Reason: the step is not used by any flow yet; the worker is a go-live prerequisite.
+- **The models are shown read-only but there is no screen to change them** (`app_settings` keys only). Reason: no settings screen exists for them in 130; adding one is a new feature.
+- **The step prefill looks only at the Sheet step "All Orders" of the same flow**, not at other flows of the page. Reason: the builder has no cross-flow data; the fields stay editable.
+- **A concurrent double run of the same step (two workers, same run id) could pass the "already queued" check together.** Reason: runs of one customer are serial; the macro_output dedupe still stops a second order row.
+- **"Continue without saving" when the encode could not even be queued still counts as an order if "Counts as an order" is ticked** (the step leaves on `next`). Reason: the customer did order; the warning is in the run path and the event is `not_saved`.
+- **`order_encodes` has no index on `run_id`/`flow_id`** for the "already queued" check. Reason: the check is also narrowed by `psid`; an index needs a migration, which this spec does not have.
+
+## 133: shadow for every page (2026-10-23)
+
+- **No history for the three import-shadow settings.** Reason: the project has no history table for `app_settings`; adding one is a new feature.
+- **The import hook reads `app_settings` and counts today's encodes with a few queries per created order.** Reason: small next to the row's own insert; cache it per import run if a big import ever shows it.
+- **`/order-encode/final` loads every order of the range in one pass (cursor) and paginates the disagreements in memory.** Reason: a week is a few thousand rows; a 30-day range of the whole company may be slow. Suggestion: a rollup table per page and day if the owner wants long ranges.
+- **A flow shadow row compared by the sheet compare and by compare-final shows in both tabs.** Reason: intended; the two answers differ (sheet DATABASE row vs final order).
+- **Orders whose `macro_output` row is deleted before compare-final wait 72 h, then show as "sheet never finished".** Reason: rare and harmless.
+- **The cap is not atomic if two import jobs ran at once.** Reason: the `orders` queue runs one import at a time.
+- **Reviewer minors:** `Schema::hasTable` and the skipped-counter read/write run per created order once the switch is on or the cap is hit; the counter is not atomic. Reason: small, display-only.

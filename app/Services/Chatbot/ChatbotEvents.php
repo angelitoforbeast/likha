@@ -108,6 +108,7 @@ class ChatbotEvents
             'send_mismatch' => 'Send at step ' . $node . ' stopped: the ticket does not match the customer (nothing sent)',
             'send_dropped' => 'Run after the send at step ' . $node . ' not continued: ' . ($d['reason'] ?? ''),
             'sheet' => 'Sheet row ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
+            'encode_order' => 'Encode order step ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
             'waiting' => 'Waiting for reply at step ' . $node . (($d['skip_after'] ?? '') !== '' ? ' (skips after ' . $d['skip_after'] . ')' : ''),
             'wait_skipped' => 'No reply in ' . ($d['after'] ?? '?') . ' → skipped at step ' . $node,
             'run_ended' => 'Run ended (' . ($d['reason'] ?? 'end') . ')',

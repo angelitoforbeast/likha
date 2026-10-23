@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\MacroOutput;
 use App\Models\OrderEncode;
 use App\Services\OrderEncode\Comparer;
 use Carbon\Carbon;
@@ -45,8 +46,9 @@ class OrderEncodeController extends Controller
         $page = trim((string) (is_string($request->query('page')) ? $request->query('page') : ''));
         $field = is_string($request->query('field')) && isset(Comparer::FIELDS[$request->query('field')]) ? $request->query('field') : '';
         $onlyDiff = (bool) $request->query('only_diff');
+        $mode = $request->query('mode') === 'live' ? 'live' : 'shadow'; // live: ang mga order ng Encode order step (walang sheet na ihahambing)
 
-        $base = OrderEncode::where('mode', 'shadow')
+        $base = OrderEncode::where('mode', $mode)
             ->where('created_at', '>=', $from->copy()->startOfDay())->where('created_at', '<=', $to->copy()->endOfDay())
             ->when($page !== '', fn ($q) => $q->where('page', $page));
 
@@ -64,11 +66,11 @@ class OrderEncodeController extends Controller
 
         return view('order-encode.index', [
             'stats' => $stats,
-            'rows' => collect($paginator->items())->map(fn (OrderEncode $o) => $this->row($o))->all(),
+            'rows' => $this->rows(collect($paginator->items())),
             'paginator' => $paginator,
             'fields' => array_keys(Comparer::FIELDS),
-            'filters' => ['from' => $from->toDateString(), 'to' => $to->toDateString(), 'page' => $page, 'field' => $field, 'only_diff' => $onlyDiff],
-            'pages' => OrderEncode::where('mode', 'shadow')->distinct()->orderBy('page')->pluck('page'),
+            'filters' => ['from' => $from->toDateString(), 'to' => $to->toDateString(), 'page' => $page, 'field' => $field, 'only_diff' => $onlyDiff, 'mode' => $mode],
+            'pages' => OrderEncode::where('mode', $mode)->distinct()->orderBy('page')->pluck('page'),
         ]);
     }
 
@@ -110,8 +112,17 @@ class OrderEncodeController extends Controller
         return $s;
     }
 
+    /** @return array<int, array<string, mixed>> */
+    private function rows(\Illuminate\Support\Collection $orders): array
+    {
+        $ids = $orders->pluck('macro_output_id')->filter()->all();
+        $stamps = $ids ? MacroOutput::whereIn('id', $ids)->pluck('TIMESTAMP', 'id')->all() : [];
+
+        return $orders->map(fn (OrderEncode $o) => $this->row($o, $stamps[$o->macro_output_id] ?? null))->all();
+    }
+
     /** @return array<string, mixed> */
-    private function row(OrderEncode $o): array
+    private function row(OrderEncode $o, ?string $stamp = null): array
     {
         $out = (array) $o->outputs;
         $db = (array) ($o->sheet['database'] ?? []);
@@ -131,10 +142,20 @@ class OrderEncodeController extends Controller
         };
 
         return [
-            'id' => $o->id, 'page' => $o->page, 'row' => $o->row_number, 'at' => $o->created_at?->format('Y-m-d H:i'), 'state' => $state,
+            'id' => $o->id, 'page' => $o->page, 'row' => $o->row_number, 'mode' => $o->mode, 'macro' => $this->macroLink($o, $stamp), 'at' => $o->created_at?->format('Y-m-d H:i'), 'state' => $state,
             'error' => $o->error, 'cells' => $cells,
             'notes' => array_values(array_intersect_key(Comparer::NOTES, array_flip((array) ($o->sheet['notes'] ?? [])))), 'title' => $this->title((array) $o->steps),
         ];
+    }
+
+    /** Ang live na order ay may link sa macro_output row nito (ang pahina ng araw ng order); wala kung hindi pa nagagawa. */
+    private function macroLink(OrderEncode $o, ?string $stamp): ?array
+    {
+        if (!$o->macro_output_id) return null;
+        // Ang araw ay galing sa TIMESTAMP ng macro_output row mismo ("HH:mm dd-MM-yyyy"); kung hindi mabasa, ang araw ng pagkakagawa.
+        $d = $stamp ? \DateTime::createFromFormat('H:i d-m-Y', trim($stamp)) : false;
+
+        return ['id' => $o->macro_output_id, 'url' => route('macro_output.index', ['date' => $d ? $d->format('Y-m-d') : $o->created_at?->toDateString()])];
     }
 
     /** Ang hover: bawat hakbang at tawag sa GPT sa isang linya (walang raw na sagot). */

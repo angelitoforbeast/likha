@@ -897,6 +897,8 @@
             placeholder: secret ? 'new value (blank = no change)' : ''});
         input.value = original;
         const mark = el('span', {class: 'block text-xs'});
+        // Ang go-live ng order encode ay ang Encode order step ng flow; ang mode dito ay off o shadow.
+        if (col.key === 'order_encode.mode') mark.textContent = 'off or shadow. Use the Encode order step in the flow instead of live.';
         put(td, input, mark);
         input.focus();
         editing = {pk: row.key, key: col.key, td, input, mark, original, secret, timer: null};

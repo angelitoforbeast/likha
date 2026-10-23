@@ -12,7 +12,7 @@ class OrderEncode extends Model
     protected $guarded = [];
 
     protected $casts = [
-        'input' => 'array', 'outputs' => 'array', 'steps' => 'array', 'usage' => 'array', 'sheet' => 'array', 'compare' => 'array',
+        'input' => 'array', 'outputs' => 'array', 'steps' => 'array', 'usage' => 'array', 'sheet' => 'array', 'compare' => 'array', 'final_compare' => 'array',
         'compare_equal' => 'boolean', 'encoded_at' => 'datetime', 'compared_at' => 'datetime',
     ];
 }

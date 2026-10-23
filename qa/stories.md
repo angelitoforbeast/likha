@@ -2021,3 +2021,51 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-130.62 | A sheet with no match where Likha has one is labelled a possible newer entry of the address file | `test_S_130_62…` | pending |
 | S-130.63 | The real `jnt_address.txt` is read in file order and is not changed | `LocationListTest::test_S_130_63…` | pending |
 | S-130.64 | The parsed list is cached until the file's mtime changes; a missing file is an empty list | `test_S_130_64…` | pending |
+
+## S-132 An "Encode order" step in the bot flow
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-132.1 | Given the flow builder, when I open it, then "Encode order" is in the palette with its help text, and its config (the A–H templates, also-write sheet, on failure) saves and reloads cleaned | `EncodeOrderNodeTest::test_S_132_1…` | pending |
+| S-132.2 | Given an Encode order step set to "Write to Google Sheet instead" or "Also write", when the flow is published without a valid sheet link, then Publish is refused with a message naming the step; "Continue without saving" needs no sheet; the draft still saves | `test_S_132_2…` | pending |
+| S-132.3 | Given a run that reaches the step, then one `EncodeOrder` (mode live, queue `encode`) is queued with the A–I row, the flow continues on `next` at once, and a `sheet` reply (skipped, "encoded in Likha") and an `encode_order` event are recorded | `test_S_132_3…` | pending |
+| S-132.4 | Given the Test tab, then nothing is queued, the row it would send is shown with "Test: would encode the order" | `test_S_132_4…` | pending |
+| S-132.5 | Given "Also write to Google Sheet", then the row is appended once, and a later failed encode does not append it again | `test_S_132_5…` | pending |
+| S-132.6 | Given an encode that fails, then the row is written to the fallback sheet once, however many times the failed order is run again | `test_S_132_6…` | pending |
+| S-132.7 | Given "Continue without saving", a failed encode writes no sheet | `test_S_132_7…` | pending |
+| S-132.8 | Given a retry after the `macro_output` row was made, then no second row is made | `test_S_132_8…` | pending |
+| S-132.9 | Given the same run reaches the step twice, then one order, one job and one sheet row; a different run is a new order | `test_S_132_9…` | pending |
+| S-132.10 | Given the encode cannot be queued, then "Write to Google Sheet instead" writes the row and continues, a failing sheet leaves on `failed`, and "Continue without saving" continues with a warning | `test_S_132_10…` | pending |
+| S-132.11 | Given replies are switched off, then nothing is queued or written | `test_S_132_11…` | pending |
+| S-132.12 | Given "Counts as an order", then the `order` event is the same as for a Sheet step (once per customer per 24 hours) and absent when not ticked | `test_S_132_12…` | pending |
+| S-132.13 | Given a graph with only the old steps, then it is cleaned and its ports are exactly as before | `test_S_132_13…` | pending |
+| S-132.14 | Given `/order-encode`, then the Mode filter shows shadow (default) or live orders, and a live order links to its `macro_output` row | `test_S_132_14…` | pending |
+| S-132.15 | Given two customers whose runs happen to share a run id, then each gets its own order (the "already queued" check includes the customer) | `test_S_132_15…` | pending |
+| S-132.16 | Given no OpenAI key (or no address file), the order goes to the fallback sheet and no `order_encodes` row is left | `test_S_132_16…` | pending |
+| S-132.17 | Given the queue refuses the job, the row is marked failed (not left queued) and the sheet gets the row once | `test_S_132_17…` | pending |
+| S-132.18 | The Page settings cell of `order_encode.mode` tells the owner to use the Encode order step instead of live | `test_S_132_18…` | pending |
+
+## S-133 Shadow-encode every page's orders from the Likha import and compare with the final order
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-133.1 | Given the switch is off, when the import creates an order, then it behaves as before and no `order_encodes` row or job exists | `ImportShadowTest::test_S_133_1…` | pending |
+| S-133.2 | Given the switch is on, when the import creates an order, then one `import` encode is queued on `encode` with the raw A–H cells, the row key and the `macro_output_id` | `test_S_133_2…` | pending |
+| S-133.3 | Given an order the import only updates, then nothing is encoded | `test_S_133_3…` | pending |
+| S-133.4 | Given the flow hook already encoded that sheet row, then no second encode is made and only `macro_output_id` is set | `test_S_133_4…` | pending |
+| S-133.5 | Given a daily cap and a skip list, then orders past the cap or on a skipped page are not encoded and are counted for today | `test_S_133_5…` | pending |
+| S-133.6 | Given the queue is down or the table is missing, then the import still creates the `macro_output` row | `test_S_133_6…` | pending |
+| S-133.7 | Given an import encode runs, then it uses the cells by column order, reads no sheet and never writes `macro_output` | `test_S_133_7…` | pending |
+| S-133.10 | Given the Macro import has not filled the order, then compare-final waits; once STATUS, APP SCRIPT CHECKER or PROVINCE is filled it compares | `CompareFinalTest::test_S_133_10…` | pending |
+| S-133.11 | Given a filled order, then each field, PROCEED and the checker are marked, with the edited flags and the STATUS | `test_S_133_11…` | pending |
+| S-133.12 | Given a blank on one side, then it is `final_blank` / `likha_blank`, not `same` | `test_S_133_12…` | pending |
+| S-133.13 | Given an order never filled after 72 hours, then it is `sheet_never_finished` (not before) | `test_S_133_13…` | pending |
+| S-133.14 | Only finished import rows and linked flow shadow rows are compared, once | `test_S_133_14…` | pending |
+| S-133.15 | The sheet compare state of a flow shadow row is not changed | `test_S_133_15…` | pending |
+| S-133.16 | Given an import encode that fails, then the order is `failed` and compare-final skips it | `CompareFinalTest::test_S_133_16…` | pending |
+| S-133.20 | The tab shows the tiles, the PROCEED table and the sortable per-page table | `FinalPageTest::test_S_133_20…` | pending |
+| S-133.21 | The date range and page filters apply | `test_S_133_21…` | pending |
+| S-133.22 | Disagreements show Likha and final values side by side with the steps on hover, and escape the text | `test_S_133_22…` | pending |
+| S-133.23 | The page shows the switch, cap, skip list, today's counts and the estimated cost | `test_S_133_23…` | pending |
+| S-133.24 | Only the CEO saves the three settings; bad values are refused | `test_S_133_24…` | pending |
+| S-133.25 | Marketing roles read the tab without the form; other roles get 404 | `test_S_133_25…` | pending |

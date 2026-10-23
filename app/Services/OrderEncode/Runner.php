@@ -3,6 +3,7 @@
 namespace App\Services\OrderEncode;
 
 use App\Models\OrderEncode;
+use App\Services\Chatbot\FlowGraph;
 use Throwable;
 
 /**
@@ -38,7 +39,7 @@ class Runner
         $res = (new Encoder($macro, $locations, $gpt, $steps))->run($in);
 
         $o->update([
-            'input' => ['row' => $o->input['row'] ?? [], 'fields' => $in->v],
+            'input' => array_merge((array) $o->input, ['fields' => $in->v]),
             'outputs' => $res['outputs'], 'steps' => $steps->log, 'usage' => self::usage($steps->log), 'encoded_at' => now(), 'error' => $res['error'],
         ]);
 
@@ -52,13 +53,16 @@ class Runner
     public function fail(OrderEncode $o, string $why): void
     {
         $why = preg_replace('/sk-[A-Za-z0-9_\-]{8,}/', '[key]', $why) ?? '';
-        if ($o->macro_output_id) {
+        if ($o->macro_output_id && $o->mode !== 'import') { // ang import row ay may macro_output_id mula sa simula: failed pa rin, para hindi maihambing
             // Nasa macro_output na ang order: hindi na isusulat sa sheet (doble).
             $o->update(['status' => 'done', 'error' => mb_substr($why . ' The order is already in macro_output.', 0, 500)]);
 
             return;
         }
-        if ($o->mode === 'live' && $o->status !== 'done') {
+        // Isang sulat lang sa sheet: hindi na inuulit ng ulit na takbo ng failed na order, at hindi kung naisulat na ng step (kasabay na sulat)
+        // o kung walang sheet na pagsusulatan (Encode order step na "Continue without saving").
+        $sheetId = FlowGraph::spreadsheetId($o->spreadsheet_id);
+        if ($o->mode === 'live' && $o->status === 'queued' && $sheetId !== null && empty($o->input['sheet_written'])) {
             try {
                 $this->sheets->append($o->spreadsheet_id, $o->tab, (array) ($o->input['row'] ?? []));
                 $why .= ' The row was written to the sheet instead.';
@@ -75,7 +79,8 @@ class Runner
     {
         $headers = null;
         try {
-            $headers = $this->sheets->headers($o->spreadsheet_id, $o->tab);
+            // Ang row ng Encode order step at ng Likha import ay laging nasa ayos na A..H, kahit ano ang header ng sheet.
+            if (empty($o->input['node']) && ($o->input['source'] ?? '') !== 'import') $headers = $this->sheets->headers($o->spreadsheet_id, $o->tab);
         } catch (Throwable) {
             // walang header: ang ayos ng column
         }

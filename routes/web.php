@@ -697,6 +697,9 @@ Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('ow
 
 // Order encode (spec 130): ang encode ng Likha laban sa DATABASE row ng Google Sheet. Parehong access ng /owner/private; read-only.
 Route::middleware(['web', 'auth'])->get('/order-encode', [\App\Http\Controllers\OrderEncodeController::class, 'index'])->name('order-encode.index');
+// Ang lahat ng page (galing sa Likha import) laban sa final na order; ang tatlong setting ng import shadow ay CEO lang.
+Route::middleware(['web', 'auth'])->get('/order-encode/final', [\App\Http\Controllers\OrderEncodeFinalController::class, 'index'])->name('order-encode.final');
+Route::middleware(['web', 'auth'])->post('/order-encode/import-settings', [\App\Http\Controllers\OrderEncodeFinalController::class, 'save'])->name('order-encode.import-settings');
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
 // Delivery status kada campaign / ad set / ad para sa expand (CEO + Marketing-OIC + Marketing, read-only).
 Route::get('/owner/private/ad-delivery', [OwnerPrivateController::class, 'adDelivery'])->name('owner.private.ad-delivery');

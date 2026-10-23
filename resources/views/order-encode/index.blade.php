@@ -6,6 +6,11 @@
     $label = fn ($f) => ucwords(str_replace('_', ' ', $f));
   @endphp
 
+  <div class="mb-4 flex gap-2 text-sm">
+    <a href="{{ route('order-encode.index') }}" class="rounded bg-blue-500 px-3 py-1 text-white">Sheet compare</a>
+    <a href="{{ route('order-encode.final') }}" class="rounded border px-3 py-1 text-gray-700">All pages (vs final order)</a>
+  </div>
+
   {{-- Filters --}}
   <form method="GET" action="{{ route('order-encode.index') }}" class="mb-4 flex flex-wrap items-end gap-3 text-sm">
     <label class="flex flex-col">From
@@ -13,6 +18,12 @@
     </label>
     <label class="flex flex-col">To
       <input type="date" name="to" value="{{ $filters['to'] }}" class="border rounded px-2 py-1">
+    </label>
+    <label class="flex flex-col">Mode
+      <select name="mode" class="border rounded px-2 py-1">
+        <option value="shadow" @selected($filters['mode'] === 'shadow')>Shadow (compared with the sheet)</option>
+        <option value="live" @selected($filters['mode'] === 'live')>Live (Encode order step)</option>
+      </select>
     </label>
     <label class="flex flex-col">Page
       <select name="page" class="border rounded px-2 py-1">
@@ -68,7 +79,7 @@
         @forelse ($rows as $r)
           <tr class="border-t align-top">
             <td class="px-2 py-1 whitespace-nowrap" title="{{ $r['title'] }}">
-              #{{ $r['id'] }} · row {{ $r['row'] }}<br>{{ $r['page'] }}<br><span class="text-gray-500">{{ $r['at'] }}</span>
+              #{{ $r['id'] }} · @if ($r['mode'] === 'live')live @if ($r['macro'])<a href="{{ $r['macro']['url'] }}" class="text-blue-700 underline">macro_output #{{ $r['macro']['id'] }}</a>@else<span class="text-gray-500">not in macro_output yet</span>@endif @else{{ 'row ' . $r['row'] }}@endif<br>{{ $r['page'] }}<br><span class="text-gray-500">{{ $r['at'] }}</span>
             </td>
             <td class="px-2 py-1" @if($r['error']) title="{{ $r['error'] }}" @endif>{{ $r['state'] }}@foreach ($r['notes'] as $n)<div class="mt-1 rounded bg-yellow-100 px-1 text-yellow-800">{{ $n }}</div>@endforeach</td>
             @foreach ($r['cells'] as $f => $c)
