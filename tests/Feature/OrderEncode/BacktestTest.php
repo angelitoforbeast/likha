@@ -73,8 +73,9 @@ class BacktestTest extends EncodeRunTestCase
             'Orders' => ['4', '4'], 'PROCEED' => ['2', '3'], 'Correct' => ['1', '3'], 'Wrong' => ['1', '0'], 'Pending' => ['1', '0'], 'Blank address' => ['1', '1'],
         ], $this->table(Artisan::output()));
 
-        $copies = OrderEncode::where('mode', 'like', 'backtest-%')->get();
+        $copies = OrderEncode::where('mode', 'like', 'bt%')->get();
         $this->assertCount(4, $copies);
+        $this->assertLessThanOrEqual(10, strlen($copies->first()->mode)); // order_encodes.mode ay varchar(10) sa MySQL
         $this->assertSame(4, $copies->where('status', 'done')->count());
         $this->assertSame(4, OrderEncode::where('mode', 'backtest2')->count()); // ang pinagmulan ay hindi ginagalaw
         $this->assertSame('BUNGAD', $copies->firstWhere('macro_output_id', $o['b']->id)->outputs['barangay']);
@@ -92,7 +93,7 @@ class BacktestTest extends EncodeRunTestCase
         $this->assertSame(['2', '-'], $rows['Orders']);
         $this->assertSame(['1', '-'], $rows['Correct']);
         $this->assertStringContainsString('tmp_sheet_out not found', $out);
-        $this->assertSame(2, OrderEncode::where('mode', 'like', 'backtest-%')->count());
+        $this->assertSame(2, OrderEncode::where('mode', 'like', 'bt%')->count());
     }
 
     public function test_S_135_52_it_says_so_when_there_are_no_stored_inputs_and_never_reads_google(): void

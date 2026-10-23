@@ -15,7 +15,7 @@ use Throwable;
 
 /**
  * Backtest ng encoder: ang mga naka-save na input ng naunang test (mga row na may --source-mode) ay ine-encode ulit sa kasalukuyang
- * rules papunta sa bagong mode (backtest-<oras>), saka ipinapakita, para sa Likha at (kung may tmp_sheet_out) sa output ng sheet:
+ * rules papunta sa bagong mode (bt<buwan araw oras minuto>), saka ipinapakita, para sa Likha at (kung may tmp_sheet_out) sa output ng sheet:
  * orders, PROCEED, correct, wrong, pending, blank address, lahat PAGKATAPOS ng MacroChecker::validateRow (gaya ng Validate button).
  * May tunay na tawag sa GPT kapag may key ang makina: patakbuhin lang sa server.
  *
@@ -42,7 +42,7 @@ class OrderEncodeBacktest extends Command
             return self::SUCCESS;
         }
 
-        $mode = 'backtest-' . now('Asia/Manila')->format('YmdHis');
+        $mode = 'bt' . now('Asia/Manila')->format('mdHi'); // order_encodes.mode ay varchar(10)
         $this->info("Re-encoding {$from->count()} orders from \"{$source}\" into \"{$mode}\" (rules: " . $settings->rules() . ').');
         $new = [];
         foreach ($from as $o) {
