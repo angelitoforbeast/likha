@@ -1,0 +1,8 @@
+Amendment 135-1. Save it verbatim as `docs/specs/135-encode-rules-and-notes.amendment-1.md`, apply it on the same branch (feat/135-encode-rules-and-notes), list it in the result, commit. Same rules as the brief (never push, no remote hosts, no attribution lines, at most 2 tries per step).
+
+| Change | Who decided, why |
+|---|---|
+| **De-duplicate the J&T list when the encoder loads it** (both the macro/FILTER list and the checker's lists): identical `PROVINCE|CITY|BARANGAY` lines count once, first occurrence keeps its position. This applies in **both** rule modes (`sheet` and `improved`), because the sheet's own LocationData has no duplicates. Do not edit `jnt_address.txt` (other parts of Likha read it). | Checked on live 2026-10-24: the file has 43,151 lines but 42,859 distinct; 266 addresses repeat (RIZAL/RIZAL-TAYTAY/SANTA ANA ×8, RIZAL/CAINTA/SAN ANDRES (POB.) ×7, RIZAL/ANTIPOLO-CITY/SAN ISIDRO (POB.) ×2 on lines 36003–36004). The repeat made "rizal antipolo san isidro" count 2 candidates → remark "MULTIPLE SUGGESTED ADDRESS" → GPT fix → Calawis, while the sheet (1 candidate) went straight to ✅. The owner: "sige ayusin mo mga doble". |
+| Fix `OrderEncodeFlowTest::test_S_130_1` (and any other test) so it does not depend on today's date. | Tests must not fail on a later day. |
+
+Done when: a test with a duplicated line shows candidate count 1 and no "MULTIPLE SUGGESTED ADDRESS" (the San Isidro, Antipolo case), in both modes; `php vendor\phpunit\phpunit\phpunit tests/Feature/OrderEncode tests/Feature/Chatblast tests/Feature/PageSettings tests/Feature/Botcake tests/Feature/NightRun` re-run after this change and after your last two commits, with results listed (known local-only credentials failure noted separately); result updated; commit.

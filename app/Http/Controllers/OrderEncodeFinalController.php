@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\OrderEncode;
 use App\Services\OrderEncode\FinalComparer;
 use App\Services\OrderEncode\ImportShadow;
+use App\Services\OrderEncode\Settings;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -55,10 +56,11 @@ class OrderEncodeFinalController extends Controller
         $base = $scope()->where('created_at', '>=', $from->copy()->startOfDay())->where('created_at', '<=', $to->copy()->endOfDay())
             ->when($page !== '', fn ($q) => $q->where('page', $page));
 
-        $t = ['orders' => 0, 'compared' => 0, 'waiting' => 0, 'never' => 0, 'failed' => 0, 'location' => 0, 'address' => 0, 'item_cod' => 0, 'cost' => 0.0];
+        $t = ['orders' => 0, 'compared' => 0, 'waiting' => 0, 'never' => 0, 'failed' => 0, 'location' => 0, 'address' => 0, 'item_cod' => 0, 'cost' => 0.0, 'note_hits' => 0];
         $matrix = ['untouched' => ['proceed' => 0, 'hold' => 0], 'edited' => ['proceed' => 0, 'hold' => 0], 'not' => ['proceed' => 0, 'hold' => 0]];
         $perPage = [];
         $disagree = [];
+        $ruleHolds = [];
         $prices = (array) config('order_encode.prices');
 
         foreach ($base->orderBy('id')->cursor() as $o) {
@@ -70,6 +72,9 @@ class OrderEncodeFinalController extends Controller
                 $pr = $prices[$model] ?? $prices['default'] ?? ['in' => 0, 'out' => 0];
                 $t['cost'] += ((int) ($u['tokens_in'] ?? 0) * $pr['in'] + (int) ($u['tokens_out'] ?? 0) * $pr['out']) / 1e6;
             }
+            $out = (array) $o->outputs;
+            if (!empty($out['note_hit'])) $t['note_hits']++;
+            if (!empty($out['hold']['rule'])) $ruleHolds[$out['hold']['rule']] = ($ruleHolds[$out['hold']['rule']] ?? 0) + 1;
             $f = $o->final_compare;
             if ($o->status === 'failed') $t['failed']++;
             elseif (!$f) $t['waiting']++;
@@ -96,7 +101,8 @@ class OrderEncodeFinalController extends Controller
         usort($pageRows, fn ($a, $b) => ($dir === 'desc' ? -1 : 1) * ($sort === 'page' ? strcasecmp((string) $a['page'], (string) $b['page']) : ($a[$sort] ?? -1) <=> ($b[$sort] ?? -1)));
 
         $tiles = ['orders' => $t['orders'], 'compared' => $t['compared'], 'waiting' => $t['waiting'], 'never' => $t['never'], 'failed' => $t['failed'],
-            'location_pct' => $pct($t['location'], $t['compared']), 'address_pct' => $pct($t['address'], $t['compared']), 'item_cod_pct' => $pct($t['item_cod'], $t['compared'])];
+            'location_pct' => $pct($t['location'], $t['compared']), 'address_pct' => $pct($t['address'], $t['compared']), 'item_cod_pct' => $pct($t['item_cod'], $t['compared']), 'note_hits' => $t['note_hits']];
+        ksort($ruleHolds);
 
         rsort($disagree);
         $number = max(1, (int) $request->query('p', 1));
@@ -108,8 +114,9 @@ class OrderEncodeFinalController extends Controller
             'import' => [
                 'on' => $shadow->on(), 'cap' => $shadow->cap(), 'skip_pages' => $shadow->skipPagesText(), 'encoded_today' => $shadow->encodedToday(),
                 'skipped_cap' => $shadow->skippedToday()['cap'], 'skipped_pages' => $shadow->skippedToday()['pages'], 'cost' => $t['cost'],
-                'can_edit' => $this->getNormalizedRole() === 'CEO',
+                'can_edit' => $this->getNormalizedRole() === 'CEO', 'rules' => app(Settings::class)->rules(),
             ],
+            'ruleHolds' => $ruleHolds,
             'filters' => ['from' => $from->toDateString(), 'to' => $to->toDateString(), 'page' => $page, 'sort' => $sort, 'dir' => $dir],
             'pages' => $scope()->distinct()->orderBy('page')->pluck('page'),
         ]);
@@ -123,10 +130,12 @@ class OrderEncodeFinalController extends Controller
             'switch' => ['required', 'in:on,off'],
             'cap' => ['required', 'integer', 'min:0', 'max:100000'],
             'skip_pages' => ['nullable', 'string', 'max:2000'],
+            'rules' => ['nullable', 'in:' . implode(',', Settings::RULE_SETS)],
         ]);
         \App\Models\AppSetting::set(ImportShadow::SWITCH, $data['switch']);
         \App\Models\AppSetting::set(ImportShadow::CAP, (string) $data['cap']);
         \App\Models\AppSetting::set(ImportShadow::SKIP_PAGES, trim((string) ($data['skip_pages'] ?? '')));
+        if (!empty($data['rules'])) \App\Models\AppSetting::set(Settings::RULES, $data['rules']);
 
         return redirect()->route('order-encode.final')->with('status', 'Saved.');
     }
@@ -146,6 +155,7 @@ class OrderEncodeFinalController extends Controller
         return [
             'id' => $o->id, 'page' => $o->page, 'macro_id' => $o->macro_output_id, 'at' => $o->created_at?->format('Y-m-d H:i'), 'source' => $o->mode === ImportShadow::MODE ? 'import' : 'flow',
             'edited' => (bool) ($f['edited'] ?? false), 'edited_flags' => (array) ($f['edited_flags'] ?? []), 'cells' => $cells, 'title' => $this->title((array) $o->steps),
+            'note_hit' => !empty($out['note_hit']), 'hold' => (array) ($out['hold'] ?? []),
         ];
     }
 

@@ -22,6 +22,10 @@ class Settings
     public const DEFAULT_EXTRACT = 'gpt-4o-mini';
     public const DEFAULT_CHECKER = 'gpt-5.2';
 
+    /** improved (default) = ang mga panuntunan ng spec 135; sheet = eksaktong kopya ng dalawang script (spec 130) */
+    public const RULES = 'order_encode_rules';
+    public const RULE_SETS = ['improved', 'sheet'];
+
     public function __construct(private PageSettings $pages)
     {
     }
@@ -50,6 +54,14 @@ class Settings
     public function modelChecker(): string
     {
         return $this->app(self::MODEL_CHECKER, self::DEFAULT_CHECKER);
+    }
+
+    /** improved o sheet; anumang iba o walang setting = improved. */
+    public function rules(): string
+    {
+        $v = strtolower($this->app(self::RULES, 'improved'));
+
+        return in_array($v, self::RULE_SETS, true) ? $v : 'improved';
     }
 
     public function key(): string

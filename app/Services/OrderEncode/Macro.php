@@ -33,29 +33,45 @@ final class Macro
      * laki ng letra) ng A. Ang una sa ayos ng listahan ang Q1; ang bilang ang U1.
      * @return array{first: ?array{0: string, 1: string, 2: string, 3: string}, count: int}
      */
-    public function filter(string $p1): array
+    public function filter(string $p1, ?array $prefer = null): array
     {
         if ($p1 === '') return ['first' => null, 'count' => 0];
         $words = array_slice(array_values(array_filter(explode(' ', Text::lower($p1)), fn ($w) => $w !== '')), 0, 6);
         if (!$words) return ['first' => null, 'count' => 0];
 
         $first = null;
+        $best = -1;
         $count = 0;
         foreach ($this->hay as $i => $h) {
             foreach ($words as $w) {
                 if (!str_contains($h, $w)) continue 2;
             }
-            $first ??= $this->rows[$i];
+            if ($prefer === null) {
+                $first ??= $this->rows[$i];
+            } else {
+                // R3: ang barangay na isinulat ng customer muna, saka ang city, saka ang ayos ng listahan (ang una ang nananalo sa pantay).
+                $score = ($prefer['barangay'] !== '' && ($this->brgyNorm[$i] ??= Written::brgy($this->rows[$i][3])) === $prefer['barangay'] ? 2 : 0)
+                    + ($prefer['city'] !== '' && ($this->cityNorm[$i] ??= Written::city($this->rows[$i][2], $this->rows[$i][1])) === $prefer['city'] ? 1 : 0);
+                if ($score > $best) {
+                    $best = $score;
+                    $first = $this->rows[$i];
+                }
+            }
             $count++;
         }
 
         return ['first' => $first, 'count' => $count];
     }
 
+    /** @var array<int, string> */
+    private array $brgyNorm = [];
+    /** @var array<int, string> */
+    private array $cityNorm = [];
+
     /** Ang Q1 gaya ng nababasa ng script: lowercase, "-" = espasyo; walang tugma = "#N/A". */
-    private function q1(string $p1): string
+    private function q1(string $p1, ?array $prefer = null): string
     {
-        $f = $this->filter($p1)['first'];
+        $f = $this->filter($p1, $prefer)['first'];
         if ($p1 === '') return '';
 
         return str_replace('-', ' ', Text::lower($f === null ? '#N/A' : $f[0]));
@@ -65,7 +81,7 @@ final class Macro
      * Macro() para sa row 2. Walang province, city at barangay = walang sinusulat (null).
      * @return array{points: int, remark: string, icon: string, province: string, city: string, barangay: string, p1: string, candidates: int}|null
      */
-    public function run(string $provinceRaw, string $cityRaw, string $barangayRaw): ?array
+    public function run(string $provinceRaw, string $cityRaw, string $barangayRaw, ?array $prefer = null): ?array
     {
         [$province, $city, $barangay] = array_map(fn ($v) => Text::jsTrim(str_replace('-', ' ', Text::lower($v))), [$provinceRaw, $cityRaw, $barangayRaw]);
         if ($province === '' && $city === '' && $barangay === '') return null;
@@ -73,25 +89,25 @@ final class Macro
         $k1 = '';
         if ($province !== '') {
             $k1 .= $province;
-            if (!str_contains($this->q1($k1), $province)) $k1 = Text::jsTrim(Text::replaceFirst($k1, $province, ''));
+            if (!str_contains($this->q1($k1, $prefer), $province)) $k1 = Text::jsTrim(Text::replaceFirst($k1, $province, ''));
         }
         if ($city !== '') {
             $k1 .= ($k1 !== '' ? ' ' : '') . $city;
-            if (!str_contains($this->q1($k1), $city)) $k1 = Text::jsTrim(Text::collapse(Text::removeWord($k1, $city)));
+            if (!str_contains($this->q1($k1, $prefer), $city)) $k1 = Text::jsTrim(Text::collapse(Text::removeWord($k1, $city)));
         }
         if ($barangay !== '') {
             $k1 .= ($k1 !== '' ? ' ' : '') . $barangay;
             // Ang script ay binabasa ang column 24 (X, hindi V) bilang "points now"; blangko ito sa bagong row, kaya hindi kailanman 7.
-            if (!str_contains($this->q1($k1), $barangay)) $k1 = Text::jsTrim(Text::collapse(Text::removeWord($k1, $barangay)));
+            if (!str_contains($this->q1($k1, $prefer), $barangay)) $k1 = Text::jsTrim(Text::collapse(Text::removeWord($k1, $barangay)));
         }
 
-        $q1 = $this->q1($k1);
+        $q1 = $this->q1($k1, $prefer);
         $points = 0;
         if ($province !== '' && str_contains($q1, $province)) $points += 1;
         if ($city !== '' && str_contains($q1, $city)) $points += 2;
         if ($barangay !== '' && str_contains($q1, $barangay)) $points += 4;
 
-        $f = $this->filter($k1);
+        $f = $this->filter($k1, $prefer);
         $suggestions = $f['count'];
         $remark = '';
         $icon = '';

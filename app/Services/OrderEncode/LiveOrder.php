@@ -43,6 +43,12 @@ class LiveOrder
         $likhaCod = preg_match('/PRICE:\s*₱\s*([0-9][\d,]*(?:\.\d{1,2})?)/iu', $in->get('shop'), $m) ? str_replace(',', '', $m[1]) : null;
         $remark = (string) ($out['remark'] ?? '');
         $final = (string) ($out['final'] ?? '');
+        // Hold ng panuntunan (spec 135): hindi ✅ ang ilalagay, kung hindi ay gagawin itong PROCEED ng Validate.
+        $hold = (array) ($out['hold'] ?? []);
+        if ($hold) {
+            $final = 'TO FIX';
+            $remark = mb_substr('HOLD ' . ($hold['rule'] ?? '') . ': ' . ($hold['reason'] ?? ''), 0, 250);
+        }
 
         $row = MacroOutput::create([
             'TIMESTAMP' => $timestamp,

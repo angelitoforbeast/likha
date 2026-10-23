@@ -10,7 +10,7 @@ namespace App\Services\OrderEncode;
  */
 class LocationList
 {
-    /** @var array<string, array{0: int, 1: array<int, array<int, string>>, 2: ?Macro, 3: ?Locations}> path => [mtime, rows, macro, locations] */
+    /** @var array<string, array{0: int, 1: array<int, array<int, string>>, 2: ?Macro, 3: ?Locations, 4: ?Locations}> path => [mtime, rows, macro, locations, exact locations] */
     private static array $memo = [];
 
     public function __construct(private ?string $path = null)
@@ -53,6 +53,16 @@ class LocationList
         return self::$memo[$path][3] ??= new Locations($entry[1]);
     }
 
+    /** Ang mga mapa ng checker na ang mga barangay ay eksaktong gaya ng sa J&T file (mga panuntunang "improved"). */
+    public function exactLocations(): ?Locations
+    {
+        $path = $this->path();
+        $entry = $this->load();
+        if (!$entry[1]) return null;
+
+        return self::$memo[$path][4] ??= new Locations($entry[1], true);
+    }
+
     /** @return array{0: int, 1: array<int, array<int, string>>} */
     private function load(): array
     {
@@ -62,14 +72,17 @@ class LocationList
         if ((self::$memo[$path][0] ?? null) === $mtime) return self::$memo[$path];
 
         $rows = [];
+        $seen = [];
         foreach (preg_split('/\r\n|\n|\r/', (string) file_get_contents($path)) as $line) {
             $line = trim($line);
             if ($line === '') continue;
             $p = explode('|', $line);
             if (count($p) < 3) continue;
-            $rows[] = [trim($p[0]), trim($p[1]), trim($p[2])];
+            $row = [trim($p[0]), trim($p[1]), trim($p[2])];
+            // Magkaparehong linya = isa lang (ang LocationData ng sheet ay walang doble); ang una ang nananatili sa pwesto nito.
+            $seen[implode('|', $row)] ??= $rows[] = $row;
         }
 
-        return self::$memo[$path] = [$mtime, $rows, null, null];
+        return self::$memo[$path] = [$mtime, $rows, null, null, null];
     }
 }

@@ -27,6 +27,7 @@
       <span>Skipped pages: <b>{{ $import['skip_pages'] !== '' ? $import['skip_pages'] : 'none' }}</b></span>
       <span>Encoded today: <b>{{ $import['encoded_today'] }}</b></span>
       <span>Skipped today: <b>{{ $import['skipped_cap'] }}</b> over the cap, <b>{{ $import['skipped_pages'] }}</b> skipped page</span>
+      <span>Rules: <b>{{ $import['rules'] }}</b></span>
       <span>Estimated GPT cost of the orders below: <b>${{ number_format($import['cost'], 2) }}</b></span>
     </div>
     @if ($import['can_edit'])
@@ -36,6 +37,12 @@
           <select name="switch" class="border rounded px-2 py-1">
             <option value="off" @selected(!$import['on'])>off</option>
             <option value="on" @selected($import['on'])>on</option>
+          </select>
+        </label>
+        <label class="flex flex-col">Rules
+          <select name="rules" class="border rounded px-2 py-1">
+            <option value="improved" @selected($import['rules'] === 'improved')>improved</option>
+            <option value="sheet" @selected($import['rules'] === 'sheet')>sheet (exact script copy)</option>
           </select>
         </label>
         <label class="flex flex-col">Daily cap
@@ -76,6 +83,13 @@
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Item and COD equal</div><div class="text-xl font-semibold">{{ $fmt($tiles['item_cod_pct']) }}</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Waiting for the final order</div><div class="text-xl font-semibold">{{ $tiles['waiting'] }}</div></div>
     <div class="rounded bg-white p-3 shadow"><div class="text-gray-500">Sheet never finished</div><div class="text-xl font-semibold">{{ $tiles['never'] }}</div><div class="text-xs text-gray-500">encode failed: {{ $tiles['failed'] }}</div></div>
+  </div>
+
+  <div class="mb-4 rounded bg-white p-3 text-sm shadow">
+    <span class="font-semibold">Learned notes and rules in this range:</span>
+    NOTE_HIT <b>{{ $tiles['note_hits'] }}</b>
+    @forelse ($ruleHolds as $rule => $n) · held by {{ $rule }} <b>{{ $n }}</b> @empty · held by a rule <b>0</b> @endforelse
+    <a href="{{ route('order-encode.notes') }}" class="ml-3 text-blue-600 underline">Address notes</a>
   </div>
 
   {{-- PROCEED table --}}
@@ -134,6 +148,8 @@
           <tr class="border-t align-top">
             <td class="px-2 py-1 whitespace-nowrap" title="{{ $r['title'] }}">
               #{{ $r['id'] }} · {{ $r['source'] }} · macro_output #{{ $r['macro_id'] }}<br>{{ $r['page'] }}<br><span class="text-gray-500">{{ $r['at'] }}</span>
+              @if ($r['note_hit'])<div class="mt-1 rounded bg-blue-100 px-1 text-blue-800">NOTE_HIT</div>@endif
+              @if ($r['hold'])<div class="mt-1 rounded bg-orange-100 px-1 text-orange-800" title="{{ $r['hold']['reason'] ?? '' }}">held by {{ $r['hold']['rule'] ?? '' }}: {{ $r['hold']['reason'] ?? '' }}</div>@endif
               @if ($r['edited'])<div class="mt-1 rounded bg-yellow-100 px-1 text-yellow-800" title="{{ implode(', ', $r['edited_flags']) }}">edited by staff</div>@endif
             </td>
             @foreach ($r['cells'] as $f => $c)

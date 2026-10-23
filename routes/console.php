@@ -202,3 +202,10 @@ Schedule::command('order-encode:compare')
 Schedule::command('order-encode:compare-final')
     ->everyFifteenMinutes()
     ->withoutOverlapping(30);
+
+// Order encode: ang natutunang address (address_notes) mula sa mga itinamang at na-deliver na order ng nakaraang 3 araw, 05:30 Manila.
+// Ligtas ulitin: bawat order ay isang beses lang nabibilang. Ang buong 60 araw ay manu-mano: order-encode:notes-build --days=60.
+Schedule::command('order-encode:notes-build --days=3')
+    ->timezone('Asia/Manila')
+    ->dailyAt('05:30')
+    ->withoutOverlapping(60);
