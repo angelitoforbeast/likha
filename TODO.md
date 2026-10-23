@@ -1034,3 +1034,5 @@ Accepted, not fixed:
 - **Orders whose `macro_output` row is deleted before compare-final wait 72 h, then show as "sheet never finished".** Reason: rare and harmless.
 - **The cap is not atomic if two import jobs ran at once.** Reason: the `orders` queue runs one import at a time.
 - **Reviewer minors:** `Schema::hasTable` and the skipped-counter read/write run per created order once the switch is on or the cap is hit; the counter is not atomic. Reason: small, display-only.
+- **`/chatbot/health` accepts any digit string as `page_id`, and each (page, range) makes a 5-minute cache entry.** Reason: only chatbot roles or the events-key holder can call it, and the JSON route is throttled. Suggestion: check `page_id` against the page map.
+- **Failure reason order is unreachable, window (#10), HTTP 5xx, timeout, other.** Reason: a 5xx whose body contains "(#10)" counts as window; narrow edge.

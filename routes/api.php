@@ -17,6 +17,7 @@ Route::post('/gateway/events', [\App\Http\Controllers\GatewayEventController::cl
 
 // Read-only feed ng kusang lipat ng provider ng chatbot, para sa assistant ng owner (header X-CHATBOT-EVENTS-KEY, sariling key).
 Route::get('/chatbot/provider-events', [\App\Http\Controllers\ChatbotProviderEventsController::class, 'index'])->middleware('throttle:30,1,chatbot-provider-events');
+Route::get('/chatbot/health', [\App\Http\Controllers\ChatbotHealthController::class, 'json'])->middleware('throttle:30,1,chatbot-health');
 
 // Read-only staff feed para sa assistant ng owner (header X-STAFF-FEED-KEY, sariling key).
 Route::middleware('throttle:30,1')->group(function () {
