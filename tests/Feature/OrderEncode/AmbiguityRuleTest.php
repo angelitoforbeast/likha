@@ -29,8 +29,10 @@ class AmbiguityRuleTest extends TestCase
         $r = $this->rules()->ambiguity('METRO-MANILA', 'QUEZON-CITY', 'NOVALICHES', 'Barangay talipapa novaliches Quizon city , malapit sa Walter mart');
         $this->assertSame(['hold' => 'Another barangay of the city is also in the chat: TALIPAPA'], $r);
 
+        // Walang marka ang gulod: hindi na hold (pinalitan 2026-10-24 dahil sa mga karaniwang salita gaya ng 'ilang', 'bato').
         $r = $this->rules()->ambiguity('METRO-MANILA', 'QUEZON-CITY', 'NOVALICHES', 'ca. no. president st sta.Monica village gulod novalitches Quezon city');
-        $this->assertSame(['hold' => 'Another barangay of the city is also in the chat: GULOD'], $r);
+        $this->assertSame([], $r);
+        $this->assertSame([], $this->rules()->ambiguity('METRO-MANILA', 'QUEZON-CITY', 'BUNGAD', 'mag kano #20.miller st. Brgy. Bungad Q.city Project 7 White Ok'));
     }
 
     public function test_the_longer_label_of_the_same_barangay_is_used_when_its_extra_word_is_in_the_chat(): void
@@ -59,7 +61,7 @@ class AmbiguityRuleTest extends TestCase
     public function test_another_city_of_the_province_in_the_chat_holds_the_order(): void
     {
         $r = $this->rules()->ambiguity('SULU', 'JOLO', 'ALAT', 'km2 smart kajatian indanan jolo sulu');
-        $this->assertSame(['hold' => 'Another city of the province is also in the chat: INDANAN'], $r);
+        $this->assertSame(['hold' => 'Another city of the province is also in the chat: INDANAN (KAJATIAN)'], $r);
     }
 
     public function test_words_that_are_part_of_the_chosen_place_or_common_words_do_not_hold(): void

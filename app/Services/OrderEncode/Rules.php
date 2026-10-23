@@ -134,7 +134,9 @@ class Rules
                 if (self::wordsIn(trim(substr($k, strlen($chosen))), $text)) $longer = $label;
                 continue;
             }
-            if (self::mentioned($k, $text)) $others[] = $label;
+            // Hold lang kapag ang ibang barangay ay malinaw na minarkahan ("brgy talipapa") at ang napili ay hindi: ang karaniwang
+            // salita at pangalan ("ilang araw", "bato", "Reyes") at ang distritong walang marka ay hindi na binibilang.
+            if (self::marked($k, $text) && !self::marked($chosen, $text)) $others[] = $label;
         }
         if ($longer !== null) return ['barangay' => $longer];
         if ($others) return ['hold' => 'Another barangay of the city is also in the chat: ' . implode(', ', array_slice($others, 0, 3))];
@@ -142,10 +144,22 @@ class Rules
         foreach (self::items($this->loc->cityList($province)) as $label) {
             $k = Written::city($label, $province);
             if ($k === $cityKey || $k === $chosen || $skip($k) || mb_strlen($k) < 5 || preg_match('/^(san|santa|santo|sta|sto)\b/u', $k)) continue;
-            if (self::mentioned($k, $text)) return ['hold' => 'Another city of the province is also in the chat: ' . $label];
+            if (!self::mentioned($k, $text)) continue;
+            // Ang ibang city ay binibilang lang kapag may barangay din nito sa chat ("kajatian indanan"), hindi ang apelyido o tanong lang.
+            foreach (self::items($this->loc->barangayList($label, $province)) as $b) {
+                $bk = Written::brgy($b);
+                if ($skip($bk) || $bk === $chosen) continue;
+                if (self::mentioned($bk, $text)) return ['hold' => 'Another city of the province is also in the chat: ' . $label . ' (' . $b . ')'];
+            }
         }
 
         return [];
+    }
+
+    /** Ang lugar ay may "brgy/barangay/bgy/brg/bry" sa unahan sa chat. */
+    private static function marked(string $k, string $text): bool
+    {
+        return $k !== '' && (bool) preg_match('/ (brgy|barangay|bgy|brg|bry|baranggay|brangy) ' . preg_quote($k, '/') . ' /u', $text);
     }
 
     private static function words(string $s): string
