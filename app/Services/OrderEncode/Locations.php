@@ -17,10 +17,16 @@ final class Locations
     /** @var array<string, array<string, true>> "brgyNorm|provNorm" => [cityLabel => true] */
     private array $brgyToCities = [];
 
+    /** @var array<string, true> "province|city|barangay" ng file, maliit na titik at Ñ = N: ang buong kombinasyon gaya ng isinulat ng J&T */
+    private array $combos = [];
+
     public string $provListCsv = '';
 
-    /** @param array<int, array<int, mixed>> $rows B, C, D ng bawat row, ayon sa ayos */
-    public function __construct(array $rows)
+    /**
+     * @param array<int, array<int, mixed>> $rows B, C, D ng bawat row, ayon sa ayos
+     * @param bool $exactLabels true: ang barangay sa mga listahan ay eksaktong gaya ng sa J&T file (walang "BARANGAY x" na pagbabago); ang pagtutugma ay ganoon pa rin
+     */
+    public function __construct(array $rows, private bool $exactLabels = false)
     {
         foreach ($rows as $r) {
             $r = array_pad(array_values((array) $r), 3, '');
@@ -28,7 +34,8 @@ final class Locations
             $p = Text::normProv((string) $r[0]);
             $cNorm = Text::normPlace((string) $r[1]);
             $cityLabel = Text::jsTrim((string) $r[1]);
-            $brgyLabel = Text::normalizeBrgyLabel((string) $r[2]);
+            $brgyLabel = $this->exactLabels ? Text::jsTrim((string) $r[2]) : Text::normalizeBrgyLabel((string) $r[2]);
+            if ($provLabel !== '' && $cityLabel !== '' && $brgyLabel !== '') $this->combos[Text::lower($provLabel . '|' . $cityLabel . '|' . Text::jsTrim((string) $r[2]))] = true;
 
             if ($p !== '' && $provLabel !== '' && !isset($this->provMap[$p])) $this->provMap[$p] = $provLabel;
 
@@ -46,6 +53,20 @@ final class Locations
         $list = array_values(array_filter($this->provMap, fn ($s) => $s !== ''));
         usort($list, fn ($a, $b) => Text::compareLocale($a, $b));
         $this->provListCsv = implode(', ', $list);
+    }
+
+    /** Ang J&T province na tinutukoy ng isinulat ng customer (Metro Manila = NCR = manila), o null kapag wala sa listahan. */
+    public function provinceOf(?string $written): ?string
+    {
+        $p = Text::normProv($written);
+
+        return $p === '' ? null : ($this->provMap[$p] ?? null);
+    }
+
+    /** Nasa J&T file ba ang eksaktong PROVINCE | CITY | BARANGAY na ito (walang pakialam sa laki ng letra at Ñ)? */
+    public function hasCombination(?string $province, ?string $city, ?string $barangay): bool
+    {
+        return isset($this->combos[Text::lower(Text::jsTrim($province) . '|' . Text::jsTrim($city) . '|' . Text::jsTrim($barangay))]);
     }
 
     public function isEmpty(): bool

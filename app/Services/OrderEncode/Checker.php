@@ -16,7 +16,7 @@ final class Checker
     public bool $phoneOk = true;
 
     /** @param array<string, string> $cells A..N galing sa encoder; ang iba ay blangko */
-    public function __construct(public array $cells, private Locations $loc, private Gpt $gpt, private Steps $steps)
+    public function __construct(public array $cells, private Locations $loc, private Gpt $gpt, private Steps $steps, private ?Rules $rules = null)
     {
     }
 
@@ -79,7 +79,8 @@ final class Checker
         }
 
         // GPT FIXES (K lang) ayon sa kasalukuyang S.
-        $sNow = Text::lower($this->get('S'));
+        // Tumama ang note: ang lugar ay galing na sa natutunang address, kaya walang pag-ayos ng GPT (ang verify sa ibaba ay tumatakbo pa).
+        $sNow = $this->rules?->noteHit ? '' : Text::lower($this->get('S'));
 
         if ($sNow === 'barangay') {
             $list = $this->get('T');
@@ -280,7 +281,7 @@ final class Checker
             . "- Do NOT keep the current province unless the message supports it.\n\n"
             . 'Current Province: ' . $provOld . "\n\n"
             . "Allowed PROVINCE list (pick ONLY from this list):\n"
-            . $provList . "\n\n"
+            . $provList . "\n\n" . $this->examples()
             . "Return STRICT JSON only: {\"province\":\"...\"}\n";
         $system = implode(' ', ['You validate Philippine province names.', 'Choose ONLY from the provided province list.',
             'Return STRICT JSON only: {"province":"..."}.', 'If truly cannot determine, return UNKNOWN.']);
@@ -322,6 +323,13 @@ final class Checker
 
             return;
         }
+        // R1: ang isinulat na city ng customer na nasa city list ng province ay hindi pinapalitan ng GPT.
+        if ($this->rules && ($kept = $this->rules->writtenCity($cityList, $prov)) !== null) {
+            if ($kept !== $this->get('F')) $this->put('F', $kept);
+            $this->log('city_fix', 'R1_WRITTEN_CITY_KEPT', $prov, $cityOld, 'CITY_OLD', $cityList, $kept, '', false, ['rule' => 'R1']);
+
+            return;
+        }
         $this->gpt->requireKey();
         $prompt = $k . "\n\n"
             . "Task: correct the CITY only.\n"
@@ -333,7 +341,7 @@ final class Checker
             . 'Province: ' . $prov . "\n"
             . 'Current City: ' . $cityOld . "\n\n"
             . "Allowed CITY list (pick ONLY from this list):\n"
-            . $cityList . "\n\n"
+            . $cityList . "\n\n" . $this->examples()
             . "Return STRICT JSON only: {\"city\":\"...\",\"province\":\"...\"}\n";
         $system = implode(' ', ['You validate Philippine cities/municipalities.', 'Choose ONLY from the provided city list.',
             'Return STRICT JSON only: {"city":"...","province":"..."}.', 'If truly cannot determine, return UNKNOWN.']);
@@ -350,7 +358,7 @@ final class Checker
 
         $status = 'CITY_NO_CHANGE';
         if ($newCity !== '' && $newCity !== 'UNKNOWN' && $newCity !== $cityOld && Text::cityInList($newCity, $cityList)) {
-            $this->put('F', Text::foldN($newCity));
+            $this->put('F', $this->rules ? Rules::canonical($cityList, $newCity, fn ($a, $b) => Text::normPlace($a) === Text::normPlace($b)) : Text::foldN($newCity)); // R4: ang label ng J&T
             $status = 'WROTE_CITY';
         } elseif ($newCity !== '' && $newCity !== 'UNKNOWN' && !Text::cityInList($newCity, $cityList)) {
             $status = 'CITY_NOT_IN_LIST';
@@ -372,6 +380,14 @@ final class Checker
 
             return;
         }
+        // R1: ang isinulat na barangay ng customer na nasa barangay list ng city ay hindi pinapalitan ng GPT.
+        if ($this->rules && ($kept = $this->rules->writtenBarangay($brgyList)) !== null) {
+            if ($kept !== $this->get('G')) $this->put('G', $kept);
+            $this->log('brgy_fix', 'R1_WRITTEN_BARANGAY_KEPT', $prov, $city, $brgy, $brgyList, $kept, '', false, ['rule' => 'R1']);
+            $this->recompute($this->get('M'));
+
+            return;
+        }
         $this->gpt->requireKey();
         $prompt = $k . "\n\n"
             . "We need to correct BARANGAY only.\n"
@@ -379,7 +395,7 @@ final class Checker
             . 'City: ' . $city . "\n"
             . 'Current Barangay: ' . $brgy . "\n\n"
             . "Allowed BARANGAY list (pick ONLY from this list):\n"
-            . $brgyList . "\n\n"
+            . $brgyList . "\n\n" . $this->examples()
             . "Return STRICT JSON only: {\"barangay\":\"...\",\"city\":\"...\",\"province\":\"...\"}\n";
         $system = implode(' ', ['You validate Philippine address barangays.',
             'Return STRICT JSON only: {"barangay":"...","city":"...","province":"..."}.',
@@ -401,7 +417,7 @@ final class Checker
         $status = 'NO_CHANGE';
         if ($newBrgy !== '' && $newBrgy !== $brgy) {
             if (Text::brgyInList($newBrgy, $brgyList)) {
-                $this->put('G', Text::foldN($newBrgy));
+                $this->put('G', $this->rules ? Rules::canonical($brgyList, $newBrgy, fn ($a, $b) => Text::brgyKey($a) === Text::brgyKey($b)) : Text::foldN($newBrgy)); // R4: ang label ng J&T
                 $status = 'WROTE_BRGY';
             } else {
                 $status = 'BRGY_NOT_IN_LIST';
@@ -500,7 +516,11 @@ final class Checker
 
         $w = self::computeW($pOk, $cOk, $bOk);
         $detail = ['province_ok' => $pOk, 'city_ok' => $cOk, 'barangay_ok' => $bOk];
-        if ($w === 'Province') {
+        if ($w === 'Province' && $this->rules && $this->rules->provinceContradiction($prov) !== null) {
+            // R2: iba ang province sa isinulat ng customer, kaya hindi ito ginagawang ✅.
+            $this->put('W', 'Province');
+            $this->log('verify_w', 'WROTE_W_PROVINCE_HELD', $prov, $city, $brgy, '', '', $raw, true, $detail + ['rule' => 'R2']);
+        } elseif ($w === 'Province') {
             // Isinusulat ang "Province", saka ginagawang ✅ pagkaraan ng isang segundo (ang script).
             $this->put('W', '✅');
             $this->log('verify_w', 'WROTE_W_PROVINCE_THEN_CHECKMARK', $prov, $city, $brgy, '', '', $raw, true, $detail);
@@ -626,6 +646,12 @@ final class Checker
     }
 
     // ---- talaan -----------------------------------------------------------------------------------------------------
+
+    /** Ang "Past corrections" ng mga natutunang address para sa prompt (walang laman sa sheet mode o kapag walang approved na note). */
+    private function examples(): string
+    {
+        return $this->rules?->examplesBlock() ?? '';
+    }
 
     /** BRGYFIX_log_ / VERIFYK_log_: $gpt = may tawag sa GPT ang hakbang na ito. */
     private function log(string $step, string $status, string $prov, string $city, string $old, string $list, string $new, string $raw = '', bool $gpt = false, array $more = []): void

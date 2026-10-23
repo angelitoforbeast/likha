@@ -10,7 +10,7 @@ use Throwable;
  */
 final class Encoder
 {
-    public function __construct(private Macro $macro, private Locations $loc, private Gpt $gpt, private Steps $steps)
+    public function __construct(private Macro $macro, private Locations $loc, private Gpt $gpt, private Steps $steps, private ?Rules $rules = null)
     {
     }
 
@@ -59,10 +59,17 @@ final class Encoder
             $this->fillMissing($cell, Text::jsTrim($name) . ' ' . Text::jsTrim($phone) . ' ' . Text::jsTrim($input));
 
             // STEP 6: Macro
-            $m = $this->macro->run($cell['M'], $cell['N'], $cell['O']);
+            $this->rules?->begin($parts);
+            $m = $this->macro->run($cell['M'], $cell['N'], $cell['O'], $this->rules?->prefer());
             $this->steps->add('macro', $m === null ? 'SKIP:NO_PLACE' : 'OK', $m === null ? [] : [
                 'p1' => $m['p1'], 'points' => $m['points'], 'candidates' => $m['candidates'], 'remark' => $m['remark'], 'icon' => $m['icon']]);
             $m ??= ['remark' => '', 'icon' => '', 'province' => '', 'city' => '', 'barangay' => ''];
+
+            // Natutunang address: kapag may approved na note ang eksaktong isinulat, ang lugar ay galing doon at walang remark.
+            if (($note = $this->rules?->lookupNote()) !== null) {
+                $m = ['remark' => '', 'icon' => '✅', 'province' => $note->province, 'city' => $note->city, 'barangay' => $note->barangay] + $m;
+                $this->steps->add('note_hit', 'NOTE_HIT', ['note' => $note->id, 'key' => $note->written_key, 'province' => $note->province, 'city' => $note->city, 'barangay' => $note->barangay]);
+            }
         } catch (Throwable $e) {
             $error = $this->steps->redact($e->getMessage());
             $m = ['remark' => '', 'icon' => '', 'province' => '', 'city' => '', 'barangay' => ''];
@@ -78,7 +85,7 @@ final class Encoder
         foreach ($write as $col => $v) $db[$col] = Text::sheetValue($v);
 
         // 1.0 OUTPUT
-        $checker = new Checker($db, $this->loc, $this->gpt, $this->steps);
+        $checker = new Checker($db, $this->loc, $this->gpt, $this->steps, $this->rules);
         try {
             $checker->run();
         } catch (Throwable $e) {
@@ -90,16 +97,24 @@ final class Encoder
         $s = Text::jsTrim($db['S']);
         $final = $w !== '' ? $w : $s;
 
-        return [
-            'outputs' => [
-                'name' => $db['B'], 'phone' => $cell['K'] ?? '', 'address_line' => $db['D'], 'province' => $db['E'], 'city' => $db['F'], 'barangay' => $db['G'],
-                'item' => $db['H'], 'cod' => $db['I'], 'remark' => $db['N'], 'icon' => $m['icon'],
-                'r' => $db['R'], 's' => $db['S'], 't' => $db['T'], 'u' => $db['U'], 'v' => $db['V'], 'w' => $db['W'],
-                'final' => $final, 'proceed' => $final === '✅', 'candidates' => $m['candidates'] ?? null, 'phone_ok' => $checker->phoneOk,
-            ],
-            'db' => $db,
-            'error' => $error,
+        $outputs = [
+            'name' => $db['B'], 'phone' => $cell['K'] ?? '', 'address_line' => $db['D'], 'province' => $db['E'], 'city' => $db['F'], 'barangay' => $db['G'],
+            'item' => $db['H'], 'cod' => $db['I'], 'remark' => $db['N'], 'icon' => $m['icon'],
+            'r' => $db['R'], 's' => $db['S'], 't' => $db['T'], 'u' => $db['U'], 'v' => $db['V'], 'w' => $db['W'],
+            'final' => $final, 'proceed' => $final === '✅', 'candidates' => $m['candidates'] ?? null, 'phone_ok' => $checker->phoneOk,
         ];
+        if ($this->rules) {
+            // R2 at R4: ang ✅ ay hold kapag iba ang province sa isinulat o ang kombinasyon ay wala sa J&T file.
+            $hold = $outputs['proceed'] ? $this->rules->checkFinal($db['E'], $db['F'], $db['G']) : null;
+            if ($final === 'Province' && ($why = $this->rules->provinceContradiction($db['E'])) !== null) $hold = ['rule' => 'R2', 'reason' => $why]; // ang checker ay hindi ginawang ✅
+            if ($hold) {
+                $outputs['proceed'] = false;
+                $this->steps->add('rule_hold', 'HOLD:' . $hold['rule'], ['rule' => $hold['rule'], 'reason' => $hold['reason']]);
+            }
+            $outputs += ['rules' => Rules::NAME, 'hold' => $hold, 'note_hit' => $this->rules->noteHit];
+        }
+
+        return ['outputs' => $outputs, 'db' => $db, 'error' => $error];
     }
 
     /** Ang K ng DATABASE (VALL_USER_INPUT ng storeAndTransferEncoderValues): ang buong usapan na binabasa ng GPT. */
