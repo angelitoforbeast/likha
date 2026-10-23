@@ -32,7 +32,7 @@
 @if(!$pages)
     <p class="cb-card px-4 py-3 text-sm text-slate-600">No page has a Botcake ID yet. Add one in <a href="{{ url('/chatblast/page-settings') }}" class="text-blue-700 hover:underline">Page settings</a>.</p>
 @else
-<div id="ib" class="cb-page" data-list-url="{{ route('chatbot.inbox.conversations') }}" data-thread-url="{{ route('chatbot.inbox.thread') }}" data-panel-url="{{ route('chatbot.inbox.panel') }}"
+<div id="ib" class="cb-page" data-list-url="{{ route('chatbot.inbox.conversations') }}" data-thread-url="{{ route('chatbot.inbox.thread') }}" data-panel-url="{{ route('chatbot.inbox.panel') }}" data-keys-url="{{ route('chatbot.inbox.field-keys') }}"
      data-send-url="{{ route('chatbot.inbox.send') }}" data-pause-url="{{ route('chatbot.inbox.pause') }}" data-roles-url="{{ route('chatbot.inbox.roles') }}" data-sequence-url="{{ route('chatbot.inbox.sequence') }}"
      data-fields-url="{{ route('chatbot.customer-fields') }}" data-pages-url="{{ route('chatbot.pages.index') }}"
      data-can-send="{{ $canSend ? '1' : '0' }}" data-user="{{ auth()->user()?->name ?: 'You' }}">
@@ -64,6 +64,13 @@
                         <option value="">All</option><option value="ordered">Ordered</option><option value="loop1">Loop 1</option><option value="loop2">Loop 2</option>
                         <option value="loop3">Loop 3</option><option value="failed">Reply failed</option><option value="phone">Phone, no order</option>
                     </select>
+                </div>
+                <div class="space-y-1">
+                    <div id="ib-conds" class="space-y-1"></div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <button type="button" id="ib-add-cond" class="cb-btn cb-btn-sm">+ Condition</button>
+                        <button type="button" id="ib-clear-conds" class="hidden text-slate-600 hover:underline">Clear conditions</button>
+                    </div>
                 </div>
                 <div class="flex gap-1 text-xs" role="tablist" aria-label="Who answers">
                     <button type="button" role="tab" data-tab="" class="ib-tab rounded-md px-2 py-1" aria-selected="true">All</button>
@@ -197,7 +204,8 @@
     async function loadList() {
         if (!S.page) return;
         try {
-            const data = await getJson(D.listUrl, {page_id: S.page, window: $('ib-window').value, tab: S.tab, status: $('ib-status').value, q: $('ib-q').value.trim()});
+            const conds = sendable();
+            const data = await getJson(D.listUrl, {page_id: S.page, window: $('ib-window').value, tab: S.tab, status: $('ib-status').value, q: $('ib-q').value.trim(), conditions: conds.length ? JSON.stringify(conds) : null});
             paintCounts(data.counts || {});
             const rows = data.rows.map(r => {
                 const li = el('li', {}, el('button', {type: 'button', class: 'flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50' + (r.psid === S.psid ? ' bg-blue-50' : ''), 'aria-current': r.psid === S.psid ? 'true' : null}, [
@@ -213,13 +221,70 @@
                 return li;
             });
             $('ib-rows').replaceChildren(...rows);
-            $('ib-list-note').textContent = rows.length ? rows.length + (rows.length >= 200 ? '+' : '') + ' conversations' : 'No conversations in this time.';
+            const total = data.total ?? rows.length;
+            $('ib-list-note').textContent = rows.length ? total + (total === 1 ? ' conversation' : ' conversations') + (total > rows.length ? ' (showing ' + rows.length + ')' : '') : 'No conversations in this time.';
         } catch (e) { $('ib-list-note').textContent = 'Could not load the list (' + (e.status || 'network') + ').'; }
     }
     const reloadList = () => { clearTimeout(listTimer); listTimer = setTimeout(loadList, 250); };
     $('ib-q').addEventListener('input', reloadList);
     $('ib-window').addEventListener('change', loadList);
     $('ib-status').addEventListener('change', loadList);
+
+    // ---- Filter builder: lahat ng kondisyon ay dapat tumugma (AND). Naaalala ang huli kada page sa browser. ----
+    const COND_KEY = 'chatbot-inbox:conditions:';
+    const COND_TYPES = {field: 'Customer field', ordered: 'Ordered', last_message: 'Last message date', first_chat: 'First chat date', bot_reply: 'Last bot reply', handler: 'Human / Bot'};
+    const FIELD_OPS = {has_value: 'has value', empty: 'is empty', is: 'is', contains: 'contains', not_contains: "doesn't contain"};
+    const CHOICES = {ordered: [['yes', 'Yes'], ['no', 'No']], bot_reply: [['failed', 'Failed'], ['sent', 'Sent']], handler: [['human', 'Human'], ['bot', 'Bot']]};
+    const blankCond = type => ({type, key: '', op: 'has_value', value: CHOICES[type] ? CHOICES[type][0][0] : '', from: '', to: ''});
+    S.conds = []; S.keys = [];
+    const readConds = () => { try { const v = JSON.parse(localStorage.getItem(COND_KEY + S.page) || '[]'); return Array.isArray(v) ? v.filter(c => c && COND_TYPES[c.type]).slice(0, 10).map(c => ({...blankCond(c.type), ...c})) : []; } catch (e) { return []; } };
+    const saveConds = () => { try { localStorage.setItem(COND_KEY + S.page, JSON.stringify(S.conds)); } catch (e) { /* walang storage: hindi maaalala */ } };
+    // Ang kumpleto lang ang ipinapadala (ang kulang ay hinihintay pa).
+    function sendable() {
+        return S.conds.filter(c => c.type === 'field' ? c.key && (['has_value', 'empty'].includes(c.op) || c.value.trim() !== '') : ['last_message', 'first_chat'].includes(c.type) ? ((c.from || c.to) && !(c.from && c.to && c.from > c.to)) : true)
+            .map(c => c.type === 'field' ? {type: 'field', key: c.key, op: c.op, value: c.value} : ['last_message', 'first_chat'].includes(c.type) ? {type: c.type, from: c.from, to: c.to}
+                : c.type === 'ordered' ? {type: 'ordered', value: c.value, from: c.from, to: c.to} : {type: c.type, value: c.value});
+    }
+    const condChanged = () => { saveConds(); reloadList(); };
+    function pick(label, options, value, onchange) {
+        const s = el('select', {class: 'min-w-0 rounded-md border border-slate-300 px-1 py-1 text-sm', 'aria-label': label}, options.map(([v, l]) => el('option', {value: v, text: l})));
+        s.value = value; s.addEventListener('change', () => onchange(s.value)); return s;
+    }
+    function dateBox(c, prop, label) {
+        const i = el('input', {type: 'date', class: 'min-w-0 flex-1 rounded-md border border-slate-300 px-1 py-1 text-sm', 'aria-label': label, value: c[prop] || null});
+        i.addEventListener('change', () => { c[prop] = i.value; condChanged(); }); return i;
+    }
+    function paintConds() {
+        $('ib-clear-conds').classList.toggle('hidden', !S.conds.length);
+        $('ib-add-cond').disabled = S.conds.length >= 10;
+        $('ib-conds').replaceChildren(...S.conds.map((c, n) => {
+            const parts = [pick('Condition type', Object.entries(COND_TYPES), c.type, t => { S.conds[n] = blankCond(t); paintConds(); condChanged(); })];
+            if (c.type === 'field') {
+                const keys = S.keys.some(k => k.key === c.key) || !c.key ? S.keys : [{key: c.key, label: c.key.toUpperCase()}, ...S.keys];
+                parts.push(pick('Customer field', [['', 'Pick a field…'], ...keys.map(k => [k.key, k.label])], c.key, v => { c.key = v; condChanged(); }));
+                parts.push(pick('Operator', Object.entries(FIELD_OPS), c.op, v => { c.op = v; paintConds(); condChanged(); }));
+                if (!['has_value', 'empty'].includes(c.op)) {
+                    const i = el('input', {type: 'text', maxlength: 200, placeholder: 'Value', class: 'min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm', 'aria-label': 'Value', value: c.value || null});
+                    i.addEventListener('input', () => { c.value = i.value; condChanged(); }); parts.push(i);
+                }
+            } else if (CHOICES[c.type]) {
+                parts.push(pick(COND_TYPES[c.type], CHOICES[c.type], c.value, v => { c.value = v; condChanged(); }));
+            }
+            if (c.type === 'ordered' || c.type === 'last_message' || c.type === 'first_chat') {
+                parts.push(el('div', {class: 'flex w-full items-center gap-1 text-xs text-slate-500'}, [dateBox(c, 'from', 'From date'), '–', dateBox(c, 'to', 'To date')]));
+            }
+            const rm = el('button', {type: 'button', class: 'ml-auto px-1 text-slate-500 hover:text-red-700', 'aria-label': 'Remove condition', title: 'Remove', text: '×'});
+            rm.addEventListener('click', () => { S.conds.splice(n, 1); paintConds(); condChanged(); });
+            return el('div', {class: 'flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1'}, [...parts, rm]);
+        }));
+    }
+    $('ib-add-cond').addEventListener('click', () => { if (S.conds.length < 10) { S.conds.push(blankCond('field')); paintConds(); saveConds(); } });
+    $('ib-clear-conds').addEventListener('click', () => { S.conds = []; paintConds(); condChanged(); });
+    async function loadKeys() {
+        const page = S.page;
+        try { const d = await getJson(D.keysUrl, {page_id: page}); if (page === S.page) { S.keys = d.keys || []; paintConds(); } } catch (e) { /* ang listahan ng field ay hindi mahalaga sa pagbukas */ }
+    }
+    function switchConds() { S.conds = readConds(); S.keys = []; paintConds(); loadKeys(); }
     function paintCounts(c) { root.querySelectorAll('#ib-status option').forEach(o => { if (!o.value) return; o.dataset.label ??= o.textContent; o.textContent = o.dataset.label + ' (' + (c[o.value] ?? 0) + ')'; }); }
     root.querySelectorAll('.ib-tab').forEach(b => b.addEventListener('click', () => { S.tab = b.dataset.tab; paintTabs(); loadList(); }));
     function paintTabs() { root.querySelectorAll('.ib-tab').forEach(b => { const on = b.dataset.tab === S.tab; b.setAttribute('aria-selected', on ? 'true' : 'false'); b.className = 'ib-tab rounded-md px-2 py-1 ' + (on ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'); }); }
@@ -545,9 +610,10 @@
         $('ib-items').replaceChildren(); $('ib-who').textContent = 'Pick a conversation'; $('ib-who-sub').textContent = ''; $('ib-older').classList.add('hidden');
         $('ib-reply').classList.add('hidden'); $('ib-to-panel').disabled = true;
         $('ib-panel-body').replaceChildren(el('p', {class: 'text-slate-500', text: 'Pick a conversation.'}));
-        show('list'); loadList();
+        switchConds(); show('list'); loadList();
     });
     paintTabs();
+    switchConds();
     loadList();
 })();
 </script>
