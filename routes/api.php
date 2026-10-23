@@ -24,6 +24,9 @@ Route::middleware('throttle:30,1')->group(function () {
     Route::get('/staff-events', [StaffFeedController::class, 'events']);
 });
 
+// Read-only feed ng Set RTS% laban sa Projected RTS% ng bawat page+item, para sa assistant ng owner (header X-RTS-CHECK-KEY, sariling key).
+Route::get('/owner/rts-check', [\App\Http\Controllers\OwnerRtsCheckController::class, 'index'])->middleware('throttle:30,1,owner-rts-check');
+
 // Default example route (optional)
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();

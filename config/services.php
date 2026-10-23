@@ -161,6 +161,11 @@ return [
         ],
     ],
 
+    // Read-only RTS check feed (/api/owner/rts-check); walang laman = 401 sa lahat.
+    'rts_check' => [
+        'key' => env('RTS_CHECK_KEY'),
+    ],
+
     // Read-only staff feed (/api/staff-status, /api/staff-events); walang laman = 503.
     'staff_feed' => [
         'key' => env('STAFF_FEED_KEY'),
