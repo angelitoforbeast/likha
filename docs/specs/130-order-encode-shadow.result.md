@@ -172,5 +172,6 @@ e06ec775 docs: spec 130 order encode shadow with the reference scripts
 3ab19386 docs: order encode guide, supervisor reference, stories for spec 130
 aafdab44 fix: order encode only takes the All Orders step, live falls back to the sheet when not ready or failed, done only after the macro row exists (spec 130)
 8bcaf8b7 fix: a live retry reuses the macro row it already made and does not also write the sheet (spec 130)
+72c6fba6 feat: order encode uses the J&T address file for both steps, enye equals n, compare labels known causes (spec 130 amendment 1)
 ```
 (plus the commit that adds this result.)
