@@ -98,8 +98,89 @@ class Rules
     {
         $written = $this->loc->provinceOf($this->written['province']);
         if ($written === null) return null; // "[Please confirm]", "N/A" at iba pang hindi province: hindi binibilang
+        if (Text::normProv($written) === Text::normProv($resultProvince)) return null;
+        // Madalas maluwag ang isinulat na province ("Cotabato" sa GenSan, "Rizal" sa Pasig, "Quezon" sa Quezon City): hold lang kapag
+        // ang isinulat na city ay nasa isinulat na province, kaya talagang ibang lugar ang sinasabi ng customer (hal. San Fernando, La Union).
+        if ($this->writtenCity($this->loc->cityList($written), $written) === null) return null;
 
-        return Text::normProv($written) === Text::normProv($resultProvince) ? null : 'Province differs from what the customer wrote';
+        return 'Province differs from what the customer wrote';
+    }
+
+    /**
+     * R6: ibang barangay o city na nabanggit din sa chat ng customer. Ang mas buong label ng parehong barangay (NOVALICHES →
+     * NOVALICHES PROPER, kapag nasa chat ang dagdag na salita) ang ibinabalik; kapag may ibang barangay ng city o ibang city ng
+     * province na buong salitang nasa chat, hold, dahil madalas distrito ang napipili (Novaliches, Tugbok) imbes na ang barangay.
+     *
+     * @return array{barangay?: string, hold?: string}
+     */
+    public function ambiguity(string $province, string $city, string $barangay, string $chat): array
+    {
+        $text = ' ' . self::words($chat) . ' ';
+        if (trim($text) === '') return [];
+        $chosen = Written::brgy($barangay);
+        $cityKey = Written::city($city, $province);
+        $skip = fn (string $k) => $k === '' || mb_strlen($k) < 4 || preg_match('/^(\d+|[ivxlc]+)$/u', $k) || $k === $cityKey || $k === Written::prov($province);
+
+        $longer = null;
+        $others = [];
+        foreach (self::items($this->loc->barangayList($city, $province)) as $label) {
+            $k = Written::brgy($label);
+            if ($k === $chosen || $skip($k)) continue;
+            if ($chosen !== '' && str_starts_with($k, $chosen . ' ')) {
+                if (self::wordsIn(trim(substr($k, strlen($chosen))), $text)) $longer = $label;
+                continue;
+            }
+            if (self::mentioned($k, $text)) $others[] = $label;
+        }
+        if ($longer !== null) return ['barangay' => $longer];
+        if ($others) return ['hold' => 'Another barangay of the city is also in the chat: ' . implode(', ', array_slice($others, 0, 3))];
+
+        foreach (self::items($this->loc->cityList($province)) as $label) {
+            $k = Written::city($label, $province);
+            if ($k === $cityKey || $k === $chosen || $skip($k) || mb_strlen($k) < 5 || preg_match('/^(san|santa|santo|sta|sto)\b/u', $k)) continue;
+            if (self::mentioned($k, $text)) return ['hold' => 'Another city of the province is also in the chat: ' . $label];
+        }
+
+        return [];
+    }
+
+    private static function words(string $s): string
+    {
+        $s = str_replace(['ñ', 'Ñ'], 'n', mb_strtolower($s));
+
+        return trim(preg_replace('/\s+/', ' ', preg_replace('/[^a-z0-9]+/u', ' ', $s) ?? '') ?? '');
+    }
+
+    /** Buong salitang nasa text, maliban kung kalye o subdivision ang tinutukoy ("manalo extension", "rizal st"). */
+    private static function mentioned(string $k, string $text): bool
+    {
+        $street = '(st|street|ave|avenue|rd|road|blvd|ext|extension|extention|village|vill|subd|subdivision|homes|hts|heights|drive|dr|highway)';
+        if (!preg_match_all('/ ' . preg_quote($k, '/') . ' (\S+)?/u', $text, $m)) return false;
+        foreach ($m[1] as $next) {
+            if (!preg_match('/^' . $street . '$/u', (string) $next)) return true;
+        }
+
+        return false;
+    }
+
+    /** Bawat salita ng $needle (3+ letra) ay nasa text, eksakto o halos pareho ang baybay ("propir" = "proper"). */
+    private static function wordsIn(string $needle, string $text): bool
+    {
+        $tokens = explode(' ', trim($text));
+        foreach (explode(' ', $needle) as $w) {
+            if (mb_strlen($w) < 3) continue;
+            $ok = false;
+            foreach ($tokens as $t) {
+                if ($t === $w) { $ok = true; break; }
+                if (strlen($w) >= 4 && abs(strlen($t) - strlen($w)) <= 2) {
+                    similar_text($t, $w, $p);
+                    if ($p >= 70) { $ok = true; break; }
+                }
+            }
+            if (!$ok) return false;
+        }
+
+        return true;
     }
 
     /** R4: bakit hold ang kombinasyon (wala sa J&T file), o null. */
