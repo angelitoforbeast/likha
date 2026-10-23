@@ -72,27 +72,31 @@ class Inbox
      * Ang mga usapan ng page sa loob ng window, pinakabagong galaw muna. tab: '' (lahat), 'bot' o 'human' (naka-pause).
      * @return array<int, array{psid: string, name: string, preview: string, from: string, at: ?string, waiting: bool, human: bool}>
      */
-    public function conversations(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = ''): array
+    public function conversations(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = '', array $conditions = []): array
     {
-        return $this->listWithCounts($pageId, $window, $q, $tab, $status)['rows'];
+        return $this->listWithCounts($pageId, $window, $q, $tab, $status, $conditions)['rows'];
     }
 
     /**
      * Ang listahan at ang bilang ng bawat status (Ordered, Loop 1-3, Reply failed, Phone no order) sa parehong page, window,
      * tab at hanap. Isang query kada uri ng status para sa mga customer ng listahan (hanggang GROUP_LIMIT x 2), walang N+1.
-     * @return array{rows: array<int, array>, counts: array<string, int>}
+     * Ang $conditions (InboxFilters::parse) ay dagdag na AND sa lahat; ang total ay ang bilang ng tumugma bago ang LIST_LIMIT.
+     * @return array{rows: array<int, array>, counts: array<string, int>, total: int}
      */
-    public function listWithCounts(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = ''): array
+    public function listWithCounts(string $pageId, string $window = '7d', string $q = '', string $tab = '', string $status = '', array $conditions = []): array
     {
+        $filters = new InboxFilters();
         $since = now()->subHours(self::WINDOWS[$window] ?? 168);
         $q = trim($q);
         $like = '%' . strtr(mb_strtolower($q), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
 
         $in = BotcakeChat::active()->where('page_id', $pageId)->where('received_at', '>=', $since)
+            ->when($conditions, fn ($w) => $filters->apply($w, $conditions, 'botcake_chats.psid', true, (int) $pageId, $since))
             ->when($q !== '', fn ($w) => $w->where(fn ($o) => $o->whereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$like])->orWhere('psid', 'like', strtr($q, ['%' => '', '_' => '']) . '%')))
             ->selectRaw('psid, MAX(id) AS last_id, MAX(received_at) AS last_at')->groupBy('psid')
             ->orderByDesc('last_at')->limit(self::GROUP_LIMIT)->get()->keyBy(fn ($r) => (string) $r->psid);
         $out = ChatbotReply::where('page_id', (int) $pageId)->where('sent_at', '>=', $since)->whereIn('kind', self::OUT_KINDS)
+            ->when($conditions, fn ($w) => $filters->apply($w, $conditions, 'chatbot_replies.psid', false, (int) $pageId, $since))
             ->selectRaw('psid, MAX(id) AS last_id, MAX(sent_at) AS last_at')->groupBy('psid')
             ->orderByDesc('last_at')->limit(self::GROUP_LIMIT)->get()->keyBy(fn ($r) => (string) $r->psid);
         // May hanap: ang mga customer na tugma sa papasok lang (ang pangalan ay nasa botcake_chats).
@@ -104,12 +108,15 @@ class Inbox
         foreach ($all as $psid) {
             $human = isset($paused[(string) $psid]);
             if (($tab === 'human' && !$human) || ($tab === 'bot' && $human)) continue;
-            $rows[$psid] = ['in' => $in[$psid] ?? null, 'out' => $out[$psid] ?? null, 'human' => $human];
+            $r = ['in' => $in[$psid] ?? null, 'out' => $out[$psid] ?? null, 'human' => $human];
+            if (InboxFilters::hasLastMessage($conditions) && !InboxFilters::lastMessageOk($conditions, (string) max($r['in']->last_at ?? '', $r['out']->last_at ?? ''))) continue;
+            $rows[$psid] = $r;
         }
         $sets = $this->statusSets((int) $pageId, array_map('strval', array_keys($rows)), $since);
         $counts = array_map('count', $sets);
         if (isset($sets[$status])) $rows = array_intersect_key($rows, $sets[$status]);
         uasort($rows, fn ($a, $b) => strcmp((string) max($b['in']->last_at ?? '', $b['out']->last_at ?? ''), (string) max($a['in']->last_at ?? '', $a['out']->last_at ?? '')));
+        $total = count($rows);
         $rows = array_slice($rows, 0, self::LIST_LIMIT, true);
 
         $inIds = array_values(array_filter(array_map(fn ($r) => $r['in']->last_id ?? null, $rows)));
@@ -140,7 +147,7 @@ class Inbox
             ];
         }
 
-        return ['rows' => $list, 'counts' => $counts];
+        return ['rows' => $list, 'counts' => $counts, 'total' => $total];
     }
 
     public const STATUSES = ['ordered', 'loop1', 'loop2', 'loop3', 'failed', 'phone'];
