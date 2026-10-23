@@ -89,16 +89,18 @@ class RulesTest extends EncodeRunTestCase
         $this->assertContains('barangay', $this->tasks);
     }
 
-    public function test_S_135_6_the_written_city_is_not_replaced_either(): void
+    public function test_S_135_6_a_written_city_that_differs_from_the_match_is_not_forced(): void
     {
+        // Pagkatapos ng re-test (2026-10-24): ang pagpilit sa isinulat ay nagkamali kapag napagpalit ng customer ang mga field
+        // ("Brgy: Capas, City: Tarlac"). Ang R1 ay para lang hindi palitan ng GPT ang nakuhang tugma na ito mismo ang isinulat.
         $rows = [['LAGUNA', 'LAGUNA-SANTA-CRUZ', 'ALIPIT'], ['LAGUNA', 'LAGUNA-LUMBAN', 'WAWA']];
-        $cxd = $this->cxd('Laguna', 'Sta. Cruz', 'Wawa'); // ang barangay ay sa ibang city: ang Macro ay maaaring magkamali, ang isinulat na city ay hindi
-        $answers = ['province' => ['province' => 'LAGUNA'], 'city' => ['city' => 'LAGUNA-LUMBAN', 'province' => 'LAGUNA'], 'barangay' => ['barangay' => 'ALIPIT']];
+        $cxd = $this->cxd('Laguna', 'Sta. Cruz', 'Wawa'); // ang nakuha ng pagtapat ay Lumban/Wawa, iba sa isinulat na city
+        $answers = ['province' => ['province' => 'LAGUNA'], 'city' => ['city' => 'LAGUNA-LUMBAN', 'province' => 'LAGUNA'], 'barangay' => ['barangay' => 'WAWA']];
 
         $o = $this->runOrder($cxd, $rows, $answers, 'improved');
 
-        $this->assertNotContains('city', $this->tasks);
-        $this->assertSame('LAGUNA-SANTA-CRUZ', $o->outputs['city']);
+        $this->assertContains('city', $this->tasks);
+        $this->assertSame('LAGUNA-LUMBAN', $o->outputs['city']);
     }
 
     public static function written(): array

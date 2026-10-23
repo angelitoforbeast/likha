@@ -323,8 +323,9 @@ final class Checker
 
             return;
         }
-        // R1: ang isinulat na city ng customer na nasa city list ng province ay hindi pinapalitan ng GPT.
-        if ($this->rules && ($kept = $this->rules->writtenCity($cityList, $prov)) !== null) {
+        // R1: kapag ang city na nakuha na ng pagtapat ay ang mismong isinulat ng customer (nasa city list), hindi na ito ipinapapalit sa GPT.
+        // Hindi pinipilit ang isinulat kapag iba ang nakuha (madalas mapagpalit ng customer ang mga field).
+        if ($this->rules && ($kept = $this->rules->writtenCity($cityList, $prov)) !== null && Written::city($kept, $prov) === Written::city($this->get('F'), $prov)) {
             if ($kept !== $this->get('F')) $this->put('F', $kept);
             $this->log('city_fix', 'R1_WRITTEN_CITY_KEPT', $prov, $cityOld, 'CITY_OLD', $cityList, $kept, '', false, ['rule' => 'R1']);
 
@@ -380,8 +381,9 @@ final class Checker
 
             return;
         }
-        // R1: ang isinulat na barangay ng customer na nasa barangay list ng city ay hindi pinapalitan ng GPT.
-        if ($this->rules && ($kept = $this->rules->writtenBarangay($brgyList)) !== null) {
+        // R1: kapag ang barangay na nakuha na ng pagtapat ay ang mismong isinulat ng customer (nasa barangay list), hindi na ito ipinapapalit sa GPT.
+        // Hindi pinipilit ang isinulat kapag iba ang nakuha (hal. distrito gaya ng Novaliches o Molo ang isinulat).
+        if ($this->rules && ($kept = $this->rules->writtenBarangay($brgyList)) !== null && Written::brgy($kept) === Written::brgy($this->get('G'))) {
             if ($kept !== $this->get('G')) $this->put('G', $kept);
             $this->log('brgy_fix', 'R1_WRITTEN_BARANGAY_KEPT', $prov, $city, $brgy, $brgyList, $kept, '', false, ['rule' => 'R1']);
             $this->recompute($this->get('M'));
