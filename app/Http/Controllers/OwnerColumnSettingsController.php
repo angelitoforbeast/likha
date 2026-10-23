@@ -93,13 +93,17 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'jnt_del',       'label' => 'Del%'],
             ['id' => 'jnt_transit',   'label' => 'Transit%'],
             ['id' => 'rts_set',       'label' => 'Set RTS%'],
-            ['id' => 'mira_rts',      'label' => 'Mira RTS'],
-            // Para sa Conditional Formatting ng Mira RTS (target o compare_col); nakatago hanggang buksan.
-            ['id' => 'rts_gap_pts',   'label' => 'RTS Gap (Set − Mira)'],
+            ['id' => 'mira_rts',      'label' => 'Projected RTS'],
+            // Mira RTS = tinype ng analyst (may dahilan); ang dalawang gap ay para sa Conditional Formatting nito.
+            ['id' => 'analyst_rts',   'label' => 'Mira RTS'],
+            ['id' => 'analyst_gap_pts', 'label' => 'Mira RTS Gap (Set − Mira)'],
+            ['id' => 'analyst_gap_abs', 'label' => 'Mira RTS Gap (abs)'],
+            // Para sa Conditional Formatting ng Projected RTS (target o compare_col); nakatago hanggang buksan.
+            ['id' => 'rts_gap_pts',   'label' => 'RTS Gap (Set − Projected)'],
             ['id' => 'rts_gap_abs',   'label' => 'RTS Gap (abs)'],
-            ['id' => 'mira_rts_error_pts', 'label' => 'Mira RTS Error (pts)'],
+            ['id' => 'mira_rts_error_pts', 'label' => 'Projected RTS Error (pts)'],
             ['id' => 'rts_gap_ratio', 'label' => 'RTS Gap ÷ Error'],
-            ['id' => 'mira_rts_matched', 'label' => 'Mira RTS Orders'],
+            ['id' => 'mira_rts_matched', 'label' => 'Projected RTS Orders'],
             ['id' => 'promo',         'label' => 'Promo'],
             ['id' => 'price',         'label' => 'Price'],
             ['id' => 'item_val',      'label' => 'Item Val.'],
@@ -247,7 +251,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_1d_m', 'proj_prof_1d_mira', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
-            'rts_set', 'mira_rts', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason',
+            'rts_set', 'mira_rts', 'analyst_rts', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason',
             'stock', 'incoming', 'units_per_day', 'doi', 'order_qty', 'lifecycle',
         ],
         'campaigns' => [
@@ -416,7 +420,10 @@ class OwnerColumnSettingsController extends Controller
     {
         $empty = ['groups' => [], 'byCol' => []];
         if (!array_key_exists($table, self::CATALOG)) return $empty;
-        if ($table === 'owner_private') $this->seedMiraRtsRules();
+        if ($table === 'owner_private') {
+            $this->seedMiraRtsRules();
+            $this->seedAnalystRtsRules();
+        }
 
         $key = $this->colFormatKey($table);
         $row = DB::table('app_settings')->where('key', $key)->first(['value']);
@@ -551,8 +558,34 @@ class OwnerColumnSettingsController extends Controller
      */
     private function seedMiraRtsRules(): void
     {
+        $rule = fn (float $v, string $bg, string $color, bool $bold, string $label) => [
+            'op' => '>', 'value' => $v, 'bg' => $bg, 'color' => $color, 'bold' => $bold, 'label' => $label,
+            'compare_col' => 'rts_gap_ratio', 'active_state' => 'any',
+        ];
+        // ORDER MATTERS — first hit wins.
+        $this->seedColRules('mira_rts', [
+            $rule(2, '#fecaca', '#b91c1c', true, 'Gap > 2× error'),
+            $rule(1, '#fde68a', '#92400e', false, 'Gap > 1× error'),
+        ]);
+    }
+
+    /** Parehong seed para sa Mira RTS ng analyst: pula kapag ang gap sa Set RTS ay ≥5 puntos, amber kapag ≥3. */
+    private function seedAnalystRtsRules(): void
+    {
+        $rule = fn (float $v, string $bg, string $color, bool $bold, string $label) => [
+            'op' => '>=', 'value' => $v, 'bg' => $bg, 'color' => $color, 'bold' => $bold, 'label' => $label,
+            'compare_col' => 'analyst_gap_abs', 'active_state' => 'any',
+        ];
+        $this->seedColRules('analyst_rts', [
+            $rule(5, '#fecaca', '#b91c1c', true, 'Gap ≥ 5 pts'),
+            $rule(3, '#fde68a', '#92400e', false, 'Gap ≥ 3 pts'),
+        ]);
+    }
+
+    private function seedColRules(string $col, array $rules): void
+    {
         if (!Schema::hasTable('app_settings')) return;
-        $marker = self::KEY_COL_FORMAT . '_mira_rts_seeded';
+        $marker = self::KEY_COL_FORMAT . '_' . $col . '_seeded';
         if (DB::table('app_settings')->where('key', $marker)->exists()) return;
 
         $row  = DB::table('app_settings')->where('key', self::KEY_COL_FORMAT)->first(['value']);
@@ -562,18 +595,10 @@ class OwnerColumnSettingsController extends Controller
 
         $has = false;
         foreach ($data['groups'] as $g) {
-            if (in_array('mira_rts', (array) ($g['cols'] ?? []), true)) $has = true;
+            if (in_array($col, (array) ($g['cols'] ?? []), true)) $has = true;
         }
         if (!$has && !$legacy) {
-            $rule = fn (float $v, string $bg, string $color, bool $bold, string $label) => [
-                'op' => '>', 'value' => $v, 'bg' => $bg, 'color' => $color, 'bold' => $bold, 'label' => $label,
-                'compare_col' => 'rts_gap_ratio', 'active_state' => 'any',
-            ];
-            // ORDER MATTERS — first hit wins.
-            $data['groups'][] = ['cols' => ['mira_rts'], 'rules' => [
-                $rule(2, '#fecaca', '#b91c1c', true, 'Gap > 2× error'),
-                $rule(1, '#fde68a', '#92400e', false, 'Gap > 1× error'),
-            ]];
+            $data['groups'][] = ['cols' => [$col], 'rules' => $rules];
             DB::table('app_settings')->updateOrInsert(
                 ['key' => self::KEY_COL_FORMAT],
                 ['value' => json_encode($data, JSON_UNESCAPED_SLASHES), 'updated_at' => now(), 'created_at' => now()]

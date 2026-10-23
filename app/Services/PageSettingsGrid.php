@@ -54,7 +54,7 @@ class PageSettingsGrid
     {
         $now    = $this->now();
         // Ang "_all" (ang mga pangalan ng Setup box) ay hindi page: wala sa grid; ang mga pangalan ay para sa Setup box.
-        [$all, $active] = PageSetting::where('active', true)->orderBy('id')->get()
+        [$all, $active] = PageSetting::where('active', true)->where('provider', '!=', \App\Services\AnalystRts::PROVIDER)->orderBy('id')->get()
             ->partition(fn ($s) => $this->settings->pageKey($s->page_name) === ChatblastSetupCheck::ALL_PAGE);
         $active = $active->values();
         $names  = $this->userNames($active);
@@ -141,7 +141,7 @@ class PageSettingsGrid
     {
         $now     = $this->now();
         $changed = PageSetting::where(fn ($q) => $q->where('created_at', '>=', $since)->orWhere('replaced_at', '>=', $since))
-            ->where('page_name', '!=', ChatblastSetupCheck::ALL_PAGE)->orderBy('id')->get();
+            ->where('provider', '!=', \App\Services\AnalystRts::PROVIDER)->where('page_name', '!=', ChatblastSetupCheck::ALL_PAGE)->orderBy('id')->get();
         $names   = $this->userNames($changed->where('active', true));
 
         $cells = [];

@@ -81,7 +81,7 @@ class MiraRtsConditionsTest extends RtsProjectionTestCase
         $this->assertSame([2, 1], array_map('intval', array_column($first, 'value')));   // pula muna, saka amber
         $this->assertSame(['rts_gap_ratio', 'rts_gap_ratio'], array_column($first, 'compare_col'));
         $saved = json_decode(DB::table('app_settings')->where('key', self::KEY)->value('value'), true);
-        $this->assertCount(1, $saved['groups']);
+        $this->assertCount(2, $saved['groups']);   // Projected RTS at Mira RTS ng analyst
 
         // Binago ng owner → hindi na ginagalaw
         $this->setRuleValues(3);

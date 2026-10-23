@@ -1819,6 +1819,7 @@ class OwnerPrivateController extends Controller
         $aliases = new \App\Services\ItemAliasResolver();
         $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
         $rtsProj = $this->projectedRtsRows($startDate, $endDate);
+        $analystRts = (new \App\Services\AnalystRts())->all();
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
@@ -2387,6 +2388,9 @@ class OwnerPrivateController extends Controller
             $miraGapAbs      = $miraGap !== null ? abs($miraGap) : null;
             $miraError       = $miraRts !== null ? ($proj['error_pts'] ?? null) : null;
             $miraMatched     = $miraRts !== null ? (int) ($proj['matched'] ?? 0) : null;
+            // Mira RTS ng analyst (tinype niya, may dahilan) at ang gap nito sa Set RTS.
+            $analyst         = $analystRts[$pk.'||'.$dominantKey] ?? null;
+            $analystGap      = ($rtsPct !== null && $analyst) ? round($rtsPct - $analyst['pct'], 2) : null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
             // alias-aware aggregation sa jntStatsMap builder above).
@@ -2770,6 +2774,12 @@ class OwnerPrivateController extends Controller
                 'projected_rts_pct'         => $proj['projected_rts'] ?? null,
                 'projected_rts_orders'      => $proj['matched'] ?? null,
                 'projected_rts_transit_pct' => $proj['in_transit_pct'] ?? null,
+                'analyst_rts_pct'           => $analyst['pct'] ?? null,
+                'analyst_rts_reason'        => $analyst['reason'] ?? null,
+                'analyst_rts_at'            => $analyst['at'] ?? null,
+                'analyst_rts_prev'          => $analyst['prev'] ?? null,
+                'analyst_gap_pts'           => $analystGap,
+                'analyst_gap_abs'           => $analystGap !== null ? abs($analystGap) : null,
                 'mira_rts_pct'              => $miraRts,
                 'rts_gap_pts'               => $miraGap,
                 'rts_gap_abs'               => $miraGapAbs,

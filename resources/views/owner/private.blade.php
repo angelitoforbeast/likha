@@ -1069,8 +1069,21 @@
                     </span>
                   </template>
 
-                  <!-- Mga column na pang-Conditional Formatting lang ng Mira RTS (nakatago bilang default) -->
-                  <template x-if="['rts_gap_pts','rts_gap_abs','mira_rts_error_pts','rts_gap_ratio'].includes(col.id)">
+                  <!-- analyst_rts — Mira RTS: tinype ng analyst, may dahilan sa hover; ang kulay ay galing sa Conditional Formatting -->
+                  <template x-if="col.id==='analyst_rts'">
+                    <span>
+                      <template x-if="row.analyst_rts_pct != null">
+                        <span :title="analystTip(row)" style="font-weight:700;cursor:help;"
+                              x-text="Number(row.analyst_rts_pct).toFixed(1)+'%'"></span>
+                      </template>
+                      <template x-if="row.analyst_rts_pct == null">
+                        <span style="color:#cbd5e1;">—</span>
+                      </template>
+                    </span>
+                  </template>
+
+                  <!-- Mga column na pang-Conditional Formatting lang ng Projected RTS at Mira RTS (nakatago bilang default) -->
+                  <template x-if="['rts_gap_pts','rts_gap_abs','mira_rts_error_pts','rts_gap_ratio','analyst_gap_pts','analyst_gap_abs'].includes(col.id)">
                     <span style="color:#111;font-size:12px;" x-text="row[col.id] != null ? Number(row[col.id]).toFixed(1) : '—'"></span>
                   </template>
                   <template x-if="col.id==='mira_rts_matched'">
@@ -2180,12 +2193,15 @@
           { id:'jnt_del',    label:'Del%',       sort:'jnt_del_pct',          align:'center', minw:90  },
           { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
-          { id:'mira_rts',   label:'Mira RTS',   sort:'mira_rts_pct',         align:'center', minw:120 },
-          { id:'rts_gap_pts',   label:'RTS Gap (Set − Mira)', sort:'rts_gap_pts',   align:'center', minw:90 },
+          { id:'mira_rts',   label:'Projected RTS',   sort:'mira_rts_pct',         align:'center', minw:120 },
+          { id:'analyst_rts',   label:'Mira RTS',   sort:'analyst_rts_pct',      align:'center', minw:110 },
+          { id:'analyst_gap_pts', label:'Mira RTS Gap (Set − Mira)', sort:'analyst_gap_pts', align:'center', minw:90 },
+          { id:'analyst_gap_abs', label:'Mira RTS Gap (abs)',        sort:'analyst_gap_abs', align:'center', minw:80 },
+          { id:'rts_gap_pts',   label:'RTS Gap (Set − Projected)', sort:'rts_gap_pts',   align:'center', minw:90 },
           { id:'rts_gap_abs',   label:'RTS Gap (abs)',        sort:'rts_gap_abs',   align:'center', minw:80 },
-          { id:'mira_rts_error_pts', label:'Mira RTS Error (pts)', sort:'mira_rts_error_pts', align:'center', minw:95 },
+          { id:'mira_rts_error_pts', label:'Projected RTS Error (pts)', sort:'mira_rts_error_pts', align:'center', minw:95 },
           { id:'rts_gap_ratio', label:'RTS Gap ÷ Error',      sort:'rts_gap_ratio', align:'center', minw:90 },
-          { id:'mira_rts_matched', label:'Mira RTS Orders',   sort:'mira_rts_matched', align:'center', minw:90 },
+          { id:'mira_rts_matched', label:'Projected RTS Orders',   sort:'mira_rts_matched', align:'center', minw:90 },
           { id:'promo',      label:'Promo',      sort:'promo',                align:'center', minw:90  },
           { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
           { id:'item_val',     label:'Item Val.',       sort:'item_value',     align:'center', minw:80  },
@@ -2557,6 +2573,9 @@
         } else if (colId === 'mira_rts') {
           if (row.projected_rts_pct == null) return null;
           L.push(this.miraTip(row));
+        } else if (colId === 'analyst_rts') {
+          if (row.analyst_rts_pct == null) return null;
+          L.push(this.analystTip(row));
         } else if (colId === 'item_val') {
           if (row.item_value === null || row.item_value === undefined) return null;
           if (row.item_value_source === 'cogs') L.push('cogs');
@@ -2865,9 +2884,16 @@
         }
       },
 
-      // Mira RTS: ang paliwanag sa title ng cell.
+      // Mira RTS ng analyst: dahilan, kailan tinype, at ang dating value.
+      analystTip(row){
+        return 'Mira RTS ' + Number(row.analyst_rts_pct).toFixed(1) + '%: ' + (row.analyst_rts_reason || '')
+          + ' (tinype ' + String(row.analyst_rts_at || '').slice(0, 16) + '; dati: '
+          + (row.analyst_rts_prev != null ? Number(row.analyst_rts_prev).toFixed(1) + '%' : '—') + ')';
+      },
+
+      // Projected RTS: ang paliwanag sa title ng cell.
       miraTip(row){
-        return 'Mira RTS ' + Number(row.mira_rts_pct).toFixed(1) + '% = projected RTS ng mga order sa napiling date range: '
+        return 'Projected RTS ' + Number(row.mira_rts_pct).toFixed(1) + '% = projected RTS ng mga order sa napiling date range: '
           + row.projected_rts_orders + ' matched orders, ' + Number(row.projected_rts_transit_pct).toFixed(0)
           + '% still in transit. Inaasahang error (edad at dami ng order): ~' + row.mira_rts_error_pts + ' puntos.';
       },
@@ -3126,6 +3152,7 @@
           case 'proj_prof_7d':  return row.projected_profit_last_7d;
           case 'rts_set':       return row.rts_pct;
           case 'mira_rts':      return row.mira_rts_pct;
+          case 'analyst_rts':   return row.analyst_rts_pct;
           case 'proj_profit_mira': return row.projected_profit_mira;
           case 'hold':          return row.hold_units ?? null;
           case 'action':        return row.action_comment ?? null;
