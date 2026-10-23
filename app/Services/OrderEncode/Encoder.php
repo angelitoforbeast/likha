@@ -104,8 +104,18 @@ final class Encoder
             'final' => $final, 'proceed' => $final === '✅', 'candidates' => $m['candidates'] ?? null, 'phone_ok' => $checker->phoneOk,
         ];
         if ($this->rules) {
+            // R6: ang mas buong label ng parehong barangay, o hold kapag may ibang barangay/city na nabanggit sa chat (hindi sa note hit).
+            $hold = null;
+            if ($outputs['proceed'] && !$this->rules->noteHit) {
+                $amb = $this->rules->ambiguity($db['E'], $db['F'], $db['G'], Text::jsTrim($input) !== '' ? $input : $cxd);
+                if (isset($amb['barangay'])) {
+                    $this->steps->add('rule_label', 'R6_LONGER_LABEL', ['old' => $db['G'], 'new' => $amb['barangay']]);
+                    $db['G'] = $outputs['barangay'] = $amb['barangay'];
+                }
+                if (isset($amb['hold'])) $hold = ['rule' => 'R6', 'reason' => $amb['hold']];
+            }
             // R2 at R4: ang ✅ ay hold kapag iba ang province sa isinulat o ang kombinasyon ay wala sa J&T file.
-            $hold = $outputs['proceed'] ? $this->rules->checkFinal($db['E'], $db['F'], $db['G']) : null;
+            if (!$hold) $hold = $outputs['proceed'] ? $this->rules->checkFinal($db['E'], $db['F'], $db['G']) : null;
             if ($final === 'Province' && !$this->rules->noteHit && ($why = $this->rules->provinceContradiction($db['E'])) !== null) $hold = ['rule' => 'R2', 'reason' => $why]; // ang checker ay hindi ginawang ✅
             if ($hold) {
                 $outputs['proceed'] = false;
