@@ -95,7 +95,11 @@ class NotesBuilder
                 foreach (preg_split('/\r\n|\n|\r/', (string) $r->{'HISTORICAL LOGS'}) as $line) {
                     $p = explode('|', $line);
                     if (count($p) < 5 || !in_array(trim($p[2]), self::FIELDS, true)) continue;
-                    $at = Carbon::createFromFormat('Y-m-d H:i:s', trim($p[0]), 'Asia/Manila') ?: null;
+                    try {
+                        $at = Carbon::createFromFormat('Y-m-d H:i:s', trim($p[0]), 'Asia/Manila');
+                    } catch (\Throwable) {
+                        $at = null; // oras na hindi mabasa: ang linya ay binibilang
+                    }
                     if ($at && $at->lt($since)) continue;
                     $found[(int) $r->id] = ['staff_fix' => true];
                     break;

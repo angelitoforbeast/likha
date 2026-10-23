@@ -305,6 +305,23 @@ class RulesTest extends EncodeRunTestCase
         $this->assertSame('Possible duplicate: e' . $first->id, $second->outputs['hold']['reason']);
     }
 
+    public function test_S_135_36_a_held_live_order_is_written_to_macro_output_as_to_fix_so_validate_cannot_make_it_proceed(): void
+    {
+        $earlier = $this->earlier();
+        $this->writeList(self::bungadRows());
+        AppSetting::set(Settings::RULES, 'improved');
+        $this->fakeGpt();
+        $this->configurePage('live');
+        $o = OrderEncode::create(['page' => self::PAGE, 'spreadsheet_id' => self::ORDERS, 'tab' => 'All Orders', 'row_number' => null, 'mode' => 'live', 'status' => 'queued',
+            'input' => ['row' => array_map(fn ($v) => "'" . $v, $this->withCxd($this->cxd('Metro Manila', 'Quezon City', 'Bungad')))]]);
+
+        app(Runner::class)->run($o);
+
+        $m = MacroOutput::where('id', '<>', $earlier->id)->sole();
+        $this->assertSame(['TO FIX', null, 'HOLD R5: Possible duplicate: ' . $earlier->id], [$m->{'APP SCRIPT CHECKER'}, $m->STATUS, $m->{'AI ANALYZE'}]);
+        $this->assertSame('✅', $o->fresh()->outputs['final']); // ang encode mismo ay hindi binabago
+    }
+
     public function test_S_135_19_sheet_mode_does_not_check_duplicates(): void
     {
         $this->earlier();
