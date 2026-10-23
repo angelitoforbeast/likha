@@ -79,8 +79,8 @@ class Runner
     {
         $headers = null;
         try {
-            // Ang row ng Encode order step ay laging nasa ayos na A..H, kahit ano ang header ng sheet na pagsusulatan nito.
-            if (empty($o->input['node'])) $headers = $this->sheets->headers($o->spreadsheet_id, $o->tab);
+            // Ang row ng Encode order step at ng Likha import ay laging nasa ayos na A..H, kahit ano ang header ng sheet.
+            if (empty($o->input['node']) && ($o->input['source'] ?? '') !== 'import') $headers = $this->sheets->headers($o->spreadsheet_id, $o->tab);
         } catch (Throwable) {
             // walang header: ang ayos ng column
         }

@@ -36,6 +36,8 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
     /** J1 resume formula — last row na may "DONE" sa col I (auto-update). */
     private const J1_FORMULA = '=ROW(I2)+MATCH(TRUE,INDEX(ISBLANK(I2:I),0),0)-2';
 
+    private ?\App\Services\OrderEncode\ImportShadow $shadow = null;
+
     /** @var array<string,bool> ts_date (Y-m-d) ng mga row na ginawa o binago ng import na ito */
     private array $touchedDates = [];
 
@@ -216,7 +218,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             if ($doneFlag === 'done') { $counters['skipped']++; continue; }
 
             $counters['processed']++;
-            $outcome = $this->importRow($row);
+            $outcome = $this->importRow($row, $actualRow, $sheetId);
             if ($outcome === 'inserted')    $counters['inserted']++;
             elseif ($outcome === 'updated') $counters['updated']++;
 
@@ -335,7 +337,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
      * Import ng IISANG row → match by TIMESTAMP+PAGE+fb_name (update) o create
      * (insert). Returns 'inserted' o 'updated'.
      */
-    private function importRow(array $row): string
+    private function importRow(array $row, ?int $sheetRow = null, ?string $sheetId = null): string
     {
         // TIMESTAMP normalize to "H:i d-m-Y"
         $rawTimestamp = trim($row[0] ?? '');
@@ -436,7 +438,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             return 'updated';
         }
 
-        MacroOutput::create([
+        $made = MacroOutput::create([
             'TIMESTAMP'          => $timestamp,
             'PAGE'               => $page,
             'FULL NAME'          => $row[2] ?? null,
@@ -451,6 +453,11 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             // Nakikita ng staff sa AI ANALYZE: walang pangalan at walang phone, kaya hindi ito maiuugnay sa customer.
             // Isinusulat lang kapag may flag, para hindi magalaw ang column sa ibang order.
             + (trim($fbName) === '' && $namePhone === '' ? ['AI ANALYZE' => OrderIdentity::NO_NAME_NO_PHONE] : []));
+
+        // Shadow encode ng bagong order (dispatch lang; hindi kailanman nagpapabagsak ng import).
+        $this->shadow ??= app(\App\Services\OrderEncode\ImportShadow::class);
+        $this->shadow->created($row, $made, $sheetId, $sheetRow);
+
         return 'inserted';
     }
 }
