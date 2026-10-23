@@ -47,15 +47,23 @@ final class Input
                 }
             }
         }
-        // Walang makilalang header: ang ayos ng column. May ilan lang: ang iba ay sa ayos din.
+        // Wala o kulang ang makilalang header (wala pang 3): ang ayos ng column.
         $mapped = count(array_filter($at, fn ($i) => $i !== null));
         $v = [];
         foreach (self::FIELDS as $pos => $field) {
             $i = $mapped >= 3 ? ($at[$field] ?? null) : $pos;
-            $v[$field] = $i === null ? '' : (string) ($row[$i] ?? '');
+            $v[$field] = $i === null ? '' : self::cell($row[$i] ?? '');
         }
 
         return new self($v);
+    }
+
+    /** Ang apostrophe sa unahan (USER_ENTERED ng sheet step) ay kinakain ng Google; wala ito sa nababasa ng script. */
+    private static function cell(mixed $v): string
+    {
+        $s = (string) $v;
+
+        return str_starts_with($s, "'") ? substr($s, 1) : $s;
     }
 
     public function get(string $field): string

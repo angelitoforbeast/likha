@@ -4,6 +4,7 @@ namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
+use App\Services\OrderEncode\FlowHook;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -494,7 +495,21 @@ class FlowEngine
 
         $vars = $run->vars();
         $row = array_map(fn ($t) => ChatbotVars::sheetCell((string) $t, $vars), (array) ($c['columns'] ?? []));
+
+        // Order encode (spec 130): live = hindi isinusulat sa sheet, ine-encode ng Likha; shadow = isinusulat gaya ng dati at may kasamang encode.
+        $encode = app(FlowHook::class);
+        $mode = $encode->mode($run);
+        if ($mode === 'live' && BotcakeOutbox::enabled() && $encode->live($run, $id, $tab, $row)) {
+            BotcakeOutbox::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $node['id'], 'sheet',
+                ['sheet' => $id, 'tab' => $tab, 'row' => $row, 'note' => FlowHook::NOTE], 'skipped');
+            $run->sheetRows[] = ['node' => $node['id'], 'sheet' => $id, 'tab' => $tab, 'row' => $row, 'status' => 'skipped', 'error' => null, 'note' => FlowHook::NOTE];
+            $run->event('sheet', $node['id'], ['result' => 'skipped', 'error' => '']);
+
+            return ['port' => 'next', 'note' => 'Row skipped: ' . FlowHook::NOTE];
+        }
+
         $res = $outbox->appendRow($run, $node['id'], $id, $tab, $row);
+        if ($mode === 'shadow' && $res['status'] === 'sent') $encode->shadow($run, $id, $tab, $row, $res['range'] ?? null);
         $run->sheetRows[] = ['node' => $node['id'], 'sheet' => $id, 'tab' => $tab, 'row' => $row, 'status' => $res['status'], 'error' => $res['error']] + array_filter(['note' => $res['note'] ?? null]);
         $run->event('sheet', $node['id'], ['result' => ['sent' => 'written', 'failed' => 'failed', 'skipped' => 'skipped'][$res['status']] ?? $res['status'], 'error' => (string) $res['error']]);
         if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Sheet failed: ' . $res['error']];

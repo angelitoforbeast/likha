@@ -61,6 +61,8 @@ return [
     // ✨ Astra engine (AstraEncoder): isang malalim na call na may tools (web_search + jnt_address_search + Pancake).
     // Hiwalay na API key para sa Astra engine (para hiwalay ang billing/limits). Blangko = gamitin ang OPENAI_API_KEY.
     'astra_encoder_key'    => env('ASTRA_ENCODER_API_KEY') ?: env('OPENAI_API_KEY'),
+    // Order encode (/order-encode, spec 130): sariling key; blangko = ang OPENAI_API_KEY. Hindi kailanman nilalabas o itinatala.
+    'order_encode_key'     => env('ORDER_ENCODE_OPENAI_KEY') ?: env('OPENAI_API_KEY'),
     'astra_encoder_model'  => env('ASTRA_ENCODER_MODEL', 'gpt-6-astra'),
     'astra_encoder_effort' => env('ASTRA_ENCODER_EFFORT', 'high'),
     'astra_encoder_max_web' => (int) env('ASTRA_ENCODER_MAX_WEB', 4),   // cap sa web search calls kada row (0 = walang cap)

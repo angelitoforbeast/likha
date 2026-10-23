@@ -86,6 +86,13 @@ class PageSettings
             return ['value' => $full . ' is written by the system (Test token / sync), not here.'];
         }
 
+        // Order encode (spec 130): tatlong key lang, at tama ang value.
+        if ($provider === OrderEncode\Settings::PROVIDER) {
+            if (!in_array($key, OrderEncode\Settings::KEYS, true)) return ['key' => 'order_encode takes only: ' . implode(', ', OrderEncode\Settings::KEYS) . '.'];
+            if ($key === 'mode' && !in_array(strtolower($value), OrderEncode\Settings::MODES, true)) return ['value' => 'order_encode.mode is off, shadow or live.'];
+            if ($key !== 'mode' && $value !== '' && Chatbot\FlowGraph::spreadsheetId($value) === null) return ['value' => 'order_encode.' . $key . ' takes a Google Sheets link or ID.'];
+        }
+
         $digits = $full === 'botcake.page_id'
             || preg_match('/^botcake\.(flow|field)\.[a-z0-9_]+$/', $full);
 

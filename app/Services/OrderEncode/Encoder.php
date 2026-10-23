@@ -73,7 +73,7 @@ final class Encoder
         $write = [
             'A' => $date, 'B' => $cell['J'], 'C' => $cell['K'], 'D' => $cell['L'], 'E' => $m['province'], 'F' => $m['city'], 'G' => $m['barangay'],
             'H' => $cell['U'] ?? '', 'I' => $cell['V'] ?? '', 'J' => $page,
-            'K' => "FB NAME: {$name}\nPHONE NUMBER: {$phone}\n{$input}\n{$shop}", 'L' => $shop, 'M' => $cxd, 'N' => $m['remark'],
+            'K' => self::allUserInput($in), 'L' => $shop, 'M' => $cxd, 'N' => $m['remark'],
         ];
         foreach ($write as $col => $v) $db[$col] = Text::sheetValue($v);
 
@@ -100,6 +100,15 @@ final class Encoder
             'db' => $db,
             'error' => $error,
         ];
+    }
+
+    /** Ang K ng DATABASE (VALL_USER_INPUT ng storeAndTransferEncoderValues): ang buong usapan na binabasa ng GPT. */
+    public static function allUserInput(Input $in): string
+    {
+        return 'FB NAME: ' . $in->get('name') . "
+PHONE NUMBER: " . $in->get('phone') . "
+" . $in->get('input') . "
+" . $in->get('shop');
     }
 
     /** checkMissingFieldsAndAutoFill: ang blangkong J..O ay itinatanong sa GPT, isa-isa, at isinusulat kahit blangko ang sagot. */
