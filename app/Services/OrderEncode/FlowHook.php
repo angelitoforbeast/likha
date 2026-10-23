@@ -93,7 +93,7 @@ class FlowHook
             $order = OrderEncode::create([
                 'page' => $run->pageName, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'run_id' => $run->runId,
                 'spreadsheet_id' => $sheetId, 'tab' => $tab, 'row_number' => null, 'mode' => 'live', 'status' => 'queued',
-                'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten],
+                'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten, 'page_id' => $run->pageId],
             ]);
             try {
                 EncodeOrder::dispatch($order->id);

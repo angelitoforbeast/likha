@@ -144,7 +144,8 @@ class OrderEncodeController extends Controller
         return [
             'id' => $o->id, 'page' => $o->page, 'row' => $o->row_number, 'mode' => $o->mode, 'macro' => $this->macroLink($o, $stamp), 'at' => $o->created_at?->format('Y-m-d H:i'), 'state' => $state,
             'error' => $o->error, 'cells' => $cells,
-            'notes' => array_values(array_intersect_key(Comparer::NOTES, array_flip((array) ($o->sheet['notes'] ?? [])))), 'title' => $this->title((array) $o->steps),
+            // ang mga tala ng live na order (hal. hindi tinanggap na ikalawang order) ay kasama ng mga tala ng compare
+            'notes' => array_merge(array_values(array_intersect_key(Comparer::NOTES, array_flip((array) ($o->sheet['notes'] ?? [])))), array_map('strval', (array) ($o->input['live_notes'] ?? []))), 'title' => $this->title((array) $o->steps),
         ];
     }
 

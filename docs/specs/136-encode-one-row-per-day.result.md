@@ -69,6 +69,7 @@ Review: `skeptic-reviewer` (standard depth) on the whole diff after G5; fix loop
 ## Progress
 
 - G0: brief and plan committed.
+- G1 done: customer lock, find (final / open / new), update with staff edits kept, not-accepted note, R5 after the link, re-encode failure without sheet. `OneRowPerDayTest` 23 green; S-130.16 test amended (the second order now meets a PROCEED row).
 
 ## Files
 

@@ -144,8 +144,10 @@ class EncodeOrderTest extends OrderEncodeTestCase
         $first = $this->runJob($this->makeOrder('live'));
         $second = $this->runJob($this->makeOrder('live'));
 
+        // ang una ay PROCEED: ang ikalawang order ng customer sa araw na iyon ay hindi tinatanggap (spec 136)
         $this->assertSame(1, MacroOutput::count());
-        $this->assertSame($first->macro_output_id, $second->macro_output_id);
+        $this->assertSame('PROCEED', MacroOutput::sole()->STATUS);
+        $this->assertSame(['second order not accepted: row ' . $first->macro_output_id], $second->input['live_notes']);
     }
 
     public function test_S_130_17_live_keeps_the_chat_name_and_phone_and_blanks_status_when_not_a_check(): void
