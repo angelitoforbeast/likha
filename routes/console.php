@@ -191,3 +191,9 @@ Schedule::command('rts:learn')
     ->timezone('Asia/Manila')
     ->dailyAt('04:40')
     ->withoutOverlapping();
+
+// Order encode (spec 130): ang paghahambing ng mga shadow na order sa DATABASE row ng sheet, kada 10 minuto. Walang gagawin kung
+// walang order na naka-shadow.
+Schedule::command('order-encode:compare')
+    ->everyTenMinutes()
+    ->withoutOverlapping(30);

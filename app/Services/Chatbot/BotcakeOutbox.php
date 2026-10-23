@@ -108,7 +108,7 @@ class BotcakeOutbox implements Outbox
             }
         }
 
-        return $this->log($run, $nodeId, 'sheet', $content, 'sent');
+        return $this->log($run, $nodeId, 'sheet', $content, 'sent') + array_filter(['range' => $content['range'] ?? null]);
     }
 
     /** @return array{status: string, error: ?string} */
