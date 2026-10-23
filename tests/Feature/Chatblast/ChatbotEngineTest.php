@@ -188,6 +188,10 @@ class ChatbotEngineTest extends ChatblastTestCase
             'greater than'       => ['gt', 'P1,200', '999', true],
             'less than'          => ['lt', '5 pcs', '10', true],
             'less than no text'  => ['lt', 'abc', '10', false],
+            'has phone plain'    => ['has_phone', '09123456789', '', true],
+            'has phone spaced'   => ['has_phone', '+63 912 345 6789', '', true],
+            'has phone price'    => ['has_phone', '₱999 po', '', false],
+            'has phone number only' => ['has_phone', '1999', '', false],
         ];
     }
 

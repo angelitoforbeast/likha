@@ -208,6 +208,8 @@ class FlowEngine
             'not_contains' => $t === '' || !str_contains($s, $t),
             'starts_with' => $t !== '' && str_starts_with($s, $t),
             'regex' => $target !== '' && @preg_match('~' . str_replace('~', '\~', $target) . '~iu', $subject) === 1,
+            // Iisang valid na PH mobile sa variable (OrderPhone), hindi ang presyo o maikling numero.
+            'has_phone' => \App\Services\OrderPhone::extract($subject) !== '',
             'is_empty' => $subject === '',
             'is_not_empty' => $subject !== '',
             'gt' => is_numeric($num($subject)) && is_numeric($num($target)) && (float) $num($subject) > (float) $num($target),
