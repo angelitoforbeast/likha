@@ -1060,14 +1060,8 @@
                   <template x-if="col.id==='mira_rts'">
                     <span>
                       <template x-if="row.projected_rts_pct != null">
-                        <div>
-                          <span :title="miraTip(row)" style="font-weight:700;"
-                                x-text="Number(row.mira_rts_pct).toFixed(1)+'%'"></span>
-                          <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
-                               x-text="row.projected_rts_orders+' orders · '+Number(row.projected_rts_transit_pct).toFixed(0)+'% in transit'"></div>
-                          <button type="button" class="cell-edit-icon" style="font-size:10px;margin-top:2px;" @click="useMiraRts(row)"
-                                  :disabled="miraSaving" title="Kopyahin ang Mira RTS sa Set RTS%">Use Mira RTS</button>
-                        </div>
+                        <span :title="miraTip(row)" style="font-weight:700;cursor:help;"
+                              x-text="Number(row.mira_rts_pct).toFixed(1)+'%'"></span>
                       </template>
                       <template x-if="row.projected_rts_pct == null">
                         <span style="color:#cbd5e1;">—</span>
@@ -2878,43 +2872,6 @@
           + '% still in transit. Inaasahang error (edad at dami ng order): ~' + row.mira_rts_error_pts + ' puntos.';
       },
 
-      // Use Mira RTS: ang rounded Mira RTS ang isi-save sa Set RTS% sa parehong save ng RTS edit (scope=rts), source mira_rts.
-      miraSaving: false,
-      async useMiraRts(row){
-        if (this.miraSaving || row.mira_rts_pct == null) return;
-        const cellPriceInt = (row.price != null && row.price > 0) ? Math.round(Number(row.price)) : null;
-        if (cellPriceInt === null) { alert('No price detected for this cell. Cannot save.'); return; }
-        const old = row.rts_pct != null ? Number(row.rts_pct).toFixed(1)+'%' : '—';
-        const neu = Number(row.mira_rts_pct).toFixed(1)+'%';
-        if (!confirm(row.page_name + ' · ' + row.item_name + '\nSet RTS: ' + old + ' → ' + neu + '\nGamitin ang Mira RTS?')) return;
-        const eff = row.settings_date || this.endDate;
-        const fd = new FormData();
-        fd.append('scope', 'rts');
-        fd.append('page_name', row.page_name);
-        fd.append('item_name', row.item_name);
-        fd.append('rts_pct', row.mira_rts_pct);
-        fd.append('comment', 'Mira RTS ' + neu + ' (' + row.projected_rts_orders + ' orders)');
-        fd.append('mode_cod_int', cellPriceInt);
-        fd.append('effective_date', eff);
-        if (eff !== this.endDate) fd.append('apply_through', this.endDate);
-        fd.append('source', 'mira_rts');
-        this.miraSaving = true;
-        try {
-          const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
-            method:'POST',
-            headers:{'X-CSRF-TOKEN':'{{ csrf_token() }}', 'Accept':'application/json'},
-            body: fd,
-          });
-          let j;
-          try { j = await r.json(); } catch { alert('Server returned non-JSON (HTTP '+r.status+')'); return; }
-          if (!r.ok || !j.ok) { alert(j.message || (j.errors ? Object.values(j.errors).flat().join('\n') : ('HTTP '+r.status))); return; }
-          await this.load(true);
-        } catch (ex) {
-          alert('Network error: ' + ex.message);
-        } finally {
-          this.miraSaving = false;
-        }
-      },
 
       _setScopeError(scope, msg){
         const e = this.edit;
