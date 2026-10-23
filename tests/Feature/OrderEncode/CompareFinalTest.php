@@ -109,6 +109,19 @@ class CompareFinalTest extends FinalTestCase
         $this->assertSame($first, $done->fresh()->final_compare['at']);
     }
 
+    public function test_S_133_16_a_failed_import_encode_is_marked_failed_and_never_compared(): void
+    {
+        $o = $this->encoded($this->macro(), more: ['status' => 'queued', 'outputs' => null, 'steps' => null, 'usage' => null]);
+        unlink($this->addressFile); // walang listahan ng lugar: hindi ma-encode
+
+        (new \App\Jobs\EncodeOrder($o->id))->handle(app(\App\Services\OrderEncode\Runner::class));
+        $this->run15();
+
+        $o = $o->fresh();
+        $this->assertSame('failed', $o->status);
+        $this->assertNull($o->final_compare);
+    }
+
     public function test_S_133_15_the_sheet_compare_of_a_flow_shadow_row_is_left_alone(): void
     {
         $o = $this->encoded($this->macro(), more: ['mode' => 'shadow', 'compare_state' => 'waiting', 'compare' => ['name' => 'same']]);

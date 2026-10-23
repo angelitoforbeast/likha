@@ -2062,6 +2062,7 @@ Spec 130. As the owner, I want the orders the Likha chatbot takes to be encoded 
 | S-133.13 | Given an order never filled after 72 hours, then it is `sheet_never_finished` (not before) | `test_S_133_13…` | pending |
 | S-133.14 | Only finished import rows and linked flow shadow rows are compared, once | `test_S_133_14…` | pending |
 | S-133.15 | The sheet compare state of a flow shadow row is not changed | `test_S_133_15…` | pending |
+| S-133.16 | Given an import encode that fails, then the order is `failed` and compare-final skips it | `CompareFinalTest::test_S_133_16…` | pending |
 | S-133.20 | The tab shows the tiles, the PROCEED table and the sortable per-page table | `FinalPageTest::test_S_133_20…` | pending |
 | S-133.21 | The date range and page filters apply | `test_S_133_21…` | pending |
 | S-133.22 | Disagreements show Likha and final values side by side with the steps on hover, and escape the text | `test_S_133_22…` | pending |

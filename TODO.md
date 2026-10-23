@@ -1033,3 +1033,4 @@ Accepted, not fixed:
 - **A flow shadow row compared by the sheet compare and by compare-final shows in both tabs.** Reason: intended; the two answers differ (sheet DATABASE row vs final order).
 - **Orders whose `macro_output` row is deleted before compare-final wait 72 h, then show as "sheet never finished".** Reason: rare and harmless.
 - **The cap is not atomic if two import jobs ran at once.** Reason: the `orders` queue runs one import at a time.
+- **Reviewer minors:** `Schema::hasTable` and the skipped-counter read/write run per created order once the switch is on or the cap is hit; the counter is not atomic. Reason: small, display-only.
