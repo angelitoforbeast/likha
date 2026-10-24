@@ -28,6 +28,12 @@ class Runner
     public function run(OrderEncode $o): void
     {
         if ($o->status === 'done') return; // ang ulit na job ay walang ginagawa
+        // Encode order (spec 137): ang row ng Upload to macro ay kilala na, kaya walang hanap ng row at walang lock ng customer.
+        if (!empty($o->input['upload'])) {
+            if ($o->status === 'queued') $this->uploaded($o);
+
+            return;
+        }
         if ($o->mode !== 'live') {
             $this->encode($o, $this->input($o));
 
@@ -77,6 +83,26 @@ class Runner
         }
         $o->update(['status' => 'done']);
         app(AddressQuestion::class)->afterEncode($o->fresh()); // hindi PROCEED: Astra on the spot, saka ang tanong sa address
+    }
+
+    /**
+     * Ang encode ng row na isinulat ng Upload to macro: ang usapan ng upload (naitabi na), ang resulta sa row na iyon lang
+     * (LiveOrder::encodeRow), saka si Astra kapag hindi PROCEED at ang pagtuloy ng flow (FlowEncode). Walang sheet at walang
+     * tanong sa address.
+     */
+    private function uploaded(OrderEncode $o): void
+    {
+        if (!$this->encode($o, new Input((array) ($o->input['fields'] ?? [])))) return;
+        $o->refresh();
+        if ($o->error) {
+            $this->fail($o, 'The encode stopped: ' . $o->error);
+
+            return;
+        }
+        $id = (int) $o->macro_output_id;
+        RowLock::hold($id, (int) config('order_encode.row_lock_wait', 180), fn () => ($row = MacroOutput::find($id)) && $this->live->encodeRow($row, $o));
+        $o->update(['status' => 'done']);
+        app(FlowEncode::class)->afterEncode($o->fresh());
     }
 
     /** Ang final na row ng customer ngayong araw: walang ginagalaw; ang order ay may tala at chat event. */
@@ -137,6 +163,13 @@ class Runner
     public function fail(OrderEncode $o, string $why): void
     {
         $why = preg_replace('/sk-[A-Za-z0-9_\-]{8,}/', '[key]', $why) ?? '';
+        // Encode order: ang row ng Upload to macro ay naiwang hold para sa staff; ang flow ay itinutuloy sa failed.
+        if (!empty($o->input['upload'])) {
+            $o->update(['status' => 'failed', 'error' => mb_substr($why . ' Row ' . $o->macro_output_id . ' was left for staff.', 0, 500)]);
+            app(FlowEncode::class)->finish($o, null, 'The encode failed.');
+
+            return;
+        }
         if ($o->macro_output_id && $o->mode !== 'import') { // ang import row ay may macro_output_id mula sa simula: failed pa rin, para hindi maihambing
             // Re-encode ng bukas na row ng customer: ang row ay hindi ginalaw at walang isusulat sa sheet (doble ang order).
             if (!empty($o->input['linked'])) {

@@ -122,6 +122,60 @@ class LiveOrder
     }
 
     /**
+     * Encode order (spec 137): ang resulta ng encode sa row ng Upload to macro: ang address, ang resulta, ang pangalan at phone
+     * mula sa usapan, at PROCEED ayon sa unang encode. Hindi ang field na inayos ng staff (edited_* o linya ng tao), hindi ang
+     * blangkong sagot sa may laman, at walang ginagalaw kapag may STATUS o waybill na.
+     * @return bool false kapag may STATUS o waybill na ang row
+     */
+    public function encodeRow(MacroOutput $row, OrderEncode $o): bool
+    {
+        if (trim((string) $row->STATUS) !== '' || trim((string) $row->waybill) !== '') return false;
+        $v = $this->values($o);
+        $out = (array) ($o->outputs ?? []);
+        $in = new Input((array) ($o->input['fields'] ?? []));
+        $new = [
+            'ADDRESS' => $v['ADDRESS'], 'PROVINCE' => $v['PROVINCE'], 'CITY' => $v['CITY'], 'BARANGAY' => $v['BARANGAY'],
+            'AI ANALYZE' => $v['AI ANALYZE'], 'APP SCRIPT CHECKER' => $v['APP SCRIPT CHECKER'],
+            'FULL NAME' => self::chatName((string) ($out['name'] ?? ''), (string) $row->{'FULL NAME'}),
+            // Ang valid na phone ng usapan (09…): ang nakuha ng encode, kung hindi ang iisang numero sa chat o sa extracted details.
+            'PHONE NUMBER' => OrderPhone::forOrder((string) ($out['phone'] ?? ''), $in->get('input'), $in->get('cxd')),
+        ];
+        $flags = ['FULL NAME' => 'edited_full_name', 'PHONE NUMBER' => 'edited_phone_number'] + self::UPDATABLE;
+        $staff = self::staffFields((string) $row->{'HISTORICAL LOGS'});
+        $changes = [];
+        $keptPlace = false;
+        foreach ($new as $col => $value) {
+            $old = $row->{$col};
+            if ((string) $value === (string) $old || (trim((string) $value) === '' && trim((string) $old) !== '')) continue;
+            if ((!empty($flags[$col]) && !empty($row->{$flags[$col]})) || in_array($col, $staff, true)) {
+                if (in_array($col, self::PLACES, true)) $keptPlace = true;
+                continue;
+            }
+            $changes[$col] = $value;
+        }
+        if ($v['_proceed'] && !$keptPlace) $changes['STATUS'] = 'PROCEED';
+
+        return $this->write($row, $changes);
+    }
+
+    /**
+     * Ang pangalan mula sa usapan (Unicode NFC, walang sobrang espasyo), o ang dati kapag mas masama ang bago: blangko, may
+     * numero, walang letra, "unknown"/"n/a", o bahagi lang ng dating pangalan.
+     */
+    private static function chatName(string $new, string $old): string
+    {
+        if (class_exists(\Normalizer::class)) $new = (string) \Normalizer::normalize($new, \Normalizer::FORM_C);
+        $new = trim((string) preg_replace('/\s+/u', ' ', $new));
+        $lower = mb_strtolower($new);
+        $oldLower = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $old)));
+        $bad = $new === '' || mb_strlen($new) < 2 || mb_strlen($new) > 100 || preg_match('/\d/u', $new) || !preg_match('/\p{L}/u', $new)
+            || in_array($lower, ['unknown', 'n/a', 'na', 'none', 'null', 'not provided'], true);
+        if ($bad || $lower === $oldLower || ($oldLower !== '' && mb_strlen($lower) < mb_strlen($oldLower) && str_contains($oldLower, $lower))) return $old;
+
+        return $new;
+    }
+
+    /**
      * Upload to macro (Insert): ang hilaw na row ng order, walang encode. Ang FULL NAME ay ang FB name at ang PHONE NUMBER ay ang
      * phone ng flow (hal. ang sagot ng GPT; 09… kapag valid); walang STATUS at walang address hanggang sa Encode order.
      */

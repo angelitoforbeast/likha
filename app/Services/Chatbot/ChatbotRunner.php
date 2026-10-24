@@ -3,6 +3,7 @@
 namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
+use App\Services\OrderEncode\FlowEncode;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -151,9 +152,11 @@ class ChatbotRunner
      */
     public function resumeAi(array $ticket): string
     {
-        return $this->resume(ChatbotAiQueue::TABLE, ['answered', 'failed'], '', ['ai'], 'ai_dropped', $ticket, function (FlowRun $run, object $row) {
+        return $this->resume(ChatbotAiQueue::TABLE, ['answered', 'failed'], '', ['ai', 'encode_macro'], 'ai_dropped', $ticket, function (FlowRun $run, object $row) {
             $run->aiAnswer = ['node' => (string) $row->node_id, 'ok' => $row->status === 'answered', 'text' => (string) $row->answer,
                 'error' => $row->error ?? 'OpenAI did not answer.'];
+            // Ang ticket ng Encode order (spec 137): ang row ng order, para sa variable kahit pumalya.
+            if ($row->model === FlowEncode::MODEL) $run->aiAnswer += ['encode' => true, 'row' => json_decode((string) $row->context, true)['row_id'] ?? null];
         });
     }
 
