@@ -203,14 +203,19 @@ of the old step.
 - Each upload is an `order_encodes` row with status `uploaded` and `input.upload` set: that is "the row of this run" for Encode order.
 - "Counts as an order" counts only when a row was written or updated.
 
-**Encode order** (`encode_macro`, ports next and failed; settings "Wait up to" 10–600 s, default 120, and "Run Astra when the encode does
-not PROCEED", default on).
-- It clears the `encode_*` variables, then:
-  - no upload in this run: failed;
-  - the row is already final: proceed yes at once;
-  - no key or no address file: failed.
-- Otherwise it queues `EncodeOrder` for the upload and the run waits ("waiting for the encode"). The customer's later chats wait too
-  (`__ai`).
+**Encode order** (`encode_macro`, ports next and failed; setting "Run Astra when the encode does not PROCEED", default on). Since spec
+143 it never waits: it queues the encode in the background and the flow goes on with next at once, in any run (main flow or sequence
+step). The result is read later with the `order_*` variables (below).
+- The target row, the first that applies:
+  - the row Upload to macro wrote in this run;
+  - else the customer's open row: same PAGE and PSID, STATUS and waybill blank, TIMESTAMP within 24 hours (crossing midnight);
+  - else failed with the note "No order row to encode"; nothing is queued.
+- The row is final (PROCEED, a courier status or a waybill): nothing is changed, next.
+- The row already has an encode queued or running (its Astra included): nothing is queued again, next ("already being encoded").
+- No key or no address file: failed, nothing queued.
+- Otherwise it queues `EncodeOrder` on `encode-live` and goes on with next. For the open-row fallback the encode uses the row's
+  last upload that was not encoded yet, else a new `order_encodes` row (`input.upload` = `encode`) with the conversation of the row's last
+  encode or upload (a row without one is read from its own columns).
 - The encode is the 136 encode (improved rules, notes, R5 counting other customers only), run on the upload's conversation. It writes
   ADDRESS, PROVINCE, CITY, BARANGAY, AI ANALYZE, APP SCRIPT CHECKER and STATUS = PROCEED (first-encode rules) into that row only, plus:
   - **PHONE NUMBER:** the phone of the chat (`OrderPhone::forOrder`: the encode's phone, else the only number in the conversation, else in
@@ -220,26 +225,29 @@ not PROCEED", default on).
 - The write skips staff-edited fields (`edited_*` or a person's log line), never blanks a filled field and changes nothing on a row with a
   STATUS or a waybill.
 - When the row is not PROCEED, the box is on and `order_encode_spot_astra` is not `off`, Astra runs on the same row in its own job, `RunEncodeAstra`
-  on the express lane `astra-live` (one try):
-  - It uses the spot path: `AiCheckerRowRunner`, source `spot`, user "Likha encode", under the row lock without waiting.
-  - The encode's result is stored on the wait first, so an Astra error, a busy row or a slow Astra continues on next with the encode's
-    result.
-- **The wait** is a row in `chatbot_ai_requests` with `model` = `order-encode` and `status` = `encoding`. The AI pool never claims it.
-  - The job finishes it as `answered` (the variables as JSON) or `failed`, then `ResumeChatbotAi` resumes the run once.
-  - Past the deadline, `ChatbotAiQueue::sweep` (every minute via `chatbot:resume-skipped`, and in the AI pool) resumes it: with the stored
-    encode result when only Astra was still running, else on failed with `error`.
-  - A late result still updates the row but never resumes again.
-  - A changed flow or a paused bot drops the resume with an `ai_dropped` event.
-  - Bot Health's AI-call counts skip these rows.
-- **Variables** (set on resume):
-  - `encode_province`, `encode_city`, `encode_barangay`, `encode_address`, `encode_name`, `encode_phone`: the row's final values;
-  - `encode_proceed`: `yes` or `no`;
-  - `encode_hold_reason`: the first of `address` (R2/R4/R6, the address check or Astra's final code not ✅, or a blank place/address),
-    `duplicate` (R5), `name` (blank), `phone` (no valid 09 number), `price` (the page/price/quantity check not ✅), `other`; `error` when
-    the encode failed or timed out; empty on proceed;
-  - `encode_row_id`.
-- The Test tab sets `encode_proceed = no` and `encode_hold_reason = address` and queues nothing.
-- A sequence step cannot wait, so there it goes to failed.
-- Publish shows a non-blocking notice when an Encode order has no Upload to macro before it.
+  on the express lane `astra-live` (one try): the spot path (`AiCheckerRowRunner`, source `spot`, user "Likha encode", under the row lock
+  without waiting). Its result is kept on the order (`input.astra`).
+- A failed encode job leaves the row held for staff (`order_encodes` status `failed`).
+- The Test tab notes "Test: would encode" and queues nothing.
+- Publish shows a non-blocking hint when an Encode order has no Upload to macro before it (it then encodes the open row, or fails).
+- Removed in spec 143: the wait (tickets in `chatbot_ai_requests`), "Wait up to" (an old `wait` key is dropped when the flow is saved and
+  ignored when it runs) and the `encode_*` variables. A wait ticket left from before the deploy is still finished by the sweep; the run
+  then just goes on with next.
+
+**`order_*` variables** (`OrderVars`, spec 143): every flow (main and sequence) can read them in a Condition and in `{{...}}` templates
+and AI prompts. They come from the customer's newest `macro_output` row on this page (PAGE = the page name, `botcake_psid` = the
+customer's PSID, `ts_date` within the last 7 days; the newest row of the last 24 hours is that same row whenever there is one), read once
+per run and again after Upload to macro or Encode order. With no row they are blank and `order_encode_state` is `none`.
+
+| Variable | Value |
+|---|---|
+| `order_row_id` | the row id |
+| `order_status` | STATUS (PROCEED, CANNOT PROCEED or blank) |
+| `order_checker` | APP SCRIPT CHECKER |
+| `order_hold_reason` | blank when the row is final or not encoded yet; else the first of `address`, `duplicate`, `name`, `phone`, `price`, `other`: from the row's last encode (and its Astra) by the 137 rule, or, for a row without one, from "HOLD Rn" in AI ANALYZE and APP SCRIPT CHECKER |
+| `order_province`, `order_city`, `order_barangay`, `order_address`, `order_name`, `order_phone` | PROVINCE, CITY, BARANGAY, ADDRESS, FULL NAME, PHONE NUMBER |
+| `order_encode_state` | from the row's latest live `order_encodes` row: `none` (none, or an upload not encoded yet), `queued`, `running` (the encode job started, or its Astra is queued or running), `done`, `failed` |
+
+The builder's variable picker lists them under "Order". Their values are never logged.
 
 No migration. The setting `order_encode_address_sequence` (the 136 address question) is used by the legacy step only.

@@ -2296,3 +2296,41 @@ As the owner building a flow, I see one "Encode order" button in the Add bar, so
 | S-142.2 (P1) | Given a saved flow with a legacy `encode_order` node, then it still loads as "Encode order (legacy)", saves and reloads its config | `UploadEncodeBuilderTest::test_S_137_1…`, `EncodeOrderNodeTest::test_S_132_1…` | passed 2026-10-25 |
 | S-142.3 (P1) | Given a new sequence, then "Exit when the customer replies" is off, the edit form shows it unchecked, and checking it still saves on | `ChatbotSequencePagesTest::test_S_142_3…` | passed 2026-10-25 |
 | S-142.4 (P1) | Given existing sequences with exit on reply on, when the migration runs, then every one is off (rows kept) | `ChatbotSequencePagesTest::test_S_142_4…` | passed 2026-10-25 |
+
+## S-143 Encode order runs in the background everywhere; flows read the order's result through order_* variables
+
+As the owner, I put Encode order in any flow (main or sequence step) and it never waits: the encode (and Astra when needed) runs in the background, and a later step (e.g. a sequence step after a delay) reads the result with the `order_*` variables to decide what to ask.
+
+Slice 143. Threat model: customer chat text, GPT and Astra output and the macro_output row values (shown in templates and AI prompts as data) are untrusted; the owner editing flows (CEO) and the J&T list are trusted. Risk tier: medium.
+Tests: `tests/Feature/OrderEncode/EncodeMacroTest.php` (on `UploadEncodeTestCase`) and `UploadEncodeBuilderTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-143.1 (P1) | Given a main flow Upload → Encode order → End, when the customer chats, then the run ends at End at once (no wait ticket, no `__ai`), `EncodeOrder` is on `encode-live`, after it `RunEncodeAstra` on `astra-live` (held row), the row is encoded, and no `encode_*` variable and no address subscription are set | `EncodeMacroTest::test_S_143_1…`, `ExpressLaneTest::test_137_1_the_new_encode…` | passed 2026-10-25 |
+| S-143.2 (P1) | Given a sequence step Upload → Encode order → End, then next at once and the row is encoded PROCEED (the 2026-10-25 01:32 case) | `test_S_143_2…` | passed 2026-10-25 |
+| S-143.3 (P1) | Given no Upload in the run, then the customer's open row (page + PSID, STATUS blank, 24 h) is encoded; with no row, only a CANNOT PROCEED row, another customer's row or a 25 h old row → failed with "No order row to encode", nothing queued | `test_S_143_3_without_an_upload…`, `test_S_143_3_with_no_order_row…` (table) | passed 2026-10-25 |
+| S-143.4 (P1) | Given an encode of the row queued, or its Astra still pending, when Encode order runs again, then nothing is queued again and the flow goes on with next | `test_S_143_4…` | passed 2026-10-25 |
+| S-143.5 (P1) | Given a PROCEED or waybill row, then every column is unchanged and the flow goes on; given a staff-edited phone or name, then it is kept | `test_S_143_5_a_final_row…` (table), `test_S_143_5_a_staff_edited…` | passed 2026-10-25 |
+| S-143.6 (P1) | Given an encoded PROCEED row, then a sequence flow's Condition sees `order_status` = PROCEED and `order_hold_reason` blank; a held row → `order_hold_reason` = address, `order_status` blank; a row without a flow encode takes its reason from "HOLD Rn" in AI ANALYZE and APP SCRIPT CHECKER | `test_S_143_6_a_sequence_flows_condition…` (table), `test_S_143_6_a_row_without_a_flow_encode…` (table) | passed 2026-10-25 |
+| S-143.7 (P1) | Given a held row, then a Send template `{{order_hold_reason}}` / `{{ORDER STATUS}}` is filled ("address", blank) | `test_S_143_7…` | passed 2026-10-25 |
+| S-143.8 (P1) | Given an Encode order, then `order_encode_state` is queued, running while the job runs and while its Astra is pending, then done; a failed job → failed and the row stays held | `test_S_143_8_order_encode_state_goes…`, `test_S_143_8_…_is_running_while_the_encode_job_runs`, `test_S_143_8_a_failed_encode_job…` | passed 2026-10-25 |
+| S-143.9 (P1) | Given no row of the customer on this page, then every `order_*` is blank and the state is none, without an error; given a row, then the variables carry its values | `test_S_143_9_with_no_row…`, `test_S_143_9_the_order_variables_carry…` | passed 2026-10-25 |
+| S-143.10 (P1) | Given an old config with `wait`, then it loads, the `wait` key is dropped and the flow runs without waiting | `test_S_143_10…`, `UploadEncodeBuilderTest::test_S_137_1_block_configs_are_validated` (table) | passed 2026-10-25 |
+| S-143.11 (P1) | Given the builder, then the variable picker has an "Order" group with the 11 `order_*` names and one-line help; the Encode order help says it runs in the background, without "Wait up to" | `UploadEncodeBuilderTest::test_S_143_11…`, `test_S_137_1_the_palette…` | passed 2026-10-25 |
+| S-143.12 (P2) | Given a 23:59 row, when read at 00:05, then it is the customer's row; a row older than 7 days is not read | `test_S_143_12_a_2359_row…`, `test_S_143_12_a_row_older…` | passed 2026-10-25 |
+| S-143.13 (P2) | Given the Test tab, then Encode order notes "Test: would encode" and nothing is written or queued | `test_S_143_13…` | passed 2026-10-25 |
+| S-143.14 (P2) | Given the Astra box off or the kill switch off, then encode only (no `RunEncodeAstra`), state done, hold address | `test_S_143_14…` (table) | passed 2026-10-25 |
+
+Story changes (S-143):
+- S-137.13 (no Upload → failed at once): now the open-row fallback; failed only when there is no open row (S-143.3).
+- S-137.14 (the run waits, resumes on next with proceed yes): retired; the flow goes on at once (S-143.1, .2). The part "the AI pool never takes an encode ticket" is retired with the wait.
+- S-137.17 (R5), .18 (Astra), .19 (no Astra), .29 (reply re-encode), .30 (ñ and emoji), .31 (odd input): kept, now checked through the row and the `order_*` variables instead of the `encode_*` variables (.19 is now S-143.14).
+- S-137.20 (the owner's Condition on `encode_hold_reason`): retired; the Condition reads `order_hold_reason` in a later step (S-143.6), and "no auto-subscribe" moved into S-143.1.
+- S-137.21 (no key or address file → failed at once): kept, without the variables.
+- S-137.22 (failed job resumes on failed; row deleted while waiting): retired; a failed job now sets `order_encode_state` = failed (S-143.8).
+- S-137.23, .24, .25, .26, .32 (deadline, late Astra, racing resumes, held chats, stale resumes): retired with the wait.
+- S-137.27 (variables cleared every pass): retired with the `encode_*` variables.
+- S-137.28 (final row): now S-143.5 (the flow goes on; no variables).
+- S-137.33 (Test tab sample variables): now S-143.13 (no variables).
+- S-137.38 (Publish notice): kept as a softer hint ("it encodes the customer's open order row, or goes to failed when there is none").
+- S-137.43 ("Wait up to" 120 s): retired; `ExpressLaneTest::test_137_1_the_new_encode…` now checks that no wait ticket exists.
