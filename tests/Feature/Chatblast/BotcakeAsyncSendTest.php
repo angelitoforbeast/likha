@@ -63,7 +63,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
     {
         return new BotcakeSendPool(function (RequestInterface $req, array $options) {
             $p = new Promise();
-            $this->calls[] = ['req' => $req, 'p' => $p, 't' => $this->clock->now()];
+            $this->calls[] = ['req' => $req, 'p' => $p, 't' => $this->clock->now(), 'timeout' => $options['timeout'] ?? null];
 
             return $p;
         }, $this->clock);
@@ -585,5 +585,66 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $all = array_merge([$this->calls[0]['t']], $times);
         sort($all);
         for ($i = 1; $i < count($all); $i++) $this->assertGreaterThanOrEqual(0.5 - 1e-6, $all[$i] - $all[$i - 1], 'still 2 per second: ' . json_encode($all));
+    }
+
+    public function test_S_140_1_a_chatbot_reply_waits_up_to_send_timeout_for_botcake_and_chatblast_keeps_15_s(): void
+    {
+        $this->echoFlow();
+        $this->says('one', '7001');
+        $this->pool->tick();
+        $this->assertSame([30], array_column($this->calls, 'timeout'), 'the pool: 30 s by default');
+
+        config(['services.botcake.send_timeout' => 45]);
+        $this->clock->time += 1;
+        $this->says('two', '7002');
+        $this->pool->tick();
+        $this->assertSame(45, $this->calls[1]['timeout'], 'the config value overrides it');
+
+        $sync = [];
+        Http::fake(['botcake.io/*' => function (HttpRequest $r, array $options) use (&$sync) {
+            $sync[] = $options['timeout'] ?? null;
+
+            return Http::response(['success' => true]);
+        }]);
+        config(['services.botcake.async_sends' => false]);
+        $this->says('three', '7003');
+        config(['services.botcake.send_timeout' => null]);
+        $this->says('four', '7004');
+        $this->assertSame([45, 30], $sync, 'the waiting send too (unset = 30)');
+
+        config(['services.botcake.async_sends' => true, 'services.botcake.send_timeout' => 45]);
+        $this->calls = [];
+        $this->blast('7005');
+        for ($n = 0; $n < 3; $n++) {
+            $this->clock->time += 1;
+            $this->pool->tick();
+            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending') $this->answerBlast($c);
+            $this->pool->tick(false);
+        }
+        $this->assertSame([15, 15, 15], array_column($this->calls, 'timeout'), 'chatblast steps keep 15 s');
+    }
+
+    public function test_S_140_2_a_chatbot_send_still_waiting_on_botcake_at_29_s_is_not_failed_and_its_answer_counts(): void
+    {
+        $this->echoFlow();
+        $this->says('slow', '7001');
+        $this->pool->tick();
+        $this->assertCount(1, $this->calls);
+
+        // 29 s of a live pool (heartbeat and sweep running) with the call still open.
+        for ($s = 0; $s < 29; $s++) {
+            $this->travel(1)->seconds();
+            $this->clock->time += 1;
+            $this->pool->beat();
+            BotcakeSendQueue::sweep();
+            $this->pool->tick();
+        }
+        $this->assertSame('sending', DB::table(BotcakeSendQueue::TABLE)->value('status'));
+        $this->assertSame([], $this->replies('7001'));
+
+        $this->answer($this->calls[0]);
+        $this->pool->tick(false);
+        $this->assertSame(['sent: You said: slow'], $this->replies('7001'));
+        $this->assertSame('yes', (new CustomerFields(1001, 7001))->get('done'));
     }
 }

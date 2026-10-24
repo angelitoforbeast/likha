@@ -17,9 +17,15 @@ class BotcakeProvider implements MessagingProvider
         $token = trim((string) $this->settings->get($pageName, 'botcake', 'token'));
         if ($token === '') return ['status' => 'failed', 'error' => BotcakeOutbox::NO_TOKEN, 'http' => null];
 
-        $client = app(BotcakeClient::class)->shared(sha1($token), 15);
+        $client = app(BotcakeClient::class)->shared(sha1($token), self::timeout());
         if ($this->once) $client = $client->once(15);
 
         return BotcakeOutbox::outcome($client->sendContent($pageId, $psid, BotcakeOutbox::wire($messages), $token), $token);
+    }
+
+    /** Segundo na hinihintay ang Botcake sa send_content ng chatbot (services.botcake.send_timeout, 30 kapag wala). */
+    public static function timeout(): int
+    {
+        return (int) config('services.botcake.send_timeout') ?: 30;
     }
 }

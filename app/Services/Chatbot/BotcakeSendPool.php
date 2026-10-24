@@ -292,7 +292,9 @@ class BotcakeSendPool extends TicketPool
             $this->after($id, $ms, fn () => $this->respond($id, $mock[0], $mock[1], null));
             return $at;
         }
-        $options = ['headers' => ['access-token' => $job['token'], 'Accept' => 'application/json'], 'timeout' => self::TIMEOUT, 'connect_timeout' => 10];
+        // Ang send_content ng chatbot ay hinihintay nang mas matagal (BotcakeProvider::timeout()); ang chatblast ay TIMEOUT pa rin.
+        $timeout = $row->kind === 'chatbot' ? BotcakeProvider::timeout() : self::TIMEOUT;
+        $options = ['headers' => ['access-token' => $job['token'], 'Accept' => 'application/json'], 'timeout' => $timeout, 'connect_timeout' => 10];
         $options[$q['method'] === 'GET' ? 'query' : 'json'] = $q['data'];
         $this->http->requestAsync($q['method'], BotcakeClient::BASE . $q['path'], $options)->then(
             function (ResponseInterface $res) use ($id) {
