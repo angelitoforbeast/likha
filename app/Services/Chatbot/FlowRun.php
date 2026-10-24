@@ -4,6 +4,7 @@ namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
+use App\Services\OrderEncode\OrderVars;
 
 /**
  * Ang isang takbo ng flow para sa isang chat: ang flow, ang page (pangalan, Botcake ID, botfields), ang customer
@@ -34,8 +35,8 @@ class FlowRun
     public ?array $ticket = null;
     /** Huminto ang takbo para hintayin ang sagot ng AI. */
     public bool $aiPending = false;
-    /** Huminto ang takbo para hintayin ang Encode order (kasama ang aiPending: ang mga bagong chat ay naghihintay din). */
-    public bool $encodePending = false;
+    /** Ang mga order_* variable (OrderVars), isang basa kada takbo; null = basahin ulit (pagkatapos ng Upload o Encode order). */
+    public ?array $orderVars = null;
     /** Itinuloy pagkatapos ng padala (botcake:send-pool): ['node', 'status', 'error', 'messages'], ginagamit nang isang beses. */
     public ?array $sendResult = null;
     /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
@@ -119,7 +120,7 @@ class FlowRun
             'last_input' => $this->input, 'full_name' => $this->fullName, 'first_name' => $first, 'psid' => $this->psid(),
             'page_id' => $this->pageId, 'page_name' => $this->pageName, 'current_date' => now('Asia/Manila')->toDateString(),
             'last_interaction' => $this->receivedAt, 'replies_via' => ChatbotProvider::viaLabel($this->via()),
-        ];
+        ] + ($this->orderVars ??= OrderVars::read($this->pageName, (string) $this->fields->psid));
         $base = ChatbotVars::merge($this->botfields, $this->fields->fields(), $run);
         $bot = array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $this->botfields);
 

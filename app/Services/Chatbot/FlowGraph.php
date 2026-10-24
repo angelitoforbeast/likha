@@ -16,9 +16,6 @@ class FlowGraph
     public const ENCODE_FIELDS = ['date', 'page', 'name', 'phone', 'input', 'shop', 'extracted', 'price'];
 
     /** "Wait up to" ng Encode order (segundo). */
-    public const ENCODE_WAIT = 120; // si Astra lang ay hanggang ~90 s, kasama pa ang encode at ang pagkuha ng worker
-    public const ENCODE_WAIT_MIN = 10;
-    public const ENCODE_WAIT_MAX = 600;
 
     public const RULES = [
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
@@ -164,8 +161,8 @@ class FlowGraph
                 'if_not_found' => ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert',
             ],
             // Encode order: gaano katagal hinihintay ang encode, at si Astra kapag hindi PROCEED (naka-on kapag walang key).
+            // Walang hintay: ang "wait" ng lumang config ay hindi na itinatabi.
             'encode_macro' => [
-                'wait' => max(self::ENCODE_WAIT_MIN, min(self::ENCODE_WAIT_MAX, is_numeric($c['wait'] ?? null) ? (int) $c['wait'] : self::ENCODE_WAIT)),
                 'astra' => !array_key_exists('astra', $c) || !empty($c['astra']),
             ],
             // sequence_id 0 = lahat (unsubscribe lang)

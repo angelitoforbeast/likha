@@ -94,6 +94,24 @@ class LiveOrder
     }
 
     /**
+     * Ang bukas na row ng customer ngayon (Encode order na walang Upload sa takbo): PAGE + PSID, walang STATUS at waybill, at
+     * ang TIMESTAMP ay nasa loob ng 24 oras (lampas man ng hatinggabi). Ang pinakabago, o null.
+     */
+    public function openRow(string $page, string $psid): ?MacroOutput
+    {
+        if (trim($page) === '' || trim($psid) === '' || $psid === '0') return null;
+        $now = now('Asia/Manila');
+        $rows = MacroOutput::query()->where('PAGE', $page)->where('botcake_psid', $psid)
+            ->where('ts_date', '>=', $now->copy()->subDay()->toDateString())->orderByDesc('id')->limit(20)->get();
+
+        return $rows->first(function (MacroOutput $r) use ($now) {
+            $at = self::time((string) $r->TIMESTAMP);
+
+            return trim((string) $r->STATUS) === '' && trim((string) $r->waybill) === '' && $at && abs($now->diffInMinutes($at, false)) <= 24 * 60;
+        });
+    }
+
+    /**
      * Ang re-encode ng bukas na row: ang address, item, COD, usapan at resulta lang; hindi ang field na inayos na ng staff
      * (edited_* o linya ng tao sa HISTORICAL LOGS), at kapag walang STATUS lang (isang kondisyonal na UPDATE).
      * @return bool false kapag nagka-STATUS na ang row (hindi na ginalaw)

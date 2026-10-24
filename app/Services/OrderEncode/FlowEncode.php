@@ -3,145 +3,118 @@
 namespace App\Services\OrderEncode;
 
 use App\Jobs\EncodeOrder;
-use App\Jobs\ResumeChatbotAi;
 use App\Jobs\RunEncodeAstra;
 use App\Models\MacroOutput;
 use App\Models\OrderEncode;
 use App\Services\AiCheckerRowRunner;
 use App\Services\BotcakeCustomerMatcher;
-use App\Services\Chatbot\ChatbotAiQueue;
-use App\Services\Chatbot\CustomerFields;
-use App\Services\Chatbot\FlowGraph;
 use App\Services\Chatbot\FlowRun;
 use Illuminate\Contracts\Cache\LockTimeoutException;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * "Encode order" step: ine-encode ang row na isinulat ng Upload to macro sa parehong takbo, at hinihintay ito ng flow gaya ng
- * AI step. Ang hinihintay ay isang ticket sa chatbot_ai_requests (model "order-encode", status "encoding": hindi ito kinukuha
- * ng AI pool), kaya ang mga susunod na chat ng customer ay naghihintay din (__ai), at ang pagtuloy ay sa ResumeChatbotAi,
- * isang beses lang. Lampas sa "Wait up to": ang sweep ang nagtutuloy (failed, o ang resulta ng encode kapag si Astra na lang
- * ang hindi natapos). Ang resulta ay mga variable ng customer na magagamit ng Condition.
+ * "Encode order" step: ine-queue ang encode ng row ng order (ang isinulat ng Upload to macro sa parehong takbo, o ang bukas na
+ * row ng customer) sa express lane, at tuloy agad ang flow sa next, sa anumang takbo (main flow o sequence step). Sa background:
+ * ang encode ng row (Runner), saka si Astra kapag hindi PROCEED. Ang resulta ay binabasa ng flow sa mga order_* variable
+ * (OrderVars), hal. sa sequence step pagkatapos ng delay.
  */
 class FlowEncode
 {
+    /** Ang ticket ng lumang paghihintay sa chatbot_ai_requests: ang naiwan bago ang pagbabago ay tinatapos pa ng sweep. */
     public const MODEL = 'order-encode';
     public const STATUS = 'encoding';
-    public const VARS = ['encode_province', 'encode_city', 'encode_barangay', 'encode_address', 'encode_name', 'encode_phone', 'encode_proceed', 'encode_hold_reason', 'encode_row_id'];
+    public const NO_ROW = 'No order row to encode';
     /** Ang mga hold ng panuntunan na tungkol sa address (R5 = doble). */
     private const ADDRESS_RULES = ['R2', 'R4', 'R6'];
 
-    public function __construct(private Settings $settings, private LocationList $list)
+    public function __construct(private Settings $settings, private LocationList $list, private LiveOrder $live)
     {
     }
 
     /**
-     * Ang step sa takbo (live): ang resulta para sa FlowEngine (port, note, suspend). Ang mga variable ay nabura na.
-     * @return array{port: ?string, note: string, suspend?: bool}
+     * Ang step sa takbo (live): ang resulta para sa FlowEngine (port at note). Hindi naghihintay.
+     * @return array{port: string, note: string}
      */
     public function start(FlowRun $run, string $nodeId, array $c): array
     {
         $up = Upload::ofRun($run);
-        if (!$up) return $this->failNow($run, $nodeId, 'No Upload to macro row in this run: nothing to encode', null);
-        $row = MacroOutput::find($up->macro_output_id);
-        if (!$row) return $this->failNow($run, $nodeId, 'The uploaded row is gone', null);
+        $row = $up ? MacroOutput::find($up->macro_output_id) : $this->live->openRow($run->pageName, (string) $run->fields->psid);
+        if (!$row) return $this->failNow($run, $nodeId, $up ? 'The uploaded row is gone' : self::NO_ROW);
 
-        // Final na ang row (PROCEED, courier status o waybill): walang ginagalaw, proceed yes.
-        if (self::final($row) || $up->status !== 'uploaded') {
-            $this->setVars($run, $this->result($up, $row, $up->input['astra'] ?? null));
+        // Final na ang row (PROCEED, courier status o waybill): walang ginagalaw.
+        if (self::final($row) || ($up && $up->status !== 'uploaded')) {
             $run->event('encode_macro', $nodeId, ['result' => self::final($row) ? 'final' : 'already', 'row' => (string) $row->id]);
 
             return ['port' => 'next', 'note' => self::final($row) ? 'Row ' . $row->id . ' is final: not encoded' : 'Already encoded in this run: row ' . $row->id];
         }
-        // Ang hinihintay ay itinutuloy sa main flow ng page: ang step ng sequence ay hindi naghihintay.
-        if ($run->startedBy !== null || !Schema::hasTable(ChatbotAiQueue::TABLE)) return $this->failNow($run, $nodeId, 'Encode order cannot wait in a sequence step', (int) $row->id);
-        if ($this->settings->key() === '' || !$this->list->has()) return $this->failNow($run, $nodeId, 'The encode is not ready (no OpenAI key or address file)', (int) $row->id);
+        // Isang encode lang kada row habang naka-queue o tumatakbo pa (kasama si Astra).
+        if (self::busy((int) $row->id)) {
+            $run->event('encode_macro', $nodeId, ['result' => 'already', 'row' => (string) $row->id]);
 
-        $wait = max(FlowGraph::ENCODE_WAIT_MIN, min(FlowGraph::ENCODE_WAIT_MAX, (int) ($c['wait'] ?? FlowGraph::ENCODE_WAIT)));
-        $request = (string) Str::uuid();
-        DB::table(ChatbotAiQueue::TABLE)->insert([
-            'request_id' => $request, 'page_id' => (int) $run->pageId, 'psid' => $run->fields->psid, 'chat_id' => $run->chatId,
-            'flow_id' => $run->flowId, 'node_id' => $nodeId, 'run_id' => $run->runId, 'page_name' => $run->pageName, 'model' => self::MODEL,
-            'messages' => '[]', 'max_tokens' => 0,
-            'context' => json_encode(['input' => $run->input, 'full_name' => $run->fullName, 'received_at' => $run->receivedAt,
-                'ai_calls' => $run->aiCalls, 'steps' => $run->steps, 'row_id' => (int) $row->id], JSON_UNESCAPED_UNICODE),
-            'status' => self::STATUS, 'deadline_at' => now()->addSeconds($wait), 'created_at' => now(), 'updated_at' => now(),
-        ]);
-        $up->update(['status' => 'queued', 'input' => array_merge((array) $up->input, ['encode' => ['request' => $request, 'node' => $nodeId, 'astra' => !empty($c['astra'])]])]);
-        // Ang marka ay bago ang job: ang resume ay itinutuloy lang kapag ito pa ang hinihintay ng customer.
-        $run->fields->set(CustomerFields::AI, $request);
+            return ['port' => 'next', 'note' => 'Row ' . $row->id . ' is already being encoded'];
+        }
+        if ($this->settings->key() === '' || !$this->list->has()) return $this->failNow($run, $nodeId, 'The encode is not ready (no OpenAI key or address file)');
+
+        $o = $up ?? $this->orderFor($run, $nodeId, $row);
+        $before = $o->exists ? $o->status : null;
+        $o->fill(['status' => 'queued', 'input' => array_merge((array) $o->input, ['encode' => ['node' => $nodeId, 'astra' => !empty($c['astra'])]])])->save();
         try {
-            EncodeOrder::dispatch($up->id, true);
+            EncodeOrder::dispatch($o->id, true);
         } catch (Throwable $e) {
             report($e);
-            DB::table(ChatbotAiQueue::TABLE)->where('request_id', $request)->delete();
-            $run->fields->clear(CustomerFields::AI);
-            $up->update(['status' => 'uploaded']);
+            $before ? $o->update(['status' => $before]) : $o->delete();
 
-            return $this->failNow($run, $nodeId, 'The encode could not be queued', (int) $row->id);
+            return $this->failNow($run, $nodeId, 'The encode could not be queued');
         }
-        $run->aiPending = true;
-        $run->encodePending = true;
-        $run->event('encode_pending', $nodeId, ['row' => (string) $row->id, 'wait' => $wait]);
+        $run->event('encode_macro', $nodeId, ['result' => 'queued', 'row' => (string) $row->id]);
 
-        return ['port' => null, 'suspend' => true, 'note' => 'Waiting for the encode (up to ' . $wait . ' s)'];
+        return ['port' => 'next', 'note' => 'Encode of row ' . $row->id . ' queued'];
     }
 
     /**
-     * Itinuloy ang takbo: ang resulta ng ticket ($answer: ['ok', 'text', 'error', 'row']) bilang mga variable at port.
-     * @return array{port: string, note: string}
+     * Ang order_encodes row na ie-encode para sa bukas na row (walang Upload sa takbong ito): ang upload nito na hindi pa
+     * na-encode, o isang bago na may usapan ng huling encode o upload ng row (kung wala, ang laman ng row mismo).
      */
-    public function resumed(FlowRun $run, string $nodeId, array $answer): array
+    private function orderFor(FlowRun $run, string $nodeId, MacroOutput $row): OrderEncode
     {
-        $res = $answer['ok'] ? json_decode((string) $answer['text'], true) : null;
-        if (!is_array($res)) return $this->failNow($run, $nodeId, 'Encode failed: ' . mb_substr((string) ($answer['error'] ?? 'no result'), 0, 150), isset($answer['row']) ? (int) $answer['row'] : null);
+        $last = OrderEncode::where('macro_output_id', $row->id)->where('mode', 'live')->whereNotNull('input->fields')->orderByDesc('id')->first();
+        if ($last && $last->status === 'uploaded' && !empty($last->input['upload'])) return $last;
 
-        $this->setVars($run, $res);
-        $proceed = ($res['encode_proceed'] ?? '') === 'yes';
-        $run->event('encode_macro', $nodeId, ['result' => $proceed ? 'proceed' : 'held', 'row' => (string) ($res['encode_row_id'] ?? ''), 'error' => (string) ($res['encode_hold_reason'] ?? '')]);
+        $fields = $last ? (array) $last->input['fields'] : [
+            'date' => (string) $row->TIMESTAMP, 'page' => (string) $row->PAGE, 'name' => (string) $row->fb_name, 'phone' => (string) $row->{'PHONE NUMBER'},
+            'input' => (string) $row->all_user_input, 'shop' => (string) $row->shop_details, 'cxd' => (string) $row->extracted_details, 'price' => (string) $row->COD,
+        ];
 
-        return ['port' => 'next', 'note' => $proceed ? 'Encoded: PROCEED' : 'Encoded: held (' . ($res['encode_hold_reason'] ?? '') . ')'];
+        return new OrderEncode([
+            'page' => $run->pageName, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'run_id' => $run->runId,
+            'spreadsheet_id' => FlowHook::NODE_SHEET, 'tab' => FlowHook::TAB, 'row_number' => null, 'mode' => 'live', 'macro_output_id' => $row->id,
+            'input' => ['row' => [], 'node' => $nodeId, 'page_id' => $run->pageId, 'upload' => 'encode', 'linked' => true, 'fields' => $fields],
+        ]);
     }
 
-    /** Ang lahat ng encode_* variable ay binubura (bawat takbo ng step, bago ang lahat). */
-    public function clearVars(FlowRun $run): void
+    /** May encode ng row na naka-queue o tumatakbo pa (pati si Astra pagkatapos nito). */
+    public static function busy(int $rowId): bool
     {
-        foreach (self::VARS as $v) $run->fields->clear($v);
+        return OrderEncode::where('macro_output_id', $rowId)->where('mode', 'live')->whereIn('status', ['queued', 'done'])->orderByDesc('id')->limit(5)->get()
+            ->contains(fn (OrderEncode $o) => in_array(OrderVars::state($o), ['queued', 'running'], true));
     }
 
-    /** @param array<string, string> $vars ang mga encode_* (ang wala o blangko ay binubura) */
-    public function setVars(FlowRun $run, array $vars): void
+    /** Ang job ng encode ay nagsimula na (order_encode_state = running). */
+    public static function started(OrderEncode $o): void
     {
-        foreach (self::VARS as $v) {
-            $value = (string) ($vars[$v] ?? '');
-            $value === '' ? $run->fields->clear($v) : $run->fields->set($v, $value);
-        }
+        $o->update(['input' => array_merge((array) $o->input, ['encode' => array_merge((array) ($o->input['encode'] ?? []), ['started_at' => now()->toDateTimeString()])])]);
     }
 
     /**
-     * Pagkatapos ng encode ng row (Runner): PROCEED o walang Astra → tapos; kung hindi, si Astra sa parehong row (ang
-     * resulta ng encode ay naitabi muna sa ticket, para ang sweep ay may maibibigay kapag mabagal si Astra).
+     * Pagkatapos ng encode ng row (Runner): kapag hindi PROCEED at naka-on ang Astra (ang box at ang kill switch), si Astra sa
+     * parehong row, sa sariling job.
      */
     public function afterEncode(OrderEncode $o): void
     {
         $row = MacroOutput::find($o->macro_output_id);
-        if (!$row) {
-            $this->finish($o, null, 'The uploaded row is gone.'); // binura habang naghihintay: failed, hindi next
+        if (!$row || self::final($row) || empty($o->input['encode']['astra']) || !$this->settings->spotAstra()) return;
 
-            return;
-        }
-        $result = $this->result($o, $row, null);
-        if ($result['encode_proceed'] === 'yes' || empty($o->input['encode']['astra']) || !$this->settings->spotAstra()) {
-            $this->finish($o, $result);
-
-            return;
-        }
-        DB::table(ChatbotAiQueue::TABLE)->where('request_id', (string) $o->input['encode']['request'])->where('status', self::STATUS)
-            ->update(['answer' => json_encode($result, JSON_UNESCAPED_UNICODE), 'updated_at' => now()]);
-
+        $o->update(['input' => array_merge((array) $o->input, ['encode' => array_merge((array) $o->input['encode'], ['astra_queued' => now()->toDateTimeString()])])]);
         try {
             RunEncodeAstra::dispatch($o->id); // sariling job sa astra-live: hindi hinahawakan ang encode worker habang si Astra
         } catch (Throwable $e) {
@@ -150,35 +123,18 @@ class FlowEncode
         }
     }
 
-    /** Ang RunEncodeAstra job: si Astra sa row, saka ang pagtuloy ng flow. */
+    /** Ang RunEncodeAstra job: si Astra sa row. */
     public function astraStep(OrderEncode $o): void
     {
         $this->afterAstra($o, $this->astra($o, (int) $o->macro_output_id));
     }
 
-    /** Ang resulta ni Astra (o ang pagpalya nito) sa order, saka ang pagtuloy na may huling value ng row. */
+    /** Ang resulta ni Astra (o ang pagpalya nito) sa order, para sa order_hold_reason at sa /order-encode. */
     public function afterAstra(OrderEncode $o, array $astra): void
     {
         $o->refresh();
         $notes = array_merge((array) ($o->input['live_notes'] ?? []), ['Astra: ' . $astra['status'] . (!empty($astra['final_code']) ? ' ' . $astra['final_code'] : '')]);
         $o->update(['input' => array_merge((array) $o->input, ['astra' => $astra + ['at' => now()->toDateTimeString()], 'live_notes' => $notes])]);
-        $row = MacroOutput::find($o->macro_output_id);
-        $row ? $this->finish($o, $this->result($o, $row, $astra)) : $this->finish($o, null, 'The uploaded row is gone.');
-    }
-
-    /**
-     * Ang hinihintay ay tapos: answered (may resulta) o failed ($result null), saka ang pagtuloy. Kapag hindi na "encoding"
-     * (lampas na sa deadline at naituloy na ng sweep), walang ginagawa: ang row lang ang naayos.
-     */
-    public function finish(OrderEncode $o, ?array $result, ?string $error = null): void
-    {
-        $request = (string) ($o->input['encode']['request'] ?? '');
-        if ($request === '') return;
-        $ok = DB::table(ChatbotAiQueue::TABLE)->where('request_id', $request)->where('status', self::STATUS)->update([
-            'status' => $result ? 'answered' : 'failed', 'answer' => $result ? json_encode($result, JSON_UNESCAPED_UNICODE) : null,
-            'error' => $result ? null : mb_substr($error ?? 'The encode failed.', 0, 255), 'answered_at' => now(), 'updated_at' => now(),
-        ]);
-        if ($ok === 1) ResumeChatbotAi::dispatch(ChatbotAiQueue::ticket(DB::table(ChatbotAiQueue::TABLE)->where('request_id', $request)->first()));
     }
 
     /** Si Astra sa row (ang parehong run-one-row ng RunSpotAstra at ng night run); hindi naghihintay kapag hawak ng iba ang row. */
@@ -206,23 +162,6 @@ class FlowEncode
         return $out === null ? ['status' => 'skipped'] : ['status' => (string) ($result['status'] ?? 'failed'), 'final_code' => $result['final_code'] ?? null, 'log_id' => $out['log_id'] ?? null];
     }
 
-    /** Ang mga variable mula sa row (ang huling value nito) at sa encode. */
-    private function result(OrderEncode $o, ?MacroOutput $row, ?array $astra): array
-    {
-        if (!$row) return ['encode_proceed' => 'no', 'encode_hold_reason' => 'error'];
-        $proceed = self::final($row);
-        $cols = ['PROVINCE', 'CITY', 'BARANGAY', 'ADDRESS', 'FULL NAME', 'PHONE NUMBER'];
-        $values = array_combine($cols, array_map(fn ($c) => (string) $row->{$c}, $cols));
-
-        return [
-            'encode_province' => $values['PROVINCE'], 'encode_city' => $values['CITY'], 'encode_barangay' => $values['BARANGAY'],
-            'encode_address' => $values['ADDRESS'], 'encode_name' => $values['FULL NAME'], 'encode_phone' => $values['PHONE NUMBER'],
-            'encode_proceed' => $proceed ? 'yes' : 'no',
-            'encode_hold_reason' => $proceed ? '' : self::holdReason((array) $o->outputs, $values, $astra),
-            'encode_row_id' => (string) $row->id,
-        ];
-    }
-
     /**
      * Bakit hindi PROCEED, ang una sa ayos: address, duplicate, name, phone, price, other. Si Astra (kapag tumakbo at may
      * resulta) ang huling salita sa address; kung hindi, ang encode (R2/R4/R6 at ang address check).
@@ -247,17 +186,16 @@ class FlowEncode
     }
 
     /** Final na ang row: may STATUS (hindi CANNOT PROCEED) o waybill. */
-    private static function final(MacroOutput $row): bool
+    public static function final(MacroOutput $row): bool
     {
         $status = strtoupper(trim((string) $row->STATUS));
 
         return ($status !== '' && $status !== 'CANNOT PROCEED') || trim((string) $row->waybill) !== '';
     }
 
-    /** Hindi ma-encode ngayon: failed port, ang hold ay "error". */
-    private function failNow(FlowRun $run, string $nodeId, string $note, ?int $rowId): array
+    /** Walang ma-encode ngayon: failed port, walang naka-queue. */
+    private function failNow(FlowRun $run, string $nodeId, string $note): array
     {
-        $this->setVars($run, ['encode_proceed' => 'no', 'encode_hold_reason' => 'error', 'encode_row_id' => $rowId ? (string) $rowId : '']);
         $run->event('encode_macro', $nodeId, ['result' => 'failed', 'error' => $note]);
 
         return ['port' => 'failed', 'note' => $note];

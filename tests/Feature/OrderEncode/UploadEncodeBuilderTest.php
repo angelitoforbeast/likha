@@ -41,7 +41,7 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
         [$up, $enc] = [$saved['nodes'][1], $saved['nodes'][2]];
         $this->assertSame([['next', 'failed'], ['next', 'failed']], [FlowGraph::ports($up), FlowGraph::ports($enc)]);
         $this->assertSame(['update', 'skip', true, '{{PHONE}}', '998'], [$up['config']['mode'], $up['config']['if_not_found'], $up['config']['counts_order'], $up['config']['phone'], $up['config']['price']]);
-        $this->assertSame(['wait' => 120, 'astra' => false], $enc['config']);
+        $this->assertSame(['astra' => false], $enc['config']);
         $this->assertArrayNotHasKey('evil', $up['config']);
     }
 
@@ -49,10 +49,8 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
     public static function configs(): array
     {
         return [
-            'encode: defaults' => [['encode_macro', []], ['wait' => 120, 'astra' => true]],
-            'encode: wait too short' => [['encode_macro', ['wait' => 3]], ['wait' => 10, 'astra' => true]],
-            'encode: wait too long' => [['encode_macro', ['wait' => 9999, 'astra' => '1']], ['wait' => 600, 'astra' => true]],
-            'encode: wait not a number' => [['encode_macro', ['wait' => 'soon']], ['wait' => 120, 'astra' => true]],
+            'encode: defaults' => [['encode_macro', []], ['astra' => true]],
+            'encode: an old wait is dropped' => [['encode_macro', ['wait' => 30, 'astra' => '1']], ['astra' => true]],
             'upload: bad enums' => [['upload_macro', ['mode' => 'drop', 'if_not_found' => 'explode']], ['mode' => 'insert', 'if_not_found' => 'insert']],
         ];
     }
@@ -62,7 +60,7 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
     {
         $c = FlowGraph::cleanConfig($node[0], $node[1]);
 
-        $this->assertSame($expected, array_intersect_key($c, $expected));
+        $this->assertSame($expected, array_intersect_key($c, $expected + ['wait' => 0]));
     }
 
     /** @return array<string, array{0: bool, 1: bool}> may Upload bago ang Encode, may notice */

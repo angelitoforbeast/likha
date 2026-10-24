@@ -78,7 +78,7 @@ class ExpressLaneTest extends UploadEncodeTestCase
 
         app(ChatbotRunner::class)->handle($chat->id);
         Queue::assertPushedOn('encode-live', EncodeOrder::class);
-        $this->assertEqualsWithDelta(120, Carbon::parse(DB::table(ChatbotAiQueue::TABLE)->value('deadline_at'))->diffInSeconds(now(), true), 1); // ang default na "Wait up to"
+        $this->assertSame(0, DB::table(ChatbotAiQueue::TABLE)->count()); // walang hintay: tuloy agad ang flow
 
         Queue::pushed(EncodeOrder::class)->first()->handle(app(Runner::class));
         Queue::assertPushedOn('astra-live', RunEncodeAstra::class);

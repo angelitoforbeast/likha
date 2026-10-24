@@ -87,11 +87,11 @@ class Runner
 
     /**
      * Ang encode ng row na isinulat ng Upload to macro: ang usapan ng upload (naitabi na), ang resulta sa row na iyon lang
-     * (LiveOrder::encodeRow), saka si Astra kapag hindi PROCEED at ang pagtuloy ng flow (FlowEncode). Walang sheet at walang
-     * tanong sa address.
+     * (LiveOrder::encodeRow), saka si Astra kapag hindi PROCEED (FlowEncode). Walang sheet at walang tanong sa address.
      */
     private function uploaded(OrderEncode $o): void
     {
+        FlowEncode::started($o);
         if (!$this->encode($o, new Input((array) ($o->input['fields'] ?? [])))) return;
         $o->refresh();
         if ($o->error) {
@@ -163,10 +163,9 @@ class Runner
     public function fail(OrderEncode $o, string $why): void
     {
         $why = preg_replace('/sk-[A-Za-z0-9_\-]{8,}/', '[key]', $why) ?? '';
-        // Encode order: ang row ng Upload to macro ay naiwang hold para sa staff; ang flow ay itinutuloy sa failed.
+        // Encode order: ang row ay naiwang hold para sa staff (order_encode_state = failed).
         if (!empty($o->input['upload'])) {
             $o->update(['status' => 'failed', 'error' => mb_substr($why . ' Row ' . $o->macro_output_id . ' was left for staff.', 0, 500)]);
-            app(FlowEncode::class)->finish($o, null, 'The encode failed.');
 
             return;
         }

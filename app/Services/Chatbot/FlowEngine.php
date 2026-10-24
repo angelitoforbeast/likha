@@ -99,7 +99,7 @@ class FlowEngine
 
         // Ang dahilan: ang huminto, ang naghihintay, ang End, ang pumalyang step na walang kasunod, o walang kasunod.
         $lastStep = $run->path ? end($run->path) : null;
-        $reason = $run->stopped ?? ($suspended ? ($run->encodePending ? 'waiting for the encode' : ($run->aiPending ? 'waiting for the AI answer' : ($run->sendPending ? 'sending' : 'waiting for a reply'))) : ($lastType === 'end' ? 'end'
+        $reason = $run->stopped ?? ($suspended ? ($run->aiPending ? 'waiting for the AI answer' : ($run->sendPending ? 'sending' : 'waiting for a reply')) : ($lastType === 'end' ? 'end'
             : (($lastStep['port'] ?? null) === 'failed' ? (string) ($lastStep['note'] ?? 'a step failed') : 'no next step')));
         $run->event('run_ended', null, ['reason' => $reason, 'path' => array_slice(array_column($run->path, 'node'), 0, 100)]);
 
@@ -629,6 +629,7 @@ class FlowEngine
 
             return ['port' => 'failed', 'note' => $note];
         }
+        $run->orderVars = null; // ang order_* ay binabasa ulit (may bagong row o usapan)
         if ($r['result'] === 'skipped') {
             $run->event('upload_skipped', $id);
 
@@ -640,23 +641,20 @@ class FlowEngine
     }
 
     /**
-     * Encode order: ine-encode ang row ng Upload to macro ng takbong ito, at humihinto ang takbo hanggang sa resulta
-     * (FlowEncode). Ang mga encode_* variable ay binubura muna; ang Test tab ay may halimbawang variable lang.
+     * Encode order: ine-queue ang encode ng row ng order (FlowEncode) at tuloy agad sa next; ang resulta ay nasa mga order_*
+     * variable kapag tapos na. Ang Test tab ay walang ine-queue.
      */
     private function encodeMacro(array $node, array $c, FlowRun $run): array
     {
         $id = $node['id'];
-        $encode = app(FlowEncode::class);
+        // Ang ticket ng lumang paghihintay (naiwan bago ang pagbabago): naka-queue na noon ang encode, kaya tuloy lang.
         if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $id) {
             if ($stop = $this->mismatch($run, $id)) return $stop;
-            $answer = $run->aiAnswer;
             $run->aiAnswer = null;
 
-            return $encode->resumed($run, $id, $answer);
+            return ['port' => 'next', 'note' => 'The encode runs in the background'];
         }
-        $encode->clearVars($run);
         if ($run->test) {
-            $encode->setVars($run, ['encode_proceed' => 'no', 'encode_hold_reason' => 'address']);
             $run->event('encode_macro', $id, ['result' => 'test']);
 
             return ['port' => 'next', 'note' => 'Test: would encode'];
@@ -667,8 +665,10 @@ class FlowEngine
             return ['port' => 'next', 'note' => BotcakeOutbox::SWITCHED_OFF];
         }
         $run->runId ??= bin2hex(random_bytes(4));
+        $r = app(FlowEncode::class)->start($run, $id, $c);
+        $run->orderVars = null; // ang order_* ay binabasa ulit (naka-queue na ang encode)
 
-        return $encode->start($run, $id, $c);
+        return $r;
     }
 
     public static function isUrl(string $v): bool
