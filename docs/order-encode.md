@@ -49,7 +49,7 @@ written to the sheet as before. The `encode` worker must be running before any p
 3. `php artisan config:clear` so `services.openai.order_encode_key` is read; set `ORDER_ENCODE_OPENAI_KEY` (or rely on `OPENAI_API_KEY`).
 4. Set `compare_sheet` for the page, then set `mode` = `shadow`.
 
-## The Encode order step (spec 132)
+## The Encode order step (spec 132; "Encode order (legacy)" since spec 137)
 
 The way to go live is a step in the bot flow: **Encode order** (flow builder → Add → Encode order). It replaces the Google Sheet step for
 orders. It works whatever the page's `order_encode.mode` is (the page setting stays `off` or `shadow`; `live` is still accepted but
@@ -175,3 +175,66 @@ chosen sequence through `ChatbotSequences::subscribe` (via `order-encode`), at m
 neither the step nor the fallback writes it again.
 
 No migration. Deploy: the `astra` worker (already running for the night run) also takes `RunSpotAstra`.
+
+## Upload to macro, then Encode order (spec 137)
+
+Two flow steps replace the one above for new flows. The old step stays as **Encode order (legacy)**: stored flows load, publish and run it as
+in 136, but its palette button is hidden. Nothing converts a flow; the owner swaps the steps himself. Both new steps ignore the page's
+`order_encode.mode`, write no Google Sheet and never subscribe a sequence on their own.
+
+**Upload to macro** (`upload_macro`, ports next and failed) writes the raw order row at once, without encoding. It uses the A–H templates
+of the old step.
+- The row: TIMESTAMP, ts_date, PAGE, fb_name, FULL NAME (the FB name), PHONE NUMBER (the flow's phone, 09… when valid), ITEM_NAME/COD from
+  the shop details (else the price cell), shop details, all_user_input (this order's messages, the 136 conversation rule), extracted
+  details/CXD and botcake_psid. STATUS and the address stay blank.
+- **Insert** always makes a new row. R5 does not run here.
+- **Update** takes the customer's open row (PAGE + PSID, no STATUS, within 24 hours; the day from the order time, Manila) and appends this
+  order's messages to its conversation. It changes only all_user_input, extracted_details and CXD, never a column with a person's log
+  line, and each change gets a "Likha encode" log line.
+  - A PROCEED, courier-status or waybill row of the order's day is never touched: the note "second order not accepted: row <id>" and an
+    event, then next.
+  - No open row: **If not found** Insert, or Skip (next, event `upload_skipped`).
+  - Uploads of one customer run one at a time (the 136 customer lock, a short wait, then failed).
+- The upload is idempotent per run + step. A DB error goes to failed and leaves no half row.
+- Each upload is an `order_encodes` row with status `uploaded` and `input.upload` set: that is "the row of this run" for Encode order.
+- "Counts as an order" counts only when a row was written or updated.
+
+**Encode order** (`encode_macro`, ports next and failed; settings "Wait up to" 10–600 s, default 90, and "Run Astra when the encode does
+not PROCEED", default on).
+- It clears the `encode_*` variables, then:
+  - no upload in this run: failed;
+  - the row is already final: proceed yes at once;
+  - no key or no address file: failed.
+- Otherwise it queues `EncodeOrder` for the upload and the run waits ("waiting for the encode"). The customer's later chats wait too
+  (`__ai`).
+- The encode is the 136 encode (improved rules, notes, R5 counting other customers only), run on the upload's conversation. It writes
+  ADDRESS, PROVINCE, CITY, BARANGAY, AI ANALYZE, APP SCRIPT CHECKER and STATUS = PROCEED (first-encode rules) into that row only, plus:
+  - **PHONE NUMBER:** the phone of the chat (`OrderPhone::forOrder`: the encode's phone, else the only number in the conversation, else in
+    the extracted details, as 09XXXXXXXXX) when it is valid and differs.
+  - **FULL NAME:** the name the encode read, in Unicode NFC, when it differs and is not worse. Worse means blank, with a digit, without a
+    letter, "unknown"/"n/a", or only a part of the current name.
+- The write skips staff-edited fields (`edited_*` or a person's log line), never blanks a filled field and changes nothing on a row with a
+  STATUS or a waybill.
+- When the row is not PROCEED, the box is on and `order_encode_spot_astra` is not `off`, Astra runs in the same job, on the same row:
+  - It uses the spot path: `AiCheckerRowRunner`, source `spot`, user "Likha encode", under the row lock without waiting.
+  - The encode's result is stored on the wait first, so an Astra error, a busy row or a slow Astra continues on next with the encode's
+    result.
+- **The wait** is a row in `chatbot_ai_requests` with `model` = `order-encode` and `status` = `encoding`. The AI pool never claims it.
+  - The job finishes it as `answered` (the variables as JSON) or `failed`, then `ResumeChatbotAi` resumes the run once.
+  - Past the deadline, `ChatbotAiQueue::sweep` (every minute via `chatbot:resume-skipped`, and in the AI pool) resumes it: with the stored
+    encode result when only Astra was still running, else on failed with `error`.
+  - A late result still updates the row but never resumes again.
+  - A changed flow or a paused bot drops the resume with an `ai_dropped` event.
+  - Bot Health's AI-call counts skip these rows.
+- **Variables** (set on resume):
+  - `encode_province`, `encode_city`, `encode_barangay`, `encode_address`, `encode_name`, `encode_phone`: the row's final values;
+  - `encode_proceed`: `yes` or `no`;
+  - `encode_hold_reason`: the first of `address` (R2/R4/R6, the address check or Astra's final code not ✅, or a blank place/address),
+    `duplicate` (R5), `name` (blank), `phone` (no valid 09 number), `price` (the page/price/quantity check not ✅), `other`; `error` when
+    the encode failed or timed out; empty on proceed;
+  - `encode_row_id`.
+- The Test tab sets `encode_proceed = no` and `encode_hold_reason = address` and queues nothing.
+- A sequence step cannot wait, so there it goes to failed.
+- Publish shows a non-blocking notice when an Encode order has no Upload to macro before it.
+
+No migration. The setting `order_encode_address_sequence` (the 136 address question) is used by the legacy step only.

@@ -2193,3 +2193,50 @@ Tests: `tests/Feature/OrderEncode/{OneRowPerDayTest,ConversationTest,SpotAstraTe
 | S-136.56 | Given a shadow page's Sheet-step order, then only `order_encodes` (S-130.1 unchanged) | `EncodeOrderTest::test_S_130_1…`, `SpotAstraTest::test_S_136_24…` | passed 2026-10-24 |
 | S-136.57 | Given the Test tab, then nothing is queued, linked or subscribed (S-132.4) | `EncodeOrderNodeTest::test_S_132_4…` | passed 2026-10-24 |
 | S-136.58 (P2) | Given replies switched off, then nothing is linked, queued or subscribed | `EncodeOrderNodeTest::test_S_132_11…` | passed 2026-10-24 |
+
+## S-137 Upload to macro writes the order row first; Encode order encodes that row and gives the flow its result
+
+Slice 137. Threat model: customer chat text (encode input, GPT prompt, variables, all_user_input, shown on /order-encode: escaped), GPT and Astra output and the block config (Wait up to range and enums validated, templates capped) are untrusted; the owner editing flows (CEO) and the J&T list are trusted. Risk tier: medium.
+Tests: `tests/Feature/OrderEncode/{UploadMacroTest,EncodeMacroTest,UploadEncodeBuilderTest}.php` (base class `UploadEncodeTestCase`, on `LiveRowTestCase`). Legacy and regressions: the S-130, S-132, S-136, NightRun and AI checker suites, unchanged.
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-137.1 | Given the builder, then the palette has Upload to macro and Encode order (the legacy button is hidden, its steps show "Encode order (legacy)"), and both configs save and reload; Wait up to is kept in 10–600 s (default 90), the enums fall back to Insert | `UploadEncodeBuilderTest::test_S_137_1_the_palette…`, `test_S_137_1_block_configs_are_validated` (table) | passed 2026-10-24 |
+| S-137.2 | Given Insert, then a new raw row (TIMESTAMP, ts_date, PAGE, fb_name, FULL NAME, PHONE from the flow, PSID, all_user_input of this order, STATUS blank) and next; a second Insert the same day makes a second row | `UploadMacroTest::test_S_137_2…` | passed 2026-10-24 |
+| S-137.3 | Given Update and an open row, then the same row gets this order's messages appended and no second row is made, also from 23:59 to 00:01 (the day is kept) | `test_S_137_3_11…` (table) | passed 2026-10-24 |
+| S-137.4 | Given Update and a PROCEED or waybill row, then every column is unchanged, the note "second order not accepted: row <id>" and an event, and next | `test_S_137_4…` (table) | passed 2026-10-24 |
+| S-137.5 | Given Update and no row, then "Insert" makes a row; "Skip" makes none, goes next with the event `upload_skipped` | `test_S_137_5…` | passed 2026-10-24 |
+| S-137.6 | Given Update and only a CANNOT PROCEED row, then it is "not found" | `test_S_137_6_11…` (table) | passed 2026-10-24 |
+| S-137.7 | Given staff edits on the open row, then they are kept, and TIMESTAMP, ts_date, PAGE, fb_name and PSID never change | `test_S_137_7…` | passed 2026-10-24 |
+| S-137.8 | Given two Update uploads of one customer, then they run one at a time (customer lock) and make one row; while another upload holds the lock, nothing is written and the step goes to failed | `test_S_137_8…` | passed 2026-10-24 |
+| S-137.9 | Given the same run reaching the upload twice, then one row | `test_S_137_9…` | passed 2026-10-24 |
+| S-137.10 (P2) | Given a DB failure, then the failed port and no half row | `test_S_137_10…` | passed 2026-10-24 |
+| S-137.11 (P2) | Given an open row 25 h old, then not found; 23 h 59 min, then found | `test_S_137_6_11…`, `test_S_137_3_11…` | passed 2026-10-24 |
+| S-137.12 (P2) | Given counts_order, then one `order` event per customer per 24 h, and none when the upload is skipped | `test_S_137_12…` | passed 2026-10-24 |
+| S-137.13 | Given no Upload row in this run, then Encode order goes to failed at once with hold_reason `error` | `EncodeMacroTest::test_S_137_13_27…` | passed 2026-10-24 |
+| S-137.14 | Given a PROCEED order, then the run waits ("waiting for the encode"), the row gets address, province, city, barangay and STATUS PROCEED, and the run resumes on next with proceed yes and no hold reason; no Astra | `test_S_137_14…` | passed 2026-10-24 |
+| S-137.15 | Given a valid chat phone different from the uploaded GPT phone, then PHONE NUMBER is replaced and logged "Likha encode"; an invalid chat phone keeps the uploaded one; the same for the name | `test_S_137_15…` (table) | passed 2026-10-24 |
+| S-137.16 | Given staff edited the phone or the name, then they are kept | `test_S_137_16…` | passed 2026-10-24 |
+| S-137.17 | Given each hold, then proceed no and its reason, the first of address, duplicate, name, phone, price, other; R5 counts only other customers | `test_S_137_17_each_hold…` (table), `test_S_137_17_r5…` (table) | passed 2026-10-24 |
+| S-137.18 | Given a held order and the Astra box on, then Astra fixes the same row (spot path, its log row) and the variables carry the row's final values | `test_S_137_18…` | passed 2026-10-24 |
+| S-137.19 | Given the box off or the kill switch off, then no Astra | `test_S_137_19…` (table) | passed 2026-10-24 |
+| S-137.20 | Given the owner's Condition (encode_hold_reason is address) → Sequence, then one subscription from the flow; the new blocks never auto-subscribe, and /order-encode/final labels the address sequence "legacy block only" | `test_S_137_20…`, `UploadEncodeBuilderTest::test_S_137_20…` | passed 2026-10-24 |
+| S-137.21 | Given no key or no address file, then failed at once, nothing queued | `test_S_137_21…` (table) | passed 2026-10-24 |
+| S-137.22 | Given the encode job fails or runs out of tries, then the run resumes on failed (error) and the row stays held | `test_S_137_22…` | passed 2026-10-24 |
+| S-137.23 | Given an encode slower than Wait up to, then the run resumes on failed (error); the late result still updates the row but never resumes again or changes the variables | `test_S_137_23…` | passed 2026-10-24 |
+| S-137.24 | Given an Astra error, or Astra slower than the wait, then the run resumes on next with the encode's result | `test_S_137_24_an_astra_error…`, `test_S_137_24_astra_slower…` | passed 2026-10-24 |
+| S-137.25 | Given two racing resume jobs, then one resume | `test_S_137_25…` | passed 2026-10-24 |
+| S-137.26 | Given a customer message while waiting, then it is held and runs after the resume | `test_S_137_26…` | passed 2026-10-24 |
+| S-137.27 | Given variables from a previous order, then they are cleared even when this encode fails | `test_S_137_13_27…` | passed 2026-10-24 |
+| S-137.28 | Given the row is already PROCEED or has a waybill, then nothing changes and proceed is yes at once | `test_S_137_28…` (table) | passed 2026-10-24 |
+| S-137.29 | Given the reply flow (Upload Update → Encode order again), then the same row is updated and re-encoded with the original order text plus the reply | `test_S_137_29…` | passed 2026-10-24 |
+| S-137.30 (P2) | Given ñ and emoji, then the variables and the row keep them | `test_S_137_30…` | passed 2026-10-24 |
+| S-137.31 (P2) | Given empty or 20,000-character input, then the run ends cleanly and the encode reads at most 8,000 characters | `test_S_137_31…` (table) | passed 2026-10-24 |
+| S-137.32 (P2) | Given the flow edited or the bot paused while waiting, then the resume is dropped with an `ai_dropped` event and the customer is not stuck | `test_S_137_32…` (table) | passed 2026-10-24 |
+| S-137.33 | Given the Test tab, then Upload writes nothing ("Test: would insert/update"), Encode order sets the sample variables (proceed no, hold address) and nothing is queued | `UploadMacroTest::test_S_137_33_35…`, `EncodeMacroTest::test_S_137_33…` | passed 2026-10-24 |
+| S-137.34 | Given a page in shadow mode, then Upload still writes its row and no sheet; the Sheet step's shadow behaviour is unchanged (S-130.1) | `UploadMacroTest::test_S_137_34…`, `EncodeOrderTest::test_S_130_1…` | passed 2026-10-24 |
+| S-137.35 (P2) | Given replies switched off, then nothing is written or queued | `UploadMacroTest::test_S_137_33_35…` | passed 2026-10-24 |
+| S-137.36 | Given a stored graph with the old `encode_order` step, then it loads, publishes and runs as in 136 | the S-132 and S-136 suites, unchanged | passed 2026-10-24 |
+| S-137.37 | Given the night run, AI Fix, AI Checker and RunSpotAstra, then they behave as before | the NightRun and OrderEncode suites, unchanged | passed 2026-10-24 |
+| S-137.38 (P2) | Given an Encode order with no Upload to macro before it, then Publish succeeds with a notice | `UploadEncodeBuilderTest::test_S_137_38…` (table) | passed 2026-10-24 |
+| S-137.39 (P2) | Given a 390 px screen, then both forms are usable (one column below 640 px, the same grid as the legacy form) | not run: no browser in this session | not run |
