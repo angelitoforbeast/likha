@@ -151,4 +151,38 @@ class ChatbotPasteScriptTest extends TestCase
         $this->assertSame('Seq 11 is an image link: put it in Seq Img 11. You can still save it.', $this->call('linkWarning', $cols[0], $cols));
         $this->assertSame('Main Flow is a link: this column needs text. You can still save it.', $this->call('linkWarning', $cols[2], $cols));
     }
+
+    public function test_S_141_13_the_row_for_the_ai_is_the_cells_with_the_header_as_a_hint_and_nothing_for_an_empty_paste(): void
+    {
+        $this->assertSame(['cells' => ['499', "Hi\nThere", ''], 'header' => null], $this->call('aiRow', "499\t\"Hi\nThere\"\t\nignored", self::COLUMNS));
+        $this->assertSame(['cells' => ['599', 'x'], 'header' => ['PRICE', 'Opening']], $this->call('aiRow', "PRICE\tOpening\n599\tx", self::COLUMNS));
+        foreach (['', "  \t \n", "PRICE\tMain Flow"] as $empty) $this->assertNull($this->call('aiRow', $empty, self::COLUMNS), json_encode($empty));
+    }
+
+    public function test_S_141_5_two_cells_on_one_field_are_conflicts_none_never_is(): void
+    {
+        $this->assertSame([true, false, true, false, false], $this->call('mapConflicts', ['price', 'seq_1', 'price', null, null]));
+    }
+
+    public function test_S_141_3_apply_gives_each_chosen_field_the_cell_exactly_and_skips_none_and_blanks(): void
+    {
+        $cells = ['₱499', "Line one\nLine two", '', 'not used', 'https://img.example.test/a.jpg'];
+        $keys = ['price', 'main_flow', 'seq_1', null, 'picture'];
+        $this->assertSame(['error' => null, 'changes' => [['key' => 'price', 'value' => '₱499'], ['key' => 'main_flow', 'value' => "Line one\nLine two"],
+            ['key' => 'picture', 'value' => 'https://img.example.test/a.jpg']]], $this->call('applyMapping', $cells, $keys, false));
+        $this->assertSame(['key' => 'seq_1', 'value' => ''], $this->call('applyMapping', $cells, $keys, true)['changes'][2], 'Paste blanks as empty');
+    }
+
+    public function test_S_141_4_a_changed_dropdown_moves_the_value_and_a_conflict_blocks_apply(): void
+    {
+        $this->assertSame([['key' => 'seq_2', 'value' => 'b'], ['key' => 'seq_1', 'value' => 'a']], $this->call('applyMapping', ['b', 'a'], ['seq_2', 'seq_1'], false)['changes']);
+        $this->assertSame(['error' => 'Two values go to the same field: choose a different field or "None" for one of them.', 'changes' => []],
+            $this->call('applyMapping', ['a', 'b'], ['price', 'price'], false));
+    }
+
+    public function test_S_141_11_image_urls_keep_their_order_into_picture_and_seq_img(): void
+    {
+        $out = $this->call('applyMapping', ['https://i.test/1.jpg', 'https://i.test/2.jpg', 'https://i.test/3.jpg'], ['picture', 'seq_img_1', 'seq_img_2'], false);
+        $this->assertSame(['picture=https://i.test/1.jpg', 'seq_img_1=https://i.test/2.jpg', 'seq_img_2=https://i.test/3.jpg'], array_map(fn ($c) => $c['key'] . '=' . $c['value'], $out['changes']));
+    }
 }
