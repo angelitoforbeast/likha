@@ -221,4 +221,19 @@ class ChatbotPasteMapTest extends ChatblastTestCase
         $this->assertSame(['0:price:high', '1:none:high', '2:none:high', '3:none:low'], self::flat($res['mapping']));
         $this->assertStringNotContainsString('[2]', $this->asked[0], 'ang blangkong cell ay hindi ipinapadala');
     }
+
+    public function test_S_141_12_the_edit_modal_has_the_ai_preview_with_apply_and_the_old_mapping_wrapping_at_phone_width(): void
+    {
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+
+        foreach (['id="pe-map"', 'id="pe-map-list"', '>Apply</button>', '>Use header/position instead</button>', 'data-paste-map-url="' . route('chatbot.paste-map') . '"',
+            'ChatbotPaste.aiRow(', 'ChatbotPaste.applyMapping(', 'ChatbotPaste.mapConflicts('] as $part) {
+            $this->assertStringContainsString($part, $html);
+        }
+        // Sa 390 px: ang bawat linya ng preview ay bumababa (flex-wrap) at ang dropdown ay hindi lalampas sa lapad.
+        $this->assertStringContainsString("'pe-map-item flex flex-wrap", $html);
+        $this->assertStringContainsString('pe-map-field max-w-full', $html);
+        $this->assertStringNotContainsString('innerHTML', substr($html, strpos($html, 'function peAiPaste')), 'textContent lang ang ipinapakita');
+    }
 }
