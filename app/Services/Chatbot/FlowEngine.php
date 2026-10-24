@@ -4,7 +4,10 @@ namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
+use App\Services\OrderEncode\FlowEncode;
 use App\Services\OrderEncode\FlowHook;
+use App\Services\OrderEncode\Upload;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -34,7 +37,7 @@ class FlowEngine
         // nito ipinagpapatuloy o binubura ang wait ng main flow.
         if ($run->aiAnswer !== null || $run->sendResult !== null) {
             $current = ($run->aiAnswer ?? $run->sendResult)['node'];
-            $run->event('run_started', null, ['reason' => $run->aiAnswer !== null ? 'resumed after AI' : 'resumed after send', 'flow' => $run->flowId]);
+            $run->event('run_started', null, ['reason' => $run->aiAnswer !== null ? (!empty($run->aiAnswer['encode']) ? 'resumed after the encode' : 'resumed after AI') : 'resumed after send', 'flow' => $run->flowId]);
         } else {
             $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
         }
@@ -76,7 +79,7 @@ class FlowEngine
             }
             $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => $port, 'note' => $r['note'] ?? null];
             // "Counts as an order": dumaan ang takbo sa node (hindi pumalya, hindi pa naghihintay ng padala sa pool).
-            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && !$run->sendPending) {
+            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && empty($r['no_order']) && !$run->sendPending) {
                 try {
                     ChatbotTags::order($run, $node['id']);
                 } catch (Throwable $e) {
@@ -96,7 +99,7 @@ class FlowEngine
 
         // Ang dahilan: ang huminto, ang naghihintay, ang End, ang pumalyang step na walang kasunod, o walang kasunod.
         $lastStep = $run->path ? end($run->path) : null;
-        $reason = $run->stopped ?? ($suspended ? ($run->aiPending ? 'waiting for the AI answer' : ($run->sendPending ? 'sending' : 'waiting for a reply')) : ($lastType === 'end' ? 'end'
+        $reason = $run->stopped ?? ($suspended ? ($run->encodePending ? 'waiting for the encode' : ($run->aiPending ? 'waiting for the AI answer' : ($run->sendPending ? 'sending' : 'waiting for a reply'))) : ($lastType === 'end' ? 'end'
             : (($lastStep['port'] ?? null) === 'failed' ? (string) ($lastStep['note'] ?? 'a step failed') : 'no next step')));
         $run->event('run_ended', null, ['reason' => $reason, 'path' => array_slice(array_column($run->path, 'node'), 0, 100)]);
 
@@ -151,6 +154,8 @@ class FlowEngine
             'clear_ai' => $this->clearAi($node, $c, $run),
             'sheet' => $this->sheet($node, $c, $run, $outbox),
             'encode_order' => $this->encodeOrder($node, $c, $run, $outbox),
+            'upload_macro' => $this->uploadMacro($node, $c, $run),
+            'encode_macro' => $this->encodeMacro($node, $c, $run),
             'sequence' => $this->sequence($node, $c, $run),
             default => ['port' => null],
         };
@@ -589,6 +594,81 @@ class FlowEngine
         $run->event('encode_order', $id, ['result' => 'not_saved']);
 
         return ['port' => 'next', 'note' => 'Warning: the order was NOT saved (the encode could not be queued)'];
+    }
+
+    /**
+     * Upload to macro: ang hilaw na order row sa macro_output (Insert o Update), walang encode at walang sheet; ang
+     * Encode order ng parehong takbo ang nag-e-encode nito. Hindi binabasa ang shadow/live ng page. Ang Test tab at ang
+     * nakapatay na replies ay walang sinusulat. Ang "order" (counts_order) ay kapag may row na naisulat o nadugtungan lang.
+     */
+    private function uploadMacro(array $node, array $c, FlowRun $run): array
+    {
+        $vars = $run->vars();
+        $row = array_map(fn ($k) => ChatbotVars::sheetCell((string) ($c[$k] ?? ''), $vars), FlowGraph::ENCODE_FIELDS);
+        $row[] = ''; // I = status
+        $mode = ($c['mode'] ?? '') === 'update' ? 'update' : 'insert';
+        $id = $node['id'];
+
+        if ($run->test) {
+            $run->event('upload_macro', $id, ['result' => 'test']);
+
+            return ['port' => 'next', 'note' => 'Test: would ' . $mode, 'no_order' => true];
+        }
+        if (!BotcakeOutbox::enabled()) {
+            $run->event('upload_macro', $id, ['result' => 'skipped']);
+
+            return ['port' => 'next', 'note' => BotcakeOutbox::SWITCHED_OFF, 'no_order' => true];
+        }
+        $run->runId ??= bin2hex(random_bytes(4));
+        try {
+            $r = app(Upload::class)->run($run, $id, $row, $mode, ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert');
+        } catch (Throwable $e) {
+            if (!$e instanceof LockTimeoutException) report($e);
+            $note = $e instanceof LockTimeoutException ? 'The order was not saved: another upload or encode of this customer is still running' : 'The order could not be saved';
+            $run->event('upload_macro', $id, ['result' => 'failed', 'error' => $note]);
+
+            return ['port' => 'failed', 'note' => $note];
+        }
+        if ($r['result'] === 'skipped') {
+            $run->event('upload_skipped', $id);
+
+            return ['port' => 'next', 'note' => $r['note'], 'no_order' => true];
+        }
+        $run->event('upload_macro', $id, ['result' => $r['result'], 'row' => (string) $r['row']] + ($r['result'] === 'not_accepted' ? ['error' => $r['note']] : []));
+
+        return ['port' => 'next', 'note' => $r['note']] + (in_array($r['result'], ['inserted', 'updated'], true) ? [] : ['no_order' => true]);
+    }
+
+    /**
+     * Encode order: ine-encode ang row ng Upload to macro ng takbong ito, at humihinto ang takbo hanggang sa resulta
+     * (FlowEncode). Ang mga encode_* variable ay binubura muna; ang Test tab ay may halimbawang variable lang.
+     */
+    private function encodeMacro(array $node, array $c, FlowRun $run): array
+    {
+        $id = $node['id'];
+        $encode = app(FlowEncode::class);
+        if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $id) {
+            if ($stop = $this->mismatch($run, $id)) return $stop;
+            $answer = $run->aiAnswer;
+            $run->aiAnswer = null;
+
+            return $encode->resumed($run, $id, $answer);
+        }
+        $encode->clearVars($run);
+        if ($run->test) {
+            $encode->setVars($run, ['encode_proceed' => 'no', 'encode_hold_reason' => 'address']);
+            $run->event('encode_macro', $id, ['result' => 'test']);
+
+            return ['port' => 'next', 'note' => 'Test: would encode'];
+        }
+        if (!BotcakeOutbox::enabled()) {
+            $run->event('encode_macro', $id, ['result' => 'skipped']);
+
+            return ['port' => 'next', 'note' => BotcakeOutbox::SWITCHED_OFF];
+        }
+        $run->runId ??= bin2hex(random_bytes(4));
+
+        return $encode->start($run, $id, $c);
     }
 
     public static function isUrl(string $v): bool

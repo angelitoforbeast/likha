@@ -26,7 +26,6 @@ class RunSpotAstra implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public const QUEUE = 'astra';
     public const BUSY_DELAY_S = 60;
     public const RETRY_DELAY_S = 65;
 
@@ -35,7 +34,7 @@ class RunSpotAstra implements ShouldQueue
 
     public function __construct(public int $orderEncodeId)
     {
-        $this->onQueue(self::QUEUE);
+        $this->onQueue((string) config('order_encode.queues.astra_live', 'astra-live')); // laging live na order: express lane
     }
 
     public function handle(): void

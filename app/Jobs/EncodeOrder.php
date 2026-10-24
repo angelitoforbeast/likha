@@ -25,9 +25,10 @@ class EncodeOrder implements ShouldQueue
     public int $timeout = 600;
     public int $tries = 2;
 
-    public function __construct(public int $orderEncodeId)
+    /** $live: ang order ng customer na naghihintay (live na order, Encode order step): sa express lane (encode-live). */
+    public function __construct(public int $orderEncodeId, bool $live = false)
     {
-        $this->onConnection('database')->onQueue(self::QUEUE);
+        $this->onConnection('database')->onQueue((string) config('order_encode.queues.' . ($live ? 'encode_live' : 'encode'), self::QUEUE));
     }
 
     public function backoff(): int

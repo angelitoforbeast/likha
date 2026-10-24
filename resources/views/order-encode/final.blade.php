@@ -51,7 +51,7 @@
             <option value="off" @selected(!$import['spot_astra'])>off</option>
           </select>
         </label>
-        <label class="flex flex-col">Address question sequence
+        <label class="flex flex-col">Address question sequence (legacy block only)
           <select name="address_sequence" class="border rounded px-2 py-1">
             <option value="">none (no question, staff fixes it)</option>
             @foreach ($import['sequences'] as $s)

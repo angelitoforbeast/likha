@@ -1064,3 +1064,20 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Untested here because sqlite can't run them:** the cache locks across two real workers (redis/database store), and the MySQL/pgsql `ts_date` trigger next to `LiveOrder` writing `ts_date` itself (same value). Reason: the test DB is sqlite in memory with the array cache.
 - **No test makes the encoder itself stop with an error on a linked re-encode** (the `Runner::live()` branch that sends it to `fail()`); blank GPT answers are tested. Reason: the encoder catches its own errors per step, so a test needs a fake that throws inside `Encoder::run`, which is more test code than the two-line branch warrants. The same `fail()` path is tested by S-136.42.
 - **The page id test of the live Sheet step only checks that the id is stored**; the event and the question that use it are tested on the Encode order step path. Reason: both read the same `input.page_id`.
+
+## 137: Upload to macro, then Encode order (2026-10-24)
+
+- **A late, older encode can overwrite the address a newer re-encode wrote to the same row.** This happens when the customer replies after the wait ran out and the queue is slow. Reason for accepting: the spec allows late results to update the row, staff edits stay protected, and it needs a slow queue plus a reply inside the window. A fix would compare the order's id with the row's last "Likha encode" run.
+- **/order-encode shows an upload that was never encoded (no Encode order step after it) as status `uploaded`, which reads as still in progress.** Reason: display only; the row itself is complete.
+- **DRY, suggestions for the owner:**
+  - The address-hold rule is in two places: `FlowEncode::ADDRESS_RULES` / `holdReason` and `AddressQuestion::ADDRESS_RULES` / `addressHold`.
+  - The COD regex `PRICE: ₱` is in two places (`LiveOrder::insertRaw` and `values`).
+
+  Reason: two copies, under the third-repetition rule, and the second is legacy code.
+- **Not tested:**
+  - the Bot Health exclusion of encode tickets (`BotHealth::aiCalls`), a one-line filter;
+  - "no half row" on the Update path (P2; the Insert path is tested and Update uses the same transaction);
+  - escaping on /order-encode for S-137.30 (P2; Blade escapes by default and no view changed);
+  - S-137.39 at 390 px (no browser in this session).
+- **Only sqlite was run for the JSON path filters** (`input->upload`, `input->node`). Reason: the same Laravel JSON-path syntax as `FlowHook::hasNode`, which runs on MySQL in production.
+- **A sequence step cannot wait for the encode: Encode order there always goes to failed.** Reason: the resume runs on the page's main flow (as for the AI step).

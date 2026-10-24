@@ -46,7 +46,7 @@ class RunNightAstraRow implements ShouldQueue
 
     public function __construct(public int $rowId)
     {
-        $this->onQueue(self::QUEUE);
+        $this->onQueue((string) config('order_encode.queues.astra', self::QUEUE));
     }
 
     public function handle(): void

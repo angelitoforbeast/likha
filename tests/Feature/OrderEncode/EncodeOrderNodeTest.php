@@ -146,7 +146,7 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         $this->assertSame(['n1', 'n2', 'n3'], array_column($run->path, 'node'));
         $this->assertSame('next', $run->path[1]['port']);
         Queue::assertPushed(EncodeOrder::class, 1);
-        Queue::assertPushed(EncodeOrder::class, fn (EncodeOrder $j) => $j->connection === 'database' && $j->queue === 'encode');
+        Queue::assertPushed(EncodeOrder::class, fn (EncodeOrder $j) => $j->connection === 'database' && $j->queue === 'encode-live'); // ang live na encode ay sa express lane
         $o = OrderEncode::sole();
         $this->assertSame([self::PAGE, 'live', 'flow-node', 'All Orders', null, self::PSID, 13, 5, 'queued'],
             [$o->page, $o->mode, $o->spreadsheet_id, $o->tab, $o->row_number, $o->psid, $o->chat_id, $o->flow_id, $o->status]);

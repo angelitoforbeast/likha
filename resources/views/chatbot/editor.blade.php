@@ -42,7 +42,7 @@
     #minimap { position: absolute; right: 8px; bottom: 8px; width: 180px; height: 120px; background: rgb(255 255 255 / .92); border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; touch-action: none; }
     @media (max-width: 640px) { #minimap { width: 120px; height: 80px; } }
     .t-start .nd-h { background: #ecfdf5; } .t-condition .nd-h { background: #fef3c7; } .t-send .nd-h { background: #eff6ff; }
-    .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-clear_ai .nd-h { background: #fff1f2; } .t-sheet .nd-h { background: #f0fdf4; } .t-encode_order .nd-h { background: #ecfeff; } .t-end .nd-h { background: #f1f5f9; }
+    .t-set .nd-h { background: #f5f3ff; } .t-ai .nd-h { background: #fdf2f8; } .t-clear_ai .nd-h { background: #fff1f2; } .t-sheet .nd-h { background: #f0fdf4; } .t-encode_order .nd-h { background: #ecfeff; } .t-upload_macro .nd-h { background: #ecfeff; } .t-encode_macro .nd-h { background: #cffafe; } .t-end .nd-h { background: #f1f5f9; }
 </style>
 @endpush
 
@@ -83,7 +83,10 @@
         <button type="button" class="cb-btn cb-btn-sm" data-add="ai">AI</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="clear_ai">Clear AI memory</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sheet">Google Sheet</button>
-        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_order" title="Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.">Encode order</button>
+        <button type="button" class="cb-btn cb-btn-sm" data-add="upload_macro" title="Saves the order to the orders (macro output) first: a new row (Insert) or the open row of the customer (Update).">Upload to macro</button>
+        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_macro" title="Encodes the row that Upload to macro saved in this run, waits for the result and puts it in encode_* variables.">Encode order</button>
+        {{-- Ang lumang Encode order (encode_order): tumatakbo pa sa mga naka-save na flow, pero hindi na idinadagdag. --}}
+        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_order" hidden title="Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.">Encode order</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sequence">Sequence</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="end">End</button>
         <span class="mx-1 text-slate-300">|</span>
@@ -163,7 +166,7 @@
     const cv = $('cv'), world = $('world'), svg = $('wires');
     const W = 220, NS = 'http://www.w3.org/2000/svg';
     const OPEN = String.fromCharCode(123, 123), CLOSE = String.fromCharCode(125, 125); // hindi isinusulat nang buo: may sariling echo ang Blade
-    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', clear_ai: 'Clear AI memory', sheet: 'Google Sheet', encode_order: 'Encode order', sequence: 'Sequence', end: 'End'};
+    const LABEL = {start: 'Start', condition: 'Condition', send: 'Send message', set: 'Set field', ai: 'AI', clear_ai: 'Clear AI memory', sheet: 'Google Sheet', encode_order: 'Encode order (legacy)', upload_macro: 'Upload to macro', encode_macro: 'Encode order', sequence: 'Sequence', end: 'End'};
     const PORT_LABEL = {next: 'next', continue: 'continue', reply: 'reply', skipped: 'skipped (no reply in time)', no: 'no match', success: 'success', failed: 'failed'};
     let graph = {nodes: [], edges: []}, variables = [], variableGroups = [], rules = {}, sequences = [];
     let view = {x: 40, y: 40, z: 1}, selWire = null, saveTimer = null, lastField = null;
@@ -192,7 +195,7 @@
             case 'condition': return [...(c.rows || []).map((_, i) => 'row_' + (i + 1)), 'no'];
             case 'send': return c.wait ? (skipMinutes(c) ? ['reply', 'skipped'] : ['reply']) : ['continue'];
             case 'ai': return ['success', 'failed'];
-            case 'sheet': case 'encode_order': return ['next', 'failed'];
+            case 'sheet': case 'encode_order': case 'upload_macro': case 'encode_macro': return ['next', 'failed'];
             default: return [];
         }
     }
@@ -215,6 +218,8 @@
             case 'clear_ai': return 'Forgets the conversation so far' + ((c.fields || []).filter(Boolean).length ? '\nclears ' + c.fields.filter(Boolean).join(', ') : '');
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
             case 'encode_order': return 'Encodes the order in Likha' + (c.also_sheet ? ' + writes the sheet' : '') + '\nOn failure: ' + (c.on_failure === 'continue' ? 'continue without saving' : 'write to the sheet');
+            case 'upload_macro': return c.mode === 'update' ? 'Updates the open row of the customer\nNo open row: ' + (c.if_not_found === 'skip' ? 'skip' : 'insert') : 'Inserts a new order row';
+            case 'encode_macro': return 'Encodes the uploaded row, waits up to ' + (c.wait || 120) + ' s' + (c.astra === false ? '' : '\nAstra when it does not PROCEED');
             case 'sequence': {
                 const s = sequences.find(x => x.id === c.sequence_id);
                 const name = c.sequence_id ? (s ? s.name : 'a deleted sequence') : (c.action === 'unsubscribe' ? 'all sequences' : 'Pick a sequence');
@@ -504,13 +509,15 @@
         condition: {rows: [{variable: 'last_input', rule: 'contains', value: ''}]}, send: {items: [{type: 'text', value: ''}], wait: false, save_to: ''},
         set: {ops: [{op: 'set', field: '', value: '', separator: ', '}]}, ai: {model: 'gpt-4o-mini', system: '', user: OPEN + 'last_input' + CLOSE, history: 100, max_tokens: 250, save_to: '', send: false},
         clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []},
-        encode_order: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', also_sheet: false, sheet: '', tab: '', on_failure: 'sheet'}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
+        encode_order: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', also_sheet: false, sheet: '', tab: '', on_failure: 'sheet'},
+        upload_macro: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', mode: 'insert', if_not_found: 'insert', counts_order: true},
+        encode_macro: {wait: 120, astra: true}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
         const next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
         const r = cv.getBoundingClientRect(), c = toWorld(r.left + r.width / 2, r.top + r.height / 3);
         const n = {id: 'n' + next, type: b.dataset.add, x: Math.round(c.x - W / 2), y: Math.round(c.y), config: JSON.parse(JSON.stringify(DEFAULTS[b.dataset.add]))};
-        if (n.type === 'encode_order') prefillEncode(n.config);
+        if (n.type === 'encode_order' || n.type === 'upload_macro') prefillEncode(n.config);
         graph.nodes.push(n); render(); changed(); openForm(n);
     }));
 
@@ -612,6 +619,8 @@
         }
         if (n.type === 'sheet') sheetForm(c, body);
         if (n.type === 'encode_order') encodeForm(c, body);
+        if (n.type === 'upload_macro') uploadForm(c, body);
+        if (n.type === 'encode_macro') encodeMacroForm(c, body);
         if (n.type === 'sequence') {
             const pick = el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
             const fill = () => {
@@ -625,7 +634,7 @@
             body.append(el('p', {class: 'text-xs text-slate-500', text: 'Subscribing while the customer is already in it does nothing; after an unsubscribe it starts again from step 1. Sequences are made in Chatbot → Sequences.'}));
         }
         // Results: ang order ay binibilang kapag dumaan ang takbo sa step na ito (isa kada customer kada 24 oras).
-        if (['send', 'set', 'sheet', 'encode_order'].includes(n.type)) {
+        if (['send', 'set', 'sheet', 'encode_order', 'upload_macro'].includes(n.type)) {
             body.append(el('div', {class: 'border-t border-slate-200 pt-2 text-sm'}, [
                 el('label', {class: 'flex items-center gap-2'}, [bind(el('input', {type: 'checkbox', checked: !!c.counts_order}), v => c.counts_order = v, true), 'Counts as an order']),
                 el('p', {class: 'mt-0.5 text-xs text-slate-500', text: 'When a customer passes this step, Chatbot → Results counts one order (once per customer per 24 hours).'})]));
@@ -813,6 +822,24 @@
         body.append(sheetBox, hint);
         drawSheet();
     }
+    const pickOne = (opts, cur) => el('select', {class: 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm'}, opts.map(([k, t]) => el('option', {value: k, text: t, selected: cur === k})));
+    // ---- Upload to macro: ang hilaw na order row (Insert o Update), parehong mga cell A..H ng Encode order ----
+    function uploadForm(c, body) {
+        body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Saves the order to the orders (macro output) right away, without encoding it. Put an Encode order step after it.'}));
+        const notFound = label('If there is no open row', bind(pickOne([['insert', 'Insert a new row'], ['skip', 'Skip (go on with next)']], c.if_not_found || 'insert'), v => c.if_not_found = v));
+        const drawNotFound = () => notFound.classList.toggle('hidden', c.mode !== 'update');
+        body.append(label('Mode', bind(pickOne([['insert', 'Insert: always a new row'], ['update', 'Update: the open row of the customer (no status yet, last 24 hours)']], c.mode || 'insert'), v => { c.mode = v; drawNotFound(); })));
+        body.append(notFound, el('p', {class: 'text-xs text-slate-500', text: 'Update adds the new messages of this order to the open row. A PROCEED or waybill row is never changed, and staff edits are kept.'}));
+        drawNotFound();
+        body.append(el('div', {class: 'grid gap-2 sm:grid-cols-2'}, ENCODE_FIELDS.map(([k, t]) => label(t, bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, c[k])), v => c[k] = v)))));
+    }
+    // ---- Encode order: ine-encode ang row ng Upload to macro, hinihintay, at ang resulta sa encode_* variables ----
+    function encodeMacroForm(c, body) {
+        body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Encodes the row that Upload to macro saved in this run. The flow waits for the result, then goes on with next (or failed).'}));
+        body.append(label('Wait up to (seconds, 10 to 600)', bind(input({type: 'number', min: 10, max: 600, step: 1, inputmode: 'numeric'}, c.wait ?? 120), v => c.wait = parseInt(v, 10) || 120)));
+        body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: c.astra !== false}), v => c.astra = v, true), 'Run Astra when the encode does not PROCEED']));
+        body.append(el('p', {class: 'text-xs text-slate-500', text: 'Variables for a Condition: encode_proceed (yes/no), encode_hold_reason (address, duplicate, name, phone, price, other, error), encode_province, encode_city, encode_barangay, encode_address, encode_name, encode_phone, encode_row_id. Past the wait, the flow goes on with failed.'}));
+    }
     function bind(control, set, checkbox = false) {
         const fire = () => set(checkbox ? control.checked : control.value);
         control.addEventListener(checkbox ? 'change' : 'input', fire);
@@ -932,7 +959,7 @@
         if (code === 409) { showConflict(true); return fail(data.error); }
         if (!ok) return fail(data.error || data.message || 'Not published.');
         setState(data); closePublish();
-        status('Published ' + (data.published_at || '').slice(11), 'text-green-700');
+        status('Published ' + (data.published_at || '').slice(11) + (data.notice ? '. Note: ' + data.notice : ''), data.notice ? 'text-amber-700' : 'text-green-700');
     });
 
     $('discard').addEventListener('click', async () => {

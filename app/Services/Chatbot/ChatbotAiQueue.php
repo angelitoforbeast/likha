@@ -3,6 +3,7 @@
 namespace App\Services\Chatbot;
 
 use App\Jobs\ResumeChatbotAi;
+use App\Services\OrderEncode\FlowEncode;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -145,6 +146,19 @@ class ChatbotAiQueue
         foreach ($late as $row) {
             $ok = DB::table(self::TABLE)->where('id', $row->id)->whereIn('status', ['pending', 'sending'])->update([
                 'status' => 'failed', 'error' => 'OpenAI did not answer in time.', 'answered_at' => now(), 'updated_at' => now(),
+            ]);
+            if ($ok === 1) {
+                ResumeChatbotAi::dispatch(self::ticket($row));
+                $out['failed']++;
+            }
+        }
+
+        // Ang Encode order na lampas na sa "Wait up to": ang resulta ng encode kapag naitabi na (si Astra ang hindi natapos), kung wala ay failed.
+        $late = DB::table(self::TABLE)->where('status', FlowEncode::STATUS)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get();
+        foreach ($late as $row) {
+            $encoded = $row->answer !== null;
+            $ok = DB::table(self::TABLE)->where('id', $row->id)->where('status', FlowEncode::STATUS)->update([
+                'status' => $encoded ? 'answered' : 'failed', 'error' => $encoded ? null : 'The encode did not finish in time.', 'answered_at' => now(), 'updated_at' => now(),
             ]);
             if ($ok === 1) {
                 ResumeChatbotAi::dispatch(self::ticket($row));

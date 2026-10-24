@@ -34,6 +34,8 @@ class FlowRun
     public ?array $ticket = null;
     /** Huminto ang takbo para hintayin ang sagot ng AI. */
     public bool $aiPending = false;
+    /** Huminto ang takbo para hintayin ang Encode order (kasama ang aiPending: ang mga bagong chat ay naghihintay din). */
+    public bool $encodePending = false;
     /** Itinuloy pagkatapos ng padala (botcake:send-pool): ['node', 'status', 'error', 'messages'], ginagamit nang isang beses. */
     public ?array $sendResult = null;
     /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
