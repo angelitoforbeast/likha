@@ -165,8 +165,8 @@ class FitToWidthTest extends OwnerPrivateTestCase
             $this->assertTrue(str_contains($html, $s), "missing: {$s}");
         }
         $this->assertSame(1, substr_count($html, ':data-ow-tip="owCompact ? owTip(col.id, row) : null"'));
-        // Natira lang ang item name, secondary item at ang owTip na title.
-        $this->assertSame(3, substr_count($html, ':title="owCompact ? '));
+        // Natira lang ang item name at secondary item; ang owTip ay nasa hover box na lang.
+        $this->assertSame(2, substr_count($html, ':title="owCompact ? '));
         $this->assertSame(0, substr_count($html, ':title="(owCompact ? '));
 
         $a = strpos($html, '// ow-tip-start');
@@ -180,6 +180,19 @@ class FitToWidthTest extends OwnerPrivateTestCase
         foreach (['getBoundingClientRect', 'preventDefault', 'stopPropagation'] as $s) {
             $this->assertFalse(str_contains($tip, $s), "tip script must not use: {$s}");
         }
+    }
+
+    public function test_compact_hover_box_is_not_repeated_by_a_native_title(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+
+        // Sa compact, ang hover box (data-ow-tip) lang; walang native title na pareho ang text.
+        $this->assertSame(0, substr_count($html, ':title="owCompact ? owTip(col.id, row) : null"'));
+        $this->assertSame(0, substr_count($html, ':title="analystTip(row)"'));
+        $this->assertSame(0, substr_count($html, ':title="miraTip(row)"'));
+        // Sa full view walang hover box, kaya native title pa rin ang nagpapakita.
+        $this->assertSame(1, substr_count($html, ':title="!owCompact ? analystTip(row) : null" style="font-weight:700;cursor:help;"'));
+        $this->assertSame(1, substr_count($html, ':title="!owCompact ? miraTip(row) : null" style="font-weight:700;cursor:help;"'));
     }
 
     public function test_actions_whitelist_ids_are_real_columns(): void
