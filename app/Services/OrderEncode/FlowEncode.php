@@ -127,8 +127,13 @@ class FlowEncode
     public function afterEncode(OrderEncode $o): void
     {
         $row = MacroOutput::find($o->macro_output_id);
+        if (!$row) {
+            $this->finish($o, null, 'The uploaded row is gone.'); // binura habang naghihintay: failed, hindi next
+
+            return;
+        }
         $result = $this->result($o, $row, null);
-        if (!$row || $result['encode_proceed'] === 'yes' || empty($o->input['encode']['astra']) || !$this->settings->spotAstra()) {
+        if ($result['encode_proceed'] === 'yes' || empty($o->input['encode']['astra']) || !$this->settings->spotAstra()) {
             $this->finish($o, $result);
 
             return;

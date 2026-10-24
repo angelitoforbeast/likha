@@ -2240,3 +2240,11 @@ Tests: `tests/Feature/OrderEncode/{UploadMacroTest,EncodeMacroTest,UploadEncodeB
 | S-137.37 | Given the night run, AI Fix, AI Checker and RunSpotAstra, then they behave as before | the NightRun and OrderEncode suites, unchanged | passed 2026-10-24 |
 | S-137.38 (P2) | Given an Encode order with no Upload to macro before it, then Publish succeeds with a notice | `UploadEncodeBuilderTest::test_S_137_38…` (table) | passed 2026-10-24 |
 | S-137.39 (P2) | Given a 390 px screen, then both forms are usable (one column below 640 px, the same grid as the legacy form) | not run: no browser in this session | not run |
+
+Story changes (S-137):
+- S-132.1: the legacy Encode order button stays in the page but is hidden; stored steps show "Encode order (legacy)". The test is unchanged.
+- S-136.29 to S-136.40 (the address question): now for the legacy step only; /order-encode/final says "legacy block only". The tests are unchanged.
+- S-137.14 adds "the AI pool never takes an encode ticket".
+- S-137.22 adds "a row deleted while waiting resumes on failed".
+- S-137.32 adds "the step became an AI step".
+- S-137.8 is tested as one upload after the other plus a held customer lock, not with two real processes.

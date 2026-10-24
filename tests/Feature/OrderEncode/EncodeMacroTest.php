@@ -496,7 +496,7 @@ class EncodeMacroTest extends UploadEncodeTestCase
     /** @return array<string, array{0: string}> */
     public static function staleResumes(): array
     {
-        return ['the flow changed' => ['flow'], 'the bot paused' => ['paused']];
+        return ['the flow changed' => ['flow'], 'the step became an AI step' => ['ai'], 'the bot paused' => ['paused']];
     }
 
     /** @dataProvider staleResumes */
@@ -506,6 +506,8 @@ class EncodeMacroTest extends UploadEncodeTestCase
         $this->says('order po');
         $this->encodeJobs();
         if ($how === 'flow') $this->flow->update(['graph' => $this->graph(['n2' => ['end']], [['n1', 'next', 'n2']])]);
+        // Ang parehong node id ay AI step na: ang resulta ng encode ay hindi kailanman nagiging sagot ng AI (na ipapadala).
+        elseif ($how === 'ai') $this->flow->update(['graph' => $this->graph(['n5' => ['ai', ['send' => true]], 'n3' => ['end']], [['n1', 'next', 'n5'], ['n5', 'success', 'n3']])]);
         else $this->fields()->set(CustomerFields::BOT_PAUSED, '1');
 
         $this->assertSame('dropped', $this->resume());
@@ -513,7 +515,30 @@ class EncodeMacroTest extends UploadEncodeTestCase
         $this->assertSame(1, DB::table('chatbot_events')->where('type', 'ai_dropped')->count());
         $this->assertSame([], $this->vars());
         $this->assertSame('PROCEED', MacroOutput::sole()->STATUS); // ang row ay na-encode pa rin
-        if ($how === 'flow') $this->assertNull((new CustomerFields((int) self::PAGE_ID, self::PSID))->get(CustomerFields::AI));
+        if ($how !== 'paused') $this->assertNull((new CustomerFields((int) self::PAGE_ID, self::PSID))->get(CustomerFields::AI));
+    }
+
+    public function test_S_137_22_a_row_deleted_while_waiting_resumes_on_failed(): void
+    {
+        $this->flowWith(['astra' => false]);
+        $this->says('order po');
+        MacroOutput::query()->delete();
+
+        $this->encodeJobs();
+        $this->resume();
+
+        $this->assertSame(['n4', 'error'], [$this->lastNode(), $this->vars()['encode_hold_reason']]);
+    }
+
+    public function test_S_137_14_the_ai_pool_never_takes_an_encode_ticket(): void
+    {
+        $this->flowWith();
+        $this->says('order po');
+
+        ChatbotAiQueue::recover('pool-1');
+
+        $this->assertSame([], ChatbotAiQueue::claim('pool-1', 10));
+        $this->assertSame('encoding', $this->ticket()->status);
     }
 
     public function test_S_137_33_the_test_tab_sets_sample_variables_and_queues_nothing(): void

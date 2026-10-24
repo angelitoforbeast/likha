@@ -152,7 +152,10 @@ class ChatbotRunner
      */
     public function resumeAi(array $ticket): string
     {
-        return $this->resume(ChatbotAiQueue::TABLE, ['answered', 'failed'], '', ['ai', 'encode_macro'], 'ai_dropped', $ticket, function (FlowRun $run, object $row) {
+        // Ang ticket ng Encode order ay sa Encode order step lang, at ang sagot ng AI ay sa AI step lang (hal. nagbago ang flow at ang id).
+        $encode = DB::table(ChatbotAiQueue::TABLE)->where('request_id', (string) ($ticket['request_id'] ?? ''))->value('model') === FlowEncode::MODEL;
+
+        return $this->resume(ChatbotAiQueue::TABLE, ['answered', 'failed'], '', [$encode ? 'encode_macro' : 'ai'], 'ai_dropped', $ticket, function (FlowRun $run, object $row) {
             $run->aiAnswer = ['node' => (string) $row->node_id, 'ok' => $row->status === 'answered', 'text' => (string) $row->answer,
                 'error' => $row->error ?? 'OpenAI did not answer.'];
             // Ang ticket ng Encode order (spec 137): ang row ng order, para sa variable kahit pumalya.
