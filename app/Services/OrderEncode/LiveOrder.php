@@ -117,6 +117,61 @@ class LiveOrder
         }
         // PROCEED lang kapag ang lugar na nasa row ay ang mismong sinuri ng encode.
         if ($v['_proceed'] && !$keptPlace) $changes['STATUS'] = 'PROCEED';
+
+        return $this->write($row, $changes);
+    }
+
+    /**
+     * Upload to macro (Insert): ang hilaw na row ng order, walang encode. Ang FULL NAME ay ang FB name at ang PHONE NUMBER ay ang
+     * phone ng flow (hal. ang sagot ng GPT; 09… kapag valid); walang STATUS at walang address hanggang sa Encode order.
+     */
+    public function insertRaw(OrderEncode $o, Input $in): MacroOutput
+    {
+        $timestamp = self::timestamp($in->get('date'));
+        $shop = $in->get('shop');
+        $phone = trim($in->get('phone'));
+        $price = trim(str_replace([',', '₱'], '', $in->get('price')));
+        $ip = Parse::itemPrice($shop);
+        $row = MacroOutput::create([
+            'TIMESTAMP' => $timestamp, 'ts_date' => self::day($timestamp), 'PAGE' => $in->get('page'), 'fb_name' => $in->get('name'),
+            'FULL NAME' => $in->get('name'),
+            'PHONE NUMBER' => \App\Services\BotcakeCustomerMatcher::normPhone($phone) ?: ($phone !== '' ? mb_substr($phone, 0, 50) : null),
+            'ITEM_NAME' => $ip['item'] ?: null,
+            'COD' => preg_match('/PRICE:\s*₱\s*([0-9][\d,]*(?:\.\d{1,2})?)/iu', $shop, $m) ? str_replace(',', '', $m[1]) : ($price !== '' ? mb_substr($price, 0, 50) : null),
+            'shop_details' => $shop, 'SHOP DETAILS' => $shop,
+            'all_user_input' => Encoder::allUserInput($in),
+            'extracted_details' => $in->get('cxd'), 'CXD' => $in->get('cxd'),
+            'STATUS' => null,
+            'botcake_psid' => $o->psid ? (string) $o->psid : null,
+        ]);
+        $o->update(['macro_output_id' => $row->id]);
+        DB::afterCommit(fn () => $this->afterImport($timestamp));
+
+        return $row;
+    }
+
+    /**
+     * Upload to macro (Update): ang usapan ng bukas na row ay ang usapan ng order na ito (ang dati + ang bagong mensahe, Conversation).
+     * Ang usapan at ang extracted details lang; hindi ang may linya ng tao. false kapag nagka-STATUS na ang row.
+     */
+    public function appendRaw(MacroOutput $row, Input $in): bool
+    {
+        $staff = self::staffFields((string) $row->{'HISTORICAL LOGS'});
+        $changes = [];
+        foreach (['all_user_input' => Encoder::allUserInput($in), 'extracted_details' => $in->get('cxd'), 'CXD' => $in->get('cxd')] as $col => $new) {
+            if ((string) $new === (string) $row->{$col} || trim((string) $new) === '' || in_array($col, $staff, true)) continue;
+            $changes[$col] = $new;
+        }
+
+        return $this->write($row, $changes);
+    }
+
+    /**
+     * Ang mga pagbabago sa row na walang STATUS pa, sa isang kondisyonal na UPDATE, na may linya sa HISTORICAL LOGS ang bawat isa.
+     * @return bool false kapag nagka-STATUS na ang row (hindi na ginalaw); true kapag walang babaguhin
+     */
+    private function write(MacroOutput $row, array $changes): bool
+    {
         if (!$changes) return true;
 
         $stamp = now('Asia/Manila')->format('Y-m-d H:i:s');

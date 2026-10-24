@@ -10,10 +10,15 @@ use InvalidArgumentException;
  */
 class FlowGraph
 {
-    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'clear_ai', 'sheet', 'encode_order', 'sequence', 'end'];
+    public const TYPES = ['start', 'condition', 'send', 'set', 'ai', 'clear_ai', 'sheet', 'encode_order', 'upload_macro', 'encode_macro', 'sequence', 'end'];
 
     /** Ang mga cell A..H ng Encode order (ang I ay status, laging blangko): ang pangalan sa config. */
     public const ENCODE_FIELDS = ['date', 'page', 'name', 'phone', 'input', 'shop', 'extracted', 'price'];
+
+    /** "Wait up to" ng Encode order (segundo). */
+    public const ENCODE_WAIT = 90;
+    public const ENCODE_WAIT_MIN = 10;
+    public const ENCODE_WAIT_MAX = 600;
 
     public const RULES = [
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
@@ -44,7 +49,7 @@ class FlowGraph
             'condition' => array_merge(array_map(fn ($i) => 'row_' . ($i + 1), array_keys(array_values((array) ($config['rows'] ?? [])))), ['no']),
             'send' => !empty($config['wait']) ? (self::skipMinutes($config) ? ['reply', 'skipped'] : ['reply']) : ['continue'],
             'ai' => ['success', 'failed'],
-            'sheet', 'encode_order' => ['next', 'failed'],
+            'sheet', 'encode_order', 'upload_macro', 'encode_macro' => ['next', 'failed'],
             default => [],
         };
     }
@@ -106,7 +111,7 @@ class FlowGraph
         $text = fn ($v, int $max = self::MAX_TEXT) => mb_substr(is_scalar($v) ? (string) $v : '', 0, $max);
         $field = fn ($v) => ChatbotVars::norm(is_scalar($v) ? (string) $v : '');
         // "Counts as an order" (Results): naka-save lang kapag naka-tick, kaya ang lumang graph ay hindi nagbabago.
-        $order = in_array($type, ['send', 'set', 'sheet', 'encode_order'], true) && !empty($c['counts_order']) ? ['counts_order' => true] : [];
+        $order = in_array($type, ['send', 'set', 'sheet', 'encode_order', 'upload_macro'], true) && !empty($c['counts_order']) ? ['counts_order' => true] : [];
 
         return $order + match ($type) {
             'condition' => ['rows' => array_values(array_map(fn ($r) => [
@@ -152,6 +157,16 @@ class FlowGraph
                 'sheet' => $text($c['sheet'] ?? '', 300),
                 'tab' => $text($c['tab'] ?? '', 100),
                 'on_failure' => ($c['on_failure'] ?? '') === 'continue' ? 'continue' : 'sheet',
+            ],
+            // Upload to macro: ang mga template ng order (A..H), Insert o Update, at ang gagawin kapag walang row sa Update.
+            'upload_macro' => array_combine(self::ENCODE_FIELDS, array_map(fn ($k) => $text($c[$k] ?? ''), self::ENCODE_FIELDS)) + [
+                'mode' => ($c['mode'] ?? '') === 'update' ? 'update' : 'insert',
+                'if_not_found' => ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert',
+            ],
+            // Encode order: gaano katagal hinihintay ang encode, at si Astra kapag hindi PROCEED (naka-on kapag walang key).
+            'encode_macro' => [
+                'wait' => max(self::ENCODE_WAIT_MIN, min(self::ENCODE_WAIT_MAX, is_numeric($c['wait'] ?? null) ? (int) $c['wait'] : self::ENCODE_WAIT)),
+                'astra' => !array_key_exists('astra', $c) || !empty($c['astra']),
             ],
             // sequence_id 0 = lahat (unsubscribe lang)
             'sequence' => [
