@@ -1049,3 +1049,10 @@ Accepted, not fixed:
 - **Tests were written after the first slice of code (rules R1 to R5) instead of before it**; the sheet-mode assertions inside each test show the old behaviour. Reason: see the result file.
 - **`/chatbot/health` accepts any digit string as `page_id`, and each (page, range) makes a 5-minute cache entry.** Reason: only chatbot roles or the events-key holder can call it, and the JSON route is throttled. Suggestion: check `page_id` against the page map.
 - **Failure reason order is unreachable, window (#10), HTTP 5xx, timeout, other.** Reason: a 5xx whose body contains "(#10)" counts as window; narrow edge.
+
+
+## 141: AI paste mapping, accepted review minors (2026-10-24)
+
+- **The AI path does not repeat the classic notes** "Only the first row was used" and "ACTIVE and FLOW are not in this window". Reason: the preview lists exactly what will be filled; the notes still show on "Use header/position instead". Small UX follow-up if staff ask.
+- **Blank cells are always None on the AI path**, so "Paste blanks as empty" only affects the header/position mapping. Reason: an empty cell carries nothing for the AI to place; clearing fields stays with the classic mapping or by hand. The story says so.
+- **The modal's own JS is not tested in a DOM**: the amber "Not sure" highlight and the client switch to the fallback (note, 429, 30 s wait) are covered only by markup checks; the helpers (`aiRow`, `mapConflicts`, `applyMapping`) and the server fallback are tested. Reason: the project has no DOM test harness; adding one is a new dependency. No browser check was run in this session.

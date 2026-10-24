@@ -190,6 +190,18 @@ class ChatbotPasteMapTest extends ChatblastTestCase
             && $ctx === ['page' => 'Page Uno', 'cells' => 1, 'model' => 'gpt-4o-mini', 'tokens_in' => 1500, 'tokens_out' => 200, 'cost_usd' => 0.000345])->once();
     }
 
+    public function test_S_141_9_a_rejected_answer_still_logs_what_it_cost(): void
+    {
+        $this->actingAs($this->user());
+        $this->ai(['mapping' => [['cell' => 0, 'field' => 'password', 'confidence' => 'high']]]);
+        Log::spy();
+
+        $this->map(['499'])->assertOk()->assertJson(['fallback' => true]);
+
+        Log::shouldHaveReceived('info')->withArgs(fn ($msg, $ctx) => $msg === 'chatbot paste map rejected'
+            && $ctx === ['model' => 'gpt-4o-mini', 'tokens_in' => 1500, 'tokens_out' => 200, 'cost_usd' => 0.000345])->once();
+    }
+
     public function test_S_141_10_a_paste_of_only_sequences_maps_to_seq_fields(): void
     {
         $this->actingAs($this->user());
