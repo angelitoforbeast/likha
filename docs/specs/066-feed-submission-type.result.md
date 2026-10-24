@@ -104,7 +104,7 @@ Branch `feat/066-feed-submission-type-2`, cut from `359a7085` (current main plus
 | `359a7085`                        | OK, Tests: 584, Assertions: 1970, PHPUnit Deprecations: 5 |
 | `feat/066-feed-submission-type-2` | OK, Tests: 587, Assertions: 1987, PHPUnit Deprecations: 5 |
 
-No new failures; the three extra tests are 066's C1 to C3 (C4 is the updated existing late-today assertion). The known local-only Google credentials error is in `ExampleTest`, outside these folders, so it did not show up in either run.
+No new failures; the three extra tests are 066's C1 to C3 (C4 is covered by the existing key-list tests `S_051_9`, `S_051_11` and `S_051_31`, now with the two keys and main's 30-minute deadlines). The known local-only Google credentials error is in `ExampleTest`, outside these folders, so it did not show up in either run.
 
 **Sample `checklist_late_today` items (fake data).**
 
