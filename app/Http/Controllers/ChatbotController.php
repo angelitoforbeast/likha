@@ -12,6 +12,7 @@ use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\PasteFieldAi;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -19,6 +20,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -31,6 +33,7 @@ use Throwable;
 class ChatbotController extends Controller
 {
     private const MAX_CELLS = 5000; // kada Paste values: 60 page × mga 52 column ay mga 3,100
+    private const MAX_PASTE_CELLS = 200; // kada paste sa Edit (isang row): higit pa sa lahat ng field ng modal
     private const SAMPLE_NAME = 'Juan Dela Cruz'; // ang sample na customer ng Preview
     private const HISTORY_LIMIT = 100;
     private const MAX_BULK_PAGES = 200; // ang bulk na "Replies via"
@@ -217,6 +220,34 @@ class ChatbotController extends Controller
         });
 
         return response()->json(['saved' => count($undo), 'unchanged' => $unchanged, 'skipped' => $skipped, 'pages' => count($pages), 'undo' => $undo]);
+    }
+
+    /**
+     * Ang paste sa Edit ng isang page: ang AI ang pumipili ng field ng bawat cell (PasteFieldAi). Mapping lang ang sagot,
+     * hindi value; walang sine-save dito. fallback: walang key, pumalya o mali ang sagot: ang dating header/position.
+     */
+    public function pasteMap(Request $request, PasteFieldAi $ai)
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        $text = fn ($list) => is_array($list) && array_is_list($list) && count($list) <= self::MAX_PASTE_CELLS
+            && !array_filter($list, fn ($c) => !is_scalar($c) && $c !== null) ? array_map(fn ($c) => (string) $c, $list) : null;
+        $cells = $text($request->input('cells'));
+        if (!$cells || !array_filter($cells, fn ($c) => trim($c) !== '')) return response()->json(['error' => 'Nothing to map.'], 422);
+        $header = $request->filled('header') ? $text($request->input('header')) : null;
+
+        $fields = array_values(array_filter($this->fields->columns(), fn ($c) => $c['key'] !== 'flow'));
+        $res = $ai->map($cells, $header, $fields);
+        if ($res === null) {
+            $note = (string) config('services.openai.key') === '' ? 'AI mapping is off (no OpenAI key), so the header/position mapping was used.'
+                : 'AI could not map this paste, so the header/position mapping was used.';
+            return response()->json(['fallback' => true, 'note' => $note]);
+        }
+        Log::info('chatbot paste map', ['page' => $page, 'cells' => count($cells), 'model' => $res['model'],
+            'tokens_in' => $res['tokens_in'], 'tokens_out' => $res['tokens_out'], 'cost_usd' => $res['cost_usd']]);
+
+        return response()->json(['mapping' => $res['mapping']]);
     }
 
     /** "+ Column": bagong botfield para sa lahat ng page. */
