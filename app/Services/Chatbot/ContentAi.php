@@ -23,15 +23,16 @@ class ContentAi
 
     /**
      * @param array<int, array> $content ang mga bahagi ng tanong ng user (text at image_url)
+     * @param int|null $timeout segundo; null = ang karaniwang TIMEOUT
      * @return array{answer: array, model: string, tokens_in: int, tokens_out: int, cost_usd: float}|null
      */
-    public function ask(string $system, array $content): ?array
+    public function ask(string $system, array $content, ?int $timeout = null): ?array
     {
         $key = (string) config('services.openai.key');
         if ($key === '') return null;
         $model = $this->model();
         try {
-            $res = Http::withToken($key)->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::TIMEOUT)
+            $res = Http::withToken($key)->connectTimeout(self::CONNECT_TIMEOUT)->timeout($timeout ?? self::TIMEOUT)
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $model,
                     'temperature' => 0,
