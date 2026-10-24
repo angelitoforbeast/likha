@@ -93,6 +93,7 @@ class OneRowPerDayTest extends LiveRowTestCase
 
     public function test_S_136_8_r5_runs_after_the_link_and_never_counts_the_customers_own_row(): void
     {
+        \App\Models\AppSetting::set(\App\Services\OrderEncode\Settings::DUPLICATE_HOLD, 'on');
         $first = $this->heldOrder();
         $second = $this->liveOrder($this->details());
 

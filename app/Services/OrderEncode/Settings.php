@@ -25,6 +25,8 @@ class Settings
     /** improved (default) = ang mga panuntunan ng spec 135; sheet = eksaktong kopya ng dalawang script (spec 130) */
     public const RULES = 'order_encode_rules';
     public const RULE_SETS = ['improved', 'sheet'];
+    /** off (default) / on: ang hold ng R5 (doble). Off: ang doble ay nasa steps lang (duplicates_seen); ang Validate ang humuhuli nito (CEO lang). */
+    public const DUPLICATE_HOLD = 'order_encode_duplicate_hold';
 
     /** on (default) / off: ang Astra on the spot sa live na order na hindi PROCEED (kill switch, CEO lang). */
     public const SPOT_ASTRA = 'order_encode_spot_astra';
@@ -67,6 +69,11 @@ class Settings
         $v = strtolower($this->app(self::RULES, 'improved'));
 
         return in_array($v, self::RULE_SETS, true) ? $v : 'improved';
+    }
+
+    public function duplicateHold(): bool
+    {
+        return strtolower($this->app(self::DUPLICATE_HOLD, 'off')) === 'on';
     }
 
     public function spotAstra(): bool

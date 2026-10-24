@@ -40,4 +40,23 @@ class LiveSettingsTest extends LiveRowTestCase
         $this->save('CEO', ['spot_astra' => 'on', 'address_sequence' => ''])->assertRedirect();
         $this->assertSame([true, null], [$settings->spotAstra(), $settings->addressSequence()]);
     }
+
+    public function test_S_144_4_the_duplicate_hold_is_off_by_default_and_only_the_ceo_switches_it(): void
+    {
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => ['database/migrations/2026_11_05_100000_add_final_compare_to_order_encodes_table.php']]); // ang final page
+        $settings = app(Settings::class);
+        $this->assertFalse($settings->duplicateHold());
+
+        $this->save('CEO', ['duplicate_hold' => 'on'])->assertRedirect();
+        $this->assertTrue($settings->duplicateHold());
+        $this->as('CEO')->get('/order-encode/final')->assertOk()->assertSee('name="duplicate_hold"', false)->assertSee('Duplicate hold: <b>on</b>', false);
+
+        $this->save('CEO', ['duplicate_hold' => 'maybe'])->assertSessionHasErrors('duplicate_hold');
+        $this->save('Marketing', ['duplicate_hold' => 'off'])->assertNotFound();
+        $this->assertTrue($settings->duplicateHold());
+        $this->as('Marketing')->get('/order-encode/final')->assertDontSee('name="duplicate_hold"', false);
+
+        $this->save('CEO', ['duplicate_hold' => 'off'])->assertRedirect();
+        $this->assertFalse($settings->duplicateHold());
+    }
 }

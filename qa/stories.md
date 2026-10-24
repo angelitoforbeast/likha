@@ -2092,10 +2092,10 @@ Tests: `tests/Feature/OrderEncode/{RulesTest,NotesBuildTest,NotesUseTest,NotesPa
 | S-135.12 | Given the J&T label "POBLACION BARANGAY 4", then the output is that label and not "BARANGAY POBLACION 4"; a GPT answer in other letters is written as the list label | `test_S_135_12…` | passed 2026-10-24 |
 | S-135.13 | Given Burauen/Bayog or Laguna Santa Cruz/Inalmasinan (not in the J&T list), then the order is held with R4 (the script PROCEEDs it) | `test_S_135_13…` | passed 2026-10-24 |
 | S-135.14 | Given a real combination, then nothing is held and the outputs say `rules: improved` | `test_S_135_14…` | passed 2026-10-24 |
-| S-135.15 | Given three orders of one phone on the same day from other customers (another PSID, or rows without one), then the next one is held with "Possible duplicate: <ids>"; the customer's own row (same page + PSID, also from yesterday) never counts (amended by S-136) | `test_S_135_15…`, `OneRowPerDayTest::test_S_136_8…` | passed 2026-10-24 |
-| S-135.16 | Given the same name, barangay and city with another phone on another customer's row (another PSID), then it is a duplicate (amended by S-136: never the customer's own row) | `test_S_135_16…` | passed 2026-10-24 |
+| S-135.15 | Given three orders of one phone on the same day from other customers (another PSID, or rows without one), then the next one is held with "Possible duplicate: <ids>"; the customer's own row (same page + PSID, also from yesterday) never counts (amended by S-136) (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `test_S_135_15…`, `OneRowPerDayTest::test_S_136_8…` | passed 2026-10-24 |
+| S-135.16 | Given the same name, barangay and city with another phone on another customer's row (another PSID), then it is a duplicate (amended by S-136: never the customer's own row) (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `test_S_135_16…` | passed 2026-10-24 |
 | S-135.17 | Given another day, the same name in another barangay, a CANNOT PROCEED row or a whitelisted phone, then no duplicate | `test_S_135_17…` | passed 2026-10-24 |
-| S-135.18 | Given an encode not yet in macro_output, then it counts for the same day ("e<id>") | `test_S_135_18…` | passed 2026-10-24 |
+| S-135.18 | Given an encode not yet in macro_output, then it counts for the same day ("e<id>") (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `test_S_135_18…` | passed 2026-10-24 |
 | S-135.19 | Given rules `sheet`, then duplicates are not checked | `test_S_135_19…` | passed 2026-10-24 |
 | S-135.20 | Given a staff fix, then notes-build makes a pending note with the J&T answer, the example and the order id | `NotesBuildTest::test_S_135_20…` | passed 2026-10-24 |
 | S-135.21 | Given an Astra/AI Fix (`fixed`, not `partial`) and a delivered order, then each makes its own source | `test_S_135_21…` | passed 2026-10-24 |
@@ -2113,7 +2113,7 @@ Tests: `tests/Feature/OrderEncode/{RulesTest,NotesBuildTest,NotesUseTest,NotesPa
 | S-135.33 | Given many approved notes with the same city or province, then at most five (closest first, approved only) are in the GPT prompts as past corrections | `test_S_135_33…` | passed 2026-10-24 |
 | S-135.34 | Given no notes, or rules `sheet`, then the prompts have no past corrections | `test_S_135_34…` | passed 2026-10-24 |
 | S-135.35 | Given the lookups, then every query on `address_notes` uses an index (no scan) | `test_S_135_35…` | passed 2026-10-24 |
-| S-135.36 | Given a held order in `live` mode, then its `macro_output` row has APP SCRIPT CHECKER `TO FIX`, no STATUS and the rule and reason in AI ANALYZE (so Validate cannot turn it into PROCEED) | `RulesTest::test_S_135_36…` | passed 2026-10-24 |
+| S-135.36 | Given a held order in `live` mode, then its `macro_output` row has APP SCRIPT CHECKER `TO FIX`, no STATUS and the rule and reason in AI ANALYZE (so Validate cannot turn it into PROCEED) (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `RulesTest::test_S_135_36…` | passed 2026-10-24 |
 | S-135.40 | Given a guest or any role but CEO, then the notes page and every action give 404 / redirect | `NotesPageTest::test_S_135_40…` | passed 2026-10-24 |
 | S-135.41 | Given the page, then it shows pending first, counts per status, and the filters (status, source, conflict, delivered, search) work | `test_S_135_41…` | passed 2026-10-24 |
 | S-135.42 | Given approve or reject, then the reviewer, time and note are saved | `test_S_135_42…` | passed 2026-10-24 |
@@ -2142,7 +2142,7 @@ Tests: `tests/Feature/OrderEncode/{OneRowPerDayTest,ConversationTest,SpotAstraTe
 | S-136.5 (P2) | Given the same person on two pages with the same phone, then two rows (Validate, unchanged, refuses the second phone) | `test_S_136_5…` (rows only; Validate not re-tested) | passed 2026-10-24 |
 | S-136.6 (P2) | Given an imported row (no PSID) of this customer today, then the order is linked to it by PAGE + fb_name | `test_S_136_6…` | passed 2026-10-24 |
 | S-136.7 (P2) | Given "Niño Peña 😀" twice, then one row with the name intact | `test_S_136_7…` | passed 2026-10-24 |
-| S-136.8 | Given the customer's open row, then the link is set before R5 and R5 never counts the customer's own row; another PSID with the same phone is still held by R5 | `test_S_136_8…` | passed 2026-10-24 |
+| S-136.8 | Given the customer's open row, then the link is set before R5 and R5 never counts the customer's own row; another PSID with the same phone is still held by R5 (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `test_S_136_8…` | passed 2026-10-24 |
 | S-136.9 | Given two runs of one customer at once, then the second waits for the customer lock (or retries) and updates the same row; no unique-key error | `test_S_136_9…` | passed 2026-10-24 |
 | S-136.10 | Given the row is PROCEED, then a later order leaves every column unchanged, the order has the note "second order not accepted: row <id>" (shown on /order-encode) and an `encode_order` chat event | `test_S_136_10_11_12…` (PROCEED), `test_S_136_10_the_not_accepted_note…` | passed 2026-10-24 |
 | S-136.11 | Given the row has a waybill (courier), then it is unchanged and the order is not accepted | `test_S_136_10_11_12…` (waybill) | passed 2026-10-24 |
@@ -2164,7 +2164,7 @@ Tests: `tests/Feature/OrderEncode/{OneRowPerDayTest,ConversationTest,SpotAstraTe
 | S-136.27 | Given the kill switch off, then no on-the-spot Astra and the question is decided from the encode's hold | `test_S_136_27…` | passed 2026-10-24 |
 | S-136.28 (P2) | Given an Astra fix or an encode update, then Astra writes its `ai_checker_logs` row (source `spot`, user "Likha encode"), the update writes "Likha encode" lines, and the Checker 1 summary and the notes build do not count them as staff | `test_S_136_22_28…`, `test_S_136_28…`, `NotesBuildTest::test_S_135_27…` (variant) | passed 2026-10-24 |
 | S-136.29 | Given an address hold after Astra, then the customer is subscribed once to the chosen sequence (via `order-encode`), with the `sequence` chat event and the note | `AddressQuestionTest::test_S_136_29…` | passed 2026-10-24 |
-| S-136.30 | Given an R5 hold (even when Astra leaves the address open), or Astra leaves the address ✅ but holds for name, phone or price, then no subscribe | `test_S_136_30_a_duplicate…`, `test_S_136_30_31…` | passed 2026-10-24 |
+| S-136.30 | Given an R5 hold (even when Astra leaves the address open), or Astra leaves the address ✅ but holds for name, phone or price, then no subscribe (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `test_S_136_30_a_duplicate…`, `test_S_136_30_31…` | passed 2026-10-24 |
 | S-136.31 | Given a PROCEED row, then no subscribe | `SpotAstraTest::test_S_136_22_28…`, `AddressQuestionTest::test_S_136_35_36…` | passed 2026-10-24 |
 | S-136.32 | Given no sequence chosen, or it is paused, deleted or has no steps, then the row stays held for staff with the reason on /order-encode | `test_S_136_32…` (table) | passed 2026-10-24 |
 | S-136.33 | Given the customer is already in the sequence, then no second subscribe | `test_S_136_33…` | passed 2026-10-24 |
@@ -2217,7 +2217,7 @@ Tests: `tests/Feature/OrderEncode/{UploadMacroTest,EncodeMacroTest,UploadEncodeB
 | S-137.14 | Given a PROCEED order, then the run waits ("waiting for the encode"), the row gets address, province, city, barangay and STATUS PROCEED, and the run resumes on next with proceed yes and no hold reason; no Astra | `test_S_137_14…` | passed 2026-10-24 |
 | S-137.15 | Given a valid chat phone different from the uploaded GPT phone, then PHONE NUMBER is replaced and logged "Likha encode"; an invalid chat phone keeps the uploaded one; the same for the name | `test_S_137_15…` (table) | passed 2026-10-24 |
 | S-137.16 | Given staff edited the phone or the name, then they are kept | `test_S_137_16…` | passed 2026-10-24 |
-| S-137.17 | Given each hold, then proceed no and its reason, the first of address, duplicate, name, phone, price, other; R5 counts only other customers | `test_S_137_17_each_hold…` (table), `test_S_137_17_r5…` (table) | passed 2026-10-24 |
+| S-137.17 | Given each hold, then proceed no and its reason, the first of address, duplicate, name, phone, price, other; R5 counts only other customers (amended by S-144: only with `order_encode_duplicate_hold` = `on`; the default `off` never holds) | `test_S_137_17_each_hold…` (table), `test_S_137_17_r5…` (table) | passed 2026-10-24 |
 | S-137.18 | Given a held order and the Astra box on, then Astra fixes the same row (spot path, its log row) and the variables carry the row's final values | `test_S_137_18…` | passed 2026-10-24 |
 | S-137.19 | Given the box off or the kill switch off, then no Astra | `test_S_137_19…` (table) | passed 2026-10-24 |
 | S-137.20 | Given the owner's Condition (encode_hold_reason is address) → Sequence, then one subscription from the flow; the new blocks never auto-subscribe, and /order-encode/final labels the address sequence "legacy block only" | `test_S_137_20…`, `UploadEncodeBuilderTest::test_S_137_20…` | passed 2026-10-24 |
@@ -2335,3 +2335,17 @@ Story changes (S-143):
 - S-137.38 (Publish notice): kept as a softer hint ("it encodes the customer's open order row, or goes to failed when there is none").
 - S-143.8 and S-143.9 gained a case each from the review: the 30-minute cap on a lost job, and no order query in flows that never name an `order_*` variable.
 - S-137.43 ("Wait up to" 120 s): retired; `ExpressLaneTest::test_137_1_the_new_encode…` now checks that no wait ticket exists.
+
+## S-144 The encoder no longer holds a possible duplicate (Validate catches it)
+
+As the owner, I want an order with a good address to PROCEED even when the same phone (or name + barangay + city) already ordered today, because staff always run Validate, which catches duplicates; and I want Astra not to run on a hold it cannot fix.
+
+Slice 144. Threat model: customer chat text and the macro_output row values are untrusted; the CEO's settings on `/order-encode/final` and the J&T list are trusted. Risk tier: medium.
+Tests: `tests/Feature/OrderEncode/RulesTest.php`, `AddressQuestionTest.php`, `EncodeMacroTest.php`, `LiveSettingsTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-144.1 (P1) | Given `order_encode_duplicate_hold` unset (default `off`) and two same-day orders of the phone, when the next order with a valid address is encoded, then it PROCEEDs with no hold and no `rule_hold` step, and the steps have `duplicates_seen` with the found ids | `RulesTest::test_S_144_1…` | passed 2026-10-25 |
+| S-144.2 (P1) | Given the setting `on` and another customer's same-day order with the phone, when a live order (legacy block) is held by R5 only, then `RunSpotAstra` is not queued (and no address question) | `AddressQuestionTest::test_S_144_2…` | passed 2026-10-25 |
+| S-144.3 (P1) | Given an Encode order step with the Astra box on and another customer's same-day order with the phone, then with the setting off the row is PROCEED, and with it on the row is held with `order_hold_reason` `duplicate`; in both, no `RunEncodeAstra` and no Astra call | `EncodeMacroTest::test_S_144_3…` (table) | passed 2026-10-25 |
+| S-144.4 (P1) | Given `/order-encode/final`, then the setting is shown (off by default) and only the CEO can switch it (another role: 404, not shown); a value other than on/off is refused | `LiveSettingsTest::test_S_144_4…` | passed 2026-10-25 |

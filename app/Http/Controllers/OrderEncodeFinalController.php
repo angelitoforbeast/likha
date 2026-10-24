@@ -114,7 +114,7 @@ class OrderEncodeFinalController extends Controller
             'import' => [
                 'on' => $shadow->on(), 'cap' => $shadow->cap(), 'skip_pages' => $shadow->skipPagesText(), 'encoded_today' => $shadow->encodedToday(),
                 'skipped_cap' => $shadow->skippedToday()['cap'], 'skipped_pages' => $shadow->skippedToday()['pages'], 'cost' => $t['cost'],
-                'can_edit' => $this->getNormalizedRole() === 'CEO', 'rules' => app(Settings::class)->rules(),
+                'can_edit' => $this->getNormalizedRole() === 'CEO', 'rules' => app(Settings::class)->rules(), 'duplicate_hold' => app(Settings::class)->duplicateHold(),
                 'spot_astra' => app(Settings::class)->spotAstra(), 'address_sequence' => app(Settings::class)->addressSequence(),
                 'sequences' => \Illuminate\Support\Facades\Schema::hasTable('chatbot_sequences') ? \App\Models\ChatbotSequence::orderBy('name')->get(['id', 'name', 'active']) : collect(),
             ],
@@ -134,6 +134,7 @@ class OrderEncodeFinalController extends Controller
             'skip_pages' => ['nullable', 'string', 'max:2000'],
             'rules' => ['nullable', 'in:' . implode(',', Settings::RULE_SETS)],
             'spot_astra' => ['nullable', 'in:on,off'],
+            'duplicate_hold' => ['nullable', 'in:on,off'],
             // ang sequence ng tanong sa address: dapat totoong sequence; blangko = walang tanong
             'address_sequence' => ['nullable', 'integer', 'exists:chatbot_sequences,id'],
         ]);
@@ -141,6 +142,7 @@ class OrderEncodeFinalController extends Controller
         \App\Models\AppSetting::set(ImportShadow::CAP, (string) $data['cap']);
         \App\Models\AppSetting::set(ImportShadow::SKIP_PAGES, trim((string) ($data['skip_pages'] ?? '')));
         if (!empty($data['rules'])) \App\Models\AppSetting::set(Settings::RULES, $data['rules']);
+        if (!empty($data['duplicate_hold'])) \App\Models\AppSetting::set(Settings::DUPLICATE_HOLD, $data['duplicate_hold']);
         if (!empty($data['spot_astra'])) \App\Models\AppSetting::set(Settings::SPOT_ASTRA, $data['spot_astra']);
         if ($request->has('address_sequence')) \App\Models\AppSetting::set(Settings::ADDRESS_SEQUENCE, (string) ($data['address_sequence'] ?? ''));
 

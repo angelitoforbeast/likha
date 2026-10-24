@@ -563,12 +563,35 @@ class EncodeMacroTest extends UploadEncodeTestCase
     /** @dataProvider duplicates */
     public function test_S_137_17_r5_holds_only_for_another_customers_order(int $otherPsid, string $status, string $reason): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
         $this->existing(['botcake_psid' => (string) $otherPsid, 'fb_name' => 'Someone', 'TIMESTAMP' => '08:00 23-10-2026', 'STATUS' => 'PROCEED']);
         $this->flowWith(['astra' => false], ['mode' => 'insert']);
 
         $this->says('order po');
         $this->encodeJobs();
 
+        $this->assertSame([$status, $reason], [$this->vars()['order_status'], $this->vars()['order_hold_reason']]);
+    }
+
+    /** @return array<string, array{0: ?string, 1: string, 2: string}> ang setting, status, hold */
+    public static function duplicateHold(): array
+    {
+        return ['the hold is off (default)' => [null, 'PROCEED', ''], 'the hold is on' => ['on', '', 'duplicate']];
+    }
+
+    /** @dataProvider duplicateHold */
+    public function test_S_144_3_another_customers_order_proceeds_unless_the_hold_is_on_and_an_r5_hold_queues_no_astra(?string $switch, string $status, string $reason): void
+    {
+        if ($switch) AppSetting::set(Settings::DUPLICATE_HOLD, $switch);
+        $calls = $this->astra(fix: true);
+        $this->existing(['botcake_psid' => '7002', 'fb_name' => 'Someone', 'TIMESTAMP' => '08:00 23-10-2026', 'STATUS' => 'PROCEED']);
+        $this->flowWith(['astra' => true], ['mode' => 'insert']);
+
+        $this->says('order po');
+        $this->encodeJobs();
+
+        Queue::assertNotPushed(RunEncodeAstra::class);
+        $this->assertSame([], $calls->getArrayCopy());
         $this->assertSame([$status, $reason], [$this->vars()['order_status'], $this->vars()['order_hold_reason']]);
     }
 

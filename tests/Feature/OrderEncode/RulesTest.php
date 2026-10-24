@@ -261,8 +261,21 @@ class RulesTest extends EncodeRunTestCase
             'CITY' => 'QUEZON-CITY', 'BARANGAY' => 'BUNGAD']);
     }
 
+    public function test_S_144_1_with_the_hold_off_a_duplicate_proceeds_and_the_steps_note_its_ids(): void
+    {
+        $ids = [(string) $this->earlier()->id, (string) $this->earlier()->id]; // gaya ng reason: "e<id>" ang encode na wala pa sa macro_output
+
+        $o = $this->runOrder($this->cxd('Metro Manila', 'Quezon City', 'Bungad'), self::bungadRows());
+
+        $this->assertTrue($o->outputs['proceed']);
+        $this->assertNull($o->outputs['hold']);
+        $this->assertSame(['OK', $ids], [$this->step($o, 'duplicates_seen')['status'], $this->step($o, 'duplicates_seen')['ids']]);
+        $this->assertNotContains('rule_hold', array_column($o->steps, 'step'));
+    }
+
     public function test_S_135_15_three_same_day_orders_of_one_phone_hold_the_fourth(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
         $ids = [$this->earlier()->id, $this->earlier()->id, $this->earlier()->id];
 
         $o = $this->runOrder($this->cxd('Metro Manila', 'Quezon City', 'Bungad'), self::bungadRows());
@@ -274,6 +287,7 @@ class RulesTest extends EncodeRunTestCase
 
     public function test_S_135_16_the_same_name_barangay_and_city_is_a_duplicate_with_another_phone(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
         $same = $this->earlier(['FULL NAME' => 'ana cruz', 'PHONE NUMBER' => '9189999999']);
 
         $o = $this->runOrder($this->cxd('Metro Manila', 'Quezon City', 'Bungad'), self::bungadRows());
@@ -298,6 +312,7 @@ class RulesTest extends EncodeRunTestCase
 
     public function test_S_135_18_an_encode_that_is_not_in_macro_output_yet_counts_for_the_same_day(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
         $first = $this->runOrder($this->cxd('Metro Manila', 'Quezon City', 'Bungad'), self::bungadRows());
         $this->assertTrue($first->outputs['proceed']);
         $first->update(['created_at' => '2026-10-23 10:00:00']);
@@ -326,6 +341,7 @@ class RulesTest extends EncodeRunTestCase
 
     public function test_S_135_36_a_held_live_order_is_written_to_macro_output_as_to_fix_so_validate_cannot_make_it_proceed(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
         $earlier = $this->earlier();
         $this->writeList(self::bungadRows());
         AppSetting::set(Settings::RULES, 'improved');

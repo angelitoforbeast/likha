@@ -196,13 +196,21 @@ class Runner
         $o->update(['status' => 'failed', 'error' => mb_substr($why, 0, 500)]);
     }
 
-    /** R5: ang order na may kapareho sa parehong araw ay hold (reason "Possible duplicate: <order ids>"). Ang naka-link na order: ang araw ng row nito. */
+    /**
+     * R5: ang order na may kapareho sa parehong araw ay hold (reason "Possible duplicate: <order ids>") kapag naka-on ang setting;
+     * kung off (default), tala lang sa steps (duplicates_seen) at tuloy ang PROCEED. Ang naka-link na order: ang araw ng row nito.
+     */
     private function duplicates(OrderEncode $o, Input $in, array $outputs, Steps $steps): array
     {
         if (!($outputs['proceed'] ?? false)) return $outputs;
         $day = $o->macro_output_id ? substr((string) MacroOutput::whereKey($o->macro_output_id)->value('ts_date'), 0, 10) : '';
         $ids = (new Duplicates())->find($o, $in, $outputs, $day !== '' ? $day : null);
         if (!$ids) return $outputs;
+        if (!$this->settings->duplicateHold()) {
+            $steps->add('duplicates_seen', 'OK', ['ids' => $ids]); // ang Validate ang humuhuli ng doble
+
+            return $outputs;
+        }
 
         $hold = ['rule' => 'R5', 'reason' => 'Possible duplicate: ' . implode(', ', $ids)];
         $steps->add('rule_hold', 'HOLD:R5', $hold);
