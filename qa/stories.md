@@ -2294,3 +2294,5 @@ As the owner building a flow, I see one "Encode order" button in the Add bar, so
 |---|---|---|---|
 | S-142.1 (P1) | Given the flow editor, when it renders, then the Add bar has exactly one "Encode order" button (`encode_macro`) and no `encode_order` button | `UploadEncodeBuilderTest::test_S_142_1…` | passed 2026-10-25 |
 | S-142.2 (P1) | Given a saved flow with a legacy `encode_order` node, then it still loads as "Encode order (legacy)", saves and reloads its config | `UploadEncodeBuilderTest::test_S_137_1…`, `EncodeOrderNodeTest::test_S_132_1…` | passed 2026-10-25 |
+| S-142.3 (P1) | Given a new sequence, then "Exit when the customer replies" is off, the edit form shows it unchecked, and checking it still saves on | `ChatbotSequencePagesTest::test_S_142_3…` | passed 2026-10-25 |
+| S-142.4 (P1) | Given existing sequences with exit on reply on, when the migration runs, then every one is off (rows kept) | `ChatbotSequencePagesTest::test_S_142_4…` | passed 2026-10-25 |
