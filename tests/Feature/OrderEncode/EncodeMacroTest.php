@@ -109,7 +109,9 @@ class EncodeMacroTest extends UploadEncodeTestCase
     /** @return array<string, string> ang mga order_* variable na nakikita ng isang takbo ng flow */
     private function vars(int $psid = self::PSID): array
     {
-        $run = new FlowRun(9, $this->graph([], []), self::PAGE, self::PAGE_ID, [], $this->fields($psid), null, '', 'Ana Cruz', now()->format('Y-m-d H:i'));
+        // Ang flow na gumagamit ng order_* (sa Send): doon lang binabasa ang mga ito.
+        $send = ['send', ['items' => [['type' => 'text', 'value' => '{{order_status}}']]]];
+        $run = new FlowRun(9, $this->graph(['n2' => $send], [['n1', 'next', 'n2']]), self::PAGE, self::PAGE_ID, [], $this->fields($psid), null, '', 'Ana Cruz', now()->format('Y-m-d H:i'));
         $out = [];
         foreach ($run->vars() as $k => $v) {
             if (str_starts_with($k, 'order ')) $out[str_replace(' ', '_', $k)] = $v;
@@ -375,6 +377,32 @@ class EncodeMacroTest extends UploadEncodeTestCase
         $this->assertSame(['order_address', 'order_barangay', 'order_checker', 'order_city', 'order_encode_state', 'order_hold_reason', 'order_name',
             'order_phone', 'order_province', 'order_row_id', 'order_status'], array_keys($vars));
         $this->assertSame(['none'], array_values(array_unique(array_filter($vars))));
+    }
+
+    public function test_S_143_9_a_flow_that_never_names_an_order_variable_reads_no_order_row(): void
+    {
+        $this->existing();
+        $run = new FlowRun(9, $this->graph(['n2' => ['send', ['items' => [['type' => 'text', 'value' => 'Hi {{first_name}}, order po?']]]]], [['n1', 'next', 'n2']]),
+            self::PAGE, self::PAGE_ID, [], $this->fields(), null, '', 'Ana Cruz', now()->format('Y-m-d H:i'));
+        DB::enableQueryLog();
+
+        $vars = $run->vars();
+
+        $this->assertArrayNotHasKey('order status', $vars);
+        $this->assertSame([], array_filter(DB::getQueryLog(), fn ($q) => str_contains($q['query'], 'macro_output') || str_contains($q['query'], 'order_encodes')));
+    }
+
+    public function test_S_143_8_an_encode_stuck_for_30_minutes_counts_as_failed_and_can_be_queued_again(): void
+    {
+        $this->openRow();
+        $this->flowWith(withUpload: false);
+        $this->says('order po'); // ang job ay hindi kailanman tumakbo (nawala ang worker)
+
+        Carbon::setTestNow(now()->addMinutes(31));
+        $this->assertSame('failed', $this->vars()['order_encode_state']);
+        $this->says('order po ulit');
+
+        Queue::assertPushed(EncodeOrder::class, 2);
     }
 
     public function test_S_143_9_the_order_variables_carry_the_rows_values(): void

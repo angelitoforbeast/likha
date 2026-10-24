@@ -237,7 +237,7 @@ step). The result is read later with the `order_*` variables (below).
 **`order_*` variables** (`OrderVars`, spec 143): every flow (main and sequence) can read them in a Condition and in `{{...}}` templates
 and AI prompts. They come from the customer's newest `macro_output` row on this page (PAGE = the page name, `botcake_psid` = the
 customer's PSID, `ts_date` within the last 7 days; the newest row of the last 24 hours is that same row whenever there is one), read once
-per run and again after Upload to macro or Encode order. With no row they are blank and `order_encode_state` is `none`.
+per run and again after Upload to macro or Encode order. With no row they are blank and `order_encode_state` is `none`. They are read only in a flow whose steps or botfields name one of them, so other runs make no extra query. While a new encode is queued or running, the other variables still show the row as it is (the previous result): read `order_encode_state` = `done` first when the fresh result matters. A `queued` or `running` encode that has not moved for 30 minutes (a lost job) counts as `failed` and the row can be queued again.
 
 | Variable | Value |
 |---|---|

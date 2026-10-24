@@ -37,6 +37,7 @@ class FlowRun
     public bool $aiPending = false;
     /** Ang mga order_* variable (OrderVars), isang basa kada takbo; null = basahin ulit (pagkatapos ng Upload o Encode order). */
     public ?array $orderVars = null;
+    private ?bool $usesOrder = null;
     /** Itinuloy pagkatapos ng padala (botcake:send-pool): ['node', 'status', 'error', 'messages'], ginagamit nang isang beses. */
     public ?array $sendResult = null;
     /** Huminto ang takbo para hintayin ang resulta ng padala sa Botcake. */
@@ -120,11 +121,17 @@ class FlowRun
             'last_input' => $this->input, 'full_name' => $this->fullName, 'first_name' => $first, 'psid' => $this->psid(),
             'page_id' => $this->pageId, 'page_name' => $this->pageName, 'current_date' => now('Asia/Manila')->toDateString(),
             'last_interaction' => $this->receivedAt, 'replies_via' => ChatbotProvider::viaLabel($this->via()),
-        ] + ($this->orderVars ??= OrderVars::read($this->pageName, (string) $this->fields->psid));
+        ] + ($this->usesOrderVars() ? ($this->orderVars ??= OrderVars::read($this->pageName, (string) $this->fields->psid)) : []);
         $base = ChatbotVars::merge($this->botfields, $this->fields->fields(), $run);
         $bot = array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $this->botfields);
 
         return ChatbotVars::merge($bot, $this->fields->fields(), $run);
+    }
+
+    /** Ang order_* ay binabasa lang kapag binabanggit ng flow o ng botfields (walang query sa ibang takbo). */
+    private function usesOrderVars(): bool
+    {
+        return $this->usesOrder ??= OrderVars::named((string) json_encode([$this->graph, $this->botfields], JSON_UNESCAPED_UNICODE));
     }
 
     public function text(string $template): string

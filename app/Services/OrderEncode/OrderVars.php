@@ -15,6 +15,8 @@ class OrderVars
     public const NAMES = ['order_row_id', 'order_status', 'order_checker', 'order_hold_reason', 'order_province', 'order_city', 'order_barangay',
         'order_address', 'order_name', 'order_phone', 'order_encode_state'];
     public const DAYS = 7;
+    /** Mas mahaba sa timeout ng encode (600 s) at ni Astra (540 s), kasama ang pila ng express lane. */
+    public const STALE_MINUTES = 30;
     /** Ang mga hold ng panuntunan na tungkol sa address (gaya ng FlowEncode::holdReason). */
     private const ADDRESS_RULES = ['R2', 'R4', 'R6'];
 
@@ -49,14 +51,23 @@ class OrderVars
     public static function state(OrderEncode $o): string
     {
         $encode = (array) ($o->input['encode'] ?? []);
-
-        return match (true) {
+        $state = match (true) {
             $o->status === 'uploaded' => 'none',
             $o->status === 'queued' => !empty($encode['started_at']) ? 'running' : 'queued',
             $o->status === 'done' && !empty($encode['astra_queued']) && empty($o->input['astra']) => 'running',
             $o->status === 'failed' => 'failed',
             default => 'done',
         };
+        // Nawalang job (patay ang worker): ang hindi na gumalaw nang STALE_MINUTES ay failed, kaya maaaring i-queue ulit ang row.
+        $stale = $o->updated_at && $o->updated_at->lt(now()->subMinutes(self::STALE_MINUTES));
+
+        return in_array($state, ['queued', 'running'], true) && $stale ? 'failed' : $state;
+    }
+
+    /** Binabanggit ba ng teksto (ang graph at botfields ng flow) ang isang order_* variable: kung hindi, walang binabasa. */
+    public static function named(string $text): bool
+    {
+        return (bool) preg_match('/order[\s_]+(row[\s_]+id|status|checker|hold[\s_]+reason|province|city|barangay|address|name|phone|encode[\s_]+state)/i', $text);
     }
 
     /**

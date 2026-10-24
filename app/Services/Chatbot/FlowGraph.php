@@ -15,8 +15,6 @@ class FlowGraph
     /** Ang mga cell A..H ng Encode order (ang I ay status, laging blangko): ang pangalan sa config. */
     public const ENCODE_FIELDS = ['date', 'page', 'name', 'phone', 'input', 'shop', 'extracted', 'price'];
 
-    /** "Wait up to" ng Encode order (segundo). */
-
     public const RULES = [
         'is' => 'is', 'is_not' => 'is not', 'contains' => 'contains', 'contains_any' => 'contains any of',
         'not_contains' => 'does not contain', 'starts_with' => 'starts with', 'regex' => 'matches regex',
@@ -160,8 +158,7 @@ class FlowGraph
                 'mode' => ($c['mode'] ?? '') === 'update' ? 'update' : 'insert',
                 'if_not_found' => ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert',
             ],
-            // Encode order: gaano katagal hinihintay ang encode, at si Astra kapag hindi PROCEED (naka-on kapag walang key).
-            // Walang hintay: ang "wait" ng lumang config ay hindi na itinatabi.
+            // Encode order: si Astra kapag hindi PROCEED (naka-on kapag walang key). Walang hintay: ang "wait" ng lumang config ay hindi na itinatabi.
             'encode_macro' => [
                 'astra' => !array_key_exists('astra', $c) || !empty($c['astra']),
             ],
