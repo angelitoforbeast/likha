@@ -479,9 +479,9 @@
         $('chg-list').replaceChildren(...data.entries.map(e => el('li', {class: 'py-2'}, [
             el('div', {class: 'mb-1 flex flex-wrap gap-x-2 text-xs text-slate-500'}, [el('span', {text: e.at || ''}), el('span', {text: e.by}), el('span', {class: 'font-medium text-slate-800', text: e.page}), el('span', {class: 'font-medium text-slate-700', text: e.field})]),
             el('div', {class: 'grid gap-1 sm:grid-cols-[1fr_auto_1fr] sm:gap-2'}, [
-                e.old === null ? el('div', {class: 'text-xs italic text-slate-400', text: '(new)'}) : folded(e.old, 'text-slate-500 line-through decoration-slate-300'),
+                e.old === null ? el('div', {class: 'text-xs italic text-slate-400', text: '(new)'}) : folded(e.old, e.old === '(none)' ? 'italic text-slate-400' : 'text-slate-500 line-through decoration-slate-300'),
                 el('span', {class: 'text-slate-400', 'aria-label': 'changed to', text: '→'}),
-                folded(e.new, e.new === '(hidden)' ? 'italic text-slate-400' : 'text-slate-900'),
+                folded(e.new, ['(hidden)', '(none)'].includes(e.new) ? 'italic text-slate-400' : 'text-slate-900'),
             ]),
         ])));
         $('chg-list').scrollTop = 0;

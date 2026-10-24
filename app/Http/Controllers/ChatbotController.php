@@ -38,6 +38,7 @@ class ChatbotController extends Controller
     private const HISTORY_LIMIT = 100;
     private const MAX_BULK_PAGES = 200; // ang bulk na "Replies via"
     private const CHANGES_PER_PAGE = 50;
+    private const CLEAR_GAP = 5; // segundo: ang deactivate na sinundan ng bagong row sa loob nito ay palit, hindi clear
     private const HIDDEN_KEYS = ['flow_id', 'mock_ai', 'mock_ai_latency_ms']; // system lang: wala sa grid, wala sa Changes
     private const BOTCAKE_LABELS = ['page_id' => 'Botcake ID', 'token' => 'Botcake token']; // ang mga botcake key na nasa grid
 
@@ -320,7 +321,7 @@ class ChatbotController extends Controller
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
         $chatBlock = app(BotcakeChatBlock::class);
-        $r = $request->boolean('on') ? $chatBlock->turnOn($page) : $chatBlock->turnOff($page);
+        $r = $request->boolean('on') ? $chatBlock->turnOn($page, false, Auth::id()) : $chatBlock->turnOff($page, Auth::id());
 
         return response()->json([
             'active' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0',
@@ -368,7 +369,7 @@ class ChatbotController extends Controller
         $on = false;
         if ($check['status'] === 'ok') {
             try {
-                $r = app(BotcakeChatBlock::class)->turnOn($listed);
+                $r = app(BotcakeChatBlock::class)->turnOn($listed, false, Auth::id());
             } catch (Throwable $e) {
                 report($e);
                 $r = ['ok' => false, 'error' => 'Could not set up the page: Botcake did not answer.'];
@@ -378,7 +379,7 @@ class ChatbotController extends Controller
         } else {
             $error = 'The token test failed' . ($error ? ' (' . $error . ')' : '') . ', so the bot was not set up and stays Off.';
         }
-        if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, null, true);
+        if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, Auth::id(), true);
 
         return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
     }
@@ -482,10 +483,17 @@ class ChatbotController extends Controller
             ->where(fn ($w) => $w->where(fn ($a) => $a->where('provider', ChatbotFields::PROVIDER)->whereNotIn('key', self::HIDDEN_KEYS))
                 ->orWhere(fn ($b) => $b->where('provider', 'botcake')->whereIn('key', array_keys(self::BOTCAKE_LABELS))));
         $hasBy = Schema::hasColumn('page_settings', 'replaced_by');
-        // Ang na-clear na value (inactive, walang mas bago sa page + provider + key) ay isang event sa oras ng replaced_at.
+        // Ang na-clear na value ay isang event sa oras ng replaced_at, kahit may mas bagong value na: inactive na hindi
+        // pinalitan ng bagong row sa sandaling iyon (walang row ng page + provider + key na ginawa sa loob ng ilang segundo).
+        $within = match (DB::connection()->getDriverName()) {
+            'pgsql' => "page_settings.replaced_at + interval '" . self::CLEAR_GAP . " seconds'",
+            'sqlite' => "datetime(page_settings.replaced_at, '+" . self::CLEAR_GAP . " seconds')",
+            default => 'DATE_ADD(page_settings.replaced_at, INTERVAL ' . self::CLEAR_GAP . ' SECOND)',
+        };
         $cleared = (clone $q)->where('active', false)->whereNotNull('replaced_at')->where('key', '!=', ForbeastWatch::KEY)
             ->whereNotExists(fn ($n) => $n->from('page_settings as newer')->whereColumn('newer.page_name', 'page_settings.page_name')
-                ->whereColumn('newer.provider', 'page_settings.provider')->whereColumn('newer.key', 'page_settings.key')->whereColumn('newer.id', '>', 'page_settings.id'));
+                ->whereColumn('newer.provider', 'page_settings.provider')->whereColumn('newer.key', 'page_settings.key')->whereColumn('newer.id', '>', 'page_settings.id')
+                ->whereRaw('newer.created_at <= ' . $within));
         $users = $this->userNames((clone $q)->whereNotNull('created_by')->distinct()->pluck('created_by')
             ->merge($hasBy ? (clone $cleared)->whereNotNull('replaced_by')->distinct()->pluck('replaced_by') : []));
 
@@ -519,7 +527,7 @@ class ChatbotController extends Controller
         $events = $q->orderByDesc('id')->limit($take)->get()->map(fn ($s) => [$s->created_at, $s->id, $s, false])
             ->concat((clone $cleared)->orderByDesc('id')->limit($take)->get()->map(fn ($s) => [$s->replaced_at, $s->id, $s, true]))
             ->sort(fn ($a, $b) => [$b[0], $b[1]] <=> [$a[0], $a[1]])->slice(($p - 1) * self::CHANGES_PER_PAGE, self::CHANGES_PER_PAGE);
-        $labels = array_column($this->fields->columns(), 'label', 'key');
+        $labels = array_column($this->fields->columns(), 'label', 'key') + ['active' => 'ACTIVE'];
 
         $entries = $events->map(function ($ev) use ($users, $labels, $hasBy) {
             [$when, , $s, $clear] = $ev;
@@ -529,7 +537,7 @@ class ChatbotController extends Controller
                 'by' => $clear ? ($s->replaced_by ? ($users[$s->replaced_by] ?? 'user #' . $s->replaced_by) : 'system') : $this->who($s, $users),
                 'page' => $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
                 'field' => $s->provider === 'botcake' ? self::BOTCAKE_LABELS[$s->key] : ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
-                'old' => $before ? $this->shown($before) : null, 'new' => $clear ? '(none)' : $this->shown($s),
+                'old' => $before ? ($this->clearedBefore($before, $s) ? '(none)' : $this->shown($before)) : null, 'new' => $clear ? '(none)' : $this->shown($s),
             ];
         })->values()->all();
 
@@ -552,7 +560,16 @@ class ChatbotController extends Controller
             return (($e['result'] ?? '') === ForbeastWatch::SWITCHED ? 'Switched to Botcake' : 'Cannot switch: no Botcake') . ' · ' . ForbeastWatch::reason($e);
         }
 
+        if ($s->provider === ChatbotFields::PROVIDER && $s->key === 'active') return $s->plainValue() === '0' ? 'Off' : 'On';
+
         return $s->is_secret ? '(hidden)' : (string) $s->plainValue();
+    }
+
+    /** Na-clear ang field bago ang sulat na ito: ang naunang row ay na-deactivate ilang segundo o higit pa bago nito. */
+    private function clearedBefore(PageSetting $before, PageSetting $s): bool
+    {
+        return $before->id !== $s->id && $before->replaced_at && $s->created_at
+            && $before->replaced_at->lt($s->created_at->copy()->subSeconds(self::CLEAR_GAP));
     }
 
     private function who(PageSetting $s, array $names): string

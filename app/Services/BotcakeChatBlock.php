@@ -36,7 +36,7 @@ class BotcakeChatBlock
      * 'publish'); sa 'publish' ay naisulat na ang block at naitala na ang key (kailangan iyon ng block).
      * @return array{ok: bool, key: string, step: ?string, error: ?string}
      */
-    public function turnOn(string $page, bool $rotate = false): array
+    public function turnOn(string $page, bool $rotate = false, ?int $userId = null): array
     {
         [$pageId, $token] = $this->ids($page);
         $plan = $this->keyPlan($page, $rotate);
@@ -53,7 +53,7 @@ class BotcakeChatBlock
         $r = $client->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply', ['update' => ['is_published' => true, 'unlimit_default_reply' => true]], $token);
         if (!$this->ok($r)) return ['ok' => false, 'key' => $plan, 'step' => 'publish', 'error' => $this->error('publish the Default Reply', $r)];
 
-        $this->settings->set($page, 'chatbot', 'active', '1', false, null, true); // system: ang switch lang ang sumusulat
+        $this->settings->set($page, 'chatbot', 'active', '1', false, $userId, true); // system: ang switch lang ang sumusulat; ang user ay para sa Changes
 
         return ['ok' => true, 'key' => $plan, 'step' => null, 'error' => null];
     }
@@ -62,7 +62,7 @@ class BotcakeChatBlock
      * I-unpublish ang Default Reply lang (naiiwan ang block at ang key, kaya isang pindot lang ang On ulit).
      * @return array{ok: bool, error: ?string}
      */
-    public function turnOff(string $page): array
+    public function turnOff(string $page, ?int $userId = null): array
     {
         [$pageId, $token] = $this->ids($page);
         if ($pageId === '' || $token === '') return ['ok' => false, 'error' => 'The page has no Botcake ID or token.'];
@@ -70,7 +70,7 @@ class BotcakeChatBlock
         $r = app(BotcakeClient::class)->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply', ['update' => ['is_published' => false]], $token);
         if (!$this->ok($r)) return ['ok' => false, 'error' => $this->error('unpublish the Default Reply', $r)];
 
-        $this->settings->set($page, 'chatbot', 'active', '0', false, null, true);
+        $this->settings->set($page, 'chatbot', 'active', '0', false, $userId, true);
 
         return ['ok' => true, 'error' => null];
     }

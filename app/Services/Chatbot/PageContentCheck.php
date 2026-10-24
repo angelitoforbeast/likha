@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Ang content check ng isang page: tungkol ba sa item na talagang ino-order (PageExpectedItem) ang laman nito?
- * - Text: Main Flow, Main Flow 2 at Fill-Up Form (pinunan ang {{Botfield}}): ang item at mga presyong binabanggit.
+ * - Setup (walang AI): kapag On ang bot, may flow at (sa Botcake) may chat.key.
+ * - SHOP DETAILS (walang AI): ang PAGE, ITEM, PRICE at QUANTITY nito laban sa page at sa mga field.
+ * - Text: Main Flow, Main Flow 2, Prompt 1-3, Seq N at Fill-Up Form (pinunan ang {{Botfield}}): ang item at mga presyong binabanggit.
  * - Larawan: PICTURE saka Seq Img N, hanggang 5: ang item na nasa larawan.
  * - Ad video: ang gpt_video_analyses na pinagkunan ng ad copy na isinulat para sa page (gpt_ad_generations.page_filter);
  *   walang ibang link ang ad sa video.
@@ -20,6 +22,9 @@ use Illuminate\Support\Facades\Schema;
 class PageContentCheck
 {
     public const TEXT_KEYS = ['main_flow', 'main_flow_2'];
+    private const EXTRA_TEXT = '/^(prompt_[1-3]|seq_\d+)$/';
+    private const SHOP_LINES = ['PAGE', 'ITEM', 'PRICE', 'QUANTITY'];
+    private const SHOP_VALUE = 80; // letra ng value ng SHOP DETAILS na ipinapakita sa finding
     private const FORM_FIELDS = [
         'Full Name' => '/name|pangalan|ngalan/iu',
         'Phone Number' => '/phone|cell|mobile|contact\s*(no|num)|number|numero|telepono|\bcp\b/iu',
@@ -70,6 +75,8 @@ TXT;
         $labels = array_column($this->fields->columns(), 'label', 'key');
         $rows = $this->settings->allWithIds($page, ChatbotFields::PROVIDER);
         $vars = ChatbotVars::merge($this->page->botfields($page));
+        $out['findings'] = $this->setup($page);
+        if (isset($labels['shop_details'])) array_push($out['findings'], ...$this->shop($page, $rows, $labels, $vars));
 
         // Ang Fill-Up Form ay walang item by design: ang tinitingnan ay ang mga hinihingi nito, sa plain text match (walang AI).
         $form = trim($rows['fill_up_form']['value'] ?? '');
@@ -83,17 +90,23 @@ TXT;
         if ($exp === null) return $out;
         $intro = 'Expected item: ' . $exp['item'] . "\n";
 
-        foreach (self::TEXT_KEYS as $key) {
+        // Ang Prompt 1-3 at Seq N ay sinusuri gaya ng Main Flow, pero ang presyo ay pasado rin kapag tugma sa PRICE (ang
+        // item lang), at walang item finding kapag walang binanggit na item ang text.
+        $field = self::peso(trim($rows['price']['value'] ?? ''));
+        $keys = array_merge(self::TEXT_KEYS, array_values(array_filter(array_keys($labels), fn ($k) => preg_match(self::EXTRA_TEXT, $k))));
+        foreach ($keys as $key) {
             $value = trim($rows[$key]['value'] ?? '');
             if ($value === '') continue;
+            $extra = !in_array($key, self::TEXT_KEYS, true);
             $label = $labels[$key] ?? $key;
             $text = mb_substr(self::fill($value, $vars), 0, self::MAX_TEXT);
             $ans = $this->answer('text', 'v' . $rows[$key]['id'] . ':' . sha1($text), $exp, $page, $label, $ask,
                 fn () => $this->ai->ask(self::TEXT_PROMPT, [['type' => 'text', 'text' => $intro . 'Field: ' . $label . "\n<<<TEXT\n" . $text . "\nTEXT>>>"]]));
             if ($ans === null) { $out['unchecked']++; continue; }
-            $verdict = $this->verdict('text', $label, $ans, $exp);
-            $out['findings'][] = $verdict;
-            if ($verdict['level'] !== 'x' && $exp['price'] !== null && ($price = $this->price($label, $ans['prices'], $exp))) $out['findings'][] = $price;
+            $verdict = $extra && $ans['found_item'] === '' ? null : $this->verdict('text', $label, $ans, $exp);
+            if ($verdict !== null) $out['findings'][] = $verdict;
+            $against = $extra ? $field : null;
+            if (($verdict['level'] ?? 'ok') !== 'x' &&($exp['price'] !== null || $against !== null) && ($price = $this->price($label, $ans['prices'], $exp, $against))) $out['findings'][] = $price;
         }
 
         $images = [];
@@ -121,6 +134,64 @@ TXT;
         }
 
         return $out;
+    }
+
+    /**
+     * Ang setup ng bot (walang AI): kapag On, kailangan ng flow, at sa Botcake ng chat.key (ang "Chat to site" block);
+     * kung wala, walang sagot na natatanggap ang customer. Ang Forbeast Gateway ay walang block.
+     * @return array<int, array{kind: string, field: string, level: string, reason: string}>
+     */
+    public function setup(string $page): array
+    {
+        if ($this->settings->get($page, ChatbotFields::PROVIDER, 'active') === '0') return [];
+        $out = [];
+        $x = fn (string $reason) => ['kind' => 'setup', 'field' => 'Bot', 'level' => 'x', 'reason' => $reason];
+        if (trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id')) === '') $out[] = $x('No flow: pick a flow in FLOW');
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && trim((string) $this->settings->get($page, 'botcake', 'chat.key')) === '') {
+            $out[] = $x('No chat block (chat.key): turn the chat block on with the bot toggle');
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang SHOP DETAILS (kasama sa order, walang AI): ang PAGE:, ITEM:, PRICE: at QUANTITY: na linya laban sa pangalan ng
+     * page, ITEM NAME IN JNT DASHBOARD, PRICE at QUANTITY. Ang ibang value = X; walang value o walang linya = babala.
+     * Ang field na walang value, o ang linyang may {{ }} pa, ay hindi inihahambing.
+     */
+    private function shop(string $page, array $rows, array $labels, array $vars): array
+    {
+        $label = $labels['shop_details'];
+        $finding = fn (string $level, string $reason) => ['kind' => 'shop', 'field' => $label, 'level' => $level, 'reason' => $label . ': ' . $reason];
+        $text = trim(self::fill($rows['shop_details']['value'] ?? '', $vars));
+        if ($text === '') return [$finding('warn', 'no value')];
+
+        $got = [];
+        preg_match_all('/\b(' . implode('|', self::SHOP_LINES) . ')\s*:\s*([^|\r\n]*)/iu', $text, $m, PREG_SET_ORDER);
+        foreach ($m as [, $name, $v]) $got[strtoupper($name)] ??= mb_substr(trim($v), 0, self::SHOP_VALUE);
+        $value = fn (string $key) => trim(self::fill($rows[$key]['value'] ?? '', $vars));
+        $num = fn (string $a, string $b) => ($x = self::peso($a)) !== null && ($y = self::peso($b)) !== null ? abs($x - $y) < 0.01 : PageExpectedItem::norm($a) === PageExpectedItem::norm($b);
+        $against = [
+            'PAGE' => ['page', $page, fn ($a, $b) => $this->settings->pageKey($a) === $this->settings->pageKey($b)],
+            'ITEM' => [$labels['item_name_in_jnt_dashboard'] ?? 'ITEM NAME IN JNT DASHBOARD', $value('item_name_in_jnt_dashboard'), fn ($a, $b) => PageExpectedItem::norm($a) === PageExpectedItem::norm($b)],
+            'PRICE' => [$labels['price'] ?? 'PRICE', $value('price'), $num],
+            'QUANTITY' => [$labels['quantity'] ?? 'QUANTITY', $value('quantity'), $num],
+        ];
+        $out = [];
+        foreach ($against as $line => [$name, $expected, $same]) {
+            $v = $got[$line] ?? null;
+            if ($v === null || $v === '') { $out[] = $finding('warn', 'no ' . $line . ': line'); continue; }
+            if ($expected === '' || str_contains($v . $expected, '{{')) continue;
+            if (!$same($v, $expected)) $out[] = $finding('x', $line . ' ' . $v . ' ≠ ' . $name . ' ' . mb_substr($expected, 0, self::SHOP_VALUE));
+        }
+
+        return $out ?: [$finding('ok', 'matches the page, item, price and quantity')];
+    }
+
+    /** Ang unang halaga sa text ("₱1,198", "198 pesos", "PHP 1,299.50"); null kapag walang numero. */
+    public static function peso(string $text): ?float
+    {
+        return preg_match('/\d[\d,]*(?:\.\d+)?/', $text, $m) ? (float) str_replace(',', '', $m[0]) : null;
     }
 
     /** Ang {{Botfield}} ng page ay pinupunan (isang antas, gaya ng Preview); ang iba (customer field) ay iniiwan. */
@@ -203,10 +274,11 @@ TXT;
     /**
      * Ang presyo, gaya sa gaya: ang COD ay laban sa buong halagang pinapangako ng text: ang nakasaad na total, o ang item
      * price + lahat ng nakasaad na fee (shipping, insurance, atbp.). Pasado kapag may isang alok na may tugma (±₱1).
+     * $field (Prompt at Seq lang): ang PRICE ng page, pasado rin kapag ang item price lang ay tugma doon.
      */
-    private function price(string $label, array $prices, array $exp): ?array
+    private function price(string $label, array $prices, array $exp, ?float $field = null): ?array
     {
-        $cod = (int) $exp['price'];
+        $cod = $exp['price'] === null ? null : (int) $exp['price'];
         $peso = fn (float $v) => '₱' . (fmod($v, 1.0) == 0.0 ? number_format($v) : number_format($v, 2));
         $first = null;
         foreach ($prices as $p) {
@@ -215,15 +287,20 @@ TXT;
             if ($p['item_price'] !== null) $sums[] = $p['item_price'] + array_sum($p['fees']);
             if (!$sums) continue;
             foreach ($sums as $sum) {
-                if (abs($sum - $cod) <= 1) return ['kind' => 'price', 'field' => $label, 'level' => 'ok', 'reason' => $label . ': price ' . $peso($sum) . ' = ' . $peso($cod) . ' COD'];
+                if ($cod !== null && abs($sum - $cod) <= 1) return ['kind' => 'price', 'field' => $label, 'level' => 'ok', 'reason' => $label . ': price ' . $peso($sum) . ' = ' . $peso($cod) . ' COD'];
+            }
+            if ($field !== null && $p['item_price'] !== null && abs($p['item_price'] - $field) <= 1) {
+                return ['kind' => 'price', 'field' => $label, 'level' => 'ok', 'reason' => $label . ': price ' . $peso($p['item_price']) . ' = PRICE ' . $peso($field)];
             }
             $first ??= $p['total'] !== null ? $peso($p['total'])
                 : $peso($p['item_price']) . ($p['fees'] ? ' + ' . implode(' + ', array_map($peso, $p['fees'])) . ' = ' . $peso($sums[0]) : '');
         }
         if ($first === null) return null;
+        $want = [];
+        if ($cod !== null) $want[] = (self::SOURCES[$exp['source']] ?? $exp['source']) . ' ' . $peso($cod) . ' COD';
+        if ($field !== null) $want[] = 'PRICE ' . $peso($field);
 
-        return ['kind' => 'price', 'field' => $label, 'level' => 'x',
-            'reason' => $label . ': price ' . $first . ' ≠ ' . (self::SOURCES[$exp['source']] ?? $exp['source']) . ' ' . $peso($cod) . ' COD'];
+        return ['kind' => 'price', 'field' => $label, 'level' => 'x', 'reason' => $label . ': price ' . $first . ' ≠ ' . implode(', ', $want)];
     }
 
     /** Ang mga video na pinagkunan ng ad copy para sa page (pinakabago muna, hanggang 3). */

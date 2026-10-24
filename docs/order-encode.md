@@ -119,7 +119,7 @@ The backtest of 1,487 orders showed where the copy of the two scripts goes wrong
 | R2 | A written province that resolves to a J&T province other than the result holds the order ("Province differs from what the customer wrote") and "Province only → ✅" does not apply. A written province that resolves to nothing does not count. |
 | R3 | Among the candidates of the word-by-word match: the written barangay first, then the written city, then list order. |
 | R4 | Barangays are listed and written as the J&T file spells them (no "BARANGAY …" rewrite on output; a GPT answer is written as the list label). The order is held ("Not a J&T address combination") unless the exact province / city / barangay is a line of `jnt_address.txt`. |
-| R5 | Held ("Possible duplicate: <ids>") when another order of the same day (`macro_output.ts_date`, or an encode of the day not yet in `macro_output`) has the same phone, or the same name + barangay + city. A phone in the Validate whitelist is skipped; `CANNOT PROCEED` rows and the order itself are not counted. |
+| R5 | Only with `app_settings.order_encode_duplicate_hold` = `on` (default `off`, CEO only on `/order-encode/final`): held ("Possible duplicate: <ids>") when another order of the same day (`macro_output.ts_date`, or an encode of the day not yet in `macro_output`) has the same phone, or the same name + barangay + city. A phone in the Validate whitelist is skipped; `CANNOT PROCEED` rows and the order itself are not counted. With the setting `off` the order is not held (Validate catches duplicates); the found ids go to the steps as `duplicates_seen` (`ids`). |
 
 **Written keys.** The customer's "written" place is the Province / City / Brgy of the extracted details read by `Parse::addressParts` (spec 130). It is normalised by `Written`: lowercase, Ñ = N, punctuation off, `MacroChecker::normBrgyKey` / `normCityKey` as the base (roman numerals to digits, sta/sto/gen/pob/bgy/brgy expanded), then for a barangay the words brgy / barangay / bgy / pob / poblacion are dropped (kept if nothing else is left), and for a city the words city / municipality and a leading province name are dropped. `written_key` = `barangay|city|province` (each part cut at 80 characters, empty parts kept).
 
@@ -160,7 +160,7 @@ the Checker 1 summary and `order-encode:notes-build` skip the user "Likha encode
 read (`input.row`). The encode reads the lines after the longest overlap with the previous run of the customer; a run linked to an open row adds them to that
 row's earlier conversation (`input.fields.input`), and its extracted details to the earlier ones. The text is cut to the newest 8,000 characters.
 
-**Astra on the spot.** A live order that ends without PROCEED queues `RunSpotAstra` (queue `astra`): the night run's `AiCheckerRowRunner` with Astra's own prompt and
+**Astra on the spot.** A live order that ends without PROCEED (except an R5-only hold: Astra cannot fix a duplicate) queues `RunSpotAstra` (queue `astra`): the night run's `AiCheckerRowRunner` with Astra's own prompt and
 rules, `only_when_status_blank`, source `spot`, user "Likha encode", one `ai_checker_logs` row. Transient OpenAI errors are retried (3 tries); the result is on the
 order (`input.astra`, note "Astra on the spot: …"). A **row lock** (`macro-row:<id>`, cache) is held by it, by the encode's update and by `RunNightAstraRow`; the
 night job waits up to `order_encode.night_row_lock_wait` (200 s), then ends the row `skipped` "Row busy". The night run still runs Astra on these rows.
@@ -172,6 +172,7 @@ chosen sequence through `ChatbotSequences::subscribe` (via `order-encode`), at m
 
 | Setting (`app_settings`, `/order-encode/final`, CEO only) | Default | Meaning |
 |---|---|---|
+| `order_encode_duplicate_hold` | `off` | `on` = R5 holds a possible duplicate again; `off` = it only notes `duplicates_seen` in the steps |
 | `order_encode_spot_astra` | `on` | `off` = no Astra on the spot (kill switch); the question is decided from the encode's hold |
 | `order_encode_address_sequence` | empty | chatbot sequence id of the address question; empty = no question; an id that is not a sequence is refused |
 
@@ -224,7 +225,7 @@ step). The result is read later with the `order_*` variables (below).
     letter, "unknown"/"n/a", or only a part of the current name.
 - The write skips staff-edited fields (`edited_*` or a person's log line), never blanks a filled field and changes nothing on a row with a
   STATUS or a waybill.
-- When the row is not PROCEED, the box is on and `order_encode_spot_astra` is not `off`, Astra runs on the same row in its own job, `RunEncodeAstra`
+- When the row is not PROCEED (and the hold is not R5 alone), the box is on and `order_encode_spot_astra` is not `off`, Astra runs on the same row in its own job, `RunEncodeAstra`
   on the express lane `astra-live` (one try): the spot path (`AiCheckerRowRunner`, source `spot`, user "Likha encode", under the row lock
   without waiting). Its result is kept on the order (`input.astra`).
 - A failed encode job leaves the row held for staff (`order_encodes` status `failed`).

@@ -36,6 +36,7 @@ class AddressQuestionTest extends LiveRowTestCase
 
     public function test_S_136_30_a_duplicate_hold_asks_nothing_even_when_astra_leaves_the_address_open(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
         $this->addressSequence();
         $this->existing(['botcake_psid' => '9999', 'fb_name' => 'Other', 'STATUS' => 'PROCEED']); // ibang customer, parehong phone
         $o = $this->liveOrder($this->details());
@@ -45,6 +46,17 @@ class AddressQuestionTest extends LiveRowTestCase
 
         $this->assertSame('R5', $o->outputs['hold']['rule']);
         $this->assertSame([], $this->subscriptions());
+    }
+
+    public function test_S_144_2_an_r5_only_hold_queues_no_spot_astra(): void
+    {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on');
+        $this->existing(['botcake_psid' => '9999', 'fb_name' => 'Other', 'STATUS' => 'PROCEED']); // ibang customer, parehong phone
+
+        $o = $this->liveOrder($this->details());
+
+        $this->assertSame('R5', $o->outputs['hold']['rule']);
+        Queue::assertNotPushed(RunSpotAstra::class);
     }
 
     public function test_S_136_30_31_astra_leaving_the_address_fine_but_not_proceed_asks_nothing(): void

@@ -28,6 +28,7 @@
       <span>Encoded today: <b>{{ $import['encoded_today'] }}</b></span>
       <span>Skipped today: <b>{{ $import['skipped_cap'] }}</b> over the cap, <b>{{ $import['skipped_pages'] }}</b> skipped page</span>
       <span>Rules: <b>{{ $import['rules'] }}</b></span>
+      <span>Duplicate hold: <b>{{ $import['duplicate_hold'] ? 'on' : 'off' }}</b></span>
       <span>Estimated GPT cost of the orders below: <b>${{ number_format($import['cost'], 2) }}</b></span>
     </div>
     @if ($import['can_edit'])
@@ -43,6 +44,12 @@
           <select name="rules" class="border rounded px-2 py-1">
             <option value="improved" @selected($import['rules'] === 'improved')>improved</option>
             <option value="sheet" @selected($import['rules'] === 'sheet')>sheet (exact script copy)</option>
+          </select>
+        </label>
+        <label class="flex flex-col">Duplicate hold (R5)
+          <select name="duplicate_hold" class="border rounded px-2 py-1">
+            <option value="off" @selected(!$import['duplicate_hold'])>off (Validate catches duplicates)</option>
+            <option value="on" @selected($import['duplicate_hold'])>on (hold as Possible duplicate)</option>
           </select>
         </label>
         <label class="flex flex-col">Astra on the spot (live orders)

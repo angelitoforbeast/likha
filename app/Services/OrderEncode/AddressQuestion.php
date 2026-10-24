@@ -29,7 +29,8 @@ class AddressQuestion
         try {
             $row = $o->macro_output_id ? MacroOutput::find($o->macro_output_id) : null;
             if (!$row || trim((string) $row->STATUS) !== '') return;
-            if ($this->settings->spotAstra()) {
+            // Ang R5 lang ang hold (doble): walang maaayos si Astra.
+            if ($this->settings->spotAstra() && (((array) $o->outputs)['hold']['rule'] ?? null) !== 'R5') {
                 $o->update(['input' => array_merge((array) $o->input, ['astra' => ['status' => 'queued']])]);
                 try {
                     RunSpotAstra::dispatch($o->id);

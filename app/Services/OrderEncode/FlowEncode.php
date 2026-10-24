@@ -113,6 +113,7 @@ class FlowEncode
     {
         $row = MacroOutput::find($o->macro_output_id);
         if (!$row || self::final($row) || empty($o->input['encode']['astra']) || !$this->settings->spotAstra()) return;
+        if ((((array) $o->outputs)['hold']['rule'] ?? null) === 'R5') return; // ang R5 lang ang hold (doble): walang maaayos si Astra
 
         $o->update(['input' => array_merge((array) $o->input, ['encode' => array_merge((array) $o->input['encode'], ['astra_queued' => now()->toDateTimeString()])])]);
         try {
