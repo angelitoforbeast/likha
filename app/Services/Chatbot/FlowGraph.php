@@ -195,6 +195,35 @@ class FlowGraph
     }
 
     /**
+     * Ang paalala ng Publish na hindi humaharang: ang Encode order na walang Upload to macro bago ito sa anumang daan papunta
+     * rito (laging pupunta sa failed). Null kapag wala.
+     */
+    public static function publishNotice(array $graph): ?string
+    {
+        $types = array_column($graph['nodes'] ?? [], 'type', 'id');
+        $from = [];
+        foreach ($graph['edges'] ?? [] as $e) $from[$e['to']][] = $e['from'];
+        $lonely = [];
+        foreach ($types as $id => $type) {
+            if ($type !== 'encode_macro') continue;
+            // Pabalik sa mga wire: may Upload to macro ba sa dinaanan bago ang step na ito?
+            $seen = [$id => true];
+            $queue = $from[$id] ?? [];
+            $found = false;
+            while (!$found && $queue) {
+                $n = array_shift($queue);
+                if (isset($seen[$n])) continue;
+                $seen[$n] = true;
+                $found = ($types[$n] ?? '') === 'upload_macro';
+                foreach ($from[$n] ?? [] as $p) $queue[] = $p;
+            }
+            if (!$found) $lonely[] = $id;
+        }
+
+        return $lonely ? 'Encode order step ' . implode(', ', $lonely) . ' has no Upload to macro before it, so it will always go to its failed port.' : null;
+    }
+
+    /**
      * Ang skip_after ng isang wait: {amount, unit} kapag may amount na 1 o higit pa, null kapag wala (walang key sa
      * config, kaya ang lumang graph ay hindi nagbabago). Lampas sa 23 oras: InvalidArgumentException.
      */
