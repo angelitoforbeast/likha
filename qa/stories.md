@@ -2335,3 +2335,15 @@ Story changes (S-143):
 - S-137.38 (Publish notice): kept as a softer hint ("it encodes the customer's open order row, or goes to failed when there is none").
 - S-143.8 and S-143.9 gained a case each from the review: the 30-minute cap on a lost job, and no order query in flows that never name an `order_*` variable.
 - S-137.43 ("Wait up to" 120 s): retired; `ExpressLaneTest::test_137_1_the_new_encode…` now checks that no wait ticket exists.
+
+## S-146 The chatbot pages "Changes" list shows every change, including the flow and the bot switch
+
+As the owner, I see in Changes who set, changed or removed each value on a page (FLOW, ACTIVE, the Botcake ID and token, every chatbot field), and no event disappears when a later value is set.
+
+- S-146.1 Given a FLOW set at 16:07 by A, removed at 19:02 by A and set again at 06:52 by B, When I open Changes for FLOW, Then I see three lines, newest first: "(none) → Main Flow" by B at 06:52, "Main Flow → (none)" by A at 19:02, and "(new) → Main Flow" by A at 16:07.
+- S-146.2 Given a value replaced A → B, When I open Changes, Then I see one line "A → B" and no clear line.
+- S-146.3 Given a user turns the bot On and another turns it Off, When I open Changes for ACTIVE, Then each line shows On/Off with the user and the time.
+- S-146.4 Given a value set by B and removed by A, When I filter by user A, Then the clear is listed; the FLOW filter lists all three FLOW events.
+- S-146.5 Given a value set on one day and removed the next, When I filter by the day of removal, Then only the clear is listed.
+- S-146.6 Given secret values set, removed and set again, When I open Changes, Then every value shows as "(hidden)" or "(none)" and no secret text is sent.
+- S-146.7 Given more than one page of mixed writes and clears, When I go through the pages, Then every event appears once, newest first.
