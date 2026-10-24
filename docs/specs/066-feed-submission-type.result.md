@@ -84,3 +84,44 @@ No syntax errors detected in .../tests/Feature/StaffActivity/StaffFeedApiTest.ph
 - **What the brief got wrong.** Nothing found.
 - **Story changes.** None. The brief brought its cases C1 to C4. No `qa/stories.md` entries were added, because the brief's cases are the stories for this small job.
 - **Browser check.** Skipped: the change is API only, with no UI.
+
+## Re-based onto 359a7085 (2026-10-24)
+
+Branch `feat/066-feed-submission-type-2`, cut from `359a7085` (current main plus spec 136). The three 066 commits were cherry-picked in order:
+
+| Original   | New        | Commit                                                    |
+| ---------- | ---------- | --------------------------------------------------------- |
+| `f806b537` | `8e1d638d` | docs: spec 066, feed submission type and submitter        |
+| `f0d92051` | `67204709` | feat: group or individual and whose submission counts     |
+| `d5121ee4` | `6218cfb9` | docs: result for spec 066                                 |
+
+**Conflicts.** One, in `tests/Feature/StaffActivity/StaffFeedApiTest.php` (the `checklist_today` order test). Main had moved the default deadline from 15 to 30 minutes after the scheduled time (`09:15` → `09:30`, `10:15` → `10:30`, `12:15` → `12:30`); 066 had added the two new arguments (`submission_type`, `submitted_by`) to the same lines. Resolved by keeping main's deadlines and adding 066's two values. `StaffFeedController.php` and `ChecklistDueToday.php` merged without conflict, so no product logic was hand-merged. `qa/stories.md` and `TODO.md` were not touched by 066, so nothing conflicted there.
+
+**Tests.** `php vendor/phpunit/phpunit/phpunit tests/Feature/StaffActivity tests/Feature/Checklist tests/Feature/OrderEncode`:
+
+| Tree                              | Result                                                    |
+| --------------------------------- | --------------------------------------------------------- |
+| `359a7085`                        | OK, Tests: 584, Assertions: 1970, PHPUnit Deprecations: 5 |
+| `feat/066-feed-submission-type-2` | OK, Tests: 587, Assertions: 1987, PHPUnit Deprecations: 5 |
+
+No new failures; the three extra tests are 066's C1 to C3 (C4 is the updated existing late-today assertion). The known local-only Google credentials error is in `ExampleTest`, outside these folders, so it did not show up in either run.
+
+**Sample `checklist_late_today` items (fake data).**
+
+Group task, submitted by a teammate:
+
+```json
+{"task_id": 41, "title": "Bilangin ang stock", "deadline": "10:30", "submitted": true,
+ "submitted_at": "10:42", "verdict": "approved", "approval_checks": 1, "rechecks": 0,
+ "overridden": false, "overridden_by": null, "overridden_at": null,
+ "submission_type": "group", "submitted_by": "Juan Dela Cruz"}
+```
+
+Individual task, not submitted yet:
+
+```json
+{"task_id": 57, "title": "Linisin ang packing area", "deadline": "09:30", "submitted": false,
+ "submitted_at": null, "verdict": null, "approval_checks": 0, "rechecks": 0,
+ "overridden": false, "overridden_by": null, "overridden_at": null,
+ "submission_type": "individual", "submitted_by": null}
+```
