@@ -2,6 +2,8 @@
 
 namespace App\Services\Chatbot;
 
+use Illuminate\Support\Facades\Log;
+
 /**
  * Ang paste sa Edit ng isang page (/chatbot/pages): tinatanong ang AI (ContentAi, ang murang model) kung aling field ng
  * modal ang bawat na-paste na cell. Ang sagot ay mapping lang (cell => key o none, may confidence), sinuri laban sa mga
@@ -53,9 +55,13 @@ TXT;
         $res = $this->ai->ask(self::PROMPT, [['type' => 'text', 'text' => implode("\n", $lines)]], self::TIMEOUT);
         if ($res === null) return null;
         $mapping = self::clean($res['answer'], $cells, array_column($fields, 'key'));
-        if ($mapping === null) return null;
+        $cost = array_intersect_key($res, array_flip(['model', 'tokens_in', 'tokens_out', 'cost_usd']));
+        if ($mapping === null) {
+            Log::info('chatbot paste map rejected', $cost); // bayad pa rin ang tokens kahit hindi tinanggap ang sagot
+            return null;
+        }
 
-        return ['mapping' => $mapping] + array_intersect_key($res, array_flip(['model', 'tokens_in', 'tokens_out', 'cost_usd']));
+        return ['mapping' => $mapping] + $cost;
     }
 
     /**

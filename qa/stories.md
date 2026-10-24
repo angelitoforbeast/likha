@@ -2272,13 +2272,13 @@ Tests: `tests/Feature/Chatblast/ChatbotPasteMapTest.php` (endpoint, fake OpenAI)
 |---|---|---|---|
 | S-141.1 | Given a row without header in another column order, when it is pasted, then the AI (fake) mapping comes back per cell (Price, Item, Main Flow, Fill-Up, Prompt, Picture, Seq Img, Seq) and the prompt lists every modal field with label, key and a one-line description (no FLOW) | `ChatbotPasteMapTest::test_S_141_1…` | passed 2026-10-24 |
 | S-141.2 | Given a header line, then it is sent as a hint only and the AI mapping is returned | `test_S_141_2…` | passed 2026-10-24 |
-| S-141.3 | Given a mapping, when Apply, then each chosen field gets its cell exactly as pasted (None and blanks skipped, blanks as empty when ticked); nothing is saved until Save | `ChatbotPasteScriptTest::test_S_141_3…`, `test_S_141_7…` (nothing saved) | passed 2026-10-24 |
+| S-141.3 | Given a mapping, when Apply, then each chosen field gets its cell exactly as pasted (None and blank cells skipped: on the AI path a blank cell is always None, so "Paste blanks as empty" applies to the header/position mapping only); nothing is saved until Save | `ChatbotPasteScriptTest::test_S_141_3…`, `test_S_141_7…` (nothing saved) | passed 2026-10-24 |
 | S-141.4 | Given a changed dropdown, then the value goes to the new field | `ChatbotPasteScriptTest::test_S_141_4…` | passed 2026-10-24 |
 | S-141.5 | Given two cells on one field, then both are marked as conflicts and Apply is refused until one changes; low confidence is highlighted | `ChatbotPasteScriptTest::test_S_141_5…`, `test_S_141_4…` | passed 2026-10-24 |
 | S-141.6 | Given no key, HTTP error, timeout, non-JSON, wrong shape, unknown or reserved key, bad cell index, a cell twice, bad confidence or extra content, then `{fallback, note}` and the header/position mapping | `ChatbotPasteMapTest::test_S_141_6…` (table + no key) | passed 2026-10-24 |
 | S-141.7 | Given a cell with instructions, then the answer is a mapping only, validated against the known keys, and nothing is written | `test_S_141_7…` | passed 2026-10-24 |
 | S-141.8 | Given a guest, a role without /chatblast or a page not on the list, then 401, 403, 422, and no AI call | `test_S_141_8…` | passed 2026-10-24 |
-| S-141.9 | Given an AI answer, then model, tokens and cost are logged | `test_S_141_9…` | passed 2026-10-24 |
+| S-141.9 | Given an AI answer, accepted or rejected, then model, tokens and cost are logged | `test_S_141_9…` (both) | passed 2026-10-24 |
 | S-141.10 (P2) | Given a paste of only sequences, then Seq fields | `test_S_141_10…` | passed 2026-10-24 |
 | S-141.11 (P2) | Given image URLs, then they keep their order into Picture / Seq Img | `ChatbotPasteScriptTest::test_S_141_11…` | passed 2026-10-24 |
 | S-141.12 (P2) | Given 390 px, then the preview rows wrap and the dropdown never exceeds the width | `ChatbotPasteMapTest::test_S_141_12…` (markup) | passed 2026-10-24; no browser check |

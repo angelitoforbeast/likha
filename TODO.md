@@ -1081,3 +1081,9 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
   - S-137.39 at 390 px (no browser in this session).
 - **Only sqlite was run for the JSON path filters** (`input->upload`, `input->node`). Reason: the same Laravel JSON-path syntax as `FlowHook::hasNode`, which runs on MySQL in production.
 - **A sequence step cannot wait for the encode: Encode order there always goes to failed.** Reason: the resume runs on the page's main flow (as for the AI step).
+
+## 141: AI paste mapping, accepted review minors (2026-10-24)
+
+- **The AI path does not repeat the classic notes** "Only the first row was used" and "ACTIVE and FLOW are not in this window". Reason: the preview lists exactly what will be filled; the notes still show on "Use header/position instead". Small UX follow-up if staff ask.
+- **Blank cells are always None on the AI path**, so "Paste blanks as empty" only affects the header/position mapping. Reason: an empty cell carries nothing for the AI to place; clearing fields stays with the classic mapping or by hand. The story says so.
+- **The modal's own JS is not tested in a DOM**: the amber "Not sure" highlight and the client switch to the fallback (note, 429, 30 s wait) are covered only by markup checks; the helpers (`aiRow`, `mapConflicts`, `applyMapping`) and the server fallback are tested. Reason: the project has no DOM test harness; adding one is a new dependency. No browser check was run in this session.
