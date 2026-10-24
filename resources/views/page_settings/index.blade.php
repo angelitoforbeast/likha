@@ -26,7 +26,7 @@
 
 @section('content')
 <div class="cb-page">
-    @include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? [], 'unreachable' => $unreachable ?? []])
+    @include('chatblast.partials.needs-setup', ['needsSetup' => $needsSetup ?? [], 'unreachable' => $unreachable ?? [], 'collapsible' => true])
 
     @if(session('success'))
         <div class="mb-3 px-4 py-2 rounded bg-green-100 text-green-800 text-sm">{{ session('success') }}</div>

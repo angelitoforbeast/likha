@@ -179,4 +179,18 @@ class ChatblastNeedsSetupTest extends ChatblastTestCase
         $this->travel(61)->seconds();
         $this->get('/chatblast')->assertSee('Needs setup (2 pages)')->assertSee('Kylene Dellamas 1');
     }
+
+    public function test_S_139_1_on_page_settings_the_header_is_a_collapsed_toggle_and_the_list_stays_rendered(): void
+    {
+        $this->actingAs($this->user());
+        $this->row('Karla Chavez', 'no_config', 'Page not ready: needs a test send');
+        $this->travel(61)->seconds();
+
+        $this->get('/chatblast/page-settings')->assertOk()
+            ->assertSee('<button id="needs-setup-toggle" type="button" aria-expanded="false" aria-controls="needs-setup-body"', false)
+            ->assertSeeInOrder(['id="needs-setup-toggle"', 'Needs setup (1 page)', '</button>', '<div id="needs-setup-body" hidden', 'Karla Chavez'], false)
+            ->assertSee('data-pages="1"', false);
+        // Sa /chatblast, walang pagbabago: bukas pa rin ang listahan, walang toggle.
+        $this->get('/chatblast')->assertOk()->assertSee('Karla Chavez')->assertDontSee('needs-setup-toggle', false);
+    }
 }
