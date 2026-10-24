@@ -123,6 +123,8 @@ return [
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
         // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page).
         'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
+        // Ilang segundo hinihintay ang Botcake sa sagot ng chatbot (send_content); ang unang mensahe na may larawan ay inaabot nang 8-15 s.
+        'send_timeout' => (int) env('BOTCAKE_SEND_TIMEOUT', 30),
     ],
 
     // Kusang J&T track-sync kada oras (jnt:track-sync-auto). Ang toggle ng CEO sa /jnt/track-sync ang nananaig kapag ginamit.
