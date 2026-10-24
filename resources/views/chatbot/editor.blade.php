@@ -219,7 +219,7 @@
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
             case 'encode_order': return 'Encodes the order in Likha' + (c.also_sheet ? ' + writes the sheet' : '') + '\nOn failure: ' + (c.on_failure === 'continue' ? 'continue without saving' : 'write to the sheet');
             case 'upload_macro': return c.mode === 'update' ? 'Updates the open row of the customer\nNo open row: ' + (c.if_not_found === 'skip' ? 'skip' : 'insert') : 'Inserts a new order row';
-            case 'encode_macro': return 'Encodes the uploaded row, waits up to ' + (c.wait || 90) + ' s' + (c.astra === false ? '' : '\nAstra when it does not PROCEED');
+            case 'encode_macro': return 'Encodes the uploaded row, waits up to ' + (c.wait || 120) + ' s' + (c.astra === false ? '' : '\nAstra when it does not PROCEED');
             case 'sequence': {
                 const s = sequences.find(x => x.id === c.sequence_id);
                 const name = c.sequence_id ? (s ? s.name : 'a deleted sequence') : (c.action === 'unsubscribe' ? 'all sequences' : 'Pick a sequence');
@@ -511,7 +511,7 @@
         clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []},
         encode_order: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', also_sheet: false, sheet: '', tab: '', on_failure: 'sheet'},
         upload_macro: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', mode: 'insert', if_not_found: 'insert', counts_order: true},
-        encode_macro: {wait: 90, astra: true}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
+        encode_macro: {wait: 120, astra: true}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
         const next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
@@ -836,7 +836,7 @@
     // ---- Encode order: ine-encode ang row ng Upload to macro, hinihintay, at ang resulta sa encode_* variables ----
     function encodeMacroForm(c, body) {
         body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Encodes the row that Upload to macro saved in this run. The flow waits for the result, then goes on with next (or failed).'}));
-        body.append(label('Wait up to (seconds, 10 to 600)', bind(input({type: 'number', min: 10, max: 600, step: 1, inputmode: 'numeric'}, c.wait ?? 90), v => c.wait = parseInt(v, 10) || 90)));
+        body.append(label('Wait up to (seconds, 10 to 600)', bind(input({type: 'number', min: 10, max: 600, step: 1, inputmode: 'numeric'}, c.wait ?? 120), v => c.wait = parseInt(v, 10) || 120)));
         body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: c.astra !== false}), v => c.astra = v, true), 'Run Astra when the encode does not PROCEED']));
         body.append(el('p', {class: 'text-xs text-slate-500', text: 'Variables for a Condition: encode_proceed (yes/no), encode_hold_reason (address, duplicate, name, phone, price, other, error), encode_province, encode_city, encode_barangay, encode_address, encode_name, encode_phone, encode_row_id. Past the wait, the flow goes on with failed.'}));
     }

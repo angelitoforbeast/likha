@@ -6,7 +6,7 @@ use App\Models\ChatbotFlow;
 use App\Services\Chatbot\FlowGraph;
 use Illuminate\Support\Facades\Artisan;
 
-/** Spec 137 A.1 at C: ang dalawang bagong step sa builder (palette, config, Publish notice) at ang label ng legacy na setting. */
+/** Ang dalawang bagong step sa builder (palette, config, Publish notice) at ang label ng legacy na setting. */
 class UploadEncodeBuilderTest extends UploadEncodeTestCase
 {
     public function test_S_137_1_the_palette_has_both_blocks_and_their_configs_save_and_reload(): void
@@ -38,10 +38,10 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
     public static function configs(): array
     {
         return [
-            'encode: defaults' => [['encode_macro', []], ['wait' => 90, 'astra' => true]],
+            'encode: defaults' => [['encode_macro', []], ['wait' => 120, 'astra' => true]],
             'encode: wait too short' => [['encode_macro', ['wait' => 3]], ['wait' => 10, 'astra' => true]],
             'encode: wait too long' => [['encode_macro', ['wait' => 9999, 'astra' => '1']], ['wait' => 600, 'astra' => true]],
-            'encode: wait not a number' => [['encode_macro', ['wait' => 'soon']], ['wait' => 90, 'astra' => true]],
+            'encode: wait not a number' => [['encode_macro', ['wait' => 'soon']], ['wait' => 120, 'astra' => true]],
             'upload: bad enums' => [['upload_macro', ['mode' => 'drop', 'if_not_found' => 'explode']], ['mode' => 'insert', 'if_not_found' => 'insert']],
         ];
     }

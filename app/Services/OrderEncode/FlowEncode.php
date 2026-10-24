@@ -4,6 +4,7 @@ namespace App\Services\OrderEncode;
 
 use App\Jobs\EncodeOrder;
 use App\Jobs\ResumeChatbotAi;
+use App\Jobs\RunEncodeAstra;
 use App\Models\MacroOutput;
 use App\Models\OrderEncode;
 use App\Services\AiCheckerRowRunner;
@@ -73,7 +74,7 @@ class FlowEncode
         // Ang marka ay bago ang job: ang resume ay itinutuloy lang kapag ito pa ang hinihintay ng customer.
         $run->fields->set(CustomerFields::AI, $request);
         try {
-            EncodeOrder::dispatch($up->id);
+            EncodeOrder::dispatch($up->id, true);
         } catch (Throwable $e) {
             report($e);
             DB::table(ChatbotAiQueue::TABLE)->where('request_id', $request)->delete();
@@ -141,11 +142,28 @@ class FlowEncode
         DB::table(ChatbotAiQueue::TABLE)->where('request_id', (string) $o->input['encode']['request'])->where('status', self::STATUS)
             ->update(['answer' => json_encode($result, JSON_UNESCAPED_UNICODE), 'updated_at' => now()]);
 
-        $astra = $this->astra($o, (int) $row->id);
+        try {
+            RunEncodeAstra::dispatch($o->id); // sariling job sa astra-live: hindi hinahawakan ang encode worker habang si Astra
+        } catch (Throwable $e) {
+            report($e);
+            $this->afterAstra($o, ['status' => 'not_queued']);
+        }
+    }
+
+    /** Ang RunEncodeAstra job: si Astra sa row, saka ang pagtuloy ng flow. */
+    public function astraStep(OrderEncode $o): void
+    {
+        $this->afterAstra($o, $this->astra($o, (int) $o->macro_output_id));
+    }
+
+    /** Ang resulta ni Astra (o ang pagpalya nito) sa order, saka ang pagtuloy na may huling value ng row. */
+    public function afterAstra(OrderEncode $o, array $astra): void
+    {
         $o->refresh();
         $notes = array_merge((array) ($o->input['live_notes'] ?? []), ['Astra: ' . $astra['status'] . (!empty($astra['final_code']) ? ' ' . $astra['final_code'] : '')]);
         $o->update(['input' => array_merge((array) $o->input, ['astra' => $astra + ['at' => now()->toDateTimeString()], 'live_notes' => $notes])]);
-        $this->finish($o, $this->result($o, MacroOutput::find($row->id), $astra));
+        $row = MacroOutput::find($o->macro_output_id);
+        $row ? $this->finish($o, $this->result($o, $row, $astra)) : $this->finish($o, null, 'The uploaded row is gone.');
     }
 
     /**

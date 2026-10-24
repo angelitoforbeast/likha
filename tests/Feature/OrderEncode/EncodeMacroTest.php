@@ -21,7 +21,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
-/** Spec 137 B: ang bagong "Encode order" step: ine-encode ang row ng Upload to macro, hinihintay ng flow, at ang mga variable. */
+/** Ang bagong "Encode order" step: ine-encode ang row ng Upload to macro, hinihintay ng flow, at ang mga variable. */
 class EncodeMacroTest extends UploadEncodeTestCase
 {
     private ?ChatbotFlow $flow = null;
@@ -76,6 +76,12 @@ class EncodeMacroTest extends UploadEncodeTestCase
             if (in_array(spl_object_id($job), $this->ran, true)) continue;
             $this->ran[] = spl_object_id($job);
             $job->handle(app(Runner::class));
+        }
+        // Si Astra ng Encode order ay sariling job (astra-live), pagkatapos ng encode.
+        foreach (Queue::pushed(\App\Jobs\RunEncodeAstra::class) as $job) {
+            if (in_array(spl_object_id($job), $this->ran, true)) continue;
+            $this->ran[] = spl_object_id($job);
+            $job->handle(app(FlowEncode::class));
         }
     }
 

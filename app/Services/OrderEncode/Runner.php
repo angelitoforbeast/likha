@@ -28,7 +28,7 @@ class Runner
     public function run(OrderEncode $o): void
     {
         if ($o->status === 'done') return; // ang ulit na job ay walang ginagawa
-        // Encode order (spec 137): ang row ng Upload to macro ay kilala na, kaya walang hanap ng row at walang lock ng customer.
+        // Encode order: ang row ng Upload to macro ay kilala na, kaya walang hanap ng row at walang lock ng customer.
         if (!empty($o->input['upload'])) {
             if ($o->status === 'queued') $this->uploaded($o);
 

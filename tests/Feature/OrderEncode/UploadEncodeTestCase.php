@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Spec 137: ang "Upload to macro" at ang bagong "Encode order" ng flow. Ang takbo ay sa tunay na FlowEngine (fake na outbox),
+ * Ang "Upload to macro" at ang bagong "Encode order" ng flow. Ang takbo ay sa tunay na FlowEngine (fake na outbox),
  * ang encode ay sa tunay na Runner (fake na OpenAI ng LiveRowTestCase), at ang mga job ay naka-fake (ang test ang nagpapatakbo).
  */
 abstract class UploadEncodeTestCase extends LiveRowTestCase
@@ -33,7 +33,7 @@ abstract class UploadEncodeTestCase extends LiveRowTestCase
         ]]);
         if (!Schema::hasColumn('macro_output', 'edited_phone_number')) Schema::table('macro_output', fn (Blueprint $t) => $t->boolean('edited_phone_number')->default(false));
         config(['services.chatbot.replies_enabled' => true, 'order_encode.upload_lock_wait' => 0]);
-        Queue::fake([EncodeOrder::class, ResumeChatbotAi::class, RunSpotAstra::class]);
+        Queue::fake([EncodeOrder::class, ResumeChatbotAi::class, RunSpotAstra::class, \App\Jobs\RunEncodeAstra::class]);
     }
 
     /** Ang mga template ng Upload to macro (A..H, gaya ng Sheet step ng All Orders). */

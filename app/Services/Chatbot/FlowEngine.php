@@ -597,7 +597,7 @@ class FlowEngine
     }
 
     /**
-     * Upload to macro (spec 137): ang hilaw na order row sa macro_output (Insert o Update), walang encode at walang sheet; ang
+     * Upload to macro: ang hilaw na order row sa macro_output (Insert o Update), walang encode at walang sheet; ang
      * Encode order ng parehong takbo ang nag-e-encode nito. Hindi binabasa ang shadow/live ng page. Ang Test tab at ang
      * nakapatay na replies ay walang sinusulat. Ang "order" (counts_order) ay kapag may row na naisulat o nadugtungan lang.
      */
@@ -640,7 +640,7 @@ class FlowEngine
     }
 
     /**
-     * Encode order (spec 137): ine-encode ang row ng Upload to macro ng takbong ito, at humihinto ang takbo hanggang sa resulta
+     * Encode order: ine-encode ang row ng Upload to macro ng takbong ito, at humihinto ang takbo hanggang sa resulta
      * (FlowEncode). Ang mga encode_* variable ay binubura muna; ang Test tab ay may halimbawang variable lang.
      */
     private function encodeMacro(array $node, array $c, FlowRun $run): array

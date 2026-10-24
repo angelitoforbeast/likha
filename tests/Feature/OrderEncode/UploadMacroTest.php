@@ -8,7 +8,7 @@ use App\Services\OrderEncode\Runner;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
-/** Spec 137 A: ang "Upload to macro" step: ang hilaw na order row (Insert / Update), walang encode. */
+/** Ang "Upload to macro" step: ang hilaw na order row (Insert / Update), walang encode. */
 class UploadMacroTest extends UploadEncodeTestCase
 {
     public function test_S_137_2_insert_writes_the_raw_row_and_a_second_insert_the_same_day_writes_a_second_row(): void

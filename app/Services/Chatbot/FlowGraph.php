@@ -16,7 +16,7 @@ class FlowGraph
     public const ENCODE_FIELDS = ['date', 'page', 'name', 'phone', 'input', 'shop', 'extracted', 'price'];
 
     /** "Wait up to" ng Encode order (segundo). */
-    public const ENCODE_WAIT = 90;
+    public const ENCODE_WAIT = 120; // si Astra lang ay hanggang ~90 s, kasama pa ang encode at ang pagkuha ng worker
     public const ENCODE_WAIT_MIN = 10;
     public const ENCODE_WAIT_MAX = 600;
 

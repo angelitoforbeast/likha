@@ -122,7 +122,7 @@ class LiveOrder
     }
 
     /**
-     * Encode order (spec 137): ang resulta ng encode sa row ng Upload to macro: ang address, ang resulta, ang pangalan at phone
+     * Encode order: ang resulta ng encode sa row ng Upload to macro: ang address, ang resulta, ang pangalan at phone
      * mula sa usapan, at PROCEED ayon sa unang encode. Hindi ang field na inayos ng staff (edited_* o linya ng tao), hindi ang
      * blangkong sagot sa may laman, at walang ginagalaw kapag may STATUS o waybill na.
      * @return bool false kapag may STATUS o waybill na ang row

@@ -45,7 +45,11 @@ written to the sheet as before. The `encode` worker must be running before any p
 ## Deploy checklist (by hand, after the owner's yes)
 
 1. `php artisan migrate --force` (adds `order_encodes`; nothing existing changes).
-2. Supervisor program `deploy/supervisor/likha-encode.conf`: `php artisan queue:work database --queue=encode --sleep=3 --tries=2 --timeout=600 --max-time=3600`.
+2. Supervisor program `deploy/supervisor/likha-encode.conf`: `php artisan queue:work database --queue=encode-live,encode --sleep=3 --tries=2 --timeout=600 --max-time=3600`.
+   `encode-live` is the express lane: the encodes of a customer who is waiting (the live encode of the legacy step and of a live Sheet step,
+   and every Encode order step). A worker always takes it before `encode` (shadow, import). The Astra worker (`likha-astra`, see
+   `docs/night-run.md`) likewise takes `--queue=astra-live,astra`: `astra-live` has the Astra of the Encode order step and `RunSpotAstra`.
+   The queue names are in `config/order_encode.php` (`queues`).
 3. `php artisan config:clear` so `services.openai.order_encode_key` is read; set `ORDER_ENCODE_OPENAI_KEY` (or rely on `OPENAI_API_KEY`).
 4. Set `compare_sheet` for the page, then set `mode` = `shadow`.
 
@@ -199,7 +203,7 @@ of the old step.
 - Each upload is an `order_encodes` row with status `uploaded` and `input.upload` set: that is "the row of this run" for Encode order.
 - "Counts as an order" counts only when a row was written or updated.
 
-**Encode order** (`encode_macro`, ports next and failed; settings "Wait up to" 10–600 s, default 90, and "Run Astra when the encode does
+**Encode order** (`encode_macro`, ports next and failed; settings "Wait up to" 10–600 s, default 120, and "Run Astra when the encode does
 not PROCEED", default on).
 - It clears the `encode_*` variables, then:
   - no upload in this run: failed;
@@ -215,7 +219,8 @@ not PROCEED", default on).
     letter, "unknown"/"n/a", or only a part of the current name.
 - The write skips staff-edited fields (`edited_*` or a person's log line), never blanks a filled field and changes nothing on a row with a
   STATUS or a waybill.
-- When the row is not PROCEED, the box is on and `order_encode_spot_astra` is not `off`, Astra runs in the same job, on the same row:
+- When the row is not PROCEED, the box is on and `order_encode_spot_astra` is not `off`, Astra runs on the same row in its own job, `RunEncodeAstra`
+  on the express lane `astra-live` (one try):
   - It uses the spot path: `AiCheckerRowRunner`, source `spot`, user "Likha encode", under the row lock without waiting.
   - The encode's result is stored on the wait first, so an Astra error, a busy row or a slow Astra continues on next with the encode's
     result.

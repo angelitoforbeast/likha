@@ -158,7 +158,7 @@ class ChatbotRunner
         return $this->resume(ChatbotAiQueue::TABLE, ['answered', 'failed'], '', [$encode ? 'encode_macro' : 'ai'], 'ai_dropped', $ticket, function (FlowRun $run, object $row) {
             $run->aiAnswer = ['node' => (string) $row->node_id, 'ok' => $row->status === 'answered', 'text' => (string) $row->answer,
                 'error' => $row->error ?? 'OpenAI did not answer.'];
-            // Ang ticket ng Encode order (spec 137): ang row ng order, para sa variable kahit pumalya.
+            // Ang ticket ng Encode order: ang row ng order, para sa variable kahit pumalya.
             if ($row->model === FlowEncode::MODEL) $run->aiAnswer += ['encode' => true, 'row' => json_decode((string) $row->context, true)['row_id'] ?? null];
         });
     }

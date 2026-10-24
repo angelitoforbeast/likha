@@ -2201,7 +2201,7 @@ Tests: `tests/Feature/OrderEncode/{UploadMacroTest,EncodeMacroTest,UploadEncodeB
 
 | Case | Story | Test | Result |
 |---|---|---|---|
-| S-137.1 | Given the builder, then the palette has Upload to macro and Encode order (the legacy button is hidden, its steps show "Encode order (legacy)"), and both configs save and reload; Wait up to is kept in 10–600 s (default 90), the enums fall back to Insert | `UploadEncodeBuilderTest::test_S_137_1_the_palette…`, `test_S_137_1_block_configs_are_validated` (table) | passed 2026-10-24 |
+| S-137.1 | Given the builder, then the palette has Upload to macro and Encode order (the legacy button is hidden, its steps show "Encode order (legacy)"), and both configs save and reload; Wait up to is kept in 10–600 s (default 120, amendment 137-1), the enums fall back to Insert | `UploadEncodeBuilderTest::test_S_137_1_the_palette…`, `test_S_137_1_block_configs_are_validated` (table) | passed 2026-10-24 |
 | S-137.2 | Given Insert, then a new raw row (TIMESTAMP, ts_date, PAGE, fb_name, FULL NAME, PHONE from the flow, PSID, all_user_input of this order, STATUS blank) and next; a second Insert the same day makes a second row | `UploadMacroTest::test_S_137_2…` | passed 2026-10-24 |
 | S-137.3 | Given Update and an open row, then the same row gets this order's messages appended and no second row is made, also from 23:59 to 00:01 (the day is kept) | `test_S_137_3_11…` (table) | passed 2026-10-24 |
 | S-137.4 | Given Update and a PROCEED or waybill row, then every column is unchanged, the note "second order not accepted: row <id>" and an event, and next | `test_S_137_4…` (table) | passed 2026-10-24 |
@@ -2248,3 +2248,17 @@ Story changes (S-137):
 - S-137.22 adds "a row deleted while waiting resumes on failed".
 - S-137.32 adds "the step became an AI step".
 - S-137.8 is tested as one upload after the other plus a held customer lock, not with two real processes.
+
+Amendment 137-1 (express lane and a 120 s default wait), in `ExpressLaneTest`:
+
+| Case | Story | Test | Result |
+|---|---|---|---|
+| S-137.40 | The queue names come from `config/order_encode.php`: `encode`, `encode-live`, `astra`, `astra-live` | `ExpressLaneTest::test_137_1_the_queue_names_come_from_the_config` | passed 2026-10-24 |
+| S-137.41 | Given a customer who is waiting, then the legacy step's live encode, a live Sheet step's encode and every Encode order encode go on `encode-live`, and a shadow Sheet step's encode stays on `encode` | `test_137_1_the_legacy_steps_live_encode…`, `test_137_1_the_sheet_steps_live_encode…` (table), `test_137_1_the_new_encode…` | passed 2026-10-24 |
+| S-137.42 | Given a held order, then the Astra of Encode order (`RunEncodeAstra`) and the legacy `RunSpotAstra` go on `astra-live`, and the night run stays on `astra` | `test_137_1_the_new_encode…`, `test_137_1_the_legacy_spot_astra…`, `test_137_1_the_queue_names…`, the NightRun suite | passed 2026-10-24 |
+| S-137.43 | Given a new Encode order block, then "Wait up to" is 120 s (max 600) | `test_137_1_the_new_encode…` (deadline), `UploadEncodeBuilderTest::test_S_137_1_block_configs_are_validated` | passed 2026-10-24 |
+
+Story changes (137-1):
+- S-132.3's test now expects the legacy step's live encode on `encode-live`; before, it expected `encode`. This was the only existing test the amendment required to change.
+- S-137.1 expects a default wait of 120 s; before, 90 s.
+- Encode order's Astra moved out of the encode job into `RunEncodeAstra`; the S-137.18/.19/.24 tests now also run that job.

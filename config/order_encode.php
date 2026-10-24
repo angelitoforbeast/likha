@@ -18,4 +18,13 @@ return [
     'row_lock_wait' => 180,
     // Ang night run: ilang segundo hinihintay ang Astra on the spot sa row bago ito laktawan ("Row busy").
     'night_row_lock_wait' => 200,
+    // Ang mga queue. Ang "live" ay ang express lane: ang encode at ang Astra ng customer na naghihintay (live na order, Encode
+    // order step), na laging inuuna ng mga worker (--queue=encode-live,encode at --queue=astra-live,astra). Ang shadow, import at
+    // night run ay sa encode / astra.
+    'queues' => [
+        'encode' => 'encode',
+        'encode_live' => 'encode-live',
+        'astra' => 'astra',
+        'astra_live' => 'astra-live',
+    ],
 ];

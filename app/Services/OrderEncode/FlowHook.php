@@ -129,7 +129,7 @@ class FlowHook
                 'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten, 'page_id' => $run->pageId],
             ]);
             try {
-                EncodeOrder::dispatch($order->id);
+                EncodeOrder::dispatch($order->id, true);
             } catch (Throwable $e) {
                 $order->update(['status' => 'failed', 'error' => 'The encode could not be queued.']); // walang naiwang queued na hindi tatakbo kailanman
                 throw $e;
@@ -166,7 +166,7 @@ class FlowHook
             ];
             // Shadow: ang parehong row ng sheet ay isang beses lang. Live: bawat takbo ng step ay sariling order.
             $order = $number === null ? OrderEncode::create($attrs + $values) : OrderEncode::firstOrCreate($attrs, $values);
-            if ($order->wasRecentlyCreated) EncodeOrder::dispatch($order->id);
+            if ($order->wasRecentlyCreated) EncodeOrder::dispatch($order->id, $mode === 'live');
 
             return true;
         } catch (Throwable $e) {

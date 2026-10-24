@@ -27,7 +27,7 @@ night; the CEO also sees the estimated cost, "Show rows" (each row links to its 
    ```ini
    [program:likha-astra]
    process_name=%(program_name)s_%(process_num)02d
-   command=php /var/www/likha/artisan queue:work database --queue=astra --sleep=3 --tries=3 --timeout=540 --max-time=3600
+   command=php /var/www/likha/artisan queue:work database --queue=astra-live,astra --sleep=3 --tries=3 --timeout=540 --max-time=3600
    directory=/var/www/likha
    numprocs=2
    autostart=true

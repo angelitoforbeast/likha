@@ -174,7 +174,8 @@ risk tier is medium.
   - Events: `upload_macro` (inserted, updated, not_accepted, already, failed, test, skipped) and `upload_skipped`.
 - **`encode_macro` "Encode order":**
   - Ports `next` and `failed`.
-  - Config: `wait`, seconds, kept in 10–600 (default 90; a value that is not a number gives 90).
+  - Config: `wait`, seconds, kept in 10–600 (default 120 since amendment 137-1, before 90; a value that is not a number gives
+    the default).
   - Config: `astra`, a boolean (default true).
   - Events: `encode_pending`, and `encode_macro` (proceed, held, failed, final, already, test, skipped).
 - **`encode_order`** (legacy) is unchanged. Its label is "Encode order (legacy)" and its palette button is hidden.
@@ -276,16 +277,111 @@ Google credentials file.
 
 ## Open points
 
-- **No migration and no new worker.** `EncodeOrder` runs on the existing `encode` queue (database connection). Astra runs inside
-  that job, so the `astra` queue is not used by the new step. The cache store must support atomic locks, as for 136.
+- **No migration and no new worker program.** Since amendment 137-1 the existing `likha-encode` and `likha-astra` workers must
+  also listen to `encode-live` and `astra-live` (see "Amendment 137-1" below). The cache store must support atomic locks, as for
+  136.
 - **Upload to macro writes no address fields.** The 132 A–H templates have no address cells, so ADDRESS, PROVINCE, CITY and
   BARANGAY stay blank until Encode order. Safest choice; templates for them could be added if the owner wants.
 - **COD on Insert** comes from the "PRICE: ₱…" in the shop details (as in the Likha import), else from the Price (H) cell.
 - **Two Encode order steps after one upload in the same run:** the second does not encode again; it gives the row's current
   values ("Already encoded in this run").
-- **Astra's HTTP timeout stays 120 s, as on the spot path.** With the default 90 s wait, a slow Astra means the flow goes on
-  with the encode's result and Astra may still PROCEED the row later. That is the brief's rule, but the owner may want a longer
-  wait when Astra is on.
+- **Astra's HTTP timeout stays 120 s, as on the spot path.** Even with the new default wait of 120 s, a slow Astra means the
+  flow goes on with the encode's result, and Astra may still PROCEED the row later. That is the brief's rule.
 - **Replies switched off:** both steps write and queue nothing. Encode order then goes on next (as the legacy step does), with
   the variables cleared.
 - **Not done locally:** no MySQL or pgsql run (only sqlite), and no browser check (none in this session).
+
+## Amendment 137-1
+
+The amendment as received (verbatim):
+
+| Change | Who decided, why |
+|---|---|
+| **Express lane for customer orders.** Jobs for a waiting customer go to their own queue, which workers always take first: the legacy block's live encode and every new Encode order encode go on queue `encode-live`, and the Astra run of the new Encode order and the legacy `RunSpotAstra` go on `astra-live`. Shadow, import, backtest and the night run stay on `encode` / `astra`. Put the queue names in `config/order_encode.php` (not hard-coded in several places). Do not change the server: in the result, write the exact worker command change the deploy must make (e.g. `queue:work database --queue=encode-live,encode …` for the likha-encode programs, `--queue=astra-live,astra …` for likha-astra), and say what happens to jobs on the new queues if the deploy forgets that change (they must not be lost; state it). | The owner, 2026-10-24, after hearing that customer encodes wait behind the shadow and import encodes (3 minutes on average in the last 3 days): "Tapos dun sa live order …", then the express lane explained and accepted ("basta paganahin mo muna"). Live data: shadow encodes averaged 188 s queue+run, Astra 26 s average, 89 s max. |
+| **Default "Wait up to" = 120 s** for new Encode order blocks (max stays 600). | The reviewer's decision: Astra alone can take up to ~90 s; 90 s left too little room once the encode itself and the queue pickup are added. |
+
+Tests: a live encode and an Encode order encode are pushed on `encode-live`, their Astra on `astra-live`; shadow/import/backtest/night jobs stay on the old queues; the default wait is 120. Re-run `tests/Feature/OrderEncode tests/Feature/NightRun` (no new failures). Update the result (Files, Evidence, Open points) and end with one status line "137-1: <done|blocked> — <one line>".
+
+### What was built
+
+- **Queue names** are in `config/order_encode.php` → `queues`: `encode`, `encode_live` (`encode-live`), `astra` and `astra_live`
+  (`astra-live`). The jobs read them from there; the old constants are only the fallback.
+- **`encode-live`** (`EncodeOrder` with `live = true`) takes:
+  - the legacy step's live encode (`FlowHook::node`);
+  - the live Sheet step's encode (`FlowHook::queue`, mode `live`; also an order of a waiting customer);
+  - every Encode order encode (`FlowEncode::start`).
+- **`encode`** stays for shadow (`FlowHook::queue`, mode `shadow`) and the import (`ImportShadow`). The backtest runs the encoder
+  inline, with no queue.
+- **`astra-live`** takes the legacy `RunSpotAstra` (only ever dispatched for live orders) and the new **`RunEncodeAstra`**.
+  - Before this amendment, the Astra of Encode order ran inline in the encode job. It now has its own one-try job, as the
+    amendment asks, so an encode worker is not held while Astra runs.
+  - The encode result is still stored on the wait first. An Astra failure, a crash (`failed()`) or a dispatch error continues on
+    next with the encode's result, and so does a slow Astra (through the sweep).
+- **`astra`** stays for the night run (`RunNightAstraRow`, which now also reads its queue name from the config).
+- **Default "Wait up to" is 120 s** (`FlowGraph::ENCODE_WAIT`, and the editor's defaults); the range stays 10–600.
+
+### Deploy: the worker command change (not done here; the server was not touched)
+
+The repo copies are updated: `deploy/supervisor/likha-encode.conf`, and the `likha-astra` block in `docs/night-run.md`.
+
+- **likha-encode** (`/etc/supervisor/conf.d/likha-encode.conf`), the `command=` line:
+  - from `php /var/www/likha/artisan queue:work database --queue=encode --sleep=3 --tries=2 --timeout=600 --max-time=3600`
+  - to `php /var/www/likha/artisan queue:work database --queue=encode-live,encode --sleep=3 --tries=2 --timeout=600 --max-time=3600`
+- **likha-astra**, the `command=` line:
+  - from `php /var/www/likha/artisan queue:work database --queue=astra --sleep=3 --tries=3 --timeout=540 --max-time=3600`
+  - to `php /var/www/likha/artisan queue:work database --queue=astra-live,astra --sleep=3 --tries=3 --timeout=540 --max-time=3600`
+- Then run `sudo supervisorctl reread && sudo supervisorctl update`, and `sudo supervisorctl restart likha-encode:* likha-astra:*`
+  after the code deploy.
+- The order of the names matters: Laravel's worker always takes a job from the first queue that has one, so `encode-live` /
+  `astra-live` go first. No migration is needed; the `jobs` table holds any queue name.
+
+**If the deploy forgets the worker change:** the jobs on `encode-live` / `astra-live` are not lost. They stay in the `jobs` table
+(database connection, no expiry: `EncodeOrder`, `RunSpotAstra` and `RunEncodeAstra` have no `retryUntil`) until a worker that
+listens to those queues starts; then they run in order. Until then:
+- **Legacy live orders** (the Encode order (legacy) step and live Sheet steps) get no macro_output row: the order waits in
+  `order_encodes` as `queued`.
+- **Legacy spot Astra** waits as well.
+- **A flow at a new Encode order step** reaches its deadline. The sweep resumes it on failed with `encode_hold_reason = error`,
+  so the customer is never stuck. The row was already saved by Upload to macro and stays for staff, and the late encode still
+  fills the row when it finally runs.
+- **Check after the deploy:**
+  `SELECT queue, COUNT(*) FROM jobs WHERE queue IN ('encode-live','astra-live') GROUP BY queue;` should stay near 0.
+
+### Files (137-1)
+
+- **New:**
+  - `app/Jobs/RunEncodeAstra.php`;
+  - `tests/Feature/OrderEncode/ExpressLaneTest.php`.
+- **Changed:**
+  - `config/order_encode.php` (`queues`);
+  - `app/Jobs/EncodeOrder.php` (`$live`);
+  - `app/Jobs/RunSpotAstra.php` (`astra-live`; the unused `QUEUE` constant was removed);
+  - `app/Jobs/RunNightAstraRow.php` (the queue name from the config, still `astra`);
+  - `app/Services/OrderEncode/FlowHook.php` and `FlowEncode.php` (`astraStep`, `afterAstra`, and `RunEncodeAstra` instead of
+    inline Astra);
+  - `app/Services/Chatbot/FlowGraph.php` (120 s);
+  - `resources/views/chatbot/editor.blade.php` (120 s);
+  - `deploy/supervisor/likha-encode.conf`, `docs/order-encode.md`, `docs/night-run.md` and `qa/stories.md` (S-137.40–.43);
+  - the tests `EncodeMacroTest` (its helper also runs `RunEncodeAstra`), `UploadEncodeTestCase` (fakes it),
+    `UploadEncodeBuilderTest` (120) and `EncodeOrderNodeTest::test_S_132_3` (the legacy live encode is now expected on
+    `encode-live`; the amendment requires this change).
+- **Also:** the code comments that cited the spec or amendment number were removed (the hard rule: comments never cite an
+  id). Test names keep their case ids.
+
+### Evidence (137-1)
+
+- **Red first:** `ExpressLaneTest` had 5 failures (e.g. "The expected [App\Jobs\EncodeOrder] job was not pushed",
+  "Failed asserting that null is identical to Array" for the config), and `UploadEncodeBuilderTest` had 2 (the 90 → 120 default).
+  The shadow case passed at once, as it should: shadow stays on `encode`.
+- **Then green:**
+  - `ExpressLaneTest`: 6 tests (S-137.40–.43);
+  - the whole of `tests/Feature/OrderEncode`;
+  - `EncodeOrderNodeTest::test_S_132_3` with the amended queue.
+- **Re-run of `tests/Feature/OrderEncode tests/Feature/NightRun`:** **722 tests, 6967 assertions, 1 error.** The error is the known local-only `NightRunImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` (missing Google credentials), as in the baseline; no new failures.
+
+### Open points (137-1)
+
+- **Deploy:** the worker command change above, by the person who deploys, after the owner's yes.
+- **Stuck jobs:** if `encode-live` jobs pile up, the new step's customers get `error` after the wait (never stuck), but legacy
+  live orders wait for their row.
+- **Astra in its own job adds one queue pickup** (a worker sleeps up to 3 s), inside the 120 s wait.
