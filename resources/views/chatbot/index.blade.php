@@ -49,6 +49,7 @@
      data-data-url="{{ route('chatbot.data') }}"
      data-cell-url="{{ route('chatbot.cell') }}"
      data-cells-url="{{ route('chatbot.cells') }}"
+     data-paste-map-url="{{ route('chatbot.paste-map') }}"
      data-column-url="{{ route('chatbot.column') }}"
      data-check-url="{{ route('chatbot.check') }}"
      data-preview-url="{{ route('chatbot.preview') }}"
@@ -114,6 +115,13 @@
                     <label class="flex items-center gap-1"><input id="pe-blanks" type="checkbox"> Paste blanks as empty</label>
                 </div>
                 <ul id="pe-notes" class="mt-1 space-y-0.5 text-xs text-slate-600" aria-live="polite"></ul>
+                {{-- Ang AI ang pumipili ng field ng bawat na-paste na value: preview muna, Apply ang pumupuno, Save pa rin ang nagse-save. --}}
+                <div id="pe-map" class="mt-2 hidden rounded-md border border-slate-200 bg-slate-50 p-2">
+                    <p id="pe-map-status" class="text-xs text-slate-600" aria-live="polite"></p>
+                    <ol id="pe-map-list" class="mt-1 max-h-60 space-y-1 overflow-y-auto"></ol>
+                    <p id="pe-map-error" class="mt-1 text-xs text-red-600 empty:hidden" aria-live="polite"></p>
+                    <div class="mt-2 flex flex-wrap gap-2"><button id="pe-map-apply" type="button" class="cb-btn cb-btn-sm cb-btn-primary" disabled>Apply</button><button id="pe-map-classic" type="button" class="cb-btn cb-btn-sm">Use header/position instead</button></div>
+                </div>
             </div>
             <div id="pe-fields" class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto px-4"></div>
             <div class="border-t border-slate-200 px-4 py-3">
@@ -966,7 +974,9 @@
         $('pe-save').textContent = n ? 'Save ' + plural(n, 'change') : 'Save';
     }
     function openPe(r) {
-        pe = {r, orig: {}, beforePaste: {}};
+        pe = {r, orig: {}, beforePaste: {}, map: null};
+        peSeq++;
+        $('pe-map').classList.add('hidden');
         $('pe-name').textContent = r.page;
         $('pe-id').textContent = r.page_id || '';
         const start = $('pe-start').value;
@@ -1006,10 +1016,14 @@
         $('pe').classList.add('hidden');
         pe = null;
     }
-    /** Ang paste box: isang row (ang una lang), ayon sa header kung mayroon, kung wala ay ayon sa ayos mula sa napiling field. */
-    function pePaste() {
+    /** Ibinabalik ang mga field bago ang huling paste, para ang bagong paste ay pumalit at hindi magpatong. */
+    function peRestore() {
         for (const [key, v] of Object.entries(pe.beforePaste)) peInput(key).value = v;
         pe.beforePaste = {};
+    }
+    /** Ang paste box: isang row (ang una lang), ayon sa header kung mayroon, kung wala ay ayon sa ayos mula sa napiling field. */
+    function pePaste() {
+        peRestore();
         const text = $('pe-paste').value, notes = [];
         const current = Object.fromEntries(botCols().map(c => [c.key, peInput(c.key).value]));
         const plan = ChatbotPaste.plan({text, columns: botCols(), targets: [{page: pe.r.page, cells: pe.orig}], startKey: $('pe-start').value, blanksEmpty: $('pe-blanks').checked, firstRowOnly: true});
@@ -1032,7 +1046,107 @@
         $('pe-fields').querySelectorAll('textarea').forEach(grow);
         paintPe();
     }
-    ['pe-paste', 'pe-start', 'pe-blanks'].forEach(i => $(i).addEventListener(i === 'pe-paste' ? 'input' : 'change', pePaste));
+    // ---- Ang AI ang pumipili ng field ng bawat value (paste sa Edit) ----
+    // pe.map: ang mga cell, ang napiling key at confidence kada cell, at kung na-Apply na. Ang value ay hindi dumadaan sa
+    // server pabalik: ang sagot ay mapping lang, at dito inilalagay ang value nang gaya ng na-paste. peSeq: ang huling
+    // paste lang ang may bisa (ang lumang sagot ay binabalewala).
+    let peSeq = 0, peTimer = null;
+    const AI_WAIT_MS = 30000; // ang server ay hanggang 20 s sa AI; lampas dito, ang dating mapping na
+    const short = v => { const one = String(v).trim().split(/\r?\n/)[0]; return one.length > 80 ? one.slice(0, 80) + '…' : one + (String(v).trim().includes('\n') ? ' …' : ''); };
+    function peAiPaste() {
+        clearTimeout(peTimer);
+        const seq = ++peSeq;
+        pe.map = null;
+        $('pe-map').classList.add('hidden');
+        const row = ChatbotPaste.aiRow($('pe-paste').value, botCols());
+        if (!row) { pePaste(); return; } // walang laman (o header lang): walang tawag sa AI
+        peRestore();
+        $('pe-notes').replaceChildren();
+        pe.map = {cells: row.cells, keys: [], conf: [], applied: false};
+        $('pe-map-list').replaceChildren();
+        $('pe-map-error').textContent = '';
+        $('pe-map-apply').disabled = true;
+        $('pe-map-status').textContent = 'Asking AI which field each value goes to…';
+        $('pe-map').classList.remove('hidden');
+        paintPe();
+        peTimer = setTimeout(async () => {
+            if (!pe || seq !== peSeq) return; // sarado na ang modal o may bagong paste
+            let res;
+            try {
+                res = await Promise.race([post(url.pasteMapUrl, {page_name: pe.r.page, cells: row.cells, header: row.header}),
+                    new Promise(ok => setTimeout(() => ok({ok: false, data: {}}), AI_WAIT_MS))]);
+            } catch (e) { res = {ok: false, data: {}}; }
+            if (!pe || seq !== peSeq) return;
+            if (!res.ok || !Array.isArray(res.data.mapping)) { peClassic(res.data.note || res.data.error || 'AI could not map this paste, so the header/position mapping was used.'); return; }
+            for (const m of res.data.mapping) { pe.map.keys[m.cell] = m.key && peInput(m.key) ? m.key : null; pe.map.conf[m.cell] = m.confidence; }
+            peMapList();
+        }, 400);
+    }
+    /** Ang preview: bawat value na may laman, may dropdown ng field na naka-set sa pinili ng AI. */
+    function peMapList() {
+        const items = [];
+        pe.map.cells.forEach((v, i) => {
+            if (String(v).trim() === '') return;
+            const sel = el('select', {class: 'pe-map-field max-w-full rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900', 'aria-label': 'Field for value ' + (i + 1)},
+                [el('option', {value: '', text: 'None (skip)'}), ...botCols().map(c => el('option', {value: c.key, text: c.label}))]);
+            sel.value = pe.map.keys[i] || '';
+            sel.addEventListener('change', () => { pe.map.keys[i] = sel.value || null; pe.map.conf[i] = 'high'; peMapPaint(); });
+            items.push(el('li', {class: 'pe-map-item flex flex-wrap items-center gap-x-2 gap-y-1 rounded border px-2 py-1', 'data-cell': String(i)}, [
+                el('span', {class: 'min-w-0 flex-1 basis-40 truncate font-mono text-xs', text: short(v)}), sel, el('span', {class: 'pe-map-tag text-xs empty:hidden'})]));
+        });
+        $('pe-map-list').replaceChildren(...items);
+        $('pe-map-apply').disabled = false;
+        peMapPaint();
+    }
+    /** Ang mababang confidence (dilaw) at ang dalawang value sa iisang field (pula). */
+    function peMapPaint() {
+        const conflicts = ChatbotPaste.mapConflicts(pe.map.cells.map((_, i) => pe.map.keys[i] || null));
+        let low = 0, clash = 0;
+        for (const li of $('pe-map-list').children) {
+            const i = +li.dataset.cell, isClash = conflicts[i], isLow = !isClash && pe.map.conf[i] === 'low';
+            low += isLow; clash += isClash;
+            li.classList.toggle('border-red-300', isClash); li.classList.toggle('bg-red-50', isClash);
+            li.classList.toggle('border-amber-300', isLow); li.classList.toggle('bg-amber-50', isLow);
+            li.classList.toggle('border-slate-200', !isClash && !isLow); li.classList.toggle('bg-white', !isClash && !isLow);
+            const tag = li.querySelector('.pe-map-tag');
+            tag.textContent = isClash ? 'Same field as another value' : isLow ? 'Not sure: check this' : '';
+            tag.className = 'pe-map-tag text-xs empty:hidden ' + (isClash ? 'text-red-700' : 'text-amber-700');
+        }
+        $('pe-map-status').textContent = 'AI picked a field for each value. Check them, then Apply (nothing is saved until Save).'
+            + (low ? ' ' + plural(low, 'value') + ' not sure.' : '') + (clash ? ' ' + plural(clash, 'value') + ' on the same field.' : '');
+        $('pe-map-error').textContent = '';
+    }
+    /** Apply: pinupuno ang mga field ayon sa napili, gaya ng na-paste; ang Save pa rin ang nagse-save. */
+    function peMapApply() {
+        const out = ChatbotPaste.applyMapping(pe.map.cells, pe.map.cells.map((_, i) => pe.map.keys[i] || null), $('pe-blanks').checked);
+        if (out.error) { $('pe-map-error').textContent = out.error; return; }
+        peRestore();
+        for (const x of out.changes) {
+            const input = peInput(x.key);
+            if (!input) continue;
+            pe.beforePaste[x.key] = input.value;
+            input.value = x.value;
+        }
+        pe.map.applied = true;
+        $('pe-map').classList.add('hidden');
+        $('pe-notes').replaceChildren(el('li', {text: plural(out.changes.length, 'field') + ' filled from the paste (AI mapping), not saved yet.'}));
+        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        paintPe();
+    }
+    /** Ang dating mapping (header o ayos), may maikling dahilan kung bakit. */
+    function peClassic(note) {
+        clearTimeout(peTimer);
+        peSeq++;
+        pe.map = null;
+        $('pe-map').classList.add('hidden');
+        pePaste();
+        if (note) $('pe-notes').prepend(el('li', {class: 'text-amber-700', text: note}));
+    }
+    $('pe-paste').addEventListener('input', peAiPaste);
+    $('pe-start').addEventListener('change', () => peClassic());
+    $('pe-blanks').addEventListener('change', () => { if (pe.map?.applied) peMapApply(); else if (!pe.map) pePaste(); });
+    $('pe-map-apply').addEventListener('click', peMapApply);
+    $('pe-map-classic').addEventListener('click', () => peClassic());
     $('pe-blanks').addEventListener('change', () => { $('f-blanks').checked = $('pe-blanks').checked; });
     $('pe-close').addEventListener('click', () => closePe());
     $('pe-cancel').addEventListener('click', () => closePe());
