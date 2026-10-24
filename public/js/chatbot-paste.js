@@ -69,6 +69,43 @@
     return c.label + ' is ' + (m ? 'an image link: put it in ' + m.label : 'a link: this column needs text') + '. You can still save it.';
   }
 
+  // Header kapag kalahati man lang ng may laman sa unang linya ay pangalan ng field (kasama ang ACTIVE at FLOW).
+  function isHeader(first, columns) {
+    var byNorm = {};
+    columns.forEach(function (c) { byNorm[norm(c.key)] = c; byNorm[norm(c.label)] = c; });
+    var named = first.filter(function (v) { return norm(v) !== ''; });
+    var hits = named.filter(function (v) { return byNorm[norm(v)] || RESERVED.indexOf(norm(v)) !== -1; }).length;
+    return hits > 0 && hits * 2 >= named.length;
+  }
+
+  // Ang ipapadala sa AI (Edit ng isang page): ang unang data row, at ang header line bilang hint lang kung mayroon.
+  // null kapag walang value na may laman: walang tawag.
+  function aiRow(text, columns) {
+    var rows = parseTsv(text);
+    if (!rows.length) return null;
+    var header = isHeader(rows[0], columns || []) ? rows[0] : null, cells = rows[header ? 1 : 0];
+    if (!cells || !cells.some(function (v) { return v.trim() !== ''; })) return null;
+    return { cells: cells, header: header };
+  }
+
+  // Kada cell: true kapag may ibang cell na sa parehong field (ang None ay hindi kailanman).
+  function mapConflicts(keys) {
+    return keys.map(function (k, i) { return !!k && keys.some(function (o, j) { return j !== i && o === k; }); });
+  }
+
+  // Ang Apply ng AI mapping: bawat napiling field ay makakatanggap ng cell nito nang eksakto gaya ng na-paste. Laktaw ang
+  // None, at ang blangko maliban kung "Paste blanks as empty". Hindi tuloy kapag dalawang cell ang nasa iisang field.
+  function applyMapping(cells, keys, blanksEmpty) {
+    if (mapConflicts(keys).some(Boolean)) return { error: 'Two values go to the same field: choose a different field or "None" for one of them.', changes: [] };
+    var changes = [];
+    keys.forEach(function (k, i) {
+      var v = String(cells[i] == null ? '' : cells[i]);
+      if (!k || (v.trim() === '' && !blanksEmpty)) return;
+      changes.push({ key: k, value: v.trim() === '' ? '' : v });
+    });
+    return { error: null, changes: changes };
+  }
+
   /**
    * Ang plano ng isang paste. input: { text, columns: [{key, label, kind}] (ang mga botfield na puwedeng i-paste, sa
    * ayos ng grid), targets: [{page, cells: {key: value}}] (sa ayos ng grid), startKey (para sa ayon sa ayos; default
@@ -87,11 +124,9 @@
     var byNorm = {};
     columns.forEach(function (c) { byNorm[norm(c.key)] = c; byNorm[norm(c.label)] = c; });
 
-    // Header kapag kalahati man lang ng may laman sa unang linya ay pangalan ng field (kasama ang ACTIVE at FLOW).
-    var first = rows[0], named = first.filter(function (v) { return norm(v) !== ''; });
-    var hits = named.filter(function (v) { return byNorm[norm(v)] || RESERVED.indexOf(norm(v)) !== -1; }).length;
+    var first = rows[0];
     var map = []; // index ng pasted na column => column (o null = laktaw)
-    var header = hits > 0 && hits * 2 >= named.length;
+    var header = isHeader(first, columns);
     if (header) rows = rows.slice(1);
     if (input.firstRowOnly && rows.length > 1) { out.extraRows = rows.length - 1; rows = rows.slice(0, 1); }
     if (header) {
@@ -135,5 +170,6 @@
     return out;
   }
 
-  root.ChatbotPaste = { parseTsv: parseTsv, toTsv: toTsv, plan: plan, isImageLink: isImageLink, isLinkOnly: isLinkOnly, linkWarning: linkWarning };
+  root.ChatbotPaste = { parseTsv: parseTsv, toTsv: toTsv, plan: plan, isImageLink: isImageLink, isLinkOnly: isLinkOnly, linkWarning: linkWarning,
+    aiRow: aiRow, mapConflicts: mapConflicts, applyMapping: applyMapping };
 })(typeof self !== 'undefined' ? self : globalThis);
