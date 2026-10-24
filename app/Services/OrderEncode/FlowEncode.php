@@ -70,16 +70,18 @@ class FlowEncode
             'status' => self::STATUS, 'deadline_at' => now()->addSeconds($wait), 'created_at' => now(), 'updated_at' => now(),
         ]);
         $up->update(['status' => 'queued', 'input' => array_merge((array) $up->input, ['encode' => ['request' => $request, 'node' => $nodeId, 'astra' => !empty($c['astra'])]])]);
+        // Ang marka ay bago ang job: ang resume ay itinutuloy lang kapag ito pa ang hinihintay ng customer.
+        $run->fields->set(CustomerFields::AI, $request);
         try {
             EncodeOrder::dispatch($up->id);
         } catch (Throwable $e) {
             report($e);
             DB::table(ChatbotAiQueue::TABLE)->where('request_id', $request)->delete();
+            $run->fields->clear(CustomerFields::AI);
             $up->update(['status' => 'uploaded']);
 
             return $this->failNow($run, $nodeId, 'The encode could not be queued', (int) $row->id);
         }
-        $run->fields->set(CustomerFields::AI, $request);
         $run->aiPending = true;
         $run->encodePending = true;
         $run->event('encode_pending', $nodeId, ['row' => (string) $row->id, 'wait' => $wait]);
