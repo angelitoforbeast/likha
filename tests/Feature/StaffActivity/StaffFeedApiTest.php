@@ -475,7 +475,8 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
         $entry = ['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:30', 'submitted' => false,
             'submitted_at' => null, 'verdict' => null, 'approval_checks' => 0,
-            'rechecks' => 0, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null];
+            'rechecks' => 0, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null,
+            'submission_type' => 'group', 'submitted_by' => null];
         $this->assertSame([$entry], $staff[$a->id]['checklist_late_today']);
         $this->assertSame([$entry], $staff[$b->id]['checklist_late_today']);
         $this->assertSame(2, $response->json('checklist_late_not_submitted'));
@@ -502,7 +503,8 @@ class StaffFeedApiTest extends StaffActivityTestCase
 
         $this->assertSame([['task_id' => $id, 'title' => 'Bilangin ang stock', 'deadline' => '10:15', 'submitted' => true,
             'submitted_at' => '10:20', 'verdict' => 'not_approved', 'approval_checks' => 3,
-            'rechecks' => 2, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null]],
+            'rechecks' => 2, 'overridden' => false, 'overridden_by' => null, 'overridden_at' => null,
+            'submission_type' => 'group', 'submitted_by' => $a->name]],
             $response->json('staff.0.checklist_late_today'));
         $this->assertSame(0, $response->json('checklist_late_not_submitted'));
     }
@@ -617,20 +619,77 @@ class StaffFeedApiTest extends StaffActivityTestCase
         $response = $this->lateAt('2026-10-16 11:00:00');
         $today = collect($response->json('staff'))->firstWhere('user_id', $a->id)['checklist_today'];
 
-        $item = fn ($id, $title, $time, $deadline, $submitted, $at, $verdict, $rechecks) => [
+        $item = fn ($id, $title, $time, $deadline, $submitted, $at, $verdict, $rechecks, $type, $by) => [
             'task_id' => $id, 'title' => $title, 'scheduled_time' => $time, 'deadline' => $deadline,
             'submitted' => $submitted, 'submitted_at' => $at, 'verdict' => $verdict, 'rechecks' => $rechecks,
+            'submission_type' => $type, 'submitted_by' => $by,
         ];
         $this->assertSame([
-            $item($rejected, 'Hindi na-approve', '08:00', '08:45', true, '08:10', 'not_approved', 1),
-            $item($approved, 'Approved na', '09:00', '09:30', true, '09:05', 'approved', 0),
-            $item($group, 'Group: iba ang nagsumite', '10:00', '10:30', true, '10:03', null, 0),
-            $item($open, 'Wala pa', '12:00', '12:30', false, null, null, 0),
-            $item($untimed, 'Walang oras', null, null, false, null, null, 0),
+            $item($rejected, 'Hindi na-approve', '08:00', '08:45', true, '08:10', 'not_approved', 1, 'individual', $a->name),
+            $item($approved, 'Approved na', '09:00', '09:30', true, '09:05', 'approved', 0, 'individual', $a->name),
+            $item($group, 'Group: iba ang nagsumite', '10:00', '10:30', true, '10:03', null, 0, 'group', $b->name),
+            $item($open, 'Wala pa', '12:00', '12:30', false, null, null, 0, 'group', null),
+            $item($untimed, 'Walang oras', null, null, false, null, null, 0, 'group', null),
         ], $today);
         foreach (['Lihim na tala', 'Paliwanag', 'notes', 'file_path', 'prompt', 'analysis'] as $private) {
             $this->assertStringNotContainsString($private, $response->getContent());
         }
+    }
+
+    /** Ang submission_type, submitted, submitted_at at submitted_by ng task sa isang listahan ng tao. */
+    private function whoSubmitted(array $staff, int $userId, string $list): array
+    {
+        return array_map(fn ($e) => [$e['submission_type'], $e['submitted'], $e['submitted_at'], $e['submitted_by']],
+            $staff[$userId][$list]);
+    }
+
+    public function test_C1_a_group_task_submitted_once_shows_the_same_submitter_for_everyone_assigned(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $c = $this->staff();
+        // Ang pangalan sa employee profile ang ginagamit ng feed para sa tao
+        DB::table('employee_profiles')->where('user_id', $b->id)->update(['name' => 'Tagapagsumite B']);
+        $id = $this->checklistTask('Group: linisin ang bodega', [$a, $b, $c], ['scheduled_time' => '08:00']);
+        $this->submittedAt($id, $b->id, '2026-10-16 08:01:00', ['not_approved']);
+        $this->submittedAt($id, $c->id, '2026-10-16 08:30:00');
+
+        $staff = collect($this->lateAt('2026-10-16 09:00:00')->json('staff'))->keyBy('user_id')->all();
+
+        foreach ([$a, $b, $c] as $u) {
+            foreach (['checklist_today', 'checklist_late_today'] as $list) {
+                $this->assertSame([['group', true, '08:01', 'Tagapagsumite B']], $this->whoSubmitted($staff, $u->id, $list));
+            }
+        }
+    }
+
+    public function test_C2_an_individual_task_shows_only_the_persons_own_submission(): void
+    {
+        $a = $this->staff();
+        $b = $this->staff();
+        $c = $this->staff();
+        $id = $this->checklistTask('Individual: sariling ulat', [$a, $b, $c], ['scheduled_time' => '08:00', 'submission_type' => 'individual']);
+        $this->submittedAt($id, $b->id, '2026-10-16 08:05:00');
+
+        $staff = collect($this->lateAt('2026-10-16 09:00:00')->json('staff'))->keyBy('user_id')->all();
+
+        foreach (['checklist_today', 'checklist_late_today'] as $list) {
+            $this->assertSame([['individual', true, '08:05', $b->name]], $this->whoSubmitted($staff, $b->id, $list));
+            foreach ([$a, $c] as $u) {
+                $this->assertSame([['individual', false, null, null]], $this->whoSubmitted($staff, $u->id, $list));
+            }
+        }
+    }
+
+    public function test_C3_a_blank_submission_type_is_reported_as_group(): void
+    {
+        $a = $this->staff();
+        $this->checklistTask('Walang uri', [$a], ['scheduled_time' => '08:00', 'submission_type' => '']);
+
+        $row = $this->lateAt('2026-10-16 09:00:00')->json('staff.0');
+
+        $this->assertSame(['group'], array_column($row['checklist_today'], 'submission_type'));
+        $this->assertSame(['group'], array_column($row['checklist_late_today'], 'submission_type'));
     }
 
     public function test_a_past_date_lists_every_due_task_with_a_deadline_and_a_future_date_none(): void

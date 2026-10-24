@@ -2,26 +2,133 @@
 
 namespace App\Services\OrderEncode;
 
+use App\Models\MacroOutput;
 use App\Models\OrderEncode;
+use App\Services\Chatbot\ChatbotEvents;
 use App\Services\Chatbot\FlowGraph;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
  * Ang pagpapatakbo ng isang OrderEncode: binabasa ang input at ang listahan ng lugar, pinapatakbo ang Encoder, itinatabi ang
  * resulta at mga hakbang. Shadow: order_encodes lang ang sinusulat. Live: pagkatapos, ang macro_output row (LiveOrder); "done"
  * ay pagkatapos lang nito, para ang pumalyang sulat ay maulit ng job. Ang live na order na hindi na maa-encode ay isinusulat
- * sa sheet (fail), para walang mawalang order.
+ * sa sheet (fail), para walang mawalang order. Isang row kada customer kada araw: ang live ay isa-isa kada customer (lock),
+ * at ang row ng customer ay hinahanap bago ang encode at R5.
  */
 class Runner
 {
-    public function __construct(private Settings $settings, private LocationList $list, private Sheets $sheets, private LiveOrder $live)
+    /** Ang lock ng customer: mas mahaba sa timeout ng job (600 s), para hindi ito mawala habang tumatakbo ang encode. */
+    public const CUSTOMER_LOCK_SECONDS = 660;
+
+    public function __construct(private Settings $settings, private LocationList $list, private Sheets $sheets, private LiveOrder $live, private Conversation $conversation)
     {
     }
 
     public function run(OrderEncode $o): void
     {
         if ($o->status === 'done') return; // ang ulit na job ay walang ginagawa
+        // Encode order: ang row ng Upload to macro ay kilala na, kaya walang hanap ng row at walang lock ng customer.
+        if (!empty($o->input['upload'])) {
+            if ($o->status === 'queued') $this->uploaded($o);
 
+            return;
+        }
+        if ($o->mode !== 'live') {
+            $this->encode($o, $this->input($o));
+
+            return;
+        }
+        // Ang dalawang takbo ng isang customer (double tap, dalawang worker) ay hindi sabay: ang ikalawa ay naghihintay at
+        // nakikita ang row ng una. Lampas sa hintay: ang job ay inuulit ng queue.
+        Cache::lock(self::customerKey($o), self::CUSTOMER_LOCK_SECONDS)->block((int) config('order_encode.customer_lock_wait', 240), fn () => $this->live($o));
+    }
+
+    public static function customerKey(OrderEncode $o): string
+    {
+        return 'order-encode:customer:' . md5($o->page . '|' . ($o->psid ? (string) $o->psid : 'name:' . (string) ($o->input['row'][2] ?? '')));
+    }
+
+    private function live(OrderEncode $o): void
+    {
+        $o->refresh();
+        if ($o->status === 'done') return;
+        $in = $this->input($o);
+        if (!$o->macro_output_id) {
+            $found = $this->live->find($o, $in);
+            if (isset($found['final'])) {
+                $this->notAccepted($o, $found['final']);
+
+                return;
+            }
+            // Ang bukas na row ng customer: naka-link bago ang encode, kaya hindi ito binibilang ng R5 at hindi ito nadodoble ng fallback.
+            if (isset($found['open'])) $o->update(['macro_output_id' => $found['open']->id, 'input' => array_merge((array) $o->input, ['linked' => true])]);
+        }
+        $in = $this->conversation->build($o, $in); // ang mga mensahe ng order na ito lang (at ang orihinal na order kapag sagot)
+        if (!$this->encode($o, $in)) return;
+
+        $o->refresh();
+        // Ang re-encode na huminto sa gitna (error ng encoder) ay hindi isinusulat: ang row ay nananatili gaya ng dati.
+        if (!empty($o->input['linked']) && $o->error) {
+            $this->fail($o, 'The encode stopped: ' . $o->error);
+
+            return;
+        }
+        if (!empty($o->input['linked'])) {
+            $id = (int) $o->macro_output_id;
+            $updated = RowLock::hold($id, (int) config('order_encode.row_lock_wait', 180), fn () => ($row = MacroOutput::find($id)) && $this->live->update($row, $o));
+            if (!$updated) $this->note($o, 'row ' . $id . ' got a status meanwhile: not changed');
+        } else {
+            $this->live->create($o);
+        }
+        $o->update(['status' => 'done']);
+        app(AddressQuestion::class)->afterEncode($o->fresh()); // hindi PROCEED: Astra on the spot, saka ang tanong sa address
+    }
+
+    /**
+     * Ang encode ng row na isinulat ng Upload to macro: ang usapan ng upload (naitabi na), ang resulta sa row na iyon lang
+     * (LiveOrder::encodeRow), saka si Astra kapag hindi PROCEED (FlowEncode). Walang sheet at walang tanong sa address.
+     */
+    private function uploaded(OrderEncode $o): void
+    {
+        FlowEncode::started($o);
+        if (!$this->encode($o, new Input((array) ($o->input['fields'] ?? [])))) return;
+        $o->refresh();
+        if ($o->error) {
+            $this->fail($o, 'The encode stopped: ' . $o->error);
+
+            return;
+        }
+        $id = (int) $o->macro_output_id;
+        RowLock::hold($id, (int) config('order_encode.row_lock_wait', 180), fn () => ($row = MacroOutput::find($id)) && $this->live->encodeRow($row, $o));
+        $o->update(['status' => 'done']);
+        app(FlowEncode::class)->afterEncode($o->fresh());
+    }
+
+    /** Ang final na row ng customer ngayong araw: walang ginagalaw; ang order ay may tala at chat event. */
+    private function notAccepted(OrderEncode $o, MacroOutput $row): void
+    {
+        $note = LiveOrder::NOT_ACCEPTED . $row->id;
+        $o->update(['status' => 'done', 'input' => array_merge((array) $o->input, ['not_accepted' => $row->id, 'live_notes' => [$note]])]);
+        $this->event($o, ['result' => 'not_accepted', 'error' => $note]);
+    }
+
+    /** Isang tala sa order (makikita sa /order-encode). */
+    private function note(OrderEncode $o, string $note): void
+    {
+        $o->update(['input' => array_merge((array) $o->input, ['live_notes' => array_merge((array) ($o->input['live_notes'] ?? []), [$note])])]);
+    }
+
+    /** Isang encode_order event sa chat ng customer (kapag kilala ang page id ng takbo). */
+    private function event(OrderEncode $o, array $detail): void
+    {
+        $pageId = (int) ($o->input['page_id'] ?? 0);
+        if ($pageId > 0 && $o->psid) ChatbotEvents::write($pageId, (int) $o->psid, 'encode_order', $detail, $o->flow_id, $o->input['node'] ?? null);
+    }
+
+    /** Ang encode mismo; false kapag hindi na-encode (fail). */
+    private function encode(OrderEncode $o, Input $in): bool
+    {
         // improved: mga barangay na eksaktong gaya ng sa J&T file at ang mga panuntunan ng spec 135; sheet: kopya ng dalawang script.
         $improved = $this->settings->rules() === Rules::NAME;
         $macro = $this->list->macro();
@@ -29,14 +136,13 @@ class Runner
         if (!$macro || !$locations) {
             $this->fail($o, 'The address list (jnt_address.txt) is missing or empty.');
 
-            return;
+            return false;
         }
 
         $key = $this->settings->key();
         $steps = new Steps($key);
         $gpt = new Gpt($key, $this->settings->modelExtract(), $this->settings->modelChecker(), $steps, (int) config('services.openai.timeout', 60));
 
-        $in = $this->input($o);
         $steps->add('input', 'OK', ['blank' => array_values(array_filter(Input::FIELDS, fn ($f) => trim($in->get($f)) === ''))]);
         $rules = $improved ? new Rules($locations, new Notes()) : null;
         $res = (new Encoder($macro, $locations, $gpt, $steps, $rules))->run($in);
@@ -46,9 +152,9 @@ class Runner
             'input' => array_merge((array) $o->input, ['fields' => $in->v]),
             'outputs' => $res['outputs'], 'steps' => $steps->log, 'usage' => self::usage($steps->log), 'encoded_at' => now(), 'error' => $res['error'],
         ]);
+        if ($o->mode !== 'live') $o->update(['status' => 'done']);
 
-        if ($o->mode === 'live') $this->live->create($o->fresh());
-        $o->update(['status' => 'done']);
+        return true;
     }
 
     /**
@@ -57,7 +163,19 @@ class Runner
     public function fail(OrderEncode $o, string $why): void
     {
         $why = preg_replace('/sk-[A-Za-z0-9_\-]{8,}/', '[key]', $why) ?? '';
+        // Encode order: ang row ay naiwang hold para sa staff (order_encode_state = failed).
+        if (!empty($o->input['upload'])) {
+            $o->update(['status' => 'failed', 'error' => mb_substr($why . ' Row ' . $o->macro_output_id . ' was left for staff.', 0, 500)]);
+
+            return;
+        }
         if ($o->macro_output_id && $o->mode !== 'import') { // ang import row ay may macro_output_id mula sa simula: failed pa rin, para hindi maihambing
+            // Re-encode ng bukas na row ng customer: ang row ay hindi ginalaw at walang isusulat sa sheet (doble ang order).
+            if (!empty($o->input['linked'])) {
+                $o->update(['status' => 'failed', 'error' => mb_substr($why . ' The re-encode left row ' . $o->macro_output_id . ' unchanged.', 0, 500)]);
+
+                return;
+            }
             // Nasa macro_output na ang order: hindi na isusulat sa sheet (doble).
             $o->update(['status' => 'done', 'error' => mb_substr($why . ' The order is already in macro_output.', 0, 500)]);
 
@@ -78,11 +196,12 @@ class Runner
         $o->update(['status' => 'failed', 'error' => mb_substr($why, 0, 500)]);
     }
 
-    /** R5: ang order na may kapareho sa parehong araw ay hold (reason "Possible duplicate: <order ids>"). */
+    /** R5: ang order na may kapareho sa parehong araw ay hold (reason "Possible duplicate: <order ids>"). Ang naka-link na order: ang araw ng row nito. */
     private function duplicates(OrderEncode $o, Input $in, array $outputs, Steps $steps): array
     {
         if (!($outputs['proceed'] ?? false)) return $outputs;
-        $ids = (new Duplicates())->find($o, $in, $outputs);
+        $day = $o->macro_output_id ? substr((string) MacroOutput::whereKey($o->macro_output_id)->value('ts_date'), 0, 10) : '';
+        $ids = (new Duplicates())->find($o, $in, $outputs, $day !== '' ? $day : null);
         if (!$ids) return $outputs;
 
         $hold = ['rule' => 'R5', 'reason' => 'Possible duplicate: ' . implode(', ', $ids)];

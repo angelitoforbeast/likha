@@ -12,7 +12,8 @@ use Throwable;
 /**
  * R5 (spec 135): ang doble sa parehong araw. Ang order ay may kaparehong phone, o kaparehong pangalan + barangay + city, na order
  * sa parehong ts_date: sa macro_output o sa mga encode na wala pa roon. Ang phone sa whitelist ng Validate ay hindi binibilang.
- * Gaya ng Validate, hindi kasama ang CANNOT PROCEED at ang order mismo.
+ * Gaya ng Validate, hindi kasama ang CANNOT PROCEED at ang order mismo. Ibang customer lang: ang mga row at encode ng parehong
+ * page + PSID (ang sariling row ng customer, pati kahapon) ay hindi binibilang.
  */
 class Duplicates
 {
@@ -20,19 +21,20 @@ class Duplicates
 
     /**
      * @param array<string, mixed> $outputs ang outputs ng encode (name, phone, city, barangay)
+     * @param string|null $day ang araw (Y-m-d) ng naka-link na row; null = ang araw ng order
      * @return array<int, string> ang mga order id ("12" sa macro_output, "e34" sa encode na wala pa roon); walang laman = walang doble
      */
-    public function find(OrderEncode $o, Input $in, array $outputs): array
+    public function find(OrderEncode $o, Input $in, array $outputs, ?string $day = null): array
     {
         try {
-            $date = self::date($in->get('date'));
+            $date = $day ?? self::date($in->get('date'));
             $phone = self::tenDigits((string) ($outputs['phone'] ?? ''));
             $name = self::name((string) ($outputs['name'] ?? ''));
             if ($phone !== '' && $this->whitelisted($phone)) $phone = '';
             if ($phone === '' && $name === '') return [];
 
             $found = [];
-            foreach ($this->macroRows($o, $date, $phone, $name) as $r) {
+            foreach ($this->macroRows($o, $date, $phone, $name, $in->get('page')) as $r) {
                 $samePhone = $phone !== '' && self::tenDigits((string) $r->{'PHONE NUMBER'}) === $phone;
                 if ($samePhone || $this->sameNameAddress($r, $name, $outputs)) $found[] = (string) $r->id;
             }
@@ -52,13 +54,14 @@ class Duplicates
     }
 
     /** @return iterable<int, object> */
-    private function macroRows(OrderEncode $o, string $date, string $phone, string $name): iterable
+    private function macroRows(OrderEncode $o, string $date, string $phone, string $name, string $page): iterable
     {
         if (!Schema::hasTable('macro_output') || !Schema::hasColumn('macro_output', 'ts_date')) return [];
 
         $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
         $q = MacroOutput::query()->where(function ($s) { $s->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED'); });
         if ($o->macro_output_id) $q->where('id', '<>', $o->macro_output_id);
+        if ($o->psid) $q->where(fn ($s) => $s->whereNull('botcake_psid')->orWhere('botcake_psid', '<>', (string) $o->psid)->orWhere('PAGE', '<>', $page));
         if (Schema::getColumnType('macro_output', 'ts_date') === 'date') $q->where('ts_date', '=', $date);
         else $q->whereBetween('ts_date', [$date . ' 00:00:00', $date . ' 23:59:59']);
 
@@ -74,6 +77,7 @@ class Duplicates
     private function encodeRows(OrderEncode $o, string $date): iterable
     {
         return OrderEncode::whereNull('macro_output_id')->where('id', '<>', $o->id)->where('status', 'done')->whereNotNull('outputs')
+            ->when($o->psid, fn ($q) => $q->where(fn ($s) => $s->whereNull('psid')->orWhere('psid', '<>', $o->psid)->orWhere('page', '<>', $o->page)))
             ->where('created_at', '>=', $date . ' 00:00:00')->where('created_at', '<=', $date . ' 23:59:59')->limit(500)->get(['id', 'outputs']);
     }
 

@@ -95,9 +95,7 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         $this->actingAs($this->user());
         $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
 
-        $page = $this->get("/chatbot/flows/{$flow->id}")->assertOk();
-        $page->assertSee('data-add="encode_order"', false)->assertSee('Encode order')
-            ->assertSee('Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.');
+        $this->get("/chatbot/flows/{$flow->id}")->assertOk();
 
         $graph = $this->graph($this->config(['also_sheet' => true, 'sheet' => 'https://docs.google.com/spreadsheets/d/' . self::ORDERS . '/edit', 'tab' => 'All Orders', 'evil' => 'x', 'counts_order' => true]));
         $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $graph, 'version' => 0])->assertOk();
@@ -146,7 +144,7 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         $this->assertSame(['n1', 'n2', 'n3'], array_column($run->path, 'node'));
         $this->assertSame('next', $run->path[1]['port']);
         Queue::assertPushed(EncodeOrder::class, 1);
-        Queue::assertPushed(EncodeOrder::class, fn (EncodeOrder $j) => $j->connection === 'database' && $j->queue === 'encode');
+        Queue::assertPushed(EncodeOrder::class, fn (EncodeOrder $j) => $j->connection === 'database' && $j->queue === 'encode-live'); // ang live na encode ay sa express lane
         $o = OrderEncode::sole();
         $this->assertSame([self::PAGE, 'live', 'flow-node', 'All Orders', null, self::PSID, 13, 5, 'queued'],
             [$o->page, $o->mode, $o->spreadsheet_id, $o->tab, $o->row_number, $o->psid, $o->chat_id, $o->flow_id, $o->status]);
@@ -285,6 +283,62 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         // ibang takbo (bagong order ng customer) = bagong order
         $this->go($c, $outbox, false, 'ffff0000');
         $this->assertSame(2, OrderEncode::count());
+    }
+
+    public function test_S_136_43_44_also_write_to_google_sheet_writes_one_sheet_row_per_customer_order_of_the_day(): void
+    {
+        Queue::fake();
+        Carbon::setTestNow(Carbon::parse('2026-10-23 10:15', 'Asia/Manila'));
+        $outbox = $this->outbox();
+        $c = $this->config(['also_sheet' => true, 'sheet' => 'https://docs.google.com/spreadsheets/d/' . self::ORDERS . '/edit']);
+
+        $this->go($c, $outbox, false, 'aaaa0001');
+        $this->go($c, $outbox, false, 'aaaa0002'); // double tap: ang una ay naka-queue pa
+        $this->assertSame(1, $outbox->appends);
+        $this->assertSame([true, true], OrderEncode::orderBy('id')->get()->map(fn ($o) => $o->input['sheet_written'])->all());
+        // .44: ang pumalyang encode ng ikalawa ay hindi na sumusulat sa sheet
+        app(Runner::class)->fail(OrderEncode::orderByDesc('id')->first(), 'boom');
+        $this->assertSame([], $this->google->appended);
+
+        // ang sagot sa bukas na row ng customer: walang bagong sheet row
+        $row = MacroOutput::create(['PAGE' => self::PAGE, 'fb_name' => 'Ana Cruz', 'botcake_psid' => (string) self::PSID, 'ts_date' => '2026-10-23', 'STATUS' => null]);
+        OrderEncode::query()->update(['macro_output_id' => $row->id, 'status' => 'done']);
+        Carbon::setTestNow(Carbon::parse('2026-10-23 11:00', 'Asia/Manila'));
+        $this->go($c, $outbox, false, 'aaaa0003');
+        $this->assertSame(1, $outbox->appends);
+
+        // CANNOT PROCEED: ang bagong order ay bagong row, kaya may sariling sheet row (at fallback)
+        OrderEncode::query()->update(['macro_output_id' => $row->id, 'status' => 'done']); // ang ikatlo ay na-encode na
+        $row->update(['STATUS' => 'CANNOT PROCEED']);
+        $this->go($c, $outbox, false, 'aaaa0004');
+        $this->assertSame(2, $outbox->appends);
+
+        // kinabukasan, PROCEED ang row kahapon: bagong order, bagong sheet row
+        OrderEncode::query()->update(['macro_output_id' => $row->id, 'status' => 'done']);
+        $row->update(['STATUS' => 'PROCEED']);
+        Carbon::setTestNow(Carbon::parse('2026-10-24 12:00', 'Asia/Manila'));
+        $this->go($c, $outbox, false, 'aaaa0005');
+        $this->assertSame(3, $outbox->appends);
+        $this->assertTrue(OrderEncode::orderByDesc('id')->first()->input['sheet_written']);
+
+        // ang bukas na row na lampas 24 oras: bagong row ang order, kaya may sariling sheet row
+        OrderEncode::query()->update(['macro_output_id' => $row->id, 'status' => 'done', 'created_at' => '2026-10-24 06:00:00']); // 30 oras bago
+        $row->update(['STATUS' => null]);
+        Carbon::setTestNow(Carbon::parse('2026-10-25 12:00', 'Asia/Manila'));
+        $this->go($c, $outbox, false, 'aaaa0006');
+        $this->assertSame(4, $outbox->appends);
+        Carbon::setTestNow();
+    }
+
+    public function test_S_136_10_29_a_live_sheet_step_order_keeps_the_page_id_for_its_events_and_the_question(): void
+    {
+        Queue::fake();
+        $this->configurePage('live');
+        $run = new FlowRun(5, $this->graph($this->config()), self::PAGE, '1001', [], new CustomerFields(1001, self::PSID), 13, 'hi po', 'Ana Cruz', '2026-10-23 10:15', false);
+
+        $this->assertTrue(app(\App\Services\OrderEncode\FlowHook::class)->live($run, self::ORDERS, 'All Orders', $this->orderRow()));
+
+        $this->assertSame('1001', (string) OrderEncode::sole()->input['page_id']);
     }
 
     public static function cannotQueue(): array

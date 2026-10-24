@@ -45,6 +45,20 @@
             <option value="sheet" @selected($import['rules'] === 'sheet')>sheet (exact script copy)</option>
           </select>
         </label>
+        <label class="flex flex-col">Astra on the spot (live orders)
+          <select name="spot_astra" class="border rounded px-2 py-1">
+            <option value="on" @selected($import['spot_astra'])>on</option>
+            <option value="off" @selected(!$import['spot_astra'])>off</option>
+          </select>
+        </label>
+        <label class="flex flex-col">Address question sequence (legacy block only)
+          <select name="address_sequence" class="border rounded px-2 py-1">
+            <option value="">none (no question, staff fixes it)</option>
+            @foreach ($import['sequences'] as $s)
+              <option value="{{ $s->id }}" @selected($import['address_sequence'] === $s->id)>{{ $s->name }}{{ $s->active ? '' : ' (paused)' }}</option>
+            @endforeach
+          </select>
+        </label>
         <label class="flex flex-col">Daily cap
           <input type="number" name="cap" min="0" max="100000" value="{{ $import['cap'] }}" class="border rounded px-2 py-1 w-28">
         </label>

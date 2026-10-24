@@ -109,6 +109,8 @@ class ChatbotEvents
             'send_dropped' => 'Run after the send at step ' . $node . ' not continued: ' . ($d['reason'] ?? ''),
             'sheet' => 'Sheet row ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
             'encode_order' => 'Encode order step ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
+            'upload_macro' => 'Upload to macro step ' . $node . ' → ' . ($d['result'] ?? '') . (($d['row'] ?? '') !== '' ? ' (row ' . $d['row'] . ')' : '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
+            'upload_skipped' => 'Upload to macro step ' . $node . ' → skipped: no open row of the customer',
             'waiting' => 'Waiting for reply at step ' . $node . (($d['skip_after'] ?? '') !== '' ? ' (skips after ' . $d['skip_after'] . ')' : ''),
             'wait_skipped' => 'No reply in ' . ($d['after'] ?? '?') . ' → skipped at step ' . $node,
             'run_ended' => 'Run ended (' . ($d['reason'] ?? 'end') . ')',

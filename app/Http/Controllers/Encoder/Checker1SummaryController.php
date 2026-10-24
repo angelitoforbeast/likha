@@ -233,6 +233,7 @@ class Checker1SummaryController extends Controller
             }
 
             if ($tsStr === '' || $user === '') continue;
+            if ($user === \App\Services\OrderEncode\LiveOrder::USER) continue; // ang encode ng Likha ay hindi staff
 
             $ts = self::safeCarbon($tsStr, $tz);
             if (!$ts) continue;

@@ -4,7 +4,10 @@ namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
 use App\Models\ChatbotReply;
+use App\Services\OrderEncode\FlowEncode;
 use App\Services\OrderEncode\FlowHook;
+use App\Services\OrderEncode\Upload;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -34,7 +37,7 @@ class FlowEngine
         // nito ipinagpapatuloy o binubura ang wait ng main flow.
         if ($run->aiAnswer !== null || $run->sendResult !== null) {
             $current = ($run->aiAnswer ?? $run->sendResult)['node'];
-            $run->event('run_started', null, ['reason' => $run->aiAnswer !== null ? 'resumed after AI' : 'resumed after send', 'flow' => $run->flowId]);
+            $run->event('run_started', null, ['reason' => $run->aiAnswer !== null ? (!empty($run->aiAnswer['encode']) ? 'resumed after the encode' : 'resumed after AI') : 'resumed after send', 'flow' => $run->flowId]);
         } else {
             $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
         }
@@ -76,7 +79,7 @@ class FlowEngine
             }
             $run->path[] = ['node' => $node['id'], 'type' => $node['type'], 'port' => $port, 'note' => $r['note'] ?? null];
             // "Counts as an order": dumaan ang takbo sa node (hindi pumalya, hindi pa naghihintay ng padala sa pool).
-            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && !$run->sendPending) {
+            if (!empty($node['config']['counts_order']) && $port !== 'failed' && empty($r['stop']) && empty($r['no_order']) && !$run->sendPending) {
                 try {
                     ChatbotTags::order($run, $node['id']);
                 } catch (Throwable $e) {
@@ -151,6 +154,8 @@ class FlowEngine
             'clear_ai' => $this->clearAi($node, $c, $run),
             'sheet' => $this->sheet($node, $c, $run, $outbox),
             'encode_order' => $this->encodeOrder($node, $c, $run, $outbox),
+            'upload_macro' => $this->uploadMacro($node, $c, $run),
+            'encode_macro' => $this->encodeMacro($node, $c, $run),
             'sequence' => $this->sequence($node, $c, $run),
             default => ['port' => null],
         };
@@ -563,8 +568,10 @@ class FlowEngine
             return ['port' => 'next', 'note' => 'Already encoded in this run'];
         }
 
-        $wrote = $also && $append()['status'] === 'sent';
-        if ($encode->node($run, $id, $instead ? $sheet : FlowHook::NODE_SHEET, $tab, $row, $wrote)) {
+        // Isang sheet row kada customer kada araw: ang sagot o ulit na order ay hindi na isinusulat (pati ng fallback).
+        $done = $also && $encode->sheetDone($run);
+        $wrote = $also && !$done && $append()['status'] === 'sent';
+        if ($encode->node($run, $id, $instead ? $sheet : FlowHook::NODE_SHEET, $tab, $row, $wrote || $done)) {
             BotcakeOutbox::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $id, 'sheet',
                 ['sheet' => $sheet, 'tab' => $tab, 'row' => $row, 'note' => FlowHook::NOTE], 'skipped');
             $log('skipped', null, FlowHook::NOTE);
@@ -574,7 +581,7 @@ class FlowEngine
         }
 
         // Hindi na-queue: ang row ay nasa sheet na, o isusulat doon ("Write to Google Sheet instead"), o sasabihin na hindi nai-save.
-        if ($wrote || ($instead && ($res = $append())['status'] === 'sent')) {
+        if ($wrote || $done || ($instead && ($res = $append())['status'] === 'sent')) {
             $run->event('encode_order', $id, ['result' => 'sheet_instead']);
 
             return ['port' => 'next', 'note' => 'Encode could not be queued: the row was written to the sheet instead'];
@@ -587,6 +594,81 @@ class FlowEngine
         $run->event('encode_order', $id, ['result' => 'not_saved']);
 
         return ['port' => 'next', 'note' => 'Warning: the order was NOT saved (the encode could not be queued)'];
+    }
+
+    /**
+     * Upload to macro: ang hilaw na order row sa macro_output (Insert o Update), walang encode at walang sheet; ang
+     * Encode order ng parehong takbo ang nag-e-encode nito. Hindi binabasa ang shadow/live ng page. Ang Test tab at ang
+     * nakapatay na replies ay walang sinusulat. Ang "order" (counts_order) ay kapag may row na naisulat o nadugtungan lang.
+     */
+    private function uploadMacro(array $node, array $c, FlowRun $run): array
+    {
+        $vars = $run->vars();
+        $row = array_map(fn ($k) => ChatbotVars::sheetCell((string) ($c[$k] ?? ''), $vars), FlowGraph::ENCODE_FIELDS);
+        $row[] = ''; // I = status
+        $mode = ($c['mode'] ?? '') === 'update' ? 'update' : 'insert';
+        $id = $node['id'];
+
+        if ($run->test) {
+            $run->event('upload_macro', $id, ['result' => 'test']);
+
+            return ['port' => 'next', 'note' => 'Test: would ' . $mode, 'no_order' => true];
+        }
+        if (!BotcakeOutbox::enabled()) {
+            $run->event('upload_macro', $id, ['result' => 'skipped']);
+
+            return ['port' => 'next', 'note' => BotcakeOutbox::SWITCHED_OFF, 'no_order' => true];
+        }
+        $run->runId ??= bin2hex(random_bytes(4));
+        try {
+            $r = app(Upload::class)->run($run, $id, $row, $mode, ($c['if_not_found'] ?? '') === 'skip' ? 'skip' : 'insert');
+        } catch (Throwable $e) {
+            if (!$e instanceof LockTimeoutException) report($e);
+            $note = $e instanceof LockTimeoutException ? 'The order was not saved: another upload or encode of this customer is still running' : 'The order could not be saved';
+            $run->event('upload_macro', $id, ['result' => 'failed', 'error' => $note]);
+
+            return ['port' => 'failed', 'note' => $note];
+        }
+        $run->orderVars = null; // ang order_* ay binabasa ulit (may bagong row o usapan)
+        if ($r['result'] === 'skipped') {
+            $run->event('upload_skipped', $id);
+
+            return ['port' => 'next', 'note' => $r['note'], 'no_order' => true];
+        }
+        $run->event('upload_macro', $id, ['result' => $r['result'], 'row' => (string) $r['row']] + ($r['result'] === 'not_accepted' ? ['error' => $r['note']] : []));
+
+        return ['port' => 'next', 'note' => $r['note']] + (in_array($r['result'], ['inserted', 'updated'], true) ? [] : ['no_order' => true]);
+    }
+
+    /**
+     * Encode order: ine-queue ang encode ng row ng order (FlowEncode) at tuloy agad sa next; ang resulta ay nasa mga order_*
+     * variable kapag tapos na. Ang Test tab ay walang ine-queue.
+     */
+    private function encodeMacro(array $node, array $c, FlowRun $run): array
+    {
+        $id = $node['id'];
+        // Ang ticket ng lumang paghihintay (naiwan bago ang pagbabago): naka-queue na noon ang encode, kaya tuloy lang.
+        if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $id) {
+            if ($stop = $this->mismatch($run, $id)) return $stop;
+            $run->aiAnswer = null;
+
+            return ['port' => 'next', 'note' => 'The encode runs in the background'];
+        }
+        if ($run->test) {
+            $run->event('encode_macro', $id, ['result' => 'test']);
+
+            return ['port' => 'next', 'note' => 'Test: would encode'];
+        }
+        if (!BotcakeOutbox::enabled()) {
+            $run->event('encode_macro', $id, ['result' => 'skipped']);
+
+            return ['port' => 'next', 'note' => BotcakeOutbox::SWITCHED_OFF];
+        }
+        $run->runId ??= bin2hex(random_bytes(4));
+        $r = app(FlowEncode::class)->start($run, $id, $c);
+        $run->orderVars = null; // ang order_* ay binabasa ulit (naka-queue na ang encode)
+
+        return $r;
     }
 
     public static function isUrl(string $v): bool

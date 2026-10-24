@@ -758,7 +758,6 @@
               <template x-for="col in cols" :key="col.id">
                 <td :data-col="owCompact ? col.id : null"
                     :data-ow-tip="owCompact ? owTip(col.id, row) : null"
-                    :title="owCompact ? owTip(col.id, row) : null"
                     @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_1d_m'?pbStyleN(row.projected_profit_last_day_m,1):'')+(col.id==='proj_prof_1d_mira'?pbStyleN(row.projected_profit_last_day_mira,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
@@ -1060,7 +1059,7 @@
                   <template x-if="col.id==='mira_rts'">
                     <span>
                       <template x-if="row.projected_rts_pct != null">
-                        <span :title="miraTip(row)" style="font-weight:700;cursor:help;"
+                        <span :title="!owCompact ? miraTip(row) : null" style="font-weight:700;cursor:help;"
                               x-text="Number(row.mira_rts_pct).toFixed(1)+'%'"></span>
                       </template>
                       <template x-if="row.projected_rts_pct == null">
@@ -1073,7 +1072,7 @@
                   <template x-if="col.id==='analyst_rts'">
                     <span>
                       <template x-if="row.analyst_rts_pct != null">
-                        <span :title="analystTip(row)" style="font-weight:700;cursor:help;"
+                        <span :title="!owCompact ? analystTip(row) : null" style="font-weight:700;cursor:help;"
                               x-text="Number(row.analyst_rts_pct).toFixed(1)+'%'"></span>
                       </template>
                       <template x-if="row.analyst_rts_pct == null">

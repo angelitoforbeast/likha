@@ -94,7 +94,7 @@ class NotesBuilder
             foreach ($rows as $r) {
                 foreach (preg_split('/\r\n|\n|\r/', (string) $r->{'HISTORICAL LOGS'}) as $line) {
                     $p = explode('|', $line);
-                    if (count($p) < 5 || !in_array(trim($p[2]), self::FIELDS, true)) continue;
+                    if (count($p) < 5 || !in_array(trim($p[2]), self::FIELDS, true) || trim($p[1]) === LiveOrder::USER) continue; // ang encode ng Likha ay hindi pagtatama ng staff
                     try {
                         $at = Carbon::createFromFormat('Y-m-d H:i:s', trim($p[0]), 'Asia/Manila');
                     } catch (\Throwable) {

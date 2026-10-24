@@ -26,6 +26,11 @@ class Settings
     public const RULES = 'order_encode_rules';
     public const RULE_SETS = ['improved', 'sheet'];
 
+    /** on (default) / off: ang Astra on the spot sa live na order na hindi PROCEED (kill switch, CEO lang). */
+    public const SPOT_ASTRA = 'order_encode_spot_astra';
+    /** id ng chatbot sequence na nagtatanong ng address; blangko = walang tanong (CEO lang). */
+    public const ADDRESS_SEQUENCE = 'order_encode_address_sequence';
+
     public function __construct(private PageSettings $pages)
     {
     }
@@ -62,6 +67,19 @@ class Settings
         $v = strtolower($this->app(self::RULES, 'improved'));
 
         return in_array($v, self::RULE_SETS, true) ? $v : 'improved';
+    }
+
+    public function spotAstra(): bool
+    {
+        return strtolower($this->app(self::SPOT_ASTRA, 'on')) !== 'off';
+    }
+
+    /** Ang sequence ng tanong sa address, o null. */
+    public function addressSequence(): ?int
+    {
+        $v = $this->app(self::ADDRESS_SEQUENCE, '');
+
+        return ctype_digit($v) && (int) $v > 0 ? (int) $v : null;
     }
 
     public function key(): string

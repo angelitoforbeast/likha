@@ -12,4 +12,19 @@ return [
     'compare_give_up_hours' => 48,
     // Ilang oras bago sabihing "sheet never finished" sa paghahambing sa final na order (macro_output).
     'final_give_up_hours' => 72,
+    // Live: ilang segundo hinihintay ng encode ang naunang encode ng parehong customer bago ulitin ng queue ang job.
+    'customer_lock_wait' => 240,
+    // Ilang segundo hinihintay ng encode ang Astra (o ang night run) na may hawak ng row bago ito isulat.
+    'row_lock_wait' => 180,
+    // Ang night run: ilang segundo hinihintay ang Astra on the spot sa row bago ito laktawan ("Row busy").
+    'night_row_lock_wait' => 200,
+    // Ang mga queue. Ang "live" ay ang express lane: ang encode at ang Astra ng customer na naghihintay (live na order, Encode
+    // order step), na laging inuuna ng mga worker (--queue=encode-live,encode at --queue=astra-live,astra). Ang shadow, import at
+    // night run ay sa encode / astra.
+    'queues' => [
+        'encode' => 'encode',
+        'encode_live' => 'encode-live',
+        'astra' => 'astra',
+        'astra_live' => 'astra-live',
+    ],
 ];

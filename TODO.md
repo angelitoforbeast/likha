@@ -1050,9 +1050,49 @@ Accepted, not fixed:
 - **`/chatbot/health` accepts any digit string as `page_id`, and each (page, range) makes a 5-minute cache entry.** Reason: only chatbot roles or the events-key holder can call it, and the JSON route is throttled. Suggestion: check `page_id` against the page map.
 - **Failure reason order is unreachable, window (#10), HTTP 5xx, timeout, other.** Reason: a 5xx whose body contains "(#10)" counts as window; narrow edge.
 
+## 136: one encode row per customer per day (2026-10-24)
+
+Minor review findings, accepted (none is on a new untrusted path, and no page uses the live path yet):
+
+- **A STATUS change by the encode goes into HISTORICAL LOGS** (`time|Likha encode|STATUS||PROCEED`), not `status_logs`. Reason: the spec asks for one HISTORICAL LOGS line per changed field, and `status_logs` feeds the encoder idle report, which must not count the encode as a person. Suggestion for the owner: decide whether the idle report should read a non-person line in `status_logs`.
+- **A PROCEED import row of another person with the same FB name on the same page and day blocks the order ("not accepted").** Reason: the settled decision is to match import rows without a PSID by PAGE + fb_name. Rare, and the note on /order-encode shows the row id.
+- **Lines from "Night run" (or any user other than "Likha encode") in HISTORICAL LOGS count as staff edits for the update**, while Astra's fixes leave no line, so a later re-encode may replace a spot-Astra place with its own. Reason: Astra writes no HISTORICAL LOGS line today, and changing Astra is out of scope. Blank answers never overwrite (fix loop 1).
+- **When staff edited ADDRESS, ITEM_NAME or COD, the kept value can still go PROCEED** (only kept places block PROCEED). Reason: the encode's PROCEED is the address checker's ✅ on province/city/barangay, which those fields don't change; Validate checks item and COD as before.
+- **A staff edit landing between the update's read and its write can lose that edit's HISTORICAL LOGS line** (milliseconds; staff edits don't take `RowLock`). Reason: closing it means changing `MacroOutputController::updateField`, out of scope.
+- **DRY:** `RunSpotAstra::transient` repeats `RunNightAstraRow::classify`'s 429 code list, and the `live_notes` append appears in three classes. Reason: the second copy only; abstract on the third (kit rule).
+- **S-136.38 (P2) is not tested:** a sequence send that fails outside the 24-hour window is recorded by the sequence engine (subscription and chat event), not on the order. Reason: the send happens later in the sequence engine; the order records only the subscribe result.
+- **Untested here because sqlite can't run them:** the cache locks across two real workers (redis/database store), and the MySQL/pgsql `ts_date` trigger next to `LiveOrder` writing `ts_date` itself (same value). Reason: the test DB is sqlite in memory with the array cache.
+- **No test makes the encoder itself stop with an error on a linked re-encode** (the `Runner::live()` branch that sends it to `fail()`); blank GPT answers are tested. Reason: the encoder catches its own errors per step, so a test needs a fake that throws inside `Encoder::run`, which is more test code than the two-line branch warrants. The same `fail()` path is tested by S-136.42.
+- **The page id test of the live Sheet step only checks that the id is stored**; the event and the question that use it are tested on the Encode order step path. Reason: both read the same `input.page_id`.
+
+## 137: Upload to macro, then Encode order (2026-10-24)
+
+- **A late, older encode can overwrite the address a newer re-encode wrote to the same row.** This happens when the customer replies after the wait ran out and the queue is slow. Reason for accepting: the spec allows late results to update the row, staff edits stay protected, and it needs a slow queue plus a reply inside the window. A fix would compare the order's id with the row's last "Likha encode" run.
+- **/order-encode shows an upload that was never encoded (no Encode order step after it) as status `uploaded`, which reads as still in progress.** Reason: display only; the row itself is complete.
+- **DRY, suggestions for the owner:**
+  - The address-hold rule is in two places: `FlowEncode::ADDRESS_RULES` / `holdReason` and `AddressQuestion::ADDRESS_RULES` / `addressHold`.
+  - The COD regex `PRICE: ₱` is in two places (`LiveOrder::insertRaw` and `values`).
+
+  Reason: two copies, under the third-repetition rule, and the second is legacy code.
+- **Not tested:**
+  - the Bot Health exclusion of encode tickets (`BotHealth::aiCalls`), a one-line filter;
+  - "no half row" on the Update path (P2; the Insert path is tested and Update uses the same transaction);
+  - escaping on /order-encode for S-137.30 (P2; Blade escapes by default and no view changed);
+  - S-137.39 at 390 px (no browser in this session).
+- **Only sqlite was run for the JSON path filters** (`input->upload`, `input->node`). Reason: the same Laravel JSON-path syntax as `FlowHook::hasNode`, which runs on MySQL in production.
+- **A sequence step cannot wait for the encode: Encode order there always goes to failed.** Reason: the resume runs on the page's main flow (as for the AI step).
 
 ## 141: AI paste mapping, accepted review minors (2026-10-24)
 
 - **The AI path does not repeat the classic notes** "Only the first row was used" and "ACTIVE and FLOW are not in this window". Reason: the preview lists exactly what will be filled; the notes still show on "Use header/position instead". Small UX follow-up if staff ask.
 - **Blank cells are always None on the AI path**, so "Paste blanks as empty" only affects the header/position mapping. Reason: an empty cell carries nothing for the AI to place; clearing fields stays with the classic mapping or by hand. The story says so.
 - **The modal's own JS is not tested in a DOM**: the amber "Not sure" highlight and the client switch to the fallback (note, 429, 30 s wait) are covered only by markup checks; the helpers (`aiRow`, `mapConflicts`, `applyMapping`) and the server fallback are tested. Reason: the project has no DOM test harness; adding one is a new dependency. No browser check was run in this session.
+
+## 143: Encode order in the background, order_* variables (2026-10-25)
+
+- **No test for a wait ticket left from before the deploy** (the sweep resumes it; `encodeMacro` then goes on with next). Reason: a one-time transition path, live only for the minutes after the deploy (the old deadline was at most 600 s); the sweep and resume code is unchanged from 137, where it was tested. Remove the `FlowEncode::MODEL`/`STATUS` handling in the sweep and `resumeAi` once no `encoding` ticket is left.
+- **The race behind S-143.4 is tested sequentially only.** Reason: chats of one customer already run under the customer lock, and a sequence step under the subscription lock; the check is one query before the dispatch.
+- **While a re-encode is queued or running, `order_status` / `order_hold_reason` still show the previous result.** Reason: they come from the row as it is; a flow that must wait for the fresh result reads `order_encode_state` (done) first. Documented in `docs/order-encode.md`.
+- **Not tested:** the open-row fallback when the newest row is final and an older one is open (the newest open row within 24 h is taken), and a dispatch failure in the open-row path (the new order row is deleted, failed port). Reason: small branches; the dispatch path mirrors 137's tested one.
+- **A botfield or customer field named like an `order_*` variable is overridden by the order value.** Reason: the same rule as the system variables; the variable picker shows the "!" with the explanation.
+- **No index on `order_encodes.macro_output_id`.** Reason: the `order_*` reads now run only in flows that name one (not on every chatbot run), so the hot path is unaffected; an index migration on a large table is a deploy decision for the owner.

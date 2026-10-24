@@ -3,6 +3,7 @@
 namespace App\Services\OrderEncode;
 
 use App\Jobs\EncodeOrder;
+use App\Models\MacroOutput;
 use App\Models\OrderEncode;
 use App\Services\Chatbot\FlowRun;
 use Illuminate\Support\Facades\Log;
@@ -79,6 +80,38 @@ class FlowHook
     }
 
     /**
+     * Naisulat na ba sa sheet ang order na tatamaan ng takbong ito? Oo kapag ang customer ay may naisulat nang order na naka-queue pa
+     * (double tap), o naka-link sa bukas na row niya, o sa final na row niya ngayong araw (hindi tatanggapin ang order). Ang bagong row
+     * (kinabukasan, pagkatapos ng CANNOT PROCEED) ay may sariling sheet row at fallback.
+     */
+    public function sheetDone(FlowRun $run): bool
+    {
+        try {
+            $today = now('Asia/Manila')->toDateString();
+            $written = OrderEncode::where('mode', 'live')->where('page', $run->pageName)->where('psid', (int) $run->fields->psid)->where('created_at', '>=', now()->subDays(2))
+                ->orderByDesc('id')->limit(20)->get(['id', 'status', 'macro_output_id', 'input', 'created_at'])->filter(fn (OrderEncode $o) => !empty($o->input['sheet_written']));
+            foreach ($written as $o) {
+                if (!$o->macro_output_id) {
+                    if ($o->status === 'queued') return true;
+                    continue;
+                }
+                $row = MacroOutput::find($o->macro_output_id);
+                if (!$row) continue;
+                $status = strtoupper(trim((string) $row->STATUS));
+                // Ang bukas na row ay tatamaan lang sa loob ng 24 oras (gaya ng LiveOrder::find); lampas doon, bagong row at sariling sheet row.
+                if ($status === '' && trim((string) $row->waybill) === '' && $o->created_at?->gte(now()->subDay())) return true;
+                if ($status !== 'CANNOT PROCEED' && substr((string) $row->ts_date, 0, 10) === $today) return true;
+            }
+
+            return false;
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
+    }
+
+    /**
      * Encode order step: naka-queue ba ang order? Hindi kailangan ang compare_sheet at ang mode ng page; ang kailangan ay ang
      * key at ang address file. $sheetWritten: naisulat na ang row sa sheet (kasabay na sulat), kaya hindi na ito isusulat ng fallback.
      */
@@ -93,10 +126,10 @@ class FlowHook
             $order = OrderEncode::create([
                 'page' => $run->pageName, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'run_id' => $run->runId,
                 'spreadsheet_id' => $sheetId, 'tab' => $tab, 'row_number' => null, 'mode' => 'live', 'status' => 'queued',
-                'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten],
+                'input' => ['row' => array_values($row), 'node' => $nodeId, 'sheet_written' => $sheetWritten, 'page_id' => $run->pageId],
             ]);
             try {
-                EncodeOrder::dispatch($order->id);
+                EncodeOrder::dispatch($order->id, true);
             } catch (Throwable $e) {
                 $order->update(['status' => 'failed', 'error' => 'The encode could not be queued.']); // walang naiwang queued na hindi tatakbo kailanman
                 throw $e;
@@ -129,11 +162,11 @@ class FlowHook
             $attrs = ['spreadsheet_id' => $sheetId, 'tab' => $tab, 'row_number' => $number];
             $values = [
                 'page' => $run->pageName, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId, 'flow_id' => $run->flowId, 'run_id' => $run->runId,
-                'mode' => $mode, 'status' => 'queued', 'input' => ['row' => array_values($row)],
+                'mode' => $mode, 'status' => 'queued', 'input' => ['row' => array_values($row)] + ($mode === 'live' ? ['page_id' => $run->pageId] : []),
             ];
             // Shadow: ang parehong row ng sheet ay isang beses lang. Live: bawat takbo ng step ay sariling order.
             $order = $number === null ? OrderEncode::create($attrs + $values) : OrderEncode::firstOrCreate($attrs, $values);
-            if ($order->wasRecentlyCreated) EncodeOrder::dispatch($order->id);
+            if ($order->wasRecentlyCreated) EncodeOrder::dispatch($order->id, $mode === 'live');
 
             return true;
         } catch (Throwable $e) {
