@@ -9,6 +9,17 @@ use Illuminate\Support\Facades\Artisan;
 /** Ang dalawang bagong step sa builder (palette, config, Publish notice) at ang label ng legacy na setting. */
 class UploadEncodeBuilderTest extends UploadEncodeTestCase
 {
+    public function test_S_142_1_the_add_bar_has_one_encode_order_button_and_no_legacy_one(): void
+    {
+        $this->actingAs($this->user());
+        $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
+
+        $html = $this->get("/chatbot/flows/{$flow->id}")->assertOk()->getContent();
+        $this->assertSame(1, substr_count($html, 'data-add="encode_macro"'));
+        $this->assertSame(0, substr_count($html, 'data-add="encode_order"'));
+        $this->assertSame(1, preg_match_all('/<button[^>]*data-add="[^"]*"[^>]*>Encode order<\/button>/', $html));
+    }
+
     public function test_S_137_1_the_palette_has_both_blocks_and_their_configs_save_and_reload(): void
     {
         $this->actingAs($this->user());
@@ -18,7 +29,7 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
         $page->assertSee('data-add="upload_macro"', false)->assertSee('data-add="encode_macro"', false)
             ->assertSee('Saves the order to the orders (macro output) first: a new row (Insert) or the open row of the customer (Update).')
             ->assertSee('Encodes the row that Upload to macro saved in this run, waits for the result and puts it in encode_* variables.')
-            ->assertSee('data-add="encode_order" hidden', false)->assertSee('Encode order (legacy)');
+            ->assertSee('Encode order (legacy)');
 
         $graph = $this->graph([
             'n2' => ['upload_macro', $this->uploadConfig(['mode' => 'update', 'if_not_found' => 'skip', 'counts_order' => true, 'evil' => 'x'])],

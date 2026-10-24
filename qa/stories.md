@@ -2285,3 +2285,12 @@ Tests: `tests/Feature/Chatblast/ChatbotPasteMapTest.php` (endpoint, fake OpenAI)
 | S-141.13 (P2) | Given an empty paste (or a header only), then nothing is called | `ChatbotPasteScriptTest::test_S_141_13…`, `ChatbotPasteMapTest::test_S_141_13…` | passed 2026-10-24 |
 
 Story changes: S-141.5 adds "Apply is refused while two values are on one field" (Apply cannot fill a field "exactly as chosen" from two cells). Added: cells the AI leaves out come back as None (low), blank cells as None (`test_S_141_cells_the_ai_leaves_out…`).
+
+## S-142 One "Encode order" button in the flow builder
+
+As the owner building a flow, I see one "Encode order" button in the Add bar, so I can't add the legacy step by mistake.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-142.1 (P1) | Given the flow editor, when it renders, then the Add bar has exactly one "Encode order" button (`encode_macro`) and no `encode_order` button | `UploadEncodeBuilderTest::test_S_142_1…` | passed 2026-10-25 |
+| S-142.2 (P1) | Given a saved flow with a legacy `encode_order` node, then it still loads as "Encode order (legacy)", saves and reloads its config | `UploadEncodeBuilderTest::test_S_137_1…`, `EncodeOrderNodeTest::test_S_132_1…` | passed 2026-10-25 |

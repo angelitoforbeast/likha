@@ -95,9 +95,7 @@ class EncodeOrderNodeTest extends OrderEncodeTestCase
         $this->actingAs($this->user());
         $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
 
-        $page = $this->get("/chatbot/flows/{$flow->id}")->assertOk();
-        $page->assertSee('data-add="encode_order"', false)->assertSee('Encode order')
-            ->assertSee('Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.');
+        $this->get("/chatbot/flows/{$flow->id}")->assertOk();
 
         $graph = $this->graph($this->config(['also_sheet' => true, 'sheet' => 'https://docs.google.com/spreadsheets/d/' . self::ORDERS . '/edit', 'tab' => 'All Orders', 'evil' => 'x', 'counts_order' => true]));
         $this->putJson("/chatbot/flows/{$flow->id}/graph", ['graph' => $graph, 'version' => 0])->assertOk();

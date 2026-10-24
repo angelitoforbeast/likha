@@ -85,8 +85,7 @@
         <button type="button" class="cb-btn cb-btn-sm" data-add="sheet">Google Sheet</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="upload_macro" title="Saves the order to the orders (macro output) first: a new row (Insert) or the open row of the customer (Update).">Upload to macro</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="encode_macro" title="Encodes the row that Upload to macro saved in this run, waits for the result and puts it in encode_* variables.">Encode order</button>
-        {{-- Ang lumang Encode order (encode_order): tumatakbo pa sa mga naka-save na flow, pero hindi na idinadagdag. --}}
-        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_order" hidden title="Encodes and checks the order in Likha and saves it to the orders (macro output). Replaces the Google Sheet step.">Encode order</button>
+        {{-- Walang button para sa lumang Encode order (encode_order): tumatakbo at nae-edit pa sa mga naka-save na flow, pero hindi na idinadagdag. --}}
         <button type="button" class="cb-btn cb-btn-sm" data-add="sequence">Sequence</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="end">End</button>
         <span class="mx-1 text-slate-300">|</span>
