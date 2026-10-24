@@ -33,6 +33,8 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         ]]);
         $this->page('Page Uno', '1001');
         $this->page('Page Dos', '2002');
+        // Naka-on ang "Chat to site" block ng dalawang page (ang setup check ay sa S-145.6 lang).
+        foreach (['Page Uno', 'Page Dos'] as $p) $this->settings()->set($p, 'botcake', 'chat.key', 'key-' . $p, false, null, true);
         // Ang inside.test ay nasa private na IP; ang iba ay pampubliko.
         $this->app->instance(ImageLinkCheck::class, new ImageLinkCheck(fn (string $host) => match ($host) {
             'inside.test' => ['10.0.0.5'], 'loop.test' => ['127.0.0.1'], 'mixed.test' => ['93.184.216.34', '192.168.1.10'], 'meta.test' => ['169.254.169.254'], default => ['93.184.216.34'],
@@ -75,7 +77,7 @@ class ChatbotPageCheckTest extends ChatblastTestCase
 
     public function test_S_099_1_missing_botfields_come_from_every_node_kind_and_from_nested_botfields(): void
     {
-        $this->assertSame(['status' => 'none', 'reasons' => []], array_intersect_key($this->check(), ['status' => 1, 'reasons' => 1]), 'walang flow: —');
+        $this->assertSame(['status' => 'x', 'reasons' => ['No flow: pick a flow in FLOW']], array_intersect_key($this->check(), ['status' => 1, 'reasons' => 1]), 'walang flow, On ang bot: X');
 
         $this->link('Page Uno', $this->flow('Main', [
             ['send', ['items' => [['type' => 'text', 'value' => '{{Main Flow}} {{first_name}}'], ['type' => 'image', 'value' => '{{PICTURE}}']]]],
@@ -227,7 +229,7 @@ class ChatbotPageCheckTest extends ChatblastTestCase
     {
         $s = $this->settings();
         $res = $this->check();
-        $this->assertSame(['none', ['No flow: the bot only receives chats']], [$res['status'], $res['warnings']], 'FLOW empty, bot On');
+        $this->assertSame(['x', ['No flow: pick a flow in FLOW'], []], [$res['status'], $res['reasons'], $res['warnings']], 'FLOW empty, bot On');
         $s->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
         $res = $this->check('Page Uno');
         $this->assertSame(['none', []], [$res['status'], $res['warnings']], 'bot Off: no rule');
@@ -271,5 +273,43 @@ class ChatbotPageCheckTest extends ChatblastTestCase
             'Seq 11 is an image link: put it in Seq Img 11',
             'Seq Img 13 is not an image link',
         ]], [$res['status'], $res['reasons']]);
+    }
+
+    public function test_S_145_6_a_bot_that_is_on_needs_a_flow_and_on_botcake_the_chat_block(): void
+    {
+        $s = $this->settings();
+        $noKey = 'No chat block (chat.key): turn the chat block on with the bot toggle';
+        $this->noChatKey('Page Uno');
+        $res = $this->check();
+        $this->assertSame(['x', ['No flow: pick a flow in FLOW', $noKey]], [$res['status'], $res['reasons']], 'bot On, no flow, no chat.key');
+
+        $this->link('Page Uno', $this->flow('Main', [$this->send('Hi')]));
+        $res = $this->check();
+        $this->assertSame(['x', [$noKey]], [$res['status'], $res['reasons']], 'may flow, walang chat.key');
+
+        $s->set('Page Uno', 'botcake', 'chat.key', 'key-1', false, null, true);
+        $res = $this->check();
+        $this->assertSame(['ok', []], [$res['status'], $res['reasons']], 'may flow at chat.key');
+
+        $this->noChatKey('Page Uno');
+        $s->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
+        $this->assertSame([], $this->check()['reasons'], 'bot Off: walang setup finding');
+    }
+
+    public function test_S_145_9_a_forbeast_gateway_page_skips_the_chat_block_check(): void
+    {
+        $s = $this->settings();
+        $this->noChatKey('Page Uno');
+        $s->set('Page Uno', 'chatbot', 'provider', 'gateway', false, null, true);
+        $this->link('Page Uno', $this->flow('Main', [$this->send('Hi')]));
+        $res = $this->check();
+        $this->assertSame(['ok', []], [$res['status'], $res['reasons']]);
+    }
+
+    private function noChatKey(string $page): void
+    {
+        foreach ($this->settings()->pageQuery($page)->where('provider', 'botcake')->where('key', 'chat.key')->where('active', true)->get() as $row) {
+            $this->settings()->deactivate($row);
+        }
     }
 }
