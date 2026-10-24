@@ -33,6 +33,7 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
             'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
             'database/migrations/2026_10_25_100000_create_chatbot_waits_table.php',
             'database/migrations/2026_10_26_100000_create_chatbot_sequence_tables.php',
+            'database/migrations/2026_11_07_100000_turn_off_exit_on_reply_on_chatbot_sequences.php',
         ]]);
         config(['services.chatbot.replies_enabled' => true]);
         $this->page('Page Uno', '1001');
@@ -133,7 +134,7 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
 
         $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertRedirect();
         $new = ChatbotSequence::where('name', 'Follow up')->first();
-        $this->assertSame([true, true], [$new->active, $new->exit_on_reply]);
+        $this->assertTrue($new->active);
         $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertSessionHasErrors('name');
     }
 
@@ -170,6 +171,35 @@ class ChatbotSequencePagesTest extends ChatblastTestCase
         ];
         foreach ($bad as $change) $this->putJson('/chatbot/sequences/' . $seq->id, array_merge($body, $change))->assertStatus(422);
         $this->assertSame(['Preorder 2', 2], [$seq->fresh()->name, $seq->steps()->count()], 'nothing changed');
+    }
+
+    public function test_S_142_3_a_new_sequence_has_exit_on_reply_off_and_a_checked_box_still_saves(): void
+    {
+        $this->actingAs($this->user());
+        $this->post('/chatbot/sequences', ['name' => 'Follow up'])->assertRedirect();
+        $new = ChatbotSequence::where('name', 'Follow up')->first();
+        $this->assertFalse($new->exit_on_reply);
+
+        $html = $this->get('/chatbot/sequences/' . $new->id)->assertOk()->getContent();
+        $this->assertSame(1, preg_match('/<input type="checkbox" name="exit_on_reply"([^>]*)>/', $html, $m));
+        $this->assertStringNotContainsString('checked', $m[1]);
+
+        $this->putJson('/chatbot/sequences/' . $new->id, ['name' => 'Follow up', 'active' => true, 'exit_on_reply' => true, 'steps' => []])->assertOk();
+        $this->assertTrue($new->fresh()->exit_on_reply);
+    }
+
+    public function test_S_142_4_the_migration_turns_exit_on_reply_off_on_every_existing_sequence(): void
+    {
+        $file = 'database/migrations/2026_11_07_100000_turn_off_exit_on_reply_on_chatbot_sequences.php';
+        $migration = require base_path($file);
+        $migration->down();
+        DB::table('chatbot_sequences')->insert(['name' => 'On', 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('chatbot_sequences')->insert(['name' => 'Off', 'active' => true, 'exit_on_reply' => false, 'created_at' => now(), 'updated_at' => now()]);
+        $this->assertSame(1, DB::table('chatbot_sequences')->where('exit_on_reply', true)->count(), 'old default is on');
+
+        $migration->up();
+        $this->assertSame(0, DB::table('chatbot_sequences')->where('exit_on_reply', true)->count());
+        $this->assertSame(2, DB::table('chatbot_sequences')->count());
     }
 
     public function test_S_070_7_the_subscribers_page_filters_by_status_and_page_with_bounded_queries(): void
