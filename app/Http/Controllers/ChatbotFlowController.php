@@ -11,6 +11,7 @@ use App\Services\Chatbot\ChatbotTags;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\ChatbotFields;
+use App\Services\OrderEncode\OrderVars;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
 use Carbon\Carbon;
@@ -35,6 +36,14 @@ class ChatbotFlowController extends Controller
         'psid' => 'the customer\'s ID on this page', 'page_id' => 'the Facebook ID of the page', 'page_name' => 'the name of the page',
         'current_date' => 'today\'s date in Manila (YYYY-MM-DD)', 'last_interaction' => 'when the customer\'s last chat came in',
         'replies_via' => 'which bot carries this chat: Botcake or Forbeast',
+    ];
+
+    /** Ang mga order_* variable (OrderVars): ang huling order row ng customer sa page, binabasa tuwing kailangan. */
+    private const ORDER_VAR_INFO = [
+        'order_row_id' => 'the id of the customer\'s latest order row on this page (last 7 days)', 'order_status' => 'STATUS of the row: PROCEED, CANNOT PROCEED or blank',
+        'order_checker' => 'APP SCRIPT CHECKER of the row', 'order_hold_reason' => 'why it did not PROCEED: address, duplicate, name, phone, price or other; blank when PROCEED or not encoded yet',
+        'order_province' => 'PROVINCE of the row', 'order_city' => 'CITY of the row', 'order_barangay' => 'BARANGAY of the row', 'order_address' => 'ADDRESS of the row',
+        'order_name' => 'FULL NAME of the row', 'order_phone' => 'PHONE NUMBER of the row', 'order_encode_state' => 'the background encode: none, queued, running, done or failed',
     ];
 
     public const KEEP_VERSIONS = 50; // snapshot kada flow
@@ -316,6 +325,7 @@ class ChatbotFlowController extends Controller
 
         $rows = [];
         foreach (self::RUN_VARS as $v) $rows[] = ['name' => $v, 'group' => 'system', 'tip' => 'Built in: ' . self::RUN_VAR_INFO[$v]];
+        foreach (OrderVars::NAMES as $v) $rows[] = ['name' => $v, 'group' => 'order', 'tip' => 'Order: ' . self::ORDER_VAR_INFO[$v]];
         foreach (array_column($this->fields->columns(), 'label') as $v) $rows[] = ['name' => $v, 'group' => 'botfield', 'tip' => 'Botfield: set per page on /chatbot/pages'];
         foreach ($writers as $w) $rows[] = ['name' => $w['name'], 'group' => 'customer', 'tip' => 'Customer field: ' . ($w['by']
             ? 'set by ' . implode(', ', $w['by']) : 'saved on customers of this flow\'s pages; no step of this flow sets it')];
@@ -324,8 +334,9 @@ class ChatbotFlowController extends Controller
         foreach ($rows as $r) $in[ChatbotVars::norm($r['name'])][$r['group']] = true;
         $rule = [
             'system' => ['customer' => 'Also a customer field; the built-in value always wins', 'botfield' => 'Also a botfield; the built-in value always wins'],
-            'botfield' => ['system' => 'Also a system variable; the built-in value always wins, so this botfield can\'t be read', 'customer' => 'Also a customer field; the customer field wins when the customer has it saved (even blank)'],
-            'customer' => ['system' => 'Also a system variable; the built-in value always wins, so this field can\'t be read', 'botfield' => 'Also a botfield; the customer field wins when the customer has it saved (even blank)'],
+            'order' => ['customer' => 'Also a customer field; the order value always wins', 'botfield' => 'Also a botfield; the order value always wins'],
+            'botfield' => ['system' => 'Also a system variable; the built-in value always wins, so this botfield can\'t be read', 'order' => 'Also an order variable; the order value always wins, so this botfield can\'t be read', 'customer' => 'Also a customer field; the customer field wins when the customer has it saved (even blank)'],
+            'customer' => ['system' => 'Also a system variable; the built-in value always wins, so this field can\'t be read', 'order' => 'Also an order variable; the order value always wins, so this field can\'t be read', 'botfield' => 'Also a botfield; the customer field wins when the customer has it saved (even blank)'],
         ];
         foreach ($rows as &$r) {
             $r['also'] = array_values(array_diff(array_keys($in[ChatbotVars::norm($r['name'])]), [$r['group']]));

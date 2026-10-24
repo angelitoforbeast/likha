@@ -12,9 +12,8 @@ use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 /**
- * Si Astra para sa Encode order step: ang row na hindi PROCEED pagkatapos ng encode, sa express lane (astra-live),
- * habang naghihintay ang flow. Isang subok lang: ang resulta ng encode ay naitabi na sa hinihintay, kaya ang pagpalya o ang
- * pagkahuli ni Astra ay "encoded, held" at tuloy ang flow sa next.
+ * Si Astra para sa Encode order step: ang row na hindi PROCEED pagkatapos ng encode, sa express lane (astra-live), sa
+ * background. Isang subok lang: ang pagpalya ni Astra ay "encoded, held" (naiwan ang row para sa staff).
  */
 class RunEncodeAstra implements ShouldQueue
 {

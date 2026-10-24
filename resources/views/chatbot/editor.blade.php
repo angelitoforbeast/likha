@@ -84,7 +84,7 @@
         <button type="button" class="cb-btn cb-btn-sm" data-add="clear_ai">Clear AI memory</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="sheet">Google Sheet</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="upload_macro" title="Saves the order to the orders (macro output) first: a new row (Insert) or the open row of the customer (Update).">Upload to macro</button>
-        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_macro" title="Encodes the row that Upload to macro saved in this run, waits for the result and puts it in encode_* variables.">Encode order</button>
+        <button type="button" class="cb-btn cb-btn-sm" data-add="encode_macro" title="Encodes the order row in the background (the row Upload to macro saved, or the customer's open row) and goes on at once. Read the result later with the order_* variables.">Encode order</button>
         {{-- Walang button para sa lumang Encode order (encode_order): tumatakbo at nae-edit pa sa mga naka-save na flow, pero hindi na idinadagdag. --}}
         <button type="button" class="cb-btn cb-btn-sm" data-add="sequence">Sequence</button>
         <button type="button" class="cb-btn cb-btn-sm" data-add="end">End</button>
@@ -218,7 +218,7 @@
             case 'sheet': return (c.tab || 'Sheet1') + ': ' + (c.columns || []).length + ' column(s)';
             case 'encode_order': return 'Encodes the order in Likha' + (c.also_sheet ? ' + writes the sheet' : '') + '\nOn failure: ' + (c.on_failure === 'continue' ? 'continue without saving' : 'write to the sheet');
             case 'upload_macro': return c.mode === 'update' ? 'Updates the open row of the customer\nNo open row: ' + (c.if_not_found === 'skip' ? 'skip' : 'insert') : 'Inserts a new order row';
-            case 'encode_macro': return 'Encodes the uploaded row, waits up to ' + (c.wait || 120) + ' s' + (c.astra === false ? '' : '\nAstra when it does not PROCEED');
+            case 'encode_macro': return 'Encodes the order row in the background' + (c.astra === false ? '' : '\nAstra when it does not PROCEED');
             case 'sequence': {
                 const s = sequences.find(x => x.id === c.sequence_id);
                 const name = c.sequence_id ? (s ? s.name : 'a deleted sequence') : (c.action === 'unsubscribe' ? 'all sequences' : 'Pick a sequence');
@@ -510,7 +510,7 @@
         clear_ai: {fields: []}, sheet: {sheet: '', tab: '', columns: []},
         encode_order: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', also_sheet: false, sheet: '', tab: '', on_failure: 'sheet'},
         upload_macro: {date: '', page: '', name: '', phone: '', input: '', shop: '', extracted: '', price: '', mode: 'insert', if_not_found: 'insert', counts_order: true},
-        encode_macro: {wait: 120, astra: true}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
+        encode_macro: {astra: true}, sequence: {action: 'subscribe', sequence_id: 0}, end: {},
     };
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
         const next = 1 + Math.max(0, ...graph.nodes.map(n => parseInt(n.id.slice(1), 10) || 0));
@@ -649,6 +649,7 @@
         ['system', 'System', 'bg-slate-100 text-slate-700 hover:bg-slate-200'],
         ['botfield', 'Botfields · per page', 'bg-purple-100 text-purple-800 hover:bg-purple-200'],
         ['customer', 'Customer fields · per customer', 'bg-teal-100 text-teal-800 hover:bg-teal-200'],
+        ['order', 'Order · latest order row', 'bg-cyan-100 text-cyan-900 hover:bg-cyan-200'],
     ];
     const SEQ_VAR = /^Seq (Img )?\d+$/;
     let seqOpen = false;
@@ -832,12 +833,11 @@
         drawNotFound();
         body.append(el('div', {class: 'grid gap-2 sm:grid-cols-2'}, ENCODE_FIELDS.map(([k, t]) => label(t, bind(grow(input({tag: 'textarea', rows: 2, maxlength: 2000}, c[k])), v => c[k] = v)))));
     }
-    // ---- Encode order: ine-encode ang row ng Upload to macro, hinihintay, at ang resulta sa encode_* variables ----
+    // ---- Encode order: ine-queue ang encode ng order row sa background; ang resulta ay binabasa sa order_* variables ----
     function encodeMacroForm(c, body) {
-        body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Encodes the row that Upload to macro saved in this run. The flow waits for the result, then goes on with next (or failed).'}));
-        body.append(label('Wait up to (seconds, 10 to 600)', bind(input({type: 'number', min: 10, max: 600, step: 1, inputmode: 'numeric'}, c.wait ?? 120), v => c.wait = parseInt(v, 10) || 120)));
+        body.append(el('p', {class: 'rounded-md bg-cyan-50 px-2 py-1 text-xs text-cyan-900', text: 'Runs in the background: encodes the row Upload to macro saved in this run (or else the customer\'s open order row) and the flow goes on with next at once. Failed only when there is no order row.'}));
         body.append(el('label', {class: 'flex items-center gap-2 text-sm'}, [bind(el('input', {type: 'checkbox', checked: c.astra !== false}), v => c.astra = v, true), 'Run Astra when the encode does not PROCEED']));
-        body.append(el('p', {class: 'text-xs text-slate-500', text: 'Variables for a Condition: encode_proceed (yes/no), encode_hold_reason (address, duplicate, name, phone, price, other, error), encode_province, encode_city, encode_barangay, encode_address, encode_name, encode_phone, encode_row_id. Past the wait, the flow goes on with failed.'}));
+        body.append(el('p', {class: 'text-xs text-slate-500', text: 'Read the result later with the order_* variables, e.g. a Condition in a sequence step after a delay: order_status (PROCEED, CANNOT PROCEED or blank), order_hold_reason (address, duplicate, name, phone, price, other), order_encode_state (none, queued, running, done, failed), order_province, order_city, order_barangay, order_address, order_name, order_phone, order_checker, order_row_id.'}));
     }
     function bind(control, set, checkbox = false) {
         const fire = () => set(checkbox ? control.checked : control.value);

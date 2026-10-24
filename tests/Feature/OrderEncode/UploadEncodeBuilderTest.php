@@ -28,7 +28,8 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
         $page = $this->get("/chatbot/flows/{$flow->id}")->assertOk();
         $page->assertSee('data-add="upload_macro"', false)->assertSee('data-add="encode_macro"', false)
             ->assertSee('Saves the order to the orders (macro output) first: a new row (Insert) or the open row of the customer (Update).')
-            ->assertSee('Encodes the row that Upload to macro saved in this run, waits for the result and puts it in encode_* variables.')
+            ->assertSee("Encodes the order row in the background (the row Upload to macro saved, or the customer's open row) and goes on at once. Read the result later with the order_* variables.", false)
+            ->assertDontSee('Wait up to')
             ->assertSee('Encode order (legacy)');
 
         $graph = $this->graph([
@@ -82,7 +83,20 @@ class UploadEncodeBuilderTest extends UploadEncodeTestCase
         $res = $this->postJson("/chatbot/flows/{$flow->id}/publish", ['version' => 1])->assertOk();
 
         $this->assertNotNull($flow->fresh()->published_at);
-        $this->assertSame($notice, str_contains((string) $res->json('notice'), 'Encode order step n3 has no Upload to macro before it'));
+        $this->assertSame($notice, str_contains((string) $res->json('notice'), "Encode order step n3 has no Upload to macro before it: it encodes the customer's open order row, or goes to failed when there is none."));
+    }
+
+    public function test_S_143_11_the_variable_picker_has_an_order_group(): void
+    {
+        $this->actingAs($this->user());
+        $flow = ChatbotFlow::create(['name' => 'Main', 'graph' => FlowGraph::blank()]);
+
+        $groups = collect($this->getJson("/chatbot/flows/{$flow->id}/graph")->assertOk()->json('variable_groups'))->where('group', 'order');
+
+        $this->assertSame(['order_row_id', 'order_status', 'order_checker', 'order_hold_reason', 'order_province', 'order_city', 'order_barangay',
+            'order_address', 'order_name', 'order_phone', 'order_encode_state'], $groups->pluck('name')->values()->all());
+        $this->assertStringContainsString('PROCEED, CANNOT PROCEED or blank', $groups->firstWhere('name', 'order_status')['tip']);
+        $this->get("/chatbot/flows/{$flow->id}")->assertOk()->assertSee("['order', 'Order", false);
     }
 
     public function test_S_137_20_the_settings_page_says_the_address_sequence_is_for_the_legacy_block_only(): void

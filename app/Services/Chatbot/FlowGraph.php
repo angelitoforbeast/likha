@@ -193,7 +193,7 @@ class FlowGraph
 
     /**
      * Ang paalala ng Publish na hindi humaharang: ang Encode order na walang Upload to macro bago ito sa anumang daan papunta
-     * rito (laging pupunta sa failed). Null kapag wala.
+     * rito (ang bukas na row ng customer ang ie-encode, o failed kapag wala). Null kapag wala.
      */
     public static function publishNotice(array $graph): ?string
     {
@@ -217,7 +217,7 @@ class FlowGraph
             if (!$found) $lonely[] = $id;
         }
 
-        return $lonely ? 'Encode order step ' . implode(', ', $lonely) . ' has no Upload to macro before it, so it will always go to its failed port.' : null;
+        return $lonely ? 'Encode order step ' . implode(', ', $lonely) . " has no Upload to macro before it: it encodes the customer's open order row, or goes to failed when there is none." : null;
     }
 
     /**
