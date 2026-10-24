@@ -2335,3 +2335,25 @@ Story changes (S-143):
 - S-137.38 (Publish notice): kept as a softer hint ("it encodes the customer's open order row, or goes to failed when there is none").
 - S-143.8 and S-143.9 gained a case each from the review: the 30-minute cap on a lost job, and no order query in flows that never name an `order_*` variable.
 - S-137.43 ("Wait up to" 120 s): retired; `ExpressLaneTest::test_137_1_the_new_encode…` now checks that no wait ticket exists.
+
+## S-145 The page check also checks SHOP DETAILS, prices and items in Prompts and Seqs, and the bot setup
+
+As the owner, I see in the CHECK column of /chatbot/pages when SHOP DETAILS names another page, item, price or quantity, when a Prompt or Seq text states a wrong price or another item, and when a page's bot is On but cannot reply (no flow, or no "Chat to site" block on a Botcake page).
+
+Slice 145. Threat model: page values (SHOP DETAILS, Prompt, Seq texts), order rows and AI answers are untrusted data, shown as text and never followed as instructions; the owner's settings and the repo are trusted. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotContentCheckTest.php`, `ChatbotPageCheckTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-145.1 (P1) | Given SHOP DETAILS "PAGE: Vanessa Reyes \| ITEM: CHRISTMAS LIGHTS" on page Tech Flask Ph with ITEM NAME IN JNT DASHBOARD = UNISEX SOCKS, then two X findings naming the field and both values; SHOP DETAILS matching the page name and item (case and spaces ignored) → ok | `test_S_145_1…` | passed 2026-10-25 |
+| S-145.2 (P1) | Given SHOP DETAILS PRICE or QUANTITY different from the PRICE or QUANTITY field, then X naming both values | `test_S_145_2…` | passed 2026-10-25 |
+| S-145.3 (P1) | Given the SHOP DETAILS column with no value, or a value without a PAGE/ITEM/PRICE/QUANTITY line, then a warning | `test_S_145_3…` | passed 2026-10-25 |
+| S-145.4 (P1) | Given a Seq text with a price that matches neither the COD nor PRICE, then X (fake AI); a matching one → ok; when run again (nightly), unchanged texts are not asked again | `test_S_145_4…` | passed 2026-10-25 |
+| S-145.5 (P1) | Given a Prompt naming another item (confidence ≥ 70), then X; a Seq that names no item gives no item finding | `test_S_145_5…` | passed 2026-10-25 |
+| S-145.6 (P1) | Given the bot On with no flow, then X "No flow: pick a flow in FLOW"; a Botcake page with the bot On and no chat.key → X "turn the chat block on with the bot toggle"; bot Off → no setup finding | `ChatbotPageCheckTest::test_S_145_6…` | passed 2026-10-25 |
+| S-145.7 (P1) | Given the nightly command, then its run and its JSON include the SHOP DETAILS, Prompt/Seq and setup findings | `test_S_145_7…` | passed 2026-10-25 |
+| S-145.8 (P2) | Given "₱1,198" or "198 pesos", then the amount parses as 1198 or 198 | `test_S_145_8…` (table) | passed 2026-10-25 |
+| S-145.9 (P2) | Given a Forbeast Gateway page with the bot On and no chat.key, then no chat block finding | `ChatbotPageCheckTest::test_S_145_9…` | passed 2026-10-25 |
+
+Story changes (S-145):
+- S-120.1 and S-099.1 (bot On with no flow → warning "No flow: the bot only receives chats", status none): now X "No flow: pick a flow in FLOW" (S-145.6).

@@ -10,6 +10,7 @@ use App\Services\Chatbot\FlowGraph;
 use App\Services\Chatbot\ImageLinkCheck;
 use App\Services\Chatbot\PageContentCheck;
 use App\Services\Chatbot\PageExpectedItem;
+use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Schema\Blueprint;
@@ -75,6 +76,7 @@ class ChatbotContentCheckTest extends ChatblastTestCase
 
         $this->page('Page Uno', '1001');
         $this->page('Page Dos', '2002');
+        foreach (['Page Uno', 'Page Dos'] as $p) app(PageSettings::class)->set($p, 'botcake', 'chat.key', 'key-' . $p, false, null, true);
         $this->app->instance(ImageLinkCheck::class, new ImageLinkCheck(fn (string $host) => ['93.184.216.34']));
         Http::fake([
             self::IMG . '*' => Http::response('', 200, ['Content-Type' => 'image/jpeg']),
@@ -412,5 +414,116 @@ Landmark:");
         $this->assertCount(2, $rows);
         $this->assertSame('ok', collect($res['findings'])->firstWhere('kind', 'image')['level']);
         $this->assertSame(['gpt-4o-mini', 1000, 100, 0.00021], [$rows[0]->model, (int) $rows[0]->tokens_in, (int) $rows[0]->tokens_out, round((float) $rows[0]->cost_usd, 6)]);
+    }
+
+    /** Ang SHOP DETAILS column, at ang item, presyo at dami ng page. */
+    private function shop(?string $details, string $item = 'UNISEX SOCKS', string $price = '299', string $quantity = '1'): void
+    {
+        app(ChatbotFields::class)->add('SHOP DETAILS');
+        $s = $this->settings();
+        foreach (['item_name_in_jnt_dashboard' => $item, 'price' => $price, 'quantity' => $quantity, 'shop_details' => $details] as $key => $value) {
+            if ($value !== null) $s->set('Page Uno', 'chatbot', $key, $value);
+        }
+    }
+
+    /** @return array<int, array{0: string, 1: string}> level at reason ng mga finding ng isang field */
+    private function of(array $res, string $field): array
+    {
+        return array_values(array_map(fn ($f) => [$f['level'], $f['reason']], array_filter($res['findings'], fn ($f) => $f['field'] === $field)));
+    }
+
+    public function test_S_145_1_shop_details_naming_another_page_and_item_is_an_x_and_a_matching_one_passes(): void
+    {
+        $this->shop('PAGE: Vanessa Reyes | ITEM: CHRISTMAS LIGHTS | PRICE: ₱299 | QUANTITY: 1');
+        $this->assertSame([
+            ['x', 'SHOP DETAILS: PAGE Vanessa Reyes ≠ page Page Uno'],
+            ['x', 'SHOP DETAILS: ITEM CHRISTMAS LIGHTS ≠ ITEM NAME IN JNT DASHBOARD UNISEX SOCKS'],
+        ], $this->of($this->content(), 'SHOP DETAILS'));
+        $res = $this->check();
+        $this->assertSame('x', $res['status']);
+        $this->assertContains('SHOP DETAILS: ITEM CHRISTMAS LIGHTS ≠ ITEM NAME IN JNT DASHBOARD UNISEX SOCKS', $res['reasons']);
+
+        $this->shop("page:  page uno\nItem: unisex  socks\nPRICE: 299\nQUANTITY: 1 pc");
+        $this->assertSame([['ok', 'SHOP DETAILS: matches the page, item, price and quantity']], $this->of($this->content(), 'SHOP DETAILS'));
+        $this->assertSame(0, $this->aiCalls(), 'walang AI');
+    }
+
+    public function test_S_145_2_a_shop_details_price_or_quantity_other_than_the_fields_is_an_x(): void
+    {
+        $this->shop('PAGE: Page Uno | ITEM: UNISEX SOCKS | PRICE: ₱1,198 | QUANTITY: 2', 'UNISEX SOCKS', '999', '1');
+        $this->assertSame([
+            ['x', 'SHOP DETAILS: PRICE ₱1,198 ≠ PRICE 999'],
+            ['x', 'SHOP DETAILS: QUANTITY 2 ≠ QUANTITY 1'],
+        ], $this->of($this->content(), 'SHOP DETAILS'));
+    }
+
+    public function test_S_145_3_no_shop_details_or_a_missing_line_is_a_warning(): void
+    {
+        $this->shop(null);
+        $this->assertSame([['warn', 'SHOP DETAILS: no value']], $this->of($this->content(), 'SHOP DETAILS'));
+        $this->shop('PAGE: Page Uno | ITEM: UNISEX SOCKS | PRICE: 299');
+        $this->assertSame([['warn', 'SHOP DETAILS: no QUANTITY: line']], $this->of($this->content(), 'SHOP DETAILS'));
+    }
+
+    public function test_S_145_4_a_seq_price_other_than_the_cod_and_price_is_an_x_and_unchanged_texts_are_not_asked_again(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'price', '249');
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_1', 'Seq wrong price');
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_2', 'Seq right total');
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_3', 'Seq item price');
+        $this->answers = [
+            'Seq wrong price' => $this->answer('SEAT COVER', true, 95, [['item_price' => 399, 'fees' => [], 'total' => null]]),
+            'Seq right total' => $this->answer('SEAT COVER', true, 95, [['item_price' => null, 'fees' => [], 'total' => 299]]),
+            'Seq item price' => $this->answer('SEAT COVER', true, 95, [['item_price' => 249, 'fees' => [], 'total' => null]]),
+        ];
+        $res = $this->content();
+        $this->assertSame([['ok', 'Seq 1: SEAT COVER (orders: SEAT COVER)'], ['x', 'Seq 1: price ₱399 ≠ orders ₱299 COD, PRICE ₱249']], $this->of($res, 'Seq 1'));
+        $this->assertSame(['ok', 'Seq 2: price ₱299 = ₱299 COD'], $this->of($res, 'Seq 2')[1]);
+        $this->assertSame(['ok', 'Seq 3: price ₱249 = PRICE ₱249'], $this->of($res, 'Seq 3')[1]);
+        $this->assertSame(3, $this->aiCalls());
+
+        $this->content();
+        $this->assertSame(3, $this->aiCalls(), 'hindi nagbago: hindi itinanong ulit');
+    }
+
+    public function test_S_145_5_a_prompt_naming_another_item_is_an_x_and_a_seq_naming_no_item_gives_no_finding(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'prompt_1', 'Prompt about lights');
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_1', 'Seq no item');
+        $this->answers = ['Prompt about lights' => $this->answer('CHRISTMAS LIGHTS', false, 90), 'Seq no item' => $this->answer('', false, 40)];
+        $res = $this->content();
+        $this->assertSame([['x', 'Prompt 1: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)']], $this->of($res, 'Prompt 1'));
+        $this->assertSame([], $this->of($res, 'Seq 1'));
+    }
+
+    public function test_S_145_7_the_nightly_run_and_its_json_include_shop_details_seq_and_setup_findings(): void
+    {
+        $this->orders('Page Uno', 'UNISEX SOCKS', '299', 3);
+        $this->shop('PAGE: Vanessa Reyes | ITEM: UNISEX SOCKS | PRICE: 299 | QUANTITY: 1');
+        $this->settings()->set('Page Uno', 'chatbot', 'seq_1', 'Seq socks');
+        $this->answers = ['Seq socks' => $this->answer('UNISEX SOCKS', true, 95)];
+        foreach ($this->settings()->pageQuery('Page Dos')->where('provider', 'botcake')->where('key', 'chat.key')->get() as $row) $this->settings()->deactivate($row);
+
+        $this->artisan('chatbot:content-check', ['--sync' => true])->assertExitCode(0);
+        $this->assertSame(1, $this->aiCalls(), 'ang Seq ay itinanong sa gabi');
+        Artisan::call('chatbot:content-check', ['--json' => true]);
+        $pages = collect(json_decode(Artisan::output(), true)['pages'])->keyBy('page');
+        $fields = array_column($pages['Page Uno']['findings'], 'field');
+        $this->assertContains('SHOP DETAILS', $fields);
+        $this->assertContains('Seq 1', $fields);
+        $this->assertContains('No chat block (chat.key): turn the chat block on with the bot toggle', array_column($pages['Page Dos']['findings'], 'reason'));
+    }
+
+    #[DataProvider('amounts')]
+    public function test_S_145_8_peso_amounts_parse(string $text, ?float $amount): void
+    {
+        $this->assertSame($amount, PageContentCheck::peso($text));
+    }
+
+    public static function amounts(): array
+    {
+        return ['peso sign and comma' => ['₱1,198', 1198.0], 'pesos word' => ['198 pesos', 198.0], 'PHP and cents' => ['PHP 1,299.50', 1299.5], 'none' => ['free', null]];
     }
 }

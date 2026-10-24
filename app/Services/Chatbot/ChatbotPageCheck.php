@@ -90,13 +90,14 @@ class ChatbotPageCheck
         $out = ['status' => 'none', 'reasons' => [], 'warnings' => [], 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
         $flow = ctype_digit($flowId) && Schema::hasTable('chatbot_flows') ? ChatbotFlow::find((int) $flowId) : null;
-        // Ang FLOW (kapag On ang bot): walang flow = babala lang (valid na setup); wala o hindi published = mali.
+        // Ang FLOW (kapag On ang bot): walang flow, o wala o hindi published, = mali; kasama ang setup ng bot (chat.key),
+        // dahil hindi na umaabot sa content check ang takbo.
         $on = $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0';
-        if ($on && $flowId === '') $out['warnings'][] = 'No flow: the bot only receives chats';
+        $setup = $flow === null || $flow->published_at === null ? array_column($this->content->setup($page), 'reason') : [];
         if ($on && $flowId !== '' && ($flow === null || $flow->published_at === null)) {
-            return ['status' => 'x', 'reasons' => ['Flow not found / not published']] + $out;
+            return ['status' => 'x', 'reasons' => ['Flow not found / not published', ...$setup]] + $out;
         }
-        if ($flow === null) return $out;
+        if ($flow === null) return $setup ? ['status' => 'x', 'reasons' => $setup] + $out : $out;
 
         $columns = $this->fields->columns();
         $byName = [];
