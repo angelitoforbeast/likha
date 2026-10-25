@@ -58,6 +58,27 @@ class ForbeastPageSetup
         return $this->result($page, 'ok', $name, null, $written);
     }
 
+    /**
+     * Subok lang ng isang token bago i-save (walang isinusulat): GET /v1/pages/{id}. Ang pangalan, id at webhook URL ay
+     * galing sa Forbeast (untrusted, text lang).
+     * @return array{status: string, name: ?string, id: ?string, webhook: ?string, error: ?string} status = ok | invalid | error | skipped
+     */
+    public function probe(string $pageId, string $token): array
+    {
+        $url = $this->baseUrl();
+        if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'id' => null, 'webhook' => null, 'error' => 'Forbeast is not set up yet.'];
+
+        $res = $this->call(fn () => $this->http($token)->get($url . '/v1/pages/' . rawurlencode($pageId)));
+        if ($res === null || !$res->successful()) {
+            $status = $res !== null && in_array($res->status(), [401, 403, 404], true) ? 'invalid' : 'error';
+            return ['status' => $status, 'name' => null, 'id' => null, 'webhook' => null, 'error' => self::why($res)];
+        }
+        $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(trim((string) $v), 0, $max) : null;
+
+        return ['status' => 'ok', 'name' => $str($res->json('name'), 255), 'id' => $str($res->json('id'), 64),
+            'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
+    }
+
     /** DELETE ng webhook (subok lang: ang pagkabigo ay hindi humaharang), saka tinatanggal ang token, secret at status. */
     public function disconnect(string $page, ?int $userId = null): void
     {

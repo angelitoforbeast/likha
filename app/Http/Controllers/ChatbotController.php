@@ -90,6 +90,7 @@ class ChatbotController extends Controller
         $check = app(ChatbotPageCheck::class);
         $prints = $check->prints();
         $forbeast = app(ForbeastPageSetup::class);
+        $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
 
         $rows = [];
         foreach ($pages as $page) {
@@ -124,6 +125,8 @@ class ChatbotController extends Controller
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
+                // Ang mga kumpletong koneksyon (Connected column at ang Bot na mapipili).
+                'connected' => $connections->connected($page),
             ];
         }
 
@@ -311,6 +314,28 @@ class ChatbotController extends Controller
         $res = $setup->connect($page);
 
         return response()->json(['status' => $res['status'], 'forbeast' => ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error']] + $setup->info($page)]);
+    }
+
+    /**
+     * Ang Connections popup ng page (access gaya ng Forbeast token): GET = ang dalawang card; POST botcake / forbeast =
+     * subok, takeover check (409 hanggang may confirm), saka save; POST chat-block = "Fix chat block". Huling 4 lang ng token.
+     */
+    public function connections(Request $request, string $provider = '')
+    {
+        $this->checkAccess();
+        $page = $this->listedPage($this->str($request, 'page_name'));
+        if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+        $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        if ($provider === '') return response()->json($connections->info($page));
+
+        $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
+        $res = match ($provider) {
+            'botcake' => $connections->saveBotcake(...$args),
+            'forbeast' => $connections->saveForbeast(...$args),
+            default => ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $connections->chatBlock($page, Auth::id())]],
+        };
+
+        return response()->json($res['body'] + ['connections' => $connections->info($this->listedPage($page) ?? $page)], $res['http']);
     }
 
     /** ACTIVE On (isulat ang block at i-publish) o Off (i-unpublish lang). Ang error ng Botcake ay walang binabago dito. */

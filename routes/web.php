@@ -352,6 +352,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
     Route::post('/provider', [\App\Http\Controllers\ChatbotController::class, 'provider'])->middleware('throttle:30,1,chatbot-provider')->name('provider');
     Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
+    Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');
+    Route::post('/connections/{provider}', [\App\Http\Controllers\ChatbotController::class, 'connections'])->whereIn('provider', ['botcake', 'forbeast', 'chat-block'])->middleware('throttle:30,1,chatbot-connections-save')->name('connections.save');
     Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
     // Check, Preview, History, Restore at Changes ng /chatbot/pages (access gaya ng page; Restore gaya ng isang cell).
     Route::get('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:240,1,chatbot-check')->name('check');

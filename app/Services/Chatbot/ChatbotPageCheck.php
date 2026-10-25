@@ -65,7 +65,7 @@ class ChatbotPageCheck
     {
         $q = $page === null ? PageSetting::query() : $this->settings->pageQuery($page);
         $pages = [];
-        foreach ($q->whereIn('provider', [ChatbotFields::PROVIDER, 'botcake'])->selectRaw('page_name, MAX(id) AS max_id, MAX(replaced_at) AS max_replaced')->groupBy('page_name')->get() as $r) {
+        foreach ($q->whereIn('provider', [ChatbotFields::PROVIDER, 'botcake', ForbeastPageSetup::PROVIDER])->selectRaw('page_name, MAX(id) AS max_id, MAX(replaced_at) AS max_replaced')->groupBy('page_name')->get() as $r) {
             $pk = $this->settings->pageKey((string) $r->page_name);
             $pages[$pk] = max($pages[$pk] ?? '', sprintf('%012d|%s', (int) $r->max_id, (string) $r->max_replaced));
         }

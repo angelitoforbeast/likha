@@ -150,6 +150,12 @@ TXT;
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && trim((string) $this->settings->get($page, 'botcake', 'chat.key')) === '') {
             $out[] = $x('No chat block (chat.key): turn the chat block on with the bot toggle');
         }
+        // Ang koneksyon na hindi kumpleto (wala sa Connected): ang pumalyang huling token test lang, hindi ang hindi pa nasubok.
+        $failed = fn (string $provider) => ($s = trim((string) $this->settings->get($page, $provider, 'token_status'))) !== '' && !str_starts_with($s, 'ok');
+        if (trim((string) $this->settings->get($page, 'botcake', 'token')) !== '' && $failed('botcake')) $out[] = $x('Botcake: token not working');
+        if (trim((string) $this->settings->get($page, ForbeastPageSetup::PROVIDER, 'token')) !== '' && !app(ForbeastPageSetup::class)->info($page)['connected']) {
+            $out[] = $x('Forbeast: ' . ($failed(ForbeastPageSetup::PROVIDER) ? 'token not working' : 'not connected'));
+        }
 
         return $out;
     }
