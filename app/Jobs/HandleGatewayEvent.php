@@ -8,6 +8,7 @@ use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
+use App\Services\Chatbot\CommentReplies;
 use App\Services\Chatbot\ForbeastWatch;
 use App\Services\PageSettings;
 use Illuminate\Bus\Queueable;
@@ -52,6 +53,9 @@ class HandleGatewayEvent implements ShouldQueue
             'quick_reply' => $s($e['quick_reply_payload'] ?? null, 1000),
             'postback' => ['title' => $s($postback['title'] ?? null, 1000), 'payload' => $s($postback['payload'] ?? null, 1000)],
             'ad_id' => $s($referral['ad_id'] ?? null, 64),
+            // Ang comment (type comment): ang mga ID lang; ang text ng comment ay hindi ipinapasa sa queue.
+            'comment_id' => $s($e['comment_id'] ?? null, 100), 'post_id' => $s($e['post_id'] ?? null, 100), 'parent_id' => $s($e['parent_id'] ?? null, 100),
+            'from_id' => $s($e['from_id'] ?? null, 64), 'is_reply' => (bool) ($e['is_reply'] ?? false), 'is_page_author' => (bool) ($e['is_page_author'] ?? false),
         ];
     }
 
@@ -66,6 +70,11 @@ class HandleGatewayEvent implements ShouldQueue
     public function handle(PageSettings $settings, BotcakeChatGuard $guard): void
     {
         $e = $this->event;
+        if ($e['kind'] === 'event' && $e['type'] === 'comment' && array_key_exists('comment_id', $e)) {
+            $pageName = BotcakeChat::pageMap()[(string) $e['page_id']] ?? null;
+            self::count($pageName === null ? 'unknown_page' : app(CommentReplies::class)->receive($e, $pageName));
+            return;
+        }
         if ($e['kind'] !== 'event' || !in_array($e['type'], self::CHATS, true) || $e['is_echo']) {
             self::count($e['is_echo'] ? 'echo' : ($e['kind'] !== 'event' ? 'other' : (string) $e['type']));
             return;

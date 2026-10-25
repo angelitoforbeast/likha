@@ -2,12 +2,16 @@
 
 namespace Tests\Feature\Chatblast;
 
+use App\Jobs\HandleComment;
+use App\Models\ChatbotCommentEvent;
 use App\Models\PageSetting;
+use App\Services\Chatbot\CommentReplies;
 use App\Services\PageSettings;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Ang sagot sa comment ng mga page na nasa Forbeast: ang Comment Reply 1-3 (public, isa na random) at ang Comment PM
@@ -59,5 +63,201 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertStringContainsString('comment_pm | Comment PM | the one private message sent to a person who commented on a post', $asked);
         $this->assertStringContainsString('comment_reply_2 | Comment Reply 2 | a public reply to a comment on a post (variant 2', $asked);
         $this->assertSame(0, PageSetting::where('key', 'comment_reply_1')->count());
+    }
+
+    // ── ang mga comment event ─────────────────────────────────────────────────────────────────────────────────────
+
+    private const GW = 'https://gw.example.test';
+    private const SECRET = 'gw-webhook-secret-test-9o8i7u';
+    private const PAGE_TOKEN = 'fb_page_token_test_z9x8c7';
+    private const REPLY_URL = self::GW . '/v1/pages/1001/comments/%s/reply';
+    private const PM_URL = self::GW . '/v1/pages/1001/comments/%s/private-reply';
+    private const COMMENT_TEXT = 'Magkano po ito? secret-comment-text';
+
+    /** @var array<int, array{url: string, body: array, token: string}> ang mga tawag sa Forbeast */
+    private array $calls = [];
+
+    protected function tearDown(): void
+    {
+        CommentReplies::pickUsing(null);
+        parent::tearDown();
+    }
+
+    private function migrateComments(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_11_08_100000_create_chatbot_comment_events_table.php']]);
+        config(['services.gateway.url' => self::GW, 'services.gateway.key' => 'gw_global_key', 'services.gateway.webhook_secret' => self::SECRET]);
+    }
+
+    /** Page Uno sa Forbeast, bot On, may token, at ang mga comment value ($values ang nananaig). */
+    private function forbeastPage(array $values = []): void
+    {
+        $this->migrateComments();
+        $s = $this->settings();
+        $s->set('Page Uno', 'chatbot', 'provider', 'gateway');
+        $s->set('Page Uno', 'forbeast', 'token', self::PAGE_TOKEN, true);
+        $s->set('Page Uno', 'chatbot', 'price', '499');
+        $values += ['comment_pm' => 'Hi po! {{PRICE}} lang po ito.', 'comment_reply_1' => 'Reply A', 'comment_reply_2' => 'Reply B {{price}}', 'comment_reply_3' => 'Reply C'];
+        foreach ($values as $key => $value) if ($value !== '') $s->set('Page Uno', 'chatbot', $key, $value);
+    }
+
+    /** Fake na Forbeast: ang reply ay may bagong comment_id; $answers = [dulo ng URL => [status, body]]. */
+    private function gateway(array $answers = []): void
+    {
+        Http::fake(['gw.example.test/*' => function (HttpRequest $req) use ($answers) {
+            $this->calls[] = ['url' => $req->url(), 'body' => $req->data(), 'token' => $req->header('Authorization')[0] ?? ''];
+            foreach ($answers as $end => [$status, $body]) if (str_ends_with($req->url(), $end)) return Http::response($body, $status);
+            return str_ends_with($req->url(), '/private-reply')
+                ? Http::response(['ok' => true, 'message_id' => 'm_1', 'recipient_id' => '777'])
+                : Http::response(['ok' => true, 'comment_id' => 'our_' . count($this->calls)]);
+        }]);
+    }
+
+    /** Ang comment event ng Forbeast, pinirmahan ng $secret (null = walang pirma). */
+    private function comment(array $e = [], ?string $secret = self::SECRET)
+    {
+        $body = json_encode($e + ['page_id' => '1001', 'type' => 'comment', 'comment_id' => '111_222', 'post_id' => '1001_9', 'parent_id' => '1001_9',
+            'message' => self::COMMENT_TEXT, 'created_time' => '2026-10-25T02:00:00+0000', 'from_id' => '555', 'from_name' => null,
+            'is_reply' => false, 'is_page_author' => false]);
+        $headers = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'];
+        if ($secret !== null) $headers['HTTP_X_GATEWAY_SIGNATURE'] = 'sha256=' . hash_hmac('sha256', $body, $secret);
+
+        return $this->call('POST', '/api/gateway/events', [], [], [], $headers, $body);
+    }
+
+    private function event(string $commentId = '111_222'): ChatbotCommentEvent
+    {
+        return ChatbotCommentEvent::where('comment_id', $commentId)->firstOrFail();
+    }
+
+    public function test_S_149_2_a_comment_gets_the_private_message_first_then_one_random_public_reply(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        $offered = null;
+        CommentReplies::pickUsing(function (array $options) use (&$offered) {
+            $offered = $options;
+            return $options[1];
+        });
+
+        $this->comment()->assertOk();
+
+        $this->assertSame(['Reply A', 'Reply B 499', 'Reply C'], $offered, 'the three variants, variables filled');
+        $this->assertSame([
+            [sprintf(self::PM_URL, '111_222'), ['text' => 'Hi po! 499 lang po ito.'], 'Bearer ' . self::PAGE_TOKEN],
+            [sprintf(self::REPLY_URL, '111_222'), ['message' => 'Reply B 499'], 'Bearer ' . self::PAGE_TOKEN],
+        ], array_map(fn ($c) => array_values($c), $this->calls));
+        $e = $this->event();
+        $this->assertSame(['sent', 'sent', 'sent', 'our_2', '555'], [$e->status, $e->pm_status, $e->reply_status, $e->reply_comment_id, $e->from_id]);
+        $this->assertSame(['Hi po! 499 lang po ito.', 'Reply B 499'], [$e->pm_text, $e->reply_text]);
+    }
+
+    /** @return array<string, array{0: array, 1: array<int, string>, 2: string, 3: ?string}> values, mga tawag, status, reason */
+    public static function parts(): array
+    {
+        $none = ['comment_reply_1' => '', 'comment_reply_2' => '', 'comment_reply_3' => ''];
+
+        return [
+            'no Comment PM: public reply only' => [['comment_pm' => ''], ['reply'], 'sent', null],
+            'no Comment Reply: private message only' => [$none, ['private-reply'], 'sent', null],
+            'nothing set: skipped' => [$none + ['comment_pm' => ''], [], 'skipped', 'not_set'],
+        ];
+    }
+
+    #[DataProvider('parts')]
+    public function test_S_149_3_an_empty_column_turns_its_part_off(array $values, array $calls, string $status, ?string $reason): void
+    {
+        $this->forbeastPage($values);
+        $this->gateway();
+
+        $this->comment()->assertOk();
+
+        $this->assertSame($calls, array_map(fn ($c) => basename($c['url']), $this->calls));
+        $this->assertSame([$status, $reason], [$this->event()->status, $this->event()->reason]);
+    }
+
+    /** @return array<string, array{0: \Closure, 1: array, 2: string}> */
+    public static function skipped(): array
+    {
+        return [
+            'Botcake page (S-149.4)' => [fn (PageSettings $s) => $s->set('Page Uno', 'chatbot', 'provider', 'botcake'), [], 'botcake_page'],
+            'bot Off (S-149.4)' => [fn (PageSettings $s) => $s->set('Page Uno', 'chatbot', 'active', '0', false, null, true), [], 'bot_off'],
+            'reply to a reply (S-149.5)' => [fn () => null, ['is_reply' => true, 'parent_id' => '111_000'], 'reply'],
+            'page-authored (S-149.5)' => [fn () => null, ['is_page_author' => true, 'from_id' => '1001'], 'page_author'],
+            'one of our replies (S-149.5)' => [fn () => ChatbotCommentEvent::create(['page_id' => 1001, 'comment_id' => '111_000', 'status' => 'sent',
+                'reply_status' => 'sent', 'reply_comment_id' => '111_222', 'received_at' => now()]), [], 'ours'],
+        ];
+    }
+
+    #[DataProvider('skipped')]
+    public function test_S_149_4_and_5_botcake_or_off_pages_replies_page_authored_and_our_own_comments_are_skipped(\Closure $given, array $event, string $reason): void
+    {
+        $this->forbeastPage();
+        $given($this->settings());
+        $this->gateway();
+
+        $this->comment($event)->assertOk();
+
+        $this->assertSame([], $this->calls);
+        $this->assertSame(['skipped', $reason], [$this->event()->status, $this->event()->reason]);
+    }
+
+    public function test_S_149_6_the_same_comment_twice_is_handled_once(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+
+        $this->comment()->assertOk();
+        $this->comment()->assertOk();
+
+        $this->assertCount(2, $this->calls);
+        $this->assertSame(1, ChatbotCommentEvent::count());
+    }
+
+    public function test_S_149_7_already_replied_is_recorded_and_not_retried(): void
+    {
+        $this->forbeastPage();
+        $this->gateway(['/private-reply' => [409, ['ok' => false, 'error' => 'already_replied', 'meta_code' => 10900, 'meta_subcode' => null]]]);
+
+        $this->comment()->assertOk();
+        (new HandleComment($this->event()->id))->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+
+        $e = $this->event();
+        $this->assertSame(['already_replied', 'sent', 'sent'], [$e->pm_status, $e->reply_status, $e->status]);
+        $this->assertCount(2, $this->calls, 'one private-reply try and one public reply, nothing on the second run');
+    }
+
+    public function test_S_149_8_the_21st_comment_in_a_minute_waits_for_the_next_minute(): void
+    {
+        $this->forbeastPage(['comment_pm' => '']);
+        $this->gateway();
+        $this->travelTo('2026-10-25 10:00:15');
+        Queue::fake([HandleComment::class]);
+        for ($i = 1; $i <= 21; $i++) $this->comment(['comment_id' => 'c_' . $i])->assertOk();
+        $jobs = Queue::pushed(HandleComment::class)->values();
+        $this->assertCount(21, $jobs);
+
+        foreach ($jobs->take(20) as $job) $job->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+        $last = $jobs[20]->withFakeQueueInteractions();
+        $last->handle(app(CommentReplies::class));
+
+        $last->assertReleased(45);
+        $this->assertSame([20, 'queued'], [count($this->calls), $this->event('c_21')->status]);
+
+        $this->travelTo('2026-10-25 10:01:00');
+        $jobs[20]->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+        $this->assertSame([21, 'sent'], [count($this->calls), $this->event('c_21')->status]);
+    }
+
+    public function test_S_149_10_an_unknown_page_or_a_bad_signature_is_refused(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+
+        $this->comment(['page_id' => '9999'])->assertStatus(401);
+        $this->comment([], 'wrong-secret')->assertStatus(401);
+        $this->comment([], null)->assertStatus(401);
+
+        $this->assertSame([0, []], [ChatbotCommentEvent::count(), $this->calls]);
     }
 }
