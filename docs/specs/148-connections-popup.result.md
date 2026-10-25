@@ -138,3 +138,106 @@ Tests to add: a Marketing and a Marketing OIC user can use On/Off, + Page and th
 | Open points 1, 4, 5 of the result are accepted as they are (Page ID is the identity for Botcake; the Forbeast Page ID must equal the Botcake ID; a never-tested token is listed after its first test or nightly run). Open point 3 is replaced by Amendment 148-1 (Marketing OIC and Marketing may also use Botcake saves, Fix chat block, On/Off and + Page, with complete logs). | The reviewer's decision; the owner's access rule. |
 
 End with "148-2: <done|blocked> — <one line>".
+
+## Amendments 148-1 and 148-2: result
+
+### Files
+- Changed:
+  - `app/Services/Chatbot/ChatbotConnections.php`: `testBotcake`, `testForbeast`, `clearForbeast`, `guard`, `stampOff`, and `blockState` (reads `/default_reply/content`). `published()` reads `/default_reply` for `settings.is_published` only.
+  - `app/Services/Chatbot/ForbeastPageSetup.php`: `connect` and `retest` take the user id; `retest` adds the time to the status.
+  - `app/Http/Controllers/ChatbotController.php`: `SETUP_ROLES`, `checkSetup()` (replaces `checkCeo()`), the On / + Page guard, `SETUP_LABELS` in Changes.
+  - `app/Console/Commands/ChatbotConnectionsCheck.php`: uses the same Test and re-applies on "none" or "old key".
+  - `app/Services/Chatbot/PageContentCheck.php`: "Botcake: no chat block".
+  - `app/Services/PageSettings.php`: `botcake.chat_block` is a system key.
+  - `app/Services/PageSettingsGrid.php`: `botcake.chat_block` is not a grid column.
+  - `routes/web.php`: new provider values and the group comment.
+  - `resources/views/chatbot/index.blade.php`: Test and Clear buttons, last test line, `$canSetUp`, 409 confirm on On and + Page.
+  - Tests: `tests/Feature/Chatblast/ChatbotConnectionsTest.php`, plus `ChatbotPagesTest.php` and `BotcakeChatAdTest.php` (see Story changes).
+  - Docs: `qa/stories.md`, `TODO.md`.
+- New routes: `POST /chatbot/connections/{botcake-test | forbeast-test | forbeast-clear}`, under the same name and throttle as the other popup saves.
+
+### Access
+- **Roles:** `CEO`, `Marketing - OIC`, `Marketing`. These are the stored names used by `OrderEncodeController`, `OwnerPrivateController` and `PlaybookController`, matched like the controller's own role check (spaces collapsed, exact).
+- **Covered:** every Connections route (read, save, Test, Clear, Fix chat block, the confirm resend), `active()` and `addPage()`. The old `POST /chatbot/forbeast-token` is also covered: it no longer has UI, but it can still save and clear a Forbeast token.
+- **Unchanged (today's /chatblast access):** viewing /chatbot/pages, cells, Flow, Bot (provider), Check, Preview and Changes.
+- **Nav settings:** the setup routes don't need the /chatblast nav link, but the Marketing roles need it to open the page.
+
+### How every action reaches Changes
+Changes now lists six setup keys besides the chatbot ones: Botcake ID, Botcake token, Botcake test (`botcake.token_status`), Botcake chat block (`botcake.chat_block`, new system key), Forbeast token, and Forbeast test (`forbeast.token_status`). Secret values show as "(hidden)".
+
+| Action | Row | Who |
+|---|---|---|
+| On / Off | `chatbot.active` (as before) + `botcake.chat_block` "applied …" / "off …" | the user |
+| Token saved / replaced / cleared | `botcake.token`, `forbeast.token` (clear = the row deactivated with the user) | the user |
+| Test | a new `*.token_status` row "ok / invalid / error, the time (Y-m-d H:i:s), · short reason", plus for Botcake `botcake.chat_block` "on / missing / unpublished / off / elsewhere / unknown, time · reason" | the user |
+| Save and test | the token row, then the same status rows | the user |
+| Fix chat block, and the block turned on by a save | `botcake.chat_block` "applied …" or "failed … · reason" | the user |
+| Nightly re-test and any block it re-applied | the same rows with no user | "system" |
+| Bot switch, Flow change | `chatbot.provider`, `chatbot.flow` (as before) | the user |
+
+Reasons are Botcake/Forbeast messages (which carry no token) and are shown as text only.
+
+**Botcake token "cleared":** the popup has no Botcake Clear, because removing the Botcake token takes the page off the chatbot list. That stays in page settings, whose clear already appears in Changes as "Botcake token → (none)" with the user.
+
+### Default Reply (148-2)
+- `blockState` reads `GET /pages/{id}/default_reply/content` and finds every `json_api` card in `blocks`:
+  - another host → that host (a confirm is needed);
+  - our host with `X-Chat-Key` = the page's chat.key → ours;
+  - our host with another key → old key (no question, because it's our site; the nightly run re-writes it with the same chat.key);
+  - no card → none;
+  - non-2xx, `success:false`, no `blocks` array, or a card without a host → unknown.
+- `GET /default_reply` is read only for `settings.is_published`, which the Test reports as "unpublished", or "off" when the bot is switched Off here.
+- The test fakes use the shapes from the live check.
+- **Who asks on "unknown":** the popup save and Fix chat block ask. On and + Page ask only when another site is seen. They never had a guard before; this was added after the review (see TODO.md).
+
+### Story changes
+- S-148.13 replaced: the setup routes are for the three roles; others get 403.
+- New cases:
+  - S-148.16: Marketing roles can use On/Off, + Page and the popup.
+  - S-148.17: the Test button and last-test time.
+  - S-148.18: every action in Changes with the user.
+  - S-148.19: the guard on multi-card and unreadable replies.
+  - S-148.20: the guard on On and + Page.
+  - S-148.21: the old Forbeast token route.
+- S-148.12: "missing" now means no block of ours, or our block with an old key, in `/default_reply/content`; the nightly rows are listed in Changes.
+- S-068.2 and S-068.3: the "not allowed" user is now a Data Encoder with /chatblast, because Marketing is allowed now.
+- S-068.3, S-068.11, S-072.1, S-072.5 and S-072.6 count Botcake writes (POST) only: On and + Page now do one read (GET) first.
+
+### Evidence
+Final run of `phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` after the review fixes: **OK, Tests: 1459, Assertions: 8505, PHPUnit Deprecations: 75, Skipped: 1**. Baseline at d1bdca9f: 1439 tests, 74 deprecations, 1 skipped. No failures. The one extra deprecation is the doc-comment `@dataProvider` of S-148.19, the same style as the existing S-072.6.
+
+| Case | Test | Result |
+|---|---|---|
+| S-148.13 | `test_S_148_13_the_setup_routes_are_for_ceo_marketing_oic_and_marketing_only` | pass |
+| S-148.16 | `test_S_148_16_marketing_oic_and_marketing_can_use_on_off_add_page_and_the_popup` | pass |
+| S-148.17 | `test_S_148_17_test_re_tests_the_saved_token_and_updates_the_last_test_time` | pass |
+| S-148.18 | `test_S_148_18_every_setup_action_shows_in_changes_with_the_user_and_never_a_token` | pass |
+| S-148.12 (nightly in Changes, content endpoint) | `test_S_148_12_the_nightly_check_retests_tokens_and_re_applies_a_missing_chat_block_only_on_active_botcake_pages` | pass |
+| S-148.19 | `test_S_148_19_the_popup_asks_on_another_site_or_an_unreadable_default_reply_and_writes_nothing` (4 cases) | pass |
+| S-148.20 | `test_S_148_20_on_and_add_page_ask_before_replacing_another_sites_default_reply` | pass |
+| S-148.21 | `test_S_148_21_the_old_forbeast_token_route_has_the_same_access_and_logs_the_user` | pass |
+
+Red runs:
+- Before the code, the new tests failed with "Expected 409 but received 200" (S-148.5, guard still on `/default_reply`), "Expected 403 but received 200" (S-148.13), "Expected 200 but received 403" (S-148.16, S-148.18) and "Expected 200 but received 404" (S-148.17, no Test route).
+- After the review, on the previous commit's code: S-148.20 failed "Expected 409 but received 200" and S-148.21 failed "Expected 403 but received 200". S-148.19 passed there, because it pins guard behaviour that already worked; the reviewer asked for it as a missing test.
+
+### Review
+`skeptic-reviewer`, adversarial depth. 3 majors:
+- the old Forbeast token route was still open to any /chatblast role;
+- On and + Page had no takeover check;
+- the guard had no tests for multi-card or unreadable replies.
+
+All three were fixed in one loop; the re-check was clean. Minors are fixed or listed in TODO.md with reasons.
+
+### Commits
+- `f7ea3b49` feat: Test button, setup access for CEO and Marketing roles, every setup action in Changes, Default Reply read from its content endpoint. Its subject names the amendments; later subjects use the spec number only (TODO.md).
+- `326f83c2` fix: takeover check on On and + Page, old Forbeast token route limited to the setup roles, chat block logged on On and Off (spec 148)
+- (this docs commit)
+
+### Open points after the amendments
+1. Open points 1, 4 and 5 above are accepted (148-2). Open point 3 is replaced by 148-1.
+2. One read-only live call is still worth doing before release: does `/default_reply/content` return the real `X-Chat-Key` value? If Botcake masks it, every page reads "old key" and the nightly run re-writes every block (TODO.md).
+3. The browser check (S-148.8, .11, .14, .15, and the new Test and Clear buttons) is still not run.
+
+148-1: done — Test buttons with last-test time, setup for CEO, Marketing - OIC and Marketing (others 403), and every listed action in Changes with the user ("system" at night); suite green, 1459 tests.
+148-2: done — the takeover guard and the nightly check read `/default_reply/content` (our host and X-Chat-Key = chat.key), `/default_reply` only for is_published, with the fakes in the live shapes.

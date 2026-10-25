@@ -1110,3 +1110,15 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Filter panel and popups: no focus trap, no focus return to ▾; Check filter values are the raw ok / x / warn.** Reason: matches the existing dialogs on the page; the values are the spec's words.
 - **The page settings link to /chatbot/pages is shown to roles without /chatblast access** (they get the access error there). Reason: page settings and /chatblast are usually the same roles.
 - **No JS test runner:** popup, Bot select, Flow popup and header filters are covered by markup checks and code review only; the browser check was not run (no local database for the dev server).
+
+## 148: amendments (Test button, setup roles, logs, Default Reply content), accepted review minors (2026-10-25)
+
+- **On and + Page do not ask when the Default Reply cannot be read** (Botcake error, timeout or another answer shape); they ask only when another site is seen. Reason: these paths never had a guard and the older On / + Page tests use generic Botcake fakes; the Connections popup asks in that case. A Botcake hiccup at the moment of On on a page another site took over would still overwrite it; asking on "unknown" there means updating those fakes.
+- **If Botcake masks the X-Chat-Key value in `/default_reply/content`, every page reads as "old key"**: the nightly run would re-write the block on every active page every night and Connected would stay red. Reason: not checkable without a live call; one read-only call settles it before release.
+- **A Test whose Default Reply cannot be read ("unknown") does not drop Botcake from Connected.** Reason: display only; the next Test or night corrects it.
+- **The nightly run adds 2 to 3 Changes rows per page per night**, and a Botcake hiccup at night writes `error`, which shows red until the next run. Reason: the amendment asks for every nightly re-test in Changes.
+- **Saving the same Forbeast token twice with the same result adds no new "Forbeast test" row** (the connect status text has no time, because the S-113 tests pin it). Reason: the token row and the webhook call are the same; the Test button always adds a row.
+- **The role check is exact (spaces collapsed)**, as in this controller: a role stored as "marketing – oic" is refused (fails closed). Reason: the amendment asks to match the controller's existing check.
+- **Marketing roles without /chatblast in nav settings can call the setup routes but cannot open /chatbot/pages.** Reason: viewing the page keeps today's rule; nav settings decide.
+- **Untested here:** Test results "unpublished", "elsewhere" and "unknown" through the Test button (the states are tested through the save guard and S-148.17's "missing"). Reason: same code path; one representative case.
+- **A commit subject names the amendments ("amendments 1 and 2").** Reason: already committed locally; later commits use the spec number only.

@@ -360,7 +360,7 @@ class ChatbotController extends Controller
 
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         if ($request->boolean('on')) {
-            // Ang On ay pinapalitan ang buong Default Reply: ang ibang site (o hindi masuri) ay kailangan ng confirm.
+            // Ang On ay pinapalitan ang buong Default Reply: ang ibang site ay kailangan ng confirm (ang hindi masuri ay hindi humaharang, gaya ng dati).
             $ask = $request->boolean('confirm') ? null : $connections->guard(trim((string) $this->settings->get($page, 'botcake', 'page_id')),
                 trim((string) $this->settings->get($page, 'botcake', 'token')), (string) $this->settings->get($page, 'botcake', 'chat.key'));
             if ($ask !== null) return response()->json($ask['body'] + ['active' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0'], $ask['http']);
@@ -398,7 +398,7 @@ class ChatbotController extends Controller
         $owner = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)->where('value', $pageId)
             ->pluck('page_name')->first(fn ($p) => $this->settings->pageKey($p) !== $this->settings->pageKey($page));
         if ($owner !== null) return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}."], 422);
-        // Ang block ay papalit sa Default Reply: ang ibang site (o hindi masuri) ay kailangan ng confirm bago may isulat.
+        // Ang block ay papalit sa Default Reply: ang ibang site ay kailangan ng confirm bago may isulat.
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         $ask = $request->boolean('confirm') ? null : $connections->guard($pageId, $token !== '' ? $token : trim((string) $this->settings->get($page, 'botcake', 'token')),
             (string) $this->settings->get($page, 'botcake', 'chat.key'));

@@ -816,7 +816,7 @@
         b.disabled = true; b.setAttribute('aria-busy', 'true'); b.classList.add('opacity-50'); paintSwitch(b, on);
         try {
             let {ok, status, data} = await post(url.activeUrl, {page_name: r.page, on});
-            // Ang Default Reply ay nasa ibang site (o hindi masuri): itanong bago palitan.
+            // Ang Default Reply ay nasa ibang site: itanong bago palitan.
             if (status === 409 && confirm(data.message)) ({ok, status, data} = await post(url.activeUrl, {page_name: r.page, on, confirm: true}));
             if (!ok) errors.set(r.page, status === 409 ? 'Not changed.' : (data.error || data.message || 'Not changed.'));
             else { r.active = data.active; if (data.error) errors.set(r.page, data.error); else errors.delete(r.page); }
