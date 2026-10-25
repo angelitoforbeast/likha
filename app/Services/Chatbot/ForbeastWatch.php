@@ -57,6 +57,8 @@ class ForbeastWatch
     private const INBOUND_CUSTOMERS = 2;
     /** Ang sagot ng bot na ilang segundo bago dumating ang standby ay sagot na rin dito (magkasabay na dating). */
     private const REPLIED_GRACE = 5;
+    /** Ang tanda sa payload ng chat ng Forbeast na nabura na ang standby na kapares nito. */
+    private const TWIN_USED = '_twin_used';
 
     public function __construct(private PageSettings $settings)
     {
@@ -146,14 +148,13 @@ class ForbeastWatch
 
     /**
      * Ang anyo ng mensahe sa paghahambing ng dalawang kopya: ang text ay walang pagkakaiba sa laki ng titik at espasyo; ang
-     * attachment ay ang uri lang (ang Forbeast ay "[Audio]", ang Botcake ay "[audio] <url>"). Ang larawan at sticker ay
-     * iisa: ang sticker ay dumarating sa Forbeast bilang larawan.
+     * attachment ay ang uri lang (ang Forbeast ay "[Audio]", ang Botcake ay "[audio] <url>"). Ang larawan, sticker at Like
+     * ay iisa: ang sticker ay dumarating sa Forbeast bilang larawan, at ang Like ay maaaring "[sticker] <url>" sa Botcake.
      */
     public static function kindOf(?string $message): string
     {
         $m = trim((string) $message);
-        if ($m === ChatMessageCleaner::LIKE) return 'att:like';
-        if ($m === ChatMessageCleaner::PHOTO) return 'att:image';
+        if ($m === ChatMessageCleaner::LIKE || $m === ChatMessageCleaner::PHOTO) return 'att:image';
         if (preg_match('/^\[(audio|image|photo|sticker|video|file|location|fallback|attachment)\](?:\s+\S+)?$/iu', $m, $x)) {
             $type = strtolower($x[1]);
 
@@ -171,7 +172,8 @@ class ForbeastWatch
     private static function pairs(\Illuminate\Support\Collection $chats): array
     {
         $out = [];
-        $forbeast = $chats->filter(fn ($c) => !self::standby($c) && ($c->payload['source'] ?? null) === 'gateway');
+        // Ang chat ng Forbeast na nakapagbura na ng standby nito (answered) ay hindi na kapares ng iba.
+        $forbeast = $chats->filter(fn ($c) => !self::standby($c) && ($c->payload['source'] ?? null) === 'gateway' && empty($c->payload[self::TWIN_USED]));
         foreach ($chats->filter(fn ($c) => self::standby($c))->sortBy('received_at') as $s) {
             $kind = self::kindOf($s->message);
             $best = $forbeast->filter(fn ($f) => !isset($out[$f->id]) && (string) $f->psid === (string) $s->psid && $f->received_at && $s->received_at
@@ -270,8 +272,15 @@ class ForbeastWatch
     public function answered(int $chatId): void
     {
         $chat = BotcakeChat::find($chatId);
-        if ($chat === null || self::standby($chat) || ($chat->payload['source'] ?? null) !== 'gateway') return;
-        self::twin($chat, true)?->delete();
+        if ($chat === null || self::standby($chat) || ($chat->payload['source'] ?? null) !== 'gateway' || !empty($chat->payload[self::TWIN_USED])) return;
+        $twin = self::twin($chat, true);
+        if ($twin === null) return;
+        // Isang standby lang kada chat ng Forbeast: may tanda ang chat, para ang susunod na send ng parehong flow ay hindi
+        // magbura ng standby ng ibang mensahe (hal. ang pangalawang voice note na hindi natanggap ng Forbeast).
+        DB::transaction(function () use ($chat, $twin) {
+            $chat->update(['payload' => (array) $chat->payload + [self::TWIN_USED => true]]);
+            $twin->delete();
+        });
     }
 
     /**

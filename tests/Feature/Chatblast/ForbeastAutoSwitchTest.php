@@ -227,6 +227,7 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
             'audio' => ['[audio] https://cdn.fbsbx.com/v/t59.3654-21/voice_clip.mp4?_nc_cat=1&oh=00_abc', '[Audio]'],
             'image' => ['https://scontent.xx.fbcdn.net/v/t1.15752-9/abc_n.jpg?stp=dst-jpg', '[Photo]'],
             'sticker' => ['[sticker] https://scontent.xx.fbcdn.net/v/t39.1997-6/sticker_n.png', '[Photo]'],
+            'like (a Botcake sticker marker too)' => ['[sticker] https://scontent.xx.fbcdn.net/v/like.png', '👍'],
             'like' => ['https://scontent.xx.fbcdn.net/v/t39.1997-6/39178562_1505197616293642_5411344281094848512_n.png', '👍'],
             'video' => ['[video] https://video.xx.fbcdn.net/v/clip.mp4', '[Video]'],
             'text, other spacing and case' => ["  Magkano   PO\nito? ", 'magkano po ito?'],
@@ -299,6 +300,37 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertNotNull($skip);
         $this->assertStringContainsString('"reason":"forbeast_twin"', $skip);
         $this->assertStringNotContainsString('voice.mp4', implode("\n", $lines));
+    }
+
+    public function test_S_149_23_a_forbeast_reply_removes_only_its_own_standby_copy_even_after_several_sends(): void
+    {
+        Queue::fake();
+        // Dalawang voice note; ang Forbeast ay ang una lang ang natanggap, at ang flow nito ay may dalawang send.
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/one.mp4')->assertOk();
+        $f1 = $this->gatewayChat('[Audio]');
+        $this->travel(30)->seconds();
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/two.mp4')->assertOk();
+
+        app(ForbeastWatch::class)->answered($f1->id);
+        app(ForbeastWatch::class)->answered($f1->id);
+
+        $left = BotcakeChat::get()->filter(fn ($c) => ForbeastWatch::standby($c))->pluck('message')->values()->all();
+        $this->assertSame(['[audio] https://cdn.fbsbx.com/two.mp4'], $left, 'the second voice note stays for a switch');
+    }
+
+    public function test_S_149_22_a_copy_with_no_twin_is_skipped_when_the_customer_was_answered_since_it_came(): void
+    {
+        Queue::fake();
+        $this->greeting();
+        $this->botcakePush('Hello po', null, self::PSID_B)->assertOk();
+        BotcakeOutbox::record(1001, (int) self::PSID_B, null, null, 'n2', 'manual', [], 'sent'); // hal. sagot mula sa Inbox
+        \Illuminate\Support\Facades\DB::table('chatbot_replies')->update(['kind' => 'send', 'sent_at' => now()->subSeconds(3)]);
+
+        Http::fake([self::GW_SEND => Http::response($this->metaError(190), 400)]);
+        $lines = $this->logged(fn () => $this->send());
+
+        Queue::assertNotPushed(RunChatbotFlow::class);
+        $this->assertNotNull(collect($lines)->first(fn ($l) => str_contains($l, 'standby skipped') && str_contains($l, '"reason":"already_answered"')));
     }
 
     public function test_S_117_5_the_health_check_switches_after_three_failures_or_at_once_when_not_connected(): void
