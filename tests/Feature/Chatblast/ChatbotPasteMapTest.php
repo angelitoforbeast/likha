@@ -377,6 +377,9 @@ class ChatbotPasteMapTest extends ChatblastTestCase
         $this->assertMatchesRegularExpression('/id="pe-map-item" class="[^"]*break-words[^"]*bg-amber-50/', $html);
         $this->assertLessThan(strpos($html, 'id="pe-map-apply"'), strpos($html, 'id="pe-map-item"'));
         $this->assertStringNotContainsString('innerHTML', $js, 'textContent lang ang ipinapakita');
+        // Add Seq: ang mga bagong field ay idinadagdag sa bukas na modal bago tingnan kung may bagong paste (walang field na kulang).
+        $add = substr($js, strpos($js, 'async function peMapAddSeq'));
+        $this->assertLessThan(strpos($add, 'if (pe.map !== map)'), strpos($add, "\$('pe-fields').append(peField(c))"));
     }
 
     public function test_S_152_8_an_instruction_in_a_cell_swept_into_seq_still_only_gets_a_key_never_a_value(): void

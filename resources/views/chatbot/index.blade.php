@@ -1431,13 +1431,16 @@
             }
             await load();
         } finally { $('pe-map-add').disabled = false; }
-        if (!pe || pe.map !== map) return; // sarado na ang modal o may bagong paste
+        if (!pe) return; // sarado na ang modal
+        // Laging idinadagdag sa bukas na modal ang mga bagong column (pinalitan na ng load() ang columns), kahit may bagong paste.
         for (const c of botCols()) {
             if (peInput(c.key)) continue;
             $('pe-fields').append(peField(c));
             $('pe-start').append(el('option', {value: c.key, text: c.label}));
         }
-        for (const m of map.missing) if (peInput(m.key)) { map.keys[m.cell] = m.key; map.conf[m.cell] = 'medium'; map.note[m.cell] = 'in order (new column)'; }
+        if (pe.map !== map) { paintPe(); return; } // may bagong paste: ang lumang mapping ay hindi na ginagalaw
+        // Ang cell na pinalitan na ng user ang field ay hindi ginagalaw.
+        for (const m of map.missing) if (peInput(m.key) && !map.keys[m.cell]) { map.keys[m.cell] = m.key; map.conf[m.cell] = 'medium'; map.note[m.cell] = 'in order (new column)'; }
         map.missing = map.missing.filter(m => !peInput(m.key));
         $('pe-fields').querySelectorAll('textarea').forEach(grow);
         peMapList();
