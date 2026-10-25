@@ -1122,3 +1122,14 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Marketing roles without /chatblast in nav settings can call the setup routes but cannot open /chatbot/pages.** Reason: viewing the page keeps today's rule; nav settings decide.
 - **Untested here:** Test results "unpublished", "elsewhere" and "unknown" through the Test button (the states are tested through the save guard and S-148.17's "missing"). Reason: same code path; one representative case.
 - **A commit subject names the amendments ("amendments 1 and 2").** Reason: already committed locally; later commits use the spec number only.
+## 149: comment replies, accepted review minors (2026-10-25)
+
+- **A comment event with no `comment_id`, or one that arrives before the migration is run, is only counted (`gateway-events` `no_id`), with no row.** Reason: without an ID nothing can be deduped or answered; the migration window is a trusted ops step (run the migration before or with the deploy).
+- **The per-minute slot is a hand-rolled cache counter, not `RateLimiter`.** Reason: same behaviour (atomic increment on the database cache), and the test pins it; swap only if it changes.
+- **`GatewayComments` repeats `GatewayProvider`'s key and timeout setup (second copy).** Reason: abstract on the third client.
+- **No test feeds `<script>` through a stored Forbeast error to the Replies view.** Reason: the view renders every value with `textContent`, checked by review.
+- **The 20 per minute counts comments, not sends** (a comment with a private message and a public reply uses one slot). Reason: Botcake's limit is per comment; check against Meta's limits if Forbeast reports throttling.
+- **Comment sends do not feed the Forbeast watch (auto-switch to Botcake).** Reason: a comment failure should not move a page's chat replies; revisit if the owner wants it.
+- **S-149.11 (Check warns when the token lacks the comment permissions) is not built.** Reason: Forbeast's `GET /v1/pages/{id}` does not report scopes today; add it when Forbeast does.
+- **`HandleComment::failed()` has no test, and no test redelivers a job whose row is already `sending`.** Reason: both are guarded by the status check on entry and the queued→sending compare-and-set; nothing can be sent twice.
+- **A worker killed mid-send leaves the row `sending`, and `failed()` then marks it `failed` even if the private message went out.** Reason: log accuracy only (Health may count one comment as failed); never a second send.
