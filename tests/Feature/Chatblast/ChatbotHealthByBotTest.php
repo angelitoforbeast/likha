@@ -96,7 +96,6 @@ class ChatbotHealthByBotTest extends ChatblastTestCase
 
     public function test_S_149_16_the_comparison_has_one_row_per_bot_for_today_and_yesterday(): void
     {
-        fwrite(STDERR, json_encode(\App\Models\PageSetting::where('key', 'auto_switch')->get(['page_name','value','created_at','active'])->map(fn($s) => [$s->page_name, $s->plainValue(), (string) $s->created_at, $s->getRawOriginal('created_at')])) . "\n");
         $this->actingAs($this->user());
 
         $compare = $this->get('/chatbot/health')->assertOk()->viewData('compare');

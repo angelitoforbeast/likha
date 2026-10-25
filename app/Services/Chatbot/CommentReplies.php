@@ -98,14 +98,14 @@ class CommentReplies
         $codes = [];
         if ($pm !== '' && $event->pm_status === null) {
             $r = $this->gateway->privateReply($pageName, (string) $event->page_id, $event->comment_id, $pm);
-            if ($r['status'] === GatewayComments::THROTTLED) return $this->throttled($event, $done, (string) $event->page_id);
+            if ($r['status'] === GatewayComments::THROTTLED) return $this->throttled($event, $done + (($code = array_values(array_filter($codes))[0] ?? null) !== null ? ['reason' => $code] : []), (string) $event->page_id);
             $done += ['pm_status' => $r['status'], 'pm_text' => $pm, 'pm_error' => $r['error']];
             $codes[] = $r['status'] === 'failed' ? $r['code'] : null;
         }
         if ($variants && $event->reply_status === null) {
             $text = self::$pick ? (string) (self::$pick)($variants) : $variants[random_int(0, count($variants) - 1)];
             $r = $this->gateway->reply($pageName, (string) $event->page_id, $event->comment_id, $text);
-            if ($r['status'] === GatewayComments::THROTTLED) return $this->throttled($event, $done, (string) $event->page_id);
+            if ($r['status'] === GatewayComments::THROTTLED) return $this->throttled($event, $done + (($code = array_values(array_filter($codes))[0] ?? null) !== null ? ['reason' => $code] : []), (string) $event->page_id);
             $done += ['reply_status' => $r['status'], 'reply_text' => $text, 'reply_error' => $r['error'], 'reply_comment_id' => $r['comment_id']];
             $codes[] = $r['status'] === 'failed' ? $r['code'] : null;
         }

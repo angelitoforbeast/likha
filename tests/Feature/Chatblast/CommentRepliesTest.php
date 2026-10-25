@@ -351,6 +351,28 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertSame(['private-reply', 'reply', 'reply'], array_map(fn ($c) => basename($c['url']), $this->calls));
     }
 
+    public function test_S_149_18_a_failed_private_message_keeps_its_code_when_the_reply_waits_for_a_429(): void
+    {
+        $this->forbeastPage();
+        $this->travelTo('2026-10-25 10:00:15');
+        $replies = 0;
+        Http::fake(['gw.example.test/*' => function (HttpRequest $req) use (&$replies) {
+            $this->calls[] = ['url' => $req->url()];
+            if (str_ends_with($req->url(), '/private-reply')) return Http::response(['ok' => false, 'error' => 'forbidden'], 403);
+            return ++$replies === 1 ? Http::response(['ok' => false, 'error' => 'rate_limited'], 429) : Http::response(['ok' => true, 'comment_id' => 'our_9']);
+        }]);
+        Queue::fake([HandleComment::class]);
+        $this->comment()->assertOk();
+        $job = Queue::pushed(HandleComment::class)->first();
+
+        $job->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+        $this->travelTo('2026-10-25 10:01:00');
+        $job->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+
+        $this->assertSame(['failed', 'forbidden', 'failed', 'sent'], [$this->event()->status, $this->event()->reason, $this->event()->pm_status, $this->event()->reply_status]);
+        $this->assertSame(['private-reply', 'reply', 'reply'], array_map(fn ($c) => basename($c['url']), $this->calls));
+    }
+
     public function test_S_149_19_a_comment_without_text_still_gets_the_private_message_and_the_reply(): void
     {
         $this->forbeastPage();

@@ -136,7 +136,7 @@
                 </tbody>
             </table>
         </div>
-        <p class="text-xs text-slate-500">Each page counts under its bot now: a page that switched today counts all day under its current bot. "Switched to Botcake" is on the row of the bot it left.</p>
+        <p class="text-xs text-slate-500">Each page counts under its bot now: a page that switched today counts all day under its current bot. "Switched to Botcake" is on the row of the bot it left. Comments in also counts comments still waiting, skipped, and "unknown" (Forbeast could not tell whether Meta posted it), so in is more than replied + failed.</p>
     </section>
 
     {{-- Mga dahilan ng pumalya ngayon. --}}
