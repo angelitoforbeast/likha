@@ -446,3 +446,24 @@ Live data check by the reviewer, 2026-10-25.
 | Answer to your question: an ignored photo/voice **still counts as the customer replying** (sequence exit-on-reply, Results "replied") — keep today's behaviour. | Reviewer's decision: the customer did respond; only the bot's answer is skipped. |
 
 Re-run the brief's folders (no new failures). End with "149-6: <done|blocked> — <one line>".
+
+### Result of 149-6
+- **One parser:** `ChatAttachments::MARKER` / `fromMarker()` now read all three forms, case-insensitive:
+  - `[type](https://…)` (Botcake's live markdown link);
+  - `[type] https://…`;
+  - a bare `[Type]` (Forbeast).
+
+  The link is kept in `payload.attachment.url`, and a photo is stored as type `image`, like Forbeast's. Only an http(s) link counts: `[audio](not-a-link)` and `[photo] ito` stay text and are answered.
+- **ForbeastWatch:** `kindOf()` (the twin pairing from 149-4) now uses the same parser, so a Botcake `[audio](https://cdn.fbsbx.com/…)` pairs with Forbeast's `[Audio]`. The old second regex is gone.
+- **Live fixtures:**
+  - `ChatbotAttachmentsTest`: `[audio](https://cdn.fbsbx.com/x)`, `[reel](https://www.facebook.com/x)`, `[fallback](https://www.facebook.com/share/y)` and `[Photo]` are ignored, with the link kept; `[audio](not-a-link)` is answered.
+  - `ForbeastAutoSwitchTest` twins: `[audio](https://cdn.fbsbx.com/x)` against `[Audio]`, `[Photo]` against `[Photo]`, and `[AUDIO](HTTPS://…)` against `[Audio]` all pair, so the page does not switch.
+- **Decision recorded:** an ignored photo or voice note still counts as the customer replying (sequence exit-on-reply, Results "replied"). No code change was needed; the TODO entry is updated.
+- **Red runs:**
+  - the four live rows failed with "no run, so no AI and no send" (and a type mismatch for `[Photo]`);
+  - the live twin failed with "two customers, but every copy has its twin".
+- **Story changes:** new S-149.33.
+- **Review:** `skeptic-reviewer`, standard depth, found no blocker or major. Two minor test rows were added (no-link and upper-case forms). The rest are in `TODO.md`: a link with a parenthesis is read as text, a marker followed by something other than a link is compared as text when pairing, and the stale "other types" line was refreshed.
+- **Suite:** the brief's folders on 28555d17: `OK, but there were issues! Tests: 1526, Assertions: 8861, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459, no failures). The later commit 0ae1ef00 only adds test rows: those two files pass (46 tests).
+
+149-6: done — Botcake's live `[audio](link)` / `[reel](link)` / `[fallback](link)` / `[Photo]` forms are ignored by the bot with the link kept, and they pair with Forbeast's `[Audio]`; ignored attachments still count as the customer replying.
