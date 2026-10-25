@@ -220,6 +220,9 @@ class ChatbotAiProviderPoolTest extends ChatbotAiProviderTestCase
         $this->pool->tick();
         $this->assertCount(2, $this->to('127.0.0.1'), 'the retry goes on from OpenAI, not from Local');
         $this->assertCount(3, $this->to('api.openai.com'));
+        // Ang lumang timer ng Local (mula sa unang kuha) ay hindi dapat tumama sa bagong subok ng OpenAI.
+        $this->travel(7)->seconds();
+        $this->pool->tick(false);
         $this->to('api.openai.com')[2]['p']->resolve(self::answer('pagkatapos ng 429'));
         $this->pool->tick(false);
         $this->assertSame(['Reply: pagkatapos ng 429'], $this->sent('7002'));
@@ -242,5 +245,14 @@ class ChatbotAiProviderPoolTest extends ChatbotAiProviderTestCase
         $this->assertEqualsWithDelta(60, $call['opt']['timeout'], 1.0);
         $this->assertEqualsWithDelta(10, $call['opt']['connect_timeout'], 0.01);
         $this->assertNotSame(false, $call['opt']['allow_redirects'] ?? null, 'redirects as today (Guzzle default)');
+
+        // Sa huling segundo ng deadline, ipinapadala pa rin sa OpenAI na may 1 s (gaya ng dati), hindi palya agad.
+        $this->pool->beat();
+        $this->says('huling segundo', 'Page Uno', '7003');
+        $this->travel(59)->seconds();
+        $this->travel(500)->milliseconds();
+        $this->pool->tick();
+        $this->assertCount(2, $this->to('api.openai.com'));
+        $this->assertSame(1, end($this->poolCalls)['opt']['timeout']);
     }
 }

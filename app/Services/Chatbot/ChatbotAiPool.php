@@ -28,6 +28,7 @@ class ChatbotAiPool extends TicketPool
     private array $chains = [];
     /** @var array<string, array> request_id => ang mga subok bago ang 429 ng OpenAI (itinutuloy sa susunod na kuha) */
     private array $carried = [];
+    private int $tokens = 0;
 
     public function __construct(mixed $handler = null)
     {
@@ -101,8 +102,9 @@ class ChatbotAiPool extends TicketPool
                 continue;
             }
             $left = now()->diffInSeconds(Carbon::parse($row->deadline_at), false);
-            if ($left < 1) {
-                // Walang isang segundo para sa provider na ito: isang palya lang (kondisyonal ang finish, kaya walang ikalawang resume kahit sa sweep).
+            if ($left < 1 && $this->chains[$id]['attempts']) {
+                // Pagkatapos ng naunang subok, walang isang segundo para sa provider na ito: isang palya lang (kondisyonal ang
+                // finish, kaya walang ikalawang resume kahit sa sweep). Ang unang subok ay ipinapadala pa rin gaya ng dati.
                 $late = ChatbotAiProviders::late($p);
                 $this->chains[$id]['attempts'][] = ChatbotAiChain::skipped($step, $model, ['why' => $late, 'error' => $late]);
                 break;
@@ -124,7 +126,9 @@ class ChatbotAiPool extends TicketPool
     {
         $id = (string) $row->request_id;
         $p = $step['provider'];
-        $token = ++$this->chains[$id]['token'];
+        // Natatangi sa buong pool (hindi nagsisimula ulit sa bawat kuha): ang lumang timer ay hindi tatama sa bagong subok.
+        $token = ++$this->tokens;
+        $this->chains[$id]['token'] = $token;
         $this->chains[$id]['slot'] = $slot;
         $this->chains[$id]['start'] = $this->nowMs();
         $r = ChatbotAiChain::request($p, $model, (array) json_decode((string) $row->messages, true), (int) $row->max_tokens);
@@ -193,7 +197,7 @@ class ChatbotAiPool extends TicketPool
     private function attempted(object $row, array $step, string $model, array $out, ?int $http): bool
     {
         $id = (string) $row->request_id;
-        $this->chains[$id]['token']++; // ang anumang huling callback ng subok na ito ay hindi na binibilang
+        $this->chains[$id]['token'] = 0; // ang anumang huling callback ng subok na ito ay hindi na binibilang
         $this->chains[$id]['slot']?->release();
         $this->chains[$id]['slot'] = null;
         $p = $step['provider'];

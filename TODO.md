@@ -1165,3 +1165,10 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **A Forbeast twin whose run is mid-send (LAST_CHAT already set, HTTP call in flight) at switch time is not seen as pending;** if that slow send succeeds, the customer gets two replies. Reason: a seconds-long window. Checking the runner lock would close it, but the failed-sends switch fires inside the very run that holds that lock, so it would also skip that customer's older copies whose replies failed, which goes against the decided rule.
 - **If the switch happens inside the twin's own run and its flow wires a failed port to more sends, parts of the flow can go out twice;** and a twin whose run finished without any send still lets the copy run. Reason: rare; the latter is the decided rule.
 - **The `ChatbotAiQueue::pending` branch of the pending check has no own test** (only "not reached yet" is tested). Reason: same condition the runner already uses.
+
+## Spec 150 (chatbot AI provider): accepted findings
+- **`ChatbotAiQueue::recorded()` runs `Schema::hasColumn` on each submit, finish and sync record.** Reason: one cheap schema query per AI request, within the few ms the spec allows; a per-process memo would hide the migration from long-running workers until restart.
+- **When the sweep fails a row mid-chain (pool died or hung), the record has no `ai_attempts`.** Reason: the attempts live in the dead pool's memory; the error text still names the last provider.
+- **The pool's carried attempts (after an OpenAI 429) stay in memory if another pool or the sweep takes that row.** Reason: a few bytes per such row until the pool restarts (it restarts at least daily).
+- **The migration's `->change()` (messages and context nullable) was run on sqlite only.** Reason: no MySQL in the test setup; it uses the native Laravel 12 column change, run by hand on deploy.
+- **Customer text of `resumed` and `sync` rows is nulled in a 2-7 day window;** a row the pool missed for 5+ days keeps its text until it is deleted at 90 days. Reason: keeps the sweep query small inside the pool loop; the pool sweeps every 5 s.

@@ -140,13 +140,22 @@ class ChatbotAiRecordTest extends ChatbotAiProviderTestCase
         end($this->poolCalls)['p']->resolve(self::answer('bago'));
         $pool->tick(false);
 
+        // Ang naiwang answered (hindi naituloy) na lampas 2 araw ay binubura pa rin gaya ng dati (may text, luma na ang usapan).
+        DB::table(ChatbotAiQueue::TABLE)->where('psid', 7004)->update(['status' => 'answered']);
+        $this->says('naiwan', 'Page Uno', '7005');
+        $pool->tick();
+        end($this->poolCalls)['p']->resolve(self::answer('naiwan'));
+        $pool->tick(false);
+        DB::table(ChatbotAiQueue::TABLE)->where('psid', 7005)->update(['status' => 'answered', 'created_at' => now()->subDays(3)]);
+        DB::table(ChatbotAiQueue::TABLE)->where('psid', 7004)->update(['status' => 'resumed']);
+
         ChatbotAiQueue::sweep();
 
+        $this->assertNull($this->row('7005'));
         $this->assertNull($this->row('7003'));
-        foreach (['7001', '7002'] as $psid) {
-            $r = $this->row($psid);
-            $this->assertSame([null, null, null, 'openai', 1], [$r->messages, $r->answer, $r->context, $r->provider, (int) $r->prompt_tokens], $psid);
-        }
+        $r = $this->row('7001');
+        $this->assertSame([null, null, null, 'openai', 1], [$r->messages, $r->answer, $r->context, $r->provider, (int) $r->prompt_tokens]);
+        $this->assertSame(['openai', 1], [$this->row('7002')->provider, (int) $this->row('7002')->prompt_tokens], 'the record stays until 90 days');
         $this->assertNotNull($this->row('7004')->messages, 'within 2 days the text stays');
     }
 
@@ -161,6 +170,10 @@ class ChatbotAiRecordTest extends ChatbotAiProviderTestCase
         $rows = DB::table(ChatbotAiQueue::TABLE)->orderBy('id')->get();
         $this->assertCount(2, $rows);
         $this->assertSame(['sync', 'sync'], $rows->pluck('path')->all());
+
+        // Ang Bot Health ay nagbibilang lang ng tawag ng pool, gaya ng dati (ang sync na record ay walang hintay na masusukat).
+        $calls = (fn () => $this->aiCalls(now()->subDay()->toDateTimeString(), now()->addDay()->toDateTimeString(), null))->call(app(\App\Services\Chatbot\BotHealth::class));
+        $this->assertSame(0, array_sum(array_column($calls, 'calls')));
     }
 
     public function test_S_150_D12_before_the_migration_the_ai_step_works_as_today(): void

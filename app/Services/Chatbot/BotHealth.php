@@ -365,7 +365,7 @@ class BotHealth
     private function aiCalls(string $startAt, string $endAt, ?array $pages): array
     {
         $out = [];
-        $rows = DB::table('chatbot_ai_requests')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)->where('model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL) // ang hinihintay ng Encode order ay hindi tawag sa AI
+        $rows = DB::table('chatbot_ai_requests')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)->where('model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL)->where('status', '<>', 'sync') // ang hinihintay ng Encode order ay hindi tawag sa AI; ang sync ay record lang ng naghihintay na tawag
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->get(['created_at', 'answered_at', 'status', 'error', 'attempts']);
         foreach ($rows as $r) {
             $day = &$out[substr($r->created_at, 0, 10)];

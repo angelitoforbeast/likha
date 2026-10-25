@@ -19,7 +19,6 @@ class ChatbotAiQueue
     public const TABLE = 'chatbot_ai_requests';
     public const KEEP_DAYS = 2; // ang text ng customer (messages, answer, context)
     public const RECORD_DAYS = 90; // ang record ng request (provider, bilis, tokens), kapag may mga column na nito
-    private const DONE = ['resumed', 'failed', 'answered', 'sync'];
     public const REDISPATCH_SECONDS = 30; // ang answered/failed na hindi pa naituloy (nawalang job) ay ipinapadala ulit
 
     /**
@@ -217,11 +216,14 @@ class ChatbotAiQueue
             $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'answered'])->orderBy('id')->limit(5000)->delete();
             return $out;
         }
-        // May record: ang text ng customer ay binubura pagkatapos ng 2 araw, ang row (record) pagkatapos ng 90.
-        $ids = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', self::DONE)
+        // May record: ang naiwang answered/failed (hindi naituloy) ay binubura pagkatapos ng 2 araw gaya ng dati; sa tapos na
+        // (resumed, sync) ang text ng customer lang ang binubura, at ang row (record) pagkatapos ng 90. Ang paghahanap ay sa
+        // ilang araw lang pagkatapos ng 2 (hindi ang buong 90), para mabilis ang sweep sa loob ng pool.
+        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['failed', 'answered'])->orderBy('id')->limit(5000)->delete();
+        $ids = DB::table(self::TABLE)->whereBetween('created_at', [now()->subDays(self::KEEP_DAYS + 5), now()->subDays(self::KEEP_DAYS)])->whereIn('status', ['resumed', 'sync'])
             ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('id')->limit(5000)->pluck('id');
         if ($ids->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $ids)->update(['messages' => null, 'answer' => null, 'context' => null]);
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', self::DONE)->orderBy('id')->limit(5000)->delete();
+        $out['pruned'] += DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', ['resumed', 'sync'])->orderBy('id')->limit(5000)->delete();
 
         return $out;
     }
