@@ -467,3 +467,18 @@ Re-run the brief's folders (no new failures). End with "149-6: <done|blocked> �
 - **Suite:** the brief's folders on 28555d17: `OK, but there were issues! Tests: 1526, Assertions: 8861, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459, no failures). The later commit 0ae1ef00 only adds test rows: those two files pass (46 tests).
 
 149-6: done — Botcake's live `[audio](link)` / `[reel](link)` / `[fallback](link)` / `[Photo]` forms are ignored by the bot with the link kept, and they pair with Forbeast's `[Audio]`; ignored attachments still count as the customer replying.
+
+## Amendment 149-7
+
+From the reviewer's qa of 149; these are the reviewer's decisions.
+
+| Change | Why |
+|---|---|
+| **After a switch, a standby Botcake copy is skipped only when the customer was actually answered**: skip it when a bot reply to that psid on that page has status sent after the copy's received_at minus 5 s (`already_answered`). A Forbeast twin alone is NOT a reason to skip: if Forbeast received the message but its reply failed (the failed_sends / connection_error switches), Botcake must answer it. Restore `test_S_117_9`'s original Then ("Pumalya ang sagot" runs via Botcake) and keep the 149-4 tests for the answered case. | Customers whose Forbeast reply failed would get nothing. |
+| **Pairing is really tested**: S-149.20's attachment rows (audio, live `[audio](url)`, photo, image, video, Like) must assert pairing with `chatbot_attachments=reply` (where attachments count as inbound evidence), so they fail if `pairs()` breaks; add `test_S_149_33` asserting `[audio](https://cdn.fbsbx.com/x)` pairs with Forbeast `[Audio]`. | qa's mutation run: 7 of 10 rows passed with pairing disabled. |
+| **Forbeast refusal shape**: in `GatewayComments` read the error code from `error.code` when `error` is an object (Forbeast's 401/403/404/422 shape `{"error":{"code","message"}}`) and from Laravel's `{message, errors}` for validation 422s; update the `refused()` test rows to Forbeast's real shapes. | Stored reason showed http_403 instead of the code. |
+| **Length guard**: the Check column warns when Comment PM is over 2000 characters or a Comment Reply over 8000 (Forbeast refuses them); no silent truncation. | They would fail at send time. |
+| **Backfill is a dry run by default**: `chatbot:replies-via-backfill` writes only with `--apply`; test both. | Safer default. |
+| Accepted as they are (no change): S-149.3 reading (empty reply columns still send the PM — Decision 1 "empty = that part off"); `chatbot_comment_events` prune left to TODO; the 20/min limit uses the app's cache store (note in the result which store production uses per config). | Reviewer's decision. |
+
+Re-run the brief's folders (no new failures). End with "149-7: <done|blocked> — <one line>".
