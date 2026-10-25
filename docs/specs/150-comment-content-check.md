@@ -1,0 +1,23 @@
+# Brief 150: the Check column checks the comment texts' content, gives them a format, and flags pages without comment permission
+
+## Why
+Spec 149 added Comment Reply 1–3 and Comment PM per page on /chatbot/pages; the bot sends them to commenters on Forbeast pages (live 2026-10-25). The owner: "dapat tama rin, pati content. Baka naman mali-mali yung sinend ko, basta-basta lang. Dapat may parang format tayo dyan." Today the Check column only checks their length. The existing content check (spec 145: `PageContentCheck`, `ContentAi`, nightly `chatbot:content-check` 02:40 and "Check again") already verifies Prompt/Seq texts against the page's item and prices from its orders; reuse it.
+
+## Decisions (do not reopen)
+| # | Decision | Why |
+|---|---|---|
+| 1 | **Comment PM content check** (same AI path, cache and cost logging as the Prompt/Seq checks of spec 145): X when it names another item or a price that does not match the page's orders (same rules as 145.4/145.5); warning when it has no price, or no order form / call to reply (it should contain the order-form lines — Name, Mobile/Phone, Complete Address, Landmark — or ask the customer to reply for the form); warning when it names another page. | One message must sell and lead to the order. |
+| 2 | **Comment Reply 1–3 format** (rules, no AI): warning when only one variant is filled ("add 2–3 variants: the same text on every comment can be flagged as spam"), when two variants are identical (ignoring case/spaces), when a reply contains a link or a phone number, or is longer than 300 characters ("keep the public reply short; the details go in the PM"); X when it names another page. | Botcake's own guidance: random variants, no links/ads in the public reply. |
+| 3 | **Format helper**: in the Edit modal (and the cell editor) for Comment PM, a **"Use template"** button fills an editable draft built from the page's own values: `Hi po! 😊 {{ITEM NAME}} — ₱{{PRICE}} lang po, FREE shipping at Cash on Delivery.\n\nPara po ma-reserve, i-fill up lang po:\n✅ Name:\n✅ Mobile Number:\n✅ Complete Address (House#/Purok/Street, Brgy, Municipality, Province):\n✅ Landmark:` (use the page's real botfield names for item and price if they differ; nothing is saved until the user saves). For Comment Reply 1–3 a "Use template" fills three short variants: "Salamat po! Nag-message po kami sa inyo 😊", "Hi po! Check your inbox po, may message kami 😊", "Thank you po! Na-send na po namin ang details sa inyo 😊". | A standard format so values are not "basta-basta". |
+| 4 | **Comment permission check**: for a Forbeast page with any comment column filled, X "Forbeast: walang comment permission — i-connect ulit ang page" when the page's Forbeast token lacks `pages_manage_engagement` or `pages_read_user_content`. Read the scopes from the Forbeast page check (`GET {GATEWAY_URL}/v1/pages/{id}`) field `permissions` (array of scope names) — Forbeast adds it in its handoff 015 in parallel; when the field is absent, show no X and record "permissions unknown" in the check detail (no false alarms). Also mark in the check a comment send that failed with a Meta permission error (codes 10, 200, 230) in the last 24 h as X with the same text. | The owner can't tell which pages need a reconnect. |
+| 5 | Same access, history and cost-logging rules as today; English UI text like the rest of the page except the template texts (Taglish, as given). | Consistency. |
+
+## Cases (add as S-150 to qa/stories.md, table like S-149)
+P1: .1 PM naming another item → X; matching item+price → ok; .2 PM without price → warning; without form/reply cue → warning; .3 replies: one variant → warning; identical variants → warning; link/phone/over 300 → warning; another page named → X; .4 "Use template" fills the PM/replies with the page's values, nothing saved until Save; .5 permission: Forbeast page with comment columns and `permissions` lacking the two scopes → X; field absent → no X, detail says unknown; a recent Meta permission error on a comment send → X; .6 unchanged texts are not sent to the AI again (cache, like 145.4); .7 nightly command and "Check again" include the new checks. P2: .8 Botcake-provider page with comment columns → info "comments are answered only on Forbeast pages".
+
+## Done when
+- P1 cases pass; `php vendor\phpunit\phpunit\phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` adds no new failures vs 52974859.
+- Result: files, rules, the prompt text added, evidence per case, commits. End with "150: <done|blocked> — <one line>".
+
+## Out of scope
+Changing how comments are answered; Botcake's comment feature; deploying.
