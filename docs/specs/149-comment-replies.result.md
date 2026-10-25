@@ -482,3 +482,82 @@ From the reviewer's qa of 149; these are the reviewer's decisions.
 | Accepted as they are (no change): S-149.3 reading (empty reply columns still send the PM — Decision 1 "empty = that part off"); `chatbot_comment_events` prune left to TODO; the 20/min limit uses the app's cache store (note in the result which store production uses per config). | Reviewer's decision. |
 
 Re-run the brief's folders (no new failures). End with "149-7: <done|blocked> — <one line>".
+
+### Result of 149-7
+
+**After a switch** (`ForbeastWatch::runStandby`)
+- A standby copy is skipped as `already_answered` only when that customer got a sent bot reply on the page since 5 s before the copy arrived. A Forbeast twin alone no longer skips it: a message whose Forbeast reply failed is answered by Botcake. `test_S_117_9` has its original Then back ("Una po" and "Pumalya ang sagot" run). It now waits a minute between the answered message and the failed one, so the 5 s rule tells them apart.
+- **Added after review (a major):** the copy is also skipped as `forbeast_pending` while its Forbeast twin's run has not finished. That is when the runner has not reached it yet (twin id > the customer's LAST_CHAT), or it waits for an AI or a send. That run will reply itself, through Botcake, since the provider is picked at send time. Without this check, a switch during the run answered twice. This keeps the decision: a finished twin whose reply failed is still answered.
+  - `test_S_149_35` covers it.
+  - The `forbeastCopy` helper of S-117.9 now sets LAST_CHAT when it records a reply, the way a finished run does.
+
+**Pairing is really tested**
+- `ForbeastWatch::inbound` leaves attachment-only copies out of the evidence only while they are ignored. Under `reply` they count, as text does.
+- S-149.20 runs under `reply` and stores the Botcake copy first. Before, when Forbeast came first with the same text, `/api/botcake/chat` dropped the Botcake copy as a duplicate, so pairing never ran.
+- `test_S_149_33`: the live `[audio](https://cdn.fbsbx.com/x)` pairs with Forbeast's `[Audio]`. A control in the same test removes the Forbeast copies, and the page then switches.
+- **Mutation check:** I stubbed `pairs()` to return nothing, and all 10 S-149.20 rows and S-149.33 failed. Then I restored it.
+
+**Forbeast refusal shape** (`GatewayComments`)
+- The code is read from `error.code` when `error` is an object, or from a flat `error` string.
+- Laravel's `{message, errors}` validation answer gives `invalid_<field>`.
+- `error.message` (or the Laravel `message`) is added to the stored error text.
+- A `meta_code` inside the error object counts too.
+- The `refused()` rows now use these shapes: 401/403/404/422 objects, a Laravel 422 and a flat 502.
+
+**Length guard**
+- Check warns "Comment PM is N characters: Forbeast sends at most 2000" and the same for each Comment Reply (8000). The limits are `GatewayComments::MAX_PM` / `MAX_REPLY`.
+- The warning shows on pages without a flow too: their status becomes `ok` with the warning.
+- Nothing is cut.
+
+**Backfill:** `chatbot:replies-via-backfill` is a dry run (counts only) unless `--apply` is given. Both are tested, and the 149-5 deploy steps above are updated.
+
+**Accepted as they are:**
+- the S-149.3 reading;
+- no prune for `chatbot_comment_events` (TODO);
+- the 20/min cache store. Per `config/cache.php` it is `CACHE_STORE`, default `database`, and `.env.example` sets `database`. On that store the per-minute increment is atomic (a row lock). Production uses whatever `CACHE_STORE` its environment sets, which I can't see here.
+
+**Cases:**
+
+| Case | Test | Result |
+|---|---|---|
+| S-117.9 | `test_S_117_9_standby_chats_are_stored_without_running_and_run_once_after_the_switch` | pass |
+| S-149.17 | `test_S_149_17_a_refused_send_is_failed_with_the_error_code_as_the_reason` (6 shapes) | pass |
+| S-149.20 | `test_S_149_20_…` (10 rows, under reply, Botcake copy first) | pass; all fail with pairing disabled |
+| S-149.22 | `test_S_149_22_…` (2 tests; reason `already_answered`) | pass |
+| S-149.26 | `test_S_149_26_…` (dry run, then `--apply`) | pass |
+| S-149.33 | `test_S_149_33_a_live_botcake_voice_copy_pairs_with_the_forbeast_audio_and_without_it_the_page_switches` | pass |
+| S-149.34 | `test_S_149_34_check_warns_when_a_comment_text_is_longer_than_forbeast_takes` | pass |
+| S-149.35 | `test_S_149_35_a_copy_whose_forbeast_run_is_still_going_is_left_to_that_run` | pass |
+
+**Red runs:**
+- `S_117_9`: "two arrays are identical" (Pumalya was skipped).
+- `S_149_22`: the log said `forbeast_twin`.
+- `S_149_33`: the control "without the Forbeast copies … switch the page".
+- The refused rows: the reason was `http_<n>`.
+- `S_149_34`: the warnings were missing.
+- `S_149_26`: the output had no "Dry run".
+- `S_149_35`: "The unexpected RunChatbotFlow job was pushed".
+
+**Story changes:**
+- S-117.9: back to "a message whose Forbeast reply failed is answered by Botcake", plus the pending-twin rule.
+- S-149.17: the real shapes.
+- S-149.20: under reply, Botcake first.
+- S-149.22: the reason is already_answered, and a copy with a twin whose reply failed runs.
+- S-149.26: dry run by default.
+- S-149.32: "while attachments are ignored".
+- S-149.33: the new test.
+- New: S-149.34 and S-149.35.
+
+**Review:**
+- `skeptic-reviewer`: standard depth, adversarial on `runStandby`. It found 1 major: a twin still running at switch time led to a double reply. It was fixed in 1 loop, and the re-check found nothing major left.
+- The minors are in `TODO.md` under "149":
+  - a twin mid-send (LAST_CHAT already set) is not seen as pending. Checking the runner lock was not done, because the failed-sends switch runs inside that lock and would then skip that customer's failed copies too;
+  - a late Botcake copy more than 5 s after Forbeast's reply;
+  - timeouts are stored as failed;
+  - untested error shapes;
+  - the "No flow" Check bucket;
+  - the code points vs UTF-16 count.
+
+**Suite:** the brief's folders on 20b683f2: `OK, but there were issues! Tests: 1531, Assertions: 8897, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459, no failures). The later commit 6b3d4247 is TODO only.
+
+149-7: done — a standby copy is skipped after a switch only when the customer was answered (or its Forbeast run is still going), pairing tests now fail without pairing, Forbeast error codes are read from their real shapes, Check warns on over-long comment texts, and the backfill is a dry run unless --apply.
