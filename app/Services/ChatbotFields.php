@@ -38,6 +38,9 @@ class ChatbotFields
             $cols['after_order_img_' . $i] = 'After Order Img ' . $i;
             $cols['after_order_' . $i] = 'After Order ' . $i;
         }
+        // Ang sagot sa comment (page na nasa Forbeast): ang public reply (isa sa mga may laman, random) at ang isang private message.
+        for ($i = 1; $i <= 3; $i++) $cols['comment_reply_' . $i] = 'Comment Reply ' . $i;
+        $cols['comment_pm'] = 'Comment PM';
 
         return $cols;
     }
@@ -47,7 +50,7 @@ class ChatbotFields
     {
         if ($key === 'flow') return 'flow'; // dropdown ng mga flow (/chatbot)
         if ($key === 'picture' || preg_match('/^(seq|after_order)_img_\d+$/', $key)) return 'image';
-        if (preg_match('/^(prompt|seq|after_order)_\d+$/', $key)) return 'long';
+        if (preg_match('/^(prompt|seq|after_order|comment_reply)_\d+$/', $key) || $key === 'comment_pm') return 'long';
 
         return 'text';
     }

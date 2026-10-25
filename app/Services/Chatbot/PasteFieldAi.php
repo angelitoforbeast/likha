@@ -109,6 +109,8 @@ TXT;
             (bool) preg_match('/^seq_\d+$/', $key) => 'follow-up message ' . $n . ' (text)',
             (bool) preg_match('/^after_order_img_\d+$/', $key) => 'an image URL sent after the order is uploaded, step ' . $n,
             (bool) preg_match('/^after_order_\d+$/', $key) => 'a message sent after the order is uploaded, step ' . $n,
+            (bool) preg_match('/^comment_reply_\d+$/', $key) => 'a public reply to a comment on a post (variant ' . $n . ', one variant is picked at random)',
+            $key === 'comment_pm' => 'the one private message sent to a person who commented on a post',
             default => 'a custom field named "' . $label . '"',
         };
     }
