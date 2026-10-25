@@ -35,10 +35,17 @@
     @media (hover: none), (max-width: 639px) { #cb-table .cb-edit { opacity: 1; } }
     #cb-table thead th { position: sticky; top: 0; z-index: 20; }
     #cb-table .stick-1 { position: sticky; left: 0; z-index: 10; }
-    #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3 { z-index: 30; }
+    #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3, #cb-table thead .stick-4 { z-index: 30; }
     @media (min-width: 640px) {
         #cb-table .stick-2 { position: sticky; left: 12rem; z-index: 10; }
         #cb-table .stick-3 { position: sticky; left: 18rem; z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }
+    }
+    /* Desktop: ang Check ay naka-freeze din (maikling cell); ang buong listahan ay lumalabas sa hover o pindot. */
+    @media (min-width: 1024px) {
+        #cb-table .stick-3 { box-shadow: none; }
+        #cb-table .stick-4 { position: sticky; left: 28rem; z-index: 11; width: 14rem; max-width: 14rem; box-shadow: 1px 0 0 #e2e8f0; }
+        #cb-table .cb-chk-pop { display: none; position: absolute; left: 0.5rem; top: 100%; z-index: 40; width: 20rem; max-width: calc(100vw - 2rem); }
+        #cb-table td.stick-4:hover .cb-chk-pop, #cb-table .cb-chk.cb-chk-open .cb-chk-pop, #cb-table .cb-chk:focus-within .cb-chk-pop { display: block; }
     }
 </style>
 @endpush
@@ -435,7 +442,7 @@
             el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
             el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
-            el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
+            el('th', {class: 'stick-4 min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
             el('th', {class: 'min-w-[7rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Bots that are fully connected'}, ['Connected', filterButton('connected')]),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
@@ -494,10 +501,22 @@
     }
     const checks = new Map(), checking = new Set();
     function checkCell(r) {
-        const td = el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs', 'data-check': r.page});
+        const td = el('td', {class: 'stick-4 border-b border-slate-100 bg-white px-3 py-2 align-top text-xs', 'data-check': r.page});
         fillCheck(td, r.page);
         return td;
     }
+    // Ang buod ng Check para sa maikling cell (naka-freeze): ang icon, ilang problema (mali at babala) at ang unang linya;
+    // null = walang problema o wala pang resulta (ang buong cell na ang ipinapakita).
+    // check-summary:start
+    function checkSummary(c) {
+        if (!c || !c.status || c.status === 'none') return null;
+        const reasons = c.status !== 'ok' ? (c.reasons || []) : [], warnings = c.warnings || [];
+        if (!reasons.length && !warnings.length) return null;
+        return {icon: reasons.length ? 'x' : 'warn', count: reasons.length + warnings.length, first: (reasons[0] ?? warnings[0])};
+    }
+    // check-summary:end
+    const FROZEN = window.matchMedia('(min-width: 1024px)');
+    FROZEN.addEventListener('change', () => render());
     function fillCheck(td, page) {
         const c = checks.get(page), out = [];
         if (checking.has(page) || !c) out.push(el('span', {class: 'text-slate-400', text: c?.error || 'Checking…'}));
@@ -516,7 +535,17 @@
             again.addEventListener('click', ev => { ev.stopPropagation(); runCheck(page, true); });
             out.push(el('div', {class: 'mt-1 flex flex-wrap items-center gap-x-2 text-slate-400'}, [c.checked_at ? el('span', {text: c.checked_at}) : null, again]));
         }
-        td.replaceChildren(...out);
+        const sum = FROZEN.matches && !checking.has(page) ? checkSummary(c) : null;
+        if (!sum) { td.replaceChildren(...out); return; }
+        // Naka-freeze: isang linya; ang buong listahan (kasama ang Check again) ay sa hover, sa pindot o sa focus.
+        const box = el('div', {class: 'cb-chk'});
+        const toggle = el('button', {type: 'button', class: 'flex w-full min-w-0 items-start gap-1 text-left', 'aria-expanded': 'false',
+            'aria-label': sum.count + ' problem' + (sum.count === 1 ? '' : 's') + ' on ' + page + ': show all'}, [icon(sum.icon, sum.icon === 'x' ? 'Check failed' : 'Check warning'),
+            el('span', {class: 'shrink-0 font-semibold ' + (sum.icon === 'x' ? 'text-red-700' : 'text-amber-700'), text: String(sum.count)}),
+            el('span', {class: 'min-w-0 truncate ' + (sum.icon === 'x' ? 'text-red-700' : 'text-amber-700'), text: sum.first})]);
+        toggle.addEventListener('click', ev => { ev.stopPropagation(); const open = box.classList.toggle('cb-chk-open'); toggle.setAttribute('aria-expanded', open ? 'true' : 'false'); });
+        box.append(toggle, el('div', {class: 'cb-chk-pop rounded-lg border border-slate-200 bg-white p-2 shadow-lg'}, out));
+        td.replaceChildren(box);
     }
     function paintCheck(page) {
         table.querySelectorAll('td[data-check]').forEach(td => { if (td.dataset.check === page) fillCheck(td, page); });
