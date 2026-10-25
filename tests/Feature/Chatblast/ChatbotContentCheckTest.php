@@ -6,6 +6,7 @@ use App\Jobs\RunChatbotContentCheck;
 use App\Models\ChatbotFlow;
 use App\Models\MacroOutput;
 use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\CommentCheck;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\Chatbot\ImageLinkCheck;
 use App\Services\Chatbot\PageContentCheck;
@@ -525,5 +526,208 @@ Landmark:");
     public static function amounts(): array
     {
         return ['peso sign and comma' => ['₱1,198', 1198.0], 'pesos word' => ['198 pesos', 198.0], 'PHP and cents' => ['PHP 1,299.50', 1299.5], 'none' => ['free', null]];
+    }
+
+    /** Ang mga finding ng comment (kind comment), [level, reason]. */
+    private function comments(array $res, bool $info = false): array
+    {
+        return array_values(array_map(fn ($f) => [$f['level'], $f['reason']], array_filter($res['findings'], fn ($f) => $f['kind'] === 'comment' && ($info || $f['level'] !== 'info'))));
+    }
+
+    private const FORM = "\n✅ Name:\n✅ Mobile Number:\n✅ Complete Address:\n✅ Landmark:";
+    private const NO_FORM = 'Comment PM: no order form or call to reply: add Name, Mobile Number, Complete Address and Landmark, or ask the customer to reply for the form';
+
+    public function test_S_150_1_a_comment_pm_naming_another_item_is_an_x_and_a_matching_item_and_price_passes(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM lights ₱299' . self::FORM);
+        $this->answers = ['PM lights' => $this->answer('CHRISTMAS LIGHTS', false, 90, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        $this->assertSame([['x', 'Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)']], $this->comments($this->content()));
+        $res = $this->check();
+        $this->assertSame('x', $res['status']);
+        $this->assertSame(1, count(array_keys($res['reasons'], 'Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)', true)), 'shown once on a page with a flow');
+
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM seat cover ₱299' . self::FORM);
+        $this->answers = ['PM seat cover' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        $this->assertSame([['ok', 'Comment PM: SEAT COVER (orders: SEAT COVER)'], ['ok', 'Comment PM: price ₱299 = ₱299 COD']], $this->comments($this->content()));
+
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM wrong price ₱399' . self::FORM);
+        $this->answers = ['PM wrong price' => $this->answer('SEAT COVER', true, 95, [['item_price' => 399, 'fees' => [], 'total' => null]])];
+        $this->assertSame(['x', 'Comment PM: price ₱399 ≠ orders ₱299 COD'], $this->comments($this->content())[1]);
+    }
+
+    public function test_S_150_2_a_comment_pm_without_a_price_or_without_a_form_or_reply_cue_is_a_warning(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM no price' . self::FORM);
+        $this->answers = ['PM no price' => $this->answer('SEAT COVER', true, 95)];
+        $this->assertSame([['ok', 'Comment PM: SEAT COVER (orders: SEAT COVER)'], ['warn', 'Comment PM: no price']], $this->comments($this->content()));
+
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'Text no form, seat cover ₱299 lang po');
+        $this->answers = ['Text no form' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        $this->assertContains(['warn', self::NO_FORM], $this->comments($this->content()));
+        $this->assertContains(self::NO_FORM, $this->check()['warnings']);
+
+        $this->answers = ['PM cue' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        foreach (['Reply YES po para sa order form.', 'Mag-PM lang po kayo.', 'Pakisend po ang details.', 'Message lang po kayo.', 'Sagutan lang po ang form.'] as $cue) {
+            $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM cue, seat cover ₱299. ' . $cue);
+            $this->assertSame([], array_values(array_filter($this->comments($this->content()), fn ($f) => $f[0] !== 'ok')), 'a call to reply is enough: ' . $cue);
+        }
+    }
+
+    #[DataProvider('replies')]
+    public function test_S_150_3_comment_replies_get_format_warnings_and_another_page_is_an_x(array $values, array $expected): void
+    {
+        foreach ($values as $i => $v) $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_' . ($i + 1), $v);
+        $this->assertSame($expected, $this->comments($this->content()));
+        $this->assertSame(0, $this->aiCalls(), 'rules only, no AI');
+    }
+
+    public static function replies(): array
+    {
+        $spam = 'the same text on every comment can be flagged as spam';
+        $short = 'keep the public reply short; the details go in the PM';
+
+        return [
+            'one variant' => [['Salamat po!'], [['warn', 'Comment Reply: only one variant: add 2–3 variants: ' . $spam]]],
+            'identical ignoring case and spaces' => [['Salamat po!', 'salamat   PO!', 'Check inbox po'], [['warn', 'Comment Reply 1 and Comment Reply 2 are the same: ' . $spam]]],
+            'link' => [['See https://shop.example.ph', 'Order sa www.shop.ph', 'Hi po'], [
+                ['warn', 'Comment Reply 1: has a link: ' . $short], ['warn', 'Comment Reply 2: has a link: ' . $short]]],
+            'phone' => [['Text 0917 123 4567 po', 'Hi po', 'Hello po'], [['warn', 'Comment Reply 1: has a phone number: ' . $short]]],
+            'over 300' => [[str_repeat('a', 301), str_repeat('b', 300)], [['warn', 'Comment Reply 1: 301 characters: ' . $short]]],
+            'another page named' => [['Salamat po!', 'Order na sa Page Dos!'], [['x', 'Comment Reply 2: names another page (Page Dos)']]],
+            'three the same: one warning' => [['Salamat po!', 'salamat po!', 'SALAMAT PO!'], [['warn', 'Comment Reply 1, Comment Reply 2 and Comment Reply 3 are the same: ' . $spam]]],
+            'good variants' => [['Salamat po!', 'Check inbox po', 'Thank you po!'], []],
+            'no space after a period is not a link' => [['Salamat po.Online seller po kami', 'Hi po.Me ito', 'Order na po.CO'], []],
+        ];
+    }
+
+    public function test_S_150_3_a_comment_pm_naming_another_page_is_a_warning_and_its_own_name_is_fine(): void
+    {
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'Galing sa page dos ito' . self::FORM);
+        $this->assertSame([['warn', 'Comment PM: names another page (Page Dos)']], $this->comments($this->content('Page Uno', false)));
+        $this->settings()->set('Page Dos', 'chatbot', 'comment_reply_1', 'Page Dos po ito');
+        $this->settings()->set('Page Dos', 'chatbot', 'comment_reply_2', 'Salamat po sa Page Dos');
+        $this->assertSame([], $this->comments($this->content('Page Dos', false)));
+    }
+
+    public function test_S_150_4_use_template_fills_the_pm_and_replies_with_the_pages_botfield_names_and_saves_nothing(): void
+    {
+        $this->assertSame([
+            'comment_pm' => "Hi po! 😊 {{ITEM NAME IN JNT DASHBOARD}} — ₱{{PRICE}} lang po, FREE shipping at Cash on Delivery.\n\nPara po ma-reserve, i-fill up lang po:\n✅ Name:\n✅ Mobile Number:\n✅ Complete Address (House#/Purok/Street, Brgy, Municipality, Province):\n✅ Landmark:",
+            'comment_reply_1' => 'Salamat po! Nag-message po kami sa inyo 😊',
+            'comment_reply_2' => 'Hi po! Check your inbox po, may message kami 😊',
+            'comment_reply_3' => 'Thank you po! Na-send na po namin ang details sa inyo 😊',
+        ], CommentCheck::templates());
+        app(ChatbotFields::class)->add('ITEM NAME');
+        $this->assertStringStartsWith('Hi po! 😊 {{ITEM NAME}} — ₱{{PRICE}} lang po', CommentCheck::templates()['comment_pm']);
+
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+        $this->assertStringContainsString('Use template', $html);
+        $this->assertStringContainsString('const commentTemplates = ' . json_encode(CommentCheck::templates()), $html);
+        $this->assertNull($this->settings()->get('Page Uno', 'chatbot', 'comment_pm'), 'opening the page saves nothing');
+    }
+
+    /** Ang Forbeast page na may comment column: provider gateway at isang Comment Reply. */
+    private function forbeastPage(): void
+    {
+        $this->settings()->set('Page Uno', 'chatbot', 'provider', 'gateway');
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_1', 'Salamat po!');
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_2', 'Check inbox po');
+    }
+
+    public function test_S_150_5_a_forbeast_token_without_the_comment_scopes_is_an_x_and_no_field_is_unknown(): void
+    {
+        $this->forbeastPage();
+        config(['services.gateway.url' => 'https://gw.example.test', 'app.url' => 'https://likha.example.test']);
+        $this->settings()->set('Page Uno', 'forbeast', 'token', 'fb-token', true);
+        $perms = null;
+        Http::fake(['gw.example.test/*' => function () use (&$perms) {
+            return Http::response(['id' => '1001', 'name' => 'Page Uno', 'webhook' => ['url' => 'https://likha.example.test/api/gateway/events']]
+                + ($perms === null ? [] : ['permissions' => $perms]));
+        }]);
+        $forbeast = app(\App\Services\Chatbot\ForbeastPageSetup::class);
+        $no = 'Forbeast: walang comment permission — i-connect ulit ang page';
+
+        $perms = ['pages_messaging', 'pages_manage_engagement'];
+        $this->assertSame('ok', $forbeast->retest('Page Uno'));
+        $this->assertContains(['x', $no], $this->comments($this->content('Page Uno', false)));
+        $this->assertContains($no, $this->check()['reasons']);
+
+        $perms = ['pages_messaging', 'pages_manage_engagement', 'pages_read_user_content'];
+        $forbeast->retest('Page Uno');
+        $this->assertSame([], $this->comments($this->content('Page Uno', false)));
+
+        $perms = null;
+        $forbeast->retest('Page Uno');
+        $this->assertSame([['info', 'Forbeast: permissions unknown']], $this->comments($this->content('Page Uno', false), true), 'no field: no X');
+        $this->assertContains('Forbeast: permissions unknown', $this->check()['notes']);
+    }
+
+    public function test_S_150_5_a_meta_permission_error_on_a_comment_send_in_the_last_24_hours_is_an_x(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_11_08_100000_create_chatbot_comment_events_table.php']]);
+        $this->forbeastPage();
+        $this->settings()->set('Page Uno', 'forbeast', 'permissions', json_encode(CommentCheck::SCOPES), false, null, true);
+        $event = fn (string $id, string $error, int $hoursAgo, string $page = '1001') => DB::table('chatbot_comment_events')->insert([
+            'page_id' => $page, 'comment_id' => $id, 'status' => 'failed', 'pm_status' => 'failed', 'pm_error' => $error,
+            'received_at' => now()->subHours($hoursAgo), 'handled_at' => now()->subHours($hoursAgo),
+        ]);
+        $event('c1', 'Forbeast said "meta_error: (#200) Permissions error" (Meta #200) (HTTP 502)', 30);
+        $event('c2', 'Forbeast said "meta_error" (Meta #10) (HTTP 502)', 1, '2002');
+        $event('c3', 'Forbeast said "meta_error" (Meta #100) (HTTP 502)', 1);
+        $this->assertSame([], $this->comments($this->content('Page Uno', false)), 'old, another page, or not a permission code');
+
+        $event('c4', 'Forbeast said "meta_error" (Meta #230) (HTTP 502)', 2);
+        $this->assertSame([['x', 'Forbeast: walang comment permission — i-connect ulit ang page']], $this->comments($this->content('Page Uno', false)));
+    }
+
+    public function test_S_150_6_an_unchanged_comment_pm_is_not_asked_again(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM seat cover ₱299' . self::FORM);
+        $this->answers = ['PM seat cover' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        $this->content();
+        $this->assertSame(1, $this->aiCalls());
+        $this->content();
+        $this->check();
+        $this->assertSame(1, $this->aiCalls(), 'unchanged: not asked again');
+        $this->assertSame(1, DB::table('chatbot_content_answers')->where('field', 'Comment PM')->whereNotNull('cost_usd')->count(), 'cost logged like Prompt/Seq');
+
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM seat cover ₱299 po' . self::FORM);
+        $this->content();
+        $this->assertSame(2, $this->aiCalls(), 'changed: asked once');
+    }
+
+    public function test_S_150_7_the_nightly_run_and_check_again_include_the_comment_checks(): void
+    {
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM lights ₱299' . self::FORM);
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_1', 'Salamat po!');
+        $this->answers = ['PM lights' => $this->answer('CHRISTMAS LIGHTS', false, 90)];
+
+        $this->artisan('chatbot:content-check', ['--sync' => true])->assertExitCode(0);
+        $this->assertSame(1, $this->aiCalls(), 'the PM is asked at night');
+        Artisan::call('chatbot:content-check', ['--json' => true]);
+        $reasons = array_column(collect(json_decode(Artisan::output(), true)['pages'])->keyBy('page')['Page Uno']['findings'], 'reason');
+        $this->assertContains('Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)', $reasons);
+        $this->assertContains('Comment Reply: only one variant: add 2–3 variants: the same text on every comment can be flagged as spam', $reasons);
+
+        $this->actingAs($this->user());
+        $res = $this->postJson('/chatbot/check', ['page_name' => 'Page Uno'])->assertOk()->json();
+        Queue::assertPushed(RunChatbotContentCheck::class, fn ($job) => $job->page === 'Page Uno');
+        $this->assertContains('Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)', $res['reasons']);
+        $this->assertContains('Comment Reply: only one variant: add 2–3 variants: the same text on every comment can be flagged as spam', $res['warnings']);
+    }
+
+    public function test_S_150_8_a_botcake_page_with_comment_columns_gets_an_info_line(): void
+    {
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_1', 'Salamat po!');
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_2', 'Check inbox po');
+        $this->assertSame([['info', 'Comment columns: comments are answered only on Forbeast pages']], $this->comments($this->content('Page Uno', false), true));
+        $res = $this->check();
+        $this->assertContains('Comment columns: comments are answered only on Forbeast pages', $res['notes']);
+        $this->assertSame([], $this->comments($this->content('Page Dos', false), true), 'no comment columns: nothing');
     }
 }

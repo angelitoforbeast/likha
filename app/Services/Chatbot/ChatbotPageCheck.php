@@ -103,7 +103,28 @@ class ChatbotPageCheck
         return $out;
     }
 
+    /**
+     * Ang Check, saka ang mga comment column (CommentCheck at ang naitalang sagot ng AI sa Comment PM): kita kahit walang
+     * flow ang page, dahil ang sagot sa comment ay hindi kailangan ng flow. Ang info ay nasa notes (hindi babala).
+     */
     private function run(string $page, bool $fresh): array
+    {
+        $res = $this->runFlow($page, $fresh) + ['notes' => []];
+        foreach ($this->content->comments($page, false)['findings'] as $f) {
+            match ($f['level']) {
+                'x' => $res['reasons'][] = $f['reason'],
+                'warn' => $res['warnings'][] = $f['reason'],
+                'info' => $res['notes'][] = $f['reason'],
+                default => null,
+            };
+        }
+        if ($res['reasons']) $res['status'] = 'x';
+        elseif ($res['status'] === 'none' && $res['warnings']) $res['status'] = 'ok';
+
+        return $res;
+    }
+
+    private function runFlow(string $page, bool $fresh): array
     {
         $out = ['status' => 'none', 'reasons' => [], 'warnings' => $this->commentLengths($page), 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
         // Ang sagot sa comment ay hindi kailangan ng flow: ang babala ay kita kahit walang flow ang page.
@@ -201,6 +222,7 @@ class ChatbotPageCheck
         $content = $this->content->run($page, false);
         $warnings = $out['warnings'];
         foreach ($content['findings'] as $f) {
+            if ($f['kind'] === 'comment') continue; // nasa run(), kasama ang page na walang flow
             if ($f['level'] === 'x') $reasons[] = $f['reason'];
             elseif ($f['level'] === 'warn') $warnings[] = $f['reason'];
         }
