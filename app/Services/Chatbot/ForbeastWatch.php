@@ -11,6 +11,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -52,6 +53,10 @@ class ForbeastWatch
     private const INBOUND_GRACE = 120;
     /** Ilang minuto ang layo ng standby at ng kopya ng Forbeast na may parehong text (walang parehong mid). */
     private const TWIN_MINUTES = 2;
+    /** Ilang magkaibang customer ang may standby na walang kapares bago lumipat dahil sa inbound. */
+    private const INBOUND_CUSTOMERS = 2;
+    /** Ang sagot ng bot na ilang segundo bago dumating ang standby ay sagot na rin dito (magkasabay na dating). */
+    private const REPLIED_GRACE = 5;
 
     public function __construct(private PageSettings $settings)
     {
@@ -123,24 +128,71 @@ class ForbeastWatch
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
         $minutes = self::limit('inbound_minutes');
-        $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes($minutes))->get(['psid', 'message', 'message_id', 'payload', 'received_at']);
+        // Kasama ang TWIN_MINUTES bago ang window: ang kapares ng pinakaunang standby ay maaaring nauna nang kaunti.
+        $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes($minutes + self::TWIN_MINUTES))
+            ->orderBy('id')->get(['id', 'psid', 'message', 'message_id', 'payload', 'received_at']);
         $settled = now()->subSeconds(self::INBOUND_GRACE);
-        $forbeast = $chats->filter(fn ($c) => ($c->payload['source'] ?? null) === 'gateway');
-        // Bawat standby (kopya ng Botcake) na walang kapares mula sa Forbeast (parehong mid, o parehong customer at text)
-        // pagkalipas ng INBOUND_GRACE: sira ang pagtanggap ng Forbeast. Kahit iisang chat ay sapat (page na kaunti ang chat).
-        $orphans = $chats->filter(fn ($c) => self::standby($c) && $c->received_at?->lte($settled) && !$forbeast->contains(
-            fn ($f) => ($c->message_id && $f->message_id === $c->message_id) || ((string) $f->psid === (string) $c->psid && trim((string) $f->message) === trim((string) $c->message))
-        ))->count();
-        if ($orphans >= self::limit('inbound_chats')) {
-            $this->switch($page, 'inbound', $orphans . ' Botcake chat(s) with no Forbeast copy after ' . self::INBOUND_GRACE . ' seconds');
+        $from = now()->subMinutes($minutes);
+        // Ang standby (kopya ng Botcake) na walang kapares mula sa Forbeast pagkalipas ng INBOUND_GRACE. Ebidensya lang kapag
+        // galing sa INBOUND_CUSTOMERS na magkaibang customer: ang isang kakaibang mensahe ay hindi dapat maglipat ng page.
+        $paired = self::pairs($chats);
+        $orphans = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from));
+        $customers = $orphans->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
+        if ($orphans->count() >= self::limit('inbound_chats') && $customers >= self::INBOUND_CUSTOMERS) {
+            $this->switch($page, 'inbound', 'Botcake chats from ' . $customers . ' customers with no Forbeast copy after ' . self::INBOUND_GRACE . ' seconds',
+                ['customers' => $customers, 'chat_ids' => $orphans->pluck('id')->take(50)->values()->all()]);
         }
+    }
+
+    /**
+     * Ang anyo ng mensahe sa paghahambing ng dalawang kopya: ang text ay walang pagkakaiba sa laki ng titik at espasyo; ang
+     * attachment ay ang uri lang (ang Forbeast ay "[Audio]", ang Botcake ay "[audio] <url>"). Ang larawan at sticker ay
+     * iisa: ang sticker ay dumarating sa Forbeast bilang larawan.
+     */
+    public static function kindOf(?string $message): string
+    {
+        $m = trim((string) $message);
+        if ($m === ChatMessageCleaner::LIKE) return 'att:like';
+        if ($m === ChatMessageCleaner::PHOTO) return 'att:image';
+        if (preg_match('/^\[(audio|image|photo|sticker|video|file|location|fallback|attachment)\](?:\s+\S+)?$/iu', $m, $x)) {
+            $type = strtolower($x[1]);
+
+            return 'att:' . (in_array($type, ['photo', 'sticker'], true) ? 'image' : $type);
+        }
+
+        return 'text:' . mb_strtolower(preg_replace('/\s+/u', ' ', $m));
+    }
+
+    /**
+     * Ang magkapares na kopya sa mga chat (iisang page): standby ng Botcake at chat ng Forbeast ng parehong customer, may
+     * parehong mid, o parehong kindOf sa loob ng TWIN_MINUTES (alinman ang nauna). Bawat chat ay isang kapares lang;
+     * ang pinakamalapit sa oras ang kinukuha. @return array<int, int> id => id ng kapares (parehong direksyon)
+     */
+    private static function pairs(\Illuminate\Support\Collection $chats): array
+    {
+        $out = [];
+        $forbeast = $chats->filter(fn ($c) => !self::standby($c) && ($c->payload['source'] ?? null) === 'gateway');
+        foreach ($chats->filter(fn ($c) => self::standby($c))->sortBy('received_at') as $s) {
+            $kind = self::kindOf($s->message);
+            $best = $forbeast->filter(fn ($f) => !isset($out[$f->id]) && (string) $f->psid === (string) $s->psid && $f->received_at && $s->received_at
+                && (($s->message_id && $f->message_id === $s->message_id)
+                    || (abs($f->received_at->getTimestamp() - $s->received_at->getTimestamp()) <= self::TWIN_MINUTES * 60 && self::kindOf($f->message) === $kind)))
+                ->sortBy(fn ($f) => [$s->message_id && $f->message_id === $s->message_id ? 0 : 1, abs($f->received_at->getTimestamp() - $s->received_at->getTimestamp())])
+                ->first();
+            if ($best !== null) {
+                $out[$s->id] = $best->id;
+                $out[$best->id] = $s->id;
+            }
+        }
+
+        return $out;
     }
 
     /**
      * Ang lipat sa Botcake: gaya ng select sa /chatbot/pages (PageSettings::set ng chatbot.provider, may history), saka ang
      * event, saka ang mga standby chat. Walang Botcake token: hindi lumilipat, isang "cannot switch" event kada oras.
      */
-    public function switch(string $page, string $condition, string $error): void
+    public function switch(string $page, string $condition, string $error, array $evidence = []): void
     {
         $hash = sha1($this->settings->pageKey($page));
         $lock = Cache::lock('forbeast-watch:switch:' . $hash, 60);
@@ -156,6 +208,8 @@ class ForbeastWatch
                 $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::BOTCAKE);
                 $this->record($page, self::SWITCHED, ChatbotProvider::BOTCAKE, $condition, $error);
             });
+            // Ang ebidensya ng lipat (bilang at ID lang; ang error ay HTTP at Meta code lang, walang text ng mensahe).
+            Log::warning('forbeast watch: switched', ['page' => $page, 'condition' => $condition, 'error' => $error] + $evidence);
             $this->reset($page, 'fails', 'no_answer', 'health');
             Cache::forget('forbeast-watch:cannot:' . $hash);
             $this->runStandby($page);
@@ -193,17 +247,20 @@ class ForbeastWatch
 
     /**
      * Ang kopya ng parehong mensahe sa kabila: ang chat ng Forbeast ng isang standby, o ang standby ng isang chat ng
-     * Forbeast. Parehong message_id (mid), o parehong customer at text sa loob ng TWIN_MINUTES.
+     * Forbeast, ayon sa pairs() (parehong mid, o parehong customer at kindOf sa loob ng TWIN_MINUTES, isa-sa-isa).
      */
     private static function twin(BotcakeChat $chat, bool $wantStandby): ?BotcakeChat
     {
         $at = $chat->received_at ?? now();
+        // Ang mga chat ng customer sa paligid (doble ng TWIN_MINUTES), para tama ang isa-sa-isang pagpares sa magkakasunod na kopya.
+        $group = BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)
+            ->whereBetween('received_at', [$at->copy()->subMinutes(2 * self::TWIN_MINUTES), $at->copy()->addMinutes(2 * self::TWIN_MINUTES)])
+            ->orderBy('id')->get();
+        if (!$group->contains('id', $chat->id)) $group->push($chat);
+        $id = self::pairs($group)[$chat->id] ?? null;
+        $twin = $id !== null ? $group->firstWhere('id', $id) : null;
 
-        return BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)->where('id', '!=', $chat->id)
-            ->whereBetween('received_at', [$at->copy()->subMinutes(self::TWIN_MINUTES), $at->copy()->addMinutes(self::TWIN_MINUTES)])
-            ->orderBy('id')->get()
-            ->first(fn ($c) => self::standby($c) === $wantStandby
-                && (($chat->message_id !== null && $c->message_id === $chat->message_id) || $c->message === $chat->message));
+        return $twin !== null && self::standby($twin) === $wantStandby ? $twin : null;
     }
 
     /**
@@ -234,8 +291,10 @@ class ForbeastWatch
     }
 
     /**
-     * Ang mga standby chat ng huling ilang minuto, luma muna, maliban sa may kopya sa Forbeast na may naipadala nang sagot:
-     * bagong chat (para sa takbo ayon sa id), at ang standby ay tinatanggal, kaya isang beses lang.
+     * Ang mga standby chat ng huling ilang minuto, luma muna. Tumatakbo lang ang walang kopya sa Forbeast at walang sagot
+     * ng bot sa customer na iyon sa page mula sa pagdating nito (bawas REPLIED_GRACE segundo): kung hindi, dobleng sagot.
+     * Ang nilaktawan ay nasa log (id at dahilan lang). Ang tumatakbo: bagong chat (para sa takbo ayon sa id), at ang
+     * standby ay tinatanggal, kaya isang beses lang.
      */
     private function runStandby(string $page): void
     {
@@ -245,8 +304,13 @@ class ForbeastWatch
             ->orderBy('id')->get()->filter(fn ($c) => self::standby($c))->values();
         foreach ($chats as $c) {
             try {
-                $twin = self::twin($c, false);
-                if ($twin !== null && ChatbotReply::where('chat_id', $twin->id)->where('kind', 'send')->where('status', 'sent')->exists()) continue;
+                $skip = self::twin($c, false) !== null ? 'forbeast_twin'
+                    : (ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $c->psid)->where('kind', 'send')->where('status', 'sent')
+                        ->where('sent_at', '>=', ($c->received_at ?? now())->copy()->subSeconds(self::REPLIED_GRACE))->exists() ? 'already_answered' : null);
+                if ($skip !== null) {
+                    Log::info('forbeast watch: standby skipped', ['page' => $page, 'chat_id' => $c->id, 'reason' => $skip]);
+                    continue;
+                }
                 $chat = DB::transaction(function () use ($c) {
                     $new = $c->replicate();
                     $payload = (array) $c->payload;
