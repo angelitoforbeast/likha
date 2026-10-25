@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Ang record ng bawat AI request (spec 150): sino ang sumagot (provider, model), gaano katagal, tokens, kung lumipat sa
+     * Ang record ng bawat AI request: sino ang sumagot (provider, model), gaano katagal, tokens, kung lumipat sa
      * susunod na AI at bakit, ang bawat subok (walang text), at kung naghihintay (sync) o pool (async). Walang text ng
      * customer dito: ang messages, answer at context ay binubura pagkatapos ng 2 araw (kaya nullable), ang record ay 90 araw.
      */

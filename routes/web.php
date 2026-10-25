@@ -353,6 +353,10 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/column', [\App\Http\Controllers\ChatbotController::class, 'column'])->middleware('throttle:30,1,chatbot-column')->name('column');
     Route::post('/active', [\App\Http\Controllers\ChatbotController::class, 'active'])->middleware('throttle:30,1,chatbot-active')->name('active');
     Route::post('/provider', [\App\Http\Controllers\ChatbotController::class, 'provider'])->middleware('throttle:30,1,chatbot-provider')->name('provider');
+    // Aling AI ang sumasagot kada page at ang site default, at ang paghahambing ng mga AI ng isang page.
+    Route::post('/ai', [\App\Http\Controllers\ChatbotAiController::class, 'save'])->middleware('throttle:30,1,chatbot-ai')->name('ai');
+    Route::post('/ai/site', [\App\Http\Controllers\ChatbotAiController::class, 'site'])->middleware('throttle:30,1,chatbot-ai-site')->name('ai.site');
+    Route::get('/ai/compare', [\App\Http\Controllers\ChatbotAiController::class, 'compare'])->middleware('throttle:60,1,chatbot-ai-compare')->name('ai.compare');
     Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
     Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');
     Route::post('/connections/{provider}', [\App\Http\Controllers\ChatbotController::class, 'connections'])->whereIn('provider', ['botcake', 'forbeast', 'chat-block', 'botcake-test', 'forbeast-test', 'forbeast-clear'])->middleware('throttle:30,1,chatbot-connections-save')->name('connections.save');

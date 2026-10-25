@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Schema;
 class ChatbotFields
 {
     public const PROVIDER = 'chatbot';
-    public const RESERVED = ['active', 'flow_id', 'mock_ai', 'mock_ai_latency_ms', 'provider', 'auto_switch']; // flow_id: ang flow na pinili sa dropdown (id), system lang; mock_ai: pekeng AI ng stress-test page (CLI lang); provider: ang select na Botcake / Forbeast Gateway; auto_switch: ang talaan ng kusang lipat (ForbeastWatch)
+    public const RESERVED = ['active', 'flow_id', 'mock_ai', 'mock_ai_latency_ms', 'provider', 'auto_switch',
+        'ai_provider', 'ai_fallback', 'ai_local_model', 'ai_local_timeout', 'ai_local_concurrency', 'ai_breaker_failures', 'ai_breaker_seconds']; // flow_id: ang flow na pinili sa dropdown (id), system lang; mock_ai: pekeng AI ng stress-test page (CLI lang); provider: ang select na Botcake / Forbeast Gateway; auto_switch: ang talaan ng kusang lipat (ForbeastWatch); ai_*: ang AI ng page at ng site (ChatbotAiSettings)
     public const ADDED_SETTING = 'chatbot.columns'; // app_settings: JSON {key: label}
     public const MAX_VALUE = 50000; // letra: ang mahahabang AI prompt (hal. 14,113)
     public const MAX_BYTES = 60000; // ang TEXT ng MySQL ay 65,535 bytes: ang ñ at emoji ay 2-4 bytes, kaya may sariling check (hindi pinuputol)
@@ -89,7 +90,7 @@ class ChatbotFields
     {
         $label = trim(preg_replace('/\s+/u', ' ', preg_replace('/[^\p{L}\p{N} \-]/u', '', $name)));
         $key = self::keyOf($label);
-        if ($key === '' || in_array($key, self::RESERVED, true)) return null;
+        if ($key === '' || in_array($key, self::RESERVED, true) || PageSettings::keyLike(self::PROVIDER, $key)) return null;
 
         $existing = collect($this->columns())->firstWhere('key', $key);
         if ($existing) return ['key' => $key, 'label' => $existing['label']];

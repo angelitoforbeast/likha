@@ -246,7 +246,7 @@ class ChatbotAiChain
             'latency_ms' => $attempts ? array_sum(array_column($attempts, 'ms')) : null,
             'prompt_tokens' => $ok ? $last['prompt_tokens'] : null, 'completion_tokens' => $ok ? $last['completion_tokens'] : null,
             'attempts' => array_map(fn ($a) => ['provider' => $a['provider'], 'model' => mb_substr((string) $a['model'], 0, 100), 'ms' => (int) $a['ms'], 'ok' => (bool) $a['ok'],
-                'why' => $a['ok'] ? null : (string) $a['why']], $attempts),
+                'why' => $a['ok'] ? null : (string) $a['why']] + (($a['called'] ?? true) ? [] : ['skipped' => true]), $attempts), // skipped: hindi tinawag (hindi sa bilis)
         ];
     }
 }

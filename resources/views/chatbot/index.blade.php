@@ -68,6 +68,7 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
+     data-ai-url="{{ route('chatbot.ai') }}" data-ai-site-url="{{ route('chatbot.ai.site') }}" data-ai-compare-url="{{ route('chatbot.ai.compare') }}"
      data-needs-token="{{ \App\Services\Chatbot\ForbeastPageSetup::NEEDS_TOKEN }}"
      @if($canSetUp) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}"
      data-connections-url="{{ route('chatbot.connections') }}" data-connections-save-url="{{ url('/chatbot/connections') }}" @endif>
@@ -83,6 +84,9 @@
         </label>
         <button id="add-column" type="button" class="cb-btn">+ Column</button>
         <button id="changes-open" type="button" class="cb-btn">Changes</button>
+        {{-- Aling AI ang sumasagot: ang site default (at ang Local cap at breaker), at ang paghahambing ng mga AI ng isang page. --}}
+        <button id="ai-site-open" type="button" class="cb-btn">AI default</button>
+        <button id="ai-compare-open" type="button" class="cb-btn">Compare AI</button>
         @if($canSetUp)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
@@ -181,6 +185,51 @@
                 <button id="chg-prev" type="button" class="cb-btn cb-btn-sm">Newer</button>
                 <span id="chg-count" class="text-slate-600"></span>
                 <button id="chg-next" type="button" class="cb-btn cb-btn-sm">Older</button>
+            </div>
+        </div>
+    </div>
+
+    {{-- Ang AI ng isang page (o ang site default): provider, fallback, Local model at timeout; sa site, pati ang cap at breaker
+         ng Local. Walang key o URL dito: nasa server lang ang mga iyon. Ang palyang save ay ibinabalik ang dating value. --}}
+    <div id="ai-box" class="fixed inset-0 hidden overflow-y-auto bg-slate-900/30 p-2 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="ai-title">
+        <form id="ai-form" class="mx-auto w-full max-w-md rounded-xl bg-white p-4 text-sm shadow-lg">
+            <div class="mb-2 flex items-start justify-between gap-3">
+                <div id="ai-title" class="min-w-0 break-words font-semibold"></div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <p id="ai-local-note" class="mb-2 hidden text-xs text-amber-700">Local AI is not set up on the server yet, so only OpenAI can be chosen.</p>
+            <div class="grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                <label class="flex flex-col">AI provider<select name="provider" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></select></label>
+                <label class="flex flex-col">If it fails, then<select name="fallback" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></select></label>
+                <label class="flex flex-col">Local model<input name="local_model" maxlength="100" autocomplete="off" spellcheck="false" placeholder="e.g. qwen3:14b" class="mt-0.5 rounded border border-slate-300 px-1 py-1 font-mono text-sm text-gray-900"></label>
+                <label class="flex flex-col">Local timeout (s)<input name="local_timeout" type="number" min="1" max="60" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+                <label data-ai-site-only class="flex flex-col">Local at a time<input name="local_concurrency" type="number" min="1" max="50" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+                <label data-ai-site-only class="flex flex-col">Pause Local after failures<input name="breaker_failures" type="number" min="1" max="20" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+                <label data-ai-site-only class="flex flex-col">Pause for (s)<input name="breaker_seconds" type="number" min="5" max="600" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+            </div>
+            <p id="ai-chain" class="mt-2 text-xs text-slate-600"></p>
+            <p id="ai-error" class="mt-1 min-h-[1rem] text-xs text-red-600" aria-live="polite"></p>
+            <div class="mt-2 flex gap-2"><button class="cb-btn cb-btn-primary">Save</button><button type="button" data-close-dialog-alt class="cb-btn">Cancel</button></div>
+        </form>
+    </div>
+    <div id="ai-compare" class="fixed inset-0 hidden bg-slate-900/30 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="aic-title">
+        <div class="mx-auto flex h-full max-h-full w-full max-w-4xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div id="aic-title" class="font-semibold">Compare AI on a page</div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <form id="aic-filters" class="grid grid-cols-2 gap-2 border-b border-slate-200 px-4 py-2 text-xs sm:grid-cols-3">
+                <label class="col-span-2 flex min-w-0 flex-col sm:col-span-1">Page<select name="page" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></select></label>
+                <label class="flex min-w-0 flex-col">From<input name="from" type="date" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+                <label class="flex min-w-0 flex-col">To<input name="to" type="date" class="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+            </form>
+            <p id="aic-note" class="px-4 pt-2 text-xs text-slate-600" aria-live="polite"></p>
+            <div class="min-h-0 flex-1 overflow-x-auto overflow-y-auto px-4 py-2">
+                <table class="min-w-[40rem] text-xs"><thead><tr class="text-left text-slate-500">
+                    <th class="py-1 pr-3">AI</th><th class="py-1 pr-3 text-right">Requests</th><th class="py-1 pr-3 text-right">Answered</th><th class="py-1 pr-3 text-right">Failed</th>
+                    <th class="py-1 pr-3 text-right">Fell back</th><th class="py-1 pr-3 text-right">Avg ms</th><th class="py-1 pr-3 text-right">p95 ms</th>
+                    <th class="py-1 pr-3 text-right">Tokens in</th><th class="py-1 pr-3 text-right">Tokens out</th>
+                </tr></thead><tbody id="aic-rows"></tbody></table>
             </div>
         </div>
     </div>
@@ -294,7 +343,7 @@
     const box = document.getElementById('cbot'), url = box.dataset, $ = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
-    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false, bots = [];
+    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false, bots = [], aiSite = null;
     const NEEDS_TOKEN = url.needsToken; // ang dahilan kapag hindi mapipili ang Forbeast
     const picked = new Set(); // mga page na may check (bulk "Replies via")
     const marks = new Map(), seqs = new Map(), errors = new Map();
@@ -324,7 +373,7 @@
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
-        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || [];
+        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || []; aiSite = data.ai_site || null;
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha isa-isa pagkatapos ng render.
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -582,7 +631,7 @@
         if (show) $(boxId).querySelector('[data-close-dialog]').focus();
     }
     document.querySelectorAll('[data-close-dialog]').forEach(b => b.addEventListener('click', () => dialog(b.closest('[role="dialog"]').id, false)));
-    ['pv', 'hist', 'chg', 'conn', 'flow-box'].forEach(d => $(d).addEventListener('click', e => { if (e.target === $(d)) dialog(d, false); }));
+    ['pv', 'hist', 'chg', 'conn', 'flow-box', 'ai-box', 'ai-compare'].forEach(d => $(d).addEventListener('click', e => { if (e.target === $(d)) dialog(d, false); }));
     const getJson = u => fetch(u, {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
     /** Ang value na 3 linya kapag sarado, may "Show all" kapag may kasunod pa. */
     function folded(text, cls = '') {
@@ -710,7 +759,7 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r));
+        td.append(b, providerSelect(r), aiButton(r));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
@@ -879,6 +928,90 @@
         });
         return sel;
     }
+
+    // ---- AI ng page at ang site default ----
+    // Ang button sa row ay nagsasabi kung aling AI ang sumasagot ("(default)" = sumusunod sa site default).
+    const aiLabel = p => (aiSite?.providers || []).find(x => x.name === p)?.label || p;
+    let aiPage = null; // ang row na binubuksan sa AI dialog; null = ang site default
+    function aiButton(r) {
+        if (!r.ai) return null;
+        const b = el('button', {type: 'button', class: 'mt-1 block max-w-[9rem] truncate rounded border border-slate-300 px-1 py-0.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500',
+            title: 'Which AI answers: ' + r.ai.chain, 'aria-label': 'AI of ' + r.page + ': ' + r.ai.label, text: 'AI: ' + r.ai.label});
+        b.addEventListener('click', () => openAi(r));
+        return b;
+    }
+    function aiOptions(sel, list, value) {
+        sel.replaceChildren(...list.map(([v, t, off]) => { const o = el('option', {value: v, text: t}); o.disabled = !!off && v !== value; return o; }));
+        sel.value = value;
+    }
+    // Ang naka-save na value sa form: pang-umpisa, at pang-balik kapag pumalya ang save (hindi ang tinype ang naiiwan).
+    function aiRevert() {
+        const f = $('ai-form'), r = aiPage, a = r ? r.ai : aiSite, notReady = !aiSite?.local_ready;
+        const provs = (aiSite?.providers || []).map(p => [p.name, p.label, p.name === 'local' && notReady]);
+        aiOptions(f.elements.provider, r ? [['default', 'Default (' + aiLabel(aiSite?.provider) + ')'], ...provs] : provs, r ? (a.override ? a.provider : 'default') : a.provider);
+        const falls = [...provs, ['none', 'None']];
+        aiOptions(f.elements.fallback, r ? [['default', 'Default'], ...falls] : [['', 'Default (Local → OpenAI, OpenAI → none)'], ...falls], r ? (a.fallback || 'default') : (a.fallback || ''));
+        f.elements.local_model.value = a.local_model || '';
+        f.elements.local_model.placeholder = r && aiSite?.local_model ? 'Default: ' + aiSite.local_model : 'e.g. qwen3:14b';
+        f.elements.local_timeout.value = a.local_timeout ?? '';
+        f.elements.local_timeout.placeholder = r ? 'Default: ' + (aiSite?.local_timeout ?? 8) : '';
+        for (const k of ['local_concurrency', 'breaker_failures', 'breaker_seconds']) f.elements[k].value = r ? '' : (a[k] ?? '');
+        f.querySelectorAll('[data-ai-site-only]').forEach(l => l.classList.toggle('hidden', !!r));
+        $('ai-chain').textContent = r ? 'Now: ' + a.chain : '';
+        $('ai-local-note').classList.toggle('hidden', !notReady);
+    }
+    function openAi(r) {
+        aiPage = r;
+        $('ai-title').textContent = r ? 'AI for ' + r.page : 'AI default for all pages';
+        $('ai-error').textContent = '';
+        aiRevert();
+        dialog('ai-box', true);
+    }
+    $('ai-site-open').addEventListener('click', () => openAi(null));
+    $('ai-box').querySelector('[data-close-dialog-alt]').addEventListener('click', () => dialog('ai-box', false));
+    $('ai-form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const f = e.target, r = aiPage, body = r ? {page_name: r.page} : {};
+        for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds']) {
+            const v = f.elements[k].value.trim();
+            if (r || v !== '') body[k] = v; // sa page, ang blangkong model o timeout = bumalik sa default
+        }
+        const btn = f.querySelector('button.cb-btn-primary');
+        btn.disabled = true;
+        try {
+            const {ok, data} = await post(r ? url.aiUrl : url.aiSiteUrl, body);
+            if (!ok) { $('ai-error').textContent = data.error || data.message || 'Not saved.'; aiRevert(); return; }
+            dialog('ai-box', false);
+            notice(data.status === 'unchanged' ? 'No change.' : 'AI saved.', 'text-green-700');
+            if (r) { r.ai = data.ai[r.page]; render(); } else { aiSite = data.ai_site; load(); }
+        } catch (err) {
+            $('ai-error').textContent = 'No connection: not saved.';
+            aiRevert();
+        } finally { btn.disabled = false; }
+    });
+
+    // Ang paghahambing ng mga AI ng isang page (mga numero lang; "–" = walang tokens).
+    const dash = v => v === null || v === undefined ? '–' : String(v);
+    async function loadCompare() {
+        const f = $('aic-filters'), q = new URLSearchParams({page: f.elements.page.value, from: f.elements.from.value, to: f.elements.to.value});
+        $('aic-note').textContent = 'Loading…';
+        const {ok, data} = await getJson(url.aiCompareUrl + '?' + q);
+        if (!ok) { $('aic-note').textContent = data.error || 'Could not load.'; $('aic-rows').replaceChildren(); return; }
+        $('aic-note').textContent = data.message ? data.message : data.requests + ' requests from ' + data.from + ' to ' + data.to + ' (Manila).';
+        $('aic-rows').replaceChildren(...data.providers.map(p => el('tr', {class: 'border-t border-slate-100'}, [
+            el('td', {class: 'py-1 pr-3 font-medium', text: p.label}),
+            ...['requests', 'answered', 'failed', 'fallbacks', 'avg_ms', 'p95_ms', 'prompt_tokens', 'completion_tokens'].map(k => el('td', {class: 'py-1 pr-3 text-right tabular-nums', text: dash(p[k])})),
+        ])));
+    }
+    $('ai-compare-open').addEventListener('click', () => {
+        const f = $('aic-filters'), day = d => d.toISOString().slice(0, 10), keep = f.elements.page.value;
+        f.elements.page.replaceChildren(...rows.map(r => el('option', {value: r.page, text: r.page})));
+        if (keep) f.elements.page.value = keep;
+        if (!f.elements.to.value) { const now = new Date(); f.elements.to.value = day(now); f.elements.from.value = day(new Date(now - 6 * 864e5)); }
+        dialog('ai-compare', true);
+        if (rows.length) loadCompare();
+    });
+    $('aic-filters').addEventListener('change', loadCompare);
 
     function paintSwitch(b, on) {
         const [track, label] = b.children;

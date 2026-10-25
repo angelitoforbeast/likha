@@ -23,7 +23,18 @@ class PageSettings
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
         'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
         'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate',
-        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms', 'forbeast.token_status', 'forbeast.webhook_secret', 'chatbot.auto_switch', 'botcake.chat_block'];
+        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms', 'forbeast.token_status', 'forbeast.webhook_secret', 'chatbot.auto_switch', 'botcake.chat_block',
+        'chatbot.ai_provider', 'chatbot.ai_fallback', 'chatbot.ai_local_model', 'chatbot.ai_local_timeout', 'chatbot.ai_local_concurrency',
+        'chatbot.ai_breaker_failures', 'chatbot.ai_breaker_seconds'];
+
+    /**
+     * Ang chatbot key na mukhang key (api_key, ai_key, …) o ai_*: hindi tinatanggap mula sa page. Ang mga key ng AI ay nasa
+     * config lang, at ang ai_* ay isinusulat lang ng AI control ng /chatbot/pages.
+     */
+    public static function keyLike(string $provider, string $key): bool
+    {
+        return $provider === 'chatbot' && (bool) preg_match('/(^|_)(api_?)?key$|^ai_/', $key);
+    }
 
     /**
      * Mga system key na ipinapakita sa loob ng cell ng ibang key (flow ID, template, message field), hindi bilang sariling
@@ -82,6 +93,7 @@ class PageSettings
             return ['key' => 'Key: lowercase letters, digits, _ and . only (e.g. flow.on_delivery).'];
         }
 
+        if (!$system && self::keyLike($provider, $key)) return ['key' => 'Keys are set on the server, not here.'];
         if (!$system && self::isSystemKey($full)) {
             return ['value' => $full . ' is written by the system (Test token / sync), not here.'];
         }

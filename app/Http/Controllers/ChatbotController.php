@@ -6,6 +6,7 @@ use App\Models\BotcakeChat;
 use App\Models\PageSetting;
 use App\Services\BotcakeChatBlock;
 use App\Services\BotcakePageSetup;
+use App\Services\Chatbot\ChatbotAiSettings;
 use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotPageCheck;
 use App\Services\Chatbot\ChatbotProvider;
@@ -100,6 +101,7 @@ class ChatbotController extends Controller
         $prints = $check->prints();
         $forbeast = app(ForbeastPageSetup::class);
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        $ai = app(\App\Services\Chatbot\ChatbotAiSettings::class);
 
         $rows = [];
         foreach ($pages as $page) {
@@ -136,11 +138,13 @@ class ChatbotController extends Controller
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
                 // Ang mga kumpletong koneksyon (Connected column at ang Bot na mapipili).
                 'connected' => $connections->connected($page),
+                // Aling AI ang sumasagot (ang override ng page o ang site default).
+                'ai' => $ai->row($page),
             ];
         }
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
-            'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS]);
+            'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS, 'ai_site' => $ai->site()]);
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */
@@ -527,7 +531,10 @@ class ChatbotController extends Controller
         $field = strtolower($this->str($request, 'field', 120));
         $user = $this->str($request, 'user', 20);
 
-        $q = ($page !== '' ? $this->settings->pageQuery($page) : PageSetting::query())->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)
+        // Ang "_all" ay hindi page; ang AI site default lang nito ang kasama (ipinapakita bilang "Site default").
+        $q = ($page !== '' ? $this->settings->pageQuery($page) : PageSetting::query())
+            ->where(fn ($s) => $s->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)
+                ->orWhere(fn ($a) => $a->where('provider', ChatbotFields::PROVIDER)->whereIn('key', ChatbotAiSettings::keys())))
             ->where(fn ($w) => $w->where(fn ($a) => $a->where('provider', ChatbotFields::PROVIDER)->whereNotIn('key', self::HIDDEN_KEYS))
                 ->orWhere(function ($b) {
                     foreach (collect(array_keys(self::SETUP_LABELS))->map(fn ($k) => explode('.', $k, 2))->groupBy(0) as $provider => $keys) {
@@ -579,7 +586,7 @@ class ChatbotController extends Controller
         $events = $q->orderByDesc('id')->limit($take)->get()->map(fn ($s) => [$s->created_at, $s->id, $s, false])
             ->concat((clone $cleared)->orderByDesc('id')->limit($take)->get()->map(fn ($s) => [$s->replaced_at, $s->id, $s, true]))
             ->sort(fn ($a, $b) => [$b[0], $b[1]] <=> [$a[0], $a[1]])->slice(($p - 1) * self::CHANGES_PER_PAGE, self::CHANGES_PER_PAGE);
-        $labels = array_column($this->fields->columns(), 'label', 'key') + ['active' => 'ACTIVE'];
+        $labels = array_column($this->fields->columns(), 'label', 'key') + ['active' => 'ACTIVE'] + ChatbotAiSettings::LABELS;
 
         $entries = $events->map(function ($ev) use ($users, $labels, $hasBy) {
             [$when, , $s, $clear] = $ev;
@@ -587,7 +594,7 @@ class ChatbotController extends Controller
             return [
                 'id' => $s->id, 'at' => $when?->timezone('Asia/Manila')->format('Y-m-d H:i'),
                 'by' => $clear ? ($s->replaced_by ? ($users[$s->replaced_by] ?? 'user #' . $s->replaced_by) : 'system') : $this->who($s, $users),
-                'page' => $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
+                'page' => $s->page_name === ChatbotAiSettings::SITE_PAGE ? 'Site default' : $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
                 'field' => self::SETUP_LABELS[$s->provider . '.' . $s->key] ?? ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
                 'old' => $before ? ($this->clearedBefore($before, $s) ? '(none)' : $this->shown($before)) : null, 'new' => $clear ? '(none)' : $this->shown($s),
             ];
@@ -613,6 +620,7 @@ class ChatbotController extends Controller
         }
 
         if ($s->provider === ChatbotFields::PROVIDER && $s->key === 'active') return $s->plainValue() === '0' ? 'Off' : 'On';
+        if ($s->provider === ChatbotFields::PROVIDER && isset(ChatbotAiSettings::LABELS[$s->key])) return ChatbotAiSettings::shown($s->key, (string) $s->plainValue());
 
         return $s->is_secret ? '(hidden)' : (string) $s->plainValue();
     }
