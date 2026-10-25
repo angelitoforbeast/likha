@@ -185,4 +185,39 @@ class ChatbotPasteScriptTest extends TestCase
         $out = $this->call('applyMapping', ['https://i.test/1.jpg', 'https://i.test/2.jpg', 'https://i.test/3.jpg'], ['picture', 'seq_img_1', 'seq_img_2'], false);
         $this->assertSame(['picture=https://i.test/1.jpg', 'seq_img_1=https://i.test/2.jpg', 'seq_img_2=https://i.test/3.jpg'], array_map(fn ($c) => $c['key'] . '=' . $c['value'], $out['changes']));
     }
+
+    public function test_S_152_4_the_position_guess_is_the_header_name_or_the_order_from_starting_at_field(): void
+    {
+        $this->assertSame(['main_flow', 'picture', 'seq_1', null], $this->call('positionKeys', "Hi\thttps://i.test/a.jpg\tFollow\textra", self::COLUMNS, 'main_flow'));
+        $this->assertSame(['price', 'main_flow', 'picture', 'seq_1'], $this->call('positionKeys', "499\tHi\thttps://i.test/a.jpg\tFollow", self::COLUMNS, ''), 'default: the first field');
+        $this->assertSame(['seq_1', null, 'price'], $this->call('positionKeys', "Seq 1\tNotes\tPRICE\nFollow\tx\t499", self::COLUMNS, 'main_flow'), 'by header: names, unknown = none');
+        $this->assertSame([], $this->call('positionKeys', '', self::COLUMNS, 'price'));
+    }
+
+    public function test_S_152_3_the_missing_seq_columns_are_listed_with_one_add_button(): void
+    {
+        $texts = [['cell' => 20, 'key' => 'seq_21', 'label' => 'Seq 21'], ['cell' => 21, 'key' => 'seq_22', 'label' => 'Seq 22']];
+        $this->assertSame(['text' => '2 more follow-up texts: no Seq 21, Seq 22 column.', 'button' => 'Add Seq 21–22', 'names' => ['Seq 21', 'Seq 22']], $this->call('missingText', $texts));
+        $mixed = [['cell' => 3, 'key' => 'seq_img_21', 'label' => 'Seq Img 21'], ['cell' => 4, 'key' => 'seq_21', 'label' => 'Seq 21']];
+        $this->assertSame(['text' => '1 more follow-up text: no Seq 21 column. 1 more follow-up image: no Seq Img 21 column.', 'button' => 'Add Seq 21, Seq Img 21',
+            'names' => ['Seq 21', 'Seq Img 21']], $this->call('missingText', $mixed));
+        $this->assertNull($this->call('missingText', []));
+    }
+
+    /** @return array<string, array{array<int, string>, array<int, ?string>, string, ?array}> */
+    public static function items(): array
+    {
+        return [
+            'another item' => [['BEDSHEET STRAP', 'Hello po'], ['item_name_in_jnt_dashboard', 'main_flow'], 'UNISEX SOCKS', ['pasted' => 'BEDSHEET STRAP', 'page' => 'UNISEX SOCKS']],
+            'same item, other case and plural' => [['Unisex Sock 3 pairs'], ['item_name_in_jnt_dashboard'], 'UNISEX SOCKS', null],
+            'no item cell in the paste' => [['BEDSHEET STRAP'], ['main_flow'], 'UNISEX SOCKS', null],
+            'page has no item' => [['BEDSHEET STRAP'], ['item_name_in_jnt_dashboard'], '', null],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('items')]
+    public function test_S_152_7_the_item_mismatch_note_compares_the_pasted_item_with_the_pages_item(array $cells, array $keys, string $page, ?array $want): void
+    {
+        $this->assertSame($want, $this->call('itemMismatch', $cells, $keys, $page));
+    }
 }
