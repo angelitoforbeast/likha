@@ -2383,3 +2383,28 @@ As the owner, I see in Changes who set, changed or removed each value on a page 
 - S-146.5 Given a value set on one day and removed the next, When I filter by the day of removal, Then only the clear is listed.
 - S-146.6 Given secret values set, removed and set again, When I open Changes, Then every value shows as "(hidden)" or "(none)" and no secret text is sent.
 - S-146.7 Given more than one page of mixed writes and clears, When I go through the pages, Then every event appears once, newest first.
+
+## S-148 One Connections popup per page, a Connected column, a safe Flow picker and header filters
+
+As the owner, on /chatbot/pages I see which bots each page is connected to, set up Botcake and Forbeast in one popup per page (each token tested on save), change the Bot and the Flow only with a confirm, and filter the table by column like Google Sheets.
+
+Slice 148. Threat model: users with /chatblast access are trusted (Botcake writes need the CEO); provider answers (page names, URLs, messages) are untrusted and shown as text; tokens are secrets (last 4 only, never logged). Risk tier: high (new routes) and medium (UI, nightly).
+Tests: `tests/Feature/Chatblast/ChatbotConnectionsTest.php`.
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-148.1 | P1 | Given a page with Botcake and Forbeast tokens, when the popup opens, then both cards show Page ID and only the last 4 of each token | `test_S_148_1…` | passed 2026-10-25 |
+| S-148.2 | P1 | Given a valid Botcake token, when it is saved, then it is tested, saved with the user, and the chat block is written and published with the same chat.key (bot On) | `test_S_148_2…` | passed 2026-10-25 |
+| S-148.3 | P1 | Given a Botcake token that fails for the Page ID, or a Forbeast token whose page name or id is another page, when saved, then it is shown red and nothing is saved | `test_S_148_3…` | passed 2026-10-25 |
+| S-148.4 | P1 | Given a valid Forbeast token, when saved, then the webhook is set to this site and Connected shows "Forbeast" | `test_S_148_4…` | passed 2026-10-25 |
+| S-148.5 | P1 | Given a Default Reply (or Forbeast webhook) pointing at another host, or a Default Reply that cannot be read, when saved, then a confirm is needed and nothing changes until it is given | `test_S_148_5…` | passed 2026-10-25 |
+| S-148.6 | P1 | Given a chat.key, when Fix chat block is pressed twice, then the block is written twice with the same key (another host needs a confirm) | `test_S_148_6…` | passed 2026-10-25 |
+| S-148.7 | P1 | Given /chatbot/pages and page settings, then the row has a Connections button and no Forbeast Add/New/Test/Clear or prompt, and page settings links to /chatbot/pages for Forbeast | `test_S_148_7…` (markup) | passed 2026-10-25 |
+| S-148.8 | P1 | Given a page, then the Bot select lists only complete connections plus the current one, one is plain text, and a change asks "Switch X from A to B?" | browser (no JS runner) | not run |
+| S-148.9 | P1 | Given pages with Botcake, Forbeast, both or failing tokens, then Connected is "Botcake", "Forbeast", both, or empty, and Check lists "Botcake: token not working" / "Forbeast: token not working" | `test_S_148_9…` | passed 2026-10-25 |
+| S-148.10 | P1 | Given the Flow ✎ popup, when a flow is searched, picked and confirmed, then it is linked through the cell path and Changes shows the user | `test_S_148_10…` (server); popup in browser | passed (server) 2026-10-25 |
+| S-148.11 | P1 | Given header filters, when Connected = Forbeast only, Check all / Uncheck all, and two columns are filtered, then only rows matching every column show | browser (no JS runner) | not run |
+| S-148.12 | P1 | Given the nightly run, then tokens are re-tested and a block is re-applied only on pages switched On here, on Botcake, whose Default Reply has no JSON API block; the log has counts only | `test_S_148_12…` | passed 2026-10-25 |
+| S-148.13 | P1 | Given a user without /chatblast, then the new routes answer 403; a /chatblast user who is not CEO can read and save Forbeast but gets 403 on Botcake and chat block | `test_S_148_13…` | passed 2026-10-25 |
+| S-148.14 | P2 | Given a 390 px screen, then the page has no horizontal scroll and the popups fit | browser | not run |
+| S-148.15 | P2 | Given a long list, then the header row stays at the top while rows scroll | browser | not run |
