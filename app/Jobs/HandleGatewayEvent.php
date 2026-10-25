@@ -145,7 +145,9 @@ class HandleGatewayEvent implements ShouldQueue
         }
         $first = $e['attachments'][0] ?? null;
         // Ang uri at link ng unang attachment, para sa susunod na transcribe o paglalarawan.
-        if ($first && $first['type']) $payload['attachment'] = ['type' => $first['type'], 'url' => $first['url']];
+        if ($first && $first['type']) {
+            $payload['attachment'] = ['type' => $first['type'], 'url' => $first['url'] !== null && preg_match('#^https?://#i', $first['url']) ? $first['url'] : null];
+        }
         if ($e['text'] !== null && $e['text'] !== '') return $e['text'];
         if (!$first) return null;
         if ($first['type'] === 'image' && $first['url']) {

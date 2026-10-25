@@ -22,8 +22,11 @@ class ChatAttachments
     public const MODES = [self::IGNORE, self::REPLY];
     public const IGNORED = ['photo', 'audio', 'video', 'reel', 'file', 'fallback'];
 
-    /** "[audio] https://…" (Botcake) o "[Audio]" (Forbeast): ang uri at ang link kung mayroon. */
-    private const MARKER = '/^\[(audio|image|photo|video|file|fallback|reel|ig_reel|sticker|location|attachment|share|template)\](?:\s+(\S+))?$/iu';
+    /**
+     * "[audio] https://…" (Botcake) o "[Audio]" (Forbeast): ang uri at ang link kung mayroon. Link lang ang puwedeng
+     * kasunod: ang text na isinulat ng customer (hal. "[photo] ito") ay text, sinasagot.
+     */
+    private const MARKER = '/^\[(audio|image|photo|video|file|fallback|reel|ig_reel|sticker|location|attachment|share|template)\](?:\s+(https?:\/\/\S+))?$/iu';
     /** Ang landas ng sticker sa Facebook CDN (ang Like at ang ibang sticker): hindi larawan ng customer. */
     private const STICKER_PATH = '/t39.1997-6/';
 
@@ -57,7 +60,7 @@ class ChatAttachments
     {
         if (!preg_match(self::MARKER, trim($message), $x)) return null;
 
-        return ['type' => strtolower($x[1]), 'url' => isset($x[2]) && preg_match('#^https?://#i', $x[2]) ? mb_substr($x[2], 0, 2000) : null];
+        return ['type' => strtolower($x[1]), 'url' => isset($x[2]) && $x[2] !== '' ? mb_substr($x[2], 0, 2000) : null];
     }
 
     /**

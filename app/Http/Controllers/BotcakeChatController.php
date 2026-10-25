@@ -148,6 +148,8 @@ class BotcakeChatController extends Controller
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
         }
 
+        // Ang mga marka ng system (attachment, hindi sinagot) ay hindi galing sa param ng Botcake.
+        unset($payload['_ignored'], $payload['attachment']);
         // Ang Like (link ng sticker) ay "👍" at ang larawan mula sa Facebook ay "[Photo]" (ang link ay nasa payload).
         if ($f['message'] !== null) {
             $clean = ChatMessageCleaner::clean($f['message']);

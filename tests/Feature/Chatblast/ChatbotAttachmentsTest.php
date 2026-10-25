@@ -119,10 +119,12 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
         $this->botcakePush('[sticker] https://scontent.xx.fbcdn.net/v/t39.1997-6/cat_n.png')->assertOk();
         $this->forbeast([['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/sticker_n.png']]); // ang sticker ay larawan sa Forbeast
         $this->forbeast([['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1.15752-9/p_n.jpg']], 'Magkano po ito?');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
+        $this->botcakePush('[photo] ito'); // isinulat ng customer: text, hindi link
 
-        $this->assertSame(4, $this->ran());
+        $this->assertSame(5, $this->ran());
         $this->assertSame([], $this->ignoredEvents());
-        $this->assertSame('Magkano po ito?', BotcakeChat::orderByDesc('id')->value('message'));
+        $this->assertSame('Magkano po ito?', BotcakeChat::where('message', 'Magkano po ito?')->value('message'));
     }
 
     public function test_S_149_30_the_reply_setting_restores_todays_behaviour_and_only_the_ceo_changes_it(): void
@@ -141,6 +143,41 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
         $this->assertSame('[audio] https://cdn.fbsbx.com/voice.mp4', BotcakeChat::sole()->message, 'stored as today');
     }
 
+    public function test_S_149_28_an_ignored_photo_is_not_run_later_when_the_customers_next_text_runs(): void
+    {
+        $fields = new \App\Services\Chatbot\CustomerFields(1001, (int) self::PSID);
+        $old = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'name' => 'Ana Cruz', 'message' => 'Hello',
+            'payload' => [], 'received_at' => now()->subMinutes(5)]);
+        $fields->set(\App\Services\Chatbot\CustomerFields::LAST_CHAT, (string) $old->id); // ang customer ay dati na
+        $this->botcakePush('https://scontent.xx.fbcdn.net/v/t1.15752-9/abc_n.jpg')->assertOk();
+        $this->botcakePush('Magkano po?')->assertOk();
+
+        app(\App\Services\Chatbot\ChatbotRunner::class)->handle((int) BotcakeChat::max('id'));
+
+        $this->assertSame(1, DB::table('chatbot_replies')->where('kind', 'send')->count(), 'only the text ran');
+        $fresh = new \App\Services\Chatbot\CustomerFields(1001, (int) self::PSID); // ang $fields ay may sariling cache
+        $this->assertSame((string) BotcakeChat::max('id'), (string) $fresh->get(\App\Services\Chatbot\CustomerFields::LAST_CHAT));
+    }
+
+    public function test_S_149_28_a_photo_during_a_wait_does_not_hold_or_drop_the_no_reply_branch(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_25_100000_create_chatbot_waits_table.php']]);
+        $fields = new \App\Services\Chatbot\CustomerFields(1001, (int) self::PSID);
+        $old = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'name' => 'Ana Cruz', 'message' => 'Hello',
+            'payload' => [], 'received_at' => now()->subMinutes(5)]);
+        $fields->set(\App\Services\Chatbot\CustomerFields::LAST_CHAT, (string) $old->id);
+        $fields->set(\App\Services\Chatbot\CustomerFields::WAIT, '1:n2');
+        $id = DB::table('chatbot_waits')->insertGetId(['page_id' => 1001, 'psid' => (int) self::PSID, 'flow_id' => 1, 'node_id' => 'n2',
+            'due_at' => now()->subSecond(), 'created_at' => now()->subMinutes(10)]);
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/voice.mp4')->assertOk();
+
+        $result = app(\App\Services\Chatbot\ChatbotRunner::class)->skip($id);
+
+        $this->assertNotSame('waiting', $result, 'the voice note is not a reply that will run');
+        $reasons = DB::table('chatbot_events')->where('type', 'skipped')->pluck('detail')->map(fn ($d) => json_decode($d, true)['reason'] ?? '')->implode(' | ');
+        $this->assertStringNotContainsString('the customer replied', $reasons);
+    }
+
     public function test_S_149_31_ignored_messages_show_in_the_inbox_and_are_counted_on_health(): void
     {
         $this->botcakePush('[audio] https://cdn.fbsbx.com/voice.mp4')->assertOk();
@@ -149,6 +186,9 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
         $item = collect($this->getJson('/chatbot/inbox/thread?page_id=1001&psid=' . self::PSID)->assertOk()->json('items'))->firstWhere('side', 'in');
         $this->assertSame('audio', $item['ignored']);
         $this->assertStringContainsString("'Not answered by the bot (' + x.ignored + ' only)'", $this->get('/chatbot/inbox')->getContent());
-        $this->assertSame(1, $this->get('/chatbot/health')->viewData('tiles')['today']['ignored']);
+        // Ang page ay sumasagot (may naipadala ngayon), kaya ang mga chat nito ay binibilang sa inbound.
+        \App\Services\Chatbot\BotcakeOutbox::record(1001, (int) self::PSID, null, 1, 'n2', 'send', [['type' => 'text', 'text' => 'Hi']], 'sent');
+        $today = $this->get('/chatbot/health')->viewData('tiles')['today'];
+        $this->assertSame([1, 0, 0], [$today['ignored'], $today['inbound'], $today['not_answered']], 'not counted as a missed chat');
     }
 }

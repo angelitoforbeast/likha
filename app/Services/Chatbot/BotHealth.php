@@ -324,6 +324,7 @@ class BotHealth
         $rows = DB::table('botcake_chats as c')
             ->leftJoin('chatbot_replies as r', fn ($j) => $j->on('r.chat_id', '=', 'c.id')->where('r.kind', 'send')->where('r.status', 'sent'))
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
+            ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
             ->groupBy('c.id', 'c.received_at')->selectRaw('c.id, c.received_at, MIN(r.sent_at) as first_at')->get();
         foreach ($rows as $r) {
             $secs = $r->first_at === null ? null : max(0, strtotime($r->first_at) - strtotime($r->received_at));

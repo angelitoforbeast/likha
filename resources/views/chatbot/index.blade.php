@@ -46,6 +46,8 @@
         #cb-table .stick-4 { position: sticky; left: 28rem; z-index: 11; width: 14rem; max-width: 14rem; box-shadow: 1px 0 0 #e2e8f0; }
         #cb-table .cb-chk-pop { display: none; position: absolute; left: 0.5rem; top: 100%; z-index: 40; width: 20rem; max-width: calc(100vw - 2rem); }
         #cb-table td.stick-4:hover .cb-chk-pop, #cb-table .cb-chk.cb-chk-open .cb-chk-pop, #cb-table .cb-chk:focus-within .cb-chk-pop { display: block; }
+        /* Ang bukas na cell ay nasa ibabaw ng mga sticky na cell ng susunod na row. */
+        #cb-table td.stick-4:hover, #cb-table td.stick-4:focus-within { z-index: 35; }
     }
 </style>
 @endpush
@@ -544,6 +546,8 @@
             el('span', {class: 'shrink-0 font-semibold ' + (sum.icon === 'x' ? 'text-red-700' : 'text-amber-700'), text: String(sum.count)}),
             el('span', {class: 'min-w-0 truncate ' + (sum.icon === 'x' ? 'text-red-700' : 'text-amber-700'), text: sum.first})]);
         toggle.addEventListener('click', ev => { ev.stopPropagation(); const open = box.classList.toggle('cb-chk-open'); toggle.setAttribute('aria-expanded', open ? 'true' : 'false'); });
+        // Escape: isinasara at ibinabalik ang focus sa linya (ang focus-within ay hindi na nagpapakita ng listahan).
+        box.addEventListener('keydown', ev => { if (ev.key !== 'Escape') return; ev.stopPropagation(); box.classList.remove('cb-chk-open'); toggle.setAttribute('aria-expanded', 'false'); toggle.blur(); });
         box.append(toggle, el('div', {class: 'cb-chk-pop rounded-lg border border-slate-200 bg-white p-2 shadow-lg'}, out));
         td.replaceChildren(box);
     }
