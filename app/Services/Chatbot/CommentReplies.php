@@ -4,8 +4,6 @@ namespace App\Services\Chatbot;
 
 use App\Jobs\HandleComment;
 use App\Models\ChatbotCommentEvent;
-use App\Services\ChatbotFields;
-use App\Services\PageSettings;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
@@ -32,7 +30,7 @@ class CommentReplies
     /** @var callable|null ang pumipili ng variant (test seam); null = random_int */
     private static $pick = null;
 
-    public function __construct(private PageSettings $settings, private ChatbotPage $page, private GatewayComments $gateway)
+    public function __construct(private ChatbotPage $page, private GatewayComments $gateway)
     {
     }
 
@@ -82,7 +80,10 @@ class CommentReplies
         if (($reason = $this->pageReason($pageName)) !== null) return $this->skip($event, $reason);
 
         $fields = $this->page->botfields($pageName);
-        $vars = ChatbotVars::merge($fields);
+        // Gaya ng FlowRun: ang botfield na may variable (hal. "Only {{PRICE}} pesos") ay pinupunan muna nang isang antas.
+        $run = ['page_id' => (string) $event->page_id, 'page_name' => $pageName, 'current_date' => now('Asia/Manila')->toDateString()];
+        $base = ChatbotVars::merge($fields, $run);
+        $vars = ChatbotVars::merge(array_map(fn ($v) => ChatbotVars::interpolate((string) $v, $base), $fields), $run);
         $value = fn (string $key) => trim(ChatbotVars::interpolate(trim((string) ($fields[$key] ?? '')), $vars));
         $pm = $value(self::PM);
         $variants = array_values(array_filter(array_map($value, self::VARIANTS), fn ($v) => $v !== ''));
@@ -112,7 +113,7 @@ class CommentReplies
     /** Ang dahilan ng hindi pagsagot na alam na pagdating ng event, o null. */
     private function skipReason(array $e, string $pageName): ?string
     {
-        if ($e['is_reply'] || ((string) $e['parent_id'] !== '' && $e['parent_id'] !== $e['post_id'])) return 'reply';
+        if ($e['is_reply']) return 'reply';
         if ($e['is_page_author'] || (string) $e['from_id'] === (string) $e['page_id']) return 'page_author';
         if (ChatbotCommentEvent::where('reply_comment_id', (string) $e['comment_id'])->exists()) return 'ours';
 
@@ -122,7 +123,7 @@ class CommentReplies
     private function pageReason(string $pageName): ?string
     {
         if (ChatbotProvider::name($pageName) !== ChatbotProvider::GATEWAY) return 'botcake_page';
-        if ($this->settings->get($pageName, ChatbotFields::PROVIDER, 'active') === '0') return 'bot_off';
+        if (app(\App\Services\BotcakeChatGuard::class)->botOff($pageName)) return 'bot_off';
 
         return null;
     }

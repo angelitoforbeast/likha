@@ -36,4 +36,11 @@ class HandleComment implements ShouldQueue
         $wait = $replies->handle($this->eventId);
         if ($wait > 0) $this->release($wait);
     }
+
+    /** Ang job na tuluyang pumalya: makikitang failed sa Replies at Health (hindi na ipinapadala ulit). */
+    public function failed(?\Throwable $e): void
+    {
+        \App\Models\ChatbotCommentEvent::whereKey($this->eventId)->whereIn('status', ['queued', 'sending'])
+            ->update(['status' => 'failed', 'reason' => null, 'handled_at' => now()]);
+    }
 }

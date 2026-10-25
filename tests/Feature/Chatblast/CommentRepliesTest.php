@@ -249,6 +249,68 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertSame([21, 'sent'], [count($this->calls), $this->event('c_21')->status]);
     }
 
+    /** @return array<string, array{0: \Closure, 1: string}> */
+    public static function changedWhileWaiting(): array
+    {
+        return [
+            'switched to Botcake' => [fn (PageSettings $s) => $s->set('Page Uno', 'chatbot', 'provider', 'botcake'), 'botcake_page'],
+            'bot switched Off' => [fn (PageSettings $s) => $s->set('Page Uno', 'chatbot', 'active', '0', false, null, true), 'bot_off'],
+        ];
+    }
+
+    #[DataProvider('changedWhileWaiting')]
+    public function test_S_149_8_a_waiting_comment_is_skipped_when_the_page_changed_before_its_turn(\Closure $change, string $reason): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        Queue::fake([HandleComment::class]);
+        $this->comment()->assertOk();
+        $change($this->settings());
+
+        Queue::pushed(HandleComment::class)->first()->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+
+        $this->assertSame([[], 'skipped', $reason], [$this->calls, $this->event()->status, $this->event()->reason]);
+    }
+
+    /** @return array<string, array{0: array}> */
+    public static function badAnswers(): array
+    {
+        return [
+            'no answer' => [[0, null]],
+            '2xx with ok false' => [[200, ['ok' => false, 'error' => 'meta_error']]],
+        ];
+    }
+
+    #[DataProvider('badAnswers')]
+    public function test_S_149_7_a_failed_send_is_recorded_failed_and_not_retried(array $answer): void
+    {
+        $this->forbeastPage(['comment_reply_1' => '', 'comment_reply_2' => '', 'comment_reply_3' => '']);
+        if ($answer[0] === 0) {
+            Http::fake(['gw.example.test/*' => function () {
+                $this->calls[] = 1;
+                throw new \Illuminate\Http\Client\ConnectionException('timeout');
+            }]);
+        } else {
+            $this->gateway(['/private-reply' => $answer]);
+        }
+
+        $this->comment(['from_id' => null])->assertOk();
+        (new HandleComment($this->event()->id))->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+
+        $this->assertSame(['failed', 'failed', null], [$this->event()->status, $this->event()->pm_status, $this->event()->from_id]);
+        $this->assertCount(1, $this->calls);
+    }
+
+    public function test_S_149_2_a_botfield_inside_a_comment_value_is_filled_too(): void
+    {
+        $this->forbeastPage(['comment_pm' => '{{SHOP DETAILS}}', 'shop_details' => 'Only {{PRICE}} pesos']);
+        $this->gateway();
+
+        $this->comment()->assertOk();
+
+        $this->assertSame('Only 499 pesos', $this->event()->pm_text);
+    }
+
     public function test_S_149_9_comments_show_on_replies_with_a_filter_and_are_counted_on_health_without_comment_text_in_the_log(): void
     {
         Artisan::call('migrate', ['--path' => [
