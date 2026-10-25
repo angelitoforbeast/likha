@@ -134,7 +134,10 @@
                 <div id="pe-map" class="mt-2 hidden rounded-md border border-slate-200 bg-slate-50 p-2">
                     <p id="pe-map-status" class="text-xs text-slate-600" aria-live="polite"></p>
                     <ol id="pe-map-list" class="mt-1 max-h-60 space-y-1 overflow-y-auto"></ol>
+                    {{-- Mga follow-up na lampas sa huling Seq column: ang button ay gumagawa lang ng mga blangkong column. --}}
+                    <div id="pe-map-missing" class="mt-1 hidden flex-wrap items-center gap-x-2 gap-y-1 text-xs text-amber-800"><span id="pe-map-missing-text" class="min-w-0 break-words"></span><button id="pe-map-add" type="button" class="cb-btn cb-btn-sm"></button></div>
                     <p id="pe-map-error" class="mt-1 text-xs text-red-600 empty:hidden" aria-live="polite"></p>
+                    <p id="pe-map-item" class="mt-1 break-words rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 empty:hidden" aria-live="polite"></p>
                     <div class="mt-2 flex flex-wrap gap-2"><button id="pe-map-apply" type="button" class="cb-btn cb-btn-sm cb-btn-primary" disabled>Apply</button><button id="pe-map-classic" type="button" class="cb-btn cb-btn-sm">Use header/position instead</button></div>
                 </div>
             </div>
@@ -1398,41 +1401,43 @@
         $('pe-notes').replaceChildren();
         $('pe-error').textContent = '';
         $('pe-start-box').classList.remove('hidden');
-        $('pe-fields').replaceChildren(...botCols().map(c => {
-            const v = pe.orig[c.key] = String(r.cells[c.key] ?? ''), fid = 'pe-f-' + c.key;
-            // Ang image ay link (isang linya, may maliit na preview); ang iba ay textarea na lumalaki, buo ang line break.
-            const input = c.kind === 'image'
-                ? el('input', {id: fid, type: 'url', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm', placeholder: 'https://…', autocomplete: 'off'})
-                : el('textarea', {id: fid, rows: '1', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
-            input.value = v;
-            input.addEventListener('input', () => { grow(input); paintPe(); });
-            const box = c.kind === 'image'
-                ? el('div', {class: 'flex items-center gap-2'}, [el('img', {alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'invisible h-10 w-10 shrink-0 rounded border border-slate-200 object-cover'}), input])
-                : input;
-            const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': 'History of ' + c.label});
-            history.addEventListener('click', () => openHistory(r.page, c));
-            const links = [history];
-            if (commentTemplates[c.key]) {
-                // Ang Comment Reply: ang tatlong variant nang sabay. Pumupuno lang; ang Save pa rin ang nagse-save.
-                const tpl = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'Use template', 'aria-label': 'Use template for ' + c.label});
-                tpl.addEventListener('click', () => {
-                    for (const k of REPLY_KEYS.includes(c.key) ? REPLY_KEYS : [c.key]) {
-                        const t = peInput(k);
-                        if (t) { t.value = commentTemplates[k]; grow(t); }
-                    }
-                    paintPe();
-                });
-                links.unshift(tpl);
-            }
-            return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
-                el('div', {class: 'mb-1 flex items-center justify-between gap-2'}, [el('label', {for: fid, class: 'text-xs font-medium text-slate-600', text: c.label}), el('div', {class: 'flex gap-3'}, links)]),
-                box, el('div', {class: 'pe-was'})]);
-        }));
+        $('pe-fields').replaceChildren(...botCols().map(peField));
         $('pe').classList.remove('hidden');
         $('pe-fields').scrollTop = 0;
         $('pe-fields').querySelectorAll('textarea').forEach(grow);
         paintPe();
         $('pe-paste').focus();
+    }
+    /** Isang field ng modal (label, input, History at template), na may value ng page nang buksan. */
+    function peField(c) {
+        const r = pe.r, v = pe.orig[c.key] = String(r.cells[c.key] ?? ''), fid = 'pe-f-' + c.key;
+        // Ang image ay link (isang linya, may maliit na preview); ang iba ay textarea na lumalaki, buo ang line break.
+        const input = c.kind === 'image'
+            ? el('input', {id: fid, type: 'url', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm', placeholder: 'https://…', autocomplete: 'off'})
+            : el('textarea', {id: fid, rows: '1', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm'});
+        input.value = v;
+        input.addEventListener('input', () => { grow(input); paintPe(); });
+        const box = c.kind === 'image'
+            ? el('div', {class: 'flex items-center gap-2'}, [el('img', {alt: '', loading: 'lazy', referrerpolicy: 'no-referrer', class: 'invisible h-10 w-10 shrink-0 rounded border border-slate-200 object-cover'}), input])
+            : input;
+        const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': 'History of ' + c.label});
+        history.addEventListener('click', () => openHistory(r.page, c));
+        const links = [history];
+        if (commentTemplates[c.key]) {
+            // Ang Comment Reply: ang tatlong variant nang sabay. Pumupuno lang; ang Save pa rin ang nagse-save.
+            const tpl = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'Use template', 'aria-label': 'Use template for ' + c.label});
+            tpl.addEventListener('click', () => {
+                for (const k of REPLY_KEYS.includes(c.key) ? REPLY_KEYS : [c.key]) {
+                    const t = peInput(k);
+                    if (t) { t.value = commentTemplates[k]; grow(t); }
+                }
+                paintPe();
+            });
+            links.unshift(tpl);
+        }
+        return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
+            el('div', {class: 'mb-1 flex items-center justify-between gap-2'}, [el('label', {for: fid, class: 'text-xs font-medium text-slate-600', text: c.label}), el('div', {class: 'flex gap-3'}, links)]),
+            box, el('div', {class: 'pe-was'})]);
     }
     function closePe(force = false) {
         if (!pe) return;
@@ -1486,8 +1491,12 @@
         if (!row) { pePaste(); return; } // walang laman (o header lang): walang tawag sa AI
         peRestore();
         $('pe-notes').replaceChildren();
-        pe.map = {cells: row.cells, keys: [], conf: [], applied: false};
+        // guesses: ang field ayon sa header o sa "Starting at field", para sa AI (ang ayos ng sheet ang batayan).
+        const guesses = ChatbotPaste.positionKeys($('pe-paste').value, botCols(), $('pe-start').value);
+        pe.map = {cells: row.cells, keys: [], conf: [], note: [], missing: [], applied: false};
         $('pe-map-list').replaceChildren();
+        $('pe-map-missing').classList.add('hidden'); $('pe-map-missing').classList.remove('flex');
+        $('pe-map-item').textContent = '';
         $('pe-map-error').textContent = '';
         $('pe-map-apply').disabled = true;
         $('pe-map-status').textContent = 'Asking AI which field each value goes to…';
@@ -1497,12 +1506,13 @@
             if (!pe || seq !== peSeq) return; // sarado na ang modal o may bagong paste
             let res;
             try {
-                res = await Promise.race([post(url.pasteMapUrl, {page_name: pe.r.page, cells: row.cells, header: row.header}),
+                res = await Promise.race([post(url.pasteMapUrl, {page_name: pe.r.page, cells: row.cells, header: row.header, guesses}),
                     new Promise(ok => setTimeout(() => ok({ok: false, data: {}}), AI_WAIT_MS))]);
             } catch (e) { res = {ok: false, data: {}}; }
             if (!pe || seq !== peSeq) return;
             if (!res.ok || !Array.isArray(res.data.mapping)) { peClassic(res.data.note || res.data.error || 'AI could not map this paste, so the header/position mapping was used.'); return; }
-            for (const m of res.data.mapping) { pe.map.keys[m.cell] = m.key && peInput(m.key) ? m.key : null; pe.map.conf[m.cell] = m.confidence; }
+            for (const m of res.data.mapping) { pe.map.keys[m.cell] = m.key && peInput(m.key) ? m.key : null; pe.map.conf[m.cell] = m.confidence; pe.map.note[m.cell] = m.note || ''; }
+            pe.map.missing = Array.isArray(res.data.missing) ? res.data.missing.filter(m => /^seq_(img_)?\d+$/.test(m?.key)) : [];
             peMapList();
         }, 400);
     }
@@ -1514,7 +1524,7 @@
             const sel = el('select', {class: 'pe-map-field max-w-full rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900', 'aria-label': 'Field for value ' + (i + 1)},
                 [el('option', {value: '', text: 'None (skip)'}), ...botCols().map(c => el('option', {value: c.key, text: c.label}))]);
             sel.value = pe.map.keys[i] || '';
-            sel.addEventListener('change', () => { pe.map.keys[i] = sel.value || null; pe.map.conf[i] = 'high'; peMapPaint(); });
+            sel.addEventListener('change', () => { pe.map.keys[i] = sel.value || null; pe.map.conf[i] = 'high'; pe.map.note[i] = ''; peMapPaint(); });
             items.push(el('li', {class: 'pe-map-item flex flex-wrap items-center gap-x-2 gap-y-1 rounded border px-2 py-1', 'data-cell': String(i)}, [
                 el('span', {class: 'min-w-0 flex-1 basis-40 truncate font-mono text-xs', text: short(v)}), sel, el('span', {class: 'pe-map-tag text-xs empty:hidden'})]));
         });
@@ -1533,12 +1543,43 @@
             li.classList.toggle('border-amber-300', isLow); li.classList.toggle('bg-amber-50', isLow);
             li.classList.toggle('border-slate-200', !isClash && !isLow); li.classList.toggle('bg-white', !isClash && !isLow);
             const tag = li.querySelector('.pe-map-tag');
-            tag.textContent = isClash ? 'Same field as another value' : isLow ? 'Not sure: check this' : '';
-            tag.className = 'pe-map-tag text-xs empty:hidden ' + (isClash ? 'text-red-700' : 'text-amber-700');
+            tag.textContent = isClash ? 'Same field as another value' : isLow ? 'Not sure: check this' : pe.map.note[i] || '';
+            tag.className = 'pe-map-tag text-xs empty:hidden ' + (isClash ? 'text-red-700' : isLow ? 'text-amber-700' : 'text-slate-500');
         }
         $('pe-map-status').textContent = 'AI picked a field for each value. Check them, then Apply (nothing is saved until Save).'
             + (low ? ' ' + plural(low, 'value') + ' not sure.' : '') + (clash ? ' ' + plural(clash, 'value') + ' on the same field.' : '');
         $('pe-map-error').textContent = '';
+        // Mga follow-up na walang Seq column pa, at ang paste na ibang item kaysa sa page (walang AI dito).
+        const miss = ChatbotPaste.missingText(pe.map.missing);
+        $('pe-map-missing').classList.toggle('hidden', !miss); $('pe-map-missing').classList.toggle('flex', !!miss);
+        $('pe-map-missing-text').textContent = miss ? miss.text : '';
+        $('pe-map-add').textContent = miss ? miss.button : '';
+        const item = ChatbotPaste.itemMismatch(pe.map.cells, pe.map.cells.map((_, i) => pe.map.keys[i] || null), pe.orig.item_name_in_jnt_dashboard);
+        $('pe-map-item').textContent = item ? 'The pasted texts mention ' + item.pasted + "; this page's item is " + item.page + '. Check you copied the right row.' : '';
+    }
+    /** "Add Seq 21–22": ang mga kulang na Seq / Seq Img column sa "+ Column", saka ang mga cell sa kanila. Walang value na sine-save. */
+    async function peMapAddSeq() {
+        const map = pe.map, miss = ChatbotPaste.missingText(map.missing);
+        if (!miss || !confirm('This adds the columns ' + miss.names.join(', ') + ' to every page now, only the empty columns: no value is saved. The pasted values go in with Apply and are saved with Save.')) return;
+        $('pe-map-add').disabled = true;
+        try {
+            for (const name of miss.names) {
+                const {ok, data} = await post(url.columnUrl, {name});
+                if (!ok) { $('pe-map-error').textContent = data.error || data.message || 'Column not added.'; return; }
+            }
+            await load();
+        } finally { $('pe-map-add').disabled = false; }
+        if (!pe || pe.map !== map) return; // sarado na ang modal o may bagong paste
+        for (const c of botCols()) {
+            if (peInput(c.key)) continue;
+            $('pe-fields').append(peField(c));
+            $('pe-start').append(el('option', {value: c.key, text: c.label}));
+        }
+        for (const m of map.missing) if (peInput(m.key)) { map.keys[m.cell] = m.key; map.conf[m.cell] = 'medium'; map.note[m.cell] = 'in order (new column)'; }
+        map.missing = map.missing.filter(m => !peInput(m.key));
+        $('pe-fields').querySelectorAll('textarea').forEach(grow);
+        peMapList();
+        paintPe();
     }
     /** Apply: pinupuno ang mga field ayon sa napili, gaya ng na-paste; ang Save pa rin ang nagse-save. */
     function peMapApply() {
@@ -1570,6 +1611,7 @@
     $('pe-start').addEventListener('change', () => peClassic());
     $('pe-blanks').addEventListener('change', () => { if (pe.map?.applied) peMapApply(); else if (!pe.map) pePaste(); });
     $('pe-map-apply').addEventListener('click', peMapApply);
+    $('pe-map-add').addEventListener('click', peMapAddSeq);
     $('pe-map-classic').addEventListener('click', () => peClassic());
     $('pe-blanks').addEventListener('change', () => { $('f-blanks').checked = $('pe-blanks').checked; });
     $('pe-close').addEventListener('click', () => closePe());

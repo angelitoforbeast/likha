@@ -88,6 +88,56 @@
     return { cells: cells, header: header };
   }
 
+  // Ang hula ayon sa ayos ng sheet, kada cell ng row para sa AI: ang pangalan sa header kung mayroon, kung wala ay ang
+  // ayos mula sa "Starting at field" (gaya ng plan). null = walang field (hindi kilalang header, lampas sa huling field).
+  function positionKeys(text, columns, startKey) {
+    var rows = parseTsv(text);
+    if (!rows.length) return [];
+    var byNorm = {};
+    columns.forEach(function (c) { byNorm[norm(c.key)] = c; byNorm[norm(c.label)] = c; });
+    var header = isHeader(rows[0], columns) ? rows[0] : null, cells = rows[header ? 1 : 0] || [];
+    var start = 0;
+    columns.forEach(function (c, i) { if (c.key === startKey) start = i; });
+    return cells.map(function (_, i) {
+      var c = header ? byNorm[norm(header[i])] : columns[start + i];
+      return c ? c.key : null;
+    });
+  }
+
+  // Ang mga Seq na walang column pa (missing ng paste-map): ang linya sa preview, ang pangalan ng button at ang mga
+  // pangalang gagawin ng "+ Column". null kapag wala.
+  function missingText(missing) {
+    if (!missing || !missing.length) return null;
+    var groups = [['text', 'Seq '], ['image', 'Seq Img ']].map(function (g) {
+      var list = missing.filter(function (m) { return (m.key.indexOf('seq_img_') === 0) === (g[0] === 'image'); });
+      var nums = list.map(function (m) { return +m.key.replace(/\D+/g, ''); }).sort(function (a, b) { return a - b; });
+      return { kind: g[0], prefix: g[1], labels: nums.map(function (n) { return g[1] + n; }), nums: nums };
+    }).filter(function (g) { return g.labels.length; });
+    return {
+      text: groups.map(function (g) {
+        return g.labels.length + ' more follow-up ' + g.kind + (g.labels.length === 1 ? '' : 's') + ': no ' + g.labels.join(', ') + ' column.';
+      }).join(' '),
+      button: 'Add ' + groups.map(function (g) {
+        return g.nums.length === 1 ? g.labels[0] : g.prefix + g.nums[0] + '–' + g.nums[g.nums.length - 1];
+      }).join(', '),
+      names: groups.reduce(function (all, g) { return all.concat(g.labels); }, [])
+    };
+  }
+
+  // Ang item ng paste laban sa item ng page (ITEM NAME IN JNT DASHBOARD): ang cell na nasa field na iyon, walang salitang
+  // magkapareho (maliit na titik, 3+ letra, walang "s" sa dulo) = ibang item. null kapag pareho o walang maihahambing.
+  function itemMismatch(cells, keys, pageItem) {
+    var i = keys.indexOf('item_name_in_jnt_dashboard'), pasted = i === -1 ? '' : String(cells[i] == null ? '' : cells[i]).trim();
+    var page = String(pageItem == null ? '' : pageItem).trim();
+    function words(v) {
+      return v.toLowerCase().split(/[^a-z0-9]+/).filter(function (w) { return w.length >= 3; })
+        .map(function (w) { return w.length > 3 ? w.replace(/s$/, '') : w; });
+    }
+    var mine = words(page);
+    if (!pasted || !mine.length || words(pasted).some(function (w) { return mine.indexOf(w) !== -1; })) return null;
+    return { pasted: pasted, page: page };
+  }
+
   // Kada cell: true kapag may ibang cell na sa parehong field (ang None ay hindi kailanman).
   function mapConflicts(keys) {
     return keys.map(function (k, i) { return !!k && keys.some(function (o, j) { return j !== i && o === k; }); });
@@ -171,5 +221,5 @@
   }
 
   root.ChatbotPaste = { parseTsv: parseTsv, toTsv: toTsv, plan: plan, isImageLink: isImageLink, isLinkOnly: isLinkOnly, linkWarning: linkWarning,
-    aiRow: aiRow, mapConflicts: mapConflicts, applyMapping: applyMapping };
+    aiRow: aiRow, mapConflicts: mapConflicts, applyMapping: applyMapping, positionKeys: positionKeys, missingText: missingText, itemMismatch: itemMismatch };
 })(typeof self !== 'undefined' ? self : globalThis);

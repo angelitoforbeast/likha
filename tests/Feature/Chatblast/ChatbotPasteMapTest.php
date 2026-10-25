@@ -361,6 +361,24 @@ class ChatbotPasteMapTest extends ChatblastTestCase
             'ang default ay ang model ng order-encode checker');
     }
 
+    public function test_S_152_9_the_preview_sends_the_guesses_lists_missing_seq_with_an_add_button_and_warns_on_another_item_at_phone_width(): void
+    {
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+        $js = substr($html, strpos($html, 'function peAiPaste'));
+
+        foreach (['const guesses = ChatbotPaste.positionKeys(', 'header: row.header, guesses}', 'ChatbotPaste.missingText(', 'ChatbotPaste.itemMismatch(', 'url.columnUrl',
+            'only the empty columns', "Check you copied the right row."] as $part) {
+            $this->assertStringContainsString($part, $js);
+        }
+        // Sa 390 px: ang linya ng kulang na Seq at ang button ay bumababa; ang babala ng item ay nasa itaas ng Apply.
+        $this->assertMatchesRegularExpression('/id="pe-map-missing" class="[^"]*flex-wrap/', $html);
+        $this->assertStringContainsString('id="pe-map-add"', $html);
+        $this->assertMatchesRegularExpression('/id="pe-map-item" class="[^"]*break-words[^"]*bg-amber-50/', $html);
+        $this->assertLessThan(strpos($html, 'id="pe-map-apply"'), strpos($html, 'id="pe-map-item"'));
+        $this->assertStringNotContainsString('innerHTML', $js, 'textContent lang ang ipinapakita');
+    }
+
     public function test_S_152_8_an_instruction_in_a_cell_swept_into_seq_still_only_gets_a_key_never_a_value(): void
     {
         $this->actingAs($this->user());
