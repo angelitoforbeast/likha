@@ -249,6 +249,43 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertSame([21, 'sent'], [count($this->calls), $this->event('c_21')->status]);
     }
 
+    public function test_S_149_9_comments_show_on_replies_with_a_filter_and_are_counted_on_health_without_comment_text_in_the_log(): void
+    {
+        Artisan::call('migrate', ['--path' => [
+            'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
+            'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
+            'database/migrations/2026_10_28_100000_create_chatbot_ai_requests_table.php',
+        ]]);
+        $logged = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Log\Events\MessageLogged::class, function ($m) use (&$logged) {
+            $logged[] = $m->message . json_encode($m->context);
+        });
+        $this->travelTo('2026-10-25 10:00:00');
+        $this->forbeastPage(['comment_reply_2' => '', 'comment_reply_3' => '']);
+        $this->gateway(['/c_2/reply' => [500, ['ok' => false, 'error' => 'meta_error', 'meta_code' => 1, 'meta_subcode' => null]]]);
+        $this->comment(['comment_id' => 'c_1'])->assertOk();
+        $this->comment(['comment_id' => 'c_2'])->assertOk();
+        $this->comment(['comment_id' => 'c_3', 'is_reply' => true])->assertOk();
+
+        $this->actingAs($this->user());
+        $rows = $this->getJson('/chatbot/replies/data?date=2026-10-25&kind=comments')->assertOk()->json('rows');
+        $this->assertSame([
+            ['c_3', 'skipped', 'Comment c_3 · Skipped: a reply to a reply'],
+            ['c_2', 'failed', 'Comment c_2 · Private message: sent "Hi po! 499 lang po ito." · Public reply: failed "Reply A"'],
+            ['c_1', 'sent', 'Comment c_1 · Private message: sent "Hi po! 499 lang po ito." · Public reply: sent "Reply A"'],
+        ], array_map(fn ($r) => [$r['comment_id'], $r['status'], $r['summary']], $rows));
+        $this->assertSame(['Page Uno', 'comment', 'Public reply: Forbeast said "meta_error" (Meta #1) (HTTP 500)'], [$rows[1]['page'], $rows[1]['kind'], $rows[1]['error']]);
+        $this->assertSame(['c_2'], array_column($this->getJson('/chatbot/replies/data?date=2026-10-25&kind=comments&status=failed')->json('rows'), 'comment_id'));
+        $this->assertSame([], $this->getJson('/chatbot/replies/data?date=2026-10-25')->json('rows'), 'the bot replies view is unchanged');
+        $this->assertStringContainsString('<option value="comments">Comments</option>', $this->get('/chatbot/replies')->assertOk()->getContent());
+
+        $today = $this->get('/chatbot/health')->assertOk()->viewData('tiles')['today'];
+        $this->assertSame([3, 1, 1], [$today['comments_in'], $today['comments_replied'], $today['comments_failed']]);
+        $this->assertStringContainsString('Comments replied', $this->get('/chatbot/health')->getContent());
+
+        $this->assertSame([], array_filter($logged, fn ($l) => str_contains($l, 'secret-comment-text')));
+    }
+
     public function test_S_149_10_an_unknown_page_or_a_bad_signature_is_refused(): void
     {
         $this->forbeastPage();

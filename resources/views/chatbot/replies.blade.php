@@ -4,7 +4,7 @@
 @section('heading', 'Replies')
 
 @section('description')
-    Every message the chatbot sent (or skipped, or failed to send) and every sheet row, newest first. One day at a time.
+    Every message the chatbot sent (or skipped, or failed to send) and every sheet row, newest first. One day at a time. Show: Comments lists the post comments on Forbeast pages and the private message and public reply each got.
 @endsection
 
 @push('styles')
@@ -27,6 +27,9 @@
                 <option value="">All pages</option>
                 @foreach($pages as $name => $id)<option value="{{ $id }}">{{ $name }}</option>@endforeach
             </select>
+        </label>
+        <label class="flex flex-col text-xs">Show
+            <select name="kind" class="border px-2 py-1 text-sm text-gray-900"><option value="">Bot replies</option><option value="comments">Comments</option></select>
         </label>
         <label class="flex flex-col text-xs">Status
             <select name="status" class="border px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="skipped">Skipped</option></select>
@@ -78,7 +81,7 @@
                 el('td', {}, el('span', {class: 'rounded-full px-2 py-0.5 text-xs ' + (COLOR[r.status] || ''), text: r.status})),
                 el('td', {class: 'break-words'}, [el('div', {class: 'line-clamp-2', text: r.summary}), r.error ? el('div', {class: 'text-xs text-red-700', text: r.error}) : null]),
             ]);
-            const open = () => detail(r.id);
+            const open = () => r.kind === 'comment' ? commentDetail(r) : detail(r.id);
             tr.addEventListener('click', open);
             tr.addEventListener('keydown', ev => { if (ev.key === 'Enter') open(); });
             $('rp-rows').append(tr);
@@ -99,6 +102,12 @@
             ['Kind', r.kind], ['Status', r.status + (r.http ? ' (HTTP ' + r.http + ')' : '')], ['Error', r.error ?? '—']];
         dl.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', {class: 'text-slate-500', text: k}), el('dd', {class: 'break-words', text: String(v)})]),
             el('dt', {class: 'text-slate-500', text: 'Content'}), el('dd', {}, content));
+        $('rp-modal').classList.remove('hidden'); $('rp-close').focus();
+    }
+    // Ang comment (Show: Comments): ang laman ng row na mismo, walang hiwalay na tawag.
+    function commentDetail(r) {
+        const rows = [['Time', r.time], ['Page', r.page], ['Commenter', r.psid || '—'], ['Comment', r.comment_id], ['Status', r.status], ['Error', r.error ?? '—'], ['What', r.summary]];
+        $('rp-detail').replaceChildren(...rows.flatMap(([k, v]) => [el('dt', {class: 'text-slate-500', text: k}), el('dd', {class: 'whitespace-pre-line break-words', text: String(v)})]));
         $('rp-modal').classList.remove('hidden'); $('rp-close').focus();
     }
     const close = () => $('rp-modal').classList.add('hidden');

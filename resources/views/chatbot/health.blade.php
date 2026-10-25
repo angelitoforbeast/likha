@@ -41,6 +41,9 @@
         ['AI time max', 'ai_max', 's', null],
         ['Orders', 'orders', '', null],
         ['Sheet writes failed', 'sheet_failed', '', 'sheet_failed'],
+        ['Comments in', 'comments_in', '', null],
+        ['Comments replied', 'comments_replied', '', null],
+        ['Comments failed', 'comments_failed', '', null],
     ];
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'from' => $f['from'], 'to' => $f['to']], fn ($v) => $v !== null);

@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
+use App\Models\ChatbotCommentEvent;
 use App\Models\ChatbotFlow;
 use App\Models\ChatbotReply;
 use App\Services\Chatbot\BotcakeOutbox;
 use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotVars;
+use App\Services\Chatbot\CommentReplies;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\FlowRun;
@@ -83,6 +85,7 @@ class ChatbotTabsController extends Controller
         $status = $this->str($request, 'status', 10);
         $q = $this->str($request, 'q', 100);
         $before = (int) $this->str($request, 'before', 20);
+        if ($this->str($request, 'kind', 20) === 'comments') return $this->comments($date, $day, $pageId, $status, $q, $before);
 
         $rows = ChatbotReply::where('sent_at', '>=', $day)->where('sent_at', '<', $day->copy()->addDay())
             ->when(ctype_digit($pageId), fn ($w) => $w->where('page_id', (int) $pageId))
@@ -103,6 +106,43 @@ class ChatbotTabsController extends Controller
             'rows' => $rows->take(self::PER_PAGE)->map(fn ($r) => [
                 'id' => $r->id, 'time' => $r->sent_at?->timezone('Asia/Manila')->format('H:i:s'), 'page' => $names[(string) $r->page_id] ?? ('Page ' . $r->page_id),
                 'psid' => (string) $r->psid, 'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'summary' => $this->summary($r),
+            ])->values(),
+            'next' => $more ? $rows->take(self::PER_PAGE)->last()->id : null,
+        ]);
+    }
+
+    /**
+     * Ang Comments ng Replies: ang mga comment mula sa Forbeast ng araw (chatbot_comment_events), pinakabago muna, at ang
+     * ginawa sa bawat isa. Ang text ng comment ay wala rito (hindi iniimbak); ang ipinadala lang namin.
+     */
+    private function comments(string $date, Carbon $day, string $pageId, string $status, string $q, int $before)
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('chatbot_comment_events')) return response()->json(['date' => $date, 'rows' => [], 'next' => null]);
+        $rows = ChatbotCommentEvent::where('received_at', '>=', $day)->where('received_at', '<', $day->copy()->addDay())
+            ->when(ctype_digit($pageId), fn ($w) => $w->where('page_id', (int) $pageId))
+            ->when(in_array($status, ['sent', 'failed', 'skipped'], true), fn ($w) => $w->where('status', $status))
+            ->when($q !== '', function ($w) use ($q) {
+                $like = '%' . strtr(mb_strtolower($q), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
+                $w->where(function ($o) use ($like) {
+                    foreach (['comment_id', 'pm_text', 'reply_text', 'pm_error', 'reply_error'] as $col) $o->orWhereRaw("LOWER($col) LIKE ? ESCAPE '!'", [$like]);
+                });
+            })
+            ->when($before > 0, fn ($w) => $w->where('id', '<', $before))
+            ->orderByDesc('id')->limit(self::PER_PAGE + 1)->get();
+        $more = $rows->count() > self::PER_PAGE;
+        $names = BotcakeChat::pageMap();
+        $part = fn (string $label, ?string $state, ?string $text) => $state === null ? null : $label . ': ' . str_replace('_', ' ', $state) . ' "' . $text . '"';
+
+        return response()->json([
+            'date' => $date,
+            'rows' => $rows->take(self::PER_PAGE)->map(fn ($r) => [
+                'id' => $r->id, 'time' => $r->received_at?->timezone('Asia/Manila')->format('H:i:s'), 'page' => $names[(string) $r->page_id] ?? ('Page ' . $r->page_id),
+                'psid' => (string) $r->from_id, 'kind' => 'comment', 'comment_id' => $r->comment_id, 'status' => $r->status,
+                'error' => implode(' · ', array_filter([$r->pm_error ? 'Private message: ' . $r->pm_error : null, $r->reply_error ? 'Public reply: ' . $r->reply_error : null])) ?: null,
+                'summary' => implode(' · ', array_filter(['Comment ' . $r->comment_id,
+                    $r->status === 'skipped' && $r->reason !== null ? 'Skipped: ' . (CommentReplies::REASONS[$r->reason] ?? $r->reason) : null,
+                    in_array($r->status, ['queued', 'sending'], true) ? 'Waiting to be sent' : null,
+                    $part('Private message', $r->pm_status, $r->pm_text), $part('Public reply', $r->reply_status, $r->reply_text)])),
             ])->values(),
             'next' => $more ? $rows->take(self::PER_PAGE)->last()->id : null,
         ]);

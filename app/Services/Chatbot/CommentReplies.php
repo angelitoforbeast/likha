@@ -22,6 +22,12 @@ class CommentReplies
     public const PER_MINUTE = 20;
     public const VARIANTS = ['comment_reply_1', 'comment_reply_2', 'comment_reply_3'];
     public const PM = 'comment_pm';
+    /** Ang mga dahilan ng skipped, sa screen (Replies). */
+    public const REASONS = [
+        'botcake_page' => 'the page replies via Botcake', 'bot_off' => 'the bot is Off', 'reply' => 'a reply to a reply',
+        'page_author' => 'written by the page', 'ours' => 'our own reply', 'not_set' => 'not set (no Comment PM or Comment Reply)',
+        'unknown_page' => 'unknown page', GatewayComments::ALREADY_REPLIED => 'already replied',
+    ];
 
     /** @var callable|null ang pumipili ng variant (test seam); null = random_int */
     private static $pick = null;

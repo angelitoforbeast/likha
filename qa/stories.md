@@ -2418,3 +2418,24 @@ Tests: `tests/Feature/Chatblast/ChatbotConnectionsTest.php`.
 | S-148.21 | P1 | Given the old Forbeast token route, then it has the same three roles and logs the user | `test_S_148_21…` | passed 2026-10-25 |
 | S-148.14 | P2 | Given a 390 px screen, then the page has no horizontal scroll and the popups fit | browser | not run |
 | S-148.15 | P2 | Given a long list, then the header row stays at the top while rows scroll | browser | not run |
+
+## S-149 Comment reply and comment-to-inbox for Forbeast pages, set per page in /chatbot/pages
+
+As the owner, I set Comment Reply 1-3 and Comment PM per page on /chatbot/pages, and every top-level comment on a Forbeast page gets one private message and one public reply (a random variant), like Botcake's comment feature, with every comment logged.
+
+Slice 149. Threat model: the comment event body (signed by Forbeast, text from the public) and the Forbeast/Meta answers are untrusted; the comment text is not stored or logged; shown values are text only; tokens are never logged or returned. Risk tier: high (a new event type from the public, publishing to Facebook) and medium (columns, logs).
+Tests: `tests/Feature/Chatblast/CommentRepliesTest.php`.
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-149.1 | P1 | Given /chatbot/pages, then Comment Reply 1, 2, 3 and Comment PM are columns (long text, Edit modal), a save keeps history, and the paste mapping describes each in one line | `test_S_149_1…` | passed 2026-10-25 |
+| S-149.2 | P1 | Given a Forbeast page, bot On, with Comment PM and three Comment Replies, when a comment event arrives, then one private reply with the PM text (variables filled) goes first, then one public reply with one of the three variants (picked through the random seam) | `test_S_149_2…` | passed 2026-10-25 |
+| S-149.3 | P1 | Given Comment PM empty, then only the public reply is sent; given all Comment Replies empty, then only the private message; given all four empty, then nothing is sent and the comment is skipped "not set" | `test_S_149_3…` (3 rows) | passed 2026-10-25 |
+| S-149.4 | P1 | Given a Botcake page or a bot that is Off, when a comment arrives, then it is skipped with that reason and nothing is sent | `test_S_149_4_and_5…` (2 rows) | passed 2026-10-25 |
+| S-149.5 | P1 | Given a reply to a reply, a comment written by the page, or a comment that is our own public reply, then it is skipped with that reason and nothing is sent | `test_S_149_4_and_5…` (3 rows) | passed 2026-10-25 |
+| S-149.6 | P1 | Given the same comment event twice, then it is stored and answered once | `test_S_149_6…` | passed 2026-10-25 |
+| S-149.7 | P1 | Given Forbeast answers `already_replied` to the private reply, then it is recorded, the public reply still goes, and a second run sends nothing | `test_S_149_7…` | passed 2026-10-25 |
+| S-149.8 | P1 | Given 21 comments on one page in one minute, then 20 are answered and the 21st waits until the next minute, then is answered | `test_S_149_8…` | passed 2026-10-25 |
+| S-149.9 | P1 | Given handled, failed and skipped comments, then Replies (Show: Comments) lists each with what was sent and the status filter works, Health counts comments in, replied and failed, and the comment text is in no log line | `test_S_149_9…` | passed 2026-10-25 |
+| S-149.10 | P1 | Given a comment event for an unknown page or with a bad or missing signature, then it is refused with 401 and nothing is stored or sent | `test_S_149_10…` | passed 2026-10-25 |
+| S-149.11 | P2 | Given a Forbeast page with comment columns set and a token without the comment permissions, then Check warns | skipped: Forbeast's page test does not report scopes | not built |

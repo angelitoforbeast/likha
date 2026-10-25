@@ -181,11 +181,13 @@ class BotHealth
         $replies = $this->replies($startAt, $endAt, $page);
         $ai = $this->aiCalls($startAt, $endAt, $page);
         $orders = $this->orders($startAt, $endAt, $page);
+        $comments = $this->comments($startAt, $endAt, $page);
 
         $metrics = [];
         for ($d = CarbonImmutable::parse($start); $d->toDateString() <= $end; $d = $d->addDay()) {
             $k = $d->toDateString();
-            $metrics[$k] = $this->dayMetrics($inbound['days'][$k] ?? [], $replies[$k] ?? [], $ai[$k] ?? [], $orders[$k] ?? 0);
+            $metrics[$k] = $this->dayMetrics($inbound['days'][$k] ?? [], $replies[$k] ?? [], $ai[$k] ?? [], $orders[$k] ?? 0)
+                + ['comments_in' => $comments[$k]['in'] ?? 0, 'comments_replied' => $comments[$k]['sent'] ?? 0, 'comments_failed' => $comments[$k]['failed'] ?? 0];
         }
         $days = [];
         for ($d = CarbonImmutable::parse($f['from']); $d->toDateString() <= $f['to']; $d = $d->addDay()) {
@@ -284,6 +286,28 @@ class BotHealth
         return DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
             ->selectRaw('DATE(created_at) as d, COUNT(*) as n')->groupBy('d')->pluck('n', 'd')->map(fn ($n) => (int) $n)->all();
+    }
+
+    /**
+     * Ang mga comment mula sa Forbeast kada araw: lahat ng dumating, ang nasagot (sent) at ang pumalya.
+     * @return array<string, array{in: int, sent: int, failed: int}>
+     */
+    private function comments(string $startAt, string $endAt, ?string $page): array
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('chatbot_comment_events')) return [];
+        $out = [];
+        $rows = DB::table('chatbot_comment_events')->where('received_at', '>=', $startAt)->where('received_at', '<', $endAt)
+            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
+            ->selectRaw('DATE(received_at) as d, status, COUNT(*) as n')->groupBy('d', 'status')->get();
+        foreach ($rows as $r) {
+            $day = &$out[$r->d];
+            $day ??= ['in' => 0, 'sent' => 0, 'failed' => 0];
+            $day['in'] += (int) $r->n;
+            if (isset($day[$r->status])) $day[$r->status] += (int) $r->n;
+            unset($day);
+        }
+
+        return $out;
     }
 
     private function dayMetrics(array $in, array $rep, array $ai, int $orders): array
