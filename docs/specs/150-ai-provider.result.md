@@ -108,7 +108,7 @@ Key grep: `git grep -n -i -P "sk-[a-z0-9]{10,}"` finds only 3 lines that are on 
 
 - `tests/Feature/Chatblast` (includes the AI pool tests): **955 tests, OK**, 6471 assertions, 1 skipped (the same skip as the base), 38 PHPUnit deprecations (same as the base). Base was 882; 73 new tests (this spec's 71 plus D.3b and D.4 from review 2). No test fails.
 - `tests/Feature/PageSettings` + `tests/Feature/OrderEncode` (they touch `PageSettings::validate` and the AI queue): **555 tests, OK**.
-- One earlier full run had `ChatbotTagsTest::test_S_100_2…` red once (a sequence-timing test, passes alone and in the later full runs) and one had this spec's F.3 red once: a whole-second timing assumption in the test, fixed by pinning the clock (C.11 had the same assumption, also pinned); both pool tests then passed 5 runs in a row.
+- One earlier full run had `ChatbotTagsTest::test_S_100_2…` red once (a sequence-timing test, passes alone and in the later full runs) and one had this spec's F.3 red once: a whole-second timing assumption in the test, fixed by pinning the clock (C.11 had the same assumption, also pinned); the pool test file then passed 3 runs after the F.3 pin, 2 runs after the C.11 pin, and the final full run.
 
 ## Rulings
 
