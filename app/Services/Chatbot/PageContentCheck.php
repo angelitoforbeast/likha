@@ -149,6 +149,14 @@ TXT;
         if (trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id')) === '') $out[] = $x('No flow: pick a flow in FLOW');
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && trim((string) $this->settings->get($page, 'botcake', 'chat.key')) === '') {
             $out[] = $x('No chat block (chat.key): turn the chat block on with the bot toggle');
+        } elseif (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && app(ChatbotConnections::class)->blockBad($page)) {
+            $out[] = $x('Botcake: no chat block'); // ayon sa huling Test: wala, luma ang key o hindi published sa Default Reply
+        }
+        // Ang koneksyon na hindi kumpleto (wala sa Connected): ang pumalyang huling token test lang, hindi ang hindi pa nasubok.
+        $failed = fn (string $provider) => ($s = trim((string) $this->settings->get($page, $provider, 'token_status'))) !== '' && !str_starts_with($s, 'ok');
+        if (trim((string) $this->settings->get($page, 'botcake', 'token')) !== '' && $failed('botcake')) $out[] = $x('Botcake: token not working');
+        if (trim((string) $this->settings->get($page, ForbeastPageSetup::PROVIDER, 'token')) !== '' && !app(ForbeastPageSetup::class)->info($page)['connected']) {
+            $out[] = $x('Forbeast: ' . (str_starts_with((string) $this->settings->get($page, ForbeastPageSetup::PROVIDER, 'token_status'), 'invalid') ? 'token not working' : 'not connected'));
         }
 
         return $out;

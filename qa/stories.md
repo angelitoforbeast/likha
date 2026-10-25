@@ -2376,10 +2376,45 @@ Story changes (S-145):
 
 As the owner, I see in Changes who set, changed or removed each value on a page (FLOW, ACTIVE, the Botcake ID and token, every chatbot field), and no event disappears when a later value is set.
 
-- S-146.1 Given a FLOW set at 16:07 by A, removed at 19:02 by A and set again at 06:52 by B, When I open Changes for FLOW, Then I see three lines, newest first: "(none) → Main Flow" by B at 06:52, "Main Flow → (none)" by A at 19:02, and "(new) → Main Flow" by A at 16:07.
-- S-146.2 Given a value replaced A → B, When I open Changes, Then I see one line "A → B" and no clear line.
-- S-146.3 Given a user turns the bot On and another turns it Off, When I open Changes for ACTIVE, Then each line shows On/Off with the user and the time.
-- S-146.4 Given a value set by B and removed by A, When I filter by user A, Then the clear is listed; the FLOW filter lists all three FLOW events.
-- S-146.5 Given a value set on one day and removed the next, When I filter by the day of removal, Then only the clear is listed.
-- S-146.6 Given secret values set, removed and set again, When I open Changes, Then every value shows as "(hidden)" or "(none)" and no secret text is sent.
-- S-146.7 Given more than one page of mixed writes and clears, When I go through the pages, Then every event appears once, newest first.
+Slice 146. Tests: `tests/Feature/Chatblast/ChatbotAllChangesTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-146.1 (P1) | Given a FLOW set at 16:07 by A, removed at 19:02 by A and set again at 06:52 by B, when I open Changes for FLOW, then three lines, newest first: "(none) → Main Flow" by B at 06:52, "Main Flow → (none)" by A at 19:02, and "(new) → Main Flow" by A at 16:07 | `test_S_146_1…` | passed 2026-10-25 |
+| S-146.2 (P1) | Given a value replaced A → B, when I open Changes, then one line "A → B" and no clear line | `test_S_146_2…` | passed 2026-10-25 |
+| S-146.3 (P1) | Given a user turns the bot On and another turns it Off, when I open Changes for ACTIVE, then each line shows On/Off with the user and the time | `test_S_146_3…` | passed 2026-10-25 |
+| S-146.4 (P1) | Given a value set by B and removed by A, when I filter by user A, then the clear is listed; the FLOW filter lists all three FLOW events | `test_S_146_4…` | passed 2026-10-25 |
+| S-146.5 (P1) | Given a value set on one day and removed the next, when I filter by the day of removal, then only the clear is listed | `test_S_146_5…` | passed 2026-10-25 |
+| S-146.6 (P1) | Given secret values set, removed and set again, when I open Changes, then every value shows as "(hidden)" or "(none)" and no secret text is sent | `test_S_146_6…` | passed 2026-10-25 |
+| S-146.7 (P2) | Given more than one page of mixed writes and clears, when I go through the pages, then every event appears once, newest first | `test_S_146_7…` | passed 2026-10-25 |
+
+## S-148 One Connections popup per page, a Connected column, a safe Flow picker and header filters
+
+As the owner, on /chatbot/pages I see which bots each page is connected to, set up Botcake and Forbeast in one popup per page (each token tested on save), change the Bot and the Flow only with a confirm, and filter the table by column like Google Sheets.
+
+Slice 148. Threat model: users with /chatblast access are trusted (Botcake writes need the CEO); provider answers (page names, URLs, messages) are untrusted and shown as text; tokens are secrets (last 4 only, never logged). Risk tier: high (new routes) and medium (UI, nightly).
+Tests: `tests/Feature/Chatblast/ChatbotConnectionsTest.php`.
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-148.1 | P1 | Given a page with Botcake and Forbeast tokens, when the popup opens, then both cards show Page ID and only the last 4 of each token | `test_S_148_1…` | passed 2026-10-25 |
+| S-148.2 | P1 | Given a valid Botcake token, when it is saved, then it is tested, saved with the user, and the chat block is written and published with the same chat.key (bot On) | `test_S_148_2…` | passed 2026-10-25 |
+| S-148.3 | P1 | Given a Botcake token that fails for the Page ID, or a Forbeast token whose page name or id is another page, when saved, then it is shown red and nothing is saved | `test_S_148_3…` | passed 2026-10-25 |
+| S-148.4 | P1 | Given a valid Forbeast token, when saved, then the webhook is set to this site and Connected shows "Forbeast" | `test_S_148_4…` | passed 2026-10-25 |
+| S-148.5 | P1 | Given a Default Reply (or Forbeast webhook) pointing at another host, or a Default Reply that cannot be read, when saved, then a confirm is needed and nothing changes until it is given | `test_S_148_5…` | passed 2026-10-25 |
+| S-148.6 | P1 | Given a chat.key, when Fix chat block is pressed twice, then the block is written twice with the same key (another host needs a confirm) | `test_S_148_6…` | passed 2026-10-25 |
+| S-148.7 | P1 | Given /chatbot/pages and page settings, then the row has a Connections button and no Forbeast Add/New/Test/Clear or prompt, and page settings links to /chatbot/pages for Forbeast | `test_S_148_7…` (markup) | passed 2026-10-25 |
+| S-148.8 | P1 | Given a page, then the Bot select lists only complete connections plus the current one, one is plain text, and a change asks "Switch X from A to B?" | browser (no JS runner) | not run |
+| S-148.9 | P1 | Given pages with Botcake, Forbeast, both or failing tokens, then Connected is "Botcake", "Forbeast", both, or empty, and Check lists "Botcake: token not working" / "Forbeast: token not working" | `test_S_148_9…` | passed 2026-10-25 |
+| S-148.10 | P1 | Given the Flow ✎ popup, when a flow is searched, picked and confirmed, then it is linked through the cell path and Changes shows the user | `test_S_148_10…` (server); popup in browser | passed (server) 2026-10-25 |
+| S-148.11 | P1 | Given header filters, when Connected = Forbeast only, Check all / Uncheck all, and two columns are filtered, then only rows matching every column show | browser (no JS runner) | not run |
+| S-148.12 | P1 | Given the nightly run, then tokens are re-tested and a block is re-applied only on pages switched On here, on Botcake, whose Default Reply (read from `/default_reply/content`) has no block of ours or one with an old X-Chat-Key; the log has counts only and each re-test shows in Changes as "system" | `test_S_148_12…` | passed 2026-10-25 |
+| S-148.13 | P1 | Given a role other than CEO, Marketing - OIC or Marketing (with or without /chatblast), then the popup routes (read, save, Test, Clear, Fix chat block), On/Off, + Page and the old Forbeast token route answer 403 and nothing is sent | `test_S_148_13…`, `test_S_148_21…` | passed 2026-10-25 |
+| S-148.16 | P1 | Given a Marketing - OIC or a Marketing user, when they switch a page Off and On, add a page and save, Test and fix in the popup, then each works | `test_S_148_16…` | passed 2026-10-25 |
+| S-148.17 | P1 | Given saved tokens, when Test is pressed on a card, then the saved token is re-tested (Botcake: token, and whether our block is in the Default Reply and published; Forbeast: connect check) without writing to the provider, and the last-test time and result are shown and updated | `test_S_148_17…` | passed 2026-10-25 |
+| S-148.18 | P1 | Given a Marketing user, when they switch On and Off, save a Botcake and a Forbeast token, Test both, fix the chat block, switch the Bot, change the Flow and clear the Forbeast token, then each shows in Changes with their name and the time, tokens only as "(hidden)"; the nightly run shows as "system" | `test_S_148_18…`, `test_S_148_12…` | passed 2026-10-25 |
+| S-148.19 | P1 | Given a Default Reply with our card and another site's card, a `success:false` answer, no blocks, or a card with no host, when a token is saved or Fix chat block is pressed, then a confirm is needed and nothing is written | `test_S_148_19…` (4 cases) | passed 2026-10-25 |
+| S-148.20 | P1 | Given a Default Reply on another site, when On or + Page is used, then a confirm is needed before anything is written; On and Off are logged in the chat block status | `test_S_148_20…` | passed 2026-10-25 |
+| S-148.21 | P1 | Given the old Forbeast token route, then it has the same three roles and logs the user | `test_S_148_21…` | passed 2026-10-25 |
+| S-148.14 | P2 | Given a 390 px screen, then the page has no horizontal scroll and the popups fit | browser | not run |
+| S-148.15 | P2 | Given a long list, then the header row stays at the top while rows scroll | browser | not run |

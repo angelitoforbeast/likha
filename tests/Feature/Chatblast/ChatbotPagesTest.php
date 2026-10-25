@@ -109,8 +109,8 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->postJson('/chatbot/pages', ['page_name' => 'Page Cinco', 'page_id' => '50x5', 'token' => self::NEW_TOKEN])->assertStatus(422);
         $this->postJson('/chatbot/pages', ['page_name' => 'Page Cinco', 'page_id' => '5005'])->assertStatus(422); // walang token
 
-        $this->navLink('/chatblast', ['Marketing']);
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->navLink('/chatblast', ['Data Encoder']); // may /chatblast pero hindi CEO, Marketing - OIC o Marketing
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->postJson('/chatbot/pages', ['page_name' => 'Page Seis', 'page_id' => '6006', 'token' => self::NEW_TOKEN])->assertForbidden();
         $this->assertNull($this->settings()->get('Page Seis', 'botcake', 'page_id'));
     }
@@ -125,7 +125,7 @@ class ChatbotPagesTest extends ChatblastTestCase
 
         $key = $this->settings()->get('Page Dos', 'botcake', 'chat.key');
         $this->assertGreaterThanOrEqual(32, strlen((string) $key));
-        $sent = Http::recorded();
+        $sent = Http::recorded(fn ($r) => $r->method() === 'POST')->values(); // ang GET ay ang takeover check
         $this->assertCount(2, $sent);
         $this->assertSame('https://botcake.io/api/public_api/v1/pages/2002/default_reply/content', $sent[0][0]->url());
         $this->assertSame(['name' => 'Default reply', 'blocks' => [app(BotcakeChatBlock::class)->block($key)]], $sent[0][0]->data());
@@ -135,8 +135,8 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->assertSame(['update' => ['is_published' => true, 'unlimit_default_reply' => true]], $sent[1][0]->data());
         $this->assertSame('1', $this->settings()->get('Page Dos', 'chatbot', 'active'));
 
-        $this->navLink('/chatblast', ['Marketing']);
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->navLink('/chatblast', ['Data Encoder']); // may /chatblast pero hindi CEO, Marketing - OIC o Marketing
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->postJson('/chatbot/active', ['page_name' => 'Page Dos', 'on' => false])->assertForbidden();
     }
 
@@ -232,7 +232,8 @@ class ChatbotPagesTest extends ChatblastTestCase
     public function test_S_068_11_on_that_fails_at_publish_keeps_the_new_key_and_says_so(): void
     {
         $calls = 0;
-        Http::fake(['botcake.io/*' => function () use (&$calls) {
+        Http::fake(['botcake.io/*' => function ($r) use (&$calls) {
+            if ($r->method() === 'GET') return Http::response(['name' => 'Default reply', 'blocks' => []]); // ang takeover check
             return ++$calls === 1 ? Http::response(['success' => true]) : Http::response(['success' => false, 'message' => 'Busy']);
         }]);
         $this->actingAs($this->user());

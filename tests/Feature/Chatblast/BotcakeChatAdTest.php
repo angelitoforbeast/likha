@@ -63,7 +63,7 @@ class BotcakeChatAdTest extends ChatblastTestCase
         $this->postJson('/chatbot/active', ['page_name' => 'Page Dos', 'on' => true])->assertOk()->assertJson(['error' => null]);
         $this->assertSame(0, Artisan::call('botcake:chat-setup', ['page' => 'Page Uno']));
 
-        $writes = collect(Http::recorded())->filter(fn ($s) => str_ends_with($s[0]->url(), '/default_reply/content'))->values();
+        $writes = collect(Http::recorded())->filter(fn ($s) => str_ends_with($s[0]->url(), '/default_reply/content') && $s[0]->method() === 'POST')->values(); // ang GET ay ang takeover check
         $this->assertCount(2, $writes);
         foreach ($writes as [$req]) {
             $card = $req->data()['blocks'][0]['cards'][0];
@@ -147,7 +147,7 @@ class BotcakeChatAdTest extends ChatblastTestCase
 
         $key = (string) $this->settings()->get('Page Cuatro', 'botcake', 'chat.key');
         $this->assertGreaterThanOrEqual(32, strlen($key));
-        $sent = collect(Http::recorded())->map(fn ($s) => $s[0])->filter(fn ($r) => str_contains($r->url(), '/default_reply'))->values();
+        $sent = collect(Http::recorded())->map(fn ($s) => $s[0])->filter(fn ($r) => str_contains($r->url(), '/default_reply') && $r->method() === 'POST')->values(); // ang GET ay ang takeover check
         $this->assertSame('https://botcake.io/api/public_api/v1/pages/4004/default_reply/content', $sent[0]->url());
         $this->assertSame(['name' => 'Default reply', 'blocks' => [app(BotcakeChatBlock::class)->block($key)]], $sent[0]->data());
         $this->assertSame(self::BODY, $sent[0]->data()['blocks'][0]['cards'][0]['body']);
@@ -185,6 +185,6 @@ class BotcakeChatAdTest extends ChatblastTestCase
         $this->assertSame('4004', $this->settings()->get('Page Cuatro', 'botcake', 'page_id'));
         $this->assertSame('0', $this->settings()->get('Page Cuatro', 'chatbot', 'active'));
         $this->assertFalse(collect($this->getJson('/chatbot/data')->json('rows'))->firstWhere('page', 'Page Cuatro')['active']);
-        if ($tokenTest !== 'ok') Http::assertNotSent(fn ($r) => str_contains($r->url(), '/default_reply'));
+        if ($tokenTest !== 'ok') Http::assertNotSent(fn ($r) => str_contains($r->url(), '/default_reply') && $r->method() === 'POST');
     }
 }

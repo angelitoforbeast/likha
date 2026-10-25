@@ -1096,3 +1096,29 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Not tested:** the open-row fallback when the newest row is final and an older one is open (the newest open row within 24 h is taken), and a dispatch failure in the open-row path (the new order row is deleted, failed port). Reason: small branches; the dispatch path mirrors 137's tested one.
 - **A botfield or customer field named like an `order_*` variable is overridden by the order value.** Reason: the same rule as the system variables; the variable picker shows the "!" with the explanation.
 - **No index on `order_encodes.macro_output_id`.** Reason: the `order_*` reads now run only in flows that name one (not on every chatbot run), so the hot path is unaffected; an index migration on a large table is a deploy decision for the owner.
+
+## 148: Connections popup, accepted review minors (2026-10-25)
+
+- **Botcake gives no page name, so the Botcake card cannot do the name compare.** Reason: the Botcake token test (`custom_fields`) returns no name and no known Botcake call does; a Botcake token is page-scoped, so a token for another page fails on this Page ID. A token and Page ID of another unlisted page still pass; the owner decides whether that is accepted (Open points of the spec result).
+- **`GET /pages/{id}/default_reply` is not verified against the live Botcake API.** Reason: no real calls from a worker; a missing endpoint or odd answer is "unknown", which asks for a confirm (manual) and writes nothing (nightly). Verify with one read-only call before the release.
+- **An untested Botcake token (no `botcake.token_status`) is not in Connected and gives no Check reason; pages that are Off get no setup reasons.** Reason: the S-145 checks pin "ok, no reasons" for these pages; the nightly test fills the status in one night.
+- **The Forbeast Page ID field only accepts the Botcake ID.** Reason: inbound gateway events are matched to the page by the Botcake page id; another id would drop every chat.
+- **A double submit of the first Botcake save on a page without chat.key can make two keys** (Botcake holds the second, the database the first) until Fix chat block. Reason: older race in `BotcakeChatBlock::turnOn`; the buttons are disabled while saving.
+- **A temporary Forbeast timeout at night shows "Forbeast: not connected" until the next run or a Save.** Reason: the status text has the reason; a retry policy is a separate change.
+- **DRY:** the "••••last 4" mask (now 3 copies), the gateway events URL (3 copies) and the Botcake ID uniqueness check (2 copies, `addPage`). Reason: legacy minimal-touch; one helper each in a cleanup.
+- **The old routes `chatbot.forbeast-token` and `page-settings.forbeast-test` are unreachable from the UI.** Reason: minimal-touch; remove in a cleanup.
+- **Filter panel and popups: no focus trap, no focus return to ▾; Check filter values are the raw ok / x / warn.** Reason: matches the existing dialogs on the page; the values are the spec's words.
+- **The page settings link to /chatbot/pages is shown to roles without /chatblast access** (they get the access error there). Reason: page settings and /chatblast are usually the same roles.
+- **No JS test runner:** popup, Bot select, Flow popup and header filters are covered by markup checks and code review only; the browser check was not run (no local database for the dev server).
+
+## 148: amendments (Test button, setup roles, logs, Default Reply content), accepted review minors (2026-10-25)
+
+- **On and + Page do not ask when the Default Reply cannot be read** (Botcake error, timeout or another answer shape); they ask only when another site is seen. Reason: these paths never had a guard and the older On / + Page tests use generic Botcake fakes; the Connections popup asks in that case. A Botcake hiccup at the moment of On on a page another site took over would still overwrite it; asking on "unknown" there means updating those fakes.
+- **If Botcake masks the X-Chat-Key value in `/default_reply/content`, every page reads as "old key"**: the nightly run would re-write the block on every active page every night and Connected would stay red. Reason: not checkable without a live call; one read-only call settles it before release.
+- **A Test whose Default Reply cannot be read ("unknown") does not drop Botcake from Connected.** Reason: display only; the next Test or night corrects it.
+- **The nightly run adds 2 to 3 Changes rows per page per night**, and a Botcake hiccup at night writes `error`, which shows red until the next run. Reason: the amendment asks for every nightly re-test in Changes.
+- **Saving the same Forbeast token twice with the same result adds no new "Forbeast test" row** (the connect status text has no time, because the S-113 tests pin it). Reason: the token row and the webhook call are the same; the Test button always adds a row.
+- **The role check is exact (spaces collapsed)**, as in this controller: a role stored as "marketing – oic" is refused (fails closed). Reason: the amendment asks to match the controller's existing check.
+- **Marketing roles without /chatblast in nav settings can call the setup routes but cannot open /chatbot/pages.** Reason: viewing the page keeps today's rule; nav settings decide.
+- **Untested here:** Test results "unpublished", "elsewhere" and "unknown" through the Test button (the states are tested through the save guard and S-148.17's "missing"). Reason: same code path; one representative case.
+- **A commit subject names the amendments ("amendments 1 and 2").** Reason: already committed locally; later commits use the spec number only.
