@@ -61,10 +61,13 @@ class ChatbotConnections
         return false;
     }
 
-    /** @return array<int, string> ang mga kumpletong koneksyon: "Botcake", "Forbeast" */
+    /** Ang mga bot na maaaring makakonekta (ang mga row ng Connected filter at ng Bot ng Health), sa ayos na ito. */
+    public const BOTS = ['Botcake', 'Forbeast'];
+
+    /** @return array<int, string> ang mga kumpletong koneksyon, mula sa BOTS */
     public function connected(string $page): array
     {
-        return array_values(array_filter([$this->botcakeConnected($page) ? 'Botcake' : null, $this->forbeast->info($page)['connected'] ? 'Forbeast' : null]));
+        return array_values(array_filter([$this->botcakeConnected($page) ? self::BOTS[0] : null, $this->forbeast->info($page)['connected'] ? self::BOTS[1] : null]));
     }
 
     /**
