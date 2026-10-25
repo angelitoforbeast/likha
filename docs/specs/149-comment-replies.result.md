@@ -283,3 +283,54 @@ A customer sent voice messages. Forbeast delivered every one to Likha within 1 s
 | Log line on every switch with the evidence (customer count, chat ids), no message text. | Diagnosis. |
 
 Tests: audio/image/sticker twins pair (no switch); text twins with different spacing/case pair; one unmatched copy → no switch; two customers unmatched after grace → switch; after a switch, a standby copy whose twin was answered is skipped, one with no twin runs; regression of the existing ForbeastWatch tests (update and list any you change under Story changes). Re-run the brief's folders (no new failures). End with "149-4: <done|blocked> — <one line>".
+
+### Result of 149-4
+
+What changed, all in `app/Services/Chatbot/ForbeastWatch.php` unless noted:
+
+- **`kindOf()`:** text is compared without case or extra spaces. An attachment is compared by its type only:
+  - Forbeast's `[Audio]` / `[Photo]` / `👍` / `[Video]` and Botcake's `[audio] <url>` style markers and cleaned fbcdn links are read the same way.
+  - Image, sticker and Like count as one kind: Forbeast delivers stickers as images, and Botcake may send a Like as `[sticker] <url>`.
+- **`pairs()`:** a Botcake standby copy and a Forbeast chat pair when they are from the same customer, and either have the same mid or the same kind within 2 minutes, in either order.
+  - Each chat pairs at most once; the closest in time wins.
+  - A Forbeast chat that has already removed its standby (`payload._twin_used`) never pairs again.
+  - `inbound()`, `twin()` (used by `answered()` and the switch run) all use this pairing.
+- **`inbound` switch:** needs unmatched copies from at least 2 customers within the window (`inbound_minutes`, default now 10), each past the 120 s grace. The data loaded reaches 2 extra minutes back, so the earliest copy can still find its twin. The event text is now "Botcake chats from N customers with no Forbeast copy after 120 seconds". The other conditions are unchanged.
+- **After a switch** (`runStandby`): a standby copy runs only if it has no Forbeast twin, and the bot sent that customer no reply on the page since the copy arrived minus 5 s. Otherwise it is skipped, with a log line `forbeast watch: standby skipped` {page, chat_id, reason: `forbeast_twin` | `already_answered`}.
+- **Switch log:** every switch writes `forbeast watch: switched` {page, condition, error (HTTP and Meta code only)}. The inbound switch adds the evidence: customers and up to 50 chat ids. No message text.
+- **`answered()`:** removes at most one standby per Forbeast chat. A flow with several sends no longer removes the standby of a message Forbeast never got.
+- **Config:** `config/services.php` and the example env file change `GATEWAY_SWITCH_INBOUND_MINUTES` to 10. **Deploy note:** if the production environment file still sets `GATEWAY_SWITCH_INBOUND_MINUTES=5`, set it to 10 (or remove it).
+
+**Cases:**
+
+| Case | Test | Result |
+|---|---|---|
+| S-149.20 | `test_S_149_20_a_botcake_copy_pairs_with_its_forbeast_twin_by_kind_and_time` (audio, image, sticker, Like as a sticker marker, Like, video, text with other spacing and case; two customers, no switch) | pass |
+| S-149.21 | `test_S_149_21_the_inbound_switch_needs_unmatched_copies_from_two_customers_after_the_grace` (one customer: no switch; still in the grace: no switch; two customers: switch; the log has the evidence and no text) | pass |
+| S-149.22 | `test_S_149_22_after_a_switch_a_copy_whose_twin_was_answered_is_skipped_and_one_without_a_twin_runs`, `test_S_149_22_a_copy_with_no_twin_is_skipped_when_the_customer_was_answered_since_it_came` | pass |
+| S-149.23 | `test_S_149_23_a_forbeast_reply_removes_only_its_own_standby_copy_even_after_several_sends` | pass |
+| S-117 regression | `ForbeastAutoSwitchTest`: 26 tests, 157 assertions | pass |
+
+**Red runs:**
+- S_149_20 failed with "two customers, but every copy has its twin" for audio, sticker, video and text. Image and Like passed on the old code, since both sides store `[Photo]` / 👍.
+- S_149_21: "one customer is not enough".
+- S_149_22: `Failed asserting that two arrays are identical`.
+- Review loop: S_149_23 "the second voice note stays for a switch", and the Like-as-sticker row. The `already_answered` test passed at once: it pins a branch the fix had already added.
+
+**Story changes:**
+- **S-117.4:** was "3 chats in 5 minutes switch; one Forbeast chat keeps it". Now: unmatched chats from at least 2 customers in 10 minutes switch, and one customer alone does not. `test_S_117_4…` now pushes from two customers; `test_S_117_4b…` now shows that one customer's orphan does not switch and a second customer's does.
+- **S-117.9:** a standby now runs only with no Forbeast twin and no reply to that customer since it came.
+  - In `test_S_117_9…`, "Una po" is now from a second customer, so it runs.
+  - "Pumalya ang sagot" (its Forbeast twin's reply failed) no longer runs and stays on standby.
+- **New cases:** S-149.20 to S-149.23.
+
+**Review:**
+- `skeptic-reviewer`, adversarial, found 1 major: `answered()` could remove the standby of another message after a second send, because the freed Forbeast chat paired again. It was fixed in 1 loop, and the re-check found nothing major left.
+- Fixed minor: a Like pairs with a Botcake `[sticker]` copy.
+- The other minors are in `TODO.md` under "149".
+
+**Open point for the owner (decided rule, kept as written):** "a standby copy runs only if no Forbeast twin of it exists". So a message that Forbeast received but could not answer is not answered by Botcake after the switch. This hits the `failed_sends` and `connection_error` switches hardest: there Forbeast receives fine but cannot send, so the customers whose failed replies caused the switch get nothing. The earlier rule ("skip only if the twin got a sent reply"), together with the new "no reply since it came" check, would still have prevented the live double reply. Say if you want that instead.
+
+**Suite:** `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` on b9f38515: `OK, but there were issues! Tests: 1503, Assertions: 8740, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459 at 5ff034d1, no failures).
+
+149-4: done — copies pair by customer, kind and time (audio, images and stickers now match), the inbound switch needs 2 customers, and after a switch an answered message is not answered again; open point: a message Forbeast received but failed to answer is not re-answered by Botcake.
