@@ -435,3 +435,14 @@ Tests: via stored per send path and shown in the Inbox payload and the Replies f
 **Suite:** `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` on 95085abf: `OK, but there were issues! Tests: 1520, Assertions: 8833, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459, no failures). The later commit b2d4bb7c changes only the Escape handling, and the page-script parse test passes on it.
 
 149-5: done — every send records via (shown in the Inbox and on Replies, with a backfill), Check is frozen on desktop with a compact cell, and attachment-only messages are ignored on every page (logged, counted, link kept; CEO can switch back to reply).
+
+## Amendment 149-6
+
+Live data check by the reviewer, 2026-10-25.
+
+| Change | Why |
+|---|---|
+| **Botcake's real attachment format is markdown-link style, not "[type] url".** Read live from `botcake_chats.message` (last 3 days): voice = `[audio](https://cdn.fbsbx.com/…)`, reel = `[reel](https://www.facebook.com/…)`, Botcake fallback = `[fallback](https://www.facebook.com/…)`, photo = `[Photo]` (no link). Forbeast sends `[Audio]`, `[Photo]`, etc. Make `ChatAttachments` (and every place that classifies or pairs attachments, including the 149-4 twin pairing in ForbeastWatch) accept `[type](url)` as well as `[type] url` and a bare `[Type]`, case-insensitive, and keep the URL. Add these exact live examples as test fixtures (pairing `[Audio]` from Forbeast with `[audio](https://cdn.fbsbx.com/x)` from Botcake within the window must pair; `[reel](https://www.facebook.com/x)` and `[fallback](…)` must be ignored by the bot; `[Photo]` ignored). | Without this the voice-message fix and the ignore rule miss Botcake's copies (the exact Venice Lim case). |
+| Answer to your question: an ignored photo/voice **still counts as the customer replying** (sequence exit-on-reply, Results "replied") — keep today's behaviour. | Reviewer's decision: the customer did respond; only the bot's answer is skipped. |
+
+Re-run the brief's folders (no new failures). End with "149-6: <done|blocked> — <one line>".
