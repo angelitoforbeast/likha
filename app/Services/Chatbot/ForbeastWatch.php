@@ -138,7 +138,9 @@ class ForbeastWatch
         // Ang standby (kopya ng Botcake) na walang kapares mula sa Forbeast pagkalipas ng INBOUND_GRACE. Ebidensya lang kapag
         // galing sa INBOUND_CUSTOMERS na magkaibang customer: ang isang kakaibang mensahe ay hindi dapat maglipat ng page.
         $paired = self::pairs($chats);
-        $orphans = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from));
+        // Ang attachment lang (larawan, voice, …) ay hindi kailanman ebidensya: hindi ito sinasagot ng bot.
+        $orphans = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from)
+            && ChatAttachments::type($c->message, (array) $c->payload) === null);
         $customers = $orphans->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
         if ($orphans->count() >= self::limit('inbound_chats') && $customers >= self::INBOUND_CUSTOMERS) {
             $this->switch($page, 'inbound', 'Botcake chats from ' . $customers . ' customers with no Forbeast copy after ' . self::INBOUND_GRACE . ' seconds',

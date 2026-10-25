@@ -44,6 +44,7 @@
         ['Comments in', 'comments_in', '', null],
         ['Comments replied', 'comments_replied', '', null],
         ['Comments failed', 'comments_failed', '', null],
+        ['Attachments ignored', 'ignored', '', null],
     ];
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot'], 'from' => $f['from'], 'to' => $f['to']], fn ($v) => $v !== null);
@@ -189,6 +190,26 @@
             @if($isCeo)<button class="cb-btn cb-btn-primary">Save thresholds</button>
             @else<p class="text-xs text-slate-500">Only the CEO can change the thresholds.</p>@endif
         </form>
+    </section>
+
+    {{-- Ang mensaheng attachment lang (larawan, voice, video, reel, file, fallback; hindi sticker o Like): CEO lang ang nagbabago. --}}
+    <section aria-labelledby="h-attachments" class="space-y-2">
+        <h2 id="h-attachments" class="text-lg font-semibold">Photos, voice and other attachments</h2>
+        <p class="text-sm text-slate-600">A customer message that is only a photo, voice note, video, reel, file or fallback (no text). Stickers and Likes are always answered.</p>
+        @if($isCeo)
+            <form method="POST" action="{{ route('chatbot.health.attachments', $keep) }}" class="flex flex-wrap items-end gap-3 text-sm">
+                @csrf
+                <label class="flex flex-col text-xs">The bot
+                    <select name="mode" class="border px-2 py-1 text-sm text-gray-900">
+                        <option value="ignore" @selected($attachments === 'ignore')>Ignores them (logged, kept for later)</option>
+                        <option value="reply" @selected($attachments === 'reply')>Answers them like text</option>
+                    </select>
+                </label>
+                <button class="cb-btn cb-btn-primary">Save</button>
+            </form>
+        @else
+            <p class="text-sm">The bot {{ $attachments === 'ignore' ? 'ignores them (logged, kept for later).' : 'answers them like text.' }}</p>
+        @endif
     </section>
 
     {{-- Mga listahan --}}

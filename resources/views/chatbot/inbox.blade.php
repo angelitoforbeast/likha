@@ -306,7 +306,8 @@
             if (x.like) body = el('span', {class: 'text-4xl leading-none', role: 'img', 'aria-label': 'Like', text: '👍'});
             else if (x.image_url) body = imageLink(x.image_url);
             else body = el('div', {class: 'whitespace-pre-line break-words rounded-2xl rounded-bl-sm bg-slate-100 px-3 py-1.5 text-sm text-slate-900', text: x.text});
-            return el('li', {class: 'ib-bubble mr-auto flex flex-col items-start', tabindex: '0'}, [body, time]);
+            return el('li', {class: 'ib-bubble mr-auto flex flex-col items-start', tabindex: '0'}, [body,
+                x.ignored ? el('div', {class: 'mt-0.5 text-[11px] text-amber-700', text: 'Not answered by the bot (' + x.ignored + ' only)'}) : null, time]);
         }
         const failed = x.status !== 'sent';
         const parts = (x.messages || []).map(m => m.type === 'image' ? imageLink(m.url)

@@ -183,7 +183,7 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         Queue::fake();
         Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
 
-        // Dalawang customer (ang isang customer lang ay hindi sapat, S-149.21).
+        // Dalawang customer (ang isang customer lang ay hindi sapat).
         foreach (['Una' => self::PSID, 'Pangalawa' => self::PSID, 'Pangatlo' => self::PSID_B] as $m => $psid) $this->botcakePush($m, null, $psid)->assertOk();
         // Kararating lang: ang kopya ng Forbeast ay maaaring nasa queue pa, kaya walang lipat.
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
@@ -255,8 +255,8 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         Queue::fake();
         Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
         // Isang customer, kahit dalawang mensahe, at isang Forbeast chat na isa lang ang kapares: walang lipat.
-        $this->gatewayChat('[Audio]');
-        foreach (['[audio] https://cdn.fbsbx.com/a.mp4', '[audio] https://cdn.fbsbx.com/b.mp4'] as $m) $this->botcakePush($m)->assertOk();
+        $this->gatewayChat('Available po?'); // text: ang attachment lang ay hindi kailanman ebidensya
+        foreach (['Available po?', 'Magkano po?'] as $m) $this->botcakePush($m)->assertOk();
         $this->travel(3)->minutes();
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('gateway', $this->provider(), 'one customer is not enough');
@@ -300,6 +300,19 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertNotNull($skip);
         $this->assertStringContainsString('"reason":"forbeast_twin"', $skip);
         $this->assertStringNotContainsString('voice.mp4', implode("\n", $lines));
+    }
+
+    public function test_S_149_32_attachment_only_copies_never_count_for_the_inbound_switch(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/a.mp4')->assertOk();
+        $this->botcakePush('https://scontent.xx.fbcdn.net/v/t1.15752-9/p_n.jpg', null, self::PSID_B)->assertOk();
+
+        $this->travel(3)->minutes();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+
+        $this->assertSame('gateway', $this->provider(), 'two customers, but only photos and voice notes');
     }
 
     public function test_S_149_23_a_forbeast_reply_removes_only_its_own_standby_copy_even_after_several_sends(): void

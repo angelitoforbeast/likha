@@ -242,12 +242,17 @@ class BotHealth
         $ai = $this->aiCalls($startAt, $endAt, $pages);
         $orders = $this->orders($startAt, $endAt, $pages);
         $comments = $this->comments($startAt, $endAt, $pages);
+        // Ang mensaheng attachment lang na hindi sinagot (ChatAttachments): ang "ignored" event.
+        $ignored = DB::table('chatbot_events')->where('type', 'ignored')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+            ->selectRaw('DATE(created_at) as d, COUNT(*) as n')->groupBy('d')->pluck('n', 'd')->map(fn ($n) => (int) $n)->all();
 
         $metrics = [];
         for ($d = CarbonImmutable::parse($start); $d->toDateString() <= $end; $d = $d->addDay()) {
             $k = $d->toDateString();
             $metrics[$k] = $this->dayMetrics($inbound['days'][$k] ?? [], $replies[$k] ?? [], $ai[$k] ?? [], $orders[$k] ?? 0)
-                + ['comments_in' => $comments[$k]['in'] ?? 0, 'comments_replied' => $comments[$k]['sent'] ?? 0, 'comments_failed' => $comments[$k]['failed'] ?? 0];
+                + ['comments_in' => $comments[$k]['in'] ?? 0, 'comments_replied' => $comments[$k]['sent'] ?? 0, 'comments_failed' => $comments[$k]['failed'] ?? 0,
+                    'ignored' => $ignored[$k] ?? 0];
         }
 
         return [$metrics, $inbound];

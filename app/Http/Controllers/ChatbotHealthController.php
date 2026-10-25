@@ -37,7 +37,8 @@ class ChatbotHealthController extends Controller
         $pages = array_flip(BotcakeChat::pageMap());
         ksort($pages, SORT_NATURAL | SORT_FLAG_CASE);
 
-        return view('chatbot.health', $out + ['pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS]);
+        return view('chatbot.health', $out + ['pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS,
+            'attachments' => \App\Services\Chatbot\ChatAttachments::ignoring() ? \App\Services\Chatbot\ChatAttachments::IGNORE : \App\Services\Chatbot\ChatAttachments::REPLY]);
     }
 
     /** I-save ang thresholds (buong hugis, kasama ang default ng hindi pinalitan). */
@@ -73,6 +74,16 @@ class ChatbotHealthController extends Controller
         AppSetting::set(BotHealth::SETTING, json_encode($new));
 
         return redirect()->route('chatbot.health', Arr::only($request->query(), ['page_id', 'bot', 'from', 'to']))->with('status', 'Thresholds saved.');
+    }
+
+    /** Ang mensaheng attachment lang (chatbot_attachments): ignore (ang default) o reply (gaya ng dati). CEO lang. */
+    public function saveAttachments(Request $request)
+    {
+        if ($this->role() !== 'CEO') abort(403);
+        $data = $request->validate(['mode' => ['required', 'string', \Illuminate\Validation\Rule::in(\App\Services\Chatbot\ChatAttachments::MODES)]]);
+        AppSetting::set(\App\Services\Chatbot\ChatAttachments::SETTING, $data['mode']);
+
+        return redirect()->route('chatbot.health', Arr::only($request->query(), ['page_id', 'bot', 'from', 'to']))->with('status', 'Attachment setting saved.');
     }
 
     /** Ang parehong numero para sa analyst: walang listahan ng customer. */

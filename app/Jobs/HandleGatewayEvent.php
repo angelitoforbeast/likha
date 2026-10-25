@@ -143,8 +143,10 @@ class HandleGatewayEvent implements ShouldQueue
             $payload['postback'] = $e['postback']['payload'];
             return $e['postback']['title'] ?: $e['postback']['payload'];
         }
-        if ($e['text'] !== null && $e['text'] !== '') return $e['text'];
         $first = $e['attachments'][0] ?? null;
+        // Ang uri at link ng unang attachment, para sa susunod na transcribe o paglalarawan.
+        if ($first && $first['type']) $payload['attachment'] = ['type' => $first['type'], 'url' => $first['url']];
+        if ($e['text'] !== null && $e['text'] !== '') return $e['text'];
         if (!$first) return null;
         if ($first['type'] === 'image' && $first['url']) {
             if (ChatMessageCleaner::clean($first['url'])['kind'] === 'like') return ChatMessageCleaner::LIKE;

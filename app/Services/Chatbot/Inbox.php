@@ -276,7 +276,9 @@ class Inbox
                 'text' => (string) $c->message, 'like' => $c->message === ChatMessageCleaner::LIKE,
                 'image_url' => is_string($img) && preg_match('#^https?://#i', $img) ? $img : null,
                 // Ang bot na naghatid: gateway = Forbeast, ang iba (default_reply, api) = Botcake.
-                'via' => ChatbotProvider::via('', $c)];
+                'via' => ChatbotProvider::via('', $c),
+                // Hindi sinagot ng bot: attachment lang (ChatAttachments), ang uri.
+                'ignored' => is_string($c->payload['_ignored'] ?? null) ? $c->payload['_ignored'] : null];
         }
         foreach ($out as $r) {
             $base = ['key' => 'out-' . $r->id, 'src' => 'out', 'id' => $r->id, 'at' => self::iso($r->sent_at), 'raw' => Carbon::parse($r->sent_at)->format('Y-m-d H:i:s'),
