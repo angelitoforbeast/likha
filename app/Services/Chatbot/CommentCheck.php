@@ -22,9 +22,11 @@ class CommentCheck
     private const META_PERMISSION = [10, 200, 230]; // ang code ng Meta na permission error, sa "(Meta #N)" ng pm_error / reply_error
     private const SPAM = 'the same text on every comment can be flagged as spam';
     private const SHORT = 'keep the public reply short; the details go in the PM';
-    private const LINK = '~https?://|\bwww\.|\b[a-z0-9-]+\.(com|ph|net|org|shop|store|me|ly|link|site|online|co)\b~i';
+    // Ang domain na walang http/www: maliliit na titik at may 3+ letra bago ang tuldok, para ang "po.Online" (walang espasyo) ay hindi link.
+    private const LINK = '~https?://|\bwww\.~i';
+    private const DOMAIN = '~\b[a-z0-9-]{3,}\.(com|ph|net|org|shop|store|me|ly|link|site|online|co)\b~';
     private const PHONE = '/(?:\+?63|\b0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b|(?<!\d)\d{7,}(?!\d)/';
-    private const REPLY_CUE = '/\b(reply|mag-?reply|i-?reply|sagot|sumagot|i-?type|i-?message|mag-?message|i-?pm|i-?send)\b/iu';
+    private const REPLY_CUE = '/(?<![\p{L}])(?:paki-?|pa-?|mag-?|i-?)?(reply|sagot|sumagot|sagutan|type|message|pm|send)(?![\p{L}])/iu';
     private const PM_TEMPLATE = "Hi po! 😊 {{%s}} — ₱{{%s}} lang po, FREE shipping at Cash on Delivery.\n\nPara po ma-reserve, i-fill up lang po:\n✅ Name:\n✅ Mobile Number:\n✅ Complete Address (House#/Purok/Street, Brgy, Municipality, Province):\n✅ Landmark:";
     private const REPLY_TEMPLATES = ['Salamat po! Nag-message po kami sa inyo 😊', 'Hi po! Check your inbox po, may message kami 😊', 'Thank you po! Na-send na po namin ang details sa inyo 😊'];
 
@@ -76,15 +78,17 @@ class CommentCheck
         $variants = array_filter(array_intersect_key($value, array_flip(CommentReplies::VARIANTS)), fn ($v) => $v !== '');
         if (count($variants) === 1) $finding('Comment Reply', 'warn', 'Comment Reply: only one variant: add 2–3 variants: ' . self::SPAM);
         $norm = fn (string $v) => mb_strtolower(preg_replace('/\s+/u', '', $v));
-        $keys = array_keys($variants);
-        foreach ($keys as $i => $a) {
-            foreach (array_slice($keys, $i + 1) as $b) {
-                if ($norm($variants[$a]) === $norm($variants[$b])) $finding($labels[$a], 'warn', $labels[$a] . ' and ' . $labels[$b] . ' are the same: ' . self::SPAM);
-            }
+        // Isang babala kada grupo ng magkaparehong variant.
+        $groups = [];
+        foreach ($variants as $key => $v) $groups[$norm($v)][] = $labels[$key];
+        foreach ($groups as $same) {
+            if (count($same) < 2) continue;
+            $last = array_pop($same);
+            $finding($same[0], 'warn', implode(', ', $same) . ' and ' . $last . ' are the same: ' . self::SPAM);
         }
         foreach ($variants as $key => $v) {
             $label = $labels[$key];
-            if (preg_match(self::LINK, $v)) $finding($label, 'warn', $label . ': has a link: ' . self::SHORT);
+            if (preg_match(self::LINK, $v) || preg_match(self::DOMAIN, $v)) $finding($label, 'warn', $label . ': has a link: ' . self::SHORT);
             if (preg_match(self::PHONE, $v)) $finding($label, 'warn', $label . ': has a phone number: ' . self::SHORT);
             if (($n = mb_strlen($v)) > self::MAX_REPLY) $finding($label, 'warn', $label . ': ' . $n . ' characters: ' . self::SHORT);
             if (($other = self::named($v, $others)) !== null) $finding($label, 'x', $label . ': names another page (' . $other . ')');

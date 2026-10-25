@@ -126,7 +126,7 @@ class ChatbotPageCheck
 
     private function runFlow(string $page, bool $fresh): array
     {
-        $out =['status' => 'none', 'reasons' => [], 'warnings' => $this->commentLengths($page), 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
+        $out = ['status' => 'none', 'reasons' => [], 'warnings' => $this->commentLengths($page), 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
         // Ang sagot sa comment ay hindi kailangan ng flow: ang babala ay kita kahit walang flow ang page.
         if ($out['warnings']) $out['status'] = 'ok';
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));

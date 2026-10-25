@@ -545,7 +545,7 @@ Landmark:");
         $this->assertSame([['x', 'Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)']], $this->comments($this->content()));
         $res = $this->check();
         $this->assertSame('x', $res['status']);
-        $this->assertContains('Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)', $res['reasons']);
+        $this->assertSame(1, count(array_keys($res['reasons'], 'Comment PM: CHRISTMAS LIGHTS ≠ orders: SEAT COVER (90%)', true)), 'shown once on a page with a flow');
 
         $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM seat cover ₱299' . self::FORM);
         $this->answers = ['PM seat cover' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
@@ -563,14 +563,16 @@ Landmark:");
         $this->answers = ['PM no price' => $this->answer('SEAT COVER', true, 95)];
         $this->assertSame([['ok', 'Comment PM: SEAT COVER (orders: SEAT COVER)'], ['warn', 'Comment PM: no price']], $this->comments($this->content()));
 
-        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM no form, seat cover ₱299 lang po');
-        $this->answers = ['PM no form' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'Text no form, seat cover ₱299 lang po');
+        $this->answers = ['Text no form' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
         $this->assertContains(['warn', self::NO_FORM], $this->comments($this->content()));
         $this->assertContains(self::NO_FORM, $this->check()['warnings']);
 
-        $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM reply cue, seat cover ₱299. Reply YES po para sa order form.');
-        $this->answers = ['PM reply cue' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
-        $this->assertSame([], array_values(array_filter($this->comments($this->content()), fn ($f) => $f[0] !== 'ok')), 'a call to reply is enough');
+        $this->answers = ['PM cue' => $this->answer('SEAT COVER', true, 95, [['item_price' => 299, 'fees' => [], 'total' => null]])];
+        foreach (['Reply YES po para sa order form.', 'Mag-PM lang po kayo.', 'Pakisend po ang details.', 'Message lang po kayo.', 'Sagutan lang po ang form.'] as $cue) {
+            $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM cue, seat cover ₱299. ' . $cue);
+            $this->assertSame([], array_values(array_filter($this->comments($this->content()), fn ($f) => $f[0] !== 'ok')), 'a call to reply is enough: ' . $cue);
+        }
     }
 
     #[DataProvider('replies')]
@@ -594,7 +596,9 @@ Landmark:");
             'phone' => [['Text 0917 123 4567 po', 'Hi po', 'Hello po'], [['warn', 'Comment Reply 1: has a phone number: ' . $short]]],
             'over 300' => [[str_repeat('a', 301), str_repeat('b', 300)], [['warn', 'Comment Reply 1: 301 characters: ' . $short]]],
             'another page named' => [['Salamat po!', 'Order na sa Page Dos!'], [['x', 'Comment Reply 2: names another page (Page Dos)']]],
+            'three the same: one warning' => [['Salamat po!', 'salamat po!', 'SALAMAT PO!'], [['warn', 'Comment Reply 1, Comment Reply 2 and Comment Reply 3 are the same: ' . $spam]]],
             'good variants' => [['Salamat po!', 'Check inbox po', 'Thank you po!'], []],
+            'no space after a period is not a link' => [['Salamat po.Online seller po kami', 'Hi po.Me ito', 'Order na po.CO'], []],
         ];
     }
 
