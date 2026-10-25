@@ -33,6 +33,12 @@ class ChatbotProvider
         return ($chat->payload['source'] ?? null) === 'gateway' ? self::FORBEAST : self::BOTCAKE;
     }
 
+    /** Ang via ng isang padala ayon sa daan na ginamit: forbeast (gateway) o botcake. */
+    public static function viaOf(MessagingProvider $provider): string
+    {
+        return $provider instanceof GatewayProvider ? self::FORBEAST : self::BOTCAKE;
+    }
+
     /** Ang pangalan sa screen ng via: Botcake o Forbeast. */
     public static function viaLabel(string $via): string
     {

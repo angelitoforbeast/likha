@@ -168,7 +168,7 @@ class BotcakeSendQueue
         $payload = (array) json_decode((string) $row->payload, true);
         BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, $row->chat_id === null ? null : (int) $row->chat_id, $row->flow_id === null ? null : (int) $row->flow_id,
             (string) $row->node_id, 'send', (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null,
-            is_array($payload['tags'] ?? null) ? $payload['tags'] : null);
+            is_array($payload['tags'] ?? null) ? $payload['tags'] : null, ChatbotProvider::BOTCAKE); // ang pool ay laging Botcake (send_content)
         ResumeChatbotSend::dispatch(self::ticket($row));
 
         return true;

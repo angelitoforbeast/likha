@@ -8,6 +8,7 @@ use App\Models\ChatbotFlow;
 use App\Models\ChatbotReply;
 use App\Services\Chatbot\BotcakeOutbox;
 use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\CommentReplies;
 use App\Services\Chatbot\CustomerFields;
@@ -83,6 +84,7 @@ class ChatbotTabsController extends Controller
         $day = Carbon::parse($date, 'Asia/Manila')->startOfDay()->timezone(config('app.timezone'));
         $pageId = $this->str($request, 'page_id', 20);
         $status = $this->str($request, 'status', 10);
+        $via = $this->str($request, 'via', 10);
         $q = $this->str($request, 'q', 100);
         $before = (int) $this->str($request, 'before', 20);
         if ($this->str($request, 'kind', 20) === 'comments') return $this->comments($date, $day, $pageId, $status, $q, $before);
@@ -90,6 +92,7 @@ class ChatbotTabsController extends Controller
         $rows = ChatbotReply::where('sent_at', '>=', $day)->where('sent_at', '<', $day->copy()->addDay())
             ->when(ctype_digit($pageId), fn ($w) => $w->where('page_id', (int) $pageId))
             ->when(in_array($status, ['sent', 'failed', 'skipped'], true), fn ($w) => $w->where('status', $status))
+            ->when(in_array($via, [ChatbotProvider::BOTCAKE, ChatbotProvider::FORBEAST], true) && ChatbotReply::hasVia(), fn ($w) => $w->where('via', $via))
             ->when($q !== '', function ($w) use ($q) {
                 $like = '%' . strtr(mb_strtolower($q), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
                 // Ang JSON ay ginagawang text bago hanapin (mysql, pgsql at sqlite).
@@ -106,6 +109,7 @@ class ChatbotTabsController extends Controller
             'rows' => $rows->take(self::PER_PAGE)->map(fn ($r) => [
                 'id' => $r->id, 'time' => $r->sent_at?->timezone('Asia/Manila')->format('H:i:s'), 'page' => $names[(string) $r->page_id] ?? ('Page ' . $r->page_id),
                 'psid' => (string) $r->psid, 'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'summary' => $this->summary($r),
+                'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null),
             ])->values(),
             'next' => $more ? $rows->take(self::PER_PAGE)->last()->id : null,
         ]);
@@ -137,7 +141,7 @@ class ChatbotTabsController extends Controller
             'date' => $date,
             'rows' => $rows->take(self::PER_PAGE)->map(fn ($r) => [
                 'id' => $r->id, 'time' => $r->received_at?->timezone('Asia/Manila')->format('H:i:s'), 'page' => $names[(string) $r->page_id] ?? ('Page ' . $r->page_id),
-                'psid' => (string) $r->from_id, 'kind' => 'comment', 'comment_id' => $r->comment_id, 'status' => $r->status,
+                'psid' => (string) $r->from_id, 'kind' => 'comment', 'comment_id' => $r->comment_id, 'status' => $r->status, 'via' => ChatbotProvider::FORBEAST,
                 'error' => implode(' · ', array_filter([$r->pm_error ? 'Private message: ' . $r->pm_error : null, $r->reply_error ? 'Public reply: ' . $r->reply_error : null])) ?: null,
                 'summary' => implode(' · ', array_filter(['Comment ' . $r->comment_id,
                     $r->status === 'skipped' && $r->reason !== null ? 'Skipped: ' . (CommentReplies::REASONS[$r->reason] ?? $r->reason) : null,
@@ -157,7 +161,7 @@ class ChatbotTabsController extends Controller
             'id' => $r->id, 'time' => $r->sent_at?->timezone('Asia/Manila')->format('Y-m-d H:i:s'),
             'page' => BotcakeChat::pageMap()[(string) $r->page_id] ?? ('Page ' . $r->page_id), 'page_id' => (string) $r->page_id, 'psid' => (string) $r->psid,
             'chat_id' => $r->chat_id, 'flow' => $r->flow_id ? ChatbotFlow::whereKey($r->flow_id)->value('name') : null, 'node' => $r->node_id,
-            'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'raw' => $r->raw, 'http' => $r->http, 'content' => $r->content,
+            'kind' => $r->kind, 'status' => $r->status, 'error' => $r->error, 'raw' => $r->raw, 'http' => $r->http, 'content' => $r->content, 'via' => $r->via,
             'link' => $r->kind === 'sheet' ? \App\Services\Chatbot\ChatbotSheet::rowLink((array) $r->content) : null,
         ]);
     }

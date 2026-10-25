@@ -169,16 +169,17 @@ class ChatbotInboxController extends Controller
         // Pause muna bago ipadala: ang chat na dumating habang naghihintay sa Botcake ay hindi na sasagutin ng bot.
         if ($request->boolean('pause')) (new CustomerFields((int) $pageId, (int) $psid))->set(CustomerFields::BOT_PAUSED, '1');
         // Ang daan ng page (Botcake o ang Forbeast Gateway), isang subok lang.
-        $o = ChatbotProvider::for($page, true)->send($page, $pageId, $psid, $messages, ChatbotProvider::ref());
+        $provider = ChatbotProvider::for($page, true);
+        $o = $provider->send($page, $pageId, $psid, $messages, ChatbotProvider::ref());
         [$status, $error, $http, $raw] = [$o['status'], $o['error'], $o['http'], $o['raw'] ?? null];
         $reply = ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
             'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]
-            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : [])
+            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotReply::viaColumn(ChatbotProvider::viaOf($provider))
             + ChatbotTags::columns($tags = ChatbotTags::manual((int) $pageId, (int) $psid, $page, count($messages))));
         ChatbotTags::storeRows($reply, $tags);
 
         return response()->json(['item' => ['key' => 'out-' . $reply->id, 'id' => $reply->id, 'side' => 'out', 'at' => Inbox::iso($reply->sent_at),
-            'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You']]);
+            'status' => $status, 'error' => $error, 'messages' => $messages, 'manual' => true, 'by' => Auth::user()?->name ?: 'You', 'via' => ChatbotProvider::viaOf($provider)]]);
     }
 
     /** Subscribe o unsubscribe ang customer sa isang sequence (ang mga puwedeng sumagot). */

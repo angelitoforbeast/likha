@@ -290,8 +290,11 @@
     function paintTabs() { root.querySelectorAll('.ib-tab').forEach(b => { const on = b.dataset.tab === S.tab; b.setAttribute('aria-selected', on ? 'true' : 'false'); b.className = 'ib-tab rounded-md px-2 py-1 ' + (on ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'); }); }
 
     // ---- Usapan ----
+    // Ang bot na naghatid o nagdala ng bawat mensahe (via); wala = lumang row na hindi tiyak.
+    const VIA = {botcake: 'Botcake', forbeast: 'Forbeast'};
+    const viaText = x => x.via && VIA[x.via] ? 'via ' + VIA[x.via] : '';
     function bubble(x) {
-        const time = el('div', {class: 'ib-time mt-0.5 text-[10px] text-slate-500', text: clock(x.at)});
+        const time = el('div', {class: 'ib-time mt-0.5 text-[10px] text-slate-500', text: clock(x.at) + (x.side === 'in' && viaText(x) ? ' · ' + viaText(x) : '')});
         if (x.side === 'system' || x.side === 'event') {
             const icon = x.side === 'system' ? '▤' : ({run_started: '▶', run_ended: '■', condition: '◇', field: '✎', ai: '✦', sheet: '▤', waiting: '⏳', skipped: '⤼', sequence: '↻'}[x.type] || '•');
             return el('li', {class: 'ib-bubble mx-auto flex flex-col items-center text-center', tabindex: '0'}, [
@@ -309,7 +312,7 @@
         const parts = (x.messages || []).map(m => m.type === 'image' ? imageLink(m.url)
             : el('div', {class: 'whitespace-pre-line break-words rounded-2xl rounded-br-sm px-3 py-1.5 text-sm ' + (failed ? 'bg-blue-100 text-slate-700' : 'bg-blue-600 text-white'), text: m.text}));
         return el('li', {class: 'ib-bubble ml-auto flex flex-col items-end', tabindex: '0'}, [
-            el('div', {class: 'mb-0.5 text-[10px] text-slate-500', text: x.by}),
+            el('div', {class: 'mb-0.5 text-[10px] text-slate-500', text: x.by + (viaText(x) ? ' · ' + viaText(x) : '')}),
             el('div', {class: 'flex flex-col items-end gap-1'}, parts),
             failed ? el('div', {class: 'mt-0.5 text-xs ' + (x.status === 'failed' ? 'text-red-700' : 'text-slate-500'), text: (x.status === 'failed' ? 'Failed' : 'Skipped') + (x.error ? ': ' + x.error : '')}) : null,
             time]);

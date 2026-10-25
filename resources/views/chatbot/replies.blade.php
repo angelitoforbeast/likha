@@ -34,6 +34,9 @@
         <label class="flex flex-col text-xs">Status
             <select name="status" class="border px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="skipped">Skipped</option><option value="unknown">Unknown (comments)</option></select>
         </label>
+        <label class="flex flex-col text-xs">Via
+            <select name="via" class="border px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="botcake">Botcake</option><option value="forbeast">Forbeast</option></select>
+        </label>
         <label class="flex flex-col text-xs">Search (this date)<input type="search" name="q" maxlength="100" placeholder="Text or error" class="border px-2 py-1 text-sm text-gray-900"></label>
         <button class="cb-btn cb-btn-primary">Show</button>
         <span id="rp-count" class="text-xs text-slate-500"></span>
@@ -41,7 +44,7 @@
 
     <div id="rp-box" class="cb-card min-h-[16rem] shrink overflow-auto">
         <table id="rp-table" class="cb-table table-fixed">
-            <thead><tr><th class="w-20">Time</th><th class="w-36">Page</th><th class="w-24">Status</th><th>What</th></tr></thead>
+            <thead><tr><th class="w-20">Time</th><th class="w-36">Page</th><th class="w-24">Status</th><th class="w-24">Via</th><th>What</th></tr></thead>
             <tbody id="rp-rows"></tbody>
         </table>
     </div>
@@ -79,6 +82,7 @@
                 el('td', {class: 'text-xs text-slate-500', text: r.time}),
                 el('td', {class: 'break-words', text: r.page}),
                 el('td', {}, el('span', {class: 'rounded-full px-2 py-0.5 text-xs ' + (COLOR[r.status] || ''), text: r.status})),
+                el('td', {class: 'text-xs text-slate-600', text: ({botcake: 'Botcake', forbeast: 'Forbeast'})[r.via] || '—'}),
                 el('td', {class: 'break-words'}, [el('div', {class: 'line-clamp-2', text: r.summary}), r.error ? el('div', {class: 'text-xs text-red-700', text: r.error}) : null]),
             ]);
             const open = () => r.kind === 'comment' ? commentDetail(r) : detail(r.id);
@@ -99,7 +103,7 @@
                 r.link ? el('a', {href: r.link, target: '_blank', rel: 'noopener noreferrer', class: 'text-sm text-blue-700 hover:underline', text: 'Open row'}) : null])
             : el('div', {class: 'space-y-1'}, (r.content || []).map(m => m.type === 'image' ? el('div', {class: 'break-all text-blue-700', text: '[image] ' + m.url}) : el('div', {class: 'whitespace-pre-line break-words rounded-lg bg-blue-50 px-2 py-1', text: m.text})));
         const rows = [['Time', r.time], ['Page', r.page + ' (' + r.page_id + ')'], ['Customer', r.psid], ['Chat', r.chat_id ?? '—'], ['Flow', (r.flow ?? '—') + ' · ' + (r.node ?? '')],
-            ['Kind', r.kind], ['Status', r.status + (r.http ? ' (HTTP ' + r.http + ')' : '')], ['Error', r.error ?? '—']];
+            ['Kind', r.kind], ['Via', ({botcake: 'Botcake', forbeast: 'Forbeast'})[r.via] || '—'], ['Status', r.status + (r.http ? ' (HTTP ' + r.http + ')' : '')], ['Error', r.error ?? '—']];
         dl.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', {class: 'text-slate-500', text: k}), el('dd', {class: 'break-words', text: String(v)})]),
             el('dt', {class: 'text-slate-500', text: 'Content'}), el('dd', {}, content));
         $('rp-modal').classList.remove('hidden'); $('rp-close').focus();
