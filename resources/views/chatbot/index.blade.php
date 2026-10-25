@@ -815,8 +815,10 @@
         // Lilipat agad ang knob habang naghihintay; ang render() pagkatapos ay sagot ng server (babalik kapag pumalya ang Botcake).
         b.disabled = true; b.setAttribute('aria-busy', 'true'); b.classList.add('opacity-50'); paintSwitch(b, on);
         try {
-            const {ok, data} = await post(url.activeUrl, {page_name: r.page, on});
-            if (!ok) errors.set(r.page, data.error || data.message || 'Not changed.');
+            let {ok, status, data} = await post(url.activeUrl, {page_name: r.page, on});
+            // Ang Default Reply ay nasa ibang site (o hindi masuri): itanong bago palitan.
+            if (status === 409 && confirm(data.message)) ({ok, status, data} = await post(url.activeUrl, {page_name: r.page, on, confirm: true}));
+            if (!ok) errors.set(r.page, status === 409 ? 'Not changed.' : (data.error || data.message || 'Not changed.'));
             else { r.active = data.active; if (data.error) errors.set(r.page, data.error); else errors.delete(r.page); }
         } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
         render();
@@ -978,7 +980,9 @@
             const btn = ev.target.querySelector('button.cb-btn-primary');
             btn.disabled = true;
             try {
-                const {ok, data} = await post(url.pagesUrl, {page_name: f.get('page_name'), page_id: f.get('page_id'), token: f.get('token')});
+                const body = {page_name: f.get('page_name'), page_id: f.get('page_id'), token: f.get('token')};
+                let {ok, status, data} = await post(url.pagesUrl, body);
+                if (status === 409 && confirm(data.message)) ({ok, status, data} = await post(url.pagesUrl, Object.assign({confirm: true}, body)));
                 if (!ok) { $('page-error').textContent = data.error || data.message || 'Not added.'; return; }
                 modal('page-box', false);
                 notice(data.page + ' added · token test: ' + data.token_test + ' · ' + (data.active ? 'On' : 'Off'), data.active ? 'text-green-700' : 'text-amber-700');

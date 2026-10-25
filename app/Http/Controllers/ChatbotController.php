@@ -309,7 +309,7 @@ class ChatbotController extends Controller
      */
     public function forbeastToken(Request $request)
     {
-        $this->checkAccess();
+        $this->checkSetup();
         $page = $this->listedPage($this->str($request, 'page_name'));
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
         $setup = app(ForbeastPageSetup::class);
@@ -320,7 +320,7 @@ class ChatbotController extends Controller
         }
         $token = trim($this->str($request, 'token', 500));
         if ($token !== '') $this->settings->set($page, ForbeastPageSetup::PROVIDER, 'token', $token, true, Auth::id());
-        $res = $setup->connect($page);
+        $res = $setup->connect($page, Auth::id());
 
         return response()->json(['status' => $res['status'], 'forbeast' => ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error']] + $setup->info($page)]);
     }
@@ -358,8 +358,17 @@ class ChatbotController extends Controller
         $page = $this->listedPage($this->str($request, 'page_name'));
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
-        $chatBlock = app(BotcakeChatBlock::class);
-        $r = $request->boolean('on') ? $chatBlock->turnOn($page, false, Auth::id()) : $chatBlock->turnOff($page, Auth::id());
+        $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        if ($request->boolean('on')) {
+            // Ang On ay pinapalitan ang buong Default Reply: ang ibang site (o hindi masuri) ay kailangan ng confirm.
+            $ask = $request->boolean('confirm') ? null : $connections->guard(trim((string) $this->settings->get($page, 'botcake', 'page_id')),
+                trim((string) $this->settings->get($page, 'botcake', 'token')), (string) $this->settings->get($page, 'botcake', 'chat.key'));
+            if ($ask !== null) return response()->json($ask['body'] + ['active' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0'], $ask['http']);
+            $r = $connections->chatBlock($page, Auth::id());
+        } else {
+            $r = app(BotcakeChatBlock::class)->turnOff($page, Auth::id());
+            if ($r['ok']) $connections->stampOff($page, Auth::id());
+        }
 
         return response()->json([
             'active' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0',
@@ -389,6 +398,11 @@ class ChatbotController extends Controller
         $owner = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)->where('value', $pageId)
             ->pluck('page_name')->first(fn ($p) => $this->settings->pageKey($p) !== $this->settings->pageKey($page));
         if ($owner !== null) return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}."], 422);
+        // Ang block ay papalit sa Default Reply: ang ibang site (o hindi masuri) ay kailangan ng confirm bago may isulat.
+        $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        $ask = $request->boolean('confirm') ? null : $connections->guard($pageId, $token !== '' ? $token : trim((string) $this->settings->get($page, 'botcake', 'token')),
+            (string) $this->settings->get($page, 'botcake', 'chat.key'));
+        if ($ask !== null) return response()->json($ask['body'], $ask['http']);
 
         $this->settings->set($page, 'botcake', 'page_id', $pageId, false, Auth::id());
         if ($token !== '') $this->settings->set($page, 'botcake', 'token', $token, true, Auth::id());
@@ -406,12 +420,7 @@ class ChatbotController extends Controller
         $error = $check['error'] ?? null;
         $on = false;
         if ($check['status'] === 'ok') {
-            try {
-                $r = app(BotcakeChatBlock::class)->turnOn($listed, false, Auth::id());
-            } catch (Throwable $e) {
-                report($e);
-                $r = ['ok' => false, 'error' => 'Could not set up the page: Botcake did not answer.'];
-            }
+            $r = $connections->chatBlock($listed, Auth::id());
             $on = $r['ok'];
             if (!$on) $error = $r['error'] . ' The bot stays Off.';
         } else {

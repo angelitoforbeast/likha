@@ -132,7 +132,10 @@ class ChatbotConnections
 
         $state = $this->blockState($client, $pageId, $token, (string) $this->settings->get($page, 'botcake', 'chat.key'));
         [$block, $note] = match (true) {
-            $state === 'ours' => $this->published($client, $pageId, $token) === false ? ['unpublished', 'the Default Reply is not published'] : ['on', null],
+            // Hindi published: sira lang kapag On ang bot dito; ang page na sadyang Off ay "off".
+            $state === 'ours' => $this->published($client, $pageId, $token) === false
+                ? ($this->settings->get($page, 'chatbot', 'active') === '0' ? ['off', 'the bot is Off'] : ['unpublished', 'the Default Reply is not published'])
+                : ['on', null],
             $state === 'none' => ['missing', 'no chat block in the Default Reply'],
             $state === 'stale' => ['missing', 'the chat block has an old key'],
             $state === 'unknown' => ['unknown', 'could not read the Default Reply'],
@@ -158,6 +161,25 @@ class ChatbotConnections
         }
 
         return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)]];
+    }
+
+    /**
+     * Ang takeover check bago isulat ang block sa On at + Page: ang tanong (409) kapag ang Default Reply ay nasa ibang site,
+     * o null. Ang hindi masuring sagot ay hindi humaharang dito (gaya ng On at + Page bago ang check na ito); ang
+     * Connections popup lang ang nagtatanong din doon.
+     */
+    public function guard(string $pageId, string $token, string $chatKey): ?array
+    {
+        if ($pageId === '' || $token === '') return null;
+        $state = $this->blockState(app(BotcakeClient::class)->once(), $pageId, $token, $chatKey);
+
+        return in_array($state, ['ours', 'stale', 'none', 'unknown'], true) ? null : $this->askMove($state);
+    }
+
+    /** Ang Off ng bot (naiiwan ang block, hindi published): itinatala sa botcake.chat_block para sa Changes. */
+    public function stampOff(string $page, ?int $userId): void
+    {
+        $this->stamp($page, 'chat_block', 'off', $userId);
     }
 
     /** Isulat ang block at i-publish (BotcakeChatBlock::turnOn, parehong chat.key); itinatala sa botcake.chat_block. */

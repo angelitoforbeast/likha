@@ -431,4 +431,66 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $labels = ['Botcake ID', 'Botcake token', 'Botcake test', 'Botcake chat block', 'Forbeast token', 'Forbeast test'];
         $this->assertSame($labels, array_values(array_intersect(array_column($res->json('fields'), 'label'), $labels)));
     }
+    public static function replies(): array
+    {
+        $card = fn (string $url, string $key = 'kept-chat-key-123') => ['plugin_id' => 'json_api', 'config' => ['method' => 'post', 'url' => $url], 'headers' => [['key' => 'X-Chat-Key', 'value' => $key]]];
+
+        return [
+            'ours then another site' => [['name' => 'Default reply', 'blocks' => [['cards' => [$card('https://app.example.test/api/botcake/chat'), $card('https://incepxion.pro/api/botcake/chat')]]]], 'incepxion.pro'],
+            'success false' => [['success' => false, 'message' => 'Page not found'], null],
+            'no blocks key' => [['name' => 'Default reply', 'status' => 'published'], null],
+            'a card with no host' => [['name' => 'Default reply', 'blocks' => [['cards' => [$card('/api/botcake/chat')]]]], null],
+        ];
+    }
+
+    /** @dataProvider replies */
+    public function test_S_148_19_the_popup_asks_on_another_site_or_an_unreadable_default_reply_and_writes_nothing(array $content, ?string $host): void
+    {
+        $this->botcake($content);
+        $this->settings()->set('Page Uno', 'botcake', 'chat.key', 'kept-chat-key-123', true, null, true);
+
+        $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])
+            ->assertStatus(409)->assertJson(['status' => 'confirm', 'host' => $host]);
+        $this->postJson('/chatbot/connections/chat-block', ['page_name' => 'Page Uno'])->assertStatus(409)->assertJson(['host' => $host]);
+        $this->assertCount(0, $this->sentTo('/default_reply/content', 'POST'));
+        $this->assertSame(self::TOKEN, $this->settings()->get('Page Uno', 'botcake', 'token'));
+    }
+
+    public function test_S_148_20_on_and_add_page_ask_before_replacing_another_sites_default_reply(): void
+    {
+        $this->botcake($this->content('https://incepxion.pro/api/botcake/chat'));
+        $this->settings()->set('Page Uno', 'chatbot', 'active', '0', false, null, true);
+
+        $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => true])->assertStatus(409)
+            ->assertJson(['status' => 'confirm', 'host' => 'incepxion.pro', 'active' => false]);
+        $this->postJson('/chatbot/pages', ['page_name' => 'Page Seis', 'page_id' => '1001', 'token' => self::NEW_BC])->assertStatus(422); // ang ID ay sa Page Uno
+        Http::fake(['botcake.io/*/pages/6006/default_reply/content' => Http::response($this->content('https://incepxion.pro/api/botcake/chat'))]);
+        $this->postJson('/chatbot/pages', ['page_name' => 'Page Seis', 'page_id' => '6006', 'token' => self::NEW_BC])->assertStatus(409)->assertJson(['host' => 'incepxion.pro']);
+        $this->assertNull($this->settings()->get('Page Seis', 'botcake', 'page_id'), 'walang naisulat bago ang confirm');
+        $this->assertCount(0, $this->sentTo('/default_reply/content', 'POST'));
+
+        $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => true, 'confirm' => true])->assertOk()->assertJson(['active' => true]);
+        $this->assertCount(1, $this->sentTo('/default_reply/content', 'POST'));
+        $this->assertStringStartsWith('applied', (string) $this->settings()->get('Page Uno', 'botcake', 'chat_block'));
+        $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => false])->assertOk();
+        $this->assertStringStartsWith('off', (string) $this->settings()->get('Page Uno', 'botcake', 'chat_block'));
+    }
+
+    public function test_S_148_21_the_old_forbeast_token_route_has_the_same_access_and_logs_the_user(): void
+    {
+        $this->forbeast(hook: 'https://app.example.test/api/gateway/events');
+        $this->navLink('/chatblast', ['Data Encoder', 'Marketing']);
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->postJson('/chatbot/forbeast-token', ['page_name' => 'Page Uno', 'token' => self::NEW_FB])->assertForbidden();
+        $this->postJson('/chatbot/forbeast-token', ['page_name' => 'Page Uno', 'clear' => true])->assertForbidden();
+        Http::assertNothingSent();
+
+        $mkt = $this->user('Marketing', 'mkt@example.test');
+        $this->actingAs($mkt);
+        $this->postJson('/chatbot/forbeast-token', ['page_name' => 'Page Uno', 'token' => self::NEW_FB])->assertOk();
+        $this->assertSame($mkt->id, PageSetting::where('provider', 'forbeast')->where('key', 'token_status')->where('active', true)->value('created_by'));
+        $this->assertSame([['Forbeast token', $mkt->name, '(hidden)']], array_map(fn ($e) => [$e['field'], $e['by'], $e['new']],
+            $this->getJson('/chatbot/changes?field=forbeast.token')->assertOk()->json('entries')));
+        $this->assertSame([$mkt->name], array_column($this->getJson('/chatbot/changes?field=forbeast.token_status')->assertOk()->json('entries'), 'by'));
+    }
 }
