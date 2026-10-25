@@ -1,4 +1,6 @@
-# 150 Comment content check: result
+# 151 Comment content check: result
+
+> Renumbered from 150 to 151, because the chatbot AI provider spec, also numbered 150, went live first. The brief in `docs/specs/151-comment-content-check.md` is kept verbatim, so its heading still says "Brief 150" and its cases say S-150; in the stories, tests and this result they are S-151.
 
 ## Plan
 
@@ -14,7 +16,7 @@ One new service, `App\Services\Chatbot\CommentCheck`, holds the comment checks. 
 The skeptic review ran once at the end (standard depth: medium tier, no new way in for untrusted input).
 
 ## Progress
-- [x] T1, T2, T3, T4: built test-first in one slice. Red run: 16 S-150 tests, 13 failures and 2 errors (`Class "App\Services\Chatbot\CommentCheck" not found`; e.g. S-150.3 "one variant": `Failed asserting that two arrays are identical`). All green after the build.
+- [x] T1, T2, T3, T4: built test-first in one slice. Red run: 16 S-151 tests, 13 failures and 2 errors (`Class "App\Services\Chatbot\CommentCheck" not found`; e.g. S-151.3 "one variant": `Failed asserting that two arrays are identical`). All green after the build.
 - [x] Review: `skeptic-reviewer`, standard depth, on `727441d6..04a5b3e9`. No blockers or majors. Minors on the untrusted path were fixed in one wave, test-first:
   - the reply-cue words with Taglish prefixes (Mag-PM, Pakisend, Message lang, Sagutan);
   - no false link on "po.Online" (a missing space after a period);
@@ -34,8 +36,8 @@ The skeptic review ran once at the end (standard depth: medium tier, no new way 
   - `app/Services/Chatbot/ForbeastPageSetup.php`: `probe()` returns `permissions`; `connect()` and `retest()` keep it in `forbeast.permissions`; `disconnect()` removes it.
   - `app/Services/PageSettings.php`: `forbeast.permissions` is a system key, so staff cannot type it.
   - `resources/views/chatbot/index.blade.php`: "Use template" in the Edit modal and the cell editor, and notes in grey in the Check cell.
-  - `tests/Feature/Chatblast/ChatbotContentCheckTest.php` (S-150) and `tests/Feature/Chatblast/ChatbotPageCheckTest.php` (S-149.34).
-  - `qa/stories.md` (S-150) and `TODO.md`.
+  - `tests/Feature/Chatblast/ChatbotContentCheckTest.php` (S-151) and `tests/Feature/Chatblast/ChatbotPageCheckTest.php` (S-149.34).
+  - `qa/stories.md` (S-151) and `TODO.md`.
 
 ## Rules
 Every value is checked after the page's `{{Botfield}}` variables are filled, the way it is sent.
@@ -76,31 +78,45 @@ The call to reply is a word list: reply, sagot, sumagot, sagutan, type, message,
 None. The Comment PM goes to the AI with the existing Prompt/Seq `TEXT_PROMPT`, unchanged, as `Expected item: …\nField: Comment PM\n<<<TEXT … TEXT>>>`. It uses the same cache key shape (`v<row id>:<sha1 of the filled text>` plus the expected item) and the same cost columns in `chatbot_content_answers`.
 
 ## Story changes
-- **S-149.34 (`ChatbotPageCheckTest`):** the test now asserts only the length warnings ("Forbeast sends at most"). Its fixture (one 8001-character reply, a PM with no form) now also gets the S-150 format warnings, which is correct.
-- **S-150.3:** added two rows the brief did not list. Three identical replies give one warning, and "po.Online" (a missing space after a period) is not a link. The review showed both false alarms.
-- **S-150.4:** the cell editor has no Save button; it saves when closed, as it always has. "Use template" there fills the textarea without the typing auto-save, and shows "Not saved yet: edit it, then close to save".
+- **S-149.34 (`ChatbotPageCheckTest`):** the test now asserts only the length warnings ("Forbeast sends at most"). Its fixture (one 8001-character reply, a PM with no form) now also gets the S-151 format warnings, which is correct.
+- **S-151.3:** added two rows the brief did not list. Three identical replies give one warning, and "po.Online" (a missing space after a period) is not a link. The review showed both false alarms.
+- **S-151.4:** the cell editor has no Save button; it saves when closed, as it always has. "Use template" there fills the textarea without the typing auto-save, and shows "Not saved yet: edit it, then close to save".
 
 ## Evidence per case
 | Case | Test | Result |
 |---|---|---|
-| S-150.1 | `test_S_150_1_a_comment_pm_naming_another_item_is_an_x_and_a_matching_item_and_price_passes` | pass |
-| S-150.2 | `test_S_150_2_a_comment_pm_without_a_price_or_without_a_form_or_reply_cue_is_a_warning` (5 cue phrases) | pass |
-| S-150.3 | `test_S_150_3_comment_replies_get_format_warnings_and_another_page_is_an_x` (9 rows), `test_S_150_3_a_comment_pm_naming_another_page_is_a_warning_and_its_own_name_is_fine` | pass |
-| S-150.4 | `test_S_150_4_use_template_fills_the_pm_and_replies_with_the_pages_botfield_names_and_saves_nothing` (server and markup; clicks not run in a browser) | pass |
-| S-150.5 | `test_S_150_5_a_forbeast_token_without_the_comment_scopes_is_an_x_and_no_field_is_unknown`, `test_S_150_5_a_meta_permission_error_on_a_comment_send_in_the_last_24_hours_is_an_x` | pass |
-| S-150.6 | `test_S_150_6_an_unchanged_comment_pm_is_not_asked_again` | pass |
-| S-150.7 | `test_S_150_7_the_nightly_run_and_check_again_include_the_comment_checks` | pass |
-| S-150.8 | `test_S_150_8_a_botcake_page_with_comment_columns_gets_an_info_line` | pass |
+| S-151.1 | `test_S_151_1_a_comment_pm_naming_another_item_is_an_x_and_a_matching_item_and_price_passes` | pass |
+| S-151.2 | `test_S_151_2_a_comment_pm_without_a_price_or_without_a_form_or_reply_cue_is_a_warning` (5 cue phrases) | pass |
+| S-151.3 | `test_S_151_3_comment_replies_get_format_warnings_and_another_page_is_an_x` (9 rows), `test_S_151_3_a_comment_pm_naming_another_page_is_a_warning_and_its_own_name_is_fine` | pass |
+| S-151.4 | `test_S_151_4_use_template_fills_the_pm_and_replies_with_the_pages_botfield_names_and_saves_nothing` (server and markup; clicks not run in a browser) | pass |
+| S-151.5 | `test_S_151_5_a_forbeast_token_without_the_comment_scopes_is_an_x_and_no_field_is_unknown`, `test_S_151_5_a_meta_permission_error_on_a_comment_send_in_the_last_24_hours_is_an_x` | pass |
+| S-151.6 | `test_S_151_6_an_unchanged_comment_pm_is_not_asked_again` | pass |
+| S-151.7 | `test_S_151_7_the_nightly_run_and_check_again_include_the_comment_checks` | pass |
+| S-151.8 | `test_S_151_8_a_botcake_page_with_comment_columns_gets_an_info_line` | pass |
 
 Done-when run: `phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode`.
-- At 52974859: 1531 tests, 0 failures, 1 skipped.
-- On this branch: 1549 tests, 0 failures, 1 skipped (the 75 PHPUnit deprecation notices are the same as at the base).
+- First build, on 52974859: 1531 tests before, 1549 after, 0 failures, 1 skipped.
+- On `feat/151-comment-content-check` (on 3d5ffc6a): 1624 tests, 0 failures, 1 skipped, 75 PHPUnit deprecation notices (the same count as before).
+
+## Moved onto 3d5ffc6a
+The work was cherry-picked from `feat/150-comment-content-check` onto 3d5ffc6a, which already holds the live chatbot AI provider work.
+
+Conflicts:
+- `app/Services/PageSettings.php`: both specs extend the `SYSTEM_KEYS` line. Both sets are kept: `forbeast.permissions` plus the `chatbot.ai_*` keys. The new `keyLike()` rule stays as is.
+- `qa/stories.md` and `TODO.md`: both specs appended at the end. Both are kept, the AI provider entries first.
+- No other conflicts. `resources/views/chatbot/index.blade.php` merged on its own.
+
+The AI provider chain (`ChatbotAiChain`, `ChatbotAiProviders`) routes only the bot's AI step. 3d5ffc6a does not change `ContentAi`, `PageContentCheck` or `config('services.openai.content_check_model')`. The Comment PM check therefore keeps the same `ContentAi` call and the same cost logging in `chatbot_content_answers`, like Prompt/Seq, and needed no change.
 
 ## Commits
-- `727441d6` docs: spec and plan for the comment content check (spec 150)
-- `04a5b3e9` feat: the Check column checks comment texts' content and format, flags pages without comment permission, and offers a template (spec 150)
-- `60c44871` fix: comment check finds reply cues with Taglish prefixes, ignores a missing space after a period, and warns once per group of identical replies (spec 150)
-- docs: result, stories and accepted minors for spec 150 (this commit)
+On `feat/151-comment-content-check`, cherry-picked with their original subjects:
+- `146b08e9` docs: spec and plan for the comment content check (spec 150)
+- `fe1dc1dc` feat: the Check column checks comment texts' content and format, flags pages without comment permission, and offers a template (spec 150)
+- `b31a105f` fix: comment check finds reply cues with Taglish prefixes, ignores a missing space after a period, and warns once per group of identical replies (spec 150)
+- `dcd1f84a` docs: result, stories and accepted minors for the comment content check (spec 150)
+- docs: renumber the comment content check to 151 after the move onto the live AI provider work (spec 151) (this commit)
+
+On the old branch `feat/150-comment-content-check`, left as it was: `727441d6`, `04a5b3e9`, `60c44871`, `fb450c20`.
 
 ## Open points
 - **Forbeast handoff 015** must add `permissions` (an array of scope names) to `GET /v1/pages/{id}`. Until then every Forbeast page with comment columns shows "Forbeast: permissions unknown". The next Test or nightly connections check stores the field once it is there.
@@ -114,4 +130,4 @@ Done-when run: `phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feat
   - the broad cue word list;
   - the untested connect/disconnect paths.
 
-150: done — the Check column now checks the Comment PM's item, price and order cue (AI, cached) and the Comment Replies' format, flags missing comment permission, and offers "Use template".
+151: done — the Check column now checks the Comment PM's item, price and order cue (AI, cached) and the Comment Replies' format, flags missing comment permission, and offers "Use template".

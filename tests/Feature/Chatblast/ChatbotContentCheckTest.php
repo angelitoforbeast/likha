@@ -537,7 +537,7 @@ Landmark:");
     private const FORM = "\n✅ Name:\n✅ Mobile Number:\n✅ Complete Address:\n✅ Landmark:";
     private const NO_FORM = 'Comment PM: no order form or call to reply: add Name, Mobile Number, Complete Address and Landmark, or ask the customer to reply for the form';
 
-    public function test_S_150_1_a_comment_pm_naming_another_item_is_an_x_and_a_matching_item_and_price_passes(): void
+    public function test_S_151_1_a_comment_pm_naming_another_item_is_an_x_and_a_matching_item_and_price_passes(): void
     {
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM lights ₱299' . self::FORM);
@@ -556,7 +556,7 @@ Landmark:");
         $this->assertSame(['x', 'Comment PM: price ₱399 ≠ orders ₱299 COD'], $this->comments($this->content())[1]);
     }
 
-    public function test_S_150_2_a_comment_pm_without_a_price_or_without_a_form_or_reply_cue_is_a_warning(): void
+    public function test_S_151_2_a_comment_pm_without_a_price_or_without_a_form_or_reply_cue_is_a_warning(): void
     {
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM no price' . self::FORM);
@@ -576,7 +576,7 @@ Landmark:");
     }
 
     #[DataProvider('replies')]
-    public function test_S_150_3_comment_replies_get_format_warnings_and_another_page_is_an_x(array $values, array $expected): void
+    public function test_S_151_3_comment_replies_get_format_warnings_and_another_page_is_an_x(array $values, array $expected): void
     {
         foreach ($values as $i => $v) $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_' . ($i + 1), $v);
         $this->assertSame($expected, $this->comments($this->content()));
@@ -602,7 +602,7 @@ Landmark:");
         ];
     }
 
-    public function test_S_150_3_a_comment_pm_naming_another_page_is_a_warning_and_its_own_name_is_fine(): void
+    public function test_S_151_3_a_comment_pm_naming_another_page_is_a_warning_and_its_own_name_is_fine(): void
     {
         $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'Galing sa page dos ito' . self::FORM);
         $this->assertSame([['warn', 'Comment PM: names another page (Page Dos)']], $this->comments($this->content('Page Uno', false)));
@@ -611,7 +611,7 @@ Landmark:");
         $this->assertSame([], $this->comments($this->content('Page Dos', false)));
     }
 
-    public function test_S_150_4_use_template_fills_the_pm_and_replies_with_the_pages_botfield_names_and_saves_nothing(): void
+    public function test_S_151_4_use_template_fills_the_pm_and_replies_with_the_pages_botfield_names_and_saves_nothing(): void
     {
         $this->assertSame([
             'comment_pm' => "Hi po! 😊 {{ITEM NAME IN JNT DASHBOARD}} — ₱{{PRICE}} lang po, FREE shipping at Cash on Delivery.\n\nPara po ma-reserve, i-fill up lang po:\n✅ Name:\n✅ Mobile Number:\n✅ Complete Address (House#/Purok/Street, Brgy, Municipality, Province):\n✅ Landmark:",
@@ -637,7 +637,7 @@ Landmark:");
         $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_2', 'Check inbox po');
     }
 
-    public function test_S_150_5_a_forbeast_token_without_the_comment_scopes_is_an_x_and_no_field_is_unknown(): void
+    public function test_S_151_5_a_forbeast_token_without_the_comment_scopes_is_an_x_and_no_field_is_unknown(): void
     {
         $this->forbeastPage();
         config(['services.gateway.url' => 'https://gw.example.test', 'app.url' => 'https://likha.example.test']);
@@ -665,7 +665,7 @@ Landmark:");
         $this->assertContains('Forbeast: permissions unknown', $this->check()['notes']);
     }
 
-    public function test_S_150_5_a_meta_permission_error_on_a_comment_send_in_the_last_24_hours_is_an_x(): void
+    public function test_S_151_5_a_meta_permission_error_on_a_comment_send_in_the_last_24_hours_is_an_x(): void
     {
         Artisan::call('migrate', ['--path' => ['database/migrations/2026_11_08_100000_create_chatbot_comment_events_table.php']]);
         $this->forbeastPage();
@@ -683,7 +683,7 @@ Landmark:");
         $this->assertSame([['x', 'Forbeast: walang comment permission — i-connect ulit ang page']], $this->comments($this->content('Page Uno', false)));
     }
 
-    public function test_S_150_6_an_unchanged_comment_pm_is_not_asked_again(): void
+    public function test_S_151_6_an_unchanged_comment_pm_is_not_asked_again(): void
     {
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM seat cover ₱299' . self::FORM);
@@ -700,7 +700,7 @@ Landmark:");
         $this->assertSame(2, $this->aiCalls(), 'changed: asked once');
     }
 
-    public function test_S_150_7_the_nightly_run_and_check_again_include_the_comment_checks(): void
+    public function test_S_151_7_the_nightly_run_and_check_again_include_the_comment_checks(): void
     {
         $this->orders('Page Uno', 'SEAT COVER', '299', 3);
         $this->settings()->set('Page Uno', 'chatbot', 'comment_pm', 'PM lights ₱299' . self::FORM);
@@ -721,7 +721,7 @@ Landmark:");
         $this->assertContains('Comment Reply: only one variant: add 2–3 variants: the same text on every comment can be flagged as spam', $res['warnings']);
     }
 
-    public function test_S_150_8_a_botcake_page_with_comment_columns_gets_an_info_line(): void
+    public function test_S_151_8_a_botcake_page_with_comment_columns_gets_an_info_line(): void
     {
         $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_1', 'Salamat po!');
         $this->settings()->set('Page Uno', 'chatbot', 'comment_reply_2', 'Check inbox po');

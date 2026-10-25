@@ -323,7 +323,7 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $s->set('Page Dos', 'chatbot', 'comment_pm', str_repeat('a', 2000));
         $s->set('Page Dos', 'chatbot', 'comment_reply_1', str_repeat('b', 8000));
 
-        // Ang babala sa haba lang (ang format at content ng comment ay sa S-150).
+        // Ang babala sa haba lang (ang format at content ng comment ay sa S-151).
         $lengths = fn (array $res) => array_values(array_filter($res['warnings'], fn ($w) => str_contains($w, 'Forbeast sends at most')));
         $over = $this->check('Page Uno');
         $this->assertSame([
