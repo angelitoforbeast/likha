@@ -21,12 +21,12 @@ return new class extends Migration
             $table->string('comment_id', 100)->unique();
             $table->string('post_id', 100)->nullable();
             $table->string('from_id', 64)->nullable();
-            $table->string('status', 10);                   // queued | sending | sent | failed | skipped
-            $table->string('reason', 20)->nullable();       // kapag skipped: botcake_page, bot_off, reply, page_author, ours, not_set
-            $table->string('pm_status', 16)->nullable();    // sent | failed | already_replied (null = walang Comment PM)
+            $table->string('status', 10);                   // queued | sending | sent | failed | unknown (504, maaaring naipost) | skipped
+            $table->string('reason', 20)->nullable();       // skipped: botcake_page, bot_off, reply, page_author, ours, not_set; failed: ang error code
+            $table->string('pm_status', 16)->nullable();    // sent | failed | already_replied | unknown (null = walang Comment PM o hindi pa)
             $table->text('pm_text')->nullable();
             $table->string('pm_error', 255)->nullable();
-            $table->string('reply_status', 16)->nullable(); // sent | failed (null = walang Comment Reply)
+            $table->string('reply_status', 16)->nullable(); // sent | failed | unknown (null = walang Comment Reply o hindi pa)
             $table->text('reply_text')->nullable();
             $table->string('reply_error', 255)->nullable();
             $table->string('reply_comment_id', 100)->nullable(); // ang comment na ginawa ng reply namin (para hindi sagutin ulit)

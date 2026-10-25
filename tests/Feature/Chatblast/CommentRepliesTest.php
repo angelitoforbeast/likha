@@ -116,9 +116,10 @@ class CommentRepliesTest extends ChatblastTestCase
     /** Ang comment event ng Forbeast, pinirmahan ng $secret (null = walang pirma). */
     private function comment(array $e = [], ?string $secret = self::SECRET)
     {
-        $body = json_encode($e + ['page_id' => '1001', 'type' => 'comment', 'comment_id' => '111_222', 'post_id' => '1001_9', 'parent_id' => '1001_9',
-            'message' => self::COMMENT_TEXT, 'created_time' => '2026-10-25T02:00:00+0000', 'from_id' => '555', 'from_name' => null,
-            'is_reply' => false, 'is_page_author' => false]);
+        // Ang hugis na ipinapadala ng Forbeast (ang kontrata nito): kind event, event_id, unix na created_time, received_at, attempt.
+        $body = json_encode($e + ['kind' => 'event', 'event_id' => 42, 'page_id' => '1001', 'type' => 'comment', 'comment_id' => '111_222', 'post_id' => '1001_9',
+            'parent_id' => '1001_9', 'message' => self::COMMENT_TEXT, 'created_time' => 1761357600, 'from_id' => '555', 'from_name' => null,
+            'is_reply' => false, 'is_page_author' => false, 'received_at' => '2026-10-25T02:00:01Z', 'attempt' => 1]);
         $headers = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'];
         if ($secret !== null) $headers['HTTP_X_GATEWAY_SIGNATURE'] = 'sha256=' . hash_hmac('sha256', $body, $secret);
 
@@ -298,6 +299,84 @@ class CommentRepliesTest extends ChatblastTestCase
         (new HandleComment($this->event()->id))->withFakeQueueInteractions()->handle(app(CommentReplies::class));
 
         $this->assertSame(['failed', 'failed', null], [$this->event()->status, $this->event()->pm_status, $this->event()->from_id]);
+        $this->assertCount(1, $this->calls);
+    }
+
+    public function test_S_149_17_an_unknown_outcome_is_logged_as_unknown_and_never_retried(): void
+    {
+        $this->forbeastPage();
+        $this->gateway(['/private-reply' => [504, ['ok' => false, 'error' => 'unknown_outcome', 'meta_code' => null, 'meta_subcode' => null]]]);
+
+        $this->comment()->assertOk();
+        (new HandleComment($this->event()->id))->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+
+        $e = $this->event();
+        $this->assertSame(['unknown', 'sent', 'unknown'], [$e->pm_status, $e->reply_status, $e->status]);
+        $this->assertStringContainsString('unknown_outcome', (string) $e->pm_error);
+        $this->assertSame(['private-reply', 'reply'], array_map(fn ($c) => basename($c['url']), $this->calls), 'no second private reply');
+        $this->actingAs($this->user());
+        $rows = $this->getJson('/chatbot/replies/data?date=' . now('Asia/Manila')->toDateString() . '&kind=comments&status=unknown')->assertOk()->json('rows');
+        $this->assertSame(['111_222'], array_column($rows, 'comment_id'));
+        $this->assertStringContainsString('Private message: unknown', $rows[0]['summary']);
+    }
+
+    public function test_S_149_18_a_429_waits_for_the_next_minute_and_sends_only_what_is_left(): void
+    {
+        $this->forbeastPage();
+        $this->travelTo('2026-10-25 10:00:15');
+        $replies = 0;
+        Http::fake(['gw.example.test/*' => function (HttpRequest $req) use (&$replies) {
+            $this->calls[] = ['url' => $req->url()];
+            if (str_ends_with($req->url(), '/private-reply')) return Http::response(['ok' => true, 'message_id' => 'm_1', 'recipient_id' => '777']);
+            return ++$replies === 1 ? Http::response(['ok' => false, 'error' => 'rate_limited'], 429) : Http::response(['ok' => true, 'comment_id' => 'our_9']);
+        }]);
+        Queue::fake([HandleComment::class]);
+        $this->comment()->assertOk();
+        $job = Queue::pushed(HandleComment::class)->first();
+
+        $first = $job->withFakeQueueInteractions();
+        $first->handle(app(CommentReplies::class));
+        $first->assertReleased(45);
+        $this->assertSame(['queued', 'sent', null], [$this->event()->status, $this->event()->pm_status, $this->event()->reply_status]);
+        // Ang ibang comment ng page ay naghihintay din hanggang sa susunod na minuto.
+        $this->comment(['comment_id' => 'other'])->assertOk();
+        $other = Queue::pushed(HandleComment::class)->last()->withFakeQueueInteractions();
+        $other->handle(app(CommentReplies::class));
+        $other->assertReleased(45);
+
+        $this->travelTo('2026-10-25 10:01:00');
+        $job->withFakeQueueInteractions()->handle(app(CommentReplies::class));
+
+        $this->assertSame(['sent', 'sent', 'sent', 'our_9'], [$this->event()->status, $this->event()->pm_status, $this->event()->reply_status, $this->event()->reply_comment_id]);
+        $this->assertSame(['private-reply', 'reply', 'reply'], array_map(fn ($c) => basename($c['url']), $this->calls));
+    }
+
+    public function test_S_149_19_a_comment_without_text_still_gets_the_private_message_and_the_reply(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+
+        $this->comment(['message' => null])->assertOk();
+
+        $this->assertSame(['private-reply', 'reply'], array_map(fn ($c) => basename($c['url']), $this->calls));
+        $this->assertSame('sent', $this->event()->status);
+    }
+
+    /** @return array<string, array{0: int, 1: string}> */
+    public static function refused(): array
+    {
+        return ['401' => [401, 'invalid_token'], '403' => [403, 'forbidden'], '404' => [404, 'not_found'], '422' => [422, 'invalid_text'], '502' => [502, 'meta_error']];
+    }
+
+    #[DataProvider('refused')]
+    public function test_S_149_17_a_refused_send_is_failed_with_the_error_code_as_the_reason(int $http, string $code): void
+    {
+        $this->forbeastPage(['comment_reply_1' => '', 'comment_reply_2' => '', 'comment_reply_3' => '']);
+        $this->gateway(['/private-reply' => [$http, ['ok' => false, 'error' => $code]]]);
+
+        $this->comment()->assertOk();
+
+        $this->assertSame(['failed', 'failed', $code], [$this->event()->status, $this->event()->pm_status, $this->event()->reason]);
         $this->assertCount(1, $this->calls);
     }
 

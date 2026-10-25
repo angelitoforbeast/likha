@@ -32,7 +32,7 @@
             <select name="kind" class="border px-2 py-1 text-sm text-gray-900"><option value="">Bot replies</option><option value="comments">Comments</option></select>
         </label>
         <label class="flex flex-col text-xs">Status
-            <select name="status" class="border px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="skipped">Skipped</option></select>
+            <select name="status" class="border px-2 py-1 text-sm text-gray-900"><option value="">All</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="skipped">Skipped</option><option value="unknown">Unknown (comments)</option></select>
         </label>
         <label class="flex flex-col text-xs">Search (this date)<input type="search" name="q" maxlength="100" placeholder="Text or error" class="border px-2 py-1 text-sm text-gray-900"></label>
         <button class="cb-btn cb-btn-primary">Show</button>

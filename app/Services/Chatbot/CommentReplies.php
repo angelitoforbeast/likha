@@ -93,21 +93,47 @@ class CommentReplies
         // Isang worker lang ang magpapadala (ang job na naulit ay walang gagawin).
         if (ChatbotCommentEvent::whereKey($event->id)->where('status', 'queued')->update(['status' => 'sending']) === 0) return 0;
 
+        // Ang bahaging nasubukan na (may status) ay hindi na ipinapadala ulit: ang 429 ay bumabalik dito para sa natitira lang.
         $done = [];
-        if ($pm !== '') {
+        $codes = [];
+        if ($pm !== '' && $event->pm_status === null) {
             $r = $this->gateway->privateReply($pageName, (string) $event->page_id, $event->comment_id, $pm);
+            if ($r['status'] === GatewayComments::THROTTLED) return $this->throttled($event, $done, (string) $event->page_id);
             $done += ['pm_status' => $r['status'], 'pm_text' => $pm, 'pm_error' => $r['error']];
+            $codes[] = $r['status'] === 'failed' ? $r['code'] : null;
         }
-        if ($variants) {
+        if ($variants && $event->reply_status === null) {
             $text = self::$pick ? (string) (self::$pick)($variants) : $variants[random_int(0, count($variants) - 1)];
             $r = $this->gateway->reply($pageName, (string) $event->page_id, $event->comment_id, $text);
+            if ($r['status'] === GatewayComments::THROTTLED) return $this->throttled($event, $done, (string) $event->page_id);
             $done += ['reply_status' => $r['status'], 'reply_text' => $text, 'reply_error' => $r['error'], 'reply_comment_id' => $r['comment_id']];
+            $codes[] = $r['status'] === 'failed' ? $r['code'] : null;
         }
-        $failed = ($done['pm_status'] ?? null) === 'failed' || ($done['reply_status'] ?? null) === 'failed';
-        $sent = ($done['pm_status'] ?? null) === 'sent' || ($done['reply_status'] ?? null) === 'sent';
-        $event->update($done + ['status' => $failed ? 'failed' : ($sent ? 'sent' : 'skipped'), 'reason' => $failed || $sent ? null : GatewayComments::ALREADY_REPLIED, 'handled_at' => now()]);
+        $parts = array_filter([$done['pm_status'] ?? $event->pm_status, $done['reply_status'] ?? $event->reply_status]);
+        $status = match (true) {
+            in_array('failed', $parts, true) => 'failed',
+            in_array(GatewayComments::UNKNOWN, $parts, true) => GatewayComments::UNKNOWN,
+            in_array('sent', $parts, true) => 'sent',
+            default => 'skipped',
+        };
+        $reason = $status === 'failed' ? (array_values(array_filter($codes))[0] ?? $event->reason) : ($status === 'skipped' ? GatewayComments::ALREADY_REPLIED : null);
+        $event->update($done + ['status' => $status, 'reason' => $reason, 'handled_at' => now()]);
 
         return 0;
+    }
+
+    /**
+     * Ang 429 ng Forbeast: ang naipadala na ay itinatabi, ang row ay naghihintay ulit, at puno na ang minuto ng page para
+     * sa lahat ng comment nito. @return int segundo hanggang sa susunod na minuto
+     */
+    private function throttled(ChatbotCommentEvent $event, array $done, string $pageId): int
+    {
+        // Sa query (hindi sa model): ang model ay "queued" pa sa memorya, kaya hindi nito isusulat ang pagbalik mula sa sending.
+        ChatbotCommentEvent::whereKey($event->id)->update($done + ['status' => 'queued']);
+        $now = now();
+        Cache::put('comment-replies:' . $pageId . ':' . $now->format('YmdHi'), self::PER_MINUTE, 120);
+
+        return max(1, 60 - (int) $now->format('s'));
     }
 
     /** Ang dahilan ng hindi pagsagot na alam na pagdating ng event, o null. */

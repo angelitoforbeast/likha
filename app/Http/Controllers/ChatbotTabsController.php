@@ -120,7 +120,7 @@ class ChatbotTabsController extends Controller
         if (!\Illuminate\Support\Facades\Schema::hasTable('chatbot_comment_events')) return response()->json(['date' => $date, 'rows' => [], 'next' => null]);
         $rows = ChatbotCommentEvent::where('received_at', '>=', $day)->where('received_at', '<', $day->copy()->addDay())
             ->when(ctype_digit($pageId), fn ($w) => $w->where('page_id', (int) $pageId))
-            ->when(in_array($status, ['sent', 'failed', 'skipped'], true), fn ($w) => $w->where('status', $status))
+            ->when(in_array($status, ['sent', 'failed', 'skipped', 'unknown'], true), fn ($w) => $w->where('status', $status))
             ->when($q !== '', function ($w) use ($q) {
                 $like = '%' . strtr(mb_strtolower($q), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
                 $w->where(function ($o) use ($like) {
