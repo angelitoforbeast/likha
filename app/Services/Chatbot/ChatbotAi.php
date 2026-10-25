@@ -2,11 +2,8 @@
 
 namespace App\Services\Chatbot;
 
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Support\Facades\Http;
-
 /**
- * Ang AI step: isang chat completion sa OpenAI gamit ang umiiral na config (services.openai.key). Walang key na
+ * Ang AI step: ang chat completion ng page (OpenAI gaya ng dati, o ang chain ng ChatbotAiChain). Walang key na
  * nakatala o ibinabalik sa error.
  */
 class ChatbotAi
@@ -16,21 +13,14 @@ class ChatbotAi
     public const NO_KEY = 'No OpenAI key is set on the server.';
 
     /**
-     * @param array<int, array{role: string, content: string}> $messages
+     * Ang naghihintay na AI step: ang chain ng page (ChatbotAiChain; walang setting = isang tawag sa OpenAI gaya ng dati).
      * @return array{ok: bool, text: string, error: ?string}
      */
-    public function complete(string $model, array $messages, int $maxTokens): array
+    public function answer(FlowRun $run, string $model, array $messages, int $maxTokens): array
     {
-        $key = (string) config('services.openai.key');
-        if ($key === '') return ['ok' => false, 'text' => '', 'error' => self::NO_KEY];
+        $out = app(ChatbotAiChain::class)->complete($run->pageName, $model, $messages, $maxTokens);
 
-        try {
-            $res = Http::withToken($key)->acceptJson()->timeout(self::TIMEOUT)->post(self::URL, self::payload($model, $messages, $maxTokens));
-        } catch (ConnectionException $e) {
-            return ['ok' => false, 'text' => '', 'error' => 'OpenAI did not answer.'];
-        }
-
-        return self::parse($res->status(), $res->json());
+        return ['ok' => $out['ok'], 'text' => $out['text'], 'error' => $out['error']];
     }
 
     /** Ang body ng request; pareho para sa naghihintay at sa chatbot:ai-pool. */

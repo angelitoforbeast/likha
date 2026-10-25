@@ -145,6 +145,20 @@ return [
         'events_key' => env('CHATBOT_EVENTS_KEY'),
     ],
 
+    // Aling AI ang sumasagot sa AI step (pinipili kada page sa /chatbot/pages; walang setting = OpenAI, gaya ng dati). Bawat
+    // provider ay OpenAI-compatible (<url>/chat/completions); ang pangatlo ay isa pang entry dito. Ang URL at key lang ang
+    // nasa env: ang model, timeout, cap at breaker ay nae-edit sa screen (ito ang default nila).
+    'chatbot_ai' => [
+        'providers' => [
+            'openai' => ['label' => 'OpenAI', 'url' => 'https://api.openai.com/v1', 'key_config' => 'services.openai.key', 'needs_key' => true],
+            // Ang Local ay sa localhost lang ng server (reverse SSH tunnel papunta sa office PC); ibang host = hindi naka-set up.
+            'local' => [
+                'label' => 'Local', 'url' => env('CHATBOT_AI_LOCAL_URL', ''), 'key' => env('CHATBOT_AI_LOCAL_KEY', ''), 'localhost_only' => true,
+                'model' => '', 'timeout' => 8, 'concurrency' => 4, 'breaker_failures' => 3, 'breaker_seconds' => 30,
+            ],
+        ],
+    ],
+
     // Forbeast Gateway: ang sariling daan ng mensahe papunta at mula sa Messenger, pinipili kada page (chatbot.provider).
     // Walang url = hindi mapipili ang gateway at ang padala ay failed na may dahilan. Ang key at webhook_secret ay pang-lahat:
     // ang page na may sariling Forbeast token (forbeast.token at forbeast.webhook_secret) ay iyon ang gamit. Ang webhook_secret ang pumipirma sa
