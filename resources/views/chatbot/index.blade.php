@@ -243,6 +243,7 @@
                 <button id="long-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <textarea id="long-text" rows="12" class="w-full rounded-md border border-slate-300 p-2 font-mono text-sm"></textarea>
+            <button id="long-template" type="button" class="mt-1 hidden text-xs text-blue-700 underline hover:text-blue-900">Use template</button>
             <p id="long-mark" class="mt-1 min-h-[1rem] text-xs" aria-live="polite"></p>
             <p id="long-warn" class="min-h-[1rem] text-xs text-amber-700" aria-live="polite"></p>
         </div>
@@ -354,6 +355,10 @@
     const pending = new Map();
     let sel = null, lastUndo = null;
     const botCols = () => columns.filter(c => c.key !== 'flow');
+    // "Use template": ang draft ng Comment PM at Comment Reply 1–3 (ang item at presyo ay variable ng botfield ng page). Pumupuno
+    // lang ng field; ang Save (o ang pagsara ng cell editor) ang nagse-save.
+    const commentTemplates = @json(\App\Services\Chatbot\CommentCheck::templates());
+    const REPLY_KEYS = ['comment_reply_1', 'comment_reply_2', 'comment_reply_3'];
 
     function el(tag, attrs = {}, children = []) {
         const e = document.createElement(tag);
@@ -579,6 +584,7 @@
         else if (c.status !== 'ok') out.push(el('div', {class: 'flex items-start gap-1'}, [icon('x', 'Check failed'), el('ul', {class: 'min-w-0 space-y-0.5 text-red-700'}, c.reasons.map(t => el('li', {class: 'break-words', text: t})))]));
         // Ang content check na hindi sigurado: babala (amber), hindi X.
         if (c?.warnings?.length) out.push(el('div', {class: 'flex items-start gap-1' + (c.status === 'ok' ? '' : ' mt-1')}, [icon('warn', 'Check warning'), el('ul', {class: 'min-w-0 space-y-0.5 text-amber-700'}, c.warnings.map(t => el('li', {class: 'break-words', text: t})))]));
+        if (c?.notes?.length) out.push(el('ul', {class: 'mt-1 min-w-0 space-y-0.5 text-slate-500'}, c.notes.map(t => el('li', {class: 'break-words', text: t}))));
         if (c?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.unchecked + ' image link' + (c.unchecked === 1 ? '' : 's') + ' not checked yet'}));
         if (c?.content?.unchecked) out.push(el('div', {class: 'text-slate-500', text: c.content.unchecked + ' content check' + (c.content.unchecked === 1 ? '' : 's') + ' not done yet'}));
         // Ang item na pinagkukumparahan at kung saan galing (orders, ads o item settings).
@@ -1153,6 +1159,7 @@
         $('long-text').value = r.cells[c.key] ?? '';
         $('long').dataset.key = id(r.page, c.key);
         $('long-mark').textContent = '';
+        $('long-template').classList.toggle('hidden', !commentTemplates[c.key]);
         longWarn();
         $('long').classList.remove('hidden');
         $('long-text').focus();
@@ -1170,6 +1177,13 @@
         $('long-warn').textContent = longCol && ChatbotPaste.isLinkOnly(v) ? ChatbotPaste.linkWarning(longCol, botCols()) : '';
     }
     $('long-text').addEventListener('input', () => { longWarn(); clearTimeout(longTimer); longTimer = setTimeout(() => save(longRow, longCol, $('long-text').value), PAUSE_MS); });
+    // Ang draft lang ng column na ito (walang auto-save habang hindi nagta-type): nase-save sa pagsara, gaya ng ibang value.
+    $('long-template').addEventListener('click', () => {
+        $('long-text').value = commentTemplates[longCol.key] ?? $('long-text').value;
+        $('long-mark').textContent = 'Not saved yet: edit it, then close to save';
+        longWarn();
+        $('long-text').focus();
+    });
     $('long-close').addEventListener('click', closeLong);
     $('long').addEventListener('click', e => { if (e.target === $('long')) closeLong(); });
 
@@ -1397,8 +1411,21 @@
                 : input;
             const history = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'History', 'aria-label': 'History of ' + c.label});
             history.addEventListener('click', () => openHistory(r.page, c));
+            const links = [history];
+            if (commentTemplates[c.key]) {
+                // Ang Comment Reply: ang tatlong variant nang sabay. Pumupuno lang; ang Save pa rin ang nagse-save.
+                const tpl = el('button', {type: 'button', class: 'text-xs text-blue-700 underline hover:text-blue-900', text: 'Use template', 'aria-label': 'Use template for ' + c.label});
+                tpl.addEventListener('click', () => {
+                    for (const k of REPLY_KEYS.includes(c.key) ? REPLY_KEYS : [c.key]) {
+                        const t = peInput(k);
+                        if (t) { t.value = commentTemplates[k]; grow(t); }
+                    }
+                    paintPe();
+                });
+                links.unshift(tpl);
+            }
             return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
-                el('div', {class: 'mb-1 flex items-center justify-between gap-2'}, [el('label', {for: fid, class: 'text-xs font-medium text-slate-600', text: c.label}), history]),
+                el('div', {class: 'mb-1 flex items-center justify-between gap-2'}, [el('label', {for: fid, class: 'text-xs font-medium text-slate-600', text: c.label}), el('div', {class: 'flex gap-3'}, links)]),
                 box, el('div', {class: 'pe-was'})]);
         }));
         $('pe').classList.remove('hidden');
