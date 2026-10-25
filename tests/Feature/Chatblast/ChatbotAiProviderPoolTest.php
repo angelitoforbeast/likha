@@ -121,10 +121,12 @@ class ChatbotAiProviderPoolTest extends ChatbotAiProviderTestCase
         $this->assertSame(['Reply: mabilis na OpenAI'], $this->sent('7001'));
 
         // Wala nang isang segundo: isang malinis na palya, at ang sweep ay walang idinadagdag.
+        $this->travelTo(now()->startOfSecond());
         $this->pool->beat(); // buhay pa ang pool pagkatapos ng paglipas ng oras
         $this->says('two', self::TECH, '7002');
         $this->pool->tick();
         $this->travel(59)->seconds();
+        $this->travel(500)->milliseconds(); // kalahating segundo na lang (buong segundo ang deadline_at)
         $this->timeout($this->to('127.0.0.1')[1]);
         $this->pool->tick(false);
         $this->assertCount(1, $this->to('api.openai.com'));
@@ -247,6 +249,7 @@ class ChatbotAiProviderPoolTest extends ChatbotAiProviderTestCase
         $this->assertNotSame(false, $call['opt']['allow_redirects'] ?? null, 'redirects as today (Guzzle default)');
 
         // Sa huling segundo ng deadline, ipinapadala pa rin sa OpenAI na may 1 s (gaya ng dati), hindi palya agad.
+        $this->travelTo(now()->startOfSecond()); // ang deadline_at ay buong segundo: kalahating segundo talaga ang natitira
         $this->pool->beat();
         $this->says('huling segundo', 'Page Uno', '7003');
         $this->travel(59)->seconds();

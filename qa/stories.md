@@ -2469,77 +2469,78 @@ Tests: `tests/Feature/Chatblast/CommentRepliesTest.php`.
 As the owner, I choose per page on /chatbot/pages which AI answers the chatbot (OpenAI or a Local model on the office PC), with a site default, an automatic switch to the next AI when one fails so a customer always gets one reply, and a per-request record to compare quality, speed and cost.
 
 Slice 150. Threat model: customer messages, anything a provider returns (status, body, usage) and form posts from staff with chatbot access are untrusted; config, env and the repo are trusted. Risk tier: high (live reply path of every page, keys).
-Tests: `tests/Feature/Chatblast/ChatbotAiProviderTest.php` (chain, keys, F), `ChatbotAiProviderPoolTest.php` (pool), `ChatbotAiRecordTest.php` (record), `ChatbotAiSettingsTest.php` (settings, Changes, comparison).
+Tests: `tests/Feature/Chatblast/ChatbotAiProviderTest.php` (chain, keys, F), `ChatbotAiProviderPoolTest.php` (pool), `ChatbotAiRecordTest.php` (record), `ChatbotAiSettingsTest.php` (settings, Changes), `ChatbotAiCompareTest.php` (comparison).
 
-| Case | P | Given / When / Then | Test | Status |
+| Case | P | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-150A.1 | P1 | Given site default OpenAI and no override, then every page shows "OpenAI (default)"; when Tech Flask Ph is set to Local and the page reloads, then it shows Local and every other page still OpenAI | `test_S_150_A1…` | not run |
-| S-150A.2 | P1 | Given an override, when it is cleared, then the page returns to the site default and the old value stays in history | `test_S_150_A2…` | not run |
-| S-150A.3 | P1 | When the site default changes, then only pages without an override change | `test_S_150_A3…` | not run |
-| S-150A.4 | P1 | Given no `/chatblast` access (or signed out), then 403 / sign-in redirect and nothing changes; anyone with `/chatblast` access may view and change it | `test_S_150_A4…` | not run |
-| S-150A.6 | P1 | Given an unknown provider, a page not on the chatbot list, or more than 200 pages in one post, then 422 and nothing changes (all or none) | `test_S_150_A6…` | not run |
-| S-150A.7 | P1 | Given no Local base URL configured, when Local is chosen, then it is refused with "Local AI is not set up yet" and the old value stays | `test_S_150_A7…` | not run |
-| S-150A.8 | P1 | Given "tech flask ph", then it is the same page as "Tech Flask Ph" | `test_S_150_A8…` | not run |
-| S-150A.9 | P1 | Given two saves for the same page at the same moment, then exactly one row is active and both are in history | `test_S_150_A9…` | not run |
-| S-150A.10 | P1 | Given a Local model name like `qwen3:14b` or `hf.co/org/model` (letters, digits, `.:-_/`, up to 100), then it is stored exactly, never replaced with gpt-4o-mini | `test_S_150_A10…` | not run |
-| S-150A.11 | P1 | Given a 390 x 844 screen, then the controls are readable; a failed save shows the old value and an error, not the new one | `test_S_150_A11…` + browser | not run |
-| S-150B.1 | P1 | Given a provider change, then Changes shows page, field "AI provider", old, new, user, Manila time | `test_S_150_B1…` | not run |
-| S-150B.2 | P1 | Given model, timeout and chain changes, then each has its own entry | `test_S_150_B2…` | not run |
-| S-150B.3 | P1 | Given a site-default change, then it is logged with user and time and shown in Changes | `test_S_150_B3…` | not run |
-| S-150B.4 | P1 | Given the same value saved again, then "unchanged" and no new entry | `test_S_150_B4…` | not run |
-| S-150B.5 | P1 | Given a rejected save, then no entry | `test_S_150_B5…` | not run |
-| S-150B.6 | P1 | Given a Manila date filter, then the whole end day is included | `test_S_150_B6…` | not run |
-| S-150B.7 | P1 | Given the user who changed it was deleted, then the entry still shows with a placeholder | `test_S_150_B7…` | not run |
-| S-150C.1 | P1 | Given chain Local → OpenAI and Local answers, then Local's text is sent once, OpenAI is not called and no fallback is recorded | `test_S_150_C1…` | not run |
-| S-150C.2 | P1 | Given Local answers HTTP 500 or refuses the connection, then OpenAI answers, one send, "fell back from Local" recorded, the failed port is not taken | `test_S_150_C2…` | not run |
-| S-150C.3 | P1 | Given Local over its timeout, then it is abandoned and OpenAI answers within the overall deadline, one reply | `test_S_150_C3…` | not run |
-| S-150C.4 | P1 | Given Local 200 with empty text, no `choices` or only a `<think>` block, then the next provider answers; a `<think>` block before real text is stripped and the rest used | `test_S_150_C4…` | not run |
-| S-150C.5 | P1 | Given every provider fails, then the failed port with `AI failed: <fixed message>`, each failure recorded | `test_S_150_C5…` | not run |
-| S-150C.6 | P1 | Given a late answer after the next provider answered, then it is ignored: no second send, no second resume | `test_S_150_C6…` | not run |
-| S-150C.7 | P1 | Given a one-provider chain, then it fails as today, no hidden fallback | `test_S_150_C7…` | not run |
-| S-150C.8 | P1 | Given a provider in the chain that is not configured, then it is skipped with "not set up" | `test_S_150_C8…` | not run |
-| S-150C.9 | P1 | Given Local refuses the connection at once, then the fallback starts at once, not after the timeout | `test_S_150_C9…` | not run |
-| S-150C.10 | P1 | Given Local slow but within its timeout, then Local's text is used and the latency recorded | `test_S_150_C10…` | not run |
-| S-150C.11 | P1 | Given the chain and the overall deadline, then the next provider gets the time left, or the run fails once cleanly; sweep and chain never resume twice | `test_S_150_C11…` | not run |
-| S-150C.12 | P1 | Given a pool restart or a second pool while a request is on its second provider, then no second reply | `test_S_150_C12…` | not run |
-| S-150C.13 | P1 | Given the Local cap (default 4), then requests beyond it go straight to the next provider; none lost, none answered twice | `test_S_150_C13…` | not run |
-| S-150C.13b | P1 | Given 3 Local failures in a row, then Local is skipped for 30 s (both configurable), then tried again | `test_S_150_C13b…` | not run |
-| S-150C.14 | P1 | Given OpenAI answers 429, then today's rule (requeue, halve); given Local answers 429, then fall back at once | `test_S_150_C14…` | not run |
-| S-150C.15 | P1 | Given the sync path (no pool, CHATBOT_AI_ASYNC=false, Test tab, sequences), then the same chain gives the same single reply | `test_S_150_C15…` | not run |
-| S-150C.16 | P1 | Given Filipino / non-ASCII text (₱, ñ), then it passes unchanged through Local and the fallback | `test_S_150_C16…` | not run |
-| S-150C.17 | P1 | Given a failure, then only a fixed reason is stored, never the error body, the key or customer text | `test_S_150_C17…` | not run |
-| S-150C.18 | P1 | Given a Local attempt, then it gets the same messages and max_tokens as OpenAI with its own model name | `test_S_150_C18…` | not run |
-| S-150D.1 | P1 | Given an OpenAI answer, then provider "openai", model, latency ms, prompt and completion tokens from `usage`, fell_back false | `test_S_150_D1…` | not run |
-| S-150D.2 | P1 | Given Local failed then OpenAI answered, then provider OpenAI, the Local attempt with its reason and latency, fell_back true | `test_S_150_D2…` | not run |
-| S-150D.3 | P1 | Given one page and a date range, then the comparison shows per provider requests, answered, failed, fallbacks, average and p95 latency, total input and output tokens | `test_S_150_D3…` | not run |
-| S-150D.4 | P1 | Given no access, then the comparison is 403 | `test_S_150_D4…` | not run |
-| S-150D.5 | P1 | Given all providers failed, then every attempt with its reason and no tokens | `test_S_150_D5…` | not run |
-| S-150D.6 | P1 | Then the record and the view hold no customer text or answer | `test_S_150_D6…` | not run |
-| S-150D.7 | P1 | Given no `usage`, then tokens are null (shown "–"), never 0, and averages skip nulls | `test_S_150_D7…` | not run |
-| S-150D.8 | P1 | Given a 30-day range, then the whole range is covered (records kept 90 days) | `test_S_150_D8…` | not run |
-| S-150D.9 | P1 | Given an empty range or page, then "no requests" and no divide by zero | `test_S_150_D9…` | not run |
-| S-150D.10 | P1 | Then the date range uses Manila day boundaries | `test_S_150_D10…` | not run |
-| S-150D.11 | P1 | Given sync and Test-tab calls, then they are recorded too, marked "sync" | `test_S_150_D11…` | not run |
-| S-150D.12 | P1 | Given the migration has not run, then the AI step works as today | `test_S_150_D12…` | not run |
-| S-150D.13 | P1 | Given a redispatch, then the record and its tokens are not doubled | `test_S_150_D13…` | not run |
-| S-150D.14 | P1 | Given a 390 x 844 screen, then the comparison is readable | `test_S_150_D14…` + browser | not run |
-| S-150E.1 | P1 | Then each provider uses only its own key from config (OpenAI's existing key; `CHATBOT_AI_LOCAL_KEY` optional) | `test_S_150_E1…` | not run |
-| S-150E.2 | P1 | Given Local with no key, then no Authorization header and it works | `test_S_150_E2…` | not run |
-| S-150E.3 | P1 | Then no key value appears in any row, page, response, Changes entry, event or log, and no page has a key input | `test_S_150_E3…` | not run |
-| S-150E.4 | P1 | Given settings named like a key (`ai_key`, `api_key`), then the generic endpoints refuse them | `test_S_150_E4…` | not run |
-| S-150E.5 | P1 | Given a Local base URL that is not http on 127.0.0.1 or localhost (public IP, a name, 169.254.169.254, file://), then it is refused and never called | `test_S_150_E5…` | not run |
-| S-150E.6 | P1 | Given Local answers with a redirect, then it is not followed | `test_S_150_E6…` | not run |
-| S-150E.7 | P1 | Given no OpenAI key, then OpenAI is skipped with "not set up" and the key is never in the error | `test_S_150_E7…` | not run |
-| S-150E.8 | P1 | Given an error body echoing the key, then only the fixed message is stored | `test_S_150_E8…` | not run |
-| S-150E.9 | P1 | Then the values come from config() (config:cache works) | `test_S_150_E9…` | not run |
-| S-150E.10 | P1 | Given a base URL with or without a trailing slash or `/v1`, then one request to `…/v1/chat/completions`, no double slash | `test_S_150_E10…` | not run |
-| S-150F.1 | P1 | Given no AI provider setting anywhere, then one POST to https://api.openai.com/v1/chat/completions with today's key, model, max_tokens and messages; nothing to Local | `test_S_150_F1…` | not run |
-| S-150F.2 | P1 | Then the OpenAI body is byte-for-byte today's `ChatbotAi::payload` | `test_S_150_F2…` | not run |
-| S-150F.3 | P1 | Given Tech Flask on Local, then another page's request, timing and record do not change | `test_S_150_F3…` | not run |
-| S-150F.4 | P1 | Given an OpenAI-only page whose OpenAI fails, then the failed port as today; Local never tried | `test_S_150_F4…` | not run |
-| S-150F.5 | P1 | Given Local down, then other pages never call Local | `test_S_150_F5…` | not run |
-| S-150F.6 | P1 | Then the spec 087 429 rule is unchanged | `test_S_150_F6…` | not run |
-| S-150F.7 | P1 | Then `ChatbotAsyncAiTest.php` and S-087.1 to S-087.10 pass unchanged | `ChatbotAsyncAiTest` | not run |
-| S-150F.8 | P1 | Given no new env vars, then OpenAI is the default and only the controls show | `test_S_150_F8…` | not run |
-| S-150F.9 | P1 | Then the `ChatbotMockAi` stress path still bypasses providers | `test_S_150_F9…` | not run |
-| S-150F.10 | P1 | Then OpenAI pages get no extra calls or waits | `test_S_150_F10…` | not run |
+| S-150A.1 | P1 | Given site default OpenAI and no override, then every page shows "OpenAI (default)"; when Tech Flask Ph is set to Local and the page reloads, then it shows Local and every other page still OpenAI | `test_S_150_A1…` | passed 2026-10-25 |
+| S-150A.2 | P1 | Given an override, when it is cleared, then the page returns to the site default and the old value stays in history | `test_S_150_A2…` | passed 2026-10-25 |
+| S-150A.3 | P1 | When the site default changes, then only pages without an override change | `test_S_150_A3…` | passed 2026-10-25 |
+| S-150A.4 | P1 | Given no `/chatblast` access (or signed out), then 403 / sign-in redirect and nothing changes; anyone with `/chatblast` access may view and change it | `test_S_150_A4…` | passed 2026-10-25 |
+| S-150A.6 | P1 | Given an unknown provider, a page not on the chatbot list, or more than 200 pages in one post, then 422 and nothing changes (all or none) | `test_S_150_A6…` | passed 2026-10-25 |
+| S-150A.7 | P1 | Given no Local base URL configured, when Local is chosen, then it is refused with "Local AI is not set up yet" and the old value stays | `test_S_150_A7…` | passed 2026-10-25 |
+| S-150A.8 | P1 | Given "tech flask ph", then it is the same page as "Tech Flask Ph" | `test_S_150_A8…` | passed 2026-10-25 |
+| S-150A.9 | P1 | Given two saves for the same page at the same moment, then exactly one row is active and both are in history | `test_S_150_A9…` | passed 2026-10-25 |
+| S-150A.10 | P1 | Given a Local model name like `qwen3:14b` or `hf.co/org/model` (letters, digits, `.:-_/`, up to 100), then it is stored exactly, never replaced with gpt-4o-mini | `test_S_150_A10…` | passed 2026-10-25 |
+| S-150A.11 | P1 | Given a 390 x 844 screen, then the controls are readable; a failed save shows the old value and an error, not the new one | `test_S_150_A11…` (markup); browser not run | passed (server) 2026-10-25 |
+| S-150B.1 | P1 | Given a provider change, then Changes shows page, field "AI provider", old, new, user, Manila time | `test_S_150_B1…` | passed 2026-10-25 |
+| S-150B.2 | P1 | Given model, timeout and chain changes, then each has its own entry | `test_S_150_B2…` | passed 2026-10-25 |
+| S-150B.3 | P1 | Given a site-default change, then it is logged with user and time and shown in Changes | `test_S_150_B3…` | passed 2026-10-25 |
+| S-150B.4 | P1 | Given the same value saved again, then "unchanged" and no new entry | `test_S_150_B4…` | passed 2026-10-25 |
+| S-150B.5 | P1 | Given a rejected save, then no entry | `test_S_150_B5…` | passed 2026-10-25 |
+| S-150B.6 | P1 | Given a Manila date filter, then the whole end day is included | `test_S_150_B6…` | passed 2026-10-25 |
+| S-150B.7 | P1 | Given the user who changed it was deleted, then the entry still shows with a placeholder | `test_S_150_B7…` | passed 2026-10-25 |
+| S-150C.1 | P1 | Given chain Local → OpenAI and Local answers, then Local's text is sent once, OpenAI is not called and no fallback is recorded | `test_S_150_C1…` | passed 2026-10-25 |
+| S-150C.2 | P1 | Given Local answers HTTP 500 or refuses the connection, then OpenAI answers, one send, "fell back from Local" recorded, the failed port is not taken | `test_S_150_C2…` | passed 2026-10-25 |
+| S-150C.3 | P1 | Given Local over its timeout, then it is abandoned and OpenAI answers within the overall deadline, one reply | `test_S_150_C3…` | passed 2026-10-25 |
+| S-150C.4 | P1 | Given Local 200 with empty text, no `choices` or only a `<think>` block, then the next provider answers; a `<think>` block before real text is stripped and the rest used | `test_S_150_C4…` | passed 2026-10-25 |
+| S-150C.5 | P1 | Given every provider fails, then the failed port with `AI failed: <fixed message>`, each failure recorded | `test_S_150_C5…` | passed 2026-10-25 |
+| S-150C.6 | P1 | Given a late answer after the next provider answered, then it is ignored: no second send, no second resume | `test_S_150_C6…` | passed 2026-10-25 |
+| S-150C.7 | P1 | Given a one-provider chain, then it fails as today, no hidden fallback | `test_S_150_C7…` | passed 2026-10-25 |
+| S-150C.8 | P1 | Given a provider in the chain that is not configured, then it is skipped with "not set up" | `test_S_150_C8…` | passed 2026-10-25 |
+| S-150C.9 | P1 | Given Local refuses the connection at once, then the fallback starts at once, not after the timeout | `test_S_150_C9…` | passed 2026-10-25 |
+| S-150C.10 | P1 | Given Local slow but within its timeout, then Local's text is used and the latency recorded | `test_S_150_C10…` | passed 2026-10-25 |
+| S-150C.11 | P1 | Given the chain and the overall deadline, then the next provider gets the time left, or the run fails once cleanly; sweep and chain never resume twice | `test_S_150_C11…` | passed 2026-10-25 |
+| S-150C.12 | P1 | Given a pool restart or a second pool while a request is on its second provider, then no second reply | `test_S_150_C12…` | passed 2026-10-25 |
+| S-150C.13 | P1 | Given the Local cap (default 4), then requests beyond it go straight to the next provider; none lost, none answered twice | `test_S_150_C13…` | passed 2026-10-25 |
+| S-150C.13b | P1 | Given 3 Local failures in a row, then Local is skipped for 30 s (both configurable), then tried again | `test_S_150_C13b…` | passed 2026-10-25 |
+| S-150C.14 | P1 | Given OpenAI answers 429, then today's rule (requeue, halve); given Local answers 429, then fall back at once | `test_S_150_C14…` | passed 2026-10-25 |
+| S-150C.15 | P1 | Given the sync path (no pool, CHATBOT_AI_ASYNC=false, Test tab, sequences), then the same chain gives the same single reply | `test_S_150_C15…` | passed 2026-10-25 |
+| S-150C.16 | P1 | Given Filipino / non-ASCII text (₱, ñ), then it passes unchanged through Local and the fallback | `test_S_150_C16…` | passed 2026-10-25 |
+| S-150C.17 | P1 | Given a failure, then only a fixed reason is stored, never the error body, the key or customer text | `test_S_150_C17…` | passed 2026-10-25 |
+| S-150C.18 | P1 | Given a Local attempt, then it gets the same messages and max_tokens as OpenAI with its own model name | `test_S_150_C18…` | passed 2026-10-25 |
+| S-150D.1 | P1 | Given an OpenAI answer, then provider "openai", model, latency ms, prompt and completion tokens from `usage`, fell_back false | `test_S_150_D1…` | passed 2026-10-25 |
+| S-150D.2 | P1 | Given Local failed then OpenAI answered, then provider OpenAI, the Local attempt with its reason and latency, fell_back true | `test_S_150_D2…` | passed 2026-10-25 |
+| S-150D.3 | P1 | Given one page and a date range, then the comparison shows per provider requests, answered, failed, fallbacks, average and p95 latency, total input and output tokens | `test_S_150_D3…` | passed 2026-10-25 |
+| S-150D.3b | P1 | Given skipped attempts (cap full, breaker open, not set up), then they count as skipped, not as calls, failures or latency; given an array page, an impossible or reversed date or more than 90 days, then 422 | `test_S_150_D3b…` | passed 2026-10-25 |
+| S-150D.4 | P1 | Given no access, then the comparison is 403 | `test_S_150_D4…` | passed 2026-10-25 |
+| S-150D.5 | P1 | Given all providers failed, then every attempt with its reason and no tokens | `test_S_150_D5…` | passed 2026-10-25 |
+| S-150D.6 | P1 | Then the record and the view hold no customer text or answer | `test_S_150_D6…` | passed 2026-10-25 |
+| S-150D.7 | P1 | Given no `usage`, then tokens are null (shown "–"), never 0, and averages skip nulls | `test_S_150_D7…` | passed 2026-10-25 |
+| S-150D.8 | P1 | Given a 30-day range, then the whole range is covered (records kept 90 days) | `test_S_150_D8…` | passed 2026-10-25 |
+| S-150D.9 | P1 | Given an empty range or page, then "no requests" and no divide by zero | `test_S_150_D9…` | passed 2026-10-25 |
+| S-150D.10 | P1 | Then the date range uses Manila day boundaries | `test_S_150_D10…` | passed 2026-10-25 |
+| S-150D.11 | P1 | Given sync and Test-tab calls, then they are recorded too, marked "sync" | `test_S_150_D11…` | passed 2026-10-25 |
+| S-150D.12 | P1 | Given the migration has not run, then the AI step works as today | `test_S_150_D12…` | passed 2026-10-25 |
+| S-150D.13 | P1 | Given a redispatch, then the record and its tokens are not doubled | `test_S_150_D13…` | passed 2026-10-25 |
+| S-150D.14 | P1 | Given a 390 x 844 screen, then the comparison is readable | `test_S_150_D14…` (markup); browser not run | passed (server) 2026-10-25 |
+| S-150E.1 | P1 | Then each provider uses only its own key from config (OpenAI's existing key; `CHATBOT_AI_LOCAL_KEY` optional) | `test_S_150_E1…` | passed 2026-10-25 |
+| S-150E.2 | P1 | Given Local with no key, then no Authorization header and it works | `test_S_150_E2…` | passed 2026-10-25 |
+| S-150E.3 | P1 | Then no key value appears in any row, page, response, Changes entry, event or log, and no page has a key input | `test_S_150_E3…` | passed 2026-10-25 |
+| S-150E.4 | P1 | Given settings named like a key (`ai_key`, `api_key`), then the generic endpoints refuse them | `test_S_150_E4…` | passed 2026-10-25 |
+| S-150E.5 | P1 | Given a Local base URL that is not http on 127.0.0.1 or localhost (public IP, a name, 169.254.169.254, file://), then it is refused and never called | `test_S_150_E5…` | passed 2026-10-25 |
+| S-150E.6 | P1 | Given Local answers with a redirect, then it is not followed | `test_S_150_E6…` | passed 2026-10-25 |
+| S-150E.7 | P1 | Given no OpenAI key, then OpenAI is skipped with "not set up" and the key is never in the error | `test_S_150_E7…` | passed 2026-10-25 |
+| S-150E.8 | P1 | Given an error body echoing the key, then only the fixed message is stored | `test_S_150_E8…` | passed 2026-10-25 |
+| S-150E.9 | P1 | Then the values come from config() (config:cache works) | `test_S_150_E9…` | passed 2026-10-25 |
+| S-150E.10 | P1 | Given a base URL with or without a trailing slash or `/v1`, then one request to `…/v1/chat/completions` (`/v1` added when missing), no double slash | `test_S_150_E10…` | passed 2026-10-25 |
+| S-150F.1 | P1 | Given no AI provider setting anywhere, then one POST to https://api.openai.com/v1/chat/completions with today's key, model, max_tokens and messages; nothing to Local | `test_S_150_F1…` | passed 2026-10-25 |
+| S-150F.2 | P1 | Then the OpenAI body is byte-for-byte today's `ChatbotAi::payload` | `test_S_150_F2…` | passed 2026-10-25 |
+| S-150F.3 | P1 | Given Tech Flask on Local, then another page's request, timing and record do not change | `test_S_150_F3…` | passed 2026-10-25 |
+| S-150F.4 | P1 | Given an OpenAI-only page whose OpenAI fails, then the failed port as today; Local never tried | `test_S_150_F4…` | passed 2026-10-25 |
+| S-150F.5 | P1 | Given Local down, then other pages never call Local | `test_S_150_F5…` | passed 2026-10-25 |
+| S-150F.6 | P1 | Then the spec 087 429 rule is unchanged | `test_S_087_7…` (unchanged) | passed 2026-10-25 |
+| S-150F.7 | P1 | Then `ChatbotAsyncAiTest.php` and S-087.1 to S-087.10 pass unchanged | `ChatbotAsyncAiTest` (unchanged) | passed 2026-10-25 |
+| S-150F.8 | P1 | Given no new env vars, then OpenAI is the default and only the controls show | `test_S_150_F8…` | passed 2026-10-25 |
+| S-150F.9 | P1 | Then the `ChatbotMockAi` stress path still bypasses providers | `test_S_087_10…` (unchanged) | passed 2026-10-25 |
+| S-150F.10 | P1 | Then OpenAI pages get no extra calls or waits | `test_S_150_F10…` | passed 2026-10-25 |
