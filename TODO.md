@@ -1145,3 +1145,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **`twin()` pairs within ±4 minutes of one chat while `inbound()` pairs over the whole window;** they can differ on long chains. Reason: rare, and the result is conservative.
 - **Botcake copies with several URLs or other types (share, reel, template, story_mention) are compared as text and never pair.** Reason: no live sample in the repo; check live `default_reply` rows.
 - **Untested edges: the −5 s reply boundary, the TWIN_MINUTES lookback at the window edge, an orphan older than the window, a mid match more than 2 minutes apart.** Reason: same code paths as the tested cases.
+- **A GIF from Forbeast (an image outside Facebook's sticker path) counts as a photo and is ignored.** Reason: no live sample; stickers and Likes are recognised by their CDN path.
+- **An ignored attachment still takes the customer out of "exit when the customer replies" sequences and still marks Results as replied.** Reason: unchanged from before, and the change is silent on it; the owner decides.
+- **The via backfill takes `tags.via` first, which is the bot of the chat that started the run, not strictly the sender.** Reason: best effort, and the same in almost every case; rows with no tags use the stored answer shape.
+- **The via label map is written three times in the views, and the `via ?? tags.via` fallback twice in PHP.** Reason: abstract on the next use.
+- **The frozen Check CSS is checked as markup strings only.** Reason: no JS or browser runner in the repo; the summary logic runs in Node.
+- **When the no-reply branch of a wait runs and the customer's newest chat is an ignored photo, the branch sees "[Photo]" as the last message.** Reason: only an AI or condition step in that branch reads it; fixing needs a second lookup.
+- **The wait test proves a photo neither holds nor drops the wait, but its flow has no real wait step, so it does not prove the no-reply branch sends.** Reason: covered by the existing wait tests; the new case only checks the ignored filter.
+- **The ignored mark is written right after the chat is stored; a text from the same customer processed in those milliseconds could still run the photo.** Reason: a very small window; it can be closed by marking before storing.
