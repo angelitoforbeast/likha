@@ -37,7 +37,7 @@ class ChatbotHealthController extends Controller
         $pages = array_flip(BotcakeChat::pageMap());
         ksort($pages, SORT_NATURAL | SORT_FLAG_CASE);
 
-        return view('chatbot.health', $out + ['pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS]);
+        return view('chatbot.health', $out + ['pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS]);
     }
 
     /** I-save ang thresholds (buong hugis, kasama ang default ng hindi pinalitan). */
@@ -72,7 +72,7 @@ class ChatbotHealthController extends Controller
         }
         AppSetting::set(BotHealth::SETTING, json_encode($new));
 
-        return redirect()->route('chatbot.health', Arr::only($request->query(), ['page_id', 'from', 'to']))->with('status', 'Thresholds saved.');
+        return redirect()->route('chatbot.health', Arr::only($request->query(), ['page_id', 'bot', 'from', 'to']))->with('status', 'Thresholds saved.');
     }
 
     /** Ang parehong numero para sa analyst: walang listahan ng customer. */
