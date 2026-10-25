@@ -346,3 +346,92 @@ The owner, 2026-10-25: "yes" to via, "okay" to freezing Check, and on voice/imag
 | **Attachment-only messages are ignored by the bot on every page (Botcake and Forbeast).** A customer message that is only a photo, voice/audio, video, reel, file, or Botcake "fallback" (no text) does not start or resume a flow, does not call the AI, sends nothing, and is not handed to a human; it is logged as an event "ignored: <type>" (visible in the Inbox thread and counted on Health). **Stickers and Likes are NOT ignored**: they keep working as today. A photo/attachment that comes with text: the text is handled as today. Keep the attachment's type and URL on the stored chat so a later feature can transcribe audio / describe images. Add a global setting `chatbot_attachments` with values `ignore` (default) and `reply` (today's behaviour), CEO-only on the existing chatbot settings place; `reply` restores today's behaviour exactly. These messages never count for the Forbeast inbound switch. | Today the AI answers 130+ photos/voices a day blind ("[Photo]"), slowing the bot; the owner wants them ignored for now and the data kept ready for transcription later. |
 
 Tests: via stored per send path and shown in the Inbox payload and the Replies filter; backfill rules; Check frozen markup + compact cell; photo-only / audio-only / video-only / fallback ignored (no run, no AI, no send, event logged), sticker/Like still answered, photo+text handled as text, `reply` setting restores old behaviour, ignored ones never trigger the inbound switch. Re-run the brief's folders (no new failures). End with "149-5: <done|blocked> — <one line>".
+
+### Result of 149-5
+
+**Via**
+- `chatbot_replies.via` (nullable `botcake` / `forbeast`) is added by migration `2026_11_09_100000_add_via_to_chatbot_replies.php`. A new column only, so it is fast on MySQL.
+- Every send path fills it:
+  - bot sends and sequence sends (`BotcakeOutbox::send` → `ChatbotProvider::viaOf(provider)`);
+  - the Botcake send pool (`BotcakeSendQueue::finishChatbot`, always Botcake);
+  - Inbox manual sends;
+  - sheet rows stay null;
+  - comment replies are always Forbeast: shown as such on the Replies Comments view, since they live in `chatbot_comment_events`.
+- **Inbox:** incoming items carry `via` from `payload.source`, shown as "· via Forbeast" next to the time. Outgoing items show "Bot · via Forbeast" or "<staff> · via Botcake". Old rows fall back to the Results `tags.via`.
+- **Replies:** a Via column, a Via filter, and Via in the detail.
+- **Backfill:** `php artisan chatbot:replies-via-backfill` (with `--dry-run`), to run by hand after the migration. It works in 1,000-row chunks by id and only touches send and manual rows that have no via.
+  - Order of evidence: Results `tags.via`, then the stored provider answer (`message_id` / `recipient_id` = Forbeast, `success` = Botcake). Anything else stays null.
+  - Note: `tags.via` is the bot of the chat that started the run, which almost always matches the sender.
+
+**Frozen Check**
+- At 1024 px and wider, Check is a fourth sticky column (`stick-4`, left 28rem, 14rem wide). Below 1024 px nothing changes; from 640 px, Page, Active and Flow stay frozen as before.
+- While frozen, a problem cell shows one line: icon, count and first problem. The full list, with "Check again", opens on hover, on click (a button with `aria-expanded`) or on keyboard focus, and Escape closes it while keeping the focus on the line.
+- The summary is a pure helper (`checkSummary`) tested in Node. The table still scrolls inside its box, so there is no horizontal page scroll.
+
+**Attachment-only messages** (`app/Services/Chatbot/ChatAttachments.php`)
+- **What counts:**
+  - photo (`[Photo]`, or Botcake's `[image] <link>`);
+  - audio, video, reel, file and fallback, from the Forbeast `[Audio]` style or Botcake's `[audio] <link>` style.
+  - A marker must be followed by an http(s) link or nothing, so typed text like "[photo] ito" is answered.
+  - Likes (👍) and stickers are not ignored. That covers Botcake's `[sticker]` and Forbeast images on Facebook's sticker CDN path `t39.1997-6`.
+- **What happens:** the gate is in `ChatbotInbound` (one path for both bots).
+  - An ignored chat gets `payload._ignored = <type>` and an `ignored` event ("Ignored: audio only …").
+  - It is not dispatched, and `ChatbotRunner` never runs it later either: it skips `_ignored` chats in the pending list and in the wait-timeout check. So no flow starts or resumes, no AI is called, and nothing is sent.
+  - Sequence exit-on-reply and Results "replied" still count it, as before (see TODO).
+- **Kept for later:** `payload.attachment` = `{type, url}` (http(s) only) on both paths, in both modes.
+- **Shown:**
+  - Inbox: "Not answered by the bot (audio only)" under the bubble;
+  - Health: an "Attachments ignored" tile, and ignored chats no longer count as inbound or not answered;
+  - Forbeast watch: they never count for the inbound switch.
+- **Setting:** `chatbot_attachments` (app_settings) is `ignore` by default, or `reply` for today's behaviour.
+  - It is set on Health → "Photos, voice and other attachments", CEO only (`POST /chatbot/health/attachments`, validated). Other roles see the current mode.
+  - Health was chosen because it holds the only existing CEO-only chatbot settings form.
+
+**Cases:**
+
+| Case | Test | Result |
+|---|---|---|
+| S-149.24 | `test_S_149_24_every_send_path_stores_which_bot_carried_it` | pass |
+| S-149.25 | `test_S_149_25_the_inbox_thread_and_the_replies_page_show_via` | pass |
+| S-149.26 | `test_S_149_26_old_rows_get_via_from_their_tags_or_the_provider_answer_and_stay_empty_when_unsure` | pass |
+| S-149.27 | `test_S_149_27_check_is_frozen_on_desktop_only_with_a_compact_cell_that_opens_the_full_list` (markup, helper in Node) | pass; browser not run |
+| S-149.28 | `test_S_149_28_an_attachment_only_message_is_ignored_logged_and_kept_for_later` (photo, audio, video, reel, file, fallback), `…_a_forbeast_audio_or_photo_is_ignored_and_its_link_kept`, `…_an_ignored_photo_is_not_run_later_when_the_customers_next_text_runs`, `…_a_photo_during_a_wait_does_not_hold_or_drop_the_no_reply_branch` | pass |
+| S-149.29 | `test_S_149_29_stickers_likes_and_a_photo_with_text_are_answered_as_today` | pass |
+| S-149.30 | `test_S_149_30_the_reply_setting_restores_todays_behaviour_and_only_the_ceo_changes_it` | pass |
+| S-149.31 | `test_S_149_31_ignored_messages_show_in_the_inbox_and_are_counted_on_health` | pass |
+| S-149.32 | `test_S_149_32_attachment_only_copies_never_count_for_the_inbound_switch` | pass |
+
+**Red runs:**
+- Via: the migration file was missing.
+- Frozen Check: the markup strings were missing.
+- Attachments: "no run, so no AI and no send" for each type, and "Undefined array key ignored". The sticker/Like test passed at once: it pins today's behaviour.
+- Review loop:
+  - the next-text test failed with "only the text ran — 2 is identical to 1";
+  - the wait test failed with "the voice note is not a reply that will run";
+  - the Health test failed with "inbound 1" once it had a sending page.
+
+**Story changes:**
+- **S-111.4b** (`ChatbotProviderTest`): the stored payload now includes `attachment`. The test runs under `reply` so it still pins the storage shape and one run per event.
+- **S-069.A4** (`ChatbotAmendmentOneTest`): the photo echo is pinned under `reply`. The default (ignored) is covered by S-149.28.
+- **S-149.21:** uses text messages, since attachment-only copies are no longer evidence.
+- **New cases:** S-149.24 to S-149.32.
+
+**Review:**
+- `skeptic-reviewer`: standard depth on via and frozen Check, adversarial on attachments.
+- It found 1 blocker: an ignored photo still ran when the customer's next text came, because the runner runs every chat after LAST_CHAT. It also found 1 major: Health counted ignored chats as not answered. Both were fixed in 1 loop, and the re-check found nothing open.
+- Fixed minors:
+  - only a link after the marker counts;
+  - injected `_ignored` / `attachment` params are dropped;
+  - the Forbeast URL gets an http(s) check;
+  - the popup's z-index;
+  - Escape.
+- The rest are in `TODO.md` under "149".
+
+**Deploy notes:**
+- Run the migration.
+- Then optionally run `php artisan chatbot:replies-via-backfill --dry-run`, and the same without `--dry-run`.
+- Ignore is the default from the deploy on. The CEO can switch to reply on Health.
+
+**Suite:** `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` on 95085abf: `OK, but there were issues! Tests: 1520, Assertions: 8833, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459, no failures). The later commit b2d4bb7c changes only the Escape handling, and the page-script parse test passes on it.
+
+149-5: done — every send records via (shown in the Inbox and on Replies, with a backfill), Check is frozen on desktop with a compact cell, and attachment-only messages are ignored on every page (logged, counted, link kept; CEO can switch back to reply).
