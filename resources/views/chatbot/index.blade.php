@@ -57,7 +57,8 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
-     data-forbeast-token-url="{{ route('chatbot.forbeast-token') }}"
+     data-connections-url="{{ route('chatbot.connections') }}"
+     data-connections-save-url="{{ url('/chatbot/connections') }}"
      data-needs-token="{{ \App\Services\Chatbot\ForbeastPageSetup::NEEDS_TOKEN }}"
      @if($isCeo) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}" @endif>
 
@@ -200,6 +201,57 @@
         </form>
     </div>
 
+    {{-- Connections ng isang page: Botcake at Forbeast, iisang ayos (Page ID at token). Ang token ay huling 4 lang galing sa
+         server; ang bagong token ay sinusubukan muna bago i-save. --}}
+    <div id="conn" class="fixed inset-0 hidden overflow-y-auto bg-slate-900/30 p-2 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="conn-title">
+        <div class="mx-auto w-full max-w-2xl rounded-xl bg-white text-sm shadow-lg">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div class="min-w-0"><div id="conn-title" class="break-words font-semibold">Connections</div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <div class="grid gap-3 p-4 sm:grid-cols-2">
+                @foreach(['botcake' => 'Botcake', 'forbeast' => 'Forbeast'] as $p => $label)
+                <form class="conn-card min-w-0 rounded-lg border border-slate-200 p-3" data-provider="{{ $p }}" autocomplete="off">
+                    <div class="mb-2 flex items-center justify-between gap-2"><span class="font-semibold">{{ $label }}</span><span class="conn-state text-xs"></span></div>
+                    <label class="flex flex-col text-xs text-slate-600">Page ID
+                        <input name="page_id" inputmode="numeric" maxlength="30" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
+                    </label>
+                    <label class="mt-2 flex flex-col text-xs text-slate-600">Token <span class="conn-token font-mono text-slate-400"></span>
+                        <input name="token" type="password" maxlength="1000" placeholder="Paste a new token" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
+                    </label>
+                    <p class="conn-msg mt-2 min-h-[1rem] break-words text-xs" aria-live="polite"></p>
+                    @if($p === 'botcake')<p class="mt-1 text-xs text-slate-500">This replaces the page's Default Reply in Botcake.</p>@endif
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        <button class="cb-btn cb-btn-primary cb-btn-sm">Save and test</button>
+                        @if($p === 'botcake')<button type="button" class="conn-fix cb-btn cb-btn-sm">Fix chat block</button>@endif
+                    </div>
+                </form>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
+    {{-- FLOW ng isang page: hanapin, piliin, saka kumpirmahin (ang dropdown sa row ay madaling mapalitan nang hindi sinasadya). --}}
+    <div id="flow-box" class="fixed inset-0 hidden overflow-y-auto bg-slate-900/30 p-2 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="flow-title">
+        <div class="mx-auto flex max-h-full w-full max-w-md flex-col rounded-xl bg-white text-sm shadow-lg">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <div id="flow-title" class="min-w-0 break-words font-semibold">Flow</div>
+                <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
+            </div>
+            <div class="px-4 pt-3"><input id="flow-q" type="search" placeholder="Search flows" aria-label="Search flows" class="w-full rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900"></div>
+            <div id="flow-list" class="min-h-0 flex-1 overflow-y-auto px-4 py-2" role="radiogroup" aria-label="Flows"></div>
+            <div class="flex gap-2 border-t border-slate-200 px-4 py-3"><button id="flow-save" type="button" class="cb-btn cb-btn-primary">Save</button><button type="button" data-close-dialog class="cb-btn">Cancel</button></div>
+        </div>
+    </div>
+
+    {{-- Ang filter ng isang column (gaya ng Google Sheets): hanap, Check all · Uncheck all, at isang check kada value. --}}
+    <div id="hf" class="fixed hidden w-64 max-w-[calc(100vw-1rem)] rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-lg" style="z-index: 40" role="dialog" aria-label="Column filter">
+        <input id="hf-q" type="search" placeholder="Search values" aria-label="Search values" class="w-full rounded border border-slate-300 px-2 py-1 text-sm text-gray-900">
+        <div class="my-1 flex gap-1 text-blue-700"><button id="hf-all" type="button" class="underline">Check all</button><span aria-hidden="true">·</span><button id="hf-none" type="button" class="underline">Uncheck all</button></div>
+        <div id="hf-list" class="max-h-60 space-y-0.5 overflow-y-auto"></div>
+        <div class="mt-1 text-right"><button id="hf-close" type="button" class="cb-btn cb-btn-sm">Done</button></div>
+    </div>
+
     @if($isCeo)
     {{-- "+ Page": bago, o isang page na nasa page settings na. Ang token ay hindi kailanman ipinapakita. --}}
     <div id="page-box" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="page-title">
@@ -269,15 +321,77 @@
 
     function visible() {
         const q = $('f-q').value.trim().toLowerCase(), st = $('f-state').value;
-        return rows.filter(r => (!q || r.page.toLowerCase().includes(q)) && (!st || (st === 'on') === r.active));
+        return rows.filter(r => (!q || r.page.toLowerCase().includes(q)) && (!st || (st === 'on') === r.active)
+            && Object.entries(hfOn).every(([k, on]) => FILTERS[k].values(r).some(v => on.has(v))));
     }
+
+    // ---- Header filters (gaya ng Google Sheets): bawat column ay may listahan ng value; AND sa pagitan ng mga column. ----
+    // hfOn[key] = ang mga value na naka-check; wala = lahat. Ang Connected na may dalawa ay tumatama sa alinman.
+    const PROVIDER_LABEL = {botcake: 'Botcake', gateway: 'Forbeast'};
+    const checkKind = r => { const c = checks.get(r.page); return !c || !c.status ? 'Not checked' : (c.status === 'none' ? 'No flow' : (c.status !== 'ok' ? 'x' : (c.warnings?.length ? 'warn' : 'ok'))); };
+    const FILTERS = {
+        page: {label: 'Page', values: r => [r.page]},
+        active: {label: 'Active', values: r => [r.active ? 'On' : 'Off']},
+        bot: {label: 'Bot', values: r => [PROVIDER_LABEL[r.provider] || 'Botcake']},
+        connected: {label: 'Connected', values: r => (r.connected || []).length ? r.connected : ['None']},
+        flow: {label: 'Flow', values: r => [r.cells.flow || 'No flow']},
+        check: {label: 'Check', values: r => [checkKind(r)]},
+    };
+    const hfOn = {};
+    let hfKey = null;
+    function filterButton(key) {
+        const b = el('button', {type: 'button', class: 'ml-1 rounded px-1 font-normal normal-case ' + (hfOn[key] ? 'bg-blue-100 text-blue-800' : 'text-slate-400 hover:text-slate-700'),
+            'aria-label': 'Filter ' + FILTERS[key].label, 'aria-haspopup': 'dialog', title: 'Filter ' + FILTERS[key].label, text: '▾'});
+        b.addEventListener('click', ev => { ev.stopPropagation(); openFilter(key, b); });
+        return b;
+    }
+    function openFilter(key, b) {
+        hfKey = key;
+        const r = b.getBoundingClientRect(), box = $('hf');
+        $('hf-q').value = '';
+        box.classList.remove('hidden');
+        box.style.top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - box.offsetHeight - 8)) + 'px';
+        box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
+        paintFilter();
+        $('hf-q').focus();
+    }
+    function filterValues(key) {
+        const all = new Set();
+        for (const r of rows) for (const v of FILTERS[key].values(r)) all.add(v);
+        return [...all].sort((a, b) => a.localeCompare(b));
+    }
+    function paintFilter() {
+        const q = $('hf-q').value.trim().toLowerCase(), on = hfOn[hfKey];
+        $('hf-list').replaceChildren(...filterValues(hfKey).filter(v => !q || v.toLowerCase().includes(q)).map(v => {
+            const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle'});
+            c.checked = !on || on.has(v);
+            c.addEventListener('change', () => setValues([v], c.checked));
+            return el('label', {class: 'flex items-center break-words'}, [c, v]);
+        }));
+    }
+    function setValues(values, checked) {
+        const all = filterValues(hfKey), on = hfOn[hfKey] || new Set(all);
+        for (const v of values) { if (checked) on.add(v); else on.delete(v); }
+        if (all.every(x => on.has(x))) delete hfOn[hfKey]; else hfOn[hfKey] = on;
+        render(); paintFilter();
+    }
+    // Check all / Uncheck all: ang mga value na nakikita sa hanap lang (gaya ng Sheets).
+    const shownValues = () => { const q = $('hf-q').value.trim().toLowerCase(); return filterValues(hfKey).filter(v => !q || v.toLowerCase().includes(q)); };
+    $('hf-q').addEventListener('input', paintFilter);
+    $('hf-all').addEventListener('click', () => setValues(shownValues(), true));
+    $('hf-none').addEventListener('click', () => setValues(shownValues(), false));
+    const closeFilter = () => { $('hf').classList.add('hidden'); hfKey = null; };
+    $('hf-close').addEventListener('click', closeFilter);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && hfKey) closeFilter(); });
+    document.addEventListener('click', e => { if (hfKey && !$('hf').contains(e.target)) closeFilter(); });
 
     function render() {
         const head = el('tr', {}, [
-            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page']),
-            el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Active'}),
-            el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Flow'}),
-            el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Check', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}),
+            el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
+            el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
+            el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
+            el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
+            el('th', {class: 'min-w-[7rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Bots that are fully connected'}, ['Connected', filterButton('connected')]),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
             ...columns.filter(c => c.key !== 'flow').map(c => el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-500', text: c.label})),
@@ -285,17 +399,19 @@
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
-                el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r)])]),
+                el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), connectionsButton(r)])]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
             checkCell(r),
+            // Ang mga kumpletong koneksyon lang, text.
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs', text: (r.connected || []).join(', ') || '—'}),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', text: r.last_chat || '—'}),
             ...columns.filter(c => c.key !== 'flow').map(c => cell(r, c)),
         ])));
         table.replaceChildren(el('thead', {}, head), body);
         $('count').textContent = list.length + ' of ' + rows.length + ' page' + (rows.length === 1 ? '' : 's');
-        if (!rows.length) table.append(el('tbody', {}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '5', text: 'No page has a Botcake ID and token yet.'}))));
+        if (!rows.length) table.append(el('tbody', {}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '7', text: 'No page has a Botcake ID and token yet.'}))));
         paintSel();
         paintBar();
         paintPicked();
@@ -384,7 +500,7 @@
         if (show) $(boxId).querySelector('[data-close-dialog]').focus();
     }
     document.querySelectorAll('[data-close-dialog]').forEach(b => b.addEventListener('click', () => dialog(b.closest('[role="dialog"]').id, false)));
-    ['pv', 'hist', 'chg'].forEach(d => $(d).addEventListener('click', e => { if (e.target === $(d)) dialog(d, false); }));
+    ['pv', 'hist', 'chg', 'conn', 'flow-box'].forEach(d => $(d).addEventListener('click', e => { if (e.target === $(d)) dialog(d, false); }));
     const getJson = u => fetch(u, {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
     /** Ang value na 3 linya kapag sarado, may "Show all" kapag may kasunod pa. */
     function folded(text, cls = '') {
@@ -514,44 +630,101 @@
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
         td.append(b, providerSelect(r));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
-        td.append(forbeastBox(r));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
         return td;
     }
 
-    // Ang Forbeast token ng page (gaya ng Botcake token): "Forbeast connected" o ang status, saka Add/New token (i-paste),
-    // Test at Clear. Huling 4 lang ng token ang galing sa server.
-    function forbeastBox(r) {
-        const f = r.forbeast || {}, box = el('div', {class: 'mt-1 max-w-[12rem] text-xs'});
-        const bad = f.status && !f.status.startsWith('ok');
-        box.append(el('div', {class: 'break-words ' + (f.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500')),
-            text: (f.connected ? 'Forbeast connected' : (f.status || (f.token ? 'Forbeast: not tested' : 'No Forbeast token'))) + (f.token ? ' (' + f.token + ')' : ''), title: f.status || ''}));
-        const btn = (text, label, fn) => {
-            const b = el('button', {type: 'button', class: 'mr-1 mt-0.5 rounded border border-slate-300 px-1 text-[11px] text-slate-600 hover:bg-slate-50', text, 'aria-label': label + ', ' + r.page});
-            b.addEventListener('click', () => fn(b));
-            return b;
-        };
-        box.append(btn(f.token ? 'New token' : 'Add token', 'Forbeast token', b => {
-            const token = (prompt('Paste the Forbeast token of ' + r.page + ' (starts with fbp_). It is tested and the page is connected right away.') || '').trim();
-            if (token) forbeastSave(r, b, {token});
+    // ---- Flow popup: hanap, pili ("No flow" o isang flow), saka "Change flow: A → B?". Isinusulat gaya ng isang cell
+    // (FLOW, nakatali ayon sa id), kaya nasa Changes ang user at oras. ----
+    let flowPick = null; // {r, c, value}
+    function openFlow(r, c) {
+        flowPick = {r, c, value: r.cells[c.key] ?? ''};
+        $('flow-title').textContent = 'Flow · ' + r.page;
+        $('flow-q').value = '';
+        paintFlows();
+        dialog('flow-box', true);
+        $('flow-q').focus();
+    }
+    function paintFlows() {
+        const q = $('flow-q').value.trim().toLowerCase();
+        const names = [''].concat(flows).filter(n => !q || (n || 'No flow').toLowerCase().includes(q));
+        $('flow-list').replaceChildren(...names.map(n => {
+            const radio = el('input', {type: 'radio', name: 'flow-pick', class: 'mr-2 align-middle'});
+            radio.checked = n === flowPick.value;
+            radio.addEventListener('change', () => { flowPick.value = n; });
+            return el('label', {class: 'flex items-center break-words rounded px-1 py-1 hover:bg-slate-50' + (n === '' ? ' italic text-slate-500' : '')}, [radio, n || 'No flow']);
         }));
-        if (f.token) {
-            box.append(btn('Test', 'Test the Forbeast token', b => forbeastSave(r, b, {})));
-            box.append(btn('Clear', 'Clear the Forbeast token', b => { if (confirm('Remove the Forbeast token of ' + r.page + ' and disconnect the page from Forbeast?')) forbeastSave(r, b, {clear: true}); }));
+        if (!names.length) $('flow-list').append(el('p', {class: 'py-2 text-slate-500', text: 'No flow matches.'}));
+    }
+    $('flow-q').addEventListener('input', paintFlows);
+    $('flow-save').addEventListener('click', () => {
+        const {r, c, value} = flowPick, before = r.cells[c.key] ?? '';
+        if (value === before && !(value === '' && r.flow_text)) { dialog('flow-box', false); return; }
+        const from = before || (r.flow_text ? 'Not linked: ' + r.flow_text : 'No flow');
+        if (!confirm('Change flow: ' + from + ' → ' + (value || 'No flow') + '?')) return;
+        dialog('flow-box', false);
+        r.flow_text = null; save(r, c, value);
+    });
+
+    // ---- Connections (Botcake at Forbeast ng isang page) ----
+    // Ang token ay huling 4 lang galing sa server. Ang Save ay sumusubok muna; ang ibang site na nakakabit na ay tinatanong
+    // (409) bago ilipat. Ang pangalan ng page mula sa provider ay text lang.
+    let connPage = null;
+    function connectionsButton(r) {
+        const b = el('button', {type: 'button', class: 'mt-1 inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs font-normal text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+            'aria-label': 'Connections of ' + r.page, title: 'Botcake and Forbeast of this page'}, [el('span', {'aria-hidden': 'true', text: '🔌'}), el('span', {class: 'hidden sm:inline', text: 'Connections'})]);
+        b.addEventListener('click', () => openConnections(r.page));
+        return b;
+    }
+    const connCard = p => document.querySelector('#conn .conn-card[data-provider="' + p + '"]');
+    function paintConnections(data) {
+        for (const p of ['botcake', 'forbeast']) {
+            const c = data[p] || {}, card = connCard(p), state = card.querySelector('.conn-state');
+            card.elements.page_id.value = c.page_id || '';
+            card.elements.token.value = '';
+            card.querySelector('.conn-token').textContent = c.token ? '(saved ' + c.token + ')' : '(none)';
+            const bad = c.status && !String(c.status).startsWith('ok');
+            state.textContent = c.connected ? 'Connected' : (p === 'botcake' && c.token && !c.chat_block ? 'No chat block' : (bad ? c.status : (c.token ? 'Not connected' : 'Not set up')));
+            state.className = 'conn-state break-words text-xs ' + (c.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500'));
         }
-        return box;
     }
-    async function forbeastSave(r, b, body) {
-        b.disabled = true; b.textContent = '…';
+    async function openConnections(page) {
+        connPage = page;
+        $('conn-title').textContent = 'Connections · ' + page;
+        document.querySelectorAll('#conn .conn-msg').forEach(m => { m.textContent = ''; });
+        dialog('conn', true);
+        const {ok, status, data} = await getJson(url.connectionsUrl + '?page_name=' + encodeURIComponent(page));
+        if (!ok) { connCard('botcake').querySelector('.conn-msg').textContent = data.error || 'Could not load (' + status + ').'; return; }
+        paintConnections(data);
+    }
+    function connMsg(card, text, good) {
+        const m = card.querySelector('.conn-msg');
+        m.textContent = text; m.className = 'conn-msg mt-2 min-h-[1rem] break-words text-xs ' + (good ? 'text-green-700' : 'text-red-600');
+    }
+    async function connSave(card, path, body) {
+        const btns = card.querySelectorAll('button');
+        btns.forEach(b => { b.disabled = true; });
+        connMsg(card, 'Testing…', true);
         try {
-            const {ok, data} = await post(url.forbeastTokenUrl, Object.assign({page_name: r.page}, body));
-            if (!ok) errors.set(r.page, data.error || data.message || 'Not changed.');
-            else if (data.forbeast?.error) errors.set(r.page, data.forbeast.error);
-            else errors.delete(r.page);
-        } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
-        load(); // ang bagong token, status at "Replies via" ng row mula sa server
+            let res = await post(url.connectionsSaveUrl + '/' + path, Object.assign({page_name: connPage}, body));
+            // Nakakabit sa ibang site (o hindi masuri): itanong bago ilipat.
+            if (res.status === 409 && confirm(res.data.message)) res = await post(url.connectionsSaveUrl + '/' + path, Object.assign({page_name: connPage, confirm: true}, body));
+            const d = res.data;
+            if (d.connections) paintConnections(d.connections);
+            if (res.status === 409) connMsg(card, 'Not changed.', false);
+            else if (!res.ok) connMsg(card, (d.name ? 'Provider page: ' + d.name + '. ' : '') + (d.error || d.message || 'Not saved (' + res.status + ').'), false);
+            else if (d.chat_block && !d.chat_block.ok) connMsg(card, 'Token saved. Chat block: ' + d.chat_block.error, false);
+            else connMsg(card, path === 'chat-block' ? 'Chat block applied.' : 'Saved and connected' + (d.name ? ' (' + d.name + ')' : '') + '.', true);
+        } catch (e) { connMsg(card, 'No connection: not changed.', false); }
+        btns.forEach(b => { b.disabled = false; });
+        load(); // ang Connected, Bot at Check ng row mula sa server
     }
+    document.querySelectorAll('#conn .conn-card').forEach(card => card.addEventListener('submit', e => {
+        e.preventDefault();
+        connSave(card, card.dataset.provider, {page_id: card.elements.page_id.value.trim(), token: card.elements.token.value.trim()});
+    }));
+    document.querySelector('#conn .conn-fix').addEventListener('click', () => connSave(connCard('botcake'), 'chat-block', {}));
 
     function pickBox(r) {
         const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'aria-label': 'Select ' + r.page});
@@ -592,18 +765,18 @@
         ]);
     }
 
-    // Kung saan dumadaan ang chat at sagot ng page: Botcake o ang Forbeast (hindi mapipili kapag hindi pa naka-set up, o
-    // walang gumaganang Forbeast token ang page at walang global key).
+    // Ang Bot ng page (kung saan dumadaan ang chat at sagot): ang mga kumpletong koneksyon lang (Connected), kasama ang
+    // kasalukuyan. Isa lang: text, walang select. Forbeast ay kailangan ding naka-set up (GATEWAY_URL).
     function providerSelect(r) {
-        const ready = gatewayReady && !!r.forbeast?.ready;
-        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Replies via, ' + r.page, title: ready ? 'Replies via' : NEEDS_TOKEN}, [
-            el('option', {value: 'botcake', text: 'Botcake'}),
-            el('option', {value: 'gateway', text: 'Forbeast' + (!gatewayReady ? ' (not set up)' : (ready ? '' : ' (add the token first)')), disabled: ready ? null : ''}),
-        ]);
-        sel.value = r.provider || 'botcake';
+        const current = r.provider || 'botcake';
+        const options = ['botcake', 'gateway'].filter(p => p === current || ((r.connected || []).includes(PROVIDER_LABEL[p]) && (p !== 'gateway' || gatewayReady)));
+        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + PROVIDER_LABEL[current]});
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Bot of ' + r.page, title: 'Replies via'},
+            options.map(p => el('option', {value: p, text: PROVIDER_LABEL[p]})));
+        sel.value = current;
         sel.addEventListener('change', async () => {
             const want = sel.value;
-            if (!confirm('Send and receive ' + r.page + "'s chats through " + (want === 'gateway' ? 'Forbeast' : 'Botcake') + '?')) { sel.value = r.provider; return; }
+            if (!confirm('Switch ' + r.page + ' from ' + PROVIDER_LABEL[current] + ' to ' + PROVIDER_LABEL[want] + '?')) { sel.value = current; return; }
             sel.disabled = true;
             try {
                 const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
@@ -638,30 +811,19 @@
 
     function cell(r, c, extra = '') {
         const k = id(r.page, c.key), m = marks.get(k);
-        // FLOW: dropdown ng mga flow (/chatbot); ang luma na text na wala sa listahan ay ipinapakita pa rin.
+        // FLOW: ang pangalan bilang text at ✎ (ang popup ay may hanap at confirm), para hindi mapalitan nang hindi sinasadya.
+        // Ang lumang FLOW text na hindi nakatali sa flow ay "Not linked" (amber).
         if (c.kind === 'flow') {
             const value = r.cells[c.key] ?? '';
             const td = el('td', {class: extra + ' border-b border-slate-100 px-3 py-2 align-top', 'data-key': c.key});
-            // Ang lumang FLOW text na hindi nakatali sa flow ay "Not linked", para ang pagpili ng flow ay totoong pagbabago.
-            const UNLINKED = '\u0000unlinked';
-            const sel = el('select', {class: 'w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-sm', 'aria-label': 'Flow for ' + r.page}, [
-                el('option', {value: '', text: '— none —'}),
-                r.flow_text ? el('option', {value: UNLINKED, text: 'Not linked: ' + r.flow_text}) : null,
-                ...flows.map(n => el('option', {value: n, text: n})),
-            ]);
-            sel.value = value || (r.flow_text ? UNLINKED : '');
-            if (!value && r.flow_text) sel.classList.add('border-amber-500', 'text-amber-800');
-            // Ang pagpalit ng flow ay nagbabago ng sagot ng bot sa page: kumpirmahin muna; kapag Cancel, ibalik ang dati.
-            let before = sel.value;
-            sel.addEventListener('change', () => {
-                if (sel.value === UNLINKED) return;
-                const from = before === '' ? '— none —' : (before === UNLINKED ? 'Not linked: ' + r.flow_text : before);
-                const to = sel.value === '' ? '— none —' : sel.value;
-                if (!confirm('Change the flow of ' + r.page + '?\n\nFrom: ' + from + '\nTo: ' + to)) { sel.value = before; return; }
-                before = sel.value;
-                r.flow_text = null; save(r, c, sel.value);
-            });
-            td.append(sel);
+            const edit = el('button', {type: 'button', class: 'shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                'aria-label': 'Change the flow of ' + r.page, title: 'Change the flow', text: '✎'});
+            edit.addEventListener('click', () => openFlow(r, c));
+            td.append(el('div', {class: 'flex items-start gap-1'}, [
+                value ? el('span', {class: 'min-w-0 break-words', text: value})
+                    : el('span', {class: 'min-w-0 break-words ' + (r.flow_text ? 'text-amber-800' : 'text-slate-400'), text: r.flow_text ? 'Not linked: ' + r.flow_text : 'No flow'}),
+                edit,
+            ]));
             if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
             return td;
         }

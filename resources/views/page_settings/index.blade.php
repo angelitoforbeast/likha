@@ -135,7 +135,7 @@
          data-page-check-url="{{ route('page-settings.page-check') }}"
          data-test-token-url="{{ route('page-settings.test-token') }}"
          data-test-token-one-url="{{ route('page-settings.test-token-one') }}"
-         data-forbeast-test-url="{{ route('page-settings.forbeast-test') }}"
+         data-connections-url="{{ route('chatbot.pages.index') }}"
          data-sync-url="{{ route('page-settings.sync') }}"
          data-send-test-url="{{ route('page-settings.send-test') }}"
          @if ($isCeo ?? false) data-mark-tested-url="{{ route('page-settings.mark-tested') }}" @endif
@@ -401,7 +401,8 @@
                 pageTd(r),
                 el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'check'}, checkCell(r)),
                 ...GROUPS.map(([group]) => el('td', {class: 'px-2 py-1 border-b border-r align-top'},
-                    group === 'flows' ? inGroup(group).filter(c => c.key === SHIPPING_KEY).map(c => flowBlock(r, c)) : inGroup(group).map(c => line(r, c)))),
+                    group === 'flows' ? inGroup(group).filter(c => c.key === SHIPPING_KEY).map(c => flowBlock(r, c))
+                        : [...inGroup(group).filter(c => !c.key.startsWith('forbeast.')).map(c => line(r, c)), group === 'botcake' ? connectionsLink() : null])),
                 el('td', {class: 'px-2 py-1 border-b border-r align-top text-right text-xs', 'data-info': 'oc', title: ORDERS_LABEL + ' / Customers'}, infoOc(r)),
                 paintSync(el('td', {class: 'px-2 py-1 border-b border-r align-top text-xs', 'data-info': 'sync'}), r),
                 el('td', {class: 'px-2 py-1 border-b align-top', 'data-info': 'actions'}, actions(r)),
@@ -771,6 +772,11 @@
 
     // Ang mga button ng row ay fetch (walang reload: hindi bumabalik sa itaas, nananatiling bukas ang ▸). Ang Cust. at
     // Orders ay link sa ibang page.
+    // Ang Forbeast token ay sa Connections ng /chatbot/pages na lang (iisang lugar ng setup).
+    function connectionsLink() {
+        return el('a', {class: 'block text-xs text-blue-700 hover:underline', href: url.connectionsUrl, text: 'Forbeast: set up in Chatbot pages → Connections'});
+    }
+
     // Ang resulta ng Test ng Forbeast token: "Forbeast connected" at ang pangalan ng page, o ang error.
     function forbeastNotice(r, f) {
         if (f.status === 'skipped') { notice(r.name + ': the page needs a Botcake ID and a Forbeast token first.', 'text-red-600'); return; }
@@ -785,7 +791,6 @@
             out.push(btn('test', 'Test', 'Test token, then read the flow, field and template from Botcake'));
             out.push(btn('sync', 'Sync', 'Sync now'));
         }
-        if (r.cells['forbeast.token']) out.push(btn('forbeast-test', 'Test Forbeast', 'Test the Forbeast token, then connect the page (webhook) to Likha'));
         if (complete(r)) {
             out.push(r.cells['botcake.test_psid'] ? btn('send-test', 'Send test', 'Send a test message to the Test PSID')
                 : el('a', {class: 'text-xs text-amber-700 hover:underline', href: url.testPsidPickerUrl, title: 'Pick the Test PSID of the page on To send', text: 'Set a Test PSID first'}));
@@ -809,12 +814,6 @@
                 const status = applyTest(r, data);
                 notice(r.name + ' · Token: ' + status + (data.error ? ' · ' + data.error : '') + (data.refresh_error ? ' · flow, field and template not checked: ' + data.refresh_error : ''),
                     status === 'ok' ? 'text-green-700' : 'text-red-600');
-            } else if (b.dataset.act === 'forbeast-test') {
-                notice('Testing the Forbeast token of ' + r.name + '…');
-                const res = await fetch(url.forbeastTestUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
-                const data = await res.json().catch(() => ({}));
-                applyCells(r, data.cells);
-                if (res.ok) forbeastNotice(r, data.forbeast); else notice(data.error || ('HTTP ' + res.status), 'text-red-600');
             } else if (b.dataset.act === 'sync') {
                 const res = await fetch(url.syncUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}, body: JSON.stringify({page_name: r.name})});
                 const data = await res.json().catch(() => ({}));

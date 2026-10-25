@@ -48,7 +48,7 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         Http::fake([
             self::BC . '/custom_fields*' => fn () => $this->fake['token_ok'] ? Http::response(['success' => true, 'data' => [['id' => 7701, 'name' => 'message']]]) : Http::response(['success' => false], 401),
             self::BC . '/default_reply/content' => Http::response(['success' => true]),
-            self::BC . '/default_reply*' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? $this->fake['reply'] : ['success' => true]),
+            self::BC . '/default_reply*' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? $this->fake['reply'] : ['success' => true], $r->method() === 'GET' ? ($this->fake['reply_status'] ?? 200) : 200),
         ]);
     }
 
@@ -168,8 +168,9 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001'])->assertOk();
 
         // Hindi masuri ang Default Reply (404): tinatanong din, at ang Fix chat block ay may parehong tanong.
-        $this->fake['reply'] = ['success' => false];
+        $this->fake['reply_status'] = 404;
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001'])->assertStatus(409)->assertJson(['status' => 'confirm', 'host' => null]);
+        $this->fake['reply_status'] = 200;
         $this->fake['reply'] = $this->jsonApiReply('https://incepxion.pro/api/botcake/chat');
         $before = count($this->sentTo('/default_reply/content'));
         $this->postJson('/chatbot/connections/chat-block', ['page_name' => 'Page Uno'])->assertStatus(409)->assertJson(['host' => 'incepxion.pro']);
@@ -195,6 +196,38 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $this->assertCount(2, $writes);
         foreach ($writes as [$req]) $this->assertSame('kept-chat-key-123', $req->data()['blocks'][0]['cards'][0]['headers'][0]['value']);
         $this->assertSame('kept-chat-key-123', $this->settings()->get('Page Uno', 'botcake', 'chat.key'));
+    }
+
+    public function test_S_148_7_the_row_has_a_connections_popup_instead_of_the_forbeast_buttons_and_page_settings_links_to_it(): void
+    {
+        Http::fake();
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+        foreach (['id="conn"', 'data-connections-url', 'Fix chat block', "This replaces the page's Default Reply in Botcake.", 'id="flow-box"', 'id="flow-q"', 'Check all', 'Uncheck all', "'Connected'"] as $want) {
+            $this->assertStringContainsString($want, $html, $want);
+        }
+        foreach (['forbeastBox', 'Paste the Forbeast token', "'New token'", "'Add token'", 'Clear the Forbeast token', 'data-forbeast-token-url'] as $gone) {
+            $this->assertStringNotContainsString($gone, $html, $gone);
+        }
+
+        $settings = $this->get('/chatblast/page-settings')->assertOk()->getContent();
+        $this->assertStringContainsString('data-connections-url="' . route('chatbot.pages.index') . '"', $settings);
+        $this->assertStringContainsString('Forbeast: set up in Chatbot pages', $settings);
+        $this->assertStringNotContainsString('Test Forbeast', $settings);
+    }
+
+    public function test_S_148_10_a_flow_picked_in_the_popup_is_linked_and_changes_shows_who_changed_it(): void
+    {
+        Http::fake();
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_23_100000_create_chatbot_tables.php']]);
+        foreach (['Main Flow', 'Encode Order'] as $name) \App\Models\ChatbotFlow::forceCreate(['name' => $name]);
+
+        // Ang popup ay sumusulat sa parehong cell path ng FLOW (nakatali ayon sa id).
+        foreach (['Main Flow', 'Encode Order'] as $name) $this->postJson('/chatbot/cell', ['page_name' => 'Page Uno', 'key' => 'flow', 'value' => $name])->assertOk();
+
+        $this->assertSame((string) \App\Models\ChatbotFlow::where('name', 'Encode Order')->value('id'), $this->settings()->get('Page Uno', 'chatbot', 'flow_id'));
+        $entries = $this->getJson('/chatbot/changes?field=flow')->assertOk()->json('entries');
+        $this->assertSame(['Main Flow', 'Encode Order'], [$entries[0]['old'], $entries[0]['new']]);
+        $this->assertSame($this->ceo->name, $entries[0]['by']);
     }
 
     public function test_S_148_9_connected_lists_only_complete_connections_and_check_gives_the_reason_for_the_rest(): void

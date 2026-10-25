@@ -163,8 +163,9 @@ class ChatbotConnections
         $state = 'none';
         foreach (self::jsonApiUrls($r['body']) as $url) {
             $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
-            if ($host !== '' && $host !== $ours) return mb_substr($host, 0, 255);
-            if ($host === $ours) $state = 'ours';
+            if ($host === '') return 'unknown'; // walang mabasang host: hindi alam kung saan papunta
+            if ($host !== $ours) return mb_substr($host, 0, 255);
+            $state = 'ours';
         }
 
         return $state;
