@@ -11,11 +11,12 @@ use Illuminate\Support\Facades\Schema;
  * Minsanang punan ang chatbot_replies.via ng mga lumang padala (send at manual) na wala pa nito, hangga't tiyak:
  * ang via ng Results (tags.via), o ang hugis ng naitabing sagot ng provider (raw, ang pumalyang padala lang): ang
  * Forbeast ay may message_id o recipient_id, ang Botcake ay may "success". Ang hindi tiyak ay naiiwang null. Kada 1,000
- * row ayon sa id (walang mahabang lock); ligtas ulitin: ang may via na ay hindi ginagalaw.
+ * row ayon sa id (walang mahabang lock); ligtas ulitin: ang may via na ay hindi ginagalaw. Dry run (bilang lang) ang
+ * default; ang --apply ang sumusulat.
  */
 class ChatbotRepliesViaBackfill extends Command
 {
-    protected $signature = 'chatbot:replies-via-backfill {--dry-run : Count only, change nothing}';
+    protected $signature = 'chatbot:replies-via-backfill {--apply : Write the values (default: dry run, counts only)}';
 
     protected $description = 'Fill chatbot_replies.via on old sends from their tags or the stored provider answer';
 
@@ -40,11 +41,11 @@ class ChatbotRepliesViaBackfill extends Command
                 }
                 foreach ($set as $via => $ids) {
                     $counts[$via] += count($ids);
-                    if ($ids && !$this->option('dry-run')) DB::table('chatbot_replies')->whereIn('id', $ids)->whereNull('via')->update(['via' => $via]);
+                    if ($ids && $this->option('apply')) DB::table('chatbot_replies')->whereIn('id', $ids)->whereNull('via')->update(['via' => $via]);
                 }
             });
 
-        $this->line(($this->option('dry-run') ? 'Dry run: ' : '') . "botcake: {$counts['botcake']}, forbeast: {$counts['forbeast']}, left empty: {$counts['unsure']}");
+        $this->line(($this->option('apply') ? '' : 'Dry run (nothing changed; add --apply to write): ') . "botcake: {$counts['botcake']}, forbeast: {$counts['forbeast']}, left empty: {$counts['unsure']}");
 
         return self::SUCCESS;
     }

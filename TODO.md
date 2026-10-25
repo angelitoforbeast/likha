@@ -1155,3 +1155,5 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **The ignored mark is written right after the chat is stored; a text from the same customer processed in those milliseconds could still run the photo.** Reason: a very small window; it can be closed by marking before storing.
 - **A markdown link whose URL contains a parenthesis (`[audio](https://x/a(b))`) is read as text.** Reason: Facebook CDN links have none.
 - **A marker followed by something other than a link (e.g. `[location] 14.5,121.0`) is compared as text when pairing copies.** Reason: no live sample; the old reading accepted any token.
+- **`chatbot_comment_events` has no prune.** Reason: accepted as is; one small row per comment; add a prune (like ChatbotEvents::prune) when the table grows.
+- **The Check length warning counts the saved text, before variables are filled;** a value under the limit can still go over after `{{…}}` is filled. Reason: the filled text depends on other botfields; the send still fails visibly (Replies, Comments) if it happens.

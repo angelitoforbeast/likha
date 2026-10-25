@@ -312,4 +312,24 @@ class ChatbotPageCheckTest extends ChatblastTestCase
             $this->settings()->deactivate($row);
         }
     }
+
+    public function test_S_149_34_check_warns_when_a_comment_text_is_longer_than_forbeast_takes(): void
+    {
+        $s = app(\App\Services\PageSettings::class);
+        $this->page('Page Dos', '2002');
+        // Walang flow ang dalawang page: ang sagot sa comment ay hindi kailangan ng flow.
+        $s->set('Page Uno', 'chatbot', 'comment_pm', str_repeat('a', 2001));
+        $s->set('Page Uno', 'chatbot', 'comment_reply_2', str_repeat('b', 8001));
+        $s->set('Page Dos', 'chatbot', 'comment_pm', str_repeat('a', 2000));
+        $s->set('Page Dos', 'chatbot', 'comment_reply_1', str_repeat('b', 8000));
+
+        $over = $this->check('Page Uno');
+        $this->assertSame([
+            'Comment PM is 2001 characters: Forbeast sends at most 2000',
+            'Comment Reply 2 is 8001 characters: Forbeast sends at most 8000',
+        ], $over['warnings']);
+        $this->assertNotSame('none', $over['status'], 'shown even without a flow');
+        $this->assertSame([], $this->check('Page Dos')['warnings'], 'at the limit is fine');
+        $this->assertSame(str_repeat('a', 2001), $s->get('Page Uno', 'chatbot', 'comment_pm'), 'nothing is cut');
+    }
 }

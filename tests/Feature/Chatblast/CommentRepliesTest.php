@@ -384,17 +384,26 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertSame('sent', $this->event()->status);
     }
 
-    /** @return array<string, array{0: int, 1: string}> */
+    /** @return array<string, array{0: int, 1: array, 2: string}> ang mga tunay na anyo ng sagot ng Forbeast, at ang reason */
     public static function refused(): array
     {
-        return ['401' => [401, 'invalid_token'], '403' => [403, 'forbidden'], '404' => [404, 'not_found'], '422' => [422, 'invalid_text'], '502' => [502, 'meta_error']];
+        $object = fn (string $code) => ['error' => ['code' => $code, 'message' => 'Refused: ' . $code]];
+
+        return [
+            '401' => [401, $object('invalid_token'), 'invalid_token'],
+            '403' => [403, $object('forbidden'), 'forbidden'],
+            '404' => [404, $object('comment_not_found'), 'comment_not_found'],
+            '422 from Forbeast' => [422, $object('text_too_long'), 'text_too_long'],
+            '422 from validation' => [422, ['message' => 'The text field is required.', 'errors' => ['text' => ['The text field is required.']]], 'invalid_text'],
+            '502' => [502, ['ok' => false, 'error' => 'meta_error', 'meta_code' => 100, 'meta_subcode' => null], 'meta_error'],
+        ];
     }
 
     #[DataProvider('refused')]
-    public function test_S_149_17_a_refused_send_is_failed_with_the_error_code_as_the_reason(int $http, string $code): void
+    public function test_S_149_17_a_refused_send_is_failed_with_the_error_code_as_the_reason(int $http, array $body, string $code): void
     {
         $this->forbeastPage(['comment_reply_1' => '', 'comment_reply_2' => '', 'comment_reply_3' => '']);
-        $this->gateway(['/private-reply' => [$http, ['ok' => false, 'error' => $code]]]);
+        $this->gateway(['/private-reply' => [$http, $body]]);
 
         $this->comment()->assertOk();
 

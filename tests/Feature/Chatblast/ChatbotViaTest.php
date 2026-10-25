@@ -113,7 +113,11 @@ class ChatbotViaTest extends ChatblastTestCase
             'already set' => $row(['via' => 'botcake', 'tags' => ['v' => 1, 'via' => 'forbeast']]),
         ];
 
-        $this->artisan('chatbot:replies-via-backfill')->assertSuccessful();
+        // Dry run ang default: bilang lang, walang binabago.
+        $this->artisan('chatbot:replies-via-backfill')->expectsOutputToContain('Dry run')->assertSuccessful();
+        $this->assertSame(1, ChatbotReply::whereNotNull('via')->count(), 'only the row that already had via');
+
+        $this->artisan('chatbot:replies-via-backfill', ['--apply' => true])->assertSuccessful();
 
         $this->assertSame(['tags' => 'forbeast', 'forbeast answer' => 'forbeast', 'botcake answer' => 'botcake', 'unsure' => null, 'already set' => 'botcake'],
             array_map(fn ($id) => ChatbotReply::find($id)->via, $ids));

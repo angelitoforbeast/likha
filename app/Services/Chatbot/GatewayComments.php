@@ -14,6 +14,9 @@ use Throwable;
  */
 class GatewayComments
 {
+    /** Ang pinakamahabang text na tinatanggap ng Forbeast (letra): ang private message at ang public reply. */
+    public const MAX_PM = 2000;
+    public const MAX_REPLY = 8000;
     public const ALREADY_REPLIED = 'already_replied';
     public const UNKNOWN = 'unknown';
     public const THROTTLED = 'throttled';
@@ -56,7 +59,16 @@ class GatewayComments
         if ($http >= 200 && $http < 300 && ($json['ok'] ?? true) !== false) {
             return ['status' => 'sent', 'error' => null, 'http' => $http, 'comment_id' => $str($json['comment_id'] ?? null, 100), 'code' => null];
         }
-        $error = $str($json['error'] ?? null, 150);
+        // Ang code ng error: "error" na text ({ok:false, error}), o object ({"error": {"code", "message"}}, ang 401/403/404/422
+        // ng Forbeast), o ang validation ng Laravel ({message, errors: {field: […]}}) = invalid_<field>.
+        $err = $json['error'] ?? null;
+        $error = is_array($err) ? $str($err['code'] ?? null, 150) : $str($err, 150);
+        $detail = is_array($err) ? $str($err['message'] ?? null, 150) : null;
+        if ($error === null && is_array($json['errors'] ?? null) && $json['errors']) {
+            $error = $str('invalid_' . preg_replace('/[^a-z0-9_]+/i', '_', (string) array_key_first($json['errors'])), 150);
+            $detail = $str($json['message'] ?? null, 150);
+        }
+        if (is_array($err) && !isset($json['meta_code']) && isset($err['meta_code'])) $json['meta_code'] = $err['meta_code'];
         // 409 already_replied (Meta #10900): naitala na. 504 unknown_outcome: maaaring naipost na ng Meta, kaya hindi inuulit.
         // 429: subukan ulit sa susunod na minuto. Ang iba (401, 403, 404, 422, 502 …): failed.
         $status = match (true) {
@@ -65,7 +77,7 @@ class GatewayComments
             $http === 429 => self::THROTTLED,
             default => 'failed',
         };
-        $why = $http === 0 ? 'Forbeast did not answer' : ($error !== null ? 'Forbeast said "' . $error . '"' : 'Forbeast refused it');
+        $why = $http === 0 ? 'Forbeast did not answer' : ($error !== null ? 'Forbeast said "' . $error . ($detail !== null ? ': ' . $detail : '') . '"' : 'Forbeast refused it');
         if (($code = $str($json['meta_code'] ?? null, 10)) !== null) $why .= ' (Meta #' . $code . ')';
 
         return ['status' => $status, 'error' => $why . ' (HTTP ' . $http . ')', 'http' => $http ?: null, 'comment_id' => null,

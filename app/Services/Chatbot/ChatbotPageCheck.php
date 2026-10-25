@@ -85,9 +85,29 @@ class ChatbotPageCheck
         return 'chatbot:page-check:' . sha1($pk . "\0" . ($prints['pages'][$pk] ?? '') . "\0" . $prints['flows']);
     }
 
+    /**
+     * Ang Comment PM at Comment Reply na mas mahaba sa tinatanggap ng Forbeast (hindi pinuputol: pupalya sa padala). Ang
+     * value gaya ng naka-save (bago punan ang variable).
+     * @return array<int, string>
+     */
+    private function commentLengths(string $page): array
+    {
+        $limits = [CommentReplies::PM => GatewayComments::MAX_PM] + array_fill_keys(CommentReplies::VARIANTS, GatewayComments::MAX_REPLY);
+        $labels = ChatbotFields::defaults();
+        $out = [];
+        foreach ($limits as $key => $max) {
+            $n = mb_strlen(trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, $key)));
+            if ($n > $max) $out[] = $labels[$key] . ' is ' . $n . ' characters: Forbeast sends at most ' . $max;
+        }
+
+        return $out;
+    }
+
     private function run(string $page, bool $fresh): array
     {
-        $out = ['status' => 'none', 'reasons' => [], 'warnings' => [], 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
+        $out = ['status' => 'none', 'reasons' => [], 'warnings' => $this->commentLengths($page), 'content' => null, 'unchecked' => 0, 'checked_at' => now('Asia/Manila')->format('Y-m-d H:i')];
+        // Ang sagot sa comment ay hindi kailangan ng flow: ang babala ay kita kahit walang flow ang page.
+        if ($out['warnings']) $out['status'] = 'ok';
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
         $flow = ctype_digit($flowId) && Schema::hasTable('chatbot_flows') ? ChatbotFlow::find((int) $flowId) : null;
         // Ang FLOW (kapag On ang bot): walang flow, o wala o hindi published, = mali; kasama ang setup ng bot (chat.key),

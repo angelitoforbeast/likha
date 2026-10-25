@@ -138,9 +138,10 @@ class ForbeastWatch
         // Ang standby (kopya ng Botcake) na walang kapares mula sa Forbeast pagkalipas ng INBOUND_GRACE. Ebidensya lang kapag
         // galing sa INBOUND_CUSTOMERS na magkaibang customer: ang isang kakaibang mensahe ay hindi dapat maglipat ng page.
         $paired = self::pairs($chats);
-        // Ang attachment lang (larawan, voice, …) ay hindi kailanman ebidensya: hindi ito sinasagot ng bot.
+        // Ang attachment lang (larawan, voice, …) ay hindi ebidensya habang hindi ito sinasagot ng bot (ignore).
+        $ignoring = ChatAttachments::ignoring();
         $orphans = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from)
-            && ChatAttachments::type($c->message, (array) $c->payload) === null);
+            && !($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null));
         $customers = $orphans->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
         if ($orphans->count() >= self::limit('inbound_chats') && $customers >= self::INBOUND_CUSTOMERS) {
             $this->switch($page, 'inbound', 'Botcake chats from ' . $customers . ' customers with no Forbeast copy after ' . self::INBOUND_GRACE . ' seconds',
@@ -300,8 +301,9 @@ class ForbeastWatch
     }
 
     /**
-     * Ang mga standby chat ng huling ilang minuto, luma muna. Tumatakbo lang ang walang kopya sa Forbeast at walang sagot
-     * ng bot sa customer na iyon sa page mula sa pagdating nito (bawas REPLIED_GRACE segundo): kung hindi, dobleng sagot.
+     * Ang mga standby chat ng huling ilang minuto, luma muna. Tumatakbo lang kapag walang naipadalang sagot ng bot sa
+     * customer na iyon sa page mula sa pagdating nito (bawas REPLIED_GRACE segundo): kung mayroon, dobleng sagot. Ang
+     * kopya sa Forbeast na pumalya ang sagot ay sinasagot dito.
      * Ang nilaktawan ay nasa log (id at dahilan lang). Ang tumatakbo: bagong chat (para sa takbo ayon sa id), at ang
      * standby ay tinatanggal, kaya isang beses lang.
      */
@@ -313,9 +315,9 @@ class ForbeastWatch
             ->orderBy('id')->get()->filter(fn ($c) => self::standby($c))->values();
         foreach ($chats as $c) {
             try {
-                $skip = self::twin($c, false) !== null ? 'forbeast_twin'
-                    : (ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $c->psid)->where('kind', 'send')->where('status', 'sent')
-                        ->where('sent_at', '>=', ($c->received_at ?? now())->copy()->subSeconds(self::REPLIED_GRACE))->exists() ? 'already_answered' : null);
+                // Ang kopya sa Forbeast lang ay hindi dahilan: kung pumalya ang sagot doon, ang Botcake ang sasagot.
+                $skip = ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $c->psid)->where('kind', 'send')->where('status', 'sent')
+                    ->where('sent_at', '>=', ($c->received_at ?? now())->copy()->subSeconds(self::REPLIED_GRACE))->exists() ? 'already_answered' : null;
                 if ($skip !== null) {
                     Log::info('forbeast watch: standby skipped', ['page' => $page, 'chat_id' => $c->id, 'reason' => $skip]);
                     continue;
