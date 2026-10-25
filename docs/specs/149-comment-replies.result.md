@@ -155,3 +155,30 @@ Suite `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings 
 - **Accepted review minors:** in `TODO.md` under "149".
 
 149: done — top-level comments on Forbeast pages get one Comment PM private message and one random Comment Reply, set per page in /chatbot/pages, at most 20 per minute, logged on Replies and Health; S-149.11 skipped because Forbeast does not report scopes.
+
+## Amendment 149-1
+
+| Change | Who decided, why |
+|---|---|
+| **Connected column filter becomes a per-bot condition filter.** Replace the Connected header filter's value checkboxes (Botcake / Forbeast / None from spec 148) with one row per bot: `<Bot name>  ( Lahat | May | Wala )` (a 3-way segmented control; default Lahat), plus a checkbox **"Walang kahit anong bot"**, plus **I-reset**. "May X" = the page's complete connections include X; "Wala X" = they do not. Rows AND together, and AND with the other column filters. "Walang kahit anong bot" = the page has no complete connection (it overrides the per-bot rows while ticked). The bot rows come from the list of providers the page data already knows (Botcake, Forbeast today; a future provider appears automatically, no filter code change). Keep the panel's look consistent with the other header filters (same panel, sticky header, no horizontal scroll, usable at 390 px); the other columns keep their Sheets-style checkbox filters. | The owner, 2026-10-25: "possible up to 5 bots… gusto ko mashow lang, botcake, or yung walang botcake, or yung walang bot" then "okay go mo na". |
+
+Tests (markup/JS-logic level like the existing chatbot page tests; if the filter logic lives in a JS helper with a node test, add cases there): May Botcake; Wala Forbeast; May Botcake + Wala Forbeast; Walang kahit anong bot; I-reset restores all; a third provider in the data shows a third row. Update S-148.11 (story change, listed) and add S-149 cases for this. Re-run the brief's test folders (no new failures). End with "149-1: <done|blocked> — <one line>".
+
+## Amendment 149-2
+
+| Change | Who decided, why |
+|---|---|
+| **Health page split by bot.** On /chatbot/health add a filter **"Bot: Lahat / Botcake / Forbeast"** (list built from the providers the data knows, like 149-1) that scopes every tile, list and graph by the page's provider (`chatbot.provider`; pages without the setting count as Botcake), and a **comparison table** with one row per bot for today and yesterday: inbound chats, answered %, first reply median and p90, failed % (without customer-not-reachable) with the top reasons, AI calls failed %, comment events in / replied (from this spec), and the number of automatic switches to Botcake (`chatbot.auto_switch` rows of the day). A page's provider is taken as of now (state the limitation in the result: a page that switched during the day counts entirely under its current bot). Same access, cache and refresh rules as the Health page today; no horizontal scroll. | The owner, 2026-10-25: moved 7 Likha pages to Forbeast at 17:41 and asked to monitor and compare with Botcake: "sige lagyan mo filter". |
+
+Tests: the filter scopes the tiles (a Forbeast page's chats count only under Forbeast); the comparison rows' numbers for a seeded day; a page without a provider setting counts as Botcake. End with "149-2: <done|blocked> — <one line>".
+
+## Amendment 149-3
+
+Align with the contract Forbeast handoff 014 actually delivered.
+
+| Change | Who decided, why |
+|---|---|
+| **Event**: Forbeast posts `{"kind":"event","event_id":42,"page_id":"…","type":"comment","comment_id":"900_501","post_id":"…_900","parent_id":"…_900","message":"How much po?" or null (sticker/photo only),"created_time":1761000000 (unix s),"from_id":null|"…" (NOT a psid),"from_name":null|"…","is_reply":false,"is_page_author":false,"received_at":"…Z","attempt":1}`, signed like every gateway event, dedupe `<page_id>:c:<comment_id>`, only verb add, Forbeast's own replies never sent back. Make sure HandleGatewayEvent passes these fields through and a null `message` is handled (still reply: the PM/reply text does not depend on the comment text). | The reviewer, from Forbeast 014's RESULT "Contract for the external system". |
+| **Endpoints**: `POST {same base as the existing Forbeast message sends}/v1/pages/{page_id}/comments/{comment_id}/reply` `{"message"}` (1–8000) → 200 `{"ok":true,"comment_id"}`; `…/private-reply` `{"text"}` (1–2000) → 200 `{"ok":true,"message_id","recipient_id"}` (Forbeast documents the paths as `/api/v1/…`; reuse exactly how GatewayProvider builds the existing send URL from GATEWAY_URL so the prefix matches). Errors and handling: 409 `already_replied` (meta_code 10900) → record, no retry; 504 `unknown_outcome` → record as "unknown", **never retry** (Meta may have posted it); 502 `meta_error` → failed, no retry; 429 → retry later within the 20/min budget; 401/403/404/422 → failed with the error code as the reason. | Same. |
+
+Tests: a 504 unknown_outcome is not retried and is logged as unknown; a 429 is retried later; a null-message comment still gets the PM and reply. End with "149-3: <done|blocked> — <one line>".
