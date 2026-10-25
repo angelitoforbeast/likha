@@ -974,8 +974,10 @@
         const f = e.target, r = aiPage, body = r ? {page_name: r.page} : {};
         for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds']) {
             const v = f.elements[k].value.trim();
-            if (r || v !== '') body[k] = v; // sa page, ang blangkong model o timeout = bumalik sa default
+            // Sa page, ang blangkong model o timeout = bumalik sa default. Sa site, ang binago lang (ang default ng server ay hindi naisusulat).
+            if (r || (v !== '' && v !== String(aiSite?.[k] ?? ''))) body[k] = v;
         }
+        if (!r && !Object.keys(body).length) { dialog('ai-box', false); notice('No change.'); return; }
         const btn = f.querySelector('button.cb-btn-primary');
         btn.disabled = true;
         try {
@@ -995,7 +997,9 @@
     async function loadCompare() {
         const f = $('aic-filters'), q = new URLSearchParams({page: f.elements.page.value, from: f.elements.from.value, to: f.elements.to.value});
         $('aic-note').textContent = 'Loading…';
-        const {ok, data} = await getJson(url.aiCompareUrl + '?' + q);
+        let res;
+        try { res = await getJson(url.aiCompareUrl + '?' + q); } catch (e) { $('aic-note').textContent = 'No connection: could not load.'; return; }
+        const {ok, data} = res;
         if (!ok) { $('aic-note').textContent = data.error || 'Could not load.'; $('aic-rows').replaceChildren(); return; }
         $('aic-note').textContent = data.message ? data.message : data.requests + ' requests from ' + data.from + ' to ' + data.to + ' (Manila).';
         $('aic-rows').replaceChildren(...data.providers.map(p => el('tr', {class: 'border-t border-slate-100'}, [
@@ -1004,7 +1008,7 @@
         ])));
     }
     $('ai-compare-open').addEventListener('click', () => {
-        const f = $('aic-filters'), day = d => d.toISOString().slice(0, 10), keep = f.elements.page.value;
+        const f = $('aic-filters'), day = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10), keep = f.elements.page.value;
         f.elements.page.replaceChildren(...rows.map(r => el('option', {value: r.page, text: r.page})));
         if (keep) f.elements.page.value = keep;
         if (!f.elements.to.value) { const now = new Date(); f.elements.to.value = day(now); f.elements.from.value = day(new Date(now - 6 * 864e5)); }

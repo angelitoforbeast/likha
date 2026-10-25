@@ -28,12 +28,12 @@ class PageSettings
         'chatbot.ai_breaker_failures', 'chatbot.ai_breaker_seconds'];
 
     /**
-     * Ang chatbot key na mukhang key (api_key, ai_key, …) o ai_*: hindi tinatanggap mula sa page. Ang mga key ng AI ay nasa
-     * config lang, at ang ai_* ay isinusulat lang ng AI control ng /chatbot/pages.
+     * Ang chatbot key na mukhang key (api_key, ai_key, …): hindi tinatanggap mula sa page, dahil ang mga key ng AI ay nasa
+     * config lang. Ang mga setting ng AI ng page (chatbot.ai_provider, …) ay nasa SYSTEM_KEYS: ang AI control lang ang sumusulat.
      */
     public static function keyLike(string $provider, string $key): bool
     {
-        return $provider === 'chatbot' && (bool) preg_match('/(^|_)(api_?)?key$|^ai_/', $key);
+        return $provider === 'chatbot' && (bool) preg_match('/(^|_)(api_?)?key$/', $key);
     }
 
     /**

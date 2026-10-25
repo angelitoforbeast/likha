@@ -117,6 +117,28 @@ class ChatbotAiCompareTest extends ChatbotAiProviderTestCase
         $this->assertSame(1, $this->compare('from=2026-11-19&to=2026-11-19')['requests']);
     }
 
+    public function test_S_150_D4_without_access_the_comparison_is_403(): void
+    {
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->getJson('/chatbot/ai/compare?page=' . urlencode(self::TECH))->assertForbidden();
+    }
+
+    public function test_S_150_D3b_skipped_attempts_and_bad_input_do_not_count_or_crash(): void
+    {
+        // Ang hindi tinawag (puno ang cap, nakabukas ang breaker) ay hiwalay: hindi request, palya o bilis ng Local.
+        $this->request('2026-11-20 09:00:00', [['local', 0, false, 'Local is busy.'], ['openai', 900, true]]);
+        $this->request('2026-11-20 09:01:00', [['local', 2000, true]]);
+        DB::table(ChatbotAiQueue::TABLE)->orderBy('id')->limit(1)->update(['ai_attempts' => json_encode([
+            ['provider' => 'local', 'model' => 'm', 'ms' => 0, 'ok' => false, 'why' => 'Local is busy.', 'skipped' => true], ['provider' => 'openai', 'model' => 'm', 'ms' => 900, 'ok' => true, 'why' => null]])]);
+
+        $local = $this->byProvider($this->compare('from=2026-11-20&to=2026-11-20'))['local'];
+        $this->assertSame([1, 1, 0, 0, 1, 2000], [$local['requests'], $local['answered'], $local['failed'], $local['fallbacks'], $local['skipped'], $local['avg_ms']]);
+
+        foreach (['page[]=x', 'from=2026-02-31&to=2026-03-01', 'from=2026-13-01', 'from=20261120', 'from=2026-11-20&to=2026-11-19', 'from=2026-01-01&to=2026-11-20'] as $q) {
+            $this->getJson('/chatbot/ai/compare?' . (str_starts_with($q, 'page') ? $q : 'page=' . urlencode(self::TECH) . '&' . $q))->assertStatus(422);
+        }
+    }
+
     public function test_S_150_D14_the_comparison_screen_is_on_the_pages_screen_and_fits_a_phone(): void
     {
         $html = $this->get('/chatbot/pages')->assertOk()->getContent();

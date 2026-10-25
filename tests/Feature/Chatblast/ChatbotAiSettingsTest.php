@@ -292,6 +292,10 @@ class ChatbotAiSettingsTest extends ChatbotAiProviderTestCase
         foreach (['AI Key', 'API Key', 'Ai Provider'] as $name) $this->postJson('/chatbot/column', ['name' => $name])->assertStatus(422);
         $this->assertSame(0, PageSetting::where('provider', 'chatbot')->where('key', 'like', '%key%')->count());
         $this->assertSame(0, PageSetting::where('key', 'like', 'ai_%')->count());
+
+        // Ang column na gawa na ng staff na nagsisimula sa "ai_" (hal. AI Prompt) ay nae-edit pa rin.
+        $this->post('/chatblast/page-settings', ['page_name' => self::TECH, 'provider' => 'chatbot', 'key' => 'ai_prompt', 'value' => 'Sagutin nang magalang.'])->assertSessionHasNoErrors();
+        $this->assertSame('Sagutin nang magalang.', app(\App\Services\PageSettings::class)->get(self::TECH, 'chatbot', 'ai_prompt'));
     }
 
     public function test_S_150_F8_with_no_new_env_vars_openai_is_the_default_and_only_the_controls_show(): void

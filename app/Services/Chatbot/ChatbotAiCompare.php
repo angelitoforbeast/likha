@@ -22,13 +22,20 @@ class ChatbotAiCompare
     {
         if ($page === null) abort(response()->json(['error' => 'This page is not on the chatbot list.'], 422));
         $today = now('Asia/Manila')->format('Y-m-d');
-        $day = fn (string $d, string $fallback) => preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) ? $d : $fallback;
-        try {
-            $start = Carbon::createFromFormat('Y-m-d', $day($from, now('Asia/Manila')->subDays(6)->format('Y-m-d')), 'Asia/Manila')->startOfDay();
-            $end = Carbon::createFromFormat('Y-m-d', $day($to, $today), 'Asia/Manila')->endOfDay();
-        } catch (Throwable $e) {
-            abort(response()->json(['error' => 'Pick dates as YYYY-MM-DD.'], 422));
-        }
+        // Walang petsa = ang huling 7 araw; ang maling petsa (hal. 2026-02-31) ay tinatanggihan, hindi inililipat nang tahimik.
+        $day = function (string $d, string $fallback) {
+            $d = $d === '' ? $fallback : $d;
+            try {
+                $c = preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) ? Carbon::createFromFormat('!Y-m-d', $d, 'Asia/Manila') : null;
+            } catch (Throwable $e) {
+                $c = null;
+            }
+            if (!$c || $c->format('Y-m-d') !== $d) abort(response()->json(['error' => 'Pick dates as YYYY-MM-DD.'], 422));
+
+            return $c;
+        };
+        $start = $day($from, now('Asia/Manila')->subDays(6)->format('Y-m-d'))->startOfDay();
+        $end = $day($to, $today)->endOfDay();
         if ($end->lt($start) || $start->diffInDays($end) > self::MAX_DAYS) abort(response()->json(['error' => 'Pick a range of up to ' . self::MAX_DAYS . ' days.'], 422));
 
         $out = ['page' => $page, 'from' => $start->format('Y-m-d'), 'to' => $end->format('Y-m-d'), 'requests' => 0, 'providers' => [], 'message' => 'No requests'];
@@ -38,7 +45,7 @@ class ChatbotAiCompare
         $rows = DB::table(ChatbotAiQueue::TABLE)->whereBetween('created_at', [$start->copy()->timezone(config('app.timezone')), $end->copy()->timezone(config('app.timezone'))])
             ->whereRaw("LOWER($trim(page_name)) = ?", [app(PageSettings::class)->pageKey($page)])
             ->where('model', '<>', FlowEncode::MODEL)->whereNotNull('ai_attempts')
-            ->get(['provider', 'ai_attempts', 'prompt_tokens', 'completion_tokens']);
+            ->select(['id', 'provider', 'ai_attempts', 'prompt_tokens', 'completion_tokens'])->cursor(); // isa-isa, hindi lahat sa memorya
 
         $stats = [];
         foreach ($rows as $row) {
@@ -50,11 +57,17 @@ class ChatbotAiCompare
                 $p = (string) ($a['provider'] ?? '');
                 if ($p === '') continue;
                 $s = &$stats[$p];
-                $s ??= ['requests' => 0, 'answered' => 0, 'failed' => 0, 'fallbacks' => 0, 'ms' => [], 'in' => [], 'out' => []];
+                $s ??= ['requests' => 0, 'answered' => 0, 'failed' => 0, 'fallbacks' => 0, 'skipped' => 0, 'ms' => [], 'in' => [], 'out' => []];
+                // Ang hindi tinawag (puno ang cap, nakabukas ang breaker, hindi naka-set up) ay hiwalay sa mga tawag.
+                if (!empty($a['skipped'])) {
+                    $s['skipped']++;
+                    unset($s);
+                    continue;
+                }
                 $s['requests']++;
                 if (!empty($a['ok'])) $s['answered']++; else $s['failed']++;
                 if (empty($a['ok']) && $i !== $last) $s['fallbacks']++;
-                if (empty($a['skipped'])) $s['ms'][] = max(0, (int) ($a['ms'] ?? 0));
+                $s['ms'][] = max(0, (int) ($a['ms'] ?? 0));
                 unset($s);
             }
             if ($row->provider !== null && isset($stats[$row->provider])) {
@@ -68,7 +81,7 @@ class ChatbotAiCompare
             $n = count($s['ms']);
             $out['providers'][] = [
                 'provider' => $p, 'label' => ChatbotAiProviders::label($p),
-                'requests' => $s['requests'], 'answered' => $s['answered'], 'failed' => $s['failed'], 'fallbacks' => $s['fallbacks'],
+                'requests' => $s['requests'], 'answered' => $s['answered'], 'failed' => $s['failed'], 'fallbacks' => $s['fallbacks'], 'skipped' => $s['skipped'],
                 'avg_ms' => $n ? (int) round(array_sum($s['ms']) / $n) : null,
                 'p95_ms' => $n ? $s['ms'][max(0, (int) ceil(0.95 * $n) - 1)] : null, // nearest rank
                 'prompt_tokens' => $s['in'] ? array_sum($s['in']) : null, 'completion_tokens' => $s['out'] ? array_sum($s['out']) : null,

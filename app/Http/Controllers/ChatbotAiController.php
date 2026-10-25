@@ -74,8 +74,8 @@ class ChatbotAiController extends Controller
     public function compare(Request $request, ChatbotAiCompare $compare)
     {
         $this->checkAccess();
-        $page = $this->listedPage((string) $request->input('page', ''));
         $str = fn (string $k) => is_scalar($request->input($k)) ? (string) $request->input($k) : '';
+        $page = $this->listedPage($str('page'));
 
         return response()->json($compare->forPage($page, $str('from'), $str('to')));
     }
