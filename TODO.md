@@ -1143,7 +1143,7 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **`already_answered` counts replies sent during the switch run itself,** so on a busy page a second copy of the same customer can be skipped by timing. Reason: the rule as decided; bound `sent_at` to before the switch if it shows up.
 - **`pairs()` compares every copy with every Forbeast chat in the 12-minute window each minute.** Reason: fine at today's volume; group by customer first if a page gets very busy.
 - **`twin()` pairs within ±4 minutes of one chat while `inbound()` pairs over the whole window;** they can differ on long chains. Reason: rare, and the result is conservative.
-- **Botcake copies with several URLs or other types (share, reel, template, story_mention) are compared as text and never pair.** Reason: no live sample in the repo; check live `default_reply` rows.
+- **Botcake copies with several URLs, a link title, or a story_mention are compared as text and never pair** (share, reel and template now pair by type). Reason: no live sample of those shapes.
 - **Untested edges: the −5 s reply boundary, the TWIN_MINUTES lookback at the window edge, an orphan older than the window, a mid match more than 2 minutes apart.** Reason: same code paths as the tested cases.
 - **A GIF from Forbeast (an image outside Facebook's sticker path) counts as a photo and is ignored.** Reason: no live sample; stickers and Likes are recognised by their CDN path.
 - **Decided (kept): an ignored attachment still counts as the customer replying** (sequence exit-on-reply, Results "replied"): the customer did respond; only the bot's answer is skipped.
@@ -1153,3 +1153,5 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **When the no-reply branch of a wait runs and the customer's newest chat is an ignored photo, the branch sees "[Photo]" as the last message.** Reason: only an AI or condition step in that branch reads it; fixing needs a second lookup.
 - **The wait test proves a photo neither holds nor drops the wait, but its flow has no real wait step, so it does not prove the no-reply branch sends.** Reason: covered by the existing wait tests; the new case only checks the ignored filter.
 - **The ignored mark is written right after the chat is stored; a text from the same customer processed in those milliseconds could still run the photo.** Reason: a very small window; it can be closed by marking before storing.
+- **A markdown link whose URL contains a parenthesis (`[audio](https://x/a(b))`) is read as text.** Reason: Facebook CDN links have none.
+- **A marker followed by something other than a link (e.g. `[location] 14.5,121.0`) is compared as text when pairing copies.** Reason: no live sample; the old reading accepted any token.

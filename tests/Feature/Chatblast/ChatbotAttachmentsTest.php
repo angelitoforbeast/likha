@@ -126,8 +126,9 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
         $this->forbeast([['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1.15752-9/p_n.jpg']], 'Magkano po ito?');
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
         $this->botcakePush('[photo] ito'); // isinulat ng customer: text, hindi link
+        $this->botcakePush('[audio](not-a-link)'); // walang http(s): text
 
-        $this->assertSame(5, $this->ran());
+        $this->assertSame(6, $this->ran());
         $this->assertSame([], $this->ignoredEvents());
         $this->assertSame('Magkano po ito?', BotcakeChat::where('message', 'Magkano po ito?')->value('message'));
     }
