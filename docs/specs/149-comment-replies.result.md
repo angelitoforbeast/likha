@@ -266,3 +266,20 @@ Tests: a 504 unknown_outcome is not retried and is logged as unknown; a 429 is r
 149-1: done — the Connected filter has Lahat / May / Wala per bot (from the data), "Walang kahit anong bot" and I-reset; the logic is tested in Node, the browser pass is not run.
 149-2: done — Health filters by bot (pages without a provider count as Botcake), and Compare bots shows today and yesterday per bot; a page counts under its bot as of now.
 149-3: done — comment sends follow Forbeast's delivered contract: 504 is unknown and never retried, 429 waits for the next minute and sends only what is left, refusals keep the error code, and null-text comments are answered.
+
+## Amendment 149-4
+
+A live bug, the owner said "oo apply na".
+
+### What happened (live, 2026-10-25 17:50–17:56, Venice Lim on Forbeast)
+A customer sent voice messages. Forbeast delivered every one to Likha within 1 s (`botcake_chats.payload.source = gateway`, text "[Audio]") and the bot answered them (n100, 17:50:35 … 17:52:24). Botcake's chat block also delivered copies (`source = default_reply`, text "[audio] https://…" ~450 chars, no message_id). `ForbeastWatch` pairs a Botcake copy with its Forbeast twin by the same text (or mid) within TWIN_MINUTES; the texts differ for attachments, so at 17:53:04 the `inbound` condition fired ("1 Botcake chat(s) with no Forbeast copy after 120 seconds"), switched the page to Botcake, and the waiting standby copies then ran, so the customer got 7 more replies (n21, n101 × 6) for messages Forbeast had already answered.
+
+### Fix
+| Change | Why |
+|---|---|
+| **Pair by kind and time, not exact text.** Normalise both copies: text messages compare case- and space-insensitively; an attachment message compares by its type only (audio, image, video, file, sticker, location — derive it from the Forbeast attachments / the "[Audio]"-style marker and Botcake's "[audio] <url>" marker); a Botcake copy is the twin of a Forbeast chat of the same page + psid + same normalised kind/text within TWIN_MINUTES (either order). Each Forbeast chat pairs at most one Botcake copy. | Attachments never matched. |
+| **The `inbound` switch needs real evidence**: unmatched Botcake copies from **at least 2 different customers** within 10 minutes (and still after the 120 s grace), not one message. Keep the other conditions (failed sends, connection errors, no answer, health) as they are. | One odd message must not move a whole page. |
+| **No double replies after a switch**: when a page switches to Botcake, a standby Botcake copy runs only if no Forbeast twin of it exists (normalised as above) and no bot reply was sent to that psid on that page after the copy's received_at minus 5 s; skipped copies are logged with a reason. | The customer was answered twice. |
+| Log line on every switch with the evidence (customer count, chat ids), no message text. | Diagnosis. |
+
+Tests: audio/image/sticker twins pair (no switch); text twins with different spacing/case pair; one unmatched copy → no switch; two customers unmatched after grace → switch; after a switch, a standby copy whose twin was answered is skipped, one with no twin runs; regression of the existing ForbeastWatch tests (update and list any you change under Story changes). Re-run the brief's folders (no new failures). End with "149-4: <done|blocked> — <one line>".
