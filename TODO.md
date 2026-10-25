@@ -1146,7 +1146,7 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Botcake copies with several URLs or other types (share, reel, template, story_mention) are compared as text and never pair.** Reason: no live sample in the repo; check live `default_reply` rows.
 - **Untested edges: the −5 s reply boundary, the TWIN_MINUTES lookback at the window edge, an orphan older than the window, a mid match more than 2 minutes apart.** Reason: same code paths as the tested cases.
 - **A GIF from Forbeast (an image outside Facebook's sticker path) counts as a photo and is ignored.** Reason: no live sample; stickers and Likes are recognised by their CDN path.
-- **An ignored attachment still takes the customer out of "exit when the customer replies" sequences and still marks Results as replied.** Reason: unchanged from before, and the change is silent on it; the owner decides.
+- **Decided (kept): an ignored attachment still counts as the customer replying** (sequence exit-on-reply, Results "replied"): the customer did respond; only the bot's answer is skipped.
 - **The via backfill takes `tags.via` first, which is the bot of the chat that started the run, not strictly the sender.** Reason: best effort, and the same in almost every case; rows with no tags use the stored answer shape.
 - **The via label map is written three times in the views, and the `via ?? tags.via` fallback twice in PHP.** Reason: abstract on the next use.
 - **The frozen Check CSS is checked as markup strings only.** Reason: no JS or browser runner in the repo; the summary logic runs in Node.

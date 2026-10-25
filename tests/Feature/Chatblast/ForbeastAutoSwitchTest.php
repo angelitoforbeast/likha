@@ -225,6 +225,8 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
     {
         return [
             'audio' => ['[audio] https://cdn.fbsbx.com/v/t59.3654-21/voice_clip.mp4?_nc_cat=1&oh=00_abc', '[Audio]'],
+            'live Botcake voice (markdown link)' => ['[audio](https://cdn.fbsbx.com/x)', '[Audio]'],
+            'live Botcake photo (no link)' => ['[Photo]', '[Photo]'],
             'image' => ['https://scontent.xx.fbcdn.net/v/t1.15752-9/abc_n.jpg?stp=dst-jpg', '[Photo]'],
             'sticker' => ['[sticker] https://scontent.xx.fbcdn.net/v/t39.1997-6/sticker_n.png', '[Photo]'],
             'like (a Botcake sticker marker too)' => ['[sticker] https://scontent.xx.fbcdn.net/v/like.png', '👍'],

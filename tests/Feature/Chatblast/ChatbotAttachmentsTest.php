@@ -76,7 +76,7 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
         return DB::table('chatbot_events')->where('type', 'ignored')->orderBy('id')->pluck('detail')->map(fn ($d) => json_decode($d, true)['attachment'])->all();
     }
 
-    /** @return array<string, array{0: string, 1: string, 2: string}> mensahe ng Botcake, uri, ang naitabing link */
+    /** @return array<string, array{0: string, 1: string, 2: ?string}> mensahe ng Botcake, uri, ang naitabing link */
     public static function botcakeAttachments(): array
     {
         return [
@@ -86,11 +86,16 @@ class ChatbotAttachmentsTest extends ChatblastTestCase
             'reel' => ['[reel] https://www.facebook.com/reel/123', 'reel', 'https://www.facebook.com/reel/123'],
             'file' => ['[file] https://cdn.fbsbx.com/v/order.pdf', 'file', 'https://cdn.fbsbx.com/v/order.pdf'],
             'fallback' => ['[fallback] https://www.facebook.com/share/xyz', 'fallback', 'https://www.facebook.com/share/xyz'],
+            // Ang tunay na anyo ng Botcake (live, markdown link) at ang [Photo] na walang link.
+            'live Botcake voice' => ['[audio](https://cdn.fbsbx.com/x)', 'audio', 'https://cdn.fbsbx.com/x'],
+            'live Botcake reel' => ['[reel](https://www.facebook.com/x)', 'reel', 'https://www.facebook.com/x'],
+            'live Botcake fallback' => ['[fallback](https://www.facebook.com/share/y)', 'fallback', 'https://www.facebook.com/share/y'],
+            'live Botcake photo' => ['[Photo]', 'photo', null],
         ];
     }
 
     #[DataProvider('botcakeAttachments')]
-    public function test_S_149_28_an_attachment_only_message_is_ignored_logged_and_kept_for_later(string $message, string $type, string $url): void
+    public function test_S_149_28_an_attachment_only_message_is_ignored_logged_and_kept_for_later(string $message, string $type, ?string $url): void
     {
         $this->botcakePush($message)->assertOk();
 

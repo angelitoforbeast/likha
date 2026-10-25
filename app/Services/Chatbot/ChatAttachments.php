@@ -23,10 +23,11 @@ class ChatAttachments
     public const IGNORED = ['photo', 'audio', 'video', 'reel', 'file', 'fallback'];
 
     /**
-     * "[audio] https://…" (Botcake) o "[Audio]" (Forbeast): ang uri at ang link kung mayroon. Link lang ang puwedeng
-     * kasunod: ang text na isinulat ng customer (hal. "[photo] ito") ay text, sinasagot.
+     * Ang marka ng attachment: "[audio](https://…)" (Botcake, markdown link), "[audio] https://…", o "[Audio]" (Forbeast),
+     * walang pagkakaiba sa laki ng titik. Link lang ang puwedeng kasunod: ang text na isinulat ng customer (hal.
+     * "[photo] ito") ay text, sinasagot.
      */
-    private const MARKER = '/^\[(audio|image|photo|video|file|fallback|reel|ig_reel|sticker|location|attachment|share|template)\](?:\s+(https?:\/\/\S+))?$/iu';
+    private const MARKER = '/^\[(audio|image|photo|video|file|fallback|reel|ig_reel|sticker|location|attachment|share|template)\](?:\((https?:\/\/[^\s)]+)\)|\s+(https?:\/\/\S+))?$/iu';
     /** Ang landas ng sticker sa Facebook CDN (ang Like at ang ibang sticker): hindi larawan ng customer. */
     private const STICKER_PATH = '/t39.1997-6/';
 
@@ -48,19 +49,25 @@ class ChatAttachments
 
             return str_contains($url, self::STICKER_PATH) ? null : 'photo';
         }
-        if (!preg_match(self::MARKER, $m, $x)) return null;
-        $type = match (strtolower($x[1])) { 'image' => 'photo', 'ig_reel' => 'reel', default => strtolower($x[1]) };
-        if ($type === 'photo' && str_contains((string) ($x[2] ?? ''), self::STICKER_PATH)) return null;
+        $a = self::fromMarker($m);
+        if ($a === null) return null;
+        $type = match ($a['type']) { 'image' => 'photo', 'ig_reel' => 'reel', default => $a['type'] };
+        if ($type === 'photo' && str_contains((string) $a['url'], self::STICKER_PATH)) return null;
 
         return in_array($type, self::IGNORED, true) ? $type : null;
     }
 
-    /** Ang uri at link mula sa "[uri] <link>" ng Botcake, para sa payload.attachment; null kapag hindi ganoon. */
+    /**
+     * Ang uri at link mula sa marka (MARKER, alinmang anyo), para sa payload.attachment at sa pagpares ng kopya; null
+     * kapag hindi ganoon. Ang uri ay maliliit na titik, ang larawan ay "image" (gaya ng uri ng Meta).
+     * @return array{type: string, url: ?string}|null
+     */
     public static function fromMarker(string $message): ?array
     {
         if (!preg_match(self::MARKER, trim($message), $x)) return null;
+        $url = ($x[2] ?? '') !== '' ? $x[2] : (($x[3] ?? '') !== '' ? $x[3] : null);
 
-        return ['type' => strtolower($x[1]), 'url' => isset($x[2]) && $x[2] !== '' ? mb_substr($x[2], 0, 2000) : null];
+        return ['type' => strtolower($x[1]) === 'photo' ? 'image' : strtolower($x[1]), 'url' => $url !== null ? mb_substr($url, 0, 2000) : null];
     }
 
     /**

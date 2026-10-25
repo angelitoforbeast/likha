@@ -150,18 +150,16 @@ class ForbeastWatch
 
     /**
      * Ang anyo ng mensahe sa paghahambing ng dalawang kopya: ang text ay walang pagkakaiba sa laki ng titik at espasyo; ang
-     * attachment ay ang uri lang (ang Forbeast ay "[Audio]", ang Botcake ay "[audio] <url>"). Ang larawan, sticker at Like
+     * attachment ay ang uri lang (ang Forbeast ay "[Audio]", ang Botcake ay "[audio](url)" o "[audio] url"). Ang larawan, sticker at Like
      * ay iisa: ang sticker ay dumarating sa Forbeast bilang larawan, at ang Like ay maaaring "[sticker] <url>" sa Botcake.
      */
     public static function kindOf(?string $message): string
     {
         $m = trim((string) $message);
         if ($m === ChatMessageCleaner::LIKE || $m === ChatMessageCleaner::PHOTO) return 'att:image';
-        if (preg_match('/^\[(audio|image|photo|sticker|video|file|location|fallback|attachment)\](?:\s+\S+)?$/iu', $m, $x)) {
-            $type = strtolower($x[1]);
-
-            return 'att:' . (in_array($type, ['photo', 'sticker'], true) ? 'image' : $type);
-        }
+        // Iisang pagbasa ng marka sa lahat ng anyo ("[audio](link)", "[audio] link", "[Audio]"): ChatAttachments.
+        $a = ChatAttachments::fromMarker($m);
+        if ($a !== null) return 'att:' . match ($a['type']) { 'sticker' => 'image', 'ig_reel' => 'reel', default => $a['type'] };
 
         return 'text:' . mb_strtolower(preg_replace('/\s+/u', ' ', $m));
     }
