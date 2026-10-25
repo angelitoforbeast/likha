@@ -256,7 +256,8 @@ class ChatbotController extends Controller
         $header = $request->filled('header') ? $text($request->input('header')) : null;
 
         $fields = array_values(array_filter($this->fields->columns(), fn ($c) => $c['key'] !== 'flow'));
-        $res = $ai->map($cells, $header, $fields);
+        $guesses = $request->input('guesses');
+        $res = $ai->map($cells, $header, $fields, is_array($guesses) && array_is_list($guesses) ? $guesses : []);
         if ($res === null) {
             $note = (string) config('services.openai.key') === '' ? 'AI mapping is off (no OpenAI key), so the header/position mapping was used.'
                 : 'AI could not map this paste, so the header/position mapping was used.';
@@ -265,7 +266,8 @@ class ChatbotController extends Controller
         Log::info('chatbot paste map', ['page' => $page, 'cells' => count($cells), 'model' => $res['model'],
             'tokens_in' => $res['tokens_in'], 'tokens_out' => $res['tokens_out'], 'cost_usd' => $res['cost_usd']]);
 
-        return response()->json(['mapping' => $res['mapping']]);
+        // missing: ang mga Seq na walang column pa (ang "Add Seq" sa preview ang gagawa).
+        return response()->json(['mapping' => $res['mapping']] + ($res['missing'] ? ['missing' => $res['missing']] : []));
     }
 
     /** "+ Column": bagong botfield para sa lahat ng page. */
