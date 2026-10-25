@@ -778,7 +778,7 @@
         const options = ['botcake', 'gateway'].filter(p => p === current || ((r.connected || []).includes(PROVIDER_LABEL[p]) && (p !== 'gateway' || gatewayReady)));
         if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + PROVIDER_LABEL[current]});
         const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Bot of ' + r.page, title: 'Replies via'},
-            options.map(p => el('option', {value: p, text: PROVIDER_LABEL[p]})));
+            [el('option', {value: 'botcake', text: 'Botcake'}), el('option', {value: 'gateway', text: 'Forbeast'})].filter(o => options.includes(o.value)));
         sel.value = current;
         sel.addEventListener('change', async () => {
             const want = sel.value;
