@@ -315,9 +315,15 @@ class ForbeastWatch
             ->orderBy('id')->get()->filter(fn ($c) => self::standby($c))->values();
         foreach ($chats as $c) {
             try {
-                // Ang kopya sa Forbeast lang ay hindi dahilan: kung pumalya ang sagot doon, ang Botcake ang sasagot.
+                // Ang kopya sa Forbeast lang ay hindi dahilan: kung pumalya ang sagot doon, ang Botcake ang sasagot. Pero kapag
+                // tumatakbo pa ang takbo ng kopyang iyon (hindi pa naaabot ng runner, o may AI o padalang hinihintay), iyon
+                // ang sasagot (sa Botcake na, dahil ang daan ay pinipili sa padala): dobleng sagot kapag pinatakbo pa ito.
                 $skip = ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $c->psid)->where('kind', 'send')->where('status', 'sent')
                     ->where('sent_at', '>=', ($c->received_at ?? now())->copy()->subSeconds(self::REPLIED_GRACE))->exists() ? 'already_answered' : null;
+                if ($skip === null && ($twin = self::twin($c, false)) !== null && ctype_digit((string) $c->psid)) {
+                    $fields = new CustomerFields((int) $pageId, (int) $c->psid);
+                    if ($twin->id > (int) $fields->get(CustomerFields::LAST_CHAT) || ChatbotAiQueue::pending($fields)) $skip = 'forbeast_pending';
+                }
                 if ($skip !== null) {
                     Log::info('forbeast watch: standby skipped', ['page' => $page, 'chat_id' => $c->id, 'reason' => $skip]);
                     continue;

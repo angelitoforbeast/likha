@@ -359,7 +359,7 @@ Tests: via stored per send path and shown in the Inbox payload and the Replies f
   - comment replies are always Forbeast: shown as such on the Replies Comments view, since they live in `chatbot_comment_events`.
 - **Inbox:** incoming items carry `via` from `payload.source`, shown as "· via Forbeast" next to the time. Outgoing items show "Bot · via Forbeast" or "<staff> · via Botcake". Old rows fall back to the Results `tags.via`.
 - **Replies:** a Via column, a Via filter, and Via in the detail.
-- **Backfill:** `php artisan chatbot:replies-via-backfill` (with `--dry-run`), to run by hand after the migration. It works in 1,000-row chunks by id and only touches send and manual rows that have no via.
+- **Backfill:** `php artisan chatbot:replies-via-backfill` (a dry run by default; `--apply` writes, since 149-7), to run by hand after the migration. It works in 1,000-row chunks by id and only touches send and manual rows that have no via.
   - Order of evidence: Results `tags.via`, then the stored provider answer (`message_id` / `recipient_id` = Forbeast, `success` = Botcake). Anything else stays null.
   - Note: `tags.via` is the bot of the chat that started the run, which almost always matches the sender.
 
@@ -429,7 +429,7 @@ Tests: via stored per send path and shown in the Inbox payload and the Replies f
 
 **Deploy notes:**
 - Run the migration.
-- Then optionally run `php artisan chatbot:replies-via-backfill --dry-run`, and the same without `--dry-run`.
+- Then optionally run `php artisan chatbot:replies-via-backfill` (a dry run: counts only), then `php artisan chatbot:replies-via-backfill --apply` to write.
 - Ignore is the default from the deploy on. The CEO can switch to reply on Health.
 
 **Suite:** `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` on 95085abf: `OK, but there were issues! Tests: 1520, Assertions: 8833, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459, no failures). The later commit b2d4bb7c changes only the Escape handling, and the page-script parse test passes on it.

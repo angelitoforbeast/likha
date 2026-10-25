@@ -330,6 +330,22 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->assertStringNotContainsString('voice.mp4', implode("\n", $lines));
     }
 
+    public function test_S_149_35_a_copy_whose_forbeast_run_is_still_going_is_left_to_that_run(): void
+    {
+        Queue::fake();
+        $this->greeting();
+        // Ang kopya ng Botcake muna, saka ang sa Forbeast: ang takbo nito ay nasa queue pa (hindi pa naaabot ng runner).
+        $this->botcakePush('Magkano po?')->assertOk();
+        $this->gatewayChat('Magkano po?');
+
+        Http::fake([self::GW_SEND => Http::response($this->metaError(190), 400)]);
+        $lines = $this->logged(fn () => $this->send());
+
+        $this->assertSame('botcake', $this->provider());
+        Queue::assertNotPushed(RunChatbotFlow::class); // ang takbo ng Forbeast ang sasagot (sa Botcake na), isang beses
+        $this->assertNotNull(collect($lines)->first(fn ($l) => str_contains($l, 'standby skipped') && str_contains($l, '"reason":"forbeast_pending"')));
+    }
+
     public function test_S_149_32_attachment_only_copies_never_count_for_the_inbound_switch(): void
     {
         Queue::fake();
@@ -460,7 +476,11 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
     {
         $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'message' => $message,
             'message_id' => $mid, 'payload' => ['source' => 'gateway'], 'received_at' => now()]);
-        if ($reply !== null) BotcakeOutbox::record(1001, (int) self::PSID, $chat->id, null, 'n2', 'send', [], $reply);
+        if ($reply !== null) {
+            BotcakeOutbox::record(1001, (int) self::PSID, $chat->id, null, 'n2', 'send', [], $reply);
+            // Tapos na ang takbo ng chat na ito (gaya ng runner): ang LAST_CHAT ay umabot na rito.
+            (new CustomerFields(1001, (int) self::PSID))->set(CustomerFields::LAST_CHAT, (string) $chat->id);
+        }
 
         return $chat;
     }
