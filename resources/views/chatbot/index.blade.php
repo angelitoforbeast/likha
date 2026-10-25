@@ -211,7 +211,9 @@
             </div>
             <div class="grid gap-3 p-4 sm:grid-cols-2">
                 @foreach(['botcake' => 'Botcake', 'forbeast' => 'Forbeast'] as $p => $label)
+                {{-- Ang Botcake save at Fix chat block ay nagpa-publish at nag-o-On ng bot: CEO lang (gaya ng On/Off). --}}
                 <form class="conn-card min-w-0 rounded-lg border border-slate-200 p-3" data-provider="{{ $p }}" autocomplete="off">
+                <fieldset class="min-w-0" @disabled($p === 'botcake' && !$isCeo)>
                     <div class="mb-2 flex items-center justify-between gap-2"><span class="font-semibold">{{ $label }}</span><span class="conn-state text-xs"></span></div>
                     <label class="flex flex-col text-xs text-slate-600">Page ID
                         <input name="page_id" inputmode="numeric" maxlength="30" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
@@ -225,6 +227,8 @@
                         <button class="cb-btn cb-btn-primary cb-btn-sm">Save and test</button>
                         @if($p === 'botcake')<button type="button" class="conn-fix cb-btn cb-btn-sm">Fix chat block</button>@endif
                     </div>
+                    @if($p === 'botcake' && !$isCeo)<p class="mt-1 text-xs text-slate-500">Only the CEO can change the Botcake connection.</p>@endif
+                </fieldset>
                 </form>
                 @endforeach
             </div>
@@ -350,9 +354,9 @@
         const r = b.getBoundingClientRect(), box = $('hf');
         $('hf-q').value = '';
         box.classList.remove('hidden');
+        paintFilter(); // bago sukatin: ang taas ay ayon sa listahan
         box.style.top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - box.offsetHeight - 8)) + 'px';
         box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
-        paintFilter();
         $('hf-q').focus();
     }
     function filterValues(key) {
@@ -695,6 +699,7 @@
         document.querySelectorAll('#conn .conn-msg').forEach(m => { m.textContent = ''; });
         dialog('conn', true);
         const {ok, status, data} = await getJson(url.connectionsUrl + '?page_name=' + encodeURIComponent(page));
+        if (connPage !== page) return; // ibang page na ang bukas
         if (!ok) { connCard('botcake').querySelector('.conn-msg').textContent = data.error || 'Could not load (' + status + ').'; return; }
         paintConnections(data);
     }
@@ -703,14 +708,15 @@
         m.textContent = text; m.className = 'conn-msg mt-2 min-h-[1rem] break-words text-xs ' + (good ? 'text-green-700' : 'text-red-600');
     }
     async function connSave(card, path, body) {
-        const btns = card.querySelectorAll('button');
+        const btns = card.querySelectorAll('button'), page = connPage;
         btns.forEach(b => { b.disabled = true; });
         connMsg(card, 'Testing…', true);
         try {
-            let res = await post(url.connectionsSaveUrl + '/' + path, Object.assign({page_name: connPage}, body));
+            let res = await post(url.connectionsSaveUrl + '/' + path, Object.assign({page_name: page}, body));
             // Nakakabit sa ibang site (o hindi masuri): itanong bago ilipat.
-            if (res.status === 409 && confirm(res.data.message)) res = await post(url.connectionsSaveUrl + '/' + path, Object.assign({page_name: connPage, confirm: true}, body));
+            if (res.status === 409 && confirm(res.data.message)) res = await post(url.connectionsSaveUrl + '/' + path, Object.assign({page_name: page, confirm: true}, body));
             const d = res.data;
+            if (connPage !== page) { btns.forEach(b => { b.disabled = false; }); load(); return; } // ibang page na ang bukas
             if (d.connections) paintConnections(d.connections);
             if (res.status === 409) connMsg(card, 'Not changed.', false);
             else if (!res.ok) connMsg(card, (d.name ? 'Provider page: ' + d.name + '. ' : '') + (d.error || d.message || 'Not saved (' + res.status + ').'), false);
