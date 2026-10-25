@@ -22,9 +22,10 @@ class ChatbotAiSettings
 
     /** Ang mga key ng page at ng site (walang "ai_" sa app_settings), at ang pangalan nila sa Changes. */
     public const PAGE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout'];
-    public const SITE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds'];
+    public const SITE_FIELDS = ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort'];
     public const LABELS = ['ai_provider' => 'AI provider', 'ai_fallback' => 'AI fallback', 'ai_local_model' => 'Local model', 'ai_local_timeout' => 'Local timeout',
-        'ai_local_concurrency' => 'Local concurrency', 'ai_breaker_failures' => 'Breaker failures', 'ai_breaker_seconds' => 'Breaker seconds'];
+        'ai_local_concurrency' => 'Local concurrency', 'ai_breaker_failures' => 'Breaker failures', 'ai_breaker_seconds' => 'Breaker seconds',
+        'ai_local_reasoning_effort' => 'Local reasoning'];
     private const RANGES = ['local_timeout' => [1, 60], 'local_concurrency' => [1, 50], 'breaker_failures' => [1, 20], 'breaker_seconds' => [5, 600]];
 
     public function __construct(private PageSettings $settings)
@@ -44,6 +45,7 @@ class ChatbotAiSettings
             'ai_provider' => ChatbotAiProviders::label($value),
             'ai_fallback' => implode(' → ', array_map(fn ($p) => $p === ChatbotAiChain::NONE ? 'None' : ChatbotAiProviders::label($p), explode(',', $value))),
             'ai_local_timeout', 'ai_breaker_seconds' => $value . ' s',
+            'ai_local_reasoning_effort' => $value === ChatbotAiChain::OMIT ? 'Not sent' : $value,
             default => $value,
         };
     }
@@ -56,10 +58,21 @@ class ChatbotAiSettings
     {
         $out = [];
         foreach ($site ? self::SITE_FIELDS : self::PAGE_FIELDS as $f) {
-            if (!array_key_exists($f, $input) || $input[$f] === null) continue;
+            if (!array_key_exists($f, $input)) continue;
+            // Ang blangko ay nagiging null sa request; sa reasoning ng Local, ang blangko ay may kahulugan (hindi ipinapadala).
+            if ($input[$f] === null) {
+                if ($f !== 'local_reasoning_effort') continue;
+                $input[$f] = '';
+            }
             if (!is_scalar($input[$f])) return ['Pick a valid ' . strtolower(self::LABELS['ai_' . $f]) . '.', []];
             $v = trim((string) $input[$f]);
             $clear = !$site && ($v === self::DEFAULT || ($v === '' && in_array($f, ['local_model', 'local_timeout'], true)));
+            // Ang reasoning ng Local: blangko = hindi ipinapadala (naitatala bilang "omit").
+            if ($f === 'local_reasoning_effort') {
+                if ($v !== '' && !in_array($v, ChatbotAiChain::EFFORTS, true)) return ['Local reasoning: none, low, medium, high, or empty (not sent).', []];
+                $out[$f] = $v === '' ? ChatbotAiChain::OMIT : $v;
+                continue;
+            }
             if ($clear) {
                 $out[$f] = self::DEFAULT;
                 continue;
@@ -181,6 +194,7 @@ class ChatbotAiSettings
             'local_concurrency' => (int) ($site['local_concurrency'] ?? ChatbotAiProviders::option($local, 'concurrency', 4)),
             'breaker_failures' => (int) ($site['breaker_failures'] ?? ChatbotAiProviders::option($local, 'breaker_failures', 3)),
             'breaker_seconds' => (int) ($site['breaker_seconds'] ?? ChatbotAiProviders::option($local, 'breaker_seconds', 30)),
+            'local_reasoning_effort' => ChatbotAiChain::reasoning($local),
             'local_ready' => ChatbotAiProviders::notReady($local) === null,
             'providers' => array_map(fn ($p) => ['name' => $p, 'label' => ChatbotAiProviders::label($p)], ChatbotAiProviders::names()),
         ];

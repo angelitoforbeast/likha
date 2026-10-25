@@ -155,6 +155,9 @@ return [
             'local' => [
                 'label' => 'Local', 'url' => env('CHATBOT_AI_LOCAL_URL', ''), 'key' => env('CHATBOT_AI_LOCAL_KEY', ''), 'localhost_only' => true,
                 'model' => '', 'timeout' => 8, 'concurrency' => 4, 'breaker_failures' => 3, 'breaker_seconds' => 30,
+                // Ang qwen3 sa Ollama ay nag-iisip muna (13-14 s, lampas sa 8 s): "none" ang pumapatay nito sa OpenAI-compatible na endpoint.
+                // none | low | medium | high, o '' = hindi ipinapadala. Hindi kailanman sa OpenAI.
+                'reasoning_effort' => 'none',
             ],
         ],
     ],

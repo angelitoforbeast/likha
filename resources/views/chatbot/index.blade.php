@@ -205,6 +205,7 @@
                 <label class="flex flex-col">Local timeout (s)<input name="local_timeout" type="number" min="1" max="60" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
                 <label data-ai-site-only class="flex flex-col">Local at a time<input name="local_concurrency" type="number" min="1" max="50" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
                 <label data-ai-site-only class="flex flex-col">Pause Local after failures<input name="breaker_failures" type="number" min="1" max="20" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
+                <label data-ai-site-only class="flex flex-col">Local reasoning<select name="local_reasoning_effort" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"><option value="none">None (fastest)</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="">Not sent</option></select></label>
                 <label data-ai-site-only class="flex flex-col">Pause for (s)<input name="breaker_seconds" type="number" min="5" max="600" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
             </div>
             <p id="ai-chain" class="mt-2 text-xs text-slate-600"></p>
@@ -955,7 +956,7 @@
         f.elements.local_model.placeholder = r && aiSite?.local_model ? 'Default: ' + aiSite.local_model : 'e.g. qwen3:14b';
         f.elements.local_timeout.value = a.local_timeout ?? '';
         f.elements.local_timeout.placeholder = r ? 'Default: ' + (aiSite?.local_timeout ?? 8) : '';
-        for (const k of ['local_concurrency', 'breaker_failures', 'breaker_seconds']) f.elements[k].value = r ? '' : (a[k] ?? '');
+        for (const k of ['local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort']) f.elements[k].value = r ? '' : (a[k] ?? '');
         f.querySelectorAll('[data-ai-site-only]').forEach(l => l.classList.toggle('hidden', !!r));
         $('ai-chain').textContent = r ? 'Now: ' + a.chain : '';
         $('ai-local-note').classList.toggle('hidden', !notReady);
@@ -972,10 +973,10 @@
     $('ai-form').addEventListener('submit', async e => {
         e.preventDefault();
         const f = e.target, r = aiPage, body = r ? {page_name: r.page} : {};
-        for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds']) {
+        for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort']) {
             const v = f.elements[k].value.trim();
             // Sa page, ang blangkong model o timeout = bumalik sa default. Sa site, ang binago lang (ang default ng server ay hindi naisusulat).
-            if (r || (v !== '' && v !== String(aiSite?.[k] ?? ''))) body[k] = v;
+            if (r || ((v !== '' || k === 'local_reasoning_effort') && v !== String(aiSite?.[k] ?? ''))) body[k] = v; // blangkong reasoning = hindi ipinapadala
         }
         if (!r && !Object.keys(body).length) { dialog('ai-box', false); notice('No change.'); return; }
         const btn = f.querySelector('button.cb-btn-primary');

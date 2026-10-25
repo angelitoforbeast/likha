@@ -25,6 +25,8 @@ class ChatbotAiChain
     public const SITE_PREFIX = 'chatbot.ai.'; // app_settings
     public const SITE_CACHE = 'chatbot-ai-site';
     public const NONE = 'none';
+    public const EFFORTS = ['none', 'low', 'medium', 'high'];
+    public const OMIT = 'omit'; // ang naka-save na "huwag ipadala ang reasoning_effort" (ang blangko ay hindi maitatala sa history)
 
     /** Ang mga setting ng site (app_settings chatbot.ai.<key>), naka-cache nang sandali. @return array<string, string> */
     public static function site(): array
@@ -159,8 +161,21 @@ class ChatbotAiChain
     {
         $key = ChatbotAiProviders::key($provider);
 
+        $body = ChatbotAi::payload($model, $messages, $maxTokens);
+        // Ang hindi OpenAI (Local): ang reasoning_effort (site, o config) ang pumapatay sa pag-iisip ng model; ang OpenAI ay ang dating body.
+        if ($provider !== ChatbotAiProviders::OPENAI && ($effort = self::reasoning($provider)) !== '') $body['reasoning_effort'] = $effort;
+
         return ['url' => (string) ChatbotAiProviders::url($provider), 'headers' => ($key !== '' ? ['Authorization' => 'Bearer ' . $key] : []) + ['Accept' => 'application/json'],
-            'body' => ChatbotAi::payload($model, $messages, $maxTokens)];
+            'body' => $body];
+    }
+
+    /** Ang reasoning_effort ng provider (none | low | medium | high), o '' = hindi ipinapadala. */
+    public static function reasoning(string $provider): string
+    {
+        $v = self::site()[$provider . '_reasoning_effort'] ?? ChatbotAiProviders::option($provider, 'reasoning_effort', '');
+        $v = (string) $v === self::OMIT ? '' : (string) $v;
+
+        return in_array($v, self::EFFORTS, true) ? $v : '';
     }
 
     /**

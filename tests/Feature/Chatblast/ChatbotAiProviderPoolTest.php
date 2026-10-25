@@ -66,6 +66,7 @@ class ChatbotAiProviderPoolTest extends ChatbotAiProviderTestCase
         $local = $this->to('127.0.0.1');
         $this->assertCount(1, $local);
         $this->assertSame([8, 5, false], [$local[0]['opt']['timeout'], $local[0]['opt']['connect_timeout'], $local[0]['opt']['allow_redirects']]);
+        $this->assertSame('none', json_decode((string) $local[0]['req']->getBody(), true)['reasoning_effort']); // S-150C.19 sa pool din
         $this->travel(8)->seconds();
         $this->timeout($local[0]);
         $this->pool->tick(false);

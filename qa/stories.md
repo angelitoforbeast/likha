@@ -2509,6 +2509,8 @@ Tests: `tests/Feature/Chatblast/ChatbotAiProviderTest.php` (chain, keys, F), `Ch
 | S-150C.16 | P1 | Given Filipino / non-ASCII text (₱, ñ), then it passes unchanged through Local and the fallback | `test_S_150_C16…` | passed 2026-10-25 |
 | S-150C.17 | P1 | Given a failure, then only a fixed reason is stored, never the error body, the key or customer text | `test_S_150_C17…` | passed 2026-10-25 |
 | S-150C.18 | P1 | Given a Local attempt, then it gets the same messages and max_tokens as OpenAI with its own model name | `test_S_150_C18…` | passed 2026-10-25 |
+| S-150C.19 | P1 | Given a Local attempt, then its body has `"reasoning_effort":"none"` by default (site setting none, low, medium, high, or empty = not sent; editable with the other Local settings, logged in Changes), and OpenAI's body never has it | `test_S_150_C19…` (+ pool body in `test_S_150_C3…`) | passed 2026-10-25 |
+| S-150C.20 | P1 | Given Local answers content plus a separate `message.reasoning`, then the content is sent and the reasoning is neither sent nor stored; given empty content with only `reasoning`, then the next provider answers | `test_S_150_C20…` | passed 2026-10-25 |
 | S-150D.1 | P1 | Given an OpenAI answer, then provider "openai", model, latency ms, prompt and completion tokens from `usage`, fell_back false | `test_S_150_D1…` | passed 2026-10-25 |
 | S-150D.2 | P1 | Given Local failed then OpenAI answered, then provider OpenAI, the Local attempt with its reason and latency, fell_back true | `test_S_150_D2…` | passed 2026-10-25 |
 | S-150D.3 | P1 | Given one page and a date range, then the comparison shows per provider requests, answered, failed, fallbacks, average and p95 latency, total input and output tokens | `test_S_150_D3…` | passed 2026-10-25 |

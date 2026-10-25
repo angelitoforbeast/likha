@@ -252,7 +252,53 @@ class ChatbotAiProviderTest extends ChatbotAiProviderTestCase
         $this->says('hello po');
 
         $body = $this->calls(self::LOCAL)[0]->data();
-        $this->assertSame(['model' => 'hf.co/org/model:Q4_K_M', 'messages' => [['role' => 'user', 'content' => 'hello po']], 'max_tokens' => 250], $body);
+        // Ang reasoning_effort ay sa Local lang (hindi bahagi ng body ng OpenAI).
+        $this->assertSame(['model' => 'hf.co/org/model:Q4_K_M', 'messages' => [['role' => 'user', 'content' => 'hello po']], 'max_tokens' => 250, 'reasoning_effort' => 'none'], $body);
+    }
+
+    public function test_S_150_C19_local_gets_reasoning_effort_none_by_default_and_not_when_the_setting_is_empty(): void
+    {
+        $this->useLocal();
+        $this->live();
+        $this->localAnswers = [Http::response([], 500)];
+        $this->says('hello');
+        $this->assertStringContainsString('"reasoning_effort":"none"', $this->calls(self::LOCAL)[0]->body());
+        $this->assertSame(['model' => 'qwen3:14b', 'messages' => [['role' => 'user', 'content' => 'hello']], 'max_tokens' => 250, 'reasoning_effort' => 'none'], $this->calls(self::LOCAL)[0]->data());
+        $this->assertSame(self::todayBody('gpt-4o-mini', [['role' => 'user', 'content' => 'hello']], 250), $this->calls(self::OPENAI)[0]->body(), 'never sent to OpenAI');
+
+        // Nae-edit sa site default (kasama ang ibang Local setting), may entry sa Changes; blangko = hindi ipinapadala.
+        $this->actingAs($this->user('CEO', 'ana@example.test'));
+        $this->postJson('/chatbot/ai/site', ['local_reasoning_effort' => 'max'])->assertStatus(422);
+        $this->postJson('/chatbot/ai/site', ['local_reasoning_effort' => 'low'])->assertOk()->assertJsonPath('ai_site.local_reasoning_effort', 'low');
+        $this->says('two', self::TECH, '7002');
+        $this->assertSame('low', $this->calls(self::LOCAL)[1]->data()['reasoning_effort']);
+        $this->postJson('/chatbot/ai/site', ['local_reasoning_effort' => ''])->assertOk()->assertJsonPath('ai_site.local_reasoning_effort', '');
+        $this->says('three', self::TECH, '7003');
+        $this->assertArrayNotHasKey('reasoning_effort', $this->calls(self::LOCAL)[2]->data());
+        $this->assertStringNotContainsString('reasoning_effort', $this->calls(self::LOCAL)[2]->body());
+
+        $changes = collect($this->getJson('/chatbot/changes?field=ai_local_reasoning_effort')->assertOk()->json('entries'));
+        $this->assertSame([['Site default', 'Local reasoning', 'low', 'Not sent']], $changes->sortBy('id')->map(fn ($e) => [$e['page'], $e['field'], $e['old'] ?? null, $e['new']])->values()->slice(-1)->values()->all());
+    }
+
+    public function test_S_150_C20_a_reasoning_field_is_dropped_and_empty_content_with_reasoning_falls_back(): void
+    {
+        $this->useLocal();
+        $this->live();
+        $this->localAnswers = [
+            Http::response(['choices' => [['message' => ['content' => 'Opo, meron pa.', 'reasoning' => 'LIHIM NA PAG-IISIP ng model']]]]),
+            Http::response(['choices' => [['message' => ['content' => '', 'reasoning' => 'LIHIM NA PAG-IISIP lang']]]]),
+        ];
+
+        $this->says('may stock?');
+        $this->says('meron pa?', self::TECH, '7002');
+
+        $this->assertSame(['Reply: Opo, meron pa.'], $this->sent());
+        $this->assertSame(['Reply: openai answer'], $this->sent('7002'));
+        $stored = collect(['chatbot_ai_requests', 'chatbot_events', 'chatbot_replies'])->filter(fn ($t) => \Illuminate\Support\Facades\Schema::hasTable($t))
+            ->map(fn ($t) => json_encode(DB::table($t)->get()))->implode(' ');
+        $this->assertStringNotContainsString('LIHIM', $stored);
+        $this->assertSame('fell back from Local: Local gave an empty answer.', DB::table('chatbot_ai_requests')->where('psid', 7002)->value('fallback_reason'));
     }
 
     public function test_S_150_E1_each_provider_uses_only_its_own_key(): void

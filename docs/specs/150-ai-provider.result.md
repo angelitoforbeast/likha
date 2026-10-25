@@ -36,6 +36,7 @@ Base: `feat/149-comment-replies` at 52974859. Base run before any change: `tests
 - Review 1 (adversarial, tasks 1–3): 1 major (stale Local timer could end a re-claimed request) fixed test-first; 3 minors fixed (OpenAI keeps its last-second send, stuck rows pruned as before, sync rows out of Bot Health); 5 minors accepted in TODO.md.
 - Stages 4–6: settings endpoints, Changes, comparison and the UI (20 + 7 tests).
 - Review 2 (adversarial, tasks 4–6): no blocker or major; minors on staff input fixed in one wave (compare `page[]` 500, impossible dates, skipped attempts counted as calls, D.4 test, existing `ai_` staff columns locked, site dialog saving env defaults, UTC date default, stuck "Loading…"); the rest accepted in TODO.md.
+- Amendment 150-1 (saved as `handoff/150-ai-provider/AMENDMENT-1.md` in the main checkout): Local's body gets `reasoning_effort` (site setting, default `none`, empty = not sent, never to OpenAI), editable in "AI default" (Local reasoning) and logged in Changes; a separate `message.reasoning` is never used or stored. C.19 and C.20 added with tests.
 - Stage 7: full Chatblast suite, PageSettings and OrderEncode suites, key grep (see Evidence).
 - Browser check: not run. This worktree has no running app; A.11 and D.14 at 390 x 844 are checked in markup only (the dialogs are single-column below `sm`, the comparison table scrolls in its own box). Owner checks on a real phone stay open.
 
@@ -61,6 +62,7 @@ Base: `feat/149-comment-replies` at 52974859. Base run before any change: `tests
 
 - Added **S-150D.3b**: skipped attempts (cap full, breaker open, not set up) are counted as `skipped`, not as calls, failures or latency, and bad compare input (array page, impossible or reversed dates, range over 90 days) is refused with 422. Reason: review 2 showed Local's failure rate looked worse than its real calls, and `page[]` gave a 500.
 - **S-150E.10**: the request always goes to `…/v1/chat/completions` (`/v1` is added when the base lacks it), because Ollama serves only `/v1`. The case text said `<base>/chat/completions`; see ruling 2.
+- Added **S-150C.19** and **S-150C.20** (amendment 1). **S-150C.18**'s expected Local body now also has `reasoning_effort` (the amendment adds it; messages, max_tokens and the model are unchanged).
 - **S-150F.6, F.7, F.9** are proven by the unchanged `ChatbotAsyncAiTest` (S-087.7 for the 429 rule, the whole file for F.7, S-087.10 for the mock bypass) instead of new tests, per the "no second test for a proven behaviour" rule.
 
 ## Evidence per case
@@ -75,6 +77,7 @@ Final run (stage 7): see "Final runs" below. Red lines are the first failure see
 | Review 1 fixes | C.14 `Failed asserting that two arrays are identical` (stale timer failed the retried request); F.3 `actual size 1 matches expected size 2` (no last-second send); D.8 stuck `answered` row not deleted; D.11 `Failed asserting that 2 is identical to 0` (sync rows in Bot Health) |
 | 4 (`ChatbotAiSettingsTest`) | 14× `Expected response status code [200] but received 404`; `Undefined array key "ai"`; E.4 `received 302` (fixed in the test: that endpoint refuses by redirect with errors) |
 | 5–6 (UI, compare) | A.11 and D.14 `Failed asserting that '<!DOCTYPE html>…' contains "data-ai-url=…"`; the first `ChatbotAiCompareTest` cases (D.3, D.6–D.10) were written before `ChatbotAiCompare` but run only after it existed, so no separate red line was captured for them (the A.4 / E.3 runs before it errored on the missing class) |
+| Amendment 1 | C.19 `Failed asserting that '{"model":"qwen3:14b","messages":[…],"max_tokens":250}' contains ""reasoning_effort":"none""`; C.20 passed on its first run (the parser already reads only `content`, and empty content already falls back), so it pins existing behaviour; C.18's expected body was updated to include the new field |
 | Review 2 fixes | D.3b `Undefined array key "skipped"`; E.4 (ai_prompt) `Failures: 1` (existing staff column refused) |
 
 | Case | Test | Result |
@@ -92,6 +95,8 @@ Final run (stage 7): see "Final runs" below. Red lines are the first failure see
 | S-150B.1–B.7 | `…test_S_150_B1…` to `…test_S_150_B7…` | pass |
 | S-150C.1, C.2, C.4, C.5, C.7–C.10, C.13 (sync), C.13b, C.15–C.18 | `ChatbotAiProviderTest::test_S_150_C…` | pass |
 | S-150C.3, C.6, C.11, C.12, C.13 (pool), C.14 | `ChatbotAiProviderPoolTest::test_S_150_C…` (C.3 also sync in `ChatbotAiProviderTest`) | pass |
+| S-150C.19 | `ChatbotAiProviderTest::test_S_150_C19…` (body default, low, not sent, OpenAI body unchanged, 422 on a bad value, Changes entry) + pool body check in `ChatbotAiProviderPoolTest::test_S_150_C3…` | pass |
+| S-150C.20 | `ChatbotAiProviderTest::test_S_150_C20…` | pass |
 | S-150D.1, D.2, D.5–D.8, D.11–D.13 | `ChatbotAiRecordTest::test_S_150_D…` (D.6 also in `ChatbotAiCompareTest`) | pass |
 | S-150D.3, D.3b, D.4, D.7, D.8, D.9, D.10, D.14 | `ChatbotAiCompareTest::test_S_150_D…` | pass (D.14 markup; browser not run) |
 | S-150E.1, E.2, E.5–E.10 | `ChatbotAiProviderTest::test_S_150_E…` | pass |
@@ -106,7 +111,8 @@ Key grep: `git grep -n -i -P "sk-[a-z0-9]{10,}"` finds only 3 lines that are on 
 
 ### Final runs
 
-- `tests/Feature/Chatblast` (includes the AI pool tests): **955 tests, OK**, 6471 assertions, 1 skipped (the same skip as the base), 38 PHPUnit deprecations (same as the base). Base was 882; 73 new tests (this spec's 71 plus D.3b and D.4 from review 2). No test fails.
+- After amendment 1: `tests/Feature/Chatblast` **957 tests, OK**, 6489 assertions, 1 skipped, 38 deprecations (the same as the base).
+- Before amendment 1: `tests/Feature/Chatblast` (includes the AI pool tests): **955 tests, OK**, 6471 assertions, 1 skipped (the same skip as the base), 38 PHPUnit deprecations (same as the base). Base was 882; 73 new tests (this spec's 71 plus D.3b and D.4 from review 2). No test fails.
 - `tests/Feature/PageSettings` + `tests/Feature/OrderEncode` (they touch `PageSettings::validate` and the AI queue): **555 tests, OK**.
 - One earlier full run had `ChatbotTagsTest::test_S_100_2…` red once (a sequence-timing test, passes alone and in the later full runs) and one had this spec's F.3 red once: a whole-second timing assumption in the test, fixed by pinning the clock (C.11 had the same assumption, also pinned); the pool test file then passed 3 runs after the F.3 pin, 2 runs after the C.11 pin, and the final full run.
 
@@ -121,6 +127,7 @@ Key grep: `git grep -n -i -P "sk-[a-z0-9]{10,}"` finds only 3 lines that are on 
 7. E.7: a missing OpenAI key is recorded as "OpenAI is not set up." in the attempts, while the step's error keeps today's "No OpenAI key is set on the server." (F: OpenAI-only pages fail exactly as today).
 8. `latency_ms` is the sum of all attempts (the customer's wait for the AI); each attempt keeps its own ms for the per-provider comparison.
 9. E.4 refuses chatbot keys ending in `key`/`api_key` only; the AI settings themselves are system keys. Existing staff columns starting with `ai_` stay editable.
+10. Amendment 1 names the config key `services.chatbot_ai.local.reasoning_effort`; it lives at `services.chatbot_ai.providers.local.reasoning_effort`, next to the other Local defaults, so a third provider can have its own. The saved "empty" is stored as `omit` (a history row cannot be blank) and shown as "Not sent". The value is a screen setting, not an env line (only URLs and keys are in env).
 
 ## Merge danger
 
@@ -130,6 +137,7 @@ Key grep: `git grep -n -i -P "sk-[a-z0-9]{10,}"` finds only 3 lines that are on 
 - **Generic settings refusal**: chatbot keys ending in `key` can no longer be written from the generic endpoints. Before deploy, check prod `page_settings` (provider chatbot) and app_settings `chatbot.columns` for such keys (TODO.md).
 - **Switch everything back to OpenAI**: on /chatbot/pages set each overridden page's AI button to "Default", and "AI default" to OpenAI; or unset `CHATBOT_AI_LOCAL_URL` and run `php artisan config:cache`, so Local is "not set up" and is skipped. Note: a page whose fallback is "None" with Local as its only provider then fails (failed port) instead of answering; set its fallback to OpenAI or its provider to Default first.
 - **Set Tech Flask Ph to Local after release**: set the env lines below, `config:cache`, restart the pool; open /chatbot/pages, click "AI: OpenAI (default)" on the Tech Flask Ph row, pick AI provider Local, type the model name (as Ollama lists it, e.g. `qwen3:14b`), leave "If it fails, then" on Default (Local → OpenAI), Save. Compare with "Compare AI".
+- **Local reasoning**: the default is `none` (thinking off; qwen3 on Ollama otherwise thinks 13-14 s per reply and trips the 8 s timeout). No env line: it is the "Local reasoning" select in "AI default" (none, low, medium, high, Not sent), logged in Changes.
 - **Env lines the server needs** (only for Local; Incepxion needs none):
   - `CHATBOT_AI_LOCAL_URL=http://127.0.0.1:11435/v1` (the reverse SSH tunnel's port on the server's localhost)
   - `CHATBOT_AI_LOCAL_KEY=` (optional; leave empty for Ollama without a key)
@@ -142,7 +150,9 @@ Key grep: `git grep -n -i -P "sk-[a-z0-9]{10,}"` finds only 3 lines that are on 
 - 1c937d59 fix: a stale Local timer never ends a re-claimed request, OpenAI keeps its last-second send, stuck rows pruned as before, sync records out of Bot Health (spec 150)
 - 0b1d01ee feat: choose the chatbot AI per page and site-wide on /chatbot/pages, AI changes in Changes, compare AI per page (spec 150)
 - fafce8dd fix: compare AI refuses bad dates and counts only real calls, staff ai_ columns stay editable, the site AI dialog saves only changed fields (spec 150)
-- (last) docs: result, stories and stable pool test timing (spec 150)
+- 99758e57 docs: result, stories and stable pool test timing (spec 150)
+- 5fe2a6a4 docs: exact rerun count in the result (spec 150)
+- (last) feat: Local gets reasoning_effort (default none), a separate reasoning field is never used (spec 150, amendment 1)
 
 ## Open points
 
