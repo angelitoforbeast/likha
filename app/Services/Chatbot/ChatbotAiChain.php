@@ -180,7 +180,7 @@ class ChatbotAiChain
             }
             $left = $attempts ? (int) floor($budget - (microtime(true) - $start)) : $budget;
             if ($left < 1) {
-                $attempts[] = self::skipped($step, $model, ['why' => ChatbotAiProviders::noAnswer($p, true), 'error' => ChatbotAiProviders::noAnswer($p, true)]);
+                $attempts[] = self::skipped($step, $model, ['why' => ChatbotAiProviders::late($p), 'error' => ChatbotAiProviders::late($p)]);
                 break;
             }
             $timeout = $step['timeout'] !== null ? min($step['timeout'], $left) : $left;

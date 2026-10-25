@@ -16,9 +16,14 @@ class ChatbotAi
      * Ang naghihintay na AI step: ang chain ng page (ChatbotAiChain; walang setting = isang tawag sa OpenAI gaya ng dati).
      * @return array{ok: bool, text: string, error: ?string}
      */
-    public function answer(FlowRun $run, string $model, array $messages, int $maxTokens): array
+    public function answer(FlowRun $run, string $nodeId, string $model, array $messages, int $maxTokens): array
     {
         $out = app(ChatbotAiChain::class)->complete($run->pageName, $model, $messages, $maxTokens);
+        try {
+            ChatbotAiQueue::record($run, $nodeId, $model, $maxTokens, $out);
+        } catch (\Throwable $e) {
+            report($e); // ang record ay hindi dapat makapigil sa sagot sa customer
+        }
 
         return ['ok' => $out['ok'], 'text' => $out['text'], 'error' => $out['error']];
     }

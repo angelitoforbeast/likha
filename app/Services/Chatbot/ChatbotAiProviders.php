@@ -86,6 +86,12 @@ class ChatbotAiProviders
         return self::label($name) . ($timedOut && $name !== self::OPENAI ? ' did not answer in time.' : ' did not answer.');
     }
 
+    /** Ubos na ang oras ng step bago pa makasagot ang provider (ang deadline ng row, o ang 30 s ng naghihintay). */
+    public static function late(string $name): string
+    {
+        return self::label($name) . ' did not answer in time.';
+    }
+
     /**
      * Ang sagot (HTTP status at JSON) bilang resulta ng step, kasama ang usage. Ang OpenAI ay binabasa gaya ng dati
      * (ChatbotAi::parse); ang iba ay inaalisan din ng <think>…</think> sa unahan (hindi magagamit ang puro pag-iisip).

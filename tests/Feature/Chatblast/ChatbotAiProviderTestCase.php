@@ -71,7 +71,7 @@ abstract class ChatbotAiProviderTestCase extends ChatblastTestCase
     /** @return array<int, string> ang migration ng record (spec 150), kapag kailangan ng test */
     protected function extraMigrations(): array
     {
-        return [];
+        return ['database/migrations/2026_11_10_100000_add_provider_record_to_chatbot_ai_requests.php'];
     }
 
     private function next(array &$answers, string $default, HttpRequest $r)

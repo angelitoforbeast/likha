@@ -415,7 +415,7 @@ class FlowEngine
                 $run->event('ai_pending', $node['id'], ['model' => $model, 'request' => substr($id, 0, 8)]);
                 return ['port' => null, 'suspend' => true, 'note' => 'Waiting for the AI answer'];
             }
-            $res = ChatbotMockAi::answer($run) ?? $this->ai->answer($run, $model, $messages, $maxTokens);
+            $res = ChatbotMockAi::answer($run) ?? $this->ai->answer($run, $node['id'], $model, $messages, $maxTokens);
         }
         if (!$res['ok']) {
             $run->event('ai', $node['id'], ['result' => 'failed', 'model' => (string) ($c['model'] ?? 'gpt-4o-mini'), 'error' => (string) $res['error']]);

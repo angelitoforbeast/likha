@@ -17,7 +17,9 @@ use Illuminate\Support\Str;
 class ChatbotAiQueue
 {
     public const TABLE = 'chatbot_ai_requests';
-    public const KEEP_DAYS = 2;
+    public const KEEP_DAYS = 2; // ang text ng customer (messages, answer, context)
+    public const RECORD_DAYS = 90; // ang record ng request (provider, bilis, tokens), kapag may mga column na nito
+    private const DONE = ['resumed', 'failed', 'answered', 'sync'];
     public const REDISPATCH_SECONDS = 30; // ang answered/failed na hindi pa naituloy (nawalang job) ay ipinapadala ulit
 
     /**
@@ -36,6 +38,35 @@ class ChatbotAiQueue
         return max(5, (int) config('services.openai.timeout', 60));
     }
 
+    /** Tumakbo na ang migration ng record? Bago iyon, ang AI step ay gaya ng dati (walang record, bura pagkatapos ng 2 araw). */
+    public static function recorded(): bool
+    {
+        return Schema::hasColumn(self::TABLE, 'provider');
+    }
+
+    /** Ang mga column ng record mula sa resulta ng chain (ChatbotAiChain::outcome): walang text ng customer o ng sagot. */
+    private static function recordOf(array $res): array
+    {
+        return ['provider' => $res['provider'], 'model_used' => $res['model_used'], 'fell_back' => (bool) $res['fell_back'],
+            'fallback_reason' => $res['fallback_reason'], 'ai_attempts' => json_encode($res['attempts'], JSON_UNESCAPED_UNICODE),
+            'latency_ms' => $res['latency_ms'], 'prompt_tokens' => $res['prompt_tokens'], 'completion_tokens' => $res['completion_tokens']];
+    }
+
+    /**
+     * Ang record ng naghihintay na tawag (Test, sequence, walang pool): isang row na status sync (hindi kinukuha, sinu-sweep o
+     * itinutuloy), walang text ng customer o ng sagot.
+     */
+    public static function record(FlowRun $run, string $nodeId, string $model, int $maxTokens, array $res): void
+    {
+        if (!isset($res['attempts']) || !Schema::hasTable(self::TABLE) || !self::recorded()) return;
+        DB::table(self::TABLE)->insert([
+            'request_id' => (string) Str::uuid(), 'page_id' => (int) $run->pageId, 'psid' => (int) $run->fields->psid, 'chat_id' => $run->chatId,
+            'flow_id' => (int) $run->flowId, 'node_id' => mb_substr($nodeId, 0, 20), 'run_id' => $run->runId, 'page_name' => $run->pageName, 'model' => mb_substr($model, 0, 100),
+            'messages' => null, 'max_tokens' => $maxTokens, 'context' => null, 'status' => 'sync', 'deadline_at' => now(), 'answered_at' => now(),
+            'error' => $res['ok'] ? null : mb_substr((string) $res['error'], 0, 255), 'path' => 'sync', 'created_at' => now(), 'updated_at' => now(),
+        ] + self::recordOf($res));
+    }
+
     /** Ang ticket: isang row, at ang __ai ng customer (ang marka na may hinihintay pang sagot). @return string request_id */
     public static function submit(FlowRun $run, string $nodeId, string $model, array $messages, int $maxTokens): string
     {
@@ -48,7 +79,7 @@ class ChatbotAiQueue
             'context' => json_encode(['input' => $run->input, 'full_name' => $run->fullName, 'received_at' => $run->receivedAt,
                 'ai_calls' => $run->aiCalls, 'steps' => $run->steps], JSON_UNESCAPED_UNICODE),
             'status' => 'pending', 'deadline_at' => now()->addSeconds(self::timeout()), 'created_at' => now(), 'updated_at' => now(),
-        ]);
+        ] + (self::recorded() ? ['path' => 'async'] : []));
         $run->fields->set(CustomerFields::AI, $id);
 
         return $id;
@@ -109,7 +140,7 @@ class ChatbotAiQueue
         $ok = DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)->update([
             'status' => $res['ok'] ? 'answered' : 'failed', 'answer' => $res['ok'] ? $res['text'] : null,
             'error' => $res['ok'] ? null : mb_substr((string) $res['error'], 0, 255), 'http' => $http, 'answered_at' => now(), 'updated_at' => now(),
-        ]);
+        ] + (isset($res['attempts']) && self::recorded() ? self::recordOf($res) : []));
         if ($ok !== 1) return false;
         ResumeChatbotAi::dispatch(self::ticket($row));
 
@@ -132,6 +163,14 @@ class ChatbotAiQueue
             ->update(['status' => 'pending', 'claimed_by' => null, 'updated_at' => now()]);
     }
 
+    /** Ang text ng walang sagot sa deadline: ang huling provider ng chain ng page ("OpenAI did not answer in time." kapag OpenAI lang). */
+    private static function late(object $row): string
+    {
+        $chain = ChatbotAiChain::forPage((string) $row->page_name);
+
+        return ChatbotAiProviders::late($chain ? $chain[array_key_last($chain)]['provider'] : ChatbotAiProviders::OPENAI);
+    }
+
     /**
      * Ang walang sagot sa deadline → failed (sumusunod sa failed port); ang answered/failed na hindi pa naituloy pagkatapos
      * ng REDISPATCH_SECONDS → ipinapadala ulit ang resume (isang beses lang tumatakbo); ang luma → binubura.
@@ -145,7 +184,7 @@ class ChatbotAiQueue
         $late = DB::table(self::TABLE)->whereIn('status', ['pending', 'sending'])->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get();
         foreach ($late as $row) {
             $ok = DB::table(self::TABLE)->where('id', $row->id)->whereIn('status', ['pending', 'sending'])->update([
-                'status' => 'failed', 'error' => 'OpenAI did not answer in time.', 'answered_at' => now(), 'updated_at' => now(),
+                'status' => 'failed', 'error' => self::late($row), 'answered_at' => now(), 'updated_at' => now(),
             ]);
             if ($ok === 1) {
                 ResumeChatbotAi::dispatch(self::ticket($row));
@@ -174,7 +213,15 @@ class ChatbotAiQueue
             $out['redispatched']++;
         }
 
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'answered'])->orderBy('id')->limit(5000)->delete();
+        if (!self::recorded()) {
+            $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'answered'])->orderBy('id')->limit(5000)->delete();
+            return $out;
+        }
+        // May record: ang text ng customer ay binubura pagkatapos ng 2 araw, ang row (record) pagkatapos ng 90.
+        $ids = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', self::DONE)
+            ->where(fn ($q) => $q->whereNotNull('messages')->orWhereNotNull('answer')->orWhereNotNull('context'))->orderBy('id')->limit(5000)->pluck('id');
+        if ($ids->isNotEmpty()) DB::table(self::TABLE)->whereIn('id', $ids)->update(['messages' => null, 'answer' => null, 'context' => null]);
+        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::RECORD_DAYS))->whereIn('status', self::DONE)->orderBy('id')->limit(5000)->delete();
 
         return $out;
     }

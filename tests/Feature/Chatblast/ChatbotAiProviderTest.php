@@ -42,6 +42,8 @@ class ChatbotAiProviderTest extends ChatbotAiProviderTestCase
             $this->assertSame(['Reply: openai answer ' . $case], $this->sent($psid), $case);
         }
         $this->assertSame([2, 2], [$this->localHits, $this->openaiHits]);
+        $this->assertSame(['fell back from Local: Local refused (HTTP 500).', 'fell back from Local: Local did not answer.'],
+            DB::table('chatbot_ai_requests')->orderBy('id')->pluck('fallback_reason')->all());
     }
 
     public function test_S_150_C3_local_over_its_timeout_is_abandoned_and_openai_answers(): void
