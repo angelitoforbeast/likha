@@ -2376,13 +2376,17 @@ Story changes (S-145):
 
 As the owner, I see in Changes who set, changed or removed each value on a page (FLOW, ACTIVE, the Botcake ID and token, every chatbot field), and no event disappears when a later value is set.
 
-- S-146.1 Given a FLOW set at 16:07 by A, removed at 19:02 by A and set again at 06:52 by B, When I open Changes for FLOW, Then I see three lines, newest first: "(none) → Main Flow" by B at 06:52, "Main Flow → (none)" by A at 19:02, and "(new) → Main Flow" by A at 16:07.
-- S-146.2 Given a value replaced A → B, When I open Changes, Then I see one line "A → B" and no clear line.
-- S-146.3 Given a user turns the bot On and another turns it Off, When I open Changes for ACTIVE, Then each line shows On/Off with the user and the time.
-- S-146.4 Given a value set by B and removed by A, When I filter by user A, Then the clear is listed; the FLOW filter lists all three FLOW events.
-- S-146.5 Given a value set on one day and removed the next, When I filter by the day of removal, Then only the clear is listed.
-- S-146.6 Given secret values set, removed and set again, When I open Changes, Then every value shows as "(hidden)" or "(none)" and no secret text is sent.
-- S-146.7 Given more than one page of mixed writes and clears, When I go through the pages, Then every event appears once, newest first.
+Slice 146. Tests: `tests/Feature/Chatblast/ChatbotAllChangesTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-146.1 (P1) | Given a FLOW set at 16:07 by A, removed at 19:02 by A and set again at 06:52 by B, when I open Changes for FLOW, then three lines, newest first: "(none) → Main Flow" by B at 06:52, "Main Flow → (none)" by A at 19:02, and "(new) → Main Flow" by A at 16:07 | `test_S_146_1…` | passed 2026-10-25 |
+| S-146.2 (P1) | Given a value replaced A → B, when I open Changes, then one line "A → B" and no clear line | `test_S_146_2…` | passed 2026-10-25 |
+| S-146.3 (P1) | Given a user turns the bot On and another turns it Off, when I open Changes for ACTIVE, then each line shows On/Off with the user and the time | `test_S_146_3…` | passed 2026-10-25 |
+| S-146.4 (P1) | Given a value set by B and removed by A, when I filter by user A, then the clear is listed; the FLOW filter lists all three FLOW events | `test_S_146_4…` | passed 2026-10-25 |
+| S-146.5 (P1) | Given a value set on one day and removed the next, when I filter by the day of removal, then only the clear is listed | `test_S_146_5…` | passed 2026-10-25 |
+| S-146.6 (P1) | Given secret values set, removed and set again, when I open Changes, then every value shows as "(hidden)" or "(none)" and no secret text is sent | `test_S_146_6…` | passed 2026-10-25 |
+| S-146.7 (P2) | Given more than one page of mixed writes and clears, when I go through the pages, then every event appears once, newest first | `test_S_146_7…` | passed 2026-10-25 |
 
 ## S-148 One Connections popup per page, a Connected column, a safe Flow picker and header filters
 

@@ -13,6 +13,7 @@ use App\Models\MacroImportRunItem;
 use App\Services\Imports\LikhaImportStarter;
 use App\Services\Imports\MacroImportStarter;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 
 /**
@@ -44,6 +45,21 @@ class ImportStartTest extends NightRunTestCase
     private function macroRun(string $status, array $extra = []): MacroImportRun
     {
         return MacroImportRun::create(array_merge(['status' => $status, 'started_at' => now()], $extra));
+    }
+
+    /** Pekeng credentials.json sa sariling storage ng test: binubuo ng job ang Google client kahit walang Google fetch. */
+    private function fakeGoogleCredentials(): void
+    {
+        $storage = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'import-start-test-' . bin2hex(random_bytes(4));
+        File::ensureDirectoryExists($storage . '/app');
+        File::put($storage . '/app/credentials.json', json_encode([
+            'type'         => 'service_account',
+            'client_email' => 'test@example.iam.gserviceaccount.com',
+            'client_id'    => '1',
+            'private_key'  => 'not-a-real-key',
+        ]));
+        $this->app->useStoragePath($storage);
+        $this->beforeApplicationDestroyed(fn () => File::deleteDirectory($storage));
     }
 
     private function pressButton()
@@ -225,6 +241,8 @@ class ImportStartTest extends NightRunTestCase
 
     public function test_macro_job_final_write_applies_only_while_the_run_is_still_active(): void
     {
+        $this->fakeGoogleCredentials();
+
         // Cancel na na-click sa huling sheet ng malusog na run: dapat matapos pa rin sa totoong resulta.
         $healthy = $this->macroRun('running', ['cancel_requested' => true]);
 
