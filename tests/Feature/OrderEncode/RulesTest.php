@@ -297,6 +297,7 @@ class RulesTest extends EncodeRunTestCase
 
     public function test_S_135_17_another_day_another_name_a_cannot_proceed_row_or_a_whitelisted_phone_is_not_a_duplicate(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on'); // naka-on: babagsak kung maling doble ang mahuli
         $this->earlier(['ts_date' => '2026-10-22']);                          // ibang araw
         $this->earlier(['PHONE NUMBER' => '9180000000', 'FULL NAME' => 'Ana Cruz', 'BARANGAY' => 'PROJECT 7']); // parehong pangalan, ibang barangay
         $this->earlier(['STATUS' => 'CANNOT PROCEED']);                       // hindi binibilang
@@ -324,6 +325,7 @@ class RulesTest extends EncodeRunTestCase
 
     public function test_S_135_60_a_line_repeated_in_the_jnt_file_counts_once_so_san_isidro_in_antipolo_is_not_multiple_suggested_address(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on'); // naka-on: babagsak kung maling doble ang mahuli
         $rows = [['RIZAL', 'RIZAL-ANTIPOLO-CITY', 'SAN ISIDRO (POB.)'], ['RIZAL', 'RIZAL-ANTIPOLO-CITY', 'SAN ISIDRO (POB.)'], ['RIZAL', 'RIZAL-ANTIPOLO-CITY', 'CALAWIS']];
         $cxd = $this->cxd('Rizal', 'Antipolo', 'San Isidro');
 
@@ -359,6 +361,7 @@ class RulesTest extends EncodeRunTestCase
 
     public function test_S_135_19_sheet_mode_does_not_check_duplicates(): void
     {
+        AppSetting::set(Settings::DUPLICATE_HOLD, 'on'); // naka-on: babagsak kung maling doble ang mahuli
         $this->earlier();
 
         $o = $this->runOrder($this->cxd('Metro Manila', 'Quezon City', 'Bungad'), self::bungadRows(), [], 'sheet');

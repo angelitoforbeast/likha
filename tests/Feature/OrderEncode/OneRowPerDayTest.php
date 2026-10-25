@@ -283,6 +283,7 @@ class OneRowPerDayTest extends LiveRowTestCase
 
     public function test_S_136_53_r5_after_midnight_does_not_count_the_customers_own_row_from_yesterday(): void
     {
+        \App\Models\AppSetting::set(\App\Services\OrderEncode\Settings::DUPLICATE_HOLD, 'on'); // naka-on: babagsak kung maling doble ang mahuli
         $this->heldOrder([0 => '23:59 23-10-2026']);
         $reply = $this->liveOrder($this->details(), [0 => '00:01 24-10-2026']);
 
