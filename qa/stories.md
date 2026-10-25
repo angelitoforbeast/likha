@@ -2481,3 +2481,22 @@ Tests: `tests/Feature/Chatblast/ChatbotContentCheckTest.php` (`S_150`).
 | S-150.6 | P1 | Given an unchanged Comment PM, then it is not sent to the AI again; a changed one is asked once; the cost is logged | `test_S_150_6…` | passed 2026-10-25 |
 | S-150.7 | P1 | Given the nightly `chatbot:content-check` and "Check again", then both include the comment checks | `test_S_150_7…` | passed 2026-10-25 |
 | S-150.8 | P2 | Given a Botcake-provider page with comment columns, then Check notes "Comment columns: comments are answered only on Forbeast pages" | `test_S_150_8…` | passed 2026-10-25 |
+
+## S-152 The Edit modal paste puts follow-up texts and images into Seq 1…N in sheet order
+
+As the owner, when I paste a row from my sheet into a page's Edit modal on /chatbot/pages, every follow-up text goes to Seq 1, 2, … N and every follow-up image to Picture, Seq Img 1, … N in sheet order, even when the AI is unsure; texts past the last Seq column can get new columns in one click; a paste of another item's row is flagged.
+
+Slice 152. Threat model: the pasted cells, header and position guesses are untrusted (staff paste; the guesses are sent by the client); the AI answer and the guesses can only pick a field, never a value; config is trusted. Risk tier: medium (behind the existing paste-map route; "Add Seq" reuses "+ Column").
+Tests: `tests/Feature/Chatblast/ChatbotPasteMapTest.php` and `ChatbotPasteScriptTest.php` (`S_152`).
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-152.1 | P1 | Given a row whose follow-up texts the AI marks none (or low on another field) after Seq 1, then the preview shows Seq 2…k in order, medium, with "in order after Seq k" | `test_S_152_1…` | passed 2026-10-26 |
+| S-152.2 | P1 | Given image links after Picture, then they go to Seq Img 1…N in order beside the texts | `test_S_152_2…` | passed 2026-10-26 |
+| S-152.3 | P1 | Given 22 follow-up texts (every page has Seq 1–20), then 2 are listed as missing with "Add Seq 21–22"; the button makes seq_21/seq_22 (long; seq_img_N image) through "+ Column", maps the cells and saves no value | `test_S_152_3…`, `test_S_152_3_the_missing_seq_columns…` (JS), `test_S_152_9…` (markup); clicks in the browser | passed (server, JS, markup) 2026-10-26 |
+| S-152.4 | P1 | Given the header or "Starting at field", then each cell's position guess is sent to the AI (known field keys only) and kept when the AI agrees; a confident AI answer against it wins | `test_S_152_4…` (server and JS) | passed 2026-10-26 |
+| S-152.5 | P1 | Given a price, a number, the order form or a link with no Picture before it, then the continuation never sweeps it into Seq; a Seq the AI gave another cell is not taken | `test_S_152_5…` | passed 2026-10-26 |
+| S-152.6 | P1 | Given `chatbot_paste_map_model` (default gpt-5.2, the order-encode checker default), then it is used; blank = the content-check model; the cost is logged | `test_S_152_6…` (2 rows) | passed 2026-10-26 |
+| S-152.7 | P1 | Given the pasted ITEM NAME cell names another item than the page's ITEM NAME IN JNT DASHBOARD, then a yellow note shows above Apply; the same item (case, plural), no item cell or no page item: no note | `test_S_152_7…` (4 rows, JS) | passed 2026-10-26 |
+| S-152.8 | P1 | Given an instruction inside a cell that is swept into Seq, then the answer still holds only keys, no value, and nothing is saved | `test_S_152_8…` | passed 2026-10-26 |
+| S-152.9 | P2 | Given a 390 px screen, then the missing line and its button wrap and the item note breaks words | `test_S_152_9…` (markup) | passed (markup) 2026-10-26 |
