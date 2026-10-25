@@ -2546,3 +2546,21 @@ Tests: `tests/Feature/Chatblast/ChatbotAiProviderTest.php` (chain, keys, F), `Ch
 | S-150F.8 | P1 | Given no new env vars, then OpenAI is the default and only the controls show | `test_S_150_F8…` | passed 2026-10-25 |
 | S-150F.9 | P1 | Then the `ChatbotMockAi` stress path still bypasses providers | `test_S_087_10…` (unchanged) | passed 2026-10-25 |
 | S-150F.10 | P1 | Then OpenAI pages get no extra calls or waits | `test_S_150_F10…` | passed 2026-10-25 |
+
+## S-150 The Check column checks the comment texts' content and format, and flags pages without comment permission
+
+As the owner, I see in the Check column of /chatbot/pages whether a page's Comment PM sells the right item at the right price and leads to the order, whether its Comment Reply variants follow the public-reply format, and whether the page's Forbeast token can answer comments; a "Use template" button gives a standard draft.
+
+Slice 150. Threat model: page values (typed or pasted by staff) and Forbeast/Meta answers (the `permissions` field, stored error texts) are untrusted; shown as text only; the AI gets the text as data. Risk tier: medium (checks on existing values, no new route; one small view change).
+Tests: `tests/Feature/Chatblast/ChatbotContentCheckTest.php` (`S_150`).
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-150.1 | P1 | Given a Comment PM that names another item, then Check shows an X; one naming the page's item and the COD price passes; another price is an X | `test_S_150_1…` | passed 2026-10-25 |
+| S-150.2 | P1 | Given a Comment PM without a price, or without the order-form lines or a call to reply (reply, PM, send, message, sagot, with paki-/pa-/mag-/i-), then Check warns | `test_S_150_2…` | passed 2026-10-25 |
+| S-150.3 | P1 | Given Comment Replies with one variant, identical variants (one warning per group), a link or phone number, or over 300 characters, then Check warns; one naming another page is an X; a Comment PM naming another page warns; the page's own name and "po.Online" are fine | `test_S_150_3…` (9 rows), `test_S_150_3_a_comment_pm…` | passed 2026-10-25 |
+| S-150.4 | P1 | Given the Edit modal or the cell editor of a comment column, when "Use template" is pressed, then the draft with the page's botfield names fills the field and nothing is saved until Save (or closing the cell editor) | `test_S_150_4…` (server and markup); clicks in the browser | passed (server) 2026-10-25 |
+| S-150.5 | P1 | Given a Forbeast page with comment columns, when its Forbeast page check reports `permissions` without `pages_manage_engagement` or `pages_read_user_content`, or a comment send failed with Meta #10, #200 or #230 in the last 24 h, then Check shows "Forbeast: walang comment permission — i-connect ulit ang page"; without the field, no X and a note "Forbeast: permissions unknown" | `test_S_150_5…` (2 tests) | passed 2026-10-25 |
+| S-150.6 | P1 | Given an unchanged Comment PM, then it is not sent to the AI again; a changed one is asked once; the cost is logged | `test_S_150_6…` | passed 2026-10-25 |
+| S-150.7 | P1 | Given the nightly `chatbot:content-check` and "Check again", then both include the comment checks | `test_S_150_7…` | passed 2026-10-25 |
+| S-150.8 | P2 | Given a Botcake-provider page with comment columns, then Check notes "Comment columns: comments are answered only on Forbeast pages" | `test_S_150_8…` | passed 2026-10-25 |
