@@ -71,6 +71,9 @@ return [
     'ai_checker_ui' => env('AI_CHECKER_UI', 'both'),
     // Content check ng /chatbot/pages (item, presyo, larawan, ad video): murang model na may vision.
     'content_check_model' => env('CHATBOT_CONTENT_MODEL', 'gpt-4o-mini'),
+    // Ang paste sa Edit ng isang page (field ng bawat cell): mas malakas na model, bihira ang tawag. Default = ang model ng
+    // order-encode checker; blangko = ang content_check_model.
+    'chatbot_paste_map_model' => env('CHATBOT_PASTE_MAP_MODEL', 'gpt-5.2'),
     // USD kada 1M tokens [input, output] + kada web search call — para sa cost_usd sa ai_checker_logs (estimate).
     'ai_checker_prices' => [
         'gpt-5.2'     => [1.75, 14.0],
