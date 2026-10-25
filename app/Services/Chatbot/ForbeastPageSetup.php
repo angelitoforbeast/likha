@@ -32,7 +32,7 @@ class ForbeastPageSetup
      * @return array{status: string, name: ?string, error: ?string, written: array<string, ?PageSetting>}
      *   status = ok | invalid | error | skipped (walang token, Botcake ID o GATEWAY_URL)
      */
-    public function connect(string $page): array
+    public function connect(string $page, ?int $userId = null): array
     {
         $url = $this->baseUrl();
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
@@ -43,19 +43,19 @@ class ForbeastPageSetup
         $res = $this->call(fn () => $this->http($token)->get($base));
         if ($res === null || !$res->successful()) {
             $status = $res !== null && in_array($res->status(), [401, 403, 404], true) ? 'invalid' : 'error';
-            return $this->result($page, $status, null, self::why($res));
+            return $this->result($page, $status, null, self::why($res), [], $userId);
         }
         $name = trim((string) ($res->json('name') ?? ''));
 
         $secret = Str::random(64);
         $hook = $this->call(fn () => $this->http($token)->put($base . '/webhook',
             ['url' => rtrim((string) config('app.url'), '/') . '/api/gateway/events', 'secret' => $secret]));
-        if ($hook === null || !$hook->successful()) return $this->result($page, 'error', $name, 'Webhook not set: ' . self::why($hook));
+        if ($hook === null || !$hook->successful()) return $this->result($page, 'error', $name, 'Webhook not set: ' . self::why($hook), [], $userId);
 
         // Pagkatapos lang ng 2xx: ang hindi natanggap na secret ay hindi ginagamit sa pagsuri ng event.
         $written = ['forbeast.webhook_secret' => $this->settings->set($page, self::PROVIDER, 'webhook_secret', $secret, true, null, true)['setting']];
 
-        return $this->result($page, 'ok', $name, null, $written);
+        return $this->result($page, 'ok', $name, null, $written, $userId);
     }
 
     /**
@@ -80,10 +80,11 @@ class ForbeastPageSetup
     }
 
     /**
-     * Ang gabi-gabing subok ng naka-save na token (walang bagong secret, walang PUT): ok lang kapag ang webhook ng page
-     * ay papunta pa rin sa app na ito. Isinusulat ang forbeast.token_status. @return string ok | invalid | error | skipped
+     * Ang Test at ang gabi-gabing subok ng naka-save na token (walang bagong secret, walang PUT): ok lang kapag ang webhook
+     * ng page ay papunta pa rin sa app na ito. Isinusulat ang forbeast.token_status na may oras (bagong row bawat test, may
+     * user; null = system). @return string ok | invalid | error | skipped
      */
-    public function retest(string $page): string
+    public function retest(string $page, ?int $userId = null): string
     {
         $p = $this->probe(trim((string) $this->settings->get($page, 'botcake', 'page_id')), $this->token($page));
         if ($p['status'] === 'skipped') return 'skipped';
@@ -91,7 +92,7 @@ class ForbeastPageSetup
         if ($p['status'] === 'ok' && rtrim((string) $p['webhook'], '/') !== $ours) {
             $p = ['status' => 'error', 'error' => $p['webhook'] === null ? 'Webhook not set' : 'Webhook points to ' . (parse_url($p['webhook'], PHP_URL_HOST) ?: 'another site')] + $p;
         }
-        $this->result($page, $p['status'], $p['name'], $p['error']);
+        $this->result($page, $p['status'], $p['name'], $p['error'], [], $userId, ' · ' . now('Asia/Manila')->format('Y-m-d H:i:s'));
 
         return $p['status'];
     }
@@ -175,10 +176,10 @@ class ForbeastPageSetup
         return ($msg !== '' ? 'Forbeast said "' . mb_substr($msg, 0, 150) . '"' : 'Forbeast refused it') . ' (HTTP ' . $res->status() . ')';
     }
 
-    private function result(string $page, string $status, ?string $name, ?string $error, array $written = []): array
+    private function result(string $page, string $status, ?string $name, ?string $error, array $written = [], ?int $userId = null, string $suffix = ''): array
     {
         $text = $status . ' · ' . ($status === 'ok' ? 'Forbeast connected' . ($name !== null && $name !== '' ? ' (' . $name . ')' : '') : $error);
-        $written['forbeast.token_status'] = $this->settings->set($page, self::PROVIDER, 'token_status', mb_substr($text, 0, 250), false, null, true)['setting'];
+        $written['forbeast.token_status'] = $this->settings->set($page, self::PROVIDER, 'token_status', mb_substr($text, 0, 250 - mb_strlen($suffix)) . $suffix, false, $userId, true)['setting'];
 
         return ['status' => $status, 'name' => $name, 'error' => $error, 'written' => $written];
     }

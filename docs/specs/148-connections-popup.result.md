@@ -119,3 +119,22 @@ Red runs, one line each:
 8. Not deployed and not pushed. After deploy there are no migrations; the new schedule entry runs at 22:15.
 
 148: done — the Connections popup, Connected column, Bot and Flow pickers, header filters and nightly re-test are built with all server cases green (1450 tests, no new failures). The browser cases and the live check of Botcake `default_reply` are still open.
+
+## Amendment 148-1
+
+| Change | Who decided, why |
+|---|---|
+| **Keep a Test button.** Each card in the Connections popup (Botcake and Forbeast) has a **Test** button that re-tests the saved token at any time (Botcake: token and chat block; Forbeast: connect check), shows the result and the time of the last test. Pasting a new token still tests it at once (decision 2 stands). This replaces the line in the brief that said there is no separate Test click. | The owner, 2026-10-25: "dapat di mawawala yung test button diba?" |
+| **Access: CEO, Marketing OIC and Marketing.** The Connections popup (save/clear token, Test, Fix chat block, takeover confirm), the **On/Off** toggle (`ChatbotController::active`, today `checkCeo()`), and **+ Page** (`addPage`, today CEO only) are allowed for the roles CEO, Marketing OIC and Marketing (match the role names the way the controller's existing role check does; find the exact stored names for the Marketing roles in the code/seeders and reuse them). Everyone else keeps today's rule. Update the comment above the /chatbot route group accordingly. | The owner: "pwede marketing OIC or marketing, sila naman maghahandle niyan e, as long as may complete logs pa din". |
+| **Complete logs.** Every one of these shows in the page's Changes list (spec 146) with who and when: On and Off; token saved / replaced / cleared for Botcake and Forbeast (never the token itself, only "(hidden)"); every Test with its result (ok / invalid / error + short reason, no secrets); Fix chat block; the nightly re-test and any chat block it re-applied (by "system"); Bot (provider) switch; Flow change. If Test results are not page_settings rows today, record them the smallest way that makes them appear in Changes (e.g. the existing *_status setting rows with the user id), and say how in the result. | Same owner line: "as long as may complete logs". |
+
+Tests to add: a Marketing and a Marketing OIC user can use On/Off, + Page and the popup (and a role outside these three still gets 403); each logged action above appears in Changes with the right user; the Test button re-tests a saved token and updates the last-test time. Re-run the brief's test folders (no new failures). Update the result (Files, Evidence, Story changes: S-148 cases for access and logs) and end with "148-1: <done|blocked> — <one line>".
+
+## Amendment 148-2
+
+| Change | Who decided, why |
+|---|---|
+| **Read the Default Reply content from the right endpoint.** Checked live (read-only) on 2026-10-25: `GET /pages/{id}/default_reply` returns only `{success, settings{is_published, unlimit_default_reply, ...}, page_id, assistants}` with no blocks, so `ChatbotConnections::botcakeReply` always finds no URL. `GET /pages/{id}/default_reply/content` returns `{name, status: "published", blocks: [{cards: [{plugin_id: "json_api", config: {method, url: "https://likhaaitech.com/..."}, headers: [{key: "X-Chat-Key", value}], ...}]}]}` and has no `success` key. Use `/default_reply/content` for the takeover guard and for the nightly "is the block still there" check (our block = a json_api card whose config.url host is this app's host and whose X-Chat-Key header equals the page's chat.key); use `/default_reply` only for `settings.is_published`. Update the fakes in the tests to these real shapes. | The reviewer's live read-only check; the worker's Open point 2. |
+| Open points 1, 4, 5 of the result are accepted as they are (Page ID is the identity for Botcake; the Forbeast Page ID must equal the Botcake ID; a never-tested token is listed after its first test or nightly run). Open point 3 is replaced by Amendment 148-1 (Marketing OIC and Marketing may also use Botcake saves, Fix chat block, On/Off and + Page, with complete logs). | The reviewer's decision; the owner's access rule. |
+
+End with "148-2: <done|blocked> — <one line>".

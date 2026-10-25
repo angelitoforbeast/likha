@@ -27,8 +27,9 @@ use Throwable;
 /**
  * /chatbot: ang listahan ng page ng sariling chatbot. Isang row kada page na may Botcake ID at token; ang ACTIVE (On/Off),
  * FLOW at mga botfield ay nasa page_settings (provider chatbot). Access gaya ng /chatblast (NavAccess; 403 sa iba); ang
- * On/Off at ang pagdagdag ng page ay CEO lang, dahil binabago nito ang live na Botcake page. Walang token o key na
- * ibinabalik.
+ * On/Off, ang pagdagdag ng page at ang Connections (token, Test, chat block) ay CEO, Marketing - OIC at Marketing lang,
+ * dahil binabago nito ang live na Botcake o Forbeast page; bawat kilos ay nasa Changes (sino at kailan). Walang token o
+ * key na ibinabalik.
  */
 class ChatbotController extends Controller
 {
@@ -40,7 +41,10 @@ class ChatbotController extends Controller
     private const CHANGES_PER_PAGE = 50;
     private const CLEAR_GAP = 5; // segundo: ang deactivate na sinundan ng bagong row sa loob nito ay palit, hindi clear
     private const HIDDEN_KEYS = ['flow_id', 'mock_ai', 'mock_ai_latency_ms']; // system lang: wala sa grid, wala sa Changes
-    private const BOTCAKE_LABELS = ['page_id' => 'Botcake ID', 'token' => 'Botcake token']; // ang mga botcake key na nasa grid
+    // Ang mga key ng Botcake at Forbeast na nasa Changes: ID at token (huling 4 lang), ang resulta ng bawat Test at ang chat block.
+    private const SETUP_LABELS = ['botcake.page_id' => 'Botcake ID', 'botcake.token' => 'Botcake token', 'botcake.token_status' => 'Botcake test',
+        'botcake.chat_block' => 'Botcake chat block', 'forbeast.token' => 'Forbeast token', 'forbeast.token_status' => 'Forbeast test'];
+    private const SETUP_ROLES = ['CEO', 'Marketing - OIC', 'Marketing'];
 
     public function __construct(private PageSettings $settings, private ChatbotFields $fields)
     {
@@ -57,10 +61,15 @@ class ChatbotController extends Controller
         if (!NavAccess::allows($this->role(), '/chatblast')) abort(403);
     }
 
-    private function checkCeo(): void
+    /** Ang setup ng live na page (On/Off, + Page, Connections): ang mga humahawak ng mga page lang. */
+    private function checkSetup(): void
     {
-        $this->checkAccess();
-        if ($this->role() !== 'CEO') abort(403);
+        if (!$this->canSetUp()) abort(403);
+    }
+
+    private function canSetUp(): bool
+    {
+        return in_array($this->role(), self::SETUP_ROLES, true);
     }
 
     public function index()
@@ -71,7 +80,7 @@ class ChatbotController extends Controller
         $others = PageSetting::where('active', true)->where('provider', '!=', \App\Services\AnalystRts::PROVIDER)->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)->distinct()->orderBy('page_name')->pluck('page_name')
             ->unique(fn ($p) => $this->settings->pageKey($p))->reject(fn ($p) => in_array($this->settings->pageKey($p), $listed, true))->values();
 
-        return view('chatbot.index', ['isCeo' => $this->role() === 'CEO', 'otherPages' => $others, 'repliesOn' => \App\Services\Chatbot\BotcakeOutbox::enabled()]);
+        return view('chatbot.index', ['canSetUp' => $this->canSetUp(), 'otherPages' => $others, 'repliesOn' => \App\Services\Chatbot\BotcakeOutbox::enabled()]);
     }
 
     /** Ang mga column at row (isang query ng settings, at ang chats ngayong araw at ang huli kada page). */
@@ -317,23 +326,25 @@ class ChatbotController extends Controller
     }
 
     /**
-     * Ang Connections popup ng page (access gaya ng Forbeast token): GET = ang dalawang card; POST botcake / forbeast =
-     * subok, takeover check (409 hanggang may confirm), saka save; POST chat-block = "Fix chat block". Huling 4 lang ng token.
+     * Ang Connections popup ng page (setup roles): GET = ang dalawang card; POST botcake / forbeast = subok, takeover check
+     * (409 hanggang may confirm), saka save; botcake-test / forbeast-test = Test ng naka-save na token; forbeast-clear =
+     * Clear; chat-block = "Fix chat block". Huling 4 lang ng token.
      */
     public function connections(Request $request, string $provider = '')
     {
-        $this->checkAccess();
+        $this->checkSetup();
         $page = $this->listedPage($this->str($request, 'page_name'));
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         if ($provider === '') return response()->json($connections->info($page));
-        // Ang Botcake save at "Fix chat block" ay nagpa-publish ng Default Reply at nag-o-On ng bot: CEO lang, gaya ng On/Off.
-        if ($provider !== 'forbeast') $this->checkCeo();
 
         $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
         $res = match ($provider) {
             'botcake' => $connections->saveBotcake(...$args),
             'forbeast' => $connections->saveForbeast(...$args),
+            'botcake-test' => $connections->testBotcake($page, Auth::id()),
+            'forbeast-test' => $connections->testForbeast($page, Auth::id()),
+            'forbeast-clear' => $connections->clearForbeast($page, Auth::id()),
             default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
 
@@ -343,7 +354,7 @@ class ChatbotController extends Controller
     /** ACTIVE On (isulat ang block at i-publish) o Off (i-unpublish lang). Ang error ng Botcake ay walang binabago dito. */
     public function active(Request $request)
     {
-        $this->checkCeo();
+        $this->checkSetup();
         $page = $this->listedPage($this->str($request, 'page_name'));
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
@@ -363,7 +374,7 @@ class ChatbotController extends Controller
      */
     public function addPage(Request $request)
     {
-        $this->checkCeo();
+        $this->checkSetup();
         $page = $this->settings->normPage($this->str($request, 'page_name'));
         $pageId = $this->str($request, 'page_id', 100);
         $token = $this->str($request, 'token', 1000);
@@ -508,7 +519,11 @@ class ChatbotController extends Controller
 
         $q = ($page !== '' ? $this->settings->pageQuery($page) : PageSetting::query())->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)
             ->where(fn ($w) => $w->where(fn ($a) => $a->where('provider', ChatbotFields::PROVIDER)->whereNotIn('key', self::HIDDEN_KEYS))
-                ->orWhere(fn ($b) => $b->where('provider', 'botcake')->whereIn('key', array_keys(self::BOTCAKE_LABELS))));
+                ->orWhere(function ($b) {
+                    foreach (collect(array_keys(self::SETUP_LABELS))->map(fn ($k) => explode('.', $k, 2))->groupBy(0) as $provider => $keys) {
+                        $b->orWhere(fn ($c) => $c->where('provider', $provider)->whereIn('key', $keys->pluck(1)->all()));
+                    }
+                }));
         $hasBy = Schema::hasColumn('page_settings', 'replaced_by');
         // Ang na-clear na value ay isang event sa oras ng replaced_at, kahit may mas bagong value na: inactive na hindi
         // pinalitan ng bagong row sa sandaling iyon (walang row ng page + provider + key na ginawa sa loob ng ilang segundo).
@@ -525,7 +540,7 @@ class ChatbotController extends Controller
             ->merge($hasBy ? (clone $cleared)->whereNotNull('replaced_by')->distinct()->pluck('replaced_by') : []));
 
         if ($field !== '') {
-            [$provider, $key] = str_starts_with($field, 'botcake.') ? ['botcake', substr($field, 8)] : [ChatbotFields::PROVIDER, $field];
+            [$provider, $key] = isset(self::SETUP_LABELS[$field]) ? explode('.', $field, 2) : [ChatbotFields::PROVIDER, $field];
             $q->where('provider', $provider)->where('key', $key);
             $cleared->where('provider', $provider)->where('key', $key);
         }
@@ -563,14 +578,14 @@ class ChatbotController extends Controller
                 'id' => $s->id, 'at' => $when?->timezone('Asia/Manila')->format('Y-m-d H:i'),
                 'by' => $clear ? ($s->replaced_by ? ($users[$s->replaced_by] ?? 'user #' . $s->replaced_by) : 'system') : $this->who($s, $users),
                 'page' => $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
-                'field' => $s->provider === 'botcake' ? self::BOTCAKE_LABELS[$s->key] : ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
+                'field' => self::SETUP_LABELS[$s->provider . '.' . $s->key] ?? ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
                 'old' => $before ? ($this->clearedBefore($before, $s) ? '(none)' : $this->shown($before)) : null, 'new' => $clear ? '(none)' : $this->shown($s),
             ];
         })->values()->all();
 
         $fields = array_merge(
             array_map(fn ($k, $l) => ['key' => (string) $k, 'label' => $l], array_keys($labels), $labels),
-            array_map(fn ($k, $l) => ['key' => 'botcake.' . $k, 'label' => $l], array_keys(self::BOTCAKE_LABELS), self::BOTCAKE_LABELS),
+            array_map(fn ($k, $l) => ['key' => $k, 'label' => $l], array_keys(self::SETUP_LABELS), self::SETUP_LABELS),
         );
 
         return response()->json([

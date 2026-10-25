@@ -40,16 +40,29 @@ class ChatbotConnectionsTest extends ChatblastTestCase
     /** Ang sagot ng fake (napapalitan sa gitna ng test: ang unang Http::fake ang tumatama). */
     private array $fake = [];
 
-    /** Botcake fake: ang token test (custom_fields), ang Default Reply na nakikita ngayon, at ang pagsulat ng block. */
-    private function botcake(array $defaultReply = ['success' => true, 'data' => []], bool $tokenOk = true): void
+    /**
+     * Botcake fake, sa hugis ng totoong sagot: ang token test (custom_fields), ang laman ng Default Reply
+     * (GET /default_reply/content: walang success key) at ang settings nito (GET /default_reply), at ang pagsulat.
+     */
+    private function botcake(?array $content = null, bool $tokenOk = true): void
     {
-        $this->fake['reply'] = $defaultReply;
+        $this->fake['content'] = $content ?? $this->content(null);
         $this->fake['token_ok'] = $tokenOk;
         Http::fake([
             self::BC . '/custom_fields*' => fn () => $this->fake['token_ok'] ? Http::response(['success' => true, 'data' => [['id' => 7701, 'name' => 'message']]]) : Http::response(['success' => false], 401),
-            self::BC . '/default_reply/content' => Http::response(['success' => true]),
-            self::BC . '/default_reply*' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? $this->fake['reply'] : ['success' => true], $r->method() === 'GET' ? ($this->fake['reply_status'] ?? 200) : 200),
+            self::BC . '/default_reply/content' => fn (HttpRequest $r) => $r->method() === 'GET' ? Http::response($this->fake['content'], $this->fake['reply_status'] ?? 200) : Http::response(['success' => true]),
+            self::BC . '/default_reply' => fn (HttpRequest $r) => Http::response($r->method() === 'GET'
+                ? ['success' => true, 'settings' => ['is_published' => $this->fake['published'] ?? true, 'unlimit_default_reply' => true], 'page_id' => '1001', 'assistants' => []]
+                : ['success' => true]),
         ]);
+    }
+
+    /** Ang laman ng Default Reply: walang block (null), o isang JSON API card papunta sa $url na may X-Chat-Key. */
+    private function content(?string $url, string $key = 'kept-chat-key-123'): array
+    {
+        $cards = $url === null ? [] : [['plugin_id' => 'json_api', 'config' => ['method' => 'post', 'url' => $url], 'headers' => [['key' => 'X-Chat-Key', 'value' => $key], ['key' => '', 'value' => '']]]];
+
+        return ['name' => 'Default reply', 'status' => 'published', 'blocks' => $url === null ? [] : [['key' => 'chat_to_site', 'cards' => $cards]]];
     }
 
     private function forbeast(string $name = 'Page Uno', string $id = '1001', ?string $hook = null): void
@@ -79,9 +92,10 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         }
     }
 
-    private function jsonApiReply(string $url): array
+    /** Ang Changes ng page: [field, by] ng bawat linya. */
+    private function changed(): array
     {
-        return ['success' => true, 'data' => ['blocks' => [['cards' => [['plugin_id' => 'json_api', 'config' => ['method' => 'post', 'url' => $url]]]]]]];
+        return array_map(fn ($e) => [$e['field'], $e['by']], $this->getJson('/chatbot/changes?page=Page%20Uno')->assertOk()->json('entries'));
     }
 
     public function test_S_148_1_the_popup_data_has_both_cards_with_only_the_last_4_of_each_token(): void
@@ -124,7 +138,7 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])
             ->assertStatus(422)->assertJson(['status' => 'invalid']);
         $this->assertSame(self::TOKEN, $this->settings()->get('Page Uno', 'botcake', 'token'));
-        $this->assertCount(0, $this->sentTo('/default_reply/content'));
+        $this->assertCount(0, $this->sentTo('/default_reply/content', 'POST'));
 
         // Forbeast: ibang pangalan ng page, o ibang page id.
         foreach ([['Tech Flask', '1001'], ['Page Uno', '9999']] as [$name, $id]) {
@@ -152,29 +166,29 @@ class ChatbotConnectionsTest extends ChatblastTestCase
 
     public function test_S_148_5_a_page_pointing_at_another_site_needs_a_confirm_before_it_moves(): void
     {
-        $this->botcake($this->jsonApiReply('https://incepxion.pro/api/botcake/chat'));
+        $this->botcake($this->content('https://incepxion.pro/api/botcake/chat'));
 
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])
             ->assertStatus(409)->assertJson(['status' => 'confirm', 'host' => 'incepxion.pro', 'message' => 'Connected to incepxion.pro now. Move it to this site?']);
         $this->assertSame(self::TOKEN, $this->settings()->get('Page Uno', 'botcake', 'token'));
-        $this->assertCount(0, $this->sentTo('/default_reply/content'));
+        $this->assertCount(0, $this->sentTo('/default_reply/content', 'POST'));
 
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC, 'confirm' => true])
             ->assertOk()->assertJson(['status' => 'ok']);
-        $this->assertCount(1, $this->sentTo('/default_reply/content'));
+        $this->assertCount(1, $this->sentTo('/default_reply/content', 'POST'));
 
-        // Ang sariling site ay hindi tinatanong.
-        $this->botcake($this->jsonApiReply('https://app.example.test/api/botcake/chat'));
+        // Ang sariling site ay hindi tinatanong (kahit luma ang key).
+        $this->fake['content'] = $this->content('https://app.example.test/api/botcake/chat', 'old-key');
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001'])->assertOk();
 
         // Hindi masuri ang Default Reply (404): tinatanong din, at ang Fix chat block ay may parehong tanong.
         $this->fake['reply_status'] = 404;
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001'])->assertStatus(409)->assertJson(['status' => 'confirm', 'host' => null]);
         $this->fake['reply_status'] = 200;
-        $this->fake['reply'] = $this->jsonApiReply('https://incepxion.pro/api/botcake/chat');
-        $before = count($this->sentTo('/default_reply/content'));
+        $this->fake['content'] = $this->content('https://incepxion.pro/api/botcake/chat');
+        $before = count($this->sentTo('/default_reply/content', 'POST'));
         $this->postJson('/chatbot/connections/chat-block', ['page_name' => 'Page Uno'])->assertStatus(409)->assertJson(['host' => 'incepxion.pro']);
-        $this->assertCount($before, $this->sentTo('/default_reply/content'));
+        $this->assertCount($before, $this->sentTo('/default_reply/content', 'POST'));
 
         // Forbeast: ang webhook ng page ay nasa ibang site.
         $this->forbeast(hook: 'https://incepxion.pro/api/gateway/events');
@@ -270,8 +284,9 @@ class ChatbotConnectionsTest extends ChatblastTestCase
     public function test_S_148_12_the_nightly_check_retests_tokens_and_re_applies_a_missing_chat_block_only_on_active_botcake_pages(): void
     {
         $s = $this->settings();
-        foreach (['Page Dos' => '2002', 'Page Tres' => '3003', 'Page Cuatro' => '4004', 'Page Cinco' => '5005', 'Page Seis' => '6006'] as $page => $id) $this->page($page, $id);
-        foreach (['Page Uno', 'Page Tres', 'Page Cuatro', 'Page Cinco'] as $page) $s->set($page, 'chatbot', 'active', '1', false, null, true);
+        foreach (['Page Dos' => '2002', 'Page Tres' => '3003', 'Page Cuatro' => '4004', 'Page Cinco' => '5005', 'Page Seis' => '6006', 'Page Siete' => '7007'] as $page => $id) $this->page($page, $id);
+        $s->set('Page Siete', 'botcake', 'chat.key', 'key-7', true, null, true);
+        foreach (['Page Uno', 'Page Tres', 'Page Cuatro', 'Page Cinco', 'Page Siete'] as $page) $s->set($page, 'chatbot', 'active', '1', false, null, true);
         // Page Seis: walang ACTIVE row (hindi in-On dito): walang block. Page Cinco: ang Default Reply ay nasa ibang site.
         $s->set('Page Dos', 'chatbot', 'active', '0', false, null, true); // Off: walang block
         $s->set('Page Tres', 'chatbot', 'provider', 'gateway', false, null, true); // Forbeast: walang block
@@ -280,8 +295,12 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $s->set('Page Uno', 'forbeast', 'webhook_secret', str_repeat('s', 64), true, null, true);
         Http::fake([
             'botcake.io/*/pages/3003/custom_fields*' => Http::response(['success' => false], 401),
-            'botcake.io/*/pages/4004/default_reply' => Http::response($this->jsonApiReply('https://app.example.test/api/botcake/chat')),
-            'botcake.io/*/pages/5005/default_reply' => Http::response($this->jsonApiReply('https://incepxion.pro/api/botcake/chat')),
+            // Page Uno: walang block; Page Cuatro: ang block namin (tamang key); Page Cinco: ibang site; Page Siete: luma ang key.
+            'botcake.io/*/pages/1001/default_reply/content' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? $this->content(null) : ['success' => true]),
+            'botcake.io/*/pages/4004/default_reply/content' => Http::response($this->content('https://app.example.test/api/botcake/chat', 'key-4')),
+            'botcake.io/*/pages/5005/default_reply/content' => Http::response($this->content('https://incepxion.pro/api/botcake/chat')),
+            'botcake.io/*/pages/7007/default_reply/content' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? $this->content('https://app.example.test/api/botcake/chat', 'old-key') : ['success' => true]),
+            'botcake.io/*/default_reply' => Http::response(['success' => true, 'settings' => ['is_published' => true], 'page_id' => '0', 'assistants' => []]),
             'botcake.io/*' => Http::response(['success' => true, 'data' => []]),
             self::GW . '/v1/pages/1001' => Http::response(['id' => '1001', 'name' => 'Page Uno', 'webhook' => ['url' => 'https://app.example.test/api/gateway/events']]),
         ]);
@@ -289,38 +308,127 @@ class ChatbotConnectionsTest extends ChatblastTestCase
 
         $this->artisan('chatbot:connections-check')->assertExitCode(0);
 
-        $blocks = collect($this->sentTo('/default_reply/content', 'POST'))->map(fn ($r) => $r[0]->url())->all();
-        $this->assertSame(['https://botcake.io/api/public_api/v1/pages/1001/default_reply/content'], $blocks);
+        $blocks = collect($this->sentTo('/default_reply/content', 'POST'))->map(fn ($r) => $r[0]->url())->sort()->values()->all();
+        $this->assertSame(['https://botcake.io/api/public_api/v1/pages/1001/default_reply/content', 'https://botcake.io/api/public_api/v1/pages/7007/default_reply/content'], $blocks);
+        $this->assertSame('key-7', $s->get('Page Siete', 'botcake', 'chat.key'), 'luma ang key sa Botcake: isinulat ulit ang block, parehong key');
         $this->assertNotSame('', (string) $s->get('Page Uno', 'botcake', 'chat.key'));
         $this->assertStringStartsWith('ok', (string) $s->get('Page Uno', 'botcake', 'token_status'));
         $this->assertStringStartsWith('invalid', (string) $s->get('Page Tres', 'botcake', 'token_status'));
-        $this->assertSame('ok · Forbeast connected (Page Uno)', $s->get('Page Uno', 'forbeast', 'token_status'));
+        $this->assertStringStartsWith('ok · Forbeast connected (Page Uno) · ', (string) $s->get('Page Uno', 'forbeast', 'token_status'));
+        // Sa Changes: ang gabi-gabing test at ang block na ibinalik, ng "system".
+        $changed = $this->changed();
+        foreach (['Botcake test', 'Botcake chat block', 'Forbeast test'] as $field) $this->assertContains([$field, 'system'], $changed, $field);
         $this->assertSame(str_repeat('s', 64), $s->get('Page Uno', 'forbeast', 'webhook_secret'), 'ang secret ay hindi pinapalitan gabi-gabi');
         $this->assertCount(0, $this->sentTo('/webhook'));
         \Illuminate\Support\Facades\Log::shouldHaveReceived('info')->withArgs(function ($msg, $ctx = []) {
             $text = $msg . json_encode($ctx);
-            return $msg === 'chatbot:connections-check' && !str_contains($text, self::TOKEN) && !str_contains($text, self::NEW_FB) && ($ctx['blocks'] ?? null) === 1;
+            return $msg === 'chatbot:connections-check' && !str_contains($text, self::TOKEN) && !str_contains($text, self::NEW_FB) && ($ctx['blocks'] ?? null) === 2;
         })->once();
     }
 
-    public function test_S_148_13_the_new_routes_need_chatblast_access_botcake_writes_need_the_ceo_and_a_listed_page(): void
+    public function test_S_148_13_the_setup_routes_are_for_ceo_marketing_oic_and_marketing_only(): void
     {
         Http::fake();
-        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
-        $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertForbidden();
-        foreach (['botcake', 'forbeast', 'chat-block'] as $path) {
-            $this->postJson('/chatbot/connections/' . $path, ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertForbidden();
+        // May /chatblast pero ibang role: 403 sa popup, On/Off at + Page. Walang /chatblast: 403 din.
+        $this->navLink('/chatblast', ['Data Encoder']);
+        foreach ([$this->user('Data Encoder', 'enc@example.test'), $this->user('Finance', 'fin@example.test')] as $user) {
+            $this->actingAs($user);
+            $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertForbidden();
+            foreach (['botcake', 'forbeast', 'chat-block', 'botcake-test', 'forbeast-test', 'forbeast-clear'] as $path) {
+                $this->postJson('/chatbot/connections/' . $path, ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertForbidden();
+            }
+            $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => false])->assertForbidden();
+            $this->postJson('/chatbot/pages', ['page_name' => 'Page Seis', 'page_id' => '6006', 'token' => self::NEW_BC])->assertForbidden();
         }
         $this->actingAs($this->ceo);
         $this->getJson('/chatbot/connections?page_name=Not%20Listed')->assertStatus(422);
-        // May /chatblast pero hindi CEO: ang Forbeast lang; ang Botcake at ang chat block (nagpa-publish at nag-o-On) ay CEO lang.
-        $this->navLink('/chatblast', ['Marketing']);
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertOk();
-        foreach (['botcake', 'chat-block'] as $path) {
-            $this->postJson('/chatbot/connections/' . $path, ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertForbidden();
-        }
         Http::assertNothingSent();
         $this->assertSame(self::TOKEN, $this->settings()->get('Page Uno', 'botcake', 'token'));
+        $this->assertNull($this->settings()->get('Page Seis', 'botcake', 'page_id'));
+    }
+
+    public function test_S_148_16_marketing_oic_and_marketing_can_use_on_off_add_page_and_the_popup(): void
+    {
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        foreach ([['Marketing - OIC', 'oic@example.test', 'Page Seis', '6006'], ['Marketing', 'mkt@example.test', 'Page Siete', '7007']] as [$role, $email, $newPage, $newId]) {
+            $this->actingAs($this->user($role, $email));
+            $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => false])->assertOk()->assertJson(['active' => false]);
+            $this->postJson('/chatbot/active', ['page_name' => 'Page Uno', 'on' => true])->assertOk()->assertJson(['active' => true]);
+            Http::fake(['botcake.io/*/pages/' . $newId . '/*' => Http::response(['success' => true, 'data' => []])]);
+            $this->postJson('/chatbot/pages', ['page_name' => $newPage, 'page_id' => $newId, 'token' => self::NEW_BC])->assertOk()->assertJson(['page' => $newPage]);
+            $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertOk();
+            $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertOk();
+            $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk();
+            $this->postJson('/chatbot/connections/chat-block', ['page_name' => 'Page Uno'])->assertOk();
+        }
+    }
+
+    public function test_S_148_17_test_re_tests_the_saved_token_and_updates_the_last_test_time(): void
+    {
+        $s = $this->settings();
+        $s->set('Page Uno', 'botcake', 'chat.key', 'kept-chat-key-123', true, null, true);
+        $s->set('Page Uno', 'forbeast', 'token', self::NEW_FB, true);
+        $s->set('Page Uno', 'forbeast', 'webhook_secret', str_repeat('s', 64), true, null, true);
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $this->forbeast(hook: 'https://app.example.test/api/gateway/events');
+
+        $this->travelTo('2026-10-25 08:00:00');
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['status' => 'ok', 'chat_block' => 'on', 'connections' => ['botcake' => ['tested_at' => '2026-10-25 08:00', 'connected' => true]]]);
+        $this->postJson('/chatbot/connections/forbeast-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['status' => 'ok', 'connections' => ['forbeast' => ['tested_at' => '2026-10-25 08:00', 'connected' => true]]]);
+        $this->assertCount(0, $this->sentTo('/default_reply/content', 'POST'), 'Test lang: walang isinusulat sa Botcake');
+        $this->assertCount(0, $this->sentTo('/webhook', 'PUT'), 'Test lang: walang bagong webhook');
+
+        // Ang block ay wala na sa Default Reply: makikita sa susunod na Test, at hindi na Connected ang Botcake.
+        $this->travelTo('2026-10-25 09:30:00');
+        $this->fake['content'] = $this->content(null);
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['status' => 'ok', 'chat_block' => 'missing', 'connections' => ['botcake' => ['tested_at' => '2026-10-25 09:30', 'connected' => false]]]);
+        $info = $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertOk()->json();
+        $this->assertSame('2026-10-25 09:30', $info['botcake']['tested_at']);
+        $this->assertStringStartsWith('missing', $info['botcake']['chat_block_status']);
+        $this->assertContains('Botcake: no chat block', array_column(app(\App\Services\Chatbot\PageContentCheck::class)->setup('Page Uno'), 'reason'));
+    }
+
+    public function test_S_148_18_every_setup_action_shows_in_changes_with_the_user_and_never_a_token(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_23_100000_create_chatbot_tables.php']]);
+        \App\Models\ChatbotFlow::forceCreate(['name' => 'Main Flow']);
+        $this->navLink('/chatblast', ['Marketing']); // ang Bot at FLOW ay sa /chatblast access pa rin
+        $mkt = $this->user('Marketing', 'mkt@example.test');
+        $this->actingAs($mkt);
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $this->forbeast(hook: 'https://app.example.test/api/gateway/events');
+        $step = 0;
+        $do = function (string $url, array $body) use (&$step) {
+            $this->travelTo(now()->addMinutes(++$step)); // bawat kilos ay sariling oras
+            return $this->postJson($url, ['page_name' => 'Page Uno'] + $body)->assertSuccessful();
+        };
+
+        $do('/chatbot/active', ['on' => false]);
+        $do('/chatbot/active', ['on' => true]);
+        $do('/chatbot/connections/botcake', ['page_id' => '1001', 'token' => self::NEW_BC]);
+        $do('/chatbot/connections/botcake-test', []);
+        $do('/chatbot/connections/chat-block', []);
+        $do('/chatbot/connections/forbeast', ['page_id' => '1001', 'token' => self::NEW_FB]);
+        $do('/chatbot/connections/forbeast-test', []);
+        $do('/chatbot/provider', ['provider' => 'gateway']);
+        $do('/chatbot/provider', ['provider' => 'botcake']);
+        $do('/chatbot/cell', ['key' => 'flow', 'value' => 'Main Flow']);
+        $do('/chatbot/connections/forbeast-clear', []);
+
+        $res = $this->getJson('/chatbot/changes?page=Page%20Uno')->assertOk();
+        $changed = array_map(fn ($e) => [$e['field'], $e['by']], $res->json('entries'));
+        foreach (['ACTIVE', 'Botcake token', 'Botcake test', 'Botcake chat block', 'Forbeast token', 'Forbeast test', 'Provider', 'FLOW'] as $field) {
+            $this->assertContains([$field, $mkt->name], $changed, $field);
+        }
+        $entries = collect($res->json('entries'));
+        $this->assertSame(2, $entries->where('field', 'ACTIVE')->where('by', $mkt->name)->count(), 'On at Off');
+        $this->assertSame(['(hidden)', '(none)'], $entries->where('field', 'Forbeast token')->pluck('new')->sort()->values()->all(), 'na-save at na-clear');
+        $this->assertGreaterThanOrEqual(2, $entries->where('field', 'Botcake chat block')->count(), 'ang kusang block at ang Fix chat block');
+        foreach ([self::TOKEN, self::NEW_BC, self::NEW_FB, 'kept-chat-key-123'] as $secret) $this->assertStringNotContainsString($secret, $res->getContent());
+        $labels = ['Botcake ID', 'Botcake token', 'Botcake test', 'Botcake chat block', 'Forbeast token', 'Forbeast test'];
+        $this->assertSame($labels, array_values(array_intersect(array_column($res->json('fields'), 'label'), $labels)));
     }
 }

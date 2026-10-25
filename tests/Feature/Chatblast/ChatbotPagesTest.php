@@ -109,8 +109,8 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->postJson('/chatbot/pages', ['page_name' => 'Page Cinco', 'page_id' => '50x5', 'token' => self::NEW_TOKEN])->assertStatus(422);
         $this->postJson('/chatbot/pages', ['page_name' => 'Page Cinco', 'page_id' => '5005'])->assertStatus(422); // walang token
 
-        $this->navLink('/chatblast', ['Marketing']);
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->navLink('/chatblast', ['Data Encoder']); // may /chatblast pero hindi CEO, Marketing - OIC o Marketing
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->postJson('/chatbot/pages', ['page_name' => 'Page Seis', 'page_id' => '6006', 'token' => self::NEW_TOKEN])->assertForbidden();
         $this->assertNull($this->settings()->get('Page Seis', 'botcake', 'page_id'));
     }
@@ -135,8 +135,8 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->assertSame(['update' => ['is_published' => true, 'unlimit_default_reply' => true]], $sent[1][0]->data());
         $this->assertSame('1', $this->settings()->get('Page Dos', 'chatbot', 'active'));
 
-        $this->navLink('/chatblast', ['Marketing']);
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->navLink('/chatblast', ['Data Encoder']); // may /chatblast pero hindi CEO, Marketing - OIC o Marketing
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->postJson('/chatbot/active', ['page_name' => 'Page Dos', 'on' => false])->assertForbidden();
     }
 

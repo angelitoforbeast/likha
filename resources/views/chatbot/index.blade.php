@@ -57,10 +57,9 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
-     data-connections-url="{{ route('chatbot.connections') }}"
-     data-connections-save-url="{{ url('/chatbot/connections') }}"
      data-needs-token="{{ \App\Services\Chatbot\ForbeastPageSetup::NEEDS_TOKEN }}"
-     @if($isCeo) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}" @endif>
+     @if($canSetUp) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}"
+     data-connections-url="{{ route('chatbot.connections') }}" data-connections-save-url="{{ url('/chatbot/connections') }}" @endif>
 
     <div class="cb-filters mb-3 flex flex-wrap items-end gap-3 text-sm">
         <label class="flex flex-col text-xs">Search
@@ -73,7 +72,7 @@
         </label>
         <button id="add-column" type="button" class="cb-btn">+ Column</button>
         <button id="changes-open" type="button" class="cb-btn">Changes</button>
-        @if($isCeo)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
+        @if($canSetUp)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
         <span id="count" class="text-xs text-slate-500"></span>
@@ -211,9 +210,7 @@
             </div>
             <div class="grid gap-3 p-4 sm:grid-cols-2">
                 @foreach(['botcake' => 'Botcake', 'forbeast' => 'Forbeast'] as $p => $label)
-                {{-- Ang Botcake save at Fix chat block ay nagpa-publish at nag-o-On ng bot: CEO lang (gaya ng On/Off). --}}
                 <form class="conn-card min-w-0 rounded-lg border border-slate-200 p-3" data-provider="{{ $p }}" autocomplete="off">
-                <fieldset class="min-w-0" @disabled($p === 'botcake' && !$isCeo)>
                     <div class="mb-2 flex items-center justify-between gap-2"><span class="font-semibold">{{ $label }}</span><span class="conn-state text-xs"></span></div>
                     <label class="flex flex-col text-xs text-slate-600">Page ID
                         <input name="page_id" inputmode="numeric" maxlength="30" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
@@ -221,14 +218,15 @@
                     <label class="mt-2 flex flex-col text-xs text-slate-600">Token <span class="conn-token font-mono text-slate-400"></span>
                         <input name="token" type="password" maxlength="1000" placeholder="Paste a new token" class="mt-1 rounded-md border border-slate-300 px-2 py-1 font-mono text-sm text-gray-900">
                     </label>
-                    <p class="conn-msg mt-2 min-h-[1rem] break-words text-xs" aria-live="polite"></p>
+                    <p class="conn-tested mt-2 text-xs text-slate-500"></p>
+                    <p class="conn-msg mt-1 min-h-[1rem] break-words text-xs" aria-live="polite"></p>
                     @if($p === 'botcake')<p class="mt-1 text-xs text-slate-500">This replaces the page's Default Reply in Botcake.</p>@endif
                     <div class="mt-2 flex flex-wrap gap-2">
                         <button class="cb-btn cb-btn-primary cb-btn-sm">Save and test</button>
+                        <button type="button" class="conn-test cb-btn cb-btn-sm">Test</button>
                         @if($p === 'botcake')<button type="button" class="conn-fix cb-btn cb-btn-sm">Fix chat block</button>@endif
+                        @if($p === 'forbeast')<button type="button" class="conn-clear cb-btn cb-btn-sm">Clear</button>@endif
                     </div>
-                    @if($p === 'botcake' && !$isCeo)<p class="mt-1 text-xs text-slate-500">Only the CEO can change the Botcake connection.</p>@endif
-                </fieldset>
                 </form>
                 @endforeach
             </div>
@@ -256,7 +254,7 @@
         <div class="mt-1 text-right"><button id="hf-close" type="button" class="cb-btn cb-btn-sm">Done</button></div>
     </div>
 
-    @if($isCeo)
+    @if($canSetUp)
     {{-- "+ Page": bago, o isang page na nasa page settings na. Ang token ay hindi kailanman ipinapakita. --}}
     <div id="page-box" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="page-title">
         <form id="page-form" class="mx-auto w-full max-w-md rounded-xl bg-white p-5 text-sm shadow-lg" autocomplete="off">
@@ -403,7 +401,7 @@
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
-                el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), connectionsButton(r)])]),
+                el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null])]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
             checkCell(r),
@@ -688,6 +686,8 @@
             card.elements.page_id.value = c.page_id || '';
             card.elements.token.value = '';
             card.querySelector('.conn-token').textContent = c.token ? '(saved ' + c.token + ')' : '(none)';
+            card.querySelector('.conn-tested').textContent = 'Last test: ' + (c.tested_at ? c.tested_at + ' · ' + (c.status || '') : 'never')
+                + (p === 'botcake' && c.chat_block_status ? ' · chat block: ' + c.chat_block_status : '');
             const bad = c.status && !String(c.status).startsWith('ok');
             state.textContent = c.connected ? 'Connected' : (p === 'botcake' && c.token && !c.chat_block ? 'No chat block' : (bad ? c.status : (c.token ? 'Not connected' : 'Not set up')));
             state.className = 'conn-state break-words text-xs ' + (c.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500'));
@@ -720,6 +720,8 @@
             if (d.connections) paintConnections(d.connections);
             if (res.status === 409) connMsg(card, 'Not changed.', false);
             else if (!res.ok) connMsg(card, (d.name ? 'Provider page: ' + d.name + '. ' : '') + (d.error || d.message || 'Not saved (' + res.status + ').'), false);
+            else if (path.endsWith('-test')) connMsg(card, 'Test: ' + d.status + (d.chat_block ? ' · chat block ' + d.chat_block : '') + (d.error ? ' · ' + d.error : ''), d.status === 'ok' && (!d.chat_block || d.chat_block === 'on'));
+            else if (path === 'forbeast-clear') connMsg(card, 'Forbeast token removed.', true);
             else if (d.chat_block && !d.chat_block.ok) connMsg(card, 'Token saved. Chat block: ' + d.chat_block.error, false);
             else connMsg(card, path === 'chat-block' ? 'Chat block applied.' : 'Saved and connected' + (d.name ? ' (' + d.name + ')' : '') + '.', true);
         } catch (e) { connMsg(card, 'No connection: not changed.', false); }
@@ -731,6 +733,11 @@
         connSave(card, card.dataset.provider, {page_id: card.elements.page_id.value.trim(), token: card.elements.token.value.trim()});
     }));
     document.querySelector('#conn .conn-fix').addEventListener('click', () => connSave(connCard('botcake'), 'chat-block', {}));
+    // Test: ang naka-save na token (at ang chat block ng Botcake), kahit kailan; walang isinusulat sa provider.
+    document.querySelectorAll('#conn .conn-test').forEach(b => b.addEventListener('click', () => { const card = b.closest('.conn-card'); connSave(card, card.dataset.provider + '-test', {}); }));
+    document.querySelector('#conn .conn-clear').addEventListener('click', () => {
+        if (confirm('Remove the Forbeast token of ' + connPage + ' and disconnect the page from Forbeast?')) connSave(connCard('forbeast'), 'forbeast-clear', {});
+    });
 
     function pickBox(r) {
         const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'aria-label': 'Select ' + r.page});
