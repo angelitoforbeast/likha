@@ -77,11 +77,14 @@ class ChatbotConnections
         }
         if (!$test['ok']) return $this->fail(422, 'invalid', "This token does not work for Botcake page {$pageId}. Nothing was saved.");
 
-        if (!$confirm && ($host = $this->botcakeOtherHost($client, $pageId, $token)) !== null) return $this->askMove($host);
+        if (!$confirm && ($ask = $this->takeover($client, $pageId, $token)) !== null) return $ask;
 
         if ($pageId !== $this->botcakePageId($page)) {
             $this->settings->set($page, 'botcake', 'page_id', $pageId, false, $userId);
             BotcakeChat::forgetPageMap();
+            // Ang Forbeast webhook ay nasa lumang Facebook page: hindi na konektado hanggang i-save ulit ang Forbeast token.
+            $this->settings->pageQuery($page)->where('provider', ForbeastPageSetup::PROVIDER)->where('key', 'token_status')->where('active', true)
+                ->get()->each(fn ($s) => $this->settings->deactivate($s, $userId));
         }
         $this->settings->set($page, 'botcake', 'token', $token, true, $userId);
         app(BotcakeCustomerSync::class)->tokenStatus($page, 'ok', true);
@@ -89,7 +92,21 @@ class ChatbotConnections
         return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)]];
     }
 
-    /** "Fix chat block": isulat ulit ang block at i-publish, parehong chat.key. */
+    /**
+     * "Fix chat block": ang takeover check muna (maliban kung may confirm), saka isulat ulit ang block at i-publish,
+     * parehong chat.key.
+     * @return array{http: int, body: array<string, mixed>}
+     */
+    public function fixChatBlock(string $page, bool $confirm, ?int $userId): array
+    {
+        $pageId = $this->botcakePageId($page);
+        $token = trim((string) $this->settings->get($page, 'botcake', 'token'));
+        if (!$confirm && $pageId !== '' && $token !== '' && ($ask = $this->takeover(app(BotcakeClient::class)->once(), $pageId, $token)) !== null) return $ask;
+
+        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)]];
+    }
+
+    /** Isulat ang block at i-publish (BotcakeChatBlock::turnOn, parehong chat.key). */
     public function chatBlock(string $page, ?int $userId): array
     {
         try {
@@ -134,19 +151,34 @@ class ChatbotConnections
         return ['http' => $res['status'] === 'ok' ? 200 : 502, 'body' => ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error']]];
     }
 
-    /** Ang host ng JSON API block sa Default Reply ng page kapag ibang site (hindi ang app na ito), o null. */
-    private function botcakeOtherHost(BotcakeClient $client, string $pageId, string $token): ?string
+    /**
+     * Ang Default Reply ng page ayon sa Botcake: 'ours' (may JSON API block papunta sa app na ito), 'none' (walang JSON
+     * API block), 'unknown' (walang sagot o kakaibang sagot), o ang host ng ibang site.
+     */
+    public function botcakeReply(BotcakeClient $client, string $pageId, string $token): string
     {
         $r = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/default_reply', [], $token);
-        // Walang sagot o kakaibang sagot: walang alam na ibang site, kaya hindi humaharang.
-        if ($r['http'] < 200 || $r['http'] >= 300 || !is_array($r['body'])) return null;
+        if ($r['http'] < 200 || $r['http'] >= 300 || !is_array($r['body']) || ($r['body']['success'] ?? null) === false) return 'unknown';
         $ours = mb_strtolower((string) parse_url((string) config('app.url'), PHP_URL_HOST));
+        $state = 'none';
         foreach (self::jsonApiUrls($r['body']) as $url) {
             $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
             if ($host !== '' && $host !== $ours) return mb_substr($host, 0, 255);
+            if ($host === $ours) $state = 'ours';
         }
 
-        return null;
+        return $state;
+    }
+
+    /** Ang tanong bago isulat ang block, o null kapag walang ibang site. Hindi masuri = tinatanong din. */
+    private function takeover(BotcakeClient $client, string $pageId, string $token): ?array
+    {
+        $state = $this->botcakeReply($client, $pageId, $token);
+        if ($state === 'ours' || $state === 'none') return null;
+        if ($state === 'unknown') return ['http' => 409, 'body' => ['status' => 'confirm', 'host' => null,
+            'message' => "Could not check whether this page's Default Reply points to another site. Replace it anyway?"]];
+
+        return $this->askMove($state);
     }
 
     /** @return array<int, string> ang config.url ng bawat card na plugin_id = json_api, saan man sa sagot */

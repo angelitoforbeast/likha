@@ -327,12 +327,14 @@ class ChatbotController extends Controller
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         if ($provider === '') return response()->json($connections->info($page));
+        // Ang Botcake save at "Fix chat block" ay nagpa-publish ng Default Reply at nag-o-On ng bot: CEO lang, gaya ng On/Off.
+        if ($provider !== 'forbeast') $this->checkCeo();
 
         $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
         $res = match ($provider) {
             'botcake' => $connections->saveBotcake(...$args),
             'forbeast' => $connections->saveForbeast(...$args),
-            default => ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $connections->chatBlock($page, Auth::id())]],
+            default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
 
         return response()->json($res['body'] + ['connections' => $connections->info($this->listedPage($page) ?? $page)], $res['http']);
