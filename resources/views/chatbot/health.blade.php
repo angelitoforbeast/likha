@@ -41,9 +41,13 @@
         ['AI time max', 'ai_max', 's', null],
         ['Orders', 'orders', '', null],
         ['Sheet writes failed', 'sheet_failed', '', 'sheet_failed'],
+        ['Comments in', 'comments_in', '', null],
+        ['Comments replied', 'comments_replied', '', null],
+        ['Comments failed', 'comments_failed', '', null],
+        ['Attachments ignored', 'ignored', '', null],
     ];
     $f = $filters;
-    $keep = array_filter(['page_id' => $f['page_id'], 'from' => $f['from'], 'to' => $f['to']], fn ($v) => $v !== null);
+    $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot'], 'from' => $f['from'], 'to' => $f['to']], fn ($v) => $v !== null);
     $chart = ['days' => $days, 'hourly' => $hourly];
 @endphp
 
@@ -61,6 +65,12 @@
             <select name="page_id" class="max-w-[14rem] border px-2 py-1 text-sm text-gray-900">
                 <option value="">All pages</option>
                 @foreach($pages as $name => $id)<option value="{{ $id }}" @selected((string) $f['page_id'] === (string) $id)>{{ $name }}</option>@endforeach
+            </select>
+        </label>
+        <label class="flex flex-col text-xs">Bot
+            <select name="bot" class="border px-2 py-1 text-sm text-gray-900">
+                <option value="">Lahat</option>
+                @foreach($bots as $bot)<option value="{{ $bot }}" @selected($f['bot'] === $bot)>{{ $bot }}</option>@endforeach
             </select>
         </label>
         <label class="flex flex-col text-xs">From<input type="date" name="from" value="{{ $f['from'] }}" class="border px-2 py-1 text-sm text-gray-900"></label>
@@ -103,6 +113,31 @@
             </div>
         </div>
         <p class="text-xs text-slate-500">Failed replies count every send that is not "sent" (failed and skipped). "Not answered" messages ({{ $t['not_answered'] }} today) are left out of the reply times. AI call records are kept for 2 days only, so the AI graph is short.</p>
+    </section>
+
+    {{-- Paghahambing kada bot (ang bot ng page ngayon), ngayon at kahapon; hindi sakop ng Bot filter. --}}
+    <section aria-labelledby="h-compare" class="space-y-2">
+        <h2 id="h-compare" class="text-lg font-semibold">Compare bots</h2>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table" data-list="compare">
+                <thead><tr><th>Bot</th><th>Day</th><th class="text-right">Inbound</th><th class="text-right">Answered</th><th class="text-right">First reply median</th>
+                    <th class="text-right">p90</th><th class="text-right">Failed % (without not reachable)</th><th>Top reasons</th><th class="text-right">AI failed</th>
+                    <th class="text-right">Comments in / replied</th><th class="text-right">Switched to Botcake</th></tr></thead>
+                <tbody>
+                @foreach($compare as $c)
+                    @foreach(['today' => 'Today', 'yesterday' => 'Yesterday'] as $day => $dayLabel)
+                        @php($x = $c[$day])
+                        <tr><td>{{ $c['bot'] }}</td><td>{{ $dayLabel }}</td><td class="text-right">{{ $x['inbound'] }}</td><td class="text-right">{{ $fmt($x['answered_pct'], '%') }}</td>
+                            <td class="text-right">{{ $fmt($x['reply_median'], 's') }}</td><td class="text-right">{{ $fmt($x['reply_p90'], 's') }}</td><td class="text-right">{{ $fmt($x['failed_pct_excl'], '%') }}</td>
+                            <td>{{ $x['top_reasons'] ? implode(', ', array_map(fn ($r) => $r[0] . ' (' . $r[1] . ')', $x['top_reasons'])) : '—' }}</td>
+                            <td class="text-right">{{ $fmt($x['ai_failed_pct'], '%') }}</td><td class="text-right">{{ $x['comments_in'] }} / {{ $x['comments_replied'] }}</td>
+                            <td class="text-right">{{ $x['auto_switches'] }}</td></tr>
+                    @endforeach
+                @endforeach
+                </tbody>
+            </table>
+        </div>
+        <p class="text-xs text-slate-500">Each page counts under its bot now: a page that switched today counts all day under its current bot. "Switched to Botcake" is on the row of the bot it left. Comments in also counts comments still waiting, skipped, and "unknown" (Forbeast could not tell whether Meta posted it), so in is more than replied + failed.</p>
     </section>
 
     {{-- Mga dahilan ng pumalya ngayon. --}}
@@ -155,6 +190,26 @@
             @if($isCeo)<button class="cb-btn cb-btn-primary">Save thresholds</button>
             @else<p class="text-xs text-slate-500">Only the CEO can change the thresholds.</p>@endif
         </form>
+    </section>
+
+    {{-- Ang mensaheng attachment lang (larawan, voice, video, reel, file, fallback; hindi sticker o Like): CEO lang ang nagbabago. --}}
+    <section aria-labelledby="h-attachments" class="space-y-2">
+        <h2 id="h-attachments" class="text-lg font-semibold">Photos, voice and other attachments</h2>
+        <p class="text-sm text-slate-600">A customer message that is only a photo, voice note, video, reel, file or fallback (no text). Stickers and Likes are always answered.</p>
+        @if($isCeo)
+            <form method="POST" action="{{ route('chatbot.health.attachments', $keep) }}" class="flex flex-wrap items-end gap-3 text-sm">
+                @csrf
+                <label class="flex flex-col text-xs">The bot
+                    <select name="mode" class="border px-2 py-1 text-sm text-gray-900">
+                        <option value="ignore" @selected($attachments === 'ignore')>Ignores them (logged, kept for later)</option>
+                        <option value="reply" @selected($attachments === 'reply')>Answers them like text</option>
+                    </select>
+                </label>
+                <button class="cb-btn cb-btn-primary">Save</button>
+            </form>
+        @else
+            <p class="text-sm">The bot {{ $attachments === 'ignore' ? 'ignores them (logged, kept for later).' : 'answers them like text.' }}</p>
+        @endif
     </section>
 
     {{-- Mga listahan --}}

@@ -121,11 +121,13 @@ class ChatbotAmendmentOneTest extends ChatblastTestCase
     {
         Http::fake([self::SEND => Http::response(['success' => true])]);
         app(ChatbotPage::class)->link('Page Uno', $this->echoFlow());
+        // Ang larawan ay sinasagot dito (reply); ang default (ignore) ay nasa ChatbotAttachmentsTest.
+        \App\Models\AppSetting::set(\App\Services\Chatbot\ChatAttachments::SETTING, \App\Services\Chatbot\ChatAttachments::REPLY);
 
         $this->send(self::LIKE_BIG);
         $this->send(self::PHOTO);
 
-        $this->assertSame(['You sent 👍', 'You sent [Photo]'], ChatbotReply::orderBy('id')->get()->map(fn ($r) => $r->content[0]['text'])->all());
+        $this->assertSame(['You sent 👍', 'You sent [Photo]'],ChatbotReply::orderBy('id')->get()->map(fn ($r) => $r->content[0]['text'])->all());
         $this->actingAs($this->user());
         foreach (['/chatbot/chats', '/chatbot/chats/customer?page_id=1001&psid=7001'] as $url) {
             $html = $this->get($url)->assertOk()->assertSee('[Photo]')->assertSee('👍')->getContent();

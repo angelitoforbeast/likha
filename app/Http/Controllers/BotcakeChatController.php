@@ -148,11 +148,16 @@ class BotcakeChatController extends Controller
             $payload[$this->text(mb_substr((string) $k, 0, 100))] = $s === null ? null : mb_substr($s, 0, self::PAYLOAD_VALUE);
         }
 
+        // Ang mga marka ng system (attachment, hindi sinagot) ay hindi galing sa param ng Botcake.
+        unset($payload['_ignored'], $payload['attachment']);
         // Ang Like (link ng sticker) ay "👍" at ang larawan mula sa Facebook ay "[Photo]" (ang link ay nasa payload).
         if ($f['message'] !== null) {
             $clean = ChatMessageCleaner::clean($f['message']);
             $f['message'] = $clean['message'];
             if ($clean['image_url'] !== null) $payload['image_url'] = $clean['image_url'];
+            // Ang uri at link ng attachment ("[audio](link)", "[audio] link" o ang larawan), para sa susunod na transcribe o paglalarawan.
+            $attachment = $clean['image_url'] !== null ? ['type' => 'image', 'url' => $clean['image_url']] : \App\Services\Chatbot\ChatAttachments::fromMarker($f['message']);
+            if ($attachment !== null) $payload['attachment'] = $attachment;
         }
 
         // Ang marka ng standby ay sa system lang (hindi galing sa param ng Botcake).

@@ -35,10 +35,21 @@
     @media (hover: none), (max-width: 639px) { #cb-table .cb-edit { opacity: 1; } }
     #cb-table thead th { position: sticky; top: 0; z-index: 20; }
     #cb-table .stick-1 { position: sticky; left: 0; z-index: 10; }
-    #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3 { z-index: 30; }
+    #cb-table thead .stick-1, #cb-table thead .stick-2, #cb-table thead .stick-3, #cb-table thead .stick-4 { z-index: 30; }
     @media (min-width: 640px) {
         #cb-table .stick-2 { position: sticky; left: 12rem; z-index: 10; }
         #cb-table .stick-3 { position: sticky; left: 18rem; z-index: 10; box-shadow: 1px 0 0 #e2e8f0; }
+    }
+    /* Desktop: ang Check ay naka-freeze din (maikling cell); ang buong listahan ay lumalabas sa hover o pindot. */
+    @media (min-width: 1024px) {
+        #cb-table .stick-3 { box-shadow: none; }
+        #cb-table .stick-4 { position: sticky; left: 28rem; z-index: 11; width: 14rem; max-width: 14rem; box-shadow: 1px 0 0 #e2e8f0; }
+        #cb-table .cb-chk-pop { display: none; position: absolute; left: 0.5rem; top: 100%; z-index: 40; width: 20rem; max-width: calc(100vw - 2rem); }
+        #cb-table td.stick-4:hover .cb-chk-pop, #cb-table .cb-chk.cb-chk-open .cb-chk-pop, #cb-table .cb-chk:focus-within .cb-chk-pop { display: block; }
+        /* Ang bukas na cell ay nasa ibabaw ng mga sticky na cell ng susunod na row. */
+        #cb-table td.stick-4:hover, #cb-table td.stick-4:focus-within { z-index: 35; }
+        /* Isinara sa Escape: nakasara kahit nasa linya pa ang focus, hanggang sa susunod na pindot. */
+        #cb-table .cb-chk.cb-chk-shut .cb-chk-pop { display: none !important; }
     }
 </style>
 @endpush
@@ -249,7 +260,7 @@
     {{-- Ang filter ng isang column (gaya ng Google Sheets): hanap, Check all · Uncheck all, at isang check kada value. --}}
     <div id="hf" class="fixed hidden w-64 max-w-[calc(100vw-1rem)] rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-lg" style="z-index: 40" role="dialog" aria-label="Column filter">
         <input id="hf-q" type="search" placeholder="Search values" aria-label="Search values" class="w-full rounded border border-slate-300 px-2 py-1 text-sm text-gray-900">
-        <div class="my-1 flex gap-1 text-blue-700"><button id="hf-all" type="button" class="underline">Check all</button><span aria-hidden="true">·</span><button id="hf-none" type="button" class="underline">Uncheck all</button></div>
+        <div id="hf-bulk" class="my-1 flex gap-1 text-blue-700"><button id="hf-all" type="button" class="underline">Check all</button><span aria-hidden="true">·</span><button id="hf-none" type="button" class="underline">Uncheck all</button></div>
         <div id="hf-list" class="max-h-60 space-y-0.5 overflow-y-auto"></div>
         <div class="mt-1 text-right"><button id="hf-close" type="button" class="cb-btn cb-btn-sm">Done</button></div>
     </div>
@@ -283,7 +294,7 @@
     const box = document.getElementById('cbot'), url = box.dataset, $ = id => document.getElementById(id);
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const PAUSE_MS = 800, table = $('cb-table');
-    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false;
+    let columns = [], rows = [], flows = [], editing = null, gatewayReady = false, bots = [];
     const NEEDS_TOKEN = url.needsToken; // ang dahilan kapag hindi mapipili ang Forbeast
     const picked = new Set(); // mga page na may check (bulk "Replies via")
     const marks = new Map(), seqs = new Map(), errors = new Map();
@@ -313,7 +324,7 @@
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
-        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready;
+        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || [];
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha isa-isa pagkatapos ng render.
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
@@ -324,11 +335,25 @@
     function visible() {
         const q = $('f-q').value.trim().toLowerCase(), st = $('f-state').value;
         return rows.filter(r => (!q || r.page.toLowerCase().includes(q)) && (!st || (st === 'on') === r.active)
-            && Object.entries(hfOn).every(([k, on]) => FILTERS[k].values(r).some(v => on.has(v))));
+            && Object.entries(hfOn).every(([k, on]) => FILTERS[k].values(r).some(v => on.has(v))) && CF.match(r.connected || [], cf));
     }
 
+    // ---- Ang Connected filter: isang row kada bot (Lahat | May | Wala), AND sa isa't isa at sa ibang column. ----
+    // cf.bots[bot] = 'has' | 'not' (wala = Lahat); cf.none = walang kahit anong kumpletong koneksyon (nananaig sa mga row).
+    // connected-filter:start
+    const CF = {
+        // Ang mga bot na alam ng data, saka ang anumang nasa connected ng mga row (ang bagong bot ay lalabas nang kusa).
+        bots: (known, rows) => [...new Set([...known, ...rows.flatMap(r => r.connected || [])])],
+        active: cf => cf.none || Object.values(cf.bots).some(m => m !== 'any'),
+        match: (connected, cf) => cf.none ? connected.length === 0
+            : Object.entries(cf.bots).every(([bot, m]) => m === 'any' || (m === 'has') === connected.includes(bot)),
+        reset: () => ({bots: {}, none: false}),
+    };
+    // connected-filter:end
+    const cf = CF.reset();
+
     // ---- Header filters (gaya ng Google Sheets): bawat column ay may listahan ng value; AND sa pagitan ng mga column. ----
-    // hfOn[key] = ang mga value na naka-check; wala = lahat. Ang Connected na may dalawa ay tumatama sa alinman.
+    // hfOn[key] = ang mga value na naka-check; wala = lahat. Ang Connected ay may sariling filter (cf, sa itaas).
     const PROVIDER_LABEL = {botcake: 'Botcake', gateway: 'Forbeast'};
     const checkKind = r => { const c = checks.get(r.page); return !c || !c.status ? 'Not checked' : (c.status === 'none' ? 'No flow' : (c.status !== 'ok' ? 'x' : (c.warnings?.length ? 'warn' : 'ok'))); };
     const FILTERS = {
@@ -342,7 +367,7 @@
     const hfOn = {};
     let hfKey = null;
     function filterButton(key) {
-        const b = el('button', {type: 'button', class: 'ml-1 rounded px-1 font-normal normal-case ' + (hfOn[key] ? 'bg-blue-100 text-blue-800' : 'text-slate-400 hover:text-slate-700'),
+        const b = el('button', {type: 'button', class: 'ml-1 rounded px-1 font-normal normal-case ' + ((key === 'connected' ? CF.active(cf) : hfOn[key]) ? 'bg-blue-100 text-blue-800' : 'text-slate-400 hover:text-slate-700'),
             'aria-label': 'Filter ' + FILTERS[key].label, 'aria-haspopup': 'dialog', title: 'Filter ' + FILTERS[key].label, text: '▾'});
         b.addEventListener('click', ev => { ev.stopPropagation(); openFilter(key, b); });
         return b;
@@ -355,7 +380,7 @@
         paintFilter(); // bago sukatin: ang taas ay ayon sa listahan
         box.style.top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - box.offsetHeight - 8)) + 'px';
         box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
-        $('hf-q').focus();
+        if (key === 'connected') $('hf-list').querySelector('button')?.focus(); else $('hf-q').focus();
     }
     function filterValues(key) {
         const all = new Set();
@@ -363,6 +388,10 @@
         return [...all].sort((a, b) => a.localeCompare(b));
     }
     function paintFilter() {
+        // Ang Connected: walang hanap at Check all; ang mga row ng bot ang laman ng parehong panel.
+        $('hf-q').classList.toggle('hidden', hfKey === 'connected');
+        $('hf-bulk').classList.toggle('hidden', hfKey === 'connected');
+        if (hfKey === 'connected') return paintConnected();
         const q = $('hf-q').value.trim().toLowerCase(), on = hfOn[hfKey];
         $('hf-list').replaceChildren(...filterValues(hfKey).filter(v => !q || v.toLowerCase().includes(q)).map(v => {
             const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle'});
@@ -370,6 +399,31 @@
             c.addEventListener('change', () => setValues([v], c.checked));
             return el('label', {class: 'flex items-center break-words'}, [c, v]);
         }));
+    }
+    function paintConnected() {
+        const focused = document.activeElement?.dataset?.cf;
+        // Ang pagbabago: muling ipinipinta ang listahan, kaya ang click ay hindi umaabot sa "click sa labas" na nagsasara.
+        const change = (ev, fn) => { ev.stopPropagation(); fn(); render(); paintFilter(); };
+        const segment = bot => el('div', {class: 'inline-flex shrink-0 overflow-hidden rounded border border-slate-300', role: 'group', 'aria-label': bot},
+            [['any', 'Lahat'], ['has', 'May'], ['not', 'Wala']].map(([m, label]) => {
+                const on = (cf.bots[bot] || 'any') === m;
+                const b = el('button', {type: 'button', 'data-cf': bot + ':' + m, 'aria-pressed': on ? 'true' : 'false', text: label,
+                    class: 'px-2 py-0.5 ' + (on ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-100')});
+                b.disabled = cf.none;
+                b.addEventListener('click', ev => change(ev, () => { if (m === 'any') delete cf.bots[bot]; else cf.bots[bot] = m; }));
+                return b;
+            }));
+        const none = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'data-cf': 'none'});
+        none.checked = cf.none;
+        none.addEventListener('change', ev => change(ev, () => { cf.none = none.checked; }));
+        const reset = el('button', {type: 'button', class: 'text-blue-700 underline', 'data-cf': 'reset', text: 'I-reset'});
+        reset.addEventListener('click', ev => change(ev, () => Object.assign(cf, CF.reset())));
+        $('hf-list').replaceChildren(
+            ...CF.bots(bots, rows).map(bot => el('div', {class: 'flex flex-wrap items-center justify-between gap-1 py-0.5' + (cf.none ? ' opacity-50' : '')},
+                [el('span', {class: 'min-w-0 break-words', text: bot}), segment(bot)])),
+            el('label', {class: 'flex items-center break-words pt-1'}, [none, 'Walang kahit anong bot']),
+            el('div', {class: 'pt-1'}, reset));
+        if (focused) $('hf-list').querySelector('[data-cf="' + CSS.escape(focused) + '"]')?.focus();
     }
     function setValues(values, checked) {
         const all = filterValues(hfKey), on = hfOn[hfKey] || new Set(all);
@@ -392,7 +446,7 @@
             el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
             el('th', {class: 'stick-3 min-w-[10rem] w-40 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Flow', filterButton('flow')]),
-            el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
+            el('th', {class: 'stick-4 min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Values the flow uses, image links, Seq pairs and unknown variables'}, ['Check', filterButton('check')]),
             el('th', {class: 'min-w-[7rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Bots that are fully connected'}, ['Connected', filterButton('connected')]),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
@@ -451,10 +505,22 @@
     }
     const checks = new Map(), checking = new Set();
     function checkCell(r) {
-        const td = el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs', 'data-check': r.page});
+        const td = el('td', {class: 'stick-4 border-b border-slate-100 bg-white px-3 py-2 align-top text-xs', 'data-check': r.page});
         fillCheck(td, r.page);
         return td;
     }
+    // Ang buod ng Check para sa maikling cell (naka-freeze): ang icon, ilang problema (mali at babala) at ang unang linya;
+    // null = walang problema o wala pang resulta (ang buong cell na ang ipinapakita).
+    // check-summary:start
+    function checkSummary(c) {
+        if (!c || !c.status || c.status === 'none') return null;
+        const reasons = c.status !== 'ok' ? (c.reasons || []) : [], warnings = c.warnings || [];
+        if (!reasons.length && !warnings.length) return null;
+        return {icon: reasons.length ? 'x' : 'warn', count: reasons.length + warnings.length, first: (reasons[0] ?? warnings[0])};
+    }
+    // check-summary:end
+    const FROZEN = window.matchMedia('(min-width: 1024px)');
+    FROZEN.addEventListener('change', () => render());
     function fillCheck(td, page) {
         const c = checks.get(page), out = [];
         if (checking.has(page) || !c) out.push(el('span', {class: 'text-slate-400', text: c?.error || 'Checking…'}));
@@ -473,7 +539,21 @@
             again.addEventListener('click', ev => { ev.stopPropagation(); runCheck(page, true); });
             out.push(el('div', {class: 'mt-1 flex flex-wrap items-center gap-x-2 text-slate-400'}, [c.checked_at ? el('span', {text: c.checked_at}) : null, again]));
         }
-        td.replaceChildren(...out);
+        const sum = FROZEN.matches && !checking.has(page) ? checkSummary(c) : null;
+        if (!sum) { td.replaceChildren(...out); return; }
+        // Naka-freeze: isang linya; ang buong listahan (kasama ang Check again) ay sa hover, sa pindot o sa focus.
+        const box = el('div', {class: 'cb-chk'});
+        const toggle = el('button', {type: 'button', class: 'flex w-full min-w-0 items-start gap-1 text-left', 'aria-expanded': 'false',
+            'aria-label': sum.count + ' problem' + (sum.count === 1 ? '' : 's') + ' on ' + page + ': show all'}, [icon(sum.icon, sum.icon === 'x' ? 'Check failed' : 'Check warning'),
+            el('span', {class: 'shrink-0 font-semibold ' + (sum.icon === 'x' ? 'text-red-700' : 'text-amber-700'), text: String(sum.count)}),
+            el('span', {class: 'min-w-0 truncate ' + (sum.icon === 'x' ? 'text-red-700' : 'text-amber-700'), text: sum.first})]);
+        toggle.addEventListener('click', ev => { ev.stopPropagation(); const open = box.classList.toggle('cb-chk-open'); toggle.setAttribute('aria-expanded', open ? 'true' : 'false'); });
+        // Escape: isinasara at ibinabalik ang focus sa linya (ang focus-within ay hindi na nagpapakita ng listahan).
+        box.addEventListener('keydown', ev => { if (ev.key !== 'Escape') return; ev.stopPropagation(); box.classList.remove('cb-chk-open'); box.classList.add('cb-chk-shut'); toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); });
+        box.addEventListener('mouseleave', () => box.classList.remove('cb-chk-shut'));
+        toggle.addEventListener('click', () => box.classList.remove('cb-chk-shut'));
+        box.append(toggle, el('div', {class: 'cb-chk-pop rounded-lg border border-slate-200 bg-white p-2 shadow-lg'}, out));
+        td.replaceChildren(box);
     }
     function paintCheck(page) {
         table.querySelectorAll('td[data-check]').forEach(td => { if (td.dataset.check === page) fillCheck(td, page); });

@@ -50,7 +50,7 @@ class BotcakeOutbox implements Outbox
             }
         }
 
-        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null);
+        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, ChatbotProvider::viaOf($provider));
     }
 
     /**
@@ -112,24 +112,24 @@ class BotcakeOutbox implements Outbox
     }
 
     /** @return array{status: string, error: ?string} */
-    private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null): array
+    private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?string $via = null): array
     {
         return self::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $nodeId, $kind, $content, $status, $error, $http, $raw,
-            $kind === 'send' ? $run->tags : null);
+            $kind === 'send' ? $run->tags : null, $via);
     }
 
     /**
      * Ang talaan ng isang padala (chatbot_replies). $raw: ang buong sagot ng pumalyang padala. $tags: ang
-     * ChatbotTags::forSend() ng padala (Results).
+     * ChatbotTags::forSend() ng padala (Results). $via: ang bot na nagdala (botcake o forbeast; null = hindi padala sa bot).
      * @return array{status: string, error: ?string}
      */
-    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null): array
+    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null, ?string $via = null): array
     {
         $reply = ChatbotReply::create([
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId,
             'node_id' => $nodeId, 'kind' => $kind, 'content' => $content, 'status' => $status, 'error' => $error === null ? null : mb_substr($error, 0, 255),
             'http' => $http, 'sent_at' => now(),
-        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags));
+        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags) + ChatbotReply::viaColumn($via));
         ChatbotTags::storeRows($reply, $tags);
 
         return ['status' => $status, 'error' => $error];

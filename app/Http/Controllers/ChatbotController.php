@@ -139,7 +139,8 @@ class ChatbotController extends Controller
             ];
         }
 
-        return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady()]);
+        return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
+            'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS]);
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */

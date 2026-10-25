@@ -58,6 +58,7 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         app(PageSettings::class)->set('Page Uno', 'botcake', 'chat.key', self::KEY_UNO, true, null, true);
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway');
         BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ana Cruz', 'psid' => self::PSID, 'status' => 'available', 'source' => 'api']);
+        BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ben Reyes', 'psid' => self::PSID_B, 'status' => 'available', 'source' => 'api']);
     }
 
     private function provider(): string
@@ -82,11 +83,35 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         return ['error' => ['code' => $code, 'message' => 'Meta said #' . $code]];
     }
 
-    private function botcakePush(string $message, ?string $mid = null)
+    private function botcakePush(string $message, ?string $mid = null, string $psid = self::PSID)
     {
         return $this->withServerVariables(['REMOTE_ADDR' => '203.171.22.6'])->postJson('/api/botcake/chat',
-            ['page_id' => '1001', 'psid' => self::PSID, 'name' => 'Ana Cruz', 'message' => $message] + ($mid ? ['message_id' => $mid] : []),
+            ['page_id' => '1001', 'psid' => $psid, 'name' => 'Ana Cruz', 'message' => $message] + ($mid ? ['message_id' => $mid] : []),
             ['X-Chat-Key' => self::KEY_UNO]);
+    }
+
+    private const PSID_B = '6012345678905678';
+
+    /** Ang kopya ng Forbeast ng isang mensahe ng customer $psid (walang mid na kapareho ng Botcake). */
+    private function gatewayChat(string $message, string $psid = self::PSID, ?string $reply = null): BotcakeChat
+    {
+        $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => $message,
+            'message_id' => 'm_' . uniqid(), 'payload' => ['source' => 'gateway'], 'received_at' => now()]);
+        if ($reply !== null) BotcakeOutbox::record(1001, (int) $psid, $chat->id, null, 'n2', 'send', [], $reply);
+
+        return $chat;
+    }
+
+    /** @return array<int, string> ang mga log line (mensahe + context) habang tumatakbo ang $fn */
+    private function logged(callable $fn): array
+    {
+        $lines = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Log\Events\MessageLogged::class, function ($m) use (&$lines) {
+            $lines[] = $m->message . ' ' . json_encode($m->context);
+        });
+        $fn();
+
+        return $lines;
     }
 
     private function greeting(): ChatbotFlow
@@ -158,7 +183,8 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         Queue::fake();
         Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
 
-        foreach (['Una', 'Pangalawa', 'Pangatlo'] as $m) $this->botcakePush($m)->assertOk();
+        // Dalawang customer (ang isang customer lang ay hindi sapat).
+        foreach (['Una' => self::PSID, 'Pangalawa' => self::PSID, 'Pangatlo' => self::PSID_B] as $m => $psid) $this->botcakePush($m, null, $psid)->assertOk();
         // Kararating lang: ang kopya ng Forbeast ay maaaring nasa queue pa, kaya walang lipat.
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('gateway', $this->provider());
@@ -183,13 +209,185 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('gateway', $this->provider());
 
-        // One Botcake chat with no Forbeast copy after two minutes is enough (a quiet page).
+        // One customer's Botcake chat with no Forbeast copy is not enough; a second customer's is.
         $this->botcakePush('Panglima')->assertOk();
+        $this->travel(2)->minutes();
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('gateway', $this->provider());
+        $this->botcakePush('Hello po', null, self::PSID_B)->assertOk();
         $this->travel(2)->minutes();
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
         $this->assertSame('botcake', $this->provider());
+    }
+
+    /** @return array<string, array{0: string, 1: string}> ang kopya ng Botcake at ang sa Forbeast */
+    public static function twins(): array
+    {
+        return [
+            'audio' => ['[audio] https://cdn.fbsbx.com/v/t59.3654-21/voice_clip.mp4?_nc_cat=1&oh=00_abc', '[Audio]'],
+            'live Botcake voice (markdown link)' => ['[audio](https://cdn.fbsbx.com/x)', '[Audio]'],
+            'live Botcake photo (no link)' => ['[Photo]', '[Photo]'],
+            'markdown link, other case' => ['[AUDIO](HTTPS://cdn.fbsbx.com/y)', '[Audio]'],
+            'image' => ['https://scontent.xx.fbcdn.net/v/t1.15752-9/abc_n.jpg?stp=dst-jpg', '[Photo]'],
+            'sticker' => ['[sticker] https://scontent.xx.fbcdn.net/v/t39.1997-6/sticker_n.png', '[Photo]'],
+            'like (a Botcake sticker marker too)' => ['[sticker] https://scontent.xx.fbcdn.net/v/like.png', '👍'],
+            'like' => ['https://scontent.xx.fbcdn.net/v/t39.1997-6/39178562_1505197616293642_5411344281094848512_n.png', '👍'],
+            'video' => ['[video] https://video.xx.fbcdn.net/v/clip.mp4', '[Video]'],
+            'text, other spacing and case' => ["  Magkano   PO\nito? ", 'magkano po ito?'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('twins')]
+    public function test_S_149_20_a_botcake_copy_pairs_with_its_forbeast_twin_by_kind_and_time(string $botcake, string $forbeast): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        // Sinasagot ang attachment (reply): ang attachment ay ebidensya, kaya ang pagpares lang ang pumipigil sa lipat.
+        \App\Models\AppSetting::set(\App\Services\Chatbot\ChatAttachments::SETTING, \App\Services\Chatbot\ChatAttachments::REPLY);
+        // Botcake muna: kung Forbeast ang nauna na may parehong text, itinatapon ng /api/botcake/chat ang kopya bilang ulit
+        // (walang pagpares na masusubok).
+        foreach ([self::PSID, self::PSID_B] as $psid) {
+            $this->botcakePush($botcake, null, $psid)->assertOk();
+            $this->gatewayChat($forbeast, $psid);
+        }
+        $this->assertSame(2, BotcakeChat::get()->filter(fn ($c) => ForbeastWatch::standby($c))->count(), 'both Botcake copies are stored');
+
+        $this->travel(3)->minutes();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+
+        $this->assertSame('gateway', $this->provider(), 'two customers, but every copy has its twin');
+    }
+
+    public function test_S_149_33_a_live_botcake_voice_copy_pairs_with_the_forbeast_audio_and_without_it_the_page_switches(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        \App\Models\AppSetting::set(\App\Services\Chatbot\ChatAttachments::SETTING, \App\Services\Chatbot\ChatAttachments::REPLY);
+        // Kapares: ang Forbeast [Audio] ng bawat customer.
+        foreach ([self::PSID, self::PSID_B] as $psid) {
+            $this->gatewayChat('[Audio]', $psid);
+            $this->botcakePush('[audio](https://cdn.fbsbx.com/x)', null, $psid)->assertOk();
+        }
+        $this->travel(3)->minutes();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('gateway', $this->provider(), 'paired');
+
+        // Walang kapares (ang kontrol): ang parehong kopya mula sa dalawang customer ay naglilipat.
+        BotcakeChat::where('payload->source', 'gateway')->delete();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('botcake', $this->provider(), 'without the Forbeast copies the same Botcake copies switch the page');
+    }
+
+    public function test_S_149_21_the_inbound_switch_needs_unmatched_copies_from_two_customers_after_the_grace(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        // Isang customer, kahit dalawang mensahe, at isang Forbeast chat na isa lang ang kapares: walang lipat.
+        $this->gatewayChat('Available po?'); // text: ang attachment lang ay hindi kailanman ebidensya
+        foreach (['Available po?', 'Magkano po?'] as $m) $this->botcakePush($m)->assertOk();
+        $this->travel(3)->minutes();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('gateway', $this->provider(), 'one customer is not enough');
+
+        // Ang pangalawang customer na walang kopya sa Forbeast, pagkalipas ng grace: lipat.
+        $this->botcakePush('Hello po, available?', null, self::PSID_B)->assertOk();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame('gateway', $this->provider(), 'still inside the 120 s grace');
+        $this->travel(3)->minutes();
+        $lines = $this->logged(fn () => $this->artisan('chatbot:forbeast-watch')->assertSuccessful());
+
+        $this->assertSame('botcake', $this->provider());
+        $this->assertSame(['inbound', 'Botcake chats from 2 customers with no Forbeast copy after 120 seconds'], [$this->events()[0]['condition'], $this->events()[0]['error']]);
+        $line = collect($lines)->first(fn ($l) => str_contains($l, 'forbeast watch: switched'));
+        $this->assertNotNull($line, 'a log line with the evidence');
+        $this->assertStringContainsString('"customers":2', $line);
+        $this->assertStringContainsString('"chat_ids":[', $line);
+        $this->assertStringNotContainsString('Hello po', implode("\n", $lines));
+    }
+
+    public function test_S_149_22_after_a_switch_a_copy_whose_twin_was_answered_is_skipped_and_one_without_a_twin_runs(): void
+    {
+        Queue::fake();
+        $this->greeting();
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/voice.mp4')->assertOk();
+        $this->gatewayChat('[Audio]', self::PSID, 'sent');
+        $this->travel(1)->minutes();
+        $this->botcakePush('Hello po, available?', null, self::PSID_B)->assertOk();
+
+        Http::fake([self::GW_SEND => Http::response($this->metaError(190), 400)]);
+        $lines = $this->logged(fn () => $this->send());
+        $this->assertSame('botcake', $this->provider());
+
+        $ran = [];
+        Queue::assertPushed(RunChatbotFlow::class, function (RunChatbotFlow $job) use (&$ran) {
+            $ran[] = BotcakeChat::find($job->chatId)?->message;
+            return true;
+        });
+        $this->assertSame(['Hello po, available?'], $ran);
+        $skip = collect($lines)->first(fn ($l) => str_contains($l, 'forbeast watch: standby skipped'));
+        $this->assertNotNull($skip);
+        $this->assertStringContainsString('"reason":"already_answered"', $skip);
+        $this->assertStringNotContainsString('voice.mp4', implode("\n", $lines));
+    }
+
+    public function test_S_149_35_a_copy_whose_forbeast_run_is_still_going_is_left_to_that_run(): void
+    {
+        Queue::fake();
+        $this->greeting();
+        // Ang kopya ng Botcake muna, saka ang sa Forbeast: ang takbo nito ay nasa queue pa (hindi pa naaabot ng runner).
+        $this->botcakePush('Magkano po?')->assertOk();
+        $this->gatewayChat('Magkano po?');
+
+        Http::fake([self::GW_SEND => Http::response($this->metaError(190), 400)]);
+        $lines = $this->logged(fn () => $this->send());
+
+        $this->assertSame('botcake', $this->provider());
+        Queue::assertNotPushed(RunChatbotFlow::class); // ang takbo ng Forbeast ang sasagot (sa Botcake na), isang beses
+        $this->assertNotNull(collect($lines)->first(fn ($l) => str_contains($l, 'standby skipped') && str_contains($l, '"reason":"forbeast_pending"')));
+    }
+
+    public function test_S_149_32_attachment_only_copies_never_count_for_the_inbound_switch(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/a.mp4')->assertOk();
+        $this->botcakePush('https://scontent.xx.fbcdn.net/v/t1.15752-9/p_n.jpg', null, self::PSID_B)->assertOk();
+
+        $this->travel(3)->minutes();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+
+        $this->assertSame('gateway', $this->provider(), 'two customers, but only photos and voice notes');
+    }
+
+    public function test_S_149_23_a_forbeast_reply_removes_only_its_own_standby_copy_even_after_several_sends(): void
+    {
+        Queue::fake();
+        // Dalawang voice note; ang Forbeast ay ang una lang ang natanggap, at ang flow nito ay may dalawang send.
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/one.mp4')->assertOk();
+        $f1 = $this->gatewayChat('[Audio]');
+        $this->travel(30)->seconds();
+        $this->botcakePush('[audio] https://cdn.fbsbx.com/two.mp4')->assertOk();
+
+        app(ForbeastWatch::class)->answered($f1->id);
+        app(ForbeastWatch::class)->answered($f1->id);
+
+        $left = BotcakeChat::get()->filter(fn ($c) => ForbeastWatch::standby($c))->pluck('message')->values()->all();
+        $this->assertSame(['[audio] https://cdn.fbsbx.com/two.mp4'], $left, 'the second voice note stays for a switch');
+    }
+
+    public function test_S_149_22_a_copy_with_no_twin_is_skipped_when_the_customer_was_answered_since_it_came(): void
+    {
+        Queue::fake();
+        $this->greeting();
+        $this->botcakePush('Hello po', null, self::PSID_B)->assertOk();
+        BotcakeOutbox::record(1001, (int) self::PSID_B, null, null, 'n2', 'manual', [], 'sent'); // hal. sagot mula sa Inbox
+        \Illuminate\Support\Facades\DB::table('chatbot_replies')->update(['kind' => 'send', 'sent_at' => now()->subSeconds(3)]);
+
+        Http::fake([self::GW_SEND => Http::response($this->metaError(190), 400)]);
+        $lines = $this->logged(fn () => $this->send());
+
+        Queue::assertNotPushed(RunChatbotFlow::class);
+        $this->assertNotNull(collect($lines)->first(fn ($l) => str_contains($l, 'standby skipped') && str_contains($l, '"reason":"already_answered"')));
     }
 
     public function test_S_117_5_the_health_check_switches_after_three_failures_or_at_once_when_not_connected(): void
@@ -278,7 +476,11 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
     {
         $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'message' => $message,
             'message_id' => $mid, 'payload' => ['source' => 'gateway'], 'received_at' => now()]);
-        if ($reply !== null) BotcakeOutbox::record(1001, (int) self::PSID, $chat->id, null, 'n2', 'send', [], $reply);
+        if ($reply !== null) {
+            BotcakeOutbox::record(1001, (int) self::PSID, $chat->id, null, 'n2', 'send', [], $reply);
+            // Tapos na ang takbo ng chat na ito (gaya ng runner): ang LAST_CHAT ay umabot na rito.
+            (new CustomerFields(1001, (int) self::PSID))->set(CustomerFields::LAST_CHAT, (string) $chat->id);
+        }
 
         return $chat;
     }
@@ -290,9 +492,10 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
 
         $this->botcakePush('Luma na', 'm_old')->assertOk();
         BotcakeChat::where('message_id', 'm_old')->update(['received_at' => now()->subMinutes(20)]);
-        $this->botcakePush('Una po', 'm_1')->assertOk();
+        $this->botcakePush('Una po', 'm_1', self::PSID_B)->assertOk(); // ibang customer: walang sagot sa kanya pagkatapos
         $this->botcakePush('Sinagot ng Forbeast', 'm_2')->assertOk();
         $this->forbeastCopy('Sinagot ng Forbeast', 'm_2', 'sent');
+        $this->travel(1)->minutes(); // ang sagot sa m_2 ay bago pa nito (lampas 5 s)
         $this->botcakePush('Pumalya ang sagot', 'm_3')->assertOk();
         $this->forbeastCopy('Pumalya ang sagot', 'm_3', 'failed');
 
@@ -310,6 +513,7 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
             $ran[] = BotcakeChat::find($job->chatId)?->message;
             return true;
         });
+        // Ang may kopya sa Forbeast na pumalya ang sagot ay sinasagot ng Botcake; ang nasagot na (m_2) ay hindi.
         $this->assertSame(['Una po', 'Pumalya ang sagot'], $ran);
         $this->assertSame(['Luma na', 'Sinagot ng Forbeast'], BotcakeChat::get()->filter(fn ($c) => ForbeastWatch::standby($c))->pluck('message')->values()->all());
     }

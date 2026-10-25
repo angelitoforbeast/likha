@@ -189,12 +189,13 @@ class ChatbotProviderTest extends ChatblastTestCase
                 null, ['source' => 'gateway', 'ad_id' => '6045246247433'], 'gw-event-18342'],
             'postback' => [['type' => 'postback', 'mid' => null, 'text' => null, 'postback' => ['title' => 'Order now', 'payload' => 'ORDER']],
                 'Order now', ['source' => 'gateway', 'postback' => 'ORDER'], 'gw-event-18342'],
+            // Ang uri at link ng attachment ay naitatabi (payload.attachment) para sa susunod na transcribe o paglalarawan.
             'photo' => [['text' => null, 'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg']]],
-                '[Photo]', ['source' => 'gateway', 'image_url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'm_AbC1'],
+                '[Photo]', ['source' => 'gateway', 'attachment' => ['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'image_url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'm_AbC1'],
             'like sticker' => [['text' => null, 'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/851587_369239346556147_162929011_n.png']]],
-                '👍', ['source' => 'gateway'], 'm_AbC1'],
+                '👍', ['source' => 'gateway', 'attachment' => ['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/851587_369239346556147_162929011_n.png']], 'm_AbC1'],
             'video, ad id not digits' => [['text' => null, 'attachments' => [['type' => 'video', 'url' => 'https://v.example.test/v.mp4']], 'referral' => ['ad_id' => 'x<1>']],
-                '[Video]', ['source' => 'gateway'], 'm_AbC1'],
+                '[Video]', ['source' => 'gateway', 'attachment' => ['type' => 'video', 'url' => 'https://v.example.test/v.mp4']], 'm_AbC1'],
         ];
     }
 
@@ -204,6 +205,8 @@ class ChatbotProviderTest extends ChatblastTestCase
         Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);
         $this->greeting();
         $this->useGateway();
+        // Ang pag-imbak lang ang sinusubok dito: ang attachment ay sinasagot gaya ng dati (reply).
+        \App\Models\AppSetting::set(\App\Services\Chatbot\ChatAttachments::SETTING, \App\Services\Chatbot\ChatAttachments::REPLY);
 
         $this->event($event)->assertOk();
         $this->event($event + ['attempt' => 2])->assertOk(); // ang ulit: parehong mid o event_id

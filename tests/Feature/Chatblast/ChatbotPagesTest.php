@@ -325,11 +325,12 @@ class ChatbotPagesTest extends ChatblastTestCase
 
         $columns = $this->getJson('/chatbot/data')->assertOk()->json('columns');
         $keys = array_column($columns, 'key');
-        $after = array_slice($keys, array_search('picture', $keys, true) + 1, 49);
+        $after = array_slice($keys, array_search('picture', $keys, true) + 1, 53);
 
         $expected = [];
         for ($i = 1; $i <= 20; $i++) array_push($expected, 'seq_img_' . $i, 'seq_' . $i);
         for ($i = 1; $i <= 4; $i++) array_push($expected, 'after_order_img_' . $i, 'after_order_' . $i);
+        array_push($expected, 'comment_reply_1', 'comment_reply_2', 'comment_reply_3', 'comment_pm');
         $this->assertSame([...$expected, 'promo'], $after);
         $this->assertSame(['Seq Img 1', 'Seq 1', 'Seq Img 2'], array_slice(array_column($columns, 'label'), array_search('seq_img_1', $keys, true), 3));
     }

@@ -116,6 +116,7 @@ class ChatbotEvents
             'run_ended' => 'Run ended (' . ($d['reason'] ?? 'end') . ')',
             'skipped' => 'Skipped: ' . ($d['reason'] ?? '') . ($node ? ' (' . $node . ')' : ''),
             'sequence' => self::sequenceText($d),
+            'ignored' => 'Ignored: ' . ($d['attachment'] ?? 'attachment') . ' only (the bot does not answer attachments)',
             'order' => 'Counted as an order at step ' . $node,
             default => $type,
         };

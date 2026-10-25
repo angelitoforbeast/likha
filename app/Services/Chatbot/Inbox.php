@@ -274,7 +274,11 @@ class Inbox
             $img = $c->message === ChatMessageCleaner::PHOTO ? ($c->payload['image_url'] ?? null) : null;
             $items[] = ['key' => 'in-' . $c->id, 'src' => 'in', 'id' => $c->id, 'side' => 'in', 'at' => self::iso($c->received_at), 'raw' => Carbon::parse($c->received_at)->format('Y-m-d H:i:s'),
                 'text' => (string) $c->message, 'like' => $c->message === ChatMessageCleaner::LIKE,
-                'image_url' => is_string($img) && preg_match('#^https?://#i', $img) ? $img : null];
+                'image_url' => is_string($img) && preg_match('#^https?://#i', $img) ? $img : null,
+                // Ang bot na naghatid: gateway = Forbeast, ang iba (default_reply, api) = Botcake.
+                'via' => ChatbotProvider::via('', $c),
+                // Hindi sinagot ng bot: attachment lang (ChatAttachments), ang uri.
+                'ignored' => is_string($c->payload['_ignored'] ?? null) ? $c->payload['_ignored'] : null];
         }
         foreach ($out as $r) {
             $base = ['key' => 'out-' . $r->id, 'src' => 'out', 'id' => $r->id, 'at' => self::iso($r->sent_at), 'raw' => Carbon::parse($r->sent_at)->format('Y-m-d H:i:s'),
@@ -288,7 +292,9 @@ class Inbox
                 ? (preg_match('#^https?://#i', (string) ($m['url'] ?? '')) ? ['type' => 'image', 'url' => (string) $m['url']] : null)
                 : ['type' => 'text', 'text' => (string) ($m['text'] ?? '')], (array) $r->content)));
             $items[] = $base + ['side' => 'out', 'messages' => $messages, 'manual' => $r->kind === 'manual',
-                'by' => $r->kind === 'manual' ? ($users[$r->user_id] ?? 'You') : 'Bot'];
+                'by' => $r->kind === 'manual' ? ($users[$r->user_id] ?? 'You') : 'Bot',
+                // Ang bot na nagdala (via); ang lumang row na wala nito: ang via ng Results (tags), kung mayroon.
+                'via' => $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null)];
         }
         $flows = $ev->isEmpty() ? [] : ChatbotFlow::whereIn('id', $ev->pluck('flow_id')->filter()->unique()->values())->pluck('name', 'id')->all();
         foreach ($ev as $e) {

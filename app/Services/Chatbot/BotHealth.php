@@ -95,9 +95,39 @@ class BotHealth
         if ($from->gt($to)) $from = $to;
         if ($from->diffInDays($to) > self::MAX_DAYS - 1) $from = $to->subDays(self::MAX_DAYS - 1);
         $page = $q['page_id'] ?? null;
+        $bot = $q['bot'] ?? null;
 
         return ['page_id' => is_string($page) && ctype_digit($page) && strlen($page) <= 30 ? $page : null,
-            'from' => $from->toDateString(), 'to' => $to->toDateString()];
+            'from' => $from->toDateString(), 'to' => $to->toDateString(),
+            'bot' => is_string($bot) && in_array($bot, ChatbotConnections::BOTS, true) ? $bot : null];
+    }
+
+    /**
+     * Ang bot ng bawat page ngayon (page ID => Botcake o Forbeast): chatbot.provider = gateway ay Forbeast, ang iba at
+     * ang walang setting ay Botcake. Ngayon lang: ang page na lumipat sa araw ay buong araw sa bot nito ngayon.
+     */
+    public static function botOfPages(): array
+    {
+        $settings = app(\App\Services\PageSettings::class);
+        $gateway = \App\Models\PageSetting::where('provider', \App\Services\ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)
+            ->get(['page_name', 'value', 'is_secret'])->filter(fn ($s) => $s->plainValue() === ChatbotProvider::GATEWAY)
+            ->map(fn ($s) => $settings->pageKey((string) $s->page_name))->flip();
+        $out = [];
+        foreach (BotcakeChat::pageMap() as $id => $name) {
+            $out[(string) $id] = isset($gateway[$settings->pageKey((string) $name)]) ? ChatbotConnections::BOTS[1] : ChatbotConnections::BOTS[0];
+        }
+
+        return $out;
+    }
+
+    /** Ang mga page ID na saklaw ng page at bot na pinili (null = lahat). */
+    private static function scope(?string $page, ?string $bot, array $botOf): ?array
+    {
+        $pages = $page !== null ? [(int) $page] : null;
+        if ($bot === null) return $pages;
+        $ids = array_map('intval', array_keys(array_filter($botOf, fn ($b) => $b === $bot)));
+
+        return $pages === null ? $ids : array_values(array_intersect($pages, $ids));
     }
 
     // ── labas ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -173,20 +203,10 @@ class BotHealth
         // Laging kasama ang ngayon at kahapon para sa mga tile, kahit ibang range ang pinili.
         $start = min($f['from'], $yesterday);
         $end = max($f['to'], $today);
-        $startAt = $start . ' 00:00:00';
-        $endAt = CarbonImmutable::parse($end)->addDay()->toDateString() . ' 00:00:00';
-        $page = $f['page_id'];
+        $botOf = self::botOfPages();
+        $pages = self::scope($f['page_id'], $f['bot'], $botOf);
 
-        $inbound = $this->inbound($startAt, $endAt, $page);
-        $replies = $this->replies($startAt, $endAt, $page);
-        $ai = $this->aiCalls($startAt, $endAt, $page);
-        $orders = $this->orders($startAt, $endAt, $page);
-
-        $metrics = [];
-        for ($d = CarbonImmutable::parse($start); $d->toDateString() <= $end; $d = $d->addDay()) {
-            $k = $d->toDateString();
-            $metrics[$k] = $this->dayMetrics($inbound['days'][$k] ?? [], $replies[$k] ?? [], $ai[$k] ?? [], $orders[$k] ?? 0);
-        }
+        [$metrics, $inbound] = $this->metrics($start, $end, $pages);
         $days = [];
         for ($d = CarbonImmutable::parse($f['from']); $d->toDateString() <= $f['to']; $d = $d->addDay()) {
             $days[] = ['date' => $d->toDateString()] + $metrics[$d->toDateString()];
@@ -202,27 +222,109 @@ class BotHealth
             'tiles' => ['dates' => ['today' => $today, 'yesterday' => $yesterday], 'today' => $t, 'yesterday' => $y]
                 + $this->deltas($t, $y),
             'days' => $days,
-            'hourly' => $this->hourly($inbound['rows'], $today, $page),
+            'hourly' => $this->hourly($inbound['rows'], $today, $pages),
             'slow' => $slow,
-            'failures' => $this->failures($f, $page, $names),
+            'failures' => $this->failures($f, $pages, $names),
+            'compare' => $this->compare($f['page_id'], $botOf, $yesterday, $today),
         ];
+    }
+
+    /**
+     * Ang mga metric kada araw mula $start hanggang $end ng mga page na saklaw (null = lahat).
+     * @return array{0: array<string, array<string, mixed>>, 1: array} ang metrics kada araw at ang inbound (para sa listahan at oras)
+     */
+    private function metrics(string $start, string $end, ?array $pages): array
+    {
+        $startAt = $start . ' 00:00:00';
+        $endAt = CarbonImmutable::parse($end)->addDay()->toDateString() . ' 00:00:00';
+        $inbound = $this->inbound($startAt, $endAt, $pages);
+        $replies = $this->replies($startAt, $endAt, $pages);
+        $ai = $this->aiCalls($startAt, $endAt, $pages);
+        $orders = $this->orders($startAt, $endAt, $pages);
+        $comments = $this->comments($startAt, $endAt, $pages);
+        // Ang mensaheng attachment lang na hindi sinagot (ChatAttachments): ang "ignored" event.
+        $ignored = DB::table('chatbot_events')->where('type', 'ignored')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+            ->selectRaw('DATE(created_at) as d, COUNT(*) as n')->groupBy('d')->pluck('n', 'd')->map(fn ($n) => (int) $n)->all();
+
+        $metrics = [];
+        for ($d = CarbonImmutable::parse($start); $d->toDateString() <= $end; $d = $d->addDay()) {
+            $k = $d->toDateString();
+            $metrics[$k] = $this->dayMetrics($inbound['days'][$k] ?? [], $replies[$k] ?? [], $ai[$k] ?? [], $orders[$k] ?? 0)
+                + ['comments_in' => $comments[$k]['in'] ?? 0, 'comments_replied' => $comments[$k]['sent'] ?? 0, 'comments_failed' => $comments[$k]['failed'] ?? 0,
+                    'ignored' => $ignored[$k] ?? 0];
+        }
+
+        return [$metrics, $inbound];
+    }
+
+    /**
+     * Ang paghahambing kada bot (ngayon at kahapon), sa page na pinili kung mayroon; hindi sakop ng Bot filter. Ang kusang
+     * lipat sa Botcake ay nasa row ng bot na nilipatan (Forbeast), ayon sa "from" ng talaan.
+     * @return array<int, array{bot: string, today: array, yesterday: array}>
+     */
+    private function compare(?string $page, array $botOf, string $yesterday, string $today): array
+    {
+        $switches = $this->switches($yesterday, $today, $page);
+        $out = [];
+        foreach (ChatbotConnections::BOTS as $bot) {
+            [$m] = $this->metrics($yesterday, $today, self::scope($page, $bot, $botOf));
+            $row = ['bot' => $bot];
+            foreach (['today' => $today, 'yesterday' => $yesterday] as $label => $d) {
+                $x = $m[$d];
+                $reasons = array_filter($x['reasons']);
+                arsort($reasons);
+                $row[$label] = [
+                    'inbound' => $x['inbound'], 'answered_pct' => $x['answered_pct'], 'reply_median' => $x['reply_median'], 'reply_p90' => $x['reply_p90'],
+                    'failed_pct_excl' => $x['failed_pct_excl'],
+                    'top_reasons' => array_map(fn ($k) => [self::REASONS[$k], $reasons[$k]], array_slice(array_keys($reasons), 0, 3)),
+                    'ai_failed_pct' => $x['ai_failed_pct'], 'comments_in' => $x['comments_in'], 'comments_replied' => $x['comments_replied'],
+                    'auto_switches' => $switches[$d][$bot] ?? 0,
+                ];
+            }
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /** Ang mga kusang lipat (chatbot.auto_switch na switched) kada araw at bot na nilipatan. @return array<string, array<string, int>> */
+    private function switches(string $start, string $end, ?string $page): array
+    {
+        $settings = app(\App\Services\PageSettings::class);
+        $only = $page !== null ? $settings->pageKey((string) (BotcakeChat::pageMap()[$page] ?? '')) : null;
+        $rows = \App\Models\PageSetting::where('provider', \App\Services\ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)
+            ->where('created_at', '>=', $start . ' 00:00:00')->where('created_at', '<', CarbonImmutable::parse($end)->addDay()->toDateString() . ' 00:00:00')
+            ->get(['page_name', 'value', 'is_secret', 'created_at']);
+        $out = [];
+        foreach ($rows as $s) {
+            if ($only !== null && $settings->pageKey((string) $s->page_name) !== $only) continue;
+            $j = json_decode((string) $s->plainValue(), true);
+            if (!is_array($j) || ($j['result'] ?? null) !== ForbeastWatch::SWITCHED) continue;
+            $bot = ($j['from'] ?? null) === ChatbotProvider::GATEWAY ? ChatbotConnections::BOTS[1] : ChatbotConnections::BOTS[0];
+            $day = $s->created_at->toDateString();
+            $out[$day][$bot] = ($out[$day][$bot] ?? 0) + 1;
+        }
+
+        return $out;
     }
 
     /**
      * Ang mga mensahe ng customer sa mga page na sinagot ng bot sa range, kasama ang una nitong sagot (send/sent).
      * @return array{days: array<string, array{secs: float[], n: int}>, rows: array<int, array{id: int, at: string, first: ?string, secs: ?int}>}
      */
-    private function inbound(string $startAt, string $endAt, ?string $page): array
+    private function inbound(string $startAt, string $endAt, ?array $pages): array
     {
         $answered = DB::table('chatbot_replies')->where('kind', 'send')->where('status', 'sent')
             ->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->distinct()->pluck('page_id')->map(fn ($p) => (string) $p)->all();
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->distinct()->pluck('page_id')->map(fn ($p) => (string) $p)->all();
         if (!$answered) return ['days' => [], 'rows' => []];
 
         $out = ['days' => [], 'rows' => []];
         $rows = DB::table('botcake_chats as c')
             ->leftJoin('chatbot_replies as r', fn ($j) => $j->on('r.chat_id', '=', 'c.id')->where('r.kind', 'send')->where('r.status', 'sent'))
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
+            ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
             ->groupBy('c.id', 'c.received_at')->selectRaw('c.id, c.received_at, MIN(r.sent_at) as first_at')->get();
         foreach ($rows as $r) {
             $secs = $r->first_at === null ? null : max(0, strtotime($r->first_at) - strtotime($r->received_at));
@@ -236,11 +338,11 @@ class BotHealth
     }
 
     /** @return array<string, array{sent: int, failed: int, reasons: array<string, int>, sheet_failed: int}> */
-    private function replies(string $startAt, string $endAt, ?string $page): array
+    private function replies(string $startAt, string $endAt, ?array $pages): array
     {
         $out = [];
         $rows = DB::table('chatbot_replies')->whereIn('kind', ['send', 'sheet'])->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
             ->selectRaw('DATE(sent_at) as d, kind, ' . self::REASON_SQL . ' as reason, COUNT(*) as n')->groupBy('d', 'kind', 'reason')->get();
         foreach ($rows as $r) {
             $day = &$out[$r->d];
@@ -260,11 +362,11 @@ class BotHealth
     }
 
     /** @return array<string, array{calls: int, failed: int, retried: int, secs: int[]}> */
-    private function aiCalls(string $startAt, string $endAt, ?string $page): array
+    private function aiCalls(string $startAt, string $endAt, ?array $pages): array
     {
         $out = [];
         $rows = DB::table('chatbot_ai_requests')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)->where('model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL) // ang hinihintay ng Encode order ay hindi tawag sa AI
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->get(['created_at', 'answered_at', 'status', 'error', 'attempts']);
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->get(['created_at', 'answered_at', 'status', 'error', 'attempts']);
         foreach ($rows as $r) {
             $day = &$out[substr($r->created_at, 0, 10)];
             $day ??= ['calls' => 0, 'failed' => 0, 'retried' => 0, 'secs' => []];
@@ -279,11 +381,33 @@ class BotHealth
     }
 
     /** @return array<string, int> */
-    private function orders(string $startAt, string $endAt, ?string $page): array
+    private function orders(string $startAt, string $endAt, ?array $pages): array
     {
         return DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
             ->selectRaw('DATE(created_at) as d, COUNT(*) as n')->groupBy('d')->pluck('n', 'd')->map(fn ($n) => (int) $n)->all();
+    }
+
+    /**
+     * Ang mga comment mula sa Forbeast kada araw: lahat ng dumating, ang nasagot (sent) at ang pumalya.
+     * @return array<string, array{in: int, sent: int, failed: int}>
+     */
+    private function comments(string $startAt, string $endAt, ?array $pages): array
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('chatbot_comment_events')) return [];
+        $out = [];
+        $rows = DB::table('chatbot_comment_events')->where('received_at', '>=', $startAt)->where('received_at', '<', $endAt)
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+            ->selectRaw('DATE(received_at) as d, status, COUNT(*) as n')->groupBy('d', 'status')->get();
+        foreach ($rows as $r) {
+            $day = &$out[$r->d];
+            $day ??= ['in' => 0, 'sent' => 0, 'failed' => 0];
+            $day['in'] += (int) $r->n;
+            if (isset($day[$r->status])) $day[$r->status] += (int) $r->n;
+            unset($day);
+        }
+
+        return $out;
     }
 
     private function dayMetrics(array $in, array $rep, array $ai, int $orders): array
@@ -325,7 +449,7 @@ class BotHealth
     }
 
     /** Ngayon kada oras: reply time ayon sa oras ng dating ng mensahe, at ang mga pumalya ayon sa oras ng padala. */
-    private function hourly(array $rows, string $today, ?string $page): array
+    private function hourly(array $rows, string $today, ?array $pages): array
     {
         $hours = array_fill(0, 24, ['secs' => [], 'failed' => 0]);
         foreach ($rows as $r) {
@@ -333,7 +457,7 @@ class BotHealth
         }
         $failed = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')
             ->where('sent_at', '>=', $today . ' 00:00:00')->where('sent_at', '<', CarbonImmutable::parse($today)->addDay()->toDateString() . ' 00:00:00')
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->pluck('sent_at');
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->pluck('sent_at');
         foreach ($failed as $at) $hours[(int) substr($at, 11, 2)]['failed']++;
 
         $out = [];
@@ -382,11 +506,11 @@ class BotHealth
     }
 
     /** Ang pinakabagong 20 pumalyang send sa range, may dahilan. Walang text ng customer: ang error ng Botcake lang. */
-    private function failures(array $f, ?string $page, array $names): array
+    private function failures(array $f, ?array $pages, array $names): array
     {
         $rows = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')
             ->where('sent_at', '>=', $f['from'] . ' 00:00:00')->where('sent_at', '<', CarbonImmutable::parse($f['to'])->addDay()->toDateString() . ' 00:00:00')
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->orderByDesc('sent_at')->orderByDesc('id')->limit(self::LIST_LIMIT)
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->orderByDesc('sent_at')->orderByDesc('id')->limit(self::LIST_LIMIT)
             ->selectRaw('id, page_id, node_id, error, http, sent_at, ' . self::REASON_SQL . ' as reason')->get();
 
         return $rows->map(fn ($r) => ['id' => (int) $r->id, 'at' => $r->sent_at, 'page' => $names[$r->page_id] ?? 'Page ' . $r->page_id, 'node' => $r->node_id,

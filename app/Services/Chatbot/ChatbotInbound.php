@@ -30,8 +30,9 @@ class ChatbotInbound
         }
         // Ang sariling chatbot: kapag may flow ang page (at naka-On), ang takbo ay sa queue na "chatbot". Ang
         // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.
+        // Ang attachment lang (larawan, audio, video, …; hindi sticker o Like) ay hindi sinasagot habang naka-ignore.
         try {
-            if (app(ChatbotPage::class)->flow($pageName)) RunChatbotFlow::dispatch($chat->id);
+            if (app(ChatbotPage::class)->flow($pageName) && !ChatAttachments::ignore($chat)) RunChatbotFlow::dispatch($chat->id);
         } catch (\Throwable $e) {
             report($e);
         }
