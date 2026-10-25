@@ -182,3 +182,87 @@ Align with the contract Forbeast handoff 014 actually delivered.
 | **Endpoints**: `POST {same base as the existing Forbeast message sends}/v1/pages/{page_id}/comments/{comment_id}/reply` `{"message"}` (1–8000) → 200 `{"ok":true,"comment_id"}`; `…/private-reply` `{"text"}` (1–2000) → 200 `{"ok":true,"message_id","recipient_id"}` (Forbeast documents the paths as `/api/v1/…`; reuse exactly how GatewayProvider builds the existing send URL from GATEWAY_URL so the prefix matches). Errors and handling: 409 `already_replied` (meta_code 10900) → record, no retry; 504 `unknown_outcome` → record as "unknown", **never retry** (Meta may have posted it); 502 `meta_error` → failed, no retry; 429 → retry later within the 20/min budget; 401/403/404/422 → failed with the error code as the reason. | Same. |
 
 Tests: a 504 unknown_outcome is not retried and is logged as unknown; a 429 is retried later; a null-message comment still gets the PM and reply. End with "149-3: <done|blocked> — <one line>".
+
+## Result of the three follow-up changes
+
+### 149-1 Connected filter per bot
+- **Data:** `/chatbot/data` now returns `bots` (`ChatbotConnections::BOTS` = Botcake, Forbeast). `connected()` takes its labels from that list.
+- **Page** (`resources/views/chatbot/index.blade.php`): the Connected header filter opens the same `#hf` panel without search or Check all. The panel holds:
+  - one row per bot with Lahat | May | Wala buttons (`aria-pressed`);
+  - "Walang kahit anong bot", which greys out and overrides the rows;
+  - I-reset.
+
+  The other columns keep their checkbox filters. The Connected rule ANDs with them in `visible()`.
+- **Logic:** one pure helper, `CF` (`bots`, `active`, `match`, `reset`), between `// connected-filter:start` and `:end`.
+  - The bot rows are `CF.bots(data.bots, rows)`: the data's list plus any name found in a row's `connected`. A new provider therefore needs no filter code.
+  - Clicks stop propagation before the repaint, so the panel doesn't close.
+  - Focus goes back to the same control.
+- **Tests** (`ChatbotConnectedFilterTest`): the helper is taken out of the rendered page and run in Node. The cases are May Botcake, Wala Forbeast, May Botcake + Wala Forbeast, Walang kahit anong bot, I-reset, and a third provider. The test also runs `node --check` on the page's whole script, and checks the markup.
+- **Red run:** `the helper is on the page — Failed asserting that 0 is identical to 1`, and `json('bots')` was null.
+- **Story changes:** S-148.11 now reads "Connected is set to May Forbeast (the per-bot filter)" instead of "Connected = Forbeast only", with the Connected logic proven by `test_S_149_12…`. New: S-149.12, S-149.13, and S-149.14 (390 px, browser, not run).
+
+### 149-2 Health by bot
+- **Filter:** `/chatbot/health?bot=Botcake|Forbeast` (select "Bot: Lahat / Botcake / Forbeast", built from `ChatbotConnections::BOTS`).
+  - It scopes every tile, graph (days, hourly) and list (slowest, failures). An unknown value is ignored.
+  - The bot filter goes into the cache key (5 minutes, same as today), and it is kept on threshold save.
+- **Each page's bot** comes from `BotHealth::botOfPages()`: `chatbot.provider` = gateway means Forbeast; anything else, or no setting, means Botcake.
+- **Compare bots table:** one row per bot for today and one for yesterday, with:
+  - inbound, answered %, first reply median and p90;
+  - failed % without not reachable, plus the top 3 reasons;
+  - AI failed %;
+  - comments in / replied;
+  - "Switched to Botcake".
+
+  The table follows the Page filter but not the Bot filter. It scrolls inside its card, so the page itself never scrolls sideways.
+- **Switch counts:** taken from every `chatbot.auto_switch` row created that day with result `switched`, active or not, and shown on the row of the bot the page left (Forbeast).
+- **Limitations, also stated on the page:**
+  - A page's bot is the one it has now, so a page that switched during the day counts all day under its current bot.
+  - With a Bot picked, pages missing from the chatbot page map (no Botcake ID) are left out.
+  - Comments in also counts waiting, skipped and unknown comments.
+- **Tests** (`ChatbotHealthByBotTest`): the filter scopes the tiles and the failures list; a page without a provider setting counts as Botcake; the compare numbers for a seeded day and the day before are checked by hand.
+- **Red run:** `Undefined array key "compare"`, and the tiles were not scoped.
+
+### 149-3 The contract Forbeast delivered
+- **Event:** the test event now has Forbeast's real shape: `kind`, `event_id`, unix `created_time`, `received_at`, `attempt`.
+  - `HandleGatewayEvent::fields()` passes `comment_id`, `post_id`, `parent_id`, `from_id`, `is_reply` and `is_page_author` through.
+  - The comment text is still never kept, and a `message: null` comment is answered as usual.
+  - Dedupe stays the unique `comment_id`. Facebook comment ids are unique across pages, so this matches `<page_id>:c:<comment_id>`.
+- **URLs:** built like `GatewayProvider` builds the message send, from the same base (`GATEWAY_URL` + `/v1/pages/…`), so the `/api` prefix matches.
+- **Answers:**
+
+  | Answer | What happens |
+  |---|---|
+  | 409 `already_replied` / Meta #10900 | Recorded, not retried. |
+  | 504 or `unknown_outcome` | That part is `unknown`, never sent again. The other part still goes, and the row is `unknown`; Replies can filter on it. |
+  | 502, 401, 403, 404, 422 | `failed`, with the error code in `reason`, not retried. |
+  | 429 | Nothing is recorded for that part. The parts already done are kept, the row goes back to `queued`, the page's minute counts as full (so its other comments wait too), and the job is released to the next minute. Only the part that is left is sent, within the 20 per minute and the 6-hour limit. |
+
+- **Tests:**
+  - `test_S_149_17…`: 504 recorded as unknown, no second private reply, Replies filter; and the 5 refused codes.
+  - `test_S_149_18…`: 429 waits a minute and sends only what is left; a failed PM keeps its code across a 429 on the reply.
+  - `test_S_149_19…`: a null message.
+- **Red runs:** the 504 test failed with `Failed asserting that two arrays are identical` (the part showed failed); the 429 test with `Job was expected to be released, but was not`; the refused codes with `reason` null; the PM 403 + reply 429 test with `'forbidden'` expected, got `null`. The null-message test passed at once, since the comment text was never used: it pins existing behaviour.
+- **Changed:** `GatewayComments.php` (unknown, throttled, code), `CommentReplies.php` (sends only the part left, `throttled()`, status and reason), the Replies status option "Unknown (comments)", and the comments in the unreleased migration (the schema is unchanged).
+
+### Review
+- `skeptic-reviewer` reviewed `dc2a0635..HEAD`: adversarial depth on 149-3, standard depth on 149-1 and 149-2. It found no blocker and no major.
+- Minors fixed:
+  - a debug line left in a test;
+  - a failed PM's code lost when the reply then got a 429;
+  - the Health note about unknown comments.
+- The rest are in `TODO.md` under "149".
+- Browser check: not run (no app or database in this worktree). S-148.11 (browser part) and S-149.14 are still open for a browser pass.
+
+### Commits
+- `dc2a0635` docs: three follow-up changes for spec 149 saved in the result
+- `c4a80cd1` feat: Connected filter on /chatbot/pages with Lahat, May and Wala per bot, no-bot and reset (spec 149)
+- `4c5d91a9` feat: Health filter by bot and a per-bot comparison for today and yesterday (spec 149)
+- `739f1b7c` feat: comment sends follow the delivered Forbeast contract: 504 unknown never retried, 429 waits a minute, error codes as reasons (spec 149)
+- `47ec43b9` fix: a failed private message keeps its error code when the reply waits for a 429; Health notes unknown comments (spec 149)
+
+### Suite
+`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` on 47ec43b9: `OK, but there were issues! Tests: 1492, Assertions: 8683, PHPUnit Deprecations: 75, Skipped: 1`. No failures (baseline 1459 at 5ff034d1, no failures), so no new failures.
+
+149-1: done — the Connected filter has Lahat / May / Wala per bot (from the data), "Walang kahit anong bot" and I-reset; the logic is tested in Node, the browser pass is not run.
+149-2: done — Health filters by bot (pages without a provider count as Botcake), and Compare bots shows today and yesterday per bot; a page counts under its bot as of now.
+149-3: done — comment sends follow Forbeast's delivered contract: 504 is unknown and never retried, 429 waits for the next minute and sends only what is left, refusals keep the error code, and null-text comments are answered.
