@@ -1,0 +1,59 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Services\BotcakeChatBlock;
+use App\Services\BotcakeClient;
+use App\Services\BotcakeCustomerSync;
+use App\Services\Chatbot\ChatbotProvider;
+use App\Services\Chatbot\ForbeastPageSetup;
+use App\Services\ChatbotFields;
+use App\Services\PageSettings;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+/**
+ * Gabi-gabi: ang Botcake token ng bawat page sa /chatbot/pages (botcake.token_status), ang chat block na isinusulat ulit
+ * kapag nawala ang chat.key sa page na On at nasa Botcake, at ang Forbeast token (forbeast.token_status). Kaya ang
+ * Connected at Check ay ayon sa huling subok. Bilang lang ang nasa log, walang token.
+ */
+class ChatbotConnectionsCheck extends Command
+{
+    protected $signature = 'chatbot:connections-check';
+
+    protected $description = 'Re-test every chatbot page\'s Botcake and Forbeast tokens and re-apply a missing chat block';
+
+    public function handle(PageSettings $settings, BotcakeCustomerSync $sync, ForbeastPageSetup $forbeast, BotcakeChatBlock $chatBlock): int
+    {
+        $counts = ['pages' => 0, 'botcake_ok' => 0, 'botcake_bad' => 0, 'blocks' => 0, 'block_failed' => 0, 'forbeast_ok' => 0, 'forbeast_bad' => 0, 'errors' => 0];
+        foreach ($settings->pagesWith('botcake', ['page_id', 'token']) as $page) {
+            $counts['pages']++;
+            try {
+                $pageId = trim((string) $settings->get($page, 'botcake', 'page_id'));
+                $ok = app(BotcakeClient::class)->once()->tokenAndFields($pageId, trim((string) $settings->get($page, 'botcake', 'token')))['ok'];
+                $sync->tokenStatus($page, $ok ? 'ok' : 'invalid');
+                $counts[$ok ? 'botcake_ok' : 'botcake_bad']++;
+                if ($ok && $settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0' && ChatbotProvider::name($page) === ChatbotProvider::BOTCAKE
+                    && trim((string) $settings->get($page, 'botcake', 'chat.key')) === '') {
+                    $counts[$chatBlock->turnOn($page)['ok'] ? 'blocks' : 'block_failed']++;
+                }
+            } catch (Throwable $e) {
+                report($e);
+                $counts['errors']++;
+            }
+            if ($forbeast->token($page) === '') continue;
+            try {
+                $status = $forbeast->retest($page);
+                if ($status !== 'skipped') $counts[$status === 'ok' ? 'forbeast_ok' : 'forbeast_bad']++;
+            } catch (Throwable $e) {
+                report($e);
+                $counts['errors']++;
+            }
+        }
+        Log::info('chatbot:connections-check', $counts);
+        $this->line(json_encode($counts));
+
+        return self::SUCCESS;
+    }
+}

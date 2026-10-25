@@ -79,6 +79,23 @@ class ForbeastPageSetup
             'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
     }
 
+    /**
+     * Ang gabi-gabing subok ng naka-save na token (walang bagong secret, walang PUT): ok lang kapag ang webhook ng page
+     * ay papunta pa rin sa app na ito. Isinusulat ang forbeast.token_status. @return string ok | invalid | error | skipped
+     */
+    public function retest(string $page): string
+    {
+        $p = $this->probe(trim((string) $this->settings->get($page, 'botcake', 'page_id')), $this->token($page));
+        if ($p['status'] === 'skipped') return 'skipped';
+        $ours = rtrim((string) config('app.url'), '/') . '/api/gateway/events';
+        if ($p['status'] === 'ok' && rtrim((string) $p['webhook'], '/') !== $ours) {
+            $p = ['status' => 'error', 'error' => $p['webhook'] === null ? 'Webhook not set' : 'Webhook points to ' . (parse_url($p['webhook'], PHP_URL_HOST) ?: 'another site')] + $p;
+        }
+        $this->result($page, $p['status'], $p['name'], $p['error']);
+
+        return $p['status'];
+    }
+
     /** DELETE ng webhook (subok lang: ang pagkabigo ay hindi humaharang), saka tinatanggal ang token, secret at status. */
     public function disconnect(string $page, ?int $userId = null): void
     {

@@ -115,6 +115,13 @@ Schedule::command('botcake:setup-check --all')
     ->dailyAt('21:30')
     ->withoutOverlapping(120)
     ->runInBackground(); // ilang minuto (60 page, 2 tawag kada segundo): hindi pinaghihintay ang ibang 21:30
+// Pagkatapos ng setup check: ang Botcake at Forbeast token ng bawat page sa /chatbot/pages, at ang nawalang chat block
+// (page na On at nasa Botcake), para ang Connected at Check ay ayon sa gabing ito.
+Schedule::command('chatbot:connections-check')
+    ->timezone('Asia/Manila')
+    ->dailyAt('22:15')
+    ->withoutOverlapping(60)
+    ->runInBackground();
 Schedule::command('botcake:setup-delivered')
     ->hourlyAt(45)
     ->withoutOverlapping(30);
