@@ -25,7 +25,7 @@ class PageContentCheck
     private const EXTRA_TEXT = '/^(prompt_[1-3]|seq_\d+)$/';
     private const SHOP_LINES = ['PAGE', 'ITEM', 'PRICE', 'QUANTITY'];
     private const SHOP_VALUE = 80; // letra ng value ng SHOP DETAILS na ipinapakita sa finding
-    private const FORM_FIELDS = [
+    public const FORM_FIELDS = [
         'Full Name' => '/name|pangalan|ngalan/iu',
         'Phone Number' => '/phone|cell|mobile|contact\s*(no|num)|number|numero|telepono|\bcp\b/iu',
         'Address' => '/address|tirahan/iu',
@@ -87,6 +87,9 @@ TXT;
                 $out['findings'][] = ['kind' => 'form', 'field' => $label, 'level' => 'warn', 'reason' => $label . ': walang ' . implode(', ', $missing)];
             }
         }
+        $comments = $this->comments($page, $ask, $exp, $rows, $labels, $vars);
+        array_push($out['findings'], ...$comments['findings']);
+        $out['unchecked'] += $comments['unchecked'];
         if ($exp === null) return $out;
         $intro = 'Expected item: ' . $exp['item'] . "\n";
 
@@ -132,6 +135,40 @@ TXT;
             if ($ans === null) { $out['unchecked']++; continue; }
             $out['findings'][] = $this->verdict('video', $label, $ans, $exp);
         }
+
+        return $out;
+    }
+
+    /**
+     * Ang mga comment column: ang mga rule (CommentCheck), at ang item at presyo ng Comment PM gaya ng Prompt at Seq (ang
+     * parehong tanong, cache at gastos; walang item finding kapag walang binanggit na item). Ang PM na walang presyo ay
+     * babala. Bawat finding ay kind "comment". Ang ibang argumento ay galing sa run(), para walang ulit na query.
+     * @return array{findings: array<int, array{kind: string, field: string, level: string, reason: string}>, unchecked: int}
+     */
+    public function comments(string $page, bool $ask, ?array $exp = null, ?array $rows = null, ?array $labels = null, ?array $vars = null): array
+    {
+        $out = ['findings' => app(CommentCheck::class)->rules($page), 'unchecked' => 0];
+        $rows ??= $this->settings->allWithIds($page, ChatbotFields::PROVIDER);
+        $value = trim($rows[CommentReplies::PM]['value'] ?? '');
+        if ($value === '') return $out;
+        $exp ??= $this->expected->for($page);
+        if ($exp === null) return $out;
+        $labels ??= array_column($this->fields->columns(), 'label', 'key');
+        $vars ??= ChatbotVars::merge($this->page->botfields($page));
+
+        $label = $labels[CommentReplies::PM] ?? CommentReplies::PM;
+        $text = mb_substr(self::fill($value, $vars), 0, self::MAX_TEXT);
+        $ans = $this->answer('text', 'v' . $rows[CommentReplies::PM]['id'] . ':' . sha1($text), $exp, $page, $label, $ask,
+            fn () => $this->ai->ask(self::TEXT_PROMPT, [['type' => 'text', 'text' => 'Expected item: ' . $exp['item'] . "\nField: " . $label . "\n<<<TEXT\n" . $text . "\nTEXT>>>"]]));
+        if ($ans === null) { $out['unchecked']++; return $out; }
+        $found = [];
+        if ($ans['found_item'] !== '') $found[] = $this->verdict('text', $label, $ans, $exp);
+        $field = self::peso(trim($rows['price']['value'] ?? ''));
+        if (($found[0]['level'] ?? 'ok') !== 'x') {
+            if (!$ans['prices']) $found[] = ['kind' => 'text', 'field' => $label, 'level' => 'warn', 'reason' => $label . ': no price'];
+            elseif (($exp['price'] !== null || $field !== null) && ($price = $this->price($label, $ans['prices'], $exp, $field))) $found[] = $price;
+        }
+        foreach ($found as $f) $out['findings'][] = ['kind' => 'comment'] + $f;
 
         return $out;
     }
@@ -203,7 +240,7 @@ TXT;
     }
 
     /** Ang {{Botfield}} ng page ay pinupunan (isang antas, gaya ng Preview); ang iba (customer field) ay iniiwan. */
-    private static function fill(string $text, array $vars): string
+    public static function fill(string $text, array $vars): string
     {
         return (string) preg_replace_callback(ChatbotVars::PATTERN, fn ($m) => $vars[ChatbotVars::norm($m[1])] ?? $m[0], $text);
     }

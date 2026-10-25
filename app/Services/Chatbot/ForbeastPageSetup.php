@@ -46,6 +46,7 @@ class ForbeastPageSetup
             return $this->result($page, $status, null, self::why($res), [], $userId);
         }
         $name = trim((string) ($res->json('name') ?? ''));
+        $this->keepScopes($page, self::scopes($res));
 
         $secret = Str::random(64);
         $hook = $this->call(fn () => $this->http($token)->put($base . '/webhook',
@@ -61,7 +62,8 @@ class ForbeastPageSetup
     /**
      * Subok lang ng isang token bago i-save (walang isinusulat): GET /v1/pages/{id}. Ang pangalan, id at webhook URL ay
      * galing sa Forbeast (untrusted, text lang).
-     * @return array{status: string, name: ?string, id: ?string, webhook: ?string, error: ?string} status = ok | invalid | error | skipped
+     * @return array{status: string, name: ?string, id: ?string, webhook: ?string, error: ?string, permissions?: ?array} status = ok | invalid | error | skipped;
+     *   permissions (ok lang): ang scopes ng token, null kapag walang field
      */
     public function probe(string $pageId, string $token): array
     {
@@ -75,7 +77,7 @@ class ForbeastPageSetup
         }
         $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(trim((string) $v), 0, $max) : null;
 
-        return ['status' => 'ok', 'name' => $str($res->json('name'), 255), 'id' => $str($res->json('id'), 64),
+        return ['status' => 'ok', 'name' => $str($res->json('name'), 255), 'id' => $str($res->json('id'), 64), 'permissions' => self::scopes($res),
             'webhook' => $str($res->json('webhook.url'), 500), 'error' => null];
     }
 
@@ -88,6 +90,7 @@ class ForbeastPageSetup
     {
         $p = $this->probe(trim((string) $this->settings->get($page, 'botcake', 'page_id')), $this->token($page));
         if ($p['status'] === 'skipped') return 'skipped';
+        if ($p['status'] === 'ok') $this->keepScopes($page, $p['permissions']);
         $ours = rtrim((string) config('app.url'), '/') . '/api/gateway/events';
         if ($p['status'] === 'ok' && rtrim((string) $p['webhook'], '/') !== $ours) {
             $p = ['status' => 'error', 'error' => $p['webhook'] === null ? 'Webhook not set' : 'Webhook points to ' . (parse_url($p['webhook'], PHP_URL_HOST) ?: 'another site')] + $p;
@@ -107,7 +110,7 @@ class ForbeastPageSetup
             $this->call(fn () => $this->http($token)->delete($url . '/v1/pages/' . rawurlencode($pageId) . '/webhook'));
         }
 
-        $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->whereIn('key', ['token', 'webhook_secret', 'token_status'])
+        $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->whereIn('key', ['token', 'webhook_secret', 'token_status', 'permissions'])
             ->where('active', true)->get()->each(fn ($s) => $this->settings->deactivate($s, $userId));
     }
 
@@ -166,6 +169,39 @@ class ForbeastPageSetup
             report($e);
             return null;
         }
+    }
+
+    /**
+     * Ang "permissions" ng page check (listahan ng scope ng token; untrusted, maiikling text lang), o null kapag wala ang
+     * field (ang lumang Forbeast): hindi alam, hindi "walang permission".
+     * @return array<int, string>|null
+     */
+    private static function scopes(Response $res): ?array
+    {
+        $list = $res->json('permissions');
+        if (!is_array($list)) return null;
+        $out = [];
+        foreach (array_slice(array_values($list), 0, 50) as $s) {
+            if (is_string($s) && preg_match('/^[a-z0-9_]{1,100}$/', trim($s))) $out[] = trim($s);
+        }
+        $out = array_values(array_unique($out));
+        sort($out);
+
+        return $out;
+    }
+
+    /**
+     * Itinatabi ang scopes sa forbeast.permissions (JSON), para sa Check ng mga comment column; isinusulat lang kapag
+     * nagbago. null = tinatanggal (hindi alam).
+     */
+    private function keepScopes(string $page, ?array $scopes): void
+    {
+        if ($scopes !== null) {
+            $this->settings->set($page, self::PROVIDER, 'permissions', json_encode($scopes), false, null, true);
+            return;
+        }
+        $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'permissions')->where('active', true)
+            ->get()->each(fn ($s) => $this->settings->deactivate($s));
     }
 
     private static function why(?Response $res): string

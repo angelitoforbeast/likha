@@ -323,13 +323,15 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $s->set('Page Dos', 'chatbot', 'comment_pm', str_repeat('a', 2000));
         $s->set('Page Dos', 'chatbot', 'comment_reply_1', str_repeat('b', 8000));
 
+        // Ang babala sa haba lang (ang format at content ng comment ay sa S-150).
+        $lengths = fn (array $res) => array_values(array_filter($res['warnings'], fn ($w) => str_contains($w, 'Forbeast sends at most')));
         $over = $this->check('Page Uno');
         $this->assertSame([
             'Comment PM is 2001 characters: Forbeast sends at most 2000',
             'Comment Reply 2 is 8001 characters: Forbeast sends at most 8000',
-        ], $over['warnings']);
+        ], $lengths($over));
         $this->assertNotSame('none', $over['status'], 'shown even without a flow');
-        $this->assertSame([], $this->check('Page Dos')['warnings'], 'at the limit is fine');
+        $this->assertSame([], $lengths($this->check('Page Dos')), 'at the limit is fine');
         $this->assertSame(str_repeat('a', 2001), $s->get('Page Uno', 'chatbot', 'comment_pm'), 'nothing is cut');
     }
 }
