@@ -28,9 +28,10 @@ One medium-tier backend + UI slice (no new route: a new event type on the existi
 - `tests/Feature/Chatblast/RealSendTimeTest.php` (new), `qa/stories.md` (S-156), `TODO.md`.
 
 ### Schema change
-- Additive and nullable only, with no default and no `AFTER`, guarded and idempotent. It changes no rows. It was designed for chatbot_replies at millions of rows.
-- On MySQL 8.0.12+ the column add is `ALGORITHM=INSTANT` (metadata only, no table rewrite). On 5.7 it would rebuild the table. The production version has not been checked: run `SELECT VERSION()` before `migrate --force`.
-- The two indexes, `client_ref` and `(via, confirmed_status, sent_at)`, are built online (INPLACE, reads and writes allowed). Each reads the table once, so expect minutes, not seconds.
+- Additive and nullable only, with no default and no `AFTER`. It changes no rows. It was designed for a table of millions of rows. Today `chatbot_replies` has about 172k rows on Likha and about 32k on Incepxion.
+- Each column and each index is added only if it is missing, so a half-applied run can be completed by running it again (amendment 156-1). `down()` drops only what exists.
+- Production is MySQL 8.0.46 on both sites. Adding the three columns there is `ALGORITHM=INSTANT` (metadata only, no table rewrite).
+- The two indexes, `client_ref` and `(via, confirmed_status, sent_at)`, are built online (INPLACE, reads and writes allowed). At these row counts each takes seconds.
 - No backfill: older Botcake rows without `confirmed_at` use their `sent_at` in the queries.
 
 ### Behaviour notes
@@ -66,21 +67,34 @@ One medium-tier backend + UI slice (no new route: a new event type on the existi
 
 `RealSendTimeTest`: OK (11 tests, 105 assertions).
 
-Done-when suite (`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode tests/Feature/MetaAds`) on the final tree: **1705 tests, 0 failures, 0 errors, 1 skipped**, the same skip as the baseline. No new failures against 816c5baa (1694 tests).
+Done-when suite (`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode tests/Feature/MetaAds`) before amendment 156-1: **1705 tests, 0 failures, 0 errors, 1 skipped**, the same skip as the baseline. No new failures against 816c5baa (1694 tests).
 
 One earlier full run ended with 1 error and 1 failure (`ChatbotTagsTest:288`: seconds 900/600 came back as 0). It ran at the same time as the reviewer's test runs in the same worktree. `ChatbotTagsTest` alone passed (12 tests), and the next full run was clean. The other red test's name was cut off in that run's output; the clean rerun covers it.
+
+## Amendment 156-1 (fix list from qa, one round)
+| # | Fix | Test | Red (before the fix) | Green |
+|---|---|---|---|---|
+| 1 | Botcake replies: `confirmed_at` is the same Carbon instance as `sent_at`, in `BotcakeOutbox::record()` (flow and send pool) and in the inbox manual reply (`ChatbotReply::confirmColumns(…, $sentAt)`). | `test_S_156_4_a_botcake_send_is_confirmed_at_exactly_its_sent_at`: a clock that moves 1 s each time it is read, both write paths | failed: `send` row, `confirmed_at` 1 s after `sent_at` | pass |
+| 2 | Migration `up()` adds each column and each index only if it is missing (no early return on `confirmed_at`); `down()` drops only the indexes and columns that exist. | `test_S_156_the_migration_completes_a_half_applied_run_and_down_drops_only_what_exists`: only `confirmed_at` present → `up()` completes all; `up()` again is a no-op; only `client_ref` + its index present → `down()` drops them; `down()` again is a no-op | failed: `up()` after a half run left `client_ref`, `confirmed_status` and both indexes missing | pass |
+| 3 | `send_status` sent through `/api/gateway/events` with the page's own webhook secret confirms the reply; with a wrong signature it is 401, the reply is unchanged, and it is counted as `bad_signature`. | `test_S_156_1_a_send_status_signed_with_the_page_secret_confirms_the_reply`, `test_S_156_1_a_send_status_with_a_wrong_signature_is_401_and_changes_nothing` | passed at once: the existing controller (signature check, then the queued job) already did this, so these pin today's behaviour | pass |
+
+The migration file was edited in place. That is allowed because it has not been applied anywhere yet (the branch is not merged or deployed).
+
+`RealSendTimeTest`: OK (15 tests, 120 assertions). Done-when suite after the amendment: **1709 tests, 0 failures, 0 errors, 1 skipped** (the same skip as the 816c5baa baseline of 1694 tests): no new failures.
 
 ## Commits
 - fbc3844a docs: spec 156 and its result template (spec 156)
 - 245a925c feat: real send time from Forbeast send_status, pending and real first reply in Bot Health, pending send lag alarm (spec 156)
 - fb771129 fix: no pending or unconfirmed before the first send_status, a lost send_status does not hold the alarm, pending without data neither raises nor clears it (spec 156)
 - 4a19778f docs: S-156 stories and cases (spec 156)
-- the final commit: docs: result, case table and accepted minors (spec 156)
+- 56a42fd1 docs: result, case table and accepted minors (spec 156)
+- 8fe8e5fe fix: Botcake confirmed_at is the same value as sent_at, the migration completes a half-applied run, signed send_status POST tests (spec 156)
+- the final commit: docs: amendment 156-1 in the result (spec 156)
 
 ## Open points
-- Check the production MySQL version before the migration (INSTANT needs 8.0.12+). The index builds take minutes on millions of rows.
+- Migration on production: MySQL 8.0.46 adds the columns instantly; the two index builds take seconds at about 172k (Likha) and about 32k (Incepxion) rows.
 - Deploy Forbeast 017 on a drained queue. Otherwise replies sent between the backlog and the deploy show as pending for up to 24 h (in TODO.md).
 - The accepted minors with reasons are in TODO.md under "156".
 - Not pushed and not deployed. No real Forbeast or Botcake calls were made (fakes only).
 
-156: done — Bot Health shows the real send time from Forbeast's send_status, the pending and unconfirmed replies, the real first reply per bot and page, and the accept → sent lag; Likha's own pending data also raises the send lag alarm; no new failures in the done-when suite.
+156: done — real send time, pending and real first reply in Bot Health, with amendment 156-1: Botcake confirmed_at equals sent_at, a re-runnable migration and signed send_status POST tests; 1709 tests, no new failures.
