@@ -60,6 +60,22 @@ class ChatbotFields
         return 'text';
     }
 
+    /**
+     * Ang mali sa value ng isang botfield (haba, bytes, link ng larawan), o null. Iisa para sa /chatbot (cell, paste,
+     * restore) at sa page values API. $schemes: ang tinatanggap na simula ng link ng larawan.
+     */
+    public static function valueError(string $key, string $value, array $schemes = ['http', 'https']): ?string
+    {
+        if ($key === ShopDetails::KEY) return ShopDetails::READ_ONLY;
+        if (mb_strlen($value) > self::MAX_VALUE) return 'At most ' . self::MAX_VALUE . ' characters.';
+        if (strlen($value) > self::MAX_BYTES) return 'Too long: at most ' . self::MAX_BYTES . ' bytes. Accented letters and emoji take 2 to 4 bytes each.';
+        if ($value !== '' && self::kind($key) === 'image' && !(filter_var($value, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($value, PHP_URL_SCHEME)), $schemes, true))) {
+            return 'Use an image link that starts with ' . implode(' or ', array_map(fn ($s) => $s . '://', $schemes)) . '.';
+        }
+
+        return null;
+    }
+
     /** Ang key ng isang pangalan ng column: maliliit na titik, numero at _ ("Promo Text!" => promo_text). */
     public static function keyOf(string $name): string
     {

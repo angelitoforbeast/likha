@@ -12,6 +12,7 @@ use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\PageValues;
 use App\Services\Chatbot\PasteFieldAi;
 use App\Services\Chatbot\ShopDetails;
 use App\Services\ChatbotFields;
@@ -595,7 +596,7 @@ class ChatbotController extends Controller
             $before = $clear ? $s : PageSetting::where('page_name', $s->page_name)->where('provider', $s->provider)->where('key', $s->key)->where('id', '<', $s->id)->orderByDesc('id')->first();
             return [
                 'id' => $s->id, 'at' => $when?->timezone('Asia/Manila')->format('Y-m-d H:i'),
-                'by' => $clear ? ($s->replaced_by ? ($users[$s->replaced_by] ?? 'user #' . $s->replaced_by) : 'system') : $this->who($s, $users),
+                'by' => $clear ? ($s->replaced_by ? ($users[$s->replaced_by] ?? 'user #' . $s->replaced_by) : (PageValues::by($s->replaced_source) ?? 'system')) : $this->who($s, $users),
                 'page' => $s->page_name, 'provider' => $s->provider, 'key' => $s->key,
                 'field' => self::SETUP_LABELS[$s->provider . '.' . $s->key] ?? ($labels[$s->key] ?? ucwords(str_replace('_', ' ', $s->key))),
                 'old' => $before ? ($this->clearedBefore($before, $s) ? '(none)' : $this->shown($before)) : null, 'new' => $clear ? '(none)' : $this->shown($s),
@@ -648,7 +649,7 @@ class ChatbotController extends Controller
             && PageSetting::where('page_name', $s->page_name)->where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)
                 ->whereBetween('created_at', [$s->created_at?->copy()->subMinute(), $s->created_at?->copy()->addMinute()])->exists()) return ForbeastWatch::WHO;
 
-        return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system';
+        return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : (PageValues::by($s->source) ?? 'system');
     }
 
     /** @return array<int, string> id => pangalan */
@@ -714,12 +715,7 @@ class ChatbotController extends Controller
     /** Ang mali sa value ng isang botfield (haba, bytes, link ng larawan), o null. Iisa para sa isang cell at sa paste. */
     private function valueError(string $key, string $value): ?string
     {
-        if ($key === ShopDetails::KEY) return ShopDetails::READ_ONLY;
-        if (mb_strlen($value) > ChatbotFields::MAX_VALUE) return 'At most ' . ChatbotFields::MAX_VALUE . ' characters.';
-        if (strlen($value) > ChatbotFields::MAX_BYTES) return 'Too long: at most ' . ChatbotFields::MAX_BYTES . ' bytes. Accented letters and emoji take 2 to 4 bytes each.';
-        if ($value !== '' && ChatbotFields::kind($key) === 'image' && !$this->isImageUrl($value)) return 'Use an image link that starts with http:// or https://.';
-
-        return null;
+        return ChatbotFields::valueError($key, $value);
     }
 
     private function isImageUrl(string $value): bool
