@@ -26,6 +26,7 @@ class ChatbotConnectionsTest extends ChatblastTestCase
     {
         parent::setUp();
         Queue::fake();
+        Http::preventStrayRequests();
         Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_20_100000_create_botcake_chats_table.php']]);
         config(['app.url' => 'https://app.example.test/', 'services.gateway.url' => self::GW, 'services.gateway.key' => '']);
         $this->page('Page Uno', '1001');
@@ -54,6 +55,10 @@ class ChatbotConnectionsTest extends ChatblastTestCase
             self::BC . '/default_reply' => fn (HttpRequest $r) => Http::response($r->method() === 'GET'
                 ? ['success' => true, 'settings' => ['is_published' => $this->fake['published'] ?? true, 'unlimit_default_reply' => true], 'page_id' => '1001', 'assistants' => []]
                 : ['success' => true]),
+            // Ang mga keyword (walang text, flag at flow id lang) at ang pangalan ng mga flow, sa hugis ng totoong sagot.
+            self::BC . '/keywords' => fn () => Http::response($this->fake['keywords'] ?? ['data' => [], 'success' => true], $this->fake['keywords_status'] ?? 200),
+            self::BC . '/flows' => fn () => Http::response(['data' => ['flows' => [['id' => 424398467, 'name' => 'ON DELIVERY SCRIPT ', 'is_removed' => false, 'parent_id' => null],
+                ['id' => 1415244560, 'name' => 'Old Promo', 'is_removed' => false, 'parent_id' => null]]], 'success' => true]),
         ]);
     }
 
@@ -492,5 +497,87 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $this->assertSame([['Forbeast token', $mkt->name, '(hidden)']], array_map(fn ($e) => [$e['field'], $e['by'], $e['new']],
             $this->getJson('/chatbot/changes?field=forbeast.token')->assertOk()->json('entries')));
         $this->assertSame([$mkt->name], array_column($this->getJson('/chatbot/changes?field=forbeast.token_status')->assertOk()->json('entries'), 'by'));
+    }
+
+    /** Ang /keywords ng Botcake: isang naka-on (flow ON DELIVERY SCRIPT), at mga naka-off. */
+    private function keywords(bool $oneOn): void
+    {
+        $this->fake['keywords'] = ['data' => [['id' => 1003861036, 'is_activated' => $oneOn, 'flow_id' => 424398467],
+            ['id' => 3837339, 'is_activated' => false, 'flow_id' => 1415244560], ['id' => 1003864376, 'is_activated' => false, 'flow_id' => null]], 'success' => true];
+    }
+
+    public function test_S_153_4_an_active_keyword_marks_the_page_not_working_yet_and_the_token_stays_ok(): void
+    {
+        $this->settings()->set('Page Uno', 'botcake', 'chat.key', 'kept-chat-key-123', true, null, true);
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $this->keywords(true);
+
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['status' => 'ok', 'chat_block' => 'on', 'keywords' => 'on', 'keywords_note' => 'ON DELIVERY SCRIPT']);
+
+        $this->assertStringStartsWith('ok', (string) $this->settings()->get('Page Uno', 'botcake', 'token_status'));
+        $stamp = PageSetting::where('provider', 'botcake')->where('key', 'keywords')->where('active', true)->first();
+        $this->assertMatchesRegularExpression('/^on \d{4}-\d\d-\d\d \d\d:\d\d:\d\d · ON DELIVERY SCRIPT$/', $stamp->plainValue());
+        $this->assertSame($this->ceo->id, $stamp->created_by);
+        $this->assertStringStartsWith('on', (string) $this->getJson('/chatbot/connections?page_name=Page%20Uno')->json('botcake.keywords_status'));
+        $this->assertCount(0, $this->sentTo('/keywords', 'POST'), 'basa lang: walang isinusulat sa Botcake');
+    }
+
+    public function test_S_153_5_only_inactive_keywords_give_none(): void
+    {
+        $this->settings()->set('Page Uno', 'botcake', 'chat.key', 'kept-chat-key-123', true, null, true);
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $this->keywords(false);
+
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['status' => 'ok', 'keywords' => 'none', 'keywords_note' => null]);
+        $this->assertStringStartsWith('none', (string) $this->settings()->get('Page Uno', 'botcake', 'keywords'));
+    }
+
+    public static function unreadableKeywords(): array
+    {
+        return [
+            'HTTP 500' => [['message' => 'down'], 500],
+            'success false' => [['success' => false], 200],
+        ];
+    }
+
+    /** @dataProvider unreadableKeywords */
+    public function test_S_153_6_unreadable_keywords_are_unknown_with_a_note_and_the_chat_block_result_is_unchanged(array $body, int $http): void
+    {
+        $this->settings()->set('Page Uno', 'botcake', 'chat.key', 'kept-chat-key-123', true, null, true);
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $this->fake['keywords'] = $body;
+        $this->fake['keywords_status'] = $http;
+
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['status' => 'ok', 'chat_block' => 'on', 'keywords' => 'unknown', 'keywords_note' => 'could not read the keywords']);
+        $this->assertStringStartsWith('unknown', (string) $this->settings()->get('Page Uno', 'botcake', 'keywords'));
+        $this->assertTrue(app(\App\Services\Chatbot\ChatbotConnections::class)->botcakeConnected('Page Uno'));
+    }
+
+    public function test_S_153_7_the_test_after_saving_a_token_also_checks_the_keywords(): void
+    {
+        $this->botcake();
+        $this->keywords(true);
+
+        $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertOk()
+            ->assertJson(['status' => 'ok', 'chat_block' => ['ok' => true], 'keywords' => 'on', 'keywords_note' => 'ON DELIVERY SCRIPT']);
+        $this->assertStringStartsWith('on', (string) $this->settings()->get('Page Uno', 'botcake', 'keywords'));
+    }
+
+    public function test_S_153_9_the_keyword_check_has_the_tests_access_and_shows_in_changes_with_the_user(): void
+    {
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $this->keywords(true);
+        $this->navLink('/chatblast', ['Data Encoder', 'Marketing']); // ang Changes ay sa /chatblast access; ang Test ay sa setup roles lang
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertForbidden();
+        $this->assertCount(0, $this->sentTo('/keywords'));
+
+        $mkt = $this->user('Marketing', 'mkt@example.test');
+        $this->actingAs($mkt);
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()->assertJson(['keywords' => 'on']);
+        $this->assertContains(['Botcake keywords', $mkt->name], $this->changed());
     }
 }
