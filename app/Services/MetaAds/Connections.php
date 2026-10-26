@@ -31,6 +31,14 @@ class Connections
         return $id !== '' ? $id : null;
     }
 
+    /** Facebook Login for Business: ang configuration (permissions) sa Meta app. Kapag wala, scope=ads_read pa rin. */
+    public function configId(): ?string
+    {
+        $id = trim((string) config('services.meta_ads.config_id'));
+
+        return $id !== '' ? $id : null;
+    }
+
     public function redirectUri(): string
     {
         return rtrim((string) config('app.url'), '/') . '/ads_manager/meta/callback';
@@ -38,25 +46,35 @@ class Connections
 
     public function dialogUrl(string $state): string
     {
+        $login = $this->configId() !== null ? ['config_id' => $this->configId()] : ['scope' => 'ads_read'];
+
         return 'https://www.facebook.com/' . $this->graph->version() . '/dialog/oauth?' . http_build_query([
             'client_id'     => $this->appId(),
             'redirect_uri'  => $this->redirectUri(),
             'state'         => $state,
-            'scope'         => 'ads_read',
+        ] + $login + [
             'response_type' => 'code',
         ]);
     }
 
     /**
      * Code → short token → long-lived token (~60 araw), ang expiry (debug_token), ang pangalan sa Facebook at ang mga
-     * ad account na nababasa nito; saka isinusulat. @throws GraphException
+     * ad account na nababasa nito; saka isinusulat. Sa Login for Business (may config_id), kapag tumanggi ang
+     * fb_exchange_token, ang token mula sa code ang itinatago (baka long-lived na ito); token_from ang nagsasabi kung alin.
+     * @throws GraphException
      */
     public function connect(int $userId, string $code): array
     {
         $app = ['client_id' => $this->appId(), 'client_secret' => (string) config('services.meta_ads.app_secret')];
 
         $short = $this->graph->get('oauth/access_token', $app + ['redirect_uri' => $this->redirectUri(), 'code' => $code]);
-        $long  = $this->graph->get('oauth/access_token', $app + ['grant_type' => 'fb_exchange_token', 'fb_exchange_token' => (string) ($short['access_token'] ?? '')]);
+        $from  = 'fb_exchange_token';
+        try {
+            $long = $this->graph->get('oauth/access_token', $app + ['grant_type' => 'fb_exchange_token', 'fb_exchange_token' => (string) ($short['access_token'] ?? '')]);
+        } catch (GraphException $e) {
+            if ($this->configId() === null) throw $e;
+            [$long, $from] = [$short, 'code'];
+        }
         $token = (string) ($long['access_token'] ?? '');
         if ($token === '') throw new GraphException('Facebook did not return a token.');
 
@@ -73,6 +91,7 @@ class Connections
             'fb_user_id'   => (string) ($me['id'] ?? ($debug['data']['user_id'] ?? '')),
             'fb_user_name' => (string) ($me['name'] ?? ''),
             'expires_at'   => $expires ?: null,
+            'token_from'   => $from,
             'ad_accounts'  => array_map(fn ($a) => [
                 'id'     => (string) ($a['account_id'] ?? preg_replace('/^act_/', '', (string) ($a['id'] ?? ''))),
                 'name'   => (string) ($a['name'] ?? ''),

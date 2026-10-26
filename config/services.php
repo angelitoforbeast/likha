@@ -39,6 +39,7 @@ return [
     'meta_ads' => [
         'app_id'        => env('META_ADS_APP_ID'),
         'app_secret'    => env('META_ADS_APP_SECRET'),
+        'config_id'     => env('META_ADS_CONFIG_ID'),
         'graph_version' => env('META_ADS_GRAPH_VERSION', 'v25.0'),
     ],
 
