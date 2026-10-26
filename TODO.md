@@ -1205,5 +1205,4 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - `Connections::all()` LIKE `meta_ads.connection.%` leaves `_` unescaped: the keys are written only by our code, so nothing else can match. Trusted path.
 - A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
 - Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
-- Compare runs inside the web request (13 accounts; rate-limit backoff can add up to 42 s per call). If production timeouts bite in the pilot, move it to the queue like Sync now.
 - Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.

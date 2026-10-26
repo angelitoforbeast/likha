@@ -20,7 +20,7 @@
 - `app/Services/MetaAds/Insights.php`: insights + ad/adset/campaign/creative + page names → report rows (the mapping below)
 - `app/Services/MetaAds/Compare.php`, `app/Services/MetaAds/Sync.php`
 - `app/Http/Controllers/MetaAdsController.php`: connect, callback, disconnect, compare, sync, writeMode, `panel()`
-- `app/Jobs/SyncMetaAdsReports.php` (Sync now runs on the queue)
+- `app/Jobs/SyncMetaAdsReports.php` (Sync now) and `app/Jobs/CompareMetaAds.php` (Compare with uploads), both on the queue, with `failed()` ending the run row
 - `app/Console/Commands/MetaAdsCompare.php` (`meta-ads:compare --from --to`), `app/Console/Commands/MetaAdsSync.php` (`meta-ads:sync [--scheduled] --from --to`)
 - `routes/web.php`: 6 routes under `/ads_manager/meta/*`, next to the report routes (same `web, auth, allowed_ip` group)
 - `routes/console.php`: `meta-ads:sync --scheduled` every minute; it runs only with write mode on and only at a schedule time
@@ -76,21 +76,21 @@ Rows go through the upload's own upsert (`importRows` → `upsertChunk`). That m
 8. The default range: today plus the 6 days before it, in Manila time. This was chosen because staff upload during the day. Confirm it matches the export's date setting.
 
 ## Story changes
-None. The S-154 cases went into `qa/stories.md` as briefed, with the Then of each case written out in full.
+- S-154.3 (amendment 154-1): the Then now says Compare runs on the queue and the card shows "Compare running…" until the report is ready. Reason: 13 accounts with paging and backoff would exceed the web timeout.
 
 ## Evidence per case
 The run was `php vendor\phpunit\phpunit\phpunit tests/Feature/MetaAds`: **OK (26 tests, 146 assertions)**.
 
 | Case | Test | Result |
 |---|---|---|
-| S-154.1 | MetaAdsConnectTest::test_S_154_1_connect_redirects_to_the_oauth_dialog_with_ads_read_and_a_state; …callback_exchanges_for_a_long_lived_token_and_stores_it_encrypted_with_expiry_and_accounts; …callback_with_a_bad_or_missing_state_is_refused_and_stores_nothing (missing, wrong) | pass |
+| S-154.1 | MetaAdsConnectTest::test_S_154_1_connect_redirects_to_the_oauth_dialog_with_ads_read_and_a_state; …callback_exchanges_for_a_long_lived_token_and_stores_it_encrypted_with_expiry_and_accounts; …callback_with_a_bad_or_missing_state_is_refused_and_stores_nothing (missing, wrong); …the_state_is_single_use | pass |
 | S-154.2 | MetaAdsConnectTest::test_S_154_2_without_an_app_id_the_card_and_connect_say_meta_app_not_set_up_yet | pass |
-| S-154.3 | MetaAdsCompareTest::test_S_154_3_compare_reports_only_in_api_only_in_upload_and_differences_per_account_and_writes_nothing; …the_compare_command_prints_the_same_report_and_writes_nothing | pass |
+| S-154.3 | MetaAdsCompareTest::test_S_154_3_compare_reports_only_in_api_only_in_upload_and_differences_per_account_and_writes_nothing (queued: "Compare running…", then the report from its upload_logs row); …the_compare_command_prints_the_same_report_and_writes_nothing | pass |
 | S-154.4 | MetaAdsSyncTest::test_S_154_4_each_column_is_filled_from_the_api_as_the_upload_would | pass |
 | S-154.5 | MetaAdsSyncTest::test_S_154_5_sync_now_with_write_mode_on_inserts_new_and_updates_existing_by_day_and_ad_id_and_logs_the_run; …with_write_mode_off_is_refused_and_writes_nothing | pass |
-| S-154.6 | MetaAdsSyncTest::test_S_154_6_error_190_marks_that_token_expired_shows_reconnect_and_the_others_still_sync; …rate_limits_back_off_then_log_a_partial_run_without_crashing (4, 17, 613) | pass |
-| S-154.7 | MetaAdsSyncTest::test_S_154_7_the_schedule_runs_only_when_write_mode_is_on_and_at_a_slot (off at slot, on at slot, on off-slot); …the_scheduler_has_the_meta_ads_sync_every_minute | pass |
-| S-154.8 | MetaAdsConnectTest::test_S_154_8_the_token_never_appears_in_logs_responses_or_the_page; …a_paging_next_link_to_another_host_is_not_followed_with_the_token; …a_failed_exchange_shows_and_logs_no_secret_or_code | pass |
+| S-154.6 | MetaAdsSyncTest::test_S_154_6_error_190_marks_that_token_expired_shows_reconnect_and_the_others_still_sync; …rate_limits_back_off_then_log_a_partial_run_without_crashing (4, 17, 613); …a_run_that_throws_or_is_killed_ends_failed_not_processing (Sync now, Compare) | pass |
+| S-154.7 | MetaAdsSyncTest::test_S_154_7_the_schedule_runs_only_when_write_mode_is_on_and_at_a_slot (off at slot, on at slot, on off-slot); …the_scheduler_registers_the_meta_ads_sync_every_minute_only_behind_write_mode | pass |
+| S-154.8 | MetaAdsConnectTest::test_S_154_8_the_token_never_appears_in_logs_responses_or_the_page; …every_user_token_call_carries_appsecret_proof_and_the_app_secret_stays_out_of_urls_but_the_exchange; MetaAdsSyncTest::…a_paging_next_to_another_host_is_not_followed_and_the_run_is_partial (other host, graph.facebook.com.evil.com, graph.facebook.com@evil.com, plain http); the page test also checks the app secret; …a_failed_exchange_shows_and_logs_no_secret_or_code | pass |
 | S-154.9 | MetaAdsConnectTest::test_S_154_9_a_role_without_the_ads_link_gets_404_on_connect_disconnect_compare_and_sync; MetaAdsSyncTest::test_S_154_9_only_the_ceo_turns_write_mode_on_or_off_and_it_is_logged; …an_uploader_role_can_compare_and_sync | pass |
 | S-154.10 | MetaAdsConnectTest::test_S_154_10_disconnect_removes_the_token_row_and_logs_it | pass |
 | S-154.11 (P2) | none: 390 px was not checked in a browser | not run |
@@ -119,4 +119,36 @@ Red runs:
 - **Pre-existing bug, not touched:** CSV uploads crash on OpenSpout v4 (`setFieldDelimiter`). XLSX uploads work.
 - Accepted minors: `TODO.md` § "154".
 
-154: done — staff connect Facebook on /ads_manager/report; Compare with uploads works and writes nothing; Sync now and the schedule write the report only when the CEO turns write mode on; the live pilot must confirm the field shapes and other-BM access.
+## Amendment 154-1 (fix list from qa, one round)
+| # | Change | Done |
+|---|---|---|
+| 1 | Compare runs on the queue | `CompareMetaAds` job. The button logs an `upload_logs` row (type `ads_manager_api_compare`, user, queued → processing → done / partial / failed) and dispatches the job. The per-account report is stored on that row, in `protected_details`: the table's existing JSON column, so no migration was needed, and the type keeps it apart from upload rows. While the run is queued or processing the card says "Compare running…" and reloads every 5 s; after that it shows the report (or the error). `meta-ads:compare` is still synchronous. |
+| 2 | `appsecret_proof` | Every user-token call carries `appsecret_proof = hash_hmac('sha256', token, app secret)`. On `paging.next` URLs it is appended to the URL, and any proof or access_token already in the URL is dropped first. `debug_token` now sends the app token (`id\|secret`) in the Authorization header, not in the URL. **The two `oauth/access_token` exchanges stay GET** with `client_secret` in the query, because that is the method Meta documents, and with no real calls allowed I could not check that Graph accepts POST there. Those URLs are never logged: every error message goes through `Graph::clean()`, which now also hides `appsecret_proof`. To check in the pilot: whether POST works for the exchange; if it does, it is a two-line change. |
+| 3 | Schedule behind write mode | `->when(fn () => Sync::writeMode())`, and the command still checks it too. The test now asserts `filtersPass` is false when off and true when on. |
+| 4 | Foreign paging host | `Graph::all()` (and `get()` given a full URL) throws "Not followed: a paging link to another host" unless the URL is `https://graph.facebook.com` with no user info and no port. The account is reported in the run's error message and the run is `partial`. |
+| 5 | No stuck rows | `Sync::run` and `CompareMetaAds::handle` end in a `finally` that calls `Sync::endUnfinished()`: a run still `queued` / `processing` becomes `failed` with a cleaned "Stopped: …" message. A run killed by the queue timeout never reaches `finally`, so both jobs' `failed()` do the same thing. |
+| 6 | Tests | Single-use state; `appsecret_proof` on every user-token call, and the app secret only in the two exchange URLs; look-alike hosts in a table (`attacker.example`, `graph.facebook.com.evil.com`, `graph.facebook.com@evil.com`, plain http), each sending one request and logging `partial`; the app secret never on the page, in logs or in upload_logs; write-mode 403 for Marketing and Marketing - OIC; the queued Compare shows "running…", then the stored report; a run that throws, or a job that is killed, ends `failed` (Sync now, Compare). |
+| 7 | Decision kept | See below. |
+
+**Decision (kept as designed):** Compare and Sync use the token of every connected person, with each ad account read only once (the first connected person who has it). This applies whoever clicks the button: a click by one uploader reads the accounts of all connected people, because one Likha report covers all 13 accounts. Tokens are never shown, logged or returned. Each person controls their own token with Disconnect.
+
+Red run (amendment, before the code): 34 tests, 2 errors and 8 failures, for example:
+- "Call to undefined method SyncMetaAdsReports::failed()"
+- "Class App\Jobs\CompareMetaAds not found"
+- "null is identical to '4f81…'" (no appsecret_proof)
+- "true is false" (schedule filter)
+- "actual size 2 matches expected size 1" (the foreign host was silently truncated and the run went on)
+
+The single-use state test passed from the start, because the session `pull` already covered it.
+
+Green, on `088012db`:
+- `tests/Feature/MetaAds`: OK (34 tests, 194 assertions)
+- `tests/Feature/Chatblast`: OK (1002 tests; 1 skipped; deprecations only)
+- `tests/Feature/PageSettings`: OK (140 tests)
+- `tests/Feature/OrderEncode`: OK (415 tests)
+
+None of these four folders had a failure in the 66ec2a4e baseline, so there are no new failures.
+
+Amendment commit: `088012db` fix: queued Compare with its report on the run row, appsecret_proof on user-token calls, schedule behind write mode, foreign paging hosts fail the run, runs never left processing (spec 154).
+
+154: done — staff connect Facebook on /ads_manager/report; Compare runs on the queue and writes nothing; Sync now and the schedule (registered only behind write mode) write the report through the upload's upsert; every user-token call carries appsecret_proof; the live pilot must confirm the field shapes, other-BM access and whether the token exchange accepts POST.
