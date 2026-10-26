@@ -310,7 +310,9 @@ class BotHealth
     }
 
     /**
-     * Ang mga mensahe ng customer sa mga page na sinagot ng bot sa range, kasama ang una nitong sagot (send/sent).
+     * Ang mga mensahe ng customer sa mga page na sinagot ng bot sa range, kasama ang una nitong sagot (send/sent). Ang
+     * chat lang na dumating habang may flow ang page (flowSpans): bago ang flow, ang sariling bot ng Botcake ang sumasagot,
+     * na hindi namin nakikita, kaya hindi ito "not answered".
      * @return array{days: array<string, array{secs: float[], n: int}>, rows: array<int, array{id: int, at: string, first: ?string, secs: ?int}>}
      */
     private function inbound(string $startAt, string $endAt, ?array $pages): array
@@ -318,6 +320,8 @@ class BotHealth
         $answered = DB::table('chatbot_replies')->where('kind', 'send')->where('status', 'sent')
             ->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->distinct()->pluck('page_id')->map(fn ($p) => (string) $p)->all();
+        $spans = self::flowSpans();
+        $answered = array_values(array_intersect($answered, array_keys($spans)));
         if (!$answered) return ['days' => [], 'rows' => []];
 
         $out = ['days' => [], 'rows' => []];
@@ -325,8 +329,9 @@ class BotHealth
             ->leftJoin('chatbot_replies as r', fn ($j) => $j->on('r.chat_id', '=', 'c.id')->where('r.kind', 'send')->where('r.status', 'sent'))
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
             ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
-            ->groupBy('c.id', 'c.received_at')->selectRaw('c.id, c.received_at, MIN(r.sent_at) as first_at')->get();
+            ->groupBy('c.id', 'c.page_id', 'c.received_at')->selectRaw('c.id, c.page_id, c.received_at, MIN(r.sent_at) as first_at')->get();
         foreach ($rows as $r) {
+            if (!self::hadFlow($spans[(string) $r->page_id], $r->received_at)) continue;
             $secs = $r->first_at === null ? null : max(0, strtotime($r->first_at) - strtotime($r->received_at));
             $day = substr($r->received_at, 0, 10);
             $out['days'][$day]['n'] = ($out['days'][$day]['n'] ?? 0) + 1;
@@ -335,6 +340,37 @@ class BotHealth
         }
 
         return $out;
+    }
+
+    /**
+     * Kailan may flow ang bawat page (page ID => [[mula, hanggang o null], ...]), mula sa history ng chatbot.flow_id: ang
+     * row na may value, mula created_at hanggang replaced_at (ang active ay walang hanggan). Ang page ID ay ayon sa
+     * Botcake ID ng page ngayon (BotcakeChat::pageMap), gaya ng listahan ng page dito.
+     * @return array<string, array<int, array{0: string, 1: ?string}>>
+     */
+    private static function flowSpans(): array
+    {
+        $settings = app(\App\Services\PageSettings::class);
+        $ids = [];
+        foreach (BotcakeChat::pageMap() as $id => $name) $ids[$settings->pageKey((string) $name)] = (string) $id;
+        $out = [];
+        $rows = \App\Models\PageSetting::where('provider', \App\Services\ChatbotFields::PROVIDER)->where('key', 'flow_id')
+            ->get(['page_name', 'value', 'is_secret', 'created_at', 'replaced_at']);
+        foreach ($rows as $s) {
+            $id = $ids[$settings->pageKey((string) $s->page_name)] ?? null;
+            if ($id === null || $s->created_at === null || trim((string) $s->plainValue()) === '') continue;
+            $out[$id][] = [$s->created_at->format('Y-m-d H:i:s'), $s->replaced_at?->format('Y-m-d H:i:s')];
+        }
+
+        return $out;
+    }
+
+    /** May flow ang page sa oras na $at (created_at <= $at, at replaced_at wala o > $at). */
+    private static function hadFlow(array $spans, string $at): bool
+    {
+        foreach ($spans as [$from, $until]) if ($from <= $at && ($until === null || $until > $at)) return true;
+
+        return false;
     }
 
     /** @return array<string, array{sent: int, failed: int, reasons: array<string, int>, sheet_failed: int}> */

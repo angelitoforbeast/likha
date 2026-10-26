@@ -27,6 +27,8 @@ class ChatbotHealthByBotTest extends ChatblastTestCase
         ]]);
         $this->page('Page Uno', '1001');
         $this->page('Page Dos', '1002');
+        // Ang Health ay bumibilang lang habang may flow ang page: may flow ang dalawang page bago ang lahat ng chat dito.
+        foreach (['Page Uno', 'Page Dos'] as $p) DB::table('page_settings')->insert(['page_name' => $p, 'provider' => 'chatbot', 'key' => 'flow_id', 'value' => '1', 'created_at' => '2026-10-01 00:00:00', 'updated_at' => '2026-10-01 00:00:00']);
         $s = app(PageSettings::class);
         $s->set('Page Uno', 'chatbot', 'provider', 'gateway');
         $this->travelTo('2026-10-20 15:00:00');
