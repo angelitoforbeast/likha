@@ -328,6 +328,21 @@ class ChatbotAsyncAiTest extends ChatblastTestCase
         $this->assertSame(3, $pool->limit(), 'grows back by one per answer');
     }
 
+    public function test_S_161_2_at_the_default_of_100_a_429_still_halves_the_pool(): void
+    {
+        config(['services.chatbot.ai_concurrency' => 100]);
+        $this->pool->stop();
+        $this->pool = $this->pool();
+        $this->pool->start();
+        $this->live();
+        $this->says('hi');
+        $this->pool->tick();
+
+        $this->calls[0]['p']->resolve(self::ai('Rate limit', 429, ['Retry-After' => '2']));
+        $this->pool->tick();
+        $this->assertSame([100, 50], [$this->pool->max(), $this->pool->limit()]);
+    }
+
     public function test_S_087_8_with_ai_async_off_the_ai_step_waits_for_the_answer_as_before(): void
     {
         config(['services.chatbot.ai_async' => false]);

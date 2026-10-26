@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\PageSetting;
 use App\Services\Chatbot\ShopDetails;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -21,6 +22,8 @@ class ChatbotFields
     public const MAX_VALUE = 50000; // letra: ang mahahabang AI prompt (hal. 14,113)
     public const MAX_BYTES = 60000; // ang TEXT ng MySQL ay 65,535 bytes: ang ñ at emoji ay 2-4 bytes, kaya may sariling check (hindi pinuputol)
     public const MAX_ADDED = 200; // hanggang ilang column ang maidadagdag sa "+ Column" (walang tanggalan sa screen)
+    public const LABELS_CACHE = 'chatbot-fields:labels';
+    public const LABELS_SECONDS = 60;
 
     /** @return array<string, string> key => label, sa ayos ng sheet */
     public static function defaults(): array
@@ -81,6 +84,17 @@ class ChatbotFields
         return $out;
     }
 
+    /**
+     * key => label ng bawat column, para sa takbo ng bot (ChatbotPage::botfields). Naka-cache nang LABELS_SECONDS: ang
+     * columns() ay binabasa ang lahat ng chatbot setting ng lahat ng page, at sa 50–100 chat/s iyon ang pinakamabigat na
+     * query ng bawat takbo. Ang "+ Column" (add) ay binubura ang cache, kaya agad na may label ang bagong column.
+     * @return array<string, string>
+     */
+    public function labels(): array
+    {
+        return Cache::remember(self::LABELS_CACHE, self::LABELS_SECONDS, fn () => array_column($this->columns(), 'label', 'key'));
+    }
+
     public function isColumn(string $key): bool
     {
         return in_array($key, array_column($this->columns(), 'key'), true);
@@ -100,7 +114,7 @@ class ChatbotFields
         if ($existing) return ['key' => $key, 'label' => $existing['label']];
 
         // Naka-lock ang row habang binabasa at isinusulat, para hindi mawala ang isa sa dalawang sabay na dagdag.
-        return DB::transaction(function () use ($key, $label) {
+        $col = DB::transaction(function () use ($key, $label) {
             if (!DB::table('app_settings')->where('key', self::ADDED_SETTING)->exists()) {
                 DB::table('app_settings')->insertOrIgnore(['key' => self::ADDED_SETTING, 'value' => '{}', 'created_at' => now(), 'updated_at' => now()]);
             }
@@ -114,6 +128,9 @@ class ChatbotFields
 
             return ['key' => $key, 'label' => $added[$key]];
         });
+        Cache::forget(self::LABELS_CACHE); // pagkatapos ng commit, para hindi maibalik ng ibang takbo ang luma
+
+        return $col;
     }
 
     /** @return array<string, string> */

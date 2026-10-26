@@ -88,7 +88,7 @@ class ChatbotPriorityTest extends ChatblastTestCase
         // at hindi naghihintay sa likod ng chatbot; ang maxProcesses ay para sa buong supervisor, gaya ng dati.
         $this->assertSame('auto', $chatbot['balance']);
         $this->assertGreaterThanOrEqual(2, $chatbot['minProcesses']);
-        $this->assertSame(16, $chatbot['maxProcesses']);
+        $this->assertSame(40, $chatbot['maxProcesses']);
     }
 
     public function test_S_108_3_a_second_dispatch_of_the_same_subscriptions_step_while_one_is_queued_is_dropped(): void

@@ -151,7 +151,7 @@ return [
         // ang takbo sa sagot (ang dati), pang-rollback nang walang deploy.
         'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),
         // Ilang request sa OpenAI nang sabay sa chatbot:ai-pool (kahati ng Astra ang rate limit ng OpenAI).
-        'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 50),
+        'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 100),
         // Read-only feed ng auto-switch events (/api/chatbot/provider-events, header X-CHATBOT-EVENTS-KEY); walang laman = 401.
         'events_key' => env('CHATBOT_EVENTS_KEY'),
     ],

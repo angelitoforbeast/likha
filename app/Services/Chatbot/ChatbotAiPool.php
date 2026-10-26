@@ -38,7 +38,7 @@ class ChatbotAiPool extends TicketPool
 
     public function max(): int
     {
-        return max(1, (int) config('services.chatbot.ai_concurrency', 50));
+        return max(1, (int) config('services.chatbot.ai_concurrency', 100));
     }
 
     public function limit(): int
