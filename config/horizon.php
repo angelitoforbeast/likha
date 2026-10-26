@@ -205,10 +205,11 @@ return [
             'queue' => ['chatbot-high', 'chatbot'], // balance auto: isang pool kada queue, kaya ang unang sagot ay may sariling workers
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
-            'minProcesses' => 2,
-            'maxProcesses' => (int) env('HORIZON_CHATBOT_MAX', 16),
-            'balanceMaxShift' => 2,
-            'balanceCooldown' => 3,
+            // Para sa 50–100 chat/s: 4 kada queue palagi, at mula 8 hanggang 40 sa loob ng ~7 s (5 kada segundo) kapag dagsa.
+            'minProcesses' => 4,
+            'maxProcesses' => (int) env('HORIZON_CHATBOT_MAX', 40),
+            'balanceMaxShift' => 5,
+            'balanceCooldown' => 1,
             'maxTime' => 3600,
             'maxJobs' => 0,
             'memory' => 256,

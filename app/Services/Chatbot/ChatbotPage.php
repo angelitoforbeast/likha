@@ -61,7 +61,7 @@ class ChatbotPage
     /** @return array<string, string> key at label => value */
     public function botfields(string $page): array
     {
-        $labels = array_column($this->fields->columns(), 'label', 'key');
+        $labels = $this->fields->labels();
         $out = [];
         $ids = [];
         foreach ($this->settings->allWithIds($page, ChatbotFields::PROVIDER) as $key => $row) {
