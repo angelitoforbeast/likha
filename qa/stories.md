@@ -2607,3 +2607,19 @@ Story changes (S-158):
 - S-145.1, S-145.2, S-145.3 (stored SHOP DETAILS compared with the fields, warnings for no value or a missing line): replaced by S-158.4, since the stored text is no longer read.
 - S-106.4: its "no X" assertion is limited to price findings (the page there has only a PRICE, so SHOP DETAILS is now an X).
 - S-099.1 now also expects the two SHOP DETAILS X's; S-099.4 fills ITEM and QUANTITY; S-099.5 recomputes on a Prompt 2 change instead of a QUANTITY change; S-068.7 sees the new column just before SHOP DETAILS (always a column now, last when no page has a typed row); S-149.2 tests a nested botfield through Main Flow instead of SHOP DETAILS.
+## S-162 Forbeast reads and edits a page's bot values
+
+As the owner, I want to see and edit each page's bot values (Main Flow, sequences, pictures…) from Forbeast, while the values stay in Likha's page settings with their history and the name of who changed them.
+
+Slice 162. Threat model: everything in a request to `/api/gateway/pages/{id}/values` (path id, headers including `X-Forbeast-User`, body) is untrusted, and so are the stored values once they came from it; the repo, config and the page's stored webhook secret are trusted. Risk tier: medium (a new route, but behind the same per-page HMAC as gateway events).
+Tests: `tests/Feature/Chatblast/GatewayPageValuesTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-162.1 (P1) | Given Page Uno with its own webhook secret and some botfields, prompts, flow_id and auto_switch, When Forbeast GETs the values with a valid signature, Then the fields come in contract order (main_flow … picture, seq_1..20, seq_img_1..20, comment_reply_1..3, comment_pm, after_order_1, shop_details) with the /chatbot labels, type text/textarea/image, value, editable (false only for shop_details) and updated_at; prompts, flow_id, auto_switch, AI settings, secrets and botcake settings never appear | `test_S_162_1…` | passed |
+| S-162.2 (P1) | Wrong secret, no signature, timestamp 301 s old or ahead, no timestamp, a body signed without the timestamp, or a page without its own secret (the global secret is not used) → 401 `bad_signature`; an unknown page id → 404 `unknown_page`; nothing changes | `test_S_162_2…` (table) | passed |
+| S-162.3 (P1) | When Forbeast PUTs new values (one set, one null), Then the old rows stay as history, the new row carries the actor, the cleared row records who cleared it, the response is the fresh GET body, and the bot's next run uses the new values (labels and page caches cleared) | `test_S_162_3…` | passed |
+| S-162.4 (P1) | A PUT with shop_details, a prompt, flow_id, an unknown key or a botcake setting → 422 `field_not_editable` naming the key; an http or non-URL picture, a value over 50,000 characters or 60,000 bytes, or a non-text value → 422 `invalid_value` with per-key errors; a missing or over-200-character actor, or `values` that is not an object → 422 `invalid_value`; nothing is saved in any of these | `test_S_162_4…` (table + 1) | passed |
+| S-162.5 (P1) | When item, price and quantity change through the API, Then SHOP DETAILS in the response and in the bot is rebuilt from them (`PRICE: ₱1,299`) | `test_S_162_5…` | passed |
+| S-162.6 (P1) | After 60 signed requests in a minute for a page, the next one (GET or PUT) → 429 `rate_limited`; another page keeps its own count; a minute later it works again | `test_S_162_6…` | passed |
+| S-162.7 (P2) | Given a value set and one cleared from Forbeast, Then the page-settings grid, the /chatbot history and Changes show "via Forbeast: <actor>" as who changed it | `test_S_162_7…` | passed |

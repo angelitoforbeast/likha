@@ -143,7 +143,7 @@ class PageSettings
                 'is_secret'  => $secret,
                 'active'     => true,
                 'created_by' => $userId,
-            ] + ($source !== null ? ['source' => $source] : []));
+            ] + ($source !== null && \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'source') ? ['source' => $source] : []));
 
             // Walang value sa log: sino, kailan at aling key lang.
             $status = $current->isEmpty() ? 'created' : 'replaced';
@@ -179,7 +179,7 @@ class PageSettings
 
         // Ang nag-clear ay itinatala (replaced_by, o replaced_source mula sa labas ng Likha) para sa Changes; ang walang user ay null.
         $setting->update(['active' => false, 'replaced_at' => now()] + ($userId && \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'replaced_by') ? ['replaced_by' => $userId] : [])
-            + ($source !== null ? ['replaced_source' => $source] : []));
+            + ($source !== null && \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'replaced_source') ? ['replaced_source' => $source] : []));
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
         if ($setting->provider === 'botcake' && in_array($setting->key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
         if ($setting->provider === 'botcake' && in_array($setting->key, BotcakeMock::KEYS, true)) BotcakeMock::forget();

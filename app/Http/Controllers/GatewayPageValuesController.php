@@ -59,7 +59,9 @@ class GatewayPageValuesController extends Controller
         $values = is_array($data) ? ($data['values'] ?? null) : null;
         if (!is_array($values) || ($values !== [] && array_is_list($values))) return self::invalid(['values' => 'Send {"values": {"<key>": "<text or null>"}}.']);
 
-        $editable = $this->values->editable();
+        // Isang basa ng mga column kada request (ChatbotFields::columns() ay binabasa ang settings ng lahat ng page).
+        $columns = $this->values->columns();
+        $editable = $this->values->editable($columns);
         foreach (array_keys($values) as $key) {
             if (!isset($editable[(string) $key])) {
                 return response()->json(['error' => 'field_not_editable', 'key' => (string) $key, 'message' => '"' . $key . '" cannot be changed here.',
@@ -75,7 +77,7 @@ class GatewayPageValuesController extends Controller
 
         $this->values->save($page, $values, $actor);
 
-        return response()->json($this->body($metaPageId, $page));
+        return response()->json($this->body($metaPageId, $page, $columns));
     }
 
     /** Ang pangalan ng page (gaya ng naitala) ng Botcake / Meta page ID na ito, o null. */
@@ -107,9 +109,9 @@ class GatewayPageValuesController extends Controller
         return null;
     }
 
-    private function body(string $metaPageId, string $page): array
+    private function body(string $metaPageId, string $page, ?array $columns = null): array
     {
-        return ['page_id' => $metaPageId, 'page_name' => $page, 'fields' => $this->values->read($page)];
+        return ['page_id' => $metaPageId, 'page_name' => $page, 'fields' => $this->values->read($page, $columns)];
     }
 
     private static function error(int $status, string $code, string $message): JsonResponse
