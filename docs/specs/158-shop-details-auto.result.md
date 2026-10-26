@@ -102,10 +102,32 @@ These are listed in `TODO.md` under "158", each with its reason:
 - **Before or right after deploy:** run `php artisan chatbot:shop-details-diff`, which is read-only. On 2026-10-26 about 6 of 33 pages differed, among them AllStock Mart and Tech Flask Ph. Their orders change to the fields' values from the first run after deploy.
 - **No migration**, no new table and no new setting rows.
 
+## Amendment 158-1: the Chatblast directory run (qa finding)
+- **Finding:** running `tests/Feature/Chatblast` as a whole failed `ChatbotWaitSkipTest::test_S_076_3` with data set "bot paused" ("Skipped: … bot paused (n2)" expected, '' got). It passed alone.
+- **Reproduced:** two full-directory runs failed it the same way, together with `ForbeastStandbyHiddenTest::test_S_117_15` (see the second cause).
+
+### Cause 1: id reuse in the "tags ready" cache (not state from 158)
+- **The failing flow run:** a temporary trace showed that the WaitSkip run crashed with `table chatbot_replies has no column named flow_version_id`. No wait was created, so nothing could be skipped.
+- **The cache:** `ChatbotTags::ready()` caches "the tags tables exist" per `spl_object_id(app())`. PHP reuses a freed object's id, so a new test's app can get an earlier test's id and inherit its "ready" answer. WaitSkip's database has no tags columns, yet `ready()` said yes.
+- **Why it depended on unrelated files:** whether an id gets reused depends on memory allocation. Dropping `ShopDetailsAutoTest`, which runs after WaitSkip, made it pass; dropping `ForbeastStandbyHiddenTest` made both pass. A filtered run of only the files up to WaitSkip also passed.
+- **The existing workaround:** `OrderEncodeTestCase::tearDown` already resets `ChatbotTags::$ready` for exactly this reason; the Chatblast base class never did. 158 added no shared state: no static or memo in `ShopDetails`, and `ChatbotPage::$ids` is unchanged.
+- **Production is not affected:** a worker runs one app per process.
+- **Fix:** the same one-line reset in `tests/Feature/Chatblast/ChatblastTestCase.php` `tearDown()`.
+- **Code fix tried and dropped:** I first changed the cache key to a `WeakReference` (the `ChatbotReply::hasRaw()` pattern). That broke two OrderEncode tests, because their tearDown resets the property with the old shape. The tests-only fix is smaller and matches the existing practice. The code fix is suggested in `TODO.md`.
+
+### Cause 2: a clock-dependent test (also not 158)
+- `ForbeastStandbyHiddenTest::test_S_117_15` puts a chat at `now()->subHour()` and expects it in "today". Between 00:00 and 01:00 Manila, that chat falls on yesterday, so the test fails even alone. This is why base failed it right after midnight.
+- **Fix:** the test pins its clock to 12:00 with `travelTo`, so it no longer depends on the time of day.
+
+### qa finding 2 and final runs
+- **qa finding 2:** `ChatbotContentCheckTest::test_S_158_4…` now opens with an explicit assertion that a page with none of the fields gets no SHOP DETAILS finding. A probe value confirmed the assertion is live.
+- **Final:** `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode tests/Feature/MetaAds` was run twice, at 00:3x Manila, past midnight. Both runs gave `Tests: 1710, Assertions: 9930, Skipped: 1`, 0 failures.
+
 ## Commits
 - `16efcd3f` docs: spec 158 and its result template (spec 158)
 - `85c69d1a` feat: SHOP DETAILS is built from the page name, item, price and quantity; read-only on the pages grid, with a diff command (spec 158)
 - `ee086fef` fix: the Inbox and the page check use the built SHOP DETAILS, the column keeps its place for pastes, and a price without a number is missing (spec 158)
-- The docs commit with this result, `TODO.md` and `docs/order-encode.md`.
+- `403d6cdc` docs: result, case table, accepted minors and the order-encode note (spec 158)
+- The amendment 158-1 fix commit: the test-isolation reset, the S-117.15 clock pin and the explicit S-158.4 assertion.
 
-158: done — SHOP DETAILS is built from the page name, item, price and quantity everywhere a page's SHOP DETAILS is read. It is read-only on /chatbot/pages, and `chatbot:shop-details-diff` lists the pages whose old text differs; target suite 1676 tests, 0 failures, 1 skipped (baseline 1660/0/1).
+158: done — SHOP DETAILS is built from the page's fields everywhere it is read; the Chatblast run failure was a pre-existing test-isolation bug (object-id cache) plus a midnight-dependent test, both fixed in tests; 5 test folders run twice, 1710 tests, 0 failures.

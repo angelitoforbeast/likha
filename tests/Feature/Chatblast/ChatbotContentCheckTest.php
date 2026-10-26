@@ -436,6 +436,9 @@ Landmark:");
 
     public function test_S_158_4_shop_details_is_built_from_the_fields_and_a_missing_part_is_an_x(): void
     {
+        // Walang ITEM, PRICE, QUANTITY o lumang SHOP DETAILS: hindi pa nagbebenta, walang SHOP DETAILS finding.
+        $this->assertSame([], $this->of($this->content(), 'SHOP DETAILS'));
+
         // Ang lumang naka-save na text (ibang page at item) ay hindi na binabasa.
         $this->shop('PAGE: Vanessa Reyes | ITEM: CHRISTMAS LIGHTS | PRICE: ₱299 | QUANTITY: 1');
         $this->assertSame([['ok', 'SHOP DETAILS: built from ITEM NAME IN JNT DASHBOARD, PRICE and QUANTITY']], $this->of($this->content(), 'SHOP DETAILS'));
