@@ -1,0 +1,29 @@
+# Brief 153: Bot Health counts a page's chats only while it has a flow; the Botcake Test flags active Botcake keywords
+
+## Why
+1. **Bot Health** (`App\Services\Chatbot\BotHealth`, the /chatbot health page): on 2026-10-26 Incepxion showed "Answered 64.5 %" (634 of 983) while the bot really answered 667 of 677 chats. The 343 extra "not answered" were chats of pages before the page got its flow that day (Daily Selection got `chatbot.flow_id` at 17:33 and had 329 earlier chats, answered by Botcake's own bot, which we never see). `inbound()` counts every chat of any page that had at least one sent reply in the range, from midnight.
+2. **Botcake keywords:** on 2026-10-26 a Shopfinity customer's order form (with a phone number) never reached the site: a Botcake keyword on that page caught the message, so Botcake's Default Reply (our chat block / JSON request) never ran and the flow stayed in loop 1. Staff turn such keywords off by hand in Botcake; nothing tells them a keyword is still on. Botcake's API cannot turn keywords off and does not expose the keyword text, but it does list them.
+
+## Facts checked on the live API (read-only, 2026-10-26)
+- `GET /pages/{page_id}/keywords` → `{"data":[{"id":1003861036,"is_activated":true,"flow_id":424398467}, {"id":3837339,"is_activated":false,"flow_id":1415244560}, {"id":1003864376,"is_activated":false,"flow_id":null}, …],"success":true}`. No keyword text or type.
+- `GET /pages/{page_id}/flows` → `{"data":{"flows":[{"id":449685071,"name":"Test ","is_removed":false,"parent_id":null}, …]},"success":true}` (names for the flow ids).
+- `GET /pages/{page_id}/keywords/{id}` → `{"success":false}` (no detail endpoint).
+- Call these through the existing `BotcakeClient::call('GET', '/pages/' . rawurlencode($pageId) . '/keywords', [], $token)` the same way `ChatbotConnections` reads `/default_reply`.
+
+## Decisions (do not reopen)
+| # | Decision | Why |
+|---|---|---|
+| 1 | **Bot Health counts a chat only if, at its `received_at`, the page had an active flow**: a `page_settings` row provider `chatbot`, key `flow_id`, non-empty value, with `created_at <= received_at` and (`replaced_at` null or `> received_at`). Use the row history, not only today's active row, so a page whose flow was removed later is still counted for the hours it had one. Applies to everything built from `inbound()` (Answered %, not answered, first-reply times, hourly, slow list, compare). Sends/failures/AI tiles are unchanged. | The owner: "mabilang yung after malagyan ng flow ng page". Chats before the flow are Botcake's own bot, invisible to us. |
+| 2 | **The Botcake Test also reads the keywords.** Wherever the Botcake Test runs (`ChatbotConnections::testBotcake`: the Test button, and the automatic test after a token is pasted/saved in the Connections popup; and any existing scheduled Botcake retest if there is one), after the token check read `/keywords` (and `/flows` for names). Any keyword with `is_activated: true` → the test result carries `keywords: "on"` with the flow names, and the page is marked **not working yet**: the popup shows a red line "May naka-on na keyword sa Botcake (flow: ON DELIVERY SCRIPT). Hindi pa gumagana nang buo ang bot: may mga message na hindi aabot dito. I-off ang keyword sa Botcake, saka i-Test ulit." None active → `keywords: "none"` (green "Walang naka-on na keyword"). Unreadable → `keywords: "unknown"` with a note, never a pass and never a block. | The owner: "pag may na-detect na naka-on na keyword, may ibabalado na hindi siya pa gumagana. And i-manual fix." |
+| 3 | **Stored and shown like the chat block result:** stamp `botcake.keywords` (on / none / unknown, note = the flow names, user and time) with the existing `stamp()`, so it shows in Changes. The /chatbot/pages row shows it where the chat-block state shows (Connected/Check area): "Botcake: keyword on" in red when on. The Check column (content check) includes an X "Botcake: may naka-on na keyword (<flow names>) — i-off sa Botcake" when the last stamp is on. | One place to see it; same pattern as chat_block. |
+| 4 | No writes to Botcake. No auto-off. The test never fails the token because of keywords (token_status stays ok); only the keyword line and the "not working yet" mark. | Botcake's API cannot turn keywords off; manual fix. |
+
+## Cases (add as S-153 to qa/stories.md, table like S-152)
+P1: .1 a page with a flow from 17:33: chats at 10:00 are not counted (not in Answered %, not in not-answered, not in hourly/slow); chats at 17:40 are; .2 a page whose flow row was replaced at 15:00 by an empty/removed flow: chats 09:00–15:00 counted, after not; a page that never had a flow: none counted; .3 the 2026-10-26 Incepxion shape (one page 329 chats before flow, others after) gives Answered ≈ answered/after-flow chats, not 64.5 %; .4 Test with one active keyword → `keywords: on`, the flow name in the line, the not-working mark, `botcake.keywords` stamped on with the user; token_status stays ok; .5 no active keyword (inactive ones only) → none, green; .6 `/keywords` fails or returns success:false → unknown with a note, no crash, chat block result unchanged; .7 the automatic test after saving a token also runs the keyword check; .8 the Check column shows the X when the last stamp is on and not when none; .9 access and logs as the existing Test (same roles, Changes row). P2: .10 390 px: the red line wraps.
+
+## Done when
+- P1 cases pass; `php vendor\phpunit\phpunit\phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` adds no new failures vs 0c516e4a (record the baseline counts first).
+- Result: files, the inbound change (the exact SQL/filter), the keyword check, evidence per case, commits. End with "153: <done|blocked> — <one line>".
+
+## Out of scope
+Turning keywords off through the API; reading keyword text; Forbeast; the live test with a staff message (later); other health tiles; deploying.

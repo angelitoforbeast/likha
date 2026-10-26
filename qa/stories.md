@@ -2500,3 +2500,23 @@ Tests: `tests/Feature/Chatblast/ChatbotPasteMapTest.php` and `ChatbotPasteScript
 | S-152.7 | P1 | Given the pasted ITEM NAME cell names another item than the page's ITEM NAME IN JNT DASHBOARD, then a yellow note shows above Apply; the same item (case, plural), no item cell or no page item: no note | `test_S_152_7…` (4 rows, JS) | passed 2026-10-26 |
 | S-152.8 | P1 | Given an instruction inside a cell that is swept into Seq, then the answer still holds only keys, no value, and nothing is saved | `test_S_152_8…` | passed 2026-10-26 |
 | S-152.9 | P2 | Given a 390 px screen, then the missing line and its button wrap and the item note breaks words | `test_S_152_9…` (markup) | passed (markup) 2026-10-26 |
+
+## S-153 Bot Health counts a page's chats only while it has a flow; the Botcake Test flags active Botcake keywords
+
+As the owner, Bot Health's Answered % and reply times count only chats that came while the page had a flow (before that Botcake's own bot answers, which we never see); and when a Botcake keyword is still on for a page, the Botcake Test says so, marks the page not working yet and the Check column shows it, so staff turn it off by hand in Botcake.
+
+Slice 153. Threat model: the Botcake answers (`/keywords`, `/flows`) are untrusted text from an outside service, shown as text only; page settings and chats in our database are trusted. No new route. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotHealthAfterFlowTest.php`, `ChatbotConnectionsTest.php` (`S_153`).
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-153.1 | P1 | Given a page with a flow from 17:33, then its chats at 10:00 are not in Answered %, not answered, hourly or slow; its chats at 17:40 are | `test_S_153_1…` | pending |
+| S-153.2 | P1 | Given a page whose flow row was replaced at 15:00 by an empty flow, then chats 09:00–15:00 count and later ones do not; a page that never had a flow counts none | `test_S_153_2…` | pending |
+| S-153.3 | P1 | Given the 2026-10-26 shape (one page with many chats before its flow, others after), then Answered = answered / chats after the flow, not the old low % | `test_S_153_3…` | pending |
+| S-153.4 | P1 | Given one active keyword, when Test runs, then `keywords: on` with the flow name, the not-working mark, `botcake.keywords` stamped on with the user; `token_status` stays ok | `test_S_153_4…` | pending |
+| S-153.5 | P1 | Given only inactive keywords, then `keywords: none` (green) | `test_S_153_5…` | pending |
+| S-153.6 | P1 | Given `/keywords` fails or returns success:false, then `keywords: unknown` with a note, no crash, the chat block result unchanged | `test_S_153_6…` (2 rows) | pending |
+| S-153.7 | P1 | Given a token saved in the popup, then the automatic test also runs the keyword check | `test_S_153_7…` | pending |
+| S-153.8 | P1 | Given the last stamp on, then Check has the X "Botcake: may naka-on na keyword (…) — i-off sa Botcake"; none: no X | `test_S_153_8…` | pending |
+| S-153.9 | P1 | Given the Test's roles, then the keyword check has the same access, and Changes shows "Botcake keywords" with the user | `test_S_153_9…` | pending |
+| S-153.10 | P2 | Given a 390 px screen, then the red keyword line wraps | `test_S_153_10…` (markup) | pending |
