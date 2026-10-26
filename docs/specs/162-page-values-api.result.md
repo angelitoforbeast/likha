@@ -75,7 +75,8 @@ Browser check: not run. There is no running app in this worktree, and the only U
 ## Deploy notes (both sites: Likha and Incepxion)
 
 1. Deploy the code, then run `php artisan migrate --force`. This runs `2026_11_12_100000_add_source_to_page_settings`: two nullable columns, guarded and safe to run again. Until it runs, Forbeast writes still save, but without the actor.
-2. No new environment variables. The API uses each page's existing `forbeast.webhook_secret`, set by the Forbeast token Test. A page whose token hasn't been tested since it got a webhook secret gets 401 until it is.
-3. On Incepxion, seq_N / seq_img_N follow that site's own `ChatbotFields` columns. No change is needed.
+2. If the site caches routes, run `php artisan route:cache` after the deploy, so the two new routes (`GET` and `PUT /api/gateway/pages/{metaPageId}/values`) are served.
+3. No new environment variables. The API uses each page's existing `forbeast.webhook_secret`, which the Forbeast token Test writes. Each page's Forbeast token Test must have run since the page got its webhook secret; until it has, that page gets 401 `bad_signature`.
+4. On Incepxion, seq_N / seq_img_N follow that site's own `ChatbotFields` columns. No change is needed.
 
 162: done — Forbeast can GET and PUT a page's bot values through `/api/gateway/pages/{id}/values`, signed per page, with history, the actor shown as "via Forbeast", and the bot using the new values at once.

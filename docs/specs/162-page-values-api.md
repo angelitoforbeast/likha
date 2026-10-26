@@ -18,7 +18,7 @@ P1: .1 GET with a valid signature returns the fields in contract order with labe
 P1 pass; `php vendor\phpunit\phpunit\phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` adds no new failures vs da1d158f. Result with deploy notes (migration if any, both sites). End with "162: <done|blocked> — <one line>".
 
 ## Rules
-Conventional Commits; no assistant/owner names, no Co-Authored-By, Claude-Session or "Generated with" lines, no "Decision N" in committed text. Never push/deploy/touch a server; never call another live app (fake it per the contract). php may only be on PowerShell's PATH (C:\Users\Forbeast\.config\herd\bin\php.bat). Medium job, 2 tries per step; commit after each passing stage; reviewer subagent at the end. The contract at the end is shared by three apps built in parallel: build only your side exactly as written; if the contract is wrong or impossible for your side, stop that part and say so in the result rather than changing it.
+Conventional Commits; no assistant/owner names, no attribution trailers in commit messages, no "Decision N" in committed text. Never push/deploy/touch a server; never call another live app (fake it per the contract). php may only be on PowerShell's PATH (C:\Users\Forbeast\.config\herd\bin\php.bat). Medium job, 2 tries per step; commit after each passing stage; reviewer subagent at the end. The contract at the end is shared by three apps built in parallel: build only your side exactly as written; if the contract is wrong or impossible for your side, stop that part and say so in the result rather than changing it.
 
 ## Contract
 # Contract: page bot values edited from Forbeast, pictures on Image Host
