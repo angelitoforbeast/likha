@@ -2510,13 +2510,13 @@ Tests: `tests/Feature/Chatblast/ChatbotHealthAfterFlowTest.php`, `ChatbotConnect
 
 | Case | P | Given / When / Then | Test | Status |
 |---|---|---|---|---|
-| S-153.1 | P1 | Given a page with a flow from 17:33, then its chats at 10:00 are not in Answered %, not answered, hourly or slow; its chats at 17:40 are | `test_S_153_1…` | pending |
-| S-153.2 | P1 | Given a page whose flow row was replaced at 15:00 by an empty flow, then chats 09:00–15:00 count and later ones do not; a page that never had a flow counts none | `test_S_153_2…` | pending |
-| S-153.3 | P1 | Given the 2026-10-26 shape (one page with many chats before its flow, others after), then Answered = answered / chats after the flow, not the old low % | `test_S_153_3…` | pending |
-| S-153.4 | P1 | Given one active keyword, when Test runs, then `keywords: on` with the flow name, the not-working mark, `botcake.keywords` stamped on with the user; `token_status` stays ok | `test_S_153_4…` | pending |
-| S-153.5 | P1 | Given only inactive keywords, then `keywords: none` (green) | `test_S_153_5…` | pending |
-| S-153.6 | P1 | Given `/keywords` fails or returns success:false, then `keywords: unknown` with a note, no crash, the chat block result unchanged | `test_S_153_6…` (2 rows) | pending |
-| S-153.7 | P1 | Given a token saved in the popup, then the automatic test also runs the keyword check | `test_S_153_7…` | pending |
-| S-153.8 | P1 | Given the last stamp on, then Check has the X "Botcake: may naka-on na keyword (…) — i-off sa Botcake"; none: no X | `test_S_153_8…` | pending |
-| S-153.9 | P1 | Given the Test's roles, then the keyword check has the same access, and Changes shows "Botcake keywords" with the user | `test_S_153_9…` | pending |
-| S-153.10 | P2 | Given a 390 px screen, then the red keyword line wraps | `test_S_153_10…` (markup) | pending |
+| S-153.1 | P1 | Given a page with a flow from 17:33, then its chats at 10:00 are not in Answered %, not answered, hourly or slow; its chats at 17:40 are | `test_S_153_1…` | passed 2026-10-26 |
+| S-153.2 | P1 | Given a page whose flow row was replaced at 15:00 by an empty flow, then chats 09:00–15:00 count and later ones do not; a page that never had a flow counts none | `test_S_153_2…` | passed 2026-10-26 |
+| S-153.3 | P1 | Given the 2026-10-26 shape (one page with many chats before its flow, others after), then Answered = answered / chats after the flow, not the old low % | `test_S_153_3…` | passed 2026-10-26 |
+| S-153.4 | P1 | Given one active keyword, when Test runs, then `keywords: on` with the flow name, the not-working mark, `botcake.keywords` stamped on with the user; `token_status` stays ok | `test_S_153_4…` | passed 2026-10-26 |
+| S-153.5 | P1 | Given only inactive keywords, then `keywords: none` (green) | `test_S_153_5…` | passed 2026-10-26 |
+| S-153.6 | P1 | Given `/keywords` fails or returns success:false, then `keywords: unknown` with a note, no crash, the chat block result unchanged | `test_S_153_6…` (2 rows) | passed 2026-10-26 |
+| S-153.7 | P1 | Given a token saved in the popup, then the automatic test also runs the keyword check, and so does the nightly `chatbot:connections-check` | `test_S_153_7…` | passed 2026-10-26 |
+| S-153.8 | P1 | Given the last stamp on, then Check has the X "Botcake: may naka-on na keyword (…) — i-off sa Botcake" and the row "Botcake: keyword on"; none, or a Forbeast page: no X and no mark | `test_S_153_8…` | passed 2026-10-26 |
+| S-153.9 | P1 | Given the Test's roles, then the keyword check has the same access, and Changes shows "Botcake keywords" with the user | `test_S_153_9…` | passed 2026-10-26 |
+| S-153.10 | P2 | Given a 390 px screen, then the red keyword line wraps | `test_S_153_10…` (markup) | passed (markup) 2026-10-26 |
