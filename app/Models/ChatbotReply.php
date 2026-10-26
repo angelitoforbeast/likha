@@ -66,13 +66,14 @@ class ChatbotReply extends Model
 
     /**
      * Ang client_ref at ang kumpirmasyon para sa create(). Ang Botcake ay sabay (bumabalik kapag naipadala na sa Meta), kaya
-     * ang sent nito ay kumpirmado na sa oras ng talaan; ang Forbeast ay hinihintay ang send_status. Wala pang column = wala.
+     * ang sent nito ay kumpirmado na sa oras ng talaan ($sentAt: ang parehong value ng sent_at); ang Forbeast ay hinihintay
+     * ang send_status. Wala pang column = wala.
      */
-    public static function confirmColumns(?string $clientRef, ?string $via, string $status): array
+    public static function confirmColumns(?string $clientRef, ?string $via, string $status, \DateTimeInterface $sentAt): array
     {
         if (!self::hasConfirm()) return [];
         $out = ['client_ref' => $clientRef];
-        if ($via === \App\Services\Chatbot\ChatbotProvider::BOTCAKE && $status === 'sent') $out += ['confirmed_at' => now(), 'confirmed_status' => 'sent'];
+        if ($via === \App\Services\Chatbot\ChatbotProvider::BOTCAKE && $status === 'sent') $out += ['confirmed_at' => $sentAt, 'confirmed_status' => 'sent'];
 
         return $out;
     }

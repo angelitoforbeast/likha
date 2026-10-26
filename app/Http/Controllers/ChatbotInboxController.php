@@ -173,8 +173,8 @@ class ChatbotInboxController extends Controller
         $o = $provider->send($page, $pageId, $psid, $messages, $ref = ChatbotProvider::ref());
         [$status, $error, $http, $raw] = [$o['status'], $o['error'], $o['http'], $o['raw'] ?? null];
         $reply = ChatbotReply::create(['page_id' => (int) $pageId, 'psid' => (int) $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null,
-            'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => now()]
-            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotReply::viaColumn(ChatbotProvider::viaOf($provider)) + ChatbotReply::confirmColumns($ref, ChatbotProvider::viaOf($provider), $status)
+            'user_id' => Auth::id(), 'kind' => 'manual', 'content' => $messages, 'status' => $status, 'error' => $error, 'http' => $http, 'sent_at' => $now = now()]
+            + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotReply::viaColumn(ChatbotProvider::viaOf($provider)) + ChatbotReply::confirmColumns($ref, ChatbotProvider::viaOf($provider), $status, $now)
             + ChatbotTags::columns($tags = ChatbotTags::manual((int) $pageId, (int) $psid, $page, count($messages))));
         ChatbotTags::storeRows($reply, $tags);
 

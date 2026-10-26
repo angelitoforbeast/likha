@@ -259,6 +259,87 @@ class RealSendTimeTest extends ChatblastTestCase
         $this->assertStringContainsString('Real first reply median', $html);
     }
 
+    public function test_S_156_4_a_botcake_send_is_confirmed_at_exactly_its_sent_at(): void
+    {
+        // Ang orasan ay umuusad ng 1 s kada tanong: ang dalawang magkahiwalay na now() ay magkaiba.
+        $t = \Illuminate\Support\Carbon::parse('2026-10-26 20:00:00');
+        \Illuminate\Support\Carbon::setTestNow(function () use (&$t) {
+            return $t = $t->copy()->addSecond();
+        });
+        $this->chat('1002', '8001', '2026-10-26 19:59:00');
+        \App\Services\Chatbot\BotcakeOutbox::record(1002, 8001, null, null, 'n2', 'send', [['type' => 'text', 'text' => 'Hi']], 'sent', via: 'botcake');
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $this->postJson('/chatbot/inbox/send', ['page_id' => '1002', 'psid' => '8001', 'text' => 'Hello po'])->assertOk();
+
+        $rows = DB::table('chatbot_replies')->where('via', 'botcake')->orderBy('id')->get(['kind', 'sent_at', 'confirmed_at', 'confirmed_status']);
+        $this->assertSame(['send', 'manual'], $rows->pluck('kind')->all());
+        foreach ($rows as $r) $this->assertSame([$r->sent_at, 'sent'], [$r->confirmed_at, $r->confirmed_status], $r->kind);
+    }
+
+    /** Ang POST ng Forbeast sa /api/gateway/events, pinirmahan ng $secret. */
+    private function signedPost(array $event, string $secret)
+    {
+        $body = json_encode($event);
+
+        return $this->call('POST', '/api/gateway/events', [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json',
+            'HTTP_X_GATEWAY_SIGNATURE' => 'sha256=' . hash_hmac('sha256', $body, $secret)], $body);
+    }
+
+    private function contract(string $ref): array
+    {
+        return ['type' => 'send_status', 'page_id' => '1001', 'psid' => '7001', 'send' => ['public_id' => 'snd_01', 'client_ref' => $ref, 'status' => 'sent',
+            'accepted_at' => self::iso('2026-10-26 19:55:00'), 'sent_at' => self::iso('2026-10-26 19:59:10'), 'message_count' => 1, 'sent_count' => 1,
+            'message_ids' => ['m_1'], 'error_code' => null, 'error_subcode' => null, 'error' => null]];
+    }
+
+    public function test_S_156_1_a_send_status_signed_with_the_page_secret_confirms_the_reply(): void
+    {
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'webhook_secret', 'whsec-page-uno-156', true, null, true);
+        $id = $this->reply(null, '2026-10-26 19:55:00', ref: 'likha-signed');
+        $this->signedPost($this->contract('likha-signed'), 'whsec-page-uno-156')->assertOk();
+        $this->assertSame(['2026-10-26 19:59:10', 'sent'], [$this->row($id)->confirmed_at, $this->row($id)->confirmed_status]);
+    }
+
+    public function test_S_156_1_a_send_status_with_a_wrong_signature_is_401_and_changes_nothing(): void
+    {
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'webhook_secret', 'whsec-page-uno-156', true, null, true);
+        $id = $this->reply(null, '2026-10-26 19:55:00', ref: 'likha-signed');
+        $this->signedPost($this->contract('likha-signed'), 'whsec-wrong-156')->assertStatus(401);
+        $this->assertSame([null, null], [$this->row($id)->confirmed_at, $this->row($id)->confirmed_status]);
+        $this->assertSame(1, $this->counted('bad_signature'));
+    }
+
+    public function test_S_156_the_migration_completes_a_half_applied_run_and_down_drops_only_what_exists(): void
+    {
+        $m = require base_path('database/migrations/2026_11_11_100000_add_real_send_to_chatbot_replies.php');
+        $s = \Illuminate\Support\Facades\Schema::class;
+        $state = fn () => [$s::hasColumn('chatbot_replies', 'client_ref'), $s::hasColumn('chatbot_replies', 'confirmed_at'), $s::hasColumn('chatbot_replies', 'confirmed_status'),
+            $s::hasIndex('chatbot_replies', 'chatbot_replies_client_ref_idx'), $s::hasIndex('chatbot_replies', 'chatbot_replies_pending_idx')];
+        $all = [true, true, true, true, true];
+        $none = [false, false, false, false, false];
+        $this->assertSame($all, $state());
+
+        // Kalahating takbo: confirmed_at lang ang naidagdag. Ang ulit ng up() ay tinatapos ang iba.
+        $m->down();
+        $s::table('chatbot_replies', fn ($t) => $t->timestamp('confirmed_at')->nullable());
+        $m->up();
+        $this->assertSame($all, $state());
+        $m->up(); // ulit: walang error, walang binago
+        $this->assertSame($all, $state());
+
+        // Kalahating takbo: client_ref at ang index nito lang. Ang down() ay binubura ang mayroon lang.
+        $m->down();
+        $this->assertSame($none, $state());
+        $s::table('chatbot_replies', function ($t) {
+            $t->string('client_ref', 100)->nullable();
+            $t->index('client_ref', 'chatbot_replies_client_ref_idx');
+        });
+        $m->down();
+        $this->assertSame($none, $state());
+        $m->down();
+        $this->assertSame($none, $state());
+    }
+
     public function test_S_156_5_alarm_from_likha_pending_after_3_minutes_and_recovery_under_30s_without_a_switch(): void
     {
         $this->sendStatus($this->confirmedRef(), 'sent', '2026-10-26 19:00:10');
