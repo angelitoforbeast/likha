@@ -176,7 +176,9 @@ class GatewayPageValuesTest extends ChatblastTestCase
     {
         $this->putValues(['main_flow' => 'x'], [])->assertStatus(422)->assertJson(['error' => 'invalid_value'])->assertJsonStructure(['errors' => ['X-Forbeast-User']]);
         $this->putValues(['main_flow' => 'x'], ['X-Forbeast-User' => str_repeat('a', 201)])->assertStatus(422)->assertJsonStructure(['errors' => ['X-Forbeast-User']]);
-        $this->signed('PUT', '{"values":["x"]}', null, self::SECRET, self::URL, ['X-Forbeast-User' => self::ACTOR])->assertStatus(422)->assertJsonStructure(['errors' => ['values']]);
+        foreach (['{"values":["x"]}', '{"values":"x"}', 'not json'] as $body) {
+            $this->signed('PUT', $body, null, self::SECRET, self::URL, ['X-Forbeast-User' => self::ACTOR])->assertStatus(422)->assertJson(['error' => 'invalid_value'])->assertJsonStructure(['errors' => ['values']]);
+        }
         $this->assertSame('Hello {{name}}', $this->value('main_flow'));
     }
 
@@ -193,7 +195,10 @@ class GatewayPageValuesTest extends ChatblastTestCase
     public function test_S_162_6_sixty_requests_per_minute_per_page(): void
     {
         app(PageSettings::class)->set('Page Dos', 'forbeast', 'webhook_secret', 'dos-secret', true, null, true);
-        for ($i = 0; $i < 60; $i++) $this->signed('GET')->assertOk();
+        // Ang hindi pinirmahan ay hindi binibilang: ang nakakaalam lang ng page id ay hindi mapipigilan ang Forbeast.
+        for ($i = 0; $i < 61; $i++) $this->signed('GET', '', null, 'wrong-secret')->assertStatus(401);
+        $this->signed('GET', '', time() - 300)->assertOk(); // 300 s ang layo: tinatanggap pa
+        for ($i = 1; $i < 60; $i++) $this->signed('GET')->assertOk();
 
         $this->signed('GET')->assertStatus(429)->assertJson(['error' => 'rate_limited']);
         $this->putValues(['main_flow' => 'x'])->assertStatus(429);

@@ -48,19 +48,19 @@ class PageValues
     }
 
     /** @return array<string, string> ang mga key na napapalitan (lahat maliban sa SHOP DETAILS) */
-    public function editable(): array
+    public function editable(?array $columns = null): array
     {
-        return array_diff_key($this->columns(), [ShopDetails::KEY => true]);
+        return array_diff_key($columns ?? $this->columns(), [ShopDetails::KEY => true]);
     }
 
     /** @return array<int, array{key: string, label: string, type: string, value: ?string, editable: bool, updated_at: ?string}> */
-    public function read(string $page): array
+    public function read(string $page, ?array $columns = null): array
     {
         // Ayon sa id: ang pinakabagong active row ang masusunod sa parehong key, gaya ng PageSettings::get.
         $rows = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get()->keyBy('key');
         $at = fn ($s) => $s?->created_at?->toIso8601String();
         $out = [];
-        foreach ($this->columns() as $key => $label) {
+        foreach ($columns ?? $this->columns() as $key => $label) {
             if ($key === ShopDetails::KEY) {
                 $parts = array_filter(array_map(fn ($k) => $rows[$k] ?? null, array_combine(ShopDetails::PARTS, ShopDetails::PARTS)));
                 $last = collect($parts)->sortBy('created_at')->last();
@@ -85,9 +85,8 @@ class PageValues
     public function save(string $page, array $values, string $actor): void
     {
         DB::transaction(function () use ($page, $values, $actor) {
-            foreach (array_keys($this->editable()) as $key) {
-                if (!array_key_exists($key, $values)) continue;
-                $value = trim((string) $values[$key]);
+            foreach ($values as $key => $value) {
+                $value = trim((string) $value);
                 if ($value === '') {
                     $actives = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key)->where('active', true)->get();
                     foreach ($actives as $s) $this->settings->deactivate($s, null, $actor);

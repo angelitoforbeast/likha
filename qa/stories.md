@@ -2697,3 +2697,20 @@ As an Ads uploader, I connect my Facebook through the Meta app's Login for Busin
 - S-159.2 No config id. Given `META_ADS_CONFIG_ID` is empty or blank, When I click Connect Facebook, Then the URL is as in S-154.1 (`scope=ads_read`).
 - S-159.3 Token path. Given a config id, When Facebook returns a code and the long-lived exchange works, Then the long-lived token is kept (`token_from` = `fb_exchange_token`); When the long-lived exchange fails, Then the code token is kept with its expiry from `debug_token` (`token_from` = `code`) and the connect succeeds. Negative: without a config id a failed long-lived exchange still fails the connect, as before. Edge: with app id + config id and no secret, the card still offers Connect (the secret is needed only for the exchange).
 - S-159.4 Token never shown. In both paths the token is not in logs, responses, the page, upload_logs or the unencrypted part of the connection row.
+
+## S-162 Forbeast reads and edits a page's bot values
+
+As the owner, I want to see and edit each page's bot values (Main Flow, sequences, pictures…) from Forbeast, while the values stay in Likha's page settings with their history and the name of who changed them.
+
+Slice 162. Threat model: everything in a request to `/api/gateway/pages/{id}/values` (path id, headers including `X-Forbeast-User`, body) is untrusted, and so are the stored values once they came from it; the repo, config and the page's stored webhook secret are trusted. Risk tier: medium (a new route, but behind the same per-page HMAC as gateway events).
+Tests: `tests/Feature/Chatblast/GatewayPageValuesTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-162.1 (P1) | Given Page Uno with its own webhook secret and some botfields, prompts, flow_id and auto_switch, When Forbeast GETs the values with a valid signature, Then the fields come in contract order (main_flow … picture, seq_1..20, seq_img_1..20, comment_reply_1..3, comment_pm, after_order_1, shop_details) with the /chatbot labels, type text/textarea/image, value, editable (false only for shop_details) and updated_at; prompts, flow_id, auto_switch, AI settings, secrets and botcake settings never appear | `test_S_162_1…` | passed |
+| S-162.2 (P1) | Wrong secret, no signature, timestamp 301 s old or ahead, no timestamp, a body signed without the timestamp, or a page without its own secret (the global secret is not used) → 401 `bad_signature`; an unknown page id → 404 `unknown_page`; nothing changes | `test_S_162_2…` (table) | passed |
+| S-162.3 (P1) | When Forbeast PUTs new values (one set, one null), Then the old rows stay as history, the new row carries the actor, the cleared row records who cleared it, the response is the fresh GET body, and the bot's next run uses the new values (labels and page caches cleared) | `test_S_162_3…` | passed |
+| S-162.4 (P1) | A PUT with shop_details, a prompt, flow_id, an unknown key or a botcake setting → 422 `field_not_editable` naming the key; an http or non-URL picture, a value over 50,000 characters or 60,000 bytes, or a non-text value → 422 `invalid_value` with per-key errors; a missing or over-200-character actor, or `values` that is not an object → 422 `invalid_value`; nothing is saved in any of these | `test_S_162_4…` (table + 1) | passed |
+| S-162.5 (P1) | When item, price and quantity change through the API, Then SHOP DETAILS in the response and in the bot is rebuilt from them (`PRICE: ₱1,299`) | `test_S_162_5…` | passed |
+| S-162.6 (P1) | After 60 signed requests in a minute for a page, the next one (GET or PUT) → 429 `rate_limited`; another page keeps its own count; a minute later it works again | `test_S_162_6…` | passed |
+| S-162.7 (P2) | Given a value set and one cleared from Forbeast, Then the page-settings grid, the /chatbot history and Changes show "via Forbeast: <actor>" as who changed it | `test_S_162_7…` | passed |
