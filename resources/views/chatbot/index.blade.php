@@ -115,7 +115,7 @@
     <div id="pe" class="fixed inset-0 z-50 hidden bg-slate-900/30 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="pe-title">
         <div class="mx-auto flex h-full max-h-full w-full max-w-2xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span></div>
+                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span> <span id="pe-fb"></span></div>
                 <button id="pe-preview" type="button" class="cb-btn cb-btn-sm ml-auto shrink-0">Preview</button>
                 <button id="pe-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
@@ -221,7 +221,7 @@
     <div id="conn" class="fixed inset-0 hidden overflow-y-auto bg-slate-900/30 p-2 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="conn-title">
         <div class="mx-auto w-full max-w-2xl rounded-xl bg-white text-sm shadow-lg">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-                <div class="min-w-0"><div id="conn-title" class="break-words font-semibold">Connections</div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
+                <div class="min-w-0"><div id="conn-title" class="break-words font-semibold">Connections</div><div id="conn-fb"></div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
                 <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <div class="grid gap-3 p-4 sm:grid-cols-2">
@@ -329,6 +329,11 @@
     function notice(text, cls = 'text-slate-600') { $('notice').className = 'mb-2 min-h-[1rem] text-xs ' + cls; $('notice').textContent = text; }
     const id = (page, key) => page + '\u0000' + key;
     const isUrl = v => /^https?:\/\//i.test(v || '');
+    // FB link: ang Facebook page mula sa Page ID (digits lang; ang iba ay walang link), bubukas sa bagong tab.
+    // fb-link:start
+    const fbLink = id => /^\d+$/.test(id || '') ? {href: 'https://www.facebook.com/' + id, target: '_blank', rel: 'noopener noreferrer', text: 'Open page ↗'} : null;
+    // fb-link:end
+    const fbAnchor = id => { const a = fbLink(id); return a ? el('a', {...a, class: 'whitespace-nowrap text-xs font-normal text-blue-700 underline hover:text-blue-900'}) : ''; };
 
     async function load() {
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
@@ -460,6 +465,7 @@
             el('th', {class: 'min-w-[7rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'Bots that are fully connected'}, ['Connected', filterButton('connected')]),
             el('th', {class: 'min-w-[5rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Chats today'}),
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
+            el('th', {class: 'min-w-[6rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', title: 'The Facebook page, from the Page ID', text: 'FB link'}),
             ...columns.filter(c => c.key !== 'flow').map(c => el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-500', text: c.label})),
         ]);
         const list = visible();
@@ -474,6 +480,7 @@
                 .concat(r.botcake_keywords === 'on' ? [el('div', {class: 'break-words text-red-600', title: 'May naka-on na keyword sa Botcake: i-off doon, saka i-Test ulit', text: 'Botcake: keyword on'})] : [])),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', text: r.last_chat || '—'}),
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top'}, fbAnchor(r.page_id)),
             ...columns.filter(c => c.key !== 'flow').map(c => cell(r, c)),
         ])));
         table.replaceChildren(el('thead', {}, head), body);
@@ -804,6 +811,7 @@
     async function openConnections(page) {
         connPage = page;
         $('conn-title').textContent = 'Connections · ' + page;
+        $('conn-fb').replaceChildren(fbAnchor(rows.find(r => r.page === page)?.page_id));
         document.querySelectorAll('#conn .conn-msg, #conn .conn-kw').forEach(m => { m.textContent = ''; });
         dialog('conn', true);
         const {ok, status, data} = await getJson(url.connectionsUrl + '?page_name=' + encodeURIComponent(page));
@@ -1275,6 +1283,7 @@
         $('pe-map').classList.add('hidden');
         $('pe-name').textContent = r.page;
         $('pe-id').textContent = r.page_id || '';
+        $('pe-fb').replaceChildren(fbAnchor(r.page_id));
         const start = $('pe-start').value;
         $('pe-start').replaceChildren(...botCols().map(c => el('option', {value: c.key, text: c.label})));
         if (start && botCols().some(c => c.key === start)) $('pe-start').value = start;

@@ -2576,3 +2576,12 @@ Tests: `tests/Feature/Chatblast/RealSendTimeTest.php` (`S_156`).
 | S-156.8 | P1 | Given a Forbeast reply over 24 h old with no confirmation, then it counts as unconfirmed, not pending | `test_S_156_8…` | passed 2026-10-26 |
 | S-156.9 | P1 | Given a confirmation (`sent` or `partial`), then the "accepted" numbers (inbound, answered, first reply avg/median/p90/max) stay as they were | `test_S_156_9…` | passed 2026-10-26 |
 | S-156.10 | P2 | Given a 390 px screen, then the real send tiles wrap two per row and the per-page table scrolls sideways | `test_S_156_10…` (markup) | passed (markup), not run in a browser |
+## S-157 Staff open a page's Facebook page from /chatbot/pages in one click
+
+As staff on /chatbot/pages, I want a link to each page's Facebook page next to its Page ID, so I can open the page without searching for it.
+
+- S-157.1 Link. Given a page with Page ID 1123777717482685, When I open /chatbot/pages, Then its FB link cell links to https://www.facebook.com/1123777717482685 with target _blank and rel noopener noreferrer, text "Open page ↗".
+- S-157.2 No link. Given a page with no Page ID or one that is not only digits, Then the FB link cell is empty.
+- S-157.3 Edit and Connections. When I open the page's Edit modal or Connections popup, Then the same link is in its header.
+- S-157.4 Column rules. The FB link column sits in the grid's fixed column order (after Last chat), like Chats today and Last chat: the grid has no per-column show/hide and no filter on these fixed columns, so none is added.
+- S-157.5 (P2) At 390 px the column scrolls with the grid and the link stays tappable.
