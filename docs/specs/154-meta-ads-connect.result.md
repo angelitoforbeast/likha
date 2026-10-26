@@ -101,7 +101,7 @@ Red runs:
 - Paging-host fix: "Attempted request to [https://attacker.example/steal?after=p2] without a matching fake".
 - **TDD deviation:** the Insights, Compare and Sync services were written in one pass with the connect slice, before their tests. Their tests were written next, and their first runs failed only on test-side bugs (a key type, a decimal trim, a Laravel output-matching quirk), not on missing behaviour.
 
-**Feature suite:** the baseline at 66ec2a4e was 3016 tests with 2 failures (`ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`). After: see the note at the end of Open points.
+**Feature suite:** the baseline at 66ec2a4e was 3016 tests with 2 failures (`ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`). After (run on `72937d29`, before the review fix, which touched only `app/Services/MetaAds`, `MetaAdsController`, the job timeout, a config comment and MetaAds tests; those re-ran green, 26 tests): **3040 tests, the same 2 failures, no new failures**.
 
 ## Commits
 - `81b956c6` docs: spec, plan, stories and result skeleton for Meta Ads connect (spec 154)
@@ -118,3 +118,5 @@ Red runs:
 - **Write mode** stays off until the CEO turns it on, after Compare shows the numbers match.
 - **Pre-existing bug, not touched:** CSV uploads crash on OpenSpout v4 (`setFieldDelimiter`). XLSX uploads work.
 - Accepted minors: `TODO.md` § "154".
+
+154: done — staff connect Facebook on /ads_manager/report; Compare with uploads works and writes nothing; Sync now and the schedule write the report only when the CEO turns write mode on; the live pilot must confirm the field shapes and other-BM access.
