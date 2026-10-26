@@ -126,12 +126,13 @@ class BotcakeOutbox implements Outbox
      */
     public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null, ?string $via = null, ?string $clientRef = null): array
     {
+        $now = now();
         $reply = ChatbotReply::create([
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId,
             'node_id' => $nodeId, 'kind' => $kind, 'content' => $content, 'status' => $status, 'error' => $error === null ? null : mb_substr($error, 0, 255),
-            'http' => $http, 'sent_at' => now(),
+            'http' => $http, 'sent_at' => $now,
         ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags) + ChatbotReply::viaColumn($via)
-            + ($kind === 'send' ? ChatbotReply::confirmColumns($clientRef, $via, $status) : []));
+            + ($kind === 'send' ? ChatbotReply::confirmColumns($clientRef, $via, $status, $now) : []));
         ChatbotTags::storeRows($reply, $tags);
 
         return ['status' => $status, 'error' => $error];
