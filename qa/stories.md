@@ -2659,3 +2659,12 @@ Tests: `tests/Feature/Chatblast/RealSendTimeTest.php` (`S_156`).
 | S-156.8 | P1 | Given a Forbeast reply over 24 h old with no confirmation, then it counts as unconfirmed, not pending | `test_S_156_8…` | passed 2026-10-26 |
 | S-156.9 | P1 | Given a confirmation (`sent` or `partial`), then the "accepted" numbers (inbound, answered, first reply avg/median/p90/max) stay as they were | `test_S_156_9…` | passed 2026-10-26 |
 | S-156.10 | P2 | Given a 390 px screen, then the real send tiles wrap two per row and the per-page table scrolls sideways | `test_S_156_10…` (markup) | passed (markup), not run in a browser |
+## S-157 Staff open a page's Messenger chat from /chatbot/pages in one click
+
+As staff on /chatbot/pages, I want a Facebook icon right beside each page's name that opens the page's Messenger chat, so I can chat with the page without searching for it.
+
+- S-157.1 Icon link. Given a page "Page Uno" with Page ID 1123777717482685, When I open /chatbot/pages, Then a small Facebook icon (Facebook blue, about 16 px) beside the page name links to https://m.me/1123777717482685 with target _blank and rel noopener noreferrer, titled and labelled "Chat with Page Uno on Messenger".
+- S-157.2 No icon. Given a page with no Page ID or one that is not only digits, Then no icon is shown.
+- S-157.3 Edit and Connections. When I open the page's Edit modal or Connections popup, Then the same icon is beside the page name in its header.
+- S-157.4 No separate column. The icon sits in the page-name cell of the grid; there is no separate FB link column.
+- S-157.5 (P2) At 390 px the icon stays beside the name and tappable.

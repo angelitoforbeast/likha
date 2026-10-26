@@ -1220,3 +1220,9 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Coupling tests not written for: health high with pending low, and a pending alarm with fresh high health samples.** Reason: the recovery code needs both sources low, and S-156.5 (two tests) and S-155.4 cover each source's own path.
 - **Deploying Forbeast 017 during a backlog leaves a gap.** The first confirmed reply's `sent_at` can be earlier than the deploy. Replies accepted in between that the old Forbeast code already sent never get a `send_status`, so they show as pending until a later reply to the same PSID is confirmed, or for at most 24 h. Reason: on a drained queue this window is seconds; deploy Forbeast 017 when the queue is empty.
 - **A reply dropped as a lost `send_status` (a newer confirmed reply to the same PSID exists) is not counted anywhere.** Reason: it keeps a lost event from holding the alarm. If it matters, a "lost" count can go in the gateway event counts later.
+## Spec 157 (FB link on /chatbot/pages): accepted minors
+- S-157.1/.2 run the page's `fbLink()` in Node and skip when Node is missing (same as the other Node-run tests of this page); on a runner without Node they show as skipped, not failed.
+- S-157.3/.4 check the page source (ids, calls, the column's place), not a rendered DOM: the page has no JS DOM test harness. `fbAnchor` only spreads `fbLink()`'s attributes into `el()`.
+- The `// fb-link:start/end` markers ship in the page so the test can find the helper; same pattern as `connected-filter` and `check-summary`.
+- The Connections header link uses the Page ID from the loaded rows; after a Page ID is changed in Connections it updates on the next reload of the list. Cosmetic.
+- S-157.5 (390 px) has no automated check; the column scrolls with the grid like the other non-frozen columns.

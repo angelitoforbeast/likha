@@ -119,7 +119,7 @@
     <div id="pe" class="fixed inset-0 z-50 hidden bg-slate-900/30 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="pe-title">
         <div class="mx-auto flex h-full max-h-full w-full max-w-2xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span></div>
+                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span></div><span id="pe-fb" class="shrink-0"></span>
                 <button id="pe-preview" type="button" class="cb-btn cb-btn-sm ml-auto shrink-0">Preview</button>
                 <button id="pe-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
@@ -271,7 +271,7 @@
     <div id="conn" class="fixed inset-0 hidden overflow-y-auto bg-slate-900/30 p-2 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="conn-title">
         <div class="mx-auto w-full max-w-2xl rounded-xl bg-white text-sm shadow-lg">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-                <div class="min-w-0"><div id="conn-title" class="break-words font-semibold">Connections</div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
+                <div class="min-w-0"><div class="flex items-center gap-1"><div id="conn-title" class="break-words font-semibold">Connections</div><span id="conn-fb" class="shrink-0"></span></div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
                 <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <div class="grid gap-3 p-4 sm:grid-cols-2">
@@ -379,6 +379,21 @@
     function notice(text, cls = 'text-slate-600') { $('notice').className = 'mb-2 min-h-[1rem] text-xs ' + cls; $('notice').textContent = text; }
     const id = (page, key) => page + '\u0000' + key;
     const isUrl = v => /^https?:\/\//i.test(v || '');
+    // FB icon katabi ng pangalan ng page: bukas ang Messenger chat ng page (m.me, mula sa Page ID; digits lang, ang iba ay
+    // walang icon), sa bagong tab.
+    // fb-link:start
+    const fbLink = (id, page) => /^\d+$/.test(id || '') ? {href: 'https://m.me/' + id, target: '_blank', rel: 'noopener noreferrer',
+        title: 'Chat with ' + page + ' on Messenger', 'aria-label': 'Chat with ' + page + ' on Messenger'} : null;
+    // fb-link:end
+    function fbAnchor(r) {
+        const a = r ? fbLink(r.page_id, r.page) : null;
+        if (!a) return '';
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        for (const [k, v] of Object.entries({viewBox: '0 0 24 24', fill: '#1877F2', class: 'h-4 w-4', 'aria-hidden': 'true', focusable: 'false'})) svg.setAttribute(k, v);
+        // Ang Facebook "f" (nakapirming SVG, walang data mula sa labas).
+        svg.innerHTML = '<path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z"/>';
+        return el('a', {...a, class: 'ml-1 inline-flex shrink-0 rounded align-middle hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'}, svg);
+    }
 
     async function load() {
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
@@ -514,7 +529,7 @@
         ]);
         const list = visible();
         const body = el('tbody', {}, list.map(r => el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
-            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
+            el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null])]),
             activeCell(r),
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
@@ -854,6 +869,7 @@
     async function openConnections(page) {
         connPage = page;
         $('conn-title').textContent = 'Connections · ' + page;
+        $('conn-fb').replaceChildren(fbAnchor(rows.find(r => r.page === page)));
         document.querySelectorAll('#conn .conn-msg, #conn .conn-kw').forEach(m => { m.textContent = ''; });
         dialog('conn', true);
         const {ok, status, data} = await getJson(url.connectionsUrl + '?page_name=' + encodeURIComponent(page));
@@ -1413,6 +1429,7 @@
         $('pe-map').classList.add('hidden');
         $('pe-name').textContent = r.page;
         $('pe-id').textContent = r.page_id || '';
+        $('pe-fb').replaceChildren(fbAnchor(r));
         const start = $('pe-start').value;
         $('pe-start').replaceChildren(...botCols().map(c => el('option', {value: c.key, text: c.label})));
         if (start && botCols().some(c => c.key === start)) $('pe-start').value = start;
