@@ -235,6 +235,7 @@
                     </label>
                     <p class="conn-tested mt-2 text-xs text-slate-500"></p>
                     <p class="conn-msg mt-1 min-h-[1rem] break-words text-xs" aria-live="polite"></p>
+                    @if($p === 'botcake')<p class="conn-kw mt-1 break-words text-xs" aria-live="polite"></p>@endif
                     @if($p === 'botcake')<p class="mt-1 text-xs text-slate-500">This replaces the page's Default Reply in Botcake.</p>@endif
                     <div class="mt-2 flex flex-wrap gap-2">
                         <button class="cb-btn cb-btn-primary cb-btn-sm">Save and test</button>
@@ -468,7 +469,8 @@
             cell(r, columns.find(c => c.key === 'flow'), 'stick-3'),
             checkCell(r),
             // Ang mga kumpletong koneksyon lang, text.
-            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs', text: (r.connected || []).join(', ') || '—'}),
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs'}, [(r.connected || []).join(', ') || '—']
+                .concat(r.botcake_keywords === 'on' ? [el('div', {class: 'break-words text-red-600', title: 'May naka-on na keyword sa Botcake: i-off doon, saka i-Test ulit', text: 'Botcake: keyword on'})] : [])),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', text: r.last_chat || '—'}),
             ...columns.filter(c => c.key !== 'flow').map(c => cell(r, c)),
@@ -780,12 +782,26 @@
             const bad = c.status && !String(c.status).startsWith('ok');
             state.textContent = c.connected ? 'Connected' : (p === 'botcake' && c.token && !c.chat_block ? 'No chat block' : (bad ? c.status : (c.token ? 'Not connected' : 'Not set up')));
             state.className = 'conn-state break-words text-xs ' + (c.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500'));
+            // Naka-on na keyword sa Botcake (huling Test): hindi pa gumagana nang buo ang bot, kahit Connected.
+            if (p === 'botcake' && String(c.keywords_status || '').startsWith('on ')) {
+                state.textContent = 'Keyword on: not working yet';
+                state.className = 'conn-state break-words text-xs text-red-600';
+            }
         }
+    }
+    // Ang linya ng keyword check ng Botcake pagkatapos ng Test o Save (text lang ang pangalan ng flow mula sa Botcake).
+    function kwLine(d) {
+        const m = connCard('botcake').querySelector('.conn-kw');
+        const [text, cls] = d.keywords === 'on'
+            ? ['May naka-on na keyword sa Botcake (flow: ' + (d.keywords_note || '?') + '). Hindi pa gumagana nang buo ang bot: may mga message na hindi aabot dito. I-off ang keyword sa Botcake, saka i-Test ulit.', 'text-red-600']
+            : (d.keywords === 'none' ? ['Walang naka-on na keyword', 'text-green-700']
+                : (d.keywords === 'unknown' ? ['Keywords: ' + (d.keywords_note || 'unknown'), 'text-slate-500'] : ['', '']));
+        m.textContent = text; m.className = 'conn-kw mt-1 break-words text-xs ' + cls;
     }
     async function openConnections(page) {
         connPage = page;
         $('conn-title').textContent = 'Connections · ' + page;
-        document.querySelectorAll('#conn .conn-msg').forEach(m => { m.textContent = ''; });
+        document.querySelectorAll('#conn .conn-msg, #conn .conn-kw').forEach(m => { m.textContent = ''; });
         dialog('conn', true);
         const {ok, status, data} = await getJson(url.connectionsUrl + '?page_name=' + encodeURIComponent(page));
         if (connPage !== page) return; // ibang page na ang bukas
@@ -807,6 +823,7 @@
             const d = res.data;
             if (connPage !== page) { btns.forEach(b => { b.disabled = false; }); load(); return; } // ibang page na ang bukas
             if (d.connections) paintConnections(d.connections);
+            if (card.dataset.provider === 'botcake') kwLine(d);
             if (res.status === 409) connMsg(card, 'Not changed.', false);
             else if (!res.ok) connMsg(card, (d.name ? 'Provider page: ' + d.name + '. ' : '') + (d.error || d.message || 'Not saved (' + res.status + ').'), false);
             else if (path.endsWith('-test')) connMsg(card, 'Test: ' + d.status + (d.chat_block ? ' · chat block ' + d.chat_block : '') + (d.error ? ' · ' + d.error : ''), d.status === 'ok' && (!d.chat_block || d.chat_block === 'on'));

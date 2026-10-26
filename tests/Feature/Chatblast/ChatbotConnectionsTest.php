@@ -580,4 +580,31 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()->assertJson(['keywords' => 'on']);
         $this->assertContains(['Botcake keywords', $mkt->name], $this->changed());
     }
+
+    public function test_S_153_8_check_and_the_row_show_an_active_keyword_until_a_test_finds_none(): void
+    {
+        Http::fake();
+        $s = $this->settings();
+        $check = fn () => array_column(app(\App\Services\Chatbot\PageContentCheck::class)->setup('Page Uno'), 'reason', 'level');
+        $x = 'Botcake: may naka-on na keyword (ON DELIVERY SCRIPT, Old Promo) — i-off sa Botcake';
+
+        $s->set('Page Uno', 'botcake', 'keywords', 'on 2026-10-26 09:00:00 · ON DELIVERY SCRIPT, Old Promo', false, null, true);
+        $this->assertSame($x, $check()['x'] ?? null);
+        $this->assertSame('on', collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->keyBy('page')['Page Uno']['botcake_keywords']);
+
+        $s->set('Page Uno', 'botcake', 'keywords', 'none 2026-10-26 10:00:00', false, null, true);
+        $this->assertNotContains($x, array_column(app(\App\Services\Chatbot\PageContentCheck::class)->setup('Page Uno'), 'reason'));
+        $this->assertSame('none', collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->keyBy('page')['Page Uno']['botcake_keywords']);
+    }
+
+    public function test_S_153_10_the_keyword_line_wraps_on_a_phone(): void
+    {
+        Http::fake();
+        $html = $this->get('/chatbot/pages')->assertOk()->getContent();
+        $this->assertMatchesRegularExpression('/<p class="conn-kw[^"]*break-words[^"]*"/', $html);
+        foreach (['May naka-on na keyword sa Botcake (flow: ', 'Hindi pa gumagana nang buo ang bot: may mga message na hindi aabot dito. I-off ang keyword sa Botcake, saka i-Test ulit.',
+            'Walang naka-on na keyword', "'Botcake: keyword on'"] as $want) {
+            $this->assertStringContainsString($want, $html, $want);
+        }
+    }
 }
