@@ -2639,3 +2639,13 @@ As an Ads uploader, I connect my Facebook to my Likha account once, so Likha can
 - S-154.9 Roles. Uploader roles (the "Ads" link) can connect, compare and sync; others get 404; only the CEO can turn write mode on or off (others 403).
 - S-154.10 Disconnect. When I Disconnect, Then my token row is removed and an event is logged.
 - S-154.11 (P2) The card is usable at 390 px.
+
+## S-157 Staff open a page's Facebook page from /chatbot/pages in one click
+
+As staff on /chatbot/pages, I want a link to each page's Facebook page next to its Page ID, so I can open the page without searching for it.
+
+- S-157.1 Link. Given a page with Page ID 1123777717482685, When I open /chatbot/pages, Then its FB link cell links to https://www.facebook.com/1123777717482685 with target _blank and rel noopener noreferrer, text "Open page ↗".
+- S-157.2 No link. Given a page with no Page ID or one that is not only digits, Then the FB link cell is empty.
+- S-157.3 Edit and Connections. When I open the page's Edit modal or Connections popup, Then the same link is in its header.
+- S-157.4 Column rules. The FB link column sits in the grid's fixed column order (after Last chat), like Chats today and Last chat: the grid has no per-column show/hide and no filter on these fixed columns, so none is added.
+- S-157.5 (P2) At 390 px the column scrolls with the grid and the link stays tappable.
