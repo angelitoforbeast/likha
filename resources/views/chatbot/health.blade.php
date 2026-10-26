@@ -51,6 +51,9 @@
     $chart = ['days' => $days, 'hourly' => $hourly];
     // Ang "first reply" ng page sa Forbeast ay ang pagtanggap ng Forbeast, hindi ang padala sa customer: may note kapag may numero ang Forbeast.
     $fbLag = $forbeast && $forbeast['status'] === 'ok' ? $forbeast['overall']['send_lag_seconds']['value'] : null;
+    // Isang page ang pinili: ang lag ng page na iyon (kung may numero ang Forbeast para rito).
+    $fbPage = $fbLag !== null && $f['page_id'] !== null ? collect($forbeast['pages'])->firstWhere('page_id', (string) $f['page_id']) : null;
+    if ($fbPage) $fbLag = $fbPage['send_lag_seconds'];
     $fbNote = $fbLag !== null && in_array($f['bot'], [null, 'Forbeast'], true) && ($f['page_id'] === null || in_array((string) $f['page_id'], $forbeast['page_ids'], true))
         ? 'accepted by Forbeast; real send lag: ' . $fbLag . 's' : null;
 @endphp

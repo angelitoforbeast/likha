@@ -53,7 +53,7 @@ class ForbeastSendHealthTest extends ChatblastTestCase
     }
 
     /** Ang sagot ayon sa kontrata; $pages: page_id => lag. */
-    private function body(int $lag = 2123, float $failed = 1.4, array $pages = ['1001' => 1800], string $workers = 'running', int $queued = 1001): array
+    private function body(int $lag = 2123, float $failed = 1.4, array $pages = ['1001' => 1800], string $workers = 'running', int $queued = 1001, array $thresholds = [30, 120, 5, 15]): array
     {
         $rows = [];
         foreach ($pages as $id => $l) $rows[] = ['page_id' => (string) $id, 'name' => 'FB ' . $id, 'queued_sends' => 120, 'send_lag_seconds' => $l, 'sent_per_min_5m' => 60, 'failed_pct_60m' => 0.5];
@@ -61,7 +61,7 @@ class ForbeastSendHealthTest extends ChatblastTestCase
         return ['at' => '2026-10-26T12:00:00Z',
             'overall' => ['queued_sends' => $queued, 'send_lag_seconds' => $lag, 'sent_last_5m' => 5120, 'sent_per_min_5m' => 1024, 'failed_last_60m' => 157,
                 'failed_pct_60m' => $failed, 'forward_lag_seconds' => 0, 'workers' => ['sends' => 32, 'status' => $workers]],
-            'pages' => $rows, 'thresholds' => ['send_lag_amber' => 30, 'send_lag_red' => 120, 'failed_amber' => 5, 'failed_red' => 15]];
+            'pages' => $rows, 'thresholds' => array_combine(['send_lag_amber', 'send_lag_red', 'failed_amber', 'failed_red'], $thresholds)];
     }
 
     /** Isang takbo ng watch kada minuto. */
@@ -119,13 +119,15 @@ class ForbeastSendHealthTest extends ChatblastTestCase
     public function test_S_155_2_panel_numbers_and_lights_follow_the_endpoint_thresholds(): void
     {
         // [send lag, failed %, workers status] => [ilaw ng lag, ilaw ng failed, ilaw ng workers]
+        // Ang huling dulo: ang thresholds ng sagot (hindi ang default) ang sinusunod.
         $cases = [
-            [10, 1.4, 'running', 'green', 'green', 'green'],
-            [60, 6.5, 'running', 'amber', 'amber', 'green'],
-            [2123, 20.5, 'stopped', 'red', 'red', 'red'],
+            [10, 1.4, 'running', 'green', 'green', 'green', [30, 120, 5, 15]],
+            [60, 6.5, 'running', 'amber', 'amber', 'green', [30, 120, 5, 15]],
+            [60, 6.5, 'running', 'red', 'red', 'green', [10, 50, 2, 4]],
+            [2123, 20.5, 'stopped', 'red', 'red', 'red', [30, 120, 5, 15]],
         ];
-        foreach ($cases as [$lag, $failed, $workers, $lagLight, $failedLight, $workersLight]) {
-            $this->watch($this->body($lag, $failed, ['1001' => 5], $workers));
+        foreach ($cases as [$lag, $failed, $workers, $lagLight, $failedLight, $workersLight, $th]) {
+            $this->watch($this->body($lag, $failed, ['1001' => 5], $workers, 1001, $th));
             $o = $this->panel()['overall'];
             $this->assertSame([$lag, $lagLight], [$o['send_lag_seconds']['value'], $o['send_lag_seconds']['light']], "lag $lag");
             $this->assertSame([$failed, $failedLight], [$o['failed_pct_60m']['value'], $o['failed_pct_60m']['light']], "failed $failed");
@@ -144,6 +146,8 @@ class ForbeastSendHealthTest extends ChatblastTestCase
         $this->assertStringContainsString('32 (stopped)', $html);
         $this->assertStringContainsString('accepted by Forbeast; real send lag: 2123s', $html);
         $this->assertStringContainsString('<svg', $html);
+        // Isang page ang pinili: ang lag ng page na iyon.
+        $this->assertStringContainsString('accepted by Forbeast; real send lag: 5s', $this->get('/chatbot/health?page_id=1001')->getContent());
     }
 
     public function test_S_155_3_per_page_table_matches_by_facebook_page_id_worst_first(): void
@@ -196,6 +200,23 @@ class ForbeastSendHealthTest extends ChatblastTestCase
         $low = $this->body(100, 1.4, ['1001' => 100]);
         $this->watch($high, $low, $high, $high, $low, $high, $low);
         $this->assertSame([], $this->lagEvents());
+
+        // Ang palyang kuha (timeout, 500, 404) ay hindi sample: hindi binibilang at hindi binubura ang bilang.
+        $pageOnly = $this->body(10, 1.4, ['1001' => 1800, '1002' => 10]);
+        $cases = [
+            [[$high, 'down', 404, $high], 0],
+            [[$high, $high, 'down', 500, $high], 1],
+            // Isang page lang ang lampas (overall 10 s): ang page at ang lag nito ang nasa event.
+            [[$pageOnly, $pageOnly, $pageOnly], 1, ['Page Uno'], 'Forbeast send lag 1800s, 120 queued'],
+        ];
+        foreach ($cases as $i => $c) {
+            \Illuminate\Support\Facades\Cache::flush();
+            PageSetting::where('key', 'auto_switch')->delete();
+            $this->watch(...$c[0]);
+            $e = $this->lagEvents();
+            $this->assertCount($c[1], $e, "case $i");
+            if (isset($c[2])) $this->assertSame([$c[2], $c[3]], [$e[0]['pages'], $e[0]['error']], "case $i");
+        }
     }
 
     public function test_S_155_6_send_lag_never_switches_a_page_to_botcake(): void
@@ -230,10 +251,14 @@ class ForbeastSendHealthTest extends ChatblastTestCase
 
     public function test_S_155_8_bot_health_renders_without_the_panel_when_no_page_is_on_forbeast(): void
     {
+        // Ang alarm na aktibo nang umalis ang lahat ng page sa Forbeast ay nawawala (walang banner na naiiwan).
+        $this->watch($this->body(2123), $this->body(2123), $this->body(2123));
+        $this->assertNotNull(app(ForbeastSendHealth::class)->activeAlarm());
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
         app(PageSettings::class)->set('Page Dos', 'chatbot', 'provider', 'botcake');
         $this->watch($this->body(2123));
         $this->assertNull($this->panel());
+        $this->assertNull(app(ForbeastSendHealth::class)->activeAlarm());
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
         $html = $this->get('/chatbot/health')->assertOk()->getContent();
         $this->assertStringNotContainsString('data-panel="forbeast"', $html);
