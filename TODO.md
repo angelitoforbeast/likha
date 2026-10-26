@@ -1211,3 +1211,12 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
 - Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
 - Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.
+
+## 156: real send time (2026-10-26)
+
+- **`available()` sits inside the 5-minute Bot Health cache**, so the Pending tile can show or hide up to 5 minutes late around the first `send_status`. Reason: the alarm reads it fresh every minute; only the screen lags, and only once.
+- **A `partial` reply counts as answered (it reached the customer) and also as failed (REASON_SQL counts every status other than `sent` as failed).** A `failed` that arrives after Forbeast's 202 takes the reply out of the accepted first reply numbers. Reason: the spec asks for this (".2 counted in failures"); it is described in the result.
+- **Missing edge tests for the fallback match** (a row more than 10 minutes away, a row that already has a `client_ref`, two candidates where the nearest wins) and for the page rendering the Unconfirmed tile. Reason: the input comes from a trusted service on a signed endpoint; the code path is small and the main cases are covered. Keep the suite small.
+- **Coupling tests not written for: health high with pending low, and a pending alarm with fresh high health samples.** Reason: the recovery code needs both sources low, and S-156.5 (two tests) and S-155.4 cover each source's own path.
+- **Deploying Forbeast 017 during a backlog leaves a gap.** The first confirmed reply's `sent_at` can be earlier than the deploy. Replies accepted in between that the old Forbeast code already sent never get a `send_status`, so they show as pending until a later reply to the same PSID is confirmed, or for at most 24 h. Reason: on a drained queue this window is seconds; deploy Forbeast 017 when the queue is empty.
+- **A reply dropped as a lost `send_status` (a newer confirmed reply to the same PSID exists) is not counted anywhere.** Reason: it keeps a lost event from holding the alarm. If it matters, a "lost" count can go in the gateway event counts later.

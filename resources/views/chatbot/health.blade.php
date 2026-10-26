@@ -24,10 +24,13 @@
     $cards = [
         ['Inbound messages', 'inbound', '', null],
         ['Answered', 'answered_pct', '%', 'answered_pct'],
-        ['First reply avg', 'reply_avg', 's', null],
-        ['First reply median', 'reply_median', 's', null],
-        ['First reply p90', 'reply_p90', 's', 'reply_p90'],
-        ['First reply max', 'reply_max', 's', 'reply_max'],
+        ['First reply avg (accepted)', 'reply_avg', 's', null],
+        ['First reply median (accepted)', 'reply_median', 's', null],
+        ['First reply p90 (accepted)', 'reply_p90', 's', 'reply_p90'],
+        ['First reply max (accepted)', 'reply_max', 's', 'reply_max'],
+        ['Real first reply median', 'real_median', 's', null],
+        ['Real first reply p90', 'real_p90', 's', null],
+        ['Real first reply max', 'real_max', 's', null],
         ['Replies sent', 'sent', '', null],
         ['Failed replies', 'failed', '', null],
         ['Failed % (all)', 'failed_pct', '%', null],
@@ -124,6 +127,62 @@
         <p class="text-xs text-slate-500">Failed replies count every send that is not "sent" (failed and skipped). "Not answered" messages ({{ $t['not_answered'] }} today) are left out of the reply times. AI call records are kept for 2 days only, so the AI graph is short.</p>
     </section>
 
+    {{-- Ang totoong padala: kailan talaga nakarating sa customer (Forbeast: send_status; Botcake: ang oras ng padala nito). --}}
+    @if($real)
+        <section aria-labelledby="h-real" class="space-y-3" data-panel="real-send">
+            <h2 id="h-real" class="text-lg font-semibold">Real send time</h2>
+            <p class="text-xs text-slate-500">"Accepted" is when the bot took the reply; "real" is when it reached the customer. Botcake sends at once, so both are the same; Forbeast queues first. A Forbeast reply not confirmed yet is pending, not fast; after 24 hours without a confirmation it is unconfirmed.</p>
+            @if(!$real['available'] && $forbeast !== null)
+                <p class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" data-note="real-unavailable">Forbeast pages: real send time not available yet (Forbeast update pending). The real first reply above counts Botcake pages only.</p>
+            @endif
+            <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+                @if($real['pending'])
+                    <div class="cb-card p-3" data-tile="pending" data-light="{{ $real['pending']['light'] }}">
+                        <div class="flex items-start justify-between gap-2 text-xs text-slate-500">
+                            <span>Pending (Forbeast)</span>
+                            <span class="mt-0.5 inline-block h-3 w-3 shrink-0 rounded-full {{ $dot[$real['pending']['light']] }}" title="{{ $real['pending']['light'] }}" aria-label="{{ $real['pending']['light'] }}"></span>
+                        </div>
+                        <div class="mt-1 text-2xl font-semibold">{{ number_format($real['pending']['count']) }}</div>
+                        <div class="text-xs text-slate-500">oldest: {{ $real['pending']['count'] ? number_format($real['pending']['oldest']) . ' s' : '—' }}</div>
+                        <div class="mt-1 text-xs text-slate-400">&gt; {{ \App\Services\Chatbot\RealSendTime::PENDING_RED }} s red</div>
+                    </div>
+                @endif
+                @if($real['available'])
+                    <div class="cb-card p-3" data-tile="unconfirmed">
+                        <div class="text-xs text-slate-500">Unconfirmed (over 24 h)</div>
+                        <div class="mt-1 text-2xl font-semibold">{{ number_format($real['unconfirmed']) }}</div>
+                        <div class="text-xs text-slate-500">{{ $f['from'] }} to {{ $f['to'] }}</div>
+                    </div>
+                    @foreach(['median' => 'median', 'p90' => 'p90', 'max' => 'max'] as $k => $label)
+                        <div class="cb-card p-3" data-tile="lag_{{ $k }}">
+                            <div class="text-xs text-slate-500">Forbeast accept → sent {{ $label }}</div>
+                            <div class="mt-1 text-2xl font-semibold">{{ $fmt($real['lag'][$k], 's') }}</div>
+                            <div class="text-xs text-slate-500">today, {{ number_format($real['lag']['n']) }} sent</div>
+                        </div>
+                    @endforeach
+                @endif
+            </div>
+            <div class="cb-card overflow-x-auto">
+                <table class="cb-table" data-list="real-pages">
+                    <thead><tr><th>Page</th><th>Bot</th><th class="text-right">Real first reply median</th><th class="text-right">p90</th><th class="text-right">max</th>
+                        @if($real['pending'])<th class="text-right">Pending</th><th class="text-right">Oldest pending</th>@endif<th class="text-right">Unconfirmed</th></tr></thead>
+                    <tbody>
+                    @forelse($real['pages'] as $p)
+                        <tr data-page="{{ $p['page_id'] }}"><td>{{ $p['page'] }}</td><td>{{ $p['bot'] }}</td><td class="text-right">{{ $fmt($p['real_median'], 's') }}</td>
+                            <td class="text-right">{{ $fmt($p['real_p90'], 's') }}</td><td class="text-right">{{ $fmt($p['real_max'], 's') }}</td>
+                            @if($real['pending'])<td class="text-right">{{ $p['pending'] }}</td>
+                                <td class="text-right {{ ($p['oldest'] ?? 0) > \App\Services\Chatbot\RealSendTime::PENDING_RED ? 'font-semibold text-red-700' : '' }}">{{ $p['oldest'] === null ? '—' : number_format($p['oldest']) . ' s' }}</td>@endif
+                            <td class="text-right">{{ $p['unconfirmed'] }}</td></tr>
+                    @empty
+                        <tr><td colspan="8" class="text-slate-500">No replies today.</td></tr>
+                    @endforelse
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-xs text-slate-500">Per page: today's real first reply. Pending is now; unconfirmed is for the dates above.</p>
+        </section>
+    @endif
+
     @if($forbeast)
         @include('chatbot.partials.forbeast-health', ['fb' => $forbeast])
     @endif
@@ -133,15 +192,15 @@
         <h2 id="h-compare" class="text-lg font-semibold">Compare bots</h2>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table" data-list="compare">
-                <thead><tr><th>Bot</th><th>Day</th><th class="text-right">Inbound</th><th class="text-right">Answered</th><th class="text-right">First reply median</th>
-                    <th class="text-right">p90</th><th class="text-right">Failed % (without not reachable)</th><th>Top reasons</th><th class="text-right">AI failed</th>
+                <thead><tr><th>Bot</th><th>Day</th><th class="text-right">Inbound</th><th class="text-right">Answered</th><th class="text-right">First reply median (accepted)</th>
+                    <th class="text-right">p90</th>@if($real)<th class="text-right">Real first reply median / p90</th>@endif<th class="text-right">Failed % (without not reachable)</th><th>Top reasons</th><th class="text-right">AI failed</th>
                     <th class="text-right">Comments in / replied</th><th class="text-right">Switched to Botcake</th></tr></thead>
                 <tbody>
                 @foreach($compare as $c)
                     @foreach(['today' => 'Today', 'yesterday' => 'Yesterday'] as $day => $dayLabel)
                         @php($x = $c[$day])
                         <tr><td>{{ $c['bot'] }}</td><td>{{ $dayLabel }}</td><td class="text-right">{{ $x['inbound'] }}</td><td class="text-right">{{ $fmt($x['answered_pct'], '%') }}</td>
-                            <td class="text-right">{{ $fmt($x['reply_median'], 's') }}</td><td class="text-right">{{ $fmt($x['reply_p90'], 's') }}@if($fbLag !== null && $c['bot'] === 'Forbeast' && $day === 'today')<div class="text-xs text-amber-700">accepted by Forbeast; real send lag: {{ $fbLag }}s</div>@endif</td><td class="text-right">{{ $fmt($x['failed_pct_excl'], '%') }}</td>
+                            <td class="text-right">{{ $fmt($x['reply_median'], 's') }}</td><td class="text-right">{{ $fmt($x['reply_p90'], 's') }}@if($fbLag !== null && $c['bot'] === 'Forbeast' && $day === 'today')<div class="text-xs text-amber-700">accepted by Forbeast; real send lag: {{ $fbLag }}s</div>@endif</td>@if($real)<td class="text-right">{{ $fmt($x['real_median'], 's') }} / {{ $fmt($x['real_p90'], 's') }}</td>@endif<td class="text-right">{{ $fmt($x['failed_pct_excl'], '%') }}</td>
                             <td>{{ $x['top_reasons'] ? implode(', ', array_map(fn ($r) => $r[0] . ' (' . $r[1] . ')', $x['top_reasons'])) : '—' }}</td>
                             <td class="text-right">{{ $fmt($x['ai_failed_pct'], '%') }}</td><td class="text-right">{{ $x['comments_in'] }} / {{ $x['comments_replied'] }}</td>
                             <td class="text-right">{{ $x['auto_switches'] }}</td></tr>

@@ -141,8 +141,44 @@ class BotHealth
         $payload['queue'] = $queue;
         $payload['thresholds'] = self::thresholds();
         $payload['lights'] = $this->lights($payload['tiles']['today'] + ['queue' => $queue['total']], $payload['thresholds']);
+        $payload['real'] = $this->pendingNow($payload['real'] ?? null, $f);
 
         return $payload;
+    }
+
+    /**
+     * Ang pending ngayon (laging bago, hindi naka-cache): ang buod at ang bilang kada page sa table. Wala pang send_status
+     * (not available): walang pending, para walang maling bilang.
+     */
+    private function pendingNow(?array $real, array $f): ?array
+    {
+        if ($real === null) return null;
+        $real['pending'] = null;
+        if (!$real['available']) return $real;
+
+        $botOf = self::botOfPages();
+        $pending = app(RealSendTime::class)->pending(self::scope($f['page_id'], $f['bot'], $botOf));
+        $real['pending'] = RealSendTime::summary($pending);
+        $rows = array_column($real['pages'], null, 'page_id');
+        $names = BotcakeChat::pageMap();
+        foreach (array_keys($pending) as $id) $rows[$id] ??= self::realRow((string) $id, $names, $botOf, [], 0);
+        foreach ($rows as $id => &$r) {
+            $r['pending'] = $pending[$id]['count'] ?? 0;
+            $r['oldest'] = $pending[$id]['oldest'] ?? null;
+        }
+        unset($r);
+        // Ang pinakamatagal na pending muna, saka ang pinakamabagal na totoong sagot.
+        usort($rows, fn ($a, $b) => [$b['oldest'] ?? -1, $b['real_p90'] ?? -1, $a['page']] <=> [$a['oldest'] ?? -1, $a['real_p90'] ?? -1, $b['page']]);
+        $real['pages'] = $rows;
+
+        return $real;
+    }
+
+    /** Isang row ng table kada page: ang totoong unang sagot ngayon at ang unconfirmed. */
+    private static function realRow(string $id, array $names, array $botOf, array $secs, int $unconfirmed): array
+    {
+        return ['page_id' => $id, 'page' => $names[$id] ?? 'Page ' . $id, 'bot' => $botOf[$id] ?? ChatbotConnections::BOTS[0],
+            'real_median' => self::median($secs), 'real_p90' => self::percentile($secs, 90), 'real_max' => $secs ? max($secs) : null, 'unconfirmed' => $unconfirmed];
     }
 
     /** @return array{queues: array<string, ?int>, total: ?int, note: ?string} */
@@ -216,17 +252,45 @@ class BotHealth
 
         $names = BotcakeChat::pageMap();
         $slow = $this->slow($inbound['rows'], $f, $names);
+        $real = RealSendTime::ready() ? $this->real($inbound['rows'], $f, $today, $pages, $botOf, $names) : null;
 
         return [
             'filters' => $f,
             'tiles' => ['dates' => ['today' => $today, 'yesterday' => $yesterday], 'today' => $t, 'yesterday' => $y]
                 + $this->deltas($t, $y),
             'days' => $days,
-            'hourly' => $this->hourly($inbound['rows'], $today, $pages),
+            'hourly' => $this->hourly($inbound['rows'], $today, $pages, $real['available'] ?? false),
+            'real' => $real,
             'slow' => $slow,
             'failures' => $this->failures($f, $pages, $names),
             'compare' => $this->compare($f['page_id'], $botOf, $yesterday, $today),
         ];
+    }
+
+    /**
+     * Ang totoong padala (ang pending ay idinadagdag sa output, laging bago): kung may send_status na, ang unconfirmed sa
+     * range, ang lag ng Forbeast mula pagtanggap hanggang padala ngayon, at ang totoong unang sagot ngayon kada page.
+     */
+    private function real(array $rows, array $f, string $today, ?array $pages, array $botOf, array $names): array
+    {
+        $rst = app(RealSendTime::class);
+        $todayAt = $today . ' 00:00:00';
+        $tomorrowAt = CarbonImmutable::parse($today)->addDay()->toDateString() . ' 00:00:00';
+        $unconfirmed = $rst->unconfirmed($f['from'] . ' 00:00:00', CarbonImmutable::parse($f['to'])->addDay()->toDateString() . ' 00:00:00', $pages);
+        $lags = $rst->lags($todayAt, $tomorrowAt, $pages);
+
+        $secs = [];
+        foreach ($rows as $r) {
+            if ($r['real'] !== null && str_starts_with($r['at'], $today)) $secs[$r['page']][] = $r['real'];
+        }
+        $out = [];
+        foreach (array_unique(array_merge(array_keys($secs), array_keys($unconfirmed))) as $id) {
+            $out[] = self::realRow((string) $id, $names, $botOf, $secs[$id] ?? [], $unconfirmed[$id] ?? 0);
+        }
+
+        return ['available' => $rst->available(), 'unconfirmed' => array_sum($unconfirmed),
+            'lag' => ['n' => count($lags), 'median' => self::median($lags), 'p90' => self::percentile($lags, 90), 'max' => $lags ? max($lags) : null],
+            'pages' => $out];
     }
 
     /**
@@ -280,7 +344,7 @@ class BotHealth
                     'top_reasons' => array_map(fn ($k) => [self::REASONS[$k], $reasons[$k]], array_slice(array_keys($reasons), 0, 3)),
                     'ai_failed_pct' => $x['ai_failed_pct'], 'comments_in' => $x['comments_in'], 'comments_replied' => $x['comments_replied'],
                     'auto_switches' => $switches[$d][$bot] ?? 0,
-                ];
+                ] + (RealSendTime::ready() ? ['real_median' => $x['real_median'], 'real_p90' => $x['real_p90'], 'real_max' => $x['real_max']] : []);
             }
             $out[] = $row;
         }
@@ -325,18 +389,25 @@ class BotHealth
         if (!$answered) return ['days' => [], 'rows' => []];
 
         $out = ['days' => [], 'rows' => []];
+        // Ang totoong unang sagot: ang kumpirmadong padala (ang partial ay may naipadala rin); ang Forbeast na hindi pa
+        // kumpirmado ay wala (pending, hindi "mabilis"); ang Botcake (pati ang lumang walang via) ay ang sent_at nito.
+        $real = RealSendTime::ready();
         $rows = DB::table('botcake_chats as c')
-            ->leftJoin('chatbot_replies as r', fn ($j) => $j->on('r.chat_id', '=', 'c.id')->where('r.kind', 'send')->where('r.status', 'sent'))
+            ->leftJoin('chatbot_replies as r', fn ($j) => $j->on('r.chat_id', '=', 'c.id')->where('r.kind', 'send')
+                ->when($real, fn ($j) => $j->whereIn('r.status', SendStatus::DELIVERED), fn ($j) => $j->where('r.status', 'sent')))
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
             ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
-            ->groupBy('c.id', 'c.page_id', 'c.received_at')->selectRaw('c.id, c.page_id, c.received_at, MIN(r.sent_at) as first_at')->get();
+            ->groupBy('c.id', 'c.page_id', 'c.received_at')->selectRaw('c.id, c.page_id, c.received_at, MIN(r.sent_at) as first_at'
+                . ($real ? ", MIN(CASE WHEN r.confirmed_status IN ('" . implode("', '", SendStatus::DELIVERED) . "') THEN r.confirmed_at WHEN r.via = 'forbeast' THEN NULL ELSE r.sent_at END) as real_at" : ''))->get();
         foreach ($rows as $r) {
             if (!self::hadFlow($spans[(string) $r->page_id], $r->received_at)) continue;
             $secs = $r->first_at === null ? null : max(0, strtotime($r->first_at) - strtotime($r->received_at));
+            $realSecs = ($r->real_at ?? null) === null ? null : max(0, strtotime($r->real_at) - strtotime($r->received_at));
             $day = substr($r->received_at, 0, 10);
             $out['days'][$day]['n'] = ($out['days'][$day]['n'] ?? 0) + 1;
             if ($secs !== null) $out['days'][$day]['secs'][] = $secs;
-            $out['rows'][] = ['id' => (int) $r->id, 'at' => $r->received_at, 'first' => $r->first_at, 'secs' => $secs];
+            if ($realSecs !== null) $out['days'][$day]['real'][] = $realSecs;
+            $out['rows'][] = ['id' => (int) $r->id, 'page' => (string) $r->page_id, 'at' => $r->received_at, 'first' => $r->first_at, 'secs' => $secs, 'real' => $realSecs];
         }
 
         return $out;
@@ -457,11 +528,13 @@ class BotHealth
         $pct = fn ($n, $of) => $of > 0 ? round($n / $of * 100, 1) : null;
         $aiSecs = $ai['secs'] ?? [];
         $aiCalls = $ai['calls'] ?? 0;
+        $real = $in['real'] ?? [];
 
         return [
             'inbound' => $inbound, 'answered' => count($secs), 'not_answered' => $inbound - count($secs), 'answered_pct' => $pct(count($secs), $inbound),
             'reply_avg' => $secs ? round(array_sum($secs) / count($secs), 1) : null, 'reply_median' => self::median($secs),
             'reply_p90' => self::percentile($secs, 90), 'reply_max' => $secs ? max($secs) : null,
+            'real_median' => self::median($real), 'real_p90' => self::percentile($real, 90), 'real_max' => $real ? max($real) : null,
             'sent' => $sent, 'failed' => $failed, 'reasons' => $reasons, 'failed_pct' => $pct($failed, $total),
             'failed_pct_excl' => $pct($failed - $reasons['unreachable'], $total),
             'ai_calls' => $aiCalls, 'ai_failed' => $ai['failed'] ?? 0, 'ai_failed_pct' => $pct($ai['failed'] ?? 0, $aiCalls), 'ai_retried' => $ai['retried'] ?? 0,
@@ -484,12 +557,16 @@ class BotHealth
         return ['delta' => $delta, 'delta_pct' => $pct];
     }
 
-    /** Ngayon kada oras: reply time ayon sa oras ng dating ng mensahe, at ang mga pumalya ayon sa oras ng padala. */
-    private function hourly(array $rows, string $today, ?array $pages): array
+    /**
+     * Ngayon kada oras: reply time ayon sa oras ng dating ng mensahe, at ang mga pumalya ayon sa oras ng padala. May
+     * send_status na ($real): ang totoong oras (ang hindi pa kumpirmado ay wala); kung wala pa, ang oras ng pagtanggap.
+     */
+    private function hourly(array $rows, string $today, ?array $pages, bool $real = false): array
     {
         $hours = array_fill(0, 24, ['secs' => [], 'failed' => 0]);
         foreach ($rows as $r) {
-            if ($r['secs'] !== null && str_starts_with($r['at'], $today)) $hours[(int) substr($r['at'], 11, 2)]['secs'][] = $r['secs'];
+            $s = $real ? $r['real'] : $r['secs'];
+            if ($s !== null && str_starts_with($r['at'], $today)) $hours[(int) substr($r['at'], 11, 2)]['secs'][] = $s;
         }
         $failed = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')
             ->where('sent_at', '>=', $today . ' 00:00:00')->where('sent_at', '<', CarbonImmutable::parse($today)->addDay()->toDateString() . ' 00:00:00')

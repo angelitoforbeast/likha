@@ -40,7 +40,7 @@ class BotcakeOutbox implements Outbox
         // ang sequence at ang takbong walang chat (hal. ang wait na lumampas) ay UPDATE.
         $type = $run->chatId !== null && $run->startedBy === null ? MessagingProvider::RESPONSE : MessagingProvider::UPDATE;
         $provider = ChatbotProvider::for($run->pageName);
-        $o = $provider->send($run->pageName, $run->pageId, $run->psid(), $messages, ChatbotProvider::ref(), $type);
+        $o = $provider->send($run->pageName, $run->pageId, $run->psid(), $messages, $ref = ChatbotProvider::ref(), $type);
         // Nasagot ng Forbeast ang chat: ang standby na kopya ng Botcake ay hindi na kailangan (ForbeastWatch).
         if ($o['status'] === 'sent' && $run->chatId !== null && !$run->test && $provider instanceof GatewayProvider) {
             try {
@@ -50,7 +50,7 @@ class BotcakeOutbox implements Outbox
             }
         }
 
-        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, ChatbotProvider::viaOf($provider));
+        return $this->log($run, $nodeId, 'send', $messages, $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, ChatbotProvider::viaOf($provider), $ref);
     }
 
     /**
@@ -112,24 +112,27 @@ class BotcakeOutbox implements Outbox
     }
 
     /** @return array{status: string, error: ?string} */
-    private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?string $via = null): array
+    private function log(FlowRun $run, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?string $via = null, ?string $clientRef = null): array
     {
         return self::record((int) $run->pageId, (int) $run->fields->psid, $run->chatId, $run->flowId, $nodeId, $kind, $content, $status, $error, $http, $raw,
-            $kind === 'send' ? $run->tags : null, $via);
+            $kind === 'send' ? $run->tags : null, $via, $clientRef);
     }
 
     /**
      * Ang talaan ng isang padala (chatbot_replies). $raw: ang buong sagot ng pumalyang padala. $tags: ang
      * ChatbotTags::forSend() ng padala (Results). $via: ang bot na nagdala (botcake o forbeast; null = hindi padala sa bot).
+     * $clientRef: ang ID ng padala (para itugma ang send_status ng Forbeast).
      * @return array{status: string, error: ?string}
      */
-    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null, ?string $via = null): array
+    public static function record(int $pageId, int $psid, ?int $chatId, ?int $flowId, string $nodeId, string $kind, array $content, string $status, ?string $error = null, ?int $http = null, ?string $raw = null, ?array $tags = null, ?string $via = null, ?string $clientRef = null): array
     {
+        $now = now();
         $reply = ChatbotReply::create([
             'page_id' => $pageId, 'psid' => $psid, 'chat_id' => $chatId, 'flow_id' => $flowId,
             'node_id' => $nodeId, 'kind' => $kind, 'content' => $content, 'status' => $status, 'error' => $error === null ? null : mb_substr($error, 0, 255),
-            'http' => $http, 'sent_at' => now(),
-        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags) + ChatbotReply::viaColumn($via));
+            'http' => $http, 'sent_at' => $now,
+        ] + ($raw !== null && ChatbotReply::hasRaw() ? ['raw' => $raw] : []) + ChatbotTags::columns($tags) + ChatbotReply::viaColumn($via)
+            + ($kind === 'send' ? ChatbotReply::confirmColumns($clientRef, $via, $status, $now) : []));
         ChatbotTags::storeRows($reply, $tags);
 
         return ['status' => $status, 'error' => $error];
