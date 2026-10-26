@@ -2604,3 +2604,19 @@ Tests: `tests/Feature/Chatblast/ChatbotHealthAfterFlowTest.php`, `ChatbotConnect
 | S-153.9 | P1 | Given the Test's roles, then the keyword check has the same access, and Changes shows "Botcake keywords" with the user | `test_S_153_9…` | passed 2026-10-26 |
 | S-153.10 | P2 | Given a 390 px screen, then the red keyword line wraps | `test_S_153_10…` (markup) | passed (markup) 2026-10-26 |
 | S-153.11 | P1 | Given the last read keyword check was on, when a later Test cannot read the keywords, then the test is `unknown` but the row mark, the Check X and a red popup line "Keyword on (last seen <date>…); could not re-check now" stay; when a later Test reads none, they clear | `test_S_153_11…` | passed 2026-10-26 |
+
+## S-154 Staff connect their Facebook once; Likha pulls the Ads Manager report from the Meta Marketing API
+
+As an Ads uploader, I connect my Facebook to my Likha account once, so Likha can compare (and, when the owner turns write mode on, fill) the Ads Manager report from the API instead of my XLSX uploads.
+
+- S-154.1 Connect. Given the Meta app id is set, When I click Connect Facebook, Then I am sent to the Facebook OAuth dialog with `scope=ads_read` and a state; When Facebook returns with that state and a code, Then the code is exchanged for a long-lived token, stored encrypted with its expiry, my Facebook name and the ad accounts I can read. Negative: a missing or wrong state is refused and nothing is stored.
+- S-154.2 Not set up. Given no Meta app id in config, When I open /ads_manager/report, Then the card says "Meta app not set up yet" and Connect does not crash (it says the same).
+- S-154.3 Compare. Given two connected ad accounts, a paged insights response, an ad only in the API, an ad only in the uploads and a spend difference, When I Compare for the date range, Then the report shows, per ad account, the rows only in the API, only in the upload and the differing values with % difference, and `ads_manager_reports` is unchanged.
+- S-154.4 Field mapping. Given a faked API ad, When it is mapped, Then each `ads_manager_reports` column is filled as the upload would (spend→amount_spent_php, inline_link_clicks→link_clicks, messaging conversations from actions, results/cost_per_result, budget and type, delivery, starts/ends, headline/body/welcome message/quick replies when present).
+- S-154.5 Sync now. Given write mode on, When I click Sync now, Then rows are upserted by day + ad_id (new inserted, existing updated) and an `ads_manager_api` run is logged with inserted/updated/skipped and who. Negative: with write mode off, Sync now is refused and nothing is written.
+- S-154.6 Errors. Given one person's token returns error 190, When a sync runs, Then that token is marked expired, the page shows a red Reconnect, and the other people still sync. Edge: rate-limit codes 4/17/613 back off and retry, then the run is logged as partial with no crash.
+- S-154.7 Schedule. Given write mode off, When the scheduled sync fires at a slot, Then nothing is called or written; Given write mode on at a slot time, Then it syncs; off a slot time, nothing.
+- S-154.8 Token never shown. The token never appears in logs, responses, the page or upload_logs; it is stored encrypted.
+- S-154.9 Roles. Uploader roles (the "Ads" link) can connect, compare and sync; others get 404; only the CEO can turn write mode on or off (others 403).
+- S-154.10 Disconnect. When I Disconnect, Then my token row is removed and an event is logged.
+- S-154.11 (P2) The card is usable at 390 px.
