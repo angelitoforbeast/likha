@@ -123,7 +123,7 @@ class EncodeMacroTest extends UploadEncodeTestCase
 
     private function lastRun(): array
     {
-        return (array) json_decode((string) DB::table('chatbot_events')->where('type', 'run_ended')->orderByDesc('id')->value('detail'), true);
+        return (array) json_decode((string) DB::table('chatbot_events')->where('type', 'run')->orderByDesc('id')->value('detail'), true); // spec 163: ang dulo ng takbo ay nasa run row
     }
 
     /** Ang huling node ng huling takbo (n3 = next, n4 = failed). */
