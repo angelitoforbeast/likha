@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\PageSetting;
 use App\Services\Chatbot\ChatbotProvider;
+use App\Services\Chatbot\ForbeastSendHealth;
 use App\Services\Chatbot\ForbeastWatch;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
@@ -41,6 +42,12 @@ class ChatbotForbeastWatch extends Command
             } catch (Throwable $e) {
                 report($e); // isang page lang ang apektado
             }
+        }
+        // Ang send health ng Forbeast (panel at send lag alarm): huli, para hindi nito maantala ang mga check sa itaas.
+        try {
+            app(ForbeastSendHealth::class)->fetch();
+        } catch (Throwable $e) {
+            report($e);
         }
 
         return self::SUCCESS;

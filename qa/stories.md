@@ -2604,3 +2604,23 @@ Tests: `tests/Feature/Chatblast/ChatbotHealthAfterFlowTest.php`, `ChatbotConnect
 | S-153.9 | P1 | Given the Test's roles, then the keyword check has the same access, and Changes shows "Botcake keywords" with the user | `test_S_153_9…` | passed 2026-10-26 |
 | S-153.10 | P2 | Given a 390 px screen, then the red keyword line wraps | `test_S_153_10…` (markup) | passed (markup) 2026-10-26 |
 | S-153.11 | P1 | Given the last read keyword check was on, when a later Test cannot read the keywords, then the test is `unknown` but the row mark, the Check X and a red popup line "Keyword on (last seen <date>…); could not re-check now" stay; when a later Test reads none, they clear | `test_S_153_11…` | passed 2026-10-26 |
+
+## S-155 Bot Health shows Forbeast's real send performance and raises an alarm on send lag
+
+As the owner, Bot Health shows how fast Forbeast really sends (Forbeast accepts a send at once and queues it, so Likha's "sent" is not the customer's reply time), and a send lag that lasts raises an alarm event and a red banner, without switching pages to Botcake.
+
+Slice 155. Threat model: the Forbeast answer (`/v1/health/sends`) comes from a trusted service we run but is shown as text only and its numbers are coerced; page settings are trusted. No new route. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ForbeastSendHealthTest.php` (`S_155`).
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-155.1 | P1 | Given the watch runs every minute, then each answer is a sample (Bearer site key), samples older than 24 h are dropped; a 404 shows "not available yet" with no alarm; a timeout or 500 keeps the last numbers for 5 minutes then shows stale, the command exits 0 and the page health checks still run | `test_S_155_1…` | passed 2026-10-26 |
+| S-155.2 | P1 | Given faked answers, then the panel shows send lag, queued, sent/min, failed %, forward lag and workers with green/amber/red from the answer's thresholds (workers red when not running), and the first-reply tiles say "accepted by Forbeast; real send lag: <n>s" | `test_S_155_2…` | passed 2026-10-26 |
+| S-155.3 | P1 | Given per-page numbers, then only pages on Forbeast in Likha are listed, matched by Facebook page ID, under their Likha names, worst lag first | `test_S_155_3…` | passed 2026-10-26 |
+| S-155.4 | P1 | Given overall lag > 120 s for 3 samples, then one `alarm` event (condition `send_lag`, error "Forbeast send lag <n>s, <q> queued", pages affected) in `chatbot.auto_switch`, no second within 30 minutes, one more after; then 3 samples < 30 s give one `recovered`; the owner feed carries the pages | `test_S_155_4…` | passed 2026-10-26 |
+| S-155.5 | P1 | Given lag > 120 s for only 1–2 samples in a row, then no alarm | `test_S_155_5…` | passed 2026-10-26 |
+| S-155.6 | P1 | Given a send lag alarm, then every page stays on Forbeast and no `switched` event is written; an overall-only alarm lists all Forbeast pages | `test_S_155_6…` | passed 2026-10-26 |
+| S-155.7 | P1 | Given an active alarm, then a red banner is on Bot Health and /chatbot/pages; after `recovered` it is gone | `test_S_155_7…` | passed 2026-10-26 |
+| S-155.8 | P1 | Given no page on Forbeast, then Bot Health renders without the panel and without the note | `test_S_155_8…` | passed 2026-10-26 |
+| S-155.9 | P1 | Given a role without Chatblast access, then Bot Health is 403; a role with it sees the panel | `test_S_155_9…` | passed 2026-10-26 |
+| S-155.10 | P2 | Given a 390 px screen, then the panel tiles wrap two per row and the per-page table scrolls sideways | (markup check: `grid-cols-2`, `overflow-x-auto`) | not run in a browser |

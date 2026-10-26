@@ -49,10 +49,15 @@
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot'], 'from' => $f['from'], 'to' => $f['to']], fn ($v) => $v !== null);
     $chart = ['days' => $days, 'hourly' => $hourly];
+    // Ang "first reply" ng page sa Forbeast ay ang pagtanggap ng Forbeast, hindi ang padala sa customer: may note kapag may numero ang Forbeast.
+    $fbLag = $forbeast && $forbeast['status'] === 'ok' ? $forbeast['overall']['send_lag_seconds']['value'] : null;
+    $fbNote = $fbLag !== null && in_array($f['bot'], [null, 'Forbeast'], true) && ($f['page_id'] === null || in_array((string) $f['page_id'], $forbeast['page_ids'], true))
+        ? 'accepted by Forbeast; real send lag: ' . $fbLag . 's' : null;
 @endphp
 
 @section('content')
 <div class="shrink-0 space-y-5 pb-8">
+    @include('chatbot.partials.send-lag-alarm', ['sendLagAlarm' => $sendLagAlarm])
     @if(session('status'))<p class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status">{{ session('status') }}</p>@endif
     @if($errors->any())
         <div class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
@@ -97,6 +102,7 @@
                     <div class="mt-1 text-2xl font-semibold">{{ $fmt($t[$key], $unit) }}</div>
                     <div class="text-xs text-slate-500">{{ $change($key, $unit) }}</div>
                     @if($l)<div class="mt-1 text-xs text-slate-400">{{ $l['rule'] }}</div>@endif
+                    @if($fbNote && str_starts_with($key, 'reply_'))<div class="mt-1 text-xs text-amber-700" data-note="forbeast-lag">Forbeast pages: {{ $fbNote }}</div>@endif
                 </div>
             @endforeach
             <div class="cb-card p-3" data-tile="queue">
@@ -115,6 +121,10 @@
         <p class="text-xs text-slate-500">Failed replies count every send that is not "sent" (failed and skipped). "Not answered" messages ({{ $t['not_answered'] }} today) are left out of the reply times. AI call records are kept for 2 days only, so the AI graph is short.</p>
     </section>
 
+    @if($forbeast)
+        @include('chatbot.partials.forbeast-health', ['fb' => $forbeast])
+    @endif
+
     {{-- Paghahambing kada bot (ang bot ng page ngayon), ngayon at kahapon; hindi sakop ng Bot filter. --}}
     <section aria-labelledby="h-compare" class="space-y-2">
         <h2 id="h-compare" class="text-lg font-semibold">Compare bots</h2>
@@ -128,7 +138,7 @@
                     @foreach(['today' => 'Today', 'yesterday' => 'Yesterday'] as $day => $dayLabel)
                         @php($x = $c[$day])
                         <tr><td>{{ $c['bot'] }}</td><td>{{ $dayLabel }}</td><td class="text-right">{{ $x['inbound'] }}</td><td class="text-right">{{ $fmt($x['answered_pct'], '%') }}</td>
-                            <td class="text-right">{{ $fmt($x['reply_median'], 's') }}</td><td class="text-right">{{ $fmt($x['reply_p90'], 's') }}</td><td class="text-right">{{ $fmt($x['failed_pct_excl'], '%') }}</td>
+                            <td class="text-right">{{ $fmt($x['reply_median'], 's') }}</td><td class="text-right">{{ $fmt($x['reply_p90'], 's') }}@if($fbLag !== null && $c['bot'] === 'Forbeast' && $day === 'today')<div class="text-xs text-amber-700">accepted by Forbeast; real send lag: {{ $fbLag }}s</div>@endif</td><td class="text-right">{{ $fmt($x['failed_pct_excl'], '%') }}</td>
                             <td>{{ $x['top_reasons'] ? implode(', ', array_map(fn ($r) => $r[0] . ' (' . $r[1] . ')', $x['top_reasons'])) : '—' }}</td>
                             <td class="text-right">{{ $fmt($x['ai_failed_pct'], '%') }}</td><td class="text-right">{{ $x['comments_in'] }} / {{ $x['comments_replied'] }}</td>
                             <td class="text-right">{{ $x['auto_switches'] }}</td></tr>

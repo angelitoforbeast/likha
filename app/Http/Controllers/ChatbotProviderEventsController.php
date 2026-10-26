@@ -35,6 +35,8 @@ class ChatbotProviderEventsController extends Controller
                     'id' => $s->id, 'at' => $s->created_at?->timezone('Asia/Manila')->toIso8601String(), 'page' => $s->page_name,
                     'result' => $e['result'] ?? null, 'from' => $e['from'] ?? null, 'to' => $e['to'] ?? null,
                     'condition' => $e['condition'] ?? null, 'error' => isset($e['error']) ? mb_substr((string) $e['error'], 0, 200) : null,
+                    // Ang send lag alarm: ang mga page na apektado (ang row ay nasa una lang).
+                    'pages' => isset($e['pages']) && is_array($e['pages']) ? array_values($e['pages']) : null,
                 ];
             })->all();
 

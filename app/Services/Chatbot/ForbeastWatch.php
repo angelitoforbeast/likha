@@ -45,6 +45,7 @@ class ForbeastWatch
         'no_answer' => 'Forbeast did not answer',
         'inbound' => 'Botcake got chats, Forbeast none',
         'health' => 'Forbeast health check failed',
+        'send_lag' => 'Forbeast send lag',
     ];
 
     /** Ilang segundo itinatago ang bilang ng palya, at ang "naitala na" ng hindi makalipat (isang event kada oras). */
@@ -347,10 +348,16 @@ class ForbeastWatch
 
     private function record(string $page, string $result, ?string $to, string $condition, string $error): void
     {
+        $this->event($page, $result, $to, $condition, $error);
+    }
+
+    /** Isang event row sa chatbot.auto_switch ng page (ang feed ng owner); $extra: dagdag na field (hal. pages ng send lag alarm). */
+    public function event(string $page, string $result, ?string $to, string $condition, string $error, array $extra = []): void
+    {
         $this->settings->set($page, ChatbotFields::PROVIDER, self::KEY, json_encode([
             'result' => $result, 'from' => ChatbotProvider::GATEWAY, 'to' => $to, 'condition' => $condition,
             'error' => mb_substr(trim($error), 0, 200), 'at' => now()->toIso8601String(),
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), false, null, true);
+        ] + $extra, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), false, null, true);
     }
 
     /**
