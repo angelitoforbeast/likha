@@ -1238,3 +1238,8 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 ## 159: Login for Business config, accepted review minors (2026-10-27)
 - With a config id set, any failure of the `fb_exchange_token` call (also a network error or 5xx) keeps the code token. Reason: the spec says "if that call fails", and the stored expiry comes from `debug_token`, so the card stays truthful; narrow it to OAuth refusals if a short token ever slips in.
 - No test pins `debug_token` `expires_at=0` (a non-expiring token) on the code path. Reason: the code (`$expires ?: null`) is unchanged from 154; add a row to the table if that path ever changes.
+## 160: hide the inbox bot pause, accepted review minors (2026-10-27)
+- S-160.4 asserts the "Unpause" string in the page, which is in the inline JS whenever the flag is off; PHPUnit can't run the JS that shows it only for a paused customer. Reason: no JS test runner in the project; confirm in the browser check.
+- 390 px (S-160.5) not checked in a browser: no running app in this worktree. The badge row uses `flex flex-wrap` like the other panel rows.
+- After Unpause, `loadPanel(threadSeq)` reloads whichever conversation is open; switching mid-request reloads the new one. Reason: harmless, same pattern as the old switch.
+- `ChatbotInboxController::pause` nests a one-line `if` inside the if/else. Reason: correct, matches the file's one-line style.
