@@ -2689,3 +2689,11 @@ Story changes (S-158):
 - S-145.1, S-145.2, S-145.3 (stored SHOP DETAILS compared with the fields, warnings for no value or a missing line): replaced by S-158.4, since the stored text is no longer read.
 - S-106.4: its "no X" assertion is limited to price findings (the page there has only a PRICE, so SHOP DETAILS is now an X).
 - S-099.1 now also expects the two SHOP DETAILS X's; S-099.4 fills ITEM and QUANTITY; S-099.5 recomputes on a Prompt 2 change instead of a QUANTITY change; S-068.7 sees the new column just before SHOP DETAILS (always a column now, last when no page has a typed row); S-149.2 tests a nested botfield through Main Flow instead of SHOP DETAILS.
+## S-159 Connect Facebook uses the Meta app's Login for Business configuration
+
+As an Ads uploader, I connect my Facebook through the Meta app's Login for Business configuration, because that app cannot offer plain Facebook Login next to the Marketing API.
+
+- S-159.1 Config id. Given `META_ADS_CONFIG_ID` is set, When I click Connect Facebook, Then the OAuth dialog URL has `config_id`, `response_type=code`, `client_id`, the `redirect_uri` from config and a state, and no `scope`.
+- S-159.2 No config id. Given `META_ADS_CONFIG_ID` is empty or blank, When I click Connect Facebook, Then the URL is as in S-154.1 (`scope=ads_read`).
+- S-159.3 Token path. Given a config id, When Facebook returns a code and the long-lived exchange works, Then the long-lived token is kept (`token_from` = `fb_exchange_token`); When the long-lived exchange fails, Then the code token is kept with its expiry from `debug_token` (`token_from` = `code`) and the connect succeeds. Negative: without a config id a failed long-lived exchange still fails the connect, as before. Edge: with app id + config id and no secret, the card still offers Connect (the secret is needed only for the exchange).
+- S-159.4 Token never shown. In both paths the token is not in logs, responses, the page, upload_logs or the unencrypted part of the connection row.
