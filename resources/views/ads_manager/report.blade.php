@@ -50,6 +50,10 @@
       </button>
     </form>
 
+    @if (!empty($meta))
+      @include('ads_manager._meta_ads')
+    @endif
+
     {{-- LATEST SUMMARY (optional, keep) --}}
     <div class="border rounded p-4 bg-gray-50">
       <h2 class="font-semibold mb-2">Latest Status (Summary)</h2>
