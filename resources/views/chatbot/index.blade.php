@@ -782,20 +782,22 @@
             const bad = c.status && !String(c.status).startsWith('ok');
             state.textContent = c.connected ? 'Connected' : (p === 'botcake' && c.token && !c.chat_block ? 'No chat block' : (bad ? c.status : (c.token ? 'Not connected' : 'Not set up')));
             state.className = 'conn-state break-words text-xs ' + (c.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500'));
-            // Naka-on na keyword sa Botcake (huling Test): hindi pa gumagana nang buo ang bot, kahit Connected.
-            if (p === 'botcake' && !bad && String(c.keywords_status || '').startsWith('on ')) {
+            // Naka-on na keyword sa Botcake (ang huling nabasa, kahit unknown ang Test ngayon): hindi pa gumagana nang buo ang bot, kahit Connected.
+            if (p === 'botcake' && !bad && c.keywords_on) {
                 state.textContent = 'Keyword on: not working yet';
                 state.className = 'conn-state break-words text-xs text-red-600';
             }
         }
     }
     // Ang linya ng keyword check ng Botcake pagkatapos ng Test o Save (text lang ang pangalan ng flow mula sa Botcake).
+    // Hindi mabasa ngayon pero naka-on sa huling nabasa: pula pa rin, hanggang may Test na makabasa at walang naka-on.
     function kwLine(d) {
-        const m = connCard('botcake').querySelector('.conn-kw');
+        const m = connCard('botcake').querySelector('.conn-kw'), last = d.connections && d.connections.botcake ? d.connections.botcake.keywords_on : null;
         const [text, cls] = d.keywords === 'on'
             ? ['May naka-on na keyword sa Botcake (flow: ' + (d.keywords_note || '?') + '). Hindi pa gumagana nang buo ang bot: may mga message na hindi aabot dito. I-off ang keyword sa Botcake, saka i-Test ulit.', 'text-red-600']
             : (d.keywords === 'none' ? ['Walang naka-on na keyword', 'text-green-700']
-                : (d.keywords === 'unknown' ? ['Keywords: ' + (d.keywords_note || 'unknown'), 'text-slate-500'] : ['', '']));
+                : (d.keywords === 'unknown' && last ? ['Keyword on (last seen ' + last.at + ', flow: ' + (last.names || '?') + '); could not re-check now. I-off ang keyword sa Botcake, saka i-Test ulit.', 'text-red-600']
+                    : (d.keywords === 'unknown' ? ['Keywords: ' + (d.keywords_note || 'unknown'), 'text-slate-500'] : ['', ''])));
         m.textContent = text; m.className = 'conn-kw mt-1 break-words text-xs ' + cls;
     }
     async function openConnections(page) {

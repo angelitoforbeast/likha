@@ -189,10 +189,9 @@ TXT;
         } elseif (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && app(ChatbotConnections::class)->blockBad($page)) {
             $out[] = $x('Botcake: no chat block'); // ayon sa huling Test: wala, luma ang key o hindi published sa Default Reply
         }
-        // Ang naka-on na Botcake keyword (ayon sa huling Test): ang mensaheng tumama dito ay hindi umaabot sa block namin.
-        $keywords = (string) $this->settings->get($page, 'botcake', 'keywords');
-        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && str_starts_with($keywords, 'on ')) {
-            $out[] = $x('Botcake: may naka-on na keyword (' . trim((string) (explode(' · ', $keywords, 2)[1] ?? '')) . ') — i-off sa Botcake');
+        // Ang naka-on na Botcake keyword (ang huling nabasa): ang mensaheng tumama dito ay hindi umaabot sa block namin.
+        if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY && ($on = app(ChatbotConnections::class)->keywordsOn($page)) !== null) {
+            $out[] = $x('Botcake: may naka-on na keyword (' . $on['names'] . ') — i-off sa Botcake');
         }
         // Ang koneksyon na hindi kumpleto (wala sa Connected): ang pumalyang huling token test lang, hindi ang hindi pa nasubok.
         $failed = fn (string $provider) => ($s = trim((string) $this->settings->get($page, $provider, 'token_status'))) !== '' && !str_starts_with($s, 'ok');

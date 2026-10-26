@@ -137,7 +137,9 @@ class ChatbotController extends Controller
                 // Ang mga kumpletong koneksyon (Connected column at ang Bot na mapipili).
                 'connected' => $connections->connected($page),
                 // Ang huling keyword check ng Botcake (on | none | unknown; null kapag hindi pa nasubok o nasa Forbeast ang page).
-                'botcake_keywords' => $provider !== ChatbotProvider::GATEWAY && ($k = (string) $this->settings->get($page, 'botcake', 'keywords')) !== '' ? strtok($k, ' ') : null,
+                // Ang unknown matapos ang on ay on pa rin: ang hindi nasagot na basa ay hindi nagtatago ng kilalang problema.
+                'botcake_keywords' => $provider !== ChatbotProvider::GATEWAY && ($k = (string) $this->settings->get($page, 'botcake', 'keywords')) !== ''
+                    ? ($connections->keywordsOn($page) !== null ? 'on' : strtok($k, ' ')) : null,
             ];
         }
 
