@@ -40,7 +40,7 @@ class ChatbotConnections
             'botcake' => ['page_id' => $pageId, 'token' => self::masked(trim((string) $this->settings->get($page, 'botcake', 'token'))),
                 'status' => $this->settings->get($page, 'botcake', 'token_status'), 'tested_at' => $this->testedAt($page, 'botcake'),
                 'chat_block' => $this->hasChatBlock($page), 'chat_block_status' => $this->settings->get($page, 'botcake', 'chat_block'),
-                'keywords_status' => $this->settings->get($page, 'botcake', 'keywords'),
+                'keywords_status' => $this->settings->get($page, 'botcake', 'keywords'), 'keywords_on' => $this->keywordsOn($page),
                 'connected' => $this->botcakeConnected($page)],
             'forbeast' => ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, ForbeastPageSetup::PROVIDER),
                 'connected' => $f['connected']],
@@ -52,6 +52,26 @@ class ChatbotConnections
     {
         return $this->botcakePageId($page) !== '' && trim((string) $this->settings->get($page, 'botcake', 'token')) !== ''
             && str_starts_with((string) $this->settings->get($page, 'botcake', 'token_status'), 'ok') && $this->hasChatBlock($page) && !$this->blockBad($page);
+    }
+
+    /**
+     * Ang huling alam na naka-on na Botcake keyword: ang pinakabagong botcake.keywords na nabasa (on o none, nilalaktawan
+     * ang unknown), para hindi maitago ng isang hindi nasagot na basa ang kilalang problema.
+     * @return array{names: string, at: string}|null null kapag none ang huling nabasa o hindi pa nasubok
+     */
+    public function keywordsOn(string $page): ?array
+    {
+        $rows = $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'keywords')->orderByDesc('id')->get(['value', 'is_secret']);
+        foreach ($rows as $s) {
+            $v = (string) $s->plainValue();
+            if (str_starts_with($v, 'unknown')) continue;
+            if (!str_starts_with($v, 'on ')) return null;
+            [$head, $names] = array_pad(explode(' · ', $v, 2), 2, '');
+
+            return ['names' => trim($names), 'at' => mb_substr(trim(mb_substr($head, 3)), 0, 16)];
+        }
+
+        return null;
     }
 
     /** Sira ang chat block ayon sa huling suri (botcake.chat_block). */

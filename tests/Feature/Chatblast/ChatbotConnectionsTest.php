@@ -618,4 +618,35 @@ class ChatbotConnectionsTest extends ChatblastTestCase
             $this->assertStringContainsString($want, $html, $want);
         }
     }
+
+    public function test_S_153_11_an_unreadable_keyword_check_keeps_the_last_known_on_until_a_check_finds_none(): void
+    {
+        $this->settings()->set('Page Uno', 'botcake', 'chat.key', 'kept-chat-key-123', true, null, true);
+        $this->botcake($this->content('https://app.example.test/api/botcake/chat'));
+        $x = 'Botcake: may naka-on na keyword (ON DELIVERY SCRIPT) — i-off sa Botcake';
+        $reasons = fn () => array_column(app(\App\Services\Chatbot\PageContentCheck::class)->setup('Page Uno'), 'reason');
+        $row = fn () => collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->keyBy('page')['Page Uno']['botcake_keywords'];
+
+        $this->travelTo('2026-10-26 09:00:00');
+        $this->keywords(true);
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()->assertJson(['keywords' => 'on']);
+
+        // Hindi mabasa: unknown ang test na ito, pero nananatili ang huling "on".
+        $this->travelTo('2026-10-26 10:00:00');
+        $this->fake['keywords'] = ['success' => false];
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['keywords' => 'unknown', 'connections' => ['botcake' => ['keywords_on' => ['names' => 'ON DELIVERY SCRIPT', 'at' => '2026-10-26 09:00']]]]);
+        $this->assertStringStartsWith('unknown', (string) $this->settings()->get('Page Uno', 'botcake', 'keywords'));
+        $this->assertContains($x, $reasons());
+        $this->assertSame('on', $row());
+
+        // Nabasa at wala nang naka-on: wala na ang mga marka.
+        $this->travelTo('2026-10-26 11:00:00');
+        $this->keywords(false);
+        $this->postJson('/chatbot/connections/botcake-test', ['page_name' => 'Page Uno'])->assertOk()
+            ->assertJson(['keywords' => 'none', 'connections' => ['botcake' => ['keywords_on' => null]]]);
+        $this->assertNotContains($x, $reasons());
+        $this->assertSame('none', $row());
+        $this->assertStringContainsString('could not re-check now', $this->get('/chatbot/pages')->getContent());
+    }
 }
