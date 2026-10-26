@@ -342,9 +342,10 @@ class Inbox
         $botfields = [];
         $labels = array_column(app(ChatbotFields::class)->columns(), 'label', 'key');
         foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get() as $s) {
-            if (in_array($s->key, ChatbotFields::RESERVED, true)) continue;
+            if (in_array($s->key, ChatbotFields::RESERVED, true) || $s->key === ShopDetails::KEY) continue; // ang lumang tina-type: hindi na binabasa
             $botfields[$s->key] = ['label' => $labels[$s->key] ?? $s->key, 'value' => (string) $s->plainValue()];
         }
+        $botfields[ShopDetails::KEY] = ['label' => $labels[ShopDetails::KEY] ?? ShopDetails::LABEL, 'value' => ShopDetails::build($page, array_map(fn ($b) => $b['value'], $botfields))];
 
         return [
             'name' => trim((string) ($last->name ?? $record->fb_name ?? '')) ?: 'PSID …' . mb_substr($psid, -4),

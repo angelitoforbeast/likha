@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\PageSetting;
+use App\Services\Chatbot\ShopDetails;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -26,7 +27,6 @@ class ChatbotFields
     {
         $cols = [
             'flow' => 'FLOW', 'price' => 'PRICE', 'quantity' => 'QUANTITY', 'item_name_in_jnt_dashboard' => 'ITEM NAME IN JNT DASHBOARD',
-            'shop_details' => 'SHOP DETAILS', // binubuo (Chatbot\ShopDetails), hindi tina-type
             'main_flow' => 'Main Flow', 'main_flow_2' => 'Main Flow 2', 'fill_up_form' => 'Fill-Up Form', 'loop_3_form' => 'Loop 3 Form',
             'prompt_1' => 'Prompt 1', 'prompt_2' => 'Prompt 2', 'prompt_3' => 'Prompt 3', 'picture' => 'PICTURE',
         ];
@@ -70,8 +70,10 @@ class ChatbotFields
         $labels = self::defaults() + $this->added();
         $inUse = PageSetting::where('provider', self::PROVIDER)->where('active', true)->distinct()->pluck('key');
         foreach ($inUse as $key) {
-            if (!in_array($key, self::RESERVED, true)) $labels[$key] ??= ucwords(str_replace('_', ' ', $key));
+            if (!in_array($key, self::RESERVED, true)) $labels[$key] ??= $key === ShopDetails::KEY ? ShopDetails::LABEL : ucwords(str_replace('_', ' ', $key));
         }
+        // Ang SHOP DETAILS ay laging column (binubuo, Chatbot\ShopDetails), sa dati nitong puwesto (o sa dulo): ang paste ng sheet ay hindi naurong.
+        $labels[ShopDetails::KEY] ??= ShopDetails::LABEL;
 
         $out = [];
         foreach ($labels as $key => $label) $out[] = ['key' => (string) $key, 'label' => $label, 'kind' => self::kind((string) $key)];

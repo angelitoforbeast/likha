@@ -337,4 +337,12 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $this->assertSame([], $lengths($this->check('Page Dos')), 'at the limit is fine');
         $this->assertSame(str_repeat('a', 2001), $s->get('Page Uno', 'chatbot', 'comment_pm'), 'nothing is cut');
     }
+
+    public function test_S_158_4_a_flow_using_shop_details_is_not_missing_it_without_a_typed_row(): void
+    {
+        $this->link('Page Uno', $this->flow('Main', [$this->send('{{SHOP DETAILS}}')]));
+        foreach (['item_name_in_jnt_dashboard' => 'GLOW TAPE', 'price' => '198', 'quantity' => '2'] as $k => $v) $this->settings()->set('Page Uno', 'chatbot', $k, $v);
+
+        $this->assertSame(['ok', []], [$this->check()['status'], $this->check()['reasons']]);
+    }
 }

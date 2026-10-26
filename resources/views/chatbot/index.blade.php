@@ -1496,7 +1496,7 @@
         peRestore();
         const text = $('pe-paste').value, notes = [];
         const current = Object.fromEntries(editCols().map(c => [c.key, peInput(c.key).value]));
-        const plan = ChatbotPaste.plan({text, columns: editCols(), targets: [{page: pe.r.page, cells: pe.orig}], startKey: $('pe-start').value, blanksEmpty: $('pe-blanks').checked, firstRowOnly: true});
+        const plan = ChatbotPaste.plan({text, columns: botCols(), targets: [{page: pe.r.page, cells: pe.orig}], startKey: $('pe-start').value, blanksEmpty: $('pe-blanks').checked, firstRowOnly: true});
         $('pe-start-box').classList.toggle('hidden', plan.byName);
         if (text.trim() && plan.error) notes.push(plan.error);
         if (plan.byName) notes.push('Mapped by the header names in the first line.');
@@ -1506,7 +1506,7 @@
         if (plan.extraRows) notes.push('Only the first row was used (' + plural(plan.extraRows, 'more row') + ' ignored).');
         let filled = 0;
         for (const x of plan.changes) {
-            if (x.status === 'blank') continue; // blangko: naiiwan ang value
+            if (x.status === 'blank' || !peInput(x.key)) continue; // blangko: naiiwan ang value; SHOP DETAILS: automatic
             pe.beforePaste[x.key] = current[x.key];
             peInput(x.key).value = x.value;
             if (x.status !== 'unchanged') filled++;
@@ -1528,12 +1528,12 @@
         const seq = ++peSeq;
         pe.map = null;
         $('pe-map').classList.add('hidden');
-        const row = ChatbotPaste.aiRow($('pe-paste').value, editCols());
+        const row = ChatbotPaste.aiRow($('pe-paste').value, botCols());
         if (!row) { pePaste(); return; } // walang laman (o header lang): walang tawag sa AI
         peRestore();
         $('pe-notes').replaceChildren();
         // guesses: ang field ayon sa header o sa "Starting at field", para sa AI (ang ayos ng sheet ang batayan).
-        const guesses = ChatbotPaste.positionKeys($('pe-paste').value, editCols(), $('pe-start').value);
+        const guesses = ChatbotPaste.positionKeys($('pe-paste').value, botCols(), $('pe-start').value);
         pe.map = {cells: row.cells, keys: [], conf: [], note: [], missing: [], applied: false};
         $('pe-map-list').replaceChildren();
         $('pe-map-missing').classList.add('hidden'); $('pe-map-missing').classList.remove('flex');
