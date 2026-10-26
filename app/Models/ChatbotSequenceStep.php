@@ -14,6 +14,13 @@ class ChatbotSequenceStep extends Model
 
     protected $casts = ['position' => 'integer', 'delay_amount' => 'integer', 'flow_id' => 'integer', 'active' => 'boolean'];
 
+    /** Anumang sulat o bura: ang naka-cache na ayos ng bot (BotConfigCache) ay binubura. */
+    protected static function booted(): void
+    {
+        static::saved(fn (self $m) => \App\Services\Chatbot\BotConfigCache::forgetSequence((int) $m->sequence_id));
+        static::deleted(fn (self $m) => \App\Services\Chatbot\BotConfigCache::forgetSequence((int) $m->sequence_id));
+    }
+
     public function flow(): BelongsTo
     {
         return $this->belongsTo(ChatbotFlow::class, 'flow_id');

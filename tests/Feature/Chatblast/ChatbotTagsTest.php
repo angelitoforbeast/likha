@@ -230,6 +230,7 @@ class ChatbotTagsTest extends ChatblastTestCase
         $graph['nodes'][1]['config']['items'][2]['value'] = '{{Main Flow 2}}!';
         DB::table('chatbot_flows')->where('id', $flow->id)->update(['graph' => json_encode($graph), 'published_at' => now()]);
         $v2 = DB::table('chatbot_flow_versions')->insertGetId(['flow_id' => $flow->id, 'graph' => json_encode($graph), 'created_at' => now()]);
+        \App\Services\Chatbot\BotConfigCache::forgetFlow($flow->id); // gaya ng Publish: ang naka-cache na flow ay binubura
         $this->runChat($this->chat('Hi', '7002'));
 
         $this->assertSame($v1, (int) DB::table('chatbot_replies')->where('psid', 7001)->value('flow_version_id'));

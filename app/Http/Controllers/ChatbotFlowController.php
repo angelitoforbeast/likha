@@ -7,6 +7,7 @@ use App\Models\ChatbotFlow;
 use App\Models\PageSetting;
 use App\Models\User;
 use App\Services\Chatbot\BotcakeOutbox;
+use App\Services\Chatbot\BotConfigCache;
 use App\Services\Chatbot\ChatbotTags;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\FlowGraph;
@@ -270,7 +271,11 @@ class ChatbotFlowController extends Controller
             $q->where('draft_version', $version);
         }
 
-        return $q->update($values + ['draft_version' => DB::raw('draft_version + 1'), 'updated_at' => now()]) === 1;
+        $ok = $q->update($values + ['draft_version' => DB::raw('draft_version + 1'), 'updated_at' => now()]) === 1;
+        // Iisang UPDATE (walang model event): ang naka-cache na flow ng takbo ay binubura dito.
+        if ($ok) BotConfigCache::forgetFlow($flow->id);
+
+        return $ok;
     }
 
     private function version(Request $request): ?int
