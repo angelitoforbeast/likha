@@ -22,6 +22,9 @@ class RealSendTimeTest extends ChatblastTestCase
 {
     private const GW = 'https://gw.example.test';
 
+    /** Ang mga sagot ng /v1/health/sends, isa kada takbo ng watch. */
+    private array $sends = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -48,7 +51,14 @@ class RealSendTimeTest extends ChatblastTestCase
         app(PageSettings::class)->set('Page Tres', 'chatbot', 'provider', 'gateway');
         Http::preventStrayRequests();
         Http::fake([
-            self::GW . '/v1/health/sends' => Http::response(['error' => 'not found'], 404),
+            // Ang health ng Forbeast: ang nakapila sa $sends (lag sa segundo, o 'down'); kung wala, 404 (hindi pa naka-deploy).
+            self::GW . '/v1/health/sends' => function () {
+                $a = array_shift($this->sends);
+                if ($a === 'down') throw new \Illuminate\Http\Client\ConnectionException('timed out');
+
+                return $a === null ? Http::response(['error' => 'not found'], 404)
+                    : Http::response(['overall' => ['send_lag_seconds' => $a, 'queued_sends' => 10, 'workers' => ['sends' => 4, 'status' => 'running']], 'pages' => []], 200);
+            },
             self::GW . '/v1/pages/*/messages' => Http::response(['public_id' => 'snd_1', 'status' => 'queued'], 202),
             self::GW . '/v1/pages/*' => Http::response(['connected' => true, 'can_send' => true], 200),
             'https://botcake.io/*' => Http::response(['success' => true]),
@@ -169,6 +179,11 @@ class RealSendTimeTest extends ChatblastTestCase
         $this->assertSame(1, $out['tiles']['today']['reasons']['unreachable']);
         $this->assertSame(1, $out['tiles']['today']['reasons']['window']);
         $this->assertEqualsCanonicalizing([$a, $b], array_column($out['failures'], 'id'));
+
+        // Ang hindi kilalang status: binibilang, walang isinusulat.
+        $c = $this->reply(null, '2026-10-26 19:03:00', ref: 'r-odd');
+        $this->sendStatus('r-odd', 'delivered', '2026-10-26 19:04:00');
+        $this->assertSame([1, null, 'sent'], [$this->counted('send_status_bad'), $this->row($c)->confirmed_status, $this->row($c)->status]);
     }
 
     public function test_S_156_3_pending_counts_accepted_unconfirmed_replies_with_the_oldest_age_per_page(): void
@@ -178,6 +193,10 @@ class RealSendTimeTest extends ChatblastTestCase
         $this->reply(null, '2026-10-26 19:59:10', ref: 'p2'); // 50 s
         $this->reply(null, '2026-10-26 19:59:30', ref: 'p3', page: '1003'); // 30 s
         $this->reply(null, '2026-10-26 19:58:00', ref: 'p4', status: 'failed'); // pumalya sa 202: hindi pending
+        // Nawalang send_status: may mas bagong kumpirmado sa parehong PSID, kaya tapos na ito (hindi pending nang 24 oras).
+        $this->reply(null, '2026-10-26 19:50:00', ref: 'lost-a', psid: '7020');
+        $this->reply(null, '2026-10-26 19:55:00', ref: 'lost-b', psid: '7020');
+        $this->sendStatus('lost-b', 'sent', '2026-10-26 19:55:30', psid: '7020');
         $this->reply(null, '2026-10-26 19:58:00', via: 'botcake', page: '1002'); // Botcake: walang pending
 
         $real = $this->out()['real'];
@@ -264,6 +283,21 @@ class RealSendTimeTest extends ChatblastTestCase
         $this->assertFalse(PageSetting::where('key', 'auto_switch')->get()->contains(fn ($s) => str_contains((string) $s->plainValue(), '"switched"')));
     }
 
+    public function test_S_156_5_a_health_alarm_is_only_cleared_by_health_samples_while_send_status_is_not_available(): void
+    {
+        $this->sends = [500, 500, 500];
+        $this->watch(3);
+        $this->assertSame(['alarm'], array_column($this->lagEvents(), 'result'));
+        // Hindi sumasagot ang health at wala pang send_status: walang ebidensya, kaya walang "recovered".
+        $this->sends = array_fill(0, 8, 'down');
+        $this->watch(8);
+        $this->assertSame(['alarm'], array_column($this->lagEvents(), 'result'));
+        // Mababa na ang health sa 3 sample: recovered (hindi hinaharang ng walang data na pending).
+        $this->sends = [5, 5, 5];
+        $this->watch(3);
+        $this->assertSame(['alarm', 'recovered'], array_column($this->lagEvents(), 'result'));
+    }
+
     public function test_S_156_6_before_any_send_status_the_real_time_is_not_available_and_there_is_no_pending_alarm(): void
     {
         $this->reply(null, '2026-10-26 19:50:00', ref: 'never'); // 600 s, pero walang send_status kailanman
@@ -277,6 +311,17 @@ class RealSendTimeTest extends ChatblastTestCase
         $html = $this->get('/chatbot/health')->assertOk()->getContent();
         $this->assertStringContainsString('real send time not available yet (Forbeast update pending)', $html);
         $this->assertStringNotContainsString('data-tile="pending"', $html);
+
+        // Ang araw na naka-deploy na sa Forbeast: ang unang send_status ay para sa bagong padala; ang mas luma ay hindi
+        // kailanman makukumpirma, kaya hindi pending o unconfirmed, at walang alarm.
+        $this->reply(null, now()->toDateTimeString(), ref: 'first');
+        $this->sendStatus('first', 'sent', now()->addSeconds(5)->toDateTimeString());
+        $real = $this->out(['from' => '2026-10-20'])['real'];
+        $this->assertTrue($real['available']);
+        $this->assertSame(['count' => 0, 'oldest' => 0, 'light' => 'green'], $real['pending']);
+        $this->assertSame(0, $real['unconfirmed']);
+        $this->watch(4);
+        $this->assertSame([], $this->lagEvents());
     }
 
     public function test_S_156_7_an_unknown_client_ref_is_counted_and_ignored_and_a_reply_from_before_the_ref_is_matched_by_page_and_psid(): void
@@ -297,6 +342,8 @@ class RealSendTimeTest extends ChatblastTestCase
     {
         $this->sendStatus($this->confirmedRef(), 'sent', '2026-10-26 19:00:10');
         $this->reply(null, '2026-10-25 19:00:00', ref: 'old'); // 25 oras
+        $this->reply(null, '2026-10-25 10:00:00', ref: 'early', psid: '7998'); // ang unang kumpirmasyon: bago ang luma sa ibaba
+        $this->sendStatus('early', 'sent', '2026-10-25 10:00:30', psid: '7998');
         $this->reply(null, '2026-10-26 19:59:00', ref: 'new');
 
         $real = $this->out(['from' => '2026-10-20'])['real'];
@@ -316,6 +363,14 @@ class RealSendTimeTest extends ChatblastTestCase
         $this->sendStatus('a1', 'sent', '2026-10-26 18:20:00');
         $this->assertSame($before, array_intersect_key($this->out()['tiles']['today'], array_flip($keys)));
         $this->assertSame([2, 2, 4.5], [$before['inbound'], $before['answered'], $before['reply_median']]);
+
+        // Ang partial ay may naipadala rin: ang accepted na unang sagot ay hindi nagbabago (ang bilang ng failed lang).
+        $replyKeys = array_flip(['inbound', 'answered', 'reply_median', 'reply_max']);
+        $c = $this->chat('1001', '7002', '2026-10-26 18:10:00');
+        $this->reply($c, '2026-10-26 18:10:07', ref: 'a2', psid: '7002');
+        $before = array_intersect_key($this->out()['tiles']['today'], $replyKeys);
+        $this->sendStatus('a2', 'partial', '2026-10-26 18:30:00', ['sent_count' => 1], psid: '7002');
+        $this->assertSame($before, array_intersect_key($this->out()['tiles']['today'], $replyKeys));
     }
 
     public function test_S_156_10_the_real_send_section_wraps_at_390px(): void
