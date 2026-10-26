@@ -413,7 +413,7 @@ class CommentRepliesTest extends ChatblastTestCase
 
     public function test_S_149_2_a_botfield_inside_a_comment_value_is_filled_too(): void
     {
-        $this->forbeastPage(['comment_pm' => '{{SHOP DETAILS}}', 'shop_details' => 'Only {{PRICE}} pesos']);
+        $this->forbeastPage(['comment_pm' => '{{Main Flow}}', 'main_flow' => 'Only {{PRICE}} pesos']);
         $this->gateway();
 
         $this->comment()->assertOk();

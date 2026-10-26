@@ -198,4 +198,18 @@ class UploadMacroTest extends UploadEncodeTestCase
         $this->assertSame(1, MacroOutput::count());
         $this->assertSame([], $this->google->appended);
     }
+
+    public function test_S_158_2_the_uploaded_order_takes_item_and_cod_from_the_computed_shop_details_not_a_stale_stored_row(): void
+    {
+        $s = app(\App\Services\PageSettings::class);
+        foreach (['item_name_in_jnt_dashboard' => 'GLOW TAPE', 'price' => '₱198', 'quantity' => '2', 'shop_details' => "PAGE: Other Page\nITEM: REF CLEANER\nPRICE: ₱999\nQUANTITY: 1"] as $key => $value) {
+            $s->set(self::PAGE, 'chatbot', $key, $value);
+        }
+        $run = new \App\Services\Chatbot\FlowRun(5, $this->uploadGraph(['shop' => '{{SHOP DETAILS}}', 'price' => '']), self::PAGE, self::PAGE_ID,
+            app(\App\Services\Chatbot\ChatbotPage::class)->botfields(self::PAGE), $this->fields(), 13, 'order po', 'Ana Cruz', '2026-10-23 10:15');
+        app(\App\Services\Chatbot\FlowEngine::class)->run($run, $this->outbox());
+
+        $row = MacroOutput::sole();
+        $this->assertSame(['2 x GLOW TAPE', '198', "PAGE: Page Uno\nITEM: GLOW TAPE\nPRICE: ₱198\nQUANTITY: 2"], [$row->ITEM_NAME, (string) $row->COD, $row->{'SHOP DETAILS'}]);
+    }
 }

@@ -65,12 +65,14 @@ class ChatbotPage
         $out = [];
         $ids = [];
         foreach ($this->settings->allWithIds($page, ChatbotFields::PROVIDER) as $key => $row) {
-            if (in_array($key, ChatbotFields::RESERVED, true)) continue;
+            if (in_array($key, ChatbotFields::RESERVED, true) || $key === ShopDetails::KEY) continue; // ang lumang tina-type: hindi na binabasa
             $out[$key] = $row['value'];
             if (isset($labels[$key])) $out[$labels[$key]] = $row['value'];
             // Ang version ng botfield (Results): ang id ng row na binasa na rito, walang dagdag na query.
             $ids[ChatbotVars::norm($key)] = $ids[ChatbotVars::norm($labels[$key] ?? $key)] = ['key' => $key, 'id' => $row['id']];
         }
+        $out[ShopDetails::KEY] = $out[ShopDetails::LABEL] = ShopDetails::build($page, $out);
+        if (isset($labels[ShopDetails::KEY])) $out[$labels[ShopDetails::KEY]] = $out[ShopDetails::KEY];
         self::$ids[$this->settings->pageKey($page)] = $ids;
 
         return $out;
