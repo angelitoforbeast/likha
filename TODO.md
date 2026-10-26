@@ -1199,3 +1199,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Spec 153: the card state "Keyword on: not working yet" for a Forbeast page with an old `on` stamp still shows in the popup (the row and Check skip Forbeast pages); `keywords_on` reads the history on every popup load and data row (one small query per page).** Reason: the popup's Botcake card is about Botcake; the stamp only changes on a Botcake Test.
 - **Spec 153: no tests for a `/keywords` answer with success true but no `data` list, the Throwable path, `/flows` failing while a keyword is on ("flow <id>"), a keyword with `flow_id: null` ("no flow"), and a page name that differs in case from the Botcake page map.** Reason: the same guards as the tested unknown and on paths; `pageKey()` is shared with the tested Health code.
 - **Spec 153: 390 px and the popup line were checked by markup and a JS syntax check only, not in a browser.** Reason: no running app in this worktree.
+
+## 154: Meta Ads connect, accepted review minors (2026-10-26)
+- Connect on /profile (Decision 1 "plus the user's profile if there is one"): not added; the card on /ads_manager/report is where the uploaders work. Add a link on /profile if staff ask.
+- `Connections::all()` LIKE `meta_ads.connection.%` leaves `_` unescaped: the keys are written only by our code, so nothing else can match. Trusted path.
+- A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
+- Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
+- Compare runs inside the web request (13 accounts; rate-limit backoff can add up to 42 s per call). If production timeouts bite in the pilot, move it to the queue like Sync now.
+- Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.
