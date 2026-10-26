@@ -56,6 +56,7 @@
 
 @section('content')
 @include('chatbot.partials.switch', ['repliesOn' => $repliesOn])
+@include('chatbot.partials.send-lag-alarm', ['sendLagAlarm' => $sendLagAlarm ?? null])
 <div id="cbot" class="cb-page"
      data-data-url="{{ route('chatbot.data') }}"
      data-cell-url="{{ route('chatbot.cell') }}"

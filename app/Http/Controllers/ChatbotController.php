@@ -80,7 +80,8 @@ class ChatbotController extends Controller
         $others = PageSetting::where('active', true)->where('provider', '!=', \App\Services\AnalystRts::PROVIDER)->where('page_name', '!=', \App\Services\ChatblastSetupCheck::ALL_PAGE)->distinct()->orderBy('page_name')->pluck('page_name')
             ->unique(fn ($p) => $this->settings->pageKey($p))->reject(fn ($p) => in_array($this->settings->pageKey($p), $listed, true))->values();
 
-        return view('chatbot.index', ['canSetUp' => $this->canSetUp(), 'otherPages' => $others, 'repliesOn' => \App\Services\Chatbot\BotcakeOutbox::enabled()]);
+        return view('chatbot.index', ['canSetUp' => $this->canSetUp(), 'otherPages' => $others, 'repliesOn' => \App\Services\Chatbot\BotcakeOutbox::enabled(),
+            'sendLagAlarm' => app(\App\Services\Chatbot\ForbeastSendHealth::class)->activeAlarm()]);
     }
 
     /** Ang mga column at row (isang query ng settings, at ang chats ngayong araw at ang huli kada page). */
@@ -615,7 +616,14 @@ class ChatbotController extends Controller
     private function shown(PageSetting $s): string
     {
         if ($s->key === ForbeastWatch::KEY && is_array($e = json_decode((string) $s->plainValue(), true))) {
-            return (($e['result'] ?? '') === ForbeastWatch::SWITCHED ? 'Switched to Botcake' : 'Cannot switch: no Botcake') . ' · ' . ForbeastWatch::reason($e);
+            $what = match ($e['result'] ?? '') {
+                ForbeastWatch::SWITCHED => 'Switched to Botcake',
+                \App\Services\Chatbot\ForbeastSendHealth::ALARM => 'Alarm (no switch)',
+                \App\Services\Chatbot\ForbeastSendHealth::RECOVERED => 'Recovered',
+                default => 'Cannot switch: no Botcake',
+            };
+
+            return $what . ' · ' . ForbeastWatch::reason($e);
         }
 
         if ($s->provider === ChatbotFields::PROVIDER && $s->key === 'active') return $s->plainValue() === '0' ? 'Off' : 'On';
