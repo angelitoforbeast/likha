@@ -255,12 +255,12 @@ class Inbox
     {
         $rank = ['in' => 0, 'ev' => 1, 'out' => 2];
 
-        return [$a['raw'], $rank[$a['src']], $a['id']] <=> [$b['raw'], $rank[$b['src']], $b['id']];
+        return [$a['raw'], $rank[$a['src']], $a['ord'] ?? $a['id']] <=> [$b['raw'], $rank[$b['src']], $b['ord'] ?? $b['id']];
     }
 
     private static function strip(array $x): array
     {
-        unset($x['raw']);
+        unset($x['raw'], $x['ord']);
 
         return $x;
     }
@@ -299,8 +299,16 @@ class Inbox
         $flows = $ev->isEmpty() ? [] : ChatbotFlow::whereIn('id', $ev->pluck('flow_id')->filter()->unique()->values())->pluck('name', 'id')->all();
         foreach ($ev as $e) {
             $d = json_decode((string) $e->detail, true) ?: [];
-            $items[] = ['key' => 'ev-' . $e->id, 'src' => 'ev', 'id' => $e->id, 'side' => 'event', 'type' => $e->type, 'at' => self::iso($e->created_at),
-                'raw' => Carbon::parse($e->created_at)->format('Y-m-d H:i:s'), 'text' => ChatbotEvents::text($e->type, $e->node_id, $d + ['flow' => $e->flow_id], $flows)];
+            $line = fn (string $key, string $type, $at, float $ord, array $detail) => ['key' => $key, 'src' => 'ev', 'id' => $e->id, 'ord' => $ord, 'side' => 'event', 'type' => $type,
+                'at' => self::iso($at), 'raw' => Carbon::parse($at)->format('Y-m-d H:i:s'), 'text' => ChatbotEvents::text($type, $e->node_id, $detail + ['flow' => $e->flow_id], $flows)];
+            // Ang `run` (isang row kada takbo): ang dalawang linya gaya ng dating run_started at run_ended. Ang simula ay bago
+            // ang mga event ng takbo ("events": ilan ang nauna rito sa iisang insert), ang dulo ay sa puwesto ng row.
+            if ($e->type === 'run') {
+                $items[] = $line('ev-' . $e->id . '-start', 'run_started', $d['started_at'] ?? $e->created_at, $e->id - (int) ($d['events'] ?? 0) - 0.5, ['reason' => $d['start'] ?? 'new']);
+                $items[] = $line('ev-' . $e->id, 'run_ended', $e->created_at, $e->id, $d);
+                continue;
+            }
+            $items[] = $line('ev-' . $e->id, $e->type, $e->created_at, $e->id, $d);
         }
         usort($items, [self::class, 'order']);
 
@@ -384,7 +392,7 @@ class Inbox
     private function runs(string $pageId, string $psid): array
     {
         if (!$this->hasEvents()) return [];
-        $ends = DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->whereIn('type', ['run_ended', 'skipped'])
+        $ends = DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->whereIn('type', ['run', 'run_ended', 'skipped'])
             ->orderByDesc('id')->limit(20)->get();
         $flows = ChatbotFlow::whereIn('id', $ends->pluck('flow_id')->filter()->unique()->values())->pluck('name', 'id');
 

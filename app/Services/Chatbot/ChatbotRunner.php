@@ -70,8 +70,11 @@ class ChatbotRunner
 
                 $run = new FlowRun($flow->id, $flow->graph, (string) $c->page_name, (string) $c->page_id, $botfields, $fields, $c->id,
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
-                $this->engine->run($run, $this->outbox);
-                ChatbotEvents::store($run, (int) $c->page_id, (int) $c->psid);
+                try {
+                    $this->engine->run($run, $this->outbox);
+                } finally {
+                    ChatbotEvents::store($run, (int) $c->page_id, (int) $c->psid); // pati ang pumalyang takbo (run: failed)
+                }
                 // Hinihintay ang sagot ng AI: ang mga kasunod na chat ay mamaya na (ibinabalik ang job sa queue).
                 if (($run->aiPending || $run->sendPending) && $c->id !== $pending->last()->id) return 'locked';
             }
@@ -139,8 +142,11 @@ class ChatbotRunner
             $run = new FlowRun($flow->id, $flow->graph, (string) $last->page_name, (string) $last->page_id, $this->page->botfields((string) $last->page_name), $fields, null,
                 (string) $last->message, (string) $last->name, $last->received_at->timezone('Asia/Manila')->format('Y-m-d H:i'));
             $run->skippedAfter = $after;
-            $this->engine->run($run, $this->outbox);
-            ChatbotEvents::store($run, (int) $wait->page_id, (int) $wait->psid);
+            try {
+                $this->engine->run($run, $this->outbox);
+            } finally {
+                ChatbotEvents::store($run, (int) $wait->page_id, (int) $wait->psid);
+            }
 
             return 'done';
         } finally {
@@ -223,8 +229,11 @@ class ChatbotRunner
             $run->steps = (int) ($ctx['steps'] ?? 0);
             $apply($run, $row);
             $run->ticket = $ticket;
-            $this->engine->run($run, $this->outbox);
-            ChatbotEvents::store($run, (int) $pageId, $psid);
+            try {
+                $this->engine->run($run, $this->outbox);
+            } finally {
+                ChatbotEvents::store($run, (int) $pageId, $psid);
+            }
 
             return 'done';
         } finally {

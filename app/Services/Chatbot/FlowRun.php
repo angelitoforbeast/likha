@@ -74,6 +74,28 @@ class FlowRun
         return is_array($m) ? ['chat' => (int) ($m['chat'] ?? 0), 'reply' => (int) ($m['reply'] ?? 0)] : null;
     }
 
+    /** Ang simula ng takbo (oras at dahilan, hal. "resumed after wait"), isinusulat kasama ng dulo sa iisang `run` event. */
+    private ?array $start = null;
+    private bool $ended = false;
+
+    public function started(string $reason): void
+    {
+        $this->start ??= ['at' => now(), 'reason' => $reason];
+    }
+
+    /**
+     * Ang dulo ng takbo: isang `run` event na may simula at dulo (ang dating run_started + run_ended), isang beses lang. Ang
+     * "events" ay ilan ang event ng takbo bago ito (sa iisang insert), para mailagay ng Inbox ang linya ng simula bago sila.
+     */
+    public function ended(string $reason): void
+    {
+        if ($this->ended) return;
+        $this->ended = true;
+        $this->event('run', null, ['started_at' => ($this->start['at'] ?? now())->format('Y-m-d H:i:s'), 'ended_at' => now()->format('Y-m-d H:i:s'),
+            'start' => $this->start['reason'] ?? 'new', 'reason' => $reason, 'flow' => $this->flowId, 'path' => array_slice(array_column($this->path, 'node'), 0, 100),
+            'events' => count($this->events)]);
+    }
+
     /** Isang executed action; ang bawat value ng detail ay hanggang 200 letra. */
     public function event(string $type, ?string $node = null, array $detail = []): void
     {

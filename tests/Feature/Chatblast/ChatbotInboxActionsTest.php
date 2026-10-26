@@ -194,8 +194,8 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
 
         $this->assertCount(1, $inserts, 'isang insert kada takbo');
         $events = DB::table('chatbot_events')->where('chat_id', $chat->id)->orderBy('id')->get();
-        $this->assertSame(['run_started', 'field', 'field', 'condition', 'ai', 'sheet', 'waiting', 'run_ended'], $events->pluck('type')->all());
-        $this->assertSame([null, 'n2', 'n2', 'n3', 'n4', 'n5', 'n6', null], $events->pluck('node_id')->all());
+        $this->assertSame(['field', 'field', 'condition', 'ai', 'sheet', 'waiting', 'run'], $events->pluck('type')->all()); // spec 163: simula at dulo sa iisang run row
+        $this->assertSame(['n2', 'n2', 'n3', 'n4', 'n5', 'n6', null], $events->pluck('node_id')->all());
         $this->assertStringNotContainsString('SECRET PROMPT', $events->pluck('detail')->implode(' '));
         $this->assertSame(1, $events->pluck('detail')->map(fn ($d) => json_decode($d, true)['run'] ?? null)->unique()->count());
         $this->assertSame(200, $events->pluck('detail')->flatMap(fn ($d) => array_map(fn ($v) => is_string($v) ? mb_strlen($v) : 0, json_decode($d, true)))->max(), 'ang value ay hanggang 200 character');

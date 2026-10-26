@@ -352,7 +352,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
 
         $this->assertSame(['failed: You said: hi (Botcake said "Server error" (HTTP 500))'], $this->replies('7001'));
         $this->assertNull((new CustomerFields(1001, 7001))->get('done'), 'the run stopped at the failed send');
-        $ended = DB::table('chatbot_events')->where('type', 'run_ended')->orderByDesc('id')->value('detail');
+        $ended = DB::table('chatbot_events')->where('type', 'run')->orderByDesc('id')->value('detail'); // spec 163: ang dulo ng takbo ay nasa run row
         $this->assertSame('Send failed: Botcake said "Server error" (HTTP 500)', json_decode($ended, true)['reason']);
         $this->clock->time += 5;
         $this->pool->tick();
@@ -449,7 +449,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         Artisan::call('chatbot:resume-skipped');
         Artisan::call('chatbot:resume-skipped');
         $this->assertSame('yes', (new CustomerFields(1001, 7003))->get('done'));
-        $this->assertSame(1, DB::table('chatbot_events')->where('psid', 7003)->where('type', 'run_started')->where('detail', 'like', '%resumed after send%')->count());
+        $this->assertSame(1, DB::table('chatbot_events')->where('psid', 7003)->where('type', 'run')->where('detail', 'like', '%"start":"resumed after send"%')->count());
     }
 
     public static function notNow(): array

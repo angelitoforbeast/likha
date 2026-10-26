@@ -28,6 +28,17 @@ class FlowEngine
 
     public function run(FlowRun $run, Outbox $outbox): FlowRun
     {
+        try {
+            return $this->steps($run, $outbox);
+        } catch (Throwable $e) {
+            // Pumalya sa labas ng isang hakbang (hal. database): ang `run` event ay naitatala pa rin, may dahilan.
+            $run->ended('failed: ' . class_basename($e));
+            throw $e;
+        }
+    }
+
+    private function steps(FlowRun $run, Outbox $outbox): FlowRun
+    {
         $nodes = [];
         foreach ($run->graph['nodes'] ?? [] as $n) $nodes[$n['id']] = $n;
         $edges = [];
@@ -37,14 +48,14 @@ class FlowEngine
         // nito ipinagpapatuloy o binubura ang wait ng main flow.
         if ($run->aiAnswer !== null || $run->sendResult !== null) {
             $current = ($run->aiAnswer ?? $run->sendResult)['node'];
-            $run->event('run_started', null, ['reason' => $run->aiAnswer !== null ? (!empty($run->aiAnswer['encode']) ? 'resumed after the encode' : 'resumed after AI') : 'resumed after send', 'flow' => $run->flowId]);
+            $run->started($run->aiAnswer !== null ? (!empty($run->aiAnswer['encode']) ? 'resumed after the encode' : 'resumed after AI') : 'resumed after send');
         } else {
             $current = $run->startedBy !== null ? false : $this->resumePoint($run, $nodes, $edges);
         }
         if ($current === false) {
             $start = collect($nodes)->firstWhere('type', 'start');
             $current = $start['id'] ?? null;
-            $run->event('run_started', null, ['reason' => $run->startedBy ?? 'new', 'flow' => $run->flowId]);
+            $run->started($run->startedBy ?? 'new');
         }
         $suspended = false;
         $lastType = null;
@@ -101,7 +112,7 @@ class FlowEngine
         $lastStep = $run->path ? end($run->path) : null;
         $reason = $run->stopped ?? ($suspended ? ($run->aiPending ? 'waiting for the AI answer' : ($run->sendPending ? 'sending' : 'waiting for a reply')) : ($lastType === 'end' ? 'end'
             : (($lastStep['port'] ?? null) === 'failed' ? (string) ($lastStep['note'] ?? 'a step failed') : 'no next step')));
-        $run->event('run_ended', null, ['reason' => $reason, 'path' => array_slice(array_column($run->path, 'node'), 0, 100)]);
+        $run->ended($reason);
 
         return $run;
     }
@@ -122,14 +133,14 @@ class FlowEngine
         if ($run->skippedAfter !== null) {
             // Walang sagot sa takdang oras: ang port na skipped, walang sine-save.
             $label = $run->skippedAfter;
-            $run->event('run_started', null, ['reason' => 'no reply in ' . $label, 'flow' => $run->flowId]);
+            $run->started('no reply in ' . $label);
             $run->event('wait_skipped', $nodeId, ['after' => $label]);
             $run->path[] = ['node' => $nodeId, 'type' => 'send', 'port' => 'skipped', 'note' => 'No reply in ' . $label];
 
             return $edges[$nodeId . ':skipped'] ?? null;
         }
 
-        $run->event('run_started', null, ['reason' => 'resumed after wait', 'flow' => $run->flowId]);
+        $run->started('resumed after wait');
         if (($node['config']['save_to'] ?? '') !== '') {
             $run->fields->set($node['config']['save_to'], $run->input);
             $run->event('field', $nodeId, ['op' => 'set', 'field' => $node['config']['save_to'], 'value' => $run->input]);

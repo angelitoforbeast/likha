@@ -223,7 +223,7 @@ class BotcakeStressPage extends Command
         $line = fn (string $label, $value) => $this->line(sprintf('%-26s %s', $label, $value));
         $this->line(count($pages) === 1 ? 'Stress page "' . reset($pages) . '" (page ID ' . array_key_first($pages) . ')' : count($pages) . ' stress pages: ' . implode(', ', $pages));
         $line('Chats in', BotcakeChat::whereIn('page_id', array_map('strval', array_keys($pages)))->count());
-        $line('Flow runs', $events('run_started'));
+        $line('Flow runs', $events('run_started') + $events('run'));
         $line('Replies sent', (int) ($replies['sent'] ?? 0));
         $line('Replies failed', (int) ($replies['failed'] ?? 0));
         $line('AI ok', $events('ai', 'success'));
