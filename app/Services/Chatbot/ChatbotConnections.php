@@ -17,7 +17,8 @@ use Throwable;
  * isinusulat sa PageSettings (may user), saka ang chat block (Botcake, parehong chat.key) o ang webhook (Forbeast).
  *
  * Talaan (para sa Changes): bawat Test ay bagong botcake.token_status / forbeast.token_status (resulta at oras, may user);
- * ang chat block (sinuri, isinulat o pumalya) ay botcake.chat_block. Ang token ay huling 4 lang sa anumang ibinabalik.
+ * ang chat block (sinuri, isinulat o pumalya) ay botcake.chat_block; ang naka-on na Botcake keyword ay botcake.keywords.
+ * Ang token ay huling 4 lang sa anumang ibinabalik.
  */
 class ChatbotConnections
 {
@@ -39,6 +40,7 @@ class ChatbotConnections
             'botcake' => ['page_id' => $pageId, 'token' => self::masked(trim((string) $this->settings->get($page, 'botcake', 'token'))),
                 'status' => $this->settings->get($page, 'botcake', 'token_status'), 'tested_at' => $this->testedAt($page, 'botcake'),
                 'chat_block' => $this->hasChatBlock($page), 'chat_block_status' => $this->settings->get($page, 'botcake', 'chat_block'),
+                'keywords_status' => $this->settings->get($page, 'botcake', 'keywords'),
                 'connected' => $this->botcakeConnected($page)],
             'forbeast' => ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, ForbeastPageSetup::PROVIDER),
                 'connected' => $f['connected']],
@@ -107,12 +109,13 @@ class ChatbotConnections
         $this->settings->set($page, 'botcake', 'token', $token, true, $userId);
         $this->stamp($page, 'token_status', 'ok', $userId);
 
-        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)]];
+        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)] + $this->checkKeywords($page, $client, $pageId, $token, $userId)];
     }
 
     /**
      * Test ng naka-save na Botcake token (walang isinusulat sa Botcake): ang token test, saka kung nasa Default Reply pa ang
-     * block namin at published. Ang resulta ay itinatala (token_status at chat_block, may user at oras).
+     * block namin at published, at ang mga naka-on na keyword. Ang resulta ay itinatala (token_status, chat_block at keywords,
+     * may user at oras).
      * @return array{http: int, body: array<string, mixed>} body.chat_block = on | missing | unpublished | elsewhere | unknown | null
      */
     public function testBotcake(string $page, ?int $userId): array
@@ -146,7 +149,50 @@ class ChatbotConnections
         };
         $this->stamp($page, 'chat_block', $block, $userId, $note);
 
-        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $block, 'block_state' => $state, 'error' => $note]];
+        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $block, 'block_state' => $state, 'error' => $note]
+            + $this->checkKeywords($page, $client, $pageId, $token, $userId)];
+    }
+
+    /**
+     * Ang naka-on na keyword ng page sa Botcake (GET /keywords: id, is_activated at flow_id lang, walang text): ang
+     * mensaheng tumama sa keyword ay hindi umaabot sa Default Reply (sa block namin), kaya hindi pa gumagana nang buo ang
+     * bot. Basa lang: hindi ito kayang i-off ng API, sa Botcake ito ino-off ng staff. Ang pangalan ng flow ay mula sa
+     * GET /flows. Itinatala sa botcake.keywords (on, none o unknown, may user at oras); hindi nito binabago ang token_status.
+     * @return array{keywords: string, keywords_note: ?string}
+     */
+    private function checkKeywords(string $page, BotcakeClient $client, string $pageId, string $token, ?int $userId): array
+    {
+        try {
+            [$state, $note] = $this->keywords($client, $pageId, $token);
+        } catch (Throwable $e) {
+            report($e);
+            [$state, $note] = ['unknown', 'could not read the keywords'];
+        }
+        $this->stamp($page, 'keywords', $state, $userId, $note);
+
+        return ['keywords' => $state, 'keywords_note' => $note];
+    }
+
+    /** @return array{0: string, 1: ?string} [on, ang mga pangalan ng flow] | [none, null] | [unknown, ang dahilan] */
+    private function keywords(BotcakeClient $client, string $pageId, string $token): array
+    {
+        $r = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/keywords', [], $token);
+        if ($r['http'] < 200 || $r['http'] >= 300 || !is_array($r['body']) || ($r['body']['success'] ?? null) === false || !is_array($r['body']['data'] ?? null)) {
+            return ['unknown', 'could not read the keywords'];
+        }
+        $on = [];
+        foreach ($r['body']['data'] as $k) {
+            if (is_array($k) && ($k['is_activated'] ?? null) === true) $on[] = is_scalar($k['flow_id'] ?? null) ? (string) $k['flow_id'] : '';
+        }
+        if (!$on) return ['none', null];
+
+        $f = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/flows', [], $token);
+        $names = [];
+        foreach (is_array($f['body']) && is_array($f['body']['data']['flows'] ?? null) ? $f['body']['data']['flows'] : [] as $flow) {
+            if (is_array($flow) && is_scalar($flow['id'] ?? null) && is_string($flow['name'] ?? null)) $names[(string) $flow['id']] = trim($flow['name']);
+        }
+
+        return ['on', implode(', ', array_unique(array_map(fn ($id) => $id === '' ? 'no flow' : (($names[$id] ?? '') !== '' ? $names[$id] : 'flow ' . $id), $on)))];
     }
 
     /**

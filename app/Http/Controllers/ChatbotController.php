@@ -41,9 +41,9 @@ class ChatbotController extends Controller
     private const CHANGES_PER_PAGE = 50;
     private const CLEAR_GAP = 5; // segundo: ang deactivate na sinundan ng bagong row sa loob nito ay palit, hindi clear
     private const HIDDEN_KEYS = ['flow_id', 'mock_ai', 'mock_ai_latency_ms']; // system lang: wala sa grid, wala sa Changes
-    // Ang mga key ng Botcake at Forbeast na nasa Changes: ID at token (huling 4 lang), ang resulta ng bawat Test at ang chat block.
+    // Ang mga key ng Botcake at Forbeast na nasa Changes: ID at token (huling 4 lang), ang resulta ng bawat Test, ang chat block at ang keywords.
     private const SETUP_LABELS = ['botcake.page_id' => 'Botcake ID', 'botcake.token' => 'Botcake token', 'botcake.token_status' => 'Botcake test',
-        'botcake.chat_block' => 'Botcake chat block', 'forbeast.token' => 'Forbeast token', 'forbeast.token_status' => 'Forbeast test'];
+        'botcake.chat_block' => 'Botcake chat block', 'botcake.keywords' => 'Botcake keywords', 'forbeast.token' => 'Forbeast token', 'forbeast.token_status' => 'Forbeast test'];
     private const SETUP_ROLES = ['CEO', 'Marketing - OIC', 'Marketing'];
 
     public function __construct(private PageSettings $settings, private ChatbotFields $fields)
