@@ -2541,3 +2541,38 @@ Tests: `tests/Feature/Chatblast/ForbeastSendHealthTest.php` (`S_155`).
 | S-155.8 | P1 | Given no page on Forbeast, then Bot Health renders without the panel and without the note | `test_S_155_8…` | passed 2026-10-26 |
 | S-155.9 | P1 | Given a role without Chatblast access, then Bot Health is 403; a role with it sees the panel | `test_S_155_9…` | passed 2026-10-26 |
 | S-155.10 | P2 | Given a 390 px screen, then the panel tiles wrap two per row and the per-page table scrolls sideways | (markup check: `grid-cols-2`, `overflow-x-auto`) | not run in a browser |
+## S-154 Staff connect their Facebook once; Likha pulls the Ads Manager report from the Meta Marketing API
+
+As an Ads uploader, I connect my Facebook to my Likha account once, so Likha can compare (and, when the owner turns write mode on, fill) the Ads Manager report from the API instead of my XLSX uploads.
+
+- S-154.1 Connect. Given the Meta app id is set, When I click Connect Facebook, Then I am sent to the Facebook OAuth dialog with `scope=ads_read` and a state; When Facebook returns with that state and a code, Then the code is exchanged for a long-lived token, stored encrypted with its expiry, my Facebook name and the ad accounts I can read. Negative: a missing or wrong state is refused and nothing is stored.
+- S-154.2 Not set up. Given no Meta app id in config, When I open /ads_manager/report, Then the card says "Meta app not set up yet" and Connect does not crash (it says the same).
+- S-154.3 Compare. Given two connected ad accounts, a paged insights response, an ad only in the API, an ad only in the uploads and a spend difference, When I Compare for the date range, Then the compare runs on the queue (the card says "Compare running…" until it finishes) and the report shows, per ad account, the rows only in the API, only in the upload and the differing values with % difference, and `ads_manager_reports` is unchanged.
+- S-154.4 Field mapping. Given a faked API ad, When it is mapped, Then each `ads_manager_reports` column is filled as the upload would (spend→amount_spent_php, inline_link_clicks→link_clicks, messaging conversations from actions, results/cost_per_result, budget and type, delivery, starts/ends, headline/body/welcome message/quick replies when present).
+- S-154.5 Sync now. Given write mode on, When I click Sync now, Then rows are upserted by day + ad_id (new inserted, existing updated) and an `ads_manager_api` run is logged with inserted/updated/skipped and who. Negative: with write mode off, Sync now is refused and nothing is written.
+- S-154.6 Errors. Given one person's token returns error 190, When a sync runs, Then that token is marked expired, the page shows a red Reconnect, and the other people still sync. Edge: rate-limit codes 4/17/613 back off and retry, then the run is logged as partial with no crash.
+- S-154.7 Schedule. Given write mode off, When the scheduled sync fires at a slot, Then nothing is called or written; Given write mode on at a slot time, Then it syncs; off a slot time, nothing.
+- S-154.8 Token never shown. The token never appears in logs, responses, the page or upload_logs; it is stored encrypted.
+- S-154.9 Roles. Uploader roles (the "Ads" link) can connect, compare and sync; others get 404; only the CEO can turn write mode on or off (others 403).
+- S-154.10 Disconnect. When I Disconnect, Then my token row is removed and an event is logged.
+- S-154.11 (P2) The card is usable at 390 px.
+
+## S-156 Bot Health shows when a reply really reached the customer, the pending replies, and the real first reply per bot
+
+As the owner, Bot Health shows when each reply really reached the customer, not when the bot took it. Forbeast's `send_status` event gives the real time; Botcake sends at once, so its time is real. I can see what is still pending, the real first reply per bot and per page, and how long Forbeast takes from accept to send. A pending backlog raises the send lag alarm even when Forbeast's health endpoint is down.
+
+Slice 156. Threat model: `send_status` arrives on the existing signed `/api/gateway/events`. Forbeast is a trusted service we run, but its error text comes from Meta and is shown as text only, cut to 150 characters. Page settings are trusted. No new route. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/RealSendTimeTest.php` (`S_156`).
+
+| Case | P | Given / When / Then | Test | Status |
+|---|---|---|---|---|
+| S-156.1 | P1 | Given a Forbeast reply accepted at T (its `client_ref` stored when sent), when `send_status` sent at T+250 s arrives, then the confirmed time is T+250 and the real first reply is customer message → T+250; a repeat event changes nothing and is counted as a repeat | `test_S_156_1…` | passed 2026-10-26 |
+| S-156.2 | P1 | Given `failed` with Meta code 551, then the reply is failed with "(#551)" in the error and counted under "Customer not reachable"; `partial` with code 10 gives status partial, "sent n of m" and "(#10)" kept; an unknown status is counted and writes nothing | `test_S_156_2…` | passed 2026-10-26 |
+| S-156.3 | P1 | Given accepted-unconfirmed Forbeast replies, then the Pending tile shows the count and the oldest age (red over 120 s), and the per-page table shows them by page; a reply that failed at accept, a Botcake reply, and a reply with a newer confirmed reply to the same customer are not pending | `test_S_156_3…` | passed 2026-10-26 |
+| S-156.4 | P1 | Given confirmed Forbeast replies and Botcake replies, then real first reply median/p90/max are shown overall, per bot (Compare bots) and per page, next to the "accepted" numbers; Botcake uses its sent_at (old rows too); Forbeast accept → sent median/p90/max are shown; the hourly chart uses the real time | `test_S_156_4…` | passed 2026-10-26 |
+| S-156.5 | P1 | Given the oldest pending Forbeast reply over 120 s for 3 runs of the watch in a row, then one `send_lag` alarm (error "Likha: oldest pending…", the late pages); after confirmation, 3 runs under 30 s give `recovered`; no page switches. Given a health alarm while there is no `send_status` yet and the health check times out, then no `recovered` until health samples are low | `test_S_156_5…` (2 tests) | passed 2026-10-26 |
+| S-156.6 | P1 | Given no `send_status` in the last 24 h, then Bot Health says "real send time not available yet (Forbeast update pending)", there is no Pending tile and no pending alarm; when the first `send_status` arrives, older replies are not counted as pending or unconfirmed | `test_S_156_6…` | passed 2026-10-26 |
+| S-156.7 | P1 | Given an unknown `client_ref`, then nothing changes and it is counted; a reply stored before `client_ref` existed is matched by page + PSID, the nearest one within 10 minutes of `accepted_at` | `test_S_156_7…` | passed 2026-10-26 |
+| S-156.8 | P1 | Given a Forbeast reply over 24 h old with no confirmation, then it counts as unconfirmed, not pending | `test_S_156_8…` | passed 2026-10-26 |
+| S-156.9 | P1 | Given a confirmation (`sent` or `partial`), then the "accepted" numbers (inbound, answered, first reply avg/median/p90/max) stay as they were | `test_S_156_9…` | passed 2026-10-26 |
+| S-156.10 | P2 | Given a 390 px screen, then the real send tiles wrap two per row and the per-page table scrolls sideways | `test_S_156_10…` (markup) | passed (markup), not run in a browser |
