@@ -10,7 +10,7 @@
         ['Failed % (60 min)', 'failed_pct_60m', '%'], ['Forward lag', 'forward_lag_seconds', 's'], ['Workers', 'workers', '']];
     // Ang 24 oras na linya ng overall send lag (inline SVG).
     $w = 600; $h = 120; $end = now()->getTimestamp(); $start = $end - 86400;
-    $max = max(array_merge([(float) ($fb['thresholds']['send_lag_red'] ?? 120)], array_map(fn ($s) => (float) $s['lag'], $fb['series'])));
+    $max = max(array_merge([1.0, (float) ($fb['thresholds']['send_lag_red'] ?? 120)], array_map(fn ($s) => (float) $s['lag'], $fb['series'])));
     $pt = fn ($s) => round(($s['at'] - $start) / 86400 * $w, 1) . ',' . round($h - (float) $s['lag'] / $max * ($h - 10), 1);
     $redY = round($h - (float) ($fb['thresholds']['send_lag_red'] ?? 120) / $max * ($h - 10), 1);
 @endphp

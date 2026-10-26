@@ -125,7 +125,11 @@ class ForbeastSendHealth
     private function alarmCheck(array $snap): void
     {
         $pages = $this->forbeastPages();
-        if ($pages === []) return;
+        if ($pages === []) {
+            // Walang page sa Forbeast: walang alarm na dapat manatili sa screen.
+            Cache::forget(self::STATE);
+            return;
+        }
         $state = (array) Cache::get(self::STATE, []) + ['active' => false, 'high' => 0, 'page_high' => [], 'low' => 0, 'last' => 0];
 
         $overallLag = $snap['overall']['send_lag_seconds'];
@@ -143,6 +147,12 @@ class ForbeastSendHealth
         $lagging = array_keys(array_filter($pageHigh, fn ($c) => $c >= self::STREAK));
         $now = now()->getTimestamp();
         $error = 'Forbeast send lag ' . $overallLag . 's, ' . $snap['overall']['queued_sends'] . ' queued';
+        if ($state['high'] < self::STREAK && $lagging !== []) {
+            // Ang page lang ang lampas: ang pinakamabagal na page ang numero, hindi ang overall.
+            usort($lagging, fn ($a, $b) => $snap['pages'][$b]['send_lag_seconds'] <=> $snap['pages'][$a]['send_lag_seconds']);
+            $w = $snap['pages'][$lagging[0]];
+            $error = 'Forbeast send lag ' . $w['send_lag_seconds'] . 's, ' . $w['queued_sends'] . ' queued';
+        }
         if (($state['high'] >= self::STREAK || $lagging !== []) && $now - (int) $state['last'] >= self::REPEAT_SECONDS) {
             // Ang apektado: ang mga page na lampas; kung ang overall lang, lahat ng page sa Forbeast.
             $names = array_map(fn ($id) => $pages[$id], $lagging !== [] ? $lagging : array_keys($pages));
