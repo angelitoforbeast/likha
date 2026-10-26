@@ -137,6 +137,10 @@ class MetaAdsController extends Controller
             $report = $compare->run($from, $to);
         } catch (GraphException $e) {
             return $this->back()->withErrors(['meta' => 'Compare failed: ' . $e->getMessage()]);
+        } catch (\Throwable $e) {
+            // Kakaibang sagot ng Graph (hal. data na hindi listahan): mensahe, hindi 500.
+            Log::warning('MetaAds: compare failed', ['error' => \App\Services\MetaAds\Graph::clean($e->getMessage())]);
+            return $this->back()->withErrors(['meta' => 'Compare failed: unexpected answer from Facebook.']);
         }
         Connections::event("compare {$from}..{$to}", Auth::id());
 

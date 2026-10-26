@@ -15,7 +15,7 @@ class SyncMetaAdsReports implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 3600;
+    public int $timeout = 1800; // mas mababa sa retry_after (1900) ng database queue
     public int $tries   = 1;
 
     public function __construct(public int $uploadLogId, public string $from, public string $to)

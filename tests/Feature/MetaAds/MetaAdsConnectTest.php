@@ -5,6 +5,7 @@ namespace Tests\Feature\MetaAds;
 use App\Services\MetaAds\Connections;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -98,6 +99,35 @@ class MetaAdsConnectTest extends MetaAdsTestCase
             $this->assertStringNotContainsString(self::TOKEN_ANA, $out);
             $this->assertStringNotContainsString(substr(self::TOKEN_ANA, -4), $out);
         }
+    }
+
+    public function test_S_154_8_a_paging_next_link_to_another_host_is_not_followed_with_the_token(): void
+    {
+        Http::fake([
+            'graph.facebook.com/*' => Http::response(['data' => [['id' => 'act_1']], 'paging' => ['next' => 'https://attacker.example/steal?after=p2']]),
+        ]);
+
+        $rows = app(\App\Services\MetaAds\Graph::class)->all('me/adaccounts', ['fields' => 'id'], self::TOKEN_ANA);
+
+        $this->assertSame([['id' => 'act_1']], $rows);
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn ($req) => str_contains($req->url(), 'attacker.example'));
+    }
+
+    public function test_S_154_8_a_failed_exchange_shows_and_logs_no_secret_or_code(): void
+    {
+        $this->actingAs($this->user('Marketing', 'm@example.test'));
+        Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException(
+            'cURL error 28 for https://graph.facebook.com/v25.0/oauth/access_token?client_id=999000&client_secret=app-secret-xyz&code=secret-code-123'));
+        $logged = [];
+        Log::listen(function ($e) use (&$logged) { $logged[] = $e->message . json_encode($e->context); });
+
+        $res = $this->withSession(['meta_ads_state' => str_repeat('s', 40)])
+            ->get('/ads_manager/meta/callback?code=secret-code-123&state=' . str_repeat('s', 40));
+
+        $shown = implode(' ', session('errors')->get('meta')) . implode("\n", $logged) . $res->getContent();
+        $this->assertStringContainsString('Facebook connect failed', $shown);
+        foreach (['app-secret-xyz', 'secret-code-123'] as $secret) $this->assertStringNotContainsString($secret, $shown);
     }
 
     public function test_S_154_10_disconnect_removes_the_token_row_and_logs_it(): void

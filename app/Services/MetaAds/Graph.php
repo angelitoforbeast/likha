@@ -65,6 +65,8 @@ class Graph
             $next = $page['paging']['next'] ?? null;
             // Walang susunod, o pareho ang next (hindi umuusad): tapos na.
             if (!is_string($next) || $next === '' || isset($seen[$next]) || empty($page['data'])) return $out;
+            // Ang token ay sa graph.facebook.com lang ipinapadala: ang next na ibang host ay hindi sinusundan.
+            if (strtolower((string) parse_url($next, PHP_URL_SCHEME)) !== 'https' || strtolower((string) parse_url($next, PHP_URL_HOST)) !== 'graph.facebook.com') return $out;
             $seen[$next] = true;
             $page = $this->get($next, [], $token);
         }
