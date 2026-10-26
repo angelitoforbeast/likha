@@ -33,11 +33,31 @@ class RealSendTime
             ->where('sent_at', '>=', $since->copy()->subSeconds(self::WINDOW_SECONDS))->where('confirmed_at', '>=', $since)->exists();
     }
 
-    /** Ang hindi pa kumpirmado ng Forbeast (tinanggap, status sent). */
+    /**
+     * Ang sent_at ng pinakaunang kumpirmadong padala ng Forbeast (kailanman); null = wala pa. Ang mas luma rito ay hindi
+     * kailanman makakakuha ng send_status (bago ito naka-deploy sa Forbeast), kaya hindi pending o unconfirmed. Isang seek
+     * sa index kada status.
+     */
+    private function firstConfirmed(): ?string
+    {
+        $mins = array_filter(array_map(fn ($s) => DB::table('chatbot_replies')->where('via', ChatbotProvider::FORBEAST)->where('confirmed_status', $s)->min('sent_at'),
+            SendStatus::STATUSES));
+
+        return $mins ? min($mins) : null;
+    }
+
+    /**
+     * Ang hindi pa kumpirmado ng Forbeast (tinanggap, status sent), mula sa unang kumpirmasyon. Hindi kasama ang may mas
+     * bagong kumpirmadong padala sa parehong page + PSID: sunod-sunod ang padala ng Forbeast kada PSID, kaya tapos na ito
+     * (nawalang send_status), at hindi nito mahahawakan ang alarm nang 24 oras.
+     */
     private function unconfirmedQuery(?array $pages)
     {
-        return DB::table('chatbot_replies')->where('via', ChatbotProvider::FORBEAST)->whereNull('confirmed_status')->where('status', 'sent')
-            ->whereIn('kind', ['send', 'manual'])->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages));
+        return DB::table('chatbot_replies as r')->where('r.via', ChatbotProvider::FORBEAST)->whereNull('r.confirmed_status')->where('r.status', 'sent')
+            ->whereIn('r.kind', ['send', 'manual'])->where('r.sent_at', '>=', $this->firstConfirmed() ?? '9999-12-31 00:00:00')
+            ->when($pages !== null, fn ($q) => $q->whereIn('r.page_id', $pages))
+            ->whereNotExists(fn ($q) => $q->from('chatbot_replies as l')->whereColumn('l.page_id', 'r.page_id')->whereColumn('l.psid', 'r.psid')
+                ->whereColumn('l.sent_at', '>', 'r.sent_at')->whereNotNull('l.confirmed_status')->where('l.via', ChatbotProvider::FORBEAST));
     }
 
     /** Ang pending ngayon kada page (page ID => [count, oldest na edad sa segundo]). @return array<string, array{count: int, oldest: int}> */
@@ -64,7 +84,7 @@ class RealSendTime
     /** Ang segundo mula pagtanggap hanggang padala ng mga naipadala (sent o partial) ng Forbeast. @return int[] */
     public function lags(string $startAt, string $endAt, ?array $pages): array
     {
-        return DB::table('chatbot_replies')->where('via', ChatbotProvider::FORBEAST)->whereIn('confirmed_status', ['sent', 'partial'])
+        return DB::table('chatbot_replies')->where('via', ChatbotProvider::FORBEAST)->whereIn('confirmed_status', SendStatus::DELIVERED)
             ->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
             ->get(['sent_at', 'confirmed_at'])->map(fn ($r) => max(0, strtotime($r->confirmed_at) - strtotime($r->sent_at)))->all();
     }

@@ -174,16 +174,23 @@ class ForbeastSendHealth
      * Ang parehong alarm mula sa sariling data ng Likha (gumagana kahit hindi sumasagot ang health ng Forbeast): ang
      * pinakamatandang pending na sagot ng Forbeast > LAG_ALARM sa STREAK na sunod na minuto. Recovered kapag ang dalawa
      * ay < LAG_CLEAR: ang pending sa STREAK na minuto, at ang health (ang sample, o walang bagong sample). Walang
-     * send_status pa (RealSendTime::available): walang pending, kaya walang alarm mula rito.
+     * send_status pa (RealSendTime::available): walang data, kaya hindi ito nagtataas o nagbubura ng alarm.
      */
     public function pendingCheck(): void
     {
         $pages = $this->forbeastPages();
         if ($pages === []) return; // alarmCheck ang nagbubura ng estado
         $rst = app(RealSendTime::class);
-        $pending = $rst->available() ? $rst->pending(array_map('intval', array_keys($pages))) : [];
-        $sum = RealSendTime::summary($pending);
         $state = (array) Cache::get(self::STATE, []) + ['active' => false, 'high' => 0, 'page_high' => [], 'low' => 0, 'last' => 0];
+        if (!$rst->available()) {
+            // Walang data mula rito: hindi nagtataas at hindi nagbubura ng alarm, at hindi rin humaharang sa recovery ng health.
+            $state['pending_high'] = 0;
+            $state['pending_low'] = self::STREAK;
+            Cache::put(self::STATE, $state, self::TTL);
+            return;
+        }
+        $pending = $rst->pending(array_map('intval', array_keys($pages)));
+        $sum = RealSendTime::summary($pending);
         $state['pending_high'] = $sum['oldest'] > self::LAG_ALARM ? ($state['pending_high'] ?? 0) + 1 : 0;
         $state['pending_low'] = $sum['oldest'] < self::LAG_CLEAR ? ($state['pending_low'] ?? 0) + 1 : 0;
 

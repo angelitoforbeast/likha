@@ -16,6 +16,8 @@ use Throwable;
 class SendStatus
 {
     public const STATUSES = ['sent', 'partial', 'failed'];
+    /** Ang may naipadala sa customer (ang partial ay may naipadala rin). */
+    public const DELIVERED = ['sent', 'partial'];
     private const NEAR_SECONDS = 600;
 
     /** @return string ang bibilangin: send_status, send_status_repeat, send_status_unknown o send_status_bad */

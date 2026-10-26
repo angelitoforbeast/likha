@@ -342,10 +342,9 @@ class BotHealth
                     'inbound' => $x['inbound'], 'answered_pct' => $x['answered_pct'], 'reply_median' => $x['reply_median'], 'reply_p90' => $x['reply_p90'],
                     'failed_pct_excl' => $x['failed_pct_excl'],
                     'top_reasons' => array_map(fn ($k) => [self::REASONS[$k], $reasons[$k]], array_slice(array_keys($reasons), 0, 3)),
-                    'real_median' => $x['real_median'], 'real_p90' => $x['real_p90'], 'real_max' => $x['real_max'],
                     'ai_failed_pct' => $x['ai_failed_pct'], 'comments_in' => $x['comments_in'], 'comments_replied' => $x['comments_replied'],
                     'auto_switches' => $switches[$d][$bot] ?? 0,
-                ];
+                ] + (RealSendTime::ready() ? ['real_median' => $x['real_median'], 'real_p90' => $x['real_p90'], 'real_max' => $x['real_max']] : []);
             }
             $out[] = $row;
         }
@@ -395,11 +394,11 @@ class BotHealth
         $real = RealSendTime::ready();
         $rows = DB::table('botcake_chats as c')
             ->leftJoin('chatbot_replies as r', fn ($j) => $j->on('r.chat_id', '=', 'c.id')->where('r.kind', 'send')
-                ->when($real, fn ($j) => $j->whereIn('r.status', ['sent', 'partial']), fn ($j) => $j->where('r.status', 'sent')))
+                ->when($real, fn ($j) => $j->whereIn('r.status', SendStatus::DELIVERED), fn ($j) => $j->where('r.status', 'sent')))
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
             ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
             ->groupBy('c.id', 'c.page_id', 'c.received_at')->selectRaw('c.id, c.page_id, c.received_at, MIN(r.sent_at) as first_at'
-                . ($real ? ", MIN(CASE WHEN r.confirmed_status IN ('sent', 'partial') THEN r.confirmed_at WHEN r.via = 'forbeast' THEN NULL ELSE r.sent_at END) as real_at" : ''))->get();
+                . ($real ? ", MIN(CASE WHEN r.confirmed_status IN ('" . implode("', '", SendStatus::DELIVERED) . "') THEN r.confirmed_at WHEN r.via = 'forbeast' THEN NULL ELSE r.sent_at END) as real_at" : ''))->get();
         foreach ($rows as $r) {
             if (!self::hadFlow($spans[(string) $r->page_id], $r->received_at)) continue;
             $secs = $r->first_at === null ? null : max(0, strtotime($r->first_at) - strtotime($r->received_at));
