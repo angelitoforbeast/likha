@@ -91,7 +91,7 @@ class ChatbotInboxController extends Controller
 
         return view('chatbot.inbox', [
             'pages' => $pages, 'canSend' => $this->canSend(), 'isCeo' => $this->role() === 'CEO',
-            'replyRoles' => self::replyRoles(), 'allRoles' => $roles, 'repliesOn' => BotcakeOutbox::enabled(),
+            'replyRoles' => self::replyRoles(), 'allRoles' => $roles, 'repliesOn' => BotcakeOutbox::enabled(), 'botPause' => (bool) config('chatbot.inbox_bot_pause'),
         ]);
     }
 
@@ -167,7 +167,7 @@ class ChatbotInboxController extends Controller
         if ($image !== '') $messages[] = ['type' => 'image', 'url' => $image];
 
         // Pause muna bago ipadala: ang chat na dumating habang naghihintay sa Botcake ay hindi na sasagutin ng bot.
-        if ($request->boolean('pause')) (new CustomerFields((int) $pageId, (int) $psid))->set(CustomerFields::BOT_PAUSED, '1');
+        if ($request->boolean('pause') && config('chatbot.inbox_bot_pause')) (new CustomerFields((int) $pageId, (int) $psid))->set(CustomerFields::BOT_PAUSED, '1');
         // Ang daan ng page (Botcake o ang Forbeast Gateway), isang subok lang.
         $provider = ChatbotProvider::for($page, true);
         $o = $provider->send($page, $pageId, $psid, $messages, $ref = ChatbotProvider::ref());
@@ -210,7 +210,8 @@ class ChatbotInboxController extends Controller
         if (!$this->canSend()) abort(403);
         [$pageId, , $psid] = $this->target($request);
         $fields = new CustomerFields((int) $pageId, (int) $psid);
-        if ($request->boolean('paused')) $fields->set(CustomerFields::BOT_PAUSED, '1'); else $fields->clear(CustomerFields::BOT_PAUSED);
+        // Nakapatay ang pause sa Inbox: ang paused=1 mula sa lumang page ay hindi pinapansin; ang unpause ay laging gumagana.
+        if ($request->boolean('paused')) { if (config('chatbot.inbox_bot_pause')) $fields->set(CustomerFields::BOT_PAUSED, '1'); } else $fields->clear(CustomerFields::BOT_PAUSED);
 
         return response()->json(['bot_paused' => $fields->get(CustomerFields::BOT_PAUSED) === '1']);
     }
