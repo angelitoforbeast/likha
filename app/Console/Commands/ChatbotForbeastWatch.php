@@ -49,6 +49,12 @@ class ChatbotForbeastWatch extends Command
         } catch (Throwable $e) {
             report($e);
         }
+        // Ang parehong alarm mula sa pending na sagot sa Likha (kahit hindi sumasagot ang health ng Forbeast).
+        try {
+            app(ForbeastSendHealth::class)->pendingCheck();
+        } catch (Throwable $e) {
+            report($e);
+        }
 
         return self::SUCCESS;
     }
