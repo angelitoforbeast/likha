@@ -1211,3 +1211,12 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
 - Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
 - Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.
+
+## 158: SHOP DETAILS built from the fields, accepted review minors (2026-10-26)
+- `chatbot:shop-details-diff` compares the text literally (CRLF aside), so old pipe-style rows ("PAGE: X | ITEM: Y") and "PRICE: 198" without ₱ are listed even when the values agree. Reason: the spec asks for old vs new text; staff read the two columns side by side.
+- The Edit modal's read-only SHOP DETAILS shows the value from when the modal opened, not a live preview while ITEM/PRICE/QUANTITY are edited. Reason: it is rebuilt on Save and reload; a live copy of the rule in JS would be a second source of truth.
+- The PAGE line uses the page name the caller passes (a flow run passes the chat's page name, which matches the stored one by `pageKey`), so case or spacing could differ from `page_settings.page_name`. Reason: orders ignore the PAGE line (`Parse::itemPrice` reads ITEM, QUANTITY, PRICE).
+- AI paste mapping: a sheet cell whose position guess is SHOP DETAILS goes to the AI without a guess (the server drops `shop_details` as a target), so the AI may map that text to another field. Reason: the mapping preview shows every value's field before Apply and Save.
+- A PRICE with no number at the start ("FREE") is reported as "SHOP DETAILS: missing PRICE" though the field has a value. Reason: wording only; the order would get no COD, which is what the X warns about.
+- If `shop_details` was ever added through "+ Column", its custom label wins over "SHOP DETAILS". Reason: only staff could have created it, and the column stays read-only (kind `auto`).
+- 390 px (S-158.7) not checked in a browser: no running app in this worktree. The cell and modal box use `break-words` / `whitespace-pre-line` like the other fields.
