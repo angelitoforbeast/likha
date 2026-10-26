@@ -10,6 +10,7 @@ use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\Chatbot\CommentReplies;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\SendStatus;
 use App\Services\PageSettings;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -56,7 +57,18 @@ class HandleGatewayEvent implements ShouldQueue
             // Ang comment (type comment): ang mga ID lang; ang text ng comment ay hindi ipinapasa sa queue.
             'comment_id' => $s($e['comment_id'] ?? null, 100), 'post_id' => $s($e['post_id'] ?? null, 100), 'parent_id' => $s($e['parent_id'] ?? null, 100),
             'from_id' => $s($e['from_id'] ?? null, 64), 'is_reply' => (bool) ($e['is_reply'] ?? false), 'is_page_author' => (bool) ($e['is_page_author'] ?? false),
-        ];
+        ] + (($e['type'] ?? null) === 'send_status' ? ['send' => self::send($e['send'] ?? null, $s)] : []);
+    }
+
+    /** Ang send ng send_status (SendStatus): ang mga field na ginagamit lang. */
+    private static function send(mixed $send, \Closure $s): array
+    {
+        $d = is_array($send) ? $send : [];
+        $int = fn ($v) => is_int($v) || (is_string($v) && ctype_digit($v)) ? (int) $v : null;
+
+        return ['client_ref' => $s($d['client_ref'] ?? null, 100), 'status' => $s($d['status'] ?? null, 10), 'accepted_at' => $s($d['accepted_at'] ?? null, 40),
+            'sent_at' => $s($d['sent_at'] ?? null, 40), 'message_count' => $int($d['message_count'] ?? null), 'sent_count' => $int($d['sent_count'] ?? null),
+            'error_code' => $int($d['error_code'] ?? null), 'error_subcode' => $int($d['error_subcode'] ?? null), 'error' => $s($d['error'] ?? null, 500)];
     }
 
     /** Bilang kada araw (Manila), 3 araw: ang type ng event, 'echo', 'botcake_page', 'duplicate', … */
@@ -70,6 +82,11 @@ class HandleGatewayEvent implements ShouldQueue
     public function handle(PageSettings $settings, BotcakeChatGuard $guard): void
     {
         $e = $this->event;
+        // Ang totoong oras ng padala (para sa Bot Health): walang takbo ng bot.
+        if ($e['kind'] === 'event' && $e['type'] === 'send_status' && isset($e['send'])) {
+            self::count(app(SendStatus::class)->receive($e));
+            return;
+        }
         if ($e['kind'] === 'event' && $e['type'] === 'comment' && array_key_exists('comment_id', $e)) {
             $pageName = BotcakeChat::pageMap()[(string) $e['page_id']] ?? null;
             self::count($pageName === null ? 'unknown_page' : app(CommentReplies::class)->receive($e, $pageName));

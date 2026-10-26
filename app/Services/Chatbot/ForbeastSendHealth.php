@@ -161,7 +161,44 @@ class ForbeastSendHealth
             $state['active'] = true;
             $state['last'] = $now;
             $state['error'] = $error;
-        } elseif ($state['active'] && $state['low'] >= self::STREAK) {
+        } elseif ($state['active'] && $state['low'] >= self::STREAK && ($state['pending_low'] ?? self::STREAK) >= self::STREAK) {
+            $this->record(array_values($pages), self::RECOVERED, $error);
+            $state['active'] = false;
+            $state['last'] = 0;
+            unset($state['since'], $state['error']);
+        }
+        Cache::put(self::STATE, $state, self::TTL);
+    }
+
+    /**
+     * Ang parehong alarm mula sa sariling data ng Likha (gumagana kahit hindi sumasagot ang health ng Forbeast): ang
+     * pinakamatandang pending na sagot ng Forbeast > LAG_ALARM sa STREAK na sunod na minuto. Recovered kapag ang dalawa
+     * ay < LAG_CLEAR: ang pending sa STREAK na minuto, at ang health (ang sample, o walang bagong sample). Walang
+     * send_status pa (RealSendTime::available): walang pending, kaya walang alarm mula rito.
+     */
+    public function pendingCheck(): void
+    {
+        $pages = $this->forbeastPages();
+        if ($pages === []) return; // alarmCheck ang nagbubura ng estado
+        $rst = app(RealSendTime::class);
+        $pending = $rst->available() ? $rst->pending(array_map('intval', array_keys($pages))) : [];
+        $sum = RealSendTime::summary($pending);
+        $state = (array) Cache::get(self::STATE, []) + ['active' => false, 'high' => 0, 'page_high' => [], 'low' => 0, 'last' => 0];
+        $state['pending_high'] = $sum['oldest'] > self::LAG_ALARM ? ($state['pending_high'] ?? 0) + 1 : 0;
+        $state['pending_low'] = $sum['oldest'] < self::LAG_CLEAR ? ($state['pending_low'] ?? 0) + 1 : 0;
+
+        $now = now()->getTimestamp();
+        $latest = Cache::get(self::LATEST);
+        $healthLow = $state['low'] >= self::STREAK || !is_array($latest) || $now - (int) $latest['fetched_at'] > self::STALE_SECONDS || Cache::has(self::MISSING);
+        $error = 'Likha: oldest pending Forbeast reply ' . $sum['oldest'] . 's, ' . $sum['count'] . ' pending';
+        if ($state['pending_high'] >= self::STREAK && $now - (int) $state['last'] >= self::REPEAT_SECONDS) {
+            $late = array_keys(array_filter($pending, fn ($p) => $p['oldest'] > self::LAG_ALARM));
+            $this->record(array_values(array_intersect_key($pages, array_flip($late))) ?: array_values($pages), self::ALARM, $error);
+            $state['since'] = $state['active'] ? ($state['since'] ?? $now) : $now;
+            $state['active'] = true;
+            $state['last'] = $now;
+            $state['error'] = $error;
+        } elseif ($state['active'] && $state['pending_low'] >= self::STREAK && $healthLow) {
             $this->record(array_values($pages), self::RECOVERED, $error);
             $state['active'] = false;
             $state['last'] = 0;
