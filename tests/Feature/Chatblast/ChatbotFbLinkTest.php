@@ -29,11 +29,13 @@ class ChatbotFbLinkTest extends ChatblastTestCase
         $this->assertSame(1, preg_match('~// fb-link:start(.*?)// fb-link:end~s', $html, $m), 'the helper is on the page');
         $node = (new ExecutableFinder())->find('node');
         if ($node === null) $this->markTestSkipped('Node is not installed.');
-        $file = tempnam(sys_get_temp_dir(), 'fbl') . '.mjs';
+        $base = tempnam(sys_get_temp_dir(), 'fbl');
+        $file = $base . '.mjs';
         file_put_contents($file, $m[1] . "\nconsole.log(JSON.stringify(" . json_encode($ids) . ".map(fbLink)));");
         $p = new Process([$node, $file]);
         $p->run();
         @unlink($file);
+        @unlink($base);
         $this->assertTrue($p->isSuccessful(), $p->getErrorOutput());
 
         return json_decode($p->getOutput(), true);
