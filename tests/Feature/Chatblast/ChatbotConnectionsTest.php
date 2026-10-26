@@ -564,6 +564,11 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $this->postJson('/chatbot/connections/botcake', ['page_name' => 'Page Uno', 'page_id' => '1001', 'token' => self::NEW_BC])->assertOk()
             ->assertJson(['status' => 'ok', 'chat_block' => ['ok' => true], 'keywords' => 'on', 'keywords_note' => 'ON DELIVERY SCRIPT']);
         $this->assertStringStartsWith('on', (string) $this->settings()->get('Page Uno', 'botcake', 'keywords'));
+
+        // Ang gabi-gabing retest (testBotcake din) ay nagtatala rin ng keyword check.
+        $this->keywords(false);
+        Artisan::call('chatbot:connections-check');
+        $this->assertStringStartsWith('none', (string) $this->settings()->get('Page Uno', 'botcake', 'keywords'));
     }
 
     public function test_S_153_9_the_keyword_check_has_the_tests_access_and_shows_in_changes_with_the_user(): void
@@ -591,6 +596,12 @@ class ChatbotConnectionsTest extends ChatblastTestCase
         $s->set('Page Uno', 'botcake', 'keywords', 'on 2026-10-26 09:00:00 · ON DELIVERY SCRIPT, Old Promo', false, null, true);
         $this->assertSame($x, $check()['x'] ?? null);
         $this->assertSame('on', collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->keyBy('page')['Page Uno']['botcake_keywords']);
+
+        // Nasa Forbeast ang page: hindi dumadaan sa Botcake keyword, kaya walang X at walang marka.
+        $s->set('Page Uno', 'chatbot', 'provider', 'gateway');
+        $this->assertNotContains($x, array_column(app(\App\Services\Chatbot\PageContentCheck::class)->setup('Page Uno'), 'reason'));
+        $this->assertNull(collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->keyBy('page')['Page Uno']['botcake_keywords']);
+        $s->set('Page Uno', 'chatbot', 'provider', 'botcake');
 
         $s->set('Page Uno', 'botcake', 'keywords', 'none 2026-10-26 10:00:00', false, null, true);
         $this->assertNotContains($x, array_column(app(\App\Services\Chatbot\PageContentCheck::class)->setup('Page Uno'), 'reason'));
