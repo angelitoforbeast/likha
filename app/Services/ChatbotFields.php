@@ -128,7 +128,7 @@ class ChatbotFields
 
             return ['key' => $key, 'label' => $added[$key]];
         });
-        Cache::forget(self::LABELS_CACHE); // pagkatapos ng commit, para hindi maibalik ng ibang takbo ang luma
+        Cache::forget(self::LABELS_CACHE); // pagkatapos ng commit; ang takbong nagbasa bago nito ay maaaring magbalik ng luma hanggang LABELS_SECONDS
 
         return $col;
     }

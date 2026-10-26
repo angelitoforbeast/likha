@@ -8,7 +8,7 @@ use App\Services\PageSettings;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Ang chatbot sa 50–100 chat bawat segundo (spec 161): ang Horizon supervisor na chatbot (min, max, bilis ng paglaki,
+ * Ang chatbot sa 50–100 chat bawat segundo: ang Horizon supervisor na chatbot (min, max, bilis ng paglaki,
  * memory), ang default na sabay na AI request, at ang label ng mga botfield na hindi na binabasa sa lahat ng page sa
  * bawat takbo.
  */
@@ -52,8 +52,6 @@ class ChatbotThroughputTest extends ChatblastTestCase
         $chatbot = $horizon['chatbot'];
 
         $this->assertSame([4, 40, 5, 1, 256], [$chatbot['minProcesses'], $chatbot['maxProcesses'], $chatbot['balanceMaxShift'], $chatbot['balanceCooldown'], $chatbot['memory']]);
-        // Mula 4 + 4 hanggang 40: 32 na dagdag, 5 kada segundo, kaya wala pang 30 s.
-        $this->assertLessThanOrEqual(30, (int) ceil(($chatbot['maxProcesses'] - 2 * $chatbot['minProcesses']) / $chatbot['balanceMaxShift']) * $chatbot['balanceCooldown']);
         // Ang chatblast ay gaya ng dati.
         $this->assertSame([2, 8, 1, 3, 256], [$horizon['chatblast']['minProcesses'], $horizon['chatblast']['maxProcesses'], $horizon['chatblast']['balanceMaxShift'], $horizon['chatblast']['balanceCooldown'], $horizon['chatblast']['memory']]);
 
