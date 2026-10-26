@@ -1211,3 +1211,10 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
 - Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
 - Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.
+
+## Spec 157 (FB link on /chatbot/pages): accepted minors
+- S-157.1/.2 run the page's `fbLink()` in Node and skip when Node is missing (same as the other Node-run tests of this page); on a runner without Node they show as skipped, not failed.
+- S-157.3/.4 check the page source (ids, calls, the column's place), not a rendered DOM: the page has no JS DOM test harness. `fbAnchor` only spreads `fbLink()`'s attributes into `el()`.
+- The `// fb-link:start/end` markers ship in the page so the test can find the helper; same pattern as `connected-filter` and `check-summary`.
+- The Connections header link uses the Page ID from the loaded rows; after a Page ID is changed in Connections it updates on the next reload of the list. Cosmetic.
+- S-157.5 (390 px) has no automated check; the column scrolls with the grid like the other non-frozen columns.

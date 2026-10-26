@@ -119,7 +119,7 @@
     <div id="pe" class="fixed inset-0 z-50 hidden bg-slate-900/30 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="pe-title">
         <div class="mx-auto flex h-full max-h-full w-full max-w-2xl flex-col bg-white text-sm shadow-lg sm:rounded-xl">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span> <span id="pe-fb"></span></div>
+                <div id="pe-title" class="min-w-0 break-words font-semibold"><span id="pe-name"></span> <span id="pe-id" class="font-mono text-xs font-normal text-slate-400"></span></div><span id="pe-fb" class="shrink-0"></span>
                 <button id="pe-preview" type="button" class="cb-btn cb-btn-sm ml-auto shrink-0">Preview</button>
                 <button id="pe-close" type="button" class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
