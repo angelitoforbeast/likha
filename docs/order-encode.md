@@ -64,6 +64,10 @@ variables as the Sheet step; I is left empty), `also_sheet` (write the row to th
 `on_failure` = `sheet` (write the row to `sheet` instead; needs a link, checked at Publish) or `continue` (go on without saving, with a warning),
 and "Counts as an order". The models in use are shown read-only (`app_settings` keys above).
 
+The page's `{{SHOP DETAILS}}` (the usual `shop` field) is built, not typed: `PAGE: <page>\nITEM: <ITEM NAME IN JNT DASHBOARD>\nPRICE: ₱<PRICE>\nQUANTITY: <QUANTITY>`
+(`App\Services\Chatbot\ShopDetails`); a missing field leaves its line out and is an X in the page Check. An old typed `shop_details` row stays in
+History but is never read; `php artisan chatbot:shop-details-diff` lists the pages where it differs from the built text.
+
 Run: the step builds the row, optionally appends it to the sheet (same Outbox call as the Sheet step), creates an `order_encodes` row
 (mode `live`, `run_id`, `input.node`, `spreadsheet_id` = the fallback sheet or `flow-node`, `row_number` empty), queues `EncodeOrder` and
 continues on **next**. The same run reaching the step again does nothing. If the order cannot be queued (no key, no address file, no table) it
