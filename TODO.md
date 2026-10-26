@@ -1211,3 +1211,7 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
 - Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
 - Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.
+
+## 159: Login for Business config, accepted review minors (2026-10-27)
+- With a config id set, any failure of the `fb_exchange_token` call (also a network error or 5xx) keeps the code token. Reason: the spec says "if that call fails", and the stored expiry comes from `debug_token`, so the card stays truthful; narrow it to OAuth refusals if a short token ever slips in.
+- No test pins `debug_token` `expires_at=0` (a non-expiring token) on the code path. Reason: the code (`$expires ?: null`) is unchanged from 154; add a row to the table if that path ever changes.
