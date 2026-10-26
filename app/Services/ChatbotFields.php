@@ -25,6 +25,7 @@ class ChatbotFields
     {
         $cols = [
             'flow' => 'FLOW', 'price' => 'PRICE', 'quantity' => 'QUANTITY', 'item_name_in_jnt_dashboard' => 'ITEM NAME IN JNT DASHBOARD',
+            'shop_details' => 'SHOP DETAILS', // binubuo (Chatbot\ShopDetails), hindi tina-type
             'main_flow' => 'Main Flow', 'main_flow_2' => 'Main Flow 2', 'fill_up_form' => 'Fill-Up Form', 'loop_3_form' => 'Loop 3 Form',
             'prompt_1' => 'Prompt 1', 'prompt_2' => 'Prompt 2', 'prompt_3' => 'Prompt 3', 'picture' => 'PICTURE',
         ];
@@ -49,6 +50,7 @@ class ChatbotFields
     public static function kind(string $key): string
     {
         if ($key === 'flow') return 'flow'; // dropdown ng mga flow (/chatbot)
+        if ($key === 'shop_details') return 'auto'; // binubuo mula sa ITEM NAME IN JNT DASHBOARD, PRICE at QUANTITY: basa lang
         if ($key === 'picture' || preg_match('/^(seq|after_order)_img_\d+$/', $key)) return 'image';
         if (preg_match('/^(prompt|seq|after_order|comment_reply)_\d+$/', $key) || $key === 'comment_pm') return 'long';
 

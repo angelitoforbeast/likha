@@ -13,6 +13,7 @@ use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastWatch;
 use App\Services\Chatbot\PasteFieldAi;
+use App\Services\Chatbot\ShopDetails;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -128,6 +129,7 @@ class ChatbotController extends Controller
             $text = $cells['flow'] ?? null;
             $linked = $flowId ? ($flowNames[$flowId] ?? null) : null;
             if ($linked !== null) $cells['flow'] = $linked; else unset($cells['flow']);
+            $cells[ShopDetails::KEY] = ShopDetails::build($page, $cells); // binubuo, ang naka-save ay hindi na binabasa
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
                 // Kusang lumipat sa Botcake (ForbeastWatch), hanggang may magpalit nang mano-mano.
@@ -207,7 +209,7 @@ class ChatbotController extends Controller
             $c = is_array($c) ? $c : [];
             [$pageIn, $key, $value] = array_map(fn ($f) => is_scalar($c[$f] ?? null) ? trim((string) $c[$f]) : '', ['page_name', 'key', 'value']);
             $key = strtolower($key);
-            if ($key === 'flow' || in_array($key, ChatbotFields::RESERVED, true)) { $skipped++; continue; }
+            if ($key === 'flow' || $key === ShopDetails::KEY || in_array($key, ChatbotFields::RESERVED, true)) { $skipped++; continue; }
             $page = $listed[$this->settings->pageKey($pageIn)] ?? null;
             $error = $page === null ? 'This page is not on the chatbot list.' : (in_array($key, $columns, true) ? $this->valueError($key, $value) : 'Unknown column.');
             if ($error === null && isset($c['value']) && !is_scalar($c['value'])) $error = 'The value must be text.';
@@ -256,7 +258,7 @@ class ChatbotController extends Controller
         if (!$cells || !array_filter($cells, fn ($c) => trim($c) !== '')) return response()->json(['error' => 'Nothing to map.'], 422);
         $header = $request->filled('header') ? $text($request->input('header')) : null;
 
-        $fields = array_values(array_filter($this->fields->columns(), fn ($c) => $c['key'] !== 'flow'));
+        $fields = array_values(array_filter($this->fields->columns(), fn ($c) => $c['key'] !== 'flow' && $c['key'] !== ShopDetails::KEY));
         $guesses = $request->input('guesses');
         $res = $ai->map($cells, $header, $fields, is_array($guesses) && array_is_list($guesses) ? $guesses : []);
         if ($res === null) {
@@ -712,6 +714,7 @@ class ChatbotController extends Controller
     /** Ang mali sa value ng isang botfield (haba, bytes, link ng larawan), o null. Iisa para sa isang cell at sa paste. */
     private function valueError(string $key, string $value): ?string
     {
+        if ($key === ShopDetails::KEY) return ShopDetails::READ_ONLY;
         if (mb_strlen($value) > ChatbotFields::MAX_VALUE) return 'At most ' . ChatbotFields::MAX_VALUE . ' characters.';
         if (strlen($value) > ChatbotFields::MAX_BYTES) return 'Too long: at most ' . ChatbotFields::MAX_BYTES . ' bytes. Accented letters and emoji take 2 to 4 bytes each.';
         if ($value !== '' && ChatbotFields::kind($key) === 'image' && !$this->isImageUrl($value)) return 'Use an image link that starts with http:// or https://.';

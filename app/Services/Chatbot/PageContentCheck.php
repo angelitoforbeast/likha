@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Ang content check ng isang page: tungkol ba sa item na talagang ino-order (PageExpectedItem) ang laman nito?
  * - Setup (walang AI): kapag On ang bot, may flow at (sa Botcake) may chat.key.
- * - SHOP DETAILS (walang AI): ang PAGE, ITEM, PRICE at QUANTITY nito laban sa page at sa mga field.
+ * - SHOP DETAILS (walang AI): binubuo (ShopDetails); X kapag kulang ang ITEM NAME IN JNT DASHBOARD, PRICE o QUANTITY.
  * - Text: Main Flow, Main Flow 2, Prompt 1-3, Seq N at Fill-Up Form (pinunan ang {{Botfield}}): ang item at mga presyong binabanggit.
  * - Larawan: PICTURE saka Seq Img N, hanggang 5: ang item na nasa larawan.
  * - Ad video: ang gpt_video_analyses na pinagkunan ng ad copy na isinulat para sa page (gpt_ad_generations.page_filter);
@@ -23,8 +23,6 @@ class PageContentCheck
 {
     public const TEXT_KEYS = ['main_flow', 'main_flow_2'];
     private const EXTRA_TEXT = '/^(prompt_[1-3]|seq_\d+)$/';
-    private const SHOP_LINES = ['PAGE', 'ITEM', 'PRICE', 'QUANTITY'];
-    private const SHOP_VALUE = 80; // letra ng value ng SHOP DETAILS na ipinapakita sa finding
     public const FORM_FIELDS = [
         'Full Name' => '/name|pangalan|ngalan/iu',
         'Phone Number' => '/phone|cell|mobile|contact\s*(no|num)|number|numero|telepono|\bcp\b/iu',
@@ -76,7 +74,8 @@ TXT;
         $rows = $this->settings->allWithIds($page, ChatbotFields::PROVIDER);
         $vars = ChatbotVars::merge($this->page->botfields($page));
         $out['findings'] = $this->setup($page);
-        if (isset($labels['shop_details'])) array_push($out['findings'], ...$this->shop($page, $rows, $labels, $vars));
+        // Ang page na walang kahit isa sa mga field (o lumang SHOP DETAILS) ay hindi pa nagbebenta: walang SHOP DETAILS check.
+        if (array_filter([ShopDetails::KEY, ...ShopDetails::PARTS], fn ($k) => trim($rows[$k]['value'] ?? '') !== '')) array_push($out['findings'], ...$this->shop($rows, $labels));
 
         // Ang Fill-Up Form ay walang item by design: ang tinitingnan ay ang mga hinihingi nito, sa plain text match (walang AI).
         $form = trim($rows['fill_up_form']['value'] ?? '');
@@ -204,37 +203,19 @@ TXT;
     }
 
     /**
-     * Ang SHOP DETAILS (kasama sa order, walang AI): ang PAGE:, ITEM:, PRICE: at QUANTITY: na linya laban sa pangalan ng
-     * page, ITEM NAME IN JNT DASHBOARD, PRICE at QUANTITY. Ang ibang value = X; walang value o walang linya = babala.
-     * Ang field na walang value, o ang linyang may {{ }} pa, ay hindi inihahambing.
+     * Ang SHOP DETAILS (kasama sa order, walang AI) ay binubuo mula sa ITEM NAME IN JNT DASHBOARD, PRICE at QUANTITY
+     * (ShopDetails): ang field na walang value = X, dahil walang item o COD ang order.
      */
-    private function shop(string $page, array $rows, array $labels, array $vars): array
+    private function shop(array $rows, array $labels): array
     {
-        $label = $labels['shop_details'];
-        $finding = fn (string $level, string $reason) => ['kind' => 'shop', 'field' => $label, 'level' => $level, 'reason' => $label . ': ' . $reason];
-        $text = trim(self::fill($rows['shop_details']['value'] ?? '', $vars));
-        if ($text === '') return [$finding('warn', 'no value')];
-
-        $got = [];
-        preg_match_all('/\b(' . implode('|', self::SHOP_LINES) . ')\s*:\s*([^|\r\n]*)/iu', $text, $m, PREG_SET_ORDER);
-        foreach ($m as [, $name, $v]) $got[strtoupper($name)] ??= mb_substr(trim($v), 0, self::SHOP_VALUE);
-        $value = fn (string $key) => trim(self::fill($rows[$key]['value'] ?? '', $vars));
-        $num = fn (string $a, string $b) => ($x = self::peso($a)) !== null && ($y = self::peso($b)) !== null ? abs($x - $y) < 0.01 : PageExpectedItem::norm($a) === PageExpectedItem::norm($b);
-        $against = [
-            'PAGE' => ['page', $page, fn ($a, $b) => $this->settings->pageKey($a) === $this->settings->pageKey($b)],
-            'ITEM' => [$labels['item_name_in_jnt_dashboard'] ?? 'ITEM NAME IN JNT DASHBOARD', $value('item_name_in_jnt_dashboard'), fn ($a, $b) => PageExpectedItem::norm($a) === PageExpectedItem::norm($b)],
-            'PRICE' => [$labels['price'] ?? 'PRICE', $value('price'), $num],
-            'QUANTITY' => [$labels['quantity'] ?? 'QUANTITY', $value('quantity'), $num],
-        ];
-        $out = [];
-        foreach ($against as $line => [$name, $expected, $same]) {
-            $v = $got[$line] ?? null;
-            if ($v === null || $v === '') { $out[] = $finding('warn', 'no ' . $line . ': line'); continue; }
-            if ($expected === '' || str_contains($v . $expected, '{{')) continue;
-            if (!$same($v, $expected)) $out[] = $finding('x', $line . ' ' . $v . ' ≠ ' . $name . ' ' . mb_substr($expected, 0, self::SHOP_VALUE));
+        $label = $labels[ShopDetails::KEY] ?? ShopDetails::LABEL;
+        $missing = ShopDetails::missing(array_map(fn ($r) => $r['value'] ?? '', $rows));
+        if (!$missing) {
+            return [['kind' => 'shop', 'field' => $label, 'level' => 'ok', 'reason' => $label . ': built from '
+                . ($labels['item_name_in_jnt_dashboard'] ?? 'ITEM NAME IN JNT DASHBOARD') . ', ' . ($labels['price'] ?? 'PRICE') . ' and ' . ($labels['quantity'] ?? 'QUANTITY')]];
         }
 
-        return $out ?: [$finding('ok', 'matches the page, item, price and quantity')];
+        return array_map(fn ($key) => ['kind' => 'shop', 'field' => $label, 'level' => 'x', 'reason' => $label . ': missing ' . ($labels[$key] ?? $key)], $missing);
     }
 
     /** Ang unang halaga sa text ("₱1,198", "198 pesos", "PHP 1,299.50"); null kapag walang numero. */
