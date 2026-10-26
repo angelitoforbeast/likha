@@ -8,8 +8,8 @@ use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
 /**
- * Ang "FB link" ng /chatbot/pages: ang link sa Facebook page mula sa naka-save na Page ID (botcake.page_id), sa grid, sa
- * Edit at sa Connections. Digits lang ang tinatanggap. Ang helper ay iisa sa page (fb-link:start/end), pinapatakbo sa Node.
+ * Ang FB icon ng /chatbot/pages: katabi ng pangalan ng page, bukas ang Messenger chat ng page (m.me) mula sa naka-save na
+ * Page ID (botcake.page_id), sa grid, sa Edit at sa Connections. Digits lang. Ang helper ay iisa sa page (fb-link:start/end), sa Node.
  */
 class ChatbotFbLinkTest extends ChatblastTestCase
 {
@@ -22,8 +22,8 @@ class ChatbotFbLinkTest extends ChatblastTestCase
         $this->actingAs($this->user());
     }
 
-    /** Pinapatakbo ang fbLink() ng page sa Node para sa bawat id. */
-    private function links(array $ids): array
+    /** Pinapatakbo ang fbLink() ng page sa Node para sa bawat [id, page]. */
+    private function links(array $pairs): array
     {
         $html = $this->get('/chatbot/pages')->assertOk()->getContent();
         $this->assertSame(1, preg_match('~// fb-link:start(.*?)// fb-link:end~s', $html, $m), 'the helper is on the page');
@@ -31,7 +31,7 @@ class ChatbotFbLinkTest extends ChatblastTestCase
         if ($node === null) $this->markTestSkipped('Node is not installed.');
         $base = tempnam(sys_get_temp_dir(), 'fbl');
         $file = $base . '.mjs';
-        file_put_contents($file, $m[1] . "\nconsole.log(JSON.stringify(" . json_encode($ids) . ".map(fbLink)));");
+        file_put_contents($file, $m[1] . "\nconsole.log(JSON.stringify(" . json_encode($pairs) . ".map(([id, page]) => fbLink(id, page))));");
         $p = new Process([$node, $file]);
         $p->run();
         @unlink($file);
@@ -41,35 +41,39 @@ class ChatbotFbLinkTest extends ChatblastTestCase
         return json_decode($p->getOutput(), true);
     }
 
-    public function test_S_157_1_a_page_id_links_to_its_facebook_page_in_a_new_tab(): void
+    public function test_S_157_1_a_page_id_opens_the_pages_messenger_chat_in_a_new_tab(): void
     {
         $this->getJson('/chatbot/data')->assertOk()->assertJsonPath('rows.0.page_id', '1123777717482685');
 
-        $this->assertSame([['href' => 'https://www.facebook.com/1123777717482685', 'target' => '_blank', 'rel' => 'noopener noreferrer', 'text' => 'Open page ↗']],
-            $this->links(['1123777717482685']));
+        $this->assertSame([['href' => 'https://m.me/1123777717482685', 'target' => '_blank', 'rel' => 'noopener noreferrer',
+            'title' => 'Chat with Page Uno on Messenger', 'aria-label' => 'Chat with Page Uno on Messenger']],
+            $this->links([['1123777717482685', 'Page Uno']]));
     }
 
-    public function test_S_157_2_no_id_or_a_non_digit_id_gives_no_link(): void
+    public function test_S_157_2_no_id_or_a_non_digit_id_gives_no_icon(): void
     {
         $this->assertSame([null, null, null, null, null, null],
-            $this->links([null, '', '12a3', ' 123', 'javascript:alert(1)', '123/../evil']));
+            $this->links(array_map(fn ($id) => [$id, 'Page Uno'], [null, '', '12a3', ' 123', 'javascript:alert(1)', '123/../evil'])));
     }
 
-    public function test_S_157_3_the_link_is_in_the_edit_and_connections_headers(): void
+    public function test_S_157_3_the_icon_is_beside_the_name_in_the_edit_and_connections_headers(): void
     {
         $html = $this->get('/chatbot/pages')->assertOk()->getContent();
 
-        foreach (['id="pe-fb"', 'id="conn-fb"', "\$('pe-fb').replaceChildren(fbAnchor(r.page_id))", "\$('conn-fb').replaceChildren("] as $part) {
+        $this->assertSame(1, preg_match('~<span id="pe-name"></span>.*?</div><span id="pe-fb"~', $html), 'Edit: icon right after the name');
+        $this->assertSame(1, preg_match('~<div id="conn-title"[^>]*>Connections</div><span id="conn-fb"~', $html), 'Connections: icon right after the name');
+        foreach (["\$('pe-fb').replaceChildren(fbAnchor(r))", "\$('conn-fb').replaceChildren(fbAnchor(rows.find(r => r.page === page)))"] as $part) {
             $this->assertStringContainsString($part, $html);
         }
     }
 
-    public function test_S_157_4_the_fb_link_column_sits_in_the_grid_with_the_other_fixed_columns(): void
+    public function test_S_157_4_the_icon_sits_beside_the_page_name_in_the_grid_with_no_separate_column(): void
     {
         $html = $this->get('/chatbot/pages')->assertOk()->getContent();
 
-        // Header pagkatapos ng Last chat, at ang cell sa parehong puwesto ng row.
-        $this->assertSame(1, preg_match("~text: 'Last chat'\}\),\s*el\('th', \{[^}]*text: 'FB link'\}\)~", $html), 'FB link header after Last chat');
-        $this->assertSame(1, preg_match("~text: r\.last_chat \|\| '—'\}\),\s*el\('td', \{[^}]*\}, fbAnchor\(r\.page_id\)\)~", $html), 'FB link cell after Last chat');
+        $this->assertSame(1, preg_match("~\[pickBox\(r\), r\.page, fbAnchor\(r\),~", $html), 'icon right after the page name');
+        $this->assertStringNotContainsString("text: 'FB link'", $html);
+        // Ang icon: maliit na Facebook "f", kulay Facebook blue.
+        $this->assertStringContainsString("fill: '#1877F2'", $html);
     }
 }
