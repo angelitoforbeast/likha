@@ -2603,3 +2603,4 @@ Tests: `tests/Feature/Chatblast/ChatbotHealthAfterFlowTest.php`, `ChatbotConnect
 | S-153.8 | P1 | Given the last stamp on, then Check has the X "Botcake: may naka-on na keyword (…) — i-off sa Botcake" and the row "Botcake: keyword on"; none, or a Forbeast page: no X and no mark | `test_S_153_8…` | passed 2026-10-26 |
 | S-153.9 | P1 | Given the Test's roles, then the keyword check has the same access, and Changes shows "Botcake keywords" with the user | `test_S_153_9…` | passed 2026-10-26 |
 | S-153.10 | P2 | Given a 390 px screen, then the red keyword line wraps | `test_S_153_10…` (markup) | passed (markup) 2026-10-26 |
+| S-153.11 | P1 | Given the last read keyword check was on, when a later Test cannot read the keywords, then the test is `unknown` but the row mark, the Check X and a red popup line "Keyword on (last seen <date>…); could not re-check now" stay; when a later Test reads none, they clear | `test_S_153_11…` | passed 2026-10-26 |

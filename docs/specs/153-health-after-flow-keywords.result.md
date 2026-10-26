@@ -48,14 +48,25 @@ foreach ($rows as $r) if (!self::hadFlow($spans[(string) $r->page_id], $r->recei
   - The row shows "Botcake: keyword on" in red, except on Forbeast pages.
   - The Check column shows the X "Botcake: may naka-on na keyword (<names>) — i-off sa Botcake" (not on Forbeast pages). The Check cache refreshes because a new botcake stamp changes `prints()`.
 
+## Amendment 153-1 (decisions on the two open points)
+1. **A page with a keyword on stays Connected.** `botcakeConnected()` is unchanged; the flag is the "not fully working yet" mark only. Kept as built.
+2. **A failed keyword read does not clear an earlier "on".**
+   - The Test still returns `keywords: unknown` and stamps `unknown`, so Changes shows it.
+   - `ChatbotConnections::keywordsOn($page)` finds the last known state. It walks the `botcake.keywords` history newest first and skips `unknown`. If the first `on`/`none` it finds is `on`, it returns `{names, at}`; otherwise it returns null.
+   - The row mark, the Check X, the card state and the popup line all use it. The popup line reads "Keyword on (last seen 2026-10-26 09:00, flow: ON DELIVERY SCRIPT); could not re-check now. I-off ang keyword sa Botcake, saka i-Test ulit." in red.
+   - `info()` gives `keywords_on`, and the `/chatbot/data` row reports `on` while the last known state is on.
+   - Only a Test that reads the keywords and finds none clears the marks.
+   - New test: S-153.11 (on → unknown keeps the marks; then → none clears them).
+
 ## Story changes
 - S-153.7 also covers the nightly `chatbot:connections-check`. Reason: the spec names "any existing scheduled Botcake retest", and the command exists.
+- S-153.11 is new, from amendment 153-1: an unreadable check keeps the last known "on" until a check finds none.
 - S-153.8 adds the row mark, and adds that a Forbeast page gets neither the X nor the mark. Reason: messages on a Forbeast page do not pass through Botcake keywords; the existing chat-block X has the same guard.
 
 ## Evidence per case
 Baseline at 0c516e4a: `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings tests/Feature/OrderEncode` gave **1639 tests, 0 failures, 1 skipped**. That run overlapped my first `BotHealth` edit, but it showed no failures, while the edit alone fails 10 Health tests, so the numbers are the baseline's.
 
-Final run, same folders, at 943b2483: **1650 tests, 9501 assertions, 0 failures, 1 skipped** (11 new tests). After the fix commit, `ChatbotConnectionsTest.php` gave 28 tests, 277 assertions, OK.
+First full run, same folders, at 943b2483: 1650 tests, 0 failures, 1 skipped. **After amendment 153-1, at c056f259: 1651 tests, 9519 assertions, 0 failures, 1 skipped** (12 new tests vs the baseline, no new failures). `ChatbotConnectionsTest.php` alone: 29 tests, 291 assertions, OK.
 
 | Case | Test | Red run (first failure) | Status |
 |---|---|---|---|
@@ -69,6 +80,7 @@ Final run, same folders, at 943b2483: **1650 tests, 9501 assertions, 0 failures,
 | S-153.8 | `…::test_S_153_8_check_and_the_row_show_an_active_keyword_until_a_test_finds_none` | `Failed asserting that two strings are identical.` | passed |
 | S-153.9 | `…::test_S_153_9_the_keyword_check_has_the_tests_access_and_shows_in_changes_with_the_user` | subset failure (no `keywords`) | passed |
 | S-153.10 | `…::test_S_153_10_the_keyword_line_wraps_on_a_phone` (markup: `conn-kw … break-words`) | `Failed asserting that '<!DOCTYPE html>…` matches | passed (markup) |
+| S-153.11 | `…::test_S_153_11_an_unreadable_keyword_check_keeps_the_last_known_on_until_a_check_finds_none` | `Failed asserting that an array has the subset` (no `keywords_on`, line 638) | passed |
 
 For the JS, the rendered `/chatbot/pages` inline scripts were parsed with `new Function` in node: both parse. There was no browser check, because this worktree has no running app.
 
@@ -78,11 +90,12 @@ For the JS, the rendered `/chatbot/pages` inline scripts were parsed with `new F
 - 68311eb4 feat: the Botcake Test and the token save read the page's keywords and stamp an active one (spec 153)
 - 943b2483 feat: Check, the pages row and the Connections popup show an active Botcake keyword (spec 153)
 - 8e86d7ce fix: the keyword mark gives way to a failed token and is not shown for Forbeast pages; the nightly retest is covered (spec 153)
-- (this commit) docs: result, stories and accepted minors (spec 153)
+- fa9dcd3c docs: result, stories and accepted minors (spec 153)
+- c056f259 fix: an unreadable keyword check keeps the last known active keyword shown until a check finds none (spec 153)
+- (this commit) docs: amendment 153-1 in the result, S-153.11 and TODO (spec 153)
 
 ## Open points
-- **"Not working yet" mark.** The mark is the red popup line, the card state, the row mark and the Check X. `botcakeConnected()` and the Connected column do not change, so the Bot picker and the Connected filter still treat the page as connected. The reason is Decision 4: the token stays ok. Say so if the owner wants the Connected column to drop Botcake while a keyword is on.
-- **`unknown` after `on`.** An `unknown` result after an `on` clears the marks until the next Test, because the last stamp decides (see `TODO.md`).
+- Both earlier open points are settled by amendment 153-1, as described above.
 - **Live check still to do.** The live test with a staff message, and a Test against a real page with an active keyword (read-only), are still to do after deploy.
 
-153: done — Bot Health counts only chats that arrive while the page has a flow, and the Botcake Test, the token save and the nightly retest flag an active Botcake keyword in the popup, the row and Check. The full suite has no new failures (1650 tests, 0 failures, 1 skipped).
+153: done — Bot Health counts only chats that arrive while the page has a flow; the Botcake Test, the token save and the nightly retest flag an active Botcake keyword, and an unreadable check keeps the last known "on" (1651 tests, 0 failures, 1 skipped).
