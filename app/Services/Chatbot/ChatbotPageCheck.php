@@ -151,6 +151,7 @@ class ChatbotPageCheck
         foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get() as $s) {
             if (!in_array($s->key, ChatbotFields::RESERVED, true)) $values[$s->key] = trim((string) $s->plainValue());
         }
+        $values[ShopDetails::KEY] = ShopDetails::build($page, $values); // binubuo: ang kulang na bahagi ay X ng content check
 
         // Ginagamit: mula sa mga graph, saka ang botfield na binabanggit ng ginagamit na botfield (hanggang wala nang bago).
         $used = [];

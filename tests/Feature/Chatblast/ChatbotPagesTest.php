@@ -84,9 +84,9 @@ class ChatbotPagesTest extends ChatblastTestCase
         $this->assertSame([true, 'Main COD', '2026-10-19 11:45', 2], [$uno['active'], $uno['flow_text'], $uno['last_chat'], $uno['today']]);
         $dos = $this->row($data, 'Page Dos');
         $this->assertSame([false, null, 0], [$dos['active'], $dos['last_chat'], $dos['today']]);
-        $this->assertSame(['flow', 'price', 'quantity', 'item_name_in_jnt_dashboard', 'shop_details', 'main_flow', 'main_flow_2', 'fill_up_form', 'loop_3_form', 'prompt_1'],
-            array_slice(array_column($data['columns'], 'key'), 0, 10));
-        $this->assertSame(['FLOW', 'PRICE', 'QUANTITY', 'ITEM NAME IN JNT DASHBOARD', 'SHOP DETAILS', 'Main Flow'], array_slice(array_column($data['columns'], 'label'), 0, 6));
+        $this->assertSame(['flow', 'price', 'quantity', 'item_name_in_jnt_dashboard', 'main_flow', 'main_flow_2', 'fill_up_form', 'loop_3_form', 'prompt_1'],
+            array_slice(array_column($data['columns'], 'key'), 0, 9));
+        $this->assertSame(['FLOW', 'PRICE', 'QUANTITY', 'ITEM NAME IN JNT DASHBOARD', 'Main Flow'], array_slice(array_column($data['columns'], 'label'), 0, 5));
         $this->assertContains(['key' => 'seq_img_20', 'label' => 'Seq Img 20', 'kind' => 'image'], $data['columns']);
         $this->assertStringNotContainsString(self::TOKEN, json_encode($data));
     }
@@ -290,7 +290,8 @@ class ChatbotPagesTest extends ChatblastTestCase
 
         $columns = $this->getJson('/chatbot/data')->json('columns');
         $this->assertSame(1, collect($columns)->where('key', 'promo_text')->count());
-        $this->assertSame(['key' => 'promo_text', 'label' => 'Promo Text', 'kind' => 'text'], collect($columns)->last());
+        // Ang huli ay ang SHOP DETAILS (laging column, binubuo): ang bagong column ay bago nito.
+        $this->assertSame([['key' => 'promo_text', 'label' => 'Promo Text', 'kind' => 'text'], ['key' => 'shop_details', 'label' => 'SHOP DETAILS', 'kind' => 'auto']], collect($columns)->slice(-2)->values()->all());
 
         $this->postJson('/chatbot/cell', ['page_name' => 'Page Dos', 'key' => 'promo_text', 'value' => 'Free shipping'])->assertOk();
         // Ang key na ginagamit sa page_settings (hal. idinagdag sa iba) ay column din.

@@ -51,18 +51,21 @@ class ShopDetails
         return array_values(array_filter(self::PARTS, fn ($key) => self::part($key, $fields) === ''));
     }
 
-    /** "₱1,299", "PHP 1,299", "P 1,299.50", "198" → "₱1,299", "₱1,299", "₱1,299.50", "₱198". */
+    /**
+     * "₱1,299", "PHP 1,299", "P 1,299.50", "198" → "₱1,299", "₱1,299", "₱1,299.50", "₱198". Walang numero sa simula
+     * ("FREE", "Promo 199") = '' (kulang): walang COD na makukuha ang order doon.
+     */
     public static function price(string $value): string
     {
         $v = preg_replace('/\s+/u', '', preg_replace('/^\s*(₱|PHP|P)/iu', '', trim($value)));
-        if (preg_match('/^\d[\d,]*(?:\.\d+)?/', $v, $m)) $v = $m[0];
 
-        return $v === '' ? '' : '₱' . $v;
+        return preg_match('/^\d[\d,]*(?:\.\d+)?/', $v, $m) ? '₱' . $m[0] : '';
     }
 
     private static function part(string $key, array $fields): string
     {
-        $v = trim((string) ($fields[$key] ?? ''));
+        // Unang linya lang: ang ikalawang linya ng ITEM ("…\nPRICE: ₱1") ay mababasa ng order bilang PRICE.
+        $v = trim(preg_split('/\R/u', trim((string) ($fields[$key] ?? '')))[0]);
 
         return $key === 'price' && $v !== '' ? self::price($v) : $v;
     }

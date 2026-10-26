@@ -36,7 +36,7 @@ class ShopDetailsAutoTest extends ChatblastTestCase
         }
     }
 
-    /** @return array<string, array{0: string, 1: string}> */
+    /** @return array<string, array{0: string, 1: ?string, 2?: string}> */
     public static function prices(): array
     {
         return [
@@ -46,15 +46,19 @@ class ShopDetailsAutoTest extends ChatblastTestCase
             'PHP and a space' => ['PHP 1,299', '₱1,299'],
             'P and a decimal' => ['P 1,299.50', '₱1,299.50'],
             'peso sign and a space' => ['₱ 198', '₱198'],
+            'no number: no PRICE line' => ['FREE', null],
+            'a word starting with P' => ['Promo 199', null],
+            'multi-line item: first line only' => ['198', '₱198', "GLOW TAPE
+PRICE: ₱1"],
         ];
     }
 
     #[DataProvider('prices')]
-    public function test_S_158_1_the_rule_builds_page_item_price_and_quantity(string $price, string $shown): void
+    public function test_S_158_1_the_rule_builds_page_item_price_and_quantity(string $price, ?string $shown, string $item = ' GLOW TAPE '): void
     {
-        $this->fields('Alexa Angeles', ' GLOW TAPE ', $price, ' 2 ');
+        $this->fields('Alexa Angeles', $item, $price, ' 2 ');
 
-        $this->assertSame("PAGE: Alexa Angeles\nITEM: GLOW TAPE\nPRICE: {$shown}\nQUANTITY: 2", app(ShopDetails::class)->for('Alexa Angeles'));
+        $this->assertSame("PAGE: Alexa Angeles\nITEM: GLOW TAPE\n" . ($shown === null ? '' : "PRICE: {$shown}\n") . 'QUANTITY: 2', app(ShopDetails::class)->for('Alexa Angeles'));
     }
 
     public function test_S_158_2_flow_variables_use_the_computed_text_and_ignore_a_stale_stored_row(): void
@@ -133,5 +137,17 @@ class ShopDetailsAutoTest extends ChatblastTestCase
 
         $bot = app(ChatbotPage::class)->botfields('Incepxion PH — Smart Home');
         $this->assertSame("PAGE: Incepxion PH — Smart Home\nITEM: WIFI PLUG\nPRICE: ₱1,299\nQUANTITY: 1", $bot['SHOP DETAILS']);
+    }
+
+    public function test_S_158_3_the_shop_details_column_keeps_its_place_so_sheet_pastes_stay_aligned(): void
+    {
+        $keys = fn () => array_column(app(ChatbotFields::class)->columns(), 'key');
+        $this->assertSame('shop_details', last($keys()), 'no typed row: at the end');
+
+        // Ang page na may lumang tina-type na row: kasama ng ibang ginagamit na key, pagkatapos ng mga idinagdag (gaya ngayon).
+        app(ChatbotFields::class)->add('Promo Text');
+        $this->settings()->set('Alexa Angeles', 'chatbot', 'shop_details', 'old');
+        $this->settings()->set('Alexa Angeles', 'chatbot', 'zz_note', 'x');
+        $this->assertSame(['promo_text', 'shop_details', 'zz_note'], array_slice($keys(), -3));
     }
 }
