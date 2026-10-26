@@ -37,7 +37,8 @@ class Graph
             try {
                 $req = Http::timeout(120)->acceptJson();
                 if ($token !== null) $req = $req->withToken($token);
-                $res = $req->get($url, $query);
+                // Walang query = null: ang [] ay bumubura sa query ng URL (ang "after" ng paging.next).
+                $res = $req->get($url, $query ?: null);
             } catch (Throwable $e) {
                 throw new GraphException('Graph request failed: ' . self::clean($e->getMessage()));
             }
@@ -58,10 +59,13 @@ class Graph
     {
         $out  = [];
         $page = $this->get($path, $query, $token);
+        $seen = [];
         while (true) {
             foreach ($page['data'] ?? [] as $row) $out[] = $row;
             $next = $page['paging']['next'] ?? null;
-            if (!is_string($next) || $next === '') return $out;
+            // Walang susunod, o pareho ang next (hindi umuusad): tapos na.
+            if (!is_string($next) || $next === '' || isset($seen[$next]) || empty($page['data'])) return $out;
+            $seen[$next] = true;
             $page = $this->get($next, [], $token);
         }
     }

@@ -216,3 +216,10 @@ Schedule::command('order-encode:notes-build --days=3')
     ->timezone('Asia/Manila')
     ->dailyAt('05:30')
     ->withoutOverlapping(60);
+
+// Meta Ads API → ads_manager_reports: tinitingnan kada minuto, pero tumatakbo lang kapag naka-on ang write mode at oras na ng
+// schedule (default 10:00, 15:00, 18:45 Manila; nasa /ads_manager/report, CEO). Off = walang ginagawa.
+Schedule::command('meta-ads:sync --scheduled')
+    ->everyMinute()
+    ->withoutOverlapping(120)
+    ->runInBackground();
