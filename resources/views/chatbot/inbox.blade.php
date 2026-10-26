@@ -72,11 +72,13 @@
                         <button type="button" id="ib-clear-conds" class="hidden text-slate-600 hover:underline">Clear conditions</button>
                     </div>
                 </div>
+                @if($botPause)
                 <div class="flex gap-1 text-xs" role="tablist" aria-label="Who answers">
                     <button type="button" role="tab" data-tab="" class="ib-tab rounded-md px-2 py-1" aria-selected="true">All</button>
                     <button type="button" role="tab" data-tab="human" class="ib-tab rounded-md px-2 py-1" aria-selected="false">Human</button>
                     <button type="button" role="tab" data-tab="bot" class="ib-tab rounded-md px-2 py-1" aria-selected="false">Bot</button>
                 </div>
+                @endif
             </div>
             <ul id="ib-rows" class="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto"></ul>
             <p id="ib-list-note" class="border-t border-slate-100 px-3 py-1.5 text-xs text-slate-500" aria-live="polite"></p>
@@ -140,7 +142,7 @@
     @if($isCeo)
     <div id="ib-roles" class="fixed inset-0 z-50 hidden overflow-y-auto bg-slate-900/30 p-4 sm:p-8" role="dialog" aria-modal="true" aria-labelledby="ib-roles-title">
         <form class="mx-auto w-full max-w-md rounded-xl bg-white p-5 text-sm shadow-lg">
-            <div id="ib-roles-title" class="mb-1 font-semibold">Who can reply and pause the bot</div>
+            <div id="ib-roles-title" class="mb-1 font-semibold">{{ $botPause ? 'Who can reply and pause the bot' : 'Who can reply' }}</div>
             <p class="mb-3 text-xs text-slate-500">The CEO always can. Others also need access to Chatblast.</p>
             <div class="max-h-72 space-y-1 overflow-y-auto">
                 <label class="flex items-center gap-2 text-slate-500"><input type="checkbox" checked disabled> CEO</label>
@@ -232,7 +234,7 @@
 
     // ---- Filter builder: lahat ng kondisyon ay dapat tumugma (AND). Naaalala ang huli kada page sa browser. ----
     const COND_KEY = 'chatbot-inbox:conditions:';
-    const COND_TYPES = {field: 'Customer field', ordered: 'Ordered', last_message: 'Last message date', first_chat: 'First chat date', bot_reply: 'Last bot reply', handler: 'Human / Bot'};
+    const COND_TYPES = {field: 'Customer field', ordered: 'Ordered', last_message: 'Last message date', first_chat: 'First chat date', bot_reply: 'Last bot reply'@if($botPause), handler: 'Human / Bot'@endif};
     const FIELD_OPS = {has_value: 'has value', empty: 'is empty', is: 'is', contains: 'contains', not_contains: "doesn't contain"};
     const CHOICES = {ordered: [['yes', 'Yes'], ['no', 'No']], bot_reply: [['failed', 'Failed'], ['sent', 'Sent']], handler: [['human', 'Human'], ['bot', 'Bot']]};
     const blankCond = type => ({type, key: '', op: 'has_value', value: CHOICES[type] ? CHOICES[type][0][0] : '', from: '', to: ''});
@@ -465,6 +467,7 @@
             el('div', {}, [el('span', {class: 'text-xs text-slate-500', text: 'CHAT STATUS '}), el('span', {class: 'font-medium', text: p.chat_status || '—'})]),
             p.waiting ? el('div', {class: 'text-xs text-slate-600', text: p.waiting}) : null,
         ]);
+@if($botPause)
         if (p.can_send) {
             const sw = el('input', {type: 'checkbox', role: 'switch', checked: !p.bot_paused, id: 'ib-bot-switch'});
             sw.addEventListener('change', async () => {
@@ -479,6 +482,20 @@
         } else {
             status.append(el('div', {class: 'text-sm', text: 'Bot for this customer: ' + (p.bot_paused ? 'Off' : 'On')}));
         }
+@else
+        // Nakatago ang pag-pause; ang naka-pause na ay ipinapakita pa rin, may Unpause para hindi maiipit ang customer.
+        if (p.bot_paused) {
+            const unpause = p.can_send ? el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Unpause'}) : null;
+            unpause?.addEventListener('click', async () => {
+                unpause.disabled = true;
+                const res = await postJson(D.pauseUrl, {page_id: S.page, psid: p.psid, paused: false});
+                unpause.disabled = false;
+                if (!res.ok) return alert(errText(res, 'Not saved.'));
+                loadPanel(threadSeq); loadList();
+            });
+            status.append(el('div', {class: 'flex flex-wrap items-center gap-2 text-sm'}, [el('span', {class: 'rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900', text: 'Bot paused'}), unpause]));
+        }
+@endif
         body.push(section('Status', status));
 
         const rows = p.fields.map(f => {
@@ -570,9 +587,11 @@
         if (!text && !image) return say('Type a message or attach an image link.', 'text-red-700');
         if (image && !isUrl(image)) return say('The image link must start with http:// or https://.', 'text-red-700');
         if (!S.psid) return;
-        // Isang beses kada usapan: itanong kung ipa-pause ang bot habang tao ang sumasagot.
         let pause = false;
+@if($botPause)
+        // Isang beses kada usapan: itanong kung ipa-pause ang bot habang tao ang sumasagot.
         if (S.panel && !S.panel.bot_paused && !S.pausedAsked) { S.pausedAsked = true; pause = confirm('Pause the bot for this customer?'); }
+@endif
         $('ib-send').disabled = true; say('Sending…', 'text-slate-500');
         const psid = S.psid;
         const res = await postJson(D.sendUrl, {page_id: S.page, psid, text, image_url: image, pause});

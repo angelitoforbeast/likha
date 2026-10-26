@@ -34,7 +34,8 @@ class ChatbotInboxActionsTest extends ChatblastTestCase
             'database/migrations/2026_10_24_100000_add_inbox_indexes.php',
             'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
         ]]);
-        config(['services.chatbot.replies_enabled' => true, 'services.openai.key' => 'sk-test-not-real']);
+        // Ang mga pause test dito ay ang asal kapag naka-on ang pause sa Inbox.
+        config(['services.chatbot.replies_enabled' => true, 'services.openai.key' => 'sk-test-not-real', 'chatbot.inbox_bot_pause' => true]);
         $this->page('Page Uno', '1001');
         $this->travelTo('2026-10-19 12:00:00');
     }
