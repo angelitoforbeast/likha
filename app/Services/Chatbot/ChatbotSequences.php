@@ -4,7 +4,6 @@ namespace App\Services\Chatbot;
 
 use App\Jobs\RunChatbotSequenceStep;
 use App\Models\BotcakeChat;
-use App\Models\ChatbotFlow;
 use App\Models\ChatbotSequence;
 use App\Models\ChatbotSequenceStep;
 use App\Models\ChatbotSequenceSubscription;
@@ -50,10 +49,10 @@ class ChatbotSequences
 
     // ---- Subscribe ----
 
-    /** Ang unang active na step mula sa $position (kasama), o null. */
+    /** Ang unang active na step mula sa $position (kasama), o null. Mula sa mga step na kasama ng sequence (BotConfigCache). */
     private function stepFrom(ChatbotSequence $seq, int $position): ?ChatbotSequenceStep
     {
-        return $seq->steps()->where('active', true)->where('position', '>=', $position)->first();
+        return $seq->steps->first(fn (ChatbotSequenceStep $s) => $s->active && $s->position >= $position);
     }
 
     /** Isang event na hindi bahagi ng takbo (inbox, tick, exit on reply). */
@@ -70,7 +69,7 @@ class ChatbotSequences
      */
     public function subscribe(int $sequenceId, int $pageId, int $psid, string $via, ?int $by = null, ?FlowRun $run = null, ?string $node = null): array
     {
-        $seq = ChatbotSequence::find($sequenceId);
+        $seq = BotConfigCache::sequence($sequenceId);
         $out = function (array $r) use ($pageId, $psid, $run, $node) {
             $detail = ['op' => $r['result'], 'name' => $r['name']] + (isset($r['reason']) ? ['reason' => $r['reason']] : []);
             $run ? $run->event('sequence', $node, $detail) : $this->event($pageId, $psid, $detail);
@@ -262,7 +261,7 @@ class ChatbotSequences
                 if ($claim !== null) $release();
                 return 'gone';
             }
-            $seq = $sub->sequence;
+            $seq = BotConfigCache::sequence((int) $sub->sequence_id);
             if (!$seq) {
                 $release(['status' => 'error', 'exit_reason' => 'sequence deleted', 'next_send_at' => null]);
                 $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => 'the sequence was deleted', 'name' => '#' . $sub->sequence_id, 'step' => $sub->current_step]);
@@ -300,7 +299,7 @@ class ChatbotSequences
                 $this->event($sub->page_id, $sub->psid, ['op' => 'skipped', 'reason' => 'outside 24h'] + $detail);
                 return 'skipped';
             }
-            $flow = $step->flow_id ? ChatbotFlow::find($step->flow_id) : null;
+            $flow = $step->flow_id ? BotConfigCache::flow((int) $step->flow_id) : null;
             $why = !$flow ? 'the flow was deleted' : ($flow->published_at === null || !is_array($flow->graph) ? 'the flow is not published' : null);
             if ($why !== null) {
                 $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => $why] + $detail, $flow?->id);

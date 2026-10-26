@@ -18,6 +18,13 @@ class ChatbotSequence extends Model
 
     protected $casts = ['active' => 'boolean', 'exit_on_reply' => 'boolean'];
 
+    /** Anumang sulat o bura: ang naka-cache na ayos ng bot (BotConfigCache) ay binubura. */
+    protected static function booted(): void
+    {
+        static::saved(fn (self $m) => \App\Services\Chatbot\BotConfigCache::forgetSequence((int) $m->id));
+        static::deleted(fn (self $m) => \App\Services\Chatbot\BotConfigCache::forgetSequence((int) $m->id));
+    }
+
     public function steps(): HasMany
     {
         return $this->hasMany(ChatbotSequenceStep::class, 'sequence_id')->orderBy('position');

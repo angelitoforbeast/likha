@@ -5,7 +5,6 @@ namespace App\Services\Chatbot;
 use App\Models\ChatbotFlow;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Ang kailangan ng isang takbo mula sa page: kung naka-On ang bot at kung aling flow, at ang mga botfield (ayon sa key
@@ -17,20 +16,18 @@ class ChatbotPage
     {
     }
 
-    private ?bool $ready = null;
-
     /**
      * Ang flow ng page kapag naka-On ang bot at may flow na pinili sa dropdown (chatbot.flow_id); kung hindi null. Ang
      * FLOW na text lang (mula pa sa page list, bago ang mga flow) ay hindi nagpapatakbo ng anuman, kahit may flow na
-     * kapangalan. Wala pang table (hindi pa na-migrate) = null.
+     * kapangalan. Wala pang table (hindi pa na-migrate) = null. Ang flow ay mula sa BotConfigCache.
      */
     public function flow(string $page): ?ChatbotFlow
     {
         if ($this->settings->get($page, 'chatbot', 'active') === '0') return null;
         $id = trim((string) $this->settings->get($page, 'chatbot', 'flow_id'));
-        if (!ctype_digit($id) || !($this->ready ??= Schema::hasTable('chatbot_flows'))) return null;
+        if (!ctype_digit($id)) return null;
 
-        return ChatbotFlow::find((int) $id);
+        return BotConfigCache::flow((int) $id);
     }
 
     /** Itali ang page sa isang flow (o alisin kapag null): ang pangalan (FLOW, para makita) at ang id (para tumakbo). */

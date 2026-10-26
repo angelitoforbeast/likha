@@ -14,6 +14,13 @@ class ChatbotFlow extends Model
 
     protected $casts = ['graph' => 'array', 'draft_graph' => 'array', 'draft_version' => 'integer', 'published_at' => 'datetime'];
 
+    /** Anumang sulat o bura: ang naka-cache na ayos ng bot (BotConfigCache) ay binubura. */
+    protected static function booted(): void
+    {
+        static::saved(fn (self $m) => \App\Services\Chatbot\BotConfigCache::forgetFlow((int) $m->id));
+        static::deleted(fn (self $m) => \App\Services\Chatbot\BotConfigCache::forgetFlow((int) $m->id));
+    }
+
     /** Ang graph na ini-edit: ang draft, o ang published kapag walang draft. */
     public function draft(): ?array
     {
