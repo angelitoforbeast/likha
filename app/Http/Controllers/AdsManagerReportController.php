@@ -81,6 +81,7 @@ class AdsManagerReportController extends Controller
             'inserted' => (int) ($latest?->inserted ?? 0),
             'updated'  => (int) ($latest?->updated ?? 0),
             'logs'     => $logs,
+            'meta'     => MetaAdsController::panel(),
         ]);
     }
 

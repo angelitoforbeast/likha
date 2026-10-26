@@ -198,6 +198,22 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
     }
 
+    /**
+     * Ang parehong upsert ng upload para sa mga row na galing na sa ibang source (Meta Ads API), para pareho ang
+     * proteksyon ng monotonic fields at ang ad_campaign_creatives / ad_catalog. Ang rows ay normalized na (gaya ng
+     * normalizeRow). @return array{inserted:int, updated:int, skipped:int, protected:array}
+     */
+    public function importRows(array $rows): array
+    {
+        $this->inserted = $this->updated = $this->skipped = 0;
+        $this->protectedByField = [];
+        foreach (array_chunk($rows, self::CHUNK_SIZE) as $chunk) {
+            $this->upsertChunk($chunk);
+        }
+
+        return ['inserted' => $this->inserted, 'updated' => $this->updated, 'skipped' => $this->skipped, 'protected' => $this->protectedByField];
+    }
+
     private function resolveDiskName(?UploadLog $log): string
     {
         // if UploadLog has disk column, use it; else fall back to default
@@ -620,6 +636,9 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'ad_set_budget_type');
                 $this->putIfExists($updateData, $r, 'reporting_starts');
                 $this->putIfExists($updateData, $r, 'reporting_ends');
+                // Ang simula at wakas ng ad set: ang API lang ang nagbibigay (wala sa export).
+                $this->putIfExists($updateData, $r, 'starts');
+                $this->putIfExists($updateData, $r, 'ends');
 
                 // Creatives mirrored here (optional)
                 $this->putIfExists($updateData, $r, 'body_ad_settings');

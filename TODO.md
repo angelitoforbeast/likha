@@ -1204,3 +1204,10 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Spec 155: an alarm whose endpoint then answers 404 or times out keeps its banner until a sample under 30 s or the cache TTL (25 h).** Reason: a failed reading is no evidence that the lag ended; the panel shows "not available" at the same time.
 - **Spec 155: no test pins the 30-minute repeat at exactly minute 30 vs 29 (S-155.4 checks before and after).** Reason: `>=` on one constant; the before/after checks cover the rule.
 - **Spec 155: 390 px was checked by markup only (`grid-cols-2`, `overflow-x-auto`), not in a browser.** Reason: no running app in this worktree.
+
+## 154: Meta Ads connect, accepted review minors (2026-10-26)
+- Connect on /profile (Decision 1 "plus the user's profile if there is one"): not added; the card on /ads_manager/report is where the uploaders work. Add a link on /profile if staff ask.
+- `Connections::all()` LIKE `meta_ads.connection.%` leaves `_` unescaped: the keys are written only by our code, so nothing else can match. Trusted path.
+- A token that cannot be decrypted (APP_KEY rotated) shows "needs Reconnect" in the run log but the card still says OK: mark it expired in a later pass if a key rotation is ever planned.
+- Sync now has no double-submit guard: two queued runs can collide on the day + ad_id unique index; the losing chunk rolls back and that account is logged as failed, no data lost. The button disables itself on click.
+- Pre-existing, not touched: CSV uploads to /ads_manager/report crash on OpenSpout v4 (`CSV\Reader::setFieldDelimiter()` does not exist); XLSX works.

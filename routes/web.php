@@ -851,6 +851,14 @@ Route::post('/ads_manager/report', [\App\Http\Controllers\AdsManagerReportContro
 Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReportController::class, 'status'])
     ->name('ads_manager.report.status');
 
+// Facebook (Meta Ads API): connect ng sariling Facebook, Compare with uploads, Sync now, write mode (CEO).
+Route::get('/ads_manager/meta/connect', [\App\Http\Controllers\MetaAdsController::class, 'connect'])->name('ads_manager.meta.connect');
+Route::get('/ads_manager/meta/callback', [\App\Http\Controllers\MetaAdsController::class, 'callback'])->name('ads_manager.meta.callback');
+Route::post('/ads_manager/meta/disconnect', [\App\Http\Controllers\MetaAdsController::class, 'disconnect'])->name('ads_manager.meta.disconnect');
+Route::post('/ads_manager/meta/compare', [\App\Http\Controllers\MetaAdsController::class, 'compare'])->name('ads_manager.meta.compare');
+Route::post('/ads_manager/meta/sync', [\App\Http\Controllers\MetaAdsController::class, 'sync'])->name('ads_manager.meta.sync');
+Route::post('/ads_manager/meta/write-mode', [\App\Http\Controllers\MetaAdsController::class, 'writeMode'])->name('ads_manager.meta.write_mode');
+
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
     Route::get('/ads_manager/cpp/data', [\App\Http\Controllers\CPPController::class, 'data'])
     ->name('ads_manager.cpp.data');

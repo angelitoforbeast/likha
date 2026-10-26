@@ -35,6 +35,13 @@ return [
         ],
     ],
 
+    // Meta Ads (Marketing API): ang app ng "Connect Facebook" sa /ads_manager/report. Walang app id = "Meta app not set up yet".
+    'meta_ads' => [
+        'app_id'        => env('META_ADS_APP_ID'),
+        'app_secret'    => env('META_ADS_APP_SECRET'),
+        'graph_version' => env('META_ADS_GRAPH_VERSION', 'v25.0'),
+    ],
+
     // /ads_manager/payment/reconcile: vision model na bumabasa ng screenshot ng card statement (OPENAI_API_KEY),
     // at ang pdftotext binary para sa PDF (smalot/pdfparser kung wala).
     'card_statement' => [
