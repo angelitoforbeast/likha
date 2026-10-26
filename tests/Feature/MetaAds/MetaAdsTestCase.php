@@ -24,6 +24,9 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
     /** @var array<int, string> mga hiningi sa Graph (path lang) */
     protected array $graphCalls = [];
 
+    /** @var array<int, array{path: string, query: array, token: string, url: string}> ang buong hiningi */
+    protected array $graphRequests = [];
+
     protected function migrationPaths(): array
     {
         return array_merge(parent::migrationPaths(), [
@@ -202,6 +205,7 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
             parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
             $token = trim(str_replace('Bearer', '', $req->header('Authorization')[0] ?? ''));
             $this->graphCalls[] = $path;
+            $this->graphRequests[] = ['path' => $path, 'query' => $q, 'token' => $token, 'url' => $url];
 
             if ($path === 'oauth/access_token') {
                 return ($q['grant_type'] ?? '') === 'fb_exchange_token'

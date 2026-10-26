@@ -60,7 +60,9 @@ class Connections
         $token = (string) ($long['access_token'] ?? '');
         if ($token === '') throw new GraphException('Facebook did not return a token.');
 
-        $debug   = $this->graph->get('debug_token', ['input_token' => $token, 'access_token' => $app['client_id'] . '|' . $app['client_secret']]);
+        // Ang app token (id|secret) ay nasa Authorization header, hindi sa URL. Ang dalawang exchange sa itaas ay GET na may
+        // client_secret sa query, gaya ng dokumento ng Meta; ang mensahe ng anumang mali ay nililinis ng Graph::clean.
+        $debug   = $this->graph->get('debug_token', ['input_token' => $token], $app['client_id'] . '|' . $app['client_secret'], false);
         $expires = (int) ($debug['data']['expires_at'] ?? 0);
         if ($expires <= 0 && isset($long['expires_in'])) $expires = time() + (int) $long['expires_in'];
 

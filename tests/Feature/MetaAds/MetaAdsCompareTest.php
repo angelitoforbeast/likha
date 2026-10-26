@@ -2,7 +2,10 @@
 
 namespace Tests\Feature\MetaAds;
 
+use App\Jobs\CompareMetaAds;
+use App\Models\UploadLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 
 /** Compare with uploads: API laban sa ads_manager_reports (day + ad_id), kada ad account; walang isinusulat. */
 class MetaAdsCompareTest extends MetaAdsTestCase
@@ -43,18 +46,27 @@ class MetaAdsCompareTest extends MetaAdsTestCase
         $this->seedTwoAccounts();
         $before = $this->reportRows();
 
-        $res = $this->post('/ads_manager/meta/compare', ['from' => self::DAY, 'to' => self::DAY]);
+        // Naka-queue: habang hindi pa tumatakbo ang job, "running…" ang nasa page.
+        Queue::fake();
+        $this->post('/ads_manager/meta/compare', ['from' => self::DAY, 'to' => self::DAY])->assertRedirect('/ads_manager/report');
+        Queue::assertPushed(CompareMetaAds::class);
+        $log = UploadLog::where('type', 'ads_manager_api_compare')->firstOrFail();
+        $this->assertSame(['queued', null], [$log->status, $log->protected_details]);
+        $this->get('/ads_manager/report')->assertSee('Compare running…');
 
-        $res->assertRedirect('/ads_manager/report');
-        $report = session('meta_compare');
+        // Ang job: ang report ay nasa upload_logs row niya.
+        app()->call([new CompareMetaAds($log->id, self::DAY, self::DAY), 'handle']);
+        $log->refresh();
+        $this->assertSame('done', $log->status);
+        $report = $log->protected_details;
         $byId = collect($report['accounts'])->keyBy('account_id');
         $this->assertSame(['111', '222'], array_column($report['accounts'], 'account_id'));
 
         $a = $byId['111'];
         $this->assertSame([2, 2, 0], [$a['api_rows'], $a['upload_rows'], $a['matched']]);
-        $this->assertSame([['day' => self::DAY, 'ad_id' => 'a2', 'spend' => 50.0]], $a['only_api']);
-        $this->assertSame([['day' => self::DAY, 'ad_id' => 'u9', 'spend' => 15.0]], $a['only_upload']);
-        $this->assertSame([['day' => self::DAY, 'ad_id' => 'a1', 'fields' => ['amount_spent_php' => ['api' => 100.0, 'upload' => 90.0, 'pct' => 11.1]]]], $a['differ']);
+        $this->assertEquals([['day' => self::DAY, 'ad_id' => 'a2', 'spend' => 50.0]], $a['only_api']);
+        $this->assertEquals([['day' => self::DAY, 'ad_id' => 'u9', 'spend' => 15.0]], $a['only_upload']);
+        $this->assertEquals([['day' => self::DAY, 'ad_id' => 'a1', 'fields' => ['amount_spent_php' => ['api' => 100.0, 'upload' => 90.0, 'pct' => 11.1]]]], $a['differ']);
 
         $b = $byId['222'];
         $this->assertSame([1, 1, 1, 0, 0, 0], [$b['api_rows'], $b['upload_rows'], $b['matched'], $b['only_api_count'], $b['only_upload_count'], $b['differ_count']]);

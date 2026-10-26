@@ -104,8 +104,16 @@
   @endif
 
   {{-- Resulta ng Compare --}}
-  @if (session('meta_compare'))
-    @php $cmp = session('meta_compare'); @endphp
+  @php $cmpLog = $meta['compare']; @endphp
+  @if ($cmpLog && in_array($cmpLog->status, ['queued', 'processing'], true))
+    <div class="border-t pt-3 text-sm text-indigo-700" id="meta-compare-running">
+      Compare running… ({{ $cmpLog->original_name }}). Nagre-refresh ang page kada 5 segundo.
+    </div>
+    <script>setTimeout(() => location.reload(), 5000);</script>
+  @elseif ($cmpLog && $cmpLog->status === 'failed')
+    <div class="border-t pt-3 text-xs text-red-700">Compare #{{ $cmpLog->id }} failed: {{ $cmpLog->error_message }}</div>
+  @elseif ($cmpLog && is_array($cmpLog->protected_details))
+    @php $cmp = $cmpLog->protected_details; @endphp
     <div class="border-t pt-3 space-y-3" id="meta-compare">
       <h3 class="font-semibold text-sm">Compare: API vs uploads, {{ $cmp['from'] }} to {{ $cmp['to'] }} (walang isinulat)</h3>
       @foreach ($cmp['problems'] as $pr)

@@ -2,14 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\CompareMetaAds;
 use App\Jobs\SyncMetaAdsReports;
 use App\Models\UploadLog;
-use App\Services\MetaAds\Compare;
 use App\Services\MetaAds\Connections;
 use App\Services\MetaAds\GraphException;
 use App\Services\MetaAds\Sync;
 use App\Support\NavAccess;
-use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -62,7 +61,8 @@ class MetaAdsController extends Controller
             ];
         }
 
-        $logs = UploadLog::whereIn('type', [Sync::LOG_TYPE, 'ads_manager_api_event'])->orderByDesc('id')->limit(20)->get();
+        $logs = UploadLog::whereIn('type', [Sync::LOG_TYPE, CompareMetaAds::LOG_TYPE, 'ads_manager_api_event'])->orderByDesc('id')->limit(20)
+            ->get(['id', 'type', 'status', 'original_name', 'inserted', 'updated', 'skipped', 'error_message', 'user_id', 'created_at']);
         $who  = $logs->pluck('user_id')->filter()->unique();
         $whoNames = $who->isEmpty() ? collect() : \App\Models\User::whereIn('id', $who)->pluck('name', 'id');
         foreach ($logs as $l) $l->who = $whoNames[$l->user_id] ?? 'system';
@@ -76,6 +76,8 @@ class MetaAdsController extends Controller
             'is_ceo'     => (new self($connections))->getNormalizedRole() === 'CEO',
             'range'      => Sync::range(null, null),
             'logs'       => $logs,
+            // Ang huling Compare (kahit sino ang nagpatakbo): "running…" o ang report.
+            'compare'    => UploadLog::where('type', CompareMetaAds::LOG_TYPE)->orderByDesc('id')->first(),
         ];
     }
 
@@ -128,23 +130,16 @@ class MetaAdsController extends Controller
         return $this->back()->with('status', 'Facebook disconnected.');
     }
 
-    public function compare(Request $request, Compare $compare)
+    public function compare(Request $request)
     {
         $this->checkAccess();
         [$from, $to] = $this->range($request);
 
-        try {
-            $report = $compare->run($from, $to);
-        } catch (GraphException $e) {
-            return $this->back()->withErrors(['meta' => 'Compare failed: ' . $e->getMessage()]);
-        } catch (\Throwable $e) {
-            // Kakaibang sagot ng Graph (hal. data na hindi listahan): mensahe, hindi 500.
-            Log::warning('MetaAds: compare failed', ['error' => \App\Services\MetaAds\Graph::clean($e->getMessage())]);
-            return $this->back()->withErrors(['meta' => 'Compare failed: unexpected answer from Facebook.']);
-        }
-        Connections::event("compare {$from}..{$to}", Auth::id());
+        // Sa queue: ang report ay nasa upload_logs row; ang page ay "running…" hanggang matapos.
+        $log = CompareMetaAds::startLog($from, $to, Auth::id());
+        CompareMetaAds::dispatch($log->id, $from, $to);
 
-        return $this->back()->with('meta_compare', $report);
+        return $this->back()->with('status', '🔎 Compare queued: #' . $log->id . " ({$from} to {$to})");
     }
 
     public function sync(Request $request)

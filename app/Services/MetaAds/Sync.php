@@ -87,7 +87,19 @@ class Sync
             return $log;
         }
         $log->update(['status' => 'processing', 'started_at' => now()]);
+        $error = null;
+        try {
+            return $this->runAccounts($log, $from, $to);
+        } catch (Throwable $e) {
+            $error = $e;
+            throw $e;
+        } finally {
+            self::endUnfinished($log, $error);
+        }
+    }
 
+    private function runAccounts(UploadLog $log, string $from, string $to): UploadLog
+    {
         $importer = new ProcessAdsManagerReportsUpload('');
         $problems = [];
         $seen     = [];
@@ -143,6 +155,21 @@ class Sync
         if ($tot['inserted'] + $tot['updated'] > 0) \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
 
         return $log;
+    }
+
+    /**
+     * Ang run na hindi natapos (may ibinato, o pinatay ng queue dahil sa timeout: tinatawag ng failed() ng job) ay "failed",
+     * hindi naiiwang "processing" o "queued". Ang tapos na ay hindi ginagalaw.
+     */
+    public static function endUnfinished(UploadLog $log, ?Throwable $e): void
+    {
+        $log->refresh();
+        if (!in_array($log->status, ['queued', 'processing'], true)) return;
+        $log->update([
+            'status'        => 'failed',
+            'error_message' => 'Stopped: ' . ($e ? mb_substr(Graph::clean($e->getMessage()), 0, 500) : 'did not finish'),
+            'finished_at'   => now(),
+        ]);
     }
 
     /**

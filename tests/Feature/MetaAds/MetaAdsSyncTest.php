@@ -2,10 +2,12 @@
 
 namespace Tests\Feature\MetaAds;
 
+use App\Models\UploadLog;
 use App\Services\MetaAds\Connections;
 use App\Services\MetaAds\Sync;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -180,17 +182,26 @@ class MetaAdsSyncTest extends MetaAdsTestCase
         Carbon::setTestNow();
     }
 
-    public function test_S_154_7_the_scheduler_has_the_meta_ads_sync_every_minute(): void
+    public function test_S_154_7_the_scheduler_registers_the_meta_ads_sync_every_minute_only_behind_write_mode(): void
     {
-        $events = collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())
-            ->filter(fn ($e) => str_contains((string) $e->command, 'meta-ads:sync --scheduled'));
+        $event = collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())
+            ->first(fn ($e) => str_contains((string) $e->command, 'meta-ads:sync --scheduled'));
 
-        $this->assertSame(['* * * * *'], $events->pluck('expression')->values()->all());
+        $this->assertSame('* * * * *', $event->expression);
+        $this->assertFalse($event->filtersPass($this->app));
+        Sync::setWriteMode(true);
+        $this->assertTrue($event->filtersPass($this->app));
     }
 
-    public function test_S_154_9_only_the_ceo_turns_write_mode_on_or_off_and_it_is_logged(): void
+    public static function notCeo(): array
     {
-        $this->actingAs($this->user('Marketing', 'm@example.test'));
+        return ['Marketing' => ['Marketing'], 'Marketing - OIC' => ['Marketing - OIC']];
+    }
+
+    #[DataProvider('notCeo')]
+    public function test_S_154_9_only_the_ceo_turns_write_mode_on_or_off_and_it_is_logged(string $role): void
+    {
+        $this->actingAs($this->user($role, 'm@example.test'));
         $this->post('/ads_manager/meta/write-mode', ['write_mode' => 'on'])->assertForbidden();
         $this->assertFalse(Sync::writeMode());
         $this->get('/ads_manager/report')->assertDontSee('Write mode (CEO)');
@@ -215,9 +226,64 @@ class MetaAdsSyncTest extends MetaAdsTestCase
         $this->fakeGraph(insights: ['111' => [self::insight('111', 'a1', self::DAY, 10.00)]], ads: ['111' => [self::adDetail('a1')]]);
         $this->actingAs($oic);
 
-        $this->post('/ads_manager/meta/compare', ['from' => self::DAY, 'to' => self::DAY])->assertSessionHasNoErrors()->assertSessionHas('meta_compare');
+        $this->post('/ads_manager/meta/compare', ['from' => self::DAY, 'to' => self::DAY])->assertSessionHasNoErrors();
         $this->post('/ads_manager/meta/sync', ['from' => self::DAY, 'to' => self::DAY])->assertSessionHasNoErrors();
 
+        $this->assertSame(['done', $oic->id], [
+            DB::table('upload_logs')->where('type', 'ads_manager_api_compare')->value('status'),
+            (int) DB::table('upload_logs')->where('type', 'ads_manager_api_compare')->value('user_id'),
+        ]);
         $this->assertSame(['a1'], array_column($this->reportRows(), 'ad_id'));
+    }
+
+    public static function foreignHosts(): array
+    {
+        return [
+            'other host'      => ['https://attacker.example/v25.0/act_111/insights?after=p2'],
+            'look-alike host' => ['https://graph.facebook.com.evil.com/v25.0/act_111/insights?after=p2'],
+            'userinfo trick'  => ['https://graph.facebook.com@evil.com/v25.0/act_111/insights?after=p2'],
+            'plain http'      => ['http://graph.facebook.com/v25.0/act_111/insights?after=p2'],
+        ];
+    }
+
+    #[DataProvider('foreignHosts')]
+    public function test_S_154_8_a_paging_next_to_another_host_is_not_followed_and_the_run_is_partial(string $next): void
+    {
+        Sync::setWriteMode(true);
+        $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111']);
+        Http::fake([
+            'graph.facebook.com/v25.0/act_111/insights*' => Http::response(['data' => [self::insight('111', 'a1', self::DAY, 10.00)], 'paging' => ['next' => $next]]),
+            '*' => Http::response(['error' => ['message' => 'should not be called', 'code' => 100]], 400),
+        ]);
+
+        $log = app(Sync::class)->run(Sync::startLog(self::DAY, self::DAY, null), self::DAY, self::DAY);
+
+        Http::assertSentCount(1);
+        $this->assertSame('partial', $log->status);
+        $this->assertStringContainsString('paging link to another host', $log->error_message);
+        $this->assertSame([], $this->reportRows());
+    }
+
+    public static function jobs(): array
+    {
+        return ['Sync now' => [\App\Jobs\SyncMetaAdsReports::class, 'ads_manager_api'], 'Compare' => [\App\Jobs\CompareMetaAds::class, 'ads_manager_api_compare']];
+    }
+
+    #[DataProvider('jobs')]
+    public function test_S_154_6_a_run_that_throws_or_is_killed_ends_failed_not_processing(string $job, string $type): void
+    {
+        Sync::setWriteMode(true);
+        $this->app->instance(Connections::class, \Mockery::mock(Connections::class, fn ($m) => $m->shouldReceive('all')->andThrow(new \RuntimeException('db gone'))));
+        $thrown = UploadLog::create(['type' => $type, 'disk' => 'api', 'path' => 'meta', 'original_name' => 'x', 'status' => 'queued']);
+        $killed = UploadLog::create(['type' => $type, 'disk' => 'api', 'path' => 'meta', 'original_name' => 'y', 'status' => 'processing']);
+
+        try {
+            app()->call([new $job($thrown->id, self::DAY, self::DAY), 'handle']);
+        } catch (\RuntimeException) {
+        }
+        (new $job($killed->id, self::DAY, self::DAY))->failed(new \RuntimeException('timed out'));
+
+        $this->assertSame(['failed', 'failed'], [$thrown->fresh()->status, $killed->fresh()->status]);
+        $this->assertStringContainsString('db gone', $thrown->fresh()->error_message);
     }
 }

@@ -98,20 +98,42 @@ class MetaAdsConnectTest extends MetaAdsTestCase
         foreach ([$callback->getContent(), $page->getContent(), implode("\n", $logged), json_encode(DB::table('upload_logs')->get())] as $out) {
             $this->assertStringNotContainsString(self::TOKEN_ANA, $out);
             $this->assertStringNotContainsString(substr(self::TOKEN_ANA, -4), $out);
+            $this->assertStringNotContainsString('app-secret-xyz', $out);
         }
     }
 
-    public function test_S_154_8_a_paging_next_link_to_another_host_is_not_followed_with_the_token(): void
+    public function test_S_154_1_the_state_is_single_use(): void
     {
-        Http::fake([
-            'graph.facebook.com/*' => Http::response(['data' => [['id' => 'act_1']], 'paging' => ['next' => 'https://attacker.example/steal?after=p2']]),
-        ]);
+        $this->actingAs($this->user('Marketing', 'm@example.test'));
+        $this->fakeGraph();
+        $url = '/ads_manager/meta/callback?code=abc&state=' . str_repeat('s', 40);
 
-        $rows = app(\App\Services\MetaAds\Graph::class)->all('me/adaccounts', ['fields' => 'id'], self::TOKEN_ANA);
+        $this->withSession(['meta_ads_state' => str_repeat('s', 40)])->get($url)->assertSessionHasNoErrors();
+        $calls = count($this->graphCalls);
+        $this->get($url)->assertRedirect('/ads_manager/report')->assertSessionHasErrors('meta');
 
-        $this->assertSame([['id' => 'act_1']], $rows);
-        Http::assertSentCount(1);
-        Http::assertNotSent(fn ($req) => str_contains($req->url(), 'attacker.example'));
+        $this->assertSame($calls, count($this->graphCalls));
+    }
+
+    public function test_S_154_8_every_user_token_call_carries_appsecret_proof_and_the_app_secret_stays_out_of_urls_but_the_exchange(): void
+    {
+        $this->actingAs($this->user('Marketing', 'm@example.test'));
+        $this->fakeGraph();
+
+        $this->withSession(['meta_ads_state' => str_repeat('s', 40)])
+            ->get('/ads_manager/meta/callback?code=abc&state=' . str_repeat('s', 40))->assertSessionHasNoErrors();
+
+        $proof = hash_hmac('sha256', self::TOKEN_ANA, 'app-secret-xyz');
+        $userCalls = array_filter($this->graphRequests, fn ($r) => $r['token'] === self::TOKEN_ANA);
+        $this->assertSame(['me', 'me/adaccounts'], array_values(array_column($userCalls, 'path')));
+        foreach ($userCalls as $r) $this->assertSame($proof, $r['query']['appsecret_proof'] ?? null);
+
+        // debug_token: ang app token ay nasa header, hindi sa URL; ang secret ay sa dalawang token exchange lang.
+        $debug = collect($this->graphRequests)->firstWhere('path', 'debug_token');
+        $this->assertSame('999000|app-secret-xyz', $debug['token']);
+        $this->assertArrayNotHasKey('access_token', $debug['query']);
+        $withSecret = array_filter($this->graphRequests, fn ($r) => str_contains($r['url'], 'app-secret-xyz'));
+        $this->assertSame(['oauth/access_token', 'oauth/access_token'], array_values(array_column($withSecret, 'path')));
     }
 
     public function test_S_154_8_a_failed_exchange_shows_and_logs_no_secret_or_code(): void

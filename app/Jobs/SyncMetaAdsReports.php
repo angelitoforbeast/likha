@@ -27,4 +27,11 @@ class SyncMetaAdsReports implements ShouldQueue
         $log = UploadLog::find($this->uploadLogId);
         if ($log) $sync->run($log, $this->from, $this->to);
     }
+
+    /** Pinatay (timeout) o nabigo: ang log row ay "failed", hindi naiiwang "processing". */
+    public function failed(?\Throwable $e = null): void
+    {
+        $log = UploadLog::find($this->uploadLogId);
+        if ($log) Sync::endUnfinished($log, $e);
+    }
 }
