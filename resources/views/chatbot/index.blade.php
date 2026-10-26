@@ -783,7 +783,7 @@
             state.textContent = c.connected ? 'Connected' : (p === 'botcake' && c.token && !c.chat_block ? 'No chat block' : (bad ? c.status : (c.token ? 'Not connected' : 'Not set up')));
             state.className = 'conn-state break-words text-xs ' + (c.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500'));
             // Naka-on na keyword sa Botcake (huling Test): hindi pa gumagana nang buo ang bot, kahit Connected.
-            if (p === 'botcake' && String(c.keywords_status || '').startsWith('on ')) {
+            if (p === 'botcake' && !bad && String(c.keywords_status || '').startsWith('on ')) {
                 state.textContent = 'Keyword on: not working yet';
                 state.className = 'conn-state break-words text-xs text-red-600';
             }
