@@ -93,7 +93,8 @@ class ChatbotPageCheckTest extends ChatblastTestCase
 
         $res = $this->check();
         $this->assertSame('x', $res['status']);
-        $this->assertSame(['Missing: QUANTITY, ITEM NAME IN JNT DASHBOARD, Prompt 2, PICTURE, Seq 4'], $res['reasons']);
+        // Ang SHOP DETAILS ay binubuo mula sa ITEM NAME IN JNT DASHBOARD, PRICE at QUANTITY: X rin ang kulang.
+        $this->assertSame(['Missing: QUANTITY, ITEM NAME IN JNT DASHBOARD, Prompt 2, PICTURE, Seq 4', 'SHOP DETAILS: missing ITEM NAME IN JNT DASHBOARD', 'SHOP DETAILS: missing QUANTITY'], $res['reasons']);
 
         foreach (['quantity' => '1', 'item_name_in_jnt_dashboard' => 'Shoe', 'prompt_2' => 'Be nice.', 'picture' => self::IMG . 'p.jpg', 'seq_4' => 'Step 4'] as $k => $v) $s->set('Page Uno', 'chatbot', $k, $v);
         $res = $this->check();
@@ -194,6 +195,8 @@ class ChatbotPageCheckTest extends ChatblastTestCase
     {
         $this->link('Page Uno', $this->flow('Main', [$this->send('{{Prompt 1}}'), ['set', ['ops' => [['op' => 'set', 'field' => 'order note', 'value' => 'x']]]]]));
         $this->settings()->set('Page Uno', 'chatbot', 'price', '499');
+        $this->settings()->set('Page Uno', 'chatbot', 'item_name_in_jnt_dashboard', 'Shoe'); // kumpleto ang SHOP DETAILS
+        $this->settings()->set('Page Uno', 'chatbot', 'quantity', '1');
         $this->settings()->set('Page Uno', 'chatbot', 'prompt_3', 'x'); // ginagamit ng Prompt 1, kaya kailangan may laman
         $this->settings()->set('Page Uno', 'chatbot', 'prompt_1', 'Only {{PRICE}} for {{first_name}}, {{order note}}, {{ PRICEE }} {{Prompt_3}}');
 
@@ -212,7 +215,7 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         DB::table('chatbot_flows')->where('id', $flow->id)->update(['graph' => json_encode(FlowGraph::clean(['nodes' => [['id' => 'n0', 'type' => 'start']], 'edges' => []]))]);
         $this->assertSame(['Missing: PRICE'], $this->check()['reasons'], 'mula sa cache');
 
-        $this->settings()->set('Page Uno', 'chatbot', 'quantity', '2');
+        $this->settings()->set('Page Uno', 'chatbot', 'prompt_2', 'x');
         $this->assertSame(['ok', []], [$this->check()['status'], $this->check()['reasons']], 'nabago ang settings: kinuwenta ulit');
 
         $this->travel(1)->minutes();
@@ -333,5 +336,13 @@ class ChatbotPageCheckTest extends ChatblastTestCase
         $this->assertNotSame('none', $over['status'], 'shown even without a flow');
         $this->assertSame([], $lengths($this->check('Page Dos')), 'at the limit is fine');
         $this->assertSame(str_repeat('a', 2001), $s->get('Page Uno', 'chatbot', 'comment_pm'), 'nothing is cut');
+    }
+
+    public function test_S_158_4_a_flow_using_shop_details_is_not_missing_it_without_a_typed_row(): void
+    {
+        $this->link('Page Uno', $this->flow('Main', [$this->send('{{SHOP DETAILS}}')]));
+        foreach (['item_name_in_jnt_dashboard' => 'GLOW TAPE', 'price' => '198', 'quantity' => '2'] as $k => $v) $this->settings()->set('Page Uno', 'chatbot', $k, $v);
+
+        $this->assertSame(['ok', []], [$this->check()['status'], $this->check()['reasons']]);
     }
 }

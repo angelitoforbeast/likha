@@ -282,4 +282,17 @@ class ChatbotInboxTest extends ChatblastTestCase
     {
         return array_values(array_filter(DB::getQueryLog(), fn ($q) => preg_match('/from "(botcake_chats|chatbot_replies)"/', $q['query'])));
     }
+
+    public function test_S_158_2_the_inbox_panel_shows_the_built_shop_details_not_the_typed_one(): void
+    {
+        $this->in('7001', 'Hi', '2026-10-18 09:00:00', '1001', 'Ana Cruz');
+        $s = app(PageSettings::class);
+        foreach (['item_name_in_jnt_dashboard' => 'GLOW TAPE', 'price' => '198', 'quantity' => '2', 'shop_details' => 'ITEM: REF CLEANER'] as $k => $v) $s->set('Page Uno', 'chatbot', $k, $v);
+        $this->actingAs($this->user());
+
+        $p = $this->getJson('/chatbot/inbox/panel?page_id=1001&psid=7001')->assertOk()->json();
+
+        $this->assertSame([['label' => 'SHOP DETAILS', 'value' => "PAGE: Page Uno\nITEM: GLOW TAPE\nPRICE: ₱198\nQUANTITY: 2"]],
+            array_values(array_filter($p['botfields'], fn ($b) => $b['label'] === 'SHOP DETAILS')));
+    }
 }

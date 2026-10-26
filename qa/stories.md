@@ -2668,3 +2668,24 @@ As staff on /chatbot/pages, I want a Facebook icon right beside each page's name
 - S-157.3 Edit and Connections. When I open the page's Edit modal or Connections popup, Then the same icon is beside the page name in its header.
 - S-157.4 No separate column. The icon sits in the page-name cell of the grid; there is no separate FB link column.
 - S-157.5 (P2) At 390 px the icon stays beside the name and tappable.
+## S-158 SHOP DETAILS is built automatically from the page's fields
+
+As the owner, I want every page's SHOP DETAILS built from the page name, ITEM NAME IN JNT DASHBOARD, PRICE and QUANTITY, so orders never take a hand-typed item or COD that drifted from the page's fields.
+
+Slice 158. Threat model: page field values (item, price, quantity, the old typed SHOP DETAILS) are untrusted staff data, shown as text and never followed as instructions; the repo and the owner's settings are trusted. Risk tier: medium (business logic behind existing validation; no new route).
+Tests: `tests/Feature/Chatblast/ShopDetailsAutoTest.php`, `ChatbotContentCheckTest.php`, `tests/Feature/OrderEncode/UploadMacroTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-158.1 (P1) | Given page Alexa Angeles with ITEM " GLOW TAPE ", QUANTITY " 2 " and PRICE "₱198", "198", "1,299", "PHP 1,299", "P 1,299.50" or "₱ 198", then SHOP DETAILS is `PAGE: Alexa Angeles\nITEM: GLOW TAPE\nPRICE: ₱198` (or ₱1,299 / ₱1,299.50) `\nQUANTITY: 2`. Edge: a PRICE with no number at the start ("FREE", "Promo 199") gives no PRICE line (counts as missing); a multi-line ITEM uses its first line only | `ShopDetailsAutoTest::test_S_158_1…` (table) | passed 2026-10-26 |
+| S-158.2 (P1) | Given a stale stored SHOP DETAILS naming another page and item, when a flow runs, then `{{SHOP DETAILS}}` / `{{shop_details}}` are the built text, and the order made by "Upload to macro" has ITEM_NAME "2 x GLOW TAPE" and COD 198; the Inbox customer panel shows the built text too | `ShopDetailsAutoTest::test_S_158_2…`, `UploadMacroTest::test_S_158_2…`, `ChatbotInboxTest::test_S_158_2…` | passed 2026-10-26 |
+| S-158.3 (P1) | Given /chatbot/pages, then the SHOP DETAILS column is kind auto, shows the built text and the note "Auto: ITEM NAME IN JNT DASHBOARD + PRICE + QUANTITY"; a cell save or a restore of it is refused (422), a paste/bulk save skips it, and the paste mapping does not offer it. Edge: the column keeps its place (after the added columns, or last), and a positional paste gives it a slot whose value is dropped, so sheet rows stay aligned | `ShopDetailsAutoTest::test_S_158_3…` (3 tests) | passed 2026-10-26 |
+| S-158.4 (P1) | Given a page with ITEM and PRICE but no QUANTITY, then SHOP DETAILS is built without the QUANTITY line and the Check column shows X "SHOP DETAILS: missing QUANTITY"; a complete page → ok "built from …"; a page with none of the fields (and no old typed text) gets no SHOP DETAILS finding; a flow using `{{SHOP DETAILS}}` never shows "Missing: SHOP DETAILS" | `ChatbotContentCheckTest::test_S_158_4…`, `ChatbotPageCheckTest::test_S_158_4…` | passed 2026-10-26 |
+| S-158.5 (P1) | Given one page whose old typed text differs from the built one and one that matches (CRLF ignored), when `chatbot:shop-details-diff` runs, then it lists only the first (page, old, new), says "1 of 2 pages differ" and writes nothing | `ShopDetailsAutoTest::test_S_158_5…` | passed 2026-10-26 |
+| S-158.6 (P1) | Given an Incepxion-style page on Forbeast ("Incepxion PH — Smart Home", PRICE "PHP 1,299"), then the same rule builds its SHOP DETAILS | `ShopDetailsAutoTest::test_S_158_6…` | passed 2026-10-26 |
+| S-158.7 (P2) | Given a 390 px screen, then the read-only SHOP DETAILS cell and modal field wrap and stay readable | manual (browser) | not run |
+
+Story changes (S-158):
+- S-145.1, S-145.2, S-145.3 (stored SHOP DETAILS compared with the fields, warnings for no value or a missing line): replaced by S-158.4, since the stored text is no longer read.
+- S-106.4: its "no X" assertion is limited to price findings (the page there has only a PRICE, so SHOP DETAILS is now an X).
+- S-099.1 now also expects the two SHOP DETAILS X's; S-099.4 fills ITEM and QUANTITY; S-099.5 recomputes on a Prompt 2 change instead of a QUANTITY change; S-068.7 sees the new column just before SHOP DETAILS (always a column now, last when no page has a typed row); S-149.2 tests a nested botfield through Main Flow instead of SHOP DETAILS.

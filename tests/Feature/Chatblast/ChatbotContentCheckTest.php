@@ -255,7 +255,8 @@ Landmark:");
         // Ang {{PRICE}} ay pinupunan mula sa botfield bago itanong.
         $this->answers = ['Seat cover only today' => $this->answer('SEAT COVER', true, 95, $prices)];
 
-        $this->assertSame($x, $this->reasons($this->content(), 'x'));
+        // Ang SHOP DETAILS (kulang ang item at dami) ay ibang check: ang presyo lang dito.
+        $this->assertSame($x, array_values(array_filter($this->reasons($this->content(), 'x'), fn ($r) => !str_starts_with($r, 'SHOP DETAILS:'))));
     }
 
     public function test_S_114_4_the_fill_up_form_is_checked_for_its_fields_without_ai_and_a_missing_one_warns(): void
@@ -433,37 +434,22 @@ Landmark:");
         return array_values(array_map(fn ($f) => [$f['level'], $f['reason']], array_filter($res['findings'], fn ($f) => $f['field'] === $field)));
     }
 
-    public function test_S_145_1_shop_details_naming_another_page_and_item_is_an_x_and_a_matching_one_passes(): void
+    public function test_S_158_4_shop_details_is_built_from_the_fields_and_a_missing_part_is_an_x(): void
     {
+        // Walang ITEM, PRICE, QUANTITY o lumang SHOP DETAILS: hindi pa nagbebenta, walang SHOP DETAILS finding.
+        $this->assertSame([], $this->of($this->content(), 'SHOP DETAILS'));
+
+        // Ang lumang naka-save na text (ibang page at item) ay hindi na binabasa.
         $this->shop('PAGE: Vanessa Reyes | ITEM: CHRISTMAS LIGHTS | PRICE: ₱299 | QUANTITY: 1');
-        $this->assertSame([
-            ['x', 'SHOP DETAILS: PAGE Vanessa Reyes ≠ page Page Uno'],
-            ['x', 'SHOP DETAILS: ITEM CHRISTMAS LIGHTS ≠ ITEM NAME IN JNT DASHBOARD UNISEX SOCKS'],
-        ], $this->of($this->content(), 'SHOP DETAILS'));
+        $this->assertSame([['ok', 'SHOP DETAILS: built from ITEM NAME IN JNT DASHBOARD, PRICE and QUANTITY']], $this->of($this->content(), 'SHOP DETAILS'));
+
+        $this->settings()->deactivate($this->settings()->pageQuery('Page Uno')->where('provider', 'chatbot')->where('key', 'quantity')->where('active', true)->sole());
+        $this->assertSame("PAGE: Page Uno\nITEM: UNISEX SOCKS\nPRICE: ₱299", app(\App\Services\Chatbot\ShopDetails::class)->for('Page Uno'));
+        $this->assertSame([['x', 'SHOP DETAILS: missing QUANTITY']], $this->of($this->content(), 'SHOP DETAILS'));
         $res = $this->check();
         $this->assertSame('x', $res['status']);
-        $this->assertContains('SHOP DETAILS: ITEM CHRISTMAS LIGHTS ≠ ITEM NAME IN JNT DASHBOARD UNISEX SOCKS', $res['reasons']);
-
-        $this->shop("page:  page uno\nItem: unisex  socks\nPRICE: 299\nQUANTITY: 1 pc");
-        $this->assertSame([['ok', 'SHOP DETAILS: matches the page, item, price and quantity']], $this->of($this->content(), 'SHOP DETAILS'));
+        $this->assertContains('SHOP DETAILS: missing QUANTITY', $res['reasons']);
         $this->assertSame(0, $this->aiCalls(), 'walang AI');
-    }
-
-    public function test_S_145_2_a_shop_details_price_or_quantity_other_than_the_fields_is_an_x(): void
-    {
-        $this->shop('PAGE: Page Uno | ITEM: UNISEX SOCKS | PRICE: ₱1,198 | QUANTITY: 2', 'UNISEX SOCKS', '999', '1');
-        $this->assertSame([
-            ['x', 'SHOP DETAILS: PRICE ₱1,198 ≠ PRICE 999'],
-            ['x', 'SHOP DETAILS: QUANTITY 2 ≠ QUANTITY 1'],
-        ], $this->of($this->content(), 'SHOP DETAILS'));
-    }
-
-    public function test_S_145_3_no_shop_details_or_a_missing_line_is_a_warning(): void
-    {
-        $this->shop(null);
-        $this->assertSame([['warn', 'SHOP DETAILS: no value']], $this->of($this->content(), 'SHOP DETAILS'));
-        $this->shop('PAGE: Page Uno | ITEM: UNISEX SOCKS | PRICE: 299');
-        $this->assertSame([['warn', 'SHOP DETAILS: no QUANTITY: line']], $this->of($this->content(), 'SHOP DETAILS'));
     }
 
     public function test_S_145_4_a_seq_price_other_than_the_cod_and_price_is_an_x_and_unchanged_texts_are_not_asked_again(): void

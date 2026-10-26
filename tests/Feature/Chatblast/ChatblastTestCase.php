@@ -47,6 +47,8 @@ abstract class ChatblastTestCase extends BotcakeApiTestCase
     protected function tearDown(): void
     {
         @set_time_limit(0);
+        // Ang "handa na ang tags" ay naka-cache kada app object id; ang susunod na test na may kaparehong id ay hindi dapat magmana nito.
+        (new \ReflectionProperty(\App\Services\Chatbot\ChatbotTags::class, 'ready'))->setValue(null, []);
         parent::tearDown();
     }
 

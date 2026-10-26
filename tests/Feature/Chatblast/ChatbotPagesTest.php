@@ -290,7 +290,8 @@ class ChatbotPagesTest extends ChatblastTestCase
 
         $columns = $this->getJson('/chatbot/data')->json('columns');
         $this->assertSame(1, collect($columns)->where('key', 'promo_text')->count());
-        $this->assertSame(['key' => 'promo_text', 'label' => 'Promo Text', 'kind' => 'text'], collect($columns)->last());
+        // Ang huli ay ang SHOP DETAILS (laging column, binubuo): ang bagong column ay bago nito.
+        $this->assertSame([['key' => 'promo_text', 'label' => 'Promo Text', 'kind' => 'text'], ['key' => 'shop_details', 'label' => 'SHOP DETAILS', 'kind' => 'auto']], collect($columns)->slice(-2)->values()->all());
 
         $this->postJson('/chatbot/cell', ['page_name' => 'Page Dos', 'key' => 'promo_text', 'value' => 'Free shipping'])->assertOk();
         // Ang key na ginagamit sa page_settings (hal. idinagdag sa iba) ay column din.

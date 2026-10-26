@@ -360,6 +360,9 @@
     const pending = new Map();
     let sel = null, lastUndo = null;
     const botCols = () => columns.filter(c => c.key !== 'flow');
+    // Ang SHOP DETAILS (kind auto) ay binubuo sa server: ipinapakita lang, hindi target ng edit, paste o mapping.
+    const editCols = () => botCols().filter(c => c.kind !== 'auto');
+    const SHOP_NOTE = @json(\App\Services\Chatbot\ShopDetails::NOTE);
     // "Use template": ang draft ng Comment PM at Comment Reply 1–3 (ang item at presyo ay variable ng botfield ng page). Pumupuno
     // lang ng field; ang Save (o ang pagsara ng cell editor) ang nagse-save.
     const commentTemplates = @json(\App\Services\Chatbot\CommentCheck::templates());
@@ -1105,6 +1108,18 @@
             if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
             return td;
         }
+        if (c.kind === 'auto') {
+            const td = el('td', {class: extra + ' cb-cell border-b border-slate-100 bg-slate-50 px-3 py-2 align-top', tabindex: '0', 'data-key': c.key, title: SHOP_NOTE});
+            td.append(el('span', {class: 'cb-txt', text: String(r.cells[c.key] ?? '')}), el('span', {class: 'block text-xs text-slate-500', text: SHOP_NOTE}));
+            td.addEventListener('click', ev => {
+                if (ev.shiftKey && sel) { sel.b = {page: r.page, key: c.key}; paintSel(); return; }
+                sel = {a: {page: r.page, key: c.key}, b: {page: r.page, key: c.key}};
+                paintSel();
+                toggleRow(r.page);
+            });
+            td.addEventListener('keydown', ev => { if (ev.target === td && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); toggleRow(r.page); } });
+            return td;
+        }
         const p = pending.get(k);
         const td = el('td', {class: extra + ' cb-cell border-b border-slate-100 px-3 py-2 align-top' + (p ? ' cb-pending' : ''), tabindex: '0', 'data-key': c.key,
             title: p ? 'Not saved yet. Was: ' + (p.old === '' ? '(empty)' : (p.old.length > 300 ? p.old.slice(0, 300) + '…' : p.old)) : null});
@@ -1371,10 +1386,11 @@
         let block = ChatbotPaste.parseTsv(e.clipboardData.getData('text/plain'));
         if (!block.length) return;
         if (block.length === 1 && block[0].length === 1) block = Array.from({length: b.bottom - b.top + 1}, () => Array(b.right - b.left + 1).fill(block[0][0]));
-        let dropped = 0, flagged = 0, added = 0, linked = 0;
+        let dropped = 0, flagged = 0, added = 0, linked = 0, auto = 0;
         block.forEach((line, i) => line.forEach((raw, j) => {
             const r = b.list[b.top + i], c = b.cols[b.left + j], value = raw.trim();
             if (!r || !c) { if (value !== '') dropped++; return; }
+            if (c.kind === 'auto') { if (value !== '') auto++; return; }
             if (value === '' && !$('f-blanks').checked) return;
             if (value !== '' && c.kind === 'image' && !ChatbotPaste.isImageLink(value)) { flagged++; return; }
             if (value !== '' && c.kind !== 'image' && c.kind !== 'flow' && ChatbotPaste.isLinkOnly(value)) linked++;
@@ -1387,7 +1403,8 @@
         if (flagged) notes.push(plural(flagged, 'value') + ' in image columns are not links and were left out');
         if (linked) notes.push(plural(linked, 'value') + ' in text columns are only a link (check the image columns)');
         if (dropped) notes.push(plural(dropped, 'value') + ' past the last column or row were dropped');
-        notice(notes.join(' · ') + '.', flagged || dropped || linked ? 'text-amber-700' : 'text-slate-600');
+        if (auto) notes.push(plural(auto, 'value') + ' in SHOP DETAILS were left out (it is automatic)');
+        notice(notes.join(' · ') + '.', flagged || dropped || linked || auto ? 'text-amber-700' : 'text-slate-600');
         render();
         table.querySelector('td.cb-sel')?.focus({preventScroll: true});
     });
@@ -1400,7 +1417,7 @@
     const grow = t => { if (t.tagName === 'TEXTAREA') { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; } };
     /** Bawat field: ang value ngayon, at kung binago (changed) o hindi link sa image field (flagged, hindi sine-save). */
     function peState() {
-        return botCols().map(c => {
+        return editCols().map(c => {
             // Ikinukumpara sa trimmed na dating value: ang lumang value na may espasyo sa dulo ay hindi "binago" pagbukas.
             const value = peInput(c.key).value.trim(), old = pe.orig[c.key], same = value === old.trim();
             const flagged = value !== '' && !same && c.kind === 'image' && !ChatbotPaste.isImageLink(value);
@@ -1431,8 +1448,8 @@
         $('pe-id').textContent = r.page_id || '';
         $('pe-fb').replaceChildren(fbAnchor(r));
         const start = $('pe-start').value;
-        $('pe-start').replaceChildren(...botCols().map(c => el('option', {value: c.key, text: c.label})));
-        if (start && botCols().some(c => c.key === start)) $('pe-start').value = start;
+        $('pe-start').replaceChildren(...editCols().map(c => el('option', {value: c.key, text: c.label})));
+        if (start && editCols().some(c => c.key === start)) $('pe-start').value = start;
         $('pe-blanks').checked = $('f-blanks').checked;
         $('pe-paste').value = '';
         $('pe-notes').replaceChildren();
@@ -1448,6 +1465,10 @@
     /** Isang field ng modal (label, input, History at template), na may value ng page nang buksan. */
     function peField(c) {
         const r = pe.r, v = pe.orig[c.key] = String(r.cells[c.key] ?? ''), fid = 'pe-f-' + c.key;
+        if (c.kind === 'auto') return el('div', {class: 'pe-field py-2', 'data-key': c.key}, [
+            el('div', {class: 'mb-1 text-xs font-medium text-slate-600', text: c.label}),
+            el('div', {class: 'whitespace-pre-line break-words rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-700', text: v}),
+            el('div', {class: 'mt-1 text-xs text-slate-500', text: SHOP_NOTE})]);
         // Ang image ay link (isang linya, may maliit na preview); ang iba ay textarea na lumalaki, buo ang line break.
         const input = c.kind === 'image'
             ? el('input', {id: fid, type: 'url', class: 'pe-in w-full rounded-md border border-slate-300 px-2 py-1 text-sm', placeholder: 'https://…', autocomplete: 'off'})
@@ -1491,7 +1512,7 @@
     function pePaste() {
         peRestore();
         const text = $('pe-paste').value, notes = [];
-        const current = Object.fromEntries(botCols().map(c => [c.key, peInput(c.key).value]));
+        const current = Object.fromEntries(editCols().map(c => [c.key, peInput(c.key).value]));
         const plan = ChatbotPaste.plan({text, columns: botCols(), targets: [{page: pe.r.page, cells: pe.orig}], startKey: $('pe-start').value, blanksEmpty: $('pe-blanks').checked, firstRowOnly: true});
         $('pe-start-box').classList.toggle('hidden', plan.byName);
         if (text.trim() && plan.error) notes.push(plan.error);
@@ -1502,7 +1523,7 @@
         if (plan.extraRows) notes.push('Only the first row was used (' + plural(plan.extraRows, 'more row') + ' ignored).');
         let filled = 0;
         for (const x of plan.changes) {
-            if (x.status === 'blank') continue; // blangko: naiiwan ang value
+            if (x.status === 'blank' || !peInput(x.key)) continue; // blangko: naiiwan ang value; SHOP DETAILS: automatic
             pe.beforePaste[x.key] = current[x.key];
             peInput(x.key).value = x.value;
             if (x.status !== 'unchanged') filled++;
@@ -1559,7 +1580,7 @@
         pe.map.cells.forEach((v, i) => {
             if (String(v).trim() === '') return;
             const sel = el('select', {class: 'pe-map-field max-w-full rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900', 'aria-label': 'Field for value ' + (i + 1)},
-                [el('option', {value: '', text: 'None (skip)'}), ...botCols().map(c => el('option', {value: c.key, text: c.label}))]);
+                [el('option', {value: '', text: 'None (skip)'}), ...editCols().map(c => el('option', {value: c.key, text: c.label}))]);
             sel.value = pe.map.keys[i] || '';
             sel.addEventListener('change', () => { pe.map.keys[i] = sel.value || null; pe.map.conf[i] = 'high'; pe.map.note[i] = ''; peMapPaint(); });
             items.push(el('li', {class: 'pe-map-item flex flex-wrap items-center gap-x-2 gap-y-1 rounded border px-2 py-1', 'data-cell': String(i)}, [
@@ -1608,7 +1629,7 @@
         } finally { $('pe-map-add').disabled = false; }
         if (!pe) return; // sarado na ang modal
         // Laging idinadagdag sa bukas na modal ang mga bagong column (pinalitan na ng load() ang columns), kahit may bagong paste.
-        for (const c of botCols()) {
+        for (const c of editCols()) {
             if (peInput(c.key)) continue;
             $('pe-fields').append(peField(c));
             $('pe-start').append(el('option', {value: c.key, text: c.label}));
