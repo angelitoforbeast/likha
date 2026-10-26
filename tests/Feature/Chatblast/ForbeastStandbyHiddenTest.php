@@ -76,6 +76,7 @@ class ForbeastStandbyHiddenTest extends ChatblastTestCase
     public function test_S_117_15_a_standby_twin_is_not_counted_in_results_nor_the_chat_stats(): void
     {
         $this->actingAs($this->user());
+        $this->travelTo(now()->setTime(12, 0)); // ang "today" ay ayon sa petsa: bago mag-1 AM, ang isang oras na nakalipas ay kahapon
         $at = now()->subHour();
         $this->chat('Real', false, '7001', $at);
         $this->chat('Real', true, '7001', $at);
