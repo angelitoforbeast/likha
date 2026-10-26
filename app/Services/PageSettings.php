@@ -117,10 +117,11 @@ class PageSettings
     }
 
     /**
-     * Isulat ang value. Parehong value ng active → walang bago.
+     * Isulat ang value. Parehong value ng active → walang bago. $source: ang sumulat mula sa labas ng Likha (walang user
+     * id), hal. ang X-Forbeast-User ng page values API.
      * @return array{status:string, setting:PageSetting} status = created|replaced|unchanged
      */
-    public function set(string $page, string $provider, string $key, string $value, bool $secret = false, ?int $userId = null, bool $system = false): array
+    public function set(string $page, string $provider, string $key, string $value, bool $secret = false, ?int $userId = null, bool $system = false, ?string $source = null): array
     {
         $errors = $this->validate($page, $provider, $key, $value, $system);
         if ($errors) throw new \InvalidArgumentException(reset($errors));
@@ -130,7 +131,7 @@ class PageSettings
         $value    = trim($value);
         $secret   = $secret || in_array($provider . '.' . $key, self::SECRET_KEYS, true);
 
-        $res = DB::transaction(function () use ($page, $provider, $key, $value, $secret, $userId) {
+        $res = DB::transaction(function () use ($page, $provider, $key, $value, $secret, $userId, $source) {
             $current = $this->pageQuery($page)->where('provider', $provider)->where('key', $key)
                 ->where('active', true)->lockForUpdate()->orderByDesc('id')->get();
 
@@ -154,7 +155,7 @@ class PageSettings
                 'is_secret'  => $secret,
                 'active'     => true,
                 'created_by' => $userId,
-            ]);
+            ] + ($source !== null ? ['source' => $source] : []));
 
             // Walang value sa log: sino, kailan at aling key lang.
             $status = $current->isEmpty() ? 'created' : 'replaced';
@@ -184,12 +185,13 @@ class PageSettings
         DB::afterCommit(fn () => BotcakeChat::forgetPageMap());
     }
 
-    public function deactivate(PageSetting $setting, ?int $userId = null): void
+    public function deactivate(PageSetting $setting, ?int $userId = null, ?string $source = null): void
     {
         if (!$setting->active) return;
 
-        // Ang nag-clear ay itinatala (replaced_by) para sa Changes; ang walang user ay null.
-        $setting->update(['active' => false, 'replaced_at' => now()] + ($userId && \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'replaced_by') ? ['replaced_by' => $userId] : []));
+        // Ang nag-clear ay itinatala (replaced_by, o replaced_source mula sa labas ng Likha) para sa Changes; ang walang user ay null.
+        $setting->update(['active' => false, 'replaced_at' => now()] + ($userId && \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'replaced_by') ? ['replaced_by' => $userId] : [])
+            + ($source !== null ? ['replaced_source' => $source] : []));
         if (ChatblastReady::watches($setting->provider, $setting->key)) ChatblastReady::forget($this->pageKey($setting->page_name));
         if ($setting->provider === 'botcake' && in_array($setting->key, ['page_id', 'chat.key'], true)) $this->forgetChatPageMap();
         if ($setting->provider === 'botcake' && in_array($setting->key, BotcakeMock::KEYS, true)) BotcakeMock::forget();

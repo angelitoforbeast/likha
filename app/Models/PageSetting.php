@@ -23,6 +23,8 @@ class PageSetting extends Model
         'replaced_at',
         'replaced_by',
         'created_by',
+        'source',
+        'replaced_source',
     ];
 
     protected $hidden = ['value'];

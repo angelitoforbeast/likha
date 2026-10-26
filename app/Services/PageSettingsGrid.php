@@ -202,7 +202,7 @@ class PageSettingsGrid
             'id'     => $s->id,
             'value'  => $s->displayValue(),
             'secret' => (bool) $s->is_secret,
-            'by'     => $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : 'system',
+            'by'     => $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : (\App\Services\Chatbot\PageValues::by($s->source) ?? 'system'),
             'at'     => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
             'ts'     => $s->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i:s'), // para sa "nasubukan na" sa page
         ];
