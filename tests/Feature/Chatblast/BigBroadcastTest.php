@@ -3,6 +3,8 @@
 namespace Tests\Feature\Chatblast;
 
 use App\Models\BotcakeMessage;
+use App\Models\ChatblastCampaign;
+use App\Services\Chatblast;
 use App\Services\Chatbot\BotcakeSendPool;
 use App\Services\Chatbot\BotcakeSendQueue;
 use App\Services\ChatblastSender;
@@ -149,6 +151,37 @@ class BigBroadcastTest extends ChatblastTestCase
         }
 
         $this->assertSame(['queued' => 5000, 'sent' => 5000, 'retried' => [], 'failed' => []], $this->pool->counts());
+    }
+
+    public function test_S_167_1_a_waybill_another_sequence_messaged_while_it_waited_in_line_is_skipped_when_the_pool_starts_it(): void
+    {
+        $this->setUpPage('Page Uno', '1001');
+        ChatblastCampaign::create(['kind' => 'c-two', 'name' => 'Iba', 'statuses' => ['In Transit'], 'pages' => null, 'window_days' => 10,
+            'days' => [['Iba {waybill}']], 'requires_on_delivery' => false, 'mode' => 'manual', 'active' => true]);
+        $this->shipped('Page Uno', 'Ana Cruz', 'WB-1', 'psid-a', 'In Transit');
+        app(Chatblast::class)->build(null, 1);
+        $rows = BotcakeMessage::where('waybill', 'WB-1')->orderBy('id')->get();
+        $this->assertCount(2, $rows, 'two sequences, one waybill');
+        BotcakeMessage::whereKey($rows->pluck('id'))->update(['status' => 'queued']);
+        foreach ($rows as $m) app(ChatblastSender::class)->process($m->id);
+        $this->assertSame(2, DB::table(BotcakeSendQueue::TABLE)->where('status', 'pending')->count(), 'both pass the queue-time check and wait in line');
+
+        $written = [];
+        for ($s = 0; $s < 60 && $this->open() > 0; $s++) {
+            $this->pool->tick();
+            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending') $this->ok($c, $written);
+            $this->pool->tick(false);
+            $this->second();
+        }
+
+        [$first, $second] = [$rows[0]->fresh(), $rows[1]->fresh()];
+        $this->assertSame('sent', $first->status);
+        $this->assertSame(['skipped', Chatblast::CROSS, null], [$second->status, $second->reason, $second->dedupe_key]);
+        $this->assertSame(['write', 'read', 'flow'], array_map(fn ($c) => self::req($c)['step'], $this->calls), 'no Botcake call for the skipped one');
+        $this->assertSame(['done', 'done'], DB::table(BotcakeSendQueue::TABLE)->orderBy('id')->pluck('status')->all());
+        $lock = Cache::lock(ChatblastSender::customerLockKey('Page Uno', 'psid-a'), 10);
+        $this->assertTrue($lock->get(), 'the customer lock is free');
+        $lock->release();
     }
 
     public static function beforeSendFlow(): array
