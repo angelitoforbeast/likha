@@ -195,9 +195,7 @@ class FailedSendKeepsConversationTest extends ChatblastTestCase
 
         $flowId = (int) DB::table('chatbot_flows')->value('id');
         $this->assertSame($flowId . ':n2', $this->fields()->get(CustomerFields::WAIT));
-        $this->says('large');
-        $this->assertSame('yes', $this->fields()->get('answered'));
-        $this->assertCount(2, $this->calls, 'nothing sent again on the reply');
+        $this->assertNull($this->fields()->get('answered'), 'the next message decides what happens (S-168.8)');
     }
 
     public static function notRetryable(): array
@@ -272,5 +270,30 @@ class FailedSendKeepsConversationTest extends ChatblastTestCase
         $this->says('magkano po?');
         $this->assertSame('yes', $this->fields()->get('answered'));
         $this->assertCount(5, $this->calls, 'the opening picture is not sent again');
+    }
+
+    public function test_S_168_8_a_question_not_delivered_is_asked_again_and_the_next_message_is_not_its_answer(): void
+    {
+        $this->live([['id' => 'n1', 'type' => 'start'],
+            ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'Address po?']], 'wait' => true, 'save_to' => 'address']],
+            self::set('n3', 'encoded')],
+            [self::edge('n1', 'next', 'n2'), self::edge('n2', 'reply', 'n3')]);
+        $this->says('hi');
+        $this->next(500, ['success' => false]);
+        $this->later();
+        $this->next(500, ['success' => false]);
+
+        $this->says('magkano po?');
+        $this->next(200);
+        $this->assertSame(['Address po?', 'Address po?', 'Address po?'], $this->sentTexts(), 'the question is sent again');
+        $this->assertNull($this->fields()->get('address'), 'the message is not taken as the answer');
+        $this->assertNull($this->fields()->get('encoded'), 'the reply edge is not followed');
+        $flowId = (int) DB::table('chatbot_flows')->value('id');
+        $this->assertSame($flowId . ':n2', $this->fields()->get(CustomerFields::WAIT), 'still waiting at n2');
+
+        $this->says('Purok 1, Brgy. San Jose');
+        $this->assertSame('Purok 1, Brgy. San Jose', $this->fields()->get('address'));
+        $this->assertSame('yes', $this->fields()->get('encoded'));
+        $this->assertCount(3, $this->calls);
     }
 }

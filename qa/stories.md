@@ -2716,19 +2716,27 @@ Tests: `tests/Feature/Chatblast/BigBroadcastTest.php`.
 | S-167.5 (P1) | Given a pool that died (no heartbeat) while holding messages, Then the existing recover path takes them back, they hold no customer lock while waiting, and the next pool sends each once, in customer order | `test_S_167_5…` | Passed · 2026-10-27 · auto |
 | S-167.6 (P1) | The Chatblast, Botcake and Unit suites add no new failures | full run | Passed · 2026-10-27 · auto |
 
-## S-168 A send Botcake refuses doesn't restart the customer's conversation
+## Slice 168 – A send Botcake refuses doesn't restart the customer's conversation
 
-As staff, I want a customer whose bot message Botcake refused to keep their place in the flow, so their next message doesn't get the opening again.
+Slice 168: 8 passed, 0 failed, 0 blocked, 0 skipped, 0 not run
 
-Slice 168. Threat model: the retry and the continue read the send pool's own tickets and Botcake's answer (status and error text are only compared); customer text is only carried as data. Nothing new is reachable from outside. Risk tier: medium (business logic of an existing background process).
-Tests: `tests/Feature/Chatblast/FailedSendKeepsConversationTest.php`.
+Threat model: the retry and the continue read the send pool's own tickets and Botcake's answer (status and error text are only compared); customer text is only carried as data. Nothing new is reachable from outside. Risk tier: medium (business logic of an existing background process).
 
-| Case | Given / When / Then | Test | Status |
-|---|---|---|---|
-| S-168.1 (P1) | Given a send that Botcake answers HTTP 5xx or not at all (HTTP 0), When ~3 s pass, Then the same content is sent once more as a new ticket, the retry is an Inbox event ("retried after HTTP 500"), and on 200 the run continues normally | `test_S_168_1…` (table: 500, 502, no answer) | passed |
-| S-168.2 (P1) | Given a send that fails twice, Then the reply stays failed, the run goes on to the next node and the next wait=true send parks the wait; the customer's next message resumes there (not the Start) | `test_S_168_2…` | passed |
-| S-168.3 (P1) | Given a wait=true send that fails twice, Then the wait is parked at it and the next message resumes there | `test_S_168_3…` | passed |
-| S-168.4 (P1) | Given a Facebook error (#551, #10) or a 4xx, Then it is not retried, and the run still goes on (a send node has no failed edge) | `test_S_168_4…` (table) | passed |
-| S-168.5 (P1) | Given a node with a failed edge (the AI step), Then its answer's send gets the one retry, and a failed AI answer still follows the failed edge | `test_S_168_5…` | passed |
-| S-168.6 (P1) | Given the reported path (image ok, text ok, text 500 twice), Then the wait=true send after it is reached and parked, and the next message resumes there | `test_S_168_6…` | passed |
-| S-168.7 (P1) | The Chatblast, Botcake, PageSettings and Unit suites add no new failures (four tests that pinned "a failed send stops the run" now assert the new behaviour) | full run | passed |
+New tests are in `tests/Feature/Chatblast/FailedSendKeepsConversationTest.php` unless another class is named.
+
+### S-168 A customer keeps their place in the flow when Botcake refuses a bot message (P1)
+
+As staff, I want a customer whose bot message Botcake refused to keep their place in the flow, so that their next message doesn't get the opening again and isn't taken as the answer to a question they never saw.
+
+Independent test: a fake Botcake answers a send HTTP 500 twice; the customer's next message resumes in the flow (not at the Start), and when the failed send was a question, the question is asked again and the message is not saved as its answer.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-168.1 | happy | Given a send that Botcake answers HTTP 5xx or not at all (HTTP 0), When ~3 s pass, Then the same content is sent once more as a new ticket, the retry is an Inbox event ("retried after HTTP 500"), and on 200 the run continues normally | `test_S_168_1_a_send_refused_with_5xx_or_no_answer_is_sent_once_more_after_3_s_and_the_run_goes_on` (table: 500, 502, no answer) | Passed · 2026-10-27 · auto |
+| S-168.2 | negative | Given a send that fails twice, Then the reply stays failed, the run goes on to the next node and the next wait=true send parks the wait; the customer's next message resumes there (not the Start) | `test_S_168_2_a_send_that_fails_twice_goes_on_to_the_next_wait_and_the_next_message_resumes_there` | Passed · 2026-10-27 · auto |
+| S-168.3 | negative | Given a wait=true send that fails twice (no answer, then HTTP 503), Then the wait is parked at it (what the next message does is S-168.8) | `test_S_168_3_a_wait_send_that_fails_twice_parks_the_wait_at_itself` | Passed · 2026-10-27 · auto |
+| S-168.4 | negative | Given a Facebook error (#551, #10) or a 4xx, Then it is not retried, and the run still goes on (a send node has no failed edge) | `test_S_168_4_a_facebook_error_or_4xx_is_not_retried_and_the_run_still_goes_on` (table) | Passed · 2026-10-27 · auto |
+| S-168.5 | edge | Given a node with a failed edge (the AI step), Then its answer's send gets the one retry, and a failed AI answer still follows the failed edge | `test_S_168_5_a_node_with_a_failed_edge_still_follows_it_and_its_send_gets_the_one_retry` | Passed · 2026-10-27 · auto |
+| S-168.6 | happy | Given the reported path (image ok, text ok, text 500 twice), Then the wait=true send after it is reached and parked, and the next message resumes there | `test_S_168_6_the_reported_path_reaches_the_wait_after_a_text_fails_twice` | Passed · 2026-10-27 · auto |
+| S-168.7 | edge | The Chatblast, Botcake, PageSettings and Unit suites add no new failures (four tests that pinned "a failed send stops the run" now assert the new behaviour) | full run | Passed · 2026-10-27 · auto |
+| S-168.8 | negative | Given a question "Address po?" (wait, save to address) that fails HTTP 500 twice, When the customer sends "magkano po?", Then "Address po?" is sent again (with the one retry), address stays empty, the reply edge is not followed and the wait stays at the question; When the question is delivered and the customer then sends their address, Then it is saved as the address and the reply edge runs | `test_S_168_8_a_question_not_delivered_is_asked_again_and_the_next_message_is_not_its_answer` | Passed · 2026-10-27 · auto |

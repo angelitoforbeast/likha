@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 class CustomerFields
 {
     public const WAIT = '__wait';
+    public const WAIT_UNSENT = '__wait_unsent'; // ang __wait na ang tanong ay hindi naihatid (pumalya ang padala): itatanong ulit, hindi sagot ang susunod na mensahe
     public const LAST_CHAT = '__last_chat';
     public const BOT_PAUSED = '__bot_paused'; // '1' = tao ang sumasagot sa customer na ito (/chatbot/inbox): walang takbo ang bot
     public const AI = '__ai'; // request_id ng AI step na hinihintay pa ang sagot (chatbot:ai-pool): naghihintay ang mga bagong chat
@@ -71,6 +72,7 @@ class CustomerFields
         if ($key === self::WAIT) {
             ChatbotWaits::forget($this->pageId, $this->psid);
             $this->clear(self::TEST_SKIP);
+            $this->clear(self::WAIT_UNSENT);
         }
     }
 
