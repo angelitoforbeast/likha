@@ -2645,3 +2645,19 @@ Tests: `tests/Feature/Chatblast/SendStatusBatchTest.php`, `ChatConfigCacheTest.p
 | S-163.4 (P1) | When a sequence step runs, Then the Inbox still shows "Flow Step started (sequence Follow step 1)", "Run ended (…)", "Sequence Follow step 1 ran" and "Sequence Follow completed" (sequence events kept) | `test_S_163_4…` | passed |
 | S-163.5 (P1) | The Chatblast, Botcake, PageSettings and OrderEncode suites add no new failures | full run | passed |
 | S-163.6 (P2) | A local benchmark of 1,000 synthetic chats (faked sends) before and after: queries, rows written, chats/s, send_status POSTs | local benchmark (not committed) | done |
+
+## S-165 A big broadcast never slows the bot's replies
+
+As staff, I want the bot to answer a customer in 2–3 s even while a big chatblast is going out on the same page.
+
+Slice 165. Threat model: the send pool reads tickets the app wrote itself (chatbot runs and chatblast jobs); customer text is only carried as data. Nothing new is reachable from outside. Risk tier: medium (business logic of an existing background process).
+Tests: `tests/Feature/Chatblast/BotRepliesBeforeBlastsTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-165.1 (P1) | Given 200 chatblast messages on one page whose held jobs all waited over 10 s, When a customer writes, Then the bot reply is the page's next send, within one rate interval (0.5 s) | `test_S_165_1…` | passed |
+| S-165.2 (P1) | Given an in-transit message (priority 2) waiting in the lane and a newer Delivering message (priority 1), Then Delivering goes first when the older one waited under 10 s, and the older one goes first when it waited over 10 s (as before) | `test_S_165_2…` (table) | passed |
+| S-165.3 (P1) | Given a page whose pool share is all held by chatblast tickets, When a customer writes, Then the reply is claimed and is the page's next send | `test_S_165_3…` | passed |
+| S-165.4 (P1) | In .1 and .3, Then no two sends of the page are closer than 0.5 s (2/s) | asserted in `test_S_165_1…` and `test_S_165_3…` | passed |
+| S-165.5 (P1) | Given 1,000 chatblast messages on 5 pages, When each page gets one reply per second for 60 s (fake clock), Then every reply is sent ≤ 1 s after it was ready, all 1,000 messages end sent, and the 2/s page rate holds | `test_S_165_5…` | passed |
+| S-165.6 (P1) | The Chatblast, Botcake and Unit suites add no new failures | full run | passed |
