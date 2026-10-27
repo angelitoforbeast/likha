@@ -8,7 +8,7 @@ use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
 /**
- * Ang FB icon ng /chatbot/pages: katabi ng pangalan ng page, bukas ang Messenger chat ng page (m.me) mula sa naka-save na
+ * Ang FB icon ng /chatbot/pages: katabi ng pangalan ng page, bukas ang chat ng page sa facebook.com (messages/t) mula sa naka-save na
  * Page ID (botcake.page_id), sa grid, sa Edit at sa Connections. Digits lang. Ang helper ay iisa sa page (fb-link:start/end), sa Node.
  */
 class ChatbotFbLinkTest extends ChatblastTestCase
@@ -41,12 +41,12 @@ class ChatbotFbLinkTest extends ChatblastTestCase
         return json_decode($p->getOutput(), true);
     }
 
-    public function test_S_157_1_a_page_id_opens_the_pages_messenger_chat_in_a_new_tab(): void
+    public function test_S_157_1_a_page_id_opens_the_pages_facebook_chat_in_a_new_tab(): void
     {
         $this->getJson('/chatbot/data')->assertOk()->assertJsonPath('rows.0.page_id', '1123777717482685');
 
-        $this->assertSame([['href' => 'https://m.me/1123777717482685', 'target' => '_blank', 'rel' => 'noopener noreferrer',
-            'title' => 'Chat with Page Uno on Messenger', 'aria-label' => 'Chat with Page Uno on Messenger']],
+        $this->assertSame([['href' => 'https://www.facebook.com/messages/t/1123777717482685', 'target' => '_blank', 'rel' => 'noopener noreferrer',
+            'title' => 'Chat with Page Uno on Facebook', 'aria-label' => 'Chat with Page Uno on Facebook']],
             $this->links([['1123777717482685', 'Page Uno']]));
     }
 

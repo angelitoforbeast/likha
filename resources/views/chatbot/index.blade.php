@@ -382,11 +382,11 @@
     function notice(text, cls = 'text-slate-600') { $('notice').className = 'mb-2 min-h-[1rem] text-xs ' + cls; $('notice').textContent = text; }
     const id = (page, key) => page + '\u0000' + key;
     const isUrl = v => /^https?:\/\//i.test(v || '');
-    // FB icon katabi ng pangalan ng page: bukas ang Messenger chat ng page (m.me, mula sa Page ID; digits lang, ang iba ay
+    // FB icon katabi ng pangalan ng page: bukas ang chat ng page sa facebook.com (messages/t, mula sa Page ID; digits lang, ang iba ay
     // walang icon), sa bagong tab.
     // fb-link:start
-    const fbLink = (id, page) => /^\d+$/.test(id || '') ? {href: 'https://m.me/' + id, target: '_blank', rel: 'noopener noreferrer',
-        title: 'Chat with ' + page + ' on Messenger', 'aria-label': 'Chat with ' + page + ' on Messenger'} : null;
+    const fbLink = (id, page) => /^\d+$/.test(id || '') ? {href: 'https://www.facebook.com/messages/t/' + id, target: '_blank', rel: 'noopener noreferrer',
+        title: 'Chat with ' + page + ' on Facebook', 'aria-label': 'Chat with ' + page + ' on Facebook'} : null;
     // fb-link:end
     function fbAnchor(r) {
         const a = r ? fbLink(r.page_id, r.page) : null;
