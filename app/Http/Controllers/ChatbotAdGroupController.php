@@ -76,6 +76,7 @@ class ChatbotAdGroupController extends Controller
     {
         $this->checkAccess();
         $page = $this->page($request);
+        if (!is_scalar($request->input('ads', '')) || !is_scalar($request->input('name', ''))) return response()->json(['error' => 'Name and ad IDs are text.'], 422);
         $parsed = AdGroups::parseAds(mb_substr((string) $request->input('ads', ''), 0, 40000));
         if ($parsed['bad']) return response()->json(['error' => 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.'], 422);
         $values = [];
@@ -96,7 +97,7 @@ class ChatbotAdGroupController extends Controller
         if (!$ads) return response()->json(['error' => 'Tick at least one ad.'], 422);
         $id = $this->id($request);
 
-        return $this->result($this->groups->addAds($page, $id, $id === null ? (string) $request->input('name', '') : null, $ads, Auth::id()));
+        return $this->result($this->groups->addAds($page, $id, $id === null ? (is_scalar($n = $request->input('name', '')) ? (string) $n : '') : null, $ads, Auth::id()));
     }
 
     public function delete(Request $request)

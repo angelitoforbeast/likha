@@ -106,6 +106,36 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->assertSame([], app(AdGroups::class)->groups('Page P'));
     }
 
+    public function test_S_172_9_restore_delete_and_history_stay_on_the_posted_page_and_keep_the_one_group_rule(): void
+    {
+        $this->actingAs($this->user());
+        $groups = app(AdGroups::class);
+        $q = $groups->save('Page Q', null, 'Q item', ['900'], ['price' => '1'])['id'];
+        $groups->save('Page Q', $q, 'Q item', ['900'], ['price' => '2']);
+        $qOld = PageSetting::where('page_name', 'Page Q')->where('key', 'g' . $q . '.price')->where('active', false)->value('id');
+        $p = $groups->save('Page P', null, 'Item A', ['111'], [])['id'];
+        $before = PageSetting::count();
+
+        $this->postJson('/chatbot/ad-groups/restore', ['page' => 'Page P', 'setting' => $qOld])->assertStatus(422);
+        $this->postJson('/chatbot/ad-groups/delete', ['page' => 'Page P', 'id' => $q === $p ? 99 : $q])->assertStatus(422);
+        $this->assertSame([], $this->getJson('/chatbot/ad-groups/history?page=Page%20P&id=' . ($q === $p ? 99 : $q))->json('rows'));
+        $this->assertSame([$before, '2'], [PageSetting::count(), $groups->groups('Page Q')[$q]['values']['price']], 'walang nagalaw sa ibang page');
+
+        // Ang lumang ad list na may ad na nasa ibang group na: tinatanggihan, may pangalan ng group.
+        $groups->save('Page P', $p, 'Item A', ['111', '555'], []);
+        $groups->save('Page P', $p, 'Item A', ['111'], []);
+        $groups->save('Page P', null, 'Item B', ['555'], []);
+        $oldAds = PageSetting::where('page_name', 'Page P')->where('key', 'g' . $p . '.ads')->where('value', '111,555')->value('id');
+        $this->postJson('/chatbot/ad-groups/restore', ['page' => 'Page P', 'setting' => $oldAds])
+            ->assertStatus(422)->assertJson(['error' => 'Ad 555 is already in the group "Item B".']);
+
+        // Ang version ng na-delete na group ay hindi na naibabalik.
+        $this->postJson('/chatbot/ad-groups/delete', ['page' => 'Page P', 'id' => $p])->assertOk();
+        $this->postJson('/chatbot/ad-groups/restore', ['page' => 'Page P', 'setting' => $oldAds])->assertStatus(422)->assertJson(['error' => 'This group was deleted.']);
+        // Ang array sa halip na text: 422, hindi 500.
+        $this->postJson('/chatbot/ad-groups', ['page' => 'Page P', 'name' => ['x'], 'ads' => ['1']])->assertStatus(422);
+    }
+
     public function test_S_172_10_only_users_who_can_edit_page_values_see_or_write_ad_groups(): void
     {
         $id = app(AdGroups::class)->save('Page P', null, 'Item A', ['111'], [])['id'];

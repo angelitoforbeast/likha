@@ -25,8 +25,10 @@ class ChatbotPage
     {
         if ($this->settings->get($page, 'chatbot', 'active') === '0') return null;
         // Ang ad group na may sariling flow (AdGroups): iyon ang tumatakbo para sa mga ad nito; ang On/Off ay sa page pa rin.
-        $own = $group !== null ? ($this->groups()->groups($page)[$group]['values']['flow_id'] ?? null) : null;
-        $id = trim((string) ($own ?? $this->settings->get($page, 'chatbot', 'flow_id')));
+        // Ang flow ng group na na-delete na: ang flow ng page (hindi tahimik na walang sagot).
+        $own = $group !== null ? trim((string) ($this->groups()->groups($page)[$group]['values']['flow_id'] ?? '')) : '';
+        if (ctype_digit($own) && ($flow = BotConfigCache::flow((int) $own))) return $flow;
+        $id = trim((string) $this->settings->get($page, 'chatbot', 'flow_id'));
         if (!ctype_digit($id)) return null;
 
         return BotConfigCache::flow((int) $id);

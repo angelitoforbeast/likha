@@ -133,7 +133,16 @@ class AdGroupRunTest extends ChatblastTestCase
         $this->assertSame(['Group flow 499'], $this->sent('7001'));
         $this->assertSame([self::PAGE_TEXT], $this->sent('7002'));
 
+        // Na-delete ang flow ng group: ang flow ng page ang tumatakbo, sa values ng group (hindi tahimik na walang sagot).
+        $groupFlow = ChatbotFlow::where('name', '!=', '')->orderByDesc('id')->first();
+        $groupFlow->delete();
+        \App\Services\Chatbot\BotConfigCache::forgetFlow($groupFlow->id);
+        $this->chat('111', '7005', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7005'), 'ang flow ng page, ang values ng group');
+        $this->assertTrue(app(ChatbotPage::class)->runs('Page P'));
+
         // Walang flow ang page pero may flow ang group: ang bagong chat ay pinapatakbo pa rin (ChatbotInbound).
+        app(AdGroups::class)->save('Page P', app(AdGroups::class)->groupForAd('Page P', '111'), 'Item A', ['111', '222'], ['flow_id' => (string) $this->flow('Group flow {{PRICE}}')->id]);
         app(ChatbotPage::class)->link('Page P', null);
         $this->assertTrue(app(ChatbotPage::class)->runs('Page P'));
         $this->chat('111', '7004', true);

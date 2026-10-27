@@ -4,6 +4,7 @@ namespace App\Services\Chatbot;
 
 use App\Models\BotcakeChat;
 use App\Models\BotcakePsid;
+use App\Models\ChatbotFlow;
 use App\Models\PageSetting;
 use App\Models\User;
 use App\Services\ChatbotFields;
@@ -155,27 +156,23 @@ class AdGroups
      */
     public function save(string $page, ?int $id, string $name, array $ads, array $values, ?int $userId = null): array
     {
-        $name = trim(preg_replace('/\s+/u', ' ', $name));
-        if ($name === '') return ['ok' => false, 'error' => 'Give the group a name.'];
-        if (mb_strlen($name) > self::MAX_NAME) return ['ok' => false, 'error' => 'Name: ' . self::MAX_NAME . ' characters at most.'];
-        $parsed = self::parseAds(implode(',', array_map('strval', $ads)));
-        if ($parsed['bad']) return ['ok' => false, 'error' => 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.'];
-        $ads = $parsed['ids'];
-        sort($ads, SORT_STRING);
-        if (count($ads) > self::MAX_ADS) return ['ok' => false, 'error' => 'At most ' . self::MAX_ADS . ' ads in a group.'];
-        foreach ($values as $key => $value) {
-            $key = (string) $key;
-            $value = trim((string) $value);
-            if (!self::isValueKey($key)) return ['ok' => false, 'error' => $key . ' is set on the page only, not in a group.'];
-            if ($value === '') continue;
-            if ($key === 'flow_id' && !ctype_digit($value)) return ['ok' => false, 'error' => 'Pick a flow from the list.'];
-            if ($err = ChatbotFields::valueError($key, $value)) return ['ok' => false, 'error' => $key . ': ' . $err];
-        }
+        return $this->change($page, $id, fn () => [$name, $ads, $values], $userId);
+    }
 
-        // Isa-isa kada page: ang pagsuri ng duplicate at ang pagsulat ay hindi nagsasabay.
-        return Cache::lock('chatbot-adgroups:' . sha1($this->settings->pageKey($page)), 10)->block(5, function () use ($page, $id, $name, $ads, $values, $userId) {
+    /**
+     * Isa-isa kada page (lock): ang group ay binabasa sa loob ng lock mula sa database (binubura muna ang memo at cache
+     * ng page), $build ang bumubuo ng pangalan, ads at values mula rito, saka sinusuri (pati ang duplicate) at isinusulat.
+     * @param callable(?array): array{0: string, 1: array, 2: array} $build
+     * @return array{ok: bool, id?: int, error?: string}
+     */
+    private function change(string $page, ?int $id, callable $build, ?int $userId): array
+    {
+        return Cache::lock('chatbot-adgroups:' . sha1($this->settings->pageKey($page)), 10)->block(5, function () use ($page, $id, $build, $userId) {
+            PageSettings::forget($page);
             $groups = $this->groups($page);
-            if ($id !== null && !isset($groups[$id])) return ['ok' => false, 'error' => 'This group was deleted. Reload the page.'];
+            if ($id !== null && !isset($groups[$id])) return ['ok' => false, 'error' => 'This group was deleted.'];
+            [$name, $ads, $values] = $build($groups[$id] ?? null);
+            if (($error = $this->invalid($name, $ads, $values)) !== null) return ['ok' => false, 'error' => $error];
             foreach ($ads as $ad) {
                 foreach ($groups as $other) {
                     if ($other['id'] !== $id && in_array($ad, $other['ads'], true)) return ['ok' => false, 'error' => 'Ad ' . $ad . ' is already in the group "' . $other['name'] . '".'];
@@ -192,17 +189,40 @@ class AdGroups
         });
     }
 
+    /** Ang mali sa pangalan, ads o values, o null; ang pangalan at ads ay inaayos (iisang espasyo, walang ulit, ayos). */
+    private function invalid(string &$name, array &$ads, array $values): ?string
+    {
+        $name = trim(preg_replace('/\s+/u', ' ', $name));
+        if ($name === '') return 'Give the group a name.';
+        if (mb_strlen($name) > self::MAX_NAME) return 'Name: ' . self::MAX_NAME . ' characters at most.';
+        $parsed = self::parseAds(implode(',', array_map('strval', $ads)));
+        if ($parsed['bad']) return 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.';
+        $ads = $parsed['ids'];
+        sort($ads, SORT_STRING);
+        if (count($ads) > self::MAX_ADS) return 'At most ' . self::MAX_ADS . ' ads in a group.';
+        foreach ($values as $key => $value) {
+            $key = (string) $key;
+            $value = trim((string) $value);
+            if (!self::isValueKey($key)) return $key . ' is set on the page only, not in a group.';
+            if ($value === '') continue;
+            // Ang flow na wala na ay hindi tinatanggap (at kapag na-delete pagkatapos, ang flow ng page ang tumatakbo).
+            if ($key === 'flow_id' && (!ctype_digit($value) || !ChatbotFlow::whereKey((int) $value)->exists())) return 'Pick a flow from the list.';
+            if ($err = ChatbotFields::valueError($key, $value)) return $key . ': ' . $err;
+        }
+
+        return null;
+    }
+
     /**
-     * Ang mga tsinek na ad mula sa "Ads not in a group yet": idinadagdag sa group $id, o sa bagong group na $name.
+     * Ang mga tsinek na ad mula sa "Ads not in a group yet": idinadagdag sa group $id, o sa bagong group na $name. Ang
+     * ads ng group ay binabasa sa loob ng lock, kaya hindi nawawala ang sabay na idinagdag ng iba.
      * @return array{ok: bool, id?: int, error?: string}
      */
     public function addAds(string $page, ?int $id, ?string $name, array $ads, ?int $userId = null): array
     {
         if ($id === null) return $this->save($page, null, (string) $name, $ads, [], $userId);
-        $g = $this->groups($page)[$id] ?? null;
-        if (!$g) return ['ok' => false, 'error' => 'This group was deleted. Reload the page.'];
 
-        return $this->save($page, $id, $g['name'], array_merge($g['ads'], $ads), [], $userId);
+        return $this->change($page, $id, fn (array $g) => [$g['name'], array_merge($g['ads'], $ads), []], $userId);
     }
 
     /** Alisin ang group: lahat ng row nito ay nagiging history; ang mga ad nito ay bumabalik sa page values. */
@@ -239,15 +259,13 @@ class AdGroups
     {
         $s = $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->whereKey($settingId)->first();
         if (!$s || !preg_match('/^g(\d+)\.(.+)$/', (string) $s->key, $m)) return ['ok' => false, 'error' => 'That version is not in this page\'s groups.'];
-        $g = $this->groups($page)[(int) $m[1]] ?? null;
-        if (!$g) return ['ok' => false, 'error' => 'This group was deleted.'];
-        $value = (string) $s->plainValue();
+        [$key, $value] = [$m[2], (string) $s->plainValue()];
 
-        return match ($m[2]) {
-            'name' => $this->save($page, $g['id'], $value, $g['ads'], [], $userId),
-            'ads' => $this->save($page, $g['id'], $g['name'], explode(',', $value), [], $userId),
-            default => $this->save($page, $g['id'], $g['name'], $g['ads'], [$m[2] => $value], $userId),
-        };
+        return $this->change($page, (int) $m[1], fn (array $g) => match ($key) {
+            'name' => [$value, $g['ads'], []],
+            'ads' => [$g['name'], explode(',', $value), []],
+            default => [$g['name'], $g['ads'], [$key => $value]],
+        }, $userId);
     }
 
     /**

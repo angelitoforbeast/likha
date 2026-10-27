@@ -320,8 +320,9 @@ class ChatbotTabsController extends Controller
     {
         // Ang flow na nakatali sa page (dropdown), kahit naka-Off ang bot: ang Test ay para subukan bago i-On. Ang
         // napiling ad group na may sariling flow: iyon.
-        $own = $group !== null ? (app(\App\Services\Chatbot\AdGroups::class)->groups($page)[$group]['values']['flow_id'] ?? null) : null;
-        $id = trim((string) ($own ?? $this->settings->get($page, 'chatbot', 'flow_id')));
+        $own = $group !== null ? trim((string) (app(\App\Services\Chatbot\AdGroups::class)->groups($page)[$group]['values']['flow_id'] ?? '')) : '';
+        if (ctype_digit($own) && ($flow = ChatbotFlow::find((int) $own))) return $flow;
+        $id = trim((string) $this->settings->get($page, 'chatbot', 'flow_id'));
 
         return ctype_digit($id) ? ChatbotFlow::find((int) $id) : null;
     }

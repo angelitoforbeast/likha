@@ -227,7 +227,7 @@ class ChatbotRunner
             if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $drop('the bot paused', true);
             $group = $this->groups->forCustomer($pageId, $psid, (string) $row->page_name);
             $flow = $this->page->flow((string) $row->page_name, $group);
-            $node =collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
+            $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
             if (!$flow || $flow->id !== (int) $row->flow_id || !in_array($node['type'] ?? '', $nodeTypes, true)) return $drop('the flow changed', true);
             $fields->clear(CustomerFields::AI);
 

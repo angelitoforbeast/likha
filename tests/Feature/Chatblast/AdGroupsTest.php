@@ -22,7 +22,7 @@ class AdGroupsTest extends ChatblastTestCase
     {
         parent::setUp();
         Queue::fake();
-        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_20_100000_create_botcake_chats_table.php']]);
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_10_20_100000_create_botcake_chats_table.php', 'database/migrations/2026_10_23_100000_create_chatbot_tables.php']]);
         $this->page('Page P', '1001');
         $this->page('Page Q', '2002');
     }
@@ -98,17 +98,41 @@ class AdGroupsTest extends ChatblastTestCase
         $this->assertNotSame($a['id'], $this->ag()->save('Page P', null, 'Item D', ['111'], [])['id']);
     }
 
+    /** Ang sulat ng ibang worker: diretso sa table, kaya hindi nabubura ang memo ng prosesong ito. */
+    private function otherWorkerSetsAds(string $page, int $id, string $ads): void
+    {
+        $row = PageSetting::where('provider', AdGroups::PROVIDER)->where('key', 'g' . $id . '.ads')->where('active', true)->first();
+        \Illuminate\Support\Facades\DB::table('page_settings')->where('id', $row->id)->update(['active' => false, 'replaced_at' => now()]);
+        \Illuminate\Support\Facades\DB::table('page_settings')->insert(['page_name' => $page, 'provider' => AdGroups::PROVIDER, 'key' => 'g' . $id . '.ads',
+            'value' => $ads, 'is_secret' => false, 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    public function test_S_172_7_adding_ticked_ads_reads_the_groups_fresh_under_the_lock(): void
+    {
+        $a = $this->ag()->save('Page P', null, 'Item A', ['111'], [])['id'];
+        $b = $this->ag()->save('Page P', null, 'Item B', ['222'], [])['id'];
+        $this->ag()->groups('Page P'); // ang memo ng prosesong ito ay may laman na
+
+        // Sabay: idinagdag ng iba ang 555 sa Item B, at ang 444 sa Item A.
+        $this->otherWorkerSetsAds('Page P', $b, '222,555');
+        $this->otherWorkerSetsAds('Page P', $a, '111,444');
+        $this->assertSame('Ad 555 is already in the group "Item B".', $this->ag()->addAds('Page P', $a, null, ['555'])['error'] ?? null);
+        $this->assertTrue($this->ag()->addAds('Page P', $a, null, ['333'])['ok']);
+        $this->assertSame(['111', '333', '444'], $this->ag()->groups('Page P')[$a]['ads'], 'walang nawalang ad ng iba');
+    }
+
     public function test_S_172_2_only_the_listed_value_keys_are_accepted(): void
     {
         $r = $this->ag()->save('Page P', null, 'Item A', ['111'], ['fill_up_form' => 'x']);
         $this->assertFalse($r['ok']);
         $this->assertFalse($this->ag()->save('Page P', null, 'Item A', ['111'], ['picture' => 'not a link'])['ok']);
         $this->assertFalse($this->ag()->save('Page P', null, 'Item A', ['111'], ['flow_id' => 'abc'])['ok']);
+        $this->assertSame('Pick a flow from the list.', $this->ag()->save('Page P', null, 'Item A', ['111'], ['flow_id' => '987654'])['error'] ?? null, 'walang ganoong flow');
         $this->assertFalse($this->ag()->save('Page P', null, '', ['111'], [])['ok'], 'kailangan ang pangalan');
         $this->assertSame([], $this->ag()->groups('Page P'));
 
         $ok = $this->ag()->save('Page P', null, 'Item A', ['111'], ['item_name_in_jnt_dashboard' => 'Serum', 'price' => '499', 'quantity' => '1',
-            'picture' => 'https://x.test/a.jpg', 'main_flow' => 'X', 'main_flow_2' => 'Y', 'flow_id' => '7', 'seq_3' => 'S3', 'seq_img_3' => 'https://x.test/3.jpg']);
+            'picture' => 'https://x.test/a.jpg', 'main_flow' => 'X', 'main_flow_2' => 'Y', 'flow_id' => (string) \App\Models\ChatbotFlow::create(['name' => 'Serum flow', 'graph' => ['nodes' => [], 'edges' => []]])->id, 'seq_3' => 'S3', 'seq_img_3' => 'https://x.test/3.jpg']);
         $this->assertTrue($ok['ok'], $ok['error'] ?? '');
     }
 
