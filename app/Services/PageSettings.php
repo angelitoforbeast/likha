@@ -93,6 +93,8 @@ class PageSettings
             return ['key' => 'Key: lowercase letters, digits, _ and . only (e.g. flow.on_delivery).'];
         }
 
+        // Ang mga ad group ay sa Ad groups ng page sa /chatbot/pages lang (Chatbot\AdGroups: pangalan, ad na iisa ang group).
+        if (!$system && $provider === Chatbot\AdGroups::PROVIDER) return ['provider' => 'Ad groups are set in the page\'s Ad groups on /chatbot/pages.'];
         if (!$system && self::keyLike($provider, $key)) return ['key' => 'Keys are set on the server, not here.'];
         if (!$system && self::isSystemKey($full)) {
             return ['value' => $full . ' is written by the system (Test token / sync), not here.'];

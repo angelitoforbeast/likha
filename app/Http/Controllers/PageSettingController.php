@@ -464,6 +464,9 @@ class PageSettingController extends Controller
         if (in_array($setting->fullKey(), [...PageSettingsGrid::CHECK_CELLS, 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate', 'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms'], true)) {
             return redirect()->route('page-settings.index')->withErrors(['value' => $setting->fullKey() . ' is written by the system, not here.']);
         }
+        if ($setting->provider === \App\Services\Chatbot\AdGroups::PROVIDER) {
+            return redirect()->route('page-settings.index')->withErrors(['value' => 'Ad groups are changed in the page\'s Ad groups on /chatbot/pages.']);
+        }
         if ($setting->fullKey() === 'forbeast.token') app(ForbeastPageSetup::class)->disconnect($setting->page_name, Auth::id());
         else $this->settings->deactivate($setting, Auth::id());
 
