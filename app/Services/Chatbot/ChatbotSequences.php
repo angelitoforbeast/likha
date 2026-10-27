@@ -82,6 +82,8 @@ class ChatbotSequences
 
         $values = ['status' => 'active', 'current_step' => $first->position, 'next_send_at' => self::dueAt(now(), $first->delay_amount, $first->delay_unit),
             'dispatched_at' => null, 'last_sent_at' => null, 'enrolled_via' => $via, 'enrolled_by' => $by, 'exit_reason' => null];
+        // Ang page na inililipat (hold sa site na ito): held agad, at ang catch-up ng paglipat ang magdadala nito sa bagong site.
+        if (($hold = $this->holdOf($pageId)) !== null) $values = ['status' => PageTransfers::HELD, 'exit_reason' => PageTransfers::HOLD_REASON . $hold] + $values;
         $existing = ChatbotSequenceSubscription::where('sequence_id', $seq->id)->where('page_id', $pageId)->where('psid', $psid)->first();
         if ($existing && in_array($existing->status, ['active', 'paused'], true)) return $out(['result' => 'already', 'name' => $seq->name]);
         if ($existing) {
@@ -97,6 +99,14 @@ class ChatbotSequences
         }
 
         return $out(['result' => 'subscribed', 'name' => $seq->name]);
+    }
+
+    /** Ang id ng paglipat na humahawak sa page (PageTransfers::hold), o null. */
+    private function holdOf(int $pageId): ?string
+    {
+        $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
+
+        return $page === null ? null : $this->settings->get($page, PageTransfers::HOLD_PROVIDER, PageTransfers::HOLD_KEY);
     }
 
     /**
@@ -190,7 +200,8 @@ class ChatbotSequences
         $resumed = 0;
         foreach ($pages as $pageId) {
             $page = $names[(string) $pageId] ?? null;
-            if ($page === null || !$this->pageOn($page)) continue;
+            // Ang page na inililipat (hold): hindi muna, kundi may padala ang source habang kinokopya.
+            if ($page === null || !$this->pageOn($page) || $this->holdOf((int) $pageId) !== null) continue;
             $resumed += DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', 'paused')->where('exit_reason', 'page off')
                 ->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null, 'updated_at' => now()]);
         }
@@ -293,8 +304,13 @@ class ChatbotSequences
                 return 'held';
             }
             $last = BotcakeChat::active()->where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
+            // Ang huling mensahe: ang chat dito, o ang dala ng paglipat ng page mula sa kabilang site, alin ang mas bago.
+            $at = $last?->received_at;
+            $moved = $fields->get(CustomerFields::LAST_MESSAGE_AT);
+            $moved = $moved !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $moved) ? Carbon::parse($moved) : null;
+            if ($moved && (!$at || $moved->gt($at))) $at = $moved;
             // Lampas 24 oras mula sa huling mensahe ng customer: walang ipapadala at tapos na ang subscription.
-            if (!$last || !$last->received_at || $last->received_at->lte(now()->subHours(self::WINDOW_HOURS))) {
+            if (!$at || $at->lte(now()->subHours(self::WINDOW_HOURS))) {
                 $release(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null]);
                 $this->event($sub->page_id, $sub->psid, ['op' => 'skipped', 'reason' => 'outside 24h'] + $detail);
                 return 'skipped';
@@ -307,7 +323,7 @@ class ChatbotSequences
             }
 
             $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page), $fields, null,
-                '', (string) $last->name, now()->format('Y-m-d H:i'));
+                '', (string) $last?->name, now()->format('Y-m-d H:i'));
             $run->startedBy = 'sequence ' . $seq->name . ' step ' . $step->position;
             [$run->sequenceId, $run->sequenceStep] = [(int) $seq->id, (int) $step->position];
             try {
@@ -330,13 +346,18 @@ class ChatbotSequences
     {
         $next = $this->stepFrom($seq, $step->position + 1);
         $values = ['dispatched_at' => null, 'updated_at' => now()] + ($sent ? ['last_sent_at' => now()] : []);
+        // Na-hold ang page (paglipat) habang ipinapadala ang step: itinatala pa rin ang usad, held pa rin, kaya ang kopya at ang
+        // hold:false ay hindi na ito uulitin. Ang huling step: lampas sa dulo, kaya sa alinmang site ay tapos agad, walang padala.
+        $held = fn (array $at) => ChatbotSequenceSubscription::whereKey($sub->id)->where('status', PageTransfers::HELD)
+            ->where('exit_reason', 'like', PageTransfers::HOLD_REASON . '%')->update($values + $at);
         if (!$next) {
-            ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values);
+            if (!ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values)
+                && $held(['current_step' => $step->position + 1, 'next_send_at' => now()])) return $sent ? 'ran' : 'skipped';
             return $this->complete($sub->fresh(), $seq);
         }
         // Habang active lang: ang customer na sumagot (o inalis) habang tumatakbo ang step ay hindi ibinabalik.
-        ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values + ['current_step' => $next->position,
-            'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit)]);
+        $at = ['current_step' => $next->position, 'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit)];
+        if (!ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values + $at)) $held($at);
 
         return $sent ? 'ran' : 'skipped';
     }

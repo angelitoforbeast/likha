@@ -51,7 +51,7 @@ class ChatblastNav
     {
         if (!NavAccess::allows($role, '/chatblast')) return [];
 
-        return [
+        $items = [
             ['label' => 'Flow', 'url' => '/chatbot', 'active' => request()->is('chatbot', 'chatbot/flows*')],
             ['label' => 'Sequences', 'url' => '/chatbot/sequences', 'active' => request()->is('chatbot/sequences*')],
             ['label' => 'Page settings', 'url' => '/chatbot/pages', 'active' => request()->is('chatbot/pages*')],
@@ -62,6 +62,12 @@ class ChatblastNav
             ['label' => 'Health', 'url' => '/chatbot/health', 'active' => request()->is('chatbot/health*')],
             ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
         ];
+        // Owners (kung aling site ang may-ari ng bawat page): CEO lang, gaya ng route nito (EnsureCeo).
+        if (preg_replace('/\s+/u', ' ', trim((string) $role)) === 'CEO') {
+            $items[] = ['label' => 'Owners', 'url' => '/chatbot/owners', 'active' => request()->is('chatbot/owners*')];
+        }
+
+        return $items;
     }
 
     /**

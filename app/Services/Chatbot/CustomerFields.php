@@ -18,6 +18,7 @@ class CustomerFields
     public const TEST_PSID = 0; // ang test customer ng Test tab
     public const TEST_SKIP = '__test_skip_at'; // Test tab: kailan lalaktawan ang hinihintay (ang Test page ang nagpapatakbo, hindi ang tick)
     public const TEST_HISTORY = '__test_history'; // Test tab: ang usapan ng test customer (JSON) para sa AI step
+    public const LAST_MESSAGE_AT = '__last_message_at'; // ang huling mensahe ng customer sa site na pinanggalingan ng page (Y-m-d H:i:s), dala ng paglipat
     public const AI_SINCE = '__ai_since'; // "Clear AI memory" (JSON: at, chat, reply): ang AI ay nakakakita lang ng mga chat at padala pagkatapos nito
 
     /** @var array<string, string> */
@@ -74,13 +75,13 @@ class CustomerFields
     }
 
     /**
-     * "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat, ang pause ng tao,
+     * "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat, ang __last_message_at, ang pause ng tao,
      * at ang alaala ng AI (ang __ai_since: hindi bumabalik ang nakalimutan na).
      */
     public function clearAll(): void
     {
         foreach (array_keys($this->values) as $key) {
-            if (!in_array($key, [self::LAST_CHAT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)) $this->clear((string) $key);
+            if (!in_array($key, [self::LAST_CHAT, self::LAST_MESSAGE_AT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)) $this->clear((string) $key);
         }
     }
 }
