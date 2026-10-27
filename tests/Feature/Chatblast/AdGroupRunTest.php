@@ -145,6 +145,21 @@ class AdGroupRunTest extends ChatblastTestCase
         $this->assertSame([], $this->sent('7003'));
     }
 
+    public function test_S_172_14_a_test_run_on_the_test_tab_can_use_a_chosen_group(): void
+    {
+        $id = $this->itemA();
+        $this->actingAs($this->user());
+        $text = fn (array $extra) => $this->postJson('/chatbot/test/send', ['page_name' => 'Page P', 'version' => 'published', 'message' => 'Hi'] + $extra)
+            ->assertOk()->json('sends.0.messages.0.text');
+
+        $this->assertSame(self::PAGE_TEXT, $text([]));
+        $this->assertSame(self::GROUP_TEXT, $text(['ad_group' => $id]));
+        $this->assertSame(self::PAGE_TEXT, $text(['ad_group' => 999]), 'walang ganoong group: page values');
+        // Ang flow ng group ang tumatakbo kapag walang napiling flow sa Test.
+        app(AdGroups::class)->save('Page P', $id, 'Item A', ['111', '222'], ['flow_id' => (string) $this->flow('Group flow {{PRICE}}')->id]);
+        $this->assertSame('Group flow 499', $text(['ad_group' => $id]));
+    }
+
     public function test_S_172_6_a_sequence_keeps_the_group_the_customer_entered_with(): void
     {
         $this->itemA();

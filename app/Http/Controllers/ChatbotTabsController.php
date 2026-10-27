@@ -209,14 +209,15 @@ class ChatbotTabsController extends Controller
         [$page, $pageId] = $this->testPage($request);
         if ($page === null) return response()->json(['error' => 'Pick a page that has a Botcake ID.'], 422);
         $flowId = (int) $this->str($request, 'flow_id', 20);
-        $flow = $flowId ? ChatbotFlow::find($flowId) : $this->pageFlow($page);
+        $group = $this->testGroup($request, $page);
+        $flow = $flowId ? ChatbotFlow::find($flowId) : $this->pageFlow($page, $group);
         $version = $this->str($request, 'version', 10) === 'published' ? 'published' : 'draft';
         $graph = $flow ? ($version === 'published' ? $flow->graph : $flow->draft()) : null;
         if (!is_array($graph)) return response()->json(['error' => 'This page has no flow. Pick one.'], 422);
 
         $fields = new CustomerFields((int) $pageId, CustomerFields::TEST_PSID);
         $message = $this->str($request, 'message', 2000);
-        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page), $fields, null,
+        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $group), $fields, null,
             $message, 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
         $engine->run($run, $this->testOutbox($request));
         TestHistory::record($fields, $message, $run);
@@ -248,7 +249,7 @@ class ChatbotTabsController extends Controller
         $fields->clear(CustomerFields::TEST_SKIP);
         if (!$node) return response()->json(['ran' => false, 'skip_in' => null, 'error' => 'The waiting step is not in this flow any more.']);
 
-        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page), $fields, null,
+        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $this->testGroup($request, $page)), $fields, null,
             '', 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
         $run->skippedAfter = FlowGraph::skipLabel((int) FlowGraph::skipMinutes((array) ($node['config'] ?? [])));
         $engine->run($run, $this->testOutbox($request));
@@ -307,10 +308,20 @@ class ChatbotTabsController extends Controller
         return [null, null];
     }
 
-    private function pageFlow(string $page): ?ChatbotFlow
+    /** Ang ad group na pinili sa Test (ad_group), kapag group ito ng page; kung hindi null (ang page values). */
+    private function testGroup(Request $request, string $page): ?int
     {
-        // Ang flow na nakatali sa page (dropdown), kahit naka-Off ang bot: ang Test ay para subukan bago i-On.
-        $id = trim((string) $this->settings->get($page, 'chatbot', 'flow_id'));
+        $id = (int) $this->str($request, 'ad_group', 20);
+
+        return $id > 0 && isset(app(\App\Services\Chatbot\AdGroups::class)->groups($page)[$id]) ? $id : null;
+    }
+
+    private function pageFlow(string $page, ?int $group = null): ?ChatbotFlow
+    {
+        // Ang flow na nakatali sa page (dropdown), kahit naka-Off ang bot: ang Test ay para subukan bago i-On. Ang
+        // napiling ad group na may sariling flow: iyon.
+        $own = $group !== null ? (app(\App\Services\Chatbot\AdGroups::class)->groups($page)[$group]['values']['flow_id'] ?? null) : null;
+        $id = trim((string) ($own ?? $this->settings->get($page, 'chatbot', 'flow_id')));
 
         return ctype_digit($id) ? ChatbotFlow::find((int) $id) : null;
     }

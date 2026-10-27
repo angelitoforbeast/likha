@@ -13,7 +13,7 @@
     The test customer has its own fields, apart from real customers.
 </p>
 
-<div id="tst" data-send-url="{{ route('chatbot.test.send') }}" data-reset-url="{{ route('chatbot.test.reset') }}" data-skip-url="{{ route('chatbot.test.skip') }}" class="grid gap-4 lg:grid-cols-[1fr_22rem]">
+<div id="tst" data-send-url="{{ route('chatbot.test.send') }}" data-reset-url="{{ route('chatbot.test.reset') }}" data-skip-url="{{ route('chatbot.test.skip') }}" data-groups-url="{{ route('chatbot.ad-groups') }}" class="grid gap-4 lg:grid-cols-[1fr_22rem]">
     <section class="cb-card flex flex-col p-4">
         <div class="mb-3 flex flex-wrap items-end gap-3 text-sm">
             <label class="flex flex-col text-xs text-slate-500">Page
@@ -32,6 +32,10 @@
                     <option value="draft" @selected($pickVersion === 'draft')>Draft</option>
                     <option value="published" @selected($pickVersion === 'published')>Published (live)</option>
                 </select>
+            </label>
+            {{-- Ang ad group na susubukan (ang mga value nito, at ang flow nito kapag walang napiling flow); wala = ang page values. --}}
+            <label id="t-group-box" class="hidden flex-col text-xs text-slate-500">Ad group
+                <select id="t-group" class="max-w-[16rem] rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900"></select>
             </label>
             <span id="t-pageflow" class="text-xs text-slate-500"></span>
             <button type="button" id="t-reset" class="cb-btn cb-btn-sm ml-auto">Reset test customer</button>
@@ -70,14 +74,21 @@
         .then(async r => ({ok: r.ok, data: await r.json().catch(() => ({}))}));
     const log = node => { $('t-log').append(node); $('t-log').scrollTop = $('t-log').scrollHeight; };
     const showPageFlow = () => { const f = $('t-page').selectedOptions[0]?.dataset.flow; $('t-pageflow').textContent = f ? 'Page flow: ' + f : 'This page has no flow yet.'; };
-    $('t-page').addEventListener('change', () => { showPageFlow(); $('t-log').replaceChildren(); stopSkip(); });
+    // Ang mga ad group ng page (kapag mayroon): ang napili ay ipinapadala bilang ad_group.
+    const loadGroups = () => fetch($('tst').dataset.groupsUrl + '?page=' + encodeURIComponent($('t-page').value), {headers: {'Accept': 'application/json'}})
+        .then(r => r.ok ? r.json() : {groups: []}).catch(() => ({groups: []})).then(d => {
+            $('t-group').replaceChildren(el('option', {value: '', text: 'Page values'}), ...(d.groups || []).map(g => el('option', {value: String(g.id), text: g.name})));
+            $('t-group-box').classList.toggle('hidden', !(d.groups || []).length); $('t-group-box').classList.toggle('flex', !!(d.groups || []).length);
+        });
+    $('t-page').addEventListener('change', () => { showPageFlow(); loadGroups(); $('t-log').replaceChildren(); stopSkip(); });
     showPageFlow();
+    loadGroups();
 
     // "Write sheet rows for real": naaalala kada browser.
     const SHEET_KEY = 'chatbot-test-write-sheet';
     $('t-write-sheet').checked = localStorage.getItem(SHEET_KEY) === '1';
     $('t-write-sheet').addEventListener('change', () => localStorage.setItem(SHEET_KEY, $('t-write-sheet').checked ? '1' : '0'));
-    const base = () => ({page_name: $('t-page').value, flow_id: $('t-flow').value, version: $('t-version').value, write_sheet: $('t-write-sheet').checked});
+    const base = () => ({page_name: $('t-page').value, flow_id: $('t-flow').value, version: $('t-version').value, ad_group: $('t-group').value, write_sheet: $('t-write-sheet').checked});
 
     function render(data) {
         (data.sends || []).forEach(s => s.messages.forEach(m => log(el('div', {class: 'flex'}, el('div', {class: 'max-w-[80%] whitespace-pre-line break-words rounded-lg bg-white px-3 py-1.5 shadow-sm'},
