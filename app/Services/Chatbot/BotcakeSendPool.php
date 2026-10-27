@@ -38,7 +38,7 @@ class BotcakeSendPool extends TicketPool
     private array $seen = [];
 
     private BotcakeClock $clock;
-    /** @var array<string, array{row: object, gen: ?\Generator, req: array, attempt: int, lane: string, token: string, notBefore: float}> */
+    /** @var array<string, array{row: object, gen: ?\Generator, req: array, attempt: int, blastTry: int, lane: string, token: string, notBefore: float}> */
     private array $jobs = [];
     /** @var array<string, array{next: float, last: float, paused: float, queue: array<int, string>}> lane (sha1 ng token) */
     private array $lanes = [];
@@ -153,7 +153,7 @@ class BotcakeSendPool extends TicketPool
                 $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
                 $req = ['step' => 'send', 'method' => 'POST', 'path' => '/pages/' . rawurlencode((string) $row->page_id) . '/flows/send_content',
                     'data' => ['psid' => (string) $row->psid, 'data' => ['version' => 'v2', 'content' => ['messages' => BotcakeOutbox::wire($messages)]]], 'onlyRateLimit' => true];
-                $this->queue($id, ['row' => $row, 'gen' => null, 'req' => $req, 'attempt' => 0, 'lane' => sha1($token), 'token' => $token, 'notBefore' => 0.0]);
+                $this->queue($id, ['row' => $row, 'gen' => null, 'req' => $req, 'attempt' => 0, 'blastTry' => 0, 'lane' => sha1($token), 'token' => $token, 'notBefore' => 0.0]);
                 return;
             }
 
@@ -193,7 +193,7 @@ class BotcakeSendPool extends TicketPool
                 return;
             }
             $gen = $sender->stepper($m, $cfg);
-            $this->queue($id, ['row' => $row, 'gen' => $gen, 'req' => $gen->current(), 'attempt' => 0, 'lane' => sha1($cfg['token']), 'token' => $cfg['token'], 'notBefore' => 0.0]);
+            $this->queue($id, ['row' => $row, 'gen' => $gen, 'req' => $gen->current(), 'attempt' => 0, 'blastTry' => 0, 'lane' => sha1($cfg['token']), 'token' => $cfg['token'], 'notBefore' => 0.0]);
         } catch (Throwable $e) {
             $this->failed($row, $e);
         }
@@ -344,11 +344,12 @@ class BotcakeSendPool extends TicketPool
             // Ang sulat o basa ng chatblast na pumalya (5xx, walang sagot) bago ang send_flow: wala pang naipadala, kaya inuulit
             // nang may mahabang pagitan (para makabawi ang Botcake). Ang send_flow at ang send_content ng chatbot ay gaya ng dati.
             $blast = $row->kind === 'chatblast' && in_array($job['req']['step'] ?? '', ['write', 'read'], true) && ($status === 0 || $status >= 500);
-            $wait = $blast ? (self::BLAST_RETRY[$job['attempt']] ?? null)
+            $wait = $blast ? (self::BLAST_RETRY[$job['blastTry']] ?? null)
                 : BotcakeClient::retryWait($job['attempt'], $status, $retryAfter, $job['req']['onlyRateLimit'], BotcakeClient::MAX_RETRIES, self::MAX_RETRY_AFTER);
             if ($wait !== null) {
                 if ($row->kind === 'chatblast') $this->counts['retried'][$job['req']['step']] = ($this->counts['retried'][$job['req']['step']] ?? 0) + 1;
                 $this->jobs[$id]['attempt']++;
+                if ($blast) $this->jobs[$id]['blastTry']++; // hiwalay sa bilang ng 429: bawat hakbang ay may sariling 15 s at 60 s
                 $until = $this->clock->now() + $wait;
                 // 429: ang page lang na ito ang humihinto; ang iba (5xx, walang sagot) ay ang request lang.
                 if ($status === 429) $this->lanes[$job['lane']]['paused'] = max($this->lanes[$job['lane']]['paused'], $until);
@@ -366,6 +367,7 @@ class BotcakeSendPool extends TicketPool
             if ($job['gen']->valid()) {
                 $this->jobs[$id]['req'] = $job['gen']->current();
                 $this->jobs[$id]['attempt'] = 0;
+                $this->jobs[$id]['blastTry'] = 0;
                 $this->jobs[$id]['notBefore'] = 0.0;
                 $this->jobs[$id]['since'] = $this->clock->now();
                 $this->lanes[$job['lane']]['queue'][] = $id;
