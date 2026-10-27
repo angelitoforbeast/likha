@@ -17,6 +17,14 @@ Route::post('/gateway/events', [\App\Http\Controllers\GatewayEventController::cl
 // Ang mga botfield ng page, binabasa at pinapalitan mula sa Forbeast (pinirmahan ng webhook secret ng page lang, may timestamp).
 Route::get('/gateway/pages/{metaPageId}/values', [\App\Http\Controllers\GatewayPageValuesController::class, 'show']);
 Route::put('/gateway/pages/{metaPageId}/values', [\App\Http\Controllers\GatewayPageValuesController::class, 'update']);
+// Ang paglipat ng page sa pagitan ng dalawang partner site, inuutos ng Forbeast (pinirmahan ng FORBEAST_SITE_SECRET, may timestamp).
+Route::prefix('/gateway/site/pages/{metaPageId}')->controller(\App\Http\Controllers\GatewaySiteController::class)->group(function () {
+    Route::post('/adopt', 'adopt');
+    Route::get('/export', 'export');
+    Route::post('/import', 'import');
+    Route::post('/release', 'release');
+    Route::post('/activate', 'activate');
+});
 
 // Read-only feed ng kusang lipat ng provider ng chatbot, para sa assistant ng owner (header X-CHATBOT-EVENTS-KEY, sariling key).
 Route::get('/chatbot/provider-events', [\App\Http\Controllers\ChatbotProviderEventsController::class, 'index'])->middleware('throttle:30,1,chatbot-provider-events');

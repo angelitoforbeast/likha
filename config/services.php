@@ -168,6 +168,14 @@ return [
         ],
     ],
 
+    // Ang site na ito bilang "site system" ng Forbeast (kung sino ang may-ari ng bawat page, at ang paglipat ng page sa
+    // kabilang site): ang fbs_ key (Bearer sa /v1/site/...) at ang secret na pumipirma sa /api/gateway/site/...
+    // Walang laman ang alinman = hindi naka-link: ang Owners screen ay sinasabi ito at ang mga endpoint ay 503.
+    'forbeast_site' => [
+        'key' => env('FORBEAST_SITE_KEY'),
+        'secret' => env('FORBEAST_SITE_SECRET'),
+    ],
+
     // Read-only RTS check feed (/api/owner/rts-check); walang laman = 401 sa lahat.
     'rts_check' => [
         'key' => env('RTS_CHECK_KEY'),
