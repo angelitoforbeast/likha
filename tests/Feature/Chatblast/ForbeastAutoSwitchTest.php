@@ -57,6 +57,8 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->page('Page Uno', '1001');
         app(PageSettings::class)->set('Page Uno', 'botcake', 'chat.key', self::KEY_UNO, true, null, true);
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway');
+        // Matagal nang nasa Forbeast ang page (ang bagong lipat ay nasa mga S-166 test).
+        PageSetting::where('provider', 'chatbot')->where('key', 'provider')->update(['created_at' => now()->subHours(3)]);
         BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ana Cruz', 'psid' => self::PSID, 'status' => 'available', 'source' => 'api']);
         BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Ben Reyes', 'psid' => self::PSID_B, 'status' => 'available', 'source' => 'api']);
     }
@@ -587,5 +589,89 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
 
         $by = collect($this->getJson('/chatbot/changes')->assertOk()->json('entries'))->where('key', 'provider')->pluck('by', 'new')->all();
         $this->assertSame(['botcake' => 'auto-switch', 'gateway' => 'system'], $by);
+    }
+
+    private const PSID_C = '6012345678909012';
+
+    /** Ang page ay inilipat ng tao mula Botcake papuntang Forbeast ngayon. */
+    private function movedToGateway(): void
+    {
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway');
+    }
+
+    /** @return array<int, string> ang mensahe ng bawat takbong naipasa sa queue, ayon sa pagkakasunod */
+    private function ranMessages(): array
+    {
+        $ran = [];
+        Queue::assertPushed(RunChatbotFlow::class, function (RunChatbotFlow $job) use (&$ran) {
+            $ran[] = BotcakeChat::find($job->chatId)?->message;
+            return true;
+        });
+
+        return $ran;
+    }
+
+    /** Ang kopya ng Botcake ng tatlong customer sa T+30, T+60 at T+90 (ang kopya ng Forbeast ay naitapon bago ang lipat). */
+    private function lateCopiesAfterTheMove(): void
+    {
+        $this->movedToGateway();
+        BotcakePsid::create(['page' => 'Page Uno', 'fb_name' => 'Cora Santos', 'psid' => self::PSID_C, 'status' => 'available', 'source' => 'api']);
+        foreach (['Available po?' => self::PSID, 'Magkano po?' => self::PSID_B, 'Hm po?' => self::PSID_C] as $m => $psid) {
+            $this->travel(30)->seconds();
+            $this->botcakePush($m, null, $psid)->assertOk();
+        }
+        $this->assertSame(3, BotcakeChat::get()->filter(fn ($c) => ForbeastWatch::standby($c))->count());
+    }
+
+    public function test_S_166_1_botcake_copies_inside_the_settle_window_after_a_move_never_switch_the_page(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        $this->lateCopiesAfterTheMove();
+
+        $this->travel(150)->seconds();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+
+        $this->assertSame('gateway', $this->provider());
+        $this->assertSame([], $this->events());
+    }
+
+    public function test_S_166_2_botcake_copies_after_the_settle_window_switch_the_page_as_today(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        $this->movedToGateway();
+        $this->travel(200)->seconds();
+        $this->botcakePush('Available po?')->assertOk();
+        $this->travel(10)->seconds();
+        $this->botcakePush('Magkano po?', null, self::PSID_B)->assertOk();
+
+        $this->travel(150)->seconds();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+
+        $this->assertSame('botcake', $this->provider());
+        $this->assertSame(['inbound', 'Botcake chats from 2 customers with no Forbeast copy after 120 seconds'], [$this->events()[0]['condition'], $this->events()[0]['error']]);
+    }
+
+    public function test_S_166_4_botcake_copies_inside_the_settle_window_are_answered_once_on_forbeast(): void
+    {
+        Queue::fake();
+        Http::fake([self::GW_PAGE => Http::response(['connected' => true, 'can_send' => true])]);
+        $this->greeting();
+        $this->lateCopiesAfterTheMove();
+
+        // Ang may INBOUND_GRACE na lang ang tumatakbo: ang kopya ng Forbeast ng iba ay maaaring parating pa.
+        $this->travel(60)->seconds();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertSame(['Available po?'], $this->ranMessages());
+
+        $this->travel(90)->seconds();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+
+        $this->assertSame(['Available po?', 'Magkano po?', 'Hm po?'], $this->ranMessages(), 'each copy runs once, oldest first');
+        $this->assertSame('gateway', $this->provider());
+        $this->assertSame(0, BotcakeChat::get()->filter(fn ($c) => ForbeastWatch::standby($c))->count());
     }
 }

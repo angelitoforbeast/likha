@@ -56,6 +56,12 @@ class ForbeastWatch
     private const TWIN_MINUTES = 2;
     /** Ilang magkaibang customer ang may standby na walang kapares bago lumipat dahil sa inbound. */
     private const INBOUND_CUSTOMERS = 2;
+    /**
+     * Ilang segundo pagkalipat ng page sa Forbeast na ang standby ay hindi ebidensya: ang kopya ng Botcake ay dumarating
+     * 60–80 s pagkatapos ng sa Forbeast, kaya ang mensaheng dumating bago ang lipat (itinapon ng Forbeast dahil nasa Botcake
+     * pa ang page) ay may standby na walang kapares kailanman.
+     */
+    private const SETTLE = 180;
     /** Ang sagot ng bot na ilang segundo bago dumating ang standby ay sagot na rin dito (magkasabay na dating). */
     private const REPLIED_GRACE = 5;
     /** Ang tanda sa payload ng chat ng Forbeast na nabura na ang standby na kapares nito. */
@@ -141,12 +147,35 @@ class ForbeastWatch
         $paired = self::pairs($chats);
         // Ang attachment lang (larawan, voice, …) ay hindi ebidensya habang hindi ito sinasagot ng bot (ignore).
         $ignoring = ChatAttachments::ignoring();
-        $orphans = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from)
-            && !($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null));
+        $unpaired = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from));
+        // Ang dumating sa loob ng SETTLE mula sa lipat sa Forbeast ay hindi ebidensya, pero sinasagot dito (walang ibang sasagot).
+        $movedAt = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)
+            ->orderByDesc('id')->first(['created_at'])?->created_at;
+        $late = $movedAt === null ? collect() : $unpaired->filter(fn ($c) => $c->received_at->lt($movedAt->copy()->addSeconds(self::SETTLE)));
+        $orphans = $unpaired->diffKeys($late)->filter(fn ($c) => !($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null));
         $customers = $orphans->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
         if ($orphans->count() >= self::limit('inbound_chats') && $customers >= self::INBOUND_CUSTOMERS) {
             $this->switch($page, 'inbound', 'Botcake chats from ' . $customers . ' customers with no Forbeast copy after ' . self::INBOUND_GRACE . ' seconds',
                 ['customers' => $customers, 'chat_ids' => $orphans->pluck('id')->take(50)->values()->all()]);
+            return; // ang lipat ang sumasagot sa lahat ng standby
+        }
+        if ($late->isNotEmpty()) $this->answerLate($page, $pageId, $late->pluck('id')->all());
+    }
+
+    /**
+     * Ang standby na walang kapares na dumating pagkalipat sa Forbeast: tumatakbo gaya ng sa lipat (runStandby), sa ilalim
+     * ng lock ng lipat, at ang mga chat ay binabasa ulit sa loob nito (ang lipat na nauna ay nakasagot na sa mga ito).
+     */
+    private function answerLate(string $page, string $pageId, array $ids): void
+    {
+        $lock = Cache::lock('forbeast-watch:switch:' . sha1($this->settings->pageKey($page)), 60);
+        if (!$lock->get()) return; // susubukan ulit sa susunod na minuto
+
+        try {
+            if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
+            $this->runChats($page, $pageId, BotcakeChat::whereIn('id', $ids)->orderBy('id')->get()->filter(fn ($c) => self::standby($c))->values());
+        } finally {
+            $lock->release();
         }
     }
 
@@ -314,6 +343,12 @@ class ForbeastWatch
         if ($pageId === '') return;
         $chats = BotcakeChat::where('page_id', $pageId)->where('received_at', '>=', now()->subMinutes(self::limit('standby_minutes')))
             ->orderBy('id')->get()->filter(fn ($c) => self::standby($c))->values();
+        $this->runChats($page, $pageId, $chats);
+    }
+
+    /** Ang pagpapatakbo ng mga standby chat (luma muna), ayon sa mga patakaran ng runStandby. */
+    private function runChats(string $page, string $pageId, \Illuminate\Support\Collection $chats): void
+    {
         foreach ($chats as $c) {
             try {
                 // Ang kopya sa Forbeast lang ay hindi dahilan: kung pumalya ang sagot doon, ang Botcake ang sasagot. Pero kapag
