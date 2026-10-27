@@ -128,5 +128,6 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
         $this->getJson('/chatbot/ad-groups?page=Page%20P')->assertOk();
         $this->postJson('/chatbot/ad-groups', ['page' => 'Page P', 'name' => 'Item B', 'ads' => '222'])->assertOk();
+        $this->get('/chatbot/pages')->assertOk()->assertSee('data-ag-url', false)->assertSee('js/chatbot-adgroups.js', false);
     }
 }

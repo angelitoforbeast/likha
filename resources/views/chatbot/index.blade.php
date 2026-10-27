@@ -69,6 +69,8 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
+     data-ag-url="{{ route('chatbot.ad-groups') }}" data-ag-add-url="{{ route('chatbot.ad-groups.add') }}" data-ag-delete-url="{{ route('chatbot.ad-groups.delete') }}"
+     data-ag-history-url="{{ route('chatbot.ad-groups.history') }}" data-ag-restore-url="{{ route('chatbot.ad-groups.restore') }}"
      data-ai-url="{{ route('chatbot.ai') }}" data-ai-site-url="{{ route('chatbot.ai.site') }}" data-ai-compare-url="{{ route('chatbot.ai.compare') }}"
      data-needs-token="{{ \App\Services\Chatbot\ForbeastPageSetup::NEEDS_TOKEN }}"
      @if($canSetUp) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}"
@@ -345,6 +347,7 @@
 </div>
 
 <script src="{{ asset('js/chatbot-paste.js') }}?v={{ substr(md5_file(public_path('js/chatbot-paste.js')), 0, 10) }}"></script>
+<script src="{{ asset('js/chatbot-adgroups.js') }}?v={{ substr(md5_file(public_path('js/chatbot-adgroups.js')), 0, 10) }}"></script>
 <script>
 (function () {
     const box = document.getElementById('cbot'), url = box.dataset, $ = id => document.getElementById(id);
@@ -1456,6 +1459,11 @@
         $('pe-error').textContent = '';
         $('pe-start-box').classList.remove('hidden');
         $('pe-fields').replaceChildren(...botCols().map(peField));
+        // Ad groups: sa ilalim ng mga value ng page (chatbot-adgroups.js); ang page value ang placeholder ng bawat field.
+        const ag = el('section', {id: 'pe-ag', class: 'py-3'});
+        $('pe-fields').append(ag);
+        ChatbotAdGroups.mount(ag, {page: r.page, pageValues: r.cells, csrf, urls: {index: url.agUrl, save: url.agUrl, add: url.agAddUrl,
+            del: url.agDeleteUrl, history: url.agHistoryUrl, restore: url.agRestoreUrl}});
         $('pe').classList.remove('hidden');
         $('pe-fields').scrollTop = 0;
         $('pe-fields').querySelectorAll('textarea').forEach(grow);
@@ -1631,7 +1639,7 @@
         // Laging idinadagdag sa bukas na modal ang mga bagong column (pinalitan na ng load() ang columns), kahit may bagong paste.
         for (const c of editCols()) {
             if (peInput(c.key)) continue;
-            $('pe-fields').append(peField(c));
+            $('pe-fields').insertBefore(peField(c), $('pe-ag')); // sa itaas ng Ad groups
             $('pe-start').append(el('option', {value: c.key, text: c.label}));
         }
         if (pe.map !== map) { paintPe(); return; } // may bagong paste: ang lumang mapping ay hindi na ginagalaw
