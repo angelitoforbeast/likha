@@ -246,8 +246,42 @@ class GatewaySitePagesTest extends ChatblastTestCase
 
         $res = $this->signed('GET', '/api/gateway/site/pages/1001/export?part=sequences')->assertOk();
 
-        $this->assertSame([['psid' => 7001, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-28T09:30:00+08:00', 'enrolled_via' => 'flow']], $res->json('items'));
+        $this->assertSame([['psid' => 7001, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-28T09:30:00+08:00', 'enrolled_via' => 'flow', 'last_message_at' => null]], $res->json('items'));
         $this->assertNull($res->json('next'));
+    }
+
+    public function test_S_164_9_sequences_carry_the_customer_last_message_time_and_the_import_keeps_the_newer_one(): void
+    {
+        $seq = $this->sequence('PREORDER');
+        foreach ([7001, 7002, 7003] as $psid) $this->sub($seq->id, $psid);
+        $chat = fn (int $psid, string $at, array $payload = []) => DB::table('botcake_chats')->insert(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => (string) $psid,
+            'name' => 'Ana', 'message' => 'Hi', 'payload' => json_encode($payload), 'received_at' => $at]);
+        $chat(7001, '2026-10-27 09:00:00');
+        $chat(7001, '2026-10-27 10:00:00');
+        $chat(7001, '2026-10-27 11:00:00', ['_standby' => true]); // not a message to the bot
+        DB::table('chatbot_customer_values')->insert([['page_id' => 1001, 'psid' => 7001, 'key' => '__last_message_at', 'value' => '2026-10-27 08:00:00', 'updated_at' => now()],
+            ['page_id' => 1001, 'psid' => 7002, 'key' => '__last_message_at', 'value' => '2026-10-27 07:00:00', 'updated_at' => now()]]);
+
+        $items = $this->signed('GET', '/api/gateway/site/pages/1001/export?part=sequences')->assertOk()->json('items');
+
+        // The latest of the chats here and the time a previous move brought; null when there is neither.
+        $this->assertSame([7001 => '2026-10-27T10:00:00+08:00', 7002 => '2026-10-27T07:00:00+08:00', 7003 => null], array_column($items, 'last_message_at', 'psid'));
+
+        // Import on the other page: recorded per customer, twice is the same, and an older time never replaces a newer one.
+        $import = fn (?string $at, int $psid = 8) => $this->signed('POST', '/api/gateway/site/pages/2002/import?part=sequences',
+            ['items' => [['psid' => $psid, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => null, 'enrolled_via' => 'flow', 'last_message_at' => $at]]]);
+        $stored = fn (int $psid = 8) => DB::table('chatbot_customer_values')->where('page_id', 2002)->where('psid', $psid)->where('key', '__last_message_at')->pluck('value')->all();
+        $import('2026-10-27T02:00:00Z')->assertOk();
+        $import('2026-10-27T02:00:00Z')->assertOk();
+        $this->assertSame(['2026-10-27 10:00:00'], $stored());
+        $import('2026-10-27T09:00:00+08:00')->assertOk();
+        $import(null)->assertOk();
+        $this->assertSame(['2026-10-27 10:00:00'], $stored());
+        $import('2026-10-27T11:30:00+08:00')->assertOk();
+        $this->assertSame(['2026-10-27 11:30:00'], $stored());
+        $import(null, 9)->assertOk();
+        $this->assertSame([], $stored(9));
+        $import('yesterday', 9)->assertStatus(422)->assertJson(['error' => 'invalid_value']);
     }
 
     // ---- import ----
@@ -279,7 +313,7 @@ class GatewaySitePagesTest extends ChatblastTestCase
         $items = [['psid' => 8, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-27T08:00:00+08:00', 'enrolled_via' => 'flow']];
 
         $this->signed('POST', '/api/gateway/site/pages/2002/import?part=sequences', ['items' => array_merge($items, [['psid' => 9, 'sequence' => 'Gone Seq', 'current_step' => 1, 'next_send_at' => null, 'enrolled_via' => 'inbox']])])
-            ->assertStatus(422)->assertJson(['error' => 'missing_names', 'missing_names' => ['Gone Seq']]);
+            ->assertStatus(422)->assertJson(['error' => 'missing_names', 'names' => ['Gone Seq']]);
         $this->assertSame(0, DB::table('chatbot_sequence_subscriptions')->count());
 
         foreach ([1, 2] as $_) {
@@ -326,7 +360,7 @@ class GatewaySitePagesTest extends ChatblastTestCase
             ['key' => 'main_flow', 'value' => 'Hello'], ['key' => 'price', 'value' => '199'], ['key' => 'seq_1', 'value' => null], ['key' => 'seq_99', 'value' => 'only on the other site']];
 
         $this->signed('POST', '/api/gateway/site/pages/2002/import?part=values', ['items' => array_merge($items, [['key' => 'flow', 'value' => 'No Such Flow']])])
-            ->assertStatus(422)->assertJson(['error' => 'missing_names', 'missing_names' => ['No Such Flow']]);
+            ->assertStatus(422)->assertJson(['error' => 'missing_names', 'names' => ['No Such Flow']]);
         $this->assertSame(0, PageSetting::where('page_name', 'Page Tres')->count());
 
         foreach ([1, 2] as $_) {

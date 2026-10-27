@@ -293,8 +293,13 @@ class ChatbotSequences
                 return 'held';
             }
             $last = BotcakeChat::active()->where('page_id', (string) $sub->page_id)->where('psid', (string) $sub->psid)->orderByDesc('id')->first();
+            // Ang huling mensahe: ang chat dito, o ang dala ng paglipat ng page mula sa kabilang site, alin ang mas bago.
+            $at = $last?->received_at;
+            $moved = $fields->get(CustomerFields::LAST_MESSAGE_AT);
+            $moved = $moved !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $moved) ? Carbon::parse($moved) : null;
+            if ($moved && (!$at || $moved->gt($at))) $at = $moved;
             // Lampas 24 oras mula sa huling mensahe ng customer: walang ipapadala at tapos na ang subscription.
-            if (!$last || !$last->received_at || $last->received_at->lte(now()->subHours(self::WINDOW_HOURS))) {
+            if (!$at || $at->lte(now()->subHours(self::WINDOW_HOURS))) {
                 $release(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null]);
                 $this->event($sub->page_id, $sub->psid, ['op' => 'skipped', 'reason' => 'outside 24h'] + $detail);
                 return 'skipped';
@@ -307,7 +312,7 @@ class ChatbotSequences
             }
 
             $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page), $fields, null,
-                '', (string) $last->name, now()->format('Y-m-d H:i'));
+                '', (string) $last?->name, now()->format('Y-m-d H:i'));
             $run->startedBy = 'sequence ' . $seq->name . ' step ' . $step->position;
             [$run->sequenceId, $run->sequenceStep] = [(int) $seq->id, (int) $step->position];
             try {

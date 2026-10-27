@@ -18,6 +18,7 @@ class CustomerFields
     public const TEST_PSID = 0; // ang test customer ng Test tab
     public const TEST_SKIP = '__test_skip_at'; // Test tab: kailan lalaktawan ang hinihintay (ang Test page ang nagpapatakbo, hindi ang tick)
     public const TEST_HISTORY = '__test_history'; // Test tab: ang usapan ng test customer (JSON) para sa AI step
+    public const LAST_MESSAGE_AT = '__last_message_at'; // ang huling mensahe ng customer sa site na pinanggalingan ng page (Y-m-d H:i:s), dala ng paglipat
     public const AI_SINCE = '__ai_since'; // "Clear AI memory" (JSON: at, chat, reply): ang AI ay nakakakita lang ng mga chat at padala pagkatapos nito
 
     /** @var array<string, string> */
