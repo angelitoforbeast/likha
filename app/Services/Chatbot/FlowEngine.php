@@ -438,7 +438,7 @@ class FlowEngine
         if ($run->sendResult !== null && $run->sendResult['node'] === $node['id']) {
             $r = $this->takeSendResult($run);
             if ($retry = $this->retrySend($node['id'], $run, $outbox, $r)) return $retry;
-            $run->sends[] =['node' => $node['id'], 'messages' => $r['messages'], 'status' => $r['status'], 'error' => $r['error']];
+            $run->sends[] = ['node' => $node['id'], 'messages' => $r['messages'], 'status' => $r['status'], 'error' => $r['error']];
             return ['port' => 'success', 'note' => 'AI answered' . (($c['save_to'] ?? '') !== '' ? ' into ' . $c['save_to'] : '')];
         }
         if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $node['id']) {
