@@ -24,6 +24,9 @@ class AdGroups
     public const MAX_ADS = 500;
     public const HISTORY_LIMIT = 100;
     public const RECENT_CHATS = 50;
+    public const UNASSIGNED_DAYS = 30;
+    public const UNASSIGNED_LIMIT = 50;
+    public const UNASSIGNED_TTL = 120;
     /** Run state ng customer (chatbot_customer_values): ang group nang pumasok siya sa sequence N. */
     public const SEQ_PIN = '__ad_group_seq_';
 
@@ -245,6 +248,77 @@ class AdGroups
             'ads' => $this->save($page, $g['id'], $g['name'], explode(',', $value), [], $userId),
             default => $this->save($page, $g['id'], $g['name'], $g['ads'], [$m[2] => $value], $userId),
         };
+    }
+
+    /**
+     * "Ads not in a group yet": ang mga ad na nakita sa page sa huling UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang
+     * ad_id ng botcake_psids ng page), wala pa sa alinmang group ng page; ang pangalan mula sa ads_manager_reports. Ang
+     * pinakamaraming customer muna, hanggang $limit; $q = bahagi ng ad ID o ng pangalan. Ang bilang ay naka-cache nang
+     * UNASSIGNED_TTL segundo kada page.
+     * @return array{rows: array<int, array{ad_id: string, name: ?string, customers: int, last: ?string}>, total: int}
+     */
+    public function unassigned(string $page, string $q = '', int $limit = self::UNASSIGNED_LIMIT): array
+    {
+        $seen = Cache::remember('chatbot-adgroups:seen:' . sha1($this->settings->pageKey($page)), self::UNASSIGNED_TTL, fn () => $this->seen($page));
+        $grouped = array_merge(...array_values(array_map(fn ($g) => $g['ads'], $this->groups($page))) ?: [[]]);
+        $rows = array_diff_key($seen, array_flip($grouped));
+        $names = $this->adNames(array_map('strval', array_keys($rows)));
+        $q = mb_strtolower(trim($q));
+        $out = [];
+        foreach ($rows as $ad => $r) {
+            $ad = (string) $ad;
+            $name = $names[$ad] ?? null;
+            if ($q !== '' && !str_contains($ad, $q) && !str_contains(mb_strtolower((string) $name), $q)) continue;
+            $out[] = ['ad_id' => $ad, 'name' => $name !== '' ? $name : null, 'customers' => $r['customers'],
+                'last' => $r['last'] ? \Carbon\Carbon::parse($r['last'])->format('Y-m-d H:i') : null];
+        }
+        usort($out, fn ($a, $b) => [$b['customers'], (string) $b['last']] <=> [$a['customers'], (string) $a['last']]);
+
+        return ['rows' => array_slice($out, 0, $limit), 'total' => count($out)];
+    }
+
+    /** @return array<string, array{customers: int, last: ?string}> ad => ilang customer at ang huling oras */
+    private function seen(string $page): array
+    {
+        $since = now()->subDays(self::UNASSIGNED_DAYS);
+        $psids = [];
+        $last = [];
+        $add = function ($ad, $psid, $at) use (&$psids, &$last) {
+            $ad = trim((string) $ad);
+            if (!preg_match('/^\d{1,64}$/', $ad)) return;
+            $psids[$ad][(string) $psid] = true;
+            $at = $at ? (string) \Carbon\Carbon::parse($at)->format('Y-m-d H:i:s') : null;
+            if ($at && ($last[$ad] ?? '') < $at) $last[$ad] = $at;
+        };
+        $pageId = $this->settings->get($page, 'botcake', 'page_id');
+        if ($pageId !== null && $pageId !== '') {
+            // Isang row kada ad + customer (ang JSON ng payload ay binabasa ng database, mysql/pgsql/sqlite).
+            BotcakeChat::active()->where('page_id', $pageId)->where('received_at', '>=', $since)->whereNotNull('payload->ad_id')
+                ->selectRaw('psid, MAX(received_at) as last_at')->addSelect('payload->ad_id as ad')
+                ->groupBy('payload->ad_id', 'psid')->toBase()->get()->each(fn ($r) => $add($r->ad, $r->psid, $r->last_at));
+        }
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        BotcakePsid::whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)])->whereNotNull('ad_id')->where('ad_id', '<>', '')
+            ->where(fn ($w) => $w->where('last_interactive_at', '>=', $since)->orWhere('first_seen_at', '>=', $since))
+            ->toBase()->get(['psid', 'ad_id', 'last_interactive_at', 'first_seen_at'])
+            ->each(fn ($r) => $add($r->ad_id, $r->psid, max((string) $r->last_interactive_at, (string) $r->first_seen_at) ?: null));
+
+        $out = [];
+        foreach ($psids as $ad => $set) $out[(string) $ad] = ['customers' => count($set), 'last' => $last[$ad] ?? null];
+
+        return $out;
+    }
+
+    /** Ang pangalan ng bawat ad (campaign / ad set / headline) mula sa pinakabagong row ng ads_manager_reports. */
+    private function adNames(array $adIds): array
+    {
+        if (!$adIds || !\Illuminate\Support\Facades\Schema::hasTable('ads_manager_reports')) return [];
+
+        return DB::table('ads_manager_reports')
+            ->whereIn('id', fn ($q) => $q->from('ads_manager_reports')->whereIn('ad_id', $adIds)->selectRaw('MAX(id)')->groupBy('ad_id'))
+            ->get(['ad_id', 'campaign_name', 'ad_set_name', 'headline'])
+            ->mapWithKeys(fn ($r) => [(string) $r->ad_id => implode(' / ', array_filter([$r->campaign_name, $r->ad_set_name, $r->headline], fn ($v) => trim((string) $v) !== ''))])
+            ->all();
     }
 
     /** Ang lahat ng row (active at history) ng group N ng page. */

@@ -373,6 +373,13 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/history', [\App\Http\Controllers\ChatbotController::class, 'history'])->middleware('throttle:120,1,chatbot-history')->name('history');
     Route::post('/restore', [\App\Http\Controllers\ChatbotController::class, 'restore'])->middleware('throttle:30,1,chatbot-restore')->name('restore');
     Route::get('/changes', [\App\Http\Controllers\ChatbotController::class, 'changes'])->middleware('throttle:60,1,chatbot-changes')->name('changes');
+    // Ad groups ng isang page (sa Edit ng page): access at throttle gaya ng page values (cells, history, restore).
+    Route::get('/ad-groups', [\App\Http\Controllers\ChatbotAdGroupController::class, 'index'])->middleware('throttle:120,1,chatbot-ad-groups')->name('ad-groups');
+    Route::post('/ad-groups', [\App\Http\Controllers\ChatbotAdGroupController::class, 'save'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.save');
+    Route::post('/ad-groups/add', [\App\Http\Controllers\ChatbotAdGroupController::class, 'add'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.add');
+    Route::post('/ad-groups/delete', [\App\Http\Controllers\ChatbotAdGroupController::class, 'delete'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.delete');
+    Route::get('/ad-groups/history', [\App\Http\Controllers\ChatbotAdGroupController::class, 'history'])->middleware('throttle:120,1,chatbot-history')->name('ad-groups.history');
+    Route::post('/ad-groups/restore', [\App\Http\Controllers\ChatbotAdGroupController::class, 'restore'])->middleware('throttle:30,1,chatbot-restore')->name('ad-groups.restore');
 });
 
 // Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings
