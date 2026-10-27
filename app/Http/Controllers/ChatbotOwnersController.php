@@ -10,40 +10,72 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 
 /**
- * /chatbot/owners (CEO lang, EnsureCeo sa route): ang bawat page na konektado sa Forbeast at kung aling site ang may-ari
- * (ForbeastSite, GET /v1/site/pages), ang mga request na naghihintay, at ang history ng isang page. Ang Take, Move, Ask at
- * Accept ay kailangan ng sariling password ng CEO (Hash::check dito, hindi ipinapadala) at ng phrase na nasa screen;
- * ang Decline at Cancel ay hindi. Ang page at ang may-ari ay laging binabasa ulit sa Forbeast bago sumulat (hindi ang
- * galing sa form). Lahat ng galing sa Forbeast ay text lang.
+ * /chatbot/owners: ang bawat page na konektado sa Forbeast at kung aling site ang may-ari (ForbeastSite, GET
+ * /v1/site/pages), ang mga request na naghihintay, at ang history ng isang page. Ang CEO ang nakakakita ng lahat at
+ * gumagawa ng lahat; ang Marketing at Marketing - OIC ay nakakakita lang ng mga page na walang may-ari at ng sa site na
+ * ito (walang request), at take lang ang puwede. Ang iba: 403. Ang Take, Move, Ask at Accept ay kailangan ng sariling
+ * password ng gumagawa (Hash::check dito, hindi ipinapadala) at ng phrase na nasa screen; ang Decline at Cancel ay hindi.
+ * Ang page at ang may-ari ay laging binabasa ulit sa Forbeast bago sumulat (hindi ang galing sa form). Lahat ng galing sa
+ * Forbeast ay text lang.
  */
 class ChatbotOwnersController extends Controller
 {
     public const CONFIRMED = ['take', 'move', 'ask', 'accept'];
+    /** Ang mga role na puwedeng mag-claim (take) ng page na walang may-ari, gaya ng sa Connections ng isang page. */
+    public const MARKETING = ['Marketing', 'Marketing - OIC'];
 
     public function __construct(private ForbeastSite $site)
     {
     }
 
+    /** Ang role na pare-pareho ang espasyo (hal. " Marketing  -OIC" → "Marketing - OIC"). */
+    public static function role(?string $role): string
+    {
+        return preg_replace('/\s*-\s*/u', ' - ', preg_replace('/\s+/u', ' ', trim((string) $role)));
+    }
+
+    /** Kung nabubuksan ng role ang Owners (ang screen at ang link nito sa nav). */
+    public static function opens(?string $role): bool
+    {
+        return in_array(self::role($role), ['CEO', ...self::MARKETING], true);
+    }
+
+    /** CEO: true; marketing: false; ang iba: 403. */
+    private function ceo(): bool
+    {
+        $role = Auth::user()?->employeeProfile?->role;
+        if (!self::opens($role)) abort(403);
+
+        return self::role($role) === 'CEO';
+    }
+
     public function index(Request $request)
     {
+        $ceo = $this->ceo();
         $linked = ForbeastSite::linked();
         $res = $linked ? $this->site->pages() : null;
         $site = $res !== null && $res['ok'] && isset(ForbeastSite::SITES[$res['body']['site'] ?? '']) ? $res['body']['site'] : ForbeastSite::self();
         $pages = $res !== null && $res['ok'] ? $this->pages($res['body']) : [];
+        // Marketing: ang walang may-ari at ang sa site na ito lang, at walang request (hindi nila ito magagalaw).
+        if (!$ceo) {
+            $pages = array_values(array_map(fn ($p) => ['pending' => []] + $p,
+                array_filter($pages, fn ($p) => $p['owner'] === null || $p['owner'] === $site)));
+        }
 
         $historyOf = (string) $request->query('history', '');
         $history = null;
-        if ($linked && preg_match('/^\d{1,20}$/', $historyOf)) {
+        if ($linked && preg_match('/^\d{1,20}$/', $historyOf) && ($ceo || collect($pages)->contains('id', $historyOf))) {
             $h = $this->site->history($historyOf);
             $history = ['page' => $historyOf, 'error' => $h['ok'] ? null : $h['error'], 'items' => $h['ok'] ? self::list($h['body']['transfers'] ?? $h['body']) : []];
         }
 
         return view('chatbot.owners', ['linked' => $linked, 'error' => $res !== null && !$res['ok'] ? $res['error'] : null, 'site' => $site,
-            'other' => ForbeastSite::other($site), 'pages' => $pages, 'history' => $history]);
+            'other' => ForbeastSite::other($site), 'pages' => $pages, 'history' => $history, 'ceo' => $ceo]);
     }
 
     public function act(Request $request, string $action)
     {
+        if (!$this->ceo() && $action !== 'take') abort(403);
         $back = redirect('/chatbot/owners');
         $fail = fn (string $msg) => $back->with('owners_error', $msg);
         $target = trim((string) $request->input('target'));
@@ -63,7 +95,9 @@ class ChatbotOwnersController extends Controller
 
         $plan = $this->plan($action, $target, $pages, $site);
         if (is_string($plan)) return $fail($plan);
-        if ($plan['phrase'] !== null && ForbeastSite::squash((string) $request->input('phrase')) !== $plan['phrase']) {
+        // confirm_text: ang pangalan ng phrase box na hindi mukhang login field (para hindi i-autofill ng browser); ang
+        // phrase ay para sa form na bukas na bago ang palit.
+        if ($plan['phrase'] !== null && ForbeastSite::squash((string) $request->input('confirm_text', $request->input('phrase'))) !== $plan['phrase']) {
             return $fail('The phrase does not match. Type: ' . $plan['phrase'] . '. Nothing was sent.');
         }
 

@@ -4,7 +4,11 @@
 @section('heading', 'Page owners')
 
 @section('description')
-    Every page connected in Forbeast and which site answers it. Take a new page, move a page to {{ \App\Services\Chatbot\ForbeastSite::label($other) }}, or ask for one of theirs; the other site's CEO accepts. Values, saved customer details and follow-ups move with the page.
+    @if($ceo)
+        Every page connected in Forbeast and which site answers it. Claim a new page, move a page to {{ \App\Services\Chatbot\ForbeastSite::label($other) }}, or ask for one of theirs; the other site's CEO accepts. Values, saved customer details and follow-ups move with the page.
+    @else
+        Pages connected in Forbeast that no site has yet, and the pages on {{ \App\Services\Chatbot\ForbeastSite::label($site) }}. Claim a new page to bring it here.
+    @endif
 @endsection
 
 @php
@@ -71,15 +75,28 @@
             <p class="text-sm text-slate-500">Forbeast lists no pages yet.</p>
         @endif
 
-        <div class="cb-scroll">
-            <ul class="grid gap-3 lg:grid-cols-2">
-                @foreach($pages as $p)
+        @php
+            // Isang page kada row, naka-grupo: ang walang may-ari sa taas, ang sa site na ito, at (CEO lang) ang sa kabila.
+            // Naka-sort na ayon sa pangalan ang $pages; ang marketing ay walang page ng kabilang site (sinala sa controller).
+            $groups = [['available', 'Available to claim', null, 'No pages to claim right now.'], ['site', 'On ' . $label($site), $site, 'No pages on ' . $label($site) . ' yet.']];
+            if ($ceo) $groups[] = ['other', 'On ' . $label($other), $other, 'No pages on ' . $label($other) . '.'];
+        @endphp
+        <div class="cb-scroll space-y-4">
+            @foreach($groups as [$group, $title, $owner, $empty])
+            @php $inGroup = array_values(array_filter($pages, fn ($p) => $p['owner'] === $owner)); @endphp
+            <section data-group="{{ $group }}" class="min-w-0">
+            <h2 class="mb-2 text-sm font-semibold text-slate-900">{{ $title }} <span class="font-normal text-slate-500">({{ count($inGroup) }})</span></h2>
+            @if(!$inGroup)
+                <p class="text-sm text-slate-500">{{ $empty }}</p>
+            @endif
+            <ul class="space-y-3">
+                @foreach($inGroup as $p)
                     @php
                         $ownerText = $p['owner'] === null ? 'Unowned' : ($p['owner'] === $site ? 'This site (' . $label($site) . ')' : $label($p['owner']));
                         $actions = [];
-                        if ($p['owner'] === null) $actions[] = ['take', 'Take', \App\Services\Chatbot\ForbeastSite::phrase('TAKE', $p['name'], $site), 'The page comes here with the bot Off until you set it up and turn it on.'];
-                        elseif ($p['owner'] === $site) $actions[] = ['move', 'Move to ' . $label($other), \App\Services\Chatbot\ForbeastSite::phrase('TRANSFER', $p['name'], $other), $label($other) . "'s CEO has to accept. The page keeps working here until then."];
-                        else $actions[] = ['ask', 'Ask for this page', \App\Services\Chatbot\ForbeastSite::phrase('TRANSFER', $p['name'], $site), $label($p['owner']) . "'s CEO has to accept. The page keeps working there until then."];
+                        if ($p['owner'] === null) $actions[] = ['take', 'Claim', \App\Services\Chatbot\ForbeastSite::phrase('TAKE', $p['name'], $site), 'The page comes here with the bot Off until you set it up and turn it on.'];
+                        elseif ($ceo && $p['owner'] === $site) $actions[] = ['move', 'Move to ' . $label($other), \App\Services\Chatbot\ForbeastSite::phrase('TRANSFER', $p['name'], $other), $label($other) . "'s CEO has to accept. The page keeps working here until then."];
+                        elseif ($ceo) $actions[] = ['ask', 'Ask for this page', \App\Services\Chatbot\ForbeastSite::phrase('TRANSFER', $p['name'], $site), $label($p['owner']) . "'s CEO has to accept. The page keeps working there until then."];
                     @endphp
                     <li data-page="{{ $p['id'] }}" class="cb-card min-w-0 p-3">
                         <div class="flex min-w-0 items-start gap-3">
@@ -135,7 +152,21 @@
                     </li>
                 @endforeach
             </ul>
+            </section>
+            @endforeach
         </div>
     @endif
 </div>
 @endsection
+
+@push('scripts')
+<script>
+    // Kapag binuksan ang Claim (o ibang confirm): makikita ang buong form sa loob ng scroll at nasa password na ang cursor.
+    document.addEventListener('toggle', (e) => {
+        const d = e.target;
+        if (!(d instanceof HTMLDetailsElement) || !d.matches('[data-owners-confirm]') || !d.open) return;
+        d.querySelector('form')?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+        d.querySelector('input[name="password"]')?.focus({preventScroll: true});
+    }, true);
+</script>
+@endpush

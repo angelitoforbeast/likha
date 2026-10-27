@@ -94,8 +94,8 @@ class PageOwnersScreenTest extends ChatblastTestCase
     public function test_S_164_1_other_roles_get_403_and_no_owners_tab(): void
     {
         $this->forbeast();
-        $this->navLink('/chatblast', ['Marketing']);
-        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $this->navLink('/chatblast', ['Encoder']);
+        $this->actingAs($this->user('Encoder', 'enc@example.test'));
 
         $this->get('/chatbot/owners')->assertForbidden();
         $this->post('/chatbot/owners/take', ['target' => '3003', 'password' => 'secret-password', 'phrase' => 'TAKE Page Tres TO LIKHA'])->assertForbidden();
@@ -220,7 +220,125 @@ class PageOwnersScreenTest extends ChatblastTestCase
         $this->assertStringContainsString('name="viewport" content="width=device-width', $html);
         $this->assertStringNotContainsString('<table', $html, 'no wide table: one card per page');
         $this->assertMatchesRegularExpression('/data-page="1001"[^>]*class="[^"]*\bmin-w-0\b/', $html);
-        preg_match_all('/<input[^>]*name="(password|phrase)"[^>]*>/', $html, $inputs);
+        preg_match_all('/<input[^>]*name="(password|confirm_text)"[^>]*>/', $html, $inputs);
         foreach ($inputs[0] as $input) $this->assertStringContainsString('w-full', $input);
+    }
+
+    public static function marketingRoles(): array
+    {
+        return ['Marketing' => ['Marketing'], 'Marketing - OIC' => ['Marketing - OIC'], 'extra spaces' => [' Marketing  -  OIC ']];
+    }
+
+    #[DataProvider('marketingRoles')]
+    public function test_S_170_1_marketing_sees_the_owners_link_and_the_screen(string $role): void
+    {
+        $this->forbeast();
+        $this->navLink('/chatblast', [preg_replace('/\s+/u', ' ', trim($role))]);
+        $this->actingAs($this->user($role, 'mkt@example.test'));
+
+        $this->assertMatchesRegularExpression('/data-cb-nav="Owners"[^>]*aria-current="page"/', $this->get('/chatbot/owners')->assertOk()->getContent());
+        $this->assertStringContainsString('data-cb-nav="Owners"', $this->get('/chatbot/pages')->assertOk()->getContent());
+    }
+
+    public function test_S_170_2_marketing_sees_only_unowned_and_this_sites_pages_and_no_requests(): void
+    {
+        $this->forbeast();
+        $this->navLink('/chatblast', ['Marketing']);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $html = $this->get('/chatbot/owners')->assertOk()->getContent();
+
+        $this->assertStringContainsString('data-page="3003"', $html);
+        $this->assertStringContainsString('data-page="1001"', $html);
+        foreach (['data-page="2002"', 'Page Dos', 'Incepxion', 'TRANSFER', 'ben@incepxion.test', self::ACTOR, 'data-group="other"'] as $absent) {
+            $this->assertStringNotContainsString($absent, $html);
+        }
+        preg_match_all('/data-action="([a-z]+)" data-target="(\d+)"/', $html, $m, PREG_SET_ORDER);
+        $this->assertSame(['take:3003'], array_values(array_unique(array_map(fn ($x) => $x[1] . ':' . $x[2], $m))));
+
+        // History: only for the pages marketing can see; another site's page is not asked of Forbeast.
+        $this->assertStringNotContainsString('data-history', $this->get('/chatbot/owners?history=2002')->assertOk()->getContent());
+        Http::assertNotSent(fn (HttpRequest $r) => str_contains($r->url(), '/transfers?page=2002'));
+        $this->assertStringContainsString('data-history="1001"', $this->get('/chatbot/owners?history=1001')->assertOk()->getContent());
+    }
+
+    public static function marketingTakes(): array
+    {
+        return [
+            'claim' => ['secret-password', 'TAKE Page Tres TO LIKHA', true, null],
+            'wrong password' => ['nope', 'TAKE Page Tres TO LIKHA', false, 'Wrong password'],
+            'wrong phrase' => ['secret-password', 'TAKE Page Uno TO LIKHA', false, 'The phrase does not match'],
+        ];
+    }
+
+    #[DataProvider('marketingTakes')]
+    public function test_S_170_3_marketing_claims_with_their_own_password_and_the_phrase(string $password, string $phrase, bool $sent, ?string $error): void
+    {
+        $this->forbeast();
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $res = $this->post('/chatbot/owners/take', ['target' => '3003', 'password' => $password, 'confirm_text' => $phrase])->assertRedirect('/chatbot/owners');
+
+        if (!$sent) {
+            $res->assertSessionHas('owners_error', fn ($e) => str_contains($e, $error));
+            $this->assertSame([], $this->writes());
+            return;
+        }
+        $res->assertSessionHas('owners_status');
+        $writes = $this->writes();
+        $this->assertCount(1, $writes);
+        $this->assertSame(self::API . '/pages/3003/take', $writes[0]->url());
+        $this->assertSame(['actor' => 'Marketing User mkt@example.test', 'phrase' => 'TAKE Page Tres TO LIKHA'], $writes[0]->data());
+    }
+
+    public static function ceoOnly(): array
+    {
+        return ['move' => ['move', '1001', 'TRANSFER Page Uno TO INCEPXION'], 'ask' => ['ask', '2002', 'TRANSFER Page Dos TO LIKHA'],
+            'accept' => ['accept', '41', 'TRANSFER Page Uno TO INCEPXION'], 'decline' => ['decline', '41', ''], 'cancel' => ['cancel', '42', '']];
+    }
+
+    #[DataProvider('ceoOnly')]
+    public function test_S_170_4_marketing_cannot_move_ask_accept_decline_or_cancel(string $action, string $target, string $phrase): void
+    {
+        $this->forbeast();
+        $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
+
+        $this->post('/chatbot/owners/' . $action, ['target' => $target, 'password' => 'secret-password', 'confirm_text' => $phrase])->assertForbidden();
+        Http::assertNothingSent();
+    }
+
+    public function test_S_170_5_available_pages_come_first_then_this_site_then_the_other_site_one_per_row(): void
+    {
+        $this->forbeast();
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/owners')->assertOk()->getContent();
+
+        $order = array_map(fn (string $needle) => strpos($html, $needle), ['data-group="available"', 'data-page="3003"', 'data-group="site"', 'data-page="1001"', 'data-group="other"', 'data-page="2002"']);
+        $this->assertNotContains(false, $order);
+        $sorted = $order;
+        sort($sorted);
+        $this->assertSame($sorted, $order, 'Available, then On Likha, then On Incepxion');
+        $this->assertStringContainsString('Available to claim', $html);
+        $this->assertStringContainsString('On Likha', $html);
+        $this->assertStringContainsString('On Incepxion', $html);
+        $this->assertStringNotContainsString('grid-cols-2', $html, 'one page per row');
+        $this->assertMatchesRegularExpression('#data-action="take" data-target="3003"[^>]*>\s*<summary[^>]*>\s*Claim\s*<#', $html);
+    }
+
+    public function test_S_170_5_an_empty_available_group_says_there_is_nothing_to_claim(): void
+    {
+        $this->forbeast([self::API . '/pages' => Http::response(['site' => 'likha', 'pages' => [['meta_page_id' => '1001', 'name' => 'Page Uno', 'owner' => 'likha', 'pending' => []]]])]);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+
+        $this->assertMatchesRegularExpression('#data-group="available"((?!data-group=)[\s\S])*No pages to claim right now#', $this->get('/chatbot/owners')->assertOk()->getContent());
+    }
+
+    public function test_S_170_6_the_confirm_form_has_a_hidden_username_then_the_password_then_the_phrase(): void
+    {
+        $this->forbeast();
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+        $html = $this->get('/chatbot/owners')->assertOk()->getContent();
+
+        $this->assertSame(1, preg_match('#data-action="take" data-target="3003"[\s\S]*?</form>#', $html, $form));
+        $this->assertMatchesRegularExpression('#<input(?=[^>]*autocomplete="username")(?=[^>]*value="mkt@example.test")(?=[^>]*\bhidden\b)[^>]*>[\s\S]*type="password"[\s\S]*<input(?=[^>]*name="confirm_text")(?=[^>]*autocomplete="off")[^>]*>#', $form[0]);
+        $this->assertStringNotContainsString('name="phrase"', $form[0]);
     }
 }

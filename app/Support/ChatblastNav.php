@@ -62,8 +62,8 @@ class ChatblastNav
             ['label' => 'Health', 'url' => '/chatbot/health', 'active' => request()->is('chatbot/health*')],
             ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
         ];
-        // Owners (kung aling site ang may-ari ng bawat page): CEO lang, gaya ng route nito (EnsureCeo).
-        if (preg_replace('/\s+/u', ' ', trim((string) $role)) === 'CEO') {
+        // Owners (kung aling site ang may-ari ng bawat page): CEO at marketing lang, gaya ng ChatbotOwnersController.
+        if (\App\Http\Controllers\ChatbotOwnersController::opens($role)) {
             $items[] = ['label' => 'Owners', 'url' => '/chatbot/owners', 'active' => request()->is('chatbot/owners*')];
         }
 
