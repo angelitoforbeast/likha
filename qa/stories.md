@@ -2736,3 +2736,21 @@ Tests: `tests/Feature/Chatblast/SendStatusBatchTest.php`, `ChatConfigCacheTest.p
 | S-163.4 (P1) | When a sequence step runs, Then the Inbox still shows "Flow Step started (sequence Follow step 1)", "Run ended (…)", "Sequence Follow step 1 ran" and "Sequence Follow completed" (sequence events kept) | `test_S_163_4…` | passed |
 | S-163.5 (P1) | The Chatblast, Botcake, PageSettings and OrderEncode suites add no new failures | full run | passed |
 | S-163.6 (P2) | A local benchmark of 1,000 synthetic chats (faked sends) before and after: queries, rows written, chats/s, send_status POSTs | local benchmark (not committed) | done |
+
+## S-164 The CEO sees who owns each page and moves pages between the partner sites
+
+As the CEO, I want to see every page connected in Forbeast and which site owns it, take a new page without pasting a token, and move a page to or from the other site with its values, saved customer details and follow-ups, behind a strong confirmation.
+
+Slice 164. Threat model: everything in a request to `/api/gateway/site/...` (body, headers, path) is untrusted until the signature with `FORBEAST_SITE_SECRET` checks out, and its text stays data after that; answers from Forbeast's Part S (page names, actors, history) are untrusted text shown on the screen; the CEO's form input (password, phrase) is untrusted. The repo, config, env and staff saves on Likha screens are trusted. Risk tier: high (new public endpoints, a new screen that starts page moves, auth).
+Tests: `tests/Feature/Chatblast/PageOwnersScreenTest.php`, `GatewaySitePagesTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-164.1 (P1) | Given Forbeast lists pages (faked), When the CEO opens the Owners screen, Then each page shows its owner (this site / the other site / Unowned) and its pending requests (who, when, direction); a non-CEO gets 403 and no Owners tab; a site without the key and secret says it is not linked | `test_S_164_1…` | open |
+| S-164.2 (P1) | Take, Move, Ask and Accept each need the CEO's own password and the phrase shown: a wrong password is refused and nothing is sent to Forbeast; a wrong phrase is refused; with both right the Part S call is made with the actor; Accept/Decline only on the other site's requests, Cancel only on this site's | `test_S_164_2…` | open |
+| S-164.3 (P1) | A signed adopt creates the page settings (page id, name, provider gateway, token) and connects the page (ForbeastPageSetup faked); take leaves the bot off; a bad signature or old timestamp → 401; a name already used by another Meta page id → 409 and nothing saved; no key/secret → 503 | `test_S_164_3…` | open |
+| S-164.4 (P1) | Export pages through values, fields and sequences with cursors (at most 500 a call), with no `__*` keys and no secrets, tokens or prompts; `since` limits fields | `test_S_164_4…` | open |
+| S-164.5 (P1) | Import is idempotent (twice = same rows), maps flows and sequences by name, a missing name → 422 `missing_names` and nothing of that part saved; imported subscriptions are held and send nothing until activate | `test_S_164_5…` | open |
+| S-164.6 (P1) | Release turns the bot off with the reason, ends the page's subscriptions (`transferred`), forgets its waits and pending AI/send requests and deactivates its Forbeast connection rows (history kept); activate releases the held subscriptions at the same step and send time | `test_S_164_6…` | open |
+| S-164.7 (P1) | The Chatblast, Botcake and PageSettings suites add no new failures | full run | open |
+| S-164.8 (P2) | The Owners screen works at 390 px | `test_S_164_8…` | open |
