@@ -368,11 +368,12 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
             'writes 10:00 on the old site, page moves 12:00, step 2 due 14:00' => ['2026-10-20T10:00:00+08:00', ['Seq 2'], ['active', null]],
             'the imported time is older than 24 h at the step' => ['2026-10-19T13:59:00+08:00', [], ['unsubscribed', 'outside 24h']],
             'no imported time and no chat here' => [null, [], ['unsubscribed', 'outside 24h']],
+            'a flow cleared all fields after the move' => ['2026-10-20T10:00:00+08:00', ['Seq 2'], ['active', null], true],
         ];
     }
 
     #[DataProvider('movedPages')]
-    public function test_S_164_9_a_copied_follow_up_uses_the_customer_last_message_time_from_the_old_site(?string $lastMessageAt, array $sent, array $end): void
+    public function test_S_164_9_a_copied_follow_up_uses_the_customer_last_message_time_from_the_old_site(?string $lastMessageAt, array $sent, array $end, bool $clearAll = false): void
     {
         $seq = $this->sequence('PREORDER', [[0, 'minutes', $this->flow('Seq 1')->id], [2, 'hours', $this->flow('Seq 2')->id], [1, 'hours', $this->flow('Seq 3')->id]]);
         $this->travelTo('2026-10-20 12:00:00');
@@ -380,6 +381,7 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $item = ['psid' => 7001, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-20T14:00:00+08:00', 'enrolled_via' => 'flow', 'last_message_at' => $lastMessageAt];
         $this->assertSame(200, $transfers->import('1001', 'sequences', [$item], '77')['http']);
         $transfers->activate(1001, '77');
+        if ($clearAll) (new CustomerFields(1001, 7001))->clearAll();
 
         $this->travelTo('2026-10-20 14:00:00');
         $this->tick();
