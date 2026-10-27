@@ -361,6 +361,10 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');
     Route::post('/connections/{provider}', [\App\Http\Controllers\ChatbotController::class, 'connections'])->whereIn('provider', ['botcake', 'forbeast', 'chat-block', 'botcake-test', 'forbeast-test', 'forbeast-clear'])->middleware('throttle:30,1,chatbot-connections-save')->name('connections.save');
     Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
+    // Owners: kung aling site ang may-ari ng bawat page (Forbeast), at ang take at paglipat. CEO lang; 10 sulat kada minuto.
+    Route::get('/owners', [\App\Http\Controllers\ChatbotOwnersController::class, 'index'])->middleware([\App\Http\Middleware\EnsureCeo::class, 'throttle:60,1,chatbot-owners'])->name('owners');
+    Route::post('/owners/{action}', [\App\Http\Controllers\ChatbotOwnersController::class, 'act'])->whereIn('action', ['take', 'move', 'ask', 'accept', 'decline', 'cancel'])
+        ->middleware([\App\Http\Middleware\EnsureCeo::class, 'throttle:10,1,chatbot-owners-act'])->name('owners.act');
     // Check, Preview, History, Restore at Changes ng /chatbot/pages (access gaya ng page; Restore gaya ng isang cell).
     Route::get('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:240,1,chatbot-check')->name('check');
     Route::post('/check', [\App\Http\Controllers\ChatbotController::class, 'check'])->middleware('throttle:30,1,chatbot-check-again')->name('check.again');
