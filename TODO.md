@@ -1329,3 +1329,8 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - When a form posts both `confirm_text` and `phrase`, `confirm_text` wins. Reason: `phrase` is only read for confirm forms that were already open at deploy; both values come from the same signed-in user, so it is no bypass.
 - Not tested: whether Chrome and phone password managers really leave the phrase box empty. Reason: needs a real browser with a saved login; the markup follows Chromium's advice (hidden `autocomplete="username"` field before the password, the phrase box after it with a non-login name).
 - The throttle on `/chatbot/owners` now runs before the role check (the route lost `EnsureCeo`; the controller checks the role). Reason: a denied role only uses up its own quota.
+## 170-1: Claiming state on the Owners screen, accepted review minors (2026-10-27)
+- When the 2-minute entry ends while the take is still running, or GET site/transfers fails, the card shows Claim again with no message. Reason: Forbeast refuses a take on a page that has an owner (409, shown on the screen), so a late second click cannot claim twice; the job finishes in about 3 s.
+- A Move or Ask blocks another Move/Ask of the same page for 2 minutes even if it is declined sooner. Reason: CEO only, short window; Forbeast allows several pending requests anyway.
+- The 3 s reload drops the one-time "Take started" message. Reason: the "Claiming… #id" chip says the same thing on the card.
+- Not tested: the 2-minute expiry (cache TTL), a take answer without a transfer id ("Claiming…" with no number), and Ask in the double-request test (same branch as Move). Reason: each is one line checked in review; keep the suite small.

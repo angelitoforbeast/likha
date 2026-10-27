@@ -110,13 +110,21 @@ class ChatbotOwnersController extends Controller
         }
 
         $actor = mb_substr(ForbeastSite::squash($user->name . ' ' . $user->email), 0, 200);
+        // Ang add ay atomic: sa dalawang sabay na pindot, isa lang ang aabot sa Forbeast.
+        $busy = in_array($action, ['take', 'move', 'ask'], true);
+        if ($busy && !Cache::add(self::BUSY . $target, ['action' => $action, 'transfer' => null], now()->addMinutes(2))) {
+            return $fail($action === 'take' ? 'This page is already being claimed.' : 'A request for this page is already in progress.');
+        }
         $out = match ($action) {
             'take' => $this->site->take($target, $actor, $plan['phrase']),
             'move', 'ask' => $this->site->request($target, $actor, $plan['phrase']),
             default => $this->site->answer($target, $action, $actor, $plan['phrase']),
         };
-        if (!$out['ok']) return $fail($out['error']);
-        if (in_array($action, ['take', 'move', 'ask'], true)) {
+        if (!$out['ok']) {
+            if ($busy) Cache::forget(self::BUSY . $target);
+            return $fail($out['error']);
+        }
+        if ($busy) {
             $id = $out['body']['transfer_id'] ?? $out['body']['id'] ?? null;
             Cache::put(self::BUSY . $target, ['action' => $action, 'transfer' => is_scalar($id) && ctype_digit((string) $id) ? (string) $id : null], now()->addMinutes(2));
         }
