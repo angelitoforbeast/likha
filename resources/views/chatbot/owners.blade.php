@@ -94,7 +94,8 @@
                     @php
                         $ownerText = $p['owner'] === null ? 'Unowned' : ($p['owner'] === $site ? 'This site (' . $label($site) . ')' : $label($p['owner']));
                         $actions = [];
-                        if ($p['owner'] === null) $actions[] = ['take', 'Claim', \App\Services\Chatbot\ForbeastSite::phrase('TAKE', $p['name'], $site), 'The page comes here with the bot Off until you set it up and turn it on.'];
+                        if ($p['owner'] === null && $p['claiming']) $actions = [];
+                        elseif ($p['owner'] === null) $actions[] = ['take', 'Claim', \App\Services\Chatbot\ForbeastSite::phrase('TAKE', $p['name'], $site), 'The page comes here with the bot Off until you set it up and turn it on.'];
                         elseif ($ceo && $p['owner'] === $site) $actions[] = ['move', 'Move to ' . $label($other), \App\Services\Chatbot\ForbeastSite::phrase('TRANSFER', $p['name'], $other), $label($other) . "'s CEO has to accept. The page keeps working here until then."];
                         elseif ($ceo) $actions[] = ['ask', 'Ask for this page', \App\Services\Chatbot\ForbeastSite::phrase('TRANSFER', $p['name'], $site), $label($p['owner']) . "'s CEO has to accept. The page keeps working there until then."];
                     @endphp
@@ -111,6 +112,13 @@
                             </div>
                             <span data-owner class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ $p['owner'] === null ? 'bg-amber-50 text-amber-800' : ($p['owner'] === $site ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-700') }}">{{ $ownerText }}</span>
                         </div>
+
+                        @if($p['claimed'])
+                            <p data-claimed class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-sm text-emerald-800" role="status">Claimed — the bot is Off until you set it up and turn it on</p>
+                        @endif
+                        @if($p['claim_error'])
+                            <p data-claim-error class="mt-3 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-sm text-red-800" role="alert">{{ $p['claim_error'] }}</p>
+                        @endif
 
                         @if($p['hold'])
                             <p data-hold class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-sm text-amber-800" role="status">Follow-ups paused for transfer #{{ $p['hold']['transfer'] }} since {{ $at($p['hold']['since']) }}</p>
@@ -144,6 +152,9 @@
                         @endif
 
                         <div class="mt-3 flex flex-wrap items-start gap-2">
+                            @if($p['owner'] === null && $p['claiming'])
+                                <span data-claiming="{{ $p['claiming']['transfer'] }}" class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800" role="status">Claiming… @if($p['claiming']['transfer'])#{{ $p['claiming']['transfer'] }}@endif</span>
+                            @endif
                             @foreach($actions as [$action, $button, $phrase, $note])
                                 @include('chatbot.partials.owners-confirm', ['action' => $action, 'target' => $p['id'], 'button' => $button, 'phrase' => $phrase, 'note' => $note])
                             @endforeach
@@ -169,4 +180,13 @@
         d.querySelector('input[name="password"]')?.focus({preventScroll: true});
     }, true);
 </script>
+@if(collect($pages)->contains(fn ($p) => $p['claiming']))
+<script data-owners-refresh>
+    // May page na "Claiming…": binabasa ulit ang screen kada ~3 s hanggang matapos (ang server ang tumitigil pagkalipas ng
+    // 2 minuto). Hindi muna habang may bukas na confirm form, para hindi mabura ang tina-type.
+    (function again() {
+        setTimeout(() => document.querySelector('details[data-owners-confirm][open]') ? again() : location.reload(), 3000);
+    })();
+</script>
+@endif
 @endpush

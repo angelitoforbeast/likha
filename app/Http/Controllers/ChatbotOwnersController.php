@@ -7,6 +7,7 @@ use App\Services\Chatbot\PageTransfers;
 use App\Services\PageSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -23,6 +24,8 @@ class ChatbotOwnersController extends Controller
     public const CONFIRMED = ['take', 'move', 'ask', 'accept'];
     /** Ang mga role na puwedeng mag-claim (take) ng page na walang may-ari, gaya ng sa Connections ng isang page. */
     public const MARKETING = ['Marketing', 'Marketing - OIC'];
+    /** Ang take, move o ask na kapapadala lang para sa isang page (cache, 2 minuto): ang action at ang transfer id. */
+    private const BUSY = 'chatbot-owners:busy:';
 
     public function __construct(private ForbeastSite $site)
     {
@@ -61,6 +64,7 @@ class ChatbotOwnersController extends Controller
             $pages = array_values(array_map(fn ($p) => ['pending' => []] + $p,
                 array_filter($pages, fn ($p) => $p['owner'] === null || $p['owner'] === $site)));
         }
+        $pages = array_map(fn ($p) => $this->claim($p, $site), $pages);
 
         $historyOf = (string) $request->query('history', '');
         $history = null;
@@ -81,6 +85,10 @@ class ChatbotOwnersController extends Controller
         $target = trim((string) $request->input('target'));
         if (!preg_match('/^\d{1,20}$/', $target)) return $fail('Pick a page or request first.');
         if (!ForbeastSite::linked()) return $fail('This site is not linked to Forbeast yet.');
+        // Ang pangalawang pindot habang tumatakbo pa ang una: tinatanggihan bago ang anumang tawag sa Forbeast.
+        if (in_array($action, ['take', 'move', 'ask'], true) && Cache::has(self::BUSY . $target)) {
+            return $fail($action === 'take' ? 'This page is already being claimed.' : 'A request for this page is already in progress.');
+        }
 
         $user = Auth::user();
         // Ang password muna, bago ang anumang tawag sa Forbeast.
@@ -108,8 +116,38 @@ class ChatbotOwnersController extends Controller
             default => $this->site->answer($target, $action, $actor, $plan['phrase']),
         };
         if (!$out['ok']) return $fail($out['error']);
+        if (in_array($action, ['take', 'move', 'ask'], true)) {
+            $id = $out['body']['transfer_id'] ?? $out['body']['id'] ?? null;
+            Cache::put(self::BUSY . $target, ['action' => $action, 'transfer' => is_scalar($id) && ctype_digit((string) $id) ? (string) $id : null], now()->addMinutes(2));
+        }
 
         return $back->with('owners_status', $plan['done']);
+    }
+
+    /**
+     * Ang take na tumatakbo pa sa Forbeast (job na ilang segundo pagkatapos ng 202): "claiming" habang wala pang may-ari;
+     * "claimed" sa unang pagkakita na sa site na ito na; "claim_error" (ang sinabi ng Forbeast) kapag failed o stuck.
+     */
+    private function claim(array $page, string $site): array
+    {
+        $page += ['claiming' => null, 'claimed' => false, 'claim_error' => null];
+        $busy = Cache::get(self::BUSY . $page['id']);
+        if (!is_array($busy) || ($busy['action'] ?? null) !== 'take') return $page;
+        if ($page['owner'] !== null) {
+            Cache::forget(self::BUSY . $page['id']);
+            return ['claimed' => $page['owner'] === $site] + $page;
+        }
+
+        $transfer = $busy['transfer'] ?? null;
+        $h = $transfer !== null ? $this->site->history($page['id']) : ['ok' => false];
+        $t = $h['ok'] ? collect(self::list($h['body']['transfers'] ?? $h['body']))->first(fn ($t) => (string) ($t['id'] ?? '') === $transfer) : null;
+        if ($t === null || !in_array($t['status'] ?? null, ['failed', 'stuck'], true)) return ['claiming' => ['transfer' => $transfer]] + $page;
+
+        Cache::forget(self::BUSY . $page['id']);
+        $said = collect(self::list($t['steps'] ?? []))->map(fn ($s) => $s['error'] ?? $s['message'] ?? null)->push($t['error'] ?? $t['message'] ?? null)
+            ->filter(fn ($v) => is_scalar($v) && trim((string) $v) !== '')->last();
+
+        return ['claim_error' => 'The claim did not finish (' . $t['status'] . ')' . ($said !== null ? ': ' . mb_substr(trim((string) $said), 0, 300) : '.')] + $page;
     }
 
     /**

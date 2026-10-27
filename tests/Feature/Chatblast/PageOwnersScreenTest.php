@@ -346,4 +346,80 @@ class PageOwnersScreenTest extends ChatblastTestCase
         // The phrase is case-sensitive: a phone keyboard must not switch it to capitals.
         $this->assertMatchesRegularExpression('#<input(?=[^>]*name="confirm_text")(?=[^>]*autocapitalize="off")(?=[^>]*autocorrect="off")[^>]*>#', $form[0]);
     }
+
+    private const UNOWNED = ['site' => 'likha', 'pages' => [['meta_page_id' => '3003', 'name' => 'Page Tres', 'owner' => null, 'pending' => []]]];
+    private const CLAIM = ['target' => '3003', 'password' => 'secret-password', 'confirm_text' => 'TAKE Page Tres TO LIKHA'];
+
+    /** Ang card ng isang page sa HTML. */
+    private function card(string $html, string $id): string
+    {
+        $this->assertSame(1, preg_match('#<li data-page="' . $id . '"((?!<li data-page=)[\s\S])*#', $html, $m), 'card ' . $id);
+
+        return $m[0];
+    }
+
+    public function test_S_170_9_after_a_claim_the_page_shows_claiming_without_its_claim_button_and_the_screen_refreshes(): void
+    {
+        $this->forbeast([self::API . '/pages' => Http::response(self::UNOWNED), self::API . '/transfers?page=3003' => Http::response(['transfers' => [
+            ['id' => 50, 'direction' => 'take', 'to' => 'likha', 'status' => 'running', 'steps' => []]]])]);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+
+        $this->post('/chatbot/owners/take', self::CLAIM)->assertSessionHas('owners_status');
+        $html = $this->get('/chatbot/owners')->assertOk()->getContent();
+        $card = $this->card($html, '3003');
+
+        $this->assertMatchesRegularExpression('#data-claiming="50"[^>]*>\s*Claiming…\s*\#50\s*<#', $card);
+        $this->assertStringNotContainsString('data-action="take"', $card);
+        $this->assertStringContainsString('data-owners-refresh', $html);
+    }
+
+    public function test_S_170_10_when_forbeast_reports_this_site_as_owner_the_card_moves_there_with_the_claimed_note(): void
+    {
+        $this->forbeast([self::API . '/pages' => Http::sequence()->push(self::UNOWNED)
+            ->push(['site' => 'likha', 'pages' => [['meta_page_id' => '3003', 'name' => 'Page Tres', 'owner' => 'likha', 'pending' => []]]])]);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+
+        $this->post('/chatbot/owners/take', self::CLAIM)->assertSessionHas('owners_status');
+        $html = $this->get('/chatbot/owners')->assertOk()->getContent();
+
+        $this->assertMatchesRegularExpression('#data-group="site"((?!data-group=)[\s\S])*data-page="3003"#', $html);
+        $this->assertMatchesRegularExpression('#data-claimed[^>]*>\s*Claimed — the bot is Off until you set it up and turn it on#', $this->card($html, '3003'));
+        $this->assertStringNotContainsString('data-claiming', $html);
+        $this->assertStringNotContainsString('data-owners-refresh', $html, 'nothing in progress: no refresh');
+    }
+
+    public function test_S_170_11_a_failed_take_shows_forbeasts_error_in_red_and_brings_the_claim_button_back(): void
+    {
+        $this->forbeast([self::API . '/pages' => Http::response(self::UNOWNED), self::API . '/transfers?page=3003' => Http::response(['transfers' => [
+            ['id' => 50, 'direction' => 'take', 'to' => 'likha', 'status' => 'stuck', 'steps' => [
+                ['step' => 'adopt', 'status' => 'failed', 'error' => 'Likha did not answer <adopt> (HTTP 500)']]]]])]);
+        $this->actingAs($this->user('Marketing', 'mkt@example.test'));
+
+        $this->post('/chatbot/owners/take', self::CLAIM)->assertSessionHas('owners_status');
+        $card = $this->card($this->get('/chatbot/owners')->assertOk()->getContent(), '3003');
+
+        $this->assertMatchesRegularExpression('#data-claim-error[^>]*text-red[^>]*>[^<]*Likha did not answer &lt;adopt&gt; \(HTTP 500\)#', $card);
+        $this->assertStringContainsString('data-action="take" data-target="3003"', $card);
+        $this->assertStringNotContainsString('data-claiming', $card);
+    }
+
+    public static function doubles(): array
+    {
+        return ['claim' => ['Marketing', 'take', self::CLAIM, 'This page is already being claimed'],
+            'move' => ['CEO', 'move', ['target' => '1001', 'password' => 'secret-password', 'confirm_text' => 'TRANSFER Page Uno TO INCEPXION'], 'A request for this page is already in progress']];
+    }
+
+    #[DataProvider('doubles')]
+    public function test_S_170_12_a_second_request_for_a_page_in_progress_is_refused_without_calling_forbeast(string $role, string $action, array $form, string $error): void
+    {
+        $this->forbeast();
+        $this->actingAs($role === 'CEO' ? $this->user() : $this->user($role, 'mkt@example.test'));
+
+        $this->post('/chatbot/owners/' . $action, $form)->assertSessionHas('owners_status');
+        $calls = count(Http::recorded());
+        $this->post('/chatbot/owners/' . $action, $form)->assertRedirect('/chatbot/owners')->assertSessionHas('owners_error', fn ($e) => str_contains($e, $error));
+
+        $this->assertCount($calls, Http::recorded(), 'nothing asked of Forbeast');
+        $this->assertCount(1, $this->writes());
+    }
 }
