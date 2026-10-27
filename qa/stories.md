@@ -2752,3 +2752,18 @@ Tests: `tests/Feature/Chatblast/BotRepliesBeforeBlastsTest.php`.
 | S-165.4 (P1) | In .1 and .3, Then no two sends of the page are closer than 0.5 s (2/s) | asserted in `test_S_165_1…` and `test_S_165_3…` | passed |
 | S-165.5 (P1) | Given 1,000 chatblast messages on 5 pages, When each page gets one reply per second for 60 s (fake clock), Then every reply is sent ≤ 1 s after it was ready, all 1,000 messages end sent, and the 2/s page rate holds | `test_S_165_5…` | passed |
 | S-165.6 (P1) | The Chatblast, Botcake and Unit suites add no new failures | full run | passed |
+
+## S-166 A page moved to Forbeast stays on Forbeast
+
+As staff, I want a page I just moved from Botcake to Forbeast to stay there, and every customer who wrote around the move to get an answer.
+
+Slice 166. Threat model: the decision reads Likha's own page settings history and stored chats (customer text is only compared, never run as instructions). Nothing new is reachable from outside. Risk tier: medium (business logic of an existing scheduled watch).
+Tests: `tests/Feature/Chatblast/ForbeastAutoSwitchTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-166.1 (P1) | Given a page moved to Forbeast at T and Botcake standby copies from 3 customers at T+30..T+90 with no Forbeast twin, When the watch runs after 120 s, Then the page stays on Forbeast and no event is recorded | `test_S_166_1…` | passed |
+| S-166.2 (P1) | Given the same move and standby copies from 2 customers at T+200 and T+210 with no twin, When the watch runs after 120 s, Then the page switches to Botcake as today (inbound event) | `test_S_166_2…` | passed |
+| S-166.3 (P1) | Given a page on Forbeast for hours, Then every existing ForbeastWatch case behaves as before (test bodies unchanged) | existing `ForbeastAutoSwitchTest` cases | passed |
+| S-166.4 (P1) | In .1, Then each copy runs once, oldest first, only after its 120 s grace, with the existing standby rules (skip if answered or the Forbeast run is pending), and no standby copy is left | `test_S_166_4…` | passed |
+| S-166.5 (P1) | The Chatblast, Botcake, PageSettings and Unit suites add no new failures | full run | passed |
