@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * Ang mga customer field ng isang page + PSID sa chatbot_customer_values: isang row kada key, pinapalitan sa lugar
  * (upsert). Ang key ay naka-norm (ChatbotVars::norm). Ang "__" sa unahan ay run state (__wait, __last_chat), hindi
- * customer field: hindi ito lumalabas sa variables at hindi binubura ng "clear all fields" maliban sa __wait.
+ * customer field: hindi ito lumalabas sa variables at hindi binubura ng "clear all fields" maliban sa __wait (at __wait_unsent).
  */
 class CustomerFields
 {
