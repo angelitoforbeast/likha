@@ -82,9 +82,15 @@ class GatewaySiteController extends Controller
         if ($page === null) return self::json(PageTransfers::error(404, 'unknown_page', 'This page is not on this site.'));
         $data = json_decode($raw, true);
         $hold = is_array($data) ? ($data['hold'] ?? null) : null;
-        if (!is_bool($hold)) return self::json(PageTransfers::invalid(['hold' => 'Send {"hold": true} or {"hold": false}.']));
+        $transfer = $this->transfer($request);
+        $errors = array_filter([
+            'hold' => !is_bool($hold) ? 'Send {"hold": true} or {"hold": false}.' : null,
+            // Ang hold ay sa isang paglipat lang (ang hold:false ay sa parehong paglipat), kaya kailangan ang id nito.
+            'X-Gateway-Transfer' => $transfer === '?' ? 'The transfer id is required.' : null,
+        ]);
+        if ($errors) return self::json(PageTransfers::invalid($errors));
 
-        return self::json($this->transfers->hold($page, (int) $metaPageId, $hold, $this->transfer($request)));
+        return self::json($this->transfers->hold($page, (int) $metaPageId, $hold, $transfer));
     }
 
     public function release(Request $request, string $metaPageId): JsonResponse

@@ -398,26 +398,27 @@ class PageTransfers
     public function hold(string $page, int $pageId, bool $hold, string $transferId): array
     {
         $source = 'transfer ' . $transferId . ($hold ? ' hold' : ' hold released');
-        $released = DB::transaction(function () use ($page, $pageId, $hold, $transferId, $source) {
+        $heldRows = fn () => DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%');
+        DB::transaction(function () use ($page, $pageId, $hold, $transferId, $source, $heldRows) {
+            $owner = $this->settings->get($page, self::HOLD_PROVIDER, self::HOLD_KEY);
             if ($hold) {
-                // Una ang tanda ng page, saka ang mga row: ang subscribe na sabay ay held na rin.
-                if ($this->settings->get($page, self::HOLD_PROVIDER, self::HOLD_KEY) === null) {
-                    $this->settings->set($page, self::HOLD_PROVIDER, self::HOLD_KEY, $transferId, false, null, true, $source);
-                }
-                DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', 'active')
+                // Una ang tanda ng page, saka ang mga row: ang subscribe na sabay ay held na rin. Ang mas bagong paglipat ang
+                // may-ari ng hold (pati ang mga row ng nauna), kaya ang huling hold:false ng nakanselang paglipat ay walang epekto.
+                if ($owner !== $transferId) $this->settings->set($page, self::HOLD_PROVIDER, self::HOLD_KEY, $transferId, false, null, true, $source);
+                DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)
+                    ->where(fn ($q) => $q->where('status', 'active')->orWhere(fn ($w) => $w->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%')))
                     ->update(['status' => self::HELD, 'exit_reason' => self::HOLD_REASON . $transferId, 'dispatched_at' => null]);
 
-                return 0;
+                return;
             }
+            if ($owner !== $transferId) return;
             $this->deactivate($page, self::HOLD_PROVIDER, [self::HOLD_KEY], $source);
-
-            return DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%')
-                ->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null]);
+            $heldRows()->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null]);
         });
         PageSettings::forget($page);
-        $held = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%')->count();
 
-        return ['http' => 200, 'body' => ['held' => $held] + ($hold ? [] : ['released' => $released])];
+        // held_at: ang oras ng site na ito, para sa since ng catch-up (hindi naaapektuhan ng layo ng orasan ng Forbeast).
+        return ['http' => 200, 'body' => ['held' => $heldRows()->count()] + ($hold ? ['held_at' => now()->toIso8601String()] : [])];
     }
 
     // ---- release / activate ----
@@ -435,8 +436,9 @@ class PageTransfers
             DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HELD_REASON . '%')
                 ->update(['status' => 'unsubscribed', 'exit_reason' => 'transfer not activated', 'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
             $ended = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->whereIn('status', ['active', 'paused'])
-                // Ang step at oras ng padala ay naiiwan: dala ng catch-up (sequences?since=) sa bagong site; ang tick ay active lang.
-                ->update(['status' => 'unsubscribed', 'exit_reason' => 'transferred', 'dispatched_at' => null, 'updated_at' => now()]);
+                // Ang step at oras ng padala ay naiiwan, at ang updated_at ay hindi binabago: ang catch-up (sequences?since=) ay
+                // ang binago lang mula sa hold ang dala, kaya ang tinapos na sa bagong site (hal. sumagot) ay hindi bumabalik.
+                ->update(['status' => 'unsubscribed', 'exit_reason' => 'transferred', 'dispatched_at' => null]);
             // Ang nasa gitna ng flow: walang wait, walang naghihintay na AI o padala (sa bagong site sila magsisimula ulit).
             if (Schema::hasTable('chatbot_waits')) DB::table('chatbot_waits')->where('page_id', $pageId)->delete();
             DB::table('chatbot_customer_values')->where('page_id', $pageId)->whereIn('key', [CustomerFields::WAIT, CustomerFields::AI])->delete();

@@ -346,13 +346,18 @@ class ChatbotSequences
     {
         $next = $this->stepFrom($seq, $step->position + 1);
         $values = ['dispatched_at' => null, 'updated_at' => now()] + ($sent ? ['last_sent_at' => now()] : []);
+        // Na-hold ang page (paglipat) habang ipinapadala ang step: itinatala pa rin ang usad, held pa rin, kaya ang kopya at ang
+        // hold:false ay hindi na ito uulitin. Ang huling step: lampas sa dulo, kaya sa alinmang site ay tapos agad, walang padala.
+        $held = fn (array $at) => ChatbotSequenceSubscription::whereKey($sub->id)->where('status', PageTransfers::HELD)
+            ->where('exit_reason', 'like', PageTransfers::HOLD_REASON . '%')->update($values + $at);
         if (!$next) {
-            ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values);
+            if (!ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values)
+                && $held(['current_step' => $step->position + 1, 'next_send_at' => now()])) return $sent ? 'ran' : 'skipped';
             return $this->complete($sub->fresh(), $seq);
         }
         // Habang active lang: ang customer na sumagot (o inalis) habang tumatakbo ang step ay hindi ibinabalik.
-        ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values + ['current_step' => $next->position,
-            'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit)]);
+        $at = ['current_step' => $next->position, 'next_send_at' => self::dueAt(now(), $next->delay_amount, $next->delay_unit)];
+        if (!ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->update($values + $at)) $held($at);
 
         return $sent ? 'ran' : 'skipped';
     }
