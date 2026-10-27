@@ -245,9 +245,9 @@ class BotHealth
      */
     public function problems(): array
     {
-        if (!\Illuminate\Support\Facades\Schema::hasTable('chatbot_replies')) return [];
-
-        return Cache::remember(self::PROBLEM_CACHE, self::PROBLEM_CACHE_SECONDS, fn () => $this->buildProblems(self::thresholds()));
+        // Ang tingin sa table ay nasa loob ng cache: walang query ang banner habang naka-cache.
+        return Cache::remember(self::PROBLEM_CACHE, self::PROBLEM_CACHE_SECONDS,
+            fn () => \Illuminate\Support\Facades\Schema::hasTable('chatbot_replies') ? $this->buildProblems(self::thresholds()) : []);
     }
 
     /**
