@@ -2850,3 +2850,20 @@ Tests: `tests/Feature/Chatblast/PageProblemsTest.php`.
 | S-169.7 (P1) | The existing Health tests and the Chatblast, Botcake and PageSettings suites add no new failures | full run | passed |
 | S-169.8 (P2) | At 390 px the banner wraps and the table scrolls sideways inside its card | not tested in a browser (see result) | not run |
 | S-169.9 (P1) | Given more than 3 red pages, Then the banner lists 3 and "+N more"; it is cached up to 60 s | `test_S_169_9…` | passed |
+
+## S-170 Marketing claims available pages from the Owners screen
+
+As marketing staff, I want to claim a page that no site has yet from the Owners screen, without seeing the other site's pages, so new pages start answering here without waiting for the CEO.
+
+Slice 170. Threat model: form input (target, password, phrase) and the `?history=` parameter are untrusted; Forbeast's answers are text data, shown escaped; roles come from staff records (trusted). A wider gate on an existing route: high for the permission part, medium for the screen. Tests: `tests/Feature/Chatblast/PageOwnersScreenTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-170.1 (P1) | Given Marketing or Marketing - OIC (any spacing), Then the Owners link shows and the screen opens; another non-CEO role gets 403 and no link | `test_S_170_1…` (3 roles), `test_S_164_1_other_roles_get_403_and_no_owners_tab` | passed |
+| S-170.2 (P1) | Given marketing, Then only Unowned and this site's pages are in the HTML, with no requests; the other site's page, its request and its history (also `?history=01001`) are absent and not fetched; the CEO still sees all and every action | `test_S_170_2…`, `test_S_164_1_the_ceo_sees_every_page…` | passed |
+| S-170.3 (P1) | When marketing claims with their own password and the phrase, Then Forbeast's take is called with them as actor; a wrong password or phrase, or a page this site or the other site owns, is refused and nothing is sent | `test_S_170_3…` (5 rows) | passed |
+| S-170.4 (P1) | When marketing posts move, ask, accept, decline or cancel, Then 403 and nothing is sent | `test_S_170_4…` (5 rows) | passed |
+| S-170.5 (P1) | Then the groups are Available to claim, On <this site>, (CEO) On <other site>, one page per row, the take button says Claim; an empty group says so ("No pages to claim right now") | `test_S_170_5…` (2 tests) | passed |
+| S-170.6 (P1) | Then the confirm form has a hidden username field with the user's email, then the password, then the phrase box (`confirm_text`, autocomplete, autocapitalize and autocorrect off); posting still checks the phrase | `test_S_170_6…`, `test_S_170_3…` | passed |
+| S-170.7 (P1) | The owners tests (164) and the Chatblast, Botcake and PageSettings suites add no new failures | full run | passed |
+| S-170.8 (P2) | At 390 px each page card, the groups and the opened confirm form fit the width | not tested in a browser (see result) | not run |
