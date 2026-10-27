@@ -16,6 +16,8 @@
   $cbTitle = $cbTitle === '' || $cbTitle === $cbAppName ? $cbAppName : $cbAppName . ' · ' . $cbTitle;
   // Ang Chatbot ay para sa may /chatblast access (gaya ng mga route nito); ang iba ay walang link papunta roon.
   $cbChatbotOpen = \App\Support\NavAccess::allows(preg_replace('/\s+/u', ' ', trim((string) $cbRole)), '/chatblast');
+  // Ang pulang page (restricted, permission o maraming pumalya sa huling oras): para sa may Chatbot menu lang.
+  $cbProblems = $cbChatbotOpen ? app(\App\Services\Chatbot\BotHealth::class)->banner() : null;
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -96,6 +98,14 @@
         </div>
     </div>
 </header>
+
+@if($cbProblems)
+    <div class="shrink-0 border-b border-red-300 bg-red-600 px-4 py-2 text-sm text-white sm:px-6" role="alert" data-alert="page-problems">
+        ⚠ @foreach($cbProblems['pages'] as $p)<strong>{{ $p['page'] }}</strong>: {{ $p['reason'] }} since {{ $p['since'] }}@unless($loop->last); @endunless @endforeach
+        @if($cbProblems['more'])<span>+{{ $cbProblems['more'] }} more</span>@endif
+        — <a href="/chatbot/health#page-problems" class="font-semibold underline">open Health</a>
+    </div>
+@endif
 
 <main class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6">
     <div class="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">
