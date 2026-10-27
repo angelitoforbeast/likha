@@ -45,6 +45,8 @@ class GatewayEventController extends Controller
             }
             // Ang pirma ay sa secret ng page ng mga event (iisang page kada batch, sinusuri pagkatapos ng pirma).
             $event = $batch[0];
+        } elseif (strlen($raw) > self::MAX_BODY) {
+            return response()->json(['ok' => false], 413); // ang mas malaking hangganan ay para sa batch lang
         }
         $global = (string) config('services.gateway.webhook_secret');
         $secret = $global;
