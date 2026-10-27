@@ -14,7 +14,7 @@
     [].concat(children || []).forEach(function (c) { if (c != null) e.append(c); });
     return e;
   }
-  var BTN = 'cb-btn cb-btn-sm', LINK = 'text-xs text-blue-700 underline hover:text-blue-900';
+  var BTN = 'cb-btn cb-btn-sm', LINK = 'py-1 text-xs text-blue-700 underline hover:text-blue-900';
   var INPUT = 'w-full rounded-md border border-slate-300 px-2 py-1 text-sm text-gray-900';
   var short = function (v, n) { v = String(v == null ? '' : v); return v.length > n ? v.slice(0, n - 1) + '…' : v; };
   var plural = function (n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); };
@@ -56,7 +56,7 @@
       var list = st.groups.length
         ? el('ul', {class: 'mt-2 space-y-2'}, st.groups.map(groupCard))
         : el('p', {class: 'mt-2 text-xs text-slate-500', text: 'No groups yet: every customer gets the page values.'});
-      body.replaceChildren(list, st.editing ? editor() : null, unassigned());
+      body.replaceChildren(...[list, st.editing ? editor() : null, unassigned()].filter(Boolean));
     }
 
     function groupCard(g) {
@@ -65,7 +65,7 @@
       edit.addEventListener('click', function () { st.editing = {id: g.id}; st.history = null; render(); focusEditor(); });
       var hist = el('button', {type: 'button', class: LINK, text: 'History', 'aria-label': 'History of ' + g.name, 'aria-expanded': st.history && st.history.id === g.id ? 'true' : 'false'});
       hist.addEventListener('click', function () { toggleHistory(g.id); });
-      var del = el('button', {type: 'button', class: 'text-xs text-red-700 underline hover:text-red-900', text: 'Delete', 'aria-label': 'Delete ' + g.name});
+      var del = el('button', {type: 'button', class: 'py-1 text-xs text-red-700 underline hover:text-red-900', text: 'Delete', 'aria-label': 'Delete ' + g.name});
       del.addEventListener('click', function () {
         if (!confirm('Delete the group "' + g.name + '"? Its ' + plural(g.ads.length, 'ad') + ' go back to the page values.')) return;
         post(u.del, {id: g.id}).then(function (r) {
@@ -177,14 +177,14 @@
       });
       var rows = st.unassigned.map(function (a) {
         var cid = 'ag-t-' + a.ad_id;
-        var cb = el('input', {id: cid, type: 'checkbox', class: 'mt-0.5 shrink-0', checked: st.ticked.has(a.ad_id)});
+        var cb = el('input', {id: cid, type: 'checkbox', class: 'mt-0.5 h-5 w-5 shrink-0', checked: st.ticked.has(a.ad_id)});
         cb.addEventListener('change', function () { if (cb.checked) st.ticked.add(a.ad_id); else st.ticked.delete(a.ad_id); paintAdd(); });
         return el('li', {class: 'flex items-start gap-2 py-1'}, [cb, el('label', {for: cid, class: 'min-w-0 flex-1 text-xs'}, [
           el('span', {class: 'block break-all font-mono text-slate-800', text: a.ad_id}),
           el('span', {class: 'block break-words text-slate-600', text: a.name || '(no name in Ads Manager)'}),
           el('span', {class: 'block text-slate-500', text: plural(a.customers, 'customer') + (a.last ? ' · last ' + a.last : '')})])]);
       });
-      var target = el('select', {class: 'rounded border border-slate-300 px-1 py-1 text-xs text-gray-900', 'aria-label': 'Add to which group'},
+      var target = el('select', {class: 'min-w-0 max-w-full flex-1 rounded border border-slate-300 px-1 py-1 text-xs text-gray-900 sm:flex-none', 'aria-label': 'Add to which group'},
         st.groups.map(function (g) { return el('option', {value: String(g.id), text: g.name}); }).concat([el('option', {value: 'new', text: 'New group…'})]));
       var add = el('button', {type: 'button', class: 'cb-btn cb-btn-sm cb-btn-primary'});
       function paintAdd() { add.disabled = !st.ticked.size; add.textContent = st.ticked.size ? 'Add ' + plural(st.ticked.size, 'ad') + ' to group' : 'Add to group'; }
