@@ -106,6 +106,7 @@ class ChatbotEvents
             'ai_dropped' => 'AI answer at step ' . $node . ' dropped: ' . ($d['reason'] ?? ''),
             'ai_mismatch' => 'AI answer at step ' . $node . ' stopped: it belongs to another customer (nothing sent)',
             'send_mismatch' => 'Send at step ' . $node . ' stopped: the ticket does not match the customer (nothing sent)',
+            'send_retry' => 'Send at step ' . $node . ' retried after ' . ($d['after'] ?? ''),
             'send_dropped' => 'Run after the send at step ' . $node . ' not continued: ' . ($d['reason'] ?? ''),
             'sheet' => 'Sheet row ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),
             'encode_order' => 'Encode order step ' . $node . ' → ' . ($d['result'] ?? '') . (($d['error'] ?? '') !== '' ? ': ' . $d['error'] : ''),

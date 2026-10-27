@@ -116,7 +116,7 @@ class ChatbotSendingTest extends ChatblastTestCase
         $this->assertSame('LOOP 1', (new CustomerFields(1001, 7001))->get('status'), 'ang takbo ay nangyayari pa rin');
     }
 
-    public function test_S_069_S3_a_failed_send_is_logged_and_stops_the_run_and_a_live_sheet_row_is_written(): void
+    public function test_S_069_S3_a_failed_send_is_logged_and_the_run_goes_on_and_a_live_sheet_row_is_written(): void
     {
         Http::fake([self::SEND => Http::sequence()->push(['success' => true])->push(['success' => false, 'message' => 'Outside the 24h window'])]);
         $this->flow([
@@ -132,7 +132,7 @@ class ChatbotSendingTest extends ChatblastTestCase
         $this->assertSame([['1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', 'Orders', ["'Ana Cruz", "'=HYPERLINK(\"x\")"]]], $this->rows);
         $this->assertSame([['sheet', 'sent', null], ['send', 'sent', null], ['send', 'failed', 'Botcake said "Outside the 24h window" (HTTP 200)']],
             ChatbotReply::orderBy('id')->get()->map(fn ($r) => [$r->kind, $r->status, $r->error])->all());
-        $this->assertNull((new CustomerFields(1001, 7001))->get('after'), 'huminto ang takbo sa pumalyang padala');
+        $this->assertSame('x', (new CustomerFields(1001, 7001))->get('after'), 'tuloy ang takbo pagkalipas ng pumalyang padala');
     }
 
     public function test_S_069_S4_a_stored_chat_queues_a_run_on_the_chatbot_queue_only_for_a_page_with_a_flow(): void

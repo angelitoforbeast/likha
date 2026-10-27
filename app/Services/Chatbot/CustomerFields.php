@@ -7,11 +7,12 @@ use Illuminate\Support\Facades\DB;
 /**
  * Ang mga customer field ng isang page + PSID sa chatbot_customer_values: isang row kada key, pinapalitan sa lugar
  * (upsert). Ang key ay naka-norm (ChatbotVars::norm). Ang "__" sa unahan ay run state (__wait, __last_chat), hindi
- * customer field: hindi ito lumalabas sa variables at hindi binubura ng "clear all fields" maliban sa __wait.
+ * customer field: hindi ito lumalabas sa variables at hindi binubura ng "clear all fields" maliban sa __wait (at __wait_unsent).
  */
 class CustomerFields
 {
     public const WAIT = '__wait';
+    public const WAIT_UNSENT = '__wait_unsent'; // ang __wait na ang tanong ay hindi naihatid (pumalya ang padala): itatanong ulit, hindi sagot ang susunod na mensahe
     public const LAST_CHAT = '__last_chat';
     public const BOT_PAUSED = '__bot_paused'; // '1' = tao ang sumasagot sa customer na ito (/chatbot/inbox): walang takbo ang bot
     public const AI = '__ai'; // request_id ng AI step na hinihintay pa ang sagot (chatbot:ai-pool): naghihintay ang mga bagong chat
@@ -71,6 +72,7 @@ class CustomerFields
         if ($key === self::WAIT) {
             ChatbotWaits::forget($this->pageId, $this->psid);
             $this->clear(self::TEST_SKIP);
+            $this->clear(self::WAIT_UNSENT);
         }
     }
 

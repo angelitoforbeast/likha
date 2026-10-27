@@ -298,7 +298,7 @@ class ChatbotEngineTest extends ChatblastTestCase
         $this->assertSame(50, strlen($this->fields()['n']));
     }
 
-    public function test_S_069_E10_a_failed_send_without_a_failed_port_stops_the_run(): void
+    public function test_S_069_E10_a_failed_send_without_a_failed_port_is_noted_and_the_run_goes_on(): void
     {
         $failing = new class implements Outbox {
             public function send(FlowRun $run, string $nodeId, array $messages): array { return ['status' => 'failed', 'error' => 'Botcake said no']; }
@@ -311,8 +311,9 @@ class ChatbotEngineTest extends ChatblastTestCase
 
         $r = $this->go($flow, 'x', null, $failing);
 
-        $this->assertSame(['n1', 'n2'], array_column($r->path, 'node'));
-        $this->assertSame('Send failed: Botcake said no', $r->stopped);
-        $this->assertArrayNotHasKey('after', $this->fields());
+        $this->assertSame(['n1', 'n2', 'n3'], array_column($r->path, 'node'));
+        $this->assertSame('Send failed: Botcake said no; continued', $r->path[1]['note']);
+        $this->assertNull($r->stopped);
+        $this->assertSame('x', $this->fields()['after']);
     }
 }
