@@ -1,6 +1,6 @@
 # Result 164: page owners and transfers between the partner sites
 
-Status: done, with one open major escalated (copied follow-ups and the 24 h window, below). Branch `feat/164-page-owner-transfers`, cut from `87cb0e1e`.
+Status: done. The escalated major (copied follow-ups and the 24 h window) is resolved by the reviewer's ruling, below. Branch `feat/164-page-owner-transfers`, cut from `87cb0e1e`.
 
 ## What shipped
 
@@ -19,15 +19,15 @@ Status: done, with one open major escalated (copied follow-ups and the 24 h wind
 - **export:** at most 500 items a call; `next` is the last row id, or null.
   - **`values`:** `name`, `active` ("0"/"1"), `flow` (the name of the flow in `chatbot.flow_id`, which is the Main Flow the bot runs), then the editable 162 fields. Unset fields are sent as null, so the target clears them. Never sent: prompts, flow_id, AI settings, secrets, tokens or `shop_details`.
   - **`fields`:** `{psid, key, value, updated_at}`. Skipped: `__*` keys (filtered in PHP, because `_` is a wildcard in LIKE) and the Test-tab customer, PSID 0. `?since=<ISO>` limits it to rows changed after that time.
-  - **`sequences`:** `{psid, sequence (name), current_step, next_send_at, enrolled_via}`. It covers active subscriptions and those paused because the page is Off, never rows still held by a transfer.
+  - **`sequences`:** `{psid, sequence (name), current_step, next_send_at, enrolled_via, last_message_at}`. `last_message_at` is the customer's last message time (below). It covers active subscriptions and those paused because the page is Off, never rows still held by a transfer.
 - **import:** all or nothing per call (one transaction). Idempotent. At most 500 items, else 422.
   - **values:** creates the page when it is new here (its name comes from the `name` item, with the same 409 clash rule). The flow is matched by name; a missing name → 422 `missing_names`, nothing saved. Values are checked like the 162 API (`ChatbotFields::valueError`, https images) and saved through `PageValues::save` (history kept). Botfields this site lacks (e.g. Incepxion's extra seq columns) are skipped and listed in `skipped`.
   - **fields:** upserts by (page, psid, key). The newer `updated_at` wins, so a value changed on the target after the switch is not overwritten by the catch-up copy. `__*` keys → 422.
-  - **sequences:** matched by sequence name; a missing name → 422 `missing_names`, nothing saved. Rows are written **held** (below). A row already running here (active, or paused because the page is Off) is left alone.
+  - **sequences:** matched by sequence name; a missing name → 422 `missing_names` with the names under `names`, nothing saved (the same for a missing flow in `values`). Rows are written **held** (below). A row already running here (active, or paused because the page is Off) is left alone. `last_message_at` is recorded per customer (below).
 - **Held subscription (decision 4, which marking): `status = paused` + `exit_reason = "transfer <id>"`, the existing columns.**
   - **No sends:** the tick takes only `active`, and `resumePaused` takes only `exit_reason = 'page off'`, so nothing is sent while held.
   - **Enrolled:** `subscribe()` treats paused as already enrolled, so a flow can't restart the customer at step 1. Exit-on-reply ends the row.
-  - **activate:** turns `active` only the rows held by its own transfer (`X-Gateway-Transfer`), keeping `current_step` and `next_send_at`. Rows left by an earlier failed transfer stay held. None of the sequence code was changed.
+  - **activate:** turns `active` only the rows held by its own transfer (`X-Gateway-Transfer`), keeping `current_step` and `next_send_at`. Rows left by an earlier failed transfer stay held. The only change to the sequence code is the time source of the 24 h check (below).
 - **release:** `chatbot.active` = 0 with source "transferred to <site>".
   - **Subscriptions:** the page's active and paused subscriptions (held ones too) → `unsubscribed`, exit_reason `transferred`.
   - **Forgotten:** the page's `chatbot_waits`, its `__wait` / `__ai` values, and its pending AI requests and chatbot send requests (→ `resumed`, error "page transferred"). Chatblast send rows are untouched.
@@ -52,21 +52,39 @@ Status: done, with one open major escalated (copied follow-ups and the 24 h wind
 - **Ids:** pending request ids are assumed to be numbers. Confirm with Forbeast 024.
 - **"Any flow-named field":** the only flow a page links to is `chatbot.flow_id` (the Main Flow); `main_flow` and the other botfields are text, copied as text.
 
-## Escalated: copied follow-ups end "outside 24h" on the new site (open major)
+## Resolved: copied follow-ups and the 24 h window
 
-`ChatbotSequences::runStep` sends a step only when `botcake_chats` has a message from the customer in the last 24 hours. The new site has no chats for customers who wrote to the old site, so after activate a copied PREORDER step is skipped and the subscription ends. Example: the customer writes at 10:00, the page moves at 12:00, and step 2 was due at 14:00.
+**The problem (escalated earlier):** `ChatbotSequences::runStep` sends a step only when the customer wrote in the last 24 hours, and the new site has no chats for customers who wrote to the old one. So a copied step was skipped and ended "outside 24h". Example: the customer writes at 10:00, the page moves at 12:00, and step 2 is due at 14:00.
 
-Not fixed here, for two reasons:
-- The fix needs the customer's last message time to travel with the copy, which is a contract change with Forbeast 024 (for example `last_message_at` on each `sequences` item, recorded on import).
-- Changing the 24 h check would change sequence logic, which the spec forbids.
+**The ruling, as built:** the customer's last message time travels with the copy; the 24 h rule itself is unchanged.
+- **Export:** each `sequences` item carries `last_message_at`, ISO 8601 with offset, or null. It is the later of the customer's latest chat on this page here (`botcake_chats`, without standby chats, the source the 24 h check reads) and a `__last_message_at` an earlier move brought. So a page moved twice within the window keeps the time.
+- **Import:** recorded per customer as the run-state value `__last_message_at` in `chatbot_customer_values` (no new table; `Y-m-d H:i:s`, app time). A newer stored value is never replaced, so a repeated or older import changes nothing. A time ahead of this site's clock is stored as now, so a wrong clock on the other site cannot keep the window open. A bad time → 422, nothing saved. `__*` keys stay out of the `fields` part.
+- **runStep:** the 24 h check uses the later of the latest chat here and `__last_message_at`. Same 24 h, same timing, same skip and end. A customer who writes on the new site is unaffected, because their chat is newer.
+- **"Clear all fields"** keeps `__last_message_at`, like `__last_chat`, so a flow clearing fields does not shorten the window.
+- **Known gap (in `TODO.md`):** until the customer writes here, a follow-up run on the imported time has no customer name.
 
-The owner decides. Also for the owner: `__bot_paused` is a `__*` key, so a customer a person took over on the old site is answered by the bot on the new one.
+**Contract addition (for the contract copy; Forbeast relays the items unchanged, so it needs no change):**
+- `GET …/export?part=sequences` items: `+ last_message_at: string|null` (ISO 8601 with offset).
+- `POST …/import?part=sequences` items: `+ last_message_at: string|null`, optional.
+
+Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took over on the old site is answered by the bot on the new one.
+
+## Checked against Forbeast's contract notes
+
+- **Refusal codes on the Owners screen:** 404 `unknown_page` / `unknown_transfer`, 409 `not_owned` / `not_set_up` / `too_many_pending`, 422 `invalid_request` and 429 `too_many_requests` each show a fixed plain message (Forbeast's text is not shown for these). Other refusals still show "Forbeast said …". Fixed in this round.
+- **`missing_names`:** the 422 body now lists the names under `names` (was `missing_names`). Fixed in this round.
+- **accept / decline / cancel answer `{"id"}`:** the screen reads only the status of these answers. The test fake now answers `{"id"}`. No change needed.
+- **`picture_url` always null:** the screen shows no picture then (the fakes already had null pictures). No change needed.
+- **adopt PUTs the webhook before answering 200:** `adopt` runs `ForbeastPageSetup::connect` and answers 200 only when it worked (502 otherwise). No change needed.
 
 ## Story changes
 
 - **S-164.3:** added that a name `_all` → 422 (from the review: the Setup box name), and that a taken page is listed on `/chatbot/pages` with the bot Off (needed for "until the CEO sets it up and turns it on").
 - **S-164.5:** added "while held, a new subscribe does not restart them at step 1 and exit-on-reply ends them" (from the review).
 - **S-164.6:** activate releases only the rows held by its own transfer (from the review).
+- **S-164.5:** a missing name lists the names under `names` (Forbeast's contract notes).
+- **S-164.9 (new):** copied follow-ups keep the customer's last message time (the ruling on the escalation), including "clear all fields" and a future time (from the review).
+- **S-164.10 (new):** each Forbeast refusal code shows a plain message (Forbeast's contract notes).
 - **Older tests updated:** three tests pinned the CEO's exact Chatbot tab list (`ChatbotInboxTest` S-074.5, `ChatbotSequencePagesTest` S-070.1, `ChatbotTabsTest` S-069.T1). They now end with "Owners", the intended new CEO-only tab.
 
 ## Cases
@@ -80,6 +98,8 @@ The owner decides. Also for the owner: `__bot_paused` is a `__*` key, so a custo
 | S-164.5 | `GatewaySitePagesTest::test_S_164_5_import_fields_is_idempotent…`, `…import_sequences_by_name_held_until_activate…`, `…import_values_maps_the_flow_by_name…` | pass |
 | S-164.6 | `GatewaySitePagesTest::test_S_164_6_release_stops_the_page_here…`, `…activate_releases_only_the_rows_held_by_its_own_transfer` | pass |
 | S-164.7 | Chatblast + Botcake + PageSettings suites | pass (see below) |
+| S-164.9 | `ChatbotSequenceEngineTest::test_S_164_9_a_copied_follow_up_uses_the_customer_last_message_time_from_the_old_site` (4 rows: 10:00 / 12:00 / 14:00 → sent; older than 24 h → skipped "outside 24h"; none → skipped; cleared all fields → sent), `GatewaySitePagesTest::test_S_164_9_sequences_carry_the_customer_last_message_time_and_the_import_keeps_the_newer_one` | pass |
+| S-164.10 | `PageOwnersScreenTest::test_S_164_10_each_forbeast_refusal_code_is_shown_as_a_plain_message` (7 rows) | pass |
 | S-164.8 (P2) | `PageOwnersScreenTest::test_S_164_8_the_screen_is_cards_that_fit_a_phone` | pass: markup only (no wide table, `min-w-0` cards, full-width inputs, viewport meta) |
 
 Red runs:
@@ -87,6 +107,8 @@ Red runs:
 - **Taken-page listing:** the test failed with `['Page Uno']` instead of `['Page Tres', 'Page Uno']`.
 - **Screen:** its tests were run red by taking the new code out: 404 on every case. Then the code was put back, and they passed.
 - **Review fix:** 5 failures before the fix (the `_all` rows, the held status, activate scoping).
+- **The 24 h ruling and the contract notes:** 12 failures before the code. The 7 refusal rows showed Forbeast's raw text. The export had no `last_message_at`. The import stored no time. The two `missing_names` bodies had no `names`. The 10:00 / 12:00 / 14:00 row sent nothing (`[]` instead of `['Seq 2']`). The "older than 24 h" and "none" rows passed before and after: they pin today's rule.
+- **Review minors fixed:** 2 failures before the fix. The "cleared all fields" row sent nothing. A future time was stored as `2026-12-31 00:00:00` instead of now.
 
 ## Suite
 
@@ -94,7 +116,8 @@ Red runs:
 
 - **Baseline at 87cb0e1e:** 1335 tests, OK (1 skipped).
 - **First run on the branch:** 1375 tests, 3 failures. All three were the tab-list expectations above, since updated.
-- **Final, after the review fix:** 1378 tests, OK (1 skipped, the same as the baseline); no new failures.
+- **After the first review fix:** 1378 tests, OK (1 skipped, the same as the baseline); no new failures.
+- **Final, after the 24 h ruling, the contract notes and the second review:** 1390 tests, 0 failures, 0 errors, 1 skipped (the same as the baseline); no new failures. PHPUnit also reports 57 runner deprecations. They are doc-comment test metadata in older test files (e.g. `BotcakeAsyncSendTest`), none in the 164 tests.
 
 ## Review
 
@@ -105,7 +128,18 @@ Fixed in one loop:
 - **Activate:** it released stale held rows from a failed transfer. It is now scoped to its own transfer id.
 - **The `_all` page name** (a minor on an untrusted path): now refused.
 
-Escalated: the 24 h window (above).
+Escalated: the 24 h window. It is now resolved by the ruling (above).
+
+**Second pass:** `skeptic-reviewer`, adversarial depth, opus, on `72104a87..6edee632` (the ruling and the contract notes). Verdict: approve, minors only.
+- **Fixed** (commit `b3ae597e`, test-first):
+  - "clear all fields" erased `__last_message_at`, so a copied step after such a flow was skipped.
+  - A future `last_message_at` was stored as sent. Now it is capped at now.
+  - S-164.9 and S-164.10 were missing from the stories and the case table.
+- **Accepted, with reasons in `TODO.md`:**
+  - no customer name until they write here;
+  - the time pattern appears twice;
+  - concurrent identical imports can answer 500 once (Forbeast retries).
+- **No change:** a note that the export takes the latest chat by time while `runStep` takes it by id; both give the same answer in practice.
 
 The other minors are accepted with reasons in `TODO.md` (164 section):
 - the signature doesn't cover method and path (the contract's choice)
@@ -128,4 +162,4 @@ The other minors are accepted with reasons in `TODO.md` (164 section):
 - **Each site's identity:** the site system's `webhook_url` in Forbeast is the site's origin (`https://likhaaitech.com`, `https://incepxion.pro`). Each site's `APP_URL` must keep its own host: Part P names this site from it.
 - **Order:** deploy after Forbeast 024 is live, or before it. Without the env lines the screen only says "not linked" and the endpoints answer 503.
 
-164: done — the Owners screen, the five Forbeast endpoints and the held follow-up copy all work, but copied follow-ups still end "outside 24h" on the new site until the contract carries the customer's last message time (escalated).
+164: done — the Owners screen, the five Forbeast endpoints and the held follow-up copy all work, and copied follow-ups now keep the customer's last message time, so they send within the same 24 h on the new site.
