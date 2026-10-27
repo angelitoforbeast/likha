@@ -187,11 +187,13 @@ class BigBroadcastTest extends ChatblastTestCase
     public static function beforeSendFlow(): array
     {
         $e500 = [500, ['message' => 'Internal error']];
+        $e429 = [429, ['message' => 'Too many requests']];
 
         return [
             'a write 500, then ok: sent' => [['write' => [$e500, 'echo']], 'sent', null, [15], ['write' => 1]],
             'a write timeout, then ok: sent' => [['write' => [[0, null], 'echo']], 'sent', null, [15], ['write' => 1]],
             'three write 500s: failed as today' => [['write' => [$e500, $e500, $e500]], 'failed', 'The custom field was not written (HTTP 500)', [15, 60], ['write' => 2]],
+            'two write 429s, a 500, then ok: sent' => [['write' => [$e429, $e429, $e500, 'echo']], 'sent', null, [2, 4, 15], ['write' => 3]],
             'a read 500, then ok: sent' => [['read' => [$e500, 'echo']], 'sent', null, [15], ['read' => 1]],
             'three read 500s: field_mismatch as today' => [['read' => [$e500, $e500, $e500]], 'field_mismatch', 'The custom field could not be read (HTTP 500); not sent', [15, 60], ['read' => 2]],
         ];

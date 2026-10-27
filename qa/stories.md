@@ -2702,14 +2702,16 @@ Tests: `tests/Feature/Chatblast/PageOwnersScreenTest.php`, `GatewaySitePagesTest
 
 As staff, I want a whole chatblast run (thousands of messages on many pages) to go out in one go: nothing failed just because it waited in line, and a Botcake hiccup before send_flow tried again safely.
 
+Slice 167: 6 passed, 0 failed, 0 blocked, 0 skipped, 0 not run
+
 Slice 167. Threat model: the send pool reads tickets the app wrote itself; Botcake answers are parsed as data only. Nothing new is reachable from outside. Risk tier: medium (business logic of an existing background process).
 Tests: `tests/Feature/Chatblast/BigBroadcastTest.php`.
 
-| Case | Given / When / Then | Test | Status |
+| Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-167.1 (P1) | Given 5,000 chatblast messages on 50 pages queued at once (10/s per page, Botcake answering in 2 s, so the line lasts longer than 4 minutes), Then all are sent, no ticket says "Not sent in time" or failed for waiting, one ticket and one send_flow per message, and each customer gets one message at a time, in order. A waybill another sequence messaged while it waited is skipped when the pool starts it (no call) | `test_S_167_1_5000_messages…`, `test_S_167_1_a_waybill_another_sequence…` | passed |
-| S-167.2 (P1) | Given a field write or read-back that Botcake answers with HTTP 5xx or no answer, Then it is tried again after 15 s, then 60 s; a success is sent once (one send_flow); 3 failures in a row end as today (`failed` / `field_mismatch`, same reason) | `test_S_167_2…` (table, 5 rows) | passed |
-| S-167.3 (P1) | Given an error after send_flow, Then it is never tried again (one call) and is `unknown` as today | `test_S_167_3…` | passed |
-| S-167.4 (P1) | Bot replies during a big run are still sent first | `BotRepliesBeforeBlastsTest` (S-165.1, .3, .5) | passed |
-| S-167.5 (P1) | Given a pool that died (no heartbeat) while holding messages, Then the existing recover path takes them back, they hold no customer lock while waiting, and the next pool sends each once, in customer order | `test_S_167_5…` | passed |
-| S-167.6 (P1) | The Chatblast, Botcake and Unit suites add no new failures | full run | passed |
+| S-167.1 (P1) | Given 5,000 chatblast messages on 50 pages queued at once (10/s per page, Botcake answering in 2 s, so the line lasts longer than 4 minutes), Then all are sent, no ticket says "Not sent in time" or failed for waiting, one ticket and one send_flow per message, and each customer gets one message at a time, in order. A waybill another sequence messaged while it waited is skipped when the pool starts it (no call) | `test_S_167_1_5000_messages…`, `test_S_167_1_a_waybill_another_sequence…` | Passed · 2026-10-27 · auto |
+| S-167.2 (P1) | Given a field write or read-back that Botcake answers with HTTP 5xx or no answer, Then it is tried again after 15 s, then 60 s; a success is sent once (one send_flow); 3 failures in a row end as today (`failed` / `field_mismatch`, same reason) | `test_S_167_2…` (table, 6 rows) | Passed · 2026-10-27 · auto |
+| S-167.3 (P1) | Given an error after send_flow, Then it is never tried again (one call) and is `unknown` as today | `test_S_167_3…` | Passed · 2026-10-27 · auto |
+| S-167.4 (P1) | Bot replies during a big run are still sent first | `BotRepliesBeforeBlastsTest` (S-165.1, .2, .3, .5) | Passed · 2026-10-27 · auto |
+| S-167.5 (P1) | Given a pool that died (no heartbeat) while holding messages, Then the existing recover path takes them back, they hold no customer lock while waiting, and the next pool sends each once, in customer order | `test_S_167_5…` | Passed · 2026-10-27 · auto |
+| S-167.6 (P1) | The Chatblast, Botcake and Unit suites add no new failures | full run | Passed · 2026-10-27 · auto |
