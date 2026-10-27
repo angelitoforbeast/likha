@@ -491,7 +491,8 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->assertTrue(collect($this->calls)->contains(fn ($c) => self::req($c)['psid'] === '8001'), 'the chatbot on another page goes out at once');
 
         // A chatbot backlog on one page bigger than the pool looks at in one go still lets another page's newer send through.
-        config(['services.botcake.send_concurrency' => 8]);
+        // 9 = Page Uno's chatblast share (6) + its reply's extra place + Page Dos's two replies.
+        config(['services.botcake.send_concurrency' => 9]);
         $this->echoFlow();
         for ($i = 1; $i <= 50; $i++) $this->says('x', (string) (9000 + $i));
         $this->says('late', '8002', '1002', 'Page Dos');

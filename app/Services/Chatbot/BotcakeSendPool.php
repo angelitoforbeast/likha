@@ -70,7 +70,7 @@ class BotcakeSendPool extends TicketPool
     {
         $started = 0;
         if ($claim) {
-            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages()));
+            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(), $this->fullPages(1)));
         }
         $this->lanes();
         $this->pump();
@@ -81,7 +81,8 @@ class BotcakeSendPool extends TicketPool
 
     /**
      * May puwang pa ba ang page ng ticket: hanggang perPage() na hawak kada lane, para hindi maubos ng isang page (hal.
-     * isang chatblast campaign) ang lahat ng puwesto ng pool. Ang hawak na (ulit na kuha) ay hindi.
+     * isang chatblast campaign) ang lahat ng puwesto ng pool. Ang sagot ng bot (priority 0) ay may isa pang puwesto, kaya
+     * nakukuha kahit puno ng chatblast ang page. Ang hawak na (ulit na kuha) ay hindi.
      */
     private function room(object $c): bool
     {
@@ -91,11 +92,11 @@ class BotcakeSendPool extends TicketPool
         $held = 0;
         foreach ($this->jobs as $job) if ($job['lane'] === $lane) $held++;
 
-        return $held < $this->perPage();
+        return $held < $this->perPage() + ((int) ($c->priority ?? 2) === 0 ? 1 : 0);
     }
 
-    /** @return array<int, string> ang mga page na puno na ang lane (hindi na kukunan ng bago) */
-    private function fullPages(): array
+    /** @return array<int, string> ang mga page na puno na ang lane (hindi na kukunan ng bago), may $extra pang puwesto */
+    private function fullPages(int $extra = 0): array
     {
         $held = [];
         $pages = [];
@@ -104,7 +105,7 @@ class BotcakeSendPool extends TicketPool
             $pages[$job['lane']][(string) $job['row']->page_name] = true;
         }
         $full = [];
-        foreach ($held as $lane => $n) if ($n >= $this->perPage()) $full = array_merge($full, array_keys($pages[$lane]));
+        foreach ($held as $lane => $n) if ($n >= $this->perPage() + $extra) $full = array_merge($full, array_keys($pages[$lane]));
 
         return $full;
     }
@@ -219,15 +220,17 @@ class BotcakeSendPool extends TicketPool
             $now = $this->clock->now();
             if (!$lane['queue'] || $now < $lane['paused'] || $now < $lane['next'] - 0.000001) continue;
             // Ang handa na may pinakamataas na priority (chatbot, saka Delivering, saka ang ibang chatblast), ang pinakauna sa
-            // mga kapareho; ang naghintay nang lampas 10 s sa lane ay nauuna (hawak ng chatblast ang lock ng customer).
+            // mga kapareho; sa chatblast, ang naghintay nang lampas 10 s sa lane ay nauuna (hawak nito ang lock ng customer).
+            // Ang sagot ng bot (priority 0) ay laging una: hindi ito naiiwan sa likod ng malaking chatblast.
             $pick = null;
             $best = null;
             foreach ($lane['queue'] as $i => $id) {
                 $job = $this->jobs[$id];
                 if ($job['notBefore'] > $now) continue;
-                $rank = $now - ($job['since'] ?? $now) > 10 ? -1 : (int) ($job['row']->priority ?? 2);
+                $priority = (int) ($job['row']->priority ?? 2);
+                $rank = $priority === 0 ? -2 : ($now - ($job['since'] ?? $now) > 10 ? -1 : $priority);
                 if ($best === null || $rank < $best) { $best = $rank; $pick = $i; }
-                if ($rank <= 0) break;
+                if ($rank === -2) break;
             }
             if ($pick === null) continue;
             // Iisang rate ng page kasama ang ibang proseso (sequence, Inbox, setup check): ang puwesto ay kinukuha nang atomic,
