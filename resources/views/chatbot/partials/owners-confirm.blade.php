@@ -14,7 +14,7 @@
         </label>
         <label class="block">
             <span class="text-slate-700">Type <code class="break-all rounded bg-slate-100 px-1 font-mono text-xs text-slate-900">{{ $phrase }}</code></span>
-            <input name="confirm_text" type="text" required autocomplete="off" autocapitalize="characters" spellcheck="false" data-lpignore="true" data-1p-ignore class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-sm">
+            <input name="confirm_text" type="text" required autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 font-mono text-sm">
         </label>
         <button class="cb-btn cb-btn-primary w-full justify-center">{{ $button }}</button>
     </form>

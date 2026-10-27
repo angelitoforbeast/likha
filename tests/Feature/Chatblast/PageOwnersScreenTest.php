@@ -257,7 +257,8 @@ class PageOwnersScreenTest extends ChatblastTestCase
 
         // History: only for the pages marketing can see; another site's page is not asked of Forbeast.
         $this->assertStringNotContainsString('data-history', $this->get('/chatbot/owners?history=2002')->assertOk()->getContent());
-        Http::assertNotSent(fn (HttpRequest $r) => str_contains($r->url(), '/transfers?page=2002'));
+        $this->assertStringNotContainsString('data-history', $this->get('/chatbot/owners?history=01001')->assertOk()->getContent());
+        Http::assertNotSent(fn (HttpRequest $r) => str_contains($r->url(), '/transfers?page=2002') || str_contains($r->url(), '/transfers?page=01001'));
         $this->assertStringContainsString('data-history="1001"', $this->get('/chatbot/owners?history=1001')->assertOk()->getContent());
     }
 
@@ -267,15 +268,17 @@ class PageOwnersScreenTest extends ChatblastTestCase
             'claim' => ['secret-password', 'TAKE Page Tres TO LIKHA', true, null],
             'wrong password' => ['nope', 'TAKE Page Tres TO LIKHA', false, 'Wrong password'],
             'wrong phrase' => ['secret-password', 'TAKE Page Uno TO LIKHA', false, 'The phrase does not match'],
+            'a page this site owns' => ['secret-password', 'TAKE Page Uno TO LIKHA', false, 'cannot be taken', '1001'],
+            'a page the other site owns' => ['secret-password', 'TAKE Page Dos TO LIKHA', false, 'cannot be taken', '2002'],
         ];
     }
 
     #[DataProvider('marketingTakes')]
-    public function test_S_170_3_marketing_claims_with_their_own_password_and_the_phrase(string $password, string $phrase, bool $sent, ?string $error): void
+    public function test_S_170_3_marketing_claims_with_their_own_password_and_the_phrase(string $password, string $phrase, bool $sent, ?string $error, string $target = '3003'): void
     {
         $this->forbeast();
         $this->actingAs($this->user('Marketing', 'mkt@example.test'));
-        $res = $this->post('/chatbot/owners/take', ['target' => '3003', 'password' => $password, 'confirm_text' => $phrase])->assertRedirect('/chatbot/owners');
+        $res = $this->post('/chatbot/owners/take', ['target' => $target, 'password' => $password, 'confirm_text' => $phrase])->assertRedirect('/chatbot/owners');
 
         if (!$sent) {
             $res->assertSessionHas('owners_error', fn ($e) => str_contains($e, $error));
@@ -340,5 +343,7 @@ class PageOwnersScreenTest extends ChatblastTestCase
         $this->assertSame(1, preg_match('#data-action="take" data-target="3003"[\s\S]*?</form>#', $html, $form));
         $this->assertMatchesRegularExpression('#<input(?=[^>]*autocomplete="username")(?=[^>]*value="mkt@example.test")(?=[^>]*\bhidden\b)[^>]*>[\s\S]*type="password"[\s\S]*<input(?=[^>]*name="confirm_text")(?=[^>]*autocomplete="off")[^>]*>#', $form[0]);
         $this->assertStringNotContainsString('name="phrase"', $form[0]);
+        // The phrase is case-sensitive: a phone keyboard must not switch it to capitals.
+        $this->assertMatchesRegularExpression('#<input(?=[^>]*name="confirm_text")(?=[^>]*autocapitalize="off")(?=[^>]*autocorrect="off")[^>]*>#', $form[0]);
     }
 }

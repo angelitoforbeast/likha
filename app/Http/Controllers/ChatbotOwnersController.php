@@ -28,10 +28,10 @@ class ChatbotOwnersController extends Controller
     {
     }
 
-    /** Ang role na pare-pareho ang espasyo (hal. " Marketing  -OIC" → "Marketing - OIC"). */
+    /** Ang role na pare-pareho ang espasyo, gaya ng sa Connections (hal. " Marketing  -  OIC" → "Marketing - OIC"). */
     public static function role(?string $role): string
     {
-        return preg_replace('/\s*-\s*/u', ' - ', preg_replace('/\s+/u', ' ', trim((string) $role)));
+        return preg_replace('/\s+/u', ' ', trim((string) $role));
     }
 
     /** Kung nabubuksan ng role ang Owners (ang screen at ang link nito sa nav). */
@@ -43,7 +43,7 @@ class ChatbotOwnersController extends Controller
     /** CEO: true; marketing: false; ang iba: 403. */
     private function ceo(): bool
     {
-        $role = Auth::user()?->employeeProfile?->role;
+        $role = Auth::user()?->employeeProfile?->role ?? Auth::user()?->role;
         if (!self::opens($role)) abort(403);
 
         return self::role($role) === 'CEO';
@@ -64,7 +64,7 @@ class ChatbotOwnersController extends Controller
 
         $historyOf = (string) $request->query('history', '');
         $history = null;
-        if ($linked && preg_match('/^\d{1,20}$/', $historyOf) && ($ceo || collect($pages)->contains('id', $historyOf))) {
+        if ($linked && preg_match('/^\d{1,20}$/', $historyOf) && ($ceo || collect($pages)->contains(fn ($p) => $p['id'] === $historyOf))) {
             $h = $this->site->history($historyOf);
             $history = ['page' => $historyOf, 'error' => $h['ok'] ? null : $h['error'], 'items' => $h['ok'] ? self::list($h['body']['transfers'] ?? $h['body']) : []];
         }
