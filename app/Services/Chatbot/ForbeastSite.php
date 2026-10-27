@@ -18,6 +18,16 @@ class ForbeastSite
     /** Ang dalawang partner site: key => pangalan sa screen. */
     public const SITES = ['likha' => 'Likha', 'incepxion' => 'Incepxion'];
     private const TIMEOUT = 15;
+    /** Ang mga kilalang pagtanggi ng Forbeast (ang "error" ng sagot) => ang sinasabi sa screen. Ang iba: ang "message" nila. */
+    private const REFUSALS = [
+        'unknown_page' => 'Forbeast does not know this page for this site. Reload the list.',
+        'unknown_transfer' => 'Forbeast has no such request for this site. It may be gone already; reload the list.',
+        'not_owned' => 'This site does not own this page any more. Reload the list.',
+        'not_set_up' => 'Forbeast has not finished setting up this site or page, so nothing was changed.',
+        'too_many_pending' => 'This page already has 5 pending requests from this site. Cancel one first.',
+        'invalid_request' => 'Forbeast did not accept the request. Reload the page and try again.',
+        'too_many_requests' => 'Too many requests to Forbeast. Wait a minute and try again.',
+    ];
 
     public static function linked(): bool
     {
@@ -116,6 +126,8 @@ class ForbeastSite
         }
         $body = is_array($res->json()) ? $res->json() : [];
         if ($res->successful()) return ['ok' => true, 'status' => $res->status(), 'body' => $body, 'error' => null];
+        $code = is_string($body['error'] ?? null) ? $body['error'] : '';
+        if (isset(self::REFUSALS[$code])) return ['ok' => false, 'status' => $res->status(), 'body' => $body, 'error' => self::REFUSALS[$code] . ' (HTTP ' . $res->status() . ')'];
         $msg = is_scalar($body['message'] ?? null) ? mb_substr(trim((string) $body['message']), 0, 200) : '';
 
         return ['ok' => false, 'status' => $res->status(), 'body' => $body,
