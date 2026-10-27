@@ -52,8 +52,13 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         foreach (['/chatbot/inbox', '/chatblast/page-settings'] as $url) {
             $html = $this->get($url)->assertOk()->getContent();
             $this->assertSame('⚠ Page Uno: 2 flows named UPDATE SHIPPING STATUS 2026 — open Page settings', $this->banner($html), $url);
-            $this->assertMatchesRegularExpression('#data-alert="setup-problems".*?href="/chatblast/page-settings"#s', $html);
+            $this->assertMatchesRegularExpression('#data-alert="setup-problems".*?href="/chatblast/page-settings\?q=Page\+Uno".*?href="/chatblast/page-settings"#s', $html, 'the page opens filtered');
         }
+        $this->check('Page Dos', ['ok' => false, 'x' => ['2 flows named <b>X</b>']]);
+        $this->travel(61)->seconds();
+        $html = $this->get('/chatbot/inbox')->getContent();
+        $this->assertStringContainsString('&lt;b&gt;X&lt;/b&gt;', $html, 'Botcake text is escaped');
+        $this->assertStringNotContainsString('<b>X</b>', $html);
     }
 
     public function test_S_171_4_token_invalid_and_none_delivered_show_and_a_grey_check_failed_does_not(): void

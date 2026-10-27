@@ -110,7 +110,8 @@
 @endif
 @if($cbSetupProblems)
     <div class="shrink-0 break-words border-b border-red-300 bg-red-600 px-4 py-1.5 text-sm text-white sm:px-6" role="alert" data-alert="setup-problems">
-        ⚠ @foreach($cbSetupProblems['pages'] as $p)<strong>{{ $p['page'] }}</strong>: {{ $p['reason'] }}@unless($loop->last); @endunless @endforeach
+        {{-- Ang pangalan ng page: bukas ang Page settings na naka-filter sa page na iyon (?q=). --}}
+        ⚠ @foreach($cbSetupProblems['pages'] as $p)<a href="/chatblast/page-settings?q={{ urlencode($p['page']) }}" class="font-semibold underline">{{ $p['page'] }}</a>: {{ $p['reason'] }}@unless($loop->last); @endunless @endforeach
         @if($cbSetupProblems['more'])<span>+{{ $cbSetupProblems['more'] }} more</span>@endif
         — <a href="/chatblast/page-settings" class="font-semibold underline">open Page settings</a>
     </div>
