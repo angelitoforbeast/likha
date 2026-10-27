@@ -13,6 +13,7 @@ use App\Services\Chatbot\ChatbotSequences;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowEngine;
 use App\Services\Chatbot\FlowGraph;
+use App\Services\Chatbot\PageTransfers;
 use App\Services\PageSettings;
 use Carbon\Carbon;
 use Illuminate\Bus\UniqueLock;
@@ -358,5 +359,32 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertSame(['Seq 1'], $this->sent());
         $this->assertSame([['failed', 'Botcake said "x" (HTTP 200)']], DB::table('chatbot_replies')->where('kind', 'send')->get()->map(fn ($r) => [$r->status, $r->error])->all());
         $this->assertSame(['Subscribed to sequence Preorder', 'Sequence Preorder step 1 ran', 'Sequence Preorder completed'], $this->events(), 'the job ran to the end');
+    }
+
+    /** @return array<string, array{0: ?string, 1: array<int, string>, 2: array{0: string, 1: ?string}}> */
+    public static function movedPages(): array
+    {
+        return [
+            'writes 10:00 on the old site, page moves 12:00, step 2 due 14:00' => ['2026-10-20T10:00:00+08:00', ['Seq 2'], ['active', null]],
+            'the imported time is older than 24 h at the step' => ['2026-10-19T13:59:00+08:00', [], ['unsubscribed', 'outside 24h']],
+            'no imported time and no chat here' => [null, [], ['unsubscribed', 'outside 24h']],
+        ];
+    }
+
+    #[DataProvider('movedPages')]
+    public function test_S_164_9_a_copied_follow_up_uses_the_customer_last_message_time_from_the_old_site(?string $lastMessageAt, array $sent, array $end): void
+    {
+        $seq = $this->sequence('PREORDER', [[0, 'minutes', $this->flow('Seq 1')->id], [2, 'hours', $this->flow('Seq 2')->id], [1, 'hours', $this->flow('Seq 3')->id]]);
+        $this->travelTo('2026-10-20 12:00:00');
+        $transfers = app(PageTransfers::class);
+        $item = ['psid' => 7001, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-20T14:00:00+08:00', 'enrolled_via' => 'flow', 'last_message_at' => $lastMessageAt];
+        $this->assertSame(200, $transfers->import('1001', 'sequences', [$item], '77')['http']);
+        $transfers->activate(1001, '77');
+
+        $this->travelTo('2026-10-20 14:00:00');
+        $this->tick();
+
+        $this->assertSame($sent, $this->sent());
+        $this->assertSame($end, [$this->sub($seq)->status, $this->sub($seq)->exit_reason]);
     }
 }

@@ -136,10 +136,36 @@ class PageTransfers
             ->where(fn ($q) => $q->where('s.status', 'active')->orWhere(fn ($w) => $w->where('s.status', 'paused')
                 ->where(fn ($x) => $x->whereNull('s.exit_reason')->orWhere('s.exit_reason', 'not like', self::HELD_REASON . '%'))))
             ->orderBy('s.id')->limit(self::MAX_ITEMS)->get(['s.id', 's.psid', 'q.name', 's.current_step', 's.next_send_at', 's.enrolled_via']);
+        $last = $this->lastMessages($pageId, $rows->pluck('psid')->map(fn ($p) => (int) $p)->unique()->values()->all());
         $items = $rows->map(fn ($r) => ['psid' => (int) $r->psid, 'sequence' => (string) $r->name, 'current_step' => (int) $r->current_step,
-            'next_send_at' => self::iso($r->next_send_at), 'enrolled_via' => (string) $r->enrolled_via])->all();
+            'next_send_at' => self::iso($r->next_send_at), 'enrolled_via' => (string) $r->enrolled_via, 'last_message_at' => self::iso($last[(int) $r->psid] ?? null)])->all();
 
         return ['http' => 200, 'body' => ['items' => $items, 'next' => $rows->count() === self::MAX_ITEMS ? (string) $rows->last()->id : null]];
+    }
+
+    /**
+     * Ang huling mensahe ng bawat customer, gaya ng sa 24 oras ng sequence (ChatbotSequences::runStep): ang pinakabagong
+     * chat dito o ang dala ng naunang paglipat (__last_message_at), alin ang mas bago.
+     * @param array<int, int> $psids
+     * @return array<int, string> psid => Y-m-d H:i:s
+     */
+    private function lastMessages(int $pageId, array $psids): array
+    {
+        if (!$psids) return [];
+        $last = [];
+        $later = function (int $psid, ?string $at) use (&$last) {
+            if ($at === null || $at === '') return;
+            $at = Carbon::parse($at, config('app.timezone'))->format('Y-m-d H:i:s');
+            if (!isset($last[$psid]) || $at > $last[$psid]) $last[$psid] = $at;
+        };
+        foreach (array_chunk($psids, 200) as $chunk) {
+            BotcakeChat::active()->where('page_id', (string) $pageId)->whereIn('psid', array_map('strval', $chunk))->groupBy('psid')
+                ->selectRaw('psid, max(received_at) as at')->get()->each(fn ($r) => $later((int) $r->psid, $r->getRawOriginal('at')));
+            DB::table('chatbot_customer_values')->where('page_id', $pageId)->whereIn('psid', $chunk)->where('key', CustomerFields::LAST_MESSAGE_AT)
+                ->get(['psid', 'value'])->each(fn ($r) => $later((int) $r->psid, preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) $r->value) ? $r->value : null));
+        }
+
+        return $last;
     }
 
     private static function iso(?string $at): ?string
@@ -289,13 +315,16 @@ class PageTransfers
             $step = is_array($it) ? ($it['current_step'] ?? null) : null;
             $next = is_array($it) ? ($it['next_send_at'] ?? null) : null;
             $at = $next === null ? null : self::localTime($next);
+            $msg = is_array($it) ? ($it['last_message_at'] ?? null) : null;
+            $msgAt = $msg === null ? null : self::localTime($msg);
             if ($psid === null) $errors["items.$i.psid"] = 'A customer PSID (digits) is required.';
             elseif ($name === '' || mb_strlen($name) > 120) $errors["items.$i.sequence"] = 'A sequence name is required.';
             elseif (!is_int($step) || $step < 1 || $step > 65535) $errors["items.$i.current_step"] = 'A step position (1 or more) is required.';
             elseif ($next !== null && $at === null) $errors["items.$i.next_send_at"] = 'Use an ISO 8601 time or null.';
+            elseif ($msg !== null && $msgAt === null) $errors["items.$i.last_message_at"] = 'Use an ISO 8601 time or null.';
             else {
                 $via = is_array($it) && in_array($it['enrolled_via'] ?? null, self::VIAS, true) ? $it['enrolled_via'] : 'other';
-                $rows[] = ['psid' => $psid, 'name' => $name, 'current_step' => $step, 'next_send_at' => $at, 'enrolled_via' => $via];
+                $rows[] = ['psid' => $psid, 'name' => $name, 'current_step' => $step, 'next_send_at' => $at, 'enrolled_via' => $via, 'last_message_at' => $msgAt];
             }
         }
         if ($errors) return self::invalid($errors);
@@ -317,6 +346,19 @@ class PageTransfers
                 } elseif ($held || !in_array($existing->status, ['active', 'paused'], true)) {
                     // Ang tumatakbo na rito (active o naka-pause, hindi held) ay hindi ginagalaw: walang dobleng follow-up.
                     DB::table('chatbot_sequence_subscriptions')->where('id', $existing->id)->where('status', $existing->status)->update($values);
+                }
+            }
+            // Ang huling mensahe ng customer sa kabilang site (para sa 24 oras ng sequence dito): ang mas bago lang ang itinatala.
+            $times = [];
+            foreach ($rows as $row) {
+                if ($row['last_message_at'] !== null && ($times[$row['psid']] ?? '') < $row['last_message_at']) $times[$row['psid']] = $row['last_message_at'];
+            }
+            foreach ($times as $psid => $at) {
+                $old = DB::table('chatbot_customer_values')->where('page_id', $pageId)->where('psid', $psid)->where('key', CustomerFields::LAST_MESSAGE_AT)->first(['id', 'value']);
+                if ($old === null) {
+                    DB::table('chatbot_customer_values')->insert(['page_id' => $pageId, 'psid' => $psid, 'key' => CustomerFields::LAST_MESSAGE_AT, 'value' => $at, 'updated_at' => now()]);
+                } elseif ((string) $old->value < $at) {
+                    DB::table('chatbot_customer_values')->where('id', $old->id)->update(['value' => $at, 'updated_at' => now()]);
                 }
             }
         });
@@ -402,6 +444,6 @@ class PageTransfers
     private static function missing(array $names): array
     {
         return ['http' => 422, 'body' => ['error' => 'missing_names', 'message' => 'This site has no flow or sequence with these names, so nothing was saved.',
-            'missing_names' => array_values($names)]];
+            'names' => array_values($names)]];
     }
 }
