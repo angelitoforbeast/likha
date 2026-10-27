@@ -119,14 +119,17 @@ class PageProblemsTest extends ChatblastTestCase
     public function test_S_169_2_failed_percent_of_a_page_with_enough_sends_makes_it_red_or_amber_and_the_thresholds_are_editable(): void
     {
         $this->sends('1002', 12, 4); // 33.3%
-        $this->sends('1003', 12, 2); // 16.7%
+        $this->sends('1003', 12, 2);
+        $this->send('1003', '2026-10-27 11:50:00', 'partial', 'Forbeast sent 1 of 2', null); // padala, hindi pumalya: 2 / 13 = 15.4%
+        $this->sends('1005', 10, 3); // eksaktong 30% sa eksaktong 10 padala
         $this->sends('1004', 9, 4); // 9 padala lang: kulang para sa %
 
         $p = $this->problems();
         $this->assertSame(['red', 33.3, 12, 4, 'Botcake error (HTTP 5xx)'], [$p['1002']['light'], $p['1002']['failed_pct'], $p['1002']['sends'], $p['1002']['failed'], $p['1002']['reason']]);
-        $this->assertSame(['amber', 16.7], [$p['1003']['light'], $p['1003']['failed_pct']]);
+        $this->assertSame(['amber', 15.4, 13], [$p['1003']['light'], $p['1003']['failed_pct'], $p['1003']['sends']]);
+        $this->assertSame(['red', 30.0], [$p['1005']['light'], $p['1005']['failed_pct']]);
         $this->assertArrayNotHasKey('1004', $p);
-        $this->assertSame(['1002', '1003'], array_map('strval', array_keys($p))); // ang pula muna
+        $this->assertSame(['1002', '1005', '1003'], array_map('strval', array_keys($p))); // ang pula muna
 
         $this->actingAs($this->user());
         $this->post('/chatbot/health/thresholds', ['t' => ['page_failed_pct' => ['amber' => 20, 'red' => 50], 'page_min_sends' => ['amber' => 9, 'red' => '']]])->assertRedirect();

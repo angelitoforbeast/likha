@@ -108,7 +108,7 @@
         @else
             <p class="cb-card px-3 py-2 text-sm text-slate-600" data-list="page-problems">No page problems in the last hour.</p>
         @endif
-        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
+        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
     </section>
 
     <form method="GET" action="{{ route('chatbot.health') }}" class="cb-filters flex flex-wrap items-end gap-3 text-sm" aria-label="Filters">
