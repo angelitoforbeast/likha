@@ -2767,3 +2767,22 @@ Tests: `tests/Feature/Chatblast/ForbeastAutoSwitchTest.php`.
 | S-166.3 (P1) | Given a page on Forbeast for hours, Then every existing ForbeastWatch case behaves as before (test bodies unchanged) | existing `ForbeastAutoSwitchTest` cases | passed |
 | S-166.4 (P1) | In .1, Then each copy runs once, oldest first, only after its 120 s grace, with the existing standby rules (skip if answered or the Forbeast run is pending), and no standby copy is left | `test_S_166_4…` | passed |
 | S-166.5 (P1) | The Chatblast, Botcake, PageSettings and Unit suites add no new failures | full run | passed |
+
+## S-169 Marketing sees a failing page at once
+
+As marketing staff, I want a page that Facebook restricted, or that fails many sends, to be impossible to miss, so I can act before dozens of customers get nothing.
+
+Slice 169. Threat model: the error and raw text of a failed send come from Botcake or Meta (stored, untrusted: shown escaped, never run); page names come from page settings; the thresholds are CEO-only input on an existing form. No new route. Risk tier: medium (a UI screen and business logic behind existing access).
+Tests: `tests/Feature/Chatblast/PageProblemsTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-169.1 (P1) | Given a page with 5 "temporarily restricted" failures in the last hour, Then its Health row is red with reason "Page restricted by Facebook", and Chatbot and Chatblast screens show "⚠ <page>: Page restricted by Facebook since <first failure time> — open Health". Restricted (text or subcode 1893063) and permission (#2022, #200, "does not have permission", code 10 in the raw answer) failures get their own reason; a (#10) window error stays "Outside 24-hour window" | `test_S_169_1…` (2 tests) | passed |
+| S-169.2 (P1) | Given a page with 12 sends and 4 Botcake 500s, Then it is red (33.3%); 12 sends and 2 failed is amber; 9 sends is too few for the %; the CEO can change the page thresholds on the existing form | `test_S_169_2…` | passed |
+| S-169.3 (P1) | Given #551 (customer not reachable) failures, Then they do not count toward the page's failed % | `test_S_169_3…` | passed |
+| S-169.4 (P1) | Given no page over a threshold (failures older than 60 min, skipped sends), Then there is no banner and the table says "No page problems in the last hour" | `test_S_169_4…` | passed |
+| S-169.5 (P1) | When staff click a page in the table, Then its latest 20 failed sends open (time, reason, error cut to 150 characters, link to the customer in the Inbox) | `test_S_169_5…` | passed |
+| S-169.6 (P1) | Given a role that only has page settings (no Chatbot menu), Then it sees no banner; a role with the Chatbot menu does | `test_S_169_6…` | passed |
+| S-169.7 (P1) | The existing Health tests and the Chatblast, Botcake and PageSettings suites add no new failures | full run | passed |
+| S-169.8 (P2) | At 390 px the banner wraps and the table scrolls sideways inside its card | not tested in a browser (see result) | not run |
+| S-169.9 (P1) | Given more than 3 red pages, Then the banner lists 3 and "+N more"; it is cached up to 60 s | `test_S_169_9…` | passed |
