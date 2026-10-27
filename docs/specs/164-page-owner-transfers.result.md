@@ -1,10 +1,10 @@
 # Result 164: page owners and transfers between the partner sites
 
-Status: done. The escalated major (copied follow-ups and the 24 h window) is resolved by the reviewer's ruling, below. Branch `feat/164-page-owner-transfers`, cut from `87cb0e1e`.
+Status: done. The escalated major (copied follow-ups and the 24 h window) is resolved by the reviewer's ruling, and contract amendment 2 (the hold) is built on this side; one contract gap is open for both sides (below). Branch `feat/164-page-owner-transfers`, cut from `87cb0e1e`.
 
 ## What shipped
 
-- **Part P, the endpoints Forbeast calls** (`GatewaySiteController`, `Chatbot\PageTransfers`). Five endpoints: `POST /api/gateway/site/pages/{id}/adopt`, `GET …/export`, `POST …/import`, `POST …/release` and `POST …/activate`.
+- **Part P, the endpoints Forbeast calls** (`GatewaySiteController`, `Chatbot\PageTransfers`). Six endpoints: `POST /api/gateway/site/pages/{id}/adopt`, `GET …/export`, `POST …/import`, `POST …/hold` (contract amendment 2, below), `POST …/release` and `POST …/activate`.
   - **Signature:** `X-Gateway-Signature: sha256=HMAC("<timestamp>.<raw body>", FORBEAST_SITE_SECRET)` (the body is empty for GET), with the timestamp at most 300 s off; `hash_equals`.
   - **Errors:** when `FORBEAST_SITE_KEY`, `FORBEAST_SITE_SECRET` or `GATEWAY_URL` is missing → 503 `not_linked`. Any bad signature → 401 `bad_signature`. A body over 16 MB → 413. Errors are `{"error","message"}`.
   - **Transfer id:** `X-Gateway-Transfer` is the transfer id and goes into the history.
@@ -19,7 +19,7 @@ Status: done. The escalated major (copied follow-ups and the 24 h window) is res
 - **export:** at most 500 items a call; `next` is the last row id, or null.
   - **`values`:** `name`, `active` ("0"/"1"), `flow` (the name of the flow in `chatbot.flow_id`, which is the Main Flow the bot runs), then the editable 162 fields. Unset fields are sent as null, so the target clears them. Never sent: prompts, flow_id, AI settings, secrets, tokens or `shop_details`.
   - **`fields`:** `{psid, key, value, updated_at}`. Skipped: `__*` keys (filtered in PHP, because `_` is a wildcard in LIKE) and the Test-tab customer, PSID 0. `?since=<ISO>` limits it to rows changed after that time.
-  - **`sequences`:** `{psid, sequence (name), current_step, next_send_at, enrolled_via, last_message_at}`. `last_message_at` is the customer's last message time (below). It covers active subscriptions and those paused because the page is Off, never rows still held by a transfer.
+  - **`sequences`:** `{psid, sequence (name), current_step, next_send_at, enrolled_via, last_message_at}`. `last_message_at` is the customer's last message time (below). It covers active subscriptions, those paused because the page is Off and those held by a hold here, never rows still held by a transfer to this site. `?since=` gives the catch-up (contract amendment 2, below).
 - **import:** all or nothing per call (one transaction). Idempotent. At most 500 items, else 422.
   - **values:** creates the page when it is new here (its name comes from the `name` item, with the same 409 clash rule). The flow is matched by name; a missing name → 422 `missing_names`, nothing saved. Values are checked like the 162 API (`ChatbotFields::valueError`, https images) and saved through `PageValues::save` (history kept). Botfields this site lacks (e.g. Incepxion's extra seq columns) are skipped and listed in `skipped`.
   - **fields:** upserts by (page, psid, key). The newer `updated_at` wins, so a value changed on the target after the switch is not overwritten by the catch-up copy. `__*` keys → 422.
@@ -29,7 +29,7 @@ Status: done. The escalated major (copied follow-ups and the 24 h window) is res
   - **Enrolled:** `subscribe()` treats paused as already enrolled, so a flow can't restart the customer at step 1. Exit-on-reply ends the row.
   - **activate:** turns `active` only the rows held by its own transfer (`X-Gateway-Transfer`), keeping `current_step` and `next_send_at`. Rows left by an earlier failed transfer stay held. The only change to the sequence code is the time source of the 24 h check (below).
 - **release:** `chatbot.active` = 0 with source "transferred to <site>".
-  - **Subscriptions:** the page's active and paused subscriptions (held ones too) → `unsubscribed`, exit_reason `transferred`.
+  - **Subscriptions:** the page's active and paused subscriptions (held ones too) → `unsubscribed`, exit_reason `transferred`, keeping their step and send time (contract amendment 2, below).
   - **Forgotten:** the page's `chatbot_waits`, its `__wait` / `__ai` values, and its pending AI requests and chatbot send requests (→ `resumed`, error "page transferred"). Chatblast send rows are untouched.
   - **Forbeast connection:** the token, webhook_secret, token_status and permissions rows are deactivated with history kept. No DELETE call, because Forbeast already moved the webhook.
   - **Caches:** the page settings cache and the page's flow in `BotConfigCache` are cleared. Idempotent. An unknown page → 404.
@@ -77,6 +77,45 @@ Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took 
 - **`picture_url` always null:** the screen shows no picture then (the fakes already had null pictures). No change needed.
 - **adopt PUTs the webhook before answering 200:** `adopt` runs `ForbeastPageSetup::connect` and answers 200 only when it worked (502 otherwise). No change needed.
 
+## Contract amendment 2: the source holds follow-ups during the move
+
+**The problem (joint QA):** the sequences were copied in step 2, but the source kept sending until release in step 4. A step sent in between went out again from the target after activate. Also, a customer who subscribed on the source after the copy was never copied.
+
+**As built (this site's side):**
+- **`POST /api/gateway/site/pages/{id}/hold` `{"hold": true|false}`:** signed like the other Part P calls. `X-Gateway-Transfer` is required here (missing or malformed → 422), because `hold:false` belongs to one transfer. Unknown page → 404. A `hold` that is not true/false → 422. Answers 200 `{"held": n}`, the page's rows still held after the call. `hold:true` also answers `"held_at"`, this site's time (ISO 8601). It's an addition: Forbeast can use it as the catch-up's `since`, so the two clocks don't need to agree.
+- **One transfer owns the hold:** a `hold:true` from a newer transfer takes over the flag and the rows. A `hold:false` from any other transfer (for example a late retry of a cancelled move) changes nothing.
+- **`hold: true`:** every **active** subscription of the page becomes `status = paused`, `exit_reason = "hold <transfer id>"`. Those are the existing columns, with a different reason from the imported `transfer <id>` so the copy still exports them. `current_step` and `next_send_at` are kept, and `updated_at` is not touched. The page gets a page_settings flag (`transfer.hold = <id>`, history kept). While the flag is on:
+  - **New subscriptions** (and restarts of ended ones) are created held the same way.
+  - **`resumePaused`** does not bring back the page's page-off rows; otherwise they would send during the copy.
+  - **Idempotent:** a second call changes nothing and answers the same `held`.
+  - **The tick** takes only `active`, so nothing is sent for the page.
+- **`hold: false`:** the flag is cleared (history kept). Every `hold …` row of the page goes back to `active` with the same step and send time. One that came due during the hold is sent on the next tick.
+- **A step being sent when the hold lands:** `runStep` checks the status and then sends; the hold can land in between. `ChatbotSequences::advance` then still records the step on a row held by a move's hold (it stays held), instead of losing it. It does so only when the usual `active` update matched no row, so pages that never move run no extra query. A last step is recorded as one past the end with a send time of now: on whichever site it next runs, it completes without sending. The copy, `hold:false` and the catch-up then carry the advanced step, and the step is not sent again. This is the only change to the sequence code in this round, and it touches only rows held by a move.
+- **`release`:** ends held rows `transferred` as before, and clears the flag. Three changes, all for the catch-up:
+  - **Step and send time kept:** `transferred` rows keep `current_step` and `next_send_at`; before, it nulled `next_send_at`. Otherwise the catch-up would copy a null send time over the target's held row, and that follow-up would never send. The tick reads only `active`, so a kept time on an ended row does nothing. The old site's subscribers screen and Inbox now show a "next send" time on these ended rows (display only, in `TODO.md`).
+  - **`updated_at` not touched:** so the catch-up carries only rows made or changed since the hold. A customer who replied on the new site after the switch stays ended there.
+  - **Stale import-held rows:** rows held here by an earlier failed move *to* this site (`transfer <id>`) are ended `transfer not activated` and are not copied.
+- **`export?part=sequences&since=<ISO>`:** subscriptions with `updated_at >= since` (`>=` so a row made in the same second as the hold isn't missed; the import is idempotent). With `since` only, it also lists rows ended `transferred`, because step 5 comes after step 4. Without `since`, nothing changes.
+- **Tests (fakes count sends per customer per step across both pages, with page 1002 standing in for the target).** Each table row lists, by hand, every send it expects:
+  - **Full move:** hold → copy → a new subscriber while held → tick (nothing) → release → catch-up → activate. Every step is sent once, after the hold only from the target.
+  - **Failed copy:** hold → copy → `hold:false`. Everything is sent from the source, once.
+  - **Reply after the switch:** the customer replies on the new page after the switch; the catch-up does not bring the row back.
+  - **Mid-send:** the hold lands while step 2 is being sent (hooked on the HTTP response), for a completed and a failed move. Step 2 is sent once, and the rest comes from one page.
+
+**Gaps for the contract, not fixable on one side (in `TODO.md`):**
+- **Ended on the source during the move:** a customer whose subscription ends on the source between the copy and release (exit-on-reply, an unsubscribe from a flow or the inbox) stays held on the target and is activated there. The `sequences` item has no status, and an import can't end a row. Suggested contract addition: catch-up items with `"status": "ended"`, and the target ends its held row. The same applies to a row made or changed during the hold whose customer then replies on the new site before the catch-up.
+- **Clock skew:** if Forbeast uses its own hold time as `since` and its clock is ahead of this site's, a subscription made just after the hold can be missed. Suggested: use `held_at` from the hold answer.
+- **A hold that never ends:** only `release` and `hold:false` clear the flag. If Forbeast's `hold:false` never arrives, the page's follow-ups stay held and no screen shows why. The flag is visible in page_settings history (`transfer.hold`).
+
+## PageSettings name match with "Ñ" (QA on SQLite)
+
+`PageSettings::pageQuery` compares `LOWER(TRIM(page_name))` with PHP's `mb_strtolower`. **On MySQL it cannot mismatch; no code change.**
+- **MySQL:** production runs MySQL with utf8mb4 and `utf8mb4_unicode_ci` (`config/database.php`). MySQL's `LOWER()` uses the column's Unicode case mapping for utf8mb4 (`LOWER('Ñ')` = `ñ`), and the `=` comparison is case-insensitive under that collation anyway, so both sides match.
+- **SQLite:** its built-in `LOWER()` folds ASCII only, so `Ñ` stays `Ñ` and the match fails. That is what QA saw, and it affects only QA and test databases.
+- **PostgreSQL:** `lower()` follows the database locale. With a C/POSIX locale non-ASCII letters may not fold, so the same mismatch is possible there.
+- **Not run against a live database:** this worktree's local database is PostgreSQL and was not running, and the local MySQL needs credentials this session doesn't hold. The MySQL behaviour above comes from MySQL's documented utf8mb4 case mapping and collation.
+- **Suggestion for the owner (not built, legacy rule):** the SQLite/pgsql path could compare `page_name` in PHP, or keep a lower-cased key, if QA keeps running on SQLite.
+
 ## Story changes
 
 - **S-164.3:** added that a name `_all` → 422 (from the review: the Setup box name), and that a taken page is listed on `/chatbot/pages` with the bot Off (needed for "until the CEO sets it up and turns it on").
@@ -85,6 +124,9 @@ Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took 
 - **S-164.5:** a missing name lists the names under `names` (Forbeast's contract notes).
 - **S-164.9 (new):** copied follow-ups keep the customer's last message time (the ruling on the escalation), including "clear all fields" and a future time (from the review).
 - **S-164.10 (new):** each Forbeast refusal code shows a plain message (Forbeast's contract notes).
+- **S-164.11 (new):** the hold on the source, held-on-create, and `hold:false` resuming as before (contract amendment 2). Added from the code: page-off rows are not resumed while held.
+- **S-164.12 (new):** `sequences?since=` for the catch-up, also after release; no step sent twice in a full or a failed move (contract amendment 2). Added from the code: rows held by an earlier failed move to this site are not copied.
+- **S-164.6 (wording unchanged, behaviour narrowed):** release still ends subscriptions `transferred`, and now keeps their step and send time for the catch-up.
 - **Older tests updated:** three tests pinned the CEO's exact Chatbot tab list (`ChatbotInboxTest` S-074.5, `ChatbotSequencePagesTest` S-070.1, `ChatbotTabsTest` S-069.T1). They now end with "Owners", the intended new CEO-only tab.
 
 ## Cases
@@ -100,6 +142,8 @@ Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took 
 | S-164.7 | Chatblast + Botcake + PageSettings suites | pass (see below) |
 | S-164.9 | `ChatbotSequenceEngineTest::test_S_164_9_a_copied_follow_up_uses_the_customer_last_message_time_from_the_old_site` (4 rows: 10:00 / 12:00 / 14:00 → sent; older than 24 h → skipped "outside 24h"; none → skipped; cleared all fields → sent), `GatewaySitePagesTest::test_S_164_9_sequences_carry_the_customer_last_message_time_and_the_import_keeps_the_newer_one` | pass |
 | S-164.10 | `PageOwnersScreenTest::test_S_164_10_each_forbeast_refusal_code_is_shown_as_a_plain_message` (7 rows) | pass |
+| S-164.11 | `GatewaySitePagesTest::test_S_164_11_hold_pauses_the_page_follow_ups_new_ones_are_created_held_and_hold_false_resumes_them_as_they_were` | pass |
+| S-164.12 | `GatewaySitePagesTest::test_S_164_12_export_sequences_since_the_hold_lists_the_ones_created_or_changed_since_then_also_after_release`, `ChatbotSequenceEngineTest::test_S_164_12_a_page_move_never_sends_a_step_twice` (5 rows: completes; copy fails → hold:false; reply on the new page after the switch; hold mid-send + completes; hold mid-send + copy fails) | pass |
 | S-164.8 (P2) | `PageOwnersScreenTest::test_S_164_8_the_screen_is_cards_that_fit_a_phone` | pass: markup only (no wide table, `min-w-0` cards, full-width inputs, viewport meta) |
 
 Red runs:
@@ -109,6 +153,12 @@ Red runs:
 - **Review fix:** 5 failures before the fix (the `_all` rows, the held status, activate scoping).
 - **The 24 h ruling and the contract notes:** 12 failures before the code. The 7 refusal rows showed Forbeast's raw text. The export had no `last_message_at`. The import stored no time. The two `missing_names` bodies had no `names`. The 10:00 / 12:00 / 14:00 row sent nothing (`[]` instead of `['Seq 2']`). The "older than 24 h" and "none" rows passed before and after: they pin today's rule.
 - **Review minors fixed:** 2 failures before the fix. The "cleared all fields" row sent nothing. A future time was stored as `2026-12-31 00:00:00` instead of now.
+- **Contract amendment 2:** both S-164.11 and S-164.12 (GatewaySitePagesTest) failed with 404 (no hold route) before the code. The first green run of S-164.11 then caught a page-off row resumed during the hold ("The unexpected RunChatbotSequenceStep job was pushed"), and `resumePaused` was fixed. The stale-row case failed ("two arrays are identical") with the release clean-up disabled. The move test's first two rows were written with the code. They were run red against two mutations, no held-on-create and release nulling the send time, and each failed.
+- **Review fix (amendment 2):** 5 failures before the fix.
+  - The reply row sent `1002 7001 Seq 2` / `Seq 3` after the reply: the catch-up brought the row back.
+  - Both mid-send rows sent `Seq 2` twice.
+  - The since export also listed 7001, changed only by release.
+  - The hold answer had no `held_at`.
 
 ## Suite
 
@@ -118,6 +168,8 @@ Red runs:
 - **First run on the branch:** 1375 tests, 3 failures. All three were the tab-list expectations above, since updated.
 - **After the first review fix:** 1378 tests, OK (1 skipped, the same as the baseline); no new failures.
 - **Final, after the 24 h ruling, the contract notes and the second review:** 1390 tests, 0 failures, 0 errors, 1 skipped (the same as the baseline); no new failures. PHPUnit also reports 57 runner deprecations. They are doc-comment test metadata in older test files (e.g. `BotcakeAsyncSendTest`), none in the 164 tests.
+- **After contract amendment 2 (hold):** 1394 tests, 0 failures, 1 skipped.
+- **Final, after its review fix:** 1397 tests, 9375 assertions, 0 failures, 0 errors, 1 skipped (the same as the baseline), 57 runner deprecations as before. No new failures against 87cb0e1e.
 
 ## Review
 
@@ -141,6 +193,23 @@ Escalated: the 24 h window. It is now resolved by the ruling (above).
   - concurrent identical imports can answer 500 once (Forbeast retries).
 - **No change:** a note that the export takes the latest chat by time while `runStep` takes it by id; both give the same answer in practice.
 
+**Third pass (contract amendment 2):** `skeptic-reviewer`, adversarial depth, opus, on `5fac5aa4..18241400`, one pass as asked; no re-check of the fix. It found 3 majors and 9 minors.
+- **Fixed in one loop** (commit `f7993413`, test-first, 5 red rows first):
+  - **Major, mid-send:** a step being sent when the hold lands was sent but not advanced, so it was sent again by the target, or by the source after `hold:false`.
+  - **Major, release bump:** release bumped `updated_at`, so the catch-up carried every row and brought back rows the new site had ended (a reply after the switch).
+  - **Minors on the new route:**
+    - `hold:false` is now scoped to its own transfer, and a newer hold takes over;
+    - the transfer id is required;
+    - `held_at` is answered, against clock skew;
+    - the unlisted `released` key is dropped;
+    - the restart-while-held and stale-row status tests were added.
+- **Major, open (contract gap, needs both sides):** a source-side exit during the move is not carried to the target. See "Gaps for the contract" above and `TODO.md`.
+- **Accepted, with reasons in `TODO.md`:**
+  - the hold flag never expires;
+  - a 2 s settings memo can let a subscription made right at the hold start un-held;
+  - "next send" is shown on ended `transferred` rows;
+  - the rarer tests: unsigned hold, and `hold:false` after release.
+
 The other minors are accepted with reasons in `TODO.md` (164 section):
 - the signature doesn't cover method and path (the contract's choice)
 - a half-made page after a failed move
@@ -162,4 +231,4 @@ The other minors are accepted with reasons in `TODO.md` (164 section):
 - **Each site's identity:** the site system's `webhook_url` in Forbeast is the site's origin (`https://likhaaitech.com`, `https://incepxion.pro`). Each site's `APP_URL` must keep its own host: Part P names this site from it.
 - **Order:** deploy after Forbeast 024 is live, or before it. Without the env lines the screen only says "not linked" and the endpoints answer 503.
 
-164: done — the Owners screen, the five Forbeast endpoints and the held follow-up copy all work, and copied follow-ups now keep the customer's last message time, so they send within the same 24 h on the new site.
+164: done — this site's side of the hold is built (hold endpoint, held-on-create, sequences?since= catch-up, a step mid-send recorded once), tested so no step is sent twice; the Ñ mismatch is SQLite-only (no MySQL change); a source-side exit during a move needs a contract addition on both sides.
