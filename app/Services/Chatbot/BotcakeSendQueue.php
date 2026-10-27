@@ -25,7 +25,9 @@ class BotcakeSendQueue
     public const MARK = 'send:'; // ang __ai ng customer habang hinihintay ang resulta ng padala
     public const CHATBOT_SECONDS = 600; // gaya ng naghihintay na worker sa matagal na pila; ang chat na lampas 30 minuto ay hindi na sinasagot
     public const DEAD_POOL_SECONDS = 60; // ang "sending" ay ibinabalik lang kapag ganito na katagal walang heartbeat (hindi ang mabagal na pool)
-    public const CHATBLAST_SECONDS = 240; // mas maikli sa lock ng customer ng chatblast (300 s)
+    // Ang paghihintay sa pila ay walang bayad (ang lock ng customer ay kinukuha ng pool kapag sinimulan na ang mensahe), kaya
+    // ang deadline ay para lang sa talagang naipit (hal. patay ang pool), hindi sa mahabang pila ng malaking chatblast.
+    public const CHATBLAST_SECONDS = 3 * 3600;
     public const KEEP_DAYS = 2;
     public const REDISPATCH_SECONDS = 30;
 
@@ -73,14 +75,17 @@ class BotcakeSendQueue
         return $id;
     }
 
-    /** Ang tatlong hakbang ng isang chatblast na mensahe bilang ticket, kasama ang lock ng customer na hawak ng job. */
-    public static function submitChatblast(BotcakeMessage $m, array $cfg, string $lockKey, string $lockOwner): bool
+    /**
+     * Ang tatlong hakbang ng isang chatblast na mensahe bilang ticket. Walang lock habang naghihintay sa pila: ang pool ang
+     * kukuha ng lock ng customer kapag sinimulan na ang mensahe (started), at ang ayos kada customer ay sa claim.
+     */
+    public static function submitChatblast(BotcakeMessage $m, array $cfg, string $lockKey): bool
     {
-        if (!self::enabled() || $lockOwner === '') return false;
+        if (!self::enabled()) return false;
         DB::table(self::TABLE)->insert([
             // Ang Delivering ay nauuna sa ibang chatblast (gaya ng chatblast-high sa Horizon).
             'request_id' => (string) Str::uuid(), 'kind' => 'chatblast', 'priority' => $m->kind === ChatblastSender::HIGH_KIND ? 1 : 2, 'customer' => $lockKey,
-            'page_id' => (int) $cfg['page_id'], 'page_name' => $m->page_name, 'psid' => (string) $m->psid, 'message_id' => $m->id, 'lock_owner' => $lockOwner,
+            'page_id' => (int) $cfg['page_id'], 'page_name' => $m->page_name, 'psid' => (string) $m->psid, 'message_id' => $m->id,
             'payload' => json_encode(['lock_key' => $lockKey]), // ang token at mga ID ay binabasa ng pool sa page settings
             'status' => 'pending', 'deadline_at' => now()->addSeconds(self::CHATBLAST_SECONDS), 'created_at' => now(), 'updated_at' => now(),
         ]);
@@ -176,16 +181,42 @@ class BotcakeSendQueue
         return true;
     }
 
-    /** Tapos na ang chatblast na mensahe (ang status ay naisulat na ng stepper): bitawan ang lock at itakda ang gap. */
+    /**
+     * Tapos na ang chatblast na mensahe (ang status ay naisulat na ng stepper): bitawan ang lock at itakda ang gap. Kapag
+     * hindi pa nakuha ang lock (natapos bago magsimula, hal. nagbago ang page settings), walang gap: walang naipadala.
+     */
     public static function finishChatblast(object $row, ?string $owner): bool
     {
         $q = DB::table(self::TABLE)->where('id', $row->id);
         if ($owner !== null) $q->where('status', 'sending')->where('claimed_by', $owner);
         else $q->where('status', 'pending');
         if ($q->update(['status' => 'done', 'done_at' => now(), 'updated_at' => now()]) !== 1) return false;
-        app(ChatblastSender::class)->afterPool((string) $row->customer, (string) $row->lock_owner);
+        if ((string) $row->lock_owner !== '') app(ChatblastSender::class)->afterPool((string) $row->customer, (string) $row->lock_owner);
 
         return true;
+    }
+
+    /**
+     * Sinimulan ng pool ang chatblast na hawak nito: ang lock ng customer ($lockOwner) ay itinatala sa ticket, para mabitawan
+     * ng finishChatblast, recover o sweep. false = hindi na hawak ng $owner.
+     */
+    public static function started(object $row, string $owner, string $lockOwner): bool
+    {
+        if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)
+            ->update(['lock_owner' => $lockOwner, 'updated_at' => now()]) !== 1) return false;
+        $row->lock_owner = $lockOwner;
+
+        return true;
+    }
+
+    /**
+     * Hindi pa masisimulan ang chatblast (may hawak ng customer o nasa gap pa): balik sa pending, kukunin ulit pagkalipas ng
+     * $seconds. Walang nabibigo at walang job na ibinabalik; ang kasunod ng customer ay naghihintay pa rin sa likod nito.
+     */
+    public static function later(object $row, string $owner, int $seconds): bool
+    {
+        return DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)
+            ->update(['status' => 'pending', 'claimed_by' => null, 'next_at' => now()->addSeconds($seconds), 'updated_at' => now()]) === 1;
     }
 
     /**
@@ -203,8 +234,15 @@ class BotcakeSendQueue
             $back = fn () => DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)
                 ->update(['status' => 'pending', 'claimed_by' => null, 'called_at' => null, 'updated_at' => now()]);
             if ($row->kind === 'chatblast') {
-                if (app(ChatblastSender::class)->lost((int) $row->message_id, $row->called_at !== null)) $back();
-                else self::finishChatblast($row, $row->claimed_by);
+                if (app(ChatblastSender::class)->lost((int) $row->message_id, $row->called_at !== null)) {
+                    // Naghihintay ulit sa pila: hindi hawak ang lock ng customer (kukunin ulit ng pool kapag sinimulan).
+                    if ($back() === 1 && (string) $row->lock_owner !== '') {
+                        Cache::restoreLock((string) $row->customer, (string) $row->lock_owner)->release();
+                        DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['lock_owner' => null]);
+                    }
+                } else {
+                    self::finishChatblast($row, $row->claimed_by);
+                }
             } elseif ($row->called_at === null) {
                 $back();
             } else {

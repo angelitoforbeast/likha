@@ -159,7 +159,7 @@ class ChatblastSender
         SendChatblastMessage::dispatch($m->id)->delay(now()->addSeconds($this->gap() + 1));
     }
 
-    private function gap(): int
+    public function gap(): int
     {
         return max(0, (int) config('services.botcake.chatblast_customer_gap', 20));
     }
@@ -298,7 +298,6 @@ class ChatblastSender
             $this->later($m);
             return;
         }
-        $handed = false;
         try {
             if (Cache::has($key . ':gap')) {
                 $this->later($m);
@@ -317,23 +316,46 @@ class ChatblastSender
                 BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]);
                 return;
             }
-            // Sa botcake:send-pool (kapag buhay): doon ang tatlong hakbang, at ang pool ang magtatakda ng gap at bibitaw ng
-            // lock (afterPool). Bakante agad ang worker.
-            if (BotcakeSendQueue::submitChatblast($m, $cfg, $key, (string) $lock->owner())) {
-                $handed = true;
-                return;
-            }
+            // Sa botcake:send-pool (kapag buhay): doon ang tatlong hakbang. Ang lock ay binibitawan na ngayon (walang hawak habang
+            // naghihintay sa pila); kukunin ulit ng pool kapag sinimulan ang mensahe (poolStart). Bakante agad ang worker.
+            if (BotcakeSendQueue::submitChatblast($m, $cfg, $key)) return;
             try {
                 $this->sendSteps($m, $cfg);
             } finally {
                 Cache::put($key . ':gap', 1, $this->gap()); // ilang segundo pa bago ang susunod na mensahe sa customer
             }
         } finally {
-            if (!$handed) $lock->release();
+            $lock->release();
         }
     }
 
-    /** Tapos na ang pool sa mensahe: ang gap ng customer, saka ang lock na hawak mula sa job. */
+    /** Ang lock ng customer na kinukuha ng pool: ang tatlong hakbang, kasama ang ulit ng sulat at basa (15 s, saka 60 s). */
+    public const POOL_LOCK_SECONDS = 900;
+
+    /**
+     * Sinisimulan ng pool ang mensahe (hindi noong pumila): ang lock ng customer, ang gap, at ang ibang campaign ng waybill na
+     * naipadala habang naghihintay ito. @return string|null ang may-ari ng lock (ituloy), null kapag hindi pa ngayon (may
+     * hawak o nasa gap pa), o '' kapag tapos na ang mensahe nang walang padala (nilaktawan).
+     */
+    public function poolStart(BotcakeMessage $m, string $key): ?string
+    {
+        $lock = Cache::lock($key, self::POOL_LOCK_SECONDS);
+        if (!$lock->get()) return null;
+        if (Cache::has($key . ':gap')) {
+            $lock->release();
+            return null;
+        }
+        if (!$m->is_test && ($why = $this->chatblast->sentByOtherCampaign($m)) !== null) {
+            $this->finish($m, 'skipped', $why, null, []);
+            BotcakeMessage::whereKey($m->id)->update(['dedupe_key' => null]); // gaya ng sa job: bukas ay may sariling row ulit
+            $lock->release();
+            return '';
+        }
+
+        return (string) $lock->owner();
+    }
+
+    /** Tapos na ang pool sa mensahe: ang gap ng customer, saka ang lock na kinuha ng pool. */
     public function afterPool(string $key, string $owner): void
     {
         Cache::put($key . ':gap', 1, $this->gap());
