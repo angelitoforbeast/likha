@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Services\Chatbot\ForbeastSite;
+use App\Services\Chatbot\PageTransfers;
+use App\Services\PageSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -139,11 +141,26 @@ class ChatbotOwnersController extends Controller
             }
             $pic = $str($p['picture_url'] ?? null, 500);
             $out[] = ['id' => $id, 'name' => $name, 'picture' => $pic !== null && str_starts_with($pic, 'https://') ? $pic : null,
-                'owner' => $site($p['owner'] ?? null), 'connected_at' => $str($p['connected_at'] ?? null, 40), 'pending' => $pending];
+                'owner' => $site($p['owner'] ?? null), 'connected_at' => $str($p['connected_at'] ?? null, 40), 'pending' => $pending, 'hold' => $this->hold($id)];
         }
         usort($out, fn ($a, $b) => strcasecmp($a['name'], $b['name']));
 
         return $out;
+    }
+
+    /**
+     * Ang hold dito ng isang paglipat (naka-pause ang follow-ups ng page): ang id at kailan, o null. Walang expiry: nakikita
+     * ito ng CEO hanggang ang release o ang hold:false ng Forbeast.
+     * @return array{transfer: string, since: string}|null
+     */
+    private function hold(string $metaPageId): ?array
+    {
+        $page = app(PageTransfers::class)->page($metaPageId);
+        if ($page === null) return null;
+        $row = app(PageSettings::class)->pageQuery($page)->where('provider', PageTransfers::HOLD_PROVIDER)->where('key', PageTransfers::HOLD_KEY)
+            ->where('active', true)->orderByDesc('id')->first(['value', 'created_at']);
+
+        return $row === null ? null : ['transfer' => (string) $row->value, 'since' => $row->created_at->toIso8601String()];
     }
 
     /** @return array<int, array> ang mga array lang ng isang listahan */

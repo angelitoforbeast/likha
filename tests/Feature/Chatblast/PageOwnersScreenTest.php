@@ -195,6 +195,22 @@ class PageOwnersScreenTest extends ChatblastTestCase
             ->assertSessionHas('owners_error', $shown);
     }
 
+    public function test_S_164_13_a_page_held_here_for_a_transfer_says_its_follow_ups_are_paused_since_when(): void
+    {
+        $this->forbeast();
+        $s = app(\App\Services\PageSettings::class);
+        $s->set('Page Uno', 'botcake', 'page_id', '1001', false, null, true);
+        $s->set('Page Dos', 'botcake', 'page_id', '2002', false, null, true);
+        $this->travelTo('2026-10-27 09:00:00');
+        $s->set('Page Uno', 'transfer', 'hold', '41', false, null, true);
+        $this->travelTo('2026-10-29 09:00:00');
+        $this->actingAs($this->user());
+        $html = $this->get('/chatbot/owners')->assertOk()->getContent();
+
+        $this->assertMatchesRegularExpression('#data-page="1001"((?!data-page=)[\s\S])*Follow-ups paused for transfer \#41 since Oct 27, 2026 9:00 AM#', $html);
+        $this->assertSame(1, substr_count($html, 'Follow-ups paused'), 'only the held page');
+    }
+
     public function test_S_164_8_the_screen_is_cards_that_fit_a_phone(): void
     {
         $this->forbeast();

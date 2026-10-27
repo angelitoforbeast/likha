@@ -246,7 +246,7 @@ class GatewaySitePagesTest extends ChatblastTestCase
 
         $res = $this->signed('GET', '/api/gateway/site/pages/1001/export?part=sequences')->assertOk();
 
-        $this->assertSame([['psid' => 7001, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-28T09:30:00+08:00', 'enrolled_via' => 'flow', 'last_message_at' => null]], $res->json('items'));
+        $this->assertSame([['psid' => 7001, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-28T09:30:00+08:00', 'enrolled_via' => 'flow', 'last_message_at' => null, 'status' => 'active']], $res->json('items'));
         $this->assertNull($res->json('next'));
     }
 
@@ -458,6 +458,58 @@ class GatewaySitePagesTest extends ChatblastTestCase
         $this->assertSame([[7002, 1, '2026-10-28T10:05:00+08:00']], array_map(fn ($i) => [$i['psid'], $i['current_step'], $i['next_send_at']], $items));
         $this->assertSame('transfer not activated', DB::table('chatbot_sequence_subscriptions')->where('id', $stale)->value('exit_reason'));
         $this->assertSame([], $this->signed('GET', '/api/gateway/site/pages/1001/export?part=sequences')->json('items'), 'without since: only running subscriptions');
+    }
+
+    public function test_S_164_13_the_catch_up_carries_each_status_ended_since_the_hold_but_never_a_release_ending(): void
+    {
+        $this->travelTo('2026-10-28 08:00:00');
+        $seq = $this->sequence('PREORDER');
+        $this->sub($seq->id, 7001, 'active', 2);
+        $this->sub($seq->id, 7003, 'active', 3);
+        $this->travelTo('2026-10-28 09:00:00');
+        $heldAt = $this->signed('POST', '/api/gateway/site/pages/1001/hold', ['hold' => true])->assertOk()->json('held_at');
+        $this->travelTo('2026-10-28 09:05:00');
+        app(ChatbotSequences::class)->unsubscribe($seq->id, 1001, 7001, 'inbox'); // ends on the source during the hold
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7002, 'flow');
+        $since = '/api/gateway/site/pages/1001/export?part=sequences&since=' . urlencode($heldAt);
+        $pick = fn ($items) => array_map(fn ($i) => [$i['psid'], $i['status'], $i['exit_reason'] ?? null], $items);
+
+        // The catch-up runs after the switch and before release: an ended row comes as ended with its reason.
+        $this->assertSame([[7001, 'ended', 'inbox'], [7002, 'active', null]], $pick($this->signed('GET', $since)->json('items')));
+        $this->assertSame([[7003, 'active', null], [7002, 'active', null]], $pick($this->signed('GET', '/api/gateway/site/pages/1001/export?part=sequences')->json('items')), 'without since: running ones, active');
+
+        // A row release ended (7003, and 7002's ending) is never sent as ended.
+        $this->signed('POST', '/api/gateway/site/pages/1001/release', ['to' => 'incepxion'])->assertOk();
+        $this->assertSame([[7001, 'ended', 'inbox'], [7002, 'active', null]], $pick($this->signed('GET', $since)->json('items')));
+    }
+
+    public function test_S_164_13_an_ended_item_ends_the_held_row_and_a_row_ended_here_after_the_switch_is_never_reopened(): void
+    {
+        Queue::fake();
+        $this->travelTo('2026-10-01 08:00:00');
+        $seq = $this->sequence('PREORDER');
+        $stale = $this->sub($seq->id, 7004, 'unsubscribed', 2, '2002'); // left here by an older move away: the copy brings it back
+        $item = fn (int $psid, string $status = 'active', ?string $reason = null) => ['psid' => $psid, 'sequence' => 'PREORDER', 'current_step' => 2,
+            'next_send_at' => '2026-10-28T10:00:00+08:00', 'enrolled_via' => 'flow', 'status' => $status] + ($reason !== null ? ['exit_reason' => $reason] : []);
+        $import = fn (array $items) => $this->signed('POST', '/api/gateway/site/pages/2002/import?part=sequences', ['items' => $items]);
+        $row = fn (int $psid) => array_values((array) DB::table('chatbot_sequence_subscriptions')->where('page_id', 2002)->where('psid', $psid)->first(['status', 'exit_reason', 'next_send_at']));
+
+        $this->travelTo('2026-10-28 09:10:00');
+        $import([$item(7001), $item(7002), $item(7004)])->assertOk();
+        $this->assertSame(['paused', 'transfer 77', '2026-10-28 10:00:00'], $row(7004));
+        $this->signed('POST', '/api/gateway/site/pages/2002/adopt', ['name' => 'Page Dos', 'token' => 'fbp_tok_1', 'mode' => 'transfer'])->assertOk();
+        $this->travelTo('2026-10-28 09:20:00');
+        app(ChatbotSequences::class)->unsubscribe($seq->id, 2002, 7002, 'reply'); // the customer writes to the new site
+
+        $this->assertArrayHasKey('items.0.status', $import([['psid' => 7009, 'sequence' => 'PREORDER', 'current_step' => 1, 'next_send_at' => null, 'status' => 'gone']])->assertStatus(422)->json('errors'));
+        foreach ([1, 2] as $_) $import([$item(7001, 'ended', 'inbox'), $item(7002), $item(7005, 'ended', 'reply')])->assertOk();
+
+        $this->assertSame(['unsubscribed', 'inbox', null], $row(7001), 'ended, never sent');
+        $this->assertSame(['unsubscribed', 'reply', null], $row(7002), 'not re-opened by the catch-up');
+        $this->assertSame([], $row(7005), 'an ended item without a held row makes none');
+        $this->signed('POST', '/api/gateway/site/pages/2002/activate')->assertOk();
+        $this->assertSame([['active', 7004]], DB::table('chatbot_sequence_subscriptions')->where('page_id', 2002)->where('status', 'active')->get()->map(fn ($r) => [$r->status, (int) $r->psid])->all());
+        $this->assertSame($stale, (int) DB::table('chatbot_sequence_subscriptions')->where('psid', 7004)->value('id'));
     }
 
     // ---- release / activate ----
