@@ -1,6 +1,6 @@
 # Result 164: page owners and transfers between the partner sites
 
-Status: done. The escalated major (copied follow-ups and the 24 h window) is resolved by the reviewer's ruling, and contract amendment 2 (the hold) is built on this side; one contract gap is open for both sides (below). Branch `feat/164-page-owner-transfers`, cut from `87cb0e1e`.
+Status: done. The escalated major (copied follow-ups and the 24 h window) is resolved by the reviewer's ruling; contract amendments 2 (the hold) and 3 (status on the catch-up, the new order, `held_at`, the Owners hold note) are built on this side. Branch `feat/164-page-owner-transfers`, cut from `87cb0e1e`.
 
 ## What shipped
 
@@ -107,6 +107,23 @@ Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took 
 - **Clock skew:** if Forbeast uses its own hold time as `since` and its clock is ahead of this site's, a subscription made just after the hold can be missed. Suggested: use `held_at` from the hold answer.
 - **A hold that never ends:** only `release` and `hold:false` clear the flag. If Forbeast's `hold:false` never arrives, the page's follow-ups stay held and no screen shows why. The flag is visible in page_settings history (`transfer.hold`).
 
+## Contract amendment 3: status on the catch-up (this site's side)
+
+The gaps above are closed by the reviewer's ruling. The end of the move is now: check → hold source → copy values, sequences, fields → switch (adopt on target) → **sequences catch-up** → release source → fields catch-up → activate target. Forbeast drives the order; this site's endpoints follow it.
+
+**As built:**
+- **`export?part=sequences` items carry `status`.**
+  - Every item is `"status": "active"` (running, page-off paused, or held by the hold).
+  - With `since` only, a row ended on the source since the hold (`unsubscribed`, `completed` or `error`, e.g. exit on reply, an unsubscribe from a flow or the inbox, finished) also comes, as `"status": "ended"` with `"exit_reason"`; a finished one has `exit_reason: "completed"`.
+  - Rows ended by release (`transferred`) or by an earlier failed move here (`transfer not activated`) are never `ended`. Asked after release, a `transferred` row still comes as `active`, as before, so a late catch-up keeps working.
+- **Import of `sequences`:**
+  - `status` is optional (absent = `active`); anything other than `active`/`ended` → 422 `items.N.status`, nothing saved.
+  - An `ended` item ends this transfer's held row for that sequence and customer (`unsubscribed`, or `completed` when the reason is `completed`; the reason kept, up to 60 characters; no send time). It is never sent and activate skips it. With no held row it does nothing and makes no row.
+  - An `active` item upserts held as before. A row this site ended **after the switch** (e.g. the customer replied on the new site) is never re-opened. The switch is recorded by `adopt` as a page setting `transfer.adopted = <transfer id>` (history kept; its `created_at` is the switch time, and a retried adopt keeps it). The first copy comes before the switch, so a stale ended row from an older move away is still brought back then, as before.
+- **Hold answer:** `{"held": n, "held_at": "<ISO 8601 with offset>"}`. `held_at` is now taken just before the hold, on this site's clock. `hold:false` is unchanged and idempotent.
+- **Owners screen:** a page held here shows "Follow-ups paused for transfer #<id> since <time>" (Manila time) from the active `transfer.hold` setting. No expiry timer; Forbeast keeps retrying `hold:false` on its stuck/failed path.
+- **No migration.** The marker is a page_settings row.
+
 ## PageSettings name match with "Ñ" (QA on SQLite)
 
 `PageSettings::pageQuery` compares `LOWER(TRIM(page_name))` with PHP's `mb_strtolower`. **On MySQL it cannot mismatch; no code change.**
@@ -126,6 +143,9 @@ Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took 
 - **S-164.10 (new):** each Forbeast refusal code shows a plain message (Forbeast's contract notes).
 - **S-164.11 (new):** the hold on the source, held-on-create, and `hold:false` resuming as before (contract amendment 2). Added from the code: page-off rows are not resumed while held.
 - **S-164.12 (new):** `sequences?since=` for the catch-up, also after release; no step sent twice in a full or a failed move (contract amendment 2). Added from the code: rows held by an earlier failed move to this site are not copied.
+- **S-164.12 (order changed):** the end of the move is now switch → catch-up → release → activate (contract amendment 3). The move test now uses the hold answer's `held_at` as `since`.
+- **S-164.13 (new):** catch-up items carry `status`; an ended item ends the held row; a release ending is never `ended`; no re-open after the switch; the Owners hold note (contract amendment 3). Added from the code: an `ended` item without a held row makes none, and a customer who replies on the old page, is subscribed again during the hold, and then replies on the new page stays ended.
+- **S-164.4 (shape):** the exact export item now ends with `"status": "active"`.
 - **S-164.6 (wording unchanged, behaviour narrowed):** release still ends subscriptions `transferred`, and now keeps their step and send time for the catch-up.
 - **Older tests updated:** three tests pinned the CEO's exact Chatbot tab list (`ChatbotInboxTest` S-074.5, `ChatbotSequencePagesTest` S-070.1, `ChatbotTabsTest` S-069.T1). They now end with "Owners", the intended new CEO-only tab.
 
@@ -143,7 +163,8 @@ Still for the owner: `__bot_paused` is a `__*` key, so a customer a person took 
 | S-164.9 | `ChatbotSequenceEngineTest::test_S_164_9_a_copied_follow_up_uses_the_customer_last_message_time_from_the_old_site` (4 rows: 10:00 / 12:00 / 14:00 → sent; older than 24 h → skipped "outside 24h"; none → skipped; cleared all fields → sent), `GatewaySitePagesTest::test_S_164_9_sequences_carry_the_customer_last_message_time_and_the_import_keeps_the_newer_one` | pass |
 | S-164.10 | `PageOwnersScreenTest::test_S_164_10_each_forbeast_refusal_code_is_shown_as_a_plain_message` (7 rows) | pass |
 | S-164.11 | `GatewaySitePagesTest::test_S_164_11_hold_pauses_the_page_follow_ups_new_ones_are_created_held_and_hold_false_resumes_them_as_they_were` | pass |
-| S-164.12 | `GatewaySitePagesTest::test_S_164_12_export_sequences_since_the_hold_lists_the_ones_created_or_changed_since_then_also_after_release`, `ChatbotSequenceEngineTest::test_S_164_12_a_page_move_never_sends_a_step_twice` (5 rows: completes; copy fails → hold:false; reply on the new page after the switch; hold mid-send + completes; hold mid-send + copy fails) | pass |
+| S-164.12 | `GatewaySitePagesTest::test_S_164_12_export_sequences_since_the_hold_lists_the_ones_created_or_changed_since_then_also_after_release`, `ChatbotSequenceEngineTest::test_S_164_12_a_page_move_never_sends_a_step_twice` (7 rows: completes; copy fails → hold:false; reply on the new page after the switch; unsubscribed on the old page during the hold; replied and subscribed again on the old page then replied on the new; hold mid-send + completes; hold mid-send + copy fails) | pass |
+| S-164.13 | `GatewaySitePagesTest::test_S_164_13_the_catch_up_carries_each_status_ended_since_the_hold_but_never_a_release_ending`, `…an_ended_item_ends_the_held_row_and_a_row_ended_here_after_the_switch_is_never_reopened`, `PageOwnersScreenTest::test_S_164_13_a_page_held_here_for_a_transfer_says_its_follow_ups_are_paused_since_when`, and the two new rows of `test_S_164_12_a_page_move…` | pass |
 | S-164.8 (P2) | `PageOwnersScreenTest::test_S_164_8_the_screen_is_cards_that_fit_a_phone` | pass: markup only (no wide table, `min-w-0` cards, full-width inputs, viewport meta) |
 
 Red runs:
@@ -159,6 +180,13 @@ Red runs:
   - Both mid-send rows sent `Seq 2` twice.
   - The since export also listed 7001, changed only by release.
   - The hold answer had no `held_at`.
+- **Contract amendment 3:** 7 failures before the code (after one test fix: the move test passed the ISO `held_at` straight to `export()`, which the controller normally converts to local time).
+  - The "unsubscribed on the old page" row sent `1002 7001 Seq 2` / `Seq 3`.
+  - The "subscribed again" row sent `1002 7001 Seq 1`–`Seq 3`: the catch-up re-opened the row.
+  - The catch-up export had no `status` (ErrorException on the missing key).
+  - The import accepted `"status": "gone"` (200 instead of 422).
+  - The Owners screen had no hold note.
+  - Two expectations of mine were wrong and were corrected, not the code: without `since` the export lists a row held by the hold as `active` (as before), and the Owners cards are sorted by name.
 
 ## Suite
 
@@ -169,9 +197,16 @@ Red runs:
 - **After the first review fix:** 1378 tests, OK (1 skipped, the same as the baseline); no new failures.
 - **Final, after the 24 h ruling, the contract notes and the second review:** 1390 tests, 0 failures, 0 errors, 1 skipped (the same as the baseline); no new failures. PHPUnit also reports 57 runner deprecations. They are doc-comment test metadata in older test files (e.g. `BotcakeAsyncSendTest`), none in the 164 tests.
 - **After contract amendment 2 (hold):** 1394 tests, 0 failures, 1 skipped.
-- **Final, after its review fix:** 1397 tests, 9375 assertions, 0 failures, 0 errors, 1 skipped (the same as the baseline), 57 runner deprecations as before. No new failures against 87cb0e1e.
+- **After amendment 2's review fix:** 1397 tests, 9375 assertions, 0 failures, 0 errors, 1 skipped, 57 runner deprecations.
+- **Final, after contract amendment 3:** 1402 tests, 9402 assertions, 0 failures, 0 errors, 1 skipped (the same as the baseline), 57 runner deprecations as before. No new failures against 87cb0e1e.
 
 ## Review
+
+**Contract amendment 3:** `skeptic-reviewer`, standard depth, one pass on `c92cb27a..6217de52`. No blocker or major; the three affected test files pass. Minors:
+- **Fixed:** S-164.13 had no story and the S-164.12 story described the old order (`qa/stories.md`, this result).
+- **Accepted, in `TODO.md`:** the move test sets `transfer.adopted` directly; an `error` source row ends as `unsubscribed`; one settings query per page on the Owners screen; a one-second precision on "ended after the switch".
+
+**Earlier rounds:**
 
 `skeptic-reviewer`, adversarial depth, opus, on 87cb0e1e..HEAD: request changes, with 3 majors.
 
@@ -231,4 +266,4 @@ The other minors are accepted with reasons in `TODO.md` (164 section):
 - **Each site's identity:** the site system's `webhook_url` in Forbeast is the site's origin (`https://likhaaitech.com`, `https://incepxion.pro`). Each site's `APP_URL` must keep its own host: Part P names this site from it.
 - **Order:** deploy after Forbeast 024 is live, or before it. Without the env lines the screen only says "not linked" and the endpoints answer 503.
 
-164: done — this site's side of the hold is built (hold endpoint, held-on-create, sequences?since= catch-up, a step mid-send recorded once), tested so no step is sent twice; the Ñ mismatch is SQLite-only (no MySQL change); a source-side exit during a move needs a contract addition on both sides.
+164: done — catch-up items carry active/ended with exit_reason, an ended item ends the held row and nothing ended on the new site after the switch is re-opened, held_at is the since, and the Owners screen shows a held page; 1402 tests green, no new failures vs 87cb0e1e.
