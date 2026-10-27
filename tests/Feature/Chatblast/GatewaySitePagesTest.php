@@ -120,6 +120,18 @@ class GatewaySitePagesTest extends ChatblastTestCase
         $this->assertSame(['Page Tres', 'Page Uno'], $this->connected);
     }
 
+    public function test_S_164_3_a_taken_page_with_only_a_forbeast_token_is_listed_on_the_chatbot_pages_with_the_bot_off(): void
+    {
+        $this->signed('POST', '/api/gateway/site/pages/2002/adopt', ['name' => 'Page Tres', 'token' => 'fbp_x', 'mode' => 'take'])->assertOk();
+        app(PageSettings::class)->set('Page Cuatro', 'forbeast', 'token', 'fbp_no_page_id', true); // walang Meta page id: hindi page
+
+        $this->actingAs($this->user());
+        $rows = collect($this->getJson('/chatbot/data')->assertOk()->json('rows'));
+
+        $this->assertSame(['Page Tres', 'Page Uno'], $rows->pluck('page')->all());
+        $this->assertSame(['page_id' => '2002', 'active' => false, 'provider' => 'gateway'], array_intersect_key($rows->firstWhere('page', 'Page Tres'), ['page_id' => 1, 'active' => 1, 'provider' => 1]));
+    }
+
     public function test_S_164_3_a_name_used_by_another_meta_page_is_409_and_nothing_is_saved(): void
     {
         $before = PageSetting::count();

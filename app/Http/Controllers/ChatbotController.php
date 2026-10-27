@@ -679,6 +679,13 @@ class ChatbotController extends Controller
     private function pages(): array
     {
         $pages = $this->settings->pagesWith('botcake', ['page_id', 'token']);
+        // Ang page na kinuha mula sa Forbeast (Owners) ay walang Botcake token: Meta page ID at Forbeast token lang.
+        $listed = array_map(fn ($p) => $this->settings->pageKey($p), $pages);
+        $withId = array_map(fn ($p) => $this->settings->pageKey($p), $this->settings->pagesWith('botcake', ['page_id']));
+        foreach ($this->settings->pagesWith(ForbeastPageSetup::PROVIDER, ['token']) as $p) {
+            $key = $this->settings->pageKey($p);
+            if (in_array($key, $withId, true) && !in_array($key, $listed, true)) $pages[] = $p;
+        }
         usort($pages, 'strcasecmp');
 
         return $pages;
