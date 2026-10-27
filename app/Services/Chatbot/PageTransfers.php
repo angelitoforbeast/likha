@@ -17,8 +17,12 @@ use Illuminate\Support\Facades\Schema;
  * - export / import: ang values ng page (ang flow ayon sa pangalan), ang customer fields (walang "__" run state) at ang
  *   mga sequence subscription (ayon sa pangalan ng sequence), hanggang 500 kada tawag. Ang import ay idempotent at lahat o wala;
  *   ang subscription ay "held": status paused at exit_reason "transfer <id>" (ang subscribe at exit on reply ay itinuturing\n *   itong naka-enroll; ang tick at resumePaused ay hindi ito kinukuha): walang padala hangga't walang activate ng paglipat na iyon;
- * - release: ang lumang site ay tumitigil (bot Off, mga subscription tapos na "transferred", ang mga wait at naghihintay na
- *   AI o padala ay kinakalimutan, ang Forbeast connection ay inactive na may history);
+ * - hold (sa source, bago kopyahin ang sequences): ang mga active na subscription ng page ay held din (paused, exit_reason
+ *   "hold <id>"), at ang bagong subscribe habang held ang page (transfer.hold) ay held agad; ang hold:false ay ibinabalik
+ *   sila gaya ng dati (parehong step at oras ng padala), kaya walang follow-up na naipapadala ng dalawang site;
+ * - release: ang lumang site ay tumitigil (bot Off, mga subscription tapos na "transferred" pero dala pa ang step at oras
+ *   para sa catch-up na sequences?since=, ang mga wait at naghihintay na AI o padala ay kinakalimutan, ang Forbeast
+ *   connection ay inactive na may history, wala nang hold);
  * - activate: ang mga held ng paglipat na ito lang ay active ulit, sa parehong step at oras ng padala.
  * Ang nasa gitna ng flow (wait, __wait, AI) ay hindi kinokopya: sa Main Flow sila magsisimula sa susunod nilang mensahe.
  * Walang value, token o secret sa log (ang PageSettings ay key lang ang itinatala).
@@ -30,6 +34,10 @@ class PageTransfers
     /** Ang held na subscription: naka-pause na may exit_reason "transfer <id>" (mga dating column at status). */
     public const HELD = 'paused';
     public const HELD_REASON = 'transfer ';
+    /** Ang held sa source habang kinokopya (ang hold): exit_reason "hold <id>"; ang page ay may transfer.hold = <id>. */
+    public const HOLD_REASON = 'hold ';
+    public const HOLD_PROVIDER = 'transfer';
+    public const HOLD_KEY = 'hold';
     /** Ang mga item ng values na hindi botfield: ang pangalan ng page, ang On/Off at ang Main Flow (ayon sa pangalan). */
     private const META_KEYS = ['name', 'active', 'flow'];
     private const VIAS = ['flow', 'inbox', 'other'];
@@ -92,7 +100,7 @@ class PageTransfers
         return match ($part) {
             'values' => ['http' => 200, 'body' => ['items' => $this->exportValues($page), 'next' => null]],
             'fields' => $this->exportFields((int) $metaPageId, $cursor, $since),
-            default => $this->exportSequences((int) $metaPageId, $cursor),
+            default => $this->exportSequences((int) $metaPageId, $cursor, $since),
         };
     }
 
@@ -128,13 +136,17 @@ class PageTransfers
     }
 
     /** @return array{http: int, body: array} */
-    private function exportSequences(int $pageId, int $cursor): array
+    private function exportSequences(int $pageId, int $cursor, ?string $since): array
     {
-        // Pati ang naka-pause dahil Off ang page (babalik kapag On sa bagong site), pero hindi ang held pa ng isang paglipat.
+        // Pati ang naka-pause dahil Off ang page o dahil sa hold (babalik sa bagong site), pero hindi ang held pa ng isang
+        // paglipat papunta rito. Ang catch-up (since = oras ng hold) ay pagkatapos ng release: kasama ang tinapos nito.
+        // ">=": ang ginawa sa mismong segundo ng hold ay hindi naiiwan (ang import ay idempotent).
         $rows = DB::table('chatbot_sequence_subscriptions as s')->join('chatbot_sequences as q', 'q.id', '=', 's.sequence_id')
             ->where('s.page_id', $pageId)->where('s.id', '>', $cursor)
+            ->when($since !== null, fn ($q) => $q->where('s.updated_at', '>=', $since))
             ->where(fn ($q) => $q->where('s.status', 'active')->orWhere(fn ($w) => $w->where('s.status', 'paused')
-                ->where(fn ($x) => $x->whereNull('s.exit_reason')->orWhere('s.exit_reason', 'not like', self::HELD_REASON . '%'))))
+                ->where(fn ($x) => $x->whereNull('s.exit_reason')->orWhere('s.exit_reason', 'not like', self::HELD_REASON . '%')))
+                ->when($since !== null, fn ($w) => $w->orWhere(fn ($x) => $x->where('s.status', 'unsubscribed')->where('s.exit_reason', 'transferred'))))
             ->orderBy('s.id')->limit(self::MAX_ITEMS)->get(['s.id', 's.psid', 'q.name', 's.current_step', 's.next_send_at', 's.enrolled_via']);
         $last = $this->lastMessages($pageId, $rows->pluck('psid')->map(fn ($p) => (int) $p)->unique()->values()->all());
         $items = $rows->map(fn ($r) => ['psid' => (int) $r->psid, 'sequence' => (string) $r->name, 'current_step' => (int) $r->current_step,
@@ -376,6 +388,38 @@ class PageTransfers
         return null;
     }
 
+    // ---- hold ----
+
+    /**
+     * Ang source bago kopyahin ang sequences: walang padala para sa page hanggang release o hold:false. Hindi binabago ang
+     * updated_at (hindi ito pagbabago ng subscription), kaya ang catch-up na sequences?since= ay ang bago lang ang dala.
+     * @return array{http: int, body: array}
+     */
+    public function hold(string $page, int $pageId, bool $hold, string $transferId): array
+    {
+        $source = 'transfer ' . $transferId . ($hold ? ' hold' : ' hold released');
+        $released = DB::transaction(function () use ($page, $pageId, $hold, $transferId, $source) {
+            if ($hold) {
+                // Una ang tanda ng page, saka ang mga row: ang subscribe na sabay ay held na rin.
+                if ($this->settings->get($page, self::HOLD_PROVIDER, self::HOLD_KEY) === null) {
+                    $this->settings->set($page, self::HOLD_PROVIDER, self::HOLD_KEY, $transferId, false, null, true, $source);
+                }
+                DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', 'active')
+                    ->update(['status' => self::HELD, 'exit_reason' => self::HOLD_REASON . $transferId, 'dispatched_at' => null]);
+
+                return 0;
+            }
+            $this->deactivate($page, self::HOLD_PROVIDER, [self::HOLD_KEY], $source);
+
+            return DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%')
+                ->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null]);
+        });
+        PageSettings::forget($page);
+        $held = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%')->count();
+
+        return ['http' => 200, 'body' => ['held' => $held] + ($hold ? [] : ['released' => $released])];
+    }
+
     // ---- release / activate ----
 
     /** @return array{http: int, body: array} */
@@ -387,8 +431,12 @@ class PageTransfers
 
         $ended = DB::transaction(function () use ($page, $pageId, $reason) {
             $this->settings->set($page, ChatbotFields::PROVIDER, 'active', '0', false, null, true, $reason);
+            // Ang naiwang held ng nabigong paglipat papunta rito ay hindi naging totoo dito: hindi ito dala ng catch-up.
+            DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HELD_REASON . '%')
+                ->update(['status' => 'unsubscribed', 'exit_reason' => 'transfer not activated', 'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
             $ended = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->whereIn('status', ['active', 'paused'])
-                ->update(['status' => 'unsubscribed', 'exit_reason' => 'transferred', 'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
+                // Ang step at oras ng padala ay naiiwan: dala ng catch-up (sequences?since=) sa bagong site; ang tick ay active lang.
+                ->update(['status' => 'unsubscribed', 'exit_reason' => 'transferred', 'dispatched_at' => null, 'updated_at' => now()]);
             // Ang nasa gitna ng flow: walang wait, walang naghihintay na AI o padala (sa bagong site sila magsisimula ulit).
             if (Schema::hasTable('chatbot_waits')) DB::table('chatbot_waits')->where('page_id', $pageId)->delete();
             DB::table('chatbot_customer_values')->where('page_id', $pageId)->whereIn('key', [CustomerFields::WAIT, CustomerFields::AI])->delete();
@@ -402,6 +450,8 @@ class PageTransfers
             }
             // Ang Forbeast connection ng page: inactive, naiiwan bilang history (walang DELETE: nailipat na ng Forbeast ang webhook).
             $this->deactivate($page, ForbeastPageSetup::PROVIDER, ['token', 'webhook_secret', 'token_status', 'permissions'], $reason);
+            // Wala nang hold: kapag bumalik ang page dito balang araw, ang bagong subscribe ay hindi held.
+            $this->deactivate($page, self::HOLD_PROVIDER, [self::HOLD_KEY], $reason);
 
             return $ended;
         });

@@ -8,7 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * /api/gateway/site/pages/{meta_page_id}/{adopt|export|import|release|activate}: ang Forbeast ang naglilipat ng page sa
+ * /api/gateway/site/pages/{meta_page_id}/{adopt|export|import|hold|release|activate}: ang Forbeast ang naglilipat ng page sa
  * pagitan ng dalawang partner site (PageTransfers). Pirma: X-Gateway-Signature = sha256=<HMAC-SHA256 ng
  * "<X-Gateway-Timestamp>.<raw body>"> (GET: walang laman ang body) gamit ang FORBEAST_SITE_SECRET, at ang timestamp ay
  * hanggang 300 s ang layo. Walang key o secret = 503 not_linked; anumang mali sa pirma = 401 bad_signature. Ang
@@ -73,6 +73,18 @@ class GatewaySiteController extends Controller
         }
 
         return self::json($this->transfers->import($metaPageId, $part, $items, $this->transfer($request)));
+    }
+
+    public function hold(Request $request, string $metaPageId): JsonResponse
+    {
+        if ($refused = $this->refused($request, $metaPageId, $raw)) return $refused;
+        $page = $this->transfers->page($metaPageId);
+        if ($page === null) return self::json(PageTransfers::error(404, 'unknown_page', 'This page is not on this site.'));
+        $data = json_decode($raw, true);
+        $hold = is_array($data) ? ($data['hold'] ?? null) : null;
+        if (!is_bool($hold)) return self::json(PageTransfers::invalid(['hold' => 'Send {"hold": true} or {"hold": false}.']));
+
+        return self::json($this->transfers->hold($page, (int) $metaPageId, $hold, $this->transfer($request)));
     }
 
     public function release(Request $request, string $metaPageId): JsonResponse

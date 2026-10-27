@@ -361,6 +361,58 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->assertSame(['Subscribed to sequence Preorder', 'Sequence Preorder step 1 ran', 'Sequence Preorder completed'], $this->events(), 'the job ran to the end');
     }
 
+    /** @return array<string, array{0: bool, 1: array<int, string>}> */
+    public static function moves(): array
+    {
+        return [
+            'the move completes: the rest comes from the new page' => [true, ['1001 7001 Seq 1', '1002 7001 Seq 2', '1002 7001 Seq 3', '1002 7002 Seq 1', '1002 7002 Seq 2']],
+            'the copy fails: hold:false and the old page sends on' => [false, ['1001 7001 Seq 1', '1001 7001 Seq 2', '1001 7001 Seq 3', '1001 7002 Seq 1', '1001 7002 Seq 2']],
+        ];
+    }
+
+    /**
+     * Both sites in one database: page 1001 is the source, page 1002 stands in for the target (export → import by name).
+     * Every step reaches every customer exactly once, from one page only.
+     */
+    #[DataProvider('moves')]
+    public function test_S_164_12_a_page_move_never_sends_a_step_twice(bool $completes, array $sends): void
+    {
+        $this->page('Page Dos', '1002');
+        Http::fake(['https://botcake.io/api/public_api/v1/pages/1002/flows/send_content' => Http::response(['success' => true])]);
+        $seq = $this->sequence('PREORDER', [[0, 'minutes', $this->flow('Seq 1')->id], [1, 'hours', $this->flow('Seq 2')->id], [1, 'hours', $this->flow('Seq 3')->id]], ['exit_on_reply' => false]);
+        $transfers = app(PageTransfers::class);
+        $copy = fn (?string $since = null) => $transfers->import('1002', 'sequences', $transfers->export('Page Uno', '1001', 'sequences', 0, $since)['body']['items'], '77');
+        $this->chat('7001');
+        $this->svc()->subscribe($seq->id, 1001, 7001, 'flow');
+        $this->tick(); // step 1 at 10:00
+
+        $this->travelTo('2026-10-20 10:30:00');
+        $holdAt = now()->format('Y-m-d H:i:s');
+        $transfers->hold('Page Uno', 1001, true, '77');
+        $this->assertSame(200, $copy()['http']);
+        $this->travelTo('2026-10-20 10:40:00');
+        $this->chat('7002');
+        $this->svc()->subscribe($seq->id, 1001, 7002, 'flow'); // created held on the source
+        $this->travelTo('2026-10-20 11:05:00');
+        $this->tick(); // 7001 step 2 is due, but both pages hold it
+
+        if ($completes) {
+            $transfers->release('Page Uno', '1001', 'incepxion');
+            $this->assertSame(200, $copy($holdAt)['http']); // the catch-up brings 7002
+            $transfers->activate(1002, '77');
+        } else {
+            $transfers->hold('Page Uno', 1001, false, '77');
+        }
+        $this->tick();
+        $this->travelTo('2026-10-20 12:10:00');
+        $this->tick();
+
+        $sent = Http::recorded(fn (HttpRequest $r) => str_ends_with($r->url(), '/flows/send_content'))
+            ->map(fn ($p) => preg_replace('#.*/pages/(\d+)/.*#', '$1', $p[0]->url()) . ' ' . $p[0]->data()['psid'] . ' ' . ($p[0]->data()['data']['content']['messages'][0]['text'] ?? ''))
+            ->sort()->values()->all();
+        $this->assertSame($sends, $sent);
+    }
+
     /** @return array<string, array{0: ?string, 1: array<int, string>, 2: array{0: string, 1: ?string}}> */
     public static function movedPages(): array
     {

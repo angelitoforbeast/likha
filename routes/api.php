@@ -22,6 +22,7 @@ Route::prefix('/gateway/site/pages/{metaPageId}')->controller(\App\Http\Controll
     Route::post('/adopt', 'adopt');
     Route::get('/export', 'export');
     Route::post('/import', 'import');
+    Route::post('/hold', 'hold');
     Route::post('/release', 'release');
     Route::post('/activate', 'activate');
 });
