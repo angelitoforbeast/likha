@@ -2740,3 +2740,22 @@ Independent test: a fake Botcake answers a send HTTP 500 twice; the customer's n
 | S-168.6 | happy | Given the reported path (image ok, text ok, text 500 twice), Then the wait=true send after it is reached and parked, and the next message resumes there | `test_S_168_6_the_reported_path_reaches_the_wait_after_a_text_fails_twice` | Passed · 2026-10-27 · auto |
 | S-168.7 | edge | The Chatblast, Botcake, PageSettings and Unit suites add no new failures (four tests that pinned "a failed send stops the run" now assert the new behaviour) | full run | Passed · 2026-10-27 · auto |
 | S-168.8 | negative | Given a question "Address po?" (wait, save to address) that fails HTTP 500 twice, When the customer sends "magkano po?", Then "Address po?" is sent again (with the one retry), address stays empty, the reply edge is not followed and the wait stays at the question; When the question is delivered and the customer then sends their address, Then it is saved as the address and the reply edge runs | `test_S_168_8_a_question_not_delivered_is_asked_again_and_the_next_message_is_not_its_answer` | Passed · 2026-10-27 · auto |
+
+## S-169 Marketing sees a failing page at once
+
+As marketing staff, I want a page that Facebook restricted, or that fails many sends, to be impossible to miss, so I can act before dozens of customers get nothing.
+
+Slice 169. Threat model: the error and raw text of a failed send come from Botcake or Meta (stored, untrusted: shown escaped, never run); page names come from page settings; the thresholds are CEO-only input on an existing form. No new route. Risk tier: medium (a UI screen and business logic behind existing access).
+Tests: `tests/Feature/Chatblast/PageProblemsTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-169.1 (P1) | Given a page with 5 "temporarily restricted" failures in the last hour, Then its Health row is red with reason "Page restricted by Facebook", and Chatbot and Chatblast screens show "⚠ <page>: Page restricted by Facebook since <first failure time> — open Health". Restricted (text or subcode 1893063) and permission (#2022, #200, "does not have permission", code 10 in the raw answer) failures get their own reason; a (#10) window error stays "Outside 24-hour window" | `test_S_169_1…` (2 tests) | passed |
+| S-169.2 (P1) | Given a page with 12 sends and 4 Botcake 500s, Then it is red (33.3%); 12 sends and 2 failed is amber; 9 sends is too few for the %; the CEO can change the page thresholds on the existing form | `test_S_169_2…` | passed |
+| S-169.3 (P1) | Given #551 (customer not reachable) failures, Then they do not count toward the page's failed % | `test_S_169_3…` | passed |
+| S-169.4 (P1) | Given no page over a threshold (failures older than 60 min, skipped sends), Then there is no banner and the table says "No page problems in the last hour" | `test_S_169_4…` | passed |
+| S-169.5 (P1) | When staff click a page in the table, Then its latest 20 failed sends open (time, reason, error cut to 150 characters, link to the customer in the Inbox) | `test_S_169_5…` | passed |
+| S-169.6 (P1) | Given a role that only has page settings (no Chatbot menu), Then it sees no banner; a role with the Chatbot menu does | `test_S_169_6…` | passed |
+| S-169.7 (P1) | The existing Health tests and the Chatblast, Botcake and PageSettings suites add no new failures | full run | passed |
+| S-169.8 (P2) | At 390 px the banner wraps and the table scrolls sideways inside its card | not tested in a browser (see result) | not run |
+| S-169.9 (P1) | Given more than 3 red pages, Then the banner lists 3 and "+N more"; it is cached up to 60 s | `test_S_169_9…` | passed |
