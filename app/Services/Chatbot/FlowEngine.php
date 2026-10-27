@@ -129,8 +129,15 @@ class FlowEngine
         if ($wait === '') return false;
         [$flowId, $nodeId] = array_pad(explode(':', $wait, 2), 2, '');
         $node = $nodes[$nodeId] ?? null;
+        $unsent = $run->fields->get(CustomerFields::WAIT_UNSENT) === $wait;
         $run->fields->clear(CustomerFields::WAIT);
         if ((int) $flowId !== $run->flowId || !$node || $node['type'] !== 'send' || empty($node['config']['wait'])) return false;
+        // Hindi naihatid ang tanong: hindi ito ang sagot (walang save, walang reply port); itatanong ulit at maghihintay.
+        if ($unsent && $run->skippedAfter === null) {
+            $run->started('question not delivered; asking again');
+
+            return $nodeId;
+        }
 
         if ($run->skippedAfter !== null) {
             // Walang sagot sa takdang oras: ang port na skipped, walang sine-save.
@@ -367,6 +374,7 @@ class FlowEngine
         }
         if (!empty($c['wait'])) {
             $run->fields->set(CustomerFields::WAIT, $run->flowId . ':' . $node['id']);
+            if (($res['status'] ?? null) === 'failed') $run->fields->set(CustomerFields::WAIT_UNSENT, $run->flowId . ':' . $node['id']);
             // Ang deadline ng skip (live lang: ang test customer ay walang tick). Ang wait na walang skip ay walang timer.
             $minutes = FlowGraph::skipMinutes($c);
             if (!$run->test) {
