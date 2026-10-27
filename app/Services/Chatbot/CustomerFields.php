@@ -75,13 +75,13 @@ class CustomerFields
     }
 
     /**
-     * "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat, ang pause ng tao,
+     * "Clear all fields": lahat ng customer field at ang paghihintay (__wait); naiiwan ang __last_chat, ang __last_message_at, ang pause ng tao,
      * at ang alaala ng AI (ang __ai_since: hindi bumabalik ang nakalimutan na).
      */
     public function clearAll(): void
     {
         foreach (array_keys($this->values) as $key) {
-            if (!in_array($key, [self::LAST_CHAT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)) $this->clear((string) $key);
+            if (!in_array($key, [self::LAST_CHAT, self::LAST_MESSAGE_AT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)) $this->clear((string) $key);
         }
     }
 }

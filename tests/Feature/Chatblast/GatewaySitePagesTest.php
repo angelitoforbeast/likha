@@ -252,6 +252,7 @@ class GatewaySitePagesTest extends ChatblastTestCase
 
     public function test_S_164_9_sequences_carry_the_customer_last_message_time_and_the_import_keeps_the_newer_one(): void
     {
+        $this->travelTo('2026-10-28 12:00:00');
         $seq = $this->sequence('PREORDER');
         foreach ([7001, 7002, 7003] as $psid) $this->sub($seq->id, $psid);
         $chat = fn (int $psid, string $at, array $payload = []) => DB::table('botcake_chats')->insert(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => (string) $psid,
@@ -281,6 +282,9 @@ class GatewaySitePagesTest extends ChatblastTestCase
         $this->assertSame(['2026-10-27 11:30:00'], $stored());
         $import(null, 9)->assertOk();
         $this->assertSame([], $stored(9));
+        // A time ahead of this site's clock is kept as now, so it cannot hold the 24 h open.
+        $import('2026-12-31T00:00:00+08:00', 9)->assertOk();
+        $this->assertSame(['2026-10-28 12:00:00'], $stored(9));
         $import('yesterday', 9)->assertStatus(422)->assertJson(['error' => 'invalid_value']);
     }
 

@@ -317,6 +317,8 @@ class PageTransfers
             $at = $next === null ? null : self::localTime($next);
             $msg = is_array($it) ? ($it['last_message_at'] ?? null) : null;
             $msgAt = $msg === null ? null : self::localTime($msg);
+            // Ang oras na lampas sa orasan dito ay ngayon: hindi nito mabubuksan ang 24 oras nang walang hangganan.
+            if ($msgAt !== null && $msgAt > now()->format('Y-m-d H:i:s')) $msgAt = now()->format('Y-m-d H:i:s');
             if ($psid === null) $errors["items.$i.psid"] = 'A customer PSID (digits) is required.';
             elseif ($name === '' || mb_strlen($name) > 120) $errors["items.$i.sequence"] = 'A sequence name is required.';
             elseif (!is_int($step) || $step < 1 || $step > 65535) $errors["items.$i.current_step"] = 'A step position (1 or more) is required.';
