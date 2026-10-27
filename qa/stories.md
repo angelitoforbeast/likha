@@ -2889,3 +2889,27 @@ Tests: `tests/Feature/Chatblast/SetupCheckEveryTenMinutesTest.php`, `tests/Featu
 | S-171.6 (P1) | Given a spec 169 red page and a page with an X, Then both banners show, the 169 one first | `test_S_171_6…` | passed |
 | S-171.7 (P1) | The existing setup-check, page-settings and 169 tests, and the Chatblast, Botcake and PageSettings suites, add no new failures | full run | passed |
 | S-171.8 (P2) | At 390 px both banners wrap inside the width | not tested in a browser (see result) | not run |
+
+## S-172 Marketing gives each ad its own item on a chatbot page
+
+As marketing staff, I want to group a page's ads and give each group its own item, price, Main Flow, flow and sequence values, with the page's values as the default, so a customer gets (and orders) the item of the ad they clicked.
+
+Slice 172. Threat model: request bodies from logged-in staff to /chatbot/ad-groups* and the Test tab, and ad IDs from chats (Botcake, Forbeast) and botcake_psids are untrusted; ad names from ads_manager_reports are shown escaped. Storage: page_settings rows, provider `adgroup` (no new table, no migration). Risk tier: high (new routes and a new write path).
+Tests: `tests/Feature/Chatblast/AdGroupsTest.php`, `AdGroupRunTest.php`, `AdGroupPagesTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-172.1 (P1) | Given a page with no groups, When a customer chats, Then the reply, values and order fields are the page values, as before | `test_S_172_1…`, existing suites | passed |
+| S-172.2 (P1) | Given group "Item A" (ads 111, 222; item Serum, price 499, Main Flow X), When a customer whose latest ad is 222 chats, Then Main Flow is X, PRICE 499 and SHOP DETAILS has Serum ₱499, and Main Flow 2 (not set in the group) is the page value; only the listed keys can be set in a group | `test_S_172_2…` (2 tests) | passed |
+| S-172.3 (P1) | Given an ad in no group (333) or no ad, Then the page values | `test_S_172_3_and_4…` (data sets) | passed |
+| S-172.4 (P1) | Given chats with 111 then 333, Then page values; 333 then 111, Then Item A; a later chat without an ad keeps the last ad; no ad in the chats uses Botcake's ad of the customer; a chat's ad wins over Botcake's | `test_S_172_3_and_4…` (7 data sets) | passed |
+| S-172.5 (P1) | Given a group with its own flow, Then that flow runs for its ads and the page flow for others; a page that is Off runs nothing; a deleted group flow falls back to the page flow with the group's values; a page with only a group flow still runs | `test_S_172_5…` | passed |
+| S-172.6 (P1) | Given a customer who entered a sequence with ad 222, When their latest ad changes to 333, Then every step uses Item A (and the reverse); "Clear all fields" keeps it | `test_S_172_6…` | passed |
+| S-172.7 (P1) | Given 111 in Item A, When 111 is saved or added to another group of the same page, Then it is refused naming "Item A", also when another worker changed the groups a moment earlier; the same ad on another page is allowed | `test_S_172_7…` (2 tests) | passed |
+| S-172.8 (P1) | "Ads not in a group yet" lists the page's ads of the last 30 days (chats and Botcake) with name, customers and last time, top 50 by customers, search by ID or name; ticking two and "Add to group" adds them; "111, 222\n333" parses three IDs and "abc" is refused | `test_S_172_8…` (4 tests) | passed |
+| S-172.9 (P1) | Group edits keep history and Restore brings back an old value; restore, delete and history only act on the posted page; restoring an ad list with an ad now in another group is refused; delete sends the ads back to the page values and a deleted group can't be restored | `test_S_172_9…` (3 tests) | passed |
+| S-172.10 (P1) | Given a user without /chatblast access (who can't edit page values), Then every ad group route answers 403 and nothing is written; a role with access can read and write | `test_S_172_10…` | passed |
+| S-172.11 (P1) | The Forbeast page values API, botfields without a group, the /chatbot columns and the generic page-settings grid show only page values; the grid can't write or clear group rows | `test_S_172_11…` | passed |
+| S-172.12 (P1) | The Chatblast, Botcake, PageSettings and OrderEncode suites add no new failures | full run | passed |
+| S-172.13 (P2) | At 390 px the Ad groups section, the editor, the history and the list fit the width | headless Chrome on a static copy of the modal (see result) | passed |
+| S-172.14 (P2) | On the Test tab a chosen group's values (and its flow when no flow is picked) are used; no or an unknown group = page values | `test_S_172_14…` | passed |

@@ -1342,3 +1342,17 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - Not tested: the quiet run where staff chose another flow ID and the result is the same (the check is written again because the ID moved); quiet "token invalid" after grey and back; --all still writing every run. Reason: trusted paths, each one line checked in review; keep the suite small.
 - The PHPUnit deprecation for the @dataProvider docblock on S-171.1. Reason: the existing tests use the same style.
 - The signature of botcake:setup-check has no space between two options. Reason: it parses; cosmetic.
+
+## 172: ad groups, accepted review minors (2026-10-28)
+- **An AI or send resume resolves the customer's group again** instead of reusing the group the run started with; a new ad chat between the start and the resume can switch the values (or drop the run as "the flow changed"). Reason: the window is seconds, the next chat runs on the new group anyway; carrying the group in the ticket context touches the AI and send queues.
+- **`/chatbot/ad-groups` accepts any page with active settings** (also one not on the /chatbot list), while a cell write requires a listed page. Reason: still needs /chatblast access, and only that page's own group rows are written.
+- **The group editor saves the ad list as loaded**: ads another user added to the same group while the editor was open are removed (last write wins). "Add to group" from the list merges under the lock and is not affected. Reason: two people editing one group's form at once is rare; History shows and restores the old list.
+- **"Ads not in a group yet" scans botcake_psids by `LOWER(TRIM(page))`** (no index), cached 120 s per page; the Test tab loads the same payload for its group dropdown. Reason: bounded by the cache; a page-key column or a groups-only endpoint is a separate change.
+- **`ChatbotRunner::handle` resolves the group before knowing there is a flow** (1–2 queries, only on pages that have groups). Reason: pages without groups do no query; the cost is one indexed read per chat.
+- **`AdGroups::adNames` repeats `PsidCoverageController::adNames`.** Reason: second copy; extract on the third.
+- **Group names may repeat on a page**, so the duplicate message can name two groups the same. Reason: cosmetic; staff name their own groups.
+- **Results tags of group runs point to `adgroup` rows**, so Results shows labels like `g1.price`. Reason: cosmetic; the version is still right.
+- **BotHealth and the pages list show "no flow" for a page whose only flows are in groups.** Reason: display only; the bot runs (ChatbotInbound uses `runs()`).
+- **The flow delete guard does not count group flows.** A deleted group flow falls back to the page flow (tested), so customers still get a reply. Reason: the fallback removes the silent-no-reply risk; showing group use on the flow screen is a separate change.
+- **Ad groups do not travel with a page move** between sites (PageTransfers exports page values only, and no `__` run state). Reason: changing the transfer contract is out of scope; set the groups up again on the new site.
+- **Untested here:** the "Ads not in a group yet" JSON group-by on MySQL and pgsql (sqlite only in tests); the Cache lock under real concurrency. Reason: the test DB is sqlite in memory; run once on MySQL before relying on the list.
