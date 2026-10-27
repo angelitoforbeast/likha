@@ -270,6 +270,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         app(ChatblastSender::class)->process($now->id);
         $this->assertSame('sending', $now->fresh()->status);
         $key = ChatblastSender::customerLockKey('Page Uno', '7001');
+        $this->pool->tick(); // the lock is taken when the pool starts the message, not while it waits in line
         $this->assertFalse(Cache::lock($key, 10)->get(), 'the customer lock is held while the pool sends');
         for ($n = 0; $n < 8; $n++) {
             $this->pool->tick();
@@ -429,13 +430,13 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->pool->stop(); // no pool takes them
         Http::fake(['botcake.io/*' => fn (HttpRequest $r) => Http::response($r->method() === 'GET' ? ['success' => true, 'data' => [['id' => 7701, 'value' => 'Hello 7002']]] : ['success' => true])]);
 
-        $this->travel(241)->seconds();
+        $this->travel(BotcakeSendQueue::CHATBLAST_SECONDS + 1)->seconds(); // only a truly stuck chatblast row (hours)
         Artisan::call('chatbot:resume-skipped');
         $this->assertSame('sent', $blast->fresh()->status, 'the chatblast message is queued again, and its job sends it (no live pool: waiting, as before)');
         $this->assertSame(['write', 'read', 'flow'], array_column((array) $blast->fresh()->steps, 'step'));
         $this->assertSame(0, collect($this->calls)->count(), 'the pool never called Botcake for it');
 
-        $this->travel(360)->seconds(); // 10 minutes after the chatbot send was handed off
+        // The chatbot send's 10-minute deadline passed long before: the same sweep failed it.
         Artisan::call('chatbot:resume-skipped');
         $this->assertSame(['failed: You said: hi (The send pool did not send it in time)'], $this->replies('7001'));
         $this->assertNull((new CustomerFields(1001, 7001))->get('done'), 'the run took the failed path (a send node stops)');

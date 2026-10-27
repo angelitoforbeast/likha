@@ -29,9 +29,16 @@ class BotcakeSendPool extends TicketPool
     public const TIMEOUT = 15;          // gaya ng BotcakeClient::shared()
     public const MAX_RETRY_AFTER = 10;  // gaya ng BotcakeClient::shared()
     public const LATE = 0.02;           // segundo: ang reserbang lampas dito ay hindi na ginagamit
+    public const BLAST_RETRY = [15, 60]; // ang hintay bago ang ika-2 at ika-3 subok ng sulat o basa ng chatblast (5xx, walang sagot)
+    public const COUNTS = 'botcake-send-pool:counts';
+
+    /** @var array{queued: int, sent: int, retried: array<string, int>, failed: array<string, int>} */
+    private array $counts = ['queued' => 0, 'sent' => 0, 'retried' => [], 'failed' => []];
+    /** @var array<string, true> request_id ng chatblast na nabilang na (ang ibinalik sa pila ay hindi binibilang ulit) */
+    private array $seen = [];
 
     private BotcakeClock $clock;
-    /** @var array<string, array{row: object, gen: ?\Generator, req: array, attempt: int, lane: string, token: string, notBefore: float}> */
+    /** @var array<string, array{row: object, gen: ?\Generator, req: array, attempt: int, blastTry: int, lane: string, token: string, notBefore: float}> */
     private array $jobs = [];
     /** @var array<string, array{next: float, last: float, paused: float, queue: array<int, string>}> lane (sha1 ng token) */
     private array $lanes = [];
@@ -146,11 +153,15 @@ class BotcakeSendPool extends TicketPool
                 $messages = (array) (json_decode((string) $row->payload, true)['messages'] ?? []);
                 $req = ['step' => 'send', 'method' => 'POST', 'path' => '/pages/' . rawurlencode((string) $row->page_id) . '/flows/send_content',
                     'data' => ['psid' => (string) $row->psid, 'data' => ['version' => 'v2', 'content' => ['messages' => BotcakeOutbox::wire($messages)]]], 'onlyRateLimit' => true];
-                $this->queue($id, ['row' => $row, 'gen' => null, 'req' => $req, 'attempt' => 0, 'lane' => sha1($token), 'token' => $token, 'notBefore' => 0.0]);
+                $this->queue($id, ['row' => $row, 'gen' => null, 'req' => $req, 'attempt' => 0, 'blastTry' => 0, 'lane' => sha1($token), 'token' => $token, 'notBefore' => 0.0]);
                 return;
             }
 
             $sender = app(ChatblastSender::class);
+            if (!isset($this->seen[$id])) {
+                $this->seen[$id] = true;
+                $this->counts['queued']++;
+            }
             $m = BotcakeMessage::find($row->message_id);
             $cfg = $m ? $sender->config((string) $m->page_name) : null;
             if (!$m || $m->status !== 'sending' || $cfg === null) {
@@ -158,18 +169,31 @@ class BotcakeSendPool extends TicketPool
                     BotcakeMessage::whereKey($m->id)->where('status', 'sending')->update(['status' => 'failed', 'reason' => 'The page settings changed before sending; safe to send again']);
                 }
                 $this->forget($id);
-                BotcakeSendQueue::finishChatblast($row, $this->owner);
+                $this->finishBlast($row);
                 return;
             }
             // Ang token na naging invalid habang naghihintay (401 sa ibang mensahe): hindi na tinatawagan, gaya ng job.
             if (str_starts_with((string) app(PageSettings::class)->get((string) $m->page_name, 'botcake', 'token_status'), 'invalid')) {
                 BotcakeMessage::whereKey($m->id)->where('status', 'sending')->update(['status' => 'failed', 'reason' => 'Token invalid: fix it on /page-settings (Test token) before sending']);
                 $this->forget($id);
-                BotcakeSendQueue::finishChatblast($row, $this->owner);
+                $this->finishBlast($row);
+                return;
+            }
+            // Ngayon lang kinukuha ang lock ng customer (hindi noong pumila). May hawak o nasa gap pa: balik sa pila, walang bigo.
+            $lockOwner = $sender->poolStart($m, (string) $row->customer);
+            if ($lockOwner === null) {
+                $this->forget($id);
+                BotcakeSendQueue::later($row, $this->owner, $sender->gap() + 1);
+                return;
+            }
+            if ($lockOwner === '' || !BotcakeSendQueue::started($row, $this->owner, $lockOwner)) {
+                if ($lockOwner !== '') Cache::restoreLock((string) $row->customer, $lockOwner)->release(); // hindi na hawak ang ticket
+                $this->forget($id);
+                if ($lockOwner === '') $this->finishBlast($row);
                 return;
             }
             $gen = $sender->stepper($m, $cfg);
-            $this->queue($id, ['row' => $row, 'gen' => $gen, 'req' => $gen->current(), 'attempt' => 0, 'lane' => sha1($cfg['token']), 'token' => $cfg['token'], 'notBefore' => 0.0]);
+            $this->queue($id, ['row' => $row, 'gen' => $gen, 'req' => $gen->current(), 'attempt' => 0, 'blastTry' => 0, 'lane' => sha1($cfg['token']), 'token' => $cfg['token'], 'notBefore' => 0.0]);
         } catch (Throwable $e) {
             $this->failed($row, $e);
         }
@@ -317,9 +341,15 @@ class BotcakeSendPool extends TicketPool
         if ($job === null) return;
         $row = $job['row'];
         try {
-            $wait = BotcakeClient::retryWait($job['attempt'], $status, $retryAfter, $job['req']['onlyRateLimit'], BotcakeClient::MAX_RETRIES, self::MAX_RETRY_AFTER);
+            // Ang sulat o basa ng chatblast na pumalya (5xx, walang sagot) bago ang send_flow: wala pang naipadala, kaya inuulit
+            // nang may mahabang pagitan (para makabawi ang Botcake). Ang send_flow at ang send_content ng chatbot ay gaya ng dati.
+            $blast = $row->kind === 'chatblast' && in_array($job['req']['step'] ?? '', ['write', 'read'], true) && ($status === 0 || $status >= 500);
+            $wait = $blast ? (self::BLAST_RETRY[$job['blastTry']] ?? null)
+                : BotcakeClient::retryWait($job['attempt'], $status, $retryAfter, $job['req']['onlyRateLimit'], BotcakeClient::MAX_RETRIES, self::MAX_RETRY_AFTER);
             if ($wait !== null) {
+                if ($row->kind === 'chatblast') $this->counts['retried'][$job['req']['step']] = ($this->counts['retried'][$job['req']['step']] ?? 0) + 1;
                 $this->jobs[$id]['attempt']++;
+                if ($blast) $this->jobs[$id]['blastTry']++; // hiwalay sa bilang ng 429: bawat hakbang ay may sariling 15 s at 60 s
                 $until = $this->clock->now() + $wait;
                 // 429: ang page lang na ito ang humihinto; ang iba (5xx, walang sagot) ay ang request lang.
                 if ($status === 429) $this->lanes[$job['lane']]['paused'] = max($this->lanes[$job['lane']]['paused'], $until);
@@ -337,16 +367,53 @@ class BotcakeSendPool extends TicketPool
             if ($job['gen']->valid()) {
                 $this->jobs[$id]['req'] = $job['gen']->current();
                 $this->jobs[$id]['attempt'] = 0;
+                $this->jobs[$id]['blastTry'] = 0;
                 $this->jobs[$id]['notBefore'] = 0.0;
                 $this->jobs[$id]['since'] = $this->clock->now();
                 $this->lanes[$job['lane']]['queue'][] = $id;
                 return;
             }
             $this->forget($id);
-            BotcakeSendQueue::finishChatblast($row, $this->owner);
+            $this->finishBlast($row);
         } catch (Throwable $e) {
             $this->failed($row, $e);
         }
+    }
+
+    /** Tapos na ang chatblast na mensahe: ang ticket (lock at gap), at ang bilang ayon sa status nito. */
+    private function finishBlast(object $row): void
+    {
+        if (!BotcakeSendQueue::finishChatblast($row, $this->owner)) return;
+        $m = BotcakeMessage::find($row->message_id, ['status', 'reason']);
+        if ($m?->status === 'sent') {
+            $this->counts['sent']++;
+        } elseif ($m) {
+            // Ang dahilan lang, walang detalye ng error (hal. "Error: …"), para walang datos ng customer sa log.
+            $why = $m->status . ': ' . trim(preg_split('/;|: /', (string) $m->reason, 2)[0]);
+            $this->counts['failed'][$why] = ($this->counts['failed'][$why] ?? 0) + 1;
+        }
+    }
+
+    /**
+     * Ang bilang ng chatblast sa takbong ito ng pool (walang datos ng customer): kinuha, naipadala, inulit kada hakbang, at
+     * hindi naipadala kada dahilan. Nasa cache (para sa screen) at sa log kapag huminto ang pool.
+     * @return array{queued: int, sent: int, retried: array<string, int>, failed: array<string, int>}
+     */
+    public function counts(): array
+    {
+        return $this->counts;
+    }
+
+    public function beat(): void
+    {
+        parent::beat();
+        if ($this->counts['queued'] > 0) Cache::put(self::COUNTS, ['owner' => $this->owner, 'at' => now()->toIso8601String()] + $this->counts, 86400);
+    }
+
+    public function stop(): void
+    {
+        if ($this->counts['queued'] > 0) Log::info('botcake send pool: chatblast counts', $this->counts);
+        parent::stop();
     }
 
     /** Ang dahilan kung bakit hindi na ipapadala ngayon (naka-off ang mga sagot, o tao na ang sumasagot), o null. */
@@ -369,7 +436,7 @@ class BotcakeSendPool extends TicketPool
             } else {
                 $flowSent = DB::table(BotcakeSendQueue::TABLE)->where('id', $row->id)->whereNotNull('called_at')->exists();
                 app(ChatblastSender::class)->poolError((int) $row->message_id, $e, $flowSent);
-                BotcakeSendQueue::finishChatblast($row, $this->owner);
+                $this->finishBlast($row);
             }
         } catch (Throwable $again) {
             report($again); // ang row ay sending pa: ang pagsisimula ng susunod na pool ang magtatapos
