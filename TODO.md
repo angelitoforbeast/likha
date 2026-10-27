@@ -1334,3 +1334,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - A Move or Ask blocks another Move/Ask of the same page for 2 minutes even if it is declined sooner. Reason: CEO only, short window; Forbeast allows several pending requests anyway.
 - The 3 s reload drops the one-time "Take started" message. Reason: the "Claiming… #id" chip says the same thing on the card.
 - Not tested: the 2-minute expiry (cache TTL), a take answer without a transfer id ("Claiming…" with no number), and Ask in the double-request test (same branch as Move). Reason: each is one line checked in review; keep the suite small.
+
+## 171: setup check every 10 minutes, accepted review minors (2026-10-27)
+- The Check column's "Checked <time>" and the token status time stay at the last change, not the last 10-minute run. Reason: the brief asks for no row when nothing changed; showing a last-run time would need a non-row store (e.g. cache), a separate change.
+- The banner's "none delivered" does not require a passing check, and the column's drift X ("the flow ID is not the flow named …") is not in the banner. Reason: both are rare and short-lived (the next check rewrites the ID); aligning means sharing rules between PHP and the grid's JS.
+- In quiet mode a grey failure after a grey failure keeps the first reason and time. Reason: intended (no flood when Botcake alternates "HTTP 500" and "no answer"); "token invalid" is still written.
+- Not tested: the quiet run where staff chose another flow ID and the result is the same (the check is written again because the ID moved); quiet "token invalid" after grey and back; --all still writing every run. Reason: trusted paths, each one line checked in review; keep the suite small.
+- The PHPUnit deprecation for the @dataProvider docblock on S-171.1. Reason: the existing tests use the same style.
+- The signature of botcake:setup-check has no space between two options. Reason: it parses; cosmetic.

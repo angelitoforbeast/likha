@@ -2871,3 +2871,21 @@ Slice 170. Threat model: form input (target, password, phrase) and the `?history
 | S-170.10 (P1) | Given a page being claimed, When Forbeast lists this site as its owner, Then the card is under "On <this site>" with the green note "Claimed — the bot is Off until you set it up and turn it on", and the reloading stops | `test_S_170_10…` | passed |
 | S-170.11 (P1) | Given a page being claimed, When its transfer is failed or stuck in GET site/transfers, Then the card shows Forbeast's error in red (escaped) and the Claim button is back | `test_S_170_11…` | passed |
 | S-170.12 (P1) | Given a Claim (or a Move/Ask) for a page sent less than 2 minutes ago, When it is posted again, Then it is refused ("This page is already being claimed" / "A request for this page is already in progress") and nothing is asked of Forbeast | `test_S_170_12…` (claim, move) | passed |
+
+## S-171 Marketing sees a broken chatblast setup within 10 minutes
+
+As marketing staff, I want the chatblast setup check to run every 10 minutes during the day and a broken page to show in red on every Chatbot and Chatblast screen, so a changed or copied Botcake flow is fixed before the next send.
+
+Slice 171. Threat model: Botcake answers (flow, field and template names inside the reasons) are external text, shown escaped; page settings are written by staff and by the system; the window is in config (trusted). No new route, no new table. Risk tier: medium (a background job and a UI banner behind existing access).
+Tests: `tests/Feature/Chatblast/SetupCheckEveryTenMinutesTest.php`, `tests/Feature/Chatblast/SetupProblemsBannerTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-171.1 (P1) | The schedule has `botcake:setup-check --chatblast` every 10 minutes (Manila, without overlapping, in the background) that runs from 06:00 to 23:00 but not 08:45–10:30 (08:50 and 23:30 no, 10:40 yes), plus the 21:30 `--all` run | `test_S_171_1…` (7 times) | passed |
+| S-171.2 (P1) | Given pages with full setup on an active campaign, one only on an off campaign and one missing a setting, When the 10-minute run runs, Then only the first gets Botcake calls; a campaign without a page list covers every fully set-up page | `test_S_171_2…` | passed |
+| S-171.3 (P1) | Given a passing page, When the run finds the same IDs and result again (or Botcake fails twice), Then no page-setting row or history is added and Ready is unchanged; a copied flow writes the X once and the page is not Ready; removing the copy writes OK and the page is Ready again | `test_S_171_3…` | passed |
+| S-171.4 (P1) | Given a page whose last check has "2 flows named …", Then a Chatbot and a Chatblast screen show "⚠ <page>: <reason> — open Page settings" linking to /chatblast/page-settings; "token invalid" and "Sent N, none delivered (Botcake)" show too; 4 pages list 3 and "+1 more"; a grey "Check failed" only, or no problems, shows no banner | `test_S_171_4…` (3 tests) | passed |
+| S-171.5 (P1) | Given a role with only page settings (no Chatbot menu), Then it sees no setup banner | `test_S_171_5…` | passed |
+| S-171.6 (P1) | Given a spec 169 red page and a page with an X, Then both banners show, the 169 one first | `test_S_171_6…` | passed |
+| S-171.7 (P1) | The existing setup-check, page-settings and 169 tests, and the Chatblast, Botcake and PageSettings suites, add no new failures | full run | passed |
+| S-171.8 (P2) | At 390 px both banners wrap inside the width | not tested in a browser (see result) | not run |
