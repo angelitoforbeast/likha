@@ -372,6 +372,8 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
             'the move completes: the rest comes from the new page' => ['completes', false, ['1001 7001 Seq 1', '1002 7001 Seq 2', '1002 7001 Seq 3', '1002 7002 Seq 1', '1002 7002 Seq 2', '1002 7002 Seq 3']],
             'the copy fails: hold:false and the old page sends on' => ['fails', false, $old],
             'the customer replies on the new page after the switch: the catch-up does not bring the row back' => ['reply', false, ['1001 7001 Seq 1', '1002 7002 Seq 1', '1002 7002 Seq 2', '1002 7002 Seq 3']],
+            'the customer is unsubscribed on the old page during the hold: ended on the new page, not activated' => ['ended', false, ['1001 7001 Seq 1', '1002 7002 Seq 1', '1002 7002 Seq 2', '1002 7002 Seq 3']],
+            'the customer replies on the old page and is subscribed again during the hold, then replies on the new page' => ['again', false, ['1001 7001 Seq 1', '1002 7002 Seq 1', '1002 7002 Seq 2', '1002 7002 Seq 3']],
             'the hold lands while step 2 is being sent, the move completes' => ['completes', true, ['1001 7001 Seq 1', '1001 7001 Seq 2', '1001 7002 Seq 1', '1002 7001 Seq 3', '1002 7002 Seq 2', '1002 7002 Seq 3']],
             'the hold lands while step 2 is being sent, the copy fails' => ['fails', true, $old],
         ];
@@ -388,11 +390,10 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         Http::fake(['https://botcake.io/api/public_api/v1/pages/1002/flows/send_content' => Http::response(['success' => true])]);
         $seq = $this->sequence('PREORDER', [[0, 'minutes', $this->flow('Seq 1')->id], [1, 'hours', $this->flow('Seq 2')->id], [1, 'hours', $this->flow('Seq 3')->id]]);
         $transfers = app(PageTransfers::class);
-        $copy = fn (?string $since = null) => $transfers->import('1002', 'sequences', $transfers->export('Page Uno', '1001', 'sequences', 0, $since)['body']['items'], '77');
+        $copy = fn (?string $since = null) => $transfers->import('1002', 'sequences', $transfers->export('Page Uno', '1001', 'sequences', 0, $since === null ? null : PageTransfers::localTime($since))['body']['items'], '77');
         $holdAt = null;
         $hold = function () use ($transfers, &$holdAt) {
-            $holdAt = now()->format('Y-m-d H:i:s');
-            $transfers->hold('Page Uno', 1001, true, '77');
+            $holdAt = $transfers->hold('Page Uno', 1001, true, '77')['body']['held_at']; // the source's clock is the catch-up's since
         };
         $this->chat('7001');
         $this->svc()->subscribe($seq->id, 1001, 7001, 'flow');
@@ -415,12 +416,20 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
         $this->tick(); // 7001 step 2 is due: held, or the hold lands during its send
         if ($midSend) $this->assertSame(200, $copy()['http']);
 
+        if ($outcome === 'ended') $this->svc()->unsubscribe($seq->id, 1001, 7001, 'inbox'); // still on the old site, while held
+        if ($outcome === 'again') {
+            $this->svc()->unsubscribe($seq->id, 1001, 7001, 'reply');
+            $this->svc()->subscribe($seq->id, 1001, 7001, 'flow');
+        }
+
         if ($outcome === 'fails') {
             $transfers->hold('Page Uno', 1001, false, '77');
         } else {
-            $transfers->release('Page Uno', '1001', 'incepxion');
-            if ($outcome === 'reply') $this->svc()->exitOnReply(1002, 7001); // after the switch the customer writes to the new site
+            // The end of the move: switch (adopt records it on the new site) → catch-up → release → activate.
+            app(PageSettings::class)->set('Page Dos', PageTransfers::HOLD_PROVIDER, 'adopted', '77', false, null, true);
+            if (in_array($outcome, ['reply', 'again'], true)) $this->svc()->exitOnReply(1002, 7001); // after the switch the customer writes to the new site
             $this->assertSame(200, $copy($holdAt)['http']); // the catch-up
+            $transfers->release('Page Uno', '1001', 'incepxion');
             $transfers->activate(1002, '77');
         }
         $this->tick();

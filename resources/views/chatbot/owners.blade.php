@@ -95,6 +95,10 @@
                             <span data-owner class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ $p['owner'] === null ? 'bg-amber-50 text-amber-800' : ($p['owner'] === $site ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-700') }}">{{ $ownerText }}</span>
                         </div>
 
+                        @if($p['hold'])
+                            <p data-hold class="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-sm text-amber-800" role="status">Follow-ups paused for transfer #{{ $p['hold']['transfer'] }} since {{ $at($p['hold']['since']) }}</p>
+                        @endif
+
                         @if($p['pending'])
                             <ul class="mt-3 space-y-2">
                                 @foreach($p['pending'] as $r)

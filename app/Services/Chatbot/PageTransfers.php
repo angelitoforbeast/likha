@@ -20,9 +20,11 @@ use Illuminate\Support\Facades\Schema;
  * - hold (sa source, bago kopyahin ang sequences): ang mga active na subscription ng page ay held din (paused, exit_reason
  *   "hold <id>"), at ang bagong subscribe habang held ang page (transfer.hold) ay held agad; ang hold:false ay ibinabalik
  *   sila gaya ng dati (parehong step at oras ng padala), kaya walang follow-up na naipapadala ng dalawang site;
- * - release: ang lumang site ay tumitigil (bot Off, mga subscription tapos na "transferred" pero dala pa ang step at oras
- *   para sa catch-up na sequences?since=, ang mga wait at naghihintay na AI o padala ay kinakalimutan, ang Forbeast
- *   connection ay inactive na may history, wala nang hold);
+ * - catch-up (pagkatapos ng switch, bago ang release): sequences?since=<held_at> ang dala ang binago mula sa hold, bawat isa
+ *   "active" o "ended" (tapos sa source, may exit_reason); sa target, ang ended ay tinatapos ang held, at ang tinapos na sa
+ *   target pagkatapos ng switch (transfer.adopted) ay hindi binubuksan ulit;
+ * - release: ang lumang site ay tumitigil (bot Off, mga subscription tapos na "transferred" pero dala pa ang step at oras,
+ *   ang mga wait at naghihintay na AI o padala ay kinakalimutan, ang Forbeast connection ay inactive na may history, wala nang hold);
  * - activate: ang mga held ng paglipat na ito lang ay active ulit, sa parehong step at oras ng padala.
  * Ang nasa gitna ng flow (wait, __wait, AI) ay hindi kinokopya: sa Main Flow sila magsisimula sa susunod nilang mensahe.
  * Walang value, token o secret sa log (ang PageSettings ay key lang ang itinatala).
@@ -38,6 +40,12 @@ class PageTransfers
     public const HOLD_REASON = 'hold ';
     public const HOLD_PROVIDER = 'transfer';
     public const HOLD_KEY = 'hold';
+    /** Ang paglipat na huling na-adopt dito: transfer.adopted = <id> (ang created_at ang oras ng switch). */
+    public const ADOPTED_KEY = 'adopted';
+    /** Ang item ng sequences: tumatakbo pa (active, pati held) o tapos na sa source mula sa hold (ended, may exit_reason). */
+    private const STATUSES = ['active', 'ended'];
+    /** Ang pagtatapos ng release o ng nabigong paglipat dito: hindi exit ng customer, kaya hindi kailanman ended. */
+    private const MOVE_ENDINGS = ['transferred', 'transfer not activated'];
     /** Ang mga item ng values na hindi botfield: ang pangalan ng page, ang On/Off at ang Main Flow (ayon sa pangalan). */
     private const META_KEYS = ['name', 'active', 'flow'];
     private const VIAS = ['flow', 'inbox', 'other'];
@@ -73,12 +81,14 @@ class PageTransfers
         }
         $source = $mode === 'take' ? 'taken by ' . ($actor ?? 'Forbeast (transfer ' . $transferId . ')') : $this->from($transferId);
 
-        DB::transaction(function () use ($page, $metaPageId, $token, $mode, $source) {
+        DB::transaction(function () use ($page, $metaPageId, $token, $mode, $source, $transferId) {
             $this->settings->set($page, 'botcake', 'page_id', $metaPageId, false, null, true, $source);
             $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::GATEWAY, false, null, true, $source);
             $this->settings->set($page, ForbeastPageSetup::PROVIDER, 'token', $token, true, null, true, $source);
             // Ang take: Off hanggang ayusin at i-On ng CEO. Ang transfer: ang On/Off na kinopya sa values.
             if ($mode === 'take') $this->settings->set($page, ChatbotFields::PROVIDER, 'active', '0', false, null, true, $source);
+            // Ang switch ng paglipat na ito (kailan): ang row na tinapos dito pagkatapos nito ay hindi binubuksan ulit ng catch-up.
+            $this->settings->set($page, self::HOLD_PROVIDER, self::ADOPTED_KEY, $transferId, false, null, true, $source);
         });
         $res = $this->forbeast->connect($page);
         if ($res['status'] !== 'ok') return self::error(502, 'connect_failed', 'The page was saved but not connected: ' . ($res['error'] ?? $res['status']));
@@ -139,18 +149,23 @@ class PageTransfers
     private function exportSequences(int $pageId, int $cursor, ?string $since): array
     {
         // Pati ang naka-pause dahil Off ang page o dahil sa hold (babalik sa bagong site), pero hindi ang held pa ng isang
-        // paglipat papunta rito. Ang catch-up (since = oras ng hold) ay pagkatapos ng release: kasama ang tinapos nito.
+        // paglipat papunta rito. Ang catch-up (since = held_at) ay pagkatapos ng switch at bago ang release: ang tinapos sa
+        // source mula sa hold (sumagot, inalis, natapos) ay "ended" kasama ang dahilan; ang tinapos ng release o ng nabigong
+        // paglipat dito ay hindi kailanman ended (ang transferred, kung tatanungin pa pagkatapos ng release, ay active gaya ng dati).
         // ">=": ang ginawa sa mismong segundo ng hold ay hindi naiiwan (ang import ay idempotent).
         $rows = DB::table('chatbot_sequence_subscriptions as s')->join('chatbot_sequences as q', 'q.id', '=', 's.sequence_id')
             ->where('s.page_id', $pageId)->where('s.id', '>', $cursor)
             ->when($since !== null, fn ($q) => $q->where('s.updated_at', '>=', $since))
             ->where(fn ($q) => $q->where('s.status', 'active')->orWhere(fn ($w) => $w->where('s.status', 'paused')
                 ->where(fn ($x) => $x->whereNull('s.exit_reason')->orWhere('s.exit_reason', 'not like', self::HELD_REASON . '%')))
-                ->when($since !== null, fn ($w) => $w->orWhere(fn ($x) => $x->where('s.status', 'unsubscribed')->where('s.exit_reason', 'transferred'))))
-            ->orderBy('s.id')->limit(self::MAX_ITEMS)->get(['s.id', 's.psid', 'q.name', 's.current_step', 's.next_send_at', 's.enrolled_via']);
+                ->when($since !== null, fn ($w) => $w->orWhere(fn ($x) => $x->where('s.status', 'unsubscribed')->where('s.exit_reason', 'transferred'))
+                    ->orWhere(fn ($x) => $x->whereIn('s.status', ['unsubscribed', 'completed', 'error'])
+                        ->where(fn ($y) => $y->whereNull('s.exit_reason')->orWhereNotIn('s.exit_reason', self::MOVE_ENDINGS)))))
+            ->orderBy('s.id')->limit(self::MAX_ITEMS)->get(['s.id', 's.psid', 'q.name', 's.current_step', 's.next_send_at', 's.enrolled_via', 's.status', 's.exit_reason']);
         $last = $this->lastMessages($pageId, $rows->pluck('psid')->map(fn ($p) => (int) $p)->unique()->values()->all());
         $items = $rows->map(fn ($r) => ['psid' => (int) $r->psid, 'sequence' => (string) $r->name, 'current_step' => (int) $r->current_step,
-            'next_send_at' => self::iso($r->next_send_at), 'enrolled_via' => (string) $r->enrolled_via, 'last_message_at' => self::iso($last[(int) $r->psid] ?? null)])->all();
+            'next_send_at' => self::iso($r->next_send_at), 'enrolled_via' => (string) $r->enrolled_via, 'last_message_at' => self::iso($last[(int) $r->psid] ?? null)]
+            + (in_array($r->status, ['active', 'paused'], true) || $r->exit_reason === 'transferred' ? ['status' => 'active'] : ['status' => 'ended', 'exit_reason' => (string) ($r->exit_reason ?? $r->status)]))->all();
 
         return ['http' => 200, 'body' => ['items' => $items, 'next' => $rows->count() === self::MAX_ITEMS ? (string) $rows->last()->id : null]];
     }
@@ -331,14 +346,19 @@ class PageTransfers
             $msgAt = $msg === null ? null : self::localTime($msg);
             // Ang oras na lampas sa orasan dito ay ngayon: hindi nito mabubuksan ang 24 oras nang walang hangganan.
             if ($msgAt !== null && $msgAt > now()->format('Y-m-d H:i:s')) $msgAt = now()->format('Y-m-d H:i:s');
+            // Walang status: active (gaya ng dati). Ang dahilan ng ended ay text lang, hanggang sa haba ng column.
+            $status = is_array($it) ? ($it['status'] ?? 'active') : null;
+            $reason = is_array($it) && is_string($it['exit_reason'] ?? null) && trim($it['exit_reason']) !== '' ? mb_substr(trim($it['exit_reason']), 0, 60) : 'ended on the old site';
             if ($psid === null) $errors["items.$i.psid"] = 'A customer PSID (digits) is required.';
             elseif ($name === '' || mb_strlen($name) > 120) $errors["items.$i.sequence"] = 'A sequence name is required.';
             elseif (!is_int($step) || $step < 1 || $step > 65535) $errors["items.$i.current_step"] = 'A step position (1 or more) is required.';
             elseif ($next !== null && $at === null) $errors["items.$i.next_send_at"] = 'Use an ISO 8601 time or null.';
             elseif ($msg !== null && $msgAt === null) $errors["items.$i.last_message_at"] = 'Use an ISO 8601 time or null.';
+            elseif (!in_array($status, self::STATUSES, true)) $errors["items.$i.status"] = 'Use "active" or "ended".';
             else {
                 $via = is_array($it) && in_array($it['enrolled_via'] ?? null, self::VIAS, true) ? $it['enrolled_via'] : 'other';
-                $rows[] = ['psid' => $psid, 'name' => $name, 'current_step' => $step, 'next_send_at' => $at, 'enrolled_via' => $via, 'last_message_at' => $msgAt];
+                $rows[] = ['psid' => $psid, 'name' => $name, 'current_step' => $step, 'next_send_at' => $at, 'enrolled_via' => $via, 'last_message_at' => $msgAt,
+                    'ended' => $status === 'ended' ? $reason : null];
             }
         }
         if ($errors) return self::invalid($errors);
@@ -348,14 +368,24 @@ class PageTransfers
         $missing = array_values(array_filter($names, fn ($n) => !isset($ids[$n])));
         if ($missing) return self::missing($missing);
 
-        DB::transaction(function () use ($pageId, $rows, $ids, $transferId) {
+        $switched = $this->switchedAt($pageId, $transferId);
+        DB::transaction(function () use ($pageId, $rows, $ids, $transferId, $switched) {
             foreach ($rows as $row) {
                 $values = ['status' => self::HELD, 'exit_reason' => self::HELD_REASON . $transferId, 'current_step' => $row['current_step'], 'next_send_at' => $row['next_send_at'],
                     'dispatched_at' => null, 'enrolled_via' => $row['enrolled_via'], 'updated_at' => now()];
                 $key = ['sequence_id' => $ids[$row['name']], 'page_id' => $pageId, 'psid' => $row['psid']];
-                $existing = DB::table('chatbot_sequence_subscriptions')->where($key)->first(['id', 'status', 'exit_reason']);
+                $existing = DB::table('chatbot_sequence_subscriptions')->where($key)->first(['id', 'status', 'exit_reason', 'updated_at']);
                 $held = $existing !== null && $existing->status === self::HELD && str_starts_with((string) $existing->exit_reason, self::HELD_REASON);
-                if ($existing === null) {
+                if ($row['ended'] !== null) {
+                    // Tapos na sa source mula sa hold: ang held ng paglipat na ito ay tapos din dito, walang padala; wala nang iba.
+                    if ($existing !== null && $existing->status === self::HELD && $existing->exit_reason === self::HELD_REASON . $transferId) {
+                        DB::table('chatbot_sequence_subscriptions')->where('id', $existing->id)->where('status', self::HELD)->where('exit_reason', $existing->exit_reason)
+                            ->update(['status' => $row['ended'] === 'completed' ? 'completed' : 'unsubscribed', 'exit_reason' => $row['ended'],
+                                'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
+                    }
+                } elseif ($existing !== null && !$held && $switched !== null && !in_array($existing->status, ['active', 'paused'], true) && (string) $existing->updated_at >= $switched) {
+                    // Tinapos dito pagkatapos ng switch (hal. sumagot sa bagong site): hindi binubuksan ulit ng catch-up.
+                } elseif ($existing === null) {
                     DB::table('chatbot_sequence_subscriptions')->insert($key + $values + ['created_at' => now()]);
                 } elseif ($held || !in_array($existing->status, ['active', 'paused'], true)) {
                     // Ang tumatakbo na rito (active o naka-pause, hindi held) ay hindi ginagalaw: walang dobleng follow-up.
@@ -388,6 +418,16 @@ class PageTransfers
         return null;
     }
 
+    /** Ang oras ng switch ng paglipat na ito dito (ang adopt), o null kapag wala pa (ang unang kopya ay bago ang switch). */
+    private function switchedAt(int $pageId, string $transferId): ?string
+    {
+        $page = $this->page((string) $pageId);
+        if ($page === null || $this->settings->get($page, self::HOLD_PROVIDER, self::ADOPTED_KEY) !== $transferId) return null;
+        $at = $this->settings->pageQuery($page)->where('provider', self::HOLD_PROVIDER)->where('key', self::ADOPTED_KEY)->where('active', true)->orderByDesc('id')->value('created_at');
+
+        return $at === null ? null : Carbon::parse($at)->format('Y-m-d H:i:s');
+    }
+
     // ---- hold ----
 
     /**
@@ -398,6 +438,8 @@ class PageTransfers
     public function hold(string $page, int $pageId, bool $hold, string $transferId): array
     {
         $source = 'transfer ' . $transferId . ($hold ? ' hold' : ' hold released');
+        // held_at: ang oras ng site na ito bago ang hold, para sa since ng catch-up (hindi naaapektuhan ng layo ng orasan ng Forbeast).
+        $heldAt = now()->toIso8601String();
         $heldRows = fn () => DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', 'like', self::HOLD_REASON . '%');
         DB::transaction(function () use ($page, $pageId, $hold, $transferId, $source, $heldRows) {
             $owner = $this->settings->get($page, self::HOLD_PROVIDER, self::HOLD_KEY);
@@ -417,8 +459,7 @@ class PageTransfers
         });
         PageSettings::forget($page);
 
-        // held_at: ang oras ng site na ito, para sa since ng catch-up (hindi naaapektuhan ng layo ng orasan ng Forbeast).
-        return ['http' => 200, 'body' => ['held' => $heldRows()->count()] + ($hold ? ['held_at' => now()->toIso8601String()] : [])];
+        return ['http' => 200, 'body' => ['held' => $heldRows()->count()] + ($hold ? ['held_at' => $heldAt] : [])];
     }
 
     // ---- release / activate ----
