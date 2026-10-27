@@ -71,6 +71,46 @@
         </div>
     @endif
 
+    {{-- Mga page na may problema sa huling oras (BotHealth::problems): ang pula muna; pindutin ang page para sa mga pumalya nito. --}}
+    <section aria-labelledby="h-problems" class="space-y-2" id="page-problems">
+        <h2 id="h-problems" class="text-lg font-semibold">Pages with problems</h2>
+        @if($problems)
+            <div class="cb-card overflow-x-auto">
+                <table class="cb-table" data-list="page-problems">
+                    <thead><tr><th>Page</th><th class="text-right">Sends</th><th class="text-right">Failed</th><th class="text-right">Failed % (without not reachable)</th><th>Top reason</th><th>First failure</th><th>Last failure</th></tr></thead>
+                    <tbody>
+                    @foreach($problems as $p)
+                        <tr data-problem="{{ $p['page_id'] }}" data-light="{{ $p['light'] }}" class="{{ $p['light'] === 'red' ? 'bg-red-50' : 'bg-amber-50' }}">
+                            <td><button type="button" class="flex items-center gap-2 text-left font-medium text-blue-700 hover:underline" data-pp-toggle aria-expanded="false" aria-controls="pp-failures-{{ $p['page_id'] }}">
+                                <span class="inline-block h-3 w-3 shrink-0 rounded-full {{ $dot[$p['light']] }}" aria-hidden="true"></span>{{ $p['page'] }}<span class="sr-only"> — {{ $p['light'] }}</span></button></td>
+                            <td class="text-right">{{ $p['sends'] }}</td>
+                            <td class="text-right">{{ $p['failed'] }}@if($p['unreachable'])<div class="text-xs text-slate-500">{{ $p['unreachable'] }} not reachable</div>@endif</td>
+                            <td class="text-right">{{ $fmt($p['failed_pct'], '%') }}</td>
+                            <td class="min-w-[10rem]">{{ $p['reason'] }}</td>
+                            <td class="whitespace-nowrap">{{ substr($p['first_at'], 11, 5) }}</td>
+                            <td class="whitespace-nowrap">{{ substr($p['last_at'], 11, 5) }}</td>
+                        </tr>
+                        <tr id="pp-failures-{{ $p['page_id'] }}" hidden>
+                            <td colspan="7" class="bg-slate-50">
+                                <p class="mb-1 text-xs font-medium text-slate-600">Latest {{ count($p['failures']) }} failed sends of {{ $p['page'] }}</p>
+                                <ul class="space-y-1.5 text-xs">
+                                    @foreach($p['failures'] as $x)
+                                        <li class="break-words"><span class="whitespace-nowrap font-medium">{{ $x['at'] }}</span> · {{ $x['reason'] }} · <span class="text-slate-600">{{ $x['error'] }}</span>
+                                            @if($x['inbox']) · <a href="{{ $x['inbox'] }}" class="whitespace-nowrap text-blue-700 hover:underline">Customer in Inbox</a>@endif</li>
+                                    @endforeach
+                                </ul>
+                            </td>
+                        </tr>
+                    @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            <p class="cb-card px-3 py-2 text-sm text-slate-600" data-list="page-problems">No page problems in the last hour.</p>
+        @endif
+        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
+    </section>
+
     <form method="GET" action="{{ route('chatbot.health') }}" class="cb-filters flex flex-wrap items-end gap-3 text-sm" aria-label="Filters">
         <label class="flex min-w-0 flex-col text-xs">Page
             <select name="page_id" class="max-w-[14rem] border px-2 py-1 text-sm text-gray-900">
@@ -257,6 +297,19 @@
                         @endif
                     </tr>
                 @endforeach
+                {{-- Ang mga ilaw kada page (Pages with problems): "≥", sa huling oras. --}}
+                @foreach($pageLights as $key => [$label, $unit])
+                    @php($u = $unit === '%' ? '%' : '')
+                    <tr data-rule="{{ $key }}">
+                        <td>{{ $label }}</td>
+                        <td>—</td>
+                        <td class="text-slate-600">{{ $key === 'page_min_sends' ? 'failed % counts from ' . $thresholds[$key]['amber'] . ' sends' : '≥ ' . $thresholds[$key]['amber'] . $u . ' amber' . ($thresholds[$key]['red'] !== null ? ', ≥ ' . $thresholds[$key]['red'] . $u . ' red' : '') }}</td>
+                        @if($isCeo)
+                            <td><input type="number" step="any" min="0" name="t[{{ $key }}][amber]" value="{{ $thresholds[$key]['amber'] }}" class="w-24 border px-2 py-1 text-sm" aria-label="{{ $label }} {{ $key === 'page_min_sends' ? 'sends' : 'amber' }}"></td>
+                            <td>@unless($key === 'page_min_sends')<input type="number" step="any" min="0" name="t[{{ $key }}][red]" value="{{ $thresholds[$key]['red'] }}" class="w-24 border px-2 py-1 text-sm" aria-label="{{ $label }} red">@endunless</td>
+                        @endif
+                    </tr>
+                @endforeach
                 </tbody>
             </table>
             @if($isCeo)<button class="cb-btn cb-btn-primary">Save thresholds</button>
@@ -327,6 +380,16 @@
 @endsection
 
 @push('scripts')
+<script>
+    // Pages with problems: ang page ang nagbubukas at nagsasara ng mga pumalya nito.
+    for (const b of document.querySelectorAll('[data-pp-toggle]')) {
+        b.addEventListener('click', () => {
+            const row = document.getElementById(b.getAttribute('aria-controls'));
+            row.hidden = !row.hidden;
+            b.setAttribute('aria-expanded', String(!row.hidden));
+        });
+    }
+</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
 (() => {
@@ -347,6 +410,8 @@
 
     new Chart(document.getElementById('bh-replies'), {type: 'bar', data: {labels, datasets: [
         {label: 'Sent', data: get('sent'), backgroundColor: C.green, stack: 's'},
+        {label: 'Page restricted by Facebook', data: reason('restricted'), backgroundColor: '#7f1d1d', stack: 's'},
+        {label: 'Permission error', data: reason('permission'), backgroundColor: '#be185d', stack: 's'},
         {label: 'Customer not reachable', data: reason('unreachable'), backgroundColor: C.slate, stack: 's'},
         {label: 'Botcake error', data: reason('botcake'), backgroundColor: C.red, stack: 's'},
         {label: 'Outside 24-hour window', data: reason('window'), backgroundColor: C.violet, stack: 's'},

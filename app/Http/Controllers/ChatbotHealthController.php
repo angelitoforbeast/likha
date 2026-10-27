@@ -38,7 +38,7 @@ class ChatbotHealthController extends Controller
         ksort($pages, SORT_NATURAL | SORT_FLAG_CASE);
         $fb = app(\App\Services\Chatbot\ForbeastSendHealth::class);
 
-        return view('chatbot.health', $out + ['forbeast' => $fb->panel(), 'sendLagAlarm' => $fb->activeAlarm(), 'pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS,
+        return view('chatbot.health', $out + ['forbeast' => $fb->panel(), 'sendLagAlarm' => $fb->activeAlarm(), 'pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'pageLights' => BotHealth::PAGE_LIGHTS, 'problems' => $this->health->problems(), 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS,
             'attachments' => \App\Services\Chatbot\ChatAttachments::ignoring() ? \App\Services\Chatbot\ChatAttachments::IGNORE : \App\Services\Chatbot\ChatAttachments::REPLY]);
     }
 
@@ -47,7 +47,7 @@ class ChatbotHealthController extends Controller
     {
         if ($this->role() !== 'CEO') abort(403);
 
-        $keys = array_keys(BotHealth::LIGHTS);
+        $keys = array_merge(array_keys(BotHealth::LIGHTS), array_keys(BotHealth::PAGE_LIGHTS));
         $v = Validator::make($request->all(), [
             't' => ['required', 'array'],
             't.*' => ['array'],
@@ -62,7 +62,7 @@ class ChatbotHealthController extends Controller
                 }
                 $red = $t['red'] ?? null;
                 if ($red === null || $red === '' || !is_numeric($t['amber'] ?? null) || !is_numeric($red)) continue;
-                $high = BotHealth::LIGHTS[$key][3] === 'high';
+                $high = (BotHealth::LIGHTS[$key][3] ?? 'high') === 'high'; // ang mga ilaw kada page ay "mas mataas ay masama"
                 if ($high ? $t['amber'] > $red : $t['amber'] < $red) $v->errors()->add("t.$key", 'Amber must come before red.');
             }
         });
@@ -73,6 +73,7 @@ class ChatbotHealthController extends Controller
             $new[$key] = ['amber' => $t['amber'] + 0, 'red' => ($t['red'] ?? '') === '' ? null : $t['red'] + 0];
         }
         AppSetting::set(BotHealth::SETTING, json_encode($new));
+        \Illuminate\Support\Facades\Cache::forget(BotHealth::PROBLEM_CACHE); // ang banner ay sumusunod agad
 
         return redirect()->route('chatbot.health', Arr::only($request->query(), ['page_id', 'bot', 'from', 'to']))->with('status', 'Thresholds saved.');
     }

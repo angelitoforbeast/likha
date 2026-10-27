@@ -132,7 +132,7 @@ class ChatbotHealthTest extends ChatblastTestCase
         $t = $this->today();
         $this->assertSame(4, $t['sent']);
         $this->assertSame(6, $t['failed']);
-        $this->assertSame(['unreachable' => 1, 'botcake' => 1, 'window' => 1, 'timeout' => 1, 'other' => 2], $t['reasons']);
+        $this->assertSame(['restricted' => 0, 'unreachable' => 1, 'permission' => 0, 'botcake' => 1, 'window' => 1, 'timeout' => 1, 'other' => 2], $t['reasons']);
         $this->assertEquals(60.0, $t['failed_pct']);
         $this->assertEquals(50.0, $t['failed_pct_excl']); // 5 / 10: ang unreachable ay hindi binibilang na pumalya
     }
