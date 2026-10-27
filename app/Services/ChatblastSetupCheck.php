@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\BotcakeMessage;
+use App\Models\PageSetting;
 use App\Support\BotcakeClock;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -29,6 +31,8 @@ class ChatblastSetupCheck
     public const DELIVERY_KEY = 'setup.delivery';
     public const DELIVERY_WAIT_MINUTES = 60; // ang padala ay dapat mas luma rito bago basahin ang delivered
     public const BUDGET = 25;                // segundo ng isang page (gaya ng Test token)
+    public const BANNER_PAGES = 3;           // ilang page ang nakalista sa banner, saka "+N more"
+    private const BANNER_SECONDS = 60;
     private const CALL_TIMEOUT = 8;
 
     public function __construct(private PageSettings $settings, private BotcakeClient $client, private BotcakeFlowNames $names, private BotcakeClock $clock)
@@ -203,6 +207,55 @@ class ChatblastSetupCheck
         $check['error_at'] = now()->format('Y-m-d H:i:s');
 
         return $this->settings->set($page, 'botcake', self::CHECK_KEY, json_encode($check, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
+    }
+
+    /**
+     * Ang pulang banner ng Chatbot at Chatblast: ang mga page na ang huling check ay may X, "token invalid", o "Sent N, none
+     * delivered" sa kasalukuyang flow (gaya ng Check column), hanggang BANNER_PAGES at ilan pa. Ang grey na "Check failed"
+     * ay hindi kasama. Naka-cache nang 60 s; null kapag wala o hindi mabasa (hindi dapat makasira ng screen).
+     * @return array{pages: array<int, array{page: string, reason: string}>, more: int}|null
+     */
+    public function banner(): ?array
+    {
+        try {
+            $list = Cache::remember('chatblast:setup-banner', self::BANNER_SECONDS, fn () => $this->problems());
+        } catch (Throwable $e) {
+            report($e);
+            return null;
+        }
+        if (!$list) return null;
+
+        return ['pages' => array_slice($list, 0, self::BANNER_PAGES), 'more' => max(0, count($list) - self::BANNER_PAGES)];
+    }
+
+    /** @return array<int, array{page: string, reason: string}> ayon sa pangalan ng page */
+    private function problems(): array
+    {
+        $pages = [];
+        PageSetting::where('active', true)->where('provider', 'botcake')->whereIn('key', [self::CHECK_KEY, self::DELIVERY_KEY, 'flow.shipping'])
+            ->where('page_name', '!=', self::ALL_PAGE)->orderBy('id')->get(['page_name', 'key', 'value'])
+            ->each(function ($s) use (&$pages) {
+                $pk = $this->settings->pageKey($s->page_name);
+                $pages[$pk]['name'] ??= $s->page_name;
+                $pages[$pk][$s->key] = (string) $s->value;
+            });
+
+        $out = [];
+        foreach ($pages as $p) {
+            $c = json_decode($p[self::CHECK_KEY] ?? '', true);
+            if (!is_array($c)) continue;
+            $d = json_decode($p[self::DELIVERY_KEY] ?? '', true);
+            $reason = null;
+            if (($c['ok'] ?? null) === false) $reason = implode(', ', (array) ($c['x'] ?? [])) ?: 'the setup check failed';
+            elseif (($c['error'] ?? null) === 'token invalid') $reason = 'token invalid';
+            elseif (is_array($d) && ($d['status'] ?? '') === 'not_delivered' && (string) ($d['flow_id'] ?? '') === trim($p['flow.shipping'] ?? '')) {
+                $reason = 'Sent ' . (int) ($d['sent'] ?? 0) . ', none delivered (Botcake)';
+            }
+            if ($reason !== null) $out[] = ['page' => $p['name'], 'reason' => $reason];
+        }
+        usort($out, fn ($a, $b) => mb_strtolower($a['page']) <=> mb_strtolower($b['page']));
+
+        return $out;
     }
 
     /** Ang active na row ng check ng page (ang ibinabalik kapag walang isinulat). */

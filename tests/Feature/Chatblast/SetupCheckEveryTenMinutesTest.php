@@ -119,6 +119,7 @@ class SetupCheckEveryTenMinutesTest extends ChatblastTestCase
 
         $this->travel(10)->minutes();
         $run();
+        $this->assertStringContainsString('✔ check', Artisan::output(), 'the run itself passed');
         $this->assertSame($rows, PageSetting::count(), 'same IDs, same result: no new page-setting row or history');
         $this->assertNull($this->ready(), 'Ready unchanged');
 

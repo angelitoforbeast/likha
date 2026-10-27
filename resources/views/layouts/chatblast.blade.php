@@ -18,6 +18,8 @@
   $cbChatbotOpen = \App\Support\NavAccess::allows(preg_replace('/\s+/u', ' ', trim((string) $cbRole)), '/chatblast');
   // Ang pulang page (restricted, permission o maraming pumalya sa huling oras): para sa may Chatbot menu lang.
   $cbProblems = $cbChatbotOpen ? app(\App\Services\Chatbot\BotHealth::class)->banner() : null;
+  // Ang mga page na may X sa setup check (o token invalid, o walang na-deliver): para rin sa may Chatbot menu lang.
+  $cbSetupProblems = $cbChatbotOpen ? app(\App\Services\ChatblastSetupCheck::class)->banner() : null;
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -104,6 +106,13 @@
         ⚠ @foreach($cbProblems['pages'] as $p)<strong>{{ $p['page'] }}</strong>: {{ $p['reason'] }} since {{ $p['since'] }}@unless($loop->last); @endunless @endforeach
         @if($cbProblems['more'])<span>+{{ $cbProblems['more'] }} more</span>@endif
         — <a href="/chatbot/health#page-problems" class="font-semibold underline">open Health</a>
+    </div>
+@endif
+@if($cbSetupProblems)
+    <div class="shrink-0 break-words border-b border-red-300 bg-red-600 px-4 py-1.5 text-sm text-white sm:px-6" role="alert" data-alert="setup-problems">
+        ⚠ @foreach($cbSetupProblems['pages'] as $p)<strong>{{ $p['page'] }}</strong>: {{ $p['reason'] }}@unless($loop->last); @endunless @endforeach
+        @if($cbSetupProblems['more'])<span>+{{ $cbSetupProblems['more'] }} more</span>@endif
+        — <a href="/chatblast/page-settings" class="font-semibold underline">open Page settings</a>
     </div>
 @endif
 
