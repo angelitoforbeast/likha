@@ -626,6 +626,10 @@
     // ---- Simula ----
     const select = $('ib-page'), saved = localStorage.getItem(PAGE_KEY);
     if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
+    // Ang link mula sa Health (?page_id=…&psid=…): ang page na iyon, at bukas agad ang usapan ng customer.
+    const linked = new URLSearchParams(location.search), linkedPage = linked.get('page_id') || '', linkedPsid = linked.get('psid') || '';
+    const fromLink = /^\d+$/.test(linkedPage) && [...select.options].some(o => o.value === linkedPage);
+    if (fromLink) select.value = linkedPage;
     S.page = select.value;
     select.addEventListener('change', () => {
         S.page = select.value; localStorage.setItem(PAGE_KEY, S.page);
@@ -637,7 +641,8 @@
     });
     paintTabs();
     switchConds();
-    loadList();
+    if (fromLink && /^\d+$/.test(linkedPsid)) openThread(linkedPsid, 'PSID ' + linkedPsid); // ang openThread ang naglo-load ng listahan
+    else loadList();
 })();
 </script>
 @endif

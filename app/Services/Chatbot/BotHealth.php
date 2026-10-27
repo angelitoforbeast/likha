@@ -26,20 +26,34 @@ class BotHealth
 
     /** Ang mga dahilan ng pumalyang padala, sa pagkakasunod na sinusuri (ang una na tumama ang panalo). */
     public const REASONS = [
+        'restricted' => 'Page restricted by Facebook',
         'unreachable' => 'Customer not reachable (#551 / isn\'t available)',
+        'permission' => 'Permission error (#2022 / code 10 / #200)',
         'botcake' => 'Botcake error (HTTP 5xx)',
         'window' => 'Outside 24-hour window (#10)',
         'timeout' => 'No answer from Botcake (HTTP 0 / timeout)',
         'other' => 'Other',
     ];
 
-    /** Ang parehong pagbilang ng reason sa lahat ng query (grouped, listahan, kada oras). */
-    private const REASON_SQL = "CASE WHEN status = 'sent' THEN 'sent'
+    /**
+     * Ang parehong pagbilang ng reason sa lahat ng query (grouped, listahan, kada oras, mga page na may problema). Ang
+     * restricted at permission ay sinusuri bago ang window: code 10 ng Meta ang dalawa, kaya ang text ang nagpapasya, at
+     * ang code 10 sa raw na hindi tungkol sa window ay permission. Wala pang raw column (bago ma-migrate): ang error lang.
+     */
+    private static function reasonSql(): string
+    {
+        $raw = \App\Models\ChatbotReply::hasRaw();
+
+        return "CASE WHEN status = 'sent' THEN 'sent'
+        WHEN LOWER(error) LIKE '%temporarily restricted%' OR error LIKE '%1893063%'" . ($raw ? " OR raw LIKE '%1893063%'" : '') . " THEN 'restricted'
         WHEN LOWER(error) LIKE '%#551%' OR LOWER(error) LIKE '%isn''t available%' THEN 'unreachable'
-        WHEN LOWER(error) LIKE '%(#10)%' THEN 'window'
+        WHEN error LIKE '%(#2022)%' OR error LIKE '%(#200)%' OR LOWER(error) LIKE '%does not have permission%' THEN 'permission'
+        WHEN LOWER(error) LIKE '%(#10)%' THEN 'window'"
+            . ($raw ? " WHEN (raw LIKE '%\"code\":10,%' OR raw LIKE '%\"code\":10}%') AND LOWER(raw) NOT LIKE '%window%' THEN 'permission'" : '') . "
         WHEN http >= 500 THEN 'botcake'
         WHEN http = 0 OR LOWER(error) LIKE '%no answer from botcake%' OR LOWER(error) LIKE '%timed out%' THEN 'timeout'
         ELSE 'other' END";
+    }
 
     /**
      * Ang mga ilaw: key => [label, metric ng tile ngayon, unit, "high" (mas mataas ay masama) o "low", amber, red (null: walang red)].
@@ -56,10 +70,26 @@ class BotHealth
         'queue' => ['Queue now', 'queue', '', 'high', 200, null],
     ];
 
+    /**
+     * Ang mga ilaw kada page sa "Pages with problems" (huling PROBLEM_MINUTES): key => [label, unit, amber, red (null:
+     * walang red)]. Dito ang hangganan ay "≥". Ang failed % ay ang walang "Customer not reachable", at binibilang lang
+     * kapag may page_min_sends na padala ang page; ang blocked ay ang restricted at permission na pumalya.
+     */
+    public const PAGE_LIGHTS = [
+        'page_blocked' => ['Page: restricted or permission failures', '', 1, 3],
+        'page_failed_pct' => ['Page: failed (without customer not reachable)', '%', 10, 30],
+        'page_min_sends' => ['Page: sends needed before its failed % counts', '', 10, null],
+    ];
+    public const PROBLEM_MINUTES = 60;
+    public const PROBLEM_CACHE = 'bot-health:page-problems';
+    public const PROBLEM_CACHE_SECONDS = 60;
+    public const BANNER_PAGES = 3;
+
     /** @return array<string, array{amber: int|float, red: int|float|null}> */
     public static function defaultThresholds(): array
     {
-        return array_map(fn ($l) => ['amber' => $l[4], 'red' => $l[5]], self::LIGHTS);
+        return array_map(fn ($l) => ['amber' => $l[4], 'red' => $l[5]], self::LIGHTS)
+            + array_map(fn ($l) => ['amber' => $l[2], 'red' => $l[3]], self::PAGE_LIGHTS);
     }
 
     /** Ang naka-save na thresholds sa ibabaw ng default; ang sira o kulang na key ay default. */
@@ -202,6 +232,98 @@ class BotHealth
     protected function queueSize(string $connection, string $queue): int
     {
         return (int) Queue::connection($connection)->size($queue);
+    }
+
+    // ── mga page na may problema ──────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Ang mga page na amber o red sa huling PROBLEM_MINUTES (ang pula muna), bawat isa may pinakabagong 20 pumalya. Ang
+     * padala lang (kind send); ang skipped (naka-pause, emergency stop) ay hindi padala ng page kaya wala rito, at ang
+     * partial ay may naipadala. Naka-cache PROBLEM_CACHE_SECONDS, kasama ang ilaw (ang pag-save ng thresholds ay
+     * nagbubura ng cache), kaya mura ito sa banner ng bawat screen.
+     * @return array<int, array<string, mixed>>
+     */
+    public function problems(): array
+    {
+        // Ang tingin sa table ay nasa loob ng cache: walang query ang banner habang naka-cache.
+        return Cache::remember(self::PROBLEM_CACHE, self::PROBLEM_CACHE_SECONDS,
+            fn () => \Illuminate\Support\Facades\Schema::hasTable('chatbot_replies') ? $this->buildProblems(self::thresholds()) : []);
+    }
+
+    /**
+     * Ang banner sa itaas ng Chatbot at Chatblast: ang mga pulang page (hanggang BANNER_PAGES) at ilan pa. null kapag
+     * walang pula o hindi mabasa (ang banner ay hindi dapat makasira ng screen).
+     * @return array{pages: array<int, array{page: string, reason: string, since: string}>, more: int}|null
+     */
+    public function banner(): ?array
+    {
+        try {
+            $red = array_values(array_filter($this->problems(), fn ($p) => $p['light'] === 'red'));
+        } catch (\Throwable $e) {
+            report($e);
+            return null;
+        }
+        if (!$red) return null;
+
+        return ['pages' => array_map(fn ($p) => ['page' => $p['page'], 'reason' => $p['reason'], 'since' => substr((string) $p['first_at'], 11, 5)],
+            array_slice($red, 0, self::BANNER_PAGES)), 'more' => max(0, count($red) - self::BANNER_PAGES)];
+    }
+
+    private function buildProblems(array $t): array
+    {
+        $rows = DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', ['sent', 'partial', 'failed'])
+            ->where('sent_at', '>=', now()->subMinutes(self::PROBLEM_MINUTES)->format('Y-m-d H:i:s'))
+            ->selectRaw('page_id, status, ' . self::reasonSql() . ' as reason, COUNT(*) as n, MIN(sent_at) as first_at, MAX(sent_at) as last_at')
+            ->groupBy('page_id', 'status', 'reason')->get();
+        $pages = [];
+        foreach ($rows as $r) {
+            $p = &$pages[(string) $r->page_id];
+            $p ??= ['sends' => 0, 'failed' => 0, 'unreachable' => 0, 'reasons' => array_fill_keys(array_keys(self::REASONS), 0), 'first_at' => null, 'last_at' => null];
+            $p['sends'] += (int) $r->n;
+            if ($r->status === 'failed') {
+                $p['failed'] += (int) $r->n;
+                if ($r->reason === 'unreachable') {
+                    $p['unreachable'] += (int) $r->n;
+                } else {
+                    $p['reasons'][$r->reason] += (int) $r->n;
+                    $p['first_at'] = $p['first_at'] === null ? $r->first_at : min($p['first_at'], $r->first_at);
+                    $p['last_at'] = $p['last_at'] === null ? $r->last_at : max($p['last_at'], $r->last_at);
+                }
+            }
+            unset($p);
+        }
+
+        $names = BotcakeChat::pageMap();
+        $at = fn ($key, $level, $v) => $t[$key][$level] !== null && $v >= $t[$key][$level];
+        $out = [];
+        foreach ($pages as $id => $p) {
+            $counted = $p['failed'] - $p['unreachable'];
+            if ($counted <= 0) continue;
+            $blocked = $p['reasons']['restricted'] + $p['reasons']['permission'];
+            $pct = round($counted / $p['sends'] * 100, 1);
+            $enough = $p['sends'] >= $t['page_min_sends']['amber'];
+            $light = $at('page_blocked', 'red', $blocked) || ($enough && $at('page_failed_pct', 'red', $pct)) ? 'red'
+                : ($at('page_blocked', 'amber', $blocked) || ($enough && $at('page_failed_pct', 'amber', $pct)) ? 'amber' : null);
+            if ($light === null) continue;
+            $reasons = array_filter($p['reasons']);
+            arsort($reasons); // stable: sa tabla, ang nauuna sa REASONS
+            $out[] = ['page_id' => $id, 'page' => $names[$id] ?? 'Page ' . $id, 'light' => $light, 'sends' => $p['sends'], 'failed' => $p['failed'],
+                'unreachable' => $p['unreachable'], 'failed_pct' => $pct, 'blocked' => $blocked, 'reason' => self::REASONS[array_key_first($reasons)],
+                'first_at' => $p['first_at'], 'last_at' => $p['last_at'], 'failures' => $this->pageFailures($id)];
+        }
+        usort($out, fn ($a, $b) => [$a['light'] !== 'red', -$a['blocked'], -$a['failed_pct'], $a['page']] <=> [$b['light'] !== 'red', -$b['blocked'], -$b['failed_pct'], $b['page']]);
+
+        return $out;
+    }
+
+    /** Ang pinakabagong 20 pumalyang padala ng page (huling 24 oras), may link sa usapan sa Inbox. Walang text ng customer. */
+    private function pageFailures(string $pageId): array
+    {
+        return DB::table('chatbot_replies')->where('kind', 'send')->where('status', 'failed')->where('page_id', (int) $pageId)
+            ->where('sent_at', '>=', now()->subDay()->format('Y-m-d H:i:s'))->orderByDesc('sent_at')->orderByDesc('id')->limit(self::LIST_LIMIT)
+            ->selectRaw('id, psid, error, sent_at, ' . self::reasonSql() . ' as reason')->get()
+            ->map(fn ($r) => ['at' => $r->sent_at, 'reason' => self::REASONS[$r->reason], 'error' => mb_substr((string) $r->error, 0, 150),
+                'inbox' => $r->psid ? route('chatbot.inbox', ['page_id' => $pageId, 'psid' => (string) $r->psid], false) : null])->all();
     }
 
     // ── mga ilaw ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -450,7 +572,7 @@ class BotHealth
         $out = [];
         $rows = DB::table('chatbot_replies')->whereIn('kind', ['send', 'sheet'])->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
-            ->selectRaw('DATE(sent_at) as d, kind, ' . self::REASON_SQL . ' as reason, COUNT(*) as n')->groupBy('d', 'kind', 'reason')->get();
+            ->selectRaw('DATE(sent_at) as d, kind, ' . self::reasonSql() . ' as reason, COUNT(*) as n')->groupBy('d', 'kind', 'reason')->get();
         foreach ($rows as $r) {
             $day = &$out[$r->d];
             $day ??= ['sent' => 0, 'failed' => 0, 'reasons' => array_fill_keys(array_keys(self::REASONS), 0), 'sheet_failed' => 0];
@@ -624,7 +746,7 @@ class BotHealth
         $rows = DB::table('chatbot_replies')->where('kind', 'send')->where('status', '<>', 'sent')
             ->where('sent_at', '>=', $f['from'] . ' 00:00:00')->where('sent_at', '<', CarbonImmutable::parse($f['to'])->addDay()->toDateString() . ' 00:00:00')
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))->orderByDesc('sent_at')->orderByDesc('id')->limit(self::LIST_LIMIT)
-            ->selectRaw('id, page_id, node_id, error, http, sent_at, ' . self::REASON_SQL . ' as reason')->get();
+            ->selectRaw('id, page_id, node_id, error, http, sent_at, ' . self::reasonSql() . ' as reason')->get();
 
         return $rows->map(fn ($r) => ['id' => (int) $r->id, 'at' => $r->sent_at, 'page' => $names[$r->page_id] ?? 'Page ' . $r->page_id, 'node' => $r->node_id,
             'reason' => self::REASONS[$r->reason], 'http' => $r->http === null ? null : (int) $r->http, 'error' => mb_substr((string) $r->error, 0, 200),
