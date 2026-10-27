@@ -114,6 +114,9 @@ return [
         'chatblast_daily_cap' => (int) env('BOTCAKE_CHATBLAST_DAILY_CAP', 3000),
         // /chatblast: ilang segundo pagkatapos ng send_flow bago ang susunod na mensahe sa parehong customer (page + PSID).
         'chatblast_customer_gap' => (int) env('BOTCAKE_CHATBLAST_CUSTOMER_GAP', 20),
+        // Ang setup check kada 10 minuto (botcake:setup-check --chatblast), oras ng Manila: from hanggang to, maliban sa
+        // skip (ang umagang chatblast burst ang gumagamit ng 2 request kada segundo ng bawat page sa Botcake).
+        'setup_check_window' => ['from' => '06:00', 'to' => '23:00', 'skip_from' => '08:45', 'skip_to' => '10:30'],
         // /chatblast "Open in Botcake": ang live chat ng page sa Botcake. {page_id} = botcake.page_id; {psid} = ang
         // customer (kapag may kumpirmadong anyo ng URL na may customer). Hindi pa kumpirmado ang path: ayusin dito.
         'inbox_url' => env('BOTCAKE_INBOX_URL', 'https://botcake.io/pages/{page_id}/live_chat'),

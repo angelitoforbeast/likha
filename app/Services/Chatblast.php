@@ -796,6 +796,21 @@ class Chatblast
             && (!in_array($top['status'], self::RTS_EXCLUDED, true) || trim((string) $top['rts_reason']) === '');
     }
 
+    /**
+     * Ang mga page na pinapadalhan ng chatblast: kumpleto ang REQUIRED na Botcake settings at kasama sa kahit isang
+     * naka-on na campaign (gaya ng sinusuri ng sender bago magpadala). Ang Ready ay hindi kasama sa tanong: ang page na may X
+     * ay sinusuri pa rin para mawala ito.
+     * @return array<int, string>
+     */
+    public function sendingPages(): array
+    {
+        if (!Schema::hasTable('chatblast_campaigns')) return [];
+        $campaigns = ChatblastCampaign::where('active', true)->get(['id', 'pages']);
+
+        return array_values(array_filter($this->settings->pagesWith('botcake', self::REQUIRED),
+            fn ($page) => $campaigns->contains(fn ($c) => $this->onPage($c, $page))));
+    }
+
     /** Kasama ba ang page sa campaign (walang listahan = lahat ng page). */
     public function onPage(ChatblastCampaign $c, string $page): bool
     {

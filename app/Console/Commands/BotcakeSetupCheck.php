@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\BotcakePageSetup;
+use App\Services\Chatblast;
 use App\Services\ChatblastReady;
 use App\Services\ChatblastSetupCheck;
 use App\Services\PageSettings;
@@ -10,19 +11,21 @@ use Illuminate\Console\Command;
 
 /**
  * Ang setup check ng chatblast (flow, custom field at template ayon sa mga pangalan ng Setup box). Isang page, o lahat
- * (--all, gabi-gabi 21:30 Manila). --dry-run: ipinapakita lang kada page ang kasalukuyang ID, ang nahanap, ang resulta at
+ * (--all, gabi-gabi 21:30 Manila), o ang mga pinapadalhan ng chatblast lang (--chatblast, kada 10 minuto: walang
+ * isinusulat kapag pareho ang nahanap at ang resulta, pati ang oras ng check at ng token status). --dry-run: ipinapakita lang kada page ang kasalukuyang ID, ang nahanap, ang resulta at
  * kung magbabago ang Ready; walang isinusulat at walang token test na itinatala.
  */
 class BotcakeSetupCheck extends Command
 {
-    protected $signature   = 'botcake:setup-check {page? : One page name} {--all : Every page with a Botcake ID and token} {--dry-run : Show what would change; write nothing}';
+    protected $signature   = 'botcake:setup-check {page? : One page name} {--all : Every page with a Botcake ID and token} {--chatblast : Only the pages chatblast sends for; writes only what changed}{--dry-run : Show what would change; write nothing}';
     protected $description = 'Set the chatblast flow and message field by the Setup box names, and check the template, per page';
 
-    public function handle(PageSettings $settings, ChatblastSetupCheck $check, BotcakePageSetup $setup, ChatblastReady $ready): int
+    public function handle(PageSettings $settings, ChatblastSetupCheck $check, BotcakePageSetup $setup, ChatblastReady $ready, Chatblast $chatblast): int
     {
         $page = trim((string) $this->argument('page'));
-        if ($page === '' && !$this->option('all')) { $this->error('Name a page, or use --all.'); return self::FAILURE; }
-        $pages = $page !== '' ? [$page] : $settings->pagesWith('botcake', ['page_id', 'token']);
+        $quiet = (bool) $this->option('chatblast');
+        if ($page === '' && !$this->option('all') && !$quiet) { $this->error('Name a page, or use --all or --chatblast.'); return self::FAILURE; }
+        $pages = $page !== '' ? [$page] : ($this->option('all') ? $settings->pagesWith('botcake', ['page_id', 'token']) : $chatblast->sendingPages());
         $names = $check->names();
         $this->line('Names: flow "' . $names['flow'] . '", field "' . $names['field'] . '", template "' . $names['template'] . '"' . ($this->option('dry-run') ? ' (dry run: nothing is written)' : ''));
 
@@ -37,7 +40,7 @@ class BotcakeSetupCheck extends Command
                 $rows[] = [$p, $this->id($r['flow'] ?? []), $this->id($r['field'] ?? []), $this->result($r), ($before ? 'Ready' : 'not Ready') . ($after !== $before ? ' → ' . ($after ? 'Ready' : 'not Ready') : '')];
                 continue;
             }
-            $res = $setup->check($p);
+            $res = $setup->check($p, $quiet);
             $r = $res['check'] ?? ['status' => $res['status'] === 'ok' ? 'error' : $res['status'], 'error' => $res['error'] ?? ('token ' . $res['status'])];
             $rows[] = [$p, $this->id($r['flow'] ?? []), $this->id($r['field'] ?? []), $this->result($r), $ready->tested($p) ? 'Ready' : 'not Ready'];
         }

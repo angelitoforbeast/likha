@@ -29,8 +29,10 @@ class BotcakePageSetup
     /**
      * @return array{status: string, written: array<string, ?PageSetting>, error: ?string, reason: ?string}
      *   status = ok | invalid | error | skipped (walang Botcake ID o token)
+     * $quiet (ang kada 10 minuto): ang token status at ang check ay isinusulat lang kapag may nagbago, para walang bagong
+     * row o history sa bawat takbo.
      */
-    public function check(string $page): array
+    public function check(string $page, bool $quiet = false): array
     {
         $deadline = $this->clock->now() + self::TEST_BUDGET;
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
@@ -45,21 +47,21 @@ class BotcakePageSetup
             if (!$e instanceof BotcakeException) report($e);
             $reason = $e instanceof BotcakeException ? $e->reason : null;
             $error = $e instanceof BotcakeException ? $e->getMessage() : 'Botcake: no answer';
-            $this->setup->recordFailure($page, $error); // ang grey na "Check failed" sa Check column
+            $this->setup->recordFailure($page, $error, $quiet); // ang grey na "Check failed" sa Check column
             return ['status' => 'error', 'written' => [], 'error' => $error, 'reason' => $reason];
         }
 
         $status = $res['ok'] ? 'ok' : 'invalid';
-        $this->sync->tokenStatus($page, $status, true);
+        $this->sync->tokenStatus($page, $status, !$quiet);
         $written = ['botcake.token_status' => $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', 'token_status')
             ->where('active', true)->orderByDesc('id')->first()];
         if ($status !== 'ok') {
-            $written['botcake.' . ChatblastSetupCheck::CHECK_KEY] = $this->setup->recordFailure($page, 'token invalid');
+            $written['botcake.' . ChatblastSetupCheck::CHECK_KEY] = $this->setup->recordFailure($page, 'token invalid', $quiet);
             return ['status' => $status, 'written' => $written, 'error' => null, 'reason' => null];
         }
 
         try {
-            $check = $this->setup->run($page, $res['fields'], $deadline); // null (kakaibang sagot): babasahin ulit ng check
+            $check = $this->setup->run($page, $res['fields'], $deadline, false, $quiet); // null (kakaibang sagot): babasahin ulit ng check
         } catch (Throwable $e) {
             report($e);
             return ['status' => 'ok', 'written' => $written, 'error' => 'Botcake: no answer', 'reason' => null, 'check' => null];

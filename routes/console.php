@@ -115,6 +115,16 @@ Schedule::command('botcake:setup-check --all')
     ->dailyAt('21:30')
     ->withoutOverlapping(120)
     ->runInBackground(); // ilang minuto (60 page, 2 tawag kada segundo): hindi pinaghihintay ang ibang 21:30
+// Kada 10 minuto sa araw: ang mga page na pinapadalhan ng chatblast lang, para makita agad ang binago o kinopyang flow.
+// Wala sa umagang burst (kapareho nito ang Botcake lane ng page). Walang isinusulat kapag walang nagbago.
+$setupWindow = config('services.botcake.setup_check_window');
+Schedule::command('botcake:setup-check --chatblast')
+    ->timezone('Asia/Manila')
+    ->everyTenMinutes()
+    ->between($setupWindow['from'], $setupWindow['to'])
+    ->unlessBetween($setupWindow['skip_from'], $setupWindow['skip_to'])
+    ->withoutOverlapping(30)
+    ->runInBackground();
 // Pagkatapos ng setup check: ang Botcake at Forbeast token ng bawat page sa /chatbot/pages, at ang nawalang chat block
 // (page na On at nasa Botcake), para ang Connected at Check ay ayon sa gabing ito.
 Schedule::command('chatbot:connections-check')

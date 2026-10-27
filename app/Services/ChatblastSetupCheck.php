@@ -70,7 +70,7 @@ class ChatblastSetupCheck
      * @return array{status: string, error: ?string, ok: bool, x: array<int, string>, flow: array, field: array, template: array, written: array}
      *   status = checked | error | skipped
      */
-    public function run(string $page, ?array $fields = null, ?float $deadline = null, bool $dryRun = false): array
+    public function run(string $page, ?array $fields = null, ?float $deadline = null, bool $dryRun = false, bool $quiet = false): array
     {
         $deadline ??= $this->clock->now() + self::BUDGET;
         $names = $this->names();
@@ -82,17 +82,17 @@ class ChatblastSetupCheck
         try {
             if ($fields === null) {
                 $res = $this->client->shared(sha1($token), self::CALL_TIMEOUT)->once(self::CALL_TIMEOUT)->tokenAndFields($pageId, $token);
-                if (!$res['ok']) return $this->failed($page, 'token invalid', $dryRun, $base);
+                if (!$res['ok']) return $this->failed($page, 'token invalid', $dryRun, $base, $quiet);
                 $fields = $res['fields'];
-                if ($fields === null) return $this->failed($page, 'Botcake: not a list', $dryRun, $base);
+                if ($fields === null) return $this->failed($page, 'Botcake: not a list', $dryRun, $base, $quiet);
             }
             [$flows, $flowError] = $this->names->readFlows($page, $deadline);
-            if ($flowError !== null) return $this->failed($page, $flowError, $dryRun, $base);
+            if ($flowError !== null) return $this->failed($page, $flowError, $dryRun, $base, $quiet);
             [$templates, $templateError] = $this->names->readTemplates($page, $deadline);
-            if ($templateError !== null || $templates === null) return $this->failed($page, $templateError ?? 'Botcake: no answer', $dryRun, $base);
+            if ($templateError !== null || $templates === null) return $this->failed($page, $templateError ?? 'Botcake: no answer', $dryRun, $base, $quiet);
         } catch (Throwable $e) {
             if (!$e instanceof BotcakeException) report($e);
-            return $this->failed($page, $e instanceof BotcakeException ? $e->getMessage() : 'Botcake: no answer', $dryRun, $base);
+            return $this->failed($page, $e instanceof BotcakeException ? $e->getMessage() : 'Botcake: no answer', $dryRun, $base, $quiet);
         }
 
         // Ang flow at ang field: eksaktong isa.
@@ -122,12 +122,18 @@ class ChatblastSetupCheck
 
         $written = [];
         $sys = fn (string $key, string $value) => $this->settings->set($page, 'botcake', $key, $value, false, null, true);
+        $moved = false; // may bagong flow o field ID: ang check ay isinusulat (bago ang oras nito kaysa sa pagbabago)
         if ($flow['ok']) {
             $r = $sys('flow.shipping', $flow['id']);
             $written['botcake.flow.shipping'] = $r['setting'];
+            $moved = $r['status'] !== 'unchanged';
             if ($r['status'] !== 'unchanged' || !$this->delivery($page)) $written['botcake.' . self::DELIVERY_KEY] = $this->baseline($page, $flow['id'], $deadline);
         }
-        if ($field['ok']) $written['botcake.field.message'] = $sys('field.message', $field['id'])['setting'];
+        if ($field['ok']) {
+            $r = $sys('field.message', $field['id']);
+            $written['botcake.field.message'] = $r['setting'];
+            $moved = $moved || $r['status'] !== 'unchanged';
+        }
         if ($template['ok']) {
             $written['botcake.template.shipping'] = $sys('template.shipping', $template['name'])['setting'];
             $written['botcake.template.shipping.text'] = $sys('template.shipping.text', $template['body'] !== '' ? $template['body'] : '(no body)')['setting'];
@@ -141,6 +147,12 @@ class ChatblastSetupCheck
 
         $check = ['at' => now()->format('Y-m-d H:i:s'), 'ok' => !$x, 'x' => $x, 'names' => $names,
             'flow' => ['id' => $flow['id'], 'ok' => $flow['ok']], 'field' => ['id' => $field['id'], 'ok' => $field['ok']], 'template' => ['ok' => $template['ok']]];
+        // Tahimik (kada 10 minuto): kapag pareho ang resulta at walang naiwang "Check failed", ang dating check ang naiiwan.
+        $before = $quiet && !$moved ? $this->check($page) : null;
+        if ($before !== null && !isset($before['error']) && array_diff_key($before, ['at' => 1]) === array_diff_key($check, ['at' => 1])) {
+            $written['botcake.' . self::CHECK_KEY] = $this->checkRow($page);
+            return ['written' => $written] + $out;
+        }
         $written['botcake.' . self::CHECK_KEY] = $sys(self::CHECK_KEY, json_encode($check, JSON_UNESCAPED_UNICODE))['setting'];
 
         return ['written' => $written] + $out;
@@ -167,25 +179,36 @@ class ChatblastSetupCheck
     }
 
     /** Hindi naabot ang Botcake: walang binabago; itinatala lang ang dahilan kasama ang huling resulta (para sa page). */
-    private function failed(string $page, string $reason, bool $dryRun, array $base): array
+    private function failed(string $page, string $reason, bool $dryRun, array $base, bool $quiet = false): array
     {
         $out = ['status' => 'error', 'error' => $reason] + $base;
-        if (!$dryRun) $out['written']['botcake.' . self::CHECK_KEY] = $this->recordFailure($page, $reason);
+        if (!$dryRun) $out['written']['botcake.' . self::CHECK_KEY] = $this->recordFailure($page, $reason, $quiet);
 
         return $out;
     }
 
     /**
      * Ang "Check failed: <dahilan>" ng page (pati kapag ang token test mismo ang pumalya, bago ang check): ang huling
-     * resulta ay naiiwan, kaya hindi nagbabago ang Ready.
+     * resulta ay naiiwan, kaya hindi nagbabago ang Ready. $quiet: kapag may "Check failed" na, hindi isinusulat ulit (iba-iba
+     * ang dahilan ng hindi sumasagot na Botcake); ang "token invalid" lang ang naiiba sa iba.
      */
-    public function recordFailure(string $page, string $reason)
+    public function recordFailure(string $page, string $reason, bool $quiet = false)
     {
         $check = $this->check($page) ?? [];
+        $was = $check['error'] ?? null;
+        if ($quiet && $was !== null && ($was === mb_substr($reason, 0, 200) || ($was !== 'token invalid' && $reason !== 'token invalid'))) {
+            return $this->checkRow($page);
+        }
         $check['error'] = mb_substr($reason, 0, 200);
         $check['error_at'] = now()->format('Y-m-d H:i:s');
 
         return $this->settings->set($page, 'botcake', self::CHECK_KEY, json_encode($check, JSON_UNESCAPED_UNICODE), false, null, true)['setting'];
+    }
+
+    /** Ang active na row ng check ng page (ang ibinabalik kapag walang isinulat). */
+    private function checkRow(string $page): ?PageSetting
+    {
+        return $this->settings->pageQuery($page)->where('provider', 'botcake')->where('key', self::CHECK_KEY)->where('active', true)->orderByDesc('id')->first();
     }
 
     /** Ang huling naitalang check ng page (JSON), o null. */
