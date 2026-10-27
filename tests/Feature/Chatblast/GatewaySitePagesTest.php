@@ -151,6 +151,8 @@ class GatewaySitePagesTest extends ChatblastTestCase
             'export, wrong secret' => [fn ($t) => $t->signed('GET', '/api/gateway/site/pages/1001/export?part=fields', '', null, 'wrong'), 401],
             'release, old timestamp' => [fn ($t) => $t->signed('POST', '/api/gateway/site/pages/1001/release', ['to' => 'incepxion'], time() - 400), 401],
             'bad mode' => [fn ($t) => $t->signed('POST', '/api/gateway/site/pages/2002/adopt', ['name' => 'Page Tres', 'token' => 'fbp_x', 'mode' => 'steal']), 422],
+            'the Setup box name' => [fn ($t) => $t->signed('POST', '/api/gateway/site/pages/2002/adopt', ['name' => ' _ALL ', 'token' => 'fbp_x', 'mode' => 'take']), 422],
+            'import values named like the Setup box' => [fn ($t) => $t->signed('POST', '/api/gateway/site/pages/2002/import?part=values', ['items' => [['key' => 'name', 'value' => '_all']]]), 422],
             'no token' => [fn ($t) => $t->signed('POST', '/api/gateway/site/pages/2002/adopt', ['name' => 'Page Tres', 'mode' => 'take']), 422],
         ];
     }
@@ -285,13 +287,36 @@ class GatewaySitePagesTest extends ChatblastTestCase
         }
         $row = DB::table('chatbot_sequence_subscriptions')->where('page_id', 2002)->get();
         $this->assertCount(1, $row);
-        $this->assertSame(['sequence_id' => $seq->id, 'status' => 'held', 'current_step' => 2, 'next_send_at' => '2026-10-27 08:00:00', 'enrolled_via' => 'flow'],
-            array_intersect_key((array) $row[0], array_flip(['sequence_id', 'status', 'current_step', 'next_send_at', 'enrolled_via'])));
+        $this->assertSame(['sequence_id' => $seq->id, 'status' => 'paused', 'current_step' => 2, 'next_send_at' => '2026-10-27 08:00:00', 'enrolled_via' => 'flow', 'exit_reason' => 'transfer 77'],
+            array_intersect_key((array) $row[0], array_flip(['sequence_id', 'status', 'exit_reason', 'current_step', 'next_send_at', 'enrolled_via'])));
 
         // Due already, but held: the tick sends nothing until activate.
         $this->travelTo('2026-10-27 09:00:00');
         app(ChatbotSequences::class)->tick();
         Queue::assertNotPushed(RunChatbotSequenceStep::class);
+
+        // While held, a flow that subscribes the customer again does not restart them at step 1 ...
+        $this->assertSame('already', app(ChatbotSequences::class)->subscribe($seq->id, 2002, 8, 'flow')['result']);
+        $this->assertSame([2, 'paused'], [(int) DB::table('chatbot_sequence_subscriptions')->value('current_step'), DB::table('chatbot_sequence_subscriptions')->value('status')]);
+        // ... and a reply with exit-on-reply ends the held row, so activate does not send it.
+        ChatbotSequence::whereKey($seq->id)->update(['exit_on_reply' => true]);
+        app(ChatbotSequences::class)->exitOnReply(2002, 8);
+        $this->assertSame('unsubscribed', DB::table('chatbot_sequence_subscriptions')->value('status'));
+    }
+
+    public function test_S_164_6_activate_releases_only_the_rows_held_by_its_own_transfer(): void
+    {
+        $seq = $this->sequence('PREORDER');
+        $items = [['psid' => 8, 'sequence' => 'PREORDER', 'current_step' => 2, 'next_send_at' => '2026-10-28T08:00:00+08:00', 'enrolled_via' => 'flow']];
+        $this->signed('POST', '/api/gateway/site/pages/2002/import?part=sequences', ['items' => $items], null, self::SECRET, '70')->assertOk(); // a transfer that failed later
+        $this->signed('POST', '/api/gateway/site/pages/2002/import?part=sequences', ['items' => [['psid' => 9] + $items[0]]], null, self::SECRET, '77')->assertOk();
+        $this->signed('POST', '/api/gateway/site/pages/2002/import?part=values', ['items' => [['key' => 'name', 'value' => 'Page Tres']]])->assertOk();
+
+        $this->signed('POST', '/api/gateway/site/pages/2002/activate', '', null, self::SECRET, '77')->assertOk()->assertJson(['activated' => 1]);
+
+        $this->assertSame([8 => 'paused', 9 => 'active'], DB::table('chatbot_sequence_subscriptions')->orderBy('psid')->pluck('status', 'psid')->all());
+        // The export of the page sends only real subscriptions, not rows still held by a transfer.
+        $this->assertSame([9], array_column($this->signed('GET', '/api/gateway/site/pages/2002/export?part=sequences')->json('items'), 'psid'));
     }
 
     public function test_S_164_5_import_values_maps_the_flow_by_name_creates_the_page_and_a_missing_flow_saves_nothing(): void
@@ -361,8 +386,8 @@ class GatewaySitePagesTest extends ChatblastTestCase
         $this->signed('POST', '/api/gateway/site/pages/9999/release', ['to' => 'incepxion'])->assertStatus(404);
 
         // activate on the new site: the held ones run again, same step and send time.
-        $held = $this->sub($seq->id, 8001, 'held', 3, '2002');
-        DB::table('chatbot_sequence_subscriptions')->where('id', $held)->update(['exit_reason' => 'transfer']);
+        $held = $this->sub($seq->id, 8001, 'paused', 3, '2002');
+        DB::table('chatbot_sequence_subscriptions')->where('id', $held)->update(['exit_reason' => 'transfer 77']);
         $this->signed('POST', '/api/gateway/site/pages/2002/adopt', ['name' => 'Page Tres', 'token' => 'fbp_new', 'mode' => 'transfer'])->assertOk();
         $this->signed('POST', '/api/gateway/site/pages/2002/activate', '')->assertOk()->assertJson(['activated' => 1]);
         $row = DB::table('chatbot_sequence_subscriptions')->where('id', $held)->first();
