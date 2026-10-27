@@ -44,7 +44,7 @@ class PageOwnersScreenTest extends ChatblastTestCase
             ]]),
             self::API . '/pages/*/take' => Http::response(['transfer_id' => 50], 202),
             self::API . '/pages/*/transfers' => Http::response(['id' => 51], 201),
-            self::API . '/transfers/*' => Http::response([], 202),
+            self::API . '/transfers/*' => Http::response(['id' => 42], 200),
         ]);
     }
 
@@ -169,6 +169,30 @@ class PageOwnersScreenTest extends ChatblastTestCase
         $this->post('/chatbot/owners/take', $form)->assertSessionHas('owners_error', 'Forbeast said "The page already has an owner." (HTTP 409).');
         for ($i = 2; $i <= 10; $i++) $this->post('/chatbot/owners/take', $form)->assertRedirect();
         $this->post('/chatbot/owners/take', $form)->assertStatus(429);
+    }
+
+    /** @return array<string, array{0: int, 1: string, 2: string}> */
+    public static function refusals(): array
+    {
+        return [
+            'unknown_page' => [404, 'unknown_page', 'Forbeast does not know this page for this site. Reload the list. (HTTP 404)'],
+            'unknown_transfer' => [404, 'unknown_transfer', 'Forbeast has no such request for this site. It may be gone already; reload the list. (HTTP 404)'],
+            'not_owned' => [409, 'not_owned', 'This site does not own this page any more. Reload the list. (HTTP 409)'],
+            'not_set_up' => [409, 'not_set_up', 'Forbeast has not finished setting up this site or page, so nothing was changed. (HTTP 409)'],
+            'too_many_pending' => [409, 'too_many_pending', 'This page already has 5 pending requests from this site. Cancel one first. (HTTP 409)'],
+            'invalid_request' => [422, 'invalid_request', 'Forbeast did not accept the request. Reload the page and try again. (HTTP 422)'],
+            'too_many_requests' => [429, 'too_many_requests', 'Too many requests to Forbeast. Wait a minute and try again. (HTTP 429)'],
+        ];
+    }
+
+    #[DataProvider('refusals')]
+    public function test_S_164_10_each_forbeast_refusal_code_is_shown_as_a_plain_message(int $status, string $code, string $shown): void
+    {
+        $this->forbeast([self::API . '/pages/3003/take' => Http::response(['error' => $code, 'message' => 'raw ' . $code . ' text'], $status)]);
+        $this->actingAs($this->user());
+
+        $this->post('/chatbot/owners/take', ['target' => '3003', 'password' => 'secret-password', 'phrase' => 'TAKE Page Tres TO LIKHA'])
+            ->assertSessionHas('owners_error', $shown);
     }
 
     public function test_S_164_8_the_screen_is_cards_that_fit_a_phone(): void
