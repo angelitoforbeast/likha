@@ -180,8 +180,12 @@ class ChatbotRunner
     {
         return $this->resume(BotcakeSendQueue::TABLE, ['done', 'failed'], BotcakeSendQueue::MARK, ['send', 'ai'], 'send_dropped', $ticket, function (FlowRun $run, object $row) {
             $r = (array) json_decode((string) $row->result, true);
+            $payload = (array) json_decode((string) $row->payload, true);
+            // http, tags at retried: para sa isang ulit ng padalang tinanggihan (FlowEngine::retrySend).
             $run->sendResult = ['node' => (string) $row->node_id, 'status' => $r['status'] ?? ($row->status === 'done' ? 'sent' : 'failed'),
-                'error' => $r['error'] ?? $row->error ?? 'Botcake did not answer (HTTP 0)', 'messages' => (array) (json_decode((string) $row->payload, true)['messages'] ?? [])];
+                'error' => $r['error'] ?? $row->error ?? 'Botcake did not answer (HTTP 0)', 'messages' => (array) ($payload['messages'] ?? []),
+                'http' => isset($r['http']) ? (int) $r['http'] : null, 'tags' => is_array($payload['tags'] ?? null) ? $payload['tags'] : null,
+                'retried' => !empty(json_decode((string) $row->context, true)['retry'])];
         });
     }
 

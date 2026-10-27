@@ -8,6 +8,7 @@ use App\Services\OrderEncode\FlowEncode;
 use App\Services\OrderEncode\FlowHook;
 use App\Services\OrderEncode\Upload;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -15,7 +16,8 @@ use Throwable;
  * Ang takbo ng isang flow para sa isang chat. Kapag naghihintay ang customer sa "wait for reply" ng parehong flow,
  * doon nagpapatuloy (ang sagot ay sine-save sa field, saka ang port na reply); kung hindi, mula sa Start. Hanggang
  * 100 node kada takbo. Ang node na pumalya ay sumusunod sa port na failed kapag mayroon, kung hindi ay humihinto ang
- * takbo (itinatala). Ang mga padala at sheet row ay dumadaan sa Outbox (live o Test).
+ * takbo (itinatala); ang pumalyang padala ng send node ay hindi humihinto (afterSend). Ang mga padala at sheet row ay
+ * dumadaan sa Outbox (live o Test).
  */
 class FlowEngine
 {
@@ -240,7 +242,8 @@ class FlowEngine
     {
         // Itinuloy pagkatapos ng padala (botcake:send-pool): ang resulta ang ginagamit, hindi na binubuo o ipinapadala ulit.
         if ($run->sendResult !== null && $run->sendResult['node'] === $node['id']) {
-            return $this->afterSend($node, $c, $run, $this->takeSendResult($run));
+            $res = $this->takeSendResult($run);
+            return $this->retrySend($node['id'], $run, $outbox, $res) ?? $this->afterSend($node, $c, $run, $res);
         }
         $messages = [];
         $templates = [];
@@ -306,9 +309,45 @@ class FlowEngine
         return $r;
     }
 
+    public const RETRY_SECONDS = 3;
+
     /**
-     * Pagkatapos ng padala ng send node (naghintay man o itinuloy mula sa pool): ang talaan ng takbo, ang failed port, at
-     * ang "wait for reply". $res null = walang maipadala.
+     * Isang ulit ng padalang itinuloy mula sa pool na tinanggihan ng Botcake (HTTP 5xx) o walang sagot (HTTP 0): bagong
+     * ticket ng parehong laman pagkalipas ng RETRY_SECONDS (ang pila at rate ng page ay gaya ng ibang padala). Hindi inuulit
+     * ang sagot ng Facebook (#551, #10…), ang 4xx, ang ulit mismo, at kapag wala nang pool. Ang dobleng mensahe (naihatid
+     * pala ang una) ay mas mabuti kaysa sa nawala. null = walang ulit.
+     */
+    private function retrySend(string $nodeId, FlowRun $run, Outbox $outbox, array $res): ?array
+    {
+        if ($res['status'] !== 'failed' || !empty($res['retried']) || !BotcakeSendQueue::async($run, $outbox)) return null;
+        $error = (string) $res['error'];
+        $http = (int) ($res['http'] ?? 0);
+        if (!($http >= 500 || ($http === 0 && str_ends_with($error, '(HTTP 0)'))) || preg_match('/#\d+|restrict/i', $error)) return null;
+        if ($stop = $this->mismatch($run, $nodeId)) return $stop;
+
+        $run->tags = $res['tags'] ?? null;
+        // Sa iisang transaksyon: hindi makukuha ng pool ang ticket bago ang next_at at ang marka ng ulit.
+        $id = DB::transaction(function () use ($run, $nodeId, $res) {
+            $id = BotcakeSendQueue::submitChatbot($run, $nodeId, (array) $res['messages']);
+            if ($id === null) return null;
+            $row = DB::table(BotcakeSendQueue::TABLE)->where('request_id', $id);
+            $ctx = (array) json_decode((string) $row->value('context'), true);
+            $row->update(['next_at' => now()->addSeconds(self::RETRY_SECONDS), 'context' => json_encode(['retry' => 1] + $ctx, JSON_UNESCAPED_UNICODE)]);
+
+            return $id;
+        });
+        if ($id === null) return null;
+        $why = $http === 0 ? 'no answer' : 'HTTP ' . $http;
+        $run->event('send_retry', $nodeId, ['after' => $why]);
+        $run->sendPending = true;
+
+        return ['port' => null, 'suspend' => true, 'note' => 'Send failed (' . $why . '); sending it again'];
+    }
+
+    /**
+     * Pagkatapos ng padala ng send node (naghintay man o itinuloy mula sa pool): ang talaan ng takbo at ang "wait for
+     * reply". Ang pumalyang padala ay hindi humihinto sa takbo: tuloy sa continue (o naka-park ang wait), at ang pumalyang
+     * row ay nasa Inbox; kung hindi, ang susunod na mensahe ng customer ay magsisimula ulit sa Start. $res null = walang maipadala.
      */
     private function afterSend(array $node, array $c, FlowRun $run, ?array $res): array
     {
@@ -317,8 +356,8 @@ class FlowEngine
             $messages = (array) $res['messages'];
             $run->sends[] = ['node' => $node['id'], 'messages' => $messages, 'status' => $res['status'], 'error' => $res['error']];
             if ($res['status'] === 'skipped') $run->event('skipped', $node['id'], ['reason' => 'replies off']);
-            if ($res['status'] === 'failed') return ['port' => 'failed', 'note' => 'Send failed: ' . $res['error']];
-            $note = count($messages) . ' message' . (count($messages) === 1 ? '' : 's') . ' ' . $res['status'];
+            $note = $res['status'] === 'failed' ? 'Send failed: ' . $res['error'] . '; continued'
+                : count($messages) . ' message' . (count($messages) === 1 ? '' : 's') . ' ' . $res['status'];
         }
 
         // Ang step ng sequence ay hindi naghihintay: ang wait (at ang timer) ng customer ay sa main flow ng page.
@@ -398,7 +437,8 @@ class FlowEngine
         // Itinuloy pagkatapos ipadala ang sagot (botcake:send-pool): ang sagot ay nasagot at na-save na bago ang padala.
         if ($run->sendResult !== null && $run->sendResult['node'] === $node['id']) {
             $r = $this->takeSendResult($run);
-            $run->sends[] = ['node' => $node['id'], 'messages' => $r['messages'], 'status' => $r['status'], 'error' => $r['error']];
+            if ($retry = $this->retrySend($node['id'], $run, $outbox, $r)) return $retry;
+            $run->sends[] =['node' => $node['id'], 'messages' => $r['messages'], 'status' => $r['status'], 'error' => $r['error']];
             return ['port' => 'success', 'note' => 'AI answered' . (($c['save_to'] ?? '') !== '' ? ' into ' . $c['save_to'] : '')];
         }
         if ($run->aiAnswer !== null && $run->aiAnswer['node'] === $node['id']) {

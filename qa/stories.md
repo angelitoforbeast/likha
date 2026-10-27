@@ -2715,3 +2715,20 @@ Tests: `tests/Feature/Chatblast/BigBroadcastTest.php`.
 | S-167.4 (P1) | Bot replies during a big run are still sent first | `BotRepliesBeforeBlastsTest` (S-165.1, .2, .3, .5) | Passed · 2026-10-27 · auto |
 | S-167.5 (P1) | Given a pool that died (no heartbeat) while holding messages, Then the existing recover path takes them back, they hold no customer lock while waiting, and the next pool sends each once, in customer order | `test_S_167_5…` | Passed · 2026-10-27 · auto |
 | S-167.6 (P1) | The Chatblast, Botcake and Unit suites add no new failures | full run | Passed · 2026-10-27 · auto |
+
+## S-168 A send Botcake refuses doesn't restart the customer's conversation
+
+As staff, I want a customer whose bot message Botcake refused to keep their place in the flow, so their next message doesn't get the opening again.
+
+Slice 168. Threat model: the retry and the continue read the send pool's own tickets and Botcake's answer (status and error text are only compared); customer text is only carried as data. Nothing new is reachable from outside. Risk tier: medium (business logic of an existing background process).
+Tests: `tests/Feature/Chatblast/FailedSendKeepsConversationTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-168.1 (P1) | Given a send that Botcake answers HTTP 5xx or not at all (HTTP 0), When ~3 s pass, Then the same content is sent once more as a new ticket, the retry is an Inbox event ("retried after HTTP 500"), and on 200 the run continues normally | `test_S_168_1…` (table: 500, 502, no answer) | passed |
+| S-168.2 (P1) | Given a send that fails twice, Then the reply stays failed, the run goes on to the next node and the next wait=true send parks the wait; the customer's next message resumes there (not the Start) | `test_S_168_2…` | passed |
+| S-168.3 (P1) | Given a wait=true send that fails twice, Then the wait is parked at it and the next message resumes there | `test_S_168_3…` | passed |
+| S-168.4 (P1) | Given a Facebook error (#551, #10) or a 4xx, Then it is not retried, and the run still goes on (a send node has no failed edge) | `test_S_168_4…` (table) | passed |
+| S-168.5 (P1) | Given a node with a failed edge (the AI step), Then its answer's send gets the one retry, and a failed AI answer still follows the failed edge | `test_S_168_5…` | passed |
+| S-168.6 (P1) | Given the reported path (image ok, text ok, text 500 twice), Then the wait=true send after it is reached and parked, and the next message resumes there | `test_S_168_6…` | passed |
+| S-168.7 (P1) | The Chatblast, Botcake, PageSettings and Unit suites add no new failures (four tests that pinned "a failed send stops the run" now assert the new behaviour) | full run | passed |

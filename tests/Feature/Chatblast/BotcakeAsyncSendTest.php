@@ -340,8 +340,9 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
     }
 
     /**
-     * A send node has no failed port in the editor (FlowGraph::ports): a failed send stops the run, as before. The AI step's
-     * failed port is for the AI answer; a failed send of the answer is logged and the step still goes on "success", as before.
+     * A send node has no failed port in the editor (FlowGraph::ports): a send that still fails after its one retry is
+     * logged and the run goes on. The AI step's failed port is for the AI answer; a failed send of the answer is logged and
+     * the step still goes on "success", as before.
      */
     public function test_S_089_9_a_failed_send_still_takes_the_failed_path_it_took_before(): void
     {
@@ -352,12 +353,14 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         $this->pool->tick(false);
 
         $this->assertSame(['failed: You said: hi (Botcake said "Server error" (HTTP 500))'], $this->replies('7001'));
-        $this->assertNull((new CustomerFields(1001, 7001))->get('done'), 'the run stopped at the failed send');
-        $ended = DB::table('chatbot_events')->where('type', 'run')->orderByDesc('id')->value('detail'); // spec 163: ang dulo ng takbo ay nasa run row
-        $this->assertSame('Send failed: Botcake said "Server error" (HTTP 500)', json_decode($ended, true)['reason']);
+        $this->assertNull((new CustomerFields(1001, 7001))->get('done'), 'the run waits for the one retry');
         $this->clock->time += 5;
+        $this->travel(5)->seconds();
         $this->pool->tick();
-        $this->assertCount(1, $this->calls, 'a 5xx on send_content is not retried (it may have arrived)');
+        $this->assertCount(2, $this->calls, 'a 5xx on send_content is sent once more');
+        $this->answer($this->calls[1], 500, ['success' => false, 'message' => 'Server error']);
+        $this->pool->tick(false);
+        $this->assertSame('yes', (new CustomerFields(1001, 7001))->get('done'), 'the second failure is logged and the run goes on');
 
         // The AI step with "send the answer": a failed send still continues on "success".
         Http::fake(['api.openai.com/*' => Http::response(['choices' => [['message' => ['content' => 'AI answer']]]])]);
@@ -365,9 +368,13 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
             ['id' => 'n3', 'type' => 'set', 'config' => ['ops' => [['op' => 'set', 'field' => 'after_ai', 'value' => 'yes']]]]],
             [['from' => 'n1', 'port' => 'next', 'to' => 'n2'], ['from' => 'n2', 'port' => 'success', 'to' => 'n3']], 'Page Dos');
         $this->says('q', '8001', '1002', 'Page Dos');
-        $this->pool->tick();
-        $this->answer(end($this->calls), 500, ['success' => false]);
-        $this->pool->tick(false);
+        foreach ([0, 5] as $wait) {
+            $this->clock->time += $wait;
+            $this->travel($wait)->seconds();
+            $this->pool->tick();
+            $this->answer(end($this->calls), 500, ['success' => false]);
+            $this->pool->tick(false);
+        }
         $this->assertSame('yes', (new CustomerFields(1002, 8001))->get('after ai')); // field names are stored normalised
     }
     private function blast(string $psid = '7001'): BotcakeMessage
@@ -439,7 +446,7 @@ class BotcakeAsyncSendTest extends ChatblastTestCase
         // The chatbot send's 10-minute deadline passed long before: the same sweep failed it.
         Artisan::call('chatbot:resume-skipped');
         $this->assertSame(['failed: You said: hi (The send pool did not send it in time)'], $this->replies('7001'));
-        $this->assertNull((new CustomerFields(1001, 7001))->get('done'), 'the run took the failed path (a send node stops)');
+        $this->assertSame('yes', (new CustomerFields(1001, 7001))->get('done'), 'the run goes on past the failed send (one sent this late is not retried)');
         $this->assertNull((new CustomerFields(1001, 7001))->get(CustomerFields::AI), 'and the customer is free again');
 
         // A result whose resume job was lost is resumed by the sweep, once.
