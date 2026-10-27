@@ -16,10 +16,10 @@ use Illuminate\Support\Facades\Schema;
  * - adopt: ang page token at ang koneksyon (ForbeastPageSetup::connect), gaya ng Connections popup; ang take ay Off ang bot;
  * - export / import: ang values ng page (ang flow ayon sa pangalan), ang customer fields (walang "__" run state) at ang
  *   mga sequence subscription (ayon sa pangalan ng sequence), hanggang 500 kada tawag. Ang import ay idempotent at lahat o wala;
- *   ang subscription ay "held" (status held, exit_reason transfer): walang padala hangga't walang activate;
+ *   ang subscription ay "held": status paused at exit_reason "transfer <id>" (ang subscribe at exit on reply ay itinuturing\n *   itong naka-enroll; ang tick at resumePaused ay hindi ito kinukuha): walang padala hangga't walang activate ng paglipat na iyon;
  * - release: ang lumang site ay tumitigil (bot Off, mga subscription tapos na "transferred", ang mga wait at naghihintay na
  *   AI o padala ay kinakalimutan, ang Forbeast connection ay inactive na may history);
- * - activate: ang mga held ay active ulit, sa parehong step at oras ng padala.
+ * - activate: ang mga held ng paglipat na ito lang ay active ulit, sa parehong step at oras ng padala.
  * Ang nasa gitna ng flow (wait, __wait, AI) ay hindi kinokopya: sa Main Flow sila magsisimula sa susunod nilang mensahe.
  * Walang value, token o secret sa log (ang PageSettings ay key lang ang itinatala).
  */
@@ -27,9 +27,9 @@ class PageTransfers
 {
     public const MAX_ITEMS = 500;
     public const PARTS = ['values', 'fields', 'sequences'];
-    /** Ang marka ng held na subscription (status at exit_reason, mga dating column). */
-    public const HELD = 'held';
-    public const HELD_REASON = 'transfer';
+    /** Ang held na subscription: naka-pause na may exit_reason "transfer <id>" (mga dating column at status). */
+    public const HELD = 'paused';
+    public const HELD_REASON = 'transfer ';
     /** Ang mga item ng values na hindi botfield: ang pangalan ng page, ang On/Off at ang Main Flow (ayon sa pangalan). */
     private const META_KEYS = ['name', 'active', 'flow'];
     private const VIAS = ['flow', 'inbox', 'other'];
@@ -130,9 +130,11 @@ class PageTransfers
     /** @return array{http: int, body: array} */
     private function exportSequences(int $pageId, int $cursor): array
     {
-        // Pati ang naka-pause dahil Off ang page: babalik sila kapag On ang page sa bagong site.
+        // Pati ang naka-pause dahil Off ang page (babalik kapag On sa bagong site), pero hindi ang held pa ng isang paglipat.
         $rows = DB::table('chatbot_sequence_subscriptions as s')->join('chatbot_sequences as q', 'q.id', '=', 's.sequence_id')
-            ->where('s.page_id', $pageId)->whereIn('s.status', ['active', 'paused'])->where('s.id', '>', $cursor)
+            ->where('s.page_id', $pageId)->where('s.id', '>', $cursor)
+            ->where(fn ($q) => $q->where('s.status', 'active')->orWhere(fn ($w) => $w->where('s.status', 'paused')
+                ->where(fn ($x) => $x->whereNull('s.exit_reason')->orWhere('s.exit_reason', 'not like', self::HELD_REASON . '%'))))
             ->orderBy('s.id')->limit(self::MAX_ITEMS)->get(['s.id', 's.psid', 'q.name', 's.current_step', 's.next_send_at', 's.enrolled_via']);
         $items = $rows->map(fn ($r) => ['psid' => (int) $r->psid, 'sequence' => (string) $r->name, 'current_step' => (int) $r->current_step,
             'next_send_at' => self::iso($r->next_send_at), 'enrolled_via' => (string) $r->enrolled_via])->all();
@@ -167,7 +169,7 @@ class PageTransfers
         return match ($part) {
             'values' => $this->importValues($metaPageId, $items, $this->from($transferId)),
             'fields' => $this->importFields((int) $metaPageId, $items),
-            default => $this->importSequences((int) $metaPageId, $items),
+            default => $this->importSequences((int) $metaPageId, $items, $transferId),
         };
     }
 
@@ -190,7 +192,7 @@ class PageTransfers
         $page = $this->page($metaPageId);
         if ($page === null) {
             $name = ForbeastSite::squash((string) ($values['name'] ?? ''));
-            if ($name === '' || mb_strlen($name) > 255) return self::invalid(['name' => 'The page name is required (at most 255 characters) for a page that is not here yet.']);
+            if ($name === '' || mb_strlen($name) > 255 || $this->settings->pageKey($name) === \App\Services\ChatblastSetupCheck::ALL_PAGE) return self::invalid(['name' => 'The page name is required (at most 255 characters) for a page that is not here yet.']);
             if ($this->clash($name, $metaPageId)) return self::error(409, 'name_taken', 'Another page here already uses this name.');
             $page = $name;
         }
@@ -277,7 +279,7 @@ class PageTransfers
     }
 
     /** @return array{http: int, body: array} */
-    private function importSequences(int $pageId, array $items): array
+    private function importSequences(int $pageId, array $items, string $transferId): array
     {
         $rows = [];
         $errors = [];
@@ -303,17 +305,18 @@ class PageTransfers
         $missing = array_values(array_filter($names, fn ($n) => !isset($ids[$n])));
         if ($missing) return self::missing($missing);
 
-        DB::transaction(function () use ($pageId, $rows, $ids) {
+        DB::transaction(function () use ($pageId, $rows, $ids, $transferId) {
             foreach ($rows as $row) {
-                $values = ['status' => self::HELD, 'exit_reason' => self::HELD_REASON, 'current_step' => $row['current_step'], 'next_send_at' => $row['next_send_at'],
+                $values = ['status' => self::HELD, 'exit_reason' => self::HELD_REASON . $transferId, 'current_step' => $row['current_step'], 'next_send_at' => $row['next_send_at'],
                     'dispatched_at' => null, 'enrolled_via' => $row['enrolled_via'], 'updated_at' => now()];
                 $key = ['sequence_id' => $ids[$row['name']], 'page_id' => $pageId, 'psid' => $row['psid']];
-                $existing = DB::table('chatbot_sequence_subscriptions')->where($key)->first(['id', 'status']);
+                $existing = DB::table('chatbot_sequence_subscriptions')->where($key)->first(['id', 'status', 'exit_reason']);
+                $held = $existing !== null && $existing->status === self::HELD && str_starts_with((string) $existing->exit_reason, self::HELD_REASON);
                 if ($existing === null) {
                     DB::table('chatbot_sequence_subscriptions')->insert($key + $values + ['created_at' => now()]);
-                } elseif (!in_array($existing->status, ['active', 'paused'], true)) {
-                    // Ang tumatakbo na rito (active o naka-pause) ay hindi ginagalaw: walang dobleng follow-up.
-                    DB::table('chatbot_sequence_subscriptions')->where('id', $existing->id)->whereNotIn('status', ['active', 'paused'])->update($values);
+                } elseif ($held || !in_array($existing->status, ['active', 'paused'], true)) {
+                    // Ang tumatakbo na rito (active o naka-pause, hindi held) ay hindi ginagalaw: walang dobleng follow-up.
+                    DB::table('chatbot_sequence_subscriptions')->where('id', $existing->id)->where('status', $existing->status)->update($values);
                 }
             }
         });
@@ -340,7 +343,7 @@ class PageTransfers
 
         $ended = DB::transaction(function () use ($page, $pageId, $reason) {
             $this->settings->set($page, ChatbotFields::PROVIDER, 'active', '0', false, null, true, $reason);
-            $ended = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->whereIn('status', ['active', 'paused', self::HELD])
+            $ended = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->whereIn('status', ['active', 'paused'])
                 ->update(['status' => 'unsubscribed', 'exit_reason' => 'transferred', 'next_send_at' => null, 'dispatched_at' => null, 'updated_at' => now()]);
             // Ang nasa gitna ng flow: walang wait, walang naghihintay na AI o padala (sa bagong site sila magsisimula ulit).
             if (Schema::hasTable('chatbot_waits')) DB::table('chatbot_waits')->where('page_id', $pageId)->delete();
@@ -365,9 +368,10 @@ class PageTransfers
     }
 
     /** @return array{http: int, body: array} */
-    public function activate(int $pageId): array
+    public function activate(int $pageId, string $transferId): array
     {
-        $n = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)
+        // Ang held lang ng paglipat na ito: ang naiwan ng nabigong paglipat noon ay hindi ipinapadala.
+        $n = DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', self::HELD)->where('exit_reason', self::HELD_REASON . $transferId)
             ->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null, 'updated_at' => now()]);
 
         return ['http' => 200, 'body' => ['ok' => true, 'activated' => $n]];

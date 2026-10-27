@@ -33,7 +33,7 @@ class GatewaySiteController extends Controller
         $mode = is_array($data) ? ($data['mode'] ?? null) : null;
         $actor = is_array($data) && is_string($data['actor'] ?? null) && trim($data['actor']) !== '' ? mb_substr(ForbeastSite::squash($data['actor']), 0, 150) : null;
         $errors = array_filter([
-            'name' => $name === '' || mb_strlen($name) > 255 ? 'The page name is required (at most 255 characters).' : null,
+            'name' => $name === '' || mb_strlen($name) > 255 || mb_strtolower($name) === \App\Services\ChatblastSetupCheck::ALL_PAGE ? 'The page name is required (at most 255 characters, not "' . \App\Services\ChatblastSetupCheck::ALL_PAGE . '").' : null,
             'token' => $token === '' || strlen($token) > 500 ? 'The page token is required.' : null,
             'mode' => !in_array($mode, ['take', 'transfer'], true) ? 'The mode is take or transfer.' : null,
         ]);
@@ -91,7 +91,7 @@ class GatewaySiteController extends Controller
     {
         if ($refused = $this->refused($request, $metaPageId, $raw)) return $refused;
 
-        return self::json($this->transfers->activate((int) $metaPageId));
+        return self::json($this->transfers->activate((int) $metaPageId, $this->transfer($request)));
     }
 
     /** Ang sagot kapag hindi tatanggapin ang request (hindi naka-link, malaki, maling page id o pirma), o null. */
