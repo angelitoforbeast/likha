@@ -2714,3 +2714,25 @@ Tests: `tests/Feature/Chatblast/GatewayPageValuesTest.php`.
 | S-162.5 (P1) | When item, price and quantity change through the API, Then SHOP DETAILS in the response and in the bot is rebuilt from them (`PRICE: ₱1,299`) | `test_S_162_5…` | passed |
 | S-162.6 (P1) | After 60 signed requests in a minute for a page, the next one (GET or PUT) → 429 `rate_limited`; another page keeps its own count; a minute later it works again | `test_S_162_6…` | passed |
 | S-162.7 (P2) | Given a value set and one cleared from Forbeast, Then the page-settings grid, the /chatbot history and Changes show "via Forbeast: <actor>" as who changed it | `test_S_162_7…` | passed |
+
+## S-163 Each chat costs Likha less work
+
+As the owner, I want each chat to cost Likha less (fewer requests, queries and event rows) without breaking anything or making debugging harder.
+
+Slice 163. Threat model: everything in a POST to `/api/gateway/events` (body, headers) is untrusted, and so is event detail text that came from customers; the repo, config, the page's stored webhook secret and staff saves on Likha screens are trusted. Risk tier: high for the batch body (a new body shape on a public webhook), medium for the cache and the run row.
+Tests: `tests/Feature/Chatblast/SendStatusBatchTest.php`, `ChatConfigCacheTest.php`, `RunEventRowTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-163.1 (P1) | Given replies sent through Forbeast, When Forbeast POSTs a signed batch of N send_status events of one page, Then 200 `{"ok":true,"accepted":N}` and each reply is confirmed with its own sent_at; the same batch again changes nothing; a single send_status still works as before | `test_S_163_1…` | passed |
+| S-163.1b (P1) | A batch with a bad signature, signed with another page's secret or naming an unknown page → 401; mixed pages, a non-send_status event, no events, `events` as an object, an element that isn't an object or 201 events → 422; a batch over 64 KB without the batch header, any body over 512 KB, or a single event over 64 KB even with the header → 413; nothing is confirmed | `test_S_163_1b…` (table) | passed |
+| S-163.1c (P1) | A batch for a page without its own secret signed with the global secret, a batch mixing page id 1001 and "1001", and 50 events over 64 KB with the header → 200, every reply confirmed | `test_S_163_1c…` (table) | passed |
+| S-163.2 (P1) | Given a page whose flow, sequence and settings were read once, When the next chat runs (fresh services, warm cache), Then it reads no bot configuration (page settings, flow, sequence, steps, schema) from the database, and the run makes at most 13 queries (17 before) | `test_S_163_2…` | passed |
+| S-163.2b (P1) | When a value is saved through the values API, the page settings service (screens, paste, imports), a flow Publish or a sequence edit, Then the very next message uses it | `test_S_163_2b…` (table) | passed |
+| S-163.3 (P1) | When a flow runs, Then one `run` row is stored instead of run_started + run_ended, and the Inbox shows the same lines in the same places as before ("Flow Main started (new)", …, "Run ended (waiting for a reply)"; "started (resumed after wait)"); the panel's last runs are the same | `test_S_163_3…` | passed |
+| S-163.3b (P1) | Given old run_started / run_ended rows, Then the Inbox and the panel still show them | `test_S_163_3b…` | passed |
+| S-163.3c (P1) | Given new run rows and old run_started / run_ended rows, Then Bot Health and Results give the same output | `test_S_163_3c…` | passed |
+| S-163.3d (P1) | When a run throws outside a step, Then its `run` row is still written with "failed: <class>" and the Inbox shows "Run ended (failed: …)" | `test_S_163_3d…` | passed |
+| S-163.4 (P1) | When a sequence step runs, Then the Inbox still shows "Flow Step started (sequence Follow step 1)", "Run ended (…)", "Sequence Follow step 1 ran" and "Sequence Follow completed" (sequence events kept) | `test_S_163_4…` | passed |
+| S-163.5 (P1) | The Chatblast, Botcake, PageSettings and OrderEncode suites add no new failures | full run | passed |
+| S-163.6 (P2) | A local benchmark of 1,000 synthetic chats (faked sends) before and after: queries, rows written, chats/s, send_status POSTs | local benchmark (not committed) | done |
