@@ -14,6 +14,7 @@ class SendStatusBatchTest extends ChatblastTestCase
 {
     private const SECRET_UNO = 'whsec-uno-163-aaaaaaaaaaaaaaaa';
     private const SECRET_DOS = 'whsec-dos-163-bbbbbbbbbbbbbbbb';
+    private const GLOBAL = 'whsec-global-163-gggggggggggggg';
 
     protected function setUp(): void
     {
@@ -30,7 +31,7 @@ class SendStatusBatchTest extends ChatblastTestCase
             'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
             'database/migrations/2026_11_11_100000_add_real_send_to_chatbot_replies.php',
         ]]);
-        config(['queue.chatbot_connection' => 'sync']);
+        config(['queue.chatbot_connection' => 'sync', 'services.gateway.webhook_secret' => self::GLOBAL]);
         $this->travelTo('2026-10-26 20:00:00');
         $s = app(PageSettings::class);
         foreach (['Page Uno' => ['1001', self::SECRET_UNO], 'Page Dos' => ['1002', self::SECRET_DOS]] as $name => [$id, $secret]) {
@@ -38,6 +39,8 @@ class SendStatusBatchTest extends ChatblastTestCase
             $s->set($name, 'chatbot', 'provider', 'gateway');
             $s->set($name, 'forbeast', 'webhook_secret', $secret, true, null, true);
         }
+        // Page Tres: walang sariling secret, kaya ang global (gaya ng iisang event).
+        $this->page('Page Tres', '1003');
     }
 
     private function reply(string $ref, string $page = '1001'): int
@@ -89,6 +92,28 @@ class SendStatusBatchTest extends ChatblastTestCase
         $this->assertSame('2026-10-26 19:02:00', $this->confirmed($single));
     }
 
+    /** [ang mga event (lahat ng page 1001 o 1003), ang secret na pumirma] */
+    public static function accepted(): array
+    {
+        $big = array_map(fn ($i) => self::event('ref-' . $i, '2026-10-26 19:00:04', id: 100 + $i) + ['note' => str_repeat('x', 1500)], range(1, 50));
+
+        return [
+            'page without its own secret: the global one' => [[self::event('ref-1', '2026-10-26 19:00:04', '1003', 31), self::event('ref-2', '2026-10-26 19:00:05', '1003', 32)], self::GLOBAL],
+            'page id as a number and as text' => [[self::event('ref-1', '2026-10-26 19:00:04', id: 33), ['page_id' => 1001] + self::event('ref-2', '2026-10-26 19:00:05', id: 34)], self::SECRET_UNO],
+            '50 events over 64 KB' => [$big, self::SECRET_UNO],
+        ];
+    }
+
+    /** @dataProvider accepted */
+    public function test_S_163_1c_a_valid_batch_variant_is_accepted_and_confirmed(array $events, string $secret): void
+    {
+        $page = (string) $events[0]['page_id'];
+        $ids = array_map(fn ($e) => $this->reply($e['send']['client_ref'], $page), $events);
+
+        $this->send(['kind' => 'batch', 'events' => $events], $secret)->assertOk()->assertExactJson(['ok' => true, 'accepted' => count($events)]);
+        $this->assertNotContains(null, array_map(fn ($id) => $this->confirmed($id), $ids));
+    }
+
     /** [ang body, ang secret na pumirma, ang status na inaasahan] */
     public static function refused(): array
     {
@@ -100,15 +125,22 @@ class SendStatusBatchTest extends ChatblastTestCase
             'mixed pages' => [['kind' => 'batch', 'events' => [$uno, self::event('ref-x', '2026-10-26 19:00:05', '1002', 22)]], self::SECRET_UNO, 422],
             'not a send_status' => [['kind' => 'batch', 'events' => [$uno, ['kind' => 'event', 'type' => 'message', 'page_id' => '1001', 'psid' => '7001', 'mid' => 'm_x', 'text' => 'hi']]], self::SECRET_UNO, 422],
             'no events' => [['kind' => 'batch', 'events' => []], self::SECRET_UNO, 422],
+            'events is an object' => [['kind' => 'batch', 'events' => ['a' => $uno]], self::SECRET_UNO, 422],
+            'an event that is not an object' => [['kind' => 'batch', 'events' => [$uno, 'x']], self::SECRET_UNO, 422],
+            '201 events' => [['kind' => 'batch', 'events' => array_fill(0, 201, $uno)], self::SECRET_UNO, 422],
+            'unknown page' => [['kind' => 'batch', 'events' => [self::event('ref-a', '2026-10-26 19:00:04', '9999', 23)]], self::SECRET_UNO, 401],
+            'a batch over 64 KB without the header' => [['kind' => 'batch', 'events' => [$uno + ['note' => str_repeat('x', 70000)]]], self::SECRET_UNO, 413, false],
+            'over 512 KB' => [['kind' => 'batch', 'events' => [$uno + ['note' => str_repeat('x', 530000)]]], self::SECRET_UNO, 413],
+            'a single event over 64 KB with the batch header' => [$uno + ['note' => str_repeat('x', 70000)], self::SECRET_UNO, 413],
         ];
     }
 
     /** @dataProvider refused */
-    public function test_S_163_1b_a_refused_batch_confirms_nothing(array $body, string $secret, int $status): void
+    public function test_S_163_1b_a_refused_batch_confirms_nothing(array $body, string $secret, int $status, bool $header = true): void
     {
         $id = $this->reply('ref-a');
 
-        $this->send($body, $secret)->assertStatus($status);
+        $this->send($body, $secret, $header)->assertStatus($status);
         $this->assertNull($this->confirmed($id));
     }
 }

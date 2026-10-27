@@ -105,7 +105,8 @@ class ChatConfigCacheTest extends ChatblastTestCase
         $this->assertTrue($this->subscribed('7002'));
         $config = array_values(array_filter($queries, fn ($sql) => preg_match(self::CONFIG, $sql)));
         $this->assertSame([], $config, 'basa ng ayos sa isang chat (lahat: ' . count($queries) . ')');
-        $this->assertLessThanOrEqual(8, count($config));
+        // Lahat ng query ng takbo (bago: 17, kasama ang 4 na basa ng ayos); ang natitira ay ang customer at ang mga sulat.
+        $this->assertLessThanOrEqual(13, count($queries), implode("\n", $queries));
     }
 
     /** [ang pag-save, ang inaasahan sa susunod na chat: [text, naka-subscribe]] */
