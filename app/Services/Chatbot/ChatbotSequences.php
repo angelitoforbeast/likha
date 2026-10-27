@@ -82,6 +82,8 @@ class ChatbotSequences
 
         $values = ['status' => 'active', 'current_step' => $first->position, 'next_send_at' => self::dueAt(now(), $first->delay_amount, $first->delay_unit),
             'dispatched_at' => null, 'last_sent_at' => null, 'enrolled_via' => $via, 'enrolled_by' => $by, 'exit_reason' => null];
+        // Ang page na inililipat (hold sa site na ito): held agad, at ang catch-up ng paglipat ang magdadala nito sa bagong site.
+        if (($hold = $this->holdOf($pageId)) !== null) $values = ['status' => PageTransfers::HELD, 'exit_reason' => PageTransfers::HOLD_REASON . $hold] + $values;
         $existing = ChatbotSequenceSubscription::where('sequence_id', $seq->id)->where('page_id', $pageId)->where('psid', $psid)->first();
         if ($existing && in_array($existing->status, ['active', 'paused'], true)) return $out(['result' => 'already', 'name' => $seq->name]);
         if ($existing) {
@@ -97,6 +99,14 @@ class ChatbotSequences
         }
 
         return $out(['result' => 'subscribed', 'name' => $seq->name]);
+    }
+
+    /** Ang id ng paglipat na humahawak sa page (PageTransfers::hold), o null. */
+    private function holdOf(int $pageId): ?string
+    {
+        $page = BotcakeChat::pageMap()[(string) $pageId] ?? null;
+
+        return $page === null ? null : $this->settings->get($page, PageTransfers::HOLD_PROVIDER, PageTransfers::HOLD_KEY);
     }
 
     /**
@@ -190,7 +200,8 @@ class ChatbotSequences
         $resumed = 0;
         foreach ($pages as $pageId) {
             $page = $names[(string) $pageId] ?? null;
-            if ($page === null || !$this->pageOn($page)) continue;
+            // Ang page na inililipat (hold): hindi muna, kundi may padala ang source habang kinokopya.
+            if ($page === null || !$this->pageOn($page) || $this->holdOf((int) $pageId) !== null) continue;
             $resumed += DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->where('status', 'paused')->where('exit_reason', 'page off')
                 ->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null, 'updated_at' => now()]);
         }

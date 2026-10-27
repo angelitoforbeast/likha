@@ -385,6 +385,72 @@ class GatewaySitePagesTest extends ChatblastTestCase
         $this->signed('POST', '/api/gateway/site/pages/2002/import?part=values', ['items' => [['key' => 'picture', 'value' => 'http://not-https.example/x.jpg']]])->assertStatus(422)->assertJson(['error' => 'invalid_value']);
     }
 
+    // ---- hold (the source, before the copy) ----
+
+    public function test_S_164_11_hold_pauses_the_page_follow_ups_new_ones_are_created_held_and_hold_false_resumes_them_as_they_were(): void
+    {
+        Queue::fake();
+        $this->travelTo('2026-10-28 09:00:00');
+        $seq = $this->sequence('PREORDER');
+        $active = $this->sub($seq->id, 7001, 'active', 2);
+        $pageOff = $this->sub($seq->id, 7002, 'paused');
+        DB::table('chatbot_sequence_subscriptions')->where('id', $pageOff)->update(['exit_reason' => 'page off']);
+        $other = $this->sub($seq->id, 7003, 'active', 2, '1002');
+        $row = fn (int $id) => (array) DB::table('chatbot_sequence_subscriptions')->where('id', $id)->first(['status', 'exit_reason', 'current_step', 'next_send_at']);
+        $before = $row($active);
+
+        foreach ([1, 2] as $_) $this->signed('POST', '/api/gateway/site/pages/1001/hold', ['hold' => true])->assertOk()->assertJson(['held' => 1]);
+
+        $this->assertSame(['status' => 'paused', 'exit_reason' => 'hold 77', 'current_step' => 2, 'next_send_at' => '2026-10-28 09:30:00'], $row($active));
+        $this->assertSame('page off', $row($pageOff)['exit_reason']);
+        $this->assertSame('active', $row($other)['status']);
+        // A customer subscribed on this page while it is held is created held too.
+        $this->assertSame('subscribed', app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7004, 'flow')['result']);
+        $created = (int) DB::table('chatbot_sequence_subscriptions')->where('psid', 7004)->value('id');
+        $this->assertSame(['paused', 'hold 77', 1], array_values(array_slice($row($created), 0, 3)));
+        // Due, but held: nothing is sent for the page.
+        $this->travelTo('2026-10-28 10:00:00');
+        DB::table('chatbot_sequence_subscriptions')->where('id', $other)->update(['next_send_at' => '2026-10-29 09:00:00']);
+        app(ChatbotSequences::class)->tick();
+        Queue::assertNotPushed(RunChatbotSequenceStep::class);
+
+        // The move failed or was cancelled: everything runs on as it was, from the same step and send time.
+        $this->signed('POST', '/api/gateway/site/pages/1001/hold', ['hold' => false])->assertOk()->assertJson(['held' => 0]);
+        $this->assertSame($before, $row($active));
+        $this->assertSame(['active', null, 1], array_values(array_slice($row($created), 0, 3)));
+        app(ChatbotSequences::class)->tick();
+        Queue::assertPushed(RunChatbotSequenceStep::class, 3); // 7001, 7004 and the page-off row, resumed as before (the page is On)
+        $this->assertSame('subscribed', app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7005, 'flow')['result']);
+        $this->assertSame('active', DB::table('chatbot_sequence_subscriptions')->where('psid', 7005)->value('status'), 'not held after hold:false');
+
+        $this->signed('POST', '/api/gateway/site/pages/9999/hold', ['hold' => true])->assertStatus(404);
+        $this->signed('POST', '/api/gateway/site/pages/1001/hold', ['hold' => 'yes'])->assertStatus(422);
+    }
+
+    public function test_S_164_12_export_sequences_since_the_hold_lists_the_ones_created_or_changed_since_then_also_after_release(): void
+    {
+        $this->travelTo('2026-10-28 08:00:00');
+        $seq = $this->sequence('PREORDER');
+        $this->sub($seq->id, 7001, 'active', 2);
+        $this->travelTo('2026-10-28 09:00:00');
+        $this->signed('POST', '/api/gateway/site/pages/1001/hold', ['hold' => true])->assertOk();
+        $this->travelTo('2026-10-28 09:05:00');
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7002, 'flow');
+        $stale = $this->sub($seq->id, 7009, 'paused'); // held here by an earlier move to this site that failed: never real here
+        DB::table('chatbot_sequence_subscriptions')->where('id', $stale)->update(['exit_reason' => 'transfer 70']);
+        $since = '/api/gateway/site/pages/1001/export?part=sequences&since=' . urlencode('2026-10-28T09:00:00+08:00');
+
+        $this->assertSame([7002], array_column($this->signed('GET', $since)->json('items'), 'psid'), 'the hold itself is not a change');
+
+        // The catch-up runs after release: the rows it ended still come over, with their step and send time.
+        $this->signed('POST', '/api/gateway/site/pages/1001/release', ['to' => 'incepxion'])->assertOk();
+        $items = collect($this->signed('GET', $since)->json('items'))->keyBy('psid');
+        $this->assertSame([7001, 7002], $items->keys()->sort()->values()->all());
+        $this->assertSame([2, '2026-10-28T09:30:00+08:00'], [$items[7001]['current_step'], $items[7001]['next_send_at']]);
+        $this->assertSame([1, '2026-10-28T10:05:00+08:00'], [$items[7002]['current_step'], $items[7002]['next_send_at']]);
+        $this->assertSame([], $this->signed('GET', '/api/gateway/site/pages/1001/export?part=sequences')->json('items'), 'without since: only running subscriptions');
+    }
+
     // ---- release / activate ----
 
     public function test_S_164_6_release_stops_the_page_here_and_activate_releases_held_subscriptions(): void
