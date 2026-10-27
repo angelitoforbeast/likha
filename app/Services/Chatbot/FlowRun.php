@@ -49,6 +49,8 @@ class FlowRun
     /** Pinatakbo ng sequence: ang sequence at ang puwesto ng step (para sa Results). */
     public ?int $sequenceId = null;
     public ?int $sequenceStep = null;
+    /** Ang ad group ng customer sa takbong ito (AdGroups); null = ang page values. Ang sequence na sinimulan dito ay ito ang itinatala. */
+    public ?int $adGroup = null;
 
     /**
      * "Clear AI memory": live, ang marker ng customer (__ai_since: oras, ang chat na ito, at ang huling padala sa kanya);

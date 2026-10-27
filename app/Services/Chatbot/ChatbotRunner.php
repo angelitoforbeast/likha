@@ -23,7 +23,7 @@ class ChatbotRunner
     public const LOCK_SECONDS = 300; // mas mahaba sa pinakamahabang takbo (hanggang 100 hakbang, ilang AI)
     public const STALE_MINUTES = 30;  // kapareho ng retryUntil ng RunChatbotFlow
 
-    public function __construct(private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox)
+    public function __construct(private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox, private AdGroups $groups)
     {
     }
 
@@ -48,13 +48,15 @@ class ChatbotRunner
             $pending = BotcakeChat::where('page_id', $chat->page_id)->where('psid', $chat->psid)
                 ->where('id', '>', $last)->where('id', '<=', $chatId)->orderBy('id')->get()
                 ->reject(fn ($c) => ForbeastWatch::standby($c)); // standby: tumatakbo lang kapag lumipat sa Botcake (bagong chat)
+            // Ang ad group ng customer (ang pinakabagong ad niya sa page), isang beses kada takbo; null = ang page values.
+            $group = $this->groups->forCustomer((string) $chat->page_id, (string) $chat->psid, (string) $chat->page_name);
             $botfields = null;
             $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {
                 $fields->set(CustomerFields::LAST_CHAT, (string) $c->id);
                 // Ang attachment lang na hindi sinagot (ChatAttachments): nilalampasan, hindi kailanman pinapatakbo.
                 if (!empty($c->payload['_ignored'])) continue;
-                $flow = $this->page->flow((string) $c->page_name);
+                $flow = $this->page->flow((string) $c->page_name, $group);
                 if (!$flow || !is_array($flow->graph)) continue;
                 // Tao ang sumasagot sa customer na ito (/chatbot/inbox): tapos na ang chat, walang takbo.
                 if ($fields->get(CustomerFields::BOT_PAUSED) === '1') {
@@ -66,10 +68,11 @@ class ChatbotRunner
                     ChatbotEvents::skipped((int) $c->page_id, (int) $c->psid, $c->id, $flow->id, 'chat too old');
                     continue;
                 }
-                $botfields ??= $this->page->botfields((string) $c->page_name);
+                $botfields ??= $this->page->botfields((string) $c->page_name, $group);
 
                 $run = new FlowRun($flow->id, $flow->graph, (string) $c->page_name, (string) $c->page_id, $botfields, $fields, $c->id,
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
+                $run->adGroup = $group;
                 try {
                     $this->engine->run($run, $this->outbox);
                 } finally {
@@ -116,7 +119,8 @@ class ChatbotRunner
 
             $last = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)->orderByDesc('id')->limit(50)->get()
                 ->first(fn ($c) => !ForbeastWatch::standby($c));
-            $flow = $last && $last->page_name !== null ? $this->page->flow((string) $last->page_name) : null;
+            $group = $last && $last->page_name !== null ? $this->groups->forCustomer((string) $wait->page_id, (string) $wait->psid, (string) $last->page_name) : null;
+            $flow = $last && $last->page_name !== null ? $this->page->flow((string) $last->page_name, $group) : null;
             $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $wait->node_id);
             $drop = function (string $why, bool $endWait) use ($wait, $fields) {
                 if ($endWait) $fields->clear(CustomerFields::WAIT);
@@ -139,9 +143,10 @@ class ChatbotRunner
             // Messenger: walang padala kapag 24 oras na mula sa huling mensahe ng customer.
             if (!$last->received_at || $last->received_at->lte(now()->subHours(24))) return $drop($label . ', but the 24-hour window has closed', true);
 
-            $run = new FlowRun($flow->id, $flow->graph, (string) $last->page_name, (string) $last->page_id, $this->page->botfields((string) $last->page_name), $fields, null,
+            $run = new FlowRun($flow->id, $flow->graph, (string) $last->page_name, (string) $last->page_id, $this->page->botfields((string) $last->page_name, $group), $fields, null,
                 (string) $last->message, (string) $last->name, $last->received_at->timezone('Asia/Manila')->format('Y-m-d H:i'));
             $run->skippedAfter = $after;
+            $run->adGroup = $group;
             try {
                 $this->engine->run($run, $this->outbox);
             } finally {
@@ -220,14 +225,16 @@ class ChatbotRunner
 
             if ($fields->get(CustomerFields::AI) !== $mark . $row->request_id) return $drop('the run moved on', false);
             if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $drop('the bot paused', true);
-            $flow = $this->page->flow((string) $row->page_name);
-            $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
+            $group = $this->groups->forCustomer($pageId, $psid, (string) $row->page_name);
+            $flow = $this->page->flow((string) $row->page_name, $group);
+            $node =collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
             if (!$flow || $flow->id !== (int) $row->flow_id || !in_array($node['type'] ?? '', $nodeTypes, true)) return $drop('the flow changed', true);
             $fields->clear(CustomerFields::AI);
 
             $ctx = (array) json_decode((string) $row->context, true);
-            $run = new FlowRun($flow->id, $flow->graph, (string) $row->page_name, $pageId, $this->page->botfields((string) $row->page_name), $fields,
+            $run = new FlowRun($flow->id, $flow->graph, (string) $row->page_name, $pageId, $this->page->botfields((string) $row->page_name, $group), $fields,
                 $row->chat_id !== null ? (int) $row->chat_id : null, (string) ($ctx['input'] ?? ''), (string) ($ctx['full_name'] ?? ''), (string) ($ctx['received_at'] ?? ''));
+            $run->adGroup = $group;
             $run->runId = $row->run_id ?: null;
             $run->aiCalls = (int) ($ctx['ai_calls'] ?? 1);
             $run->steps = (int) ($ctx['steps'] ?? 0);

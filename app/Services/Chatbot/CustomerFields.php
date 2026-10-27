@@ -83,7 +83,9 @@ class CustomerFields
     public function clearAll(): void
     {
         foreach (array_keys($this->values) as $key) {
-            if (!in_array($key, [self::LAST_CHAT, self::LAST_MESSAGE_AT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)) $this->clear((string) $key);
+            // Ang ad group ng bawat sequence (AdGroups::SEQ_PIN) ay naiiwan din: hindi lumilipat ang sequence sa gitna.
+            if (!in_array($key, [self::LAST_CHAT, self::LAST_MESSAGE_AT, self::BOT_PAUSED, self::TEST_HISTORY, self::AI_SINCE], true)
+                && !str_starts_with((string) $key, AdGroups::SEQ_PIN)) $this->clear((string) $key);
         }
     }
 }

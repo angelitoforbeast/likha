@@ -33,7 +33,7 @@ class ChatbotSequences
 
     private static ?bool $tables = null; // kada proseso: true lang ang iniimbak (sa ibaba)
 
-    public function __construct(private PageSettings $settings, private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox)
+    public function __construct(private PageSettings $settings, private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox, private AdGroups $groups)
     {
     }
 
@@ -96,6 +96,10 @@ class ChatbotSequences
             } catch (\Illuminate\Database\UniqueConstraintViolationException) {
                 return $out(['result' => 'already', 'name' => $seq->name]);
             }
+        }
+        // Ang ad group ng customer sa pagpasok (ng takbong nagpasok, o ang pinakabagong ad niya): hindi lumilipat sa gitna.
+        if (($page = BotcakeChat::pageMap()[(string) $pageId] ?? null) !== null) {
+            $this->groups->pin($seq->id, $run?->fields ?? new CustomerFields($pageId, $psid), $page, $run ? $run->adGroup : $this->groups->forCustomer($pageId, $psid, $page));
         }
 
         return $out(['result' => 'subscribed', 'name' => $seq->name]);
@@ -322,8 +326,10 @@ class ChatbotSequences
                 return $this->advance($sub, $seq, $step, false);
             }
 
-            $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page), $fields, null,
+            $group = $this->groups->forSequence((int) $seq->id, $fields, $page);
+            $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page, $group), $fields, null,
                 '', (string) $last?->name, now()->format('Y-m-d H:i'));
+            $run->adGroup = $group;
             $run->startedBy = 'sequence ' . $seq->name . ' step ' . $step->position;
             [$run->sequenceId, $run->sequenceStep] = [(int) $seq->id, (int) $step->position];
             try {

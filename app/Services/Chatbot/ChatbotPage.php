@@ -21,13 +21,31 @@ class ChatbotPage
      * FLOW na text lang (mula pa sa page list, bago ang mga flow) ay hindi nagpapatakbo ng anuman, kahit may flow na
      * kapangalan. Wala pang table (hindi pa na-migrate) = null. Ang flow ay mula sa BotConfigCache.
      */
-    public function flow(string $page): ?ChatbotFlow
+    public function flow(string $page, ?int $group = null): ?ChatbotFlow
     {
         if ($this->settings->get($page, 'chatbot', 'active') === '0') return null;
-        $id = trim((string) $this->settings->get($page, 'chatbot', 'flow_id'));
+        // Ang ad group na may sariling flow (AdGroups): iyon ang tumatakbo para sa mga ad nito; ang On/Off ay sa page pa rin.
+        $own = $group !== null ? ($this->groups()->groups($page)[$group]['values']['flow_id'] ?? null) : null;
+        $id = trim((string) ($own ?? $this->settings->get($page, 'chatbot', 'flow_id')));
         if (!ctype_digit($id)) return null;
 
         return BotConfigCache::flow((int) $id);
+    }
+
+    /** May tatakbo para sa page: ang flow ng page, o ang flow ng isa sa mga ad group nito. */
+    public function runs(string $page): bool
+    {
+        if ($this->flow($page)) return true;
+        foreach ($this->groups()->groups($page) as $id => $g) {
+            if (isset($g['values']['flow_id']) && $this->flow($page, $id)) return true;
+        }
+
+        return false;
+    }
+
+    private function groups(): AdGroups
+    {
+        return app(AdGroups::class);
     }
 
     /** Itali ang page sa isang flow (o alisin kapag null): ang pangalan (FLOW, para makita) at ang id (para tumakbo). */
@@ -55,13 +73,22 @@ class ChatbotPage
     /** @var array<string, array<string, array{key: string, id: int}>> page key => pangalan (naka-norm) => botfield at row id */
     private static array $ids = [];
 
-    /** @return array<string, string> key at label => value */
-    public function botfields(string $page): array
+    /**
+     * $group: ang ad group ng customer (AdGroups); ang bawat value na itinakda nito ang pumapalit sa page value, kasama
+     * ang SHOP DETAILS na binubuo mula sa item, presyo at dami. null = ang page values.
+     * @return array<string, string> key at label => value
+     */
+    public function botfields(string $page, ?int $group = null): array
     {
         $labels = $this->fields->labels();
         $out = [];
         $ids = [];
-        foreach ($this->settings->allWithIds($page, ChatbotFields::PROVIDER) as $key => $row) {
+        $rows = $this->settings->allWithIds($page, ChatbotFields::PROVIDER);
+        $g = $group !== null ? ($this->groups()->groups($page)[$group] ?? null) : null;
+        foreach ($g['values'] ?? [] as $key => $value) {
+            if ($key !== 'flow_id') $rows[$key] = ['value' => $value, 'id' => $g['ids'][$key]];
+        }
+        foreach ($rows as $key => $row) {
             if (in_array($key, ChatbotFields::RESERVED, true) || $key === ShopDetails::KEY) continue; // ang lumang tina-type: hindi na binabasa
             $out[$key] = $row['value'];
             if (isset($labels[$key])) $out[$labels[$key]] = $row['value'];

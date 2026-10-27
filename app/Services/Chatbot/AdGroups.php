@@ -2,6 +2,8 @@
 
 namespace App\Services\Chatbot;
 
+use App\Models\BotcakeChat;
+use App\Models\BotcakePsid;
 use App\Models\PageSetting;
 use App\Models\User;
 use App\Services\ChatbotFields;
@@ -21,6 +23,9 @@ class AdGroups
     public const MAX_NAME = 100;
     public const MAX_ADS = 500;
     public const HISTORY_LIMIT = 100;
+    public const RECENT_CHATS = 50;
+    /** Run state ng customer (chatbot_customer_values): ang group nang pumasok siya sa sequence N. */
+    public const SEQ_PIN = '__ad_group_seq_';
 
     /** Ang mga botfield na puwedeng palitan ng group; ang iba (form, shop details, AI, connection, On/Off) ay sa page lang. */
     public const VALUE_KEYS = ['item_name_in_jnt_dashboard', 'price', 'quantity', 'picture', 'main_flow', 'main_flow_2', 'flow_id'];
@@ -81,6 +86,60 @@ class AdGroups
         }
 
         return null;
+    }
+
+    /**
+     * Ang pinakabagong ad ng customer sa page: ang pinakabagong chat niya (sa huling RECENT_CHATS) na may ad_id (ang
+     * referral ng Forbeast o ang ad ng Botcake webhook, may oras ang bawat isa); kung wala, ang ad_id ng botcake_psids ng
+     * page (ang kasalukuyang ad ng customer ayon sa Botcake, walang sariling oras).
+     */
+    public function latestAd(int|string $pageId, int|string $psid, string $page): ?string
+    {
+        $chats = BotcakeChat::active()->where('page_id', (string) $pageId)->where('psid', (string) $psid)
+            ->orderByDesc('id')->limit(self::RECENT_CHATS)->get(['id', 'payload']);
+        foreach ($chats as $c) {
+            $ad = trim((string) ($c->payload['ad_id'] ?? ''));
+            if (preg_match('/^\d{1,64}$/', $ad)) return $ad;
+        }
+        $key = $this->settings->pageKey($page);
+        $ad = BotcakePsid::where('psid', (string) $psid)->whereNotNull('ad_id')->where('ad_id', '<>', '')->get(['page', 'ad_id'])
+            ->first(fn ($r) => $this->settings->pageKey((string) $r->page) === $key)?->ad_id;
+
+        return $ad !== null && preg_match('/^\d{1,64}$/', (string) $ad) ? (string) $ad : null;
+    }
+
+    /** Ang group ng customer ayon sa pinakabagong ad niya, o null (page values). Ang page na walang group: walang query. */
+    public function forCustomer(int|string $pageId, int|string $psid, string $page): ?int
+    {
+        if (!$this->groups($page)) return null;
+
+        return $this->groupForAd($page, $this->latestAd($pageId, $psid, $page));
+    }
+
+    /**
+     * Ang group ng customer sa isang sequence: ang naitala nang pumasok siya (pin), para hindi lumipat sa gitna. Ang walang
+     * pin (pumasok bago nagkaroon ng group ang page) ay kinukuha ngayon at itinatala. Ang na-delete na group = page values.
+     */
+    public function forSequence(int $sequenceId, CustomerFields $fields, string $page): ?int
+    {
+        $groups = $this->groups($page);
+        if (!$groups) return null;
+        $pin = $fields->get(self::SEQ_PIN . $sequenceId);
+        if ($pin === null) {
+            $group = $this->groupForAd($page, $this->latestAd($fields->pageId, $fields->psid, $page));
+            $this->pin($sequenceId, $fields, $page, $group);
+
+            return $group;
+        }
+
+        return isset($groups[(int) $pin]) ? (int) $pin : null;
+    }
+
+    /** Itala ang group ng customer sa pagpasok sa sequence (0 = page values). Walang isinusulat kapag walang group ang page. */
+    public function pin(int $sequenceId, CustomerFields $fields, string $page, ?int $group): void
+    {
+        if ($group === null && !$this->groups($page)) return;
+        $fields->set(self::SEQ_PIN . $sequenceId, (string) ($group ?? 0));
     }
 
     /**

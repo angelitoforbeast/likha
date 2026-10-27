@@ -88,7 +88,8 @@ class ChatbotSheetController extends Controller
         if (!$chat) abort(404);
 
         $columns = FlowGraph::cleanConfig('sheet', ['columns' => $request->input('columns')])['columns'];
-        $run = new FlowRun($flow->id, [], (string) $chat->page_name, (string) $chat->page_id, $this->page->botfields((string) $chat->page_name),
+        $run = new FlowRun($flow->id, [], (string) $chat->page_name, (string) $chat->page_id, $this->page->botfields((string) $chat->page_name,
+                app(\App\Services\Chatbot\AdGroups::class)->forCustomer((string) $chat->page_id, (string) $chat->psid, (string) $chat->page_name)),
             new CustomerFields((int) $chat->page_id, (int) $chat->psid), $chat->id, (string) $chat->message, (string) $chat->name,
             $chat->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
         $vars = $run->vars();

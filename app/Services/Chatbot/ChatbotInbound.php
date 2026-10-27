@@ -32,7 +32,7 @@ class ChatbotInbound
         // pumalyang pag-queue ay hindi nakakaapekto sa naimbak na chat.
         // Ang attachment lang (larawan, audio, video, …; hindi sticker o Like) ay hindi sinasagot habang naka-ignore.
         try {
-            if (app(ChatbotPage::class)->flow($pageName) && !ChatAttachments::ignore($chat)) RunChatbotFlow::dispatch($chat->id);
+            if (app(ChatbotPage::class)->runs($pageName) && !ChatAttachments::ignore($chat)) RunChatbotFlow::dispatch($chat->id);
         } catch (\Throwable $e) {
             report($e);
         }
