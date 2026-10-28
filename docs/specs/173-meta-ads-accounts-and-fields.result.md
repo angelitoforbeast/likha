@@ -89,12 +89,69 @@ None between the brief and CLAUDE.local.md.
 
 ## Deploy notes
 - No migration. Run `php artisan view:clear` (the Blade view changed) and `php artisan route:clear` (or `route:cache`) for the new POST route.
-- **Until accounts are chosen, Sync does nothing.** Write mode is off today, so nothing changes in practice. Compare still reads all accounts.
+- **Changed by amendment 173-1:** until a selection is saved, every account is ticked, so Sync would read all accounts. Set the 5 accounts **before** write mode is turned on. Write mode is off today, so nothing changes in practice.
 - To set the 5 accounts that carry the upload spend after deploy:
   1. Run `php artisan meta-ads:accounts --list`. The latest Compare on /ads_manager/report shows the "not in uploads" accounts.
-  2. Run `php artisan meta-ads:accounts --set=ID1,ID2,ID3,ID4,ID5`. It prints `Selected 5 of N ad accounts`; an unknown ID is refused and nothing changes.
-  3. Or the CEO ticks the 5 accounts on /ads_manager/report and presses "Save accounts".
+  2. Run `php artisan meta-ads:accounts --set=ID1,ID2,ID3,ID4,ID5`. It prints `Selected 5 of N ad accounts`, marks every current account as seen, and leaves the other accounts unticked. An unknown ID is refused and nothing changes.
+  3. Or the CEO, Marketing or Marketing - OIC ticks the 5 accounts on /ads_manager/report and presses "Save accounts".
+- An account added later (a new ad account or a new connection) is ticked automatically and read by the next Sync. Untick it on the page if it should not be synced.
 - Before turning write mode on, run a Compare and then one Sync on a past day, and check that run log's "No page name, skipped" list. Any page listed there needs its `botcake.page_id` on /page-settings.
 - **Incepxion:** the same commits apply unchanged. Same codebase, no migration, no site-specific config.
 
 173: done — Sync and Compare read the accounts the CEO picks, and API rows get the upload's page name (from Likha page settings), delivery and result type; the suites have no new failures.
+
+## Amendment 173-1
+
+Saved verbatim:
+
+> Amendment 173-1 (the owner, 2026-10-28: "pati marketing oic and marketing dapat" / "new ad account are ticked by default"). Same rules as the spec: Conventional Commits ending "(spec 173)", no assistant/owner names or attribution lines, never push/deploy/touch a server, 2 tries per step, tests with `php vendor\phpunit\phpunit\phpunit` from PowerShell. Save this amendment verbatim in the result under "Amendment 173-1" and list what you applied.
+>
+> | # | Change | Why |
+> |---|---|---|
+> | 1 | Saving the ad-account selection (the page's Save and the server-side check) is allowed for **CEO, Marketing and Marketing - OIC** (employeeProfile->role, whitespace-normalised, the same role names used elsewhere in the app). Other roles keep the read-only view and get 403 on save. Turning write mode on stays CEO only, unchanged. | Owner: marketing and marketing OIC choose the accounts too. |
+> | 2 | **A new ad account is ticked by default.** Store which accounts have been seen as well as which are selected (one app_settings value, e.g. {"selected":[…],"seen":[…]}; read the old plain-list form too). An account that appears in a connection and is not in "seen" counts as selected (and is added to both on the next save or sync). An account someone unticked stays unticked. With nothing saved at all, every current account is ticked. `meta-ads:accounts --set=` marks all current accounts as seen and selects exactly the given ones. Update the screen text and the "Choose the ad accounts first" rule so it only applies when every account is unticked. | Owner: new accounts are on by default. |
+> | 3 | Tests: a Marketing and a Marketing - OIC user can save; another role gets 403; after `--set=A,B` with accounts A,B,C,D known, a new account E appearing in a connection is read by Sync (Http faked) while C and D are not; unticking E keeps it off; the old plain-list value still reads correctly. Existing tests pass. | Proof. |
+>
+> Done when: these pass plus the spec's suites with no new failures vs the current branch head; result updated; end with "173-1: <done|blocked> — <one line>".
+
+### What I applied
+1. **Roles**
+   - `MetaAdsController::ACCOUNT_ROLES` = CEO, Marketing and Marketing - OIC. The role is the whitespace-normalised `employeeProfile->role`, read by the existing `getNormalizedRole()`.
+   - `POST /ads_manager/meta/accounts` answers 403 to any other role. The panel flag `can_choose_accounts` enables the checkboxes and the Save button.
+   - Other roles that can open the Ads page see the list read-only.
+   - Write mode is still CEO only (`is_ceo`, unchanged).
+2. **New accounts ticked by default** (in `Sync`)
+   - `meta_ads.accounts` now holds `{"selected":[…],"seen":[…]}`.
+   - `Sync::accounts()` is the effective selection: `selected` plus every current account that is not in `seen`.
+   - With nothing saved, every current account is ticked.
+   - The old plain-list form reads as the selection, with every current account counted as seen. That way the old unticked accounts stay unticked.
+   - Saving (the page or `--set=`) stores the given IDs as `selected`, and `seen` = the earlier `seen` plus every current account.
+   - Each Sync run writes new accounts into both lists (`rememberNew`).
+   - "Choose the ad accounts first" now applies only when every account is unticked. Compare still reads all accounts in that case.
+   - The screen text now says new accounts come ticked and an unticked one stays off.
+   - So that one run reads the connections only once, `Connections::accounts()` and `Sync::current()` accept the connections that were already read.
+3. **Tests** (`MetaAdsAccountsTest`)
+   - New:
+     - `…marketing_and_marketing_oic_can_save_the_selection` (2 roles);
+     - `…another_role_with_the_ads_link_sees_the_list_read_only_and_the_save_is_refused`. Admin is given the Ads link, because without it the access check answers 404 first;
+     - `…a_new_account_is_ticked_by_default_and_an_unticked_one_stays_off`: after `--set=111,222` with 111–444 known, the new 555 is read and 333 and 444 are not; after `--set=111,222` again, 555 stays off;
+     - `…the_old_plain_list_value_still_reads_as_the_selection`. It passed before the change too, so it guards the old form rather than going red first.
+   - Changed for the new rules:
+     - the stored value is now an object;
+     - the "before" list in the events is now all 5 accounts (nothing was saved, so all were ticked);
+     - "no selection" is set up as "every account unticked";
+     - a refused save now checks that no row was written;
+     - the Sync and Compare selection tests save the selection after the connections exist;
+     - the Compare table gained "nothing saved yet: all ticked".
+   - The old "non-CEO is read-only" test is replaced by the two role tests above.
+
+### Amendment tests and suites
+- Red before the code: 5 failures, for example `marketing_and_marketing_oic_can_save_the_selection` (Save was missing and the checkbox was disabled) and `a_new_account_is_ticked_by_default…` (555 was not read).
+- After: `tests/Feature/MetaAds` gives `OK (72 tests, 365 assertions)`.
+- The spec's suites (`MetaAds`, `Chatblast`, `Botcake`, `PageSettings`):
+  - at the branch head before the amendment: `Tests: 1568, Skipped: 1`, no failures;
+  - after: `Tests: 1572, Assertions: 46958, Skipped: 1`, no failures.
+- No new failures.
+- Story S-173.1 is updated in `qa/stories.md`. The deploy notes above are updated: set the accounts before write mode is turned on.
+
+173-1: done — CEO, Marketing and Marketing - OIC can save the account choice, new accounts come ticked and unticked ones stay off; no new failures.
