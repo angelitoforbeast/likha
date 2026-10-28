@@ -103,6 +103,32 @@
         @include('chatbot.partials.speed-chart', ['id' => 'ai', 'title' => 'With AI vs no AI by hour: average (solid), median (dashed) and AI time', 'label' => 'Average and median reply time with AI and without AI, and the AI time, per hour, with the previous day as reference', 'tall' => true])
     </section>
 
+    <section aria-labelledby="h-push">
+        <h2 id="h-push" class="mb-2 text-base font-semibold">Replies: pushed → sent at Meta, by hour</h2>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[44rem]" data-table="push">
+                <thead><tr><th>Hour</th>@foreach(['Pushed (Forbeast)', 'Measured', 'Average', 'Median', 'p90', 'Max', 'Not confirmed yet', 'Botcake (no Meta time)'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr></thead>
+                <tbody>
+                @foreach($push['hours'] as $h => $r)
+                    <tr data-hour="{{ $h }}">
+                        <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
+                        @if($r === null)
+                            @for($i = 0; $i < 8; $i++)<td></td>@endfor
+                        @else
+                            @include('chatbot.partials.speed-push-cells', ['r' => $r])
+                        @endif
+                    </tr>
+                @endforeach
+                </tbody>
+                <tfoot><tr class="font-semibold"><td>Day</td>@include('chatbot.partials.speed-push-cells', ['r' => $push['total']])</tr></tfoot>
+            </table>
+        </div>
+        <p class="mt-2 text-xs text-slate-500">
+            The bot's replies on Forbeast (sequence steps are in Sequences below). Hour = when Likha pushed the reply. Pushed = when Forbeast accepted the reply from Likha (the reply's recorded sent time, written right after Forbeast's gateway answered). Sent at Meta = the sent time Forbeast reports back (send_status). Measured = pushed replies with that confirmation; Not confirmed yet = no send_status received. Replies Meta refused are not here (they have no sent time). Botcake sends at once and reports no separate Meta time, so its replies are only counted.
+        </p>
+        @include('chatbot.partials.speed-chart', ['id' => 'push', 'title' => 'Replies pushed → sent at Meta by hour: average, p90 and max', 'label' => 'Average, p90 and max seconds from pushed to sent at Meta for bot replies per hour, max on the right axis, with the previous day as reference'])
+    </section>
+
     <section aria-labelledby="h-seq">
         <h2 id="h-seq" class="mb-2 text-base font-semibold">Sequences by hour due</h2>
         <div class="cb-card overflow-x-auto">
@@ -172,6 +198,7 @@
         reply: [['avg', 'Average', '#0f766e', false, 2.5], ['median', 'Median', '#2563eb', false, 2], ['p90', 'p90', '#d97706', false, 2]],
         ai: [['with_ai_avg', 'With AI avg', '#7c3aed', false, 2.5], ['no_ai_avg', 'No AI avg', '#0891b2', false, 2.5],
             ['with_ai_median', 'With AI median', '#7c3aed', true, 1.5], ['no_ai_median', 'No AI median', '#0891b2', true, 1.5], ['ai_time_avg', 'AI time avg', '#db2777', false, 1]],
+        push: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2], ['max', 'Max (right axis)', '#dc2626', false, 1.5, 'y2']],
         seq: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2]],
     };
     for (const [id, lines] of Object.entries(charts)) {

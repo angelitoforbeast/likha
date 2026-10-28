@@ -78,6 +78,9 @@ class ResponseSpeed
                 'with_ai_median' => fn ($r) => $r['with_ai']['median'], 'no_ai_median' => fn ($r) => $r['no_ai']['median'],
                 'ai_time_avg' => fn ($r) => $r['ai_time']['avg'],
             ], ['with AI' => fn ($r) => $r['with_ai']['n'], 'no AI' => fn ($r) => $r['no_ai']['n']]],
+            'push' => [fn ($o) => $o['push']['hours'], [
+                'avg' => fn ($r) => $r['avg'], 'p90' => fn ($r) => $r['p90'], 'max' => fn ($r) => $r['max'],
+            ], ['measured' => fn ($r) => $r['measured'], 'not confirmed' => fn ($r) => $r['unconfirmed']]],
             'seq' => [fn ($o) => $o['sequences']['hours'], [
                 'avg' => fn ($r) => $r['pushed_to_meta']['avg'], 'p90' => fn ($r) => $r['pushed_to_meta']['p90'],
             ], ['steps' => fn ($r) => $r['pushed_to_meta']['n']]],
@@ -130,7 +133,26 @@ class ResponseSpeed
         $want = [];
         foreach ($keys as $i => $k) if ($ons[$i]) $want[$k] = true;
         $until = date('Y-m-d H:i:s', strtotime($end) + self::MAX_WAIT_SECONDS);
-        $replies = $this->replies($start, $until, $f['page_id'], $want);
+        // Habang binabasa ang mga padala: ang pushed → sent sa Meta ng mga sagot ng araw (parehong query, walang bago).
+        $pushBlank = ['pushed' => 0, 'unconfirmed' => 0, 'botcake' => 0, 'secs' => []];
+        $push = ['hours' => array_fill(0, 24, $pushBlank), 'total' => $pushBlank];
+        $replies = $this->replies($start, $until, $f['page_id'], $want, function (object $r) use (&$push, $end, $f): void {
+            if ($r->sent_at >= $end) return;
+            $forbeast = ($r->via ?? null) === ChatbotProvider::FORBEAST;
+            if ($f['bot'] !== null && $f['bot'] !== ChatbotConnections::BOTS[$forbeast ? 1 : 0]) return;
+            $confirmed = in_array($r->confirmed_status ?? null, SendStatus::DELIVERED, true) && ($r->confirmed_at ?? null) !== null;
+            foreach ([&$push['hours'][(int) substr($r->sent_at, 11, 2)], &$push['total']] as &$b) {
+                // Ang Botcake ay walang oras ng Meta (sabay ang padala): bilang lang, hiwalay.
+                if (!$forbeast) {
+                    $b['botcake']++;
+                    continue;
+                }
+                $b['pushed']++;
+                if ($confirmed) $b['secs'][] = max(0, strtotime($r->confirmed_at) - strtotime($r->sent_at));
+                else $b['unconfirmed']++;
+            }
+            unset($b);
+        });
         unset($want);
         $ai = $this->aiTimes($start, $until, $f['page_id']);
 
@@ -171,8 +193,19 @@ class ResponseSpeed
             'hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::row($hours[$h]), range(0, 23)),
             'total' => self::row($total),
             'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
+            'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
+                'total' => self::pushRow($push['total'])],
             'sequences' => $this->sequences($f, $start, $end, $nowHour),
         ];
+    }
+
+    /** Ang isang oras o ang araw ng pushed → sent sa Meta: pushed (Forbeast), measured, average, median, p90, max, unconfirmed, botcake. */
+    private static function pushRow(array $b): array
+    {
+        $s = self::stats($b['secs']);
+
+        return ['pushed' => $b['pushed'], 'measured' => $s['n'], 'avg' => $s['avg'], 'median' => $s['median'], 'p90' => $s['p90'], 'max' => $s['max'],
+            'unconfirmed' => $b['unconfirmed'], 'botcake' => $b['botcake']];
     }
 
     /**
@@ -212,21 +245,23 @@ class ResponseSpeed
      * sagot) sa mga customer na $want, kada page + PSID, ayon sa sent_at: ang sent_at (at), ang totoong oras (real), kung
      * kumpirmado (confirmed) at ang chat ng takbo (chat). Ang real, confirmed at chat ng bawat isa ay ang sa pinakamaagang
      * totoong oras mula rito pababa (sunod-sunod ang padala kada PSID, pero hindi umaasa rito). Mga scalar lang, para
-     * magaan ang isang buong araw.
+     * magaan ang isang buong araw. $each: tinatawag sa bawat row ng query (lahat ng customer), para sa ibang bilang mula
+     * sa parehong pagbasa.
      * @return array{at: array<string, int[]>, real: array<string, int[]>, confirmed: array<string, bool[]>, chat: array<string, array<int, ?int>>}
      */
-    private function replies(string $startAt, string $endAt, ?string $page, array $want): array
+    private function replies(string $startAt, string $endAt, ?string $page, array $want, ?\Closure $each = null): array
     {
         $out = ['at' => [], 'real' => [], 'confirmed' => [], 'chat' => []];
-        if (!$want) return $out;
+        if (!$want && $each === null) return $out;
         $confirm = ChatbotReply::hasConfirm();
-        $cols = array_merge(['page_id', 'psid', 'chat_id', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : []);
+        $cols = array_merge(['page_id', 'psid', 'chat_id', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : [], ChatbotReply::hasVia() ? ['via'] : []);
         $rows = DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)
             ->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
             ->when(Schema::hasColumn('chatbot_replies', 'sequence_id'), fn ($q) => $q->whereNull('sequence_id'))
             ->orderBy('sent_at')->orderBy('id')->select($cols)->cursor();
         foreach ($rows as $r) {
+            if ($each !== null) $each($r);
             $k = $r->page_id . ':' . $r->psid;
             if (!isset($want[$k])) continue;
             $real = $confirm && in_array($r->confirmed_status, SendStatus::DELIVERED, true) && $r->confirmed_at !== null;

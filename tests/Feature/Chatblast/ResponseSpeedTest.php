@@ -428,27 +428,28 @@ class ResponseSpeedTest extends ChatblastTestCase
             $hours = $res->viewData('hours');
             $this->assertEquals(self::col($hours, fn ($r) => $r['avg']), $c['reply']['series']['avg'], "$q reply");
             $this->assertEquals(self::col($hours, fn ($r) => $r['with_ai']['avg']), $c['ai']['series']['with_ai_avg'], "$q ai");
+            $this->assertEquals(self::col($res->viewData('push')['hours'], fn ($r) => $r['avg']), $c['push']['series']['avg'], "$q push");
             $this->assertEquals(self::col($res->viewData('sequences')['hours'], fn ($r) => $r['pushed_to_meta']['avg']), $c['seq']['series']['avg'], "$q seq");
-            foreach (['reply', 'ai', 'seq'] as $k) $this->assertNotEquals($all[$k]['series'], $c[$k]['series'], "$q changes $k");
+            foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertNotEquals($all[$k]['series'], $c[$k]['series'], "$q changes $k");
         }
         [$fb] = $this->screen('bot=Forbeast');
-        $this->assertSame([72, 72, 120], [$fb['reply']['series']['avg'][10], $fb['ai']['series']['with_ai_avg'][10], $fb['seq']['series']['p90'][10]]);
+        $this->assertSame([72, 72, 2, 120], [$fb['reply']['series']['avg'][10], $fb['ai']['series']['with_ai_avg'][10], $fb['push']['series']['max'][10], $fb['seq']['series']['p90'][10]]);
         [$bc] = $this->screen('bot=Botcake');
-        $this->assertSame([], array_filter($bc['seq']['series']['avg'], fn ($v) => $v !== null));
+        $this->assertSame([], array_filter([...$bc['push']['series']['avg'], ...$bc['seq']['series']['avg']], fn ($v) => $v !== null));
     }
 
     public function test_S_185_7_access_as_before(): void
     {
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->get('/chatbot/speed')->assertForbidden();
         $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
-        foreach (['reply', 'ai', 'seq'] as $k) $this->assertStringContainsString('id="sp-chart-' . $k . '"', $html);
+        foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('id="sp-chart-' . $k . '"', $html);
     }
 
     public function test_S_185_9_each_chart_sits_under_its_table_and_fits_a_phone(): void
     {
         $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
         // Kada chart ay sa ilalim ng sariling table (walang ibang table sa pagitan), sa kahong sumusunod sa lapad ng screen.
-        foreach (['hours' => 'reply', 'ai' => 'ai', 'sequences' => 'seq'] as $table => $chart) {
+        foreach (['hours' => 'reply', 'ai' => 'ai', 'push' => 'push', 'sequences' => 'seq'] as $table => $chart) {
             $this->assertMatchesRegularExpression('#data-table="' . $table . '"(?:(?!data-table=).)*?<div class="relative h-\d+ w-full[^"]*">\s*<canvas id="sp-chart-' . $chart . '"#s', $html, $chart);
         }
     }
@@ -472,6 +473,7 @@ class ResponseSpeedTest extends ChatblastTestCase
             foreach (['with_ai', 'no_ai'] as $g) foreach (['avg', 'median'] as $k) $this->assertEquals(self::col($p['hours'], fn ($r) => $r[$g][$k]), $c['ai']['prev'][$g . '_' . $k], "ai $g $k");
             $this->assertEquals(self::col($p['hours'], fn ($r) => $r['ai_time']['avg']), $c['ai']['prev']['ai_time_avg']);
             foreach (['avg', 'p90'] as $k) $this->assertEquals(self::col($p['sequences']['hours'], fn ($r) => $r['pushed_to_meta'][$k]), $c['seq']['prev'][$k], "seq $k");
+            foreach (['avg', 'p90', 'max'] as $k) $this->assertEquals(self::col($p['push']['hours'], fn ($r) => $r[$k]), $c['push']['prev'][$k], "push $k");
             $this->assertSame(self::col($p['hours'], fn ($r) => $r['answered']), $c['reply']['prev_counts']['answered']);
 
             return $c;
@@ -488,5 +490,62 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertEquals(3, $page['reply']['prev']['avg'][9]);
         $this->assertNull($page['reply']['prev']['avg'][10]); // ang 40 s ay sa Page Uno
         $this->assertStringContainsString('dotted = 2026-10-20', $this->get('/chatbot/speed')->getContent());
+    }
+
+    /** Ang mga padala ng bot noong 2026-10-20 10:00: tatlo sa Forbeast (3 s, 30 s, hindi pa kumpirmado) at isa sa Botcake. */
+    private function seedPushes(): void
+    {
+        $this->reply('1001', '7301', '2026-10-20 10:00:00', ['confirmed_at' => '2026-10-20 10:00:03', 'confirmed_status' => 'sent']);
+        $this->reply('1001', '7302', '2026-10-20 10:00:10', ['confirmed_at' => '2026-10-20 10:00:40', 'confirmed_status' => 'partial']);
+        $this->reply('1001', '7303', '2026-10-20 10:00:20'); // hindi pa kumpirmado
+        $this->reply('1002', '7304', '2026-10-20 10:00:30'); // Botcake: walang oras ng Meta
+        // Hindi kasama: ang sequence step (nasa Sequences), ang test, ang pumalya sa Meta, at ang padala ng ibang araw.
+        $this->reply('1001', '7305', '2026-10-20 10:00:40', ['sequence_id' => 5, 'sequence_step' => 1, 'confirmed_at' => '2026-10-20 10:09:00', 'confirmed_status' => 'sent']);
+        $this->reply('1001', '7306', '2026-10-20 10:00:50', ['status' => 'test']);
+        $this->reply('1001', '7307', '2026-10-20 10:00:55', ['status' => 'failed', 'confirmed_status' => 'failed']);
+        $this->reply('1001', '7308', '2026-10-19 10:00:00', ['confirmed_at' => '2026-10-19 10:05:00', 'confirmed_status' => 'sent']);
+    }
+
+    public function test_S_185_3_replies_pushed_to_sent_at_meta_by_hour_with_botcake_apart(): void
+    {
+        $this->seedPushes();
+        $p = $this->out(['date' => '2026-10-20'])['push'];
+        $h = $p['hours'][10];
+
+        $this->assertSame(10, $h['hour']);
+        $this->assertSame([3, 2, 1, 1], [$h['pushed'], $h['measured'], $h['unconfirmed'], $h['botcake']]);
+        $this->assertEquals(16.5, $h['avg']);
+        $this->assertEquals(16.5, $h['median']);
+        $this->assertSame([30, 30], [$h['p90'], $h['max']]);
+        // Ang araw: dagdag ang sagot ng Botcake nang 09:00:03.
+        $this->assertSame([3, 2, 1, 2], [$p['total']['pushed'], $p['total']['measured'], $p['total']['unconfirmed'], $p['total']['botcake']]);
+        $this->assertSame([0, 0, 1], [$p['hours'][9]['pushed'], $p['hours'][9]['measured'], $p['hours'][9]['botcake']]);
+        $this->assertNull($p['hours'][9]['avg']);
+        // Ngayon: ang 10:06:10 ng Forbeast (kumpirmado 10:06:12) ay 2 s; ang mga oras pagkatapos ng ngayon ay blangko.
+        $today = $this->out()['push'];
+        $this->assertSame([1, 2], [$today['hours'][10]['measured'], $today['hours'][10]['max']]);
+        foreach (range(13, 23) as $hr) $this->assertNull($today['hours'][$hr]);
+        // Ang page filter.
+        $this->assertSame([0, 1], [$this->out(['date' => '2026-10-20', 'page_id' => '1002'])['push']['hours'][10]['pushed'], $this->out(['date' => '2026-10-20', 'page_id' => '1002'])['push']['hours'][10]['botcake']]);
+
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/speed?date=2026-10-20')->assertOk()->getContent();
+        $this->assertMatchesRegularExpression('#data-table="push".*?<tr data-hour="10">\s*<td[^>]*>10:00</td>\s*<td[^>]*>3</td>\s*<td[^>]*>2</td>\s*<td[^>]*>16\.5 s</td>#s', $html);
+    }
+
+    public function test_S_185_4_chart_3_series_equal_the_push_table(): void
+    {
+        $this->seedPushes();
+        [$c, $res] = $this->screen('date=2026-10-20');
+        $rows = $res->viewData('push')['hours'];
+
+        $this->assertSame(['avg', 'p90', 'max'], array_keys($c['push']['series']));
+        foreach (['avg', 'p90', 'max'] as $k) $this->assertEquals(self::col($rows, fn ($r) => $r[$k]), $c['push']['series'][$k], $k);
+        $this->assertEquals([16.5, 30, 30], [$c['push']['series']['avg'][10], $c['push']['series']['p90'][10], $c['push']['series']['max'][10]]);
+        $this->assertSame(self::col($rows, fn ($r) => $r['measured']), $c['push']['counts']['measured']);
+        $this->assertSame(self::col($rows, fn ($r) => $r['unconfirmed']), $c['push']['counts']['not confirmed']);
+        // Ang reference: ang 2026-10-19 (5 minuto sa Meta nang 10:00).
+        $this->assertSame(300, $c['push']['prev']['max'][10]);
+        $this->assertStringContainsString('id="sp-chart-push"', $res->getContent());
     }
 }
