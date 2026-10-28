@@ -331,13 +331,15 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
     public static function aroundTheMove(): array
     {
         // Ang segundo mula sa lipat sa Forbeast (T) ng mga kopya ng Botcake, at kung lilipat sa T+500.
-        return ['received at T-60 s (Forbeast copy dropped while on Botcake)' => [-60, 'gateway'], 'received at T+200 s' => [200, 'botcake']];
+        return ['received at T-60 s (Forbeast copy dropped while on Botcake)' => [-60, 'gateway', 180], 'received at T+200 s' => [200, 'botcake', 180],
+            'settle_seconds 30: received at T+60 s' => [60, 'botcake', 30]];
     }
 
     /** @dataProvider aroundTheMove */
-    public function test_S_175_9_only_botcake_chats_after_the_move_plus_the_settle_time_count(int $offset, string $provider): void
+    public function test_S_175_9_only_botcake_chats_after_the_move_plus_the_settle_time_count(int $offset, string $provider, int $settle): void
     {
         Queue::fake();
+        config(['services.gateway.auto_switch.settle_seconds' => $settle]);
         $this->health(null);
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
         $this->travel(60)->seconds();
@@ -362,6 +364,26 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
         $this->watch();
 
         $this->assertSame('gateway', $this->provider());
+        $this->assertSame(['switched', 'switched_back'], array_column($this->events(), 'result'), 'no "moved" after the watcher\'s own move');
+    }
+
+    public function test_S_175_10b_a_system_move_is_recorded_as_system_and_a_move_older_than_an_hour_is_not_recorded(): void
+    {
+        Queue::fake();
+        $this->actingAs($this->user());
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway');
+        PageSetting::where('provider', 'chatbot')->where('key', 'provider')->where('active', true)->update(['created_at' => now()->subMinutes(61)]);
+        $this->watch();
+        $this->assertSame([], $this->events(), 'a move older than an hour');
+
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway');
+        $this->watch();
+
+        $this->assertStringStartsWith('moved to Forbeast by system at ', $this->events()[0]['error']);
+        $changes = collect($this->getJson('/chatbot/changes')->assertOk()->json('entries'));
+        $this->assertSame('system', $changes->where('key', 'provider')->first()['by'], 'not auto-switch');
     }
 
     public function test_S_175_10_a_move_to_forbeast_the_watcher_did_not_make_is_recorded_once_with_who_and_when(): void
