@@ -48,7 +48,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
         $expected = [
             'day' => self::DAY, 'ad_id' => 'a1', 'page_name' => 'Page P1',
             'campaign_id' => 'ca1', 'campaign_name' => 'Campaign a1', 'ad_set_id' => 'asa1', 'ad_set_name' => 'Adset a1',
-            'campaign_delivery' => 'inactive', 'ad_set_delivery' => 'active',
+            'campaign_delivery' => 'not_delivering', 'ad_set_delivery' => 'active',
             'amount_spent_php' => '250.5', 'reach' => '900', 'impressions' => '1500', 'link_clicks' => '33',
             'messaging_conversations_started' => '12', 'purchases' => '2', 'results' => '12', 'cost_per_result' => '20.88',
             'result_type' => 'Messaging conversations started', 'attribution_setting' => '7-day click or 1-day view',

@@ -3,6 +3,8 @@
 namespace App\Services\MetaAds;
 
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
@@ -16,16 +18,24 @@ class Insights
 
     public const AD_FIELDS = 'id,effective_status,'
         . 'adset{id,effective_status,daily_budget,lifetime_budget,start_time,end_time,optimization_goal},'
-        . 'campaign{id,effective_status},creative{id,title,body,object_story_spec,page_welcome_message}';
+        . 'campaign{id,effective_status},creative{id,title,body,object_story_spec,page_welcome_message,actor_id,effective_object_story_id}';
 
     public const MESSAGING = 'onsite_conversion.messaging_conversation_started_7d';
     /** Purchases: ang unang meron sa actions (dapat patunayan sa pilot kung alin ang tugma sa export). */
     public const PURCHASE_KEYS = ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_web_purchase'];
 
-    /** Ang Result type ng export, mula sa optimization_goal ng ad set (walang sariling field ang API). */
+    /**
+     * Ang Result type ng export, mula sa optimization_goal ng ad set (walang sariling field ang API). Sa production
+     * (Oct 26, 208 row): MESSAGING_PURCHASE_CONVERSION → "Meta purchases" kahit OUTCOME_SALES o OUTCOME_ENGAGEMENT ang
+     * campaign; sa 30 araw ng upload ay "Meta purchases", "Messaging conversations started" at "Meta purchase
+     * conversion value" lang ang lumalabas.
+     */
     public const RESULT_TYPES = [
-        'CONVERSATIONS'       => 'Messaging conversations started',
-        'OFFSITE_CONVERSIONS' => 'Website purchases',
+        'MESSAGING_PURCHASE_CONVERSION' => 'Meta purchases',
+        'OFFSITE_CONVERSIONS'           => 'Meta purchases',
+        'ONSITE_CONVERSIONS'            => 'Meta purchases',
+        'VALUE'                         => 'Meta purchase conversion value',
+        'CONVERSATIONS'                 => 'Messaging conversations started',
         'LINK_CLICKS'         => 'Link clicks',
         'LANDING_PAGE_VIEWS'  => 'Landing page views',
         'REACH'               => 'Reach',
@@ -34,6 +44,15 @@ class Insights
         'THRUPLAY'            => 'ThruPlays',
         'LEAD_GENERATION'     => 'Leads',
     ];
+
+    /**
+     * effective_status ng ad set → ad_set_delivery ng export; ang iba (ARCHIVED, DELETED, WITH_ISSUES, IN_PROCESS, …)
+     * ay not_delivering. Sa production (Oct 26): ACTIVE → active, PAUSED → inactive, CAMPAIGN_PAUSED → not_delivering.
+     * Ang campaign_delivery ay active lang kapag ACTIVE ang campaign at ang ad set ng ad (ACTIVE campaign + PAUSED ad set
+     * = not_delivering sa export); kung hindi, not_delivering. Ang bihirang campaign "inactive" ng export ay hindi ginagawa.
+     */
+    public const AD_SET_DELIVERY = ['ACTIVE' => 'active', 'PAUSED' => 'inactive'];
+    public const NOT_DELIVERING = 'not_delivering';
 
     public const ATTRIBUTION = [
         '7d_click_1d_view' => '7-day click or 1-day view',
@@ -63,7 +82,7 @@ class Insights
         $ads = $pages = [];
         if ($details && $insights) {
             $ads   = $this->ads($accountId, array_values(array_unique(array_map(fn ($r) => (string) ($r['ad_id'] ?? ''), $insights))), $token);
-            $pages = $this->pageNames($ads, $token);
+            $pages = $this->pageNames($ads);
         }
 
         $out = [];
@@ -91,27 +110,35 @@ class Insights
         return $out;
     }
 
-    /** page id => pangalan (ang page na pino-promote ng ad: object_story_spec.page_id). */
-    private function pageNames(array $ads, string $token): array
+    /**
+     * page id => pangalan ng Likha page: ang active na botcake.page_id sa page_settings (ang tanging Facebook page ID na
+     * naka-tala sa Likha). Hindi tinatanong ang Meta: ang Page name ay kailangan ng pages_read_engagement, na wala sa app.
+     */
+    private function pageNames(array $ads): array
     {
-        $ids = [];
-        foreach ($ads as $ad) {
-            $id = (string) ($ad['creative']['object_story_spec']['page_id'] ?? '');
-            if ($id !== '') $ids[$id] = true;
-        }
+        $ids = array_values(array_unique(array_filter(array_map(fn ($ad) => self::pageId($ad), $ads))));
         $out = [];
-        foreach (array_chunk(array_keys($ids), 50) as $chunk) {
-            try {
-                foreach ($this->graph->get('', ['ids' => implode(',', $chunk), 'fields' => 'name'], $token) as $id => $p) {
-                    if (is_array($p) && isset($p['name'])) $out[(string) $id] = (string) $p['name'];
-                }
-            } catch (GraphException $e) {
-                if ($e->tokenExpired() || $e->rateLimited()) throw $e;
-                // hindi mabasa ang pangalan ng page: ang row ay walang page_name (hindi papalitan ang nasa upload)
+        if (!$ids || !Schema::hasTable('page_settings')) return $out;
+        foreach (array_chunk($ids, 500) as $chunk) {
+            foreach (DB::table('page_settings')->where('provider', 'botcake')->where('key', 'page_id')->where('active', true)
+                ->whereIn('value', $chunk)->orderBy('id')->get(['page_name', 'value']) as $s) {
+                $out[trim((string) $s->value)] ??= (string) $s->page_name;
             }
         }
 
         return $out;
+    }
+
+    /** Ang page ng ad: object_story_spec.page_id, kung wala ay actor_id, kung wala ay ang <page id> ng "<page id>_<post id>". */
+    public static function pageId(?array $ad): ?string
+    {
+        $cr = $ad['creative'] ?? [];
+        foreach ([$cr['object_story_spec']['page_id'] ?? null, $cr['actor_id'] ?? null, explode('_', (string) ($cr['effective_object_story_id'] ?? ''))[0]] as $id) {
+            $id = self::str($id);
+            if ($id !== null) return $id;
+        }
+
+        return null;
     }
 
     /** Isang insights row (+ detalye ng ad) → mga column ng ads_manager_reports, gaya ng normalizeRow ng upload. */
@@ -153,9 +180,12 @@ class Insights
             $oss = $cr['object_story_spec'] ?? [];
             $goal = strtoupper((string) ($set['optimization_goal'] ?? ''));
 
-            $row['page_name']          = $pages[(string) ($oss['page_id'] ?? '')] ?? null;
-            $row['campaign_delivery']  = self::delivery($ad['campaign']['effective_status'] ?? null);
+            $row['page_id']            = self::pageId($ad); // hindi column: para sa talaan ng nilaktawan (Sync)
+            $row['page_name']          = $pages[(string) $row['page_id']] ?? null;
             $row['ad_set_delivery']    = self::delivery($set['effective_status'] ?? null);
+            $campaign                  = self::delivery($ad['campaign']['effective_status'] ?? null);
+            $row['campaign_delivery']  = $campaign === null ? null
+                : ($campaign === 'active' && $row['ad_set_delivery'] === 'active' ? 'active' : self::NOT_DELIVERING);
             $row['result_type']        = $goal === '' ? null : (self::RESULT_TYPES[$goal] ?? ucfirst(strtolower(str_replace('_', ' ', $goal))));
             [$row['ad_set_budget'], $row['ad_set_budget_type']] = self::budget($set);
             $row['starts']             = self::time($set['start_time'] ?? null);
@@ -169,15 +199,12 @@ class Insights
         return $row;
     }
 
-    /** ACTIVE → active; PAUSED (kahit sa campaign o ad set) → inactive; iba pa → maliit na titik, gaya ng export. */
+    /** Ang effective_status → salita ng export (AD_SET_DELIVERY, kung wala ay not_delivering); walang status = null. */
     private static function delivery(?string $status): ?string
     {
         if ($status === null || $status === '') return null;
-        $s = strtoupper($status);
-        if ($s === 'ACTIVE') return 'active';
-        if (in_array($s, ['PAUSED', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED'], true)) return 'inactive';
 
-        return strtolower($s);
+        return self::AD_SET_DELIVERY[strtoupper($status)] ?? self::NOT_DELIVERING;
     }
 
     /** Ang budget ay nasa sentimo (minor unit) sa API; ang export ay piso. */

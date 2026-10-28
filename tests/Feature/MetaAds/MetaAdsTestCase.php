@@ -32,6 +32,10 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
         return array_merge(parent::migrationPaths(), [
             // "Ads" link (/ads_manager/report): Marketing, Marketing - OIC at CEO.
             'database/migrations/2026_05_18_140000_create_nav_links_and_visibility_tables.php',
+            // Ang Facebook page ID ng bawat Likha page (botcake.page_id): pinanggagalingan ng page_name.
+            'database/migrations/2026_10_17_100000_create_page_settings_table.php',
+            'database/migrations/2026_11_03_100000_add_replaced_by_to_page_settings.php',
+            'database/migrations/2026_11_12_100000_add_source_to_page_settings.php',
         ]);
     }
 
@@ -119,6 +123,8 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
             $t->timestamps();
             $t->unique(['day', 'ad_id']);
         });
+        // Ang page ng adDetail() (object_story_spec.page_id p1).
+        $this->pageSetting('Page P1', 'p1');
         Schema::create('ad_campaign_creatives', function (Blueprint $t) {
             $t->id();
             $t->string('ad_id')->nullable()->unique();
@@ -135,6 +141,15 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
             $t->string('quick_reply_3')->nullable();
             $t->timestamps();
         });
+    }
+
+    /** Isang botcake.page_id row sa page_settings (active = false: naka-replace na). */
+    protected function pageSetting(string $page, string $pageId, bool $active = true): void
+    {
+        DB::table('page_settings')->insert([
+            'page_name' => $page, 'provider' => 'botcake', 'key' => 'page_id', 'value' => $pageId, 'is_secret' => false,
+            'active' => $active, 'created_at' => now(), 'updated_at' => now(),
+        ]);
     }
 
     protected function connect(User $user, string $token, array $accounts, array $extra = []): void
@@ -237,11 +252,6 @@ abstract class MetaAdsTestCase extends OwnerPrivateTestCase
                 return Http::response(['data' => $insights[$acc] ?? []]);
             }
             if (preg_match('#^act_(\d+)/ads$#', $path, $m)) return Http::response(['data' => $ads[$m[1]] ?? []]);
-            if ($path === '' && isset($q['ids'])) {
-                $out = [];
-                foreach (explode(',', $q['ids']) as $id) $out[$id] = ['id' => $id, 'name' => 'Page ' . strtoupper($id)];
-                return Http::response($out);
-            }
 
             return Http::response(['error' => ['message' => 'unexpected ' . $path, 'code' => 100]], 400);
         });

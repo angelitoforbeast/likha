@@ -104,6 +104,7 @@ class Sync
         $problems = [];
         $seen     = [];
         $tot      = ['processed' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0, 'protected' => []];
+        $noPage   = []; // "ad <id> (page <id>)" ng mga row na nilaktawan dahil walang page_name
 
         foreach ($this->connections->all() as $userId => $c) {
             $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
@@ -122,7 +123,8 @@ class Sync
                     $seen[$accId] = true;
                     $res  = $importer->importRows($rows['rows']);
                     $tot['processed'] += count($rows['rows']);
-                    $tot['skipped']   += $rows['skipped'] + $res['skipped'];
+                    $tot['skipped']   += count($rows['skipped']) + $res['skipped'];
+                    $noPage = array_merge($noPage, $rows['skipped']);
                     $tot['inserted']  += $res['inserted'];
                     $tot['updated']   += $res['updated'];
                     foreach ($res['protected'] as $f => $n) $tot['protected'][$f] = ($tot['protected'][$f] ?? 0) + $n;
@@ -149,7 +151,8 @@ class Sync
             'updated'           => $tot['updated'],
             'skipped'           => $tot['skipped'],
             'protected_details' => $tot['protected'] ?: null,
-            'error_message'     => $problems ? mb_substr(implode('; ', $problems), 0, 2000) : null,
+            'error_message'     => ($problems || $noPage) ? mb_substr(implode('; ', array_merge($problems,
+                $noPage ? ['No page name, skipped: ' . implode(', ', array_unique($noPage))] : [])), 0, 2000) : null,
             'finished_at'       => now(),
         ]);
         if ($tot['inserted'] + $tot['updated'] > 0) \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
@@ -173,8 +176,9 @@ class Sync
     }
 
     /**
-     * Ang row na walang page_name (hindi nabasa ang page) ay kumukuha ng page_name ng dating row ng parehong ad; kung
-     * wala, laktaw (page_name ay NOT NULL sa ads_manager_reports). @return array{rows: array, skipped: int}
+     * Ang row na walang page_name (walang Likha page na may ganitong Facebook page ID) ay kumukuha ng page_name ng dating
+     * row ng parehong ad; kung wala, laktaw (page_name ay NOT NULL sa ads_manager_reports), at nakalista sa run log para
+     * maayos (hal. idagdag ang botcake.page_id sa /page-settings). @return array{rows: array, skipped: list<string>}
      */
     private function withPageNames(array $rows): array
     {
@@ -185,11 +189,12 @@ class Sync
                 ->orderBy('day')->pluck('page_name', 'ad_id')->all();
         }
 
-        $out = [];
-        $skipped = 0;
+        $out = $skipped = [];
         foreach ($rows as $r) {
+            $pageId = $r['page_id'] ?? null;
+            unset($r['page_id']);
             if (empty($r['page_name'])) $r['page_name'] = $known[$r['ad_id']] ?? null;
-            if (empty($r['page_name'])) { $skipped++; continue; }
+            if (empty($r['page_name'])) { $skipped[] = 'ad ' . $r['ad_id'] . ' (page ' . ($pageId ?? 'unknown') . ')'; continue; }
             $out[] = $r;
         }
 
