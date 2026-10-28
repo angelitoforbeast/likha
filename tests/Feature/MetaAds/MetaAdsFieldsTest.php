@@ -59,6 +59,22 @@ class MetaAdsFieldsTest extends MetaAdsTestCase
         $this->assertSame('done', $log->status);
     }
 
+    public static function pageIdSources(): array
+    {
+        return [
+            'object_story_spec.page_id wins over actor_id' => [['object_story_spec' => ['page_id' => '111'], 'actor_id' => '222', 'effective_object_story_id' => '333_9'], '111'],
+            'actor_id wins over the story id'              => [['object_story_spec' => [], 'actor_id' => '222', 'effective_object_story_id' => '333_9'], '222'],
+            'a story id without "_" is the page id'        => [['effective_object_story_id' => '333'], '333'],
+            'nothing'                                      => [[], null],
+        ];
+    }
+
+    #[DataProvider('pageIdSources')]
+    public function test_S_173_4_the_page_id_comes_from_the_story_spec_then_actor_id_then_the_story_id(array $creative, ?string $expected): void
+    {
+        $this->assertSame($expected, Insights::pageId(['creative' => $creative]));
+    }
+
     public static function deliveryPairs(): array
     {
         // campaign effective_status, ad set effective_status => campaign_delivery, ad_set_delivery (export)

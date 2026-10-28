@@ -23,7 +23,7 @@ class MetaAdsSync extends Command
             return self::SUCCESS;
         }
         if (!Sync::accounts()) {
-            $this->warn(Sync::NO_ACCOUNTS . ' (meta-ads:accounts --set=ID,ID): nothing written.');
+            if (!$this->option('scheduled')) $this->warn(Sync::NO_ACCOUNTS . ' (meta-ads:accounts --set=ID,ID): nothing written.');
             return self::SUCCESS;
         }
         if ($this->option('scheduled') && !in_array(Carbon::now('Asia/Manila')->format('H:i'), Sync::schedule(), true)) {

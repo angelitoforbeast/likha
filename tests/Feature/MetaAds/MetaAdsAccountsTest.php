@@ -75,6 +75,18 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
         $this->get('/ads_manager/report')->assertSee('value="111" checked', false)->assertDontSee('value="222" checked', false);
     }
 
+    public function test_S_173_1_a_ceo_saving_with_nothing_ticked_clears_the_selection_and_it_is_logged(): void
+    {
+        $this->seedFive();
+        Sync::setAccounts(['111', '222']);
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+
+        $this->post('/ads_manager/meta/accounts', [])->assertSessionHasNoErrors();
+
+        $this->assertSame([], Sync::accounts());
+        $this->assertSame(['before' => ['111', '222'], 'after' => []], UploadLog::where('type', 'ads_manager_api_event')->latest('id')->first()->protected_details);
+    }
+
     public function test_S_173_1_an_id_that_is_not_in_any_connection_is_refused(): void
     {
         $this->seedFive();
@@ -113,6 +125,8 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
         $this->post('/ads_manager/meta/sync')->assertRedirect('/ads_manager/report')
             ->assertSessionHasErrors(['meta' => 'Choose the ad accounts first']);
         $this->artisan('meta-ads:sync')->expectsOutputToContain('Choose the ad accounts first')->assertSuccessful();
+        $this->artisan('meta-ads:sync', ['--scheduled' => true])->doesntExpectOutputToContain('Choose')->assertSuccessful();
+        $this->assertFalse(DB::table('upload_logs')->where('type', Sync::LOG_TYPE)->exists());
         $log = app(Sync::class)->run(Sync::startLog(self::DAY, self::DAY, null), self::DAY, self::DAY);
 
         $this->assertSame([], $this->graphCalls);

@@ -2,8 +2,8 @@
 
 namespace App\Services\MetaAds;
 
+use App\Models\BotcakeChat;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
 
@@ -112,18 +112,17 @@ class Insights
 
     /**
      * page id => pangalan ng Likha page: ang active na botcake.page_id sa page_settings (ang tanging Facebook page ID na
-     * naka-tala sa Likha). Hindi tinatanong ang Meta: ang Page name ay kailangan ng pages_read_engagement, na wala sa app.
+     * naka-tala sa Likha; pareho ng mapa ng Botcake chats). Hindi tinatanong ang Meta: ang Page name ay kailangan ng
+     * pages_read_engagement, na wala sa app.
      */
     private function pageNames(array $ads): array
     {
-        $ids = array_values(array_unique(array_filter(array_map(fn ($ad) => self::pageId($ad), $ads))));
+        if (!$ads || !Schema::hasTable('page_settings')) return [];
+        $map = BotcakeChat::pageMap();
         $out = [];
-        if (!$ids || !Schema::hasTable('page_settings')) return $out;
-        foreach (array_chunk($ids, 500) as $chunk) {
-            foreach (DB::table('page_settings')->where('provider', 'botcake')->where('key', 'page_id')->where('active', true)
-                ->whereIn('value', $chunk)->orderBy('id')->get(['page_name', 'value']) as $s) {
-                $out[trim((string) $s->value)] ??= (string) $s->page_name;
-            }
+        foreach ($ads as $ad) {
+            $id = self::pageId($ad);
+            if ($id !== null && isset($map[$id])) $out[$id] = (string) $map[$id];
         }
 
         return $out;
