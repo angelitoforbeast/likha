@@ -75,7 +75,7 @@
      data-provider-url="{{ route('chatbot.provider') }}"
      data-ag-url="{{ route('chatbot.ad-groups') }}" data-ag-add-url="{{ route('chatbot.ad-groups.add') }}" data-ag-delete-url="{{ route('chatbot.ad-groups.delete') }}"
      data-ag-history-url="{{ route('chatbot.ad-groups.history') }}" data-ag-restore-url="{{ route('chatbot.ad-groups.restore') }}"
-     data-ag-mode-url="{{ route('chatbot.ad-groups.mode') }}" data-ag-value-url="{{ route('chatbot.ad-groups.value') }}" data-ag-remove-ad-url="{{ route('chatbot.ad-groups.remove-ad') }}"
+     data-ag-mode-url="{{ route('chatbot.ad-groups.mode') }}" data-ag-value-url="{{ route('chatbot.ad-groups.value') }}" data-ag-remove-ad-url="{{ route('chatbot.ad-groups.remove-ad') }}" data-ag-ad-url="{{ route('chatbot.ad-groups.ad') }}"
      data-ai-url="{{ route('chatbot.ai') }}" data-ai-site-url="{{ route('chatbot.ai.site') }}" data-ai-compare-url="{{ route('chatbot.ai.compare') }}"
      data-needs-token="{{ \App\Services\Chatbot\ForbeastPageSetup::NEEDS_TOKEN }}"
      @if($canSetUp) data-active-url="{{ route('chatbot.active') }}" data-pages-url="{{ route('chatbot.pages') }}"
@@ -539,8 +539,9 @@
             ...columns.filter(c => c.key !== 'flow').map(c => el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-500', text: c.label})),
         ]);
         const list = visible();
-        // Ang Ad-based na page na bukas: ang mga sub-row nito (chatbot-adgroups.js) sa ilalim mismo ng row ng page.
-        const subs = r => r.reply === 'ad' && AG.isOpen(r.page) ? AG.subRows(r, {cols: 7 + botCols().length, botCols: botCols(), defaultRow: () => defaultRow(r)}) : [];
+        // Ang Ad-based na page na bukas: ang mga sub-row nito (chatbot-adgroups.js) sa ilalim mismo ng row ng page; pantingin
+        // lang, ang pag-ayos ay sa Edit (Manage in Edit).
+        const subs = r => r.reply === 'ad' && AG.isOpen(r.page) ? AG.subRows(r, {cols: 7 + botCols().length, botCols: botCols(), defaultRow: () => defaultRow(r), manage: () => manageAdGroups(r)}) : [];
         const body = el('tbody', {}, list.flatMap(r => [el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null]), replyControl(r)]),
@@ -567,7 +568,13 @@
 
     // ---- Reply values: Page-based (ang default: page values sa lahat) o Ad-based (ang mga ad group ng page) ----
     const AG = ChatbotAdGroups.create({csrf, urls: {index: url.agUrl, save: url.agUrl, add: url.agAddUrl, del: url.agDeleteUrl, history: url.agHistoryUrl,
-        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl}, onChange: () => { if (!editing) render(); }});
+        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: () => { if (!editing) render(); }});
+    /** Manage in Edit: ang Edit ng page, nakatapat sa Ad groups. */
+    function manageAdGroups(r) {
+        openPe(r);
+        $('pe-ag').scrollIntoView({block: 'start'});
+        $('pe-ag-title').focus();
+    }
     window.addEventListener('resize', () => $('cb-box').style.setProperty('--cbw', $('cb-box').clientWidth + 'px'));
     function replyControl(r) {
         const sel = el('select', {class: 'mt-0.5 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900', 'aria-label': 'Reply values of ' + r.page,
@@ -1508,11 +1515,12 @@
         $('pe-error').textContent = '';
         $('pe-start-box').classList.remove('hidden');
         $('pe-fields').replaceChildren(...botCols().map(peField));
-        // Ad groups: nasa table na (ang row ng page); dito, kung saan sila makikita.
-        $('pe-fields').append(el('section', {id: 'pe-ag', class: 'py-3 text-xs text-slate-600'}, [el('h3', {class: 'text-sm font-semibold text-slate-800', text: 'Ad groups'}),
-            el('p', {class: 'mt-1', text: r.reply === 'ad'
-                ? 'This page is Ad-based. Its ad groups, their ad IDs and their values are in the pages table: close this window and press "Ad groups" under the page name.'
-                : 'This page is Page-based: every customer gets the values above. To give ads their own values, set Replies to Ad-based under the page name in the table, then open its Ad groups.'})]));
+        // Ad groups: dito ginagawa at inaayos (Ad-based lang); sa table, tinitingnan.
+        const agHost = el('div', {class: 'mt-1'});
+        $('pe-fields').append(el('section', {id: 'pe-ag', class: 'py-3 text-xs text-slate-600'}, [el('h3', {id: 'pe-ag-title', tabindex: '-1', class: 'text-sm font-semibold text-slate-800 focus:outline-none', text: 'Ad groups'}),
+            r.reply === 'ad' ? agHost
+                : el('p', {class: 'mt-1', text: 'This page is Page-based: every customer gets the values above. To give ads their own values, set Replies to Ad-based under the page name in the table; its ad groups are then made here.'})]));
+        if (r.reply === 'ad') AG.mount(r, agHost);
         $('pe').classList.remove('hidden');
         $('pe-fields').scrollTop = 0;
         $('pe-fields').querySelectorAll('textarea').forEach(grow);
@@ -1558,6 +1566,7 @@
         if (!pe) return;
         if (!force && peDirty() && !confirm('Discard the changes to ' + pe.r.page + '?')) return;
         $('pe').classList.add('hidden');
+        AG.unmount(pe.r.page);
         pe = null;
     }
     /** Ibinabalik ang mga field bago ang huling paste, para ang bagong paste ay pumalit at hindi magpatong. */

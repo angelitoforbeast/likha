@@ -1,5 +1,7 @@
-// Ad groups ng isang Ad-based na page sa /chatbot/pages: ang mga sub-row sa ilalim ng row ng page (Default, isang row
-// kada group na may sariling mga cell, ang mga ad ID ng group na may status, Add ad group at "Ads not in a group yet").
+// Ad groups ng isang Ad-based na page sa /chatbot/pages. Sa table (pantingin): ang mga sub-row sa ilalim ng row ng page
+// (Default, isang row kada group na may sariling mga cell, ang mga ad ID ng group na may status, at ilang ad ang wala pa
+// sa group). Sa Edit ng page (pang-ayos): gumawa, palitan ang pangalan, burahin, magdagdag o mag-alis ng ad ID, ang mga
+// value, History at "Ads not in a group yet". Ang pindot sa ad ID ay nagpapakita ng video o larawan ng ad.
 // Ang blangkong cell ng group ay ang default (page value). Lahat ng text mula sa server ay textContent.
 // Plain na script, hindi module: iisang pangalan lang ang inilalagay nito sa page, ang ChatbotAdGroups.
 (function (root) {
@@ -34,11 +36,17 @@
   function newBadge(a) { return a.new ? el('span', {class: 'inline-block rounded bg-blue-600 px-1.5 py-0.5 text-[11px] font-semibold text-white', text: 'New'}) : null; }
 
   /**
-   * opts: {csrf, urls: {index, save, add, del, history, restore, mode, value, removeAd}, onChange()}
-   * Ang onChange ay tinatawag kapag may bagong data (ang table ay muling ipinipinta).
+   * opts: {csrf, urls: {index, save, add, del, history, restore, mode, value, removeAd, ad}, onChange()}
+   * Ang onChange ay tinatawag kapag may bagong data (ang table ay muling ipinipinta); ang bukas na panel sa Edit ay
+   * muling ipinipinta rito mismo.
    */
   function create(opts) {
-    var u = opts.urls, pages = new Map(), open = new Set();
+    var u = opts.urls, pages = new Map(), open = new Set(), panels = new Map();
+    function changed(page) {
+      var p = panels.get(page);
+      if (p) p.host.replaceChildren.apply(p.host, panel(p.r));
+      opts.onChange(page);
+    }
     var post = function (url, body) {
       return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': opts.csrf}, body: JSON.stringify(body)})
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return {ok: r.ok, status: r.status, data: d}; }); })
@@ -56,10 +64,10 @@
           if (seq !== st.seq) return;
           st.data = d; st.error = '';
           st.ticked.forEach(function (a) { if (!d.unassigned.some(function (x) { return x.ad_id === a; })) st.ticked.delete(a); });
-          opts.onChange(page, d);
+          changed(page);
           if (focusSearch) { var s = document.querySelector('input[data-ag-search="' + CSS.escape(page) + '"]'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }
         })
-        .catch(function (s) { if (seq === st.seq) { st.error = 'Could not load the ad groups (' + s + ').'; opts.onChange(page); } });
+        .catch(function (s) { if (seq === st.seq) { st.error = 'Could not load the ad groups (' + s + ').'; changed(page); } });
     }
     function say(page, text, bad) { var st = state(page); st.note = text; st.noteBad = !!bad; }
     // Pagkatapos ng sulat: ang mensahe, saka ang bagong data ng page.
@@ -142,6 +150,38 @@
       fill();
     }
 
+    /**
+     * Ang video o larawan ng ad at ang headline at body, mula sa naka-save na creative (gaya ng /owner/private, sa
+     * plugin ng Facebook: video para sa reel/video, post para sa iba). Walang naka-save: "No preview".
+     */
+    function fbEmbedSrc(link) {
+      var clean = link.split('#')[0].split('?')[0], href = encodeURIComponent(link);
+      return /facebook\.com\/(reel|watch|.*\/videos)|fb\.watch\//i.test(clean)
+        ? 'https://www.facebook.com/plugins/video.php?href=' + href + '&show_text=false&width=340'
+        : 'https://www.facebook.com/plugins/post.php?href=' + href + '&show_text=true&width=340';
+    }
+    function preview(page, a) {
+      var body = el('div', {class: 'text-xs text-slate-500', text: 'Loading…'});
+      openModal('Ad ' + a.ad_id, a.name || page, body);
+      fetch(u.ad + '?page=' + encodeURIComponent(page) + '&ad=' + encodeURIComponent(a.ad_id), {headers: {'Accept': 'application/json'}})
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (d) {
+          var media = d.link
+            ? el('div', {}, [
+              el('iframe', {src: fbEmbedSrc(d.link), title: 'Ad ' + a.ad_id + ' on Facebook', class: 'block w-full rounded-md border border-slate-200 bg-slate-50',
+                style: 'height: min(560px, 65vh)', loading: 'lazy', allow: 'autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share', allowfullscreen: true}),
+              el('a', {href: d.link, target: '_blank', rel: 'noopener noreferrer', class: 'mt-1 inline-block ' + LINK, text: 'Open on Facebook ↗'})])
+            : el('div', {class: 'rounded-md border border-dashed border-slate-300 p-6 text-center text-slate-500', text: 'No preview: no video or post link is saved for this ad.'});
+          body.className = 'space-y-2 text-xs text-slate-700';
+          body.replaceChildren.apply(body, [
+            d.from_campaign ? el('p', {class: 'text-amber-700', text: 'This ad has no creative of its own saved: showing its campaign\'s.'}) : null,
+            media,
+            el('div', {}, [el('div', {class: 'font-semibold uppercase text-slate-500', text: 'Headline'}), el('div', {class: 'break-words', text: d.headline || '(no headline)'})]),
+            el('div', {}, [el('div', {class: 'font-semibold uppercase text-slate-500', text: 'Body'}), el('div', {class: 'whitespace-pre-line break-words', text: d.body || '(no body text)'})])].filter(Boolean));
+        })
+        .catch(function (s) { body.className = 'text-xs text-red-600'; body.textContent = 'Could not load the ad (' + s + ').'; });
+    }
+
     // ---- Ang mga sub-row ----
     // Ang buong-lapad na row: ang laman ay nakadikit sa kaliwa (sticky), kaya kita kahit naka-scroll pakanan ang table.
     function wide(cols, children, cls) {
@@ -149,9 +189,17 @@
         el('div', {class: 'ag-pin px-3 py-2 text-xs ' + (cls || '')}, children)));
     }
 
-    function adItem(page, g, a) {
+    // Ang ad ID ay button: ang preview ng ad (video o larawan, headline at body).
+    function adButton(page, a) {
+      var b = el('button', {type: 'button', class: 'break-all py-1 text-left font-mono text-blue-700 underline hover:text-blue-900', text: a.ad_id, title: 'Watch this ad', 'aria-label': 'Watch ad ' + a.ad_id});
+      b.addEventListener('click', function (e) { e.preventDefault(); preview(page, a); });
+      return b;
+    }
+
+    /** Isang ad: ID (preview), New, status, pangalan, mga customer. Remove lang sa Edit (manage) at kapag nasa group. */
+    function adItem(page, g, a, manage) {
       var rm = null;
-      if (g) {
+      if (g && manage) {
         rm = el('button', {type: 'button', class: 'py-1 text-xs text-red-700 underline hover:text-red-900', text: 'Remove', 'aria-label': 'Remove ad ' + a.ad_id + ' from ' + g.name});
         rm.addEventListener('click', function () {
           if (!confirm('Remove ad ' + a.ad_id + ' from "' + g.name + '"? Its customers get the page values again.')) return;
@@ -161,19 +209,26 @@
       }
       return el('li', {class: 'flex items-start gap-2 py-1'}, [
         el('div', {class: 'min-w-0 flex-1'}, [
-          el('div', {class: 'flex flex-wrap items-center gap-1'}, [el('span', {class: 'break-all font-mono text-slate-800', text: a.ad_id}), newBadge(a), statusPill(a)]),
+          el('div', {class: 'flex flex-wrap items-center gap-1'}, [adButton(page, a), newBadge(a), statusPill(a)]),
           el('div', {class: 'break-words text-slate-600', text: a.name || '(no name in Ads Manager)'}),
           el('div', {class: 'text-slate-500', text: plural(a.customers, 'customer') + ' in 30 days' + (a.last ? ' · last ' + a.last : '')})]),
         rm]);
     }
 
-    function adsBlock(page, g) {
+    /** Ang mga ad ID ng group; sa Edit (manage) may Remove at kahon para mag-paste ng iba pa. */
+    function adsBlock(page, g, manage) {
       var st = state(page), all = st.showAll.has(g.id), ads = all ? g.ads : g.ads.slice(0, SHOWN_ADS);
       var more = null;
       if (g.ads.length > SHOWN_ADS) {
         more = el('button', {type: 'button', class: LINK, text: all ? 'Show less' : 'Show all ' + g.ads.length, 'aria-expanded': all ? 'true' : 'false'});
-        more.addEventListener('click', function () { if (all) st.showAll.delete(g.id); else st.showAll.add(g.id); opts.onChange(page); });
+        more.addEventListener('click', function () { if (all) st.showAll.delete(g.id); else st.showAll.add(g.id); changed(page); });
       }
+      var list = [
+        el('div', {class: 'font-medium text-slate-700', text: plural(g.ads.length, 'ad ID') + ' in ' + g.name}),
+        ads.length ? el('ul', {class: 'divide-y divide-slate-100'}, ads.map(function (a) { return adItem(page, g, a, manage); }))
+          : el('p', {class: 'text-slate-500', text: manage ? 'No ad IDs yet: add some below.' : 'No ad IDs yet.'}),
+        more];
+      if (!manage) return list;
       var typed = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'Ad IDs: comma, space or new line', 'aria-label': 'Ad IDs to add to ' + g.name});
       var add = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Add'});
       add.addEventListener('click', function () {
@@ -181,11 +236,7 @@
         add.disabled = true;
         post(u.add, {page: page, id: g.id, ads: typed.value}).then(after(page, true, 'Added to "' + g.name + '".'));
       });
-      return [
-        el('div', {class: 'font-medium text-slate-700', text: plural(g.ads.length, 'ad ID') + ' in ' + g.name}),
-        ads.length ? el('ul', {class: 'divide-y divide-slate-100'}, ads.map(function (a) { return adItem(page, g, a); })) : el('p', {class: 'text-slate-500', text: 'No ad IDs yet: add some below.'}),
-        more,
-        el('div', {class: 'mt-1 flex flex-wrap items-start gap-2'}, [typed, add])];
+      return list.concat([el('div', {class: 'mt-1 flex flex-wrap items-start gap-2'}, [typed, add])]);
     }
 
     /** Ang cell ng group: ang sariling value, o ang default (malabo, "uses default"); ang page-only ay "page value". */
@@ -219,7 +270,8 @@
       return sel;
     }
 
-    function groupRow(page, r, g, ctx, keys, flows) {
+    /** Rename, History (may Restore) at Delete ng group: sa Edit lang. */
+    function manageLinks(page, g) {
       var hist = el('button', {type: 'button', class: LINK, text: 'History', 'aria-label': 'History of ' + g.name});
       hist.addEventListener('click', function () { history(page, g); });
       var rename = el('button', {type: 'button', class: LINK, text: 'Rename', 'aria-label': 'Rename ' + g.name});
@@ -233,12 +285,16 @@
         if (!confirm('Delete the group "' + g.name + '"? Its ' + plural(g.ads.length, 'ad') + ' go back to the page values.')) return;
         post(u.del, {page: page, id: g.id}).then(after(page, true, 'Deleted "' + g.name + '".'));
       });
+      return el('div', {class: 'flex flex-wrap gap-x-3 font-normal'}, [rename, hist, del]);
+    }
+
+    /** Ang row ng group sa table: pangalan, ang mga value nito (✎ gaya ng mga cell ng page) at ang flow. */
+    function groupRow(page, r, g, ctx, keys, flows) {
       var muted = g.all_off ? ' opacity-60' : '';
       return el('tr', {class: 'ag-sub', 'data-ag-group': String(g.id)}, [
         el('td', {class: 'stick-1 ' + TD + ' font-medium break-words' + muted}, [
           el('div', {class: 'flex items-start gap-1'}, [el('span', {'aria-hidden': 'true', class: 'text-slate-400', text: '↳'}), el('span', {class: 'min-w-0 break-words', text: g.name})]),
-          el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'ad') + (g.all_off ? ' · all ads off' : '')}),
-          el('div', {class: 'flex flex-wrap gap-x-3 font-normal'}, [rename, hist, del])]),
+          el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'ad') + (g.all_off ? ' · all ads off' : '')})]),
         el('td', {class: 'stick-2 ' + TD}),
         el('td', {class: 'stick-3 ' + TD + muted}, flowSelect(page, g, flows)),
         el('td', {class: 'stick-4 ' + TD}),
@@ -256,15 +312,15 @@
       ids.addEventListener('input', function () { form.ids = ids.value; });
       var create = el('button', {type: 'button', class: 'cb-btn cb-btn-primary cb-btn-sm', text: 'Create group'});
       var cancel = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Cancel'});
-      cancel.addEventListener('click', function () { st.adding = false; opts.onChange(page); });
+      cancel.addEventListener('click', function () { st.adding = false; changed(page); });
       create.addEventListener('click', function () {
         create.disabled = true;
         post(u.save, {page: page, id: null, name: name.value, ads: ids.value, values: {}}).then(function (r) {
           create.disabled = false;
-          if (!r.ok) { say(page, r.data.error || 'Not created (' + r.status + ').', true); opts.onChange(page); return; }
+          if (!r.ok) { say(page, r.data.error || 'Not created (' + r.status + ').', true); changed(page); return; }
           st.adding = false;
           st.ticked.clear();
-          say(page, 'Created "' + name.value.trim() + '". Set its values in its row: empty cells use the default.');
+          say(page, 'Created "' + name.value.trim() + '". Set its values: empty ones use the default (the page value).');
           load(page);
         });
       });
@@ -294,7 +350,7 @@
       paint();
       add.addEventListener('click', function () {
         var ads = Array.from(st.ticked);
-        if (target.value === 'new') { st.adding = {name: '', ids: ads.join(', '), focused: false}; opts.onChange(page); return; }
+        if (target.value === 'new') { st.adding = {name: '', ids: ads.join(', '), focused: false}; changed(page); return; }
         add.disabled = true;
         var g = d.groups.find(function (x) { return String(x.id) === target.value; });
         post(u.add, {page: page, id: Number(target.value), ads: ads}).then(function (r) { if (r.ok) st.ticked.clear(); return after(page, true, 'Added ' + plural(ads.length, 'ad') + ' to "' + (g ? g.name : '') + '".')(r); });
@@ -309,8 +365,13 @@
         rows.length ? el('div', {class: 'mt-2 flex flex-wrap items-center gap-2'}, [target, add]) : null];
     }
 
+    function asOfText(d) { return d.as_of ? 'Ad status as of ' + d.as_of + ' (Ads Manager data)' : 'No Ads Manager data for these ads yet'; }
+    function noteLine(st) { return st.note ? el('p', {class: 'mt-1 ' + (st.noteBad ? 'text-red-600' : 'text-green-700'), 'aria-live': 'polite', text: st.note}) : null; }
+    function valueKeys(d) { var keys = {}; (d.keys || []).forEach(function (k) { if (k.key !== 'flow_id') keys[k.key] = k; }); return keys; }
+
     /**
-     * Ang mga sub-row ng isang bukas na Ad-based na page. ctx: {cols (ilang column ang table), botCols, defaultRow(): <tr>}.
+     * Ang mga sub-row ng isang bukas na Ad-based na page sa table: pantingin lang (walang gawa, dagdag o alis; nasa Edit
+     * iyon). ctx: {cols (ilang column ang table), botCols, defaultRow(): <tr>, manage(): binubuksan ang Edit sa Ad groups}.
      * Kapag wala pang data, isang "Loading…" na row (at kinukuha ang data).
      */
     function subRows(r, ctx) {
@@ -319,25 +380,78 @@
         if (!st.error && !st.loading) { st.loading = true; load(page).then(function () { st.loading = false; }); }
         return [wide(ctx.cols, st.error ? el('span', {class: 'text-red-600', text: st.error}) : el('span', {class: 'text-slate-500', text: 'Loading ad groups…'}))];
       }
-      var keys = {};
-      (d.keys || []).forEach(function (k) { if (k.key !== 'flow_id') keys[k.key] = k; });
-      var addBtn = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: '+ Add ad group'});
-      addBtn.addEventListener('click', function () { if (!st.adding) st.adding = {name: '', ids: '', focused: false}; opts.onChange(page); });
+      var manage = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Manage in Edit', 'aria-label': 'Manage the ad groups of ' + page + ' in its Edit window'});
+      manage.addEventListener('click', function () { ctx.manage(); });
+      var rest = st.q ? null : d.unassigned_total;
       var out = [wide(ctx.cols, [
         el('div', {class: 'flex flex-wrap items-center gap-x-3 gap-y-1'}, [
           el('span', {class: 'font-semibold text-slate-700', text: 'Ad-based: customers whose latest ad is in a group get that group\'s values; everyone else gets Default.'}),
-          el('span', {class: 'text-slate-500', text: d.as_of ? 'Ad status as of ' + d.as_of + ' (Ads Manager data)' : 'No Ads Manager data for these ads yet'}),
-          d.new_unassigned ? el('span', {class: 'rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-800', text: plural(d.new_unassigned, 'new ad ID') + ' not in a group yet'}) : null]),
-        st.note ? el('p', {class: 'mt-1 ' + (st.noteBad ? 'text-red-600' : 'text-green-700'), 'aria-live': 'polite', text: st.note}) : null])];
+          el('span', {class: 'text-slate-500', text: asOfText(d)}),
+          rest != null ? el('span', {class: 'rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-800', text: plural(rest, 'ad') + ' not in a group yet' + (d.new_unassigned ? ' (' + d.new_unassigned + ' new)' : '')}) : null,
+          manage]),
+        noteLine(st)])];
       out.push(ctx.defaultRow());
       d.groups.forEach(function (g) {
-        out.push(groupRow(page, r, g, ctx, keys, d.flows || []));
-        out.push(wide(ctx.cols, adsBlock(page, g), g.all_off ? 'opacity-60' : ''));
+        out.push(groupRow(page, r, g, ctx, valueKeys(d), d.flows || []));
+        out.push(wide(ctx.cols, adsBlock(page, g, false), g.all_off ? 'opacity-60' : ''));
       });
-      out.push(wide(ctx.cols, [
-        el('div', {class: 'flex flex-wrap items-center gap-2'}, [addBtn, el('span', {class: 'text-slate-500', text: d.groups.length ? '' : 'No groups yet: every customer gets Default.'})]),
-        st.adding ? newGroupForm(page, st.adding) : null].concat(unassignedBlock(page))));
+      if (!d.groups.length) out.push(wide(ctx.cols, el('p', {class: 'text-slate-500', text: 'No groups yet: every customer gets Default. Create groups with "Manage in Edit".'})));
       return out;
+    }
+
+    /** Ang mga value ng group sa Edit: bawat key na maitatakda ng group, ang sariling value o ang default (malabo), at ✎. */
+    function valuesBlock(page, r, g, d) {
+      var keys = valueKeys(d);
+      var items = Object.keys(keys).map(function (key) {
+        var k = keys[key], own = (g.values || {})[key], def = String(r.cells[key] == null ? '' : r.cells[key]);
+        var edit = el('button', {type: 'button', class: 'shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+          'aria-label': 'Edit ' + k.label + ' of ' + g.name, title: 'Edit ' + k.label, text: '✎'});
+        edit.addEventListener('click', function () { editValue(page, g, k, def); });
+        var show = own != null && own !== ''
+          ? el('div', {class: 'cb-txt line-clamp-3 whitespace-pre-line break-words text-slate-900', text: own})
+          : el('div', {class: 'line-clamp-2 whitespace-pre-line break-words text-slate-400'}, [el('span', {class: 'italic', text: 'uses default: '}), def || '(empty)']);
+        return el('li', {class: 'flex items-start gap-2 py-1'}, [el('div', {class: 'w-28 shrink-0 break-words font-medium text-slate-600', text: k.label}), el('div', {class: 'min-w-0 flex-1'}, show), edit]);
+      });
+      items.unshift(el('li', {class: 'flex items-center gap-2 py-1'}, [el('div', {class: 'w-28 shrink-0 font-medium text-slate-600', text: 'FLOW'}), flowSelect(page, g, d.flows || [])]));
+      return el('ul', {class: 'mt-1 divide-y divide-slate-100'}, items);
+    }
+
+    /**
+     * Ang Ad groups sa Edit ng page (pang-ayos): bawat group (Rename, History, Delete, mga value, mga ad ID na may Remove
+     * at paste), + Add ad group, at "Ads not in a group yet" (tick o hanap). Parehong mga endpoint at state ng table.
+     */
+    function panel(r) {
+      var page = r.page, st = state(page), d = st.data;
+      if (!d) return [el('p', {class: st.error ? 'text-red-600' : 'text-slate-500', text: st.error || 'Loading ad groups…'})];
+      var addBtn = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: '+ Add ad group'});
+      addBtn.addEventListener('click', function () { if (!st.adding) st.adding = {name: '', ids: '', focused: false}; changed(page); });
+      var out = [
+        el('p', {class: 'text-slate-500', text: 'Customers whose latest ad is in a group get that group\'s values; everyone else gets the page values above. Changes here save right away (not with Save below). ' + asOfText(d) + '.'}),
+        noteLine(st)];
+      d.groups.forEach(function (g) {
+        out.push(el('div', {class: 'mt-2 rounded-md border border-slate-200 p-2' + (g.all_off ? ' bg-slate-50' : ''), 'data-ag-group': String(g.id)}, [
+          el('div', {class: 'flex flex-wrap items-baseline gap-x-2'}, [el('h4', {class: 'min-w-0 break-words text-sm font-semibold text-slate-800', text: g.name}),
+            el('span', {class: 'text-slate-500', text: plural(g.ads.length, 'ad') + (g.all_off ? ' · all ads off' : '')})]),
+          manageLinks(page, g),
+          valuesBlock(page, r, g, d),
+          el('div', {class: 'mt-2'}, adsBlock(page, g, true))]));
+      });
+      out.push(el('div', {class: 'mt-2 flex flex-wrap items-center gap-2'}, [addBtn, d.groups.length ? null : el('span', {class: 'text-slate-500', text: 'No groups yet: every customer gets the page values.'})]));
+      if (st.adding) out.push(newGroupForm(page, st.adding));
+      return out.concat(unassignedBlock(page)).filter(Boolean);
+    }
+
+    /** Inilalagay ang panel sa Edit ng page (host); unmount kapag isinara ang Edit. */
+    function mount(r, host) {
+      panels.set(r.page, {r: r, host: host});
+      host.replaceChildren.apply(host, panel(r));
+      return load(r.page);
+    }
+    function unmount(page) {
+      if (!panels.delete(page)) return;
+      var st = pages.get(page);
+      // Ang hanap sa Edit ay hindi naiiwan sa table: ang bilang ng "not in a group yet" doon ay ang lahat.
+      if (st && (st.q || st.adding)) { st.q = ''; st.adding = false; st.ticked.clear(); load(page); }
     }
 
     /** Page-based o Ad-based; ibinabalik ang bagong mode, o null kapag hindi nabago. */
@@ -353,7 +467,7 @@
       isOpen: function (page) { return open.has(page); },
       toggle: function (page) { if (open.has(page)) open.delete(page); else { open.add(page); pages.delete(page); } },
       groupCount: function (page) { var st = pages.get(page); return st && st.data ? st.data.groups.length : null; },
-      subRows: subRows, setMode: setMode, statusText: statusText,
+      subRows: subRows, mount: mount, unmount: unmount, setMode: setMode, statusText: statusText,
     };
   }
 
