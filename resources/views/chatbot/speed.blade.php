@@ -107,15 +107,15 @@
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[56rem]" data-table="sequences">
                 <thead>
-                    <tr><th></th><th colspan="4"></th><th colspan="4" class="!text-center">Scheduled → pushed</th><th colspan="4" class="!text-center">Pushed → sent at Meta</th></tr>
-                    <tr><th>Hour</th>@foreach(['Due', 'Sent', 'Failed', 'Skipped', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
+                    <tr><th></th><th colspan="5"></th><th colspan="4" class="!text-center">Scheduled → pushed</th><th colspan="4" class="!text-center">Pushed → sent at Meta</th></tr>
+                    <tr><th>Hour</th>@foreach(['Due', 'Sent', 'Failed', 'Skipped', 'No message', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
                 </thead>
                 <tbody>
                 @foreach($sequences['hours'] as $h => $r)
                     <tr data-hour="{{ $h }}">
                         <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
                         @if($r === null)
-                            @for($i = 0; $i < 12; $i++)<td></td>@endfor
+                            @for($i = 0; $i < 13; $i++)<td></td>@endfor
                         @else
                             @include('chatbot.partials.speed-seq-cells', ['r' => $r])
                         @endif
@@ -126,7 +126,7 @@
             </table>
         </div>
         <p class="mt-2 text-xs text-slate-500">
-            Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". A held step's due is its last retry time. Steps that ran before the due time was recorded have no scheduled time.
+            Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
         </p>
 
         <h3 class="mb-2 mt-4 text-sm font-semibold">Slowest steps of the day</h3>

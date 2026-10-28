@@ -254,21 +254,21 @@ class ResponseSpeed
      */
     private function sequences(array $f, string $start, string $end, int $nowHour): array
     {
-        $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'botcake' => 0, 'push' => [], 'meta' => []];
+        $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
         $slow = [];
         $late = date('Y-m-d H:i:s', strtotime($end) + self::STEP_LATE_SECONDS);
         $events = DB::table('chatbot_events')->where('type', 'sequence')->where('created_at', '>=', $start)->where('created_at', '<', $late)
-            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']))->get(['page_id', 'psid', 'detail', 'created_at']);
+            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']))->get(['page_id', 'psid', 'detail', 'created_at'])
+            ->map(fn ($e) => [$e, json_decode((string) $e->detail, true)])->filter(fn ($x) => is_array($x[1]) && in_array($x[1]['op'] ?? null, ['ran', 'skipped', 'failed'], true));
         $sends = $this->stepSends(date('Y-m-d H:i:s', strtotime($start) - self::STEP_PUSH_SECONDS), $late, $f['page_id']);
         $botOf = $f['bot'] !== null ? BotHealth::botOfPages() : [];
         $names = \App\Models\BotcakeChat::pageMap();
+        [$before, $delays] = $this->stepHistory($events->all(), $late);
 
-        foreach ($events as $e) {
-            $d = json_decode((string) $e->detail, true);
-            if (!is_array($d) || !in_array($d['op'] ?? null, ['ran', 'skipped', 'failed'], true)) continue;
-            $due = is_string($d['due'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $d['due']) ? $d['due'] : null;
+        foreach ($events as [$e, $d]) {
+            $due = self::originalDue($e, $d, $before, $delays);
             $at = $due ?? (string) $e->created_at;
             if ($at < $start || $at >= $end) continue;
             if ($f['bot'] !== null && ($botOf[(string) $e->page_id] ?? ChatbotConnections::BOTS[0]) !== $f['bot']) continue;
@@ -300,11 +300,64 @@ class ResponseSpeed
         }
         usort($slow, fn ($a, $b) => [$b['delay'], $b['pushed']] <=> [$a['delay'], $a['pushed']]);
 
-        $out = fn ($b) => ['due' => $b['due'], 'sent' => $b['sent'], 'failed' => $b['failed'], 'skipped' => $b['skipped'], 'botcake' => $b['botcake'],
+        $out = fn ($b) => ['due' => $b['due'], 'sent' => $b['sent'], 'failed' => $b['failed'], 'skipped' => $b['skipped'], 'no_message' => $b['none'], 'botcake' => $b['botcake'],
             'scheduled_to_pushed' => self::delayStats($b['push']), 'pushed_to_meta' => self::delayStats($b['meta'])];
 
         return ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + $out($hours[$h]), range(0, 23)), 'total' => $out($total),
             'slowest' => array_slice($slow, 0, self::SLOWEST)];
+    }
+
+    /**
+     * Para sa orihinal na due ng bawat step: ang mga naunang sequence event ng parehong customer at sequence (subscribed,
+     * ran, skipped, failed: ang mga sandaling itinakda ng subscribe at ng advance ang next_send_at), kada page:PSID:pangalan,
+     * ayon sa oras; at ang delay ng bawat step (sequence ID:position => [amount, unit]).
+     * @return array{0: array<string, string[]>, 1: array<string, array{0: int, 1: string}>}
+     */
+    private function stepHistory(array $events, string $until): array
+    {
+        $before = [];
+        $pages = array_values(array_unique(array_map(fn ($x) => (int) $x[0]->page_id, $events)));
+        $psids = array_values(array_unique(array_map(fn ($x) => (int) $x[0]->psid, $events)));
+        foreach (array_chunk($psids, 500) as $chunk) {
+            $rows = DB::table('chatbot_events')->where('type', 'sequence')->whereIn('page_id', $pages)->whereIn('psid', $chunk)->where('created_at', '<', $until)
+                ->orderBy('created_at')->orderBy('id')->get(['page_id', 'psid', 'detail', 'created_at']);
+            foreach ($rows as $r) {
+                $d = json_decode((string) $r->detail, true);
+                if (!is_array($d) || !is_string($d['name'] ?? null) || !in_array($d['op'] ?? null, ['subscribed', 'ran', 'skipped', 'failed'], true)) continue;
+                $before[$r->page_id . ':' . $r->psid . ':' . $d['name']][] = (string) $r->created_at;
+            }
+        }
+        $delays = [];
+        if ($events && Schema::hasTable('chatbot_sequence_steps')) {
+            $ids = DB::table('chatbot_sequences')->whereIn('name', array_values(array_unique(array_map(fn ($x) => (string) ($x[1]['name'] ?? ''), $events))))->pluck('id', 'name');
+            foreach (DB::table('chatbot_sequence_steps')->whereIn('sequence_id', $ids->values()->all())->get(['sequence_id', 'position', 'delay_amount', 'delay_unit']) as $s) {
+                $delays[$s->sequence_id . ':' . $s->position] = [(int) $s->delay_amount, (string) $s->delay_unit];
+            }
+            foreach ($ids as $name => $id) $delays['name:' . $name] = (int) $id;
+        }
+
+        return [$before, $delays];
+    }
+
+    /**
+     * Ang orihinal na due ng step: ang delay nito mula sa naunang event ng customer sa sequence (gaya ng kinuwenta ng
+     * subscribe at advance), dahil ang next_send_at ay inuusog ng retry (lock, AI na hinihintay, bot paused). Kapag walang
+     * naunang event o step (luma o binura), ang "due" ng event; kung wala rin, null.
+     */
+    private static function originalDue(object $e, array $d, array $before, array $delays): ?string
+    {
+        $recorded = is_string($d['due'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $d['due']) ? $d['due'] : null;
+        $name = (string) ($d['name'] ?? '');
+        $id = is_int($d['sequence_id'] ?? null) ? $d['sequence_id'] : ($delays['name:' . $name] ?? null);
+        $delay = $id !== null ? ($delays[$id . ':' . (int) ($d['step'] ?? 0)] ?? null) : null;
+        $prev = null;
+        foreach ($before[$e->page_id . ':' . $e->psid . ':' . $name] ?? [] as $t) {
+            if ($t >= (string) $e->created_at) break;
+            $prev = $t;
+        }
+        if ($delay === null || $prev === null) return $recorded;
+
+        return ChatbotSequences::dueAt(\Carbon\Carbon::parse($prev), $delay[0], $delay[1])->format('Y-m-d H:i:s');
     }
 
     /**
