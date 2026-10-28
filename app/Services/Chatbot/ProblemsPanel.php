@@ -191,7 +191,7 @@ class ProblemsPanel
         $usual = $this->usual()['median'];
         $out = [];
         foreach (app(ResponseSpeed::class)->pageSeconds(now()->subHour()->format('Y-m-d H:i:s'), $now, $now) as $id => $secs) {
-            if (count($secs) < max(1, (int) $c['slow_min_replies'])) continue;
+            if (count($secs) < max(1, (int) $c['slow_min_replies']) || BotcakeMock::isTestId((string) $id)) continue;
             $m = (int) round(BotHealth::median($secs));
             $u = $usual[$id] ?? null;
             if ($m < (int) $c['slow_seconds'] && !($u > 0 && $m >= (float) $c['slow_factor'] * $u)) continue;

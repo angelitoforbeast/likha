@@ -218,7 +218,7 @@ class ChatblastSetupCheck
     public function banner(): ?array
     {
         try {
-            $list = $this->pages();
+            $list = Cache::remember('chatblast:setup-banner', self::BANNER_SECONDS, fn () => $this->problems());
         } catch (Throwable $e) {
             report($e);
             return null;

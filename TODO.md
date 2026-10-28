@@ -1429,3 +1429,12 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **The `gateway-events:<date>:bot_off` key is typed again** (the job owns it). Reason: second copy, below the DRY bar; the job is another worker's file.
 - **Untested here:** a reply before the message (answer to an earlier message), a `partial` reply, a page whose flow starts mid-day, the per-bot rows ignoring the Bot filter, and MySQL timing. Reason: thin branches over tested paths (the binary search, `SendStatus::DELIVERED`, `BotHealth::hadFlow`); time `/chatbot/speed` once on production after deploy.
 - **The 390 px check reads the markup only.** Reason: no browser run in this job.
+
+## 184: problems panel, accepted review minors (2026-10-28)
+- **Amber (169) failing pages show as 🟠 and count as urgent.** The old banner showed red pages only. Reason: the brief lists failing sends under 🔴 without saying what amber becomes; 🟠 keeps amber below red without hiding it. Confirm with the owner.
+- **The History link sets the Changes page filter by exact name.** If the auto_switch row's name differs from the list (case, spacing), the filter falls back to "All pages". Reason: both names come from the same page_settings rows; fix with a case-insensitive match if it shows.
+- **`usual()` (every 10 min) and the 60 s panel cache have no lock**, so screens loading at the same moment can recompute together (7 one-hour scans). Reason: indexed reads, a few per 10 minutes; use `Cache::lock`/`Cache::flexible` if it shows on production.
+- **`ResponseSpeed::pageSeconds` repeats `build()`'s rule for which chats count** (ignored, standby, on bot). Reason: second copy, below the DRY bar; legacy minimal touch.
+- **`ChatblastSetupCheck::banner()` and `BotHealth::banner()` have no screen caller now** (kept as the spec's "keep their data sources"; `BotHealth::banner` is still used by a 183 test). Reason: suggest removal to the owner.
+- **Untested here:** the double-replies line, the Held/Back on Forbeast labels and "latest of each kind", an amber sends line, one source failing while others show, the slow rule under 5 replies or with no usual, test pages in slow/no-chats, the order tie-breakers and the Changes deep link (JavaScript, no JS test setup). Reason: thin branches over tested sources; add on the next change here.
+- **390 px is checked in the markup only** (`truncate`, `max-h-[60vh]`, `break-words`). Reason: no browser in this job.
