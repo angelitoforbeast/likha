@@ -380,6 +380,11 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/ad-groups/delete', [\App\Http\Controllers\ChatbotAdGroupController::class, 'delete'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.delete');
     Route::get('/ad-groups/history', [\App\Http\Controllers\ChatbotAdGroupController::class, 'history'])->middleware('throttle:120,1,chatbot-history')->name('ad-groups.history');
     Route::post('/ad-groups/restore', [\App\Http\Controllers\ChatbotAdGroupController::class, 'restore'])->middleware('throttle:30,1,chatbot-restore')->name('ad-groups.restore');
+    // Page-based o Ad-based ang reply values ng page (ang row ng page sa /chatbot/pages).
+    Route::post('/ad-groups/mode', [\App\Http\Controllers\ChatbotAdGroupController::class, 'mode'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.mode');
+    // Ang cell ng isang group at ang pag-alis ng isang ad ID, sa row ng page.
+    Route::post('/ad-groups/value', [\App\Http\Controllers\ChatbotAdGroupController::class, 'value'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.value');
+    Route::post('/ad-groups/remove-ad', [\App\Http\Controllers\ChatbotAdGroupController::class, 'removeAd'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.remove-ad');
 });
 
 // Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings

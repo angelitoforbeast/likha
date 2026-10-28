@@ -49,6 +49,8 @@ class AdGroupRunTest extends ChatblastTestCase
             $s->set('Page P', 'chatbot', $k, $v);
         }
         app(ChatbotPage::class)->link('Page P', $this->flow(self::TEXT));
+        // Ang mga group ay ginagamit lang ng page na Ad-based (spec 174); ang 172 cases ay sa ganoong page.
+        app(AdGroups::class)->setMode('Page P', true);
     }
 
     private function flow(string $text): ChatbotFlow
@@ -152,6 +154,45 @@ class AdGroupRunTest extends ChatblastTestCase
         app(PageSettings::class)->set('Page P', 'chatbot', 'active', '0', false, null, true);
         $this->chat('111', '7003', true);
         $this->assertSame([], $this->sent('7003'));
+    }
+
+    public function test_S_174_2_a_page_based_page_ignores_its_groups_and_switching_to_ad_based_applies_them(): void
+    {
+        $groups = app(AdGroups::class);
+        $groups->setMode('Page P', false);
+        $this->itemA();
+        $this->chat('222', '7001', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'), 'Page-based: page values kahit nasa group ang ad');
+
+        $groups->setMode('Page P', true);
+        $this->chat('222', '7002', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7002'), 'Ad-based: ang values ng group (172)');
+
+        $groups->setMode('Page P', false);
+        $this->chat('222', '7003', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7003'), 'balik sa Page-based');
+        $this->assertSame(['Item A'], array_column($groups->groups('Page P'), 'name'), 'naiiwan ang mga group');
+
+        // Ang flow ng group ay hindi rin tumatakbo sa Page-based na page na walang sariling flow.
+        $groups->save('Page P', $groups->groupForAd('Page P', '111'), 'Item A', ['111', '222'], ['flow_id' => (string) $this->flow('Group flow')->id]);
+        app(ChatbotPage::class)->link('Page P', null);
+        $this->assertFalse(app(ChatbotPage::class)->runs('Page P'));
+        $groups->setMode('Page P', true);
+        $this->assertTrue(app(ChatbotPage::class)->runs('Page P'));
+    }
+
+    public function test_S_174_2_a_sequence_on_a_page_based_page_uses_page_values_and_pins_nothing(): void
+    {
+        app(AdGroups::class)->setMode('Page P', false);
+        $this->itemA();
+        $seq = ChatbotSequence::create(['name' => 'Drip', 'active' => true, 'exit_on_reply' => false]);
+        $seq->steps()->create(['position' => 1, 'delay_amount' => 0, 'delay_unit' => 'minutes', 'flow_id' => $this->flow('Seq {{PRICE}}')->id, 'active' => true]);
+        $this->chat('222', '7001');
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7001, 'other');
+        Artisan::call('chatbot:sequence-tick');
+
+        $this->assertSame(['Seq 199'], $this->sent('7001'), 'page values kahit nasa group ang ad');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id), 'walang pin sa Page-based na page');
     }
 
     public function test_S_172_14_a_test_run_on_the_test_tab_can_use_a_chosen_group(): void

@@ -69,7 +69,7 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->assertSame([
             ['ad_id' => '555', 'name' => 'Serum Sale / Women 25+ / Glow', 'customers' => 3, 'last' => '2026-10-20 10:00'],
             ['ad_id' => '666', 'name' => null, 'customers' => 2, 'last' => '2026-10-19 10:00'],
-        ], $data['unassigned']);
+        ], array_map(fn ($r) => array_intersect_key($r, array_flip(['ad_id', 'name', 'customers', 'last'])), $data['unassigned']));
         $this->assertSame(['Item A'], array_column($data['groups'], 'name'));
         $this->assertSame(['666'], array_column($this->getJson('/chatbot/ad-groups?page=Page%20P&q=66')->json('unassigned'), 'ad_id'));
         $this->assertSame(['555'], array_column($this->getJson('/chatbot/ad-groups?page=Page%20P&q=serum')->json('unassigned'), 'ad_id'));

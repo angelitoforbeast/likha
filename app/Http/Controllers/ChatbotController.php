@@ -105,6 +105,7 @@ class ChatbotController extends Controller
         $forbeast = app(ForbeastPageSetup::class);
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         $ai = app(\App\Services\Chatbot\ChatbotAiSettings::class);
+        $adGroups = app(\App\Services\Chatbot\AdGroups::class);
 
         $rows = [];
         foreach ($pages as $page) {
@@ -148,6 +149,10 @@ class ChatbotController extends Controller
                     ? ($connections->keywordsOn($page) !== null ? 'on' : strtok($k, ' ')) : null,
                 // Aling AI ang sumasagot (ang override ng page o ang site default).
                 'ai' => $ai->row($page),
+                // Reply values: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga ad group ng page).
+                'reply' => ($adBased = $adGroups->adBased($page)) ? \App\Services\Chatbot\AdGroups::MODE_AD : 'page',
+                // Ad-based lang: ilang bagong ad ang wala pa sa group (ang badge ng nakasarang row; naka-cache, ≤ 5 min).
+                'ad_new' => $adBased ? $adGroups->newUnassigned($page) : null,
             ];
         }
 
