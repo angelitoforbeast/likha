@@ -112,6 +112,20 @@ class ChatbotSequenceEngineTest extends ChatblastTestCase
             ->map(fn ($e) => ChatbotEvents::text($e->type, $e->node_id, (array) json_decode($e->detail, true)))->all();
     }
 
+    public function test_S_182_12_a_step_event_records_when_the_step_was_due_and_its_sequence(): void
+    {
+        $this->travelTo('2026-10-21 09:00:00');
+        $this->chat('7001', '2026-10-21 08:50:00');
+        $seq = $this->sequence('Due check', [[1, 'hours', $this->flow('Seq 1')->id]]);
+        $this->svc()->subscribe($seq->id, 1001, 7001, 'other');
+
+        $this->travelTo('2026-10-21 10:02:30');
+        $this->tick();
+        $this->assertSame(['Seq 1'], $this->sent());
+        $ran = DB::table('chatbot_events')->where('type', 'sequence')->get()->map(fn ($e) => json_decode($e->detail, true))->firstWhere('op', 'ran');
+        $this->assertSame(['2026-10-21 10:00:00', $seq->id, 1], [$ran['due'] ?? null, $ran['sequence_id'] ?? null, $ran['step']]);
+    }
+
     public function test_S_078_1_a_step_due_at_2am_is_sent_at_2am(): void
     {
         $this->travelTo('2026-10-21 01:00:00');

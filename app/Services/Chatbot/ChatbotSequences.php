@@ -289,7 +289,8 @@ class ChatbotSequences
             $step = $this->stepFrom($seq, $sub->current_step);
             if (!$step) return $this->complete($sub, $seq);
 
-            $detail = ['name' => $seq->name, 'step' => $step->position];
+            // Ang due ay kung kailan dapat tumakbo ang step: ang /chatbot/speed ay sumusukat ng delay mula rito hanggang sa padala.
+            $detail = ['name' => $seq->name, 'step' => $step->position, 'sequence_id' => (int) $seq->id, 'due' => $sub->next_send_at?->format('Y-m-d H:i:s')];
             $page = BotcakeChat::pageMap()[(string) $sub->page_id] ?? null;
             if ($page === null) {
                 $release(['status' => 'error', 'exit_reason' => 'page not set up', 'next_send_at' => null]);

@@ -3,6 +3,6 @@
 <td class="text-right tabular-nums">{{ number_format($r['messages']) }}</td>
 <td class="text-right tabular-nums">{{ number_format($r['answered']) }}</td>
 <td class="text-right tabular-nums">{{ number_format($r['unanswered']) }}</td>
-@foreach(['avg', 'median', 'p90'] as $k)<td class="text-right tabular-nums">{{ $r[$k] === null ? '—' : $num($r[$k]) . ' s' }}</td>@endforeach
+@foreach(['avg', 'median', 'p90', 'max'] as $k)<td class="text-right tabular-nums">{{ $r[$k] === null ? '—' : $num($r[$k]) . ' s' }}</td>@endforeach
 @foreach([30, 60, 300] as $s)<td class="text-right tabular-nums" title="{{ number_format($r["within_$s"]) }} messages">{{ $r["pct_$s"] === null ? '—' : $num($r["pct_$s"]) . '%' }}</td>@endforeach
 <td class="text-right tabular-nums">{{ number_format($r['not_on_bot']) }}</td>
