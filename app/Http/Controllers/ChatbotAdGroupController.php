@@ -91,13 +91,22 @@ class ChatbotAdGroupController extends Controller
         return $this->result($this->groups->save($page, $this->id($request), (string) $request->input('name', ''), $parsed['ids'], $values, Auth::id()));
     }
 
-    /** Ang mga tsinek mula sa "Ads not in a group yet": sa group na ito (id) o sa bagong group (name). */
+    /**
+     * Ang mga tsinek mula sa "Ads not in a group yet" (listahan), o ang tina-type o pina-paste na mga ad ID (text: comma,
+     * space o bagong linya): sa group na ito (id) o sa bagong group (name).
+     */
     public function add(Request $request)
     {
         $this->checkAccess();
         $page = $this->page($request);
-        $ads = array_map(fn ($a) => is_scalar($a) ? (string) $a : '', array_slice((array) $request->input('ads', []), 0, AdGroups::MAX_ADS));
-        if (!$ads) return response()->json(['error' => 'Tick at least one ad.'], 422);
+        $input = $request->input('ads', []);
+        if (is_string($input)) {
+            $parsed = AdGroups::parseAds(mb_substr($input, 0, 40000));
+            if ($parsed['bad']) return response()->json(['error' => 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.'], 422);
+            $input = $parsed['ids'];
+        }
+        $ads = array_map(fn ($a) => is_scalar($a) ? (string) $a : '', array_slice((array) $input, 0, AdGroups::MAX_ADS));
+        if (!$ads) return response()->json(['error' => is_string($request->input('ads')) ? 'Type at least one ad ID.' : 'Tick at least one ad.'], 422);
         $id = $this->id($request);
 
         return $this->result($this->groups->addAds($page, $id, $id === null ? (is_scalar($n = $request->input('name', '')) ? (string) $n : '') : null, $ads, Auth::id()));
@@ -120,6 +129,30 @@ class ChatbotAdGroupController extends Controller
         $id = $this->id($request);
 
         return response()->json(['rows' => $id === null ? [] : $this->groups->history($page, $id)]);
+    }
+
+    /** Isang value ng group (ang cell ng group sa row ng page): blangko = ang default (page value). History gaya ng Save. */
+    public function value(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->page($request);
+        $id = $this->id($request);
+        [$key, $value] = [$request->input('key'), $request->input('value', '')];
+        if ($id === null || !is_string($key) || (!is_scalar($value) && $value !== null)) return response()->json(['error' => 'Pick a group, a field and a text value.'], 422);
+
+        return $this->result($this->groups->setValue($page, $id, mb_substr($key, 0, 100), (string) $value, Auth::id()));
+    }
+
+    /** Alisin ang isang ad ID sa group (history ng ad list). */
+    public function removeAd(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->page($request);
+        $id = $this->id($request);
+        $ad = $request->input('ad');
+        if ($id === null || !is_scalar($ad) || !preg_match('/^\d{1,64}$/', (string) $ad)) return response()->json(['error' => 'Pick an ad ID of the group.'], 422);
+
+        return $this->result($this->groups->removeAd($page, $id, (string) $ad, Auth::id()));
     }
 
     /** Ang Reply values ng page: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga group ang ginagamit). */

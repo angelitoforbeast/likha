@@ -268,6 +268,31 @@ class AdGroups
         return $this->change($page, $id, fn (array $g) => [$g['name'], array_merge($g['ads'], $ads), []], $userId);
     }
 
+    /**
+     * Isang value ng group (ang cell sa row ng page): sa loob ng parehong lock at pagsuri ng save; blangko = page value.
+     * @return array{ok: bool, id?: int, error?: string}
+     */
+    public function setValue(string $page, int $id, string $key, string $value, ?int $userId = null): array
+    {
+        return $this->change($page, $id, fn (array $g) => [$g['name'], $g['ads'], [$key => $value]], $userId);
+    }
+
+    /**
+     * Alisin ang isang ad ID sa group (ang lumang ad list ay history); ang ad ay bumabalik sa "Ads not in a group yet".
+     * @return array{ok: bool, id?: int, error?: string}
+     */
+    public function removeAd(string $page, int $id, string $ad, ?int $userId = null): array
+    {
+        $missing = false;
+        $r = $this->change($page, $id, function (array $g) use ($ad, &$missing) {
+            $missing = !in_array($ad, $g['ads'], true);
+
+            return [$g['name'], array_values(array_diff($g['ads'], [$ad])), []];
+        }, $userId);
+
+        return $missing && $r['ok'] ? ['ok' => false, 'error' => 'Ad ' . $ad . ' is not in this group.'] : $r;
+    }
+
     /** Alisin ang group: lahat ng row nito ay nagiging history; ang mga ad nito ay bumabalik sa page values. */
     public function delete(string $page, int $id, ?int $userId = null): bool
     {

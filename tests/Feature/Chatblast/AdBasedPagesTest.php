@@ -143,6 +143,65 @@ class AdBasedPagesTest extends ChatblastTestCase
         $this->assertSame(1, $data['new_unassigned']);
     }
 
+    public function test_S_174_3_a_group_cell_saves_with_history_and_restore_and_page_only_keys_are_refused(): void
+    {
+        $this->actingAs($this->user());
+        $groups = app(AdGroups::class);
+        $id = $groups->save('Precious Lopez', null, 'Serum', ['111'], ['price' => '499'])['id'];
+        $post = fn (array $b) => $this->postJson('/chatbot/ad-groups/value', ['page' => 'Precious Lopez', 'id' => $id] + $b);
+
+        $post(['key' => 'price', 'value' => '599'])->assertOk();
+        $post(['key' => 'main_flow', 'value' => 'Hello serum'])->assertOk();
+        $this->assertSame(['price' => '599', 'main_flow' => 'Hello serum'], $groups->groups('Precious Lopez')[$id]['values']);
+        $this->assertSame(['Serum', ['111']], [$groups->groups('Precious Lopez')[$id]['name'], $groups->groups('Precious Lopez')[$id]['ads']], 'ang pangalan at ads ay hindi nagalaw');
+
+        $old = collect($this->getJson('/chatbot/ad-groups/history?page=Precious%20Lopez&id=' . $id)->json('rows'))->first(fn ($r) => $r['key'] === 'price' && $r['value'] === '499');
+        $this->assertFalse($old['active']);
+        $this->postJson('/chatbot/ad-groups/restore', ['page' => 'Precious Lopez', 'setting' => $old['id']])->assertOk();
+        $this->assertSame('499', $groups->groups('Precious Lopez')[$id]['values']['price']);
+
+        // Blangko = bumalik sa default (page value).
+        $post(['key' => 'main_flow', 'value' => ''])->assertOk();
+        $this->assertArrayNotHasKey('main_flow', $groups->groups('Precious Lopez')[$id]['values']);
+        $post(['key' => 'fill_up_form', 'value' => 'x'])->assertStatus(422)->assertJson(['error' => 'fill_up_form is set on the page only, not in a group.']);
+        $post(['key' => 'price', 'value' => ['x']])->assertStatus(422);
+        $this->postJson('/chatbot/ad-groups/value', ['page' => 'Precious Lopez', 'id' => 99, 'key' => 'price', 'value' => '1'])->assertStatus(422)->assertJson(['error' => 'This group was deleted.']);
+
+        $before = PageSetting::count();
+        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
+        $post(['key' => 'price', 'value' => '1'])->assertForbidden();
+        $this->postJson('/chatbot/ad-groups/remove-ad', ['page' => 'Precious Lopez', 'id' => $id, 'ad' => '111'])->assertForbidden();
+        $this->assertSame($before, PageSetting::count());
+    }
+
+    public function test_S_174_4_removing_an_ad_id_from_a_group_keeps_history(): void
+    {
+        $this->actingAs($this->user());
+        $groups = app(AdGroups::class);
+        $id = $groups->save('Precious Lopez', null, 'Serum', ['111', '222'], [])['id'];
+
+        $this->postJson('/chatbot/ad-groups/remove-ad', ['page' => 'Precious Lopez', 'id' => $id, 'ad' => '222'])->assertOk();
+        $this->assertSame(['111'], $groups->groups('Precious Lopez')[$id]['ads']);
+        $this->assertSame([['111,222', false], ['111', true]], PageSetting::where('key', 'g' . $id . '.ads')->orderBy('id')->get()->map(fn ($s) => [$s->value, (bool) $s->active])->all());
+        $this->postJson('/chatbot/ad-groups/remove-ad', ['page' => 'Precious Lopez', 'id' => $id, 'ad' => '222'])->assertStatus(422)->assertJson(['error' => 'Ad 222 is not in this group.']);
+    }
+
+    public function test_S_174_5_typed_ad_ids_are_added_to_a_group_non_digits_and_ads_of_another_group_are_refused(): void
+    {
+        $this->actingAs($this->user());
+        $groups = app(AdGroups::class);
+        $id = $groups->save('Precious Lopez', null, 'Serum', ['100'], [])['id'];
+        $groups->save('Precious Lopez', null, 'Toner', ['444'], []);
+        $add = fn (string $text) => $this->postJson('/chatbot/ad-groups/add', ['page' => 'Precious Lopez', 'id' => $id, 'ads' => $text]);
+
+        $add("111, 222\n333")->assertOk();
+        $this->assertSame(['100', '111', '222', '333'], $groups->groups('Precious Lopez')[$id]['ads']);
+        $add('555, 12a')->assertStatus(422)->assertJson(['error' => 'Not an ad ID (digits only): 12a.']);
+        $add('555 444')->assertStatus(422)->assertJson(['error' => 'Ad 444 is already in the group "Toner".']);
+        $add(' , ')->assertStatus(422);
+        $this->assertSame(['100', '111', '222', '333'], $groups->groups('Precious Lopez')[$id]['ads'], 'walang naidagdag sa mga tinanggihan');
+    }
+
     public function test_S_174_1_every_page_starts_page_based_an_editor_switches_it_with_history_and_others_get_403(): void
     {
         $this->actingAs($this->user());
