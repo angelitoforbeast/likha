@@ -1454,3 +1454,10 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **A `confirmed_at` earlier than `sent_at` (clock skew) is clamped to 0 s** and not counted apart. Reason: same clamp as the reply time; count them if zeros show up.
 - **A cold Today view now builds two days** (the previous day for the reference lines; it is then cached 30 minutes). About 0.9–1.1 s for all pages on the sqlite fixture of 35k chats a day. Reason: the amendment asks for the previous day from the same cached computation; time it on MySQL after deploy.
 - **Untested here:** a null `via` row, `hasVia()` false, the 0 s clamp, an empty day's chart, and Chart.js failing to load (the charts stay blank, as before). Reason: thin branches over tested paths.
+
+## 187: Landmark in the order address, accepted review minors (2026-10-29)
+- **A whole landmark in ( ) or [ ] is treated as a note, not a landmark.** A few real landmarks written that way ("(mega paint)") are dropped, against thousands of "(not provided)". Reason: the spec lists bracketed notes as placeholders.
+- **The prefix strip leaves connector words** ("near lang sa …", "near po sa …"). Reason: the spec keeps Astra's prefix list; widen it in one place (`AddressLandmark::PREFIX`) if staff ask.
+- **The "already in the address" check ignores case and spaces, not punctuation**, so "near Brgy. Hall" plus the landmark "brgy hall" adds it again. Reason: the spec keeps Astra's normalized contains check.
+- **Staff notes typed in the Landmark line** ("do not proceed encoders!!", about 30 in old data) are appended as a landmark. Reason: rare; such notes belong elsewhere.
+- **The /order-encode sheet compare and the backtest** compare the encode address line with the sheet's ADDRESS, which still comes from the AI-only prompt: orders with a landmark now read as different there. Reason: expected; compare rates after deploy are not comparable with earlier runs.
