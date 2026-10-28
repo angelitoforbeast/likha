@@ -36,6 +36,7 @@ class ChatbotProviderEventsController extends Controller
                     'result' => $e['result'] ?? null, 'from' => $e['from'] ?? null, 'to' => $e['to'] ?? null,
                     'condition' => $e['condition'] ?? null, 'error' => isset($e['error']) ? mb_substr((string) $e['error'], 0, 200) : null,
                     // Ang send lag alarm: ang mga page na apektado (ang row ay nasa una lang).
+                    'reason' => $e ? ForbeastWatch::reason($e) : null,
                     'pages' => isset($e['pages']) && is_array($e['pages']) ? array_values($e['pages']) : null,
                 ];
             })->all();

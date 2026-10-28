@@ -136,8 +136,8 @@ class ChatbotController extends Controller
             $cells[ShopDetails::KEY] = ShopDetails::build($page, $cells); // binubuo, ang naka-save ay hindi na binabasa
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
-                // Kusang lumipat sa Botcake (ForbeastWatch), hanggang may magpalit nang mano-mano.
-                'auto_switched' => $provider === ChatbotProvider::BOTCAKE ? ForbeastWatch::note($autoSwitch, $providerRow) : null,
+                // Kusang lumipat sa Botcake, held o ibinalik sa Forbeast (ForbeastWatch), hanggang may magpalit nang mano-mano.
+                'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider),
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
@@ -633,6 +633,9 @@ class ChatbotController extends Controller
         if ($s->key === ForbeastWatch::KEY && is_array($e = json_decode((string) $s->plainValue(), true))) {
             $what = match ($e['result'] ?? '') {
                 ForbeastWatch::SWITCHED => 'Switched to Botcake',
+                ForbeastWatch::HELD => 'Held on Forbeast',
+                ForbeastWatch::SWITCHED_BACK => 'Switched back to Forbeast',
+                ForbeastWatch::MOVED => 'Moved to Forbeast',
                 \App\Services\Chatbot\ForbeastSendHealth::ALARM => 'Alarm (no switch)',
                 \App\Services\Chatbot\ForbeastSendHealth::RECOVERED => 'Recovered',
                 default => 'Cannot switch: no Botcake',
@@ -656,11 +659,12 @@ class ChatbotController extends Controller
 
     private function who(PageSetting $s, array $names): string
     {
-        // Ang kusang lipat lang ang sumusulat ng event; ang provider row na walang user ay "auto-switch" kapag may event ng page sa oras na iyon (sabay silang sinusulat), kung hindi, system.
+        // Ang provider row na walang user ay "auto-switch" kapag may lipat o balik ng bantay sa oras na iyon (sabay silang sinusulat), kung hindi, system.
         if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && $s->key === ForbeastWatch::KEY) return ForbeastWatch::WHO;
         if (!$s->created_by && $s->provider === ChatbotFields::PROVIDER && $s->key === 'provider'
             && PageSetting::where('page_name', $s->page_name)->where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)
-                ->whereBetween('created_at', [$s->created_at?->copy()->subMinute(), $s->created_at?->copy()->addMinute()])->exists()) return ForbeastWatch::WHO;
+                ->whereBetween('created_at', [$s->created_at?->copy()->subMinute(), $s->created_at?->copy()->addMinute()])->get()
+                ->contains(fn ($e) => in_array(json_decode((string) $e->plainValue(), true)['result'] ?? null, [ForbeastWatch::SWITCHED, ForbeastWatch::SWITCHED_BACK], true))) return ForbeastWatch::WHO;
 
         return $s->created_by ? ($names[$s->created_by] ?? 'user #' . $s->created_by) : (PageValues::by($s->source) ?? 'system');
     }

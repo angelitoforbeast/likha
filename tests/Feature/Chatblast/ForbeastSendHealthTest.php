@@ -43,6 +43,8 @@ class ForbeastSendHealthTest extends ChatblastTestCase
         $this->page('Page Tres', '1003');
         app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway');
         app(PageSettings::class)->set('Page Dos', 'chatbot', 'provider', 'gateway');
+        // Matagal nang nasa Forbeast ang mga page (ang bagong lipat ay may sariling "moved" event, ForbeastSmartSwitchTest).
+        PageSetting::where('provider', 'chatbot')->where('key', 'provider')->update(['created_at' => now()->subHours(3)]);
         Http::preventStrayRequests();
         Http::fake([self::SENDS => function () {
             $a = array_shift($this->answers) ?? $this->body();

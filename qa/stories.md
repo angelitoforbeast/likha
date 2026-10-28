@@ -2967,3 +2967,30 @@ Tests: `tests/Feature/MetaAds/MetaAdsAccountNamesTest.php`, existing Meta Ads te
 | S-176.4 (P1) | Only an inactive ad_accounts row, Then the ID | `test_S_176_…` (S-176.4) | passed |
 | S-176.5 (P1) | Meta name "act_<ID>", or the ad_accounts ID stored as "act_<ID>", Then the ad_accounts name | `test_S_176_…` (2 S-176.5 sets) | passed |
 | S-176.6 (P1) | Existing Meta Ads and Ads Manager tests pass | `tests/Feature/MetaAds`, `tests/Feature/AdAccount` | passed |
+
+## S-175 The Forbeast watcher moves a page only on Forbeast's fault, and moves it back by itself
+
+As the owner, I want a page to leave Forbeast only when Forbeast is really slow (not on Meta misses or Likha's own lag), the missing customers to be answered anyway, and pages the watcher moved to come back by themselves, so pages don't sit on Botcake for days.
+
+Slice 175. Threat model: Botcake and Forbeast webhook payloads and customer messages are untrusted; config, the Forbeast health response (our own service) and owner inputs are trusted. No new route, table or migration. Risk tier: medium (background job on trusted paths).
+Tests: `tests/Feature/Chatblast/ForbeastSmartSwitchTest.php`, `ForbeastAutoSwitchTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-175.1 (P1) | Given 3 customers' Botcake copies with no Forbeast copy for 300 s, Likha not behind, health without inbound_lag_seconds, When the watcher runs, Then the page switches ("…from 3 customers … after 300 seconds") | `test_S_175_1…` | passed |
+| S-175.2 (P1) | Given 2 customers after 300 s, or 3 customers after 200 s, Then no switch and no event; the customers past 300 s are answered from standby, the ones at 200 s are not yet | `test_S_175_2…` (2 data sets) | passed |
+| S-175.3 (P1) | Given the evidence and Likha 120 s behind (a gateway event processed 120 s after it was queued, or a job waiting 120 s on the database queue), Then held with one event "held: Likha ingest lag 120 s" per hour, no switch, nothing answered (the Forbeast copies are in Likha's queue) | `test_S_175_3…` (2 data sets) | passed |
+| S-175.4 (P1) | Given the evidence and health inbound_lag_seconds 3, Then held "held: Forbeast healthy (lag 3 s), 3 customers missing — likely not delivered by Meta" and the 3 customers are answered via standby | `test_S_175_4…` | passed |
+| S-175.5 (P1) | Given the evidence and inbound_lag_seconds 400, Then switch with error starting "Forbeast slow: 400 s" and the /chatbot/pages note shows it | `test_S_175_5…` | passed |
+| S-175.6 (P1) | A watcher-switched page (inbound) with 30 healthy minutes goes back with a "switched_back" event, note "Back on Forbeast" and changes entry; 29 min does not; a page a person changed after the switch never goes back; a second switch back within 6 h waits; a slow check restarts the 30 minutes; a send-lag alarm row written after the switch does not block it | `test_S_175_6a…6e` | passed |
+| S-175.7 (P1) | A Meta connection code (190) still switches at once and never goes back | `test_S_175_7…` | passed |
+| S-175.8 (P1) | The Chatblast, Botcake and PageSettings suites (incl. ForbeastWatch and BotHealth tests) add no new failures | full run | passed |
+
+Amendment 175-1 (a page just moved to Forbeast is not blamed for messages from its Botcake time; manual moves are on the feed):
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-175.9 (P1) | Given a person sets a page to gateway at T, When 3 customers' Botcake copies received at T-60 s have no Forbeast copy, Then no switch at T+500 s; received at T+200 s, Then they count and the page switches; with settle_seconds 30, copies at T+60 s count | `test_S_175_9…` (3 data sets) | passed |
+| S-175.9b (P1) | Given the watcher switched a page back to Forbeast, When copies arrive 60 s later with no Forbeast copy, Then no switch, and no "moved" event follows the watcher's own move | `test_S_175_9b…` | passed |
+| S-175.10 (P1) | Given a person moves a page to Forbeast, When the watcher runs (twice), Then one "moved" event "moved to Forbeast by <name> at <time>" and the provider change stays the person's in the history | `test_S_175_10…` | passed |
+| S-175.10b (P2) | A move with no user is recorded "by system" and labelled system (not auto-switch); a move older than an hour gets no event | `test_S_175_10b…` | passed |
