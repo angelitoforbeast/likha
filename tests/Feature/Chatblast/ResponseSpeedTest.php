@@ -548,4 +548,29 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame(300, $c['push']['prev']['max'][10]);
         $this->assertStringContainsString('id="sp-chart-push"', $res->getContent());
     }
+
+    public function test_S_185_3_a_push_just_before_midnight_counts_in_hour_23_and_the_bot_filter_keeps_its_own_column(): void
+    {
+        $this->seedPushes();
+        $this->reply('1001', '7309', '2026-10-20 23:59:58', ['confirmed_at' => '2026-10-21 00:00:04', 'confirmed_status' => 'sent']);
+
+        $h = $this->out(['date' => '2026-10-20'])['push']['hours'][23];
+        $this->assertSame([1, 1, 6], [$h['pushed'], $h['measured'], $h['max']]);
+        $this->assertSame(0, $this->out()['push']['hours'][0]['pushed']); // hindi rin sa susunod na araw
+
+        $fb = $this->out(['date' => '2026-10-20', 'bot' => 'Forbeast'])['push']['hours'][10];
+        $this->assertSame([3, 2, 0], [$fb['pushed'], $fb['measured'], $fb['botcake']]);
+        $bc = $this->out(['date' => '2026-10-20', 'bot' => 'Botcake'])['push']['hours'][10];
+        $this->assertSame([0, 0, 1], [$bc['pushed'], $bc['measured'], $bc['botcake']]);
+    }
+
+    public function test_an_entry_cached_by_the_earlier_screen_is_not_read(): void
+    {
+        // Ang hugis bago ang 185 (walang push): ang lumang key ay hindi na binabasa pagkatapos ng deploy.
+        $f = ResponseSpeed::filters([]);
+        Cache::flush();
+        Cache::put('response-speed:' . md5(json_encode($f)), ['filters' => $f, 'hours' => [], 'total' => [], 'by_bot' => [], 'sequences' => []], 120);
+
+        $this->assertArrayHasKey('push', app(ResponseSpeed::class)->output([]));
+    }
 }

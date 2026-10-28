@@ -53,12 +53,15 @@ class ResponseSpeed
             'charts' => self::charts($out, $prev)];
     }
 
-    /** Ang mga numero ng isang araw at filter, naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto). */
+    /**
+     * Ang mga numero ng isang araw at filter, naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto). Ang bersyon sa key
+     * ay pinapalitan kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
+     */
     private function day(array $f, string $today): array
     {
         $ttl = $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
 
-        return Cache::remember('response-speed:' . md5(json_encode($f)), $ttl, fn () => $this->build($f, $today));
+        return Cache::remember('response-speed:v2:' . md5(json_encode($f)), $ttl, fn () => $this->build($f, $today));
     }
 
     /**
