@@ -133,13 +133,15 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
 
     public static function notEnough(): array
     {
-        return ['two customers after 300 s' => [2, 301], 'three customers after 200 s' => [3, 200]];
+        // Ang sinasagot: ang customer na wala pang kopya pagkalipas ng 300 s (hindi ang nasa 200 s pa lang).
+        return ['two customers after 300 s' => [2, 301, ['Available po?', 'Magkano po?']], 'three customers after 200 s' => [3, 200, []]];
     }
 
     /** @dataProvider notEnough */
-    public function test_S_175_2_fewer_customers_or_a_shorter_wait_never_switch(int $customers, int $seconds): void
+    public function test_S_175_2_fewer_customers_or_a_shorter_wait_never_switch_and_customers_past_the_wait_are_answered(int $customers, int $seconds, array $answered): void
     {
         Queue::fake();
+        $this->greeting();
         $this->health(null);
         $this->missing($customers);
         $this->travel($seconds)->seconds();
@@ -148,6 +150,7 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
 
         $this->assertSame('gateway', $this->provider());
         $this->assertSame([], $this->events());
+        $answered === [] ? Queue::assertNotPushed(RunChatbotFlow::class) : $this->assertSame($answered, $this->ranMessages());
     }
 
     public static function likhaBehind(): array
@@ -244,6 +247,18 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
         $this->assertSame(['Back on Forbeast', 'back on Forbeast after 30 min healthy'], [$row['auto_switched']['label'], $row['auto_switched']['reason']]);
         $changes = collect($this->getJson('/chatbot/changes')->assertOk()->json('entries'));
         $this->assertSame('Switched back to Forbeast · back on Forbeast after 30 min healthy', $changes->firstWhere('key', 'auto_switch')['new']);
+    }
+
+    public function test_S_175_6e_a_send_lag_alarm_written_after_the_switch_does_not_keep_the_page_on_botcake(): void
+    {
+        Queue::fake();
+        $this->health(2);
+        app(ForbeastWatch::class)->switch('Page Uno', 'failed_sends', 'HTTP 500');
+        app(ForbeastWatch::class)->event('Page Uno', \App\Services\Chatbot\ForbeastSendHealth::ALARM, null, 'send_lag', 'lag');
+
+        $this->healthyFor(30);
+
+        $this->assertSame('gateway', $this->provider());
     }
 
     public function test_S_175_6b_a_page_a_person_set_after_the_switch_is_never_moved_back(): void

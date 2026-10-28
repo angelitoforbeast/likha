@@ -45,7 +45,7 @@ class ChatbotForbeastWatch extends Command
         }
         // Ang page na inilipat ng bantay sa Botcake (inbound o padala): ibinabalik sa Forbeast kapag matagal nang maayos ang health.
         $back = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)->where('active', true)->orderBy('id')->get()
-            ->filter(fn ($s) => ForbeastWatch::returnable($s))->pluck('page_name')->unique(fn ($p) => $settings->pageKey((string) $p));
+            ->filter(fn ($s) => ForbeastWatch::returnable($s) || ForbeastWatch::alarm($s))->pluck('page_name')->unique(fn ($p) => $settings->pageKey((string) $p));
         foreach ($back as $page) {
             try {
                 $watch->switchBack((string) $page);

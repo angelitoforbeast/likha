@@ -83,6 +83,11 @@ class ForbeastWatch
     private const REPLIED_GRACE = 5;
     /** Ang tanda sa payload ng chat ng Forbeast na nabura na ang standby na kapares nito. */
     private const TWIN_USED = '_twin_used';
+    /**
+     * Ang tanda sa chat na sinagot mula sa standby: ebidensya pa rin ito ng kopyang wala sa Forbeast (inbound), para ang
+     * mga customer na sinagot isa-isa ay naiipon pa rin hanggang inbound_customers.
+     */
+    private const FROM_STANDBY = '_from_standby';
 
     public function __construct(private PageSettings $settings)
     {
@@ -170,10 +175,10 @@ class ForbeastWatch
         $from = now()->subMinutes($minutes);
         // Ang standby (kopya ng Botcake) na walang kapares mula sa Forbeast pagkalipas ng inbound_seconds. Ebidensya lang kapag
         // galing sa inbound_customers na magkaibang customer: ang isang kakaibang mensahe ay hindi dapat maglipat ng page.
-        $paired = self::pairs($chats);
+        $paired = self::pairs($chats, true);
         // Ang attachment lang (larawan, voice, …) ay hindi ebidensya habang hindi ito sinasagot ng bot (ignore).
         $ignoring = ChatAttachments::ignoring();
-        $unpaired = $chats->filter(fn ($c) => self::standby($c) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from));
+        $unpaired = $chats->filter(fn ($c) => self::copy($c, true) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from));
         // Ang dumating sa loob ng SETTLE mula sa lipat sa Forbeast ay hindi ebidensya, pero sinasagot dito (walang ibang sasagot).
         $movedAt = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)
             ->orderByDesc('id')->first(['created_at'])?->created_at;
@@ -195,7 +200,11 @@ class ForbeastWatch
                 if ($enough) $this->hold($page, 'forbeast', 'held: Forbeast healthy (lag ' . $forbeast . ' s), ' . $customers . ' customers missing — likely not delivered by Meta',
                     ['customers' => $customers, 'forbeast_lag' => (int) $forbeast]);
                 $answer = $late->union($orphans);
-            } elseif ($enough) {
+            } elseif (!$enough) {
+                // Kulang ang ebidensya para lumipat: ang customer na wala pa ring kopya pagkalipas ng inbound_seconds ay sinasagot
+                // mula sa standby, maliban kung sinabi ng Forbeast na mabagal ito (ang kopya ay parating pa, iyon ang sasagot).
+                if ($forbeast === null) $answer = $late->union($orphans);
+            } else {
                 $this->switch($page, 'inbound', ($forbeast !== null ? 'Forbeast slow: ' . $forbeast . ' s · ' : '') . 'Botcake chats from ' . $customers
                     . ' customers with no Forbeast copy after ' . self::limit('inbound_seconds') . ' seconds',
                     ['customers' => $customers, 'chat_ids' => $orphans->pluck('id')->take(50)->values()->all(), 'likha_lag' => $likha],
@@ -286,12 +295,12 @@ class ForbeastWatch
      * parehong mid, o parehong kindOf sa loob ng TWIN_MINUTES (alinman ang nauna). Bawat chat ay isang kapares lang;
      * ang pinakamalapit sa oras ang kinukuha. @return array<int, int> id => id ng kapares (parehong direksyon)
      */
-    private static function pairs(\Illuminate\Support\Collection $chats): array
+    private static function pairs(\Illuminate\Support\Collection $chats, bool $answered = false): array
     {
         $out = [];
         // Ang chat ng Forbeast na nakapagbura na ng standby nito (answered) ay hindi na kapares ng iba.
         $forbeast = $chats->filter(fn ($c) => !self::standby($c) && ($c->payload['source'] ?? null) === 'gateway' && empty($c->payload[self::TWIN_USED]));
-        foreach ($chats->filter(fn ($c) => self::standby($c))->sortBy('received_at') as $s) {
+        foreach ($chats->filter(fn ($c) => self::copy($c, $answered))->sortBy('received_at') as $s) {
             $kind = self::kindOf($s->message);
             $best = $forbeast->filter(fn ($f) => !isset($out[$f->id]) && (string) $f->psid === (string) $s->psid && $f->received_at && $s->received_at
                 && (($s->message_id && $f->message_id === $s->message_id)
@@ -377,6 +386,14 @@ class ForbeastWatch
             && in_array($e['condition'] ?? null, self::BACK_CONDITIONS, true);
     }
 
+    /** Ang event ay alarm o recovered ng send lag (ForbeastSendHealth), hindi lipat. */
+    public static function alarm(PageSetting $event): bool
+    {
+        $result = json_decode((string) $event->plainValue(), true)['result'] ?? null;
+
+        return in_array($result, [ForbeastSendHealth::ALARM, ForbeastSendHealth::RECOVERED], true);
+    }
+
     /**
      * Maaaring ibalik: nasa Botcake, handa ang Forbeast token ng page, ang huling event ay lipat na kusang ibinabalik at walang
      * nagpalit ng provider pagkatapos nito (laging panalo ang tao), at walang balik sa huling back_hours.
@@ -385,7 +402,8 @@ class ForbeastWatch
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::BOTCAKE || !app(ForbeastPageSetup::class)->ready($page)) return false;
         $rows = fn (string $key) => $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key);
-        $event = $rows(self::KEY)->where('active', true)->orderByDesc('id')->first();
+        // Ang send lag alarm (ForbeastSendHealth) ay sumusulat din dito: hindi ito lipat, kaya nilalaktawan.
+        $event = $rows(self::KEY)->orderByDesc('id')->limit(20)->get()->first(fn ($s) => !self::alarm($s));
         $provider = $rows('provider')->where('active', true)->orderByDesc('id')->first(['id']);
         if ($event === null || !self::returnable($event) || ($provider !== null && $provider->id > $event->id)) return false;
 
@@ -436,6 +454,12 @@ class ForbeastWatch
         $label = self::REASONS[$e['condition'] ?? ''] ?? (string) ($e['condition'] ?? '');
 
         return $label . (($e['error'] ?? '') !== '' ? ': ' . $e['error'] : '');
+    }
+
+    /** Ang kopya ng Botcake: standby, at (kung $answered) ang standby na nasagot na (FROM_STANDBY). */
+    private static function copy(BotcakeChat $chat, bool $answered): bool
+    {
+        return self::standby($chat) || ($answered && !empty($chat->payload[self::FROM_STANDBY]));
     }
 
     /** Ang chat ng Botcake na iniimbak lang habang nasa Forbeast ang page (walang takbo). */
@@ -534,6 +558,7 @@ class ForbeastWatch
                     $new = $c->replicate();
                     $payload = (array) $c->payload;
                     unset($payload['_standby']);
+                    $payload[self::FROM_STANDBY] = true;
                     $new->payload = $payload;
                     $new->save();
                     $c->delete();
