@@ -34,11 +34,11 @@ class ChatbotPage
         return BotConfigCache::flow((int) $id);
     }
 
-    /** May tatakbo para sa page: ang flow ng page, o ang flow ng isa sa mga ad group nito. */
+    /** May tatakbo para sa page: ang flow ng page, o (sa Ad-based na page) ang flow ng isa sa mga ad group nito. */
     public function runs(string $page): bool
     {
         if ($this->flow($page)) return true;
-        foreach ($this->groups()->groups($page) as $id => $g) {
+        foreach ($this->groups()->activeGroups($page) as $id => $g) {
             if (isset($g['values']['flow_id']) && $this->flow($page, $id)) return true;
         }
 

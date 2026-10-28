@@ -64,6 +64,7 @@ class ChatbotAdGroupController extends Controller
         $unassigned = $this->groups->unassigned($page, $q);
 
         return response()->json([
+            'mode' => $this->groups->adBased($page) ? AdGroups::MODE_AD : 'page',
             'groups' => array_values(array_map(fn ($g) => ['id' => $g['id'], 'name' => $g['name'], 'ads' => $g['ads'], 'values' => (object) $g['values']], $this->groups->groups($page))),
             'keys' => array_values($keys),
             'flows' => ChatbotFlow::orderBy('name')->get(['id', 'name'])->map(fn ($f) => ['id' => $f->id, 'name' => $f->name])->all(),
@@ -117,6 +118,18 @@ class ChatbotAdGroupController extends Controller
         $id = $this->id($request);
 
         return response()->json(['rows' => $id === null ? [] : $this->groups->history($page, $id)]);
+    }
+
+    /** Ang Reply values ng page: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga group ang ginagamit). */
+    public function mode(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->page($request);
+        $mode = $request->input('mode');
+        if (!in_array($mode, ['page', AdGroups::MODE_AD], true)) return response()->json(['error' => 'Pick Page-based or Ad-based.'], 422);
+        $this->groups->setMode($page, $mode === AdGroups::MODE_AD, Auth::id());
+
+        return response()->json(['ok' => true, 'mode' => $this->groups->adBased($page) ? AdGroups::MODE_AD : 'page']);
     }
 
     public function restore(Request $request)

@@ -30,6 +30,9 @@ class AdGroups
     public const UNASSIGNED_TTL = 120;
     /** Run state ng customer (chatbot_customer_values): ang group nang pumasok siya sa sequence N. */
     public const SEQ_PIN = '__ad_group_seq_';
+    /** Ang switch ng page: adgroup.mode = "ad" ay Ad-based; wala = Page-based (ang default). */
+    public const MODE_KEY = 'mode';
+    public const MODE_AD = 'ad';
 
     /** Ang mga botfield na puwedeng palitan ng group; ang iba (form, shop details, AI, connection, On/Off) ay sa page lang. */
     public const VALUE_KEYS = ['item_name_in_jnt_dashboard', 'price', 'quantity', 'picture', 'main_flow', 'main_flow_2', 'flow_id'];
@@ -81,6 +84,36 @@ class AdGroups
         return $out;
     }
 
+    /**
+     * Ad-based ang page (row na adgroup.mode = "ad"): ang mga group lang nito ang ginagamit sa takbo. Ang wala o ibang
+     * value = Page-based (ang default): page values lagi, ang mga group ay naiiwan pero hindi binabasa.
+     */
+    public function adBased(string $page): bool
+    {
+        return $this->settings->get($page, self::PROVIDER, self::MODE_KEY) === self::MODE_AD;
+    }
+
+    /**
+     * Ilipat ang page sa Ad-based (isang row) o pabalik sa Page-based (ang row ay nagiging history). Ang parehong mode ay
+     * walang isinusulat.
+     */
+    public function setMode(string $page, bool $ad, ?int $userId = null): void
+    {
+        if ($ad) {
+            $this->settings->set($page, self::PROVIDER, self::MODE_KEY, self::MODE_AD, false, $userId, true);
+            return;
+        }
+        foreach ($this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', self::MODE_KEY)->where('active', true)->get() as $s) {
+            $this->settings->deactivate($s, $userId);
+        }
+    }
+
+    /** Ang mga group na ginagamit sa takbo: ang sa Ad-based na page lang. */
+    public function activeGroups(string $page): array
+    {
+        return $this->adBased($page) ? $this->groups($page) : [];
+    }
+
     /** Ang numero ng group ng page na may ad na ito, o null. */
     public function groupForAd(string $page, ?string $adId): ?int
     {
@@ -112,10 +145,13 @@ class AdGroups
         return $ad !== null && preg_match('/^\d{1,64}$/', (string) $ad) ? (string) $ad : null;
     }
 
-    /** Ang group ng customer ayon sa pinakabagong ad niya, o null (page values). Ang page na walang group: walang query. */
+    /**
+     * Ang group ng customer ayon sa pinakabagong ad niya, o null (page values). Ang Page-based na page o ang walang group:
+     * walang query.
+     */
     public function forCustomer(int|string $pageId, int|string $psid, string $page): ?int
     {
-        if (!$this->groups($page)) return null;
+        if (!$this->activeGroups($page)) return null;
 
         return $this->groupForAd($page, $this->latestAd($pageId, $psid, $page));
     }
@@ -123,10 +159,11 @@ class AdGroups
     /**
      * Ang group ng customer sa isang sequence: ang naitala nang pumasok siya (pin), para hindi lumipat sa gitna. Ang walang
      * pin (pumasok bago nagkaroon ng group ang page) ay kinukuha ngayon at itinatala. Ang na-delete na group = page values.
+     * Ang Page-based na page: page values, at ang pin ay hindi ginagalaw (bumabalik kapag Ad-based ulit).
      */
     public function forSequence(int $sequenceId, CustomerFields $fields, string $page): ?int
     {
-        $groups = $this->groups($page);
+        $groups = $this->activeGroups($page);
         if (!$groups) return null;
         $pin = $fields->get(self::SEQ_PIN . $sequenceId);
         if ($pin === null) {
@@ -139,10 +176,13 @@ class AdGroups
         return isset($groups[(int) $pin]) ? (int) $pin : null;
     }
 
-    /** Itala ang group ng customer sa pagpasok sa sequence (0 = page values). Walang isinusulat kapag walang group ang page. */
+    /**
+     * Itala ang group ng customer sa pagpasok sa sequence (0 = page values). Walang isinusulat kapag walang ginagamit na
+     * group ang page (Page-based, o walang group).
+     */
     public function pin(int $sequenceId, CustomerFields $fields, string $page, ?int $group): void
     {
-        if ($group === null && !$this->groups($page)) return;
+        if ($group === null && !$this->activeGroups($page)) return;
         $fields->set(self::SEQ_PIN . $sequenceId, (string) ($group ?? 0));
     }
 
