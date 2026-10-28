@@ -144,13 +144,14 @@ class Connections
     }
 
     /**
-     * Bawat ad account ng lahat ng connection, isang beses: id => [id, name, who (mga Facebook name na nakakabasa)].
+     * Bawat ad account ng lahat ng connection ($all = ang all() na nabasa na), isang beses: id => [id, name, who (mga
+     * Facebook name na nakakabasa)].
      * @return array<string, array{id:string, name:string, who:list<string>}>
      */
-    public function accounts(): array
+    public function accounts(?array $all = null): array
     {
         $out = [];
-        foreach ($this->all() as $userId => $c) {
+        foreach ($all ?? $this->all() as $userId => $c) {
             $who = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
             foreach ($c['ad_accounts'] ?? [] as $acc) {
                 $id = (string) ($acc['id'] ?? '');

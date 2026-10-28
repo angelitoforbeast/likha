@@ -21,6 +21,8 @@ use Illuminate\Support\Str;
 class MetaAdsController extends Controller
 {
     public const NAV_URL = '/ads_manager/report';
+    /** Ang mga role na pumipili ng ad account (ang write mode ay CEO lang). */
+    public const ACCOUNT_ROLES = ['CEO', 'Marketing', 'Marketing - OIC'];
 
     public function __construct(private Connections $connections)
     {
@@ -84,6 +86,7 @@ class MetaAdsController extends Controller
             'write_mode' => Sync::writeMode(),
             'schedule'   => Sync::schedule(),
             'is_ceo'     => (new self($connections))->getNormalizedRole() === 'CEO',
+            'can_choose_accounts' => in_array((new self($connections))->getNormalizedRole(), self::ACCOUNT_ROLES, true),
             'range'      => Sync::range(null, null),
             'accounts'   => $accounts,
             'logs'       => $logs,
@@ -181,11 +184,11 @@ class MetaAdsController extends Controller
         return $this->back()->with('status', 'Meta Ads write mode: ' . $data['write_mode']);
     }
 
-    /** Ang mga ad account na binabasa ng Sync at Compare (CEO lang). Ang ID na wala sa connection ay tinatanggihan. */
+    /** Ang mga ad account na binabasa ng Sync at Compare (ACCOUNT_ROLES). Ang ID na wala sa connection ay tinatanggihan. */
     public function accounts(Request $request, Sync $sync)
     {
         $this->checkAccess();
-        if ($this->getNormalizedRole() !== 'CEO') abort(403);
+        if (!in_array($this->getNormalizedRole(), self::ACCOUNT_ROLES, true)) abort(403);
         $data = $request->validate(['accounts' => 'nullable|array|max:500', 'accounts.*' => 'string|max:50']);
 
         $unknown = $sync->chooseAccounts($data['accounts'] ?? [], Auth::id());

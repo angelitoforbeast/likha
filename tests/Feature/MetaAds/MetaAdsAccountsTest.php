@@ -68,9 +68,11 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
 
         $this->post('/ads_manager/meta/accounts', ['accounts' => ['333', '111']])->assertRedirect('/ads_manager/report')->assertSessionHasNoErrors();
 
-        $this->assertSame(['111', '333'], json_decode(DB::table('app_settings')->where('key', Sync::ACCOUNTS)->value('value'), true));
+        $this->assertSame(['selected' => ['111', '333'], 'seen' => ['111', '222', '333', '444', '555']],
+            json_decode(DB::table('app_settings')->where('key', Sync::ACCOUNTS)->value('value'), true));
         $event = UploadLog::where('type', 'ads_manager_api_event')->latest('id')->first();
-        $this->assertSame([$ceo->id, ['before' => [], 'after' => ['111', '333']]], [(int) $event->user_id, $event->protected_details]);
+        // Walang naka-save pa: lahat ay naka-check bago ang pili.
+        $this->assertSame([$ceo->id, ['before' => ['111', '222', '333', '444', '555'], 'after' => ['111', '333']]], [(int) $event->user_id, $event->protected_details]);
         $this->assertStringContainsString('ad accounts', $event->original_name);
         $this->get('/ads_manager/report')->assertSee('value="111" checked', false)->assertDontSee('value="222" checked', false);
     }
@@ -94,20 +96,34 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
 
         $this->post('/ads_manager/meta/accounts', ['accounts' => ['111', '999']])->assertSessionHasErrors('meta');
 
-        $this->assertSame([], Sync::accounts());
+        $this->assertFalse(DB::table('app_settings')->where('key', Sync::ACCOUNTS)->exists());
     }
 
-    public static function notCeo(): array
+    public static function marketing(): array
     {
         return ['Marketing' => ['Marketing'], 'Marketing - OIC' => ['Marketing - OIC']];
     }
 
-    #[DataProvider('notCeo')]
-    public function test_S_173_1_a_non_ceo_sees_the_list_read_only_and_the_save_is_refused(string $role): void
+    #[DataProvider('marketing')]
+    public function test_S_173_1_marketing_and_marketing_oic_can_save_the_selection(string $role): void
     {
         $this->seedFive();
         Sync::setAccounts(['111']);
         $this->actingAs($this->user($role, 'm@example.test'));
+
+        $this->get('/ads_manager/report')->assertSee('value="111" checked', false)->assertDontSee('value="111" checked disabled', false)->assertSee('Save accounts');
+        $this->post('/ads_manager/meta/accounts', ['accounts' => ['222']])->assertSessionHasNoErrors();
+
+        $this->assertSame(['222'], Sync::accounts());
+    }
+
+    public function test_S_173_1_another_role_with_the_ads_link_sees_the_list_read_only_and_the_save_is_refused(): void
+    {
+        $this->seedFive();
+        Sync::setAccounts(['111']);
+        $link = DB::table('nav_links')->where('route_url', '/ads_manager/report')->value('id');
+        DB::table('nav_link_role_visibility')->updateOrInsert(['nav_link_id' => $link, 'role' => 'Admin'], ['is_visible' => true]);
+        $this->actingAs($this->user('Admin', 'admin@example.test'));
 
         $this->get('/ads_manager/report')->assertSee('value="111" checked disabled', false)->assertDontSee('Save accounts');
         $this->post('/ads_manager/meta/accounts', ['accounts' => ['222']])->assertForbidden();
@@ -119,6 +135,7 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
     {
         Sync::setWriteMode(true);
         [$ana] = $this->seedFive();
+        Sync::setAccounts([]); // bawat account ay naka-uncheck
         $this->fakeGraph();
         $this->actingAs($ana);
 
@@ -136,8 +153,8 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
     public function test_S_173_2_sync_reads_only_the_selected_accounts(): void
     {
         Sync::setWriteMode(true);
-        Sync::setAccounts(['222', '444']);
         $this->seedFive();
+        Sync::setAccounts(['222', '444']);
         $this->fakeGraph();
 
         $log = app(Sync::class)->run(Sync::startLog(self::DAY, self::DAY, null), self::DAY, self::DAY);
@@ -149,16 +166,17 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
     public static function compareSelections(): array
     {
         return [
-            'nothing selected: all accounts' => [[], ['111', '222', '333', '444', '555']],
+            'every account unticked: all'    => [[], ['111', '222', '333', '444', '555']],
+            'nothing saved yet: all ticked'  => [null, ['111', '222', '333', '444', '555']],
             'a selection: only those'        => [['333', '555'], ['333', '555']],
         ];
     }
 
     #[DataProvider('compareSelections')]
-    public function test_S_173_2_compare_reads_the_selected_accounts_or_all_while_nothing_is_selected(array $selected, array $read): void
+    public function test_S_173_2_compare_reads_the_selected_accounts_or_all_while_nothing_is_selected(?array $selected, array $read): void
     {
-        if ($selected) Sync::setAccounts($selected);
         $this->seedFive();
+        if ($selected !== null) Sync::setAccounts($selected);
         $this->fakeGraph();
 
         $this->artisan('meta-ads:compare', ['--from' => self::DAY, '--to' => self::DAY])->assertSuccessful();
@@ -171,11 +189,11 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
         $this->seedFive();
 
         $this->artisan('meta-ads:accounts', ['--set' => '111,999'])->expectsOutputToContain('999')->assertFailed();
-        $this->assertSame([], Sync::accounts());
+        $this->assertFalse(DB::table('app_settings')->where('key', Sync::ACCOUNTS)->exists());
 
         $this->artisan('meta-ads:accounts', ['--set' => '555, 111'])->expectsOutputToContain('2 of 5')->assertSuccessful();
         $this->assertSame(['111', '555'], Sync::accounts());
-        $this->assertSame(['before' => [], 'after' => ['111', '555']], UploadLog::where('type', 'ads_manager_api_event')->latest('id')->first()->protected_details);
+        $this->assertSame(['before' => ['111', '222', '333', '444', '555'], 'after' => ['111', '555']], UploadLog::where('type', 'ads_manager_api_event')->latest('id')->first()->protected_details);
 
         $this->artisan('meta-ads:accounts', ['--list' => true])
             ->expectsOutputToContain('111  Account 111  yes')
@@ -183,5 +201,35 @@ class MetaAdsAccountsTest extends MetaAdsTestCase
             ->doesntExpectOutputToContain(self::TOKEN_ANA)
             ->doesntExpectOutputToContain(self::TOKEN_BEN)
             ->assertSuccessful();
+    }
+
+    public function test_S_173_1_a_new_account_is_ticked_by_default_and_an_unticked_one_stays_off(): void
+    {
+        Sync::setWriteMode(true);
+        $ana = $this->user('Marketing', 'ana@example.test');
+        $this->connect($ana, self::TOKEN_ANA, ['111', '222', '333', '444']);
+        $this->artisan('meta-ads:accounts', ['--set' => '111,222'])->assertSuccessful();
+
+        // Lumabas ang 555 sa connection (Reconnect): bago, kaya naka-check.
+        $this->connect($ana, self::TOKEN_ANA, ['111', '222', '333', '444', '555']);
+        $this->fakeGraph();
+        app(Sync::class)->run(Sync::startLog(self::DAY, self::DAY, null), self::DAY, self::DAY);
+        $this->assertSame(['111', '222', '555'], $this->insightCalls());
+        $this->assertSame(['selected' => ['111', '222', '555'], 'seen' => ['111', '222', '333', '444', '555']],
+            json_decode(DB::table('app_settings')->where('key', Sync::ACCOUNTS)->value('value'), true));
+
+        // Inalis ang check ng 555: hindi na binabasa.
+        $this->artisan('meta-ads:accounts', ['--set' => '111,222'])->assertSuccessful();
+        $this->graphCalls = [];
+        app(Sync::class)->run(Sync::startLog(self::DAY, self::DAY, null), self::DAY, self::DAY);
+        $this->assertSame(['111', '222'], $this->insightCalls());
+    }
+
+    public function test_S_173_1_the_old_plain_list_value_still_reads_as_the_selection(): void
+    {
+        $this->seedFive();
+        DB::table('app_settings')->insert(['key' => Sync::ACCOUNTS, 'value' => json_encode(['333', '111']), 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->assertSame(['111', '333'], Sync::accounts());
     }
 }

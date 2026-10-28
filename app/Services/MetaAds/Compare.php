@@ -23,9 +23,10 @@ class Compare
     public function run(string $from, string $to): array
     {
         $accounts = $problems = [];
-        // Ang mga piniling account; habang walang pinili, lahat (para makatulong sa pagpili).
-        $selected = array_flip(Sync::accounts());
-        foreach ($this->connections->all() as $userId => $c) {
+        // Ang mga naka-check na account; kapag lahat ay naka-uncheck, lahat (para makatulong sa pagpili).
+        $all      = $this->connections->all();
+        $selected = array_flip(Sync::accounts(Sync::current($all)));
+        foreach ($all as $userId => $c) {
             $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
             $token = $this->connections->token($c);
             if (($c['status'] ?? 'ok') === 'expired' || $token === null) {

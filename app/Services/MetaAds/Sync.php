@@ -19,7 +19,12 @@ class Sync
 {
     public const WRITE_MODE = 'meta_ads.write_mode';
     public const SCHEDULE = 'meta_ads.schedule';
-    /** Ang mga ad account na binabasa (JSON na listahan ng ID, CEO ang pumipili). Wala = walang Sync; Compare = lahat. */
+    /**
+     * Ang mga ad account na binabasa: JSON {selected: [ID…], seen: [ID…]} (CEO, Marketing at Marketing - OIC ang pumipili).
+     * Ang account na wala pa sa seen (bago) ay naka-check; ang inalisan ng check ay nananatiling wala. Walang naka-save =
+     * lahat naka-check. Ang lumang anyo (listahan lang ng ID) = ang pili, at lahat ng account ay nakita na.
+     * Lahat naka-uncheck = walang Sync; Compare = lahat.
+     */
     public const ACCOUNTS = 'meta_ads.accounts';
     public const NO_ACCOUNTS = 'Choose the ad accounts first';
     public const DEFAULT_SCHEDULE = '10:00,15:00,18:45';
@@ -58,17 +63,47 @@ class Sync
         AppSetting::set(self::SCHEDULE, implode(',', array_map('trim', explode(',', $times))));
     }
 
-    /** @return list<string> ang mga piniling ad account ID (ayos, walang ulit) */
-    public static function accounts(): array
+    /**
+     * @param list<string>|null $current ang mga account ID ng lahat ng connection (null = basahin ngayon)
+     * @return list<string> ang mga naka-check na ad account ID (ayos, walang ulit)
+     */
+    public static function accounts(?array $current = null): array
     {
-        $ids = json_decode((string) self::setting(self::ACCOUNTS), true);
+        $current ??= self::current();
+        $state = self::accountState();
+        if ($state === null) return $current;
 
-        return is_array($ids) ? self::ids($ids) : [];
+        return self::ids(array_merge($state['selected'], array_diff($current, $state['seen'] ?? $current)));
     }
 
-    public static function setAccounts(array $ids): void
+    /** Ang pili ay eksaktong $ids; ang lahat ng account ngayon (at ang nakita na dati) ay "seen". */
+    public static function setAccounts(array $ids, ?array $current = null): void
     {
-        AppSetting::set(self::ACCOUNTS, json_encode(self::ids($ids)));
+        $seen = array_merge(self::accountState()['seen'] ?? [], $current ?? self::current());
+        AppSetting::set(self::ACCOUNTS, json_encode(['selected' => self::ids($ids), 'seen' => self::ids($seen)]));
+    }
+
+    /** @return list<string> ang mga account ID ng lahat ng connection */
+    public static function current(?array $connections = null): array
+    {
+        return self::ids(array_map('strval', array_keys(app(Connections::class)->accounts($connections))));
+    }
+
+    /** @return array{selected: list<string>, seen: list<string>|null}|null null = walang naka-save; seen null = lumang anyo */
+    private static function accountState(): ?array
+    {
+        $v = json_decode((string) self::setting(self::ACCOUNTS), true);
+        if (!is_array($v)) return null;
+        if (array_is_list($v)) return ['selected' => self::ids($v), 'seen' => null];
+
+        return ['selected' => self::ids((array) ($v['selected'] ?? [])), 'seen' => self::ids((array) ($v['seen'] ?? []))];
+    }
+
+    /** Ang bagong account (wala pa sa seen) ay isinusulat sa selected at seen, para manatili ang check hanggang alisin. */
+    private static function rememberNew(array $current, array $selected): void
+    {
+        $state = self::accountState();
+        if ($state === null || $state['seen'] === null || array_diff($current, $state['seen'])) self::setAccounts($selected, $current);
     }
 
     /**
@@ -128,10 +163,6 @@ class Sync
             $log->update(['status' => 'failed', 'error_message' => 'Write mode is off.', 'finished_at' => now()]);
             return $log;
         }
-        if (!self::accounts()) {
-            $log->update(['status' => 'failed', 'error_message' => self::NO_ACCOUNTS, 'finished_at' => now()]);
-            return $log;
-        }
         $log->update(['status' => 'processing', 'started_at' => now()]);
         $error = null;
         try {
@@ -149,11 +180,19 @@ class Sync
         $importer = new ProcessAdsManagerReportsUpload('');
         $problems = [];
         $seen     = [];
-        $selected = array_flip(self::accounts());
+        $all      = $this->connections->all();
+        $current  = self::current($all);
+        $selected = self::accounts($current);
+        if (!$selected) {
+            $log->update(['status' => 'failed', 'error_message' => self::NO_ACCOUNTS, 'finished_at' => now()]);
+            return $log;
+        }
+        self::rememberNew($current, $selected);
+        $selected = array_flip($selected);
         $tot      = ['processed' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0, 'protected' => []];
         $noPage   = []; // "ad <id> (page <id>)" ng mga row na nilaktawan dahil walang page_name
 
-        foreach ($this->connections->all() as $userId => $c) {
+        foreach ($all as $userId => $c) {
             $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
             $token = $this->connections->token($c);
             if (($c['status'] ?? 'ok') === 'expired' || $token === null) {
