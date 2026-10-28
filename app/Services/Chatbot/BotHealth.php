@@ -552,7 +552,7 @@ class BotHealth
      * Botcake ID ng page ngayon (BotcakeChat::pageMap), gaya ng listahan ng page dito.
      * @return array<string, array<int, array{0: string, 1: ?string}>>
      */
-    private static function flowSpans(): array
+    public static function flowSpans(): array
     {
         $settings = app(\App\Services\PageSettings::class);
         $ids = [];
@@ -570,7 +570,7 @@ class BotHealth
     }
 
     /** May flow ang page sa oras na $at (created_at <= $at, at replaced_at wala o > $at). */
-    private static function hadFlow(array $spans, string $at): bool
+    public static function hadFlow(array $spans, string $at): bool
     {
         foreach ($spans as [$from, $until]) if ($from <= $at && ($until === null || $until > $at)) return true;
 

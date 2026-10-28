@@ -3065,3 +3065,21 @@ Tests: `tests/Feature/Chatblast/ChatEchoTest.php`, `tests/Feature/Chatblast/Forb
 | S-183.5b (P1) | Given a switch back at T0 and a new switch at T0+10 min, When healthy since, Then no switch back before T0+60 min, and it switches back after | `test_S_183_5b…` | passed |
 | S-183.6 (P1) | Given Botcake copies from 3 customers with no Forbeast copy after 300 s, one of whom was answered by a person (echo), Then only 2 customers are evidence and the page stays on Forbeast | `test_S_183_6…` | passed |
 | S-183.7 (P1) | Existing ForbeastWatch, BotHealth, Chatblast, Botcake and PageSettings suites pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | see result |
+
+## S-182 The owner sees the bot's reply time per hour, today and any other day
+
+As the owner, I want one screen with the bot's first reply time per hour (from the customer's message to the bot's reply actually sent), for today by default and for yesterday or any day with one click, so I can see when the bot is slow.
+
+Slice 182. Threat model: the query string (date, page_id, bot) comes from logged-in staff and is untrusted (validated to a date, digits and a known bot); chat and reply rows come from customers and the bots and are only counted, never shown as text; page names are staff-typed and shown escaped. Risk tier: medium (a new read-only screen behind the existing Chatbot access, no new table or migration).
+Tests: `tests/Feature/Chatblast/ResponseSpeedTest.php`, existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-182.1 (P1) | Given 3 customers writing at 10:05 with replies sent 10:05:20 (Botcake), 10:06:10 (Forbeast, send_status says sent 10:06:12) and none (only a sequence step, a test and a failed send), When the day is shown, Then the 10:00 row has messages 3, answered 2, unanswered 1, average and median 46 s, p90 72 s, within 30 s 1, within 1 min 1, within 5 min 2; without the send_status the time is the recorded 70 s and the answer is counted as unconfirmed | `test_S_182_1…` (3 tests, one for midnight and the 24 h limit) | passed |
+| S-182.2 (P1) | Given today 2026-10-21, When Yesterday or ← is used, Then 2026-10-20 is shown with its own numbers and links to 10-19 and 10-21; today has no → link; a future or broken date shows today | `test_S_182_2…` | passed |
+| S-182.3 (P1) | When the day is shown, Then the Forbeast and Botcake rows split the day's messages by the bot that carried the chat; the Bot filter and the Page filter narrow the hour table | `test_S_182_3…` | passed |
+| S-182.4 (P1) | Given now 12:30, Then hours 13–23 are blank, hour 12 and earlier have numbers (0 when no messages) | `test_S_182_4…` | passed |
+| S-182.5 (P1) | Given a chat on a page without a flow, Then it is not in messages and is counted as "Not on bot" in its hour and the day; attachments the bot ignores and the standby copy on Forbeast pages are left out | `test_S_182_5…` (2 tests, one for the bot-Off refused count), fixture of `test_S_182_1…` | passed |
+| S-182.6 (P1) | Given a role without Chatbot access, Then /chatbot/speed is 403; a CEO sees the screen and the Speed tab in the Chatbot nav | `test_S_182_6…` | passed |
+| S-182.7 (P1) | Existing Chatblast, Botcake and PageSettings suites pass (three nav tests now list the Speed tab) | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |
+| S-182.8 (P2) | At 390 px the hour table scrolls inside its card, and the day buttons and filters wrap | `test_S_182_8…` (markup only) | passed; not run in a browser |

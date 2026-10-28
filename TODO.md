@@ -1419,3 +1419,13 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **`ChatEchoes::latest()` is public and unused** (decision 2's "expose for other features"). Reason: the next feature will need it; it has no test yet.
 - **The `psid` of Forbeast's echo is assumed to be the customer** (Meta's recipient). An echo whose psid is the page id is now refused. Reason: confirm with Forbeast spec 027 before relying on the numbers.
 - **`timestamp` is read only as integer milliseconds**; any other form falls back to the processing time. Reason: confirm the format with Forbeast spec 027.
+
+## 182: Speed tab, accepted review minors (2026-10-28)
+- **Forbeast start time is when Likha stored the chat, not when the webhook came in.** `HandleGatewayEvent` sets `received_at` inside the queued job, and Forbeast sends no Meta timestamp, so a backed-up queue hides Likha's own delay. Reason: this is the time the spec allows. A fix means storing `queued_at` (or Meta's timestamp) in the job, which is another worker's file.
+- **A Forbeast reply not confirmed yet counts at its handover time here; Bot Health's "real" numbers leave it out as pending.** Reason: decision 1 says "else the reply's sent_at (mark which)". It is marked in the unconfirmed note.
+- **Unconfirmed is not split by bot.** Botcake replies from before send confirmations were recorded also count. Reason: the note says so; splitting needs `via` in the reply read.
+- **Any past date is computed (no 90-day clamp).** One staff member can force a fresh day per distinct date, up to the 60/min route throttle. Reason: logged-in staff only, about 0.3 s per day; clamp if it shows on the server.
+- **Each chat's full payload is read to check three keys.** Reason: about 36 MB peak for 35k chats in the fixture; move the three keys into SQL if days with large payloads show memory pressure.
+- **The `gateway-events:<date>:bot_off` key is typed again** (the job owns it). Reason: second copy, below the DRY bar; the job is another worker's file.
+- **Untested here:** a reply before the message (answer to an earlier message), a `partial` reply, a page whose flow starts mid-day, the per-bot rows ignoring the Bot filter, and MySQL timing. Reason: thin branches over tested paths (the binary search, `SendStatus::DELIVERED`, `BotHealth::hadFlow`); time `/chatbot/speed` once on production after deploy.
+- **The 390 px check reads the markup only.** Reason: no browser run in this job.

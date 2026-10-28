@@ -1,0 +1,18 @@
+# Brief 182: bot response time by hour, today and yesterday
+
+## Why
+The owner wants one screen with the bot's speed per hour: when the customer's message arrived vs when the bot's reply was actually sent, today by hour, with a button for yesterday (and any day). Likha already has the times: customer chats (botcake_chats.received_at), replies (chatbot_replies.sent_at; for Forbeast pages the actual sent time from Meta via send_status → confirmed_at/confirmed_status, SendStatus.php; RealSendTime may already compute something — read it). Bot Health and Results screens exist (ChatbotHealthController / BotHealth, ChatbotResults) — reuse their patterns.
+
+## Decisions (do not reopen)
+| # | Decision | Why |
+|---|---|---|
+| 1 | **Measure = customer message → first bot reply actually sent.** Start: the customer's message time (the chat's received time; if the Forbeast payload carries Meta's own timestamp, prefer it and say so). End: the first reply to that customer after that message whose **sent** time is known — the Meta-confirmed sent time (send_status / confirmed_at) when available, else the reply's sent_at (mark which). **Not "delivered"**: delivered depends on the customer's phone being online and can be hours late; it measures the customer's device, not the bot. Show delivered/seen nowhere in this metric. | Owner asked which is right: sent. |
+| 2 | **Screen** (new tab under Chatbot, e.g. "Speed", same access as Bot Health): a table by hour (00–23 Manila) for the chosen day — default today, with buttons Yesterday / ← day / day → / date picker: customer messages, answered, unanswered (no reply yet), average, median, p90 reply time, % within 30 s / 1 min / 5 min, and by provider (Forbeast vs Botcake) and a page filter. A totals row for the day. Hours not yet reached are blank. A small line or bar chart of median and p90 per hour is welcome (no heavy library; follow existing chart usage in the app if any). | Owner: per hour, today, button for yesterday. |
+| 3 | **Data:** compute from existing tables with indexed queries; cache per (day, page filter) — today's cache ≤ 2 min, past days longer. If live computing a day is too slow on production volumes (~35k chats/day, ~30k replies/day), add a small hourly rollup kept in an existing table pattern (check precedent: page_settings/app_settings rows or an existing summary table) — a new table only if rows truly cannot hold it, justified in the result. Exclude test runs, echoes, non-text attachments the bot ignores by design, and chats on pages whose bot is off (show them as a separate "not on bot" count). | Fast and honest. |
+| 4 | No change to sending, flows, Bot Health thresholds, or other screens. | Safe. |
+
+## Cases (S-182)
+P1: .1 fixture day: 3 customers at 10:05 with replies sent 10:05:20, 10:06:10 (confirmed by send_status 10:06:12) and none → 10:00 row: messages 3, answered 2, unanswered 1, median/avg/p90 from 20 s and 72 s (confirmed time used), within 30 s = 1, within 1 min = 1, within 5 min = 2; .2 Yesterday button shows the previous day; ← → move by day; .3 provider split and page filter; .4 hours after now are blank; .5 bot-off pages excluded and counted apart; .6 access like Bot Health (403 otherwise); .7 existing suites pass. P2: .8 390 px.
+
+## Done when
+P1 pass; `php vendor\phpunit\phpunit\phpunit tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` adds no new failures vs 858f3d89 (record the baseline). Result with the exact definitions, the queries/indexes used and their measured time on a production-sized fixture if possible, deploy notes, and that it applies to Incepxion. End with "182: <done|blocked> — <one line>".
