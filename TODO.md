@@ -1408,3 +1408,14 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Untested here:** a refusal on a failed upload, the LIST_MAX cap text, the Missing/New day boundaries, a row with two lower metrics, `--json` leaving app_settings unchanged, and the raw SQL on MySQL and pgsql (sqlite in tests). Reason: thin branches over tested paths; run `php artisan ads:data-health` once on MySQL after deploy.
 - **The lock covers existing rows only.** Two sources inserting the same new (day, ad_id) at once still meet the unique key, as before. Reason: older behaviour; the second insert fails loudly, it does not lower a value.
 - **The 390 px check is by reading the markup only.** Reason: no browser run in this job.
+
+## 183: echo, who answered, switch back, accepted review minors (2026-10-28)
+- **Test pages are left out by page id (`BotcakeMock::isTestId`) with no test.** Reason: test pages never receive Forbeast echoes, so they are never measured anyway.
+- **The database fallback of echo idempotency (`detail->mid` lookup) has no test of its own**; the duplicate test stops at `Cache::add`. Reason: the same pattern as the gateway chat dedupe; the lookup is one indexed query.
+- **Inbox polling with the `echo` cursor has no dedicated tests** (cursor advances, an echo of an already shown reply in a later poll, executed actions without echoes). There is also a race: an echo polled before its reply row is written shows as its own bubble until reload. And a tab open from before the deploy may pull a few old echoes on its first poll. Reason: display-only, corrected by a reload.
+- **Two identical Likha replies within 120 s: both echoes label the first one.** Reason: cosmetic.
+- **`ChatEchoes::health` reads one cache key per page each rebuild (once a minute).** Reason: about 100 pages; switch to `Cache::many` if the cache is the database.
+- **The text normalisation in `ChatEchoes::hash` repeats `ForbeastWatch::kindOf`'s text rule.** Reason: two uses, different purposes (hash vs kind); extract on a third.
+- **`ChatEchoes::latest()` is public and unused** (decision 2's "expose for other features"). Reason: the next feature will need it; it has no test yet.
+- **The `psid` of Forbeast's echo is assumed to be the customer** (Meta's recipient). An echo whose psid is the page id is now refused. Reason: confirm with Forbeast spec 027 before relying on the numbers.
+- **`timestamp` is read only as integer milliseconds**; any other form falls back to the processing time. Reason: confirm the format with Forbeast spec 027.

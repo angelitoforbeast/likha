@@ -312,10 +312,12 @@
                 x.ignored ? el('div', {class: 'mt-0.5 text-[11px] text-amber-700', text: 'Not answered by the bot (' + x.ignored + ' only)'}) : null, time]);
         }
         const failed = x.status !== 'sent';
+        // Ang padala ng ibang app o ng tao (echo, hindi galing sa Likha): ibang kulay.
         const parts = (x.messages || []).map(m => m.type === 'image' ? imageLink(m.url)
-            : el('div', {class: 'whitespace-pre-line break-words rounded-2xl rounded-br-sm px-3 py-1.5 text-sm ' + (failed ? 'bg-blue-100 text-slate-700' : 'bg-blue-600 text-white'), text: m.text}));
+            : el('div', {class: 'whitespace-pre-line break-words rounded-2xl rounded-br-sm px-3 py-1.5 text-sm ' + (x.echo ? 'bg-slate-200 text-slate-900' : failed ? 'bg-blue-100 text-slate-700' : 'bg-blue-600 text-white'), text: m.text}));
+        // Sino ang talagang nagpadala ayon sa echo ng Meta (sender): Bot (Forbeast), Botcake, Person, ibang app.
         return el('li', {class: 'ib-bubble ml-auto flex flex-col items-end', tabindex: '0'}, [
-            el('div', {class: 'mb-0.5 text-[10px] text-slate-500', text: x.by + (viaText(x) ? ' · ' + viaText(x) : '')}),
+            el('div', {class: 'mb-0.5 text-[10px] text-slate-500', text: x.by + (viaText(x) ? ' · ' + viaText(x) : '') + (x.sender && x.sender !== x.by ? ' · ' + x.sender : '')}),
             el('div', {class: 'flex flex-col items-end gap-1'}, parts),
             failed ? el('div', {class: 'mt-0.5 text-xs ' + (x.status === 'failed' ? 'text-red-700' : 'text-slate-500'), text: (x.status === 'failed' ? 'Failed' : 'Skipped') + (x.error ? ': ' + x.error : '')}) : null,
             time]);

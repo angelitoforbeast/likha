@@ -7,6 +7,7 @@ use App\Models\BotcakePsid;
 use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotProvider;
+use App\Services\Chatbot\ChatEchoes;
 use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\Chatbot\CommentReplies;
 use App\Services\Chatbot\ForbeastWatch;
@@ -51,6 +52,9 @@ class HandleGatewayEvent implements ShouldQueue
             'kind' => $s($e['kind'] ?? 'event', 30), 'event_id' => $s($e['event_id'] ?? null, 40), 'type' => $s($e['type'] ?? null, 20),
             'page_id' => $s($e['page_id'] ?? null, 64), 'psid' => $s($e['psid'] ?? null, 64), 'mid' => $s($e['mid'] ?? null, 191),
             'text' => $s($e['text'] ?? null, 5000), 'attachments' => $attachments, 'is_echo' => (bool) ($e['is_echo'] ?? false),
+            // Ang app ng nagpadala (echo) at ang oras ng Meta (ms), para sa ChatEchoes.
+            'app_id' => is_scalar($e['app_id'] ?? null) && preg_match('/^\d{1,32}$/', (string) $e['app_id']) ? (string) $e['app_id'] : null,
+            'timestamp' => is_int($e['timestamp'] ?? null) ? $e['timestamp'] : null,
             'quick_reply' => $s($e['quick_reply_payload'] ?? null, 1000),
             'postback' => ['title' => $s($postback['title'] ?? null, 1000), 'payload' => $s($postback['payload'] ?? null, 1000)],
             'ad_id' => $s($referral['ad_id'] ?? null, 64),
@@ -93,6 +97,11 @@ class HandleGatewayEvent implements ShouldQueue
         if ($e['kind'] === 'event' && $e['type'] === 'comment' && array_key_exists('comment_id', $e)) {
             $pageName = BotcakeChat::pageMap()[(string) $e['page_id']] ?? null;
             self::count($pageName === null ? 'unknown_page' : app(CommentReplies::class)->receive($e, $pageName));
+            return;
+        }
+        // Ang echo (padala ng page, alinmang app): iniimbak kahit nasa Botcake ang page o naka-Off ang bot, walang takbo.
+        if ($e['kind'] === 'event' && $e['is_echo'] && array_key_exists('app_id', $e)) {
+            self::count(ChatEchoes::store($e));
             return;
         }
         if ($e['kind'] !== 'event' || !in_array($e['type'], self::CHATS, true) || $e['is_echo']) {

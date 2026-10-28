@@ -3044,3 +3044,24 @@ Tests: `tests/Feature/MetaAds/AdsDataHealthTest.php`, `tests/Feature/MetaAds/Ads
 | S-178.4 (P1) | Given a role without the Ads page, When it opens /ads_manager/report, Then neither the Data health box nor the notice is shown; Marketing sees the box | `test_S_178_4…` | passed |
 | S-178.5 (P1) | Existing Meta Ads, AdAccount and Ads Manager upload tests pass (one changed expectation: a refused row is no longer counted as updated) | `tests/Feature/MetaAds`, `tests/Feature/AdAccount`, `tests/Feature/Chatblast` | passed |
 | S-178.6 (P2) | At 390 px the notice and the Data health list stack per account without sideways scrolling | read the markup only (flex-wrap, `min-w-0`, `break-all`) | not run in a browser |
+
+## S-183 Likha uses the page echo to know who answered, and pages moved to Botcake come back
+
+As the owner, I want to see who answered each customer (the bot on Forbeast, Botcake, a person, another app), to be told when customers are not answered or answered twice, and pages the watcher moved to Botcake to come back by themselves, so no customer is left waiting and no page stays on Botcake for nothing.
+
+Slice 183. Threat model: the gateway webhook body (signed per page, but its text and ids come from Meta, customers and pages) and the stored echo text are untrusted; config, migrations and tests are trusted. No new route, table or migration. Risk tier: high for the webhook batch (a new body shape on an existing route), medium for the rest.
+Tests: `tests/Feature/Chatblast/ChatEchoTest.php`, `tests/Feature/Chatblast/ForbeastSmartSwitchTest.php` (S-183.5, .6), existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-183.1 (P1) | Given page P on the gateway, When an echo from Botcake's app id for customer C arrives (twice), Then it is stored once with sender "Botcake", its mid, app id, text hash and text, and shows on C's Inbox chat as a page message labelled "Botcake" | `test_S_183_1…` | passed |
+| S-183.1b (P1) | When a batch of 3 echoes arrives as `{"kind":"batch","events":[…]}` and again as a bare array, Then each is stored once | `test_S_183_1b…` | passed |
+| S-183.1c (P1) | When an echo has 300 characters and an unknown app id, Then 200 characters are stored and the sender is "other" | `test_S_183_1c…` | passed |
+| S-183.2 (P1) | When a person replies (Page Inbox app id), Then it is labelled "Person" and the bot is not paused: the customer's next message runs the flow | `test_S_183_2…` | passed |
+| S-183.3 (P1) | Given a bot-On page with echoes, When 3 customers have a message with no echo from any app within 5 min (one answered after 6 min), Then Bot Health counts 3 unanswered and the red banner says "3 customers not answered in 5 min"; a customer answered within 5 min, an ignored attachment and a message younger than 5 min are not counted | `test_S_183_3…` | passed |
+| S-183.3b (P1) | Given a bot-Off page with 3 unanswered customers and a bot-On page with 2, Then the bot-Off page is not counted and there is no banner | `test_S_183_3b…` | passed |
+| S-183.4 (P1) | When Forbeast and Botcake reply to one customer 30 s apart, Then 1 double reply with "Bot (Forbeast) + Botcake" and the Inbox link; 90 s apart, or the same app twice, is not a double reply | `test_S_183_4…` | passed |
+| S-183.5 (P1) | Given a page the watcher moved with condition `health`, When Forbeast is healthy for 30 min, Then it switches back; a person's change after a later switch keeps it on Botcake | `test_S_183_5…` | passed |
+| S-183.5b (P1) | Given a switch back at T0 and a new switch at T0+10 min, When healthy since, Then no switch back before T0+60 min, and it switches back after | `test_S_183_5b…` | passed |
+| S-183.6 (P1) | Given Botcake copies from 3 customers with no Forbeast copy after 300 s, one of whom was answered by a person (echo), Then only 2 customers are evidence and the page stays on Forbeast | `test_S_183_6…` | passed |
+| S-183.7 (P1) | Existing ForbeastWatch, BotHealth, Chatblast, Botcake and PageSettings suites pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | see result |

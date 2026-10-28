@@ -289,6 +289,7 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
     public function test_S_175_6c_a_second_switch_back_within_6_hours_waits(): void
     {
         Queue::fake();
+        config(['services.gateway.auto_switch.back_gap_minutes' => 360]); // ang dating default; ang 60 minuto ay S-183.5b
         $this->switchedThenHealthy(30);
         $this->assertSame('gateway', $this->provider());
 
@@ -419,5 +420,61 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
         $this->healthyFor(31);
         $this->assertSame('botcake', $this->provider());
         $this->assertCount(1, $this->events());
+    }
+
+    public function test_S_183_5_a_page_moved_for_health_goes_back_after_30_healthy_minutes_unless_a_person_changed_it(): void
+    {
+        Queue::fake();
+        $this->switchedThenHealthy(30, 'health');
+        $this->assertSame('gateway', $this->provider());
+        $this->assertSame(['switched', 'switched_back'], array_column($this->events(), 'result'));
+
+        // Ang tao ay naglipat pagkatapos ng lipat: hindi na ibinabalik.
+        $this->travel(2)->hours();
+        app(ForbeastWatch::class)->switch('Page Uno', 'health', 'Forbeast did not answer');
+        $person = $this->user()->id;
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway', false, $person);
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake', false, $person);
+        $this->healthyFor(31);
+        $this->assertSame('botcake', $this->provider());
+    }
+
+    public function test_S_183_5b_one_switch_back_per_60_minutes(): void
+    {
+        Queue::fake();
+        $this->switchedThenHealthy(30);
+        $this->assertSame('gateway', $this->provider());
+
+        // 10 minuto pagkatapos ng balik, lipat ulit: ang 30 minutong maayos ay umaabot lang sa 41 minuto mula sa balik.
+        $this->travel(10)->minutes();
+        app(ForbeastWatch::class)->switch('Page Uno', 'inbound', 'again');
+        $this->healthyFor(31);
+        $this->assertSame('botcake', $this->provider(), 'within 60 minutes of the last switch back');
+
+        $this->healthyFor(20);
+        $this->assertSame('gateway', $this->provider(), 'after 60 minutes');
+    }
+
+    public static function echoAfter(): array
+    {
+        // Ang echo sa loob ng 300 s ay sagot (2 customer na lang, walang lipat); ang echo pagkalipas ng 300 s (hal. ang sagot mula
+        // sa standby) ay hindi nagbubura ng ebidensya.
+        return ['answered at 30 s' => [30, 'gateway'], 'answered after 300 s' => [301, 'botcake']];
+    }
+
+    /** @dataProvider echoAfter */
+    public function test_S_183_6_a_customer_answered_by_any_app_within_300_s_is_not_evidence_for_a_switch(int $at, string $provider): void
+    {
+        Queue::fake();
+        $this->health(null);
+        $this->missing(3);
+        $this->travel($at)->seconds();
+        \App\Services\Chatbot\ChatEchoes::store(HandleGatewayEvent::fields(['kind' => 'event', 'type' => 'message', 'page_id' => '1001', 'psid' => array_key_first(self::PSIDS),
+            'mid' => 'm_person_1', 'text' => 'Ako na po', 'is_echo' => true, 'app_id' => '263902037430900']));
+        $this->travel(301 - $at)->seconds();
+
+        $this->watch();
+
+        $this->assertSame($provider, $this->provider());
     }
 }
