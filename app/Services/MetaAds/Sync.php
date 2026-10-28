@@ -191,6 +191,7 @@ class Sync
         $selected = array_flip($selected);
         $tot      = ['processed' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0, 'protected' => []];
         $noPage   = []; // "ad <id> (page <id>)" ng mga row na nilaktawan dahil walang page_name
+        $refused  = []; // ang mga row na tinanggihan dahil may numerong bumaba (DataHealth)
 
         foreach ($all as $userId => $c) {
             $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
@@ -214,6 +215,7 @@ class Sync
                     $tot['inserted']  += $res['inserted'];
                     $tot['updated']   += $res['updated'];
                     foreach ($res['protected'] as $f => $n) $tot['protected'][$f] = ($tot['protected'][$f] ?? 0) + $n;
+                    foreach ($res['refused'] as $x) $refused[] = ['account' => $x['account'] ?? $accId] + $x;
                     $synced = true;
                 } catch (GraphException $e) {
                     if ($e->tokenExpired()) {
@@ -241,6 +243,7 @@ class Sync
                 $noPage ? ['No page name, skipped: ' . implode(', ', array_unique($noPage))] : [])), 0, 2000) : null,
             'finished_at'       => now(),
         ]);
+        DataHealth::recordRefusals($log, 'sync', $refused);
         if ($tot['inserted'] + $tot['updated'] > 0) \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
 
         return $log;

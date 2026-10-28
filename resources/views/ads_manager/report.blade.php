@@ -2,6 +2,10 @@
   <x-slot name="heading">Import Ads Manager Reports</x-slot>
 
   <div class="max-w-6xl mt-6 space-y-6">
+    @if (!empty($health))
+      @include('ads_manager._data_notice')
+    @endif
+
     {{-- Quick links sa related pages --}}
     <div class="flex gap-2 flex-wrap">
       <a href="/ads_manager/catalog"
@@ -49,6 +53,10 @@
         Upload (Multiple)
       </button>
     </form>
+
+    @if (!empty($health))
+      @include('ads_manager._data_health')
+    @endif
 
     @if (!empty($meta))
       @include('ads_manager._meta_ads')
@@ -177,6 +185,9 @@
                     </details>
                   @else
                     <span class="text-gray-300">—</span>
+                  @endif
+                  @if (!empty($refused[$log->id]))
+                    @include('ads_manager._refused', ['ref' => $refused[$log->id]])
                   @endif
                 </td>
 

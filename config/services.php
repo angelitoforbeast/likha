@@ -41,6 +41,8 @@ return [
         'app_secret'    => env('META_ADS_APP_SECRET'),
         'config_id'     => env('META_ADS_CONFIG_ID'),
         'graph_version' => env('META_ADS_GRAPH_VERSION', 'v25.0'),
+        // Oras (Manila, H:i) ng araw-araw na ads:data-health --record.
+        'data_health_at' => env('META_ADS_DATA_HEALTH_AT') ?: '12:00',
     ],
 
     // /ads_manager/payment/reconcile: vision model na bumabasa ng screenshot ng card statement (OPENAI_API_KEY),

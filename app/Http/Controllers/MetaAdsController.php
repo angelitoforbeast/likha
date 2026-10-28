@@ -92,6 +92,7 @@ class MetaAdsController extends Controller
             'range'      => Sync::range(null, null),
             'accounts'   => $accounts,
             'logs'       => $logs,
+            'refused'    => \App\Services\MetaAds\DataHealth::refusals($logs->where('type', Sync::LOG_TYPE)->pluck('id')->all()),
             'compare'    => $compare,
         ];
     }

@@ -40,6 +40,12 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
      */
     private array $protectedByField = [];
 
+    /**
+     * Ang mga row na tinanggihan dahil may numerong bumaba: [day, ad_id, account, metrics {field: {stored, incoming}}].
+     * Itinatala ng DataHealth::recordRefusals sa dulo ng upload o ng Sync run.
+     */
+    private array $refused = [];
+
     private const CHUNK_SIZE = 2000;
 
     public function __construct(
@@ -163,6 +169,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     'protected_details' => !empty($this->protectedByField) ? $this->protectedByField : null,
                     'finished_at'       => now(),
                 ]);
+                \App\Services\MetaAds\DataHealth::recordRefusals($log, 'upload', $this->refused);
             }
 
             // Bagong ads data → invalidate /owner/private cache so users see
@@ -179,6 +186,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     'protected_details' => !empty($this->protectedByField) ? $this->protectedByField : null,
                     'finished_at'       => now(),
                 ]);
+                \App\Services\MetaAds\DataHealth::recordRefusals($log, 'upload', $this->refused);
             }
             throw $e;
         } finally {
@@ -201,17 +209,24 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     /**
      * Ang parehong upsert ng upload para sa mga row na galing na sa ibang source (Meta Ads API), para pareho ang
      * proteksyon ng monotonic fields at ang ad_campaign_creatives / ad_catalog. Ang rows ay normalized na (gaya ng
-     * normalizeRow). @return array{inserted:int, updated:int, skipped:int, protected:array}
+     * normalizeRow). @return array{inserted:int, updated:int, skipped:int, protected:array, refused:list<array>}
      */
     public function importRows(array $rows): array
     {
         $this->inserted = $this->updated = $this->skipped = 0;
-        $this->protectedByField = [];
+        $this->protectedByField = $this->refused = [];
         foreach (array_chunk($rows, self::CHUNK_SIZE) as $chunk) {
             $this->upsertChunk($chunk);
         }
 
-        return ['inserted' => $this->inserted, 'updated' => $this->updated, 'skipped' => $this->skipped, 'protected' => $this->protectedByField];
+        return ['inserted' => $this->inserted, 'updated' => $this->updated, 'skipped' => $this->skipped, 'protected' => $this->protectedByField,
+            'refused' => $this->refused];
+    }
+
+    /** Buong numero bilang int (1500, hindi 1500.0), para malinis sa talaan. */
+    private static function number(float $n): int|float
+    {
+        return floor($n) == $n ? (int) $n : $n;
     }
 
     private function resolveDiskName(?UploadLog $log): string
@@ -541,9 +556,9 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     /**
      * Columns na monotonically increasing — Meta cumulative metrics na NEVER
      * dapat bumababa sa same (day, ad_id) pair. Kung yung new value ay LOWER
-     * kaysa existing → reject, keep existing, track which column got protected.
+     * kaysa existing → ang buong row ay tinatanggihan (tingnan ang PROTECTION sa upsertChunk).
      *
-     * Zero/null values are treated as "missing data" — also rejected.
+     * Null (walang column o blangko) = walang data, hindi isinusulat; ang 0 ay numero (mas mababa kung may nakatabi).
      */
     private const MONOTONIC_FIELDS = [
         'amount_spent_php',
@@ -591,6 +606,10 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     $existing = DB::table('ads_manager_reports')
                         ->where('day', $day)
                         ->whereIn('ad_id', $adIds)
+                        // Naka-lock hanggang commit: ang Sync (ibang proseso) at ang upload ay hindi sabay na nagpapasya sa
+                        // parehong row, kaya walang mas mababang numerong nakakalusot sa pagtanggi.
+                        ->orderBy('ad_id')
+                        ->lockForUpdate()
                         ->get(array_merge(['ad_id'], self::MONOTONIC_FIELDS));
                     foreach ($existing as $row) {
                         $existingByKey["{$day}|{$row->ad_id}"] = (array) $row;
@@ -648,37 +667,37 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'quick_reply_2');
                 $this->putIfExists($updateData, $r, 'quick_reply_3');
 
-                // ── PROTECTION: enforce only-up sa monotonic cumulative fields.
-                // If new < existing (or new is 0/null treated as missing),
-                // drop yung field from $updateData so the existing value stays.
-                // Track which column got protected for admin visibility.
+                // ── PROTECTION: buo ang row o wala. Kapag may monotonic field na mas mababa ang dumating kaysa
+                // nakatabi (kasama ang 0), tinatanggihan ang BUONG row: walang column na ginagalaw, para hindi
+                // maghalo ang luma at bagong numero. Itinatala sa $this->refused (day, ad_id, account, nakatabi vs
+                // dumating) at binibilang pa rin kada column sa protectedByField. Ang 0 sa row na wala pang numero
+                // ay hindi isinusulat (gaya ng dati). Pantay o mas mataas = update gaya ng dati, kahit lumang araw.
                 $existingRow = $existingByKey["{$day}|{$adId}"] ?? null;
                 if ($existingRow !== null) {
+                    $lower = [];
                     foreach (self::MONOTONIC_FIELDS as $field) {
                         if (!array_key_exists($field, $updateData)) continue;
 
-                        $newVal = $updateData[$field];
+                        $newNum = (float) $updateData[$field];
                         $oldVal = $existingRow[$field] ?? null;
-
-                        // Treat null/0 as missing data — never overwrite a non-zero existing.
-                        $newNum = $newVal === null ? null : (float) $newVal;
                         $oldNum = $oldVal === null ? null : (float) $oldVal;
 
-                        if ($newNum === null || $newNum === 0.0) {
-                            // Skip this field — keep existing value.
-                            if ($oldNum !== null && $oldNum > 0) {
-                                $this->protectedByField[$field] = ($this->protectedByField[$field] ?? 0) + 1;
-                            }
-                            unset($updateData[$field]);
-                            continue;
-                        }
-
                         if ($oldNum !== null && $newNum < $oldNum) {
-                            // New value is lower → reject, keep existing, track protection.
-                            $this->protectedByField[$field] = ($this->protectedByField[$field] ?? 0) + 1;
-                            unset($updateData[$field]);
+                            $lower[$field] = ['stored' => self::number($oldNum), 'incoming' => self::number($newNum)];
+                        } elseif ($newNum === 0.0) {
+                            unset($updateData[$field]); // 0 sa wala pang numero: walang saysay isulat
                         }
-                        // else: newNum >= oldNum (or existing is null) → allow update.
+                    }
+                    if ($lower) {
+                        foreach ($lower as $field => $_) {
+                            $this->protectedByField[$field] = ($this->protectedByField[$field] ?? 0) + 1;
+                        }
+                        $this->refused[] = [
+                            'day' => $day, 'ad_id' => $adId,
+                            'account' => isset($r['account_id']) && trim((string) $r['account_id']) !== '' ? trim((string) $r['account_id']) : null,
+                            'metrics' => $lower,
+                        ];
+                        continue;
                     }
                 }
 

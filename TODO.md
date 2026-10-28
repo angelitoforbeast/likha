@@ -1397,3 +1397,14 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **"Finds capacity at once" holds within one rate interval (≤ 0.5 s at 2/s)**, not 0 s: a reply that lands just after a chatblast call still waits for the page's interval. Reason: the page rate is fixed (decision 4); the share only means the next free slot isn't taken by chatblast.
 - **No test holds `perPage()` bot jobs on one lane** (the bot-full branch of the claim filter). Reason: the filter mirrors the chatblast branch, which the S-165/S-179 tests cover; 6 replies held on one page at once is rare.
 - **No test of chatblast with bot traffic at or above the rate.** Reason: it's the first item's accepted behaviour.
+
+## 178: Ads data health and refusals, accepted review minors (2026-10-28)
+- **The refused total counts refusal events, not distinct rows.** The three daily Syncs re-fetch the same days, so one bad row can show as "today 3 rows". Reason: the per-run details are exact; the total is a signal. Count distinct (day, ad_id) if it confuses staff.
+- **Refusals from an account's earlier chunks are not recorded when `importRows` throws partway through that account** (Sync). Reason: the stored values stay correct (the refused rows were never written); only the report of that run is incomplete. The run itself ends partial or failed.
+- **`recordRefusals` falls back to the ad's creatives row only, not the campaign's.** Reason: upload rows carry the required Account ID and sync rows carry the account, so the fallback is rarely reached.
+- **An unticked account that has upload data yesterday shows OK.** Its source says "API unticked". Reason: the data is there; "Not synced (unticked)" is kept for accounts with no data.
+- **The plain `ads:data-health` (no option) prints the list.** Reason: small, read-only, helps operations.
+- **The act_ strip is in three places** (`DataHealth::bare`, `Connections::names`, `Connections::connect`). Reason: DRY clean-up of 176 code is out of scope.
+- **Untested here:** a refusal on a failed upload, the LIST_MAX cap text, the Missing/New day boundaries, a row with two lower metrics, `--json` leaving app_settings unchanged, and the raw SQL on MySQL and pgsql (sqlite in tests). Reason: thin branches over tested paths; run `php artisan ads:data-health` once on MySQL after deploy.
+- **The lock covers existing rows only.** Two sources inserting the same new (day, ad_id) at once still meet the unique key, as before. Reason: older behaviour; the second insert fails loudly, it does not lower a value.
+- **The 390 px check is by reading the markup only.** Reason: no browser run in this job.

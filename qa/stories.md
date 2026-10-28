@@ -3028,3 +3028,19 @@ Tests: `tests/Feature/Chatblast/BotLaneShareTest.php` (fake Botcake answering af
 | S-179.4 (P1) | Given 500 chatblast jobs and 50 replies in 30 s on one page, Then every reply goes out within 1 s of being ready and every chatblast message is sent; the wait before and after is in the result | `test_S_179_4…` | passed |
 | S-179.5 (P1) | Given 60 chatblast jobs and a reply every second for 300 s, Then every chatblast message is sent | `test_S_179_5…` | passed |
 | S-179.6 (P1) | Existing Chatblast, Botcake and PageSettings suites pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |
+
+## S-178 Ads Manager data is complete every day, and bad data is refused and reported
+
+As the owner, I want to see every ad account and whether yesterday's Ads Manager data is in (from the sync or an upload), and I want a fetch or upload that lowers a stored number refused and reported, so no account is missed and no wrong number is accepted silently.
+
+Slice 178. Threat model: uploaded files and the Meta API numbers are untrusted data (numbers compared, names shown escaped); ad_accounts names are staff-typed text, shown escaped; config and the schedule are trusted. No new route, table or migration. Risk tier: medium (business logic in the existing upload and sync paths, a scheduled job, a UI box behind the existing Ads access).
+Tests: `tests/Feature/MetaAds/AdsDataHealthTest.php`, `tests/Feature/MetaAds/AdsDataRefusalTest.php`, existing Meta Ads, AdAccount and Chatblast tests.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-178.1 (P1) | Given an API-selected account with rows yesterday, an upload-only account with rows yesterday, an API account with spend 2 days ago and nothing yesterday, an account that appeared in a connection today, an active /ads_manager/ad_account row in no connection, an unticked account, and an uploaded ad whose account is unknown, When the Data health list is built, Then they are OK, OK, Missing yesterday, New, Not readable by API, Not synced (unticked) and "Account unknown" OK, each with its source, latest day, yesterday's rows and spend, and its name by the 176 rules | `test_S_178_1…` (2 tests) | passed |
+| S-178.2 (P1) | When `ads:data-health --record` runs (scheduled daily 12:00 Manila), Then the result is stored, a CEO sees the red notice listing the accounts that need attention, and `ads:data-health --json` prints the stored result; when every account is OK there is no notice | `test_S_178_2…` (2 tests) | passed |
+| S-178.3 (P1) | Given a stored row, When an upload or a sync brings lower impressions, Then the whole row keeps its stored values, a refusal is recorded (source, log id, user, day, ad, account, stored vs incoming), and the log shows "1 row refused (lower values)" with the details; equal or higher values update the row; the Data health box shows today's and yesterday's refused totals | `test_S_178_3…` (6 tests, 1 with 2 data sets) | passed |
+| S-178.4 (P1) | Given a role without the Ads page, When it opens /ads_manager/report, Then neither the Data health box nor the notice is shown; Marketing sees the box | `test_S_178_4…` | passed |
+| S-178.5 (P1) | Existing Meta Ads, AdAccount and Ads Manager upload tests pass (one changed expectation: a refused row is no longer counted as updated) | `tests/Feature/MetaAds`, `tests/Feature/AdAccount`, `tests/Feature/Chatblast` | passed |
+| S-178.6 (P2) | At 390 px the notice and the Data health list stack per account without sideways scrolling | read the markup only (flex-wrap, `min-w-0`, `break-all`) | not run in a browser |

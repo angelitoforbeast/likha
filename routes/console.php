@@ -234,3 +234,10 @@ Schedule::command('meta-ads:sync --scheduled')
     ->when(fn () => \App\Services\MetaAds\Sync::writeMode())
     ->withoutOverlapping(120)
     ->runInBackground();
+
+// Ads Manager data health: bawat ad account at kung may data kahapon (sync man o upload); itinatabi para sa pulang paalala
+// sa /ads_manager/report. Default 12:00 Manila (services.meta_ads.data_health_at), pagkatapos ng mga upload sa umaga.
+Schedule::command('ads:data-health --record')
+    ->timezone('Asia/Manila')
+    ->dailyAt((string) config('services.meta_ads.data_health_at', '12:00'))
+    ->withoutOverlapping(30);
