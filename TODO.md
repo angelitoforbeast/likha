@@ -1361,3 +1361,14 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Compare reads nothing when every saved account ID has left the connections** (instead of falling back to all). Reason: the selection is the CEO's own trusted state; the list shows the accounts to pick again.
 - **No test sends `accounts` as a plain string or an item over 50 characters.** Reason: Laravel's `array` / `max:50` rules refuse them before any code of ours runs; the CEO-only route is tested for 403 and unknown IDs.
 - **The 390 px layout was checked by reading the markup only** (no browser in this session). Reason: a stacked list with `min-w-0`, `break-all` and `shrink-0`; check once on a phone after deploy.
+
+## 174: Page-based or Ad-based pages, accepted review minors (2026-10-28)
+- **"New" uses the first customer only when the ad has no report data**, while the spec says "first report day or first customer". Reason: the customer window is 30 days, so an old ad that got a customer again after a quiet month would look New; the first report day is the reliable age when it exists.
+- **`/chatbot/data` computes the "N new" badge for every Ad-based page on each load**, not only on expand, and its status cache key differs from the expanded view's (two cache entries per page). Reason: cached 120 s (seen) and 300 s (status); only Ad-based pages pay, and few pages are Ad-based. Move the badge to the expand call if the list gets slow.
+- **Rename resends the group's ad list** from the screen, so an ad typed into the same group by someone else a moment earlier is dropped. Reason: rare, History restores the list; a rename-only write under the lock is a small follow-up.
+- **Group cells in the table stay clamped at 3 lines** (the row click does not open group rows); the full value shows in the edit window. Reason: display only.
+- **The "N new" badge appears after the next table load** when a page is switched to Ad-based. Reason: display only; the expanded view shows the count at once.
+- **The "active%" delivery rule is written again as SQL** (also in AdsManagerCampaignsController twice); **the grouped-ads merge appears twice in AdGroups.** Reason: extract on the next copy.
+- **Checkbox ids of two expanded pages whose names differ only in punctuation can collide** (label `for` only). Reason: cosmetic.
+- **Untested here:** status queries on MySQL and pgsql (sqlite in tests); rows with only `reporting_starts` and no `day` are not counted for status; typed add past 500 ads, `/value` with a deleted flow, removing a group's last ad, an object as `ads`. Reason: covered by the 172 checks they reuse (MAX_ADS, flow check, put of an empty list); run the expanded view once on MySQL after deploy.
+- **The 390 px check ran on a static copy of the page with a mocked server**, not the logged-in live page. Reason: no browser tools and no test server with data here.
