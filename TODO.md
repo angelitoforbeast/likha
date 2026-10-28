@@ -1438,3 +1438,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **`ChatblastSetupCheck::banner()` and `BotHealth::banner()` have no screen caller now** (kept as the spec's "keep their data sources"; `BotHealth::banner` is still used by a 183 test). Reason: suggest removal to the owner.
 - **Untested here:** the double-replies line, the Held/Back on Forbeast labels and "latest of each kind", an amber sends line, one source failing while others show, the slow rule under 5 replies or with no usual, test pages in slow/no-chats, the order tie-breakers and the Changes deep link (JavaScript, no JS test setup). Reason: thin branches over tested sources; add on the next change here.
 - **390 px is checked in the markup only** (`truncate`, `max-h-[60vh]`, `break-words`). Reason: no browser in this job.
+
+## 182-1: Speed tab AI split and sequences, accepted review minors (2026-10-28)
+- **"With AI" and AI time use every AI call of the reply's chat**, also a call made after the timed reply. Reason: the note says so; limit it to calls before the reply's sent time if the numbers look high.
+- **The original scheduled time uses the step's delay as it is now.** A delay edited after the step ran changes the old scheduled times. Reason: delays rarely change; the recorded `due` is the fallback.
+- **The same sequence re-joined by the same customer within 10 minutes can reuse the first run's send.** Reason: rare; the match is per page, PSID, sequence and step within 600 s.
+- **The Bot filter on sequences uses each page's bot now** (the reply rows use each chat's own source). Reason: same as Bot Health; a page that switched mid-day splits differently in the two sections.
+- **The seconds formatter is in three Blade partials.** Reason: third copy reached; a shared helper is a small clean-up for later.
+- **Untested here:** the Bot filter on sequences, a step due before midnight that ran after, an old event without `due`, a ran step whose sends all failed, two sequences with the same step number within 600 s, an unanswered or `sync` AI call, and escaping of sequence names in the slowest list (they use `{{ }}`). Reason: thin branches over tested paths.

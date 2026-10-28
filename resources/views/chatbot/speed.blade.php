@@ -15,7 +15,7 @@
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot']], fn ($v) => $v !== null);
     $day = fn ($d) => route('chatbot.speed', $keep + ['date' => $d], false);
     $chart = ['hours' => array_map(fn ($h) => $h === null ? null : ['median' => $h['median'], 'p90' => $h['p90']], $hours)];
-    $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot'];
+    $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', 'Max', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot'];
 @endphp
 
 @section('content')
@@ -74,6 +74,82 @@
             @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a confirmed sent time (a Forbeast reply not confirmed yet, or a reply recorded before sent times were kept): their time is when Likha handed the reply over.@endif
             @if($refused_off) {{ number_format($refused_off) }} messages came in on pages with the bot Off and were not stored.@endif
         </p>
+    </section>
+
+    <section aria-labelledby="h-ai">
+        <h2 id="h-ai" class="mb-2 text-base font-semibold">With AI vs no AI, by hour</h2>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[60rem]" data-table="ai">
+                <thead>
+                    <tr><th></th><th colspan="5" class="!text-center">With AI</th><th colspan="5" class="!text-center">No AI (flow only)</th><th colspan="3" class="!text-center">AI time</th></tr>
+                    <tr><th>Hour</th>@foreach(['Answered', 'Average', 'Median', 'p90', 'Max', 'Answered', 'Average', 'Median', 'p90', 'Max', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
+                </thead>
+                <tbody>
+                @foreach($hours as $h => $r)
+                    <tr data-hour="{{ $h }}">
+                        <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
+                        @if($r === null)
+                            @for($i = 0; $i < 13; $i++)<td></td>@endfor
+                        @else
+                            @include('chatbot.partials.speed-ai-cells', ['r' => $r])
+                        @endif
+                    </tr>
+                @endforeach
+                </tbody>
+                <tfoot><tr class="font-semibold"><td>Day</td>@include('chatbot.partials.speed-ai-cells', ['r' => $total])</tr></tfoot>
+            </table>
+        </div>
+        <p class="mt-2 text-xs text-slate-500">With AI = the first reply came from a run that called the AI (any AI request of that chat, answered or not). AI time = how long the AI itself took for that reply: request created → answered, summed over the run's answered calls.</p>
+    </section>
+
+    <section aria-labelledby="h-seq">
+        <h2 id="h-seq" class="mb-2 text-base font-semibold">Sequences by hour due</h2>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[56rem]" data-table="sequences">
+                <thead>
+                    <tr><th></th><th colspan="5"></th><th colspan="4" class="!text-center">Scheduled → pushed</th><th colspan="4" class="!text-center">Pushed → sent at Meta</th></tr>
+                    <tr><th>Hour</th>@foreach(['Due', 'Sent', 'Failed', 'Skipped', 'No message', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
+                </thead>
+                <tbody>
+                @foreach($sequences['hours'] as $h => $r)
+                    <tr data-hour="{{ $h }}">
+                        <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
+                        @if($r === null)
+                            @for($i = 0; $i < 13; $i++)<td></td>@endfor
+                        @else
+                            @include('chatbot.partials.speed-seq-cells', ['r' => $r])
+                        @endif
+                    </tr>
+                @endforeach
+                </tbody>
+                <tfoot><tr class="font-semibold"><td>Day</td>@include('chatbot.partials.speed-seq-cells', ['r' => $sequences['total']])</tr></tfoot>
+            </table>
+        </div>
+        <p class="mt-2 text-xs text-slate-500">
+            Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
+        </p>
+
+        <h3 class="mb-2 mt-4 text-sm font-semibold">Slowest steps of the day</h3>
+        <div class="cb-card overflow-x-auto">
+            <table class="cb-table min-w-[52rem]" data-table="sequence-slowest">
+                <thead><tr><th>Page</th><th>Sequence</th><th class="!text-right">Step</th><th>Scheduled</th><th>Pushed</th><th>Sent at Meta</th><th class="!text-right">Delay</th></tr></thead>
+                <tbody>
+                @forelse($sequences['slowest'] as $s)
+                    <tr>
+                        <td>{{ $s['page'] }}</td>
+                        <td>{{ $s['sequence'] }}</td>
+                        <td class="text-right tabular-nums">{{ $s['step'] }}</td>
+                        <td class="tabular-nums">{{ $s['scheduled'] ? substr($s['scheduled'], 11) : '—' }}</td>
+                        <td class="tabular-nums">{{ substr($s['pushed'], 11) }}@if($s['scheduled_to_pushed'] !== null) <span class="text-xs text-slate-500">+{{ $s['scheduled_to_pushed'] }} s</span>@endif</td>
+                        <td class="tabular-nums">@if($s['sent']){{ substr($s['sent'], 11) }}@if($s['sent_is_pushed']) <span class="text-xs text-slate-500">(Botcake: = pushed)</span>@else <span class="text-xs text-slate-500">+{{ $s['pushed_to_meta'] }} s</span>@endif @else — <span class="text-xs text-slate-500">(not confirmed)</span>@endif</td>
+                        <td class="text-right tabular-nums">{{ $s['delay'] }} s</td>
+                    </tr>
+                @empty
+                    <tr><td colspan="7" class="text-slate-500">No sequence steps sent this day.</td></tr>
+                @endforelse
+                </tbody>
+            </table>
+        </div>
     </section>
 
     <section aria-labelledby="h-chart" class="cb-card p-3">

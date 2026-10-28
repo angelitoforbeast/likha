@@ -23,6 +23,8 @@ class ResponseSpeedTest extends ChatblastTestCase
             'database/migrations/2026_10_20_100000_create_botcake_chats_table.php',
             'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
             'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
+            'database/migrations/2026_10_26_100000_create_chatbot_sequence_tables.php',
+            'database/migrations/2026_10_28_100000_create_chatbot_ai_requests_table.php',
             'database/migrations/2026_10_30_098000_add_raw_to_chatbot_replies.php',
             'database/migrations/2026_10_30_100000_add_results_to_chatbot_replies.php',
             'database/migrations/2026_11_06_100000_add_chat_index_to_chatbot_replies.php',
@@ -227,5 +229,105 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame(2, $s->output(['bot' => 'Forbeast'])['hours'][10]['messages']);
         $this->assertSame(120, ResponseSpeed::TODAY_CACHE_SECONDS);
         $this->assertGreaterThan(120, ResponseSpeed::PAST_CACHE_SECONDS);
+    }
+
+    /** Ang tawag sa AI ng takbo ng isang chat (created → answered). */
+    private function ai(int $chat, string $at, ?string $answered, string $page = '1001', string $model = 'm'): void
+    {
+        DB::table('chatbot_ai_requests')->insert(['request_id' => uniqid('r', true), 'page_id' => (int) $page, 'psid' => 7002, 'chat_id' => $chat, 'flow_id' => 1,
+            'node_id' => 'n3', 'page_name' => 'Page Uno', 'model' => $model, 'messages' => '[]', 'max_tokens' => 10, 'context' => '{}',
+            'status' => $answered ? 'answered' : 'failed', 'attempts' => 1, 'deadline_at' => $at, 'answered_at' => $answered, 'created_at' => $at, 'updated_at' => $at]);
+    }
+
+    /** Ang chat na tinutugunan ng sagot (ang run ng sagot ay ang sa chat na ito), hindi ang standby na kopya. */
+    private function linkReply(string $psid, string $replyAt): int
+    {
+        $chat = (int) DB::table('botcake_chats')->where('psid', $psid)->orderBy('id')->value('id');
+        DB::table('chatbot_replies')->where('psid', (int) $psid)->where('sent_at', $replyAt)->update(['chat_id' => $chat]);
+
+        return $chat;
+    }
+
+    public function test_S_182_9_each_hour_splits_replies_with_ai_from_flow_only_and_shows_the_ai_time(): void
+    {
+        // 7002 (Forbeast, 72 s): dalawang tawag sa AI ng takbo nito, 30 s + 18 s = 48 s. 7001 (Botcake, 20 s): flow lang.
+        $chat = $this->linkReply('7002', '2026-10-21 10:06:10');
+        $this->linkReply('7001', '2026-10-21 10:05:20');
+        $this->ai($chat, '2026-10-21 10:05:02', '2026-10-21 10:05:32');
+        $this->ai($chat, '2026-10-21 10:05:40', '2026-10-21 10:05:58');
+        $this->ai($chat, '2026-10-21 10:05:40', '2026-10-21 10:09:00', model: \App\Services\OrderEncode\FlowEncode::MODEL); // hindi tawag sa AI
+
+        $h = $this->out()['hours'][10];
+        $this->assertSame(['n' => 1, 'avg' => 72.0, 'median' => 72, 'p90' => 72, 'max' => 72], $h['with_ai']);
+        $this->assertSame(['n' => 1, 'avg' => 20.0, 'median' => 20, 'p90' => 20, 'max' => 20], $h['no_ai']);
+        $this->assertSame(['avg' => 48.0, 'p90' => 48, 'max' => 48], $h['ai_time']);
+        $this->assertSame(1, $this->out()['total']['with_ai']['n']);
+    }
+
+    public function test_S_182_10_max_is_shown_per_hour_and_for_the_day(): void
+    {
+        $o = $this->out();
+        $this->assertSame([72, 5, 72], [$o['hours'][10]['max'], $o['hours'][11]['max'], $o['total']['max']]);
+        $this->assertNull($o['hours'][3]['max']);
+
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $this->assertStringContainsString('>Max<', $this->get('/chatbot/speed')->assertOk()->getContent());
+    }
+
+    /** Isang step ng sequence: ang event ng takbo (kailan due, kailan tumakbo) at ang padala nito. */
+    private function step(int $seq, string $psid, string $op, string $due, string $ranAt, ?string $pushed = null, ?string $metaAt = null, string $page = '1001'): void
+    {
+        DB::table('chatbot_events')->insert(['page_id' => (int) $page, 'psid' => (int) $psid, 'type' => 'sequence', 'created_at' => $ranAt,
+            'detail' => json_encode(['op' => $op, 'name' => 'Follow up', 'step' => 2, 'sequence_id' => $seq, 'due' => $due])]);
+        if ($pushed) $this->reply($page, $psid, $pushed, ['sequence_id' => $seq, 'sequence_step' => 2]
+            + ($metaAt ? ['confirmed_at' => $metaAt, 'confirmed_status' => 'sent'] : []));
+    }
+
+    public function test_S_182_11_sequence_steps_show_scheduled_to_pushed_and_pushed_to_meta_with_the_slowest(): void
+    {
+        $seq = DB::table('chatbot_sequences')->insertGetId(['name' => 'Follow up', 'active' => true, 'exit_on_reply' => true]);
+        $this->step($seq, '7101', 'ran', '2026-10-21 10:00:00', '2026-10-21 10:01:02', '2026-10-21 10:01:00', '2026-10-21 10:03:00');
+        $this->step($seq, '7102', 'ran', '2026-10-21 10:10:00', '2026-10-21 10:10:21', '2026-10-21 10:10:20', '2026-10-21 10:10:25');
+        $this->step($seq, '7103', 'skipped', '2026-10-21 10:20:00', '2026-10-21 10:20:01');
+        $this->step($seq, '7104', 'failed', '2026-10-21 11:00:00', '2026-10-21 11:00:01');
+        $this->step($seq, '7105', 'ran', '2026-10-21 11:30:00', '2026-10-21 11:30:04', '2026-10-21 11:30:03', page: '1002'); // Botcake: sent = pushed
+
+        $s = $this->out()['sequences'];
+        $h = $s['hours'][10];
+        $this->assertSame([3, 2, 0, 1], [$h['due'], $h['sent'], $h['failed'], $h['skipped']]);
+        $this->assertSame(['n' => 2, 'avg' => 40.0, 'p90' => 60, 'max' => 60], $h['scheduled_to_pushed']);
+        $this->assertSame(['n' => 2, 'avg' => 62.5, 'p90' => 120, 'max' => 120], $h['pushed_to_meta']);
+        $this->assertSame([1, 1, 0], [$s['hours'][11]['failed'], $s['hours'][11]['botcake'], $s['hours'][11]['pushed_to_meta']['n']]); // Botcake: wala sa pushed → Meta
+        $this->assertSame(2, $s['total']['pushed_to_meta']['n']);
+        $this->assertSame(['n' => 3, 'max' => 60], array_intersect_key($s['total']['scheduled_to_pushed'], ['n' => 1, 'max' => 1]));
+        foreach (range(13, 23) as $hr) $this->assertNull($s['hours'][$hr]);
+
+        $slow = $s['slowest'][0];
+        $this->assertSame(['Page Uno', 'Follow up', 2, '2026-10-21 10:00:00', '2026-10-21 10:01:00', '2026-10-21 10:03:00', 60, 120, 180],
+            [$slow['page'], $slow['sequence'], $slow['step'], $slow['scheduled'], $slow['pushed'], $slow['sent'], $slow['scheduled_to_pushed'], $slow['pushed_to_meta'], $slow['delay']]);
+        $this->assertSame([false, true], [$slow['sent_is_pushed'], collect($s['slowest'])->firstWhere('page', 'Page Dos')['sent_is_pushed']]);
+        $this->assertSame(1, $this->out(['page_id' => '1002'])['sequences']['total']['due']);
+
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/speed')->assertOk()->getContent();
+        $this->assertStringContainsString('data-table="sequences"', $html);
+        $this->assertStringContainsString('data-table="sequence-slowest"', $html);
+    }
+
+    public function test_S_182_11_the_scheduled_time_is_the_original_due_not_the_last_retry(): void
+    {
+        // Step 1 ng "Follow up" ay 60 minuto pagkatapos ng subscribe (09:00) → due 10:00. Naghintay ito sa AI (retry kada
+        // minuto), kaya ang next_send_at noong tumakbo ay 10:04; ang padala ay 10:05:00, ang Meta 10:05:10.
+        $seq = DB::table('chatbot_sequences')->insertGetId(['name' => 'Follow up', 'active' => true, 'exit_on_reply' => true]);
+        DB::table('chatbot_sequence_steps')->insert(['sequence_id' => $seq, 'position' => 1, 'delay_amount' => 60, 'delay_unit' => 'minutes', 'active' => true]);
+        DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => 7201, 'type' => 'sequence', 'created_at' => '2026-10-21 09:00:30',
+            'detail' => json_encode(['op' => 'subscribed', 'name' => 'Follow up'])]);
+        DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => 7201, 'type' => 'sequence', 'created_at' => '2026-10-21 10:05:02',
+            'detail' => json_encode(['op' => 'ran', 'name' => 'Follow up', 'step' => 1, 'sequence_id' => $seq, 'due' => '2026-10-21 10:04:00'])]);
+        $this->reply('1001', '7201', '2026-10-21 10:05:00', ['sequence_id' => $seq, 'sequence_step' => 1, 'confirmed_at' => '2026-10-21 10:05:10', 'confirmed_status' => 'sent']);
+
+        $s = $this->out()['sequences'];
+        $this->assertSame(['n' => 1, 'avg' => 300.0, 'p90' => 300, 'max' => 300], $s['hours'][10]['scheduled_to_pushed']);
+        $this->assertSame(['2026-10-21 10:00:00', 310], [$s['slowest'][0]['scheduled'], $s['slowest'][0]['delay']]);
     }
 }
