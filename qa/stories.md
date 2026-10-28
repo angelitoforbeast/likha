@@ -2949,3 +2949,12 @@ Tests: `tests/Feature/Chatblast/ForbeastSmartSwitchTest.php`, `ForbeastAutoSwitc
 | S-175.6 (P1) | A watcher-switched page (inbound) with 30 healthy minutes goes back with a "switched_back" event, note "Back on Forbeast" and changes entry; 29 min does not; a page a person changed after the switch never goes back; a second switch back within 6 h waits; a slow check restarts the 30 minutes; a send-lag alarm row written after the switch does not block it | `test_S_175_6a…6e` | passed |
 | S-175.7 (P1) | A Meta connection code (190) still switches at once and never goes back | `test_S_175_7…` | passed |
 | S-175.8 (P1) | The Chatblast, Botcake and PageSettings suites (incl. ForbeastWatch and BotHealth tests) add no new failures | full run | passed |
+
+Amendment 175-1 (a page just moved to Forbeast is not blamed for messages from its Botcake time; manual moves are on the feed):
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-175.9 (P1) | Given a person sets a page to gateway at T, When 3 customers' Botcake copies received at T-60 s have no Forbeast copy, Then no switch at T+500 s; received at T+200 s, Then they count and the page switches; with settle_seconds 30, copies at T+60 s count | `test_S_175_9…` (3 data sets) | passed |
+| S-175.9b (P1) | Given the watcher switched a page back to Forbeast, When copies arrive 60 s later with no Forbeast copy, Then no switch, and no "moved" event follows the watcher's own move | `test_S_175_9b…` | passed |
+| S-175.10 (P1) | Given a person moves a page to Forbeast, When the watcher runs (twice), Then one "moved" event "moved to Forbeast by <name> at <time>" and the provider change stays the person's in the history | `test_S_175_10…` | passed |
+| S-175.10b (P2) | A move with no user is recorded "by system" and labelled system (not auto-switch); a move older than an hour gets no event | `test_S_175_10b…` | passed |

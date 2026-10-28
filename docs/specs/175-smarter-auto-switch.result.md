@@ -31,6 +31,7 @@
 | lag_seconds | GATEWAY_SWITCH_LAG_SECONDS | 60 |
 | back_minutes | GATEWAY_SWITCH_BACK_MINUTES | 30 |
 | back_hours | GATEWAY_SWITCH_BACK_HOURS | 6 |
+| settle_seconds (175-1) | GATEWAY_SWITCH_SETTLE_SECONDS | 180 |
 
 ## The exact "Likha is behind" check
 
@@ -101,4 +102,61 @@ The ForbeastWatch tests (`ForbeastAutoSwitchTest`, 35 tests) and the BotHealth t
 - After deploy, the pages the watcher moved on Oct 26–27 (inbound) become eligible: each goes back to Forbeast after 30 healthy minutes if its Forbeast token is ready and nobody changed its provider since. Expect a wave of `switched_back` events in the first hour.
 - The same commits apply to Incepxion (same codebase; no site-specific code).
 
+
+## Amendment 175-1
+
+> Amendment 175-1 (new evidence, 2026-10-28). Same rules as the spec: Conventional Commits ending "(spec 175)", no assistant/owner names or attribution lines, never push/deploy/touch a server, 2 tries per step, tests with `php vendor\phpunit\phpunit\phpunit` from PowerShell. Save this amendment verbatim in the result under "Amendment 175-1" and list what you applied.
+>
+> Evidence: the Oct 27 10:08 switch of "Jenny De Guzman" was not Likha lag. The page was on botcake until a person set it to gateway at 10:05:30 (page_settings chatbot.provider row created_by a user); HandleGatewayEvent drops Forbeast events for a page whose provider is not gateway (counted as `botcake_page`, not stored), so the Forbeast copies of messages that arrived before 10:05:30 were never stored. At 10:08:05 the watcher found Botcake chats from 2 customers "with no Forbeast copy after 120 seconds" — chats whose Forbeast copy had been dropped by design — and switched the page straight back. The same likely happened to pages moved back to gateway by hand around 12:02 that switched again at 13:01–13:09.
+>
+> | # | Change | Why |
+> |---|---|---|
+> | 1 | The "inbound" missing-copy check only counts Botcake chats **received after the page's current gateway period started plus a settle time** (config, default 180 s): find the time the page's chatbot.provider became gateway (latest active row's created_at / the switch-back event time) and ignore chats received before `that + settle`. Applies to manual switches, the new automatic switch back, and Mira/owner changes alike. | A page just moved to Forbeast must not be blamed for messages that arrived while it was on Botcake. |
+> | 2 | Record the gateway-period start on the auto_switch feed when the watcher sees a provider change to gateway that it did not make ("moved to Forbeast by <user or source> at <time>"), so the history shows manual moves too. | The owner can see who moved a page. |
+> | 3 | Tests: a page set to gateway at T; Botcake chats from 3 customers at T-60 s with no Forbeast copy → no switch at T+300 s; the same chats at T+200 s with no copy → counts (with decision 1's other conditions); the automatic switch back starts the same settle window. | Proof. |
+>
+> Done when: these pass plus the spec's suites with no new failures vs the current branch head; result updated; end with "175-1: <done|blocked> — <one line>".
+
+### What I applied
+
+1. **Settle after any move to Forbeast.**
+   - **What was already there:** spec 166 (commit 755c397c, Oct 27 11:29, after the 10:08 switch) already ignores Botcake copies received before the latest active `chatbot.provider` row's `created_at` + 180 s. Those copies are answered from standby, not counted. The cut-off is the newest provider row, whoever wrote it: a person, another source, or the watcher's own switch back, which writes that row too.
+   - **What changed:** the 180 s is now the config `settle_seconds` (`GATEWAY_SWITCH_SETTLE_SECONDS`, default 180).
+   - **The Oct 27 13:01–13:09 switches:** whether they predate 166 depends on when 166 was deployed, which I can't see from here.
+2. **The "moved" event.**
+   - **When:** the watcher sees an active provider row = gateway that is less than 1 h old and has no newer auto_switch event.
+   - **What it writes:** one event with result `moved`, from botcake, to gateway, condition `manual`, error `moved to Forbeast by <user name | source | system> at <Manila time>`, and the fields `by` and `gateway_since`. It is written once; the 1 h limit stops a burst of events for old pages at deploy.
+   - **Where it shows:** the changes log shows "Moved to Forbeast · …" and the feed's `reason` gives the plain text.
+   - **`ChatbotController::who()`:** it now labels a provider row with no user "auto-switch" only when a `switched` or `switched_back` event falls within a minute. Before, any event counted, so a system move followed by its "moved" or "held" event read as auto-switch.
+3. **Tests.**
+   - S-175.9: the move at T, with copies at T-60 s (no switch at T+500 s), copies at T+200 s (counts, switches), and settle 30 s with copies at T+60 s (counts).
+   - S-175.9b: copies 60 s after a switch back don't count, and no "moved" event follows.
+   - S-175.10: a person's move is recorded once, with name and time.
+   - S-175.10b: a move with no user is recorded as by "system" and is not labelled auto-switch; a move older than 1 h is not recorded.
+   - Red runs: S-175.10 failed with "actual size 0 matches expected size 1". S-175.9 with 180 s passed from the start, because it pins spec 166's behaviour. Its 30 s data set and S-175.10b failed when the config read and the who() change were reverted by hand, then passed when they were restored.
+4. **Existing tests adjusted.**
+   - S-166.1 and S-166.2 now expect the `moved` event of their own move first.
+   - `ForbeastSendHealthTest::setUp` backdates its provider rows by 3 h, like the auto-switch test does: its pages are long on Forbeast, and the test is about the alarm.
+
+### Amendment case table
+
+| Case | Test | Result |
+|---|---|---|
+| S-175.9 | `test_S_175_9_only_botcake_chats_after_the_move_plus_the_settle_time_count` (3 data sets) | pass |
+| S-175.9b | `test_S_175_9b_the_automatic_switch_back_starts_the_same_settle_window` | pass |
+| S-175.10 | `test_S_175_10_a_move_to_forbeast_the_watcher_did_not_make_is_recorded_once_with_who_and_when` | pass |
+| S-175.10b | `test_S_175_10b_a_system_move_is_recorded_as_system_and_a_move_older_than_an_hour_is_not_recorded` | pass |
+
+### Amendment suites and review
+
+- Suites (`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings`):
+  - branch head before the amendment (3ad521d2): 1513 tests, OK, 1 skipped;
+  - after: **1519 tests, OK, 1 skipped**, 0 failures (PHPUnit deprecations only).
+- `skeptic-reviewer`, standard depth, on 3ad521d2..69829856: no blocker or major findings.
+  - Missing tests (fixed in c1b89f2c): settle read from config, the who() branch, no "moved" event after a switch back, a move older than 1 h.
+  - Other minors: accepted in `TODO.md`.
+- Deploy notes: the same as above, plus the optional `GATEWAY_SWITCH_SETTLE_SECONDS`. Still no migration. The same commits apply to Incepxion.
+
 175: done — the inbound switch now needs 3 customers, 300 s, a Likha that isn't behind and a Forbeast that isn't reporting itself fast; held customers are answered; watcher-moved pages return after 30 healthy minutes.
+
+175-1: done — Botcake copies from before any move to Forbeast (+ settle_seconds, 180) never count, and manual moves appear on the feed as "moved to Forbeast by … at …".
