@@ -337,24 +337,12 @@ class AdGroups
     }
 
     /**
-     * "Ads not in a group yet": ang mga ad na nakita sa page sa huling UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang
-     * ad_id ng botcake_psids ng page), wala pa sa alinmang group ng page; ang pangalan mula sa ads_manager_reports at ang
-     * status (statuses). Ang bago muna, saka ang On, saka ang pinakamaraming customer, hanggang $limit; $q = bahagi ng ad
-     * ID o ng pangalan. new = ilang bago ang wala pa sa group (hindi ayon sa $q). Ang nakita ay naka-cache nang
-     * UNASSIGNED_TTL segundo kada page, ang status nang STATUS_TTL.
-     * @return array{rows: array<int, array<string, mixed>>, total: int, new: int}
-     */
-    public function unassigned(string $page, string $q = '', int $limit = self::UNASSIGNED_LIMIT): array
-    {
-        $o = $this->overview($page, $q, $limit);
-
-        return ['rows' => $o['unassigned'], 'total' => $o['unassigned_total'], 'new' => $o['new_unassigned']];
-    }
-
-    /**
      * Ang lahat ng kailangan ng row ng Ad-based na page: ang mga group na ang bawat ad ay may pangalan, status, ilang
-     * customer at huling oras (all_off = lahat ng ad ay Off), ang "Ads not in a group yet", at ang huling araw ng report
-     * (as_of). Iisang statuses() para sa lahat ng ad ng page.
+     * customer at huling oras (all_off = lahat ng ad ay Off), ang huling araw ng report (as_of), at ang "Ads not in a
+     * group yet": ang mga ad na nakita sa page sa huling UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang ad_id ng
+     * botcake_psids ng page) na wala pa sa group; ang bago muna, saka ang On, saka ang pinakamaraming customer, hanggang
+     * $limit; $q = bahagi ng ad ID o ng pangalan. new_unassigned = ilang bago ang wala pa sa group (hindi ayon sa $q).
+     * Iisang statuses() para sa lahat ng ad ng page; ang nakita ay naka-cache nang UNASSIGNED_TTL segundo kada page.
      * @return array{groups: array<int, array<string, mixed>>, unassigned: array<int, array<string, mixed>>, unassigned_total: int, new_unassigned: int, as_of: ?string}
      */
     public function overview(string $page, string $q = '', int $limit = self::UNASSIGNED_LIMIT): array
@@ -419,7 +407,8 @@ class AdGroups
      * Ang status ng mga ad mula sa ads_manager_reports (walang tawag sa Meta). Dalawang grouped query, parehong
      * "ad_id IN (...)" (index ads_report_adid_idx): (1) kada ad ang unang at huling araw, ang huling araw na may gastos at
      * ang unang araw na hindi parehong active ang campaign at ad set; (2) ang mga row ng bawat ad sa huling araw nito.
-     * on: sa huling araw, active ang campaign at ad set (gaya ng Ads Manager report: LIKE 'active%'), o may gastos.
+     * on: may row ang ad sa as_of, at sa araw na iyon active ang campaign at ad set (gaya ng Ads Manager report: LIKE
+     * 'active%'), o may gastos.
      * off: off_since = ang araw pagkatapos ng huling gastos, o ang unang hindi active na araw kapag hindi kailanman
      * gumastos; off_days = as_of − off_since + 1. as_of = ang pinakahuling araw ng report ng mga ad na ito. Ang ad na wala
      * sa reports ay wala sa "ads" (No report data). Naka-cache nang STATUS_TTL segundo.
@@ -448,8 +437,12 @@ class AdGroups
             $out = [];
             foreach ($days as $ad => $r) {
                 $l = $latest[$ad] ?? null;
-                $on = $l && ((int) $l->on_now === 1 || (float) $l->spend > 0);
-                $since = $on ? null : ($r->last_spend !== null ? \Carbon\Carbon::parse($day($r->last_spend))->addDay()->toDateString() : ($day($r->first_off) ?? $day($r->last_day)));
+                // Ang ad na wala nang row sa huling araw ng report (as_of) ay Off: ang report ay may row lang sa mga araw na
+                // may delivery, kaya ang na-pause na ad ay basta nawawala, at ang huling row nito ay madalas may gastos pa.
+                $current = $day($r->last_day) === $asOf;
+                $on = $current && $l && ((int) $l->on_now === 1 || (float) $l->spend > 0);
+                $since = $on ? null : ($r->last_spend !== null ? \Carbon\Carbon::parse($day($r->last_spend))->addDay()->toDateString()
+                    : ($day($r->first_off) ?? \Carbon\Carbon::parse($day($r->last_day))->addDay()->toDateString()));
                 $out[(string) $ad] = ['status' => $on ? 'on' : 'off', 'off_since' => $since,
                     'off_days' => $since === null ? null : (int) \Carbon\Carbon::parse($since)->diffInDays(\Carbon\Carbon::parse($asOf)) + 1,
                     'first_day' => $day($r->first_day)];

@@ -181,6 +181,20 @@ class AdGroupRunTest extends ChatblastTestCase
         $this->assertTrue(app(ChatbotPage::class)->runs('Page P'));
     }
 
+    public function test_S_174_2_a_sequence_on_a_page_based_page_uses_page_values_and_pins_nothing(): void
+    {
+        app(AdGroups::class)->setMode('Page P', false);
+        $this->itemA();
+        $seq = ChatbotSequence::create(['name' => 'Drip', 'active' => true, 'exit_on_reply' => false]);
+        $seq->steps()->create(['position' => 1, 'delay_amount' => 0, 'delay_unit' => 'minutes', 'flow_id' => $this->flow('Seq {{PRICE}}')->id, 'active' => true]);
+        $this->chat('222', '7001');
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7001, 'other');
+        Artisan::call('chatbot:sequence-tick');
+
+        $this->assertSame(['Seq 199'], $this->sent('7001'), 'page values kahit nasa group ang ad');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id), 'walang pin sa Page-based na page');
+    }
+
     public function test_S_172_14_a_test_run_on_the_test_tab_can_use_a_chosen_group(): void
     {
         $id = $this->itemA();

@@ -82,11 +82,12 @@ class AdBasedPagesTest extends ChatblastTestCase
         $this->reports('505', '2026-10-17', '2026-10-19', 0, 'not_delivering');
         $this->report('506', '2026-10-01', 10);                                     // aktibo pa, walang gastos ngayon
         $this->report('506', '2026-10-19', 0);
+        $this->reports('507', '2026-10-01', '2026-10-14', 60);                      // na-pause: wala nang row pagkatapos ng 10-14
         $this->chat('7001', '504', daysAgo: 10);                                    // wala sa reports
         $this->chat('7002', '504', daysAgo: 2);
         $groups = app(AdGroups::class);
         $groups->setMode('Precious Lopez', true);
-        $a = $groups->save('Precious Lopez', null, 'Serum', ['501', '502', '503', '504', '506'], [])['id'];
+        $a = $groups->save('Precious Lopez', null, 'Serum', ['501', '502', '503', '504', '506', '507'], [])['id'];
         $b = $groups->save('Precious Lopez', null, 'Old toner', ['502', '505'], [])['id'] ?? null;
         $this->assertNull($b, 'ang 502 ay nasa Serum na');
         $b = $groups->save('Precious Lopez', null, 'Old toner', ['505'], [])['id'];
@@ -101,6 +102,7 @@ class AdBasedPagesTest extends ChatblastTestCase
             ['503', 'on', null, null, true],
             ['504', 'none', null, null, false],
             ['506', 'on', null, null, false],
+            ['507', 'off', '2026-10-15', 5, false],
         ], array_map($pick, $ads));
         // Ang ad na wala sa reports ay may customers pa rin; ang pangalan ay mula sa reports.
         $this->assertSame(['ad_id' => '504', 'name' => null, 'customers' => 2, 'last' => '2026-10-18 10:00'], array_intersect_key($ads[3], array_flip(['ad_id', 'name', 'customers', 'last'])));

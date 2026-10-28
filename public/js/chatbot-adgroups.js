@@ -246,11 +246,14 @@
       ].concat(ctx.botCols.map(function (c) { var td = groupCell(page, r, g, c, keys); if (muted) td.classList.add('opacity-60'); return td; })));
     }
 
-    function newGroupForm(page, ads) {
+    // Ang form ng bagong group: ang na-type ay nasa st.adding ({name, ids, focused}), kaya hindi nawawala sa muling pagpinta.
+    function newGroupForm(page, form) {
       var st = state(page);
       var name = el('input', {type: 'text', maxlength: '100', class: INPUT + ' sm:max-w-xs', autocomplete: 'off', placeholder: 'Group name, e.g. Serum', 'aria-label': 'New group name'});
       var ids = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'Ad IDs: comma, space or new line', 'aria-label': 'Ad IDs of the new group'});
-      ids.value = (ads || []).join(', ');
+      name.value = form.name; ids.value = form.ids;
+      name.addEventListener('input', function () { form.name = name.value; });
+      ids.addEventListener('input', function () { form.ids = ids.value; });
       var create = el('button', {type: 'button', class: 'cb-btn cb-btn-primary cb-btn-sm', text: 'Create group'});
       var cancel = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Cancel'});
       cancel.addEventListener('click', function () { st.adding = false; opts.onChange(page); });
@@ -265,7 +268,7 @@
           load(page);
         });
       });
-      setTimeout(function () { name.focus(); });
+      if (!form.focused) { form.focused = true; setTimeout(function () { name.focus(); }); }
       return el('div', {class: 'mt-1 flex flex-col gap-2 rounded-md border border-blue-200 bg-white p-2 sm:flex-row sm:flex-wrap sm:items-start'}, [name, ids, el('div', {class: 'flex gap-2'}, [create, cancel])]);
     }
 
@@ -291,7 +294,7 @@
       paint();
       add.addEventListener('click', function () {
         var ads = Array.from(st.ticked);
-        if (target.value === 'new') { st.adding = ads; opts.onChange(page); return; }
+        if (target.value === 'new') { st.adding = {name: '', ids: ads.join(', '), focused: false}; opts.onChange(page); return; }
         add.disabled = true;
         var g = d.groups.find(function (x) { return String(x.id) === target.value; });
         post(u.add, {page: page, id: Number(target.value), ads: ads}).then(function (r) { if (r.ok) st.ticked.clear(); return after(page, true, 'Added ' + plural(ads.length, 'ad') + ' to "' + (g ? g.name : '') + '".')(r); });
@@ -319,7 +322,7 @@
       var keys = {};
       (d.keys || []).forEach(function (k) { if (k.key !== 'flow_id') keys[k.key] = k; });
       var addBtn = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: '+ Add ad group'});
-      addBtn.addEventListener('click', function () { st.adding = []; opts.onChange(page); });
+      addBtn.addEventListener('click', function () { if (!st.adding) st.adding = {name: '', ids: '', focused: false}; opts.onChange(page); });
       var out = [wide(ctx.cols, [
         el('div', {class: 'flex flex-wrap items-center gap-x-3 gap-y-1'}, [
           el('span', {class: 'font-semibold text-slate-700', text: 'Ad-based: customers whose latest ad is in a group get that group\'s values; everyone else gets Default.'}),
