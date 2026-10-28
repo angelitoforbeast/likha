@@ -824,6 +824,20 @@
         $('chg-list').scrollTop = 0;
     }
     $('changes-open').addEventListener('click', () => { dialog('chg', true); chgPage = 1; loadChanges(); });
+    // ?changes=<page>&field=<key> (mula sa banner ng mga problema): bukas agad ang Changes, naka-filter sa page at field.
+    const chgDeep = new URLSearchParams(location.search);
+    if (chgDeep.has('changes')) {
+        dialog('chg', true);
+        loadChanges().then(() => {
+            const f = $('chg-filters').elements;
+            f.page.value = chgDeep.get('changes');
+            // Ang auto_switch (talaan ng kusang lipat) ay wala sa listahan ng field: idinadagdag para ma-filter.
+            const key = chgDeep.get('field') || '';
+            if (key && ![...f.field.options].some(o => o.value === key)) f.field.append(el('option', {value: key, text: key === 'auto_switch' ? 'Auto switch' : key}));
+            f.field.value = key;
+            loadChanges();
+        });
+    }
     $('chg-filters').addEventListener('change', () => { chgPage = 1; loadChanges(); });
     $('chg-filters').addEventListener('submit', e => e.preventDefault());
     $('chg-prev').addEventListener('click', () => { chgPage--; loadChanges(); });

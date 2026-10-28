@@ -39,9 +39,11 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         app(PageSettings::class)->set($page, 'botcake', ChatblastSetupCheck::CHECK_KEY, json_encode($value), false, null, true);
     }
 
-    private function banner(string $html, string $alert = 'setup-problems'): ?string
+    /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null. */
+    private function banner(string $html): ?string
     {
-        return preg_match('#<div[^>]*data-alert="' . $alert . '"[^>]*>(.*?)</div>#s', $html, $m) ? trim(preg_replace('/\s+/', ' ', strip_tags($m[1]))) : null;
+        return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>\s*</div>#s', $html, $m)
+            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('#<span aria-hidden="true">.*?</span>#', '', $m[1])))) : null;
     }
 
     public function test_S_171_4_a_page_with_an_x_shows_on_chatbot_and_chatblast_screens_with_the_reason_and_the_link(): void
@@ -51,8 +53,8 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         $this->actingAs($this->user());
         foreach (['/chatbot/inbox', '/chatblast/page-settings'] as $url) {
             $html = $this->get($url)->assertOk()->getContent();
-            $this->assertSame('⚠ Page Uno: 2 flows named UPDATE SHIPPING STATUS 2026 — open Page settings', $this->banner($html), $url);
-            $this->assertMatchesRegularExpression('#data-alert="setup-problems".*?href="/chatblast/page-settings\?q=Page\+Uno".*?href="/chatblast/page-settings"#s', $html, 'the page opens filtered');
+            $this->assertSame('⚠ 1 page with problems (1 urgent) Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html), $url);
+            $this->assertMatchesRegularExpression('#data-alert="problems".*?href="/chatblast/page-settings\?q=Page\+Uno"#s', $html, 'the page opens filtered');
         }
         $this->check('Page Dos', ['ok' => false, 'x' => ['2 flows named <b>X</b>']]);
         $this->travel(61)->seconds();
@@ -71,10 +73,12 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         $this->check('Page Tres', []);
         app(PageSettings::class)->set('Page Tres', 'botcake', ChatblastSetupCheck::DELIVERY_KEY, json_encode(['flow_id' => '5501', 'status' => 'not_delivered', 'sent' => 3]), false, null, true);
         $this->travel(61)->seconds(); // naka-cache hanggang isang minuto
-        $this->assertSame('⚠ Page Dos: token invalid; Page Tres: Sent 3, none delivered (Botcake) — open Page settings', $this->banner($this->get('/chatbot/inbox')->getContent()));
+        $this->assertSame('⚠ 2 pages with problems (2 urgent) Page Dos 🟠 Setup: token invalid Page settings Page Tres 🟠 Setup: Sent 3, none delivered (Botcake) Page settings',
+            $this->banner($this->get('/chatbot/inbox')->getContent()));
     }
 
-    public function test_S_171_4_at_most_three_pages_then_more_and_no_problems_means_no_banner(): void
+    /** Spec 184: lahat ng page ay nasa listahan (wala nang "+N more"). */
+    public function test_S_171_4_every_page_is_listed_and_no_problems_means_no_banner(): void
     {
         $this->actingAs($this->user());
         $this->assertNull($this->banner($this->get('/chatblast/page-settings')->getContent()), 'no check: no banner');
@@ -84,8 +88,8 @@ class SetupProblemsBannerTest extends ChatblastTestCase
         foreach (['Page Uno', 'Page Dos', 'Page Tres', 'Page Kwatro'] as $p) $this->check($p, ['ok' => false, 'x' => ['No custom field named message in Botcake']]);
         $this->travel(61)->seconds();
         $banner = (string) $this->banner($this->get('/chatblast/page-settings')->getContent());
-        $this->assertSame(3, substr_count($banner, 'No custom field named message in Botcake'));
-        $this->assertStringContainsString('+1 more — open Page settings', $banner);
+        $this->assertSame(4, substr_count($banner, 'No custom field named message in Botcake'));
+        $this->assertStringStartsWith('⚠ 4 pages with problems (4 urgent)', $banner);
     }
 
     public function test_S_171_5_roles_without_the_chatbot_menu_see_no_banner(): void
@@ -112,8 +116,8 @@ class SetupProblemsBannerTest extends ChatblastTestCase
 
         $this->actingAs($this->user());
         $html = $this->get('/chatbot/inbox')->assertOk()->getContent();
-        $this->assertStringStartsWith('⚠ Page Dos: Page restricted by Facebook', (string) $this->banner($html, 'page-problems'));
-        $this->assertSame('⚠ Page Uno: 2 flows named UPDATE SHIPPING STATUS 2026 — open Page settings', $this->banner($html));
-        $this->assertLessThan(strpos($html, 'data-alert="setup-problems"'), strpos($html, 'data-alert="page-problems"'));
+        // Spec 184: iisang banner; ang pulang page ang nauuna.
+        $this->assertSame('⚠ 2 pages with problems (2 urgent) Page Dos 🔴 Page restricted by Facebook: 3 of 3 sends failed since 11:20 Health Inbox '
+            . 'Page Uno 🟠 Setup: 2 flows named UPDATE SHIPPING STATUS 2026 Page settings', $this->banner($html));
     }
 }

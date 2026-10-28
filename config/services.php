@@ -161,6 +161,16 @@ return [
         'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 100),
         // Read-only feed ng auto-switch events (/api/chatbot/provider-events, header X-CHATBOT-EVENTS-KEY); walang laman = 401.
         'events_key' => env('CHATBOT_EVENTS_KEY'),
+        // Ang banner ng mga problema (ProblemsPanel). Mabagal: ang median ng unang sagot sa huling oras ay slow_factor beses
+        // ng karaniwan ng page sa parehong oras (huling 7 araw), o slow_seconds pataas, na may slow_min_replies na sagot man
+        // lang. Walang chat: karaniwang no_chats_per_hour pataas sa oras na ito, pero wala sa huling no_chats_minutes.
+        'problems' => [
+            'slow_factor' => (float) env('CHATBOT_SLOW_FACTOR', 3),
+            'slow_seconds' => (int) env('CHATBOT_SLOW_SECONDS', 60),
+            'slow_min_replies' => (int) env('CHATBOT_SLOW_MIN_REPLIES', 5),
+            'no_chats_per_hour' => (int) env('CHATBOT_NO_CHATS_PER_HOUR', 20),
+            'no_chats_minutes' => (int) env('CHATBOT_NO_CHATS_MINUTES', 30),
+        ],
     ],
 
     // Aling AI ang sumasagot sa AI step (pinipili kada page sa /chatbot/pages; walang setting = OpenAI, gaya ng dati). Bawat

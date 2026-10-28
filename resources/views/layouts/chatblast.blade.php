@@ -16,10 +16,8 @@
   $cbTitle = $cbTitle === '' || $cbTitle === $cbAppName ? $cbAppName : $cbAppName . ' · ' . $cbTitle;
   // Ang Chatbot ay para sa may /chatblast access (gaya ng mga route nito); ang iba ay walang link papunta roon.
   $cbChatbotOpen = \App\Support\NavAccess::allows(preg_replace('/\s+/u', ' ', trim((string) $cbRole)), '/chatblast');
-  // Ang pulang page (restricted, permission o maraming pumalya sa huling oras): para sa may Chatbot menu lang.
-  $cbProblems = $cbChatbotOpen ? app(\App\Services\Chatbot\BotHealth::class)->banner() : null;
-  // Ang mga page na may X sa setup check (o token invalid, o walang na-deliver): para rin sa may Chatbot menu lang.
-  $cbSetupProblems = $cbChatbotOpen ? app(\App\Services\ChatblastSetupCheck::class)->banner() : null;
+  // Ang mga page na may problema (pumapalya, hindi nasagot, lipat ng bot, mabagal, setup, walang chat): para sa may Chatbot menu lang.
+  $cbProblems = $cbChatbotOpen ? app(\App\Services\Chatbot\ProblemsPanel::class)->panel() : null;
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -102,18 +100,22 @@
 </header>
 
 @if($cbProblems)
-    <div class="shrink-0 border-b border-red-300 bg-red-600 px-4 py-2 text-sm text-white sm:px-6" role="alert" data-alert="page-problems">
-        ⚠ @foreach($cbProblems['pages'] as $p)<strong>{{ $p['page'] }}</strong>: {{ $p['reason'] }} since {{ $p['since'] }}@unless($loop->last); @endunless @endforeach
-        @if($cbProblems['more'])<span>+{{ $cbProblems['more'] }} more</span>@endif
-        — <a href="/chatbot/health#page-problems" class="font-semibold underline">open Health</a>
-    </div>
-@endif
-@if($cbSetupProblems)
-    <div class="shrink-0 break-words border-b border-red-300 bg-red-600 px-4 py-1.5 text-sm text-white sm:px-6" role="alert" data-alert="setup-problems">
-        {{-- Ang pangalan ng page: bukas ang Page settings na naka-filter sa page na iyon (?q=). --}}
-        ⚠ @foreach($cbSetupProblems['pages'] as $p)<a href="/chatblast/page-settings?q={{ urlencode($p['page']) }}" class="font-semibold underline">{{ $p['page'] }}</a>: {{ $p['reason'] }}@unless($loop->last); @endunless @endforeach
-        @if($cbSetupProblems['more'])<span>+{{ $cbSetupProblems['more'] }} more</span>@endif
-        — <a href="/chatblast/page-settings" class="font-semibold underline">open Page settings</a>
+    {{-- Isang linya muna; ang pag-click ay nagbubukas ng listahan dito rin (walang lipat ng page). --}}
+    <div class="shrink-0 border-b {{ $cbProblems['urgent'] ? 'border-red-300 bg-red-600 text-white' : 'border-slate-300 bg-slate-100 text-slate-800' }} text-sm" role="alert" data-alert="problems">
+        <button type="button" id="cb-problems-toggle" aria-expanded="false" aria-controls="cb-problems-list"
+                class="block w-full truncate px-4 py-1.5 text-left font-semibold sm:px-6">⚠ {{ count($cbProblems['pages']) }} {{ count($cbProblems['pages']) === 1 ? 'page' : 'pages' }} with problems ({{ $cbProblems['urgent'] }} urgent) <span aria-hidden="true">▾</span></button>
+        <ol id="cb-problems-list" class="max-h-[60vh] overflow-y-auto break-words border-t border-slate-200 bg-white px-4 py-2 text-slate-800 sm:px-6" hidden>
+            @foreach($cbProblems['pages'] as $p)
+                <li data-page="{{ $p['page'] }}" data-level="{{ $p['level'] }}" class="py-1.5">
+                    <div class="font-semibold">{{ $p['page'] }}</div>
+                    <ul class="space-y-0.5 pl-1">
+                        @foreach($p['lines'] as $l)
+                            <li data-level="{{ $l['level'] }}">{{ \App\Services\Chatbot\ProblemsPanel::LEVELS[$l['level']] }} {{ $l['text'] }} @foreach($l['links'] as [$label, $href]) <a href="{{ $href }}" class="text-blue-700 underline hover:text-blue-900">{{ $label }}</a>@endforeach</li>
+                        @endforeach
+                    </ul>
+                </li>
+            @endforeach
+        </ol>
     </div>
 @endif
 
@@ -136,6 +138,18 @@
     for (const s of document.querySelectorAll('.cb-scroll')) {
         s.addEventListener('scroll', () => s.classList.toggle('is-scrolled', s.scrollTop > 0), {passive: true});
     }
+    // Ang banner ng mga problema: bukas o sarado, naaalala ng browser (walang localStorage sa ilang browser: sarado na lang).
+    (() => {
+        const btn = document.getElementById('cb-problems-toggle'), list = document.getElementById('cb-problems-list');
+        if (!btn || !list) return;
+        const show = open => { list.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+        try { show(localStorage.getItem('cb-problems-open') === '1'); } catch (e) {}
+        btn.addEventListener('click', () => {
+            const open = list.hidden;
+            show(open);
+            try { localStorage.setItem('cb-problems-open', open ? '1' : '0'); } catch (e) {}
+        });
+    })();
 </script>
 @stack('scripts')
 </body>

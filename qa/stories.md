@@ -3083,3 +3083,22 @@ Tests: `tests/Feature/Chatblast/ResponseSpeedTest.php`, existing Chatblast, Botc
 | S-182.6 (P1) | Given a role without Chatbot access, Then /chatbot/speed is 403; a CEO sees the screen and the Speed tab in the Chatbot nav | `test_S_182_6…` | passed |
 | S-182.7 (P1) | Existing Chatblast, Botcake and PageSettings suites pass (three nav tests now list the Speed tab) | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |
 | S-182.8 (P2) | At 390 px the hour table scrolls inside its card, and the day buttons and filters wrap | `test_S_182_8…` (markup only) | passed; not run in a browser |
+
+## S-184 One clickable problems panel shows, per page, everything that is wrong
+
+As the owner, I want one banner on every Chatbot and Chatblast screen that I can click to see, per page, every current problem (failing sends, unanswered customers, bot moves, slowness, double replies, setup errors, no chats) with a link to where it is fixed, so I can act from one place.
+
+Slice 184. Threat model: page names, setup reasons and watcher errors are staff- or Botcake-supplied text, shown escaped; links are built from page ids (digits) and url-encoded page names; nothing in the panel is written by the viewer. Risk tier: medium (a UI change behind the existing Chatbot access, read-only, no new route, table or migration).
+Tests: `tests/Feature/Chatblast/ProblemsPanelTest.php`, `PageProblemsTest`, `SetupProblemsBannerTest`, existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-184.1 (P1) | Given a restricted page (red), a sending page with a setup X (orange) and a not-sending page with a setup X (white), When any Chatbot or Chatblast screen opens, Then one collapsed line reads "⚠ 3 pages with problems (2 urgent)", the list is hidden until clicked, the pages are red → orange → white, each line has its links, the open/closed state is kept in localStorage inside try/catch, and the old two banners are gone | `test_S_184_1…` | see result |
+| S-184.2 (P1) | Given a page with a setup X, 4 customers not answered in 5 min and a watcher move to Botcake at 10:15, Then its row has 🔴 unanswered (Inbox on the latest customer, Health), 🟠 "Moved to Botcake at 10:15: <reason>" (History) and 🟠 "Setup: <X>" (Page settings filtered); a watcher event older than 6 h is not shown | `test_S_184_2…` | see result |
+| S-184.3 (P1) | Given a setup X on a page no On campaign sends to, Then the line is ⚪ "Not sending, setup incomplete: <X>" and the page is not urgent | `test_S_184_3…` | see result |
+| S-184.4 (P1) | Given a page usually answered in 4 s at this hour (last 7 days), When its median first reply in the last hour is 70 s (or 12 s = 3×), Then 🟠 "Slow: median first reply … (usual 4 s at this hour)" with a Speed link; 11 s is not slow; 60 s is slow whatever the usual | `test_S_184_4…` (4 data sets) | see result |
+| S-184.5 (P1) | Given pages that usually get 25 chats in this hour, When a bot-On page has no chat in the last 30 min, Then ⚪ "No chats in the last 30 min (usually 25 an hour)"; not for a bot-Off page, a page usually under 20, or a page with a chat in the last 30 min | `test_S_184_5…` | see result |
+| S-184.6 (P1) | Given no problems, Then no banner; a new problem shows within 61 s (cached up to a minute) | `test_S_184_6…` | see result |
+| S-184.7 (P1) | Given a role without the Chatbot menu, Then no banner | `test_S_184_7…` | see result |
+| S-184.8 (P1) | Existing Chatblast, Botcake and PageSettings suites pass (the 169 and 171 banner tests now read the panel) | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | see result |
+| S-184.9 (P2) | At 390 px the collapsed line is one line (cut with …) and the open list scrolls inside 60 % of the screen, long text wraps | `test_S_184_9…` (markup only) | see result |

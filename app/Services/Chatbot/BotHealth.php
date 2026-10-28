@@ -307,9 +307,11 @@ class BotHealth
             if ($light === null) continue;
             $reasons = array_filter($p['reasons']);
             arsort($reasons); // stable: sa tabla, ang nauuna sa REASONS
+            // Ang send_*: ang ilaw, dahilan at simula ng mga padala lang (hindi napapalitan ng hindi nasagot sa ibaba).
             $out[(string) $id] = ['page_id' => (string) $id, 'page' => $names[$id] ?? 'Page ' . $id, 'light' => $light, 'sends' => $p['sends'], 'failed' => $p['failed'],
                 'unreachable' => $p['unreachable'], 'failed_pct' => $pct, 'blocked' => $blocked, 'reason' => self::REASONS[array_key_first($reasons)],
-                'first_at' => $p['first_at'], 'last_at' => $p['last_at'], 'failures' => $this->pageFailures($id), 'unanswered' => 0];
+                'first_at' => $p['first_at'], 'last_at' => $p['last_at'], 'failures' => $this->pageFailures($id), 'unanswered' => 0, 'send_light' => $light, 'send_since' => $p['first_at'],
+                'send_reason' => self::REASONS[array_key_first($reasons)]];
         }
         // Ang mga customer na walang sagot mula sa anumang app (echo) sa loob ng ilang minuto: pula ang page kapag sapat ang dami.
         $wait = ChatEchoes::limit('unanswered_minutes');
@@ -317,7 +319,7 @@ class BotHealth
             if ($e['unanswered'] < ChatEchoes::limit('unanswered_customers')) continue;
             $text = $e['unanswered'] . ' customers not answered in ' . $wait . ' min';
             $row = $out[$e['page_id']] ?? ['page_id' => $e['page_id'], 'page' => $e['page'], 'light' => null, 'sends' => 0, 'failed' => 0, 'unreachable' => 0,
-                'failed_pct' => 0.0, 'blocked' => 0, 'reason' => $text, 'first_at' => $e['first_at'], 'last_at' => '', 'failures' => []];
+                'failed_pct' => 0.0, 'blocked' => 0, 'reason' => $text, 'first_at' => $e['first_at'], 'last_at' => '', 'failures' => [], 'send_light' => null];
             if ($row['light'] !== 'red') [$row['reason'], $row['first_at']] = [$text, $e['first_at']];
             $out[$e['page_id']] = ['light' => 'red', 'unanswered' => $e['unanswered']] + $row;
         }

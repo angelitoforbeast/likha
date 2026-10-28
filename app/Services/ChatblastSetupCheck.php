@@ -218,7 +218,7 @@ class ChatblastSetupCheck
     public function banner(): ?array
     {
         try {
-            $list = Cache::remember('chatblast:setup-banner', self::BANNER_SECONDS, fn () => $this->problems());
+            $list = $this->pages();
         } catch (Throwable $e) {
             report($e);
             return null;
@@ -226,6 +226,15 @@ class ChatblastSetupCheck
         if (!$list) return null;
 
         return ['pages' => array_slice($list, 0, self::BANNER_PAGES), 'more' => max(0, count($list) - self::BANNER_PAGES)];
+    }
+
+    /**
+     * Lahat ng page na may X, "token invalid" o walang na-deliver (naka-cache BANNER_SECONDS), para sa banner ng mga problema.
+     * @return array<int, array{page: string, reason: string}> ayon sa pangalan ng page
+     */
+    public function pages(): array
+    {
+        return Cache::remember('chatblast:setup-banner', self::BANNER_SECONDS, fn () => $this->problems());
     }
 
     /** @return array<int, array{page: string, reason: string}> ayon sa pangalan ng page */

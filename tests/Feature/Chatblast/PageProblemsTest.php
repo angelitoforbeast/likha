@@ -70,9 +70,11 @@ class PageProblemsTest extends ChatblastTestCase
         }
     }
 
+    /** Ang banner ng mga problema (spec 184, pumalit sa banner na ito) bilang text, o null. */
     private function banner(string $html): ?string
     {
-        return preg_match('#<div[^>]*data-alert="page-problems"[^>]*>(.*?)</div>#s', $html, $m) ? trim(preg_replace('/\s+/', ' ', strip_tags($m[1]))) : null;
+        return preg_match('#<div[^>]*data-alert="problems"[^>]*>(.*?)</ol>\s*</div>#s', $html, $m)
+            ? trim(preg_replace('/\s+/', ' ', strip_tags(preg_replace('#<span aria-hidden="true">.*?</span>#', '', $m[1])))) : null;
     }
 
     public function test_S_169_1_a_restricted_page_is_red_and_the_banner_names_it_with_the_since_time(): void
@@ -90,9 +92,9 @@ class PageProblemsTest extends ChatblastTestCase
         $this->actingAs($this->user());
         foreach (['/chatbot/inbox', '/chatbot/health', '/chatblast/page-settings'] as $url) {
             $banner = $this->banner($this->get($url)->assertOk()->getContent());
-            $this->assertSame('⚠ Patricia Manalo: Page restricted by Facebook since 11:17 — open Health', $banner, $url);
+            $this->assertSame('⚠ 1 page with problems (1 urgent) Patricia Manalo 🔴 Page restricted by Facebook: 5 of 5 sends failed since 11:17 Health Inbox', $banner, $url);
         }
-        $this->assertStringContainsString('href="/chatbot/health#page-problems"', $this->get('/chatbot/inbox')->getContent());
+        $this->assertStringContainsString('href="/chatbot/health?page_id=1001#page-problems"', $this->get('/chatbot/inbox')->getContent());
     }
 
     /** Ang mga bagong dahilan: restricted (text o subcode 1893063) at permission (#2022, #200, code 10); ang (#10) na window ay window pa rin. */
@@ -199,22 +201,23 @@ class PageProblemsTest extends ChatblastTestCase
         $this->assertNull($this->banner($this->get('/chatblast/page-settings')->assertOk()->getContent()));
 
         $this->actingAs($this->user('Marketing - OIC', 'oic@example.test'));
-        $this->assertStringStartsWith('⚠ Patricia Manalo', (string) $this->banner($this->get('/chatblast/page-settings')->assertOk()->getContent()));
+        $this->assertStringContainsString('Patricia Manalo 🔴', (string) $this->banner($this->get('/chatblast/page-settings')->assertOk()->getContent()));
     }
 
-    public function test_S_169_9_the_banner_lists_at_most_three_pages_and_is_cached_up_to_a_minute(): void
+    /** Spec 184: ang banner ng mga problema ay naglilista ng lahat ng page (wala nang "+N more"). */
+    public function test_S_169_9_the_banner_lists_every_failing_page_and_is_cached_up_to_a_minute(): void
     {
         foreach (['1001', '1002', '1003', '1004'] as $page) {
             foreach (['11:20:00', '11:30:00', '11:40:00'] as $t) $this->send($page, '2026-10-27 ' . $t, 'failed', self::RESTRICTED, 200);
         }
         $this->actingAs($this->user());
         $banner = $this->banner($this->get('/chatbot')->getContent());
-        $this->assertSame(3, substr_count($banner, 'Page restricted by Facebook'));
-        $this->assertStringContainsString('+1 more', $banner);
+        $this->assertSame(4, substr_count($banner, 'Page restricted by Facebook'));
+        $this->assertStringStartsWith('⚠ 4 pages with problems (4 urgent)', $banner);
 
         foreach (['11:50:00', '11:51:00', '11:52:00'] as $t) $this->send('1005', '2026-10-27 ' . $t, 'failed', self::RESTRICTED, 200);
-        $this->assertStringContainsString('+1 more', $this->banner($this->get('/chatbot')->getContent())); // naka-cache pa
+        $this->assertStringStartsWith('⚠ 4 pages', $this->banner($this->get('/chatbot')->getContent())); // naka-cache pa
         $this->travel(61)->seconds();
-        $this->assertStringContainsString('+2 more', $this->banner($this->get('/chatbot')->getContent()));
+        $this->assertStringStartsWith('⚠ 5 pages', $this->banner($this->get('/chatbot')->getContent()));
     }
 }

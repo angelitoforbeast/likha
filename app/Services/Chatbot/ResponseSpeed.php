@@ -121,6 +121,33 @@ class ResponseSpeed
         ];
     }
 
+    /**
+     * Ang segundo ng unang sagot kada page, para sa mga mensaheng dumating sa [$from, $to), parehong tuntunin ng screen
+     * (nasa bot lang; hindi ang attachment na sadyang hindi sinasagot o ang kopya ng Botcake). Ang sagot ay hanggang $until
+     * lang; ang hindi pa nasasagot ay wala sa listahan. Para sa banner ng mga problema ("mabagal").
+     * @return array<string, int[]>
+     */
+    public function pageSeconds(string $from, string $to, string $until): array
+    {
+        $spans = BotHealth::flowSpans();
+        [$keys, $ats] = [[], []];
+        $chats = DB::table('botcake_chats')->where('received_at', '>=', $from)->where('received_at', '<', $to)->select(['page_id', 'psid', 'received_at', 'payload'])->cursor();
+        foreach ($chats as $c) {
+            $payload = json_decode((string) $c->payload, true) ?: [];
+            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !self::hadFlow($spans, (string) $c->page_id, $c->received_at)) continue;
+            $keys[] = [(string) $c->page_id, $c->page_id . ':' . $c->psid];
+            $ats[] = strtotime($c->received_at);
+        }
+        $replies = $this->replies($from, $until, null, array_fill_keys(array_column($keys, 1), true));
+        $out = [];
+        foreach ($keys as $i => [$page, $key]) {
+            [$secs] = self::firstReply($replies, $key, $ats[$i]);
+            if ($secs !== null) $out[$page][] = $secs;
+        }
+
+        return $out;
+    }
+
     private static function hadFlow(array $spans, string $page, string $at): bool
     {
         return isset($spans[$page]) && BotHealth::hadFlow($spans[$page], $at);
