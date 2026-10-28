@@ -2,6 +2,7 @@
 
 namespace App\Services\OrderEncode;
 
+use App\Services\AddressLandmark;
 use Throwable;
 
 /**
@@ -92,6 +93,9 @@ final class Encoder
             $error ??= $this->steps->redact($e->getMessage());
         }
         $db = $checker->cells;
+        // Ang landmark ng form ay idinudugtong sa address line ng AI ayon sa panuntunan (hindi iniaasa sa prompt). Pagkatapos ng
+        // checker, para ang lugar na sinuri nito ay ang dati pa rin.
+        $this->landmark($db, $cxd);
 
         $w = Text::jsTrim($db['W']);
         $s = Text::jsTrim($db['S']);
@@ -164,6 +168,31 @@ PHONE NUMBER: " . $in->get('phone') . "
                 $this->steps->add('fill_' . strtolower(str_replace(' ', '_', $label)), 'ERR:' . $e->getMessage(), $this->gpt->meta());
             }
         }
+    }
+
+    /**
+     * Ang "Landmark:" ng extracted details sa address line (D): landmark_added, landmark_kept (nasa address na),
+     * landmark_no_room (halos nasa limit na ang address line), no_landmark (wala o placeholder), o no_address (walang address
+     * line: hindi ginagawang landmark lang ang address).
+     */
+    private function landmark(array &$db, string $cxd): void
+    {
+        $landmark = Parse::landmark($cxd);
+        if (AddressLandmark::clean($landmark) === '') {
+            $this->steps->add('landmark', 'no_landmark');
+
+            return;
+        }
+        $address = Text::jsTrim($db['D']);
+        // "unknown" ay walang address line, gaya ng finalize ng checker.
+        if ($address === '' || Text::lower($address) === 'unknown') {
+            $this->steps->add('landmark', 'no_address', ['landmark' => $landmark]);
+
+            return;
+        }
+        $r = AddressLandmark::apply($address, $landmark);
+        if ($r['result'] === 'added') $db['D'] = Text::sheetValue($r['address']);
+        $this->steps->add('landmark', 'landmark_' . $r['result'], ['landmark' => $landmark]);
     }
 
     /** @return array<string, string> ang sagot ng OpenAI kapag walang nakuhang text (para makita kung bakit). */
