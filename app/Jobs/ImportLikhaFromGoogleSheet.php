@@ -418,7 +418,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             }
 
             if ($existing->{'PHONE NUMBER'} === null || $existing->{'PHONE NUMBER'} === '') {
-                $updateData['PHONE NUMBER'] = $namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null);
+                $updateData['PHONE NUMBER'] = OrderPhone::website($namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : '')) ?: null;
             }
 
             if (($existing->{'ITEM_NAME'} ?? null) === null || trim((string)$existing->{'ITEM_NAME'}) === '') {
@@ -443,7 +443,8 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             'PAGE'               => $page,
             'FULL NAME'          => $row[2] ?? null,
             'fb_name'            => $row[2] ?? null,
-            'PHONE NUMBER'       => $namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null),
+            // Anyo ng website: 9XXXXXXXXX (10 digits).
+            'PHONE NUMBER'       => OrderPhone::website($namePhone !== '' ? $namePhone : (preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : '')) ?: null,
             'all_user_input'     => 'FB NAME: ' . ($row[2] ?? '') . "\n" . ($row[4] ?? ''),
             'shop_details'       => $row[5] ?? null,
             'extracted_details'  => $row[6] ?? null,

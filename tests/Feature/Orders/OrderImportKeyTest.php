@@ -70,7 +70,16 @@ class OrderImportKeyTest extends TestCase
         $this->likha('', '', 'phone ko 09123456789');
 
         $this->assertSame(1, MacroOutput::count());
-        $this->assertSame('09123456789', MacroOutput::first()->{'PHONE NUMBER'});
+        $this->assertSame('9123456789', MacroOutput::first()->{'PHONE NUMBER'});
+    }
+
+    public function test_S_186_1_the_likha_import_writes_the_phone_as_ten_digits(): void
+    {
+        $this->likha('Ana Cruz', '09171234567');
+        $this->likha('', '0918 123 4567', 'a');
+        $this->likha('Ben Reyes', 'wala');
+
+        $this->assertSame(['9171234567', '9181234567', null], MacroOutput::orderBy('id')->pluck('PHONE NUMBER')->all());
     }
 
     public function test_S_121_1_5_no_name_and_no_phone_always_inserts_and_is_flagged(): void
@@ -89,7 +98,7 @@ class OrderImportKeyTest extends TestCase
 
         $hit = OrderIdentity::find('10:15 20-10-2026', 'Page Uno', '', '09987654321', "FB NAME: \nibang text");
 
-        $this->assertSame('09987654321', $hit->{'PHONE NUMBER'});
+        $this->assertSame('9987654321', $hit->{'PHONE NUMBER'});
     }
 
     public function test_S_121_2_2_macro_without_phone_matches_only_identical_input(): void
