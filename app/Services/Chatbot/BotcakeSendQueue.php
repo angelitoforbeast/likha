@@ -110,8 +110,8 @@ class BotcakeSendQueue
      * Kunin ang hanggang $n na pending, kondisyonal, para sa pool na $owner. Laging ang pinakaunang hindi pa tapos ng bawat
      * customer lang: ang kasunod ay naghihintay hanggang matapos ito (ayos ng padala kada customer). Ayon sa priority: ang
      * chatbot, saka ang Delivering, saka ang ibang chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng
-     * row; ang tinanggihan ay naiiwang pending. $fullPages: puno na ang page; $fullForReplies: puno na pati sa sagot ng bot
-     * (priority 0), na may isa pang puwesto sa page na puno ng chatblast.
+     * row; ang tinanggihan ay naiiwang pending. $fullPages: puno na ang page para sa chatblast; $fullForReplies: puno na ang
+     * page para sa sagot ng bot (priority 0), na may sariling puwesto kahit puno ng chatblast ang page.
      * @return array<int, object>
      */
     public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = []): array
@@ -121,8 +121,8 @@ class BotcakeSendQueue
         $rows = DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
             ->where('t.deadline_at', '>', now())
             // Ang page na puno na ang lane ay hindi na isinasama sa SQL: hindi nito mapupuno ang listahan ng kandidato (ang ibang page ay nakikita pa rin).
-            ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->whereNotIn('t.page_name', $fullPages)
-                ->orWhere(fn ($r) => $r->where('t.priority', 0)->when($fullForReplies, fn ($x) => $x->whereNotIn('t.page_name', $fullForReplies)))))
+            ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
+            ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
             ->orderBy('t.priority')->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind', 't.priority']);

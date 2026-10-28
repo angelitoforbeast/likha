@@ -133,6 +133,8 @@ return [
         'chat_rate' => (int) env('BOTCAKE_CHAT_RATE', 1200),
         // Ilang request kada segundo kada page (token) sa Botcake: ang pool (botcake:send-pool) ay eksakto, ang iba ay sumusunod.
         'rate_per_page' => (float) env('BOTCAKE_RATE_PER_PAGE', 2),
+        // Habang may sagot ang bot sa page, ang chatblast ay hanggang ganitong bahagi lang ng rate_per_page (0.5 = 1 sa 2 kada segundo).
+        'chatblast_share' => (float) env('BOTCAKE_CHATBLAST_SHARE', 0.5),
         // true = ang padala ng chatbot at chatblast ay ipinapasa sa botcake:send-pool (kapag buhay ito); false = naghihintay ang worker (ang dati).
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
         // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page).

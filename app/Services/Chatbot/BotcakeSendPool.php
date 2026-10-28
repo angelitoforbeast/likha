@@ -31,6 +31,7 @@ class BotcakeSendPool extends TicketPool
     public const LATE = 0.02;           // segundo: ang reserbang lampas dito ay hindi na ginagamit
     public const BLAST_RETRY = [15, 60]; // ang hintay bago ang ika-2 at ika-3 subok ng sulat o basa ng chatblast (5xx, walang sagot)
     public const COUNTS = 'botcake-send-pool:counts';
+    public const BOT_RECENT = 10.0;     // segundo: pagkatapos ng huling sagot ng bot, ang chatblast ay nasa bahagi pa rin nito ng rate
 
     /** @var array{queued: int, sent: int, retried: array<string, int>, failed: array<string, int>} */
     private array $counts = ['queued' => 0, 'sent' => 0, 'retried' => [], 'failed' => []];
@@ -77,7 +78,11 @@ class BotcakeSendPool extends TicketPool
     {
         $started = 0;
         if ($claim) {
-            $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(), $this->fullPages(1)));
+            // Ang sagot ng bot at ang chatblast ay may kanya-kanyang max() na puwesto: ang chatblast na puno ang pool ay hindi
+            // humaharang sa pagkuha ng sagot (nauuna sila sa claim ayon sa priority).
+            $bots = count(array_filter($this->jobs, fn (array $job) => self::bot($job['row'])));
+            $n = max(0, $this->max() - $bots) + max(0, $this->max() - (count($this->jobs) - $bots));
+            $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true)));
         }
         $this->lanes();
         $this->pump();
@@ -86,33 +91,47 @@ class BotcakeSendPool extends TicketPool
         return $started;
     }
 
+    /** Sagot ng bot (priority 0), hindi chatblast. */
+    private static function bot(object $row): bool
+    {
+        return (int) ($row->priority ?? 2) === 0;
+    }
+
     /**
      * May puwang pa ba ang page ng ticket: hanggang perPage() na hawak kada lane, para hindi maubos ng isang page (hal.
-     * isang chatblast campaign) ang lahat ng puwesto ng pool. Ang sagot ng bot (priority 0) ay may isa pang puwesto, kaya
-     * nakukuha kahit puno ng chatblast ang page. Ang hawak na (ulit na kuha) ay hindi.
+     * isang chatblast campaign) ang lahat ng puwesto ng pool. Ang sagot ng bot (priority 0) at ang chatblast ay may
+     * kanya-kanyang perPage() kada lane at max() sa pool, kaya nakukuha ang mga sagot kahit puno ng chatblast ang page o
+     * ang pool. Ang hawak na (ulit na kuha) ay hindi.
      */
     private function room(object $c): bool
     {
         if (isset($this->jobs[(string) $c->request_id])) return false;
         $token = $this->token((string) $c->page_name);
         $lane = $token === '' ? '' : sha1($token);
+        $bot = self::bot($c);
         $held = 0;
-        foreach ($this->jobs as $job) if ($job['lane'] === $lane) $held++;
+        $all = 0;
+        foreach ($this->jobs as $job) {
+            if (self::bot($job['row']) !== $bot) continue;
+            $all++;
+            if ($job['lane'] === $lane) $held++;
+        }
 
-        return $held < $this->perPage() + ((int) ($c->priority ?? 2) === 0 ? 1 : 0);
+        return $all < $this->max() && $held < $this->perPage();
     }
 
-    /** @return array<int, string> ang mga page na puno na ang lane (hindi na kukunan ng bago), may $extra pang puwesto */
-    private function fullPages(int $extra = 0): array
+    /** @return array<int, string> ang mga page na puno na ang lane para sa sagot ng bot ($bots) o sa chatblast */
+    private function fullPages(bool $bots): array
     {
         $held = [];
         $pages = [];
         foreach ($this->jobs as $job) {
+            if (self::bot($job['row']) !== $bots) continue;
             $held[$job['lane']] = ($held[$job['lane']] ?? 0) + 1;
             $pages[$job['lane']][(string) $job['row']->page_name] = true;
         }
         $full = [];
-        foreach ($held as $lane => $n) if ($n >= $this->perPage() + $extra) $full = array_merge($full, array_keys($pages[$lane]));
+        foreach ($held as $lane => $n) if ($n >= $this->perPage()) $full = array_merge($full, array_keys($pages[$lane]));
 
         return $full;
     }
@@ -121,6 +140,21 @@ class BotcakeSendPool extends TicketPool
     public function perPage(): int
     {
         return max(2, (int) ceil(3 / BotcakeClient::interval()));
+    }
+
+    /** Ang bahagi ng rate ng page na puwedeng gamitin ng chatblast habang may ginagawa ang bot (0.5 = 1 sa 2 request). */
+    private function share(): float
+    {
+        return min(1.0, max(0.05, (float) config('services.botcake.chatblast_share', 0.5)));
+    }
+
+    /** May ginagawa ang bot sa lane: may hawak na sagot (naghihintay o hinihintay ang sagot), o may padala sa huling BOT_RECENT s. */
+    private function botBusy(string $lane, float $now): bool
+    {
+        if ($now - ($this->lanes[$lane]['lastBot'] ?? -INF) < self::BOT_RECENT) return true;
+        foreach ($this->jobs as $job) if ($job['lane'] === $lane && self::bot($job['row'])) return true;
+
+        return false;
     }
 
     /** Ang token ng page (page settings), nasa memory nang 10 s. */
@@ -246,12 +280,17 @@ class BotcakeSendPool extends TicketPool
             // Ang handa na may pinakamataas na priority (chatbot, saka Delivering, saka ang ibang chatblast), ang pinakauna sa
             // mga kapareho; sa chatblast, ang naghintay nang lampas 10 s sa lane ay nauuna (hawak nito ang lock ng customer).
             // Ang sagot ng bot (priority 0) ay laging una: hindi ito naiiwan sa likod ng malaking chatblast.
+            // Habang may ginagawa ang bot sa lane, ang chatblast ay hanggang chatblast_share lang ng rate, kaya ang sagot na
+            // dumating sa pagitan ng dalawang hakbang ng chatblast ay may libreng puwesto agad.
+            $blastWait = $this->botBusy($key, $now) ? $interval / $this->share() : $interval;
+            $blastOk = $now >= ($lane['lastBlast'] ?? 0.0) + $blastWait - 0.000001;
             $pick = null;
             $best = null;
             foreach ($lane['queue'] as $i => $id) {
                 $job = $this->jobs[$id];
                 if ($job['notBefore'] > $now) continue;
                 $priority = (int) ($job['row']->priority ?? 2);
+                if ($priority !== 0 && !$blastOk) continue;
                 $rank = $priority === 0 ? -2 : ($now - ($job['since'] ?? $now) > 10 ? -1 : $priority);
                 if ($best === null || $rank < $best) { $best = $rank; $pick = $i; }
                 if ($rank === -2) break;
@@ -275,10 +314,12 @@ class BotcakeSendPool extends TicketPool
             $id = $lane['queue'][$pick];
             array_splice($this->lanes[$key]['queue'], $pick, 1);
             // Ang susunod na puwede ay mula sa oras na talagang lumabas ang tawag (hindi sa oras ng pasya): eksaktong interval.
+            $bot = self::bot($this->jobs[$id]['row']);
             $at = $this->issue($id);
             if ($at === null) continue;
             $this->lanes[$key]['next'] = $at + $interval;
             $this->lanes[$key]['last'] = $at;
+            $this->lanes[$key][$bot ? 'lastBot' : 'lastBlast'] = $at;
             if ($at > $free + 0.000001) BotcakeClient::sentAt($key, $at);
             $this->sentAt[$key][] = $at;
             if (count($this->sentAt[$key]) > 100) array_shift($this->sentAt[$key]);

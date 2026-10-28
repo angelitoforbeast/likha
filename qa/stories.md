@@ -2994,3 +2994,19 @@ Amendment 175-1 (a page just moved to Forbeast is not blamed for messages from i
 | S-175.9b (P1) | Given the watcher switched a page back to Forbeast, When copies arrive 60 s later with no Forbeast copy, Then no switch, and no "moved" event follows the watcher's own move | `test_S_175_9b…` | passed |
 | S-175.10 (P1) | Given a person moves a page to Forbeast, When the watcher runs (twice), Then one "moved" event "moved to Forbeast by <name> at <time>" and the provider change stays the person's in the history | `test_S_175_10…` | passed |
 | S-175.10b (P2) | A move with no user is recorded "by system" and labelled system (not auto-switch); a move older than an hour gets no event | `test_S_175_10b…` | passed |
+
+## S-179 The bot's replies always go before chatblast on a page's Botcake lane
+
+As a customer writing to a page during the 09:00 chatblast, I want the bot's reply right away, so I am not left waiting behind the page's chatblast; chatblast may wait, but still finishes.
+
+Slice 179. Threat model: the customers' messages and the chatblast rows are untrusted data that only queue work; the rate, share and pool sizes come from config (trusted). Risk tier: medium (scheduling inside the existing botcake:send-pool, no new route, table or input).
+Tests: `tests/Feature/Chatblast/BotLaneShareTest.php` (fake Botcake answering after 1 s, one page at 2 requests/s), existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-179.1 (P1) | Given a page's lane busy with 20 chatblast jobs, When three customers write at once, Then the next three sends of the page are the three replies, within three rate intervals | `test_S_179_1…` | passed |
+| S-179.2 (P1) | Given 10 chatblast jobs and a reply every 0.5 s, Then every chatblast message's calls are write, read, send_flow in that order, and all are sent | `test_S_179_2…` | passed |
+| S-179.3 (P1) | Given 40 chatblast jobs, When no bot work, Then chatblast makes ≥ 19 calls in 10 s; When a reply every 2 s, Then chatblast makes ≤ 11 calls in 10 s (its 50% share) | `test_S_179_3…` (2 data sets) | passed |
+| S-179.4 (P1) | Given 500 chatblast jobs and 50 replies in 30 s on one page, Then every reply goes out within 1 s of being ready and every chatblast message is sent; the wait before and after is in the result | `test_S_179_4…` | passed |
+| S-179.5 (P1) | Given 60 chatblast jobs and a reply every second for 300 s, Then every chatblast message is sent | `test_S_179_5…` | passed |
+| S-179.6 (P1) | Existing Chatblast, Botcake and PageSettings suites pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |
