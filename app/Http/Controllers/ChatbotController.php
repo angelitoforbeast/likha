@@ -150,7 +150,9 @@ class ChatbotController extends Controller
                 // Aling AI ang sumasagot (ang override ng page o ang site default).
                 'ai' => $ai->row($page),
                 // Reply values: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga ad group ng page).
-                'reply' => $adGroups->adBased($page) ? \App\Services\Chatbot\AdGroups::MODE_AD : 'page',
+                'reply' => ($adBased = $adGroups->adBased($page)) ? \App\Services\Chatbot\AdGroups::MODE_AD : 'page',
+                // Ad-based lang: ilang bagong ad ang wala pa sa group (ang badge ng nakasarang row; naka-cache, ≤ 5 min).
+                'ad_new' => $adBased ? $adGroups->newUnassigned($page) : null,
             ];
         }
 

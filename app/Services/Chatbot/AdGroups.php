@@ -28,6 +28,9 @@ class AdGroups
     public const UNASSIGNED_DAYS = 30;
     public const UNASSIGNED_LIMIT = 50;
     public const UNASSIGNED_TTL = 120;
+    /** Ang status ng mga ad (ads_manager_reports) ay naka-cache nang 5 minuto; "New" = nasa huling NEW_DAYS araw. */
+    public const STATUS_TTL = 300;
+    public const NEW_DAYS = 3;
     /** Run state ng customer (chatbot_customer_values): ang group nang pumasok siya sa sequence N. */
     public const SEQ_PIN = '__ad_group_seq_';
     /** Ang switch ng page: adgroup.mode = "ad" ay Ad-based; wala = Page-based (ang default). */
@@ -310,59 +313,164 @@ class AdGroups
 
     /**
      * "Ads not in a group yet": ang mga ad na nakita sa page sa huling UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang
-     * ad_id ng botcake_psids ng page), wala pa sa alinmang group ng page; ang pangalan mula sa ads_manager_reports. Ang
-     * pinakamaraming customer muna, hanggang $limit; $q = bahagi ng ad ID o ng pangalan. Ang bilang ay naka-cache nang
-     * UNASSIGNED_TTL segundo kada page.
-     * @return array{rows: array<int, array{ad_id: string, name: ?string, customers: int, last: ?string}>, total: int}
+     * ad_id ng botcake_psids ng page), wala pa sa alinmang group ng page; ang pangalan mula sa ads_manager_reports at ang
+     * status (statuses). Ang bago muna, saka ang On, saka ang pinakamaraming customer, hanggang $limit; $q = bahagi ng ad
+     * ID o ng pangalan. new = ilang bago ang wala pa sa group (hindi ayon sa $q). Ang nakita ay naka-cache nang
+     * UNASSIGNED_TTL segundo kada page, ang status nang STATUS_TTL.
+     * @return array{rows: array<int, array<string, mixed>>, total: int, new: int}
      */
     public function unassigned(string $page, string $q = '', int $limit = self::UNASSIGNED_LIMIT): array
     {
-        $seen = Cache::remember('chatbot-adgroups:seen:' . sha1($this->settings->pageKey($page)), self::UNASSIGNED_TTL, fn () => $this->seen($page));
-        $grouped = array_merge(...array_values(array_map(fn ($g) => $g['ads'], $this->groups($page))) ?: [[]]);
-        $rows = array_diff_key($seen, array_flip($grouped));
-        $names = $this->adNames(array_map('strval', array_keys($rows)));
-        $q = mb_strtolower(trim($q));
-        $out = [];
-        foreach ($rows as $ad => $r) {
-            $ad = (string) $ad;
-            $name = $names[$ad] ?? null;
-            if ($q !== '' && !str_contains($ad, $q) && !str_contains(mb_strtolower((string) $name), $q)) continue;
-            $out[] = ['ad_id' => $ad, 'name' => $name !== '' ? $name : null, 'customers' => $r['customers'],
-                'last' => $r['last'] ? \Carbon\Carbon::parse($r['last'])->format('Y-m-d H:i') : null];
-        }
-        usort($out, fn ($a, $b) => [$b['customers'], (string) $b['last']] <=> [$a['customers'], (string) $a['last']]);
+        $o = $this->overview($page, $q, $limit);
 
-        return ['rows' => array_slice($out, 0, $limit), 'total' => count($out)];
+        return ['rows' => $o['unassigned'], 'total' => $o['unassigned_total'], 'new' => $o['new_unassigned']];
     }
 
-    /** @return array<string, array{customers: int, last: ?string}> ad => ilang customer at ang huling oras */
+    /**
+     * Ang lahat ng kailangan ng row ng Ad-based na page: ang mga group na ang bawat ad ay may pangalan, status, ilang
+     * customer at huling oras (all_off = lahat ng ad ay Off), ang "Ads not in a group yet", at ang huling araw ng report
+     * (as_of). Iisang statuses() para sa lahat ng ad ng page.
+     * @return array{groups: array<int, array<string, mixed>>, unassigned: array<int, array<string, mixed>>, unassigned_total: int, new_unassigned: int, as_of: ?string}
+     */
+    public function overview(string $page, string $q = '', int $limit = self::UNASSIGNED_LIMIT): array
+    {
+        $seen = $this->seenCached($page);
+        $groups = $this->groups($page);
+        $grouped = array_merge(...array_values(array_map(fn ($g) => $g['ads'], $groups)) ?: [[]]);
+        $rest = array_diff_key($seen, array_flip($grouped));
+        $all = array_values(array_unique(array_merge($grouped, array_map('strval', array_keys($rest)))));
+        $status = $this->statuses($all);
+        $names = $this->adNames($all);
+        $row = fn (string $ad) => $this->adRow($ad, $names[$ad] ?? null, $seen[$ad] ?? null, $status['ads'][$ad] ?? null);
+
+        $outGroups = [];
+        foreach ($groups as $id => $g) {
+            $ads = array_map($row, $g['ads']);
+            $outGroups[$id] = $g + ['rows' => $ads, 'all_off' => $ads && !array_filter($ads, fn ($a) => $a['status'] !== 'off')];
+        }
+        $q = mb_strtolower(trim($q));
+        $out = [];
+        $new = 0;
+        foreach (array_keys($rest) as $ad) {
+            $r = $row((string) $ad);
+            if ($r['new']) $new++;
+            if ($q !== '' && !str_contains($r['ad_id'], $q) && !str_contains(mb_strtolower((string) $r['name']), $q)) continue;
+            $out[] = $r;
+        }
+        usort($out, fn ($a, $b) => [$b['new'], $b['status'] === 'on', $b['customers'], (string) $b['last']] <=> [$a['new'], $a['status'] === 'on', $a['customers'], (string) $a['last']]);
+
+        return ['groups' => $outGroups, 'unassigned' => array_slice($out, 0, $limit), 'unassigned_total' => count($out), 'new_unassigned' => $new, 'as_of' => $status['as_of']];
+    }
+
+    /** Ilang bagong ad (New) ang wala pa sa group ng page: ang badge ng nakasarang Ad-based na row. */
+    public function newUnassigned(string $page): int
+    {
+        $seen = $this->seenCached($page);
+        $rest = array_diff_key($seen, array_flip(array_merge(...array_values(array_map(fn ($g) => $g['ads'], $this->groups($page))) ?: [[]])));
+        $status = $this->statuses(array_map('strval', array_keys($rest)));
+
+        return count(array_filter(array_keys($rest), fn ($ad) => $this->adRow((string) $ad, null, $rest[$ad], $status['ads'][(string) $ad] ?? null)['new']));
+    }
+
+    /**
+     * Isang ad para sa screen. new: ang unang araw nito sa reports ay nasa huling NEW_DAYS araw (kasama ngayon); kapag
+     * wala sa reports, ang unang customer nito (sa huling UNASSIGNED_DAYS araw) ay nasa huling NEW_DAYS araw.
+     * @param ?array{customers: int, last: ?string, first?: ?string} $seen
+     * @param ?array{status: string, off_since: ?string, off_days: ?int, first_day: string} $st
+     */
+    private function adRow(string $ad, ?string $name, ?array $seen, ?array $st): array
+    {
+        $first = $seen['first'] ?? null;
+        $new = $st !== null
+            ? $st['first_day'] >= now()->subDays(self::NEW_DAYS - 1)->toDateString()
+            : ($first !== null && \Carbon\Carbon::parse($first)->gte(now()->subDays(self::NEW_DAYS)));
+
+        return ['ad_id' => $ad, 'name' => $name !== '' ? $name : null, 'status' => $st['status'] ?? 'none', 'off_since' => $st['off_since'] ?? null,
+            'off_days' => $st['off_days'] ?? null, 'new' => $new, 'customers' => (int) ($seen['customers'] ?? 0),
+            'last' => !empty($seen['last']) ? \Carbon\Carbon::parse($seen['last'])->format('Y-m-d H:i') : null];
+    }
+
+    /**
+     * Ang status ng mga ad mula sa ads_manager_reports (walang tawag sa Meta). Dalawang grouped query, parehong
+     * "ad_id IN (...)" (index ads_report_adid_idx): (1) kada ad ang unang at huling araw, ang huling araw na may gastos at
+     * ang unang araw na hindi parehong active ang campaign at ad set; (2) ang mga row ng bawat ad sa huling araw nito.
+     * on: sa huling araw, active ang campaign at ad set (gaya ng Ads Manager report: LIKE 'active%'), o may gastos.
+     * off: off_since = ang araw pagkatapos ng huling gastos, o ang unang hindi active na araw kapag hindi kailanman
+     * gumastos; off_days = as_of − off_since + 1. as_of = ang pinakahuling araw ng report ng mga ad na ito. Ang ad na wala
+     * sa reports ay wala sa "ads" (No report data). Naka-cache nang STATUS_TTL segundo.
+     * @param array<int, string> $ads
+     * @return array{as_of: ?string, ads: array<string, array{status: string, off_since: ?string, off_days: ?int, first_day: string}>}
+     */
+    public function statuses(array $ads): array
+    {
+        $ads = array_values(array_unique(array_filter(array_map('strval', $ads), fn ($a) => preg_match('/^\d{1,64}$/', $a))));
+        sort($ads, SORT_STRING);
+        if (!$ads || !\Illuminate\Support\Facades\Schema::hasTable('ads_manager_reports')) return ['as_of' => null, 'ads' => []];
+
+        return Cache::remember('chatbot-adgroups:status:' . sha1(implode(',', $ads)), self::STATUS_TTL, function () use ($ads) {
+            $active = "(LOWER(TRIM(COALESCE(campaign_delivery, ''))) LIKE 'active%' AND LOWER(TRIM(COALESCE(ad_set_delivery, ''))) LIKE 'active%')";
+            $days = DB::table('ads_manager_reports')->whereIn('ad_id', $ads)->whereNotNull('day')->groupBy('ad_id')
+                ->selectRaw("ad_id, MIN(day) AS first_day, MAX(day) AS last_day, MAX(CASE WHEN amount_spent_php > 0 THEN day END) AS last_spend, MIN(CASE WHEN NOT $active THEN day END) AS first_off")
+                ->get()->keyBy(fn ($r) => (string) $r->ad_id);
+            if ($days->isEmpty()) return ['as_of' => null, 'ads' => []];
+            $latest = DB::table('ads_manager_reports as a')
+                ->joinSub(DB::table('ads_manager_reports')->whereIn('ad_id', $ads)->whereNotNull('day')->groupBy('ad_id')->selectRaw('ad_id, MAX(day) AS d'), 'm', fn ($j) => $j->on('a.ad_id', '=', 'm.ad_id')->on('a.day', '=', 'm.d'))
+                ->groupBy('a.ad_id')
+                ->selectRaw('a.ad_id, SUM(COALESCE(a.amount_spent_php, 0)) AS spend, MAX(CASE WHEN ' . str_replace(['campaign_delivery', 'ad_set_delivery'], ['a.campaign_delivery', 'a.ad_set_delivery'], $active) . ' THEN 1 ELSE 0 END) AS on_now')
+                ->get()->keyBy(fn ($r) => (string) $r->ad_id);
+            $day = fn ($v) => $v === null ? null : substr((string) $v, 0, 10);
+            $asOf = $days->map(fn ($r) => $day($r->last_day))->max();
+            $out = [];
+            foreach ($days as $ad => $r) {
+                $l = $latest[$ad] ?? null;
+                $on = $l && ((int) $l->on_now === 1 || (float) $l->spend > 0);
+                $since = $on ? null : ($r->last_spend !== null ? \Carbon\Carbon::parse($day($r->last_spend))->addDay()->toDateString() : ($day($r->first_off) ?? $day($r->last_day)));
+                $out[(string) $ad] = ['status' => $on ? 'on' : 'off', 'off_since' => $since,
+                    'off_days' => $since === null ? null : (int) \Carbon\Carbon::parse($since)->diffInDays(\Carbon\Carbon::parse($asOf)) + 1,
+                    'first_day' => $day($r->first_day)];
+            }
+
+            return ['as_of' => $asOf, 'ads' => $out];
+        });
+    }
+
+    /** @return array<string, array{customers: int, last: ?string, first: ?string}> */
+    private function seenCached(string $page): array
+    {
+        return Cache::remember('chatbot-adgroups:seen:v2:' . sha1($this->settings->pageKey($page)), self::UNASSIGNED_TTL, fn () => $this->seen($page));
+    }
+
+    /** @return array<string, array{customers: int, last: ?string, first: ?string}> ad => ilang customer, ang huli at ang unang oras */
     private function seen(string $page): array
     {
         $since = now()->subDays(self::UNASSIGNED_DAYS);
         $psids = [];
         $last = [];
-        $add = function ($ad, $psid, $at) use (&$psids, &$last) {
+        $first = [];
+        $add = function ($ad, $psid, $at, $from = null) use (&$psids, &$last, &$first) {
             $ad = trim((string) $ad);
             if (!preg_match('/^\d{1,64}$/', $ad)) return;
             $psids[$ad][(string) $psid] = true;
             $at = $at ? (string) \Carbon\Carbon::parse($at)->format('Y-m-d H:i:s') : null;
             if ($at && ($last[$ad] ?? '') < $at) $last[$ad] = $at;
+            $from = $from ? (string) \Carbon\Carbon::parse($from)->format('Y-m-d H:i:s') : $at;
+            if ($from && (!isset($first[$ad]) || $first[$ad] > $from)) $first[$ad] = $from;
         };
         $pageId = $this->settings->get($page, 'botcake', 'page_id');
         if ($pageId !== null && $pageId !== '') {
             // Isang row kada ad + customer (ang JSON ng payload ay binabasa ng database, mysql/pgsql/sqlite).
             BotcakeChat::active()->where('page_id', $pageId)->where('received_at', '>=', $since)->whereNotNull('payload->ad_id')
-                ->selectRaw('psid, MAX(received_at) as last_at')->addSelect('payload->ad_id as ad')
-                ->groupBy('payload->ad_id', 'psid')->toBase()->get()->each(fn ($r) => $add($r->ad, $r->psid, $r->last_at));
+                ->selectRaw('psid, MAX(received_at) as last_at, MIN(received_at) as first_at')->addSelect('payload->ad_id as ad')
+                ->groupBy('payload->ad_id', 'psid')->toBase()->get()->each(fn ($r) => $add($r->ad, $r->psid, $r->last_at, $r->first_at));
         }
         $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
         BotcakePsid::whereRaw("LOWER($trim(page)) = ?", [$this->settings->pageKey($page)])->whereNotNull('ad_id')->where('ad_id', '<>', '')
             ->where(fn ($w) => $w->where('last_interactive_at', '>=', $since)->orWhere('first_seen_at', '>=', $since))
             ->toBase()->get(['psid', 'ad_id', 'last_interactive_at', 'first_seen_at'])
-            ->each(fn ($r) => $add($r->ad_id, $r->psid, max((string) $r->last_interactive_at, (string) $r->first_seen_at) ?: null));
+            ->each(fn ($r) => $add($r->ad_id, $r->psid, max((string) $r->last_interactive_at, (string) $r->first_seen_at) ?: null, $r->first_seen_at ?: null));
 
         $out = [];
-        foreach ($psids as $ad => $set) $out[(string) $ad] = ['customers' => count($set), 'last' => $last[$ad] ?? null];
+        foreach ($psids as $ad => $set) $out[(string) $ad] = ['customers' => count($set), 'last' => $last[$ad] ?? null, 'first' => $first[$ad] ?? null];
 
         return $out;
     }

@@ -61,14 +61,16 @@ class ChatbotAdGroupController extends Controller
                 $keys[$key] = ['key' => $key, 'label' => $key === 'flow_id' ? 'FLOW' : ($labels[$key] ?? $key), 'kind' => $key === 'flow_id' ? 'flow' : ChatbotFields::kind($key)];
             }
         }
-        $unassigned = $this->groups->unassigned($page, $q);
+        // Ang bawat ad (sa group at sa "Ads not in a group yet") ay may pangalan, status, ilang customer at huling oras.
+        $o = $this->groups->overview($page, $q);
 
         return response()->json([
             'mode' => $this->groups->adBased($page) ? AdGroups::MODE_AD : 'page',
-            'groups' => array_values(array_map(fn ($g) => ['id' => $g['id'], 'name' => $g['name'], 'ads' => $g['ads'], 'values' => (object) $g['values']], $this->groups->groups($page))),
+            'as_of' => $o['as_of'],
+            'groups' => array_values(array_map(fn ($g) => ['id' => $g['id'], 'name' => $g['name'], 'ads' => $g['rows'], 'all_off' => $g['all_off'], 'values' => (object) $g['values']], $o['groups'])),
             'keys' => array_values($keys),
             'flows' => ChatbotFlow::orderBy('name')->get(['id', 'name'])->map(fn ($f) => ['id' => $f->id, 'name' => $f->name])->all(),
-            'unassigned' => $unassigned['rows'], 'unassigned_total' => $unassigned['total'],
+            'unassigned' => $o['unassigned'], 'unassigned_total' => $o['unassigned_total'], 'new_unassigned' => $o['new_unassigned'],
         ]);
     }
 
