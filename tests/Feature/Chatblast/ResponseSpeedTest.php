@@ -445,12 +445,13 @@ class ResponseSpeedTest extends ChatblastTestCase
         foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('id="sp-chart-' . $k . '"', $html);
     }
 
-    public function test_S_185_9_each_chart_sits_under_its_table_and_fits_a_phone(): void
+    public function test_S_185_9_each_chart_sits_with_its_table_and_fits_a_phone(): void
     {
         $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
-        // Kada chart ay sa ilalim ng sariling table (walang ibang table sa pagitan), sa kahong sumusunod sa lapad ng screen.
+        // Spec 188: ang chart ay nasa itaas na ng sariling table (walang ibang table sa pagitan), sa kahong sumusunod sa
+        // lapad ng screen.
         foreach (['hours' => 'reply', 'ai' => 'ai', 'push' => 'push', 'sequences' => 'seq'] as $table => $chart) {
-            $this->assertMatchesRegularExpression('#data-table="' . $table . '"(?:(?!data-table=).)*?<div class="relative h-\d+ w-full[^"]*">\s*<canvas id="sp-chart-' . $chart . '"#s', $html, $chart);
+            $this->assertMatchesRegularExpression('#<div class="relative h-\d+ w-full[^"]*">\s*<canvas id="sp-chart-' . $chart . '"(?:(?!data-table=).)*?data-table="' . $table . '"#s', $html, $chart);
         }
     }
 
@@ -572,5 +573,129 @@ class ResponseSpeedTest extends ChatblastTestCase
         Cache::put('response-speed:' . md5(json_encode($f)), ['filters' => $f, 'hours' => [], 'total' => [], 'by_bot' => [], 'sequences' => []], 120);
 
         $this->assertArrayHasKey('push', app(ResponseSpeed::class)->output([]));
+    }
+
+    /** Ang mga <details> ng screen: [key => [buong tag, laman]]. */
+    private static function details(string $html): array
+    {
+        preg_match_all('#(<details\b[^>]*data-sp-table="([^"]+)"[^>]*>)(.*?)</details>#s', $html, $m, PREG_SET_ORDER);
+        $out = [];
+        foreach ($m as $d) $out[$d[2]] = [$d[1], $d[3]];
+
+        return $out;
+    }
+
+    /** Ang buod sa ilalim ng heading ng isang section, bilang plain text. */
+    private static function summary(string $html, string $key): string
+    {
+        preg_match('#<p\b[^>]*data-sp-summary="' . $key . '"[^>]*>(.*?)</p>#s', $html, $m);
+
+        return trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($m[1] ?? ''), ENT_QUOTES)));
+    }
+
+    public function test_S_188_1_the_charts_show_and_every_table_is_in_a_closed_details(): void
+    {
+        $this->seedSteps();
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
+        $d = self::details($html);
+
+        $this->assertSame(['hours', 'ai', 'push', 'sequences', 'sequence-slowest'], array_keys($d));
+        foreach ($d as $key => [$tag, $body]) {
+            $this->assertDoesNotMatchRegularExpression('#\sopen\b#', $tag, "$key is closed by default");
+            $this->assertStringContainsString('data-table="' . $key . '"', $body, "$key table is inside its details");
+            $this->assertMatchesRegularExpression('#<summary\b[^>]*>.*Show .*Hide .*</summary>#s', $body, "$key has Show / Hide");
+        }
+        // Wala nang table sa labas ng mga details; ang apat na chart ay nasa labas, nakikita.
+        $outside = preg_replace('#<details\b.*?</details>#s', '', $html);
+        $this->assertStringNotContainsString('<table', $outside);
+        foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('<canvas id="sp-chart-' . $k . '"', $outside);
+        // Ang heading, ang buod at ang chart ay nauuna sa table ng bawat section.
+        foreach (['hours' => ['h-hours', 'reply'], 'ai' => ['h-ai', 'ai'], 'push' => ['h-push', 'push'], 'sequences' => ['h-seq', 'seq']] as $table => [$h, $chart]) {
+            $this->assertMatchesRegularExpression('#id="' . $h . '".*?data-sp-summary="' . $table . '".*?<canvas id="sp-chart-' . $chart . '".*?<details\b[^>]*data-sp-table="' . $table . '"#s', $html, $table);
+        }
+        // Ang bukas o sarado ay naaalala ng browser (localStorage, sa loob ng try/catch).
+        $this->assertMatchesRegularExpression('#try\s*\{[^}]*localStorage#', $html);
+    }
+
+    public function test_S_188_2_the_summary_line_shows_each_tables_day_totals(): void
+    {
+        $this->seedAi();
+        $this->seedSteps();
+        $res = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk();
+        $html = $res->getContent();
+        $sec = fn ($v) => $v === null ? '—' : rtrim(rtrim(number_format($v, 1), '0'), '.') . ' s';
+
+        $this->assertSame('Day: 4 messages · 3 answered · avg 32.3 s · median 20 s · p90 72 s · max 72 s', self::summary($html, 'hours'));
+
+        $t = $res->viewData('total');
+        $g = fn ($k, $label) => "$label {$t[$k]['n']} answered · avg {$sec($t[$k]['avg'])} · median {$sec($t[$k]['median'])} · p90 {$sec($t[$k]['p90'])} · max {$sec($t[$k]['max'])}";
+        $this->assertSame('Day: ' . $g('with_ai', 'with AI') . '; ' . $g('no_ai', 'no AI') . "; AI time avg {$sec($t['ai_time']['avg'])} · p90 {$sec($t['ai_time']['p90'])} · max {$sec($t['ai_time']['max'])}", self::summary($html, 'ai'));
+        $this->assertStringStartsWith('Day: with AI 1 answered · avg 72 s', self::summary($html, 'ai'));
+        $this->assertStringEndsWith('AI time avg 48 s · p90 48 s · max 48 s', self::summary($html, 'ai'));
+
+        $p = $res->viewData('push')['total'];
+        $this->assertSame("Day: {$p['pushed']} pushed (Forbeast) · {$p['measured']} measured · avg {$sec($p['avg'])} · median {$sec($p['median'])} · p90 {$sec($p['p90'])} · max {$sec($p['max'])} · {$p['unconfirmed']} not confirmed yet · {$p['botcake']} Botcake (no Meta time)", self::summary($html, 'push'));
+        $this->assertStringContainsString('measured · avg 2 s', self::summary($html, 'push'));
+
+        $s = $res->viewData('sequences')['total'];
+        $this->assertSame("Day: {$s['due']} due · {$s['sent']} sent · {$s['failed']} failed · {$s['skipped']} skipped; scheduled → pushed avg {$sec($s['scheduled_to_pushed']['avg'])} · p90 {$sec($s['scheduled_to_pushed']['p90'])} · max {$sec($s['scheduled_to_pushed']['max'])}; pushed → sent at Meta: {$s['pushed_to_meta']['n']} steps · avg {$sec($s['pushed_to_meta']['avg'])} · p90 {$sec($s['pushed_to_meta']['p90'])} · max {$sec($s['pushed_to_meta']['max'])}", self::summary($html, 'sequences'));
+        $this->assertStringEndsWith('2 steps · avg 62.5 s · p90 120 s · max 120 s', self::summary($html, 'sequences'));
+    }
+
+    public function test_S_188_3_opening_a_table_shows_the_same_table_with_its_notes(): void
+    {
+        $this->seedSteps();
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
+        $d = self::details($html);
+
+        // Ang table ay ang dati (sa kahong nag-i-scroll, may Day na row), at ang paliwanag nito ay kasama sa loob.
+        $notes = ['hours' => 'Hour = when the customer', 'ai' => 'With AI = the first reply', 'push' => "The bot's replies on Forbeast", 'sequences' => 'Scheduled = when the step was due'];
+        foreach ($notes as $key => $note) {
+            $this->assertMatchesRegularExpression('#<div class="cb-card overflow-x-auto">\s*<table class="cb-table min-w-\[\d+rem\]" data-table="' . $key . '">#', $d[$key][1], $key);
+            $this->assertMatchesRegularExpression('#<tfoot>\s*<tr class="font-semibold"[^>]*><td>Day</td>#', $d[$key][1], "$key Day row");
+            $this->assertStringContainsString($note, html_entity_decode($d[$key][1], ENT_QUOTES), "$key notes");
+        }
+        $this->assertMatchesRegularExpression('#data-table="hours".*<tr data-hour="10">\s*<td[^>]*>10:00</td>\s*<td[^>]*>3</td>\s*<td[^>]*>2</td>#s', $d['hours'][1]);
+        $this->assertStringContainsString('Follow up', $d['sequence-slowest'][1]);
+    }
+
+    public function test_S_188_6_only_the_average_series_are_shown_by_default(): void
+    {
+        $this->seedAi();
+        $this->seedSteps();
+        [$c, $res] = $this->screen();
+
+        // Ang average lang ang nakikita sa simula; ang iba ay nasa legend pero nakatago (pati ang sa naunang araw).
+        $this->assertSame(['avg'], $c['reply']['shown']);
+        $this->assertSame(['with_ai_avg', 'no_ai_avg'], $c['ai']['shown']);
+        $this->assertSame(['avg'], $c['push']['shown']);
+        $this->assertSame(['avg'], $c['seq']['shown']);
+        foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertSame([], array_diff($c[$k]['shown'], array_keys($c[$k]['series'])), $k);
+        // Ang chart script ang gumagamit nito: nakatago ang serye na wala sa shown.
+        $this->assertStringContainsString('hidden: !c.shown.includes(key)', $res->getContent());
+    }
+
+    public function test_S_188_7_the_axis_top_is_about_three_times_the_typical_average_and_a_spike_is_clamped(): void
+    {
+        $day = fn (array $set) => array_replace(array_fill(0, 24, null), $set);
+        // Karaniwang 6 s kada oras at isang oras na 363 s: ang taas ay 3 × 6 = 18 → 20 s; ang 363 ay lampas (iginuguhit sa taas).
+        $spike = $day(array_fill(0, 10, 6) + [10 => 363]);
+        $this->assertSame(20, ResponseSpeed::axisTop($spike, []));
+        // Kaunti pa ang oras ngayon (wala pang 3): ang naunang araw ang batayan.
+        $this->assertSame(100, ResponseSpeed::axisTop($day([0 => 2, 1 => 500]), $day(array_fill(0, 8, 30))));
+        // Hindi bababa sa 10 s; walang data: 10 s.
+        $this->assertSame(10, ResponseSpeed::axisTop($day(array_fill(0, 12, 1)), []));
+        $this->assertSame(10, ResponseSpeed::axisTop($day([]), $day([])));
+        // Malinis na numero pataas: 3 × 41 = 123 → 150.
+        $this->assertSame(150, ResponseSpeed::axisTop($day(array_fill(0, 5, 41)), []));
+
+        // Ang screen: kada chart ay may taas mula sa (mga) average nito. Ngayon: 46 s at 5 s (2 oras; ang kahapon ay 1 oras
+        // lang kaya ngayon pa rin) → median 25.5 × 3 = 76.5 → 80 s.
+        [$c, $res] = $this->screen();
+        $this->assertSame(80, $c['reply']['top']);
+        foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertGreaterThanOrEqual(10, $c[$k]['top'], $k);
+        // Ang chart script: ang taas ang max ng axis, ang lampas ay iginuguhit sa taas na may tunay na value bilang label.
+        $this->assertMatchesRegularExpression('#max:\s*c\.top#', $res->getContent());
+        $this->assertStringContainsString('Math.min(v, c.top)', $res->getContent());
     }
 }

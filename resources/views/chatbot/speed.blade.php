@@ -44,7 +44,11 @@
     </form>
 
     <section aria-labelledby="h-hours">
-        <h2 id="h-hours" class="mb-2 text-base font-semibold">{{ $f['date'] }}{{ $f['date'] === $dates['today'] ? ' (today)' : ($f['date'] === $dates['yesterday'] ? ' (yesterday)' : '') }} by hour</h2>
+        <h2 id="h-hours" class="mb-1 text-base font-semibold">{{ $f['date'] }}{{ $f['date'] === $dates['today'] ? ' (today)' : ($f['date'] === $dates['yesterday'] ? ' (yesterday)' : '') }} by hour</h2>
+        <p class="text-sm tabular-nums text-slate-600" data-sp-summary="hours">Day: {{ number_format($total['messages']) }} messages · {{ number_format($total['answered']) }} answered · avg {{ $sec($total['avg']) }} · median {{ $sec($total['median']) }} · p90 {{ $sec($total['p90']) }} · max {{ $sec($total['max']) }}</p>
+        @include('chatbot.partials.speed-chart', ['id' => 'reply', 'title' => 'Reply time by hour: average, median and p90', 'label' => 'Average, median and p90 first reply time per hour, with the previous day as reference'])
+        <details class="sp-table mt-3" data-sp-table="hours">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[48rem]" data-table="hours">
                 <thead><tr><th>Hour</th>@foreach($cols as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr></thead>
@@ -73,11 +77,15 @@
             @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a confirmed sent time (a Forbeast reply not confirmed yet, or a reply recorded before sent times were kept): their time is when Likha handed the reply over.@endif
             @if($refused_off) {{ number_format($refused_off) }} messages came in on pages with the bot Off and were not stored.@endif
         </p>
-        @include('chatbot.partials.speed-chart', ['id' => 'reply', 'title' => 'Reply time by hour: average, median and p90', 'label' => 'Average, median and p90 first reply time per hour, with the previous day as reference'])
+        </details>
     </section>
 
     <section aria-labelledby="h-ai">
-        <h2 id="h-ai" class="mb-2 text-base font-semibold">With AI vs no AI, by hour</h2>
+        <h2 id="h-ai" class="mb-1 text-base font-semibold">With AI vs no AI, by hour</h2>
+        <p class="text-sm tabular-nums text-slate-600" data-sp-summary="ai">Day: @foreach(['with_ai' => 'with AI', 'no_ai' => 'no AI'] as $g => $gl){{ $gl }} {{ number_format($total[$g]['n']) }} answered · avg {{ $sec($total[$g]['avg']) }} · median {{ $sec($total[$g]['median']) }} · p90 {{ $sec($total[$g]['p90']) }} · max {{ $sec($total[$g]['max']) }}; @endforeach AI time avg {{ $sec($total['ai_time']['avg']) }} · p90 {{ $sec($total['ai_time']['p90']) }} · max {{ $sec($total['ai_time']['max']) }}</p>
+        @include('chatbot.partials.speed-chart', ['id' => 'ai', 'title' => 'With AI vs no AI by hour: average (solid), median (dashed) and AI time', 'label' => 'Average and median reply time with AI and without AI, and the AI time, per hour, with the previous day as reference', 'tall' => true])
+        <details class="sp-table mt-3" data-sp-table="ai">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[60rem]" data-table="ai">
                 <thead>
@@ -100,11 +108,16 @@
             </table>
         </div>
         <p class="mt-2 text-xs text-slate-500">With AI = the first reply came from a run that called the AI (any AI request of that chat, answered or not). AI time = how long the AI itself took for that reply: request created → answered, summed over the run's answered calls.</p>
-        @include('chatbot.partials.speed-chart', ['id' => 'ai', 'title' => 'With AI vs no AI by hour: average (solid), median (dashed) and AI time', 'label' => 'Average and median reply time with AI and without AI, and the AI time, per hour, with the previous day as reference', 'tall' => true])
+        </details>
     </section>
 
     <section aria-labelledby="h-push">
-        <h2 id="h-push" class="mb-2 text-base font-semibold">Replies: pushed → sent at Meta, by hour</h2>
+        <h2 id="h-push" class="mb-1 text-base font-semibold">Replies: pushed → sent at Meta, by hour</h2>
+        @php($pt = $push['total'])
+        <p class="text-sm tabular-nums text-slate-600" data-sp-summary="push">Day: {{ number_format($pt['pushed']) }} pushed (Forbeast) · {{ number_format($pt['measured']) }} measured · avg {{ $sec($pt['avg']) }} · median {{ $sec($pt['median']) }} · p90 {{ $sec($pt['p90']) }} · max {{ $sec($pt['max']) }} · {{ number_format($pt['unconfirmed']) }} not confirmed yet · {{ number_format($pt['botcake']) }} Botcake (no Meta time)</p>
+        @include('chatbot.partials.speed-chart', ['id' => 'push', 'title' => 'Replies pushed → sent at Meta by hour: average, p90 and max', 'label' => 'Average, p90 and max seconds from pushed to sent at Meta for bot replies per hour, max on the right axis, with the previous day as reference'])
+        <details class="sp-table mt-3" data-sp-table="push">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[44rem]" data-table="push">
                 <thead><tr><th>Hour</th>@foreach(['Pushed (Forbeast)', 'Measured', 'Average', 'Median', 'p90', 'Max', 'Not confirmed yet', 'Botcake (no Meta time)'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr></thead>
@@ -126,11 +139,16 @@
         <p class="mt-2 text-xs text-slate-500">
             The bot's replies on Forbeast (sequence steps are in Sequences below). Hour = when Likha pushed the reply. Pushed = when Forbeast accepted the reply from Likha (the reply's recorded sent time, written right after Forbeast's gateway answered). Sent at Meta = the sent time Forbeast reports back (send_status). Measured = pushed replies with that confirmation; Not confirmed yet = no send_status received. Replies Meta refused are not here (they have no sent time). Botcake sends at once and reports no separate Meta time, so its replies are only counted.
         </p>
-        @include('chatbot.partials.speed-chart', ['id' => 'push', 'title' => 'Replies pushed → sent at Meta by hour: average, p90 and max', 'label' => 'Average, p90 and max seconds from pushed to sent at Meta for bot replies per hour, max on the right axis, with the previous day as reference'])
+        </details>
     </section>
 
     <section aria-labelledby="h-seq">
-        <h2 id="h-seq" class="mb-2 text-base font-semibold">Sequences by hour due</h2>
+        <h2 id="h-seq" class="mb-1 text-base font-semibold">Sequences by hour due</h2>
+        @php($st = $sequences['total'])
+        <p class="text-sm tabular-nums text-slate-600" data-sp-summary="sequences">Day: {{ number_format($st['due']) }} due · {{ number_format($st['sent']) }} sent · {{ number_format($st['failed']) }} failed · {{ number_format($st['skipped']) }} skipped; scheduled → pushed avg {{ $sec($st['scheduled_to_pushed']['avg']) }} · p90 {{ $sec($st['scheduled_to_pushed']['p90']) }} · max {{ $sec($st['scheduled_to_pushed']['max']) }}; pushed → sent at Meta: {{ number_format($st['pushed_to_meta']['n']) }} steps · avg {{ $sec($st['pushed_to_meta']['avg']) }} · p90 {{ $sec($st['pushed_to_meta']['p90']) }} · max {{ $sec($st['pushed_to_meta']['max']) }}</p>
+        @include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
+        <details class="sp-table mt-3" data-sp-table="sequences">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[56rem]" data-table="sequences">
                 <thead>
@@ -155,9 +173,10 @@
         <p class="mt-2 text-xs text-slate-500">
             Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
         </p>
-        @include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
-
-        <h3 class="mb-2 mt-4 text-sm font-semibold">Slowest steps of the day</h3>
+        </details>
+        <details class="sp-table mt-3" data-sp-table="sequence-slowest">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show slowest steps</span><span class="sp-hide">Hide slowest steps</span></summary>
+        <h3 class="mb-2 mt-2 text-sm font-semibold">Slowest steps of the day</h3>
         <div class="cb-card overflow-x-auto">
             <table class="cb-table min-w-[52rem]" data-table="sequence-slowest">
                 <thead><tr><th>Page</th><th>Sequence</th><th class="!text-right">Step</th><th>Scheduled</th><th>Pushed</th><th>Sent at Meta</th><th class="!text-right">Delay</th></tr></thead>
@@ -178,13 +197,30 @@
                 </tbody>
             </table>
         </div>
+        </details>
     </section>
 </div>
 
 <script type="application/json" id="sp-data">{!! json_encode($charts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
 @endsection
 
+@push('styles')
+<style>
+    /* Ang label ng bawat nakatagong table: "Show" kapag sarado, "Hide" kapag bukas. */
+    .sp-table[open] > summary .sp-show, .sp-table:not([open]) > summary .sp-hide { display: none; }
+</style>
+@endpush
+
 @push('scripts')
+<script>
+// Sarado ang mga table sa simula; ang binuksan ay naaalala ng browser na ito (localStorage). Kapag walang storage
+// (private window o naka-block), sarado lang ang lahat.
+document.querySelectorAll('details[data-sp-table]').forEach(d => {
+    const key = 'chatbot-speed-table:' + d.dataset.spTable;
+    try { if (localStorage.getItem(key) === 'open') d.open = true; } catch (e) { /* walang storage */ }
+    d.addEventListener('toggle', () => { try { d.open ? localStorage.setItem(key, 'open') : localStorage.removeItem(key); } catch (e) { /* hindi maaalala */ } });
+});
+</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
 (() => {
@@ -205,20 +241,45 @@
         const el = document.getElementById('sp-chart-' + id);
         const c = data[id];
         if (!el || !c) continue;
-        const sets = lines.map(([key, label, color, dashed, width, axis]) => ({label, data: c.series[key], borderColor: color, backgroundColor: color,
-            borderWidth: width, borderDash: dashed ? [6, 4] : [], pointRadius: 2, tension: .25, spanGaps: false, yAxisID: axis || 'y'}))
-            .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: c.prev[key], borderColor: color + '66',
-                backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y'})));
+        // Spec 188-1: ang average lang ang nakikita sa simula (c.shown); ang iba ay nasa legend, nakatago. Ang y-axis ay
+        // hanggang c.top (mga 3 × ang karaniwang average): ang lampas ay iginuguhit sa taas (tatsulok) na may tunay na
+        // value bilang label at sa tooltip (real). Ang right axis (max) ay may sariling sukat, hindi pinuputol.
+        const clamp = (vals, axis) => axis ? vals : vals.map(v => v === null ? null : Math.min(v, c.top));
+        const over = (vals, axis, yes, no) => vals.map(v => !axis && v !== null && v > c.top ? yes : no);
+        const sets = lines.map(([key, label, color, dashed, width, axis]) => ({label, data: clamp(c.series[key], axis), real: c.series[key], borderColor: color, backgroundColor: color,
+            borderWidth: width, borderDash: dashed ? [6, 4] : [], pointRadius: over(c.series[key], axis, 4, 2), pointStyle: over(c.series[key], axis, 'triangle', 'circle'),
+            tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)}))
+            .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: clamp(c.prev[key], axis), real: c.prev[key], borderColor: color + '66',
+                backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)})));
         const counts = (part, i) => Object.entries(c[part] || {}).map(([k, v]) => k + ' ' + (v[i] ?? '—')).join(', ');
-        const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, title: {display: true, text: 'seconds'}}};
-        if (lines.some(l => l[5] === 'y2')) scales.y2 = {beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
-        new Chart(el, {type: 'line', data: {labels: c.series[lines[0][0]].map((_, i) => pad(i)), datasets: sets}, options: {
-            responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+        const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, max: c.top, title: {display: true, text: 'seconds'}}};
+        if (lines.some(l => l[5] === 'y2')) scales.y2 = {display: 'auto', beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
+        // Ang label ng value na lampas sa taas: ang una ay sa itaas ng gilid, ang kasunod sa parehong oras ay pababa.
+        const overLabels = {id: 'spOver', afterDatasetsDraw(chart) {
+            const {ctx, chartArea} = chart;
+            const used = {};
+            ctx.save();
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            chart.data.datasets.forEach((ds, i) => {
+                if (ds.yAxisID !== 'y' || !chart.isDatasetVisible(i)) return;
+                chart.getDatasetMeta(i).data.forEach((pt, j) => {
+                    const v = ds.real[j];
+                    if (v === null || v <= c.top) return;
+                    const k = used[j] = (used[j] ?? -1) + 1;
+                    ctx.fillStyle = ds.borderColor;
+                    ctx.fillText(fmt(v), pt.x, k === 0 ? chartArea.top - 4 : chartArea.top + 4 + 11 * k);
+                });
+            });
+            ctx.restore();
+        }};
+        new Chart(el, {type: 'line', data: {labels: c.series[lines[0][0]].map((_, i) => pad(i)), datasets: sets}, plugins: [overLabels], options: {
+            responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}, layout: {padding: {top: 14}},
             plugins: {
                 legend: {position: 'bottom', labels: {boxWidth: 12, boxHeight: 2, font: {size: 11}}},
                 tooltip: {callbacks: {
                     title: items => items.length ? pad(items[0].dataIndex) + ':00–' + pad(items[0].dataIndex) + ':59' : '',
-                    label: item => item.dataset.label + ': ' + fmt(item.raw),
+                    label: item => item.dataset.label + ': ' + fmt(item.dataset.real[item.dataIndex]),
                     footer: items => items.length ? [data.date + ': ' + counts('counts', items[0].dataIndex), data.prev_date + ': ' + counts('prev_counts', items[0].dataIndex)] : [],
                 }},
             },

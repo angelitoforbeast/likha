@@ -96,9 +96,35 @@ class ResponseSpeed
             foreach (['counts' => $day, 'prev_counts' => $prev] as $part => $o) {
                 foreach ($counts as $k => $get) $out[$key][$part][$k] = $col($rows($o), $get);
             }
+            // Spec 188-1: ang average lang ang nakikita sa simula (ang iba ay nasa legend, nakatago), at ang taas ng axis
+            // ay mula sa average para hindi mapatag ng isang biglang taas ang ibang oras.
+            $shown = $key === 'ai' ? ['with_ai_avg', 'no_ai_avg'] : ['avg'];
+            $out[$key]['shown'] = $shown;
+            $out[$key]['top'] = self::axisTop(array_merge(...array_map(fn ($k) => $out[$key]['series'][$k], $shown)),
+                array_merge(...array_map(fn ($k) => $out[$key]['prev'][$k], $shown)));
         }
 
         return $out;
+    }
+
+    /**
+     * Ang taas ng y-axis ng isang chart: mga 3 × ang karaniwang average kada oras (ang median ng mga average ng mga oras na
+     * may numero; ang sa naunang araw kapag wala pang 3 oras ngayon), hindi bababa sa 10 s, pataas sa malinis na numero
+     * (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8 × 10ⁿ). Ang value na lampas dito ay iginuguhit sa taas ng chart na may sariling label.
+     */
+    public static function axisTop(array $values, array $prevValues): int
+    {
+        $values = array_values(array_filter($values, fn ($v) => $v !== null));
+        $prevValues = array_values(array_filter($prevValues, fn ($v) => $v !== null));
+        if (count($values) < 3 && count($prevValues) > count($values)) $values = $prevValues;
+        $want = 3 * (BotHealth::median($values) ?? 0);
+        if ($want <= 10) return 10;
+        $mag = 10 ** (int) floor(log10($want));
+        foreach ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10] as $step) {
+            if ($step * $mag >= $want - 1e-9) return (int) round($step * $mag);
+        }
+
+        return (int) (10 * $mag);
     }
 
     /**
