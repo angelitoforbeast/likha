@@ -3011,3 +3011,20 @@ Tests: `tests/Feature/Chatblast/AdPreviewTest.php`, the 172/174 tests, and a hea
 | S-181.5 (P1) | Given a user who cannot edit page values, When they call the ad preview or the ad groups, Then 403; an ad not of the page → 404; a non-digit ad → 422 | `test_S_181_5…` | passed |
 | S-181.6 (P1) | The 172/174 and Chatblast/Botcake/PageSettings suites have no new failures | full run | passed |
 | S-181.7 (P2) | At 390 px the list sub-rows, the Edit section and the preview fit without horizontal overflow | headless Chrome, 390 px iframe | passed |
+
+## S-179 The bot's replies always go before chatblast on a page's Botcake lane
+
+As a customer writing to a page during the 09:00 chatblast, I want the bot's reply right away, so I am not left waiting behind the page's chatblast; chatblast may wait, but still finishes.
+
+Slice 179. Threat model: the customers' messages and the chatblast rows are untrusted data that only queue work; the rate, share and pool sizes come from config (trusted). Risk tier: medium (scheduling inside the existing botcake:send-pool, no new route, table or input).
+Tests: `tests/Feature/Chatblast/BotLaneShareTest.php` (fake Botcake answering after 1 s, one page at 2 requests/s), existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-179.1 (P1) | Given a page's lane busy with 20 chatblast jobs, When three customers write at once, Then the next three sends of the page are the three replies, within three rate intervals | `test_S_179_1…` | passed |
+| S-179.1b (P1) | Given the whole pool (send_concurrency 2) full of chatblast, When a customer writes, Then the reply is claimed and is the next send of the page | `test_S_179_1b…` | passed |
+| S-179.2 (P1) | Given 10 chatblast jobs and a reply every 0.5 s, Then every chatblast message's calls are write, read, send_flow in that order, and all are sent | `test_S_179_2…` | passed |
+| S-179.3 (P1) | Given 40 chatblast jobs, When no bot work, or one reply and then none, Then chatblast makes ≥ 19 calls in 10 s; When a reply every 1 s (bot work always waiting), Then chatblast makes ≤ 11 calls in 10 s (its 50% share) | `test_S_179_3…` (3 data sets) | passed |
+| S-179.4 (P1) | Given 500 chatblast jobs and 50 replies in 30 s on one page, Then every reply goes out within 1 s of being ready and every chatblast message is sent; the wait before and after is in the result | `test_S_179_4…` | passed |
+| S-179.5 (P1) | Given 60 chatblast jobs and a reply every second for 300 s, Then every chatblast message is sent | `test_S_179_5…` | passed |
+| S-179.6 (P1) | Existing Chatblast, Botcake and PageSettings suites pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |
