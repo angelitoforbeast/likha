@@ -35,6 +35,18 @@ final class Parse
         return compact('name', 'phone', 'province', 'city', 'barangay');
     }
 
+    /** Ang "Landmark:" ng extracted details (ang huling linya, gaya ng ibang label), hilaw; '' kapag wala. */
+    public static function landmark(string $cxd): string
+    {
+        $landmark = '';
+        foreach (explode("\n", $cxd) as $line) {
+            $line = Text::jsTrim($line);
+            if (preg_match('/^-?\s*Landmark:/i', $line)) $landmark = Text::jsTrim(preg_replace('/^-?\s*Landmark:\s*/i', '', $line));
+        }
+
+        return $landmark;
+    }
+
     /** NA / N/A / NOT PROVIDED = null (hindi ginagalaw ang value); kung hindi, tinatanggal ang "province/brgy/barangay/city" at ang simbolo. */
     private static function place(string $raw): ?string
     {
