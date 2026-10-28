@@ -97,7 +97,7 @@ final class Encoder
         // checker, para ang lugar na sinuri nito ay ang dati pa rin.
         $this->landmark($db, $cxd);
 
-        $w =Text::jsTrim($db['W']);
+        $w = Text::jsTrim($db['W']);
         $s = Text::jsTrim($db['S']);
         $final = $w !== '' ? $w : $s;
 
@@ -171,8 +171,9 @@ PHONE NUMBER: " . $in->get('phone') . "
     }
 
     /**
-     * Ang "Landmark:" ng extracted details sa address line (D): landmark_added, landmark_kept (nasa address na), no_landmark
-     * (wala o placeholder), o no_address (walang address line: hindi ginagawang landmark lang ang address).
+     * Ang "Landmark:" ng extracted details sa address line (D): landmark_added, landmark_kept (nasa address na),
+     * landmark_no_room (halos nasa limit na ang address line), no_landmark (wala o placeholder), o no_address (walang address
+     * line: hindi ginagawang landmark lang ang address).
      */
     private function landmark(array &$db, string $cxd): void
     {
@@ -183,7 +184,8 @@ PHONE NUMBER: " . $in->get('phone') . "
             return;
         }
         $address = Text::jsTrim($db['D']);
-        if ($address === '') {
+        // "unknown" ay walang address line, gaya ng finalize ng checker.
+        if ($address === '' || Text::lower($address) === 'unknown') {
             $this->steps->add('landmark', 'no_address', ['landmark' => $landmark]);
 
             return;

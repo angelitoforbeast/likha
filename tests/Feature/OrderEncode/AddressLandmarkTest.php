@@ -20,7 +20,8 @@ class AddressLandmarkTest extends TestCase
     {
         $list = ['', '  ', '-', '--', '.', 'N/A', 'n/a', 'NA', 'N.A.', 'none', 'None po', 'wala', 'Wala po', 'Wala pong nabanggit', 'wala pong na-mention',
             'Wala pong nakalagay', 'walang landmark', 'Not provided', 'not mentioned', 'No landmark', 'unknown', '[Not provided]', '(Wala pong na-mention)',
-            '[customer did not give one]', 'Hindi pa naibigay', 'hindi po nabanggit', 'malapit sa N/A'];
+            '[customer did not give one]', 'Hindi pa naibigay', 'hindi po nabanggit', 'malapit sa N/A', 'None provided', 'None specified',
+            'Not explicitly provided', 'wala specified', 'Nothing mentioned'];
 
         return array_combine($list, array_map(fn ($p) => [$p], $list));
     }
@@ -53,18 +54,28 @@ class AddressLandmarkTest extends TestCase
 
     public function test_S_187_4_a_long_address_with_a_landmark_is_capped_at_a_word_and_never_over_the_limit(): void
     {
-        $address = trim(str_repeat('Sitio Malaking Bato ', 13)); // 259 chars
-        $out = AddressLandmark::apply($address, 'Brgy. Hall');
-
         $this->assertSame(250, AddressLandmark::MAX);
-        $this->assertSame('added', $out['result']);
-        $this->assertLessThanOrEqual(250, mb_strlen($out['address']));
-        $this->assertStringStartsWith('Sitio Malaking Bato Sitio', $out['address']);
-        $this->assertMatchesRegularExpression('/(Sitio|Malaking|Bato)$/', $out['address'], 'cut at a word boundary, no trailing comma or space');
+        $address = trim(str_repeat('Sitio Malaking Bato ', 12)); // 239 chars
+
+        // Ang landmark ay pinuputol sa dulo ng salita, hindi lalampas sa 250.
+        $out = AddressLandmark::apply($address, 'Hall ng Barangay Malaking Bato');
+        $this->assertSame(['address' => $address . ', near Hall', 'result' => 'added'], $out);
+        $this->assertSame(250, mb_strlen($out['address']));
+
+        // Walang buong salita ng landmark na kasya: walang "near" na nakabitin, at ang address line ay buo.
+        $this->assertSame(['address' => $address, 'result' => 'no_room'], AddressLandmark::apply($address, 'Covered Court ng Brgy'));
+
+        // Astra (maraming bahagi): putol sa dulo ng salita, walang kuwit o espasyo sa dulo.
+        $astra = AddressLandmark::compose(['Blk 12', trim(str_repeat('Sitio Malaking Bato ', 13))], 'Brgy. Hall');
+        $this->assertLessThanOrEqual(250, mb_strlen($astra));
+        $this->assertMatchesRegularExpression('/ (Sitio|Malaking|Bato)$/', $astra);
 
         // Isang mahabang salita: walang hangganan na malapit, kaya putol sa mismong limit.
-        $one = AddressLandmark::apply(str_repeat('Z', 300), 'Brgy. Hall');
-        $this->assertSame(str_repeat('Z', 250), $one['address']);
+        $this->assertSame(str_repeat('Z', 250), AddressLandmark::compose([str_repeat('Z', 300)], 'Brgy. Hall'));
+
+        // Walang puwang ang landmark sa address line na halos nasa limit na: ang address line ay hindi pinuputol.
+        $full = str_repeat('Sitio Bato ', 23); // 253 chars
+        $this->assertSame(['address' => $full, 'result' => 'no_room'], AddressLandmark::apply($full, 'Brgy. Hall'));
 
         // Kasya: buo.
         $fits = str_repeat('a', 230);

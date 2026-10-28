@@ -64,6 +64,7 @@ class LandmarkTest extends LiveRowTestCase
             'N/A' => 'N/A', 'NA' => 'NA', '[Not provided]' => '[Not provided]', '(Wala pong na-mention)' => '(Wala pong na-mention)',
             'Wala pong nabanggit' => 'Wala pong nabanggit', 'dash' => '-', 'none' => 'none', 'wala' => 'Wala', 'not provided' => 'Not provided',
             'wala pong nakalagay' => 'Wala pong nakalagay', 'hindi pa naibigay' => 'Hindi pa naibigay', 'none po' => 'None po',
+            'None provided' => 'None provided',
         ]);
     }
 
@@ -75,6 +76,37 @@ class LandmarkTest extends LiveRowTestCase
 
         $this->assertSame('Pk. 17, Zone 7,', MacroOutput::sole()->ADDRESS);
         $this->assertSame('no_landmark', $this->step($o, 'landmark')['status'] ?? null);
+    }
+
+    #[DataProvider('noAddressLine')]
+    public function test_S_187_3_no_address_line_is_not_made_into_a_landmark_only_address(string $line): void
+    {
+        // Walang address line ang STEP 3 at ang finalize ng checker.
+        Http::swap(new Factory(app('events')));
+        Http::fake(['api.openai.com/v1/chat/completions' => Http::response(Fixtures::chat($line))]);
+        $this->fakeGpt(['name_addr' => ['full_name' => 'Ana Cruz', 'address_line1' => $line]]);
+
+        $o = $this->liveOrder($this->withLandmark('Malapit sa Brgy. Hall'));
+
+        $this->assertStringNotContainsString('Brgy. Hall', (string) MacroOutput::sole()->ADDRESS);
+        $this->assertSame('no_address', $this->step($o, 'landmark')['status'] ?? null);
+    }
+
+    public static function noAddressLine(): array
+    {
+        return ['blank' => [''], 'unknown' => ['Unknown']];
+    }
+
+    public function test_S_187_1_the_landmark_is_added_to_an_address_line_written_by_the_checker(): void
+    {
+        Http::swap(new Factory(app('events')));
+        Http::fake(['api.openai.com/v1/chat/completions' => Http::response(Fixtures::chat(''))]);
+        $this->fakeGpt(['name_addr' => ['full_name' => 'Ana Cruz', 'address_line1' => 'Pk. 17, Zone 7']]);
+
+        $o = $this->liveOrder($this->withLandmark('Malapit sa Brgy. Hall'));
+
+        $this->assertSame('Pk. 17, Zone 7, near Brgy. Hall', MacroOutput::sole()->ADDRESS);
+        $this->assertSame('landmark_added', $this->step($o, 'landmark')['status'] ?? null);
     }
 
     public function test_S_187_6_a_staff_edited_address_is_not_changed_by_a_re_encode(): void

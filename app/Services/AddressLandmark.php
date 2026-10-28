@@ -19,8 +19,8 @@ final class AddressLandmark
         '/^[\s\-\.,_\/]*$/u',
         // Nasa loob ng [ ] o ( ): tala ng bot o ng staff, hindi landmark ("[Not provided]", "(Wala pong na-mention)")
         '/^[\[\(].*[\]\)]$/su',
-        '/^(n\s?[\.\/]?\s?a|none|nothing|null|nil|no|unknown|no landmark|not (provided|mentioned|specified|given|applicable|available|stated|indicated))(\s+po)?$/u',
-        '/^(wala|walang|wla)(\s+(po|pong|pa|pang|naman|talaga))*(\s+(landmark|nabanggit|binanggit|na-?banggit|na-?mention|mention|nakalagay|nilagay|inilagay|binigay|ibinigay|naibigay|nabigay|sinabi|nasabi|info|impormasyon))?(\s+po)?$/u',
+        '/^(n\s?[\.\/]?\s?a|none|nothing|null|nil|no|unknown|no landmark|(none|not|nothing|no landmark)(\s+(explicitly|yet|specifically))?\s+(provided|mentioned|specified|given|applicable|available|stated|indicated))(\s+po)?$/u',
+        '/^(wala|walang|wla)(\s+(po|pong|pa|pang|naman|talaga))*(\s+(landmark|nabanggit|binanggit|na-?banggit|na-?mention|mention|mentioned|nakalagay|nilagay|inilagay|binigay|ibinigay|naibigay|nabigay|sinabi|nasabi|info|impormasyon|provided|specified|given|stated))?(\s+po)?$/u',
         '/^(hindi|di)(\s+(pa|po|naman))*\s+(na-?banggit|nabanggit|binanggit|naibigay|ibinigay|binigay|nabigay|sinabi|nasabi|na-?mention|nakalagay|nilagay|inilagay)\b/u',
     ];
 
@@ -49,7 +49,7 @@ final class AddressLandmark
 
     /**
      * Ang encode order: ang address line ng AI at ang landmark ng form. result: added (idinugtong), kept (nasa address na;
-     * hindi ginalaw), none (walang landmark; hindi ginalaw).
+     * hindi ginalaw), none (walang landmark; hindi ginalaw), no_room (ang address line ay halos nasa limit na: hindi pinuputol).
      * @return array{address: string, result: string}
      */
     public static function apply(string $address, ?string $landmark, int $max = self::MAX): array
@@ -57,9 +57,12 @@ final class AddressLandmark
         $lm = self::clean($landmark);
         if ($lm === '') return ['address' => $address, 'result' => 'none'];
         if (str_contains(self::norm($address), self::norm($lm))) return ['address' => $address, 'result' => 'kept'];
-
         // Walang ",," kapag nagtatapos sa kuwit ang address line ("Pk. 17, Zone 7,").
-        return ['address' => self::join([rtrim($address, " ,")], $lm, $max), 'result' => 'added'];
+        $line = rtrim($address, ' ,');
+        $out = mb_strlen($line) + mb_strlen(', near ') < $max ? self::join([$line], $lm, $max) : '';
+        if ($out === '' || $out === $line) return ['address' => $address, 'result' => 'no_room'];
+
+        return ['address' => $out, 'result' => 'added'];
     }
 
     /** @param array<int, mixed> $parts */
@@ -106,7 +109,8 @@ final class AddressLandmark
             $cut = $m[1];
         }
 
-        return rtrim($cut, ' ,');
+        // Walang "near" na nakabitin kapag walang salita ng landmark na kasya.
+        return rtrim(preg_replace('/,?\s*near$/iu', '', rtrim($cut, ' ,')) ?? $cut, ' ,');
     }
 
     private static function norm(string $x): string
