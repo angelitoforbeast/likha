@@ -40,6 +40,8 @@ class ForbeastWatch
     public const CANNOT = 'cannot_switch';
     public const HELD = 'held';
     public const SWITCHED_BACK = 'switched_back';
+    /** Inilipat sa Forbeast ng tao o ng ibang sistema (hindi ng bantay): ang simula ng panahon sa Forbeast. */
+    public const MOVED = 'moved';
     /** Ang mga lipat na kusang ibinabalik: ang sa koneksyon ng page at ang health ay tao ang nag-aayos. */
     public const BACK_CONDITIONS = ['inbound', 'failed_sends', 'no_answer'];
 
@@ -73,12 +75,8 @@ class ForbeastWatch
     private const STREAK_GAP = 180;
     /** Ilang oras ipinapakita sa /chatbot/pages ang note ng held at ng balik. */
     private const NOTE_HOURS = 24;
-    /**
-     * Ilang segundo pagkalipat ng page sa Forbeast na ang standby ay hindi ebidensya: ang kopya ng Botcake ay dumarating
-     * 60–80 s pagkatapos ng sa Forbeast, kaya ang mensaheng dumating bago ang lipat (itinapon ng Forbeast dahil nasa Botcake
-     * pa ang page) ay may standby na walang kapares kailanman.
-     */
-    private const SETTLE = 180;
+    /** Ang "moved" event ay itinatala lang sa lipat na ganito kabago (oras): ang lumang lipat bago ang deploy ay hindi. */
+    private const MOVED_HOURS = 1;
     /** Ang sagot ng bot na ilang segundo bago dumating ang standby ay sagot na rin dito (magkasabay na dating). */
     private const REPLIED_GRACE = 5;
     /** Ang tanda sa payload ng chat ng Forbeast na nabura na ang standby na kapares nito. */
@@ -179,10 +177,15 @@ class ForbeastWatch
         // Ang attachment lang (larawan, voice, …) ay hindi ebidensya habang hindi ito sinasagot ng bot (ignore).
         $ignoring = ChatAttachments::ignoring();
         $unpaired = $chats->filter(fn ($c) => self::copy($c, true) && !isset($paired[$c->id]) && $c->received_at?->lte($settled) && $c->received_at?->gte($from));
-        // Ang dumating sa loob ng SETTLE mula sa lipat sa Forbeast ay hindi ebidensya, pero sinasagot dito (walang ibang sasagot).
-        $movedAt = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)
-            ->orderByDesc('id')->first(['created_at'])?->created_at;
-        $late = $movedAt === null ? collect() : $unpaired->filter(fn ($c) => $c->received_at->lt($movedAt->copy()->addSeconds(self::SETTLE)));
+        // Ang dumating bago ang lipat sa Forbeast + settle_seconds ay hindi ebidensya, pero sinasagot dito (walang ibang sasagot):
+        // ang kopya ng Botcake ay dumarating 60–80 s pagkatapos ng sa Forbeast, kaya ang mensaheng dumating bago ang lipat
+        // (itinapon ng Forbeast dahil nasa Botcake pa ang page) ay may standby na walang kapares kailanman. Kahit sino ang
+        // naglipat: tao, ibang sistema, o ang balik ng bantay.
+        $moved = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)
+            ->orderByDesc('id')->first();
+        $movedAt = $moved?->created_at;
+        if ($moved !== null) $this->noticeMove($page, $moved);
+        $late = $movedAt === null ? collect() : $unpaired->filter(fn ($c) => $c->received_at->lt($movedAt->copy()->addSeconds(self::limit('settle_seconds'))));
         $orphans = $unpaired->diffKeys($late)->filter(fn ($c) => $c->received_at->lte($proof) && !($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null));
         $customers = $orphans->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
         $answer = $late;
@@ -213,6 +216,21 @@ class ForbeastWatch
             }
         }
         if ($answer->isNotEmpty()) $this->answerLate($page, $pageId, $answer->sortKeys()->pluck('id')->all());
+    }
+
+    /**
+     * Ang lipat sa Forbeast na hindi gawa ng bantay (walang event ng page na mas bago sa provider row): isang "moved" event,
+     * may sino at kailan, para makita sa history ang mano-manong lipat. Ang lipat na mas luma sa MOVED_HOURS ay hindi.
+     */
+    private function noticeMove(string $page, PageSetting $moved): void
+    {
+        if ($moved->plainValue() !== ChatbotProvider::GATEWAY || $moved->created_at === null || $moved->created_at->lt(now()->subHours(self::MOVED_HOURS))) return;
+        $newer = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', self::KEY)->where('id', '>', $moved->id)->exists();
+        if ($newer) return;
+        $who = $moved->created_by ? (\App\Models\User::find($moved->created_by)?->name ?? 'user #' . $moved->created_by) : (PageValues::by($moved->source) ?? 'system');
+        $this->event($page, self::MOVED, ChatbotProvider::GATEWAY, 'manual',
+            'moved to Forbeast by ' . $who . ' at ' . $moved->created_at->copy()->timezone('Asia/Manila')->format('Y-m-d H:i'),
+            ['from' => ChatbotProvider::BOTCAKE, 'by' => $who, 'gateway_since' => $moved->created_at->toIso8601String()]);
     }
 
     /** Hindi lumipat kahit may ebidensya: isang "held" event kada oras kada dahilan ($kind), at ang log tuwing minuto. */
@@ -450,7 +468,7 @@ class ForbeastWatch
     /** Ang dahilan bilang text: ang kondisyon at ang huling error; ang held at ang balik ay ang error lang (buo na ang dahilan). */
     public static function reason(array $e): string
     {
-        if (in_array($e['result'] ?? null, [self::HELD, self::SWITCHED_BACK], true)) return (string) ($e['error'] ?? '');
+        if (in_array($e['result'] ?? null, [self::HELD, self::SWITCHED_BACK, self::MOVED], true)) return (string) ($e['error'] ?? '');
         $label = self::REASONS[$e['condition'] ?? ''] ?? (string) ($e['condition'] ?? '');
 
         return $label . (($e['error'] ?? '') !== '' ? ': ' . $e['error'] : '');

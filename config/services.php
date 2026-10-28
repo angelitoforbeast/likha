@@ -201,6 +201,8 @@ return [
             // Ang kusang balik sa Forbeast: ilang minutong sunod-sunod na maayos ang health, at isa lang kada ilang oras.
             'back_minutes' => (int) env('GATEWAY_SWITCH_BACK_MINUTES', 30),
             'back_hours' => (int) env('GATEWAY_SWITCH_BACK_HOURS', 6),
+            // Ilang segundo pagkalipat sa Forbeast (kahit sino ang naglipat) na ang chat ng Botcake ay hindi ebidensya.
+            'settle_seconds' => (int) env('GATEWAY_SWITCH_SETTLE_SECONDS', 180),
         ],
     ],
 

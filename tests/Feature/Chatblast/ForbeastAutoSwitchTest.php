@@ -637,7 +637,8 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
 
         $this->assertSame('gateway', $this->provider());
-        $this->assertSame([], $this->events());
+        // Ang mano-manong lipat lang ang naitala (moved), walang lipat ng bantay.
+        $this->assertSame(['moved'], array_column($this->events(), 'result'));
     }
 
     public function test_S_166_2_botcake_copies_after_the_settle_window_switch_the_page_as_today(): void
@@ -654,7 +655,8 @@ class ForbeastAutoSwitchTest extends ChatblastTestCase
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
 
         $this->assertSame('botcake', $this->provider());
-        $this->assertSame(['inbound', 'Botcake chats from 2 customers with no Forbeast copy after 120 seconds'], [$this->events()[0]['condition'], $this->events()[0]['error']]);
+        $this->assertSame(['moved', 'switched'], array_column($this->events(), 'result'));
+        $this->assertSame(['inbound', 'Botcake chats from 2 customers with no Forbeast copy after 120 seconds'], [$this->events()[1]['condition'], $this->events()[1]['error']]);
     }
 
     public function test_S_166_4_botcake_copies_inside_the_settle_window_are_answered_once_on_forbeast(): void

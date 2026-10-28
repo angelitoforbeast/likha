@@ -319,6 +319,71 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
         $this->assertSame('gateway', $this->provider());
     }
 
+    /** Ang standby ng 3 customer na natanggap sa $at, walang kopya sa Forbeast. */
+    private function standbyAt(\Illuminate\Support\Carbon $at): void
+    {
+        foreach (self::PSIDS as $psid => $m) {
+            BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => (string) $psid, 'message' => $m, 'message_id' => 'm_bc_' . $psid,
+                'payload' => ['_standby' => true], 'received_at' => $at]);
+        }
+    }
+
+    public static function aroundTheMove(): array
+    {
+        // Ang segundo mula sa lipat sa Forbeast (T) ng mga kopya ng Botcake, at kung lilipat sa T+500.
+        return ['received at T-60 s (Forbeast copy dropped while on Botcake)' => [-60, 'gateway'], 'received at T+200 s' => [200, 'botcake']];
+    }
+
+    /** @dataProvider aroundTheMove */
+    public function test_S_175_9_only_botcake_chats_after_the_move_plus_the_settle_time_count(int $offset, string $provider): void
+    {
+        Queue::fake();
+        $this->health(null);
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
+        $this->travel(60)->seconds();
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'gateway', false, $this->user()->id);
+        $moved = now();
+        $this->standbyAt($moved->copy()->addSeconds($offset));
+
+        $this->travel(500)->seconds();
+        $this->watch();
+
+        $this->assertSame($provider, $this->provider());
+    }
+
+    public function test_S_175_9b_the_automatic_switch_back_starts_the_same_settle_window(): void
+    {
+        Queue::fake();
+        $this->switchedThenHealthy(30);
+        $this->assertSame('gateway', $this->provider());
+        $this->standbyAt(now()->addSeconds(60));
+
+        $this->travel(400)->seconds();
+        $this->watch();
+
+        $this->assertSame('gateway', $this->provider());
+    }
+
+    public function test_S_175_10_a_move_to_forbeast_the_watcher_did_not_make_is_recorded_once_with_who_and_when(): void
+    {
+        Queue::fake();
+        $this->actingAs($this->user());
+        app(PageSettings::class)->set('Page Uno', 'chatbot', 'provider', 'botcake');
+        $this->postJson('/chatbot/provider', ['page_name' => 'Page Uno', 'provider' => 'gateway'])->assertOk();
+        $at = now('Asia/Manila')->format('Y-m-d H:i');
+
+        $this->watch();
+        $this->watch();
+
+        $events = $this->events();
+        $this->assertCount(1, $events);
+        $this->assertSame(['moved', 'botcake', 'gateway', 'moved to Forbeast by CEO User at ' . $at],
+            [$events[0]['result'], $events[0]['from'], $events[0]['to'], $events[0]['error']]);
+        $changes = collect($this->getJson('/chatbot/changes')->assertOk()->json('entries'));
+        $this->assertSame('CEO User', $changes->where('key', 'provider')->first()['by'], 'the person, not auto-switch');
+        $this->assertStringStartsWith('Moved to Forbeast · moved to Forbeast by', $changes->firstWhere('key', 'auto_switch')['new']);
+    }
+
     public function test_S_175_7_a_connection_code_still_switches_at_once_and_never_moves_back(): void
     {
         Queue::fake();
