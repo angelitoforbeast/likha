@@ -41,6 +41,7 @@ class ChatEchoTest extends ChatblastTestCase
             'database/migrations/2026_10_30_100000_add_results_to_chatbot_replies.php',
             'database/migrations/2026_11_06_100000_add_chat_index_to_chatbot_replies.php',
             'database/migrations/2026_11_08_100000_create_chatbot_comment_events_table.php',
+            'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
         ]]);
         config(['services.chatbot.replies_enabled' => true, 'services.gateway.url' => 'https://gw.example.test', 'services.gateway.key' => 'gw_test_key_1q2w3e4r',
             'services.gateway.webhook_secret' => self::SECRET]);
@@ -111,12 +112,13 @@ class ChatEchoTest extends ChatblastTestCase
         $this->assertSame(['forbeast', 'botcake', 'person'], $this->echoes()->pluck('sender')->all());
     }
 
-    public function test_S_183_1c_text_is_cut_to_200_characters_and_an_echo_from_an_unknown_app_is_other(): void
+    public function test_S_183_1c_text_is_cut_to_200_characters_an_unknown_app_is_other_and_an_echo_to_the_page_itself_is_not_stored(): void
     {
         $this->send(self::echo('m_long', '999000111', str_repeat('a', 300)))->assertOk();
+        $this->send(self::echo('m_self', self::BOTCAKE, 'Hi', null, '1001'))->assertOk();
 
         $row = $this->echoes()->first();
-        $this->assertSame([200, 'other'], [mb_strlen($row['text']), $row['sender']]);
+        $this->assertSame([1, 200, 'other'], [$this->echoes()->count(), mb_strlen($row['text']), $row['sender']]);
     }
 
     public function test_S_183_2_a_person_reply_is_labelled_person_and_the_bot_is_not_paused(): void
@@ -194,5 +196,43 @@ class ChatEchoTest extends ChatblastTestCase
         $this->assertSame(1, $page['doubles']);
         $this->assertSame('Bot (Forbeast) + Botcake', $page['double_examples'][0]['senders']);
         $this->assertStringContainsString('psid=' . self::PSID, $page['double_examples'][0]['inbox']);
+    }
+
+    /** [ang body, ang status na inaasahan, may X-Gateway-Batch] */
+    public static function refusedLists(): array
+    {
+        $echo = self::echo('m_r1', self::BOTCAKE, 'Hello');
+
+        return [
+            'mixed pages' => [[$echo, ['page_id' => '1002'] + self::echo('m_r2', self::BOTCAKE, 'Hi')], 422],
+            'a customer message' => [[$echo, ['is_echo' => false] + self::echo('m_r3', null, 'Available po?')], 422],
+            'is_echo as text' => [[['is_echo' => 'true'] + $echo], 422],
+            'over 64 KB without the header' => [[$echo + ['note' => str_repeat('x', 70000)]], 413, false],
+        ];
+    }
+
+    /** @dataProvider refusedLists */
+    public function test_S_183_1d_a_refused_list_stores_nothing(array $body, int $status, bool $header = true): void
+    {
+        $this->page('Page Dos', '1002');
+
+        $this->send($body, $header)->assertStatus($status);
+
+        $this->assertCount(0, $this->echoes());
+        $this->assertSame(0, BotcakeChat::count());
+    }
+
+    public function test_S_183_1e_an_echo_labels_only_a_reply_sent_through_its_own_app(): void
+    {
+        $t = now()->subMinute();
+        \App\Models\ChatbotReply::create(['page_id' => 1001, 'psid' => (int) self::PSID, 'kind' => 'send', 'content' => [['type' => 'text', 'text' => 'Hello po!']],
+            'status' => 'sent', 'sent_at' => $t, 'via' => 'forbeast']);
+        // Ang Botcake ay nagpadala rin ng parehong text: hiwalay na bubble, hindi label ng sagot ng Forbeast.
+        $this->send(self::echo('m_bc', self::BOTCAKE, 'Hello po!', $t->copy()->addSeconds(5)->getTimestampMs()))->assertOk();
+        $this->send(self::echo('m_fb', self::FORBEAST, 'Hello po!', $t->copy()->addSecond()->getTimestampMs()))->assertOk();
+
+        $this->actingAs($this->user());
+        $outs = collect($this->thread())->where('side', 'out')->values();
+        $this->assertSame([['Bot', 'Bot (Forbeast)'], ['Botcake', 'Botcake']], $outs->map(fn ($x) => [$x['by'], $x['sender']])->all());
     }
 }

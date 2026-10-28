@@ -70,7 +70,8 @@ class ChatEchoes
         $pageId = (string) $e['page_id'];
         $psid = (string) $e['psid'];
         $mid = (string) $e['mid'];
-        if ($mid === '' || !preg_match('/^\d{1,19}$/', $pageId) || !preg_match('/^\d{1,19}$/', $psid)) return 'echo_no_id';
+        // Ang psid ay ang customer: ang page mismo (ang nagpadala) ay hindi customer.
+        if ($mid === '' || !preg_match('/^\d{1,19}$/', $pageId) || !preg_match('/^\d{1,19}$/', $psid) || $psid === $pageId) return 'echo_no_id';
         if (!Schema::hasTable('chatbot_events')) return self::TYPE;
 
         $seen = 'chat-echoes:seen:' . sha1($mid);

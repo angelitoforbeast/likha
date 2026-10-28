@@ -68,6 +68,8 @@ class ForbeastWatch
     private const INBOUND_GRACE = 120;
     /** Ilang minuto ang layo ng standby at ng kopya ng Forbeast na may parehong text (walang parehong mid). */
     private const TWIN_MINUTES = 2;
+    /** Ang kopya ng Botcake ay 60–80 s pagkatapos ng totoong mensahe: ang echo mula ganito kaaga bago ang kopya ay sagot pa rin. */
+    private const ECHO_SLACK = 90;
     /** Ang huling lag ng Likha sa pag-imbak ng gateway event (HandleGatewayEvent), ilang segundo itong itinuturing na bago. */
     private const INGEST = 'forbeast-watch:ingest';
     private const INGEST_TTL = 300;
@@ -187,11 +189,13 @@ class ForbeastWatch
         if ($moved !== null) $this->noticeMove($page, $moved);
         $late = $movedAt === null ? collect() : $unpaired->filter(fn ($c) => $c->received_at->lt($movedAt->copy()->addSeconds(self::limit('settle_seconds'))));
         $orphans = $unpaired->diffKeys($late)->filter(fn ($c) => $c->received_at->lte($proof) && !($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null));
-        // Ebidensya lang ang customer na wala ring echo mula sa anumang app mula nang dumating ang kopya (bawas TWIN_MINUTES, ang
-        // pagkahuli ng kopya ng Botcake): ang may echo ay nasagot (ng tao, Botcake o ng Forbeast mismo). Ang pagsagot mula sa
-        // standby sa ibaba ay ayon pa rin sa $orphans.
-        $echoes = $this->echoes($pageId, $from->copy()->subMinutes(self::TWIN_MINUTES));
-        $evidence = $orphans->reject(fn ($c) => ($echoes[(string) $c->psid] ?? collect())->contains(fn ($at) => $at >= $c->received_at->getTimestamp() - self::TWIN_MINUTES * 60));
+        // Ebidensya lang ang customer na wala ring echo mula sa anumang app sa loob ng inbound_seconds mula sa mensahe (ang kopya
+        // ng Botcake ay dumarating hanggang ECHO_SLACK segundo pagkatapos ng totoong mensahe): ang may echo ay nasagot (ng tao,
+        // Botcake o ng Forbeast mismo). Ang echo na mas huli (hal. ang sagot mula sa standby dito) ay hindi nagbubura ng
+        // ebidensya. Ang pagsagot mula sa standby sa ibaba ay ayon pa rin sa $orphans.
+        $echoes = $orphans->isEmpty() ? [] : $this->echoes($pageId, $from->copy()->subSeconds(self::ECHO_SLACK));
+        $evidence = $orphans->reject(fn ($c) => ($echoes[(string) $c->psid] ?? collect())->contains(fn ($at) => $at >= $c->received_at->getTimestamp() - self::ECHO_SLACK
+            && $at <= $c->received_at->getTimestamp() + self::limit('inbound_seconds')));
         $customers = $evidence->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
         $answer = $late;
         if ($orphans->isNotEmpty()) {

@@ -274,14 +274,15 @@ class Inbox
         $sig = fn (array $messages) => array_map(fn ($m) => ($m['type'] ?? '') === 'image' ? 'image' : ChatEchoes::hash((string) ($m['text'] ?? '')), $messages);
         $outs = [];
         foreach ($items as $i => $x) {
-            if ($x['src'] === 'out' && isset($x['messages'])) $outs[$i] = [Carbon::parse($x['raw'])->getTimestamp(), $sig($x['messages'])];
+            if ($x['src'] === 'out' && isset($x['messages'])) $outs[$i] = [Carbon::parse($x['raw'])->getTimestamp(), $sig($x['messages']), $x['via'] ?? null];
         }
-        $known = $shown->map(fn ($r) => [Carbon::parse($r->sent_at)->getTimestamp(), $sig((array) $r->content)])->all();
+        $known = $shown->map(fn ($r) => [Carbon::parse($r->sent_at)->getTimestamp(), $sig((array) $r->content), $r->via ?? (is_array($r->tags) ? ($r->tags['via'] ?? null) : null)])->all();
         foreach ($echo->sortBy('id') as $e) {
             $d = json_decode((string) $e->detail, true) ?: [];
             $at = Carbon::parse($e->created_at);
             $label = ChatEchoes::label($d['sender'] ?? null);
-            $fits = fn ($o) => abs($o[0] - $at->getTimestamp()) <= self::ECHO_MATCH_SECONDS
+            // Ang sagot ng Likha ay sa daan nito (via forbeast o botcake = ang app ng echo); ang lumang row na walang via: alinman.
+            $fits = fn ($o) => abs($o[0] - $at->getTimestamp()) <= self::ECHO_MATCH_SECONDS && ($o[2] === null || $o[2] === ($d['sender'] ?? null))
                 && (in_array($d['hash'] ?? '', $o[1], true) || (($d['text'] ?? '') === '[Image]' && in_array('image', $o[1], true)));
             $i = collect($outs)->filter($fits)->keys()->first();
             if ($i !== null) {

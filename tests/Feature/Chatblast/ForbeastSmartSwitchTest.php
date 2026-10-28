@@ -455,20 +455,26 @@ class ForbeastSmartSwitchTest extends ChatblastTestCase
         $this->assertSame('gateway', $this->provider(), 'after 60 minutes');
     }
 
-    public function test_S_183_6_a_customer_answered_by_any_app_since_the_message_is_not_evidence_for_a_switch(): void
+    public static function echoAfter(): array
+    {
+        // Ang echo sa loob ng 300 s ay sagot (2 customer na lang, walang lipat); ang echo pagkalipas ng 300 s (hal. ang sagot mula
+        // sa standby) ay hindi nagbubura ng ebidensya.
+        return ['answered at 30 s' => [30, 'gateway'], 'answered after 300 s' => [301, 'botcake']];
+    }
+
+    /** @dataProvider echoAfter */
+    public function test_S_183_6_a_customer_answered_by_any_app_within_300_s_is_not_evidence_for_a_switch(int $at, string $provider): void
     {
         Queue::fake();
         $this->health(null);
         $this->missing(3);
-        // Isang customer ay sinagot ng tao (echo ng Page Inbox) kahit walang kopya sa Forbeast.
-        $this->travel(30)->seconds();
+        $this->travel($at)->seconds();
         \App\Services\Chatbot\ChatEchoes::store(HandleGatewayEvent::fields(['kind' => 'event', 'type' => 'message', 'page_id' => '1001', 'psid' => array_key_first(self::PSIDS),
             'mid' => 'm_person_1', 'text' => 'Ako na po', 'is_echo' => true, 'app_id' => '263902037430900']));
-        $this->travel(271)->seconds();
+        $this->travel(301 - $at)->seconds();
 
         $this->watch();
 
-        $this->assertSame('gateway', $this->provider(), 'only 2 customers have no copy and no echo');
-        $this->assertNotContains('switched', array_column($this->events(), 'result'));
+        $this->assertSame($provider, $this->provider());
     }
 }
