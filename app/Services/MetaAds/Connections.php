@@ -5,6 +5,7 @@ namespace App\Services\MetaAds;
 use App\Models\UploadLog;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 /**
@@ -160,6 +161,37 @@ class Connections
                 if (!in_array($who, $out[$id]['who'], true)) $out[$id]['who'][] = $who;
             }
         }
+        foreach (self::names(array_column($out, 'name', 'id')) as $id => $name) $out[(string) $id]['name'] = $name;
+
+        return $out;
+    }
+
+    /**
+     * Ang ipinapakitang pangalan: ang galing sa Meta, maliban kung wala o ID lang (may act_ man o wala); saka ang active
+     * na ad_accounts row (/ads_manager/ad_account) ng ID na iyon, may act_ man o wala; saka ang ID. Binabasa lang ang ad_accounts.
+     * @param array<string, string> $metaNames id => pangalan mula sa Meta
+     * @return array<string, string> id => ipinapakitang pangalan
+     */
+    public static function names(array $metaNames): array
+    {
+        $bare = fn ($id) => preg_replace('/^act_/', '', trim((string) $id));
+        $out = $missing = [];
+        foreach ($metaNames as $id => $name) {
+            $name = trim((string) $name);
+            $out[$id] = $name;
+            if ($name === '' || $bare($name) === $bare($id)) $missing[$bare($id)] = $id;
+        }
+        if (!$missing) return $out;
+
+        $page = [];
+        if (Schema::hasTable('ad_accounts')) {
+            $ids = array_map('strval', array_keys($missing));
+            foreach (DB::table('ad_accounts')->where('active', true)->whereIn('ad_account_id', array_merge($ids, array_map(fn ($i) => 'act_' . $i, $ids)))
+                ->orderBy('id')->get(['ad_account_id', 'name']) as $r) {
+                $page[$bare($r->ad_account_id)] ??= trim((string) $r->name);
+            }
+        }
+        foreach ($missing as $b => $id) $out[$id] = ($page[$b] ?? '') !== '' ? $page[$b] : (string) $id;
 
         return $out;
     }

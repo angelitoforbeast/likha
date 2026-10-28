@@ -26,6 +26,7 @@ class Compare
         // Ang mga naka-check na account; kapag lahat ay naka-uncheck, lahat (para makatulong sa pagpili).
         $all      = $this->connections->all();
         $selected = array_flip(Sync::accounts(Sync::current($all)));
+        $names    = array_column($this->connections->accounts($all), 'name', 'id');
         foreach ($all as $userId => $c) {
             $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
             $token = $this->connections->token($c);
@@ -37,7 +38,7 @@ class Compare
                 $id = (string) ($acc['id'] ?? '');
                 if ($id === '' || isset($accounts[$id]) || ($selected && !isset($selected[$id]))) continue;
                 try {
-                    $accounts[$id] = $this->account($id, (string) ($acc['name'] ?? ''), $who, $this->insights->rows($id, $from, $to, $token, false), $from, $to);
+                    $accounts[$id] = $this->account($id, (string) ($names[$id] ?? $id), $who, $this->insights->rows($id, $from, $to, $token, false), $from, $to);
                 } catch (GraphException $e) {
                     if ($e->tokenExpired()) {
                         $this->connections->update($userId, ['status' => 'expired', 'last_error' => $e->getMessage()]);
