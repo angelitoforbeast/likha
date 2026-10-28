@@ -634,39 +634,9 @@ class AstraAddressRules
         return $d === '' ? null : $d;
     }
 
+    /** Ang address ng form: ang iisang panuntunan ng landmark (AddressLandmark), pareho sa encode order. */
     public static function composeAddress(array $form): string
     {
-        $norm  = fn (string $x): string => mb_strtolower(trim(preg_replace('/\s+/u', ' ', $x) ?? $x));
-        $raw   = [];
-        foreach (['house_number', 'purok_sitio', 'address'] as $k) {
-            $v = trim((string) ($form[$k] ?? ''));
-            if ($v !== '' && $v !== '-') $raw[] = $v;
-        }
-        // Tanggalin ang bahaging NASA LOOB na ng ibang bahagi ("8543" at "OB Junction" ay nasa "8543 OB Junction")
-        $parts = [];
-        foreach ($raw as $i => $p) {
-            $np = $norm($p); $drop = false;
-            foreach ($raw as $j => $q) {
-                if ($i === $j) continue;
-                $nq = $norm($q);
-                if ($nq === $np) { if ($j < $i) { $drop = true; break; } continue; }   // eksaktong kapareho → una lang ang iiwan
-                if (str_contains($nq, $np)) { $drop = true; break; }                    // nasa loob ng mas mahaba
-            }
-            if (!$drop) $parts[] = $p;
-        }
-        $lm = trim((string) ($form['landmark'] ?? ''));
-        $lm = trim(preg_replace('/^(near|malapit sa|malapit|sa may|sa tabi ng|tabi mismo ng|tabi mismo|tabi ng|tapat ng|tapat|harap ng|likod ng|beside|in front of|katabi ng|next to)\s+/iu', '', $lm) ?? $lm);
-        if ($lm !== '' && $lm !== '-') {
-            $nl = $norm($lm); $inside = false;
-            foreach ($parts as $p) if (str_contains($norm($p), $nl)) { $inside = true; break; }
-            if (!$inside) {
-                // Bahaging nasa loob na ng landmark → alisin (iwas "Naic Public Market, near Jekep's, Naic Public Market")
-                $parts = array_values(array_filter($parts, fn ($p) => !str_contains($nl, $norm($p))));
-                $parts[] = 'near ' . $lm;
-            }
-        }
-        $addr = implode(', ', $parts);
-        $addr = preg_replace('/\s+/u', ' ', $addr) ?? $addr;
-        return mb_substr(trim($addr, " ,"), 0, 250);
+        return AddressLandmark::compose([$form['house_number'] ?? '', $form['purok_sitio'] ?? '', $form['address'] ?? ''], (string) ($form['landmark'] ?? ''));
     }
 }
