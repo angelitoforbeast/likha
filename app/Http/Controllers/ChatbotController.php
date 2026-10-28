@@ -135,8 +135,8 @@ class ChatbotController extends Controller
             $cells[ShopDetails::KEY] = ShopDetails::build($page, $cells); // binubuo, ang naka-save ay hindi na binabasa
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
-                // Kusang lumipat sa Botcake (ForbeastWatch), hanggang may magpalit nang mano-mano.
-                'auto_switched' => $provider === ChatbotProvider::BOTCAKE ? ForbeastWatch::note($autoSwitch, $providerRow) : null,
+                // Kusang lumipat sa Botcake, held o ibinalik sa Forbeast (ForbeastWatch), hanggang may magpalit nang mano-mano.
+                'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider),
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
@@ -628,6 +628,8 @@ class ChatbotController extends Controller
         if ($s->key === ForbeastWatch::KEY && is_array($e = json_decode((string) $s->plainValue(), true))) {
             $what = match ($e['result'] ?? '') {
                 ForbeastWatch::SWITCHED => 'Switched to Botcake',
+                ForbeastWatch::HELD => 'Held on Forbeast',
+                ForbeastWatch::SWITCHED_BACK => 'Switched back to Forbeast',
                 \App\Services\Chatbot\ForbeastSendHealth::ALARM => 'Alarm (no switch)',
                 \App\Services\Chatbot\ForbeastSendHealth::RECOVERED => 'Recovered',
                 default => 'Cannot switch: no Botcake',

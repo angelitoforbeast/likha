@@ -57,6 +57,8 @@ class HandleGatewayEvent implements ShouldQueue
             // Ang comment (type comment): ang mga ID lang; ang text ng comment ay hindi ipinapasa sa queue.
             'comment_id' => $s($e['comment_id'] ?? null, 100), 'post_id' => $s($e['post_id'] ?? null, 100), 'parent_id' => $s($e['parent_id'] ?? null, 100),
             'from_id' => $s($e['from_id'] ?? null, 64), 'is_reply' => (bool) ($e['is_reply'] ?? false), 'is_page_author' => (bool) ($e['is_page_author'] ?? false),
+            // Ang oras ng pagpasok sa queue: ang tagal bago ito naproseso ang lag ng Likha (ForbeastWatch::ingested).
+            'queued_at' => now()->getTimestamp(),
         ] + (($e['type'] ?? null) === 'send_status' ? ['send' => self::send($e['send'] ?? null, $s)] : []);
     }
 
@@ -82,6 +84,7 @@ class HandleGatewayEvent implements ShouldQueue
     public function handle(PageSettings $settings, BotcakeChatGuard $guard): void
     {
         $e = $this->event;
+        if (isset($e['queued_at'])) ForbeastWatch::ingested((int) $e['queued_at']);
         // Ang totoong oras ng padala (para sa Bot Health): walang takbo ng bot.
         if ($e['kind'] === 'event' && $e['type'] === 'send_status' && isset($e['send'])) {
             self::count(app(SendStatus::class)->receive($e));

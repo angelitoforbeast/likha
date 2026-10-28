@@ -950,11 +950,11 @@
         render();
     });
 
-    // Kusang lumipat sa Botcake dahil pumalya ang Forbeast: ang oras, at ang dahilan sa loob (keyboard din). Nawawala kapag
+    // Kusang lumipat sa Botcake dahil pumalya ang Forbeast (o held, o ibinalik sa Forbeast): ang label at oras, at ang dahilan sa loob (keyboard din). Nawawala kapag
     // may nagpalit nang mano-mano.
     function autoSwitchNote(a) {
         return el('details', {class: 'mt-1 max-w-[12rem] text-[11px] text-amber-700'}, [
-            el('summary', {class: 'cursor-pointer', text: 'Auto-switched ' + a.at, title: a.reason}),
+            el('summary', {class: 'cursor-pointer', text: (a.label || 'Auto-switched') + ' ' + a.at, title: a.reason}),
             el('div', {class: 'break-words text-slate-600', text: a.reason}),
         ]);
     }

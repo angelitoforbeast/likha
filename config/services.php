@@ -193,6 +193,14 @@ return [
             'inbound_chats' => (int) env('GATEWAY_SWITCH_INBOUND_CHATS', 1),
             'inbound_minutes' => (int) env('GATEWAY_SWITCH_INBOUND_MINUTES', 10),
             'standby_minutes' => (int) env('GATEWAY_SWITCH_STANDBY_MINUTES', 15),
+            // Ang "inbound" na lipat: ilang customer na walang kopya sa Forbeast, at ilang segundo bago ito ebidensya.
+            'inbound_customers' => (int) env('GATEWAY_SWITCH_INBOUND_CUSTOMERS', 3),
+            'inbound_seconds' => (int) env('GATEWAY_SWITCH_INBOUND_SECONDS', 300),
+            // Ang lag (segundo) na "mabagal" na: ang sa Likha (queue ng gateway events) at ang inbound_lag_seconds ng Forbeast.
+            'lag_seconds' => (int) env('GATEWAY_SWITCH_LAG_SECONDS', 60),
+            // Ang kusang balik sa Forbeast: ilang minutong sunod-sunod na maayos ang health, at isa lang kada ilang oras.
+            'back_minutes' => (int) env('GATEWAY_SWITCH_BACK_MINUTES', 30),
+            'back_hours' => (int) env('GATEWAY_SWITCH_BACK_HOURS', 6),
         ],
     ],
 

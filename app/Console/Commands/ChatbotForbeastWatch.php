@@ -13,7 +13,7 @@ use Throwable;
 
 /**
  * Kada minuto: ang bawat page na nasa Forbeast ay sinusuri (health check at ang mga chat ng Botcake laban sa Forbeast); ang
- * pumapalya ay kusang inililipat sa Botcake (ForbeastWatch). Binubura rin ang luma nang standby. Walang GATEWAY_URL: walang
+ * pumapalya ay kusang inililipat sa Botcake (ForbeastWatch), at ang inilipat nito ay ibinabalik kapag maayos na. Binubura rin ang luma nang standby. Walang GATEWAY_URL: walang
  * sinusuri.
  */
 class ChatbotForbeastWatch extends Command
@@ -41,6 +41,16 @@ class ChatbotForbeastWatch extends Command
                 if ($pageId !== '') $watch->inbound((string) $page, $pageId);
             } catch (Throwable $e) {
                 report($e); // isang page lang ang apektado
+            }
+        }
+        // Ang page na inilipat ng bantay sa Botcake (inbound o padala): ibinabalik sa Forbeast kapag matagal nang maayos ang health.
+        $back = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)->where('active', true)->orderBy('id')->get()
+            ->filter(fn ($s) => ForbeastWatch::returnable($s))->pluck('page_name')->unique(fn ($p) => $settings->pageKey((string) $p));
+        foreach ($back as $page) {
+            try {
+                $watch->switchBack((string) $page);
+            } catch (Throwable $e) {
+                report($e);
             }
         }
         // Ang send health ng Forbeast (panel at send lag alarm): huli, para hindi nito maantala ang mga check sa itaas.
