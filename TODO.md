@@ -1418,3 +1418,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **The `gateway-events:<date>:bot_off` key is typed again** (the job owns it). Reason: second copy, below the DRY bar; the job is another worker's file.
 - **Untested here:** a reply before the message (answer to an earlier message), a `partial` reply, a page whose flow starts mid-day, the per-bot rows ignoring the Bot filter, and MySQL timing. Reason: thin branches over tested paths (the binary search, `SendStatus::DELIVERED`, `BotHealth::hadFlow`); time `/chatbot/speed` once on production after deploy.
 - **The 390 px check reads the markup only.** Reason: no browser run in this job.
+
+## 182-1: Speed tab AI split and sequences, accepted review minors (2026-10-28)
+- **"With AI" and AI time use every AI call of the reply's chat**, also a call made after the timed reply. Reason: the note says so; limit it to calls before the reply's sent time if the numbers look high.
+- **The original scheduled time uses the step's delay as it is now.** A delay edited after the step ran changes the old scheduled times. Reason: delays rarely change; the recorded `due` is the fallback.
+- **The same sequence re-joined by the same customer within 10 minutes can reuse the first run's send.** Reason: rare; the match is per page, PSID, sequence and step within 600 s.
+- **The Bot filter on sequences uses each page's bot now** (the reply rows use each chat's own source). Reason: same as Bot Health; a page that switched mid-day splits differently in the two sections.
+- **The seconds formatter is in three Blade partials.** Reason: third copy reached; a shared helper is a small clean-up for later.
+- **Untested here:** the Bot filter on sequences, a step due before midnight that ran after, an old event without `due`, a ran step whose sends all failed, two sequences with the same step number within 600 s, an unanswered or `sync` AI call, and escaping of sequence names in the slowest list (they use `{{ }}`). Reason: thin branches over tested paths.
