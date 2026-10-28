@@ -3125,5 +3125,20 @@ Tests: `tests/Feature/Chatblast/ResponseSpeedTest.php`, existing Chatblast, Botc
 | S-185.6 (P1) | When the page, bot or day filter is set, Then every chart follows it and equals that view's tables | `test_S_185_6…` | passed |
 | S-185.7 (P1) | Given a role without Chatbot access, Then /chatbot/speed is 403; a CEO sees all four charts | `test_S_185_7…` | passed |
 | S-185.8 (P1) | Existing Chatblast, Botcake and PageSettings suites and the Speed tests pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |
-| S-185.9 (P2) | At 390 px each chart sits under its table in a box as wide as the screen and stays readable | `test_S_185_9…` (markup) and a headless Chrome render at 390 px | passed |
+| S-185.9 (P2) | At 390 px each chart sits with its table (above it since S-188.1; under it before) in a box as wide as the screen and stays readable | `test_S_185_9…` (markup) and a headless Chrome render at 390 px | passed |
 | S-185.10 (P1, amendment 185-1) | Viewing a fixture day D, Then each chart also has D-1's series equal to D-1's table values (with the same filters); viewing Yesterday compares with the day before | `test_S_185_10…` | passed |
+
+## S-188 The owner reads the Speed screen by its graphs, with the tables folded away
+
+As the owner, I want each Speed section to show its heading, the day's key numbers and its chart, with the table folded away until I open it, so I read the screen by the graphs and open a table only when I need the hour-by-hour numbers.
+
+Slice 188. Threat model: no new input; the same query string as S-182 (date, page_id, bot). The open or closed state of each table is kept in the viewer's own browser (localStorage) and read only as "open" or not. Risk tier: low (UI only on an existing read-only screen; no change to numbers, queries, cache or access).
+Tests: `tests/Feature/Chatblast/ResponseSpeedTest.php`, existing Chatblast suite.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-188.1 (P1) | When a CEO opens /chatbot/speed, Then the four charts show, each under its heading and summary line, and every table (the four section tables and the slowest steps) is inside a `<details>` without `open`, labelled Show / Hide; no table is outside one | `test_S_188_1…` | passed |
+| S-188.2 (P1) | Given the S-182.9 and S-182.11 fixtures, Then each section's summary line shows its table's Day row: "Day: 4 messages · 3 answered · avg 32.3 s · median 20 s · p90 72 s · max 72 s", the With AI / No AI / AI time totals, the pushed → Meta totals, and the sequences totals | `test_S_188_2…` | passed |
+| S-188.3 (P1) | When a table is opened, Then it is the same table as before (same scrolling box, columns, hour rows and Day row) with its notes | `test_S_188_3…`, the unchanged S-182 and S-185 table tests, and the rendered tables compared with e919bec5 | passed |
+| S-188.4 (P1) | Existing ResponseSpeedTest and Chatblast suites pass | `tests/Feature/Chatblast` | passed |
+| S-188.5 (P2) | At 390 px the charts are readable and the page does not scroll sideways, with tables closed and open | headless Chrome render at 390 px | passed |
