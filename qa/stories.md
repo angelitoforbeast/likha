@@ -2951,3 +2951,19 @@ Tests: `tests/Feature/Chatblast/AdBasedPagesTest.php`, plus the 172 tests.
 | S-174.8 (P1) | Given a Page-based page, Then it renders as one row, as before | 390 px check, `test_S_174_8…` | passed |
 | S-174.9 (P1) | The 172/173 and Chatblast/Botcake/PageSettings/MetaAds suites have no new failures | full run | passed |
 | S-174.10 (P2) | At 390 px the sub-rows stack readably | headless Chrome | passed |
+
+## S-176 Ad account names fall back to the names on /ads_manager/ad_account
+
+As Marketing or the CEO, I want an ad account that Meta returns without a real name to show the name kept on /ads_manager/ad_account, so the Meta Ads list and Compare are readable.
+
+Slice 176. Threat model: Meta's account names and the `ad_accounts` names (typed by staff) are untrusted text, shown escaped as before; `ad_accounts` is only read. Risk tier: low (display only, behind the existing access check, no new route or write).
+Tests: `tests/Feature/MetaAds/MetaAdsAccountNamesTest.php`, existing Meta Ads tests.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-176.1 (P1) | Meta name "1978377456240271" and an active ad_accounts row "Vane Mendoza", Then the account list, the checkbox row, the people table, `meta-ads:accounts --list` and Compare show "Vane Mendoza"; ad_accounts is unchanged | `test_S_176_…` (data set S-176.1), `test_S_176_1…` | passed |
+| S-176.2 (P1) | Meta name "Vanie Lopez" and ad_accounts says something else, Then "Vanie Lopez" | `test_S_176_…` (S-176.2) | passed |
+| S-176.3 (P1) | No Meta name and no ad_accounts row, Then the ID | `test_S_176_…` (S-176.3) | passed |
+| S-176.4 (P1) | Only an inactive ad_accounts row, Then the ID | `test_S_176_…` (S-176.4) | passed |
+| S-176.5 (P1) | Meta name "act_<ID>", or the ad_accounts ID stored as "act_<ID>", Then the ad_accounts name | `test_S_176_…` (2 S-176.5 sets) | passed |
+| S-176.6 (P1) | Existing Meta Ads and Ads Manager tests pass | `tests/Feature/MetaAds`, `tests/Feature/AdAccount` | passed |

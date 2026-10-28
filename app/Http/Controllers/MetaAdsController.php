@@ -55,7 +55,9 @@ class MetaAdsController extends Controller
         $people = [];
         $all = $connections->all();
         $names = $all ? \App\Models\User::whereIn('id', array_keys($all))->pluck('name', 'id') : collect();
+        $shown = array_column($connections->accounts($all), 'name', 'id');
         foreach ($all as $userId => $c) {
+            foreach ($c['ad_accounts'] ?? [] as $i => $acc) $c['ad_accounts'][$i]['name'] = $shown[(string) ($acc['id'] ?? '')] ?? ($acc['name'] ?? '');
             $people[] = $connections->strip($c) + [
                 'likha_name' => $names[$userId] ?? ('user ' . $userId),
                 'reconnect'  => $connections->needsReconnect($c),
