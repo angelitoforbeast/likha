@@ -120,7 +120,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     {
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
         $html = $this->get('/chatbot/speed')->assertOk()->getContent();
-        $this->assertStringContainsString('date=2026-10-20', $html); // Yesterday at ←
+        $this->assertMatchesRegularExpression('#href="/chatbot/speed\?date=2026-10-20"[^>]*>Yesterday<#', $html);
         $this->assertStringNotContainsString('date=2026-10-22', $html); // walang → lampas ngayon
 
         $y = $this->out(['date' => '2026-10-20']);
@@ -135,7 +135,31 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertStringContainsString('date=2026-10-21', $html);
         // Ang petsa sa hinaharap o sira ay ngayon.
         $this->assertSame('2026-10-21', $this->out(['date' => '2026-10-25'])['filters']['date']);
-        $this->assertSame('2026-10-21', $this->out(['date' => '2026-02-30'])['filters']['date']);
+        foreach (['2026-02-30', ['x'], '<script>', '2026-10-1'] as $bad) $this->assertSame('2026-10-21', $this->out(['date' => $bad])['filters']['date']);
+        $this->assertNull($this->out(['page_id' => ['1002']])['filters']['page_id']);
+        $this->get('/chatbot/speed?date[]=x&page_id[]=1')->assertOk();
+    }
+
+    public function test_S_182_1_a_message_just_before_midnight_counts_in_hour_23_with_its_reply_after_midnight(): void
+    {
+        $this->chat('1002', '7020', '2026-10-20 23:59:50');
+        $this->reply('1002', '7020', '2026-10-21 00:00:10');
+        $this->chat('1002', '7021', '2026-10-20 08:00:00');
+        $this->reply('1002', '7021', '2026-10-21 08:00:01'); // lampas 24 oras: hindi na sagot
+
+        $y = $this->out(['date' => '2026-10-20']);
+        $this->assertSame([1, 1, 20], [$y['hours'][23]['messages'], $y['hours'][23]['answered'], $y['hours'][23]['median']]);
+        $this->assertSame([1, 0], [$y['hours'][8]['messages'], $y['hours'][8]['answered']]);
+    }
+
+    public function test_S_182_5_messages_refused_with_the_bot_off_are_shown_only_without_filters(): void
+    {
+        Cache::put('botcake-chat:refused:2026-10-21:bot_off', 2);
+        Cache::put('gateway-events:2026-10-21:bot_off', 3);
+        $s = app(ResponseSpeed::class);
+
+        $this->assertSame(5, $s->output([])['refused_off']);
+        $this->assertNull($s->output(['page_id' => '1002'])['refused_off']);
     }
 
     public function test_S_182_3_provider_split_and_filters(): void
@@ -198,6 +222,9 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame(3, $s->output([])['hours'][10]['messages']);
         $this->travel(121)->seconds();
         $this->assertSame(4, $s->output([])['hours'][10]['messages']);
+        // Bawat filter ay may sariling cache.
+        $this->assertSame(2, $s->output(['page_id' => '1002'])['hours'][10]['messages']);
+        $this->assertSame(2, $s->output(['bot' => 'Forbeast'])['hours'][10]['messages']);
         $this->assertSame(120, ResponseSpeed::TODAY_CACHE_SECONDS);
         $this->assertGreaterThan(120, ResponseSpeed::PAST_CACHE_SECONDS);
     }

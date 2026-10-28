@@ -71,7 +71,7 @@
         </div>
         <p class="mt-2 text-xs text-slate-500">
             Hour = when the customer's message arrived (Manila). Answered = a bot reply to the same customer within 24 hours that was sent (failed, test and sequence sends are not replies). ≤ 30 s / 1 min / 5 min are counted against all messages. Attachments the bot ignores by design are left out. Not on bot = messages on a page without a flow at that time; they are not in the other numbers. The Forbeast and Botcake rows are for the whole day and follow the page filter only.
-            @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a send confirmation from Forbeast: their time is when Likha handed the reply over.@endif
+            @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a confirmed sent time (a Forbeast reply not confirmed yet, or a reply recorded before sent times were kept): their time is when Likha handed the reply over.@endif
             @if($refused_off) {{ number_format($refused_off) }} messages came in on pages with the bot Off and were not stored.@endif
         </p>
     </section>
