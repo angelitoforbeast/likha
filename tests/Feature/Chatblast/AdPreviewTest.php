@@ -86,8 +86,14 @@ class AdPreviewTest extends ChatblastTestCase
         $this->report('222', 'c222');
         $this->preview('222')->assertOk()->assertJson(['link' => 'https://fb.watch/abc123/', 'headline' => 'Campaign headline', 'from_campaign' => true]);
 
-        DB::table('ad_campaign_creatives')->insert(['ad_id' => '111', 'campaign_id' => 'c111', 'ad_link' => 'javascript:alert(1)', 'created_at' => now(), 'updated_at' => now()]);
-        $this->preview('111')->assertOk()->assertJson(['link' => null]);
+        // Ang body na wala sa creative ay mula sa report; ang link na hindi https na Facebook ay hindi ini-embed.
+        DB::table('ads_manager_reports')->where('ad_id', '222')->update(['body' => 'Report body']);
+        $this->preview('222')->assertOk()->assertJson(['body' => 'Report body']);
+        DB::table('ad_campaign_creatives')->insert(['ad_id' => '111', 'campaign_id' => 'c111', 'created_at' => now(), 'updated_at' => now()]);
+        foreach (['javascript:alert(1)', 'https://evilfacebook.com/x', 'https://facebook.com.evil.com/x', 'http://www.facebook.com/x', 'https://www.facebook.com/reel/1'] as $link) {
+            DB::table('ad_campaign_creatives')->where('ad_id', '111')->update(['ad_link' => $link]);
+            $this->preview('111')->assertOk()->assertJson(['link' => $link === 'https://www.facebook.com/reel/1' ? $link : null], $link);
+        }
     }
 
     public function test_S_181_5_only_editors_and_only_ads_of_the_page(): void
@@ -96,6 +102,7 @@ class AdPreviewTest extends ChatblastTestCase
         $this->preview('12a')->assertStatus(422);
         $this->preview('111', 'No Such Page')->assertNotFound();
         $this->preview('999', 'Page Q')->assertOk();
+        $this->get('/chatbot/pages')->assertOk()->assertSee('data-ag-ad-url', false);
 
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
         $this->preview('111')->assertForbidden();

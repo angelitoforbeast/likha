@@ -1373,6 +1373,13 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Untested here:** status queries on MySQL and pgsql (sqlite in tests); rows with only `reporting_starts` and no `day` are not counted for status; typed add past 500 ads, `/value` with a deleted flow, removing a group's last ad, an object as `ads`. Reason: covered by the 172 checks they reuse (MAX_ADS, flow check, put of an empty list); run the expanded view once on MySQL after deploy.
 - **The 390 px check ran on a static copy of the page with a mocked server**, not the logged-in live page. Reason: no browser tools and no test server with data here.
 
+## 181: ad groups viewed in the list, managed in Edit, ad preview, accepted review minors (2026-10-28)
+- **The creative lookup (ad row, else the campaign's row) and the Facebook embed URL repeat /owner/private's** (`AdsManagerCampaignsController::creativePreview`, `fbEmbedSrc` in owner/private). Reason: reusing them means touching a Meta Ads controller other work is changing, or inline Alpine in a legacy view; extract on the next copy.
+- **In "Ads not in a group yet" the ad-ID button sits inside the checkbox label** (invalid nesting; the checkbox's name includes the ID). Reason: works by click and keyboard; cosmetic.
+- **The ad preview shares the 120/min `chatbot-ad-groups` throttle bucket with the ad groups list.** Reason: plenty for one screen.
+- **The UI cases (S-181.1, .2, .4, .7) are checked by a headless Chrome probe of the rendered page with a mocked server, not by a committed test**, as in 172/174. Reason: the project has no JS test runner; the writes go through the tested 172/174 endpoints.
+- **Untested:** an ad seen more than 30 days ago and in no group (404, same `seen` window as 174), and a database without `ad_campaign_creatives`. Reason: both rest on tested code paths (`seen`, `Schema::hasTable`).
+
 ## 175: Forbeast watcher, accepted review minors (2026-10-28)
 - **The switch back can't check "no missing copies" or "no send failure"** while a page is on Botcake. Reason: Forbeast drops that page's messages and nothing sends through it; the health (connected, can_send, inbound_lag_seconds) is the evidence.
 - **The Horizon (redis) path of the Likha lag check is untested.** A supervisor with a combined queue string returns 0. Reason: production runs the database queue, which is tested.

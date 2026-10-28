@@ -2994,3 +2994,20 @@ Amendment 175-1 (a page just moved to Forbeast is not blamed for messages from i
 | S-175.9b (P1) | Given the watcher switched a page back to Forbeast, When copies arrive 60 s later with no Forbeast copy, Then no switch, and no "moved" event follows the watcher's own move | `test_S_175_9b…` | passed |
 | S-175.10 (P1) | Given a person moves a page to Forbeast, When the watcher runs (twice), Then one "moved" event "moved to Forbeast by <name> at <time>" and the provider change stays the person's in the history | `test_S_175_10…` | passed |
 | S-175.10b (P2) | A move with no user is recorded "by system" and labelled system (not auto-switch); a move older than an hour gets no event | `test_S_175_10b…` | passed |
+
+## S-181 Marketing sees an Ad-based page's groups in the pages list, watches each ad, and manages the groups in Edit
+
+As marketing staff, I want the pages list to show an Ad-based page's groups and their ad IDs with status, each ad clickable to watch its video or post, and the creating and changing of groups to happen in the page's Edit window, so the list stays readable and every change happens in one place.
+
+Slice 181. Threat model: request params from logged-in staff to /chatbot/ad-groups* are untrusted; ad links, headlines, bodies and ad names in the database are stored text shown escaped; the preview iframe is built only from an https Facebook link. No new table, no migration, no Meta call. Risk tier: medium (one new read route behind the existing access check; UI move).
+Tests: `tests/Feature/Chatblast/AdPreviewTest.php`, the 172/174 tests, and a headless Chrome probe of the real page at 390 px.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-181.1 (P1) | Given an Ad-based page, When its Ad groups expand in the list, Then Default, each group with its values and its ad IDs (status, customers, last time), "as of" and "N ads not in a group yet" show, with "Manage in Edit" and no add, remove, create, rename, delete or unassigned list | 390 px probe | passed |
+| S-181.2 (P1) | Given an Ad-based page, When Edit opens (or "Manage in Edit"), Then its Ad groups section has create, rename, delete, History, values, add by paste or tick, and Remove; When an ad ID is added there, Then the list shows it | 390 px probe; endpoints by the 172/174 tests | passed |
+| S-181.3 (P1) | When an ad ID with a stored creative is clicked, Then its video or post (Facebook embed), headline and body show; the campaign's creative is the fallback, marked; When no link is stored or the link is not an https Facebook link, Then "No preview" | `test_S_181_3…` (2), 390 px probe | passed |
+| S-181.4 (P1) | Given a Page-based page, Then it is one row as before, and its Edit window says how to make it Ad-based | 390 px probe, `test_S_174_1…` | passed |
+| S-181.5 (P1) | Given a user who cannot edit page values, When they call the ad preview or the ad groups, Then 403; an ad not of the page → 404; a non-digit ad → 422 | `test_S_181_5…` | passed |
+| S-181.6 (P1) | The 172/174 and Chatblast/Botcake/PageSettings suites have no new failures | full run | passed |
+| S-181.7 (P2) | At 390 px the list sub-rows, the Edit section and the preview fit without horizontal overflow | headless Chrome, 390 px iframe | passed |
