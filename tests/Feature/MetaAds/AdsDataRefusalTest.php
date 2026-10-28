@@ -25,7 +25,7 @@ class AdsDataRefusalTest extends MetaAdsTestCase
         ]);
     }
 
-    private function upload(string $spend, string $impressions, ?int $userId = null): UploadLog
+    private function upload(string $spend, string $impressions, ?int $userId = null, string $clicks = '33'): UploadLog
     {
         Storage::fake('local');
         $path = 'uploads/ads_manager_reports/t.xlsx';
@@ -35,7 +35,7 @@ class AdsDataRefusalTest extends MetaAdsTestCase
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['Day', 'Ad ID', 'Account ID', 'Campaign ID', 'Ad set ID', 'Page name', 'Campaign name',
             'Ad set name', 'Amount spent (PHP)', 'Impressions', 'Reach', 'Results', 'Result type', 'Link clicks']));
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([self::DAY, 'a1', '111', 'c1', 'as1', 'Page P1', 'New camp', 'Adset', $spend,
-            $impressions, '900', '12', 'Messaging conversations started', '33']));
+            $impressions, '900', '12', 'Messaging conversations started', $clicks]));
         $writer->close();
         $log = UploadLog::create(['type' => 'ads_manager_reports', 'disk' => 'local', 'path' => $path, 'original_name' => 't.xlsx',
             'status' => 'queued', 'user_id' => $userId]);
@@ -83,6 +83,27 @@ class AdsDataRefusalTest extends MetaAdsTestCase
 
         $this->assertSame([$wantSpend, $wantImpr, 'New camp'], $this->row());
         $this->assertSame(1, (int) $log->updated);
+        $this->assertSame([], DataHealth::refusals([$log->id]));
+    }
+
+    public function test_S_178_3_a_zero_against_a_stored_value_refuses_the_row(): void
+    {
+        $this->stored();
+
+        $log = $this->upload('120', '1600', null, '0');
+
+        $this->assertSame([100.0, 1500, 'Old camp'], $this->row());
+        $this->assertSame(['link_clicks' => ['stored' => 33, 'incoming' => 0]], DataHealth::refusals([$log->id])[$log->id]['rows'][0]['metrics']);
+    }
+
+    public function test_S_178_3_a_blank_metric_cell_keeps_that_column_and_updates_the_rest_without_a_refusal(): void
+    {
+        $this->stored();
+
+        $log = $this->upload('120', '1600', null, '');
+
+        $this->assertSame([120.0, 1600, 'New camp'], $this->row());
+        $this->assertSame(33, (int) DB::table('ads_manager_reports')->where('ad_id', 'a1')->value('link_clicks'));
         $this->assertSame([], DataHealth::refusals([$log->id]));
     }
 

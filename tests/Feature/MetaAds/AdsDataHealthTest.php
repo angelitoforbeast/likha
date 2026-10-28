@@ -94,6 +94,21 @@ class AdsDataHealthTest extends MetaAdsTestCase
         $this->assertSame('Old Shop', collect(DataHealth::evaluate()['accounts'])->firstWhere('id', '777')['name']);
     }
 
+    public function test_S_178_1_an_uploaded_ad_without_its_own_creatives_row_takes_its_campaigns_account(): void
+    {
+        // Sa production, unique ang ad_campaign_creatives.campaign_id: isang ad lang kada campaign ang may row.
+        DB::table('ad_campaign_creatives')->insert(['ad_id' => 'a1', 'campaign_id' => 'c9', 'account_id' => '111']);
+        DB::table('ads_manager_reports')->insert([
+            ['day' => self::YESTERDAY, 'ad_id' => 'a1', 'campaign_id' => 'c9', 'page_name' => 'P', 'amount_spent_php' => 10, 'created_at' => now(), 'updated_at' => now()],
+            ['day' => self::YESTERDAY, 'ad_id' => 'a2', 'campaign_id' => 'c9', 'page_name' => 'P', 'amount_spent_php' => 5, 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $got = collect(DataHealth::evaluate()['accounts'])->keyBy('id');
+
+        $this->assertSame([2, 15.0], [$got['111']['rows'], $got['111']['spend']]);
+        $this->assertFalse($got->has(''), 'walang "Account unknown"');
+    }
+
     public function test_S_178_2_the_noon_check_records_the_result_shows_the_red_notice_and_prints_json(): void
     {
         $this->world();
@@ -141,9 +156,12 @@ class AdsDataHealthTest extends MetaAdsTestCase
     {
         $this->world();
         $this->artisan('ads:data-health', ['--record' => true])->assertSuccessful();
+        $src = UploadLog::create(['type' => 'ads_manager_reports', 'disk' => 'local', 'path' => 'x', 'original_name' => 'x.xlsx', 'status' => 'done']);
+        DataHealth::recordRefusals($src, 'upload', [['day' => self::YESTERDAY, 'ad_id' => 'a1', 'account' => '111', 'metrics' => ['reach' => ['stored' => 9, 'incoming' => 8]]]]);
 
-        $this->actingAs($this->user('Logistics', 'log@example.test'))->get('/ads_manager/report')
-            ->assertDontSee('Data health')->assertDontSee('id="ads-data-notice"', false)->assertDontSee('Old Shop');
-        $this->actingAs($this->user('Marketing', 'mk@example.test'))->get('/ads_manager/report')->assertSee('Data health');
+        $this->actingAs($this->user('Logistics', 'log@example.test'))->get('/ads_manager/report')->assertOk()
+            ->assertDontSee('Data health')->assertDontSee('id="ads-data-notice"', false)->assertDontSee('Old Shop')
+            ->assertDontSee('refused (lower values)');
+        $this->actingAs($this->user('Marketing', 'mk@example.test'))->get('/ads_manager/report')->assertSee('Data health')->assertSee('1 row refused (lower values)');
     }
 }

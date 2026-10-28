@@ -85,7 +85,8 @@ class AdsManagerReportController extends Controller
             // Data health (bawat ad account, kahapon): ang may "Ads" link lang, gaya ng Meta section.
             'health'   => MetaAdsController::allowed()
                 ? ['live' => \App\Services\MetaAds\DataHealth::evaluate(), 'last' => \App\Services\MetaAds\DataHealth::last()] : null,
-            'refused'  => \App\Services\MetaAds\DataHealth::refusals($logs->pluck('id')->all()),
+            // Ang detalye ng tinanggihang row (ad, account, numero): ang may "Ads" link lang.
+            'refused'  => MetaAdsController::allowed() ? \App\Services\MetaAds\DataHealth::refusals($logs->pluck('id')->all()) : [],
         ]);
     }
 

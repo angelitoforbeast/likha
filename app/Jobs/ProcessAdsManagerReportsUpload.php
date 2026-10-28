@@ -209,7 +209,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     /**
      * Ang parehong upsert ng upload para sa mga row na galing na sa ibang source (Meta Ads API), para pareho ang
      * proteksyon ng monotonic fields at ang ad_campaign_creatives / ad_catalog. Ang rows ay normalized na (gaya ng
-     * normalizeRow). @return array{inserted:int, updated:int, skipped:int, protected:array}
+     * normalizeRow). @return array{inserted:int, updated:int, skipped:int, protected:array, refused:list<array>}
      */
     public function importRows(array $rows): array
     {
@@ -606,6 +606,10 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     $existing = DB::table('ads_manager_reports')
                         ->where('day', $day)
                         ->whereIn('ad_id', $adIds)
+                        // Naka-lock hanggang commit: ang Sync (ibang proseso) at ang upload ay hindi sabay na nagpapasya sa
+                        // parehong row, kaya walang mas mababang numerong nakakalusot sa pagtanggi.
+                        ->orderBy('ad_id')
+                        ->lockForUpdate()
                         ->get(array_merge(['ad_id'], self::MONOTONIC_FIELDS));
                     foreach ($existing as $row) {
                         $existingByKey["{$day}|{$row->ad_id}"] = (array) $row;

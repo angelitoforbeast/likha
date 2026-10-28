@@ -136,19 +136,23 @@ class DataHealth
     {
         $D     = $d->format('Y-m-d');
         $prior = $d->copy()->subDays(self::MISSING_DAYS)->format('Y-m-d');
-        $q = DB::table('ads_manager_reports as r')
+        // Ang account ng row: ang ad_campaign_creatives ng ad, saka ang ng campaign nito (unique ang campaign_id doon, kaya
+        // isang ad lang kada campaign ang may sariling row). Kada row muna sa subquery, saka group sa labas (mysql at pgsql).
+        $inner = DB::table('ads_manager_reports as r')
             ->where('r.day', '>=', $d->copy()->subDays(self::WINDOW_DAYS)->format('Y-m-d'))
-            ->where('r.day', '<', $d->copy()->addDay()->format('Y-m-d'));
-        $acc = "''";
+            ->where('r.day', '<', $d->copy()->addDay()->format('Y-m-d'))
+            ->select(['r.day', 'r.amount_spent_php']);
         if (Schema::hasTable('ad_campaign_creatives')) {
-            $q->leftJoin('ad_campaign_creatives as c', 'c.ad_id', '=', 'r.ad_id');
-            $acc = "COALESCE(c.account_id, '')";
+            $inner->selectRaw("COALESCE((SELECT MAX(c.account_id) FROM ad_campaign_creatives c WHERE c.ad_id = r.ad_id),
+                (SELECT MAX(c2.account_id) FROM ad_campaign_creatives c2 WHERE c2.campaign_id = r.campaign_id), '') AS acc");
+        } else {
+            $inner->selectRaw("'' AS acc");
         }
-        $rows = $q->selectRaw("{$acc} AS acc, MIN(r.day) AS first_day, MAX(r.day) AS last_day,
-                SUM(CASE WHEN r.day >= ? THEN 1 ELSE 0 END) AS y_rows,
-                SUM(CASE WHEN r.day >= ? THEN COALESCE(r.amount_spent_php, 0) ELSE 0 END) AS y_spend,
-                SUM(CASE WHEN r.day >= ? AND r.day < ? THEN COALESCE(r.amount_spent_php, 0) ELSE 0 END) AS prior_spend", [$D, $D, $prior, $D])
-            ->groupByRaw($acc)->get();
+        $rows = DB::query()->fromSub($inner, 'x')->selectRaw("acc, MIN(day) AS first_day, MAX(day) AS last_day,
+                SUM(CASE WHEN day >= ? THEN 1 ELSE 0 END) AS y_rows,
+                SUM(CASE WHEN day >= ? THEN COALESCE(amount_spent_php, 0) ELSE 0 END) AS y_spend,
+                SUM(CASE WHEN day >= ? AND day < ? THEN COALESCE(amount_spent_php, 0) ELSE 0 END) AS prior_spend", [$D, $D, $prior, $D])
+            ->groupBy('acc')->get();
 
         $out = [];
         foreach ($rows as $r) {
