@@ -33,6 +33,17 @@ class OrderPhone
         return count($n) === 1 ? $n[0] : '';
     }
 
+    /**
+     * Ang anyo ng phone sa website (mula pa sa sheet, na nag-aalis ng unang 0): 9XXXXXXXXX, 10 digits. Ito ang hinahanap ng
+     * Validate, ng duplicate check, ng whitelist at ni Astra. '' kapag hindi valid na PH mobile.
+     */
+    public static function website(?string $phone): string
+    {
+        $p = BotcakeCustomerMatcher::normPhone($phone);
+
+        return $p === '' ? '' : substr($p, 1);
+    }
+
     /** D, kung hindi E, kung hindi G. Ang E na may dalawang numero ay humihinto na: hindi na tinitingnan ang G. */
     public static function forOrder(?string $d, ?string $e, ?string $g): string
     {

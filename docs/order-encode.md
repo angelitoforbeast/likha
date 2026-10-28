@@ -193,7 +193,7 @@ in 136, but its palette button is hidden. Nothing converts a flow; the owner swa
 
 **Upload to macro** (`upload_macro`, ports next and failed) writes the raw order row at once, without encoding. It uses the A–H templates
 of the old step.
-- The row: TIMESTAMP, ts_date, PAGE, fb_name, FULL NAME (the FB name), PHONE NUMBER (the flow's phone, 09… when valid), ITEM_NAME/COD from
+- The row: TIMESTAMP, ts_date, PAGE, fb_name, FULL NAME (the FB name), PHONE NUMBER (the flow's phone, 9XXXXXXXXX when valid), ITEM_NAME/COD from
   the shop details (else the price cell), shop details, all_user_input (this order's messages, the 136 conversation rule), extracted
   details/CXD and botcake_psid. STATUS and the address stay blank.
 - **Insert** always makes a new row. R5 does not run here.
@@ -224,7 +224,8 @@ step). The result is read later with the `order_*` variables (below).
 - The encode is the 136 encode (improved rules, notes, R5 counting other customers only), run on the upload's conversation. It writes
   ADDRESS, PROVINCE, CITY, BARANGAY, AI ANALYZE, APP SCRIPT CHECKER and STATUS = PROCEED (first-encode rules) into that row only, plus:
   - **PHONE NUMBER:** the phone of the chat (`OrderPhone::forOrder`: the encode's phone, else the only number in the conversation, else in
-    the extracted details, as 09XXXXXXXXX) when it is valid and differs.
+    the extracted details), stored in the website form 9XXXXXXXXX (`OrderPhone::website`), when it is valid and is a different number
+    (the same number as 09… and 9… is not a change).
   - **FULL NAME:** the name the encode read, in Unicode NFC, when it differs and is not worse. Worse means blank, with a digit, without a
     letter, "unknown"/"n/a", or only a part of the current name.
 - The write skips staff-edited fields (`edited_*` or a person's log line), never blanks a filled field and changes nothing on a row with a

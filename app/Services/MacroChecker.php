@@ -1164,7 +1164,8 @@ class MacroChecker
     private function duplicatePhoneRows($row, string $phone): array
     {
         try {
-            $q = MacroOutput::query()->where('id', '<>', (int) $row->id)->where('PHONE NUMBER', $phone)
+            // Pati ang lumang anyong 09… ng parehong numero.
+            $q = MacroOutput::query()->where('id', '<>', (int) $row->id)->whereIn('PHONE NUMBER', [$phone, '0' . $phone])
                 ->where(function ($s) { $s->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED'); });
             $date = null;
             if (!empty($row->ts_date)) {
