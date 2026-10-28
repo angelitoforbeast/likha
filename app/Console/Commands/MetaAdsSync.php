@@ -22,6 +22,10 @@ class MetaAdsSync extends Command
             if (!$this->option('scheduled')) $this->warn('Write mode is off: nothing written. Use meta-ads:compare.');
             return self::SUCCESS;
         }
+        if (!Sync::accounts()) {
+            $this->warn(Sync::NO_ACCOUNTS . ' (meta-ads:accounts --set=ID,ID): nothing written.');
+            return self::SUCCESS;
+        }
         if ($this->option('scheduled') && !in_array(Carbon::now('Asia/Manila')->format('H:i'), Sync::schedule(), true)) {
             return self::SUCCESS;
         }

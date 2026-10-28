@@ -870,6 +870,7 @@ Route::post('/ads_manager/meta/disconnect', [\App\Http\Controllers\MetaAdsContro
 Route::post('/ads_manager/meta/compare', [\App\Http\Controllers\MetaAdsController::class, 'compare'])->name('ads_manager.meta.compare');
 Route::post('/ads_manager/meta/sync', [\App\Http\Controllers\MetaAdsController::class, 'sync'])->name('ads_manager.meta.sync');
 Route::post('/ads_manager/meta/write-mode', [\App\Http\Controllers\MetaAdsController::class, 'writeMode'])->name('ads_manager.meta.write_mode');
+Route::post('/ads_manager/meta/accounts', [\App\Http\Controllers\MetaAdsController::class, 'accounts'])->name('ads_manager.meta.accounts');
 
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
     Route::get('/ads_manager/cpp/data', [\App\Http\Controllers\CPPController::class, 'data'])

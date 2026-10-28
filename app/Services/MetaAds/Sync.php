@@ -19,6 +19,9 @@ class Sync
 {
     public const WRITE_MODE = 'meta_ads.write_mode';
     public const SCHEDULE = 'meta_ads.schedule';
+    /** Ang mga ad account na binabasa (JSON na listahan ng ID, CEO ang pumipili). Wala = walang Sync; Compare = lahat. */
+    public const ACCOUNTS = 'meta_ads.accounts';
+    public const NO_ACCOUNTS = 'Choose the ad accounts first';
     public const DEFAULT_SCHEDULE = '10:00,15:00,18:45';
     public const LOG_TYPE = 'ads_manager_api';
 
@@ -55,6 +58,45 @@ class Sync
         AppSetting::set(self::SCHEDULE, implode(',', array_map('trim', explode(',', $times))));
     }
 
+    /** @return list<string> ang mga piniling ad account ID (ayos, walang ulit) */
+    public static function accounts(): array
+    {
+        $ids = json_decode((string) self::setting(self::ACCOUNTS), true);
+
+        return is_array($ids) ? self::ids($ids) : [];
+    }
+
+    public static function setAccounts(array $ids): void
+    {
+        AppSetting::set(self::ACCOUNTS, json_encode(self::ids($ids)));
+    }
+
+    /**
+     * Ang bagong pili (web at meta-ads:accounts): tanggap lang ang ID na nasa isang connection. Kapag tama, isinusulat at
+     * itinatala (before / after). @return list<string> ang mga ID na hindi kilala (walang isinulat kapag may laman)
+     */
+    public function chooseAccounts(array $ids, ?int $userId): array
+    {
+        $ids     = self::ids($ids);
+        $unknown = array_values(array_diff($ids, array_map('strval', array_keys($this->connections->accounts()))));
+        if ($unknown) return $unknown;
+
+        $before = self::accounts();
+        self::setAccounts($ids);
+        Connections::event('ad accounts: ' . count($ids) . ' selected (was ' . count($before) . ')', $userId, ['before' => $before, 'after' => $ids]);
+
+        return [];
+    }
+
+    /** @return list<string> */
+    public static function ids(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(fn ($id) => trim((string) $id), $ids), fn ($id) => $id !== '')));
+        sort($ids);
+
+        return $ids;
+    }
+
     /** from..to (Y-m-d). Default: ang huling 7 araw kasama ngayon (Manila), gaya ng export na inu-upload. */
     public static function range(?string $from, ?string $to): array
     {
@@ -77,13 +119,17 @@ class Sync
     }
 
     /**
-     * Isang run: bawat naka-connect na tao, bawat ad account niya (isang beses lang ang bawat account). 190 = expired ang
+     * Isang run: bawat naka-connect na tao, bawat piniling ad account niya (isang beses lang ang bawat account). 190 = expired ang
      * token ng taong iyon (Reconnect), tuloy ang iba; rate limit = laktaw ang account, "partial" ang run.
      */
     public function run(UploadLog $log, string $from, string $to): UploadLog
     {
         if (!self::writeMode()) {
             $log->update(['status' => 'failed', 'error_message' => 'Write mode is off.', 'finished_at' => now()]);
+            return $log;
+        }
+        if (!self::accounts()) {
+            $log->update(['status' => 'failed', 'error_message' => self::NO_ACCOUNTS, 'finished_at' => now()]);
             return $log;
         }
         $log->update(['status' => 'processing', 'started_at' => now()]);
@@ -103,6 +149,7 @@ class Sync
         $importer = new ProcessAdsManagerReportsUpload('');
         $problems = [];
         $seen     = [];
+        $selected = array_flip(self::accounts());
         $tot      = ['processed' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0, 'protected' => []];
         $noPage   = []; // "ad <id> (page <id>)" ng mga row na nilaktawan dahil walang page_name
 
@@ -117,7 +164,7 @@ class Sync
             $synced = false;
             foreach ($c['ad_accounts'] ?? [] as $acc) {
                 $accId = (string) ($acc['id'] ?? '');
-                if ($accId === '' || isset($seen[$accId])) continue;
+                if ($accId === '' || isset($seen[$accId]) || !isset($selected[$accId])) continue;
                 try {
                     $rows = $this->withPageNames($this->insights->rows($accId, $from, $to, $token, true));
                     $seen[$accId] = true;

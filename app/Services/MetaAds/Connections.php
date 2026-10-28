@@ -143,6 +143,26 @@ class Connections
         return $out;
     }
 
+    /**
+     * Bawat ad account ng lahat ng connection, isang beses: id => [id, name, who (mga Facebook name na nakakabasa)].
+     * @return array<string, array{id:string, name:string, who:list<string>}>
+     */
+    public function accounts(): array
+    {
+        $out = [];
+        foreach ($this->all() as $userId => $c) {
+            $who = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
+            foreach ($c['ad_accounts'] ?? [] as $acc) {
+                $id = (string) ($acc['id'] ?? '');
+                if ($id === '') continue;
+                $out[$id] ??= ['id' => $id, 'name' => (string) ($acc['name'] ?? ''), 'who' => []];
+                if (!in_array($who, $out[$id]['who'], true)) $out[$id]['who'][] = $who;
+            }
+        }
+
+        return $out;
+    }
+
     public function token(array $connection): ?string
     {
         try {
@@ -169,12 +189,15 @@ class Connections
         return $c;
     }
 
-    /** Talaan ng connect / disconnect / compare / write mode: sino at kailan (upload_logs, type ads_manager_api_event). */
-    public static function event(string $what, ?int $userId): void
+    /**
+     * Talaan ng connect / disconnect / compare / write mode / ad accounts: sino at kailan (upload_logs, type
+     * ads_manager_api_event). $details (hal. before / after) ay nasa protected_details.
+     */
+    public static function event(string $what, ?int $userId, ?array $details = null): void
     {
         UploadLog::create([
             'type' => 'ads_manager_api_event', 'disk' => 'api', 'path' => 'meta', 'original_name' => mb_substr($what, 0, 250),
-            'status' => 'done', 'user_id' => $userId, 'started_at' => now(), 'finished_at' => now(),
+            'status' => 'done', 'user_id' => $userId, 'started_at' => now(), 'finished_at' => now(), 'protected_details' => $details,
         ]);
     }
 

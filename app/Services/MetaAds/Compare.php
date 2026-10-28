@@ -23,6 +23,8 @@ class Compare
     public function run(string $from, string $to): array
     {
         $accounts = $problems = [];
+        // Ang mga piniling account; habang walang pinili, lahat (para makatulong sa pagpili).
+        $selected = array_flip(Sync::accounts());
         foreach ($this->connections->all() as $userId => $c) {
             $who   = (string) ($c['fb_user_name'] ?? ('user ' . $userId));
             $token = $this->connections->token($c);
@@ -32,7 +34,7 @@ class Compare
             }
             foreach ($c['ad_accounts'] ?? [] as $acc) {
                 $id = (string) ($acc['id'] ?? '');
-                if ($id === '' || isset($accounts[$id])) continue;
+                if ($id === '' || isset($accounts[$id]) || ($selected && !isset($selected[$id]))) continue;
                 try {
                     $accounts[$id] = $this->account($id, (string) ($acc['name'] ?? ''), $who, $this->insights->rows($id, $from, $to, $token, false), $from, $to);
                 } catch (GraphException $e) {

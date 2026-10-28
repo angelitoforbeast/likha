@@ -15,6 +15,7 @@ class MetaAdsFieldsTest extends MetaAdsTestCase
     private function sync(array $ads): \App\Models\UploadLog
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111']);
         $this->fakeGraph(
             insights: ['111' => array_map(fn ($id) => self::insight('111', $id, self::DAY, 10.00), array_keys($ads))],

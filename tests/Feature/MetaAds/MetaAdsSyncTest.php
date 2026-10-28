@@ -27,6 +27,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_4_each_column_is_filled_from_the_api_as_the_upload_would(): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $ana = $this->user('Marketing', 'ana@example.test');
         $this->connect($ana, self::TOKEN_ANA, ['111']);
         $welcome = json_encode(['type' => 'VISUAL_EDITOR', 'text_format' => ['message' => [
@@ -71,6 +72,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_5_sync_now_with_write_mode_on_inserts_new_and_updates_existing_by_day_and_ad_id_and_logs_the_run(): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $ana = $this->user('Marketing', 'ana@example.test');
         $this->connect($ana, self::TOKEN_ANA, ['111']);
         $this->existing('a1', 80.00);
@@ -107,6 +109,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_6_error_190_marks_that_token_expired_shows_reconnect_and_the_others_still_sync(): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $ana = $this->user('Marketing', 'ana@example.test');
         $ben = $this->user('Marketing - OIC', 'ben@example.test');
         $this->connect($ana, self::TOKEN_ANA, ['111']);
@@ -137,6 +140,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_6_rate_limits_back_off_then_log_a_partial_run_without_crashing(int $code): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $ana = $this->user('Marketing', 'ana@example.test');
         $ben = $this->user('Marketing - OIC', 'ben@example.test');
         $this->connect($ana, self::TOKEN_ANA, ['111']);
@@ -171,6 +175,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_7_the_schedule_runs_only_when_write_mode_is_on_and_at_a_slot(bool $on, string $time, int $runs): void
     {
         Sync::setWriteMode($on);
+        Sync::setAccounts(['111', '222']);
         $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111']);
         $this->fakeGraph(insights: ['111' => [self::insight('111', 'a1', self::DAY, 10.00)]], ads: ['111' => [self::adDetail('a1')]]);
         Carbon::setTestNow(Carbon::parse('2026-10-26 ' . $time, 'Asia/Manila'));
@@ -190,6 +195,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
         $this->assertSame('* * * * *', $event->expression);
         $this->assertFalse($event->filtersPass($this->app));
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $this->assertTrue($event->filtersPass($this->app));
     }
 
@@ -221,6 +227,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_9_an_uploader_role_can_compare_and_sync(): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $oic = $this->user('Marketing - OIC', 'oic@example.test');
         $this->connect($oic, self::TOKEN_ANA, ['111']);
         $this->fakeGraph(insights: ['111' => [self::insight('111', 'a1', self::DAY, 10.00)]], ads: ['111' => [self::adDetail('a1')]]);
@@ -250,6 +257,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_8_a_paging_next_to_another_host_is_not_followed_and_the_run_is_partial(string $next): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $this->connect($this->user('Marketing', 'ana@example.test'), self::TOKEN_ANA, ['111']);
         Http::fake([
             'graph.facebook.com/v25.0/act_111/insights*' => Http::response(['data' => [self::insight('111', 'a1', self::DAY, 10.00)], 'paging' => ['next' => $next]]),
@@ -273,6 +281,7 @@ class MetaAdsSyncTest extends MetaAdsTestCase
     public function test_S_154_6_a_run_that_throws_or_is_killed_ends_failed_not_processing(string $job, string $type): void
     {
         Sync::setWriteMode(true);
+        Sync::setAccounts(['111', '222']);
         $this->app->instance(Connections::class, \Mockery::mock(Connections::class, fn ($m) => $m->shouldReceive('all')->andThrow(new \RuntimeException('db gone'))));
         $thrown = UploadLog::create(['type' => $type, 'disk' => 'api', 'path' => 'meta', 'original_name' => 'x', 'status' => 'queued']);
         $killed = UploadLog::create(['type' => $type, 'disk' => 'api', 'path' => 'meta', 'original_name' => 'y', 'status' => 'processing']);

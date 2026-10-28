@@ -67,6 +67,16 @@ class MetaAdsController extends Controller
         $whoNames = $who->isEmpty() ? collect() : \App\Models\User::whereIn('id', $who)->pluck('name', 'id');
         foreach ($logs as $l) $l->who = $whoNames[$l->user_id] ?? 'system';
 
+        // Ang huling Compare (kahit sino ang nagpatakbo): "running…" o ang report; ang mga numero nito ay nasa pagpili ng account.
+        $compare = UploadLog::where('type', CompareMetaAds::LOG_TYPE)->orderByDesc('id')->first();
+        $lastNumbers = UploadLog::where('type', CompareMetaAds::LOG_TYPE)->whereIn('status', ['done', 'partial'])->orderByDesc('id')->first()?->protected_details;
+        $numbers  = collect($lastNumbers['accounts'] ?? [])->keyBy('account_id');
+        $selected = array_flip(Sync::accounts());
+        $accounts = [];
+        foreach ($connections->accounts() as $id => $a) {
+            $accounts[] = $a + ['selected' => isset($selected[(string) $id]), 'compare' => $numbers[(string) $id] ?? null];
+        }
+
         return [
             'set_up'     => $connections->appId() !== null,
             'people'     => $people,
@@ -75,9 +85,9 @@ class MetaAdsController extends Controller
             'schedule'   => Sync::schedule(),
             'is_ceo'     => (new self($connections))->getNormalizedRole() === 'CEO',
             'range'      => Sync::range(null, null),
+            'accounts'   => $accounts,
             'logs'       => $logs,
-            // Ang huling Compare (kahit sino ang nagpatakbo): "running…" o ang report.
-            'compare'    => UploadLog::where('type', CompareMetaAds::LOG_TYPE)->orderByDesc('id')->first(),
+            'compare'    => $compare,
         ];
     }
 
@@ -146,6 +156,7 @@ class MetaAdsController extends Controller
     {
         $this->checkAccess();
         if (!Sync::writeMode()) return $this->back()->withErrors(['meta' => 'Write mode is off: Sync now is not allowed. Use Compare with uploads.']);
+        if (!Sync::accounts()) return $this->back()->withErrors(['meta' => Sync::NO_ACCOUNTS]);
         [$from, $to] = $this->range($request);
 
         $log = Sync::startLog($from, $to, Auth::id());
@@ -168,6 +179,19 @@ class MetaAdsController extends Controller
         Connections::event('write mode ' . $data['write_mode'] . ' (' . implode(', ', Sync::schedule()) . ')', Auth::id());
 
         return $this->back()->with('status', 'Meta Ads write mode: ' . $data['write_mode']);
+    }
+
+    /** Ang mga ad account na binabasa ng Sync at Compare (CEO lang). Ang ID na wala sa connection ay tinatanggihan. */
+    public function accounts(Request $request, Sync $sync)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') abort(403);
+        $data = $request->validate(['accounts' => 'nullable|array|max:500', 'accounts.*' => 'string|max:50']);
+
+        $unknown = $sync->chooseAccounts($data['accounts'] ?? [], Auth::id());
+        if ($unknown) return $this->back()->withErrors(['meta' => 'Not in any connection: ' . implode(', ', $unknown)]);
+
+        return $this->back()->with('status', 'Meta Ads ad accounts saved: ' . count(Sync::accounts()) . ' selected');
     }
 
     /** from / to (Y-m-d, Manila); default ang huling 7 araw kasama ngayon. Hanggang 31 araw. */

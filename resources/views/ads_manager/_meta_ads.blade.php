@@ -69,6 +69,45 @@
     </table>
   </div>
 
+  {{-- Mga ad account na binabasa ng Sync at Compare (CEO ang pumipili); ang numero ay mula sa huling Compare --}}
+  @if ($meta['accounts'])
+    <form method="POST" action="{{ route('ads_manager.meta.accounts') }}" class="border-t pt-3 space-y-2" id="meta-accounts">
+      @csrf
+      <h3 class="font-semibold text-sm">Ad accounts to sync</h3>
+      <p class="text-xs text-gray-500">
+        Sync now at ang schedule: ang may check lang. Compare: ang may check, o lahat kapag wala pang pinili.
+        Ang bagong account ay walang check hanggang piliin.
+      </p>
+      <div class="divide-y border rounded">
+        @foreach ($meta['accounts'] as $a)
+          @php $n = $a['compare']; @endphp
+          <label class="flex items-start gap-3 p-2 text-sm {{ $meta['is_ceo'] ? 'cursor-pointer' : '' }}">
+            <input type="checkbox" name="accounts[]" value="{{ $a['id'] }}" @checked($a['selected']) @disabled(!$meta['is_ceo']) class="mt-1 h-5 w-5 shrink-0">
+            <span class="min-w-0">
+              <span class="font-medium break-words">{{ $a['name'] !== '' ? $a['name'] : 'Ad account' }}</span>
+              <span class="font-mono text-xs text-gray-500 break-all">{{ $a['id'] }}</span>
+              <span class="block text-xs text-gray-500 break-words">Facebook: {{ implode(', ', $a['who']) }}</span>
+              @if ($n)
+                <span class="block text-xs">
+                  upload {{ $n['upload_rows'] }} rows · ₱{{ number_format($n['upload_spend'], 2) }} ·
+                  API {{ $n['api_rows'] }} rows · ₱{{ number_format($n['api_spend'], 2) }}
+                  @if ((float) $n['upload_spend'] == 0.0)<span class="ml-1 px-1.5 rounded bg-yellow-100 text-yellow-800">not in uploads</span>@endif
+                </span>
+              @else
+                <span class="block text-xs text-gray-400">Wala pa sa huling Compare.</span>
+              @endif
+            </span>
+          </label>
+        @endforeach
+      </div>
+      @if ($meta['is_ceo'])
+        <button class="bg-gray-800 hover:bg-gray-900 text-white text-sm px-4 py-2 rounded">Save accounts</button>
+      @else
+        <p class="text-xs text-gray-500">CEO lang ang nakakapagpalit ng pili.</p>
+      @endif
+    </form>
+  @endif
+
   {{-- Compare / Sync now --}}
   <div class="flex gap-3 flex-wrap items-end">
     <form method="POST" action="{{ route('ads_manager.meta.compare') }}" class="flex gap-2 flex-wrap items-end">
