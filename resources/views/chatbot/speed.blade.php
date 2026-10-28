@@ -241,20 +241,45 @@ document.querySelectorAll('details[data-sp-table]').forEach(d => {
         const el = document.getElementById('sp-chart-' + id);
         const c = data[id];
         if (!el || !c) continue;
-        const sets = lines.map(([key, label, color, dashed, width, axis]) => ({label, data: c.series[key], borderColor: color, backgroundColor: color,
-            borderWidth: width, borderDash: dashed ? [6, 4] : [], pointRadius: 2, tension: .25, spanGaps: false, yAxisID: axis || 'y'}))
-            .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: c.prev[key], borderColor: color + '66',
-                backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y'})));
+        // Spec 188-1: ang average lang ang nakikita sa simula (c.shown); ang iba ay nasa legend, nakatago. Ang y-axis ay
+        // hanggang c.top (mga 3 × ang karaniwang average): ang lampas ay iginuguhit sa taas (tatsulok) na may tunay na
+        // value bilang label at sa tooltip (real). Ang right axis (max) ay may sariling sukat, hindi pinuputol.
+        const clamp = (vals, axis) => axis ? vals : vals.map(v => v === null ? null : Math.min(v, c.top));
+        const over = (vals, axis, yes, no) => vals.map(v => !axis && v !== null && v > c.top ? yes : no);
+        const sets = lines.map(([key, label, color, dashed, width, axis]) => ({label, data: clamp(c.series[key], axis), real: c.series[key], borderColor: color, backgroundColor: color,
+            borderWidth: width, borderDash: dashed ? [6, 4] : [], pointRadius: over(c.series[key], axis, 4, 2), pointStyle: over(c.series[key], axis, 'triangle', 'circle'),
+            tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)}))
+            .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: clamp(c.prev[key], axis), real: c.prev[key], borderColor: color + '66',
+                backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)})));
         const counts = (part, i) => Object.entries(c[part] || {}).map(([k, v]) => k + ' ' + (v[i] ?? '—')).join(', ');
-        const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, title: {display: true, text: 'seconds'}}};
-        if (lines.some(l => l[5] === 'y2')) scales.y2 = {beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
-        new Chart(el, {type: 'line', data: {labels: c.series[lines[0][0]].map((_, i) => pad(i)), datasets: sets}, options: {
-            responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+        const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, max: c.top, title: {display: true, text: 'seconds'}}};
+        if (lines.some(l => l[5] === 'y2')) scales.y2 = {display: 'auto', beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
+        // Ang label ng value na lampas sa taas: ang una ay sa itaas ng gilid, ang kasunod sa parehong oras ay pababa.
+        const overLabels = {id: 'spOver', afterDatasetsDraw(chart) {
+            const {ctx, chartArea} = chart;
+            const used = {};
+            ctx.save();
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            chart.data.datasets.forEach((ds, i) => {
+                if (ds.yAxisID !== 'y' || !chart.isDatasetVisible(i)) return;
+                chart.getDatasetMeta(i).data.forEach((pt, j) => {
+                    const v = ds.real[j];
+                    if (v === null || v <= c.top) return;
+                    const k = used[j] = (used[j] ?? -1) + 1;
+                    ctx.fillStyle = ds.borderColor;
+                    ctx.fillText(fmt(v), pt.x, k === 0 ? chartArea.top - 4 : chartArea.top + 4 + 11 * k);
+                });
+            });
+            ctx.restore();
+        }};
+        new Chart(el, {type: 'line', data: {labels: c.series[lines[0][0]].map((_, i) => pad(i)), datasets: sets}, plugins: [overLabels], options: {
+            responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}, layout: {padding: {top: 14}},
             plugins: {
                 legend: {position: 'bottom', labels: {boxWidth: 12, boxHeight: 2, font: {size: 11}}},
                 tooltip: {callbacks: {
                     title: items => items.length ? pad(items[0].dataIndex) + ':00–' + pad(items[0].dataIndex) + ':59' : '',
-                    label: item => item.dataset.label + ': ' + fmt(item.raw),
+                    label: item => item.dataset.label + ': ' + fmt(item.dataset.real[item.dataIndex]),
                     footer: items => items.length ? [data.date + ': ' + counts('counts', items[0].dataIndex), data.prev_date + ': ' + counts('prev_counts', items[0].dataIndex)] : [],
                 }},
             },

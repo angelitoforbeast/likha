@@ -658,4 +658,44 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertMatchesRegularExpression('#data-table="hours".*<tr data-hour="10">\s*<td[^>]*>10:00</td>\s*<td[^>]*>3</td>\s*<td[^>]*>2</td>#s', $d['hours'][1]);
         $this->assertStringContainsString('Follow up', $d['sequence-slowest'][1]);
     }
+
+    public function test_S_188_6_only_the_average_series_are_shown_by_default(): void
+    {
+        $this->seedAi();
+        $this->seedSteps();
+        [$c, $res] = $this->screen();
+
+        // Ang average lang ang nakikita sa simula; ang iba ay nasa legend pero nakatago (pati ang sa naunang araw).
+        $this->assertSame(['avg'], $c['reply']['shown']);
+        $this->assertSame(['with_ai_avg', 'no_ai_avg'], $c['ai']['shown']);
+        $this->assertSame(['avg'], $c['push']['shown']);
+        $this->assertSame(['avg'], $c['seq']['shown']);
+        foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertSame([], array_diff($c[$k]['shown'], array_keys($c[$k]['series'])), $k);
+        // Ang chart script ang gumagamit nito: nakatago ang serye na wala sa shown.
+        $this->assertStringContainsString('hidden: !c.shown.includes(key)', $res->getContent());
+    }
+
+    public function test_S_188_7_the_axis_top_is_about_three_times_the_typical_average_and_a_spike_is_clamped(): void
+    {
+        $day = fn (array $set) => array_replace(array_fill(0, 24, null), $set);
+        // Karaniwang 6 s kada oras at isang oras na 363 s: ang taas ay 3 × 6 = 18 → 20 s; ang 363 ay lampas (iginuguhit sa taas).
+        $spike = $day(array_fill(0, 10, 6) + [10 => 363]);
+        $this->assertSame(20, ResponseSpeed::axisTop($spike, []));
+        // Kaunti pa ang oras ngayon (wala pang 3): ang naunang araw ang batayan.
+        $this->assertSame(100, ResponseSpeed::axisTop($day([0 => 2, 1 => 500]), $day(array_fill(0, 8, 30))));
+        // Hindi bababa sa 10 s; walang data: 10 s.
+        $this->assertSame(10, ResponseSpeed::axisTop($day(array_fill(0, 12, 1)), []));
+        $this->assertSame(10, ResponseSpeed::axisTop($day([]), $day([])));
+        // Malinis na numero pataas: 3 × 41 = 123 → 150.
+        $this->assertSame(150, ResponseSpeed::axisTop($day(array_fill(0, 5, 41)), []));
+
+        // Ang screen: kada chart ay may taas mula sa (mga) average nito. Ngayon: 46 s at 5 s (2 oras; ang kahapon ay 1 oras
+        // lang kaya ngayon pa rin) → median 25.5 × 3 = 76.5 → 80 s.
+        [$c, $res] = $this->screen();
+        $this->assertSame(80, $c['reply']['top']);
+        foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertGreaterThanOrEqual(10, $c[$k]['top'], $k);
+        // Ang chart script: ang taas ang max ng axis, ang lampas ay iginuguhit sa taas na may tunay na value bilang label.
+        $this->assertMatchesRegularExpression('#max:\s*c\.top#', $res->getContent());
+        $this->assertStringContainsString('Math.min(v, c.top)', $res->getContent());
+    }
 }
