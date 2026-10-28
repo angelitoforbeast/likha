@@ -66,25 +66,49 @@ class ResponseSpeed
     {
         $start = $f['date'] . ' 00:00:00';
         $end = CarbonImmutable::parse($f['date'])->addDay()->toDateString() . ' 00:00:00';
-        $firsts = $this->replies($start, date('Y-m-d H:i:s', strtotime($end) + self::MAX_WAIT_SECONDS), $f['page_id']);
         $spans = BotHealth::flowSpans();
 
-        $hours = array_fill(0, 24, []);
-        $total = [];
-        $byBot = array_fill_keys(ChatbotConnections::BOTS, []);
+        // Ang mga mensahe muna (para ang sagot lang ng mga customer na ito ang babasahin), sa magkakahiwalay na listahan ng
+        // scalar para magaan ang buong araw: page:PSID, oras, oras sa araw, bot (true = Forbeast), nasa bot.
+        [$keys, $ats, $hrs, $fbs, $ons] = [[], [], [], [], []];
         $chats = DB::table('botcake_chats')->where('received_at', '>=', $start)->where('received_at', '<', $end)
             ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor();
         foreach ($chats as $c) {
             $payload = json_decode((string) $c->payload, true) ?: [];
             // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast.
             if (!empty($payload['_ignored']) || !empty($payload['_standby'])) continue;
-            $bot = ($payload['source'] ?? null) === 'gateway' ? ChatbotConnections::BOTS[1] : ChatbotConnections::BOTS[0];
-            $x = ['on' => self::hadFlow($spans, (string) $c->page_id, $c->received_at), 'secs' => null, 'confirmed' => true];
-            if ($x['on']) [$x['secs'], $x['confirmed']] = self::firstReply($firsts[$c->page_id . ':' . $c->psid] ?? null, strtotime($c->received_at));
-            $byBot[$bot][] = $x;
+            $keys[] = $c->page_id . ':' . $c->psid;
+            $ats[] = strtotime($c->received_at);
+            $hrs[] = (int) substr($c->received_at, 11, 2);
+            $fbs[] = ($payload['source'] ?? null) === 'gateway';
+            $ons[] = self::hadFlow($spans, (string) $c->page_id, $c->received_at);
+        }
+        $want = [];
+        foreach ($keys as $i => $k) if ($ons[$i]) $want[$k] = true;
+        $replies = $this->replies($start, date('Y-m-d H:i:s', strtotime($end) + self::MAX_WAIT_SECONDS), $f['page_id'], $want);
+        unset($want);
+
+        $blank = ['n' => 0, 'off' => 0, 'unconfirmed' => 0, 'secs' => []];
+        $hours = array_fill(0, 24, $blank);
+        $total = $blank;
+        $byBot = array_fill_keys(ChatbotConnections::BOTS, $blank);
+        $add = function (array &$b, bool $on, ?int $secs, bool $confirmed): void {
+            if (!$on) {
+                $b['off']++;
+                return;
+            }
+            $b['n']++;
+            if ($secs === null) return;
+            $b['secs'][] = $secs;
+            if (!$confirmed) $b['unconfirmed']++;
+        };
+        foreach ($keys as $i => $key) {
+            [$secs, $confirmed] = $ons[$i] ? self::firstReply($replies, $key, $ats[$i]) : [null, true];
+            $bot = ChatbotConnections::BOTS[$fbs[$i] ? 1 : 0];
+            $add($byBot[$bot], $ons[$i], $secs, $confirmed);
             if ($f['bot'] !== null && $f['bot'] !== $bot) continue;
-            $hours[(int) substr($c->received_at, 11, 2)][] = $x;
-            $total[] = $x;
+            $add($hours[$hrs[$i]], $ons[$i], $secs, $confirmed);
+            $add($total, $ons[$i], $secs, $confirmed);
         }
 
         $nowHour = $f['date'] === $today ? (int) now()->format('G') : 23;
@@ -104,12 +128,15 @@ class ResponseSpeed
 
     /**
      * Ang mga padala ng bot na naipadala (sent o partial; hindi ang test, pumalya, skipped o ang sequence step na hindi
-     * sagot), kada page + PSID: [sent_at, totoong oras, kumpirmado], ayon sa sent_at, at ang pinakamaagang totoong oras
-     * mula sa bawat isa pababa (sunod-sunod ang padala kada PSID, pero hindi umaasa rito).
-     * @return array<string, array{at: int[], best: array<int, array{0: int, 1: bool}>}>
+     * sagot) sa mga customer na $want, kada page + PSID, ayon sa sent_at: ang sent_at (at), ang totoong oras (real) at
+     * kung kumpirmado (confirmed). Ang real at confirmed ng bawat isa ay ang pinakamaaga mula rito pababa (sunod-sunod ang
+     * padala kada PSID, pero hindi umaasa rito). Mga int at bool lang, para magaan ang isang buong araw.
+     * @return array{at: array<string, int[]>, real: array<string, int[]>, confirmed: array<string, bool[]>}
      */
-    private function replies(string $startAt, string $endAt, ?string $page): array
+    private function replies(string $startAt, string $endAt, ?string $page, array $want): array
     {
+        $out = ['at' => [], 'real' => [], 'confirmed' => []];
+        if (!$want) return $out;
         $confirm = ChatbotReply::hasConfirm();
         $cols = array_merge(['page_id', 'psid', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : []);
         $rows = DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)
@@ -117,46 +144,47 @@ class ResponseSpeed
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
             ->when(Schema::hasColumn('chatbot_replies', 'sequence_id'), fn ($q) => $q->whereNull('sequence_id'))
             ->orderBy('sent_at')->orderBy('id')->select($cols)->cursor();
-        $by = [];
         foreach ($rows as $r) {
-            $real = $confirm && in_array($r->confirmed_status, SendStatus::DELIVERED, true) && $r->confirmed_at !== null;
             $k = $r->page_id . ':' . $r->psid;
-            $by[$k]['at'][] = strtotime($r->sent_at);
-            $by[$k]['real'][] = [strtotime($real ? $r->confirmed_at : $r->sent_at), $real];
+            if (!isset($want[$k])) continue;
+            $real = $confirm && in_array($r->confirmed_status, SendStatus::DELIVERED, true) && $r->confirmed_at !== null;
+            $out['at'][$k][] = strtotime($r->sent_at);
+            $out['real'][$k][] = strtotime($real ? $r->confirmed_at : $r->sent_at);
+            $out['confirmed'][$k][] = $real;
         }
-        foreach ($by as &$b) {
-            $best = $b['real'];
-            for ($i = count($best) - 2; $i >= 0; $i--) if ($best[$i + 1][0] < $best[$i][0]) $best[$i] = $best[$i + 1];
-            $b = ['at' => $b['at'], 'best' => $best];
+        foreach ($out['real'] as $k => $real) {
+            for ($i = count($real) - 2; $i >= 0; $i--) {
+                if ($real[$i + 1] < $real[$i]) {
+                    $real[$i] = $real[$i + 1];
+                    $out['confirmed'][$k][$i] = $out['confirmed'][$k][$i + 1];
+                }
+            }
+            $out['real'][$k] = $real;
         }
-        unset($b);
 
-        return $by;
+        return $out;
     }
 
     /** Ang segundo hanggang sa unang naipadalang sagot pagkatapos ng $at, at kung kumpirmado ang oras; [null, true] kapag wala. */
-    private static function firstReply(?array $r, int $at): array
+    private static function firstReply(array $replies, string $key, int $at): array
     {
-        if ($r === null) return [null, true];
-        [$lo, $hi] = [0, count($r['at'])];
+        $times = $replies['at'][$key] ?? [];
+        [$lo, $hi] = [0, count($times)];
         while ($lo < $hi) {
             $mid = intdiv($lo + $hi, 2);
-            $r['at'][$mid] >= $at ? $hi = $mid : $lo = $mid + 1;
+            $times[$mid] >= $at ? $hi = $mid : $lo = $mid + 1;
         }
-        if ($lo === count($r['at'])) return [null, true];
-        [$sent, $real] = $r['best'][$lo];
-        $secs = max(0, $sent - $at);
+        if ($lo === count($times)) return [null, true];
+        $secs = max(0, $replies['real'][$key][$lo] - $at);
 
-        return $secs > self::MAX_WAIT_SECONDS ? [null, true] : [$secs, $real];
+        return $secs > self::MAX_WAIT_SECONDS ? [null, true] : [$secs, $replies['confirmed'][$key][$lo]];
     }
 
-    /** Ang mga numero ng isang oras, araw o bot. */
-    private static function row(array $items): array
+    /** Ang mga numero ng isang oras, araw o bot, mula sa bilang nito (n: nasa bot, off: wala sa bot) at sa mga segundo ng nasagot. */
+    private static function row(array $b): array
     {
-        $on = array_filter($items, fn ($x) => $x['on']);
-        $answered = array_filter($on, fn ($x) => $x['secs'] !== null);
-        $secs = array_column($answered, 'secs');
-        $n = count($on);
+        $secs = $b['secs'];
+        $n = $b['n'];
         $out = ['messages' => $n, 'answered' => count($secs), 'unanswered' => $n - count($secs),
             'avg' => $secs ? round(array_sum($secs) / count($secs), 1) : null, 'median' => BotHealth::median($secs), 'p90' => BotHealth::percentile($secs, 90)];
         foreach (self::WITHIN as $s) {
@@ -164,6 +192,6 @@ class ResponseSpeed
             $out["pct_$s"] = $n > 0 ? round(100 * $out["within_$s"] / $n, 1) : null;
         }
 
-        return $out + ['not_on_bot' => count($items) - $n, 'unconfirmed' => count(array_filter($answered, fn ($x) => !$x['confirmed']))];
+        return $out + ['not_on_bot' => $b['off'], 'unconfirmed' => $b['unconfirmed']];
     }
 }
