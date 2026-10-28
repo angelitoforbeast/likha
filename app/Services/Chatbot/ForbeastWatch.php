@@ -25,9 +25,9 @@ use Throwable;
  *
  * Ang "inbound" ay lumilipat lang kapag ang Forbeast talaga ang mabagal: hindi kapag ang Likha ang huli sa pag-imbak ng
  * gateway events, at hindi kapag sinasabi ng Forbeast na mabilis ito (inbound_lag_seconds) — ang nawawalang mensahe ay hindi
- * ipinadala ng Meta, kaya sinasagot ito dito at nananatili ang page ("held"). Ang page na inilipat ng bantay dahil sa inbound
- * o sa padala ay kusang ibinabalik sa Forbeast pagkatapos ng ilang minutong sunod-sunod na maayos na health (switchBack);
- * ang lipat dahil sa koneksyon o health, at ang page na binago ng tao pagkatapos, ay tao ang nagbabalik.
+ * ipinadala ng Meta, kaya sinasagot ito dito at nananatili ang page ("held"). Ang page na inilipat ng bantay dahil sa inbound,
+ * sa padala o sa health ay kusang ibinabalik sa Forbeast pagkatapos ng ilang minutong sunod-sunod na maayos na health
+ * (switchBack); ang lipat dahil sa koneksyon, at ang page na binago ng tao pagkatapos, ay tao ang nagbabalik.
  *
  * Bawat lipat, hindi makalipat, held at balik ay itinatala sa chatbot.auto_switch ng page (JSON: result, from, to, condition,
  * error, at mga dagdag na field), kasama ng history ng page settings; ito rin ang event feed (/api/chatbot/provider-events).
@@ -42,8 +42,8 @@ class ForbeastWatch
     public const SWITCHED_BACK = 'switched_back';
     /** Inilipat sa Forbeast ng tao o ng ibang sistema (hindi ng bantay): ang simula ng panahon sa Forbeast. */
     public const MOVED = 'moved';
-    /** Ang mga lipat na kusang ibinabalik: ang sa koneksyon ng page at ang health ay tao ang nag-aayos. */
-    public const BACK_CONDITIONS = ['inbound', 'failed_sends', 'no_answer'];
+    /** Ang mga lipat na kusang ibinabalik: ang sa koneksyon ng page (token, permiso) ay tao ang nag-aayos. */
+    public const BACK_CONDITIONS = ['inbound', 'failed_sends', 'no_answer', 'health'];
 
     /** Mga error ng Meta na sa customer ang dahilan (wala na, hindi na maabot, labas sa 24 oras, naka-block): hindi binibilang. */
     public const CUSTOMER_CODES = [551, 10];
@@ -372,7 +372,8 @@ class ForbeastWatch
      */
     public function switchBack(string $page): void
     {
-        if (!$this->mayGoBack($page)) return;
+        // Ang health ay sinusukat kahit nasa puwang pa ng huling balik (back_gap_minutes): ang puwang ay sa mismong balik lang.
+        if (!$this->mayGoBack($page, false)) return;
         $this->health($page);
         $streak = Cache::get($this->counter($page, 'healthy'));
         if (!is_array($streak) || (int) $streak['since'] > now()->getTimestamp() - self::limit('back_minutes') * 60) return;
@@ -395,7 +396,7 @@ class ForbeastWatch
         }
     }
 
-    /** Ang event ay lipat ng bantay na kusang ibinabalik (inbound o padala, papuntang Botcake). */
+    /** Ang event ay lipat ng bantay na kusang ibinabalik (inbound, padala o health, papuntang Botcake). */
     public static function returnable(PageSetting $event): bool
     {
         $e = json_decode((string) $event->plainValue(), true);
@@ -414,9 +415,9 @@ class ForbeastWatch
 
     /**
      * Maaaring ibalik: nasa Botcake, handa ang Forbeast token ng page, ang huling event ay lipat na kusang ibinabalik at walang
-     * nagpalit ng provider pagkatapos nito (laging panalo ang tao), at walang balik sa huling back_hours.
+     * nagpalit ng provider pagkatapos nito (laging panalo ang tao), at ($gap) walang balik sa huling back_gap_minutes.
      */
-    private function mayGoBack(string $page): bool
+    private function mayGoBack(string $page, bool $gap = true): bool
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::BOTCAKE || !app(ForbeastPageSetup::class)->ready($page)) return false;
         $rows = fn (string $key) => $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key);
@@ -425,7 +426,7 @@ class ForbeastWatch
         $provider = $rows('provider')->where('active', true)->orderByDesc('id')->first(['id']);
         if ($event === null || !self::returnable($event) || ($provider !== null && $provider->id > $event->id)) return false;
 
-        return !$rows(self::KEY)->where('created_at', '>=', now()->subHours(self::limit('back_hours')))->get()
+        return !$gap || !$rows(self::KEY)->where('created_at', '>=', now()->subMinutes(self::limit('back_gap_minutes')))->get()
             ->contains(fn ($s) => (json_decode((string) $s->plainValue(), true)['result'] ?? null) === self::SWITCHED_BACK);
     }
 

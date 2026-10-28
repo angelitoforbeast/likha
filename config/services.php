@@ -202,9 +202,9 @@ return [
             'inbound_seconds' => (int) env('GATEWAY_SWITCH_INBOUND_SECONDS', 300),
             // Ang lag (segundo) na "mabagal" na: ang sa Likha (queue ng gateway events) at ang inbound_lag_seconds ng Forbeast.
             'lag_seconds' => (int) env('GATEWAY_SWITCH_LAG_SECONDS', 60),
-            // Ang kusang balik sa Forbeast: ilang minutong sunod-sunod na maayos ang health, at isa lang kada ilang oras.
+            // Ang kusang balik sa Forbeast: ilang minutong sunod-sunod na maayos ang health, at isa lang kada ilang minuto.
             'back_minutes' => (int) env('GATEWAY_SWITCH_BACK_MINUTES', 30),
-            'back_hours' => (int) env('GATEWAY_SWITCH_BACK_HOURS', 6),
+            'back_gap_minutes' => (int) env('GATEWAY_SWITCH_BACK_GAP_MINUTES', 60),
             // Ilang segundo pagkalipat sa Forbeast (kahit sino ang naglipat) na ang chat ng Botcake ay hindi ebidensya.
             'settle_seconds' => (int) env('GATEWAY_SWITCH_SETTLE_SECONDS', 180),
         ],
