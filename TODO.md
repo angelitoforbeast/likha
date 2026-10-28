@@ -1356,3 +1356,8 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **The flow delete guard does not count group flows.** A deleted group flow falls back to the page flow (tested), so customers still get a reply. Reason: the fallback removes the silent-no-reply risk; showing group use on the flow screen is a separate change.
 - **Ad groups do not travel with a page move** between sites (PageTransfers exports page values only, and no `__` run state). Reason: changing the transfer contract is out of scope; set the groups up again on the new site.
 - **Untested here:** the "Ads not in a group yet" JSON group-by on MySQL and pgsql (sqlite only in tests); the Cache lock under real concurrency. Reason: the test DB is sqlite in memory; run once on MySQL before relying on the list.
+
+## 173: Meta Ads accounts and fields, accepted review minors (2026-10-28)
+- **Compare reads nothing when every saved account ID has left the connections** (instead of falling back to all). Reason: the selection is the CEO's own trusted state; the list shows the accounts to pick again.
+- **No test sends `accounts` as a plain string or an item over 50 characters.** Reason: Laravel's `array` / `max:50` rules refuse them before any code of ours runs; the CEO-only route is tested for 403 and unknown IDs.
+- **The 390 px layout was checked by reading the markup only** (no browser in this session). Reason: a stacked list with `min-w-0`, `break-all` and `shrink-0`; check once on a phone after deploy.

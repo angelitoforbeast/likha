@@ -2913,3 +2913,21 @@ Tests: `tests/Feature/Chatblast/AdGroupsTest.php`, `AdGroupRunTest.php`, `AdGrou
 | S-172.12 (P1) | The Chatblast, Botcake, PageSettings and OrderEncode suites add no new failures | full run | passed |
 | S-172.13 (P2) | At 390 px the Ad groups section, the editor, the history and the list fit the width | headless Chrome on a static copy of the modal (see result) | passed |
 | S-172.14 (P2) | On the Test tab a chosen group's values (and its flow when no flow is picked) are used; no or an unknown group = page values | `test_S_172_14…` | passed |
+
+## S-173 Staff choose the Meta ad accounts, and API rows read like the upload
+
+As the CEO, I want to choose which Facebook ad accounts the Meta Ads sync reads, and the API rows to have the same page name, delivery and result type as the uploaded export, so write mode can be turned on without changing reports.
+
+Slice 173. Threat model: the `accounts[]` request body (CEO only) and page settings typed by staff are untrusted; text from Meta is shown escaped; the operator's `meta-ads:accounts --set` is trusted. Storage: one app_settings row `meta_ads.accounts` (no new table, no migration). Risk tier: medium (a new CEO-only route behind the existing access check).
+Tests: `tests/Feature/MetaAds/MetaAdsAccountsTest.php`, `MetaAdsFieldsTest.php`, existing Meta Ads tests.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-173.1 (P1) | The Meta section lists each account once (name, ID, Facebook names) with its latest Compare numbers ("not in uploads" when upload spend is 0) and a checkbox; a CEO saves 2 of 5, Then the row holds exactly those IDs and an event logs before/after; saving nothing clears the selection; an ID in no connection is refused; a non-CEO sees it read-only and the save is 403 | `test_S_173_1…` (5 tests) | passed |
+| S-173.2 (P1) | Sync with no selection: no Graph calls, "Choose the ad accounts first" (button, command; scheduled is quiet and logs nothing); with a selection only those accounts; Compare with none reads all, with a selection only those | `test_S_173_2…` (3 tests) | passed |
+| S-173.3 (P1) | `meta-ads:accounts --set=` refuses an ID in no connection and sets valid ones (logged); `--list` prints ID, name, yes/no and no token | `test_S_173_3…` | passed |
+| S-173.4 (P1) | Only actor_id 602349066290691 → "Joy Villaluna"; only effective_object_story_id "970868019448492_…" → "Sienna Lopez"; unknown page with an earlier upload row → that name; unknown and no earlier row → skipped and listed on the run log; no request for the Page name; page_id wins over actor_id, then the story id | `test_S_173_4…` (3 tests) | passed |
+| S-173.5 (P1) | Each evidence pair maps to the export's delivery wording (other statuses → not_delivering) | `test_S_173_5…` (5 data sets) | passed |
+| S-173.6 (P1) | MESSAGING_PURCHASE_CONVERSION / OFFSITE_CONVERSIONS → "Meta purchases", CONVERSATIONS → "Messaging conversations started", VALUE → "Meta purchase conversion value"; others unchanged | `test_S_173_6…` (5 data sets) | passed |
+| S-173.7 (P1) | Existing 154 tests and the Ads Manager upload tests pass | `tests/Feature/MetaAds` | passed |
+| S-173.8 (P2) | At 390 px the account list fits the width | markup review only (see result) | not run in a browser |
