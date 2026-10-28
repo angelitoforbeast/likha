@@ -504,8 +504,8 @@ class EncodeMacroTest extends UploadEncodeTestCase
     public static function chatIdentity(): array
     {
         return [
-            'chat phone and name replace the uploaded ones' => ['09171234567', ['full_name' => 'Ana Cruz', 'address_line1' => 'Blk 5'], '09171234567', 'Ana Cruz'],
-            'invalid chat phone and no name keep the uploaded ones' => ['12345', ['full_name' => '', 'address_line1' => 'Blk 5'], '09181112222', 'anacruz88'],
+            'chat phone and name replace the uploaded ones' => ['09171234567', ['full_name' => 'Ana Cruz', 'address_line1' => 'Blk 5'], '9171234567', 'Ana Cruz'],
+            'invalid chat phone and no name keep the uploaded ones' => ['12345', ['full_name' => '', 'address_line1' => 'Blk 5'], '9181112222', 'anacruz88'],
         ];
     }
 
@@ -522,8 +522,57 @@ class EncodeMacroTest extends UploadEncodeTestCase
         $row = MacroOutput::sole();
         $this->assertSame([$phone, $name], [$row->{'PHONE NUMBER'}, $row->{'FULL NAME'}]);
         $logs = (string) $row->{'HISTORICAL LOGS'};
-        $this->assertSame($phone !== '09181112222', str_contains($logs, '|Likha encode|PHONE NUMBER|09181112222|09171234567'));
+        $this->assertSame($phone !== '9181112222', str_contains($logs, '|Likha encode|PHONE NUMBER|9181112222|9171234567'));
         $this->assertSame($name !== 'anacruz88', str_contains($logs, '|Likha encode|FULL NAME|anacruz88|Ana Cruz'));
+    }
+
+    /** @return array<string, array{0: string, 1: string, 2: string}> ang PHONE ng flow, ang phone sa chat (CXD), ang PHONE NUMBER sa dulo */
+    public static function websitePhones(): array
+    {
+        return [
+            'chat 09 with spaces' => ['', '0917 123 4567', '9171234567'],
+            'chat +63 with dashes' => ['', '+63 917-123-4567', '9171234567'],
+            'uploaded 09 only' => ['0918 111 2222', 'wala', '9181112222'],
+            'no phone' => ['', 'wala', ''],
+        ];
+    }
+
+    /** @dataProvider websitePhones */
+    public function test_S_186_1_the_encode_writes_the_phone_as_ten_digits(string $flowPhone, string $chatPhone, string $expected): void
+    {
+        $this->fields()->set('PHONE', $flowPhone);
+        $this->fields()->set('CXD', $this->details(phone: $chatPhone));
+        $this->flowWith(['astra' => false]);
+
+        $this->says('order po');
+        $this->encodeJobs();
+
+        $this->assertSame($expected, (string) MacroOutput::sole()->{'PHONE NUMBER'});
+    }
+
+    /** @return array<string, array{0: string, 1: bool}> ang phone na nasa row bago ang encode, may linya ng staff */
+    public static function sameNumberRows(): array
+    {
+        return [
+            'staff set ten digits' => ['9171234567', true],
+            'ten digits' => ['9171234567', false],
+            'older 09 row' => ['09171234567', false],
+        ];
+    }
+
+    /** @dataProvider sameNumberRows */
+    public function test_S_186_2_the_same_number_in_the_other_form_is_not_an_edit(string $stored, bool $staff): void
+    {
+        $this->flowWith(['astra' => false]);
+        $this->says('order po', 'anacruz88');
+        $logs = $staff ? '2026-10-23 10:16:00|Joy|PHONE NUMBER|9181112222|' . $stored : null;
+        MacroOutput::query()->update(['PHONE NUMBER' => $stored, 'HISTORICAL LOGS' => $logs]);
+
+        $this->encodeJobs(); // ang chat (CXD) ay may 09171234567
+
+        $row = MacroOutput::sole();
+        $this->assertSame($stored, $row->{'PHONE NUMBER'});
+        $this->assertStringNotContainsString('|Likha encode|PHONE NUMBER|', (string) $row->{'HISTORICAL LOGS'});
     }
 
     /** @return array<string, array{0: array, 1: array, 2: ?array, 3: string}> encode outputs, row, Astra, hold reason */

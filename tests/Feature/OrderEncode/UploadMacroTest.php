@@ -19,7 +19,7 @@ class UploadMacroTest extends UploadEncodeTestCase
         $run = $this->go($this->uploadGraph(), 'order po, isa');
 
         $row = MacroOutput::sole();
-        $this->assertSame(['10:15 23-10-2026', '2026-10-23', self::PAGE, 'Ana Cruz', 'Ana Cruz', '09181112222', (string) self::PSID, null],
+        $this->assertSame(['10:15 23-10-2026', '2026-10-23', self::PAGE, 'Ana Cruz', 'Ana Cruz', '9181112222', (string) self::PSID, null],
             [$row->TIMESTAMP, substr((string) $row->ts_date, 0, 10), $row->PAGE, $row->fb_name, $row->{'FULL NAME'}, $row->{'PHONE NUMBER'}, $row->botcake_psid, $row->STATUS]);
         $this->assertStringContainsString('order po, isa', (string) $row->all_user_input);
         $this->assertSame(['998', $this->details(), null, null], [(string) $row->COD, $row->CXD, $row->PROVINCE, $row->ADDRESS]);
