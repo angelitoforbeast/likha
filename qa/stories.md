@@ -3107,3 +3107,23 @@ Tests: `tests/Feature/Chatblast/ProblemsPanelTest.php`, `PageProblemsTest`, `Set
 | S-184.8 (P1) | Existing Chatblast, Botcake and PageSettings suites pass (the 169 and 171 banner tests now read the panel) | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | see result |
 | S-184.9 (P2) | At 390 px the collapsed line is one line (cut with …) and the open list scrolls inside 60 % of the screen, long text wraps | `test_S_184_9…` (markup only) | see result |
 
+
+## S-185 The owner reads the Speed screen's numbers as charts, with the previous day as reference
+
+As the owner, I want each Speed table drawn as a chart by hour (reply time with its average, With AI vs No AI, replies pushed → sent at Meta, and sequences pushed → sent at Meta), with the previous day's lines behind it, so I can see at a glance which hour got slow and whether it was Likha (flow or AI) or the send path (Forbeast or Meta).
+
+Slice 185 (with amendment 185-1). Threat model: the same query string as S-182 (date, page_id, bot), validated the same way; the chart data is numbers from the tables, written into the page as JSON with every HTML-sensitive character escaped. Risk tier: medium (a read-only screen behind the existing Chatbot access; no new table or migration).
+Tests: `tests/Feature/Chatblast/ResponseSpeedTest.php`, existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-185.1 (P1) | Given the S-182.1 fixture, Then chart 1 has Average, Median and p90 series equal to the hour table (46, 46, 72 s at 10:00), with gaps (not zeros) for hours without replies and hours not yet reached | `test_S_185_1…` | see result |
+| S-185.2 (P1) | Given the S-182.9 fixture, Then chart 2's With AI and No AI average and median series and the AI time average equal the With AI vs No AI table (72, 20, 72, 20, 48 s at 10:00) | `test_S_185_2…` | see result |
+| S-185.3 (P1) | Given Forbeast replies pushed 10:00:00 (Meta 10:00:03), 10:00:10 (Meta 10:00:40) and 10:00:20 (no confirmation), and a Botcake reply, Then the 10:00 row of "pushed → sent at Meta" has 3 pushed, 2 measured, average 16.5 s, max 30 s, 1 not confirmed and 1 Botcake (no Meta time); sequence, test and failed sends are not in it | `test_S_185_3…` | see result |
+| S-185.4 (P1) | Then chart 3's Average, p90 and Max series equal that table | `test_S_185_4…` | see result |
+| S-185.5 (P1) | Given the S-182.11 steps, Then chart 4's Average and p90 equal the Sequences table's pushed → sent at Meta columns (62.5 s and 120 s at 10:00) | `test_S_185_5…` | see result |
+| S-185.6 (P1) | When the page, bot or day filter is set, Then every chart follows it and equals that view's tables | `test_S_185_6…` | see result |
+| S-185.7 (P1) | Given a role without Chatbot access, Then /chatbot/speed is 403; a CEO sees all four charts | `test_S_185_7…` | see result |
+| S-185.8 (P1) | Existing Chatblast, Botcake and PageSettings suites and the Speed tests pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | see result |
+| S-185.9 (P2) | At 390 px each chart sits under its table in a box as wide as the screen and stays readable | `test_S_185_9…` (markup) and a browser check | see result |
+| S-185.10 (P1, amendment 185-1) | Viewing a fixture day D, Then each chart also has D-1's series equal to D-1's table values (with the same filters); viewing Yesterday compares with the day before | `test_S_185_10…` | see result |

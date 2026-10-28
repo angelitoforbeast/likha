@@ -42,13 +42,57 @@ class ResponseSpeed
     {
         $f = self::filters($q);
         $today = now()->toDateString();
-        $ttl = $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
-        $out = Cache::remember('response-speed:' . md5(json_encode($f)), $ttl, fn () => $this->build($f, $today));
+        $out = $this->day($f, $today);
         $day = CarbonImmutable::parse($f['date']);
+        // Ang reference ng mga chart: ang naunang araw na may parehong filter, mula sa parehong cache ng araw na iyon.
+        $prev = $this->day(['date' => $day->subDay()->toDateString()] + $f, $today);
 
         return $out + ['dates' => ['today' => $today, 'yesterday' => CarbonImmutable::parse($today)->subDay()->toDateString(),
             'prev' => $day->subDay()->toDateString(), 'next' => $f['date'] < $today ? $day->addDay()->toDateString() : null],
-            'refused_off' => $f['page_id'] === null && $f['bot'] === null ? $this->refusedOff($f['date']) : null];
+            'refused_off' => $f['page_id'] === null && $f['bot'] === null ? $this->refusedOff($f['date']) : null,
+            'charts' => self::charts($out, $prev)];
+    }
+
+    /** Ang mga numero ng isang araw at filter, naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto). */
+    private function day(array $f, string $today): array
+    {
+        $ttl = $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
+
+        return Cache::remember('response-speed:' . md5(json_encode($f)), $ttl, fn () => $this->build($f, $today));
+    }
+
+    /**
+     * Ang data ng mga chart, galing mismo sa mga table (kaya pareho ang numero): kada chart ang serye ng araw (24 na
+     * value, null = puwang: walang numero o hindi pa naaabot ang oras), ang parehong serye ng naunang araw (prev) bilang
+     * reference, at ang bilang sa likod ng bawat punto (counts, prev_counts) para sa tooltip.
+     */
+    public static function charts(array $day, array $prev): array
+    {
+        $col = fn (array $rows, callable $get) => array_map(fn ($r) => $r === null ? null : $get($r), $rows);
+        $defs = [
+            'reply' => [fn ($o) => $o['hours'], [
+                'avg' => fn ($r) => $r['avg'], 'median' => fn ($r) => $r['median'], 'p90' => fn ($r) => $r['p90'],
+            ], ['answered' => fn ($r) => $r['answered']]],
+            'ai' => [fn ($o) => $o['hours'], [
+                'with_ai_avg' => fn ($r) => $r['with_ai']['avg'], 'no_ai_avg' => fn ($r) => $r['no_ai']['avg'],
+                'with_ai_median' => fn ($r) => $r['with_ai']['median'], 'no_ai_median' => fn ($r) => $r['no_ai']['median'],
+                'ai_time_avg' => fn ($r) => $r['ai_time']['avg'],
+            ], ['with AI' => fn ($r) => $r['with_ai']['n'], 'no AI' => fn ($r) => $r['no_ai']['n']]],
+            'seq' => [fn ($o) => $o['sequences']['hours'], [
+                'avg' => fn ($r) => $r['pushed_to_meta']['avg'], 'p90' => fn ($r) => $r['pushed_to_meta']['p90'],
+            ], ['steps' => fn ($r) => $r['pushed_to_meta']['n']]],
+        ];
+        $out = ['date' => $day['filters']['date'], 'prev_date' => $prev['filters']['date']];
+        foreach ($defs as $key => [$rows, $series, $counts]) {
+            foreach (['series' => $day, 'prev' => $prev] as $part => $o) {
+                foreach ($series as $k => $get) $out[$key][$part][$k] = $col($rows($o), $get);
+            }
+            foreach (['counts' => $day, 'prev_counts' => $prev] as $part => $o) {
+                foreach ($counts as $k => $get) $out[$key][$part][$k] = $col($rows($o), $get);
+            }
+        }
+
+        return $out;
     }
 
     /**

@@ -14,7 +14,6 @@
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot']], fn ($v) => $v !== null);
     $day = fn ($d) => route('chatbot.speed', $keep + ['date' => $d], false);
-    $chart = ['hours' => array_map(fn ($h) => $h === null ? null : ['median' => $h['median'], 'p90' => $h['p90']], $hours)];
     $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', 'Max', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot'];
 @endphp
 
@@ -74,6 +73,7 @@
             @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a confirmed sent time (a Forbeast reply not confirmed yet, or a reply recorded before sent times were kept): their time is when Likha handed the reply over.@endif
             @if($refused_off) {{ number_format($refused_off) }} messages came in on pages with the bot Off and were not stored.@endif
         </p>
+        @include('chatbot.partials.speed-chart', ['id' => 'reply', 'title' => 'Reply time by hour: average, median and p90', 'label' => 'Average, median and p90 first reply time per hour, with the previous day as reference'])
     </section>
 
     <section aria-labelledby="h-ai">
@@ -100,6 +100,7 @@
             </table>
         </div>
         <p class="mt-2 text-xs text-slate-500">With AI = the first reply came from a run that called the AI (any AI request of that chat, answered or not). AI time = how long the AI itself took for that reply: request created → answered, summed over the run's answered calls.</p>
+        @include('chatbot.partials.speed-chart', ['id' => 'ai', 'title' => 'With AI vs no AI by hour: average (solid), median (dashed) and AI time', 'label' => 'Average and median reply time with AI and without AI, and the AI time, per hour, with the previous day as reference', 'tall' => true])
     </section>
 
     <section aria-labelledby="h-seq">
@@ -128,6 +129,7 @@
         <p class="mt-2 text-xs text-slate-500">
             Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
         </p>
+        @include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
 
         <h3 class="mb-2 mt-4 text-sm font-semibold">Slowest steps of the day</h3>
         <div class="cb-card overflow-x-auto">
@@ -151,14 +153,9 @@
             </table>
         </div>
     </section>
-
-    <section aria-labelledby="h-chart" class="cb-card p-3">
-        <h2 id="h-chart" class="mb-1 text-sm font-medium">Median and p90 reply time by hour (seconds)</h2>
-        <div class="h-56"><canvas id="sp-chart" role="img" aria-label="Median and p90 first reply time per hour"></canvas></div>
-    </section>
 </div>
 
-<script type="application/json" id="sp-data">{!! json_encode($chart, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
+<script type="application/json" id="sp-data">{!! json_encode($charts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
 @endsection
 
 @push('scripts')
@@ -167,11 +164,40 @@
 (() => {
     if (!window.Chart) return;
     const data = JSON.parse(document.getElementById('sp-data').textContent);
-    const get = k => data.hours.map(h => h === null ? null : h[k]);
-    new Chart(document.getElementById('sp-chart'), {type: 'line', data: {labels: data.hours.map((_, i) => String(i).padStart(2, '0')), datasets: [
-        {label: 'Median', data: get('median'), borderColor: '#2563eb', backgroundColor: '#2563eb', tension: .25, spanGaps: true, pointRadius: 2},
-        {label: 'p90', data: get('p90'), borderColor: '#d97706', backgroundColor: '#d97706', tension: .25, spanGaps: true, pointRadius: 2},
-    ]}, options: {responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false}, plugins: {legend: {position: 'bottom'}}, scales: {y: {beginAtZero: true}}}});
+    const pad = h => String(h).padStart(2, '0');
+    const fmt = v => v === null || v === undefined ? '—' : (Math.round(v * 10) / 10).toLocaleString() + ' s';
+    // Kada chart, ang mga linya: [serye, pangalan, kulay, putol-putol, kapal, axis]. Ang naunang araw ay ang parehong mga
+    // linya, manipis, mapusyaw at tuldok-tuldok (napapatay sa legend). Ang null ay puwang, hindi 0.
+    const charts = {
+        reply: [['avg', 'Average', '#0f766e', false, 2.5], ['median', 'Median', '#2563eb', false, 2], ['p90', 'p90', '#d97706', false, 2]],
+        ai: [['with_ai_avg', 'With AI avg', '#7c3aed', false, 2.5], ['no_ai_avg', 'No AI avg', '#0891b2', false, 2.5],
+            ['with_ai_median', 'With AI median', '#7c3aed', true, 1.5], ['no_ai_median', 'No AI median', '#0891b2', true, 1.5], ['ai_time_avg', 'AI time avg', '#db2777', false, 1]],
+        seq: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2]],
+    };
+    for (const [id, lines] of Object.entries(charts)) {
+        const el = document.getElementById('sp-chart-' + id);
+        const c = data[id];
+        if (!el || !c) continue;
+        const sets = lines.map(([key, label, color, dashed, width, axis]) => ({label, data: c.series[key], borderColor: color, backgroundColor: color,
+            borderWidth: width, borderDash: dashed ? [6, 4] : [], pointRadius: 2, tension: .25, spanGaps: false, yAxisID: axis || 'y'}))
+            .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: c.prev[key], borderColor: color + '66',
+                backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y'})));
+        const counts = (part, i) => Object.entries(c[part] || {}).map(([k, v]) => k + ' ' + (v[i] ?? '—')).join(', ');
+        const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, title: {display: true, text: 'seconds'}}};
+        if (lines.some(l => l[5] === 'y2')) scales.y2 = {beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
+        new Chart(el, {type: 'line', data: {labels: c.series[lines[0][0]].map((_, i) => pad(i)), datasets: sets}, options: {
+            responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+            plugins: {
+                legend: {position: 'bottom', labels: {boxWidth: 12, boxHeight: 2, font: {size: 11}}},
+                tooltip: {callbacks: {
+                    title: items => items.length ? pad(items[0].dataIndex) + ':00–' + pad(items[0].dataIndex) + ':59' : '',
+                    label: item => item.dataset.label + ': ' + fmt(item.raw),
+                    footer: items => items.length ? [data.date + ': ' + counts('counts', items[0].dataIndex), data.prev_date + ': ' + counts('prev_counts', items[0].dataIndex)] : [],
+                }},
+            },
+            scales,
+        }});
+    }
 })();
 </script>
 @endpush
