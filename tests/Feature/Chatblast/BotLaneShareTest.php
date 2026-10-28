@@ -160,6 +160,21 @@ class BotLaneShareTest extends ChatblastTestCase
         $this->assertRate();
     }
 
+    public function test_S_179_1b_a_pool_full_of_chatblast_still_claims_and_sends_the_reply_next(): void
+    {
+        config(['services.botcake.send_concurrency' => 2]);
+        $this->blasts(10);
+        $this->step();
+        $this->assertSame(2, DB::table('botcake_send_requests')->where('status', 'sending')->count(), 'the pool is full of chatblast');
+        $this->says('8001');
+        $ready = $this->clock->now();
+        for ($n = 0; $n < 20; $n++) $this->step();
+
+        $this->assertSame(1, DB::table('botcake_send_requests')->where('kind', 'chatbot')->whereIn('status', ['done', 'resumed'])->count(), 'the reply is claimed and sent');
+        $next = array_values(array_filter($this->sends(), fn ($s) => $s['t'] >= $ready - 1e-9))[0];
+        $this->assertSame(['chatbot', '8001'], [$next['kind'], $next['psid']], 'the reply is the next send of the page');
+    }
+
     public function test_S_179_2_each_chatblast_job_keeps_its_write_read_flow_order_between_replies(): void
     {
         $r = $this->burst(10, 0.5, 20, 120.0);
@@ -170,12 +185,13 @@ class BotLaneShareTest extends ChatblastTestCase
         foreach ($steps as $psid => $order) $this->assertSame(['write', 'read', 'flow'], $order, 'steps of ' . $psid);
     }
 
-    /** [ang sagot ng bot kada ilang segundo (0 = wala), ang pinakamaraming chatblast na tawag sa 10 s] */
+    /** [ang sagot ng bot kada ilang segundo (0 = wala, 30 = isa lang sa simula), ang pinakamarami o pinakakaunting chatblast na tawag sa 10 s] */
     public static function shares(): array
     {
         return [
             'S-179.3 no bot work: chatblast uses the full rate' => [0.0, 20],
-            'S-179.3 bot work: chatblast uses at most its share (1 of 2 per second)' => [2.0, 11],
+            'S-179.3 one reply, then no bot work: chatblast is back to the full rate' => [30.0, 20],
+            'S-179.3 bot work: chatblast uses at most its share (1 of 2 per second)' => [1.0, 11],
         ];
     }
 
@@ -195,7 +211,7 @@ class BotLaneShareTest extends ChatblastTestCase
         }
         // Ang 10 s sa gitna (5 s hanggang 15 s), kapag tuloy-tuloy na ang lane.
         $blast = array_filter($this->sends(), fn ($s) => $s['kind'] === 'chatblast' && $s['t'] >= $start + 5.0 - 1e-9 && $s['t'] < $start + 15.0 - 1e-9);
-        if ($every > 0) {
+        if ($every > 0 && $every < 30) {
             $this->assertLessThanOrEqual($max, count($blast));
         } else {
             $this->assertGreaterThanOrEqual($max - 1, count($blast), 'two chatblast calls per second');

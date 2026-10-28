@@ -137,7 +137,7 @@ return [
         'chatblast_share' => (float) env('BOTCAKE_CHATBLAST_SHARE', 0.5),
         // true = ang padala ng chatbot at chatblast ay ipinapasa sa botcake:send-pool (kapag buhay ito); false = naghihintay ang worker (ang dati).
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
-        // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page).
+        // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page), tig-isang ganito ang sagot ng bot at ang chatblast.
         'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
         // Ilang segundo hinihintay ang Botcake sa sagot ng chatbot (send_content); ang unang mensahe na may larawan ay inaabot nang 8-15 s.
         'send_timeout' => (int) env('BOTCAKE_SEND_TIMEOUT', 30),

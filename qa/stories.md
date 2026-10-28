@@ -3005,8 +3005,9 @@ Tests: `tests/Feature/Chatblast/BotLaneShareTest.php` (fake Botcake answering af
 | Case | Given / When / Then | Test | Status |
 |---|---|---|---|
 | S-179.1 (P1) | Given a page's lane busy with 20 chatblast jobs, When three customers write at once, Then the next three sends of the page are the three replies, within three rate intervals | `test_S_179_1…` | passed |
+| S-179.1b (P1) | Given the whole pool (send_concurrency 2) full of chatblast, When a customer writes, Then the reply is claimed and is the next send of the page | `test_S_179_1b…` | passed |
 | S-179.2 (P1) | Given 10 chatblast jobs and a reply every 0.5 s, Then every chatblast message's calls are write, read, send_flow in that order, and all are sent | `test_S_179_2…` | passed |
-| S-179.3 (P1) | Given 40 chatblast jobs, When no bot work, Then chatblast makes ≥ 19 calls in 10 s; When a reply every 2 s, Then chatblast makes ≤ 11 calls in 10 s (its 50% share) | `test_S_179_3…` (2 data sets) | passed |
+| S-179.3 (P1) | Given 40 chatblast jobs, When no bot work, or one reply and then none, Then chatblast makes ≥ 19 calls in 10 s; When a reply every 1 s (bot work always waiting), Then chatblast makes ≤ 11 calls in 10 s (its 50% share) | `test_S_179_3…` (3 data sets) | passed |
 | S-179.4 (P1) | Given 500 chatblast jobs and 50 replies in 30 s on one page, Then every reply goes out within 1 s of being ready and every chatblast message is sent; the wait before and after is in the result | `test_S_179_4…` | passed |
 | S-179.5 (P1) | Given 60 chatblast jobs and a reply every second for 300 s, Then every chatblast message is sent | `test_S_179_5…` | passed |
 | S-179.6 (P1) | Existing Chatblast, Botcake and PageSettings suites pass | `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` | passed |

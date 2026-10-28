@@ -111,10 +111,11 @@ class BotcakeSendQueue
      * customer lang: ang kasunod ay naghihintay hanggang matapos ito (ayos ng padala kada customer). Ayon sa priority: ang
      * chatbot, saka ang Delivering, saka ang ibang chatblast. $accept (ng pool) ang nagpapasya kung may puwang pa ang page ng
      * row; ang tinanggihan ay naiiwang pending. $fullPages: puno na ang page para sa chatblast; $fullForReplies: puno na ang
-     * page para sa sagot ng bot (priority 0), na may sariling puwesto kahit puno ng chatblast ang page.
+     * page para sa sagot ng bot (priority 0), na may sariling puwesto kahit puno ng chatblast ang page. $repliesOnly: puno na
+     * ng chatblast ang pool, kaya ang mga sagot lang ang hinahanap (hindi binabasa ang daan-daang chatblast kada ikot).
      * @return array<int, object>
      */
-    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = []): array
+    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false): array
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
@@ -123,6 +124,7 @@ class BotcakeSendQueue
             // Ang page na puno na ang lane ay hindi na isinasama sa SQL: hindi nito mapupuno ang listahan ng kandidato (ang ibang page ay nakikita pa rin).
             ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
             ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
+            ->when($repliesOnly, fn ($q) => $q->where('t.priority', 0))
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
             ->orderBy('t.priority')->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind', 't.priority']);

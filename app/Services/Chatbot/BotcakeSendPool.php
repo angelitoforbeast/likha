@@ -16,8 +16,8 @@ use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
 /**
- * Ang pool ng padala sa Botcake (botcake:send-pool): hanggang services.botcake.send_concurrency na ticket nang sabay, sa
- * iisang proseso (TicketPool). Bawat page (token) ay may sariling "lane": isang request lang kada 1 / rate_per_page na
+ * Ang pool ng padala sa Botcake (botcake:send-pool): hanggang services.botcake.send_concurrency na ticket nang sabay (ang
+ * sagot ng bot at ang chatblast ay may tig-isang ganito), sa iisang proseso (TicketPool). Bawat page (token) ay may sariling "lane": isang request lang kada 1 / rate_per_page na
  * segundo, eksakto dahil iisang proseso ang nagpapasya (kahati ang cache key ng BotcakeClient, kaya iginagalang din ang
  * naghihintay na padala sa ibang lugar). Sa 429 ay ang page lang na iyon ang humihinto. Ang ulit ay ang patakaran ng
  * BotcakeClient::call. Ang send_content ng chatbot ay isang request; ang chatblast ay ang stepper ng ChatblastSender
@@ -31,7 +31,6 @@ class BotcakeSendPool extends TicketPool
     public const LATE = 0.02;           // segundo: ang reserbang lampas dito ay hindi na ginagamit
     public const BLAST_RETRY = [15, 60]; // ang hintay bago ang ika-2 at ika-3 subok ng sulat o basa ng chatblast (5xx, walang sagot)
     public const COUNTS = 'botcake-send-pool:counts';
-    public const BOT_RECENT = 10.0;     // segundo: pagkatapos ng huling sagot ng bot, ang chatblast ay nasa bahagi pa rin nito ng rate
 
     /** @var array{queued: int, sent: int, retried: array<string, int>, failed: array<string, int>} */
     private array $counts = ['queued' => 0, 'sent' => 0, 'retried' => [], 'failed' => []];
@@ -81,8 +80,9 @@ class BotcakeSendPool extends TicketPool
             // Ang sagot ng bot at ang chatblast ay may kanya-kanyang max() na puwesto: ang chatblast na puno ang pool ay hindi
             // humaharang sa pagkuha ng sagot (nauuna sila sa claim ayon sa priority).
             $bots = count(array_filter($this->jobs, fn (array $job) => self::bot($job['row'])));
-            $n = max(0, $this->max() - $bots) + max(0, $this->max() - (count($this->jobs) - $bots));
-            $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true)));
+            $blasts = max(0, $this->max() - (count($this->jobs) - $bots));
+            $n = max(0, $this->max() - $bots) + $blasts;
+            $started = count(BotcakeSendQueue::claim($this->owner, $n, fn (object $c) => $this->room($c), fn (object $row) => $this->take($row), $this->fullPages(false), $this->fullPages(true), $blasts === 0));
         }
         $this->lanes();
         $this->pump();
@@ -148,10 +148,13 @@ class BotcakeSendPool extends TicketPool
         return min(1.0, max(0.05, (float) config('services.botcake.chatblast_share', 0.5)));
     }
 
-    /** May ginagawa ang bot sa lane: may hawak na sagot (naghihintay o hinihintay ang sagot), o may padala sa huling BOT_RECENT s. */
+    /**
+     * May ginagawa ang bot sa lane: may hawak na sagot (naghihintay o hinihintay ang sagot), o may padala sa huling dalawang
+     * interval (ang kasunod na sagot ng usapan ay may puwesto agad). Pagkatapos nito ay buong rate na ulit ang chatblast.
+     */
     private function botBusy(string $lane, float $now): bool
     {
-        if ($now - ($this->lanes[$lane]['lastBot'] ?? -INF) < self::BOT_RECENT) return true;
+        if ($now - ($this->lanes[$lane]['lastBot'] ?? -INF) < 2 * BotcakeClient::interval()) return true;
         foreach ($this->jobs as $job) if ($job['lane'] === $lane && self::bot($job['row'])) return true;
 
         return false;

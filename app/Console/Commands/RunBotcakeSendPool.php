@@ -30,7 +30,7 @@ class RunBotcakeSendPool extends Command
             foreach ([SIGTERM, SIGINT, SIGQUIT] as $sig) pcntl_signal($sig, fn () => $this->stop = true);
         }
 
-        $this->info('botcake:send-pool started, up to ' . $pool->max() . ' tickets at a time.');
+        $this->info('botcake:send-pool started, up to ' . $pool->max() . ' bot replies and ' . $pool->max() . ' chatblast tickets at a time.');
         $pool->run(max(10, (int) $this->option('max-time')), fn () => $this->stop);
         $this->info('botcake:send-pool stopped.');
 
