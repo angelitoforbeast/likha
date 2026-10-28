@@ -187,10 +187,15 @@ class ForbeastWatch
         if ($moved !== null) $this->noticeMove($page, $moved);
         $late = $movedAt === null ? collect() : $unpaired->filter(fn ($c) => $c->received_at->lt($movedAt->copy()->addSeconds(self::limit('settle_seconds'))));
         $orphans = $unpaired->diffKeys($late)->filter(fn ($c) => $c->received_at->lte($proof) && !($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null));
-        $customers = $orphans->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
+        // Ebidensya lang ang customer na wala ring echo mula sa anumang app mula nang dumating ang kopya (bawas TWIN_MINUTES, ang
+        // pagkahuli ng kopya ng Botcake): ang may echo ay nasagot (ng tao, Botcake o ng Forbeast mismo). Ang pagsagot mula sa
+        // standby sa ibaba ay ayon pa rin sa $orphans.
+        $echoes = $this->echoes($pageId, $from->copy()->subMinutes(self::TWIN_MINUTES));
+        $evidence = $orphans->reject(fn ($c) => ($echoes[(string) $c->psid] ?? collect())->contains(fn ($at) => $at >= $c->received_at->getTimestamp() - self::TWIN_MINUTES * 60));
+        $customers = $evidence->pluck('psid')->map(fn ($p) => (string) $p)->unique()->count();
         $answer = $late;
         if ($orphans->isNotEmpty()) {
-            $enough = $orphans->count() >= self::limit('inbound_chats') && $customers >= self::limit('inbound_customers');
+            $enough = $evidence->count() >= self::limit('inbound_chats') && $customers >= self::limit('inbound_customers');
             $slow = self::limit('lag_seconds');
             $likha = $this->likhaLag();
             $forbeast = Cache::get($this->counter($page, 'lag'));
@@ -210,7 +215,7 @@ class ForbeastWatch
             } else {
                 $this->switch($page, 'inbound', ($forbeast !== null ? 'Forbeast slow: ' . $forbeast . ' s · ' : '') . 'Botcake chats from ' . $customers
                     . ' customers with no Forbeast copy after ' . self::limit('inbound_seconds') . ' seconds',
-                    ['customers' => $customers, 'chat_ids' => $orphans->pluck('id')->take(50)->values()->all(), 'likha_lag' => $likha],
+                    ['customers' => $customers, 'chat_ids' => $evidence->pluck('id')->take(50)->values()->all(), 'likha_lag' => $likha],
                     ['customers' => $customers, 'likha_lag' => $likha] + ($forbeast !== null ? ['forbeast_lag' => (int) $forbeast] : []));
                 return; // ang lipat ang sumasagot sa lahat ng standby
             }
@@ -231,6 +236,15 @@ class ForbeastWatch
         $this->event($page, self::MOVED, ChatbotProvider::GATEWAY, 'manual',
             'moved to Forbeast by ' . $who . ' at ' . $moved->created_at->copy()->timezone('Asia/Manila')->format('Y-m-d H:i'),
             ['from' => ChatbotProvider::BOTCAKE, 'by' => $who, 'gateway_since' => $moved->created_at->toIso8601String()]);
+    }
+
+    /** Ang oras (unix) ng mga echo ng page mula $since, kada customer (ChatEchoes). @return array<string, \Illuminate\Support\Collection> */
+    private function echoes(string $pageId, \Carbon\Carbon $since): array
+    {
+        if (!preg_match('/^\d{1,19}$/', $pageId) || !Schema::hasTable('chatbot_events')) return [];
+
+        return DB::table('chatbot_events')->where('type', ChatEchoes::TYPE)->where('page_id', (int) $pageId)->where('created_at', '>=', $since->format('Y-m-d H:i:s'))
+            ->get(['psid', 'created_at'])->groupBy(fn ($r) => (string) $r->psid)->map(fn ($rows) => $rows->map(fn ($r) => \Carbon\Carbon::parse($r->created_at)->getTimestamp()))->all();
     }
 
     /** Hindi lumipat kahit may ebidensya: isang "held" event kada oras kada dahilan ($kind), at ang log tuwing minuto. */
