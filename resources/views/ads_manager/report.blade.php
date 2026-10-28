@@ -178,6 +178,9 @@
                   @else
                     <span class="text-gray-300">—</span>
                   @endif
+                  @if (!empty($refused[$log->id]))
+                    @include('ads_manager._refused', ['ref' => $refused[$log->id]])
+                  @endif
                 </td>
 
                 <td class="p-2 text-xs text-red-700 max-w-xs whitespace-normal break-words" data-col="error_message">{{ $log->error_message }}</td>

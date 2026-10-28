@@ -204,7 +204,11 @@
                 <td class="p-1 font-mono">#{{ $l->id }}</td>
                 <td class="p-1">{{ $l->original_name }}</td>
                 <td class="p-1">{{ $l->type === 'ads_manager_api' ? strtoupper($l->status) . ' · +' . $l->inserted . ' / ~' . $l->updated . ' / skip ' . $l->skipped : '' }}</td>
-                <td class="p-1 text-red-700">{{ $l->error_message }}</td>
+                <td class="p-1 text-red-700">{{ $l->error_message }}
+                  @if (!empty($meta['refused'][$l->id]))
+                    @include('ads_manager._refused', ['ref' => $meta['refused'][$l->id]])
+                  @endif
+                </td>
                 <td class="p-1">{{ $l->who }}</td>
                 <td class="p-1 font-mono">{{ $l->created_at?->timezone('Asia/Manila')->format('M j, g:i A') }}</td>
               </tr>

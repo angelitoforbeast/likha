@@ -82,6 +82,7 @@ class AdsManagerReportController extends Controller
             'updated'  => (int) ($latest?->updated ?? 0),
             'logs'     => $logs,
             'meta'     => MetaAdsController::panel(),
+            'refused'  => \App\Services\MetaAds\DataHealth::refusals($logs->pluck('id')->all()),
         ]);
     }
 

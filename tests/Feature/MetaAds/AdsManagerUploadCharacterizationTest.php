@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 
 /**
  * Ang XLSX/CSV upload na kapareho ng upsert ng Meta API sync: ang bagong row ay ini-insert, at ang mas mababang spend
- * sa susunod na upload ay hindi pumapalit (protected). Ang starts/ends ay hindi pinupuno ng upload.
+ * sa susunod na upload ay tinatanggihan para sa buong row (protected, hindi updated). Ang starts/ends ay hindi pinupuno ng upload.
  */
 class AdsManagerUploadCharacterizationTest extends MetaAdsTestCase
 {
@@ -37,7 +37,7 @@ class AdsManagerUploadCharacterizationTest extends MetaAdsTestCase
         $second = $this->upload('90');
 
         $this->assertSame(['done', 1, 0], [$first->status, (int) $first->inserted, (int) $first->updated]);
-        $this->assertSame(['done', 0, 1, ['amount_spent_php' => 1]], [$second->status, (int) $second->inserted, (int) $second->updated, $second->protected_details]);
+        $this->assertSame(['done', 0, 0, ['amount_spent_php' => 1]], [$second->status, (int) $second->inserted, (int) $second->updated, $second->protected_details]);
         $row = DB::table('ads_manager_reports')->first();
         $this->assertSame([100.5, 'Page P1', null, null], [(float) $row->amount_spent_php, $row->page_name, $row->starts, $row->ends]);
     }
