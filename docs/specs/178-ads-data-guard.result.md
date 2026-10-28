@@ -19,12 +19,14 @@ Branch `feat/178-ads-data-guard`, based on fe54c227 (live). Not pushed, not depl
    - Where it shows on /ads_manager/report:
      - in the upload log table (🛡 column): "⛔ N rows refused (lower values)", which opens to e.g. `2026-10-20 ad a1 · 111: impressions 1,500 → 1,400`;
      - on each Sync run in "API runs and changes", the same.
+   - The existing-row read is now `lockForUpdate` (ordered by ad_id) until the chunk commits. An upload and a Sync (separate processes) can no longer both pass the check on the same row and let a lower value through.
+   - The refusal details in the upload log table are shown only to the roles that see the Ads page. The other roles keep the old count columns.
    - Not changed: the chunk-level `ad_campaign_creatives` and `ad_catalog` upserts still run for a refused row. They hold names and dates, not the refused numbers.
 2. **Data health box** (`DataHealth::evaluate`, `_data_health.blade.php`). It sits on /ads_manager/report above the Meta section, for the roles that see the Ads page (`MetaAdsController::allowed()`, the same check as the Meta section).
    - **Accounts come from three sources:**
      - the Meta connections;
      - the `ad_accounts` rows (/ads_manager/ad_account);
-     - the uploads of the last 60 days: `ads_manager_reports.ad_id` → `ad_campaign_creatives.account_id`. An ad with no known account is grouped as "Account unknown".
+     - the uploads of the last 60 days: the account of the ad's `ad_campaign_creatives` row, else the account of its campaign's row. `campaign_id` is unique there, so only one ad per campaign has its own row. An ad with no known account is grouped as "Account unknown".
    - **Per account:** the name (176 rules; an account outside the connections takes its active ad_accounts name, else the ID), the source, the latest day with data (within 60 days), and yesterday's rows and spend.
    - **Source** is one of: API selected / API unticked / upload only / none.
    - **Status**, first match wins:
@@ -52,11 +54,11 @@ Branch `feat/178-ads-data-guard`, based on fe54c227 (live). Not pushed, not depl
 ## Case table
 | Case | Test | Result |
 |---|---|---|
-| S-178.1 | `AdsDataHealthTest::test_S_178_1_the_coverage_list_gives_each_account_its_source_and_status` | pass |
+| S-178.1 | `AdsDataHealthTest::test_S_178_1_the_coverage_list_gives_each_account_its_source_and_status`, `…an_uploaded_ad_without_its_own_creatives_row_takes_its_campaigns_account` | pass |
 | S-178.2 | `test_S_178_2_the_noon_check_records_the_result_shows_the_red_notice_and_prints_json`, `test_S_178_2_no_red_notice_when_every_account_is_ok` | pass |
-| S-178.3 | `AdsDataRefusalTest::test_S_178_3_an_upload_with_lower_impressions_keeps_the_whole_row_and_records_the_refusal`, `…an_upload_with_equal_or_higher_values_updates_the_row` (equal, higher), `…a_sync_row_with_lower_impressions_keeps_the_whole_row_and_the_run_shows_one_row_refused`, `AdsDataHealthTest::test_S_178_3_the_box_shows_the_daily_total_of_refused_rows` | pass |
+| S-178.3 | `AdsDataRefusalTest::test_S_178_3_an_upload_with_lower_impressions_keeps_the_whole_row_and_records_the_refusal`, `…an_upload_with_equal_or_higher_values_updates_the_row` (equal, higher), `…a_zero_against_a_stored_value_refuses_the_row`, `…a_blank_metric_cell_keeps_that_column_and_updates_the_rest_without_a_refusal`, `…a_sync_row_with_lower_impressions_keeps_the_whole_row_and_the_run_shows_one_row_refused`, `AdsDataHealthTest::test_S_178_3_the_box_shows_the_daily_total_of_refused_rows` | pass |
 | S-178.4 | `test_S_178_4_a_role_without_the_ads_page_does_not_see_the_box_or_the_notice` | pass |
-| S-178.5 | `tests/Feature/MetaAds` (incl. `AdsManagerUploadCharacterizationTest`), `tests/Feature/AdAccount`, `tests/Feature/Chatblast` | SUITE_RESULT |
+| S-178.5 | `tests/Feature/MetaAds` (incl. `AdsManagerUploadCharacterizationTest`), `tests/Feature/AdAccount`, `tests/Feature/Chatblast` | pass, no new failures (see Suites) |
 | S-178.6 (P2) | Checked by reading the markup only: the notice and the list stack per account (`flex-wrap`, `min-w-0`, `basis-48`, `break-all`, badges `shrink-0`). | not run in a browser |
 
 Red runs:
@@ -66,7 +68,7 @@ Red runs:
 ## Suites (done-when)
 `php vendor\phpunit\phpunit\phpunit tests/Feature/MetaAds tests/Feature/AdAccount tests/Feature/Chatblast` (the Ads Manager upload test is `tests/Feature/MetaAds/AdsManagerUploadCharacterizationTest.php`):
 - At fe54c227 (baseline): `Tests: 1391, Assertions: 46005, Skipped: 1`, no failures.
-- After the change: AFTER_LINE
+- After the change (HEAD, with the review fixes): `Tests: 1403, Assertions: 46055, Skipped: 1`, no failures. The same 48 PHPUnit deprecations as the baseline.
 - No new failures.
 
 ## Changes to existing tests (needed by the decisions)
@@ -81,6 +83,7 @@ Red runs:
 - **"Not readable by API" includes every active ad_accounts row in no connection.** An old account that is still active on /ads_manager/ad_account keeps the red notice on until someone connects it or deletes the row there.
 - **The notice reads the stored 12:00 check; the box is live.** After a late upload the box shows OK before the notice clears at the next check.
 - **The page's live check writes `meta_ads.first_seen`** when a new connection account first appears, so "first seen" is the first time anyone looked, not only the 12:00 run. `--json` and the plain command never write.
+- **An unticked account that has upload data yesterday shows OK**, with source "API unticked". "Not synced (unticked)" is used when it has no data.
 - **The upload window is 60 days.** "Latest day" and the upload part of "first seen" read the last 60 days of ads_manager_reports, to keep the page fast. An account silent for over 60 days shows "latest —", and if it comes back it shows as New.
 
 ## Deploy notes
@@ -91,6 +94,12 @@ Red runs:
 - **Incepxion:** the same commits apply to Incepxion (same code paths, no data-specific values).
 
 ## Accepted findings
-REVIEW_LINE
+- **Review:** `skeptic-reviewer`, standard depth, on fe54c227..77783cbb. Three majors, fixed in one loop (f95552e1), each test-first where it changes behaviour:
+  1. **Uploaded ads were mapped to an account through their own creatives row only.** In production `ad_campaign_creatives.campaign_id` is unique, so the other ads of a campaign fell under "Account unknown". Now the campaign's row is used too. New test; red before the fix.
+  2. **Race between an upload and a Sync on the same row.** Added `lockForUpdate`. This is not testable on sqlite.
+  3. **No tests for the 0 vs blank rule.** Two tests added. They passed on the code as written and pin it.
+- **One minor fixed:** the refusal details are gated by Ads access, and S-178.4 now asserts `assertOk` and that the details are hidden (red before the fix). The importRows docblock is also fixed.
+- **The other minors are accepted with reasons in `TODO.md`** (178 section): event-count totals, refusals lost when a Sync throws mid-account, the creatives-only fallback in `recordRefusals`, an unticked account with data showing OK, the extra plain command, the act_ strip copies, untested branches, insert races on new rows, and the 390 px check by markup only.
+- **Scoped re-check of the fix commit:** requested; its verdict had not arrived when this was written.
 
 178: done — accounts' daily coverage with a 12:00 check, red notice and `ads:data-health --json`; lower values refuse the whole row and are listed per upload/run.
