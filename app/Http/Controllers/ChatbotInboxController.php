@@ -131,7 +131,7 @@ class ChatbotInboxController extends Controller
         $cursor = function (string $key) use ($request): ?array {
             $v = $request->query($key);
             if (!is_array($v)) return null;
-            return ['in' => (int) ($v['in'] ?? 0), 'out' => (int) ($v['out'] ?? 0), 'ev' => (int) ($v['ev'] ?? 0),
+            return ['in' => (int) ($v['in'] ?? 0), 'out' => (int) ($v['out'] ?? 0), 'ev' => (int) ($v['ev'] ?? 0), 'echo' => (int) ($v['echo'] ?? 0),
                 'at' => is_string($v['at'] ?? null) && strtotime($v['at']) ? $v['at'] : null];
         };
 

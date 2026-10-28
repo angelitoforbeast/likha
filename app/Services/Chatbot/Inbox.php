@@ -34,6 +34,8 @@ class Inbox
     public const EVENT_LIMIT = 300;  // pinakamaraming event kada basa
     public const REPLY_WINDOW_HOURS = 24; // Messenger: send_content lang sa loob ng 24 oras mula sa huling mensahe ng customer
     public const OUT_KINDS = ['send', 'manual'];
+    /** Ang echo na ganito kalapit (segundo) sa sagot ng Likha na may parehong text ay ang echo ng sagot na iyon. */
+    private const ECHO_MATCH_SECONDS = 120;
 
     public function __construct(private PageSettings $settings)
     {
@@ -204,16 +206,26 @@ class Inbox
         $events = $events && $this->hasEvents();
         $inQ = fn () => BotcakeChat::active()->where('page_id', $pageId)->where('psid', $psid);
         $outQ = fn () => ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $psid);
-        $evQ = fn () => DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid);
+        // Ang echo (ChatEchoes) ay hindi executed action: hiwalay, ipinapakita bilang padala ng page.
+        $evQ = fn () => DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('type', '<>', ChatEchoes::TYPE);
+        $hasEcho = $this->hasEvents();
+        $echoQ = fn () => DB::table('chatbot_events')->where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('type', ChatEchoes::TYPE);
 
         if ($after !== null) {
             $in = $inQ()->where('id', '>', (int) ($after['in'] ?? 0))->orderBy('id')->limit(self::PAGE_SIZE)->get();
             $out = $outQ()->where('id', '>', (int) ($after['out'] ?? 0))->orderBy('id')->limit(self::PAGE_SIZE)->get();
             $ev = $events ? $evQ()->where('id', '>', (int) ($after['ev'] ?? 0))->orderBy('id')->limit(self::EVENT_LIMIT)->get() : collect();
+            $echo = $hasEcho ? $echoQ()->where('id', '>', (int) ($after['echo'] ?? 0))->orderBy('id')->limit(self::PAGE_SIZE)->get() : collect();
+            // Ang sagot ng Likha na naipakita na: para hindi maging pangalawang bubble ang echo nito.
+            $shown = $echo->isEmpty() ? collect() : $outQ()->where('id', '<=', (int) ($after['out'] ?? 0))
+                ->where('sent_at', '>=', Carbon::parse($echo->min('created_at'))->subSeconds(self::ECHO_MATCH_SECONDS))->get();
             $newer = ['in' => (int) ($in->max('id') ?? ($after['in'] ?? 0)), 'out' => (int) ($out->max('id') ?? ($after['out'] ?? 0)),
-                'ev' => (int) ($ev->max('id') ?? ($after['ev'] ?? 0))];
+                'ev' => (int) ($ev->max('id') ?? ($after['ev'] ?? 0)), 'echo' => (int) ($echo->max('id') ?? ($after['echo'] ?? 0))];
 
-            return ['items' => array_map([self::class, 'strip'], $this->merge($in, $out, $ev)), 'older' => null, 'newer' => $newer, 'has_older' => null];
+            $items = $this->merge($in, $out, $ev);
+            $this->echoes($items, $echo, $shown);
+
+            return ['items' => array_map([self::class, 'strip'], $items), 'older' => null, 'newer' => $newer, 'has_older' => null];
         }
 
         $in = $inQ()->when($before, fn ($w) => $w->where('id', '<', (int) ($before['in'] ?? 0)))->orderByDesc('id')->limit(self::PAGE_SIZE + 1)->get();
@@ -229,13 +241,13 @@ class Inbox
         // mas luma) hanggang sa dating pinakaluma (kapag "Load older") o hanggang ngayon.
         // Ang pinakabagong event ay binabasa bago ang listahan: ang takbong naisulat sa pagitan ay lalabas pa sa polling.
         $evMax = !$before && $events ? (int) ($evQ()->max('id') ?? 0) : 0;
-        $ev = collect();
-        if ($events) {
-            $ev = $evQ()->when($hasOlder && $oldestAt, fn ($w) => $w->where('created_at', '>=', $oldestAt))
-                ->when($before && !empty($before['at']), fn ($w) => $w->where('created_at', '<', Carbon::parse($before['at'])))
-                ->orderByDesc('id')->limit(self::EVENT_LIMIT)->get();
-        }
+        $echoMax = !$before && $hasEcho ? (int) ($echoQ()->max('id') ?? 0) : 0;
+        $range = fn ($q) => $q->when($hasOlder && $oldestAt, fn ($w) => $w->where('created_at', '>=', $oldestAt))
+            ->when($before && !empty($before['at']), fn ($w) => $w->where('created_at', '<', Carbon::parse($before['at'])));
+        $ev = $events ? $range($evQ())->orderByDesc('id')->limit(self::EVENT_LIMIT)->get() : collect();
+        $echo = $hasEcho ? $range($echoQ())->orderByDesc('id')->limit(self::EVENT_LIMIT)->get() : collect();
         $items = array_values(array_merge($items, $this->merge(collect(), collect(), $ev)));
+        $this->echoes($items, $echo, collect());
         usort($items, [self::class, 'order']);
 
         return [
@@ -246,14 +258,47 @@ class Inbox
                 'out' => $shownOut ? min(array_column($shownOut, 'id')) : ($out->isNotEmpty() ? (int) $out->max('id') + 1 : (int) ($before['out'] ?? 0)),
                 'at' => $oldestAt ? Carbon::parse($oldestAt)->toIso8601String() : ($before['at'] ?? null)],
             // Ang polling ng event ay mula sa pinakabagong event ng customer, hindi sa naipakita (para hindi bumalik ang mga luma).
-            'newer' => $before ? null : ['in' => (int) ($in->max('id') ?? 0), 'out' => (int) ($out->max('id') ?? 0), 'ev' => $evMax],
+            'newer' => $before ? null : ['in' => (int) ($in->max('id') ?? 0), 'out' => (int) ($out->max('id') ?? 0), 'ev' => $evMax, 'echo' => $echoMax],
             'has_older' => $hasOlder,
         ];
     }
 
+    /**
+     * Ang mga echo ng usapan (ChatEchoes): ang echo ng sagot ng Likha (parehong text, o larawan, sa loob ng
+     * ECHO_MATCH_SECONDS) ay label lang ng sagot na iyon ("sender"); ang iba (Botcake, tao, ibang app) ay sariling padala ng
+     * page. Ang echo ng sagot na naipakita na ($shown, sa polling) ay hindi na ipinapakita.
+     */
+    private function echoes(array &$items, Collection $echo, Collection $shown): void
+    {
+        if ($echo->isEmpty()) return;
+        $sig = fn (array $messages) => array_map(fn ($m) => ($m['type'] ?? '') === 'image' ? 'image' : ChatEchoes::hash((string) ($m['text'] ?? '')), $messages);
+        $outs = [];
+        foreach ($items as $i => $x) {
+            if ($x['src'] === 'out' && isset($x['messages'])) $outs[$i] = [Carbon::parse($x['raw'])->getTimestamp(), $sig($x['messages'])];
+        }
+        $known = $shown->map(fn ($r) => [Carbon::parse($r->sent_at)->getTimestamp(), $sig((array) $r->content)])->all();
+        foreach ($echo->sortBy('id') as $e) {
+            $d = json_decode((string) $e->detail, true) ?: [];
+            $at = Carbon::parse($e->created_at);
+            $label = ChatEchoes::label($d['sender'] ?? null);
+            $fits = fn ($o) => abs($o[0] - $at->getTimestamp()) <= self::ECHO_MATCH_SECONDS
+                && (in_array($d['hash'] ?? '', $o[1], true) || (($d['text'] ?? '') === '[Image]' && in_array('image', $o[1], true)));
+            $i = collect($outs)->filter($fits)->keys()->first();
+            if ($i !== null) {
+                $items[$i]['sender'] ??= $label;
+                continue;
+            }
+            if (collect($known)->contains($fits)) continue;
+            $items[] = ['key' => 'echo-' . $e->id, 'src' => 'echo', 'id' => $e->id, 'side' => 'out', 'at' => self::iso($at), 'raw' => $at->format('Y-m-d H:i:s'),
+                'status' => 'sent', 'error' => null, 'messages' => [['type' => 'text', 'text' => (string) ($d['text'] ?? '')]], 'manual' => false,
+                'by' => $label, 'via' => null, 'sender' => $label, 'echo' => true];
+        }
+        usort($items, [self::class, 'order']);
+    }
+
     private static function order(array $a, array $b): int
     {
-        $rank = ['in' => 0, 'ev' => 1, 'out' => 2];
+        $rank = ['in' => 0, 'ev' => 1, 'out' => 2, 'echo' => 2];
 
         return [$a['raw'], $rank[$a['src']], $a['ord'] ?? $a['id']] <=> [$b['raw'], $rank[$b['src']], $b['ord'] ?? $b['id']];
     }

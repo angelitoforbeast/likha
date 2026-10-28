@@ -108,7 +108,33 @@
         @else
             <p class="cb-card px-3 py-2 text-sm text-slate-600" data-list="page-problems">No page problems in the last hour.</p>
         @endif
-        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
+        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\BotHealth::PROBLEM_MINUTES }} minutes, per page, refreshed every minute. Red: {{ $thresholds['page_blocked']['red'] ?? '—' }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['red'] ?? '—' }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends, or {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_customers') }}+ customers not answered in {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min. Amber: {{ $thresholds['page_blocked']['amber'] }}+ restricted or permission failures, or {{ $thresholds['page_failed_pct']['amber'] }}%+ failed with {{ $thresholds['page_min_sends']['amber'] }}+ sends. "Customer not reachable" does not count; skipped sends (paused) are left out.</p>
+    </section>
+
+    {{-- Sino ang sumagot (echo ng Meta, ChatEchoes): ang hindi nasagot ng anumang app at ang dobleng sagot ng dalawang app. --}}
+    <section aria-labelledby="h-echoes" class="space-y-2" id="who-answered">
+        <h2 id="h-echoes" class="text-lg font-semibold">Who answered</h2>
+        @if($echoes['pages'])
+            <div class="cb-card overflow-x-auto">
+                <table class="cb-table" data-list="who-answered">
+                    <thead><tr><th>Page</th><th class="text-right">Not answered in {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min</th><th>Latest</th><th class="text-right">Double replies</th><th>Latest</th></tr></thead>
+                    <tbody>
+                    @foreach($echoes['pages'] as $e)
+                        <tr data-echo-page="{{ $e['page_id'] }}">
+                            <td class="font-medium">{{ $e['page'] }}</td>
+                            <td class="text-right">{{ $e['unanswered'] }}@if($e['unanswered_messages'] > $e['unanswered'])<div class="text-xs text-slate-500">{{ $e['unanswered_messages'] }} messages</div>@endif</td>
+                            <td class="text-xs">@foreach($e['examples'] as $x)<a href="{{ $x['inbox'] }}" class="block whitespace-nowrap text-blue-700 hover:underline">{{ substr($x['at'], 11, 5) }} · Customer in Inbox</a>@endforeach</td>
+                            <td class="text-right">{{ $e['doubles'] }}</td>
+                            <td class="text-xs">@foreach($e['double_examples'] as $x)<a href="{{ $x['inbox'] }}" class="block whitespace-nowrap text-blue-700 hover:underline">{{ substr($x['at'], 11, 5) }} · {{ $x['senders'] }}</a>@endforeach</td>
+                        </tr>
+                    @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            <p class="cb-card px-3 py-2 text-sm text-slate-600" data-list="who-answered">{{ $echoes['measured'] ? 'Every customer was answered, no double replies in the last hour.' : 'No echoes yet: Forbeast has not sent any page echo in the last 24 hours.' }}</p>
+        @endif
+        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} minutes, from Meta's echo of every message a page sends (any app or a person). Not answered: a customer message with no echo from any sender within {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min (bot-On pages with echoes; attachments the bot ignores are left out). Double reply: two different apps answering one customer within {{ \App\Services\Chatbot\ChatEchoes::limit('double_seconds') }} s.</p>
     </section>
 
     <form method="GET" action="{{ route('chatbot.health') }}" class="cb-filters flex flex-wrap items-end gap-3 text-sm" aria-label="Filters">

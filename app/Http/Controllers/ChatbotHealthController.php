@@ -38,7 +38,7 @@ class ChatbotHealthController extends Controller
         ksort($pages, SORT_NATURAL | SORT_FLAG_CASE);
         $fb = app(\App\Services\Chatbot\ForbeastSendHealth::class);
 
-        return view('chatbot.health', $out + ['forbeast' => $fb->panel(), 'sendLagAlarm' => $fb->activeAlarm(), 'pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'pageLights' => BotHealth::PAGE_LIGHTS, 'problems' => $this->health->problems(), 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS,
+        return view('chatbot.health', $out + ['forbeast' => $fb->panel(), 'sendLagAlarm' => $fb->activeAlarm(), 'pages' => $pages, 'isCeo' => $this->role() === 'CEO', 'metaLights' => BotHealth::LIGHTS, 'pageLights' => BotHealth::PAGE_LIGHTS, 'problems' => $this->health->problems(), 'echoes' => app(\App\Services\Chatbot\ChatEchoes::class)->health(), 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS,
             'attachments' => \App\Services\Chatbot\ChatAttachments::ignoring() ? \App\Services\Chatbot\ChatAttachments::IGNORE : \App\Services\Chatbot\ChatAttachments::REPLY]);
     }
 

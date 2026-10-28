@@ -208,6 +208,13 @@ return [
             // Ilang segundo pagkalipat sa Forbeast (kahit sino ang naglipat) na ang chat ng Botcake ay hindi ebidensya.
             'settle_seconds' => (int) env('GATEWAY_SWITCH_SETTLE_SECONDS', 180),
         ],
+        // Ang echo (ChatEchoes): ilang minuto bago "hindi nasagot" ang mensahe ng customer, ilang customer na hindi nasagot
+        // sa huling oras bago pula ang page, at ilang segundo ang layo ng dalawang app na "dobleng sagot".
+        'echo' => [
+            'unanswered_minutes' => (int) env('GATEWAY_ECHO_UNANSWERED_MINUTES', 5),
+            'unanswered_customers' => (int) env('GATEWAY_ECHO_UNANSWERED_CUSTOMERS', 3),
+            'double_seconds' => (int) env('GATEWAY_ECHO_DOUBLE_SECONDS', 60),
+        ],
     ],
 
     // Ang site na ito bilang "site system" ng Forbeast (kung sino ang may-ari ng bawat page, at ang paglipat ng page sa

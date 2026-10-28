@@ -17,9 +17,10 @@ use Illuminate\Support\Facades\Log;
  * GATEWAY_WEBHOOK_SECRET. Hindi kilalang page = 401; walang secret = 503 (walang tinatanggap). Ang trabaho ay nasa queue
  * (HandleGatewayEvent): mabilis ang 200, at ang hindi 2xx ay inuulit ng gateway.
  *
- * Ang batch ({"kind": "batch", "events": [...]}, X-Gateway-Batch: 1): mga send_status lang ng iisang page, pinirmahan gamit
- * ang secret ng page na iyon. Bawat event ay sariling job, gaya ng iisang event; ang 200 ay kapag nasa queue na lahat. Ang
- * halo ng page, ang hindi send_status at ang walang laman ay 422 (walang tinatanggap).
+ * Ang batch ({"kind": "batch", "events": [...]}, o ang array ng mga event; X-Gateway-Batch: 1 para sa mas malaking body):
+ * mga send_status at echo (is_echo true) lang ng iisang page, pinirmahan gamit ang secret ng page na iyon. Bawat event ay
+ * sariling job, gaya ng iisang event; ang 200 ay kapag nasa queue na lahat. Ang halo ng page, ang ibang event at ang
+ * walang laman ay 422 (walang tinatanggap).
  */
 class GatewayEventController extends Controller
 {
@@ -37,6 +38,8 @@ class GatewayEventController extends Controller
         }
 
         $event = json_decode($raw, true);
+        // Ang array ng mga event (walang "kind") ay batch din.
+        if (is_array($event) && $event !== [] && array_is_list($event)) $event = ['kind' => 'batch', 'events' => $event];
         $batch = null;
         if (is_array($event) && ($event['kind'] ?? null) === 'batch') {
             $batch = $event['events'] ?? null;
@@ -76,7 +79,7 @@ class GatewayEventController extends Controller
         if ($batch !== null) {
             $page = (string) $event['page_id'];
             foreach ($batch as $e) {
-                if (($e['type'] ?? null) !== 'send_status' || !is_scalar($e['page_id'] ?? null) || (string) $e['page_id'] !== $page) {
+                if ((($e['type'] ?? null) !== 'send_status' && ($e['is_echo'] ?? null) !== true) || !is_scalar($e['page_id'] ?? null) || (string) $e['page_id'] !== $page) {
                     return response()->json(['ok' => false], 422);
                 }
             }
