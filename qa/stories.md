@@ -2931,3 +2931,23 @@ Tests: `tests/Feature/MetaAds/MetaAdsAccountsTest.php`, `MetaAdsFieldsTest.php`,
 | S-173.6 (P1) | MESSAGING_PURCHASE_CONVERSION / OFFSITE_CONVERSIONS → "Meta purchases", CONVERSATIONS → "Messaging conversations started", VALUE → "Meta purchase conversion value"; others unchanged | `test_S_173_6…` (5 data sets) | passed |
 | S-173.7 (P1) | Existing 154 tests and the Ads Manager upload tests pass | `tests/Feature/MetaAds` | passed |
 | S-173.8 (P2) | At 390 px the account list fits the width | markup review only (see result) | not run in a browser |
+
+## S-174 Marketing switches a page to Ad-based and sets its ad groups in the pages table
+
+As marketing staff, I want each page to say whether its replies use the page values (Page-based, the default) or the values of the customer's ad group (Ad-based), and an Ad-based page to open in the pages table with its groups, their ad IDs and each ad's status, so I set up groups for the ads that matter without hunting for them.
+
+Slice 174. Threat model: request bodies and queries from logged-in staff to /chatbot/ad-groups* are untrusted; ad names from ads_manager_reports and ad IDs from chats are stored text shown escaped. Storage: page_settings row provider `adgroup`, key `mode` (no new table, no migration). Risk tier: high (new write routes).
+Tests: `tests/Feature/Chatblast/AdBasedPagesTest.php`, plus the 172 tests.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-174.1 (P1) | Given any page, Then it is Page-based; When an editor switches Precious to Ad-based, Then one setting row is written with history; When a non-editor posts the switch, Then 403 and nothing is written | `test_S_174_1…` | open |
+| S-174.2 (P1) | Given a Page-based page with a group, When a customer from a grouped ad chats, Then the page values; When the page is Ad-based, Then the group's values; When switched back, Then page values and the groups are still there | `test_S_174_2…` | open |
+| S-174.3 (P1) | Given an expanded Ad-based page, Then Default and one sub-row per group; When a group cell is edited, Then it saves with history and Restore; an empty group cell shows the default muted; page-only columns are not editable in group rows | `test_S_174_3…`, 390 px check | open |
+| S-174.4 (P1) | Given a group, Then its ad list shows name, status, customers and last time; When an ad ID is removed, Then a history row is written | `test_S_174_4…` | open |
+| S-174.5 (P1) | When "111, 222\n333" is typed into a group, Then three IDs are added; non-digits are refused; an ID in another group of the page is refused naming that group | `test_S_174_5…` | open |
+| S-174.6 (P1) | Given the page's ads seen in 30 days, Then "Ads not in a group yet" lists them with status, New → On → customers; When two are ticked and added, Then they join the group; the "N new not in a group" count is right | `test_S_174_6…` | open |
+| S-174.7 (P1) | Status: spend on the latest report day → On; last spend 5 days before → "Off since <date> (5 days)"; first report day yesterday → New; not in reports → No report data; a group whose ads are all off → "all ads off" | `test_S_174_7…` | open |
+| S-174.8 (P1) | Given a Page-based page, Then it renders as one row, as before | 390 px check, `test_S_174_8…` | open |
+| S-174.9 (P1) | The 172/173 and Chatblast/Botcake/PageSettings/MetaAds suites have no new failures | full run | open |
+| S-174.10 (P2) | At 390 px the sub-rows stack readably | headless Chrome | open |
