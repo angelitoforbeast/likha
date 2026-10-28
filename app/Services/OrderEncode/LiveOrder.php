@@ -155,8 +155,8 @@ class LiveOrder
             'ADDRESS' => $v['ADDRESS'], 'PROVINCE' => $v['PROVINCE'], 'CITY' => $v['CITY'], 'BARANGAY' => $v['BARANGAY'],
             'AI ANALYZE' => $v['AI ANALYZE'], 'APP SCRIPT CHECKER' => $v['APP SCRIPT CHECKER'],
             'FULL NAME' => self::chatName((string) ($out['name'] ?? ''), (string) $row->{'FULL NAME'}),
-            // Ang valid na phone ng usapan (09…): ang nakuha ng encode, kung hindi ang iisang numero sa chat o sa extracted details.
-            'PHONE NUMBER' => OrderPhone::forOrder((string) ($out['phone'] ?? ''), $in->get('input'), $in->get('cxd')),
+            // Ang valid na phone ng usapan (anyo ng website, 9…): ang nakuha ng encode, kung hindi ang iisang numero sa chat o sa extracted details.
+            'PHONE NUMBER' => OrderPhone::website(OrderPhone::forOrder((string) ($out['phone'] ?? ''), $in->get('input'), $in->get('cxd'))),
         ];
         $flags = ['FULL NAME' => 'edited_full_name', 'PHONE NUMBER' => 'edited_phone_number'] + self::UPDATABLE;
         $staff = self::staffFields((string) $row->{'HISTORICAL LOGS'});
@@ -165,6 +165,8 @@ class LiveOrder
         foreach ($new as $col => $value) {
             $old = $row->{$col};
             if ((string) $value === (string) $old || (trim((string) $value) === '' && trim((string) $old) !== '')) continue;
+            // Iisang numero sa ibang anyo (09… at 9…) ay hindi pagbabago.
+            if ($col === 'PHONE NUMBER' && OrderPhone::website((string) $old) === $value) continue;
             if ((!empty($flags[$col]) && !empty($row->{$flags[$col]})) || in_array($col, $staff, true)) {
                 if (in_array($col, self::PLACES, true)) $keptPlace = true;
                 continue;
@@ -195,7 +197,7 @@ class LiveOrder
 
     /**
      * Upload to macro (Insert): ang hilaw na row ng order, walang encode. Ang FULL NAME ay ang FB name at ang PHONE NUMBER ay ang
-     * phone ng flow (hal. ang sagot ng GPT; 09… kapag valid); walang STATUS at walang address hanggang sa Encode order.
+     * phone ng flow (hal. ang sagot ng GPT; 9XXXXXXXXX kapag valid); walang STATUS at walang address hanggang sa Encode order.
      */
     public function insertRaw(OrderEncode $o, Input $in): MacroOutput
     {
@@ -207,7 +209,7 @@ class LiveOrder
         $row = MacroOutput::create([
             'TIMESTAMP' => $timestamp, 'ts_date' => self::day($timestamp), 'PAGE' => $in->get('page'), 'fb_name' => $in->get('name'),
             'FULL NAME' => $in->get('name'),
-            'PHONE NUMBER' => \App\Services\BotcakeCustomerMatcher::normPhone($phone) ?: ($phone !== '' ? mb_substr($phone, 0, 50) : null),
+            'PHONE NUMBER' => OrderPhone::website($phone) ?: ($phone !== '' ? mb_substr($phone, 0, 50) : null),
             'ITEM_NAME' => $ip['item'] ?: null,
             'COD' => preg_match('/PRICE:\s*₱\s*([0-9][\d,]*(?:\.\d{1,2})?)/iu', $shop, $m) ? str_replace(',', '', $m[1]) : ($price !== '' ? mb_substr($price, 0, 50) : null),
             'shop_details' => $shop, 'SHOP DETAILS' => $shop,
@@ -286,7 +288,9 @@ class LiveOrder
         return [
             '_timestamp' => $timestamp, '_page' => $in->get('page'), '_fb_name' => $fbName, '_shop' => $in->get('shop'),
             '_full_name' => trim($fbName) !== '' ? $fbName : (string) ($out['name'] ?? ''),
-            '_phone' => $likhaPhone ?: (($out['phone'] ?? '') !== '' ? mb_substr((string) $out['phone'], 0, 50) : null),
+            // Anyo ng website (9…) kapag valid; ang hindi valid ay gaya ng dati.
+            '_phone' => $likhaPhone ? OrderPhone::website($likhaPhone)
+                : (OrderPhone::website((string) ($out['phone'] ?? '')) ?: (($out['phone'] ?? '') !== '' ? mb_substr((string) $out['phone'], 0, 50) : null)),
             '_proceed' => (bool) ($out['proceed'] ?? false),
             'ADDRESS' => (string) ($out['address_line'] ?? ''),
             'PROVINCE' => (string) ($out['province'] ?? ''),

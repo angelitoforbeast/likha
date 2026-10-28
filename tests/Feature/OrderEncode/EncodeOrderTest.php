@@ -126,7 +126,7 @@ class EncodeOrderTest extends OrderEncodeTestCase
 
         $m = MacroOutput::sole();
         $this->assertSame($m->id, $o->macro_output_id);
-        $this->assertSame(['10:15 23-10-2026', 'Page Uno', 'Ana Cruz', 'Ana Cruz', '09171234567', '7001'],
+        $this->assertSame(['10:15 23-10-2026', 'Page Uno', 'Ana Cruz', 'Ana Cruz', '9171234567', '7001'],
             [$m->TIMESTAMP, $m->PAGE, $m->{'FULL NAME'}, $m->fb_name, $m->{'PHONE NUMBER'}, $m->botcake_psid]);
         $this->assertSame(['Blk 5 Lot 3 Lahug', 'CEBU', 'CEBU-CITY', 'LAHUG', '2 x GLOW SERUM', '998'],
             [$m->ADDRESS, $m->PROVINCE, $m->CITY, $m->BARANGAY, $m->ITEM_NAME, $m->COD]);
@@ -161,7 +161,7 @@ class EncodeOrderTest extends OrderEncodeTestCase
 
         $m = app(LiveOrder::class)->create($o);
 
-        $this->assertSame(['09:05 23-10-2026', 'Ben', '09171112222', 'Province and City', 'Barangay', null], [$m->TIMESTAMP, $m->{'FULL NAME'}, $m->{'PHONE NUMBER'}, $m->{'AI ANALYZE'}, $m->{'APP SCRIPT CHECKER'}, $m->STATUS]);
+        $this->assertSame(['09:05 23-10-2026', 'Ben', '9171112222', 'Province and City', 'Barangay', null], [$m->TIMESTAMP, $m->{'FULL NAME'}, $m->{'PHONE NUMBER'}, $m->{'AI ANALYZE'}, $m->{'APP SCRIPT CHECKER'}, $m->STATUS]);
     }
 
     public function test_S_130_18_the_models_come_from_app_settings(): void

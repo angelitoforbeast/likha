@@ -2730,7 +2730,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
     /** Ang SELECT na naghahanap ng ibang order na may parehong phone (ang tanong ng duplicate rule ng gate). */
     private function duplicatePhoneQueries(array $statements): array
     {
-        return array_values(array_filter($statements, fn (string $sql) => preg_match('/^select\b.*\bfrom "macro_output" where .*"PHONE NUMBER" = \?/is', $sql) === 1));
+        return array_values(array_filter($statements, fn (string $sql) => preg_match('/^select\b.*\bfrom "macro_output" where .*"PHONE NUMBER" (= \?|in \(\?, \?\))/is', $sql) === 1));
     }
 
     private function nightLogRules(int $orderId): string
