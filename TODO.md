@@ -1361,3 +1361,10 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Compare reads nothing when every saved account ID has left the connections** (instead of falling back to all). Reason: the selection is the CEO's own trusted state; the list shows the accounts to pick again.
 - **No test sends `accounts` as a plain string or an item over 50 characters.** Reason: Laravel's `array` / `max:50` rules refuse them before any code of ours runs; the CEO-only route is tested for 403 and unknown IDs.
 - **The 390 px layout was checked by reading the markup only** (no browser in this session). Reason: a stacked list with `min-w-0`, `break-all` and `shrink-0`; check once on a phone after deploy.
+
+## 175: Forbeast watcher, accepted review minors (2026-10-28)
+- **The switch back can't check "no missing copies" or "no send failure"** while a page is on Botcake. Reason: Forbeast drops that page's messages and nothing sends through it; the health (connected, can_send, inbound_lag_seconds) is the evidence.
+- **The Horizon (redis) path of the Likha lag check is untested.** A supervisor with a combined queue string returns 0. Reason: production runs the database queue, which is tested.
+- **One cache write per gateway event, and a retried job counts its retry delay as Likha lag** until the next event. Reason: small; the lag is a max over 5 minutes and only delays a switch.
+- **The switch-back health checks run one after another in the per-minute command.** Reason: withoutOverlapping and the 180 s streak gap absorb a slow run; at worst the switch back comes later.
+- **No tests for the feed's `reason` field, the "Held on Forbeast" note, or failed_sends / no_answer switches going back.** Reason: thin wrappers over `reason()`, `note()` and `BACK_CONDITIONS`, which the S-175 tests already cover.
