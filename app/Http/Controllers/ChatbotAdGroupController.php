@@ -155,6 +155,21 @@ class ChatbotAdGroupController extends Controller
         return $this->result($this->groups->removeAd($page, $id, (string) $ad, Auth::id()));
     }
 
+    /**
+     * Ang preview ng isang ad ng page: ang link ng video o post (para i-embed), ang headline at body, mula sa
+     * ad_campaign_creatives gaya ng /owner/private. Ang ad lang na nasa group ng page o nakita sa page (404 ang iba).
+     */
+    public function ad(Request $request)
+    {
+        $this->checkAccess();
+        $page = $this->page($request);
+        $ad = $request->query('ad');
+        if (!is_string($ad) || !preg_match('/^\d{1,64}$/', $ad)) return response()->json(['error' => 'Not an ad ID (digits only).'], 422);
+        if (!$this->groups->hasAd($page, $ad)) abort(404);
+
+        return response()->json($this->groups->creative($ad));
+    }
+
     /** Ang Reply values ng page: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga group ang ginagamit). */
     public function mode(Request $request)
     {

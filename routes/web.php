@@ -385,6 +385,8 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     // Ang cell ng isang group at ang pag-alis ng isang ad ID, sa row ng page.
     Route::post('/ad-groups/value', [\App\Http\Controllers\ChatbotAdGroupController::class, 'value'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.value');
     Route::post('/ad-groups/remove-ad', [\App\Http\Controllers\ChatbotAdGroupController::class, 'removeAd'])->middleware('throttle:30,1,chatbot-ad-groups-save')->name('ad-groups.remove-ad');
+    // Ang preview ng isang ad ng page (video o larawan, headline at body) mula sa naka-save na creative; walang tawag sa Meta.
+    Route::get('/ad-groups/ad', [\App\Http\Controllers\ChatbotAdGroupController::class, 'ad'])->middleware('throttle:120,1,chatbot-ad-groups')->name('ad-groups.ad');
 });
 
 // Settings kada page (Page | Provider | Key | Value), bahagi ng Chatblast app. Access ayon sa /owner/nav-settings

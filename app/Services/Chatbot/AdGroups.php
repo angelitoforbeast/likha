@@ -505,6 +505,42 @@ class AdGroups
             ->all();
     }
 
+    /** Ad ba ito ng page: nasa isang group nito, o nakita sa page sa huling UNASSIGNED_DAYS araw. */
+    public function hasAd(string $page, string $ad): bool
+    {
+        foreach ($this->groups($page) as $g) if (in_array($ad, $g['ads'], true)) return true;
+
+        return isset($this->seenCached($page)[$ad]);
+    }
+
+    /**
+     * Ang creative ng isang ad para sa preview, mula sa naka-save na (walang tawag sa Meta), gaya ng /owner/private:
+     * ang row ng ad sa ad_campaign_creatives, o kapag wala, ang row ng campaign nito (from_campaign). Ang headline at body
+     * na wala roon ay mula sa pinakabagong row ng ads_manager_reports. link: ang ad_link (post, reel o video sa
+     * Facebook) kapag https na Facebook link lang, dahil ini-embed ito; kung hindi, null ("No preview").
+     * @return array{ad_id: string, name: ?string, headline: string, body: string, link: ?string, from_campaign: bool}
+     */
+    public function creative(string $ad): array
+    {
+        $cols = ['headline', 'body_ad_settings', 'ad_link'];
+        $hasCreatives = \Illuminate\Support\Facades\Schema::hasTable('ad_campaign_creatives');
+        $report = \Illuminate\Support\Facades\Schema::hasTable('ads_manager_reports')
+            ? DB::table('ads_manager_reports')->where('ad_id', $ad)->orderByDesc('day')->orderByDesc('id')->first(['headline', 'body', 'campaign_id']) : null;
+        $cre = $hasCreatives ? DB::table('ad_campaign_creatives')->where('ad_id', $ad)->first($cols) : null;
+        $fromCampaign = false;
+        if (!$cre && $hasCreatives && $report && $report->campaign_id) {
+            $cre = DB::table('ad_campaign_creatives')->where('campaign_id', $report->campaign_id)->first($cols);
+            $fromCampaign = (bool) $cre;
+        }
+        $link = trim((string) ($cre->ad_link ?? ''));
+        $facebook = preg_match('#^https://([a-z0-9-]+\.)?(facebook\.com|fb\.watch)/#i', $link) === 1;
+        $text = fn (...$v) => (string) (collect($v)->first(fn ($x) => trim((string) $x) !== '') ?? '');
+
+        return ['ad_id' => $ad, 'name' => ($this->adNames([$ad])[$ad] ?? '') ?: null,
+            'headline' => $text($cre->headline ?? null, $report->headline ?? null), 'body' => $text($cre->body_ad_settings ?? null, $report->body ?? null),
+            'link' => $facebook ? $link : null, 'from_campaign' => $fromCampaign];
+    }
+
     /** Ang lahat ng row (active at history) ng group N ng page. */
     private function rows(string $page, int $id)
     {
