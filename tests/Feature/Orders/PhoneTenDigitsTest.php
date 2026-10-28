@@ -115,6 +115,30 @@ class PhoneTenDigitsTest extends TestCase
         $this->assertSame(3, substr_count(file_get_contents($this->storage . '/logs/orders-phone-ten-digits.log'), "\n"));
     }
 
+    public function test_S_186_3_one_row_chunks_convert_every_row_and_dry_run_beats_apply(): void
+    {
+        foreach (['09171234567', '09181234567', '09191234567'] as $p) $this->order($p);
+
+        $this->artisan('orders:phone-ten-digits --apply --dry-run')->expectsOutputToContain('DRY RUN')->assertSuccessful();
+        $this->assertSame(3, MacroOutput::where('PHONE NUMBER', 'like', '09%')->count());
+
+        $this->artisan('orders:phone-ten-digits --apply --chunk=1')->expectsOutputToContain('Changed: 3')->assertSuccessful();
+        $this->assertSame(['9171234567', '9181234567', '9191234567'], MacroOutput::orderBy('id')->pluck('PHONE NUMBER')->all());
+    }
+
+    public function test_S_186_3_apply_changes_nothing_when_the_log_cannot_be_written(): void
+    {
+        $this->order('09171234567');
+        rmdir($this->storage . '/logs');
+        file_put_contents($this->storage . '/logs', 'not a folder'); // storage/logs ay file: hindi mabubuksan ang log
+
+        $this->artisan('orders:phone-ten-digits --apply')->assertFailed();
+
+        $this->assertSame('09171234567', MacroOutput::sole()->{'PHONE NUMBER'});
+        unlink($this->storage . '/logs');
+        mkdir($this->storage . '/logs');
+    }
+
     private function phoneReasons(MacroOutput $row, string $phone): array
     {
         $maps = ['provincesSet' => [], 'citiesByProv' => [], 'brgysByCityProv' => []];

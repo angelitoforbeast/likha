@@ -15,13 +15,14 @@ use Illuminate\Support\Facades\DB;
  *  - Query builder lang (hindi Eloquent): hindi ginagalaw ang updated_at, walang linya sa HISTORICAL LOGS (ang linya ng hindi
  *    "Likha encode" ay ituturing ng encode na edit ng staff at hindi na nito babaguhin ang phone), walang edited_* flag.
  *
- *   php artisan orders:phone-ten-digits            (dry run)
+ *   php artisan orders:phone-ten-digits            (dry run; pareho sa --dry-run)
  *   php artisan orders:phone-ten-digits --apply
  */
 class OrdersPhoneTenDigits extends Command
 {
     protected $signature = 'orders:phone-ten-digits
                             {--apply : i-convert talaga (default: dry run, walang binabago)}
+                            {--dry-run : bilangin lang (ang default din; nananaig sa --apply)}
                             {--chunk=500 : ilang row kada batch}';
     protected $description = 'macro_output PHONE NUMBER na 09XXXXXXXXX → 9XXXXXXXXX (dry run ang default)';
 
@@ -30,35 +31,48 @@ class OrdersPhoneTenDigits extends Command
 
     public function handle(): int
     {
-        $apply = (bool) $this->option('apply');
+        $apply = (bool) $this->option('apply') && !$this->option('dry-run');
         $chunk = max(1, (int) $this->option('chunk'));
         $perDay = [];
         $samples = [];
         $changed = 0;
-        $log = storage_path(self::LOG);
 
-        // LIKE '09' + 9 na kahit-ano = 11 characters na nagsisimula sa 09 (mysql, pgsql, sqlite); ang regex sa PHP ang huling sala.
-        DB::table('macro_output')->where(self::COL, 'like', '09_________')->select(['id', self::COL, 'ts_date'])
-            ->chunkById($chunk, function ($rows) use ($apply, $log, &$perDay, &$samples, &$changed) {
-                $lines = [];
-                foreach ($rows as $r) {
-                    $before = (string) $r->{self::COL};
-                    if (!preg_match('/^09\d{9}$/', $before)) continue;
-                    $after = substr($before, 1);
-                    $day = $r->ts_date ? substr((string) $r->ts_date, 0, 10) : '(walang ts_date)';
-                    if (count($samples) < 5) $samples[] = [$r->id, $before, $after, $day];
+        // Ang log ang tanging tala kung aling 9… ang dating 09…: bukas na bago ang unang palit, kung hindi ay walang ginagalaw.
+        $log = null;
+        if ($apply && !($log = @fopen(storage_path(self::LOG), 'ab'))) {
+            $this->error('Hindi masulatan ang storage/' . self::LOG . ': walang binago.');
 
-                    if ($apply) {
-                        // Kapag nabago ng iba ang phone habang tumatakbo, hindi ito ginagalaw.
-                        $n = DB::table('macro_output')->where('id', $r->id)->where(self::COL, $before)->update([self::COL => $after]);
-                        if ($n !== 1) continue;
-                        $changed++;
-                        $lines[] = now('Asia/Manila')->format('Y-m-d H:i:s') . "\tid=" . $r->id . "\tbefore=" . $before . "\tafter=" . $after;
+            return self::FAILURE;
+        }
+
+        try {
+            // LIKE '09' + 9 na kahit-ano = 11 characters na nagsisimula sa 09 (mysql, pgsql, sqlite); ang regex sa PHP ang huling sala.
+            DB::table('macro_output')->where(self::COL, 'like', '09_________')->select(['id', self::COL, 'ts_date'])
+                ->chunkById($chunk, function ($rows) use ($apply, $log, &$perDay, &$samples, &$changed) {
+                    foreach ($rows as $r) {
+                        $before = (string) $r->{self::COL};
+                        if (!preg_match('/^09\d{9}$/', $before)) continue;
+                        $after = substr($before, 1);
+                        $day = $r->ts_date ? substr((string) $r->ts_date, 0, 10) : '(walang ts_date)';
+                        if (count($samples) < 5) $samples[] = [$r->id, $before, $after, $day];
+
+                        if ($apply) {
+                            // Kapag nabago ng iba ang phone habang tumatakbo, hindi ito ginagalaw.
+                            $n = DB::table('macro_output')->where('id', $r->id)->where(self::COL, $before)->update([self::COL => $after]);
+                            if ($n !== 1) continue;
+                            $changed++;
+                            // Isinusulat agad ang bawat palit: ang paghinto sa gitna ay hindi nag-iiwan ng palit na walang tala.
+                            $line = now('Asia/Manila')->format('Y-m-d H:i:s') . "\tid=" . $r->id . "\tbefore=" . $before . "\tafter=" . $after . "\n";
+                            if (fwrite($log, $line) !== strlen($line) || !fflush($log)) {
+                                throw new \RuntimeException('Hindi naisulat sa log ang palit ng id ' . $r->id . ' (' . $before . ' → ' . $after . ')');
+                            }
+                        }
+                        $perDay[$day] = ($perDay[$day] ?? 0) + 1;
                     }
-                    $perDay[$day] = ($perDay[$day] ?? 0) + 1;
-                }
-                if ($lines) file_put_contents($log, implode("\n", $lines) . "\n", FILE_APPEND | LOCK_EX);
-            });
+                });
+        } finally {
+            if ($log) fclose($log);
+        }
 
         ksort($perDay);
         $total = array_sum($perDay);
