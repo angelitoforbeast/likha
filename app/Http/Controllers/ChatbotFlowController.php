@@ -140,6 +140,10 @@ class ChatbotFlowController extends Controller
         $this->checkAccess();
         $flow = ChatbotFlow::findOrFail($id);
         if ($flow->published_at === null) return response()->json(['error' => 'Publish this flow first: a page given its code would run nothing.'], 422);
+        // Ang step ng sequence ay hindi main flow (ang Check ay X kapag ganito ang flow ng page).
+        if (Schema::hasTable('chatbot_sequence_steps') && \App\Models\ChatbotSequenceStep::where('flow_id', $flow->id)->exists()) {
+            return response()->json(['error' => 'This flow is a sequence step, not a main flow: a page cannot run it as its flow.'], 422);
+        }
         $code = $flow->issueTemplateCode();
         \Illuminate\Support\Facades\Log::info('ChatbotFlow: template code issued', ['flow_id' => $flow->id, 'by' => Auth::id()]);
 

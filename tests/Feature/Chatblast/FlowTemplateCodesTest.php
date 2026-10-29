@@ -223,6 +223,21 @@ class FlowTemplateCodesTest extends ChatblastTestCase
         $this->assertSame(0, PageSetting::where('key', 'flow_id')->count());
     }
 
+    public function test_S_195_7_a_flow_naming_system_keys_never_makes_them_editable_from_forbeast(): void
+    {
+        $flow = $this->flow('Sneaky', [$this->send('{{FLOW}} {{flow_id}} {{provider}} {{gateway}} {{active}} {{ai_provider}} {{auto_switch}} {{SHOP DETAILS}} {{Prompt 3}}')]);
+        $flow->issueTemplateCode();
+        $this->apply($flow->fresh()->template_code)->assertOk();
+        $put = fn (array $values) => $this->signed('PUT', '/api/gateway/pages/1001/values', json_encode(['values' => $values]), self::SECRET, ['X-Forbeast-User' => self::ACTOR]);
+
+        foreach (['flow' => 'Other', 'flow_id' => '999', 'provider' => 'botcake', 'gateway' => 'incepxionbot', 'active' => '0', 'ai_provider' => 'local', 'auto_switch' => '{}', 'shop_details' => 'x'] as $key => $value) {
+            $put([$key => $value])->assertStatus(422)->assertJson(['error' => 'field_not_editable', 'key' => $key]);
+        }
+        $this->assertSame((string) $flow->id, $this->settings()->get('Page Uno', ChatbotFields::PROVIDER, 'flow_id'));
+        $this->assertNull($this->settings()->get('Page Uno', ChatbotFields::PROVIDER, 'provider'));
+        $put(['prompt_3' => 'Needed by the flow'])->assertOk();
+    }
+
     public function test_S_195_7_values_from_forbeast_read_back_as_forbeast_likha_marks_them_and_needed_fields_can_be_filled(): void
     {
         $this->values();
@@ -315,5 +330,12 @@ class FlowTemplateCodesTest extends ChatblastTestCase
         // Ang hindi pa naipa-publish na flow ay walang code (walang tatakbo).
         $this->postJson("/chatbot/flows/{$draft->id}/code")->assertStatus(422)->assertJson(['error' => 'Publish this flow first: a page given its code would run nothing.']);
         $this->assertNull($draft->fresh()->template_code);
+
+        // Ang flow na step ng sequence ay hindi main flow: walang code.
+        $step = $this->flow('Follow-up step', [$this->send('Hi again')]);
+        $seq = \App\Models\ChatbotSequence::create(['name' => 'Follow-ups', 'active' => true]);
+        \App\Models\ChatbotSequenceStep::create(['sequence_id' => $seq->id, 'position' => 1, 'delay_amount' => 1, 'delay_unit' => 'hours', 'flow_id' => $step->id, 'active' => true]);
+        $this->postJson("/chatbot/flows/{$step->id}/code")->assertStatus(422)->assertJson(['error' => 'This flow is a sequence step, not a main flow: a page cannot run it as its flow.']);
+        $this->assertNull($step->fresh()->template_code);
     }
 }
