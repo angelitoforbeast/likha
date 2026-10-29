@@ -44,7 +44,15 @@ class ChatbotConnections
                 'connected' => $this->botcakeConnected($page)],
             'forbeast' => ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, ForbeastPageSetup::PROVIDER),
                 'connected' => $f['connected']],
-        ];
+        ] + (Gateways::setUp(Gateways::INCEPXIONBOT) ? ['incepxionbot' => $this->gatewayCard($page, $pageId, Gateways::INCEPXIONBOT)] : []);
+    }
+
+    /** Ang card ng isang gateway (huling 4 ng token, status, oras ng test, konektado). */
+    private function gatewayCard(string $page, string $pageId, string $gateway): array
+    {
+        $f = $this->forbeast->on($gateway)->info($page);
+
+        return ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, $gateway), 'connected' => $f['connected']];
     }
 
     /** Kumpleto ang Botcake: may Page ID, ok ang huling token test, at may chat block (chat.key, at hindi sira sa huling suri). */
@@ -86,10 +94,17 @@ class ChatbotConnections
     /** Ang mga bot na maaaring makakonekta (ang mga row ng Connected filter at ng Bot ng Health), sa ayos na ito. */
     public const BOTS = ['Botcake', 'Forbeast'];
 
-    /** @return array<int, string> ang mga kumpletong koneksyon, mula sa BOTS */
+    /** Ang BOTS at ang pangalawang gateway kapag naka-set up (Incepxionbot). @return array<int, string> */
+    public static function bots(): array
+    {
+        return array_merge(self::BOTS, Gateways::setUp(Gateways::INCEPXIONBOT) ? [Gateways::label(Gateways::INCEPXIONBOT)] : []);
+    }
+
+    /** @return array<int, string> ang mga kumpletong koneksyon, mula sa bots() */
     public function connected(string $page): array
     {
-        return array_values(array_filter([$this->botcakeConnected($page) ? self::BOTS[0] : null, $this->forbeast->info($page)['connected'] ? self::BOTS[1] : null]));
+        return array_values(array_filter([$this->botcakeConnected($page) ? self::BOTS[0] : null, $this->forbeast->info($page)['connected'] ? self::BOTS[1] : null,
+            Gateways::setUp(Gateways::INCEPXIONBOT) && $this->forbeast->on(Gateways::INCEPXIONBOT)->info($page)['connected'] ? Gateways::label(Gateways::INCEPXIONBOT) : null]));
     }
 
     /**
@@ -270,47 +285,51 @@ class ChatbotConnections
      * webhook sa ibang site ay kailangan ng confirm. Saka ForbeastPageSetup::connect (webhook at status).
      * @return array{http: int, body: array<string, mixed>}
      */
-    public function saveForbeast(string $page, string $pageId, string $token, bool $confirm, ?int $userId): array
+    public function saveForbeast(string $page, string $pageId, string $token, bool $confirm, ?int $userId, string $gateway = Gateways::FORBEAST): array
     {
+        // Ang parehong card para sa pangalawang gateway (incepxionbot): ang sariling URL, mga row at webhook nito.
+        $setup = $this->forbeast->on($gateway);
+        $l = Gateways::label($gateway);
         $botcakeId = $this->botcakePageId($page);
         $pageId = $pageId !== '' ? $pageId : $botcakeId;
-        // Ang mga event ng Forbeast ay itinatapat sa page ayon sa Botcake ID (iisang Facebook page id).
-        if ($pageId !== $botcakeId) return $this->fail(422, 'error', "The Forbeast Page ID must be this page's Facebook page id ({$botcakeId}), the same as the Botcake ID.");
-        $token = $token !== '' ? $token : $this->forbeast->token($page);
-        if ($token === '') return $this->fail(422, 'error', 'Paste the Forbeast token.');
+        // Ang mga event ng gateway ay itinatapat sa page ayon sa Botcake ID (iisang Facebook page id).
+        if ($pageId !== $botcakeId) return $this->fail(422, 'error', "The {$l} Page ID must be this page's Facebook page id ({$botcakeId}), the same as the Botcake ID.");
+        $token = $token !== '' ? $token : $setup->token($page);
+        if ($token === '') return $this->fail(422, 'error', 'Paste the ' . $l . ' token.');
 
-        $probe = $this->forbeast->probe($pageId, $token);
+        $probe = $setup->probe($pageId, $token);
         if ($probe['status'] !== 'ok') return $this->fail($probe['status'] === 'invalid' ? 422 : 502, $probe['status'], $probe['error'] . '. Nothing was saved.');
         $sameName = $probe['name'] === null || $this->settings->pageKey($this->squash($probe['name'])) === $this->settings->pageKey($this->squash($page));
         if (!$sameName || ($probe['id'] !== null && $probe['id'] !== $pageId)) {
             return ['http' => 422, 'body' => ['status' => 'mismatch', 'name' => $probe['name'], 'id' => $probe['id'],
                 'error' => 'This token is for "' . ($probe['name'] ?? '?') . '" (' . ($probe['id'] ?? '?') . '), not this page. Nothing was saved.']];
         }
-        $ours = rtrim((string) config('app.url'), '/') . '/api/gateway/events';
+        $ours = Gateways::eventsUrl($gateway);
         if (!$confirm && $probe['webhook'] !== null && rtrim($probe['webhook'], '/') !== $ours) {
             return $this->askMove((string) (parse_url($probe['webhook'], PHP_URL_HOST) ?: $probe['webhook']));
         }
 
-        $this->settings->set($page, ForbeastPageSetup::PROVIDER, 'token', $token, true, $userId);
-        $res = $this->forbeast->connect($page, $userId);
+        $this->settings->set($page, $gateway, 'token', $token, true, $userId);
+        $res = $setup->connect($page, $userId);
 
         return ['http' => $res['status'] === 'ok' ? 200 : 502, 'body' => ['status' => $res['status'], 'name' => $res['name'], 'error' => $res['error']]];
     }
 
-    /** Test ng naka-save na Forbeast token: ForbeastPageSetup::retest (walang bagong secret), may user. */
-    public function testForbeast(string $page, ?int $userId): array
+    /** Test ng naka-save na token ng gateway: ForbeastPageSetup::retest (walang bagong secret), may user. */
+    public function testForbeast(string $page, ?int $userId, string $gateway = Gateways::FORBEAST): array
     {
-        if ($this->forbeast->token($page) === '') return $this->fail(422, 'error', 'Save a Forbeast token first.');
-        $status = $this->forbeast->retest($page, $userId);
-        $text = (string) $this->settings->get($page, ForbeastPageSetup::PROVIDER, 'token_status');
+        $setup = $this->forbeast->on($gateway);
+        if ($setup->token($page) === '') return $this->fail(422, 'error', 'Save a ' . Gateways::label($gateway) . ' token first.');
+        $status = $setup->retest($page, $userId);
+        $text = (string) $this->settings->get($page, $gateway, 'token_status');
 
         return ['http' => 200, 'body' => ['status' => $status, 'error' => $status === 'ok' ? null : trim((string) (explode(' · ', $text)[1] ?? ''))]];
     }
 
-    /** Clear ng Forbeast token: DELETE ng webhook (subok lang), saka tinatanggal ang token, secret at status (may user). */
-    public function clearForbeast(string $page, ?int $userId): array
+    /** Clear ng token ng gateway: DELETE ng webhook (subok lang), saka tinatanggal ang token, secret at status (may user). */
+    public function clearForbeast(string $page, ?int $userId, string $gateway = Gateways::FORBEAST): array
     {
-        $this->forbeast->disconnect($page, $userId);
+        $this->forbeast->on($gateway)->disconnect($page, $userId);
 
         return ['http' => 200, 'body' => ['status' => 'cleared']];
     }

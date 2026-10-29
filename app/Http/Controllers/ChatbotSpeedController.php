@@ -23,6 +23,6 @@ class ChatbotSpeedController extends Controller
         $pages = array_flip(BotcakeChat::pageMap());
         ksort($pages, SORT_NATURAL | SORT_FLAG_CASE);
 
-        return view('chatbot.speed', $this->speed->output($request->query()) + ['pages' => $pages, 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS]);
+        return view('chatbot.speed', $this->speed->output($request->query()) + ['pages' => $pages, 'bots' => \App\Services\Chatbot\ChatbotConnections::bots()]);
     }
 }

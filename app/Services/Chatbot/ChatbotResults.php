@@ -62,10 +62,16 @@ class ChatbotResults
         if ($from > $to) [$from, $to] = [$to, $from];
         if (Carbon::parse($from)->diffInDays(Carbon::parse($to)) >= self::MAX_DAYS) $from = Carbon::parse($to)->subDays(self::MAX_DAYS - 1)->toDateString();
 
-        $via = $str('via', 10);
+        $via = $str('via', 20);
 
         return ['page_id' => $id('page_id'), 'from' => $from, 'to' => $to, 'flow_id' => $id('flow_id'), 'version_id' => $id('version_id'),
-            'via' => in_array($via, self::VIA, true) ? $via : null];
+            'via' => in_array($via, self::vias(), true) ? $via : null];
+    }
+
+    /** Ang VIA at ang pangalawang gateway kapag naka-set up (incepxionbot). @return array<int, string> */
+    public static function vias(): array
+    {
+        return array_merge(self::VIA, Gateways::setUp(Gateways::INCEPXIONBOT) ? [Gateways::INCEPXIONBOT] : []);
     }
 
     /** Ang paghahambing sa query: compare=flow|botfield at a, b (digits). @return array{0: string, 1: int, 2: int}|null */
@@ -155,15 +161,20 @@ class ChatbotResults
      */
     private static function whereVia($q, string $column, string $via)
     {
-        return $q->where(fn ($w) => $column === 'payload->source'
-            ? ($via === 'forbeast' ? $w->where($column, 'gateway') : $w->whereNull($column)->orWhere($column, '<>', 'gateway'))
-            : ($via === 'forbeast' ? $w->where($column, 'forbeast') : $w->whereNull($column)->orWhere($column, '<>', 'forbeast')));
+        $gateway = Gateways::valid($via);
+        if ($column === 'payload->source') {
+            // Ang chat mula sa gateway: ang payload->gateway ay ang gateway na naghatid (wala = forbeast).
+            return $q->where(fn ($w) => !$gateway ? $w->whereNull($column)->orWhere($column, '<>', 'gateway')
+                : $w->where($column, 'gateway')->where(fn ($g) => $via === Gateways::FORBEAST ? $g->whereNull('payload->gateway')->orWhere('payload->gateway', $via) : $g->where('payload->gateway', $via)));
+        }
+
+        return $q->where(fn ($w) => $gateway ? $w->where($column, $via) : $w->whereNull($column)->orWhereNotIn($column, Gateways::ALL));
     }
 
     /** Ang via ng isang order; ang wala (luma) ay botcake. */
     private static function orderVia(object $o): string
     {
-        return ($o->detail['via'] ?? null) === 'forbeast' ? 'forbeast' : 'botcake';
+        return Gateways::valid($o->detail['via'] ?? null) ? $o->detail['via'] : 'botcake';
     }
 
     /** Ilang customer (page + PSID) ang nag-chat sa range; ang chat na galing sa gateway ay forbeast. */
@@ -179,7 +190,7 @@ class ChatbotResults
     private function byVia(array $f, Carbon $start, Carbon $end, Collection $allOrders, array $delivery): array
     {
         $out = [];
-        foreach (self::VIA as $via) {
+        foreach (self::vias() as $via) {
             $g = ['via' => $via] + $f;
             $orders = $allOrders->filter(fn ($o) => self::orderVia($o) === $via
                 && ($f['flow_id'] === null || (int) $o->flow_id === (int) $f['flow_id'])

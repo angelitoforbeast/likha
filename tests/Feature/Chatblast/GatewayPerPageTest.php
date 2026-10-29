@@ -49,6 +49,8 @@ class GatewayPerPageTest extends ChatblastTestCase
             'database/migrations/2026_10_24_100000_add_inbox_indexes.php',
             'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
             'database/migrations/2026_10_29_100000_create_botcake_send_requests_table.php',
+            'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
+            'database/migrations/2026_11_13_100000_widen_via_on_chatbot_replies.php',
         ]]);
         config([
             'services.chatbot.replies_enabled' => true,
@@ -67,7 +69,8 @@ class GatewayPerPageTest extends ChatblastTestCase
             $base = str_starts_with($r->url(), self::IXB) ? self::IXB : self::GW;
             if ($r->method() === 'GET' && str_ends_with($r->url(), '/v1/pages/1001')) {
                 [$http, $ok] = $this->health[$base];
-                return Http::response(['connected' => $ok, 'can_send' => $ok], $http);
+                return Http::response(['connected' => $ok, 'can_send' => $ok, 'name' => 'Page Uno', 'id' => '1001',
+                    'webhook' => ['url' => Gateways::eventsUrl($base === self::IXB ? 'incepxionbot' : 'forbeast')]], $http);
             }
             if (str_ends_with($r->url(), '/messages')) return Http::response(['ok' => $this->send[$base] < 300], $this->send[$base]);
 
@@ -159,6 +162,42 @@ class GatewayPerPageTest extends ChatblastTestCase
         Http::assertSent(fn (HttpRequest $r) => $r->hasHeader('Authorization', 'Bearer ixb_uno_token'));
         Http::assertNotSent(fn (HttpRequest $r) => str_starts_with($r->url(), self::GW) || $r->hasHeader('Authorization', 'Bearer fbp_uno_token'));
         $this->assertSame('incepxionbot', ChatbotProvider::viaOf($provider));
+    }
+
+    public function test_S_194_2b_a_flow_reply_records_the_gateway_that_sent_it(): void
+    {
+        $this->greeting();
+        $this->useGateway('incepxionbot');
+        $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'message' => 'Hi', 'payload' => ['source' => 'gateway'], 'received_at' => now()]);
+
+        app(\App\Services\Chatbot\ChatbotRunner::class)->handle($chat->id);
+
+        $this->assertSame(['sent', 'incepxionbot'], [\App\Models\ChatbotReply::sole()->status, \App\Models\ChatbotReply::sole()->via]);
+        $this->assertSame(['Incepxionbot', 'incepxionbot'], [ChatbotProvider::viaLabel('incepxionbot'), ChatbotProvider::via('Page Uno', $chat)]);
+    }
+
+    public function test_S_194_3b_page_values_site_calls_and_echoes_know_the_second_gateway(): void
+    {
+        Queue::fake();
+        config(['services.incepxionbot.site_key' => 'ixb_site_key', 'services.incepxionbot.site_secret' => 'ixb-site-secret', 'services.incepxionbot.app_id' => '99887766']);
+        $signed = function (string $method, string $url, string $body, string $secret) {
+            $ts = time();
+            return $this->call($method, $url, [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_X_GATEWAY_TIMESTAMP' => (string) $ts,
+                'HTTP_X_GATEWAY_SIGNATURE' => 'sha256=' . hash_hmac('sha256', $ts . '.' . $body, $secret), 'HTTP_X_FORBEAST_USER' => 'ixb user'], $body);
+        };
+
+        // Ang page values: ang secret ng page sa incepxionbot ay tinatanggap; ang ibang secret ay hindi.
+        $signed('GET', '/api/gateway/pages/1001/values', '', self::IXB_SECRET)->assertOk();
+        $signed('GET', '/api/gateway/pages/1001/values', '', 'not-a-secret')->assertStatus(401);
+        // Ang site: ang site secret ng incepxionbot; ang adopt ay isinusulat ang token sa incepxionbot at doon sasagot.
+        $body = json_encode(['name' => 'Page Siete', 'token' => 'ixb_siete_token', 'mode' => 'take', 'actor' => 'Owner']);
+        $signed('POST', '/api/gateway/site/pages/7007/adopt', $body, 'ixb-site-secret')->assertOk();
+        $this->assertSame(['ixb_siete_token', '', 'incepxionbot'], [app(PageSettings::class)->get('Page Siete', 'incepxionbot', 'token'),
+            (string) app(PageSettings::class)->get('Page Siete', 'forbeast', 'token'), Gateways::active('Page Siete')]);
+        Http::assertSent(fn (HttpRequest $r) => $r->method() === 'PUT' && $r->url() === self::IXB . '/v1/pages/7007/webhook'
+            && $r['url'] === rtrim((string) config('app.url'), '/') . '/api/gateway/events/incepxionbot');
+        // Ang echo ng Meta app ng incepxionbot.
+        $this->assertSame(['incepxionbot', 'Bot (Incepxionbot)'], [\App\Services\Chatbot\ChatEchoes::sender('99887766'), \App\Services\Chatbot\ChatEchoes::label('incepxionbot')]);
     }
 
     public function test_S_194_3_the_same_message_from_both_gateways_is_processed_once(): void
@@ -281,6 +320,12 @@ class GatewayPerPageTest extends ChatblastTestCase
         $this->assertSame('forbeast', Gateways::active('Page Dos'));
         $this->assertNotNull(PageSetting::where('provider', 'chatbot')->where('key', 'gateway')->where('active', true)->value('created_by'));
         $this->get('/chatbot/pages')->assertOk()->assertSee('data-gateway-url', false);
+        // Ang Connections: may card ang incepxionbot, at ang Test nito ay sa sariling URL at token.
+        $card = $this->getJson('/chatbot/connections?page_name=Page%20Uno')->assertOk()->json('incepxionbot');
+        $this->assertSame(['••••oken', true], [$card['token'], $card['connected']]);
+        $this->assertContains('Incepxionbot', $row()['connected']);
+        $this->postJson('/chatbot/connections/incepxionbot-test', ['page_name' => 'Page Uno'])->assertOk()->assertJson(['status' => 'ok']);
+        Http::assertSent(fn (HttpRequest $r) => $r->url() === self::IXB . '/v1/pages/1001' && $r->hasHeader('Authorization', 'Bearer ixb_uno_token'));
     }
 
     public function test_S_194_9_incepxion_with_only_incepxionbot_uses_it_as_its_gateway(): void

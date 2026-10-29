@@ -71,12 +71,12 @@ class Gateways
         return self::setUp(self::FORBEAST) ? self::FORBEAST : (self::setUpList()[0] ?? self::FORBEAST);
     }
 
-    /** Ang aktibong gateway ng page (ang chatbot.gateway, o ang default). */
+    /** Ang aktibong gateway ng page: ang chatbot.gateway kapag naka-set up ito, kung hindi ay ang default. */
     public static function active(string $page): string
     {
         $g = trim((string) app(PageSettings::class)->get($page, ChatbotFields::PROVIDER, self::KEY));
 
-        return self::valid($g) ? $g : self::default();
+        return self::valid($g) && self::setUp($g) ? $g : self::default();
     }
 
     /**

@@ -28,7 +28,7 @@ class ChatEchoes
         '573598697063667' => 'chatbot_builder',
         '263902037430900' => 'person', // Page Inbox / Business Suite: tao ang sumagot
     ];
-    public const LABELS = ['forbeast' => 'Bot (Forbeast)', 'botcake' => 'Botcake', 'chatbot_builder' => 'Chatbot Builder', 'person' => 'Person', 'other' => 'Other app'];
+    public const LABELS = ['forbeast' => 'Bot (Forbeast)', 'incepxionbot' => 'Bot (Incepxionbot)', 'botcake' => 'Botcake', 'chatbot_builder' => 'Chatbot Builder', 'person' => 'Person', 'other' => 'Other app'];
     public const TEXT = 200;
     /**
      * Ang echo na ganito kaaga bago ang mensahe ng customer (segundo) ay sagot pa rin dito: ang oras ng chat ay ang pagdating
@@ -44,9 +44,15 @@ class ChatEchoes
     private const ACTIVE_SECONDS = 86400;
     private const SEEN_SECONDS = 86400;
 
-    /** Ang nagpadala ayon sa app_id: forbeast, botcake, chatbot_builder, person, o other (hindi kilala o wala). */
+    /**
+     * Ang nagpadala ayon sa app_id: forbeast, incepxionbot (ang Meta app nito, INCEPXIONBOT_APP_ID), botcake,
+     * chatbot_builder, person, o other (hindi kilala o wala).
+     */
     public static function sender(?string $appId): string
     {
+        $ixb = Gateways::config(Gateways::INCEPXIONBOT)['app_id'];
+        if ($ixb !== '' && (string) $appId === $ixb) return Gateways::INCEPXIONBOT;
+
         return self::APPS[(string) $appId] ?? 'other';
     }
 

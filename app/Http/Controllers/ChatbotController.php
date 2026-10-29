@@ -162,7 +162,7 @@ class ChatbotController extends Controller
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
             'gateway_labels' => Gateways::LABELS,
-            'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS, 'ai_site' => $ai->site()]);
+            'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]);
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */
@@ -392,12 +392,19 @@ class ChatbotController extends Controller
         if ($provider === '') return response()->json($connections->info($page));
 
         $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
+        // Ang pangalawang gateway: ang card nito ay kapag naka-set up lang (INCEPXIONBOT_URL).
+        if (str_starts_with($provider, Gateways::INCEPXIONBOT) && !Gateways::setUp(Gateways::INCEPXIONBOT)) {
+            return response()->json(['error' => Gateways::label(Gateways::INCEPXIONBOT) . ' is not set up yet.'], 422);
+        }
         $res = match ($provider) {
             'botcake' => $connections->saveBotcake(...$args),
             'forbeast' => $connections->saveForbeast(...$args),
+            'incepxionbot' => $connections->saveForbeast(...[...$args, Gateways::INCEPXIONBOT]),
             'botcake-test' => $connections->testBotcake($page, Auth::id()),
             'forbeast-test' => $connections->testForbeast($page, Auth::id()),
+            'incepxionbot-test' => $connections->testForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             'forbeast-clear' => $connections->clearForbeast($page, Auth::id()),
+            'incepxionbot-clear' => $connections->clearForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
 
