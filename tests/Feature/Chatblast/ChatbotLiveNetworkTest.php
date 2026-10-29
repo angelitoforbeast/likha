@@ -189,6 +189,44 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
         $this->assertSame($all, $read(['bot' => ['forbeast']]));
     }
 
+    public function test_S_199_6_the_page_renders_every_section_with_its_data_hooks_and_keeps_every_number_of_the_scoreboard(): void
+    {
+        $this->seedOrders();
+        $seq = DB::table('chatbot_sequences')->insertGetId(['name' => 'Pa-remind', 'created_at' => now(), 'updated_at' => now()]);
+        $this->reply('1001', '2026-10-21 12:26:00', 'forbeast', ['sequence_id' => $seq]);
+        $this->chat('1001', '7001', '2026-10-21 12:27:00', 'forbeast');
+        DB::table('botcake_chats')->insert(['page_id' => '1001', 'page_name' => 'x', 'psid' => '7009', 'name' => 'Juan Dela Cruz', 'message' => 'Magkano po ito?',
+            'received_at' => '2026-10-21 12:27:30', 'payload' => null]); // walang bot na naitala
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live?bot=botcake')->assertOk()->getContent();
+
+        // Header: pangalan, live, page at bot filter, orasan ng Manila, TV mode at ang labas.
+        foreach (['<h1>LIKHA LIVE</h1>', 'data-live-status="live"', 'data-live-page', 'name="bot"', 'data-live-clock', 'data-live-fullscreen', 'data-tv-exit',
+            'value="botcake" selected', 'Bot 2 · Incepxionbot', '"bot":"botcake"'] as $s) $this->assertStringContainsString($s, $html);
+        // KPI strip (at bawat bilang ng scoreboard): ang numero ay nasa mismong hook.
+        foreach (['replies' => '0', 'orders' => '4', 'messages' => '2', 'follow_ups' => '1', 'ai' => '0', 'peso' => '3,200', 'signals' => '6',
+            'in-forbeast' => '0', 'in-botcake' => '0', 'out-forbeast' => '0', 'in-unknown' => '0'] as $key => $v) {
+            $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($v, '#') . '<#', $html, $key);
+        }
+        foreach (['data-live-recent="replies"', 'data-live-recent="orders"', 'data-live-count="reply_time"', 'data-live-unit', 'data-live-note="reply_time"',
+            'data-live-count="active"', 'data-live-unknown="in"', 'data-live-unknown="out"', 'data-live-last-order', 'data-live-plus', 'data-live-kpi="orders"'] as $s) {
+            $this->assertStringContainsString($s, $html, $s);
+        }
+        // Ang network: mga input, ang core at ang orasan nito, ang AI node, ang tatlong bot, ang Orders; bawat link ay isang path.
+        foreach (['NEURAL NETWORK', 'CUSTOMER INQUIRIES', 'FOLLOW-UP SEQUENCES', 'AI ANSWERS', 'signals · last 5 min', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT',
+            'BOTCAKE · FALLBACK', 'DORMANT', 'Follow-ups sent', 'Orders recorded', 'Order value today', 'LIVE ACTIVITY', 'Listening for new events'] as $s) {
+            $this->assertStringContainsString($s, $html, $s);
+        }
+        foreach (['inq', 'seq', 'ai', 'ord', 'forbeast', 'incepxionbot', 'botcake'] as $p) $this->assertSame(1, substr_count($html, 'data-path="' . $p . '"'), $p);
+        $this->assertSame(60, preg_match_all('#<line [^>]*/>#', explode('</g>', explode('<g data-live-ticks', $html, 2)[1], 2)[0]));
+        $this->assertMatchesRegularExpression('#data-live-seq="0"[^>]*>Pa-remind · 1<#', $html);
+        $this->assertMatchesRegularExpression('#data-bot-row="incepxionbot"[^>]*data-linked="[01]"#', $html);
+        $this->assertStringContainsString('data-live-log', $html);
+        // Privacy at TV: walang pangalan o mensahe ng customer; walang font o script mula sa labas; walang blur.
+        foreach (['Juan Dela Cruz', 'Magkano', 'fonts.googleapis', 'cdn.', 'backdrop-filter', 'filter: blur'] as $s) $this->assertStringNotContainsString($s, $html, $s);
+        $this->assertStringContainsString('js/chatbot-live-rules.js', $html);
+    }
+
     public function test_S_199_8_the_query_count_of_a_poll_does_not_grow_with_the_number_of_events(): void
     {
         $count = function () {
