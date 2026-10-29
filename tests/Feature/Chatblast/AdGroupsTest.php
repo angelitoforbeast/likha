@@ -123,7 +123,7 @@ class AdGroupsTest extends ChatblastTestCase
 
     public function test_S_172_2_only_the_listed_value_keys_are_accepted(): void
     {
-        $r = $this->ag()->save('Page P', null, 'Item A', ['111'], ['fill_up_form' => 'x']);
+        $r = $this->ag()->save('Page P', null, 'Item A', ['111'], ['active' => '0']);
         $this->assertFalse($r['ok']);
         $this->assertFalse($this->ag()->save('Page P', null, 'Item A', ['111'], ['picture' => 'not a link'])['ok']);
         $this->assertFalse($this->ag()->save('Page P', null, 'Item A', ['111'], ['flow_id' => 'abc'])['ok']);

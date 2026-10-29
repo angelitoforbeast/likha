@@ -166,7 +166,7 @@ class AdBasedPagesTest extends ChatblastTestCase
         // Blangko = bumalik sa default (page value).
         $post(['key' => 'main_flow', 'value' => ''])->assertOk();
         $this->assertArrayNotHasKey('main_flow', $groups->groups('Precious Lopez')[$id]['values']);
-        $post(['key' => 'fill_up_form', 'value' => 'x'])->assertStatus(422)->assertJson(['error' => 'fill_up_form is set on the page only, not in a group.']);
+        $post(['key' => 'active', 'value' => '0'])->assertStatus(422)->assertJson(['error' => 'active' . AdGroups::PAGE_ONLY]);
         $post(['key' => 'price', 'value' => ['x']])->assertStatus(422);
         $this->postJson('/chatbot/ad-groups/value', ['page' => 'Precious Lopez', 'id' => 99, 'key' => 'price', 'value' => '1'])->assertStatus(422)->assertJson(['error' => 'This group was deleted.']);
 

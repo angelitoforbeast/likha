@@ -37,16 +37,26 @@ class AdGroups
     public const MODE_KEY = 'mode';
     public const MODE_AD = 'ad';
 
-    /** Ang mga botfield na puwedeng palitan ng group; ang iba (form, shop details, AI, connection, On/Off) ay sa page lang. */
-    public const VALUE_KEYS = ['item_name_in_jnt_dashboard', 'price', 'quantity', 'picture', 'main_flow', 'main_flow_2', 'flow_id'];
+    /**
+     * Ang group ay nakapagtatakda ng bawat value ng page (bawat botfield ng /chatbot/pages, ang flow na pinili, at ang AI
+     * ng page) maliban sa mga ito: ang pagkakakilanlan at mga switch ng page (On/Off, provider, ang Botcake ID at mga
+     * token, ang Ad-based switch), ang hindi value (ang talaan ng kusang lipat, ang pekeng AI ng stress test, ang FLOW na
+     * text, ang SHOP DETAILS na binubuo, ang AI ng buong site), at ang sariling name at ads ng group.
+     */
+    public const EXCLUDED = ['active', 'provider', 'page_id', 'token', self::MODE_KEY, 'auto_switch', 'mock_ai', 'mock_ai_latency_ms', 'flow', 'shop_details',
+        'ai_local_concurrency', 'ai_breaker_failures', 'ai_breaker_seconds', 'ai_local_reasoning_effort', 'name', 'ads'];
+    /** Ang AI ng page (ChatbotAiSettings::PAGE_FIELDS) na maitatakda rin ng group. */
+    public const AI_KEYS = ['ai_provider', 'ai_fallback', 'ai_local_model', 'ai_local_timeout'];
+    public const PAGE_ONLY = ' is the page\'s own setting (identity or a switch): it is set on the page only, not in a group.';
 
     public function __construct(private PageSettings $settings)
     {
     }
 
+    /** Value ba ito na maitatakda ng group (anyo ng key ng botfield, at wala sa EXCLUDED). */
     public static function isValueKey(string $key): bool
     {
-        return in_array($key, self::VALUE_KEYS, true) || (bool) preg_match('/^seq(_img)?_([1-9]|[1-9]\d)$/', $key);
+        return preg_match('/^[a-z0-9_]{1,100}$/', $key) === 1 && !in_array($key, self::EXCLUDED, true);
     }
 
     /**
@@ -243,14 +253,34 @@ class AdGroups
         $ads = $parsed['ids'];
         sort($ads, SORT_STRING);
         if (count($ads) > self::MAX_ADS) return 'At most ' . self::MAX_ADS . ' ads in a group.';
+        $labels = null;
         foreach ($values as $key => $value) {
             $key = (string) $key;
             $value = trim((string) $value);
-            if (!self::isValueKey($key)) return $key . ' is set on the page only, not in a group.';
+            if (!self::isValueKey($key)) return $key . self::PAGE_ONLY;
+            $labels ??= app(ChatbotFields::class)->labels();
+            $ai = in_array($key, self::AI_KEYS, true);
+            if (!$ai && $key !== 'flow_id' && !isset($labels[$key]) && !preg_match('/^seq(_img)?_([1-9]|[1-9]\d)$/', $key)) return $key . ' is not a value of the page.';
             if ($value === '') continue;
             // Ang flow na wala na ay hindi tinatanggap (at kapag na-delete pagkatapos, ang flow ng page ang tumatakbo).
             if ($key === 'flow_id' && (!ctype_digit($value) || !ChatbotFlow::whereKey((int) $value)->exists())) return 'Pick a flow from the list.';
-            if ($err = ChatbotFields::valueError($key, $value)) return $key . ': ' . $err;
+            if ($ai && ($err = self::aiError($key, $value))) return $err;
+            if (!$ai && ($err = ChatbotFields::valueError($key, $value))) return $key . ': ' . $err;
+        }
+
+        return null;
+    }
+
+    /** Ang mali sa AI ng group: gaya ng sa page (ChatbotAiSettings::clean), pero ang "default" ay ang blangko (ang sa page). */
+    private static function aiError(string $key, string $value): ?string
+    {
+        $field = substr($key, 3);
+        $label = ChatbotAiSettings::LABELS[$key];
+        [$err, $clean] = ChatbotAiSettings::clean([$field => $value], false);
+        if ($err !== null) return str_starts_with($err, $label) ? $err : $label . ': ' . $err;
+        if (($clean[$field] ?? null) === ChatbotAiSettings::DEFAULT) return $label . ': leave it empty to use the page\'s.';
+        if (in_array($key, ['ai_provider', 'ai_fallback'], true) && $value === ChatbotAiProviders::LOCAL && ChatbotAiProviders::notReady(ChatbotAiProviders::LOCAL) !== null) {
+            return $label . ': ' . ChatbotAiSettings::NOT_SET_UP;
         }
 
         return null;

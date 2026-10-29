@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\ChatbotFlow;
 use App\Services\Chatbot\AdGroups;
+use App\Services\Chatbot\ChatbotAiChain;
+use App\Services\Chatbot\ChatbotAiProviders;
+use App\Services\Chatbot\ChatbotAiSettings;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use App\Support\NavAccess;
@@ -54,12 +57,19 @@ class ChatbotAdGroupController extends Controller
         $this->checkAccess();
         $page = $this->page($request);
         $q = mb_substr(trim((string) $request->query('q', '')), 0, 100);
-        $labels = $this->fields->labels();
-        $keys = [];
-        foreach ([...AdGroups::VALUE_KEYS, ...array_keys($labels)] as $key) {
-            if (AdGroups::isValueKey($key) && !isset($keys[$key])) {
-                $keys[$key] = ['key' => $key, 'label' => $key === 'flow_id' ? 'FLOW' : ($labels[$key] ?? $key), 'kind' => $key === 'flow_id' ? 'flow' : ChatbotFields::kind($key)];
-            }
+        // Bawat value ng page: ang flow na pinili, ang bawat column ng /chatbot/pages, at ang AI ng page (mapipili).
+        $keys = ['flow_id' => ['key' => 'flow_id', 'label' => 'FLOW', 'kind' => 'flow']];
+        foreach ($this->fields->labels() as $key => $label) {
+            $key = (string) $key;
+            if (AdGroups::isValueKey($key)) $keys[$key] = ['key' => $key, 'label' => $label, 'kind' => ChatbotFields::kind($key)];
+        }
+        $providers = array_map(fn ($p) => [$p, ChatbotAiProviders::label($p)], ChatbotAiProviders::names());
+        foreach (AdGroups::AI_KEYS as $key) {
+            $keys[$key] = ['key' => $key, 'label' => ChatbotAiSettings::LABELS[$key], 'kind' => 'ai'] + match ($key) {
+                'ai_provider' => ['options' => $providers],
+                'ai_fallback' => ['options' => [...$providers, [ChatbotAiChain::NONE, 'None']]],
+                default => [],
+            };
         }
         // Ang bawat ad (sa group at sa "Ads not in a group yet") ay may pangalan, status, ilang customer at huling oras.
         $o = $this->groups->overview($page, $q);
