@@ -105,17 +105,27 @@ class ForbeastSite
         return $this->call('POST', '/v1/site/transfers/' . rawurlencode($transferId) . '/' . $verb, ['actor' => $actor] + ($phrase !== null ? ['phrase' => $phrase] : []));
     }
 
+    /**
+     * Ang totoong reply time ng isang araw sa orasan ng Meta (customer sent → sagot namin sent), kada oras, mula sa
+     * Forbeast. $timeout: segundo, para hindi maghintay nang matagal ang screen.
+     * @return array{ok: bool, status: int, body: array, error: ?string}
+     */
+    public function replySpeed(string $date, ?string $pageId, int $timeout): array
+    {
+        return $this->call('GET', '/v1/site/reply-speed', ['date' => $date] + ($pageId !== null ? ['page_id' => $pageId] : []), $timeout);
+    }
+
     private static function baseUrl(): string
     {
         return rtrim((string) config('services.gateway.url'), '/');
     }
 
     /** @return array{ok: bool, status: int, body: array, error: ?string} */
-    private function call(string $method, string $path, array $data = []): array
+    private function call(string $method, string $path, array $data = [], int $timeout = self::TIMEOUT): array
     {
         if (!self::linked()) return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'This site is not linked to Forbeast.'];
         try {
-            $http = Http::withToken(trim((string) config('services.forbeast_site.key')))->acceptJson()->connectTimeout(5)->timeout(self::TIMEOUT);
+            $http = Http::withToken(trim((string) config('services.forbeast_site.key')))->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout);
             /** @var Response $res */
             $res = $method === 'GET' ? $http->get(self::baseUrl() . $path, $data) : $http->post(self::baseUrl() . $path, $data);
         } catch (ConnectionException) {

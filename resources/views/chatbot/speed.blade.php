@@ -43,6 +43,48 @@
         <button class="cb-btn cb-btn-primary">Show</button>
     </form>
 
+    <section aria-labelledby="h-meta">
+        <h2 id="h-meta" class="mb-1 text-base font-semibold">Reply time at Meta (customer sent → our reply sent, Meta's clock)</h2>
+        @if($meta['state'] === 'botcake')
+            <p class="text-sm text-slate-600" data-sp-meta="botcake">Botcake gives no Meta times. Choose Forbeast or all bots to see this section.</p>
+        @elseif($meta['state'] === 'not_linked')
+            <p class="text-sm text-slate-600" data-sp-meta="not-linked">Not linked to Forbeast. This site has no Forbeast link, so there are no Meta times here.</p>
+        @else
+            <p class="text-xs text-slate-500" data-sp-meta="scope">Only pages on Forbeast are in this section. {{ number_format($by_bot['Botcake']['messages']) }} of the day's messages went through Botcake and are not in it.</p>
+            @if($meta['state'] === 'error')
+                <p class="mt-1 text-sm text-amber-700" role="status" data-sp-meta="error">Forbeast did not answer ({{ $meta['at'] }}). {{ $meta['error'] }} The rest of this page is not affected; it tries again within a minute.</p>
+            @else
+                @php($mt = $meta['total'])
+                <p class="text-sm tabular-nums text-slate-600" data-sp-summary="meta">Day: {{ number_format($mt['messages']) }} messages · {{ number_format($mt['bot_answered']) }} bot answered · {{ number_format($mt['person_answered']) }} by a person · {{ number_format($mt['unanswered']) }} unanswered · avg {{ $sec($mt['avg']) }} · median {{ $sec($mt['median']) }} · p90 {{ $sec($mt['p90']) }} · max {{ $sec($mt['max']) }} · Meta → Forbeast avg {{ $sec($mt['meta_to_forbeast_avg']) }}</p>
+                @include('chatbot.partials.speed-chart', ['id' => 'meta', 'title' => 'Reply time at Meta by hour: average, median (dashed) and p90', 'label' => 'Average, median and p90 seconds from the customer\'s message sent to our reply sent, on Meta\'s clock, per hour, with the previous day as reference'])
+                <details class="sp-table mt-3" data-sp-table="meta">
+                    <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
+                <div class="cb-card overflow-x-auto">
+                    <table class="cb-table min-w-[48rem]" data-table="meta">
+                        <thead><tr><th>Hour</th>@foreach(['Messages', 'Bot answered', 'By a person', 'Unanswered', 'Average', 'Median', 'p90', 'Max', 'Meta → Forbeast avg'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr></thead>
+                        <tbody>
+                        @foreach($meta['hours'] as $h => $r)
+                            <tr data-hour="{{ $h }}">
+                                <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
+                                @if($r === null)
+                                    @for($i = 0; $i < 9; $i++)<td></td>@endfor
+                                @else
+                                    @include('chatbot.partials.speed-meta-cells', ['r' => $r])
+                                @endif
+                            </tr>
+                        @endforeach
+                        </tbody>
+                        <tfoot><tr class="font-semibold" data-row="total"><td>Day</td>@include('chatbot.partials.speed-meta-cells', ['r' => $meta['total']])</tr></tfoot>
+                    </table>
+                </div>
+                <p class="mt-2 text-xs text-slate-500">
+                    Forbeast's numbers, on Meta's clock at both ends: from when the customer's message was sent to when our reply was sent (Manila hours). Bot answered and By a person = who sent the first reply. Meta → Forbeast avg = how long Meta took to hand the customer's message to Forbeast. Today refreshes every 2 minutes.
+                </p>
+                </details>
+            @endif
+        @endif
+    </section>
+
     <section aria-labelledby="h-hours">
         <h2 id="h-hours" class="mb-1 text-base font-semibold">{{ $f['date'] }}{{ $f['date'] === $dates['today'] ? ' (today)' : ($f['date'] === $dates['yesterday'] ? ' (yesterday)' : '') }} by hour</h2>
         <p class="text-sm tabular-nums text-slate-600" data-sp-summary="hours">Day: {{ number_format($total['messages']) }} messages · {{ number_format($total['answered']) }} answered · avg {{ $sec($total['avg']) }} · median {{ $sec($total['median']) }} · p90 {{ $sec($total['p90']) }} · max {{ $sec($total['max']) }}</p>
@@ -231,6 +273,7 @@ document.querySelectorAll('details[data-sp-table]').forEach(d => {
     // Kada chart, ang mga linya: [serye, pangalan, kulay, putol-putol, kapal, axis]. Ang naunang araw ay ang parehong mga
     // linya, manipis, mapusyaw at tuldok-tuldok (napapatay sa legend). Ang null ay puwang, hindi 0.
     const charts = {
+        meta: [['avg', 'Average', '#0f766e', false, 2.5], ['median', 'Median', '#2563eb', true, 2], ['p90', 'p90', '#d97706', false, 2]],
         reply: [['avg', 'Average', '#0f766e', false, 2.5], ['median', 'Median', '#2563eb', false, 2], ['p90', 'p90', '#d97706', false, 2]],
         ai: [['with_ai_avg', 'With AI avg', '#7c3aed', false, 2.5], ['no_ai_avg', 'No AI avg', '#0891b2', false, 2.5],
             ['with_ai_median', 'With AI median', '#7c3aed', true, 1.5], ['no_ai_median', 'No AI median', '#0891b2', true, 1.5], ['ai_time_avg', 'AI time avg', '#db2777', false, 1]],

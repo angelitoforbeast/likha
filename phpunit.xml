@@ -32,5 +32,7 @@
         <env name="TELESCOPE_ENABLED" value="false"/>
         <!-- Ang typing ng Forbeast (spec 191) ay off sa tests: walang tawag palabas sa fake na HTTP na kulang; GatewayTypingTest ang nag-o-On. -->
         <env name="GATEWAY_TYPING" value="false"/>
+        <!-- Ang Speed screen ay nagbabasa sa Forbeast kapag naka-link: walang site key sa tests, para walang totoong tawag kahit naka-link ang .env; ang test ang nagli-link (config). -->
+        <env name="FORBEAST_SITE_KEY" value=""/>
     </php>
 </phpunit>
