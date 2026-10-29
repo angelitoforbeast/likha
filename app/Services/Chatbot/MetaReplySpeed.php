@@ -138,7 +138,7 @@ class MetaReplySpeed
             $out['series'][$k] = $col($hours, $k);
             $out['prev'][$k] = $col($prev, $k);
         }
-        foreach (['messages' => 'messages', 'bot answered' => 'bot_answered', 'by a person' => 'person_answered', 'unanswered' => 'unanswered'] as $label => $k) {
+        foreach (['messages' => 'messages', 'bot answered' => 'bot_answered', 'by another app or a person' => 'person_answered', 'unanswered' => 'unanswered'] as $label => $k) {
             $out['counts'][$label] = $col($hours, $k);
             $out['prev_counts'][$label] = $col($prev, $k);
         }
