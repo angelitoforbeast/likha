@@ -14,6 +14,8 @@ Route::match(['get', 'post'], '/botcake/chat', [BotcakeChatController::class, 'r
 
 // Mga event ng Forbeast Gateway (pinirmahan ng webhook secret ng page, o ng GATEWAY_WEBHOOK_SECRET; walang session o CSRF).
 Route::post('/gateway/events', [\App\Http\Controllers\GatewayEventController::class, 'receive']);
+// Ang mga event ng pangalawang gateway (incepxionbot): sariling path, sinusuri ng sariling mga secret lang nito.
+Route::post('/gateway/events/{gateway}', [\App\Http\Controllers\GatewayEventController::class, 'receive'])->whereIn('gateway', [\App\Services\Chatbot\Gateways::INCEPXIONBOT]);
 // Ang mga botfield ng page, binabasa at pinapalitan mula sa Forbeast (pinirmahan ng webhook secret ng page lang, may timestamp).
 Route::get('/gateway/pages/{metaPageId}/values', [\App\Http\Controllers\GatewayPageValuesController::class, 'show']);
 Route::put('/gateway/pages/{metaPageId}/values', [\App\Http\Controllers\GatewayPageValuesController::class, 'update']);

@@ -23,7 +23,8 @@ class PageSettings
     public const SYSTEM_KEYS = ['botcake.token_status', 'botcake.template.shipping.text', 'botcake.test_ok',
         'botcake.flow.shipping.options', 'botcake.field.message.options', 'botcake.chat.key', 'chatbot.active', 'chatbot.flow_id',
         'botcake.setup.check', 'botcake.setup.delivery', 'botcake.mock', 'botcake.mock_latency_ms', 'botcake.mock_error_rate',
-        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms', 'forbeast.token_status', 'forbeast.webhook_secret', 'forbeast.permissions', 'chatbot.auto_switch', 'botcake.chat_block',
+        'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms', 'forbeast.token_status', 'forbeast.webhook_secret', 'forbeast.permissions', 'chatbot.auto_switch',
+        'incepxionbot.token_status', 'incepxionbot.webhook_secret', 'incepxionbot.permissions', 'chatbot.gateway', 'botcake.chat_block',
         'chatbot.ai_provider', 'chatbot.ai_fallback', 'chatbot.ai_local_model', 'chatbot.ai_local_timeout', 'chatbot.ai_local_concurrency',
         'chatbot.ai_breaker_failures', 'chatbot.ai_breaker_seconds', 'chatbot.ai_local_reasoning_effort'];
 
@@ -43,7 +44,7 @@ class PageSettings
     public const DETAIL_PATTERN = '/^botcake\.flow\.[a-z0-9_]+\.name$|^botcake\.template\.shipping\.text$|^botcake\.(flow\.shipping|field\.message)\.options$/';
 
     /** Mga key na laging secret. */
-    public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key', 'forbeast.token', 'forbeast.webhook_secret'];
+    public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key', 'forbeast.token', 'forbeast.webhook_secret', 'incepxionbot.token', 'incepxionbot.webhook_secret'];
 
     public static function isSystemKey(string $full): bool
     {

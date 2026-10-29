@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BotcakeChat;
-use App\Services\Chatbot\ForbeastPageSetup;
+use App\Services\Chatbot\Gateways;
 use App\Services\Chatbot\PageValues;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\RateLimiter;
 /**
  * /api/gateway/pages/{meta_page_id}/values: ang Forbeast ang bumabasa (GET) at nagpapalit (PUT) ng mga botfield ng page
  * (PageValues). Pirma: X-Gateway-Signature = sha256=<HMAC-SHA256 ng "<X-Gateway-Timestamp>.<raw body>"> (GET: walang
- * laman ang body), gamit ang sariling webhook secret lang ng page (forbeast.webhook_secret; walang global dito), at ang
+ * laman ang body), gamit ang sariling webhook secret lang ng page (forbeast.webhook_secret, o incepxionbot.webhook_secret
+ * kapag naka-set up ang gateway na iyon; walang global dito), at ang
  * timestamp ay hanggang 300 s ang layo. Hindi kilalang page = 404 unknown_page; anumang mali sa pirma = 401 bad_signature;
  * 60 request kada minuto kada page. Ang PUT ay may X-Forbeast-User (ang actor sa history). Lahat ng galing sa request ay
  * untrusted: text lang, hindi sinusunod.
@@ -88,13 +89,19 @@ class GatewayPageValuesController extends Controller
 
     private function signed(Request $request, string $page, string $body): bool
     {
-        $secret = (string) $this->settings->get($page, ForbeastPageSetup::PROVIDER, 'webhook_secret');
         $ts = (string) $request->header('X-Gateway-Timestamp');
         $given = strtolower((string) $request->header('X-Gateway-Signature'));
         if (str_starts_with($given, 'sha256=')) $given = substr($given, 7);
-        if ($secret === '' || $given === '' || !preg_match('/^\d{1,12}$/', $ts) || abs(time() - (int) $ts) > self::MAX_SKEW) return false;
+        if ($given === '' || !preg_match('/^\d{1,12}$/', $ts) || abs(time() - (int) $ts) > self::MAX_SKEW) return false;
+        // Ang secret ng page sa bawat gateway, isa-isa (forbeast muna, saka ang naka-set up na incepxionbot): bawat isa ay
+        // buong pirma ng sarili nito, walang pinaghahalo.
+        foreach (Gateways::ALL as $gw) {
+            if ($gw !== Gateways::FORBEAST && !Gateways::setUp($gw)) continue;
+            $secret = (string) $this->settings->get($page, $gw, 'webhook_secret');
+            if ($secret !== '' && hash_equals(hash_hmac('sha256', $ts . '.' . $body, $secret), $given)) return true;
+        }
 
-        return hash_equals(hash_hmac('sha256', $ts . '.' . $body, $secret), $given);
+        return false;
     }
 
     /** Pagkatapos ng pirma lang binibilang: ang hindi pinirmahang request ay hindi nakakaubos ng bilang ng page. */

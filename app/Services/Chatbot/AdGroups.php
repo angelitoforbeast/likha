@@ -43,7 +43,7 @@ class AdGroups
      * token, ang Ad-based switch), ang hindi value (ang talaan ng kusang lipat, ang pekeng AI ng stress test, ang FLOW na
      * text, ang SHOP DETAILS na binubuo, ang AI ng buong site), at ang sariling name at ads ng group.
      */
-    public const EXCLUDED = ['active', 'provider', 'page_id', 'token', self::MODE_KEY, 'auto_switch', 'mock_ai', 'mock_ai_latency_ms', 'flow', 'shop_details',
+    public const EXCLUDED = ['active', 'provider', 'gateway', 'page_id', 'token', self::MODE_KEY, 'auto_switch', 'mock_ai', 'mock_ai_latency_ms', 'flow', 'shop_details',
         'ai_local_concurrency', 'ai_breaker_failures', 'ai_breaker_seconds', 'ai_local_reasoning_effort', 'name', 'ads'];
     /** Ang AI ng page (ChatbotAiSettings::PAGE_FIELDS) na maitatakda rin ng group. */
     public const AI_KEYS = ['ai_provider', 'ai_fallback', 'ai_local_model', 'ai_local_timeout'];

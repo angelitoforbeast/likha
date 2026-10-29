@@ -73,6 +73,7 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
+     data-gateway-url="{{ route('chatbot.gateway') }}"
      data-ag-url="{{ route('chatbot.ad-groups') }}" data-ag-add-url="{{ route('chatbot.ad-groups.add') }}" data-ag-delete-url="{{ route('chatbot.ad-groups.delete') }}"
      data-ag-history-url="{{ route('chatbot.ad-groups.history') }}" data-ag-restore-url="{{ route('chatbot.ad-groups.restore') }}"
      data-ag-mode-url="{{ route('chatbot.ad-groups.mode') }}" data-ag-value-url="{{ route('chatbot.ad-groups.value') }}" data-ag-remove-ad-url="{{ route('chatbot.ad-groups.remove-ad') }}" data-ag-ad-url="{{ route('chatbot.ad-groups.ad') }}"

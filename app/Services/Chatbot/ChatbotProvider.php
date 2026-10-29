@@ -7,14 +7,15 @@ use App\Services\PageSettings;
 use Illuminate\Support\Str;
 
 /**
- * Aling daan ang gamit ng chatbot ng isang page: chatbot.provider = gateway (Forbeast Gateway), kung hindi ay Botcake
- * (ang default, pati ang ibang value). Ang Facebook page ID ng gateway ay ang botcake.page_id ng page.
+ * Aling daan ang gamit ng chatbot ng isang page: chatbot.provider = gateway (ang aktibong gateway ng page, Gateways:
+ * forbeast o incepxionbot), kung hindi ay Botcake (ang default, pati ang ibang value). Ang Facebook page ID ng gateway
+ * ay ang botcake.page_id ng page.
  */
 class ChatbotProvider
 {
     public const BOTCAKE = 'botcake';
     public const GATEWAY = 'gateway';
-    public const FORBEAST = 'forbeast'; // ang via ng chat na galing sa gateway
+    public const FORBEAST = 'forbeast'; // ang via ng chat na galing sa gateway na forbeast
     public const ALL = [self::BOTCAKE, self::GATEWAY];
 
     public static function name(string $pageName): string
@@ -23,38 +24,45 @@ class ChatbotProvider
     }
 
     /**
-     * Aling bot ang may dala ng chat: botcake o forbeast. Ang chat na galing sa gateway (payload source gateway) ay forbeast,
-     * ang ibang chat ay botcake; walang chat (hal. sequence) = ang provider ng page.
+     * Aling bot ang may dala ng chat: botcake, o ang aktibong gateway ng page (forbeast, incepxionbot) para sa chat na galing
+     * sa gateway (payload source gateway): iyon ang sasagot. Walang chat (hal. sequence) = ayon sa provider ng page.
      */
     public static function via(string $pageName, ?BotcakeChat $chat): string
     {
-        if ($chat === null) return self::name($pageName) === self::GATEWAY ? self::FORBEAST : self::BOTCAKE;
+        if ($chat === null) return self::name($pageName) === self::GATEWAY ? Gateways::active($pageName) : self::BOTCAKE;
+        if (($chat->payload['source'] ?? null) !== 'gateway') return self::BOTCAKE;
 
-        return ($chat->payload['source'] ?? null) === 'gateway' ? self::FORBEAST : self::BOTCAKE;
+        return $pageName !== '' ? Gateways::active($pageName) : (Gateways::valid($chat->payload['gateway'] ?? null) ? $chat->payload['gateway'] : self::FORBEAST);
     }
 
-    /** Ang via ng isang padala ayon sa daan na ginamit: forbeast (gateway) o botcake. */
+    /** Ang via ng isang padala ayon sa daan na ginamit: ang gateway (forbeast, incepxionbot) o botcake. */
     public static function viaOf(MessagingProvider $provider): string
     {
-        return $provider instanceof GatewayProvider ? self::FORBEAST : self::BOTCAKE;
+        return $provider instanceof GatewayProvider ? ($provider->gateway() ?? self::FORBEAST) : self::BOTCAKE;
     }
 
-    /** Ang pangalan sa screen ng via: Botcake o Forbeast. */
+    /** Ang via ay isa sa mga gateway (hindi Botcake)? */
+    public static function isGateway(?string $via): bool
+    {
+        return Gateways::valid($via);
+    }
+
+    /** Ang pangalan sa screen ng via: Botcake, Forbeast o Incepxionbot. */
     public static function viaLabel(string $via): string
     {
-        return $via === self::FORBEAST ? 'Forbeast' : 'Botcake';
+        return Gateways::valid($via) ? Gateways::label($via) : 'Botcake';
     }
 
-    /** $once: isang subok lang sa Botcake (web request, hal. ang Inbox). */
+    /** $once: isang subok lang sa Botcake (web request, hal. ang Inbox). Ang gateway ay pinipili sa bawat padala (ang aktibo). */
     public static function for(string $pageName, bool $once = false): MessagingProvider
     {
         return self::name($pageName) === self::GATEWAY ? new GatewayProvider() : new BotcakeProvider(app(PageSettings::class), $once);
     }
 
-    /** Mapipili ba ang gateway (may GATEWAY_URL)? */
+    /** Mapipili ba ang gateway (may naka-set up na gateway: GATEWAY_URL o INCEPXIONBOT_URL)? */
     public static function gatewayReady(): bool
     {
-        return (string) config('services.gateway.url') !== '';
+        return Gateways::setUpList() !== [];
     }
 
     /** Ang ID ng isang padala (client_ref ng gateway, hanggang 100 letra). */

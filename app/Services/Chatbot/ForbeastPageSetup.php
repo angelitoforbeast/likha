@@ -16,7 +16,8 @@ use Throwable;
  * sa GET /v1/pages/{id} (id = botcake.page_id). Kapag ok: bagong webhook secret ng page (forbeast.webhook_secret) at
  * PUT /v1/pages/{id}/webhook, para ang mga event ng page ay dumating sa /api/gateway/events na pinirmahan ng secret na iyon.
  * Ang resulta ay nasa forbeast.token_status ("ok · Forbeast connected (<pangalan>)", "invalid · …" o "error · …"). Ang pagbura ng token ay
- * DELETE (subok lang) at tinatanggal ang token, secret at status.
+ * DELETE (subok lang) at tinatanggal ang token, secret at status. Ang on('incepxionbot') ay ang parehong setup sa
+ * pangalawang gateway: ang URL nito, ang mga row na incepxionbot.*, at ang webhook na /api/gateway/events/incepxionbot.
  */
 class ForbeastPageSetup
 {
@@ -24,8 +25,25 @@ class ForbeastPageSetup
     public const NEEDS_TOKEN = 'Add the Forbeast token first';
     private const TIMEOUT = 15;
 
+    /** Ang gateway na sakop (Gateways): ang mga row ng page ay <gateway>.token, …; ang default ay forbeast. */
+    private string $gateway = Gateways::FORBEAST;
+
     public function __construct(private PageSettings $settings)
     {
+    }
+
+    /** Ang parehong setup para sa ibang gateway (ang sariling URL, mga row at webhook nito). */
+    public function on(string $gateway): static
+    {
+        $c = clone $this;
+        $c->gateway = Gateways::valid($gateway) ? $gateway : Gateways::FORBEAST;
+
+        return $c;
+    }
+
+    public function gateway(): string
+    {
+        return $this->gateway;
     }
 
     /**
@@ -43,18 +61,18 @@ class ForbeastPageSetup
         $res = $this->call(fn () => $this->http($token)->get($base));
         if ($res === null || !$res->successful()) {
             $status = $res !== null && in_array($res->status(), [401, 403, 404], true) ? 'invalid' : 'error';
-            return $this->result($page, $status, null, self::why($res), [], $userId);
+            return $this->result($page, $status, null, $this->why($res), [], $userId);
         }
         $name = trim((string) ($res->json('name') ?? ''));
         $this->keepScopes($page, self::scopes($res));
 
         $secret = Str::random(64);
         $hook = $this->call(fn () => $this->http($token)->put($base . '/webhook',
-            ['url' => rtrim((string) config('app.url'), '/') . '/api/gateway/events', 'secret' => $secret]));
-        if ($hook === null || !$hook->successful()) return $this->result($page, 'error', $name, 'Webhook not set: ' . self::why($hook), [], $userId);
+            ['url' => Gateways::eventsUrl($this->gateway), 'secret' => $secret]));
+        if ($hook === null || !$hook->successful()) return $this->result($page, 'error', $name, 'Webhook not set: ' . $this->why($hook), [], $userId);
 
         // Pagkatapos lang ng 2xx: ang hindi natanggap na secret ay hindi ginagamit sa pagsuri ng event.
-        $written = ['forbeast.webhook_secret' => $this->settings->set($page, self::PROVIDER, 'webhook_secret', $secret, true, null, true)['setting']];
+        $written = [$this->gateway . '.webhook_secret' => $this->settings->set($page, $this->gateway, 'webhook_secret', $secret, true, null, true)['setting']];
 
         return $this->result($page, 'ok', $name, null, $written, $userId);
     }
@@ -68,12 +86,12 @@ class ForbeastPageSetup
     public function probe(string $pageId, string $token): array
     {
         $url = $this->baseUrl();
-        if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'id' => null, 'webhook' => null, 'error' => 'Forbeast is not set up yet.'];
+        if ($url === '' || $pageId === '' || $token === '') return ['status' => 'skipped', 'name' => null, 'id' => null, 'webhook' => null, 'error' => Gateways::label($this->gateway) . ' is not set up yet.'];
 
         $res = $this->call(fn () => $this->http($token)->get($url . '/v1/pages/' . rawurlencode($pageId)));
         if ($res === null || !$res->successful()) {
             $status = $res !== null && in_array($res->status(), [401, 403, 404], true) ? 'invalid' : 'error';
-            return ['status' => $status, 'name' => null, 'id' => null, 'webhook' => null, 'error' => self::why($res)];
+            return ['status' => $status, 'name' => null, 'id' => null, 'webhook' => null, 'error' => $this->why($res)];
         }
         $str = fn ($v, int $max) => is_scalar($v) && trim((string) $v) !== '' ? mb_substr(trim((string) $v), 0, $max) : null;
 
@@ -91,7 +109,7 @@ class ForbeastPageSetup
         $p = $this->probe(trim((string) $this->settings->get($page, 'botcake', 'page_id')), $this->token($page));
         if ($p['status'] === 'skipped') return 'skipped';
         if ($p['status'] === 'ok') $this->keepScopes($page, $p['permissions']);
-        $ours = rtrim((string) config('app.url'), '/') . '/api/gateway/events';
+        $ours = Gateways::eventsUrl($this->gateway);
         if ($p['status'] === 'ok' && rtrim((string) $p['webhook'], '/') !== $ours) {
             $p = ['status' => 'error', 'error' => $p['webhook'] === null ? 'Webhook not set' : 'Webhook points to ' . (parse_url($p['webhook'], PHP_URL_HOST) ?: 'another site')] + $p;
         }
@@ -110,7 +128,7 @@ class ForbeastPageSetup
             $this->call(fn () => $this->http($token)->delete($url . '/v1/pages/' . rawurlencode($pageId) . '/webhook'));
         }
 
-        $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->whereIn('key', ['token', 'webhook_secret', 'token_status', 'permissions'])
+        $this->settings->pageQuery($page)->where('provider', $this->gateway)->whereIn('key', ['token', 'webhook_secret', 'token_status', 'permissions'])
             ->where('active', true)->get()->each(fn ($s) => $this->settings->deactivate($s, $userId));
     }
 
@@ -122,11 +140,11 @@ class ForbeastPageSetup
     public function info(string $page): array
     {
         $token = $this->token($page);
-        $connected = $token !== '' && $this->ok($page) && (string) $this->settings->get($page, self::PROVIDER, 'webhook_secret') !== '';
+        $connected = $token !== '' && $this->ok($page) && (string) $this->settings->get($page, $this->gateway, 'webhook_secret') !== '';
         // Gaya ng PageSetting::displayValue: •••• at ang huling 4 lang.
         $shown = $token === '' ? null : '••••' . (mb_strlen($token) > 4 ? mb_substr($token, -4) : '');
 
-        return ['token' => $shown, 'status' => $this->settings->get($page, self::PROVIDER, 'token_status'),
+        return ['token' => $shown, 'status' => $this->settings->get($page, $this->gateway, 'token_status'),
             'connected' => $connected, 'ready' => $this->ready($page)];
     }
 
@@ -140,17 +158,17 @@ class ForbeastPageSetup
 
     public function token(string $page): string
     {
-        return trim((string) $this->settings->get($page, self::PROVIDER, 'token'));
+        return trim((string) $this->settings->get($page, $this->gateway, 'token'));
     }
 
     private function ok(string $page): bool
     {
-        return str_starts_with((string) $this->settings->get($page, self::PROVIDER, 'token_status'), 'ok');
+        return str_starts_with((string) $this->settings->get($page, $this->gateway, 'token_status'), 'ok');
     }
 
     private function baseUrl(): string
     {
-        return rtrim((string) config('services.gateway.url'), '/');
+        return Gateways::url($this->gateway);
     }
 
     private function http(string $token)
@@ -197,25 +215,25 @@ class ForbeastPageSetup
     private function keepScopes(string $page, ?array $scopes): void
     {
         if ($scopes !== null) {
-            $this->settings->set($page, self::PROVIDER, 'permissions', json_encode($scopes), false, null, true);
+            $this->settings->set($page, $this->gateway, 'permissions', json_encode($scopes), false, null, true);
             return;
         }
-        $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'permissions')->where('active', true)
+        $this->settings->pageQuery($page)->where('provider', $this->gateway)->where('key', 'permissions')->where('active', true)
             ->get()->each(fn ($s) => $this->settings->deactivate($s));
     }
 
-    private static function why(?Response $res): string
+    private function why(?Response $res): string
     {
-        if ($res === null) return 'Forbeast did not answer';
+        if ($res === null) return Gateways::label($this->gateway) . ' did not answer';
         $msg = BotcakeClient::messageText(is_array($res->json()) ? $res->json() : []);
 
-        return ($msg !== '' ? 'Forbeast said "' . mb_substr($msg, 0, 150) . '"' : 'Forbeast refused it') . ' (HTTP ' . $res->status() . ')';
+        return ($msg !== '' ? Gateways::label($this->gateway) . ' said "' . mb_substr($msg, 0, 150) . '"' : Gateways::label($this->gateway) . ' refused it') . ' (HTTP ' . $res->status() . ')';
     }
 
     private function result(string $page, string $status, ?string $name, ?string $error, array $written = [], ?int $userId = null, string $suffix = ''): array
     {
-        $text = $status . ' · ' . ($status === 'ok' ? 'Forbeast connected' . ($name !== null && $name !== '' ? ' (' . $name . ')' : '') : $error);
-        $written['forbeast.token_status'] = $this->settings->set($page, self::PROVIDER, 'token_status', mb_substr($text, 0, 250 - mb_strlen($suffix)) . $suffix, false, $userId, true)['setting'];
+        $text = $status . ' · ' . ($status === 'ok' ? Gateways::label($this->gateway) . ' connected' . ($name !== null && $name !== '' ? ' (' . $name . ')' : '') : $error);
+        $written[$this->gateway . '.token_status'] = $this->settings->set($page, $this->gateway, 'token_status', mb_substr($text, 0, 250 - mb_strlen($suffix)) . $suffix, false, $userId, true)['setting'];
 
         return ['status' => $status, 'name' => $name, 'error' => $error, 'written' => $written];
     }

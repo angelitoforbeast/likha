@@ -93,41 +93,53 @@ class ForbeastWatch
     {
     }
 
-    /** Pagkatapos ng bawat padala sa Forbeast (GatewayProvider). $body: ang sagot ng Forbeast. */
-    public function afterSend(string $page, array $outcome, mixed $body): void
+    /**
+     * Pagkatapos ng bawat padala sa gateway (GatewayProvider). $body: ang sagot ng gateway; $gateway: ang gateway na
+     * ginamit. Ang palya ng gateway na hindi na aktibo (lumipat na ang page) ay hindi ebidensya.
+     */
+    public function afterSend(string $page, array $outcome, mixed $body, ?string $gateway = null): void
     {
         if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
+        $gw = $gateway ?? Gateways::active($page);
+        if ($gw !== Gateways::active($page)) return;
         if ($outcome['status'] === 'sent') {
-            $this->reset($page, 'fails', 'no_answer');
+            $this->reset($page, $gw, 'fails', 'no_answer');
             return;
         }
-        if ($outcome['error'] === GatewayProvider::NOT_SET_UP) return; // walang tawag: hindi palya ng Forbeast
+        if ($outcome['error'] === GatewayProvider::notSetUp($gw)) return; // walang tawag: hindi palya ng gateway
 
         [$code, $sub] = self::metaCode($body);
         if (in_array($code, self::CUSTOMER_CODES, true) || in_array($sub, self::CUSTOMER_SUBCODES, true)) return;
-        // Ang HTTP at ang code lang: ang text ng sagot ng Forbeast ay maaaring may laman ng mensahe (napupunta sa feed at sa screen).
+        // Ang HTTP at ang code lang: ang text ng sagot ng gateway ay maaaring may laman ng mensahe (napupunta sa feed at sa screen).
         $http = (int) ($outcome['http'] ?? 0);
-        $error = ($http === 0 ? 'Forbeast did not answer' : 'HTTP ' . $http) . ($code !== null ? ' (Meta #' . $code . ')' : '');
+        $error = ($http === 0 ? Gateways::label($gw) . ' did not answer' : 'HTTP ' . $http) . ($code !== null ? ' (Meta #' . $code . ')' : '');
         if (in_array($code, self::CONNECTION_CODES, true)) {
             $this->switch($page, 'connection_error', $error);
             return;
         }
 
         $noAnswer = $http === 0 || $http >= 500;
-        $fails = $this->bump($page, 'fails');
-        if ($noAnswer && $this->bump($page, 'no_answer') >= self::limit('no_answer')) $this->switch($page, 'no_answer', $error);
+        $fails = $this->bump($page, $gw, 'fails');
+        if ($noAnswer && $this->bump($page, $gw, 'no_answer') >= self::limit('no_answer')) $this->switch($page, 'no_answer', $error);
         elseif ($fails >= self::limit('failed_sends')) $this->switch($page, 'failed_sends', $error);
-        if (!$noAnswer) $this->reset($page, 'no_answer');
+        if (!$noAnswer) $this->reset($page, $gw, 'no_answer');
     }
 
-    /** Ang health check ng page: GET /v1/pages/{id} gamit ang Forbeast token ng page (o ang global key). */
-    public function health(string $page): void
+    /**
+     * Ang health check ng page sa isang gateway ($gateway; wala = ang aktibo): GET /v1/pages/{id} gamit ang token ng page
+     * doon. Bawat gateway ay may sariling bilang at sunod-sunod na maayos (streak). Ang aktibong gateway lang ang
+     * naglilipat ng page kapag pumalya; ang kabila ay sinusukat lang (kung handa itong lipatan, at ang balik).
+     */
+    public function health(string $page, ?string $gateway = null): void
     {
-        $url = rtrim((string) config('services.gateway.url'), '/');
+        $gw = $gateway ?? Gateways::active($page);
+        $own = $gw === Gateways::active($page);
+        $url = Gateways::url($gw);
         $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         // Sariling token lang ng page: ang system key (GATEWAY_KEY, fbs_) ay 404 sa /v1/pages/{id}, kaya hindi ito sukatan.
-        $key = app(ForbeastPageSetup::class)->token($page);
+        $key = app(ForbeastPageSetup::class)->on($gw)->token($page);
         if ($url === '' || $pageId === '' || $key === '') return;
+        $l = Gateways::label($gw);
 
         try {
             $res = Http::withToken($key)->acceptJson()->connectTimeout(3)->timeout(5)->get($url . '/v1/pages/' . rawurlencode($pageId));
@@ -138,24 +150,32 @@ class ForbeastWatch
             $res = null;
         }
         if ($res !== null && $res->successful()) {
-            // Ang inbound_lag_seconds (bagong Forbeast lang): ang tagal ng mensahe sa Forbeast bago ipasa. Wala = hindi alam.
+            // Ang inbound_lag_seconds (bagong Forbeast lang): ang tagal ng mensahe sa gateway bago ipasa. Wala = hindi alam.
             $lag = $res->json('inbound_lag_seconds');
             $lag = is_numeric($lag) ? max(0, (int) $lag) : null;
-            if ($lag === null) $this->reset($page, 'lag'); else Cache::put($this->counter($page, 'lag'), $lag, self::INGEST_TTL);
+            if ($lag === null) $this->reset($page, $gw, 'lag'); else Cache::put($this->counter($page, 'lag', $gw), $lag, self::INGEST_TTL);
             if ($res->json('connected') === false || $res->json('can_send') === false) {
-                $this->streak($page, false);
-                $this->switch($page, 'health', 'Forbeast says the page is ' . ($res->json('connected') === false ? 'not connected' : 'not able to send'));
+                $this->streak($page, false, $gw);
+                if ($own) $this->switch($page, 'health', $l . ' says the page is ' . ($res->json('connected') === false ? 'not connected' : 'not able to send'));
                 return;
             }
-            $this->reset($page, 'health');
-            $this->streak($page, $lag === null || $lag < self::limit('lag_seconds'));
+            $this->reset($page, $gw, 'health');
+            $this->streak($page, $lag === null || $lag < self::limit('lag_seconds'), $gw);
             return;
         }
-        $this->reset($page, 'lag');
-        $this->streak($page, false);
-        if ($this->bump($page, 'health') >= self::limit('health_fails')) {
-            $this->switch($page, 'health', $res === null ? 'Forbeast did not answer' : 'Forbeast answered HTTP ' . $res->status());
+        $this->reset($page, $gw, 'lag');
+        $this->streak($page, false, $gw);
+        if ($this->bump($page, $gw, 'health') >= self::limit('health_fails') && $own) {
+            $this->switch($page, 'health', $res === null ? $l . ' did not answer' : $l . ' answered HTTP ' . $res->status());
         }
+    }
+
+    /** Maayos ang huling health check ng page sa gateway (may sunod-sunod na maayos na hindi pa luma). */
+    public function healthy(string $page, string $gateway): bool
+    {
+        $s = Cache::get($this->counter($page, 'healthy', $gateway));
+
+        return is_array($s) && (int) ($s['last'] ?? 0) >= now()->getTimestamp() - self::STREAK_GAP;
     }
 
     /**
@@ -202,7 +222,7 @@ class ForbeastWatch
             $enough = $evidence->count() >= self::limit('inbound_chats') && $customers >= self::limit('inbound_customers');
             $slow = self::limit('lag_seconds');
             $likha = $this->likhaLag();
-            $forbeast = Cache::get($this->counter($page, 'lag'));
+            $forbeast = Cache::get($this->counter($page, 'lag', Gateways::active($page)));
             if ($likha >= $slow) {
                 // Ang Likha ang huli: ang kopya ng Forbeast ay nasa queue pa, at iyon ang sasagot (walang dobleng sagot dito).
                 if ($enough) $this->hold($page, 'likha', 'held: Likha ingest lag ' . $likha . ' s', ['customers' => $customers, 'likha_lag' => $likha]);
@@ -353,8 +373,14 @@ class ForbeastWatch
     }
 
     /**
-     * Ang lipat sa Botcake: gaya ng select sa /chatbot/pages (PageSettings::set ng chatbot.provider, may history), saka ang
-     * event, saka ang mga standby chat. Walang Botcake token: hindi lumilipat, isang "cannot switch" event kada oras.
+     * Ang lipat kapag pumalya ang aktibong gateway ng page. Una ang kabilang gateway (target): naka-set up, gumagana ang token
+     * ng page doon, at maayos ang huling health check nito; ang chatbot.gateway ay pinapalitan (provider gateway pa rin). Ang
+     * "inbound" (may chat ang Botcake, walang kopya mula sa alinmang gateway) ay diretso sa Botcake: parehong gateway ang
+     * naghahatid sa iisang queue, kaya hindi rin naghatid ang kabila. Kung walang kabilang gateway: ang lipat sa Botcake,
+     * gaya ng select sa /chatbot/pages (PageSettings::set ng chatbot.provider, may history). Saka ang event (may gateway na
+     * iniwan at ang chosen: ang sariling pili ng page na binabalikan), saka ang mga standby chat (ang customer na pumalya ang
+     * sagot ay sinasagot nang isang beses sa bagong daan). Walang Botcake token at walang kabilang gateway: hindi lumilipat,
+     * isang "cannot switch" event kada oras.
      */
     public function switch(string $page, string $condition, string $error, array $evidence = [], array $fields = []): void
     {
@@ -364,18 +390,28 @@ class ForbeastWatch
 
         try {
             if (ChatbotProvider::name($page) !== ChatbotProvider::GATEWAY) return;
-            if (trim((string) $this->settings->get($page, 'botcake', 'token')) === '') {
-                if (Cache::add('forbeast-watch:cannot:' . $hash, 1, self::CANNOT_TTL)) $this->record($page, self::CANNOT, null, $condition, $error);
-                return;
+            $from = Gateways::active($page);
+            $chosen = $this->chosen($page, $from);
+            $to = $condition === 'inbound' ? null : $this->target($page, $from);
+            if ($to !== null) {
+                DB::transaction(function () use ($page, $condition, $error, $fields, $from, $to, $chosen) {
+                    $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::KEY, $to, false, null, true);
+                    $this->event($page, self::SWITCHED, $to, $condition, $error, ['from' => $from, 'gateway' => $from, 'chosen' => $chosen] + $fields);
+                });
+            } else {
+                if (trim((string) $this->settings->get($page, 'botcake', 'token')) === '') {
+                    if (Cache::add('forbeast-watch:cannot:' . $hash, 1, self::CANNOT_TTL)) $this->record($page, self::CANNOT, null, $condition, $error);
+                    return;
+                }
+                DB::transaction(function () use ($page, $condition, $error, $fields, $from, $chosen) {
+                    $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::BOTCAKE);
+                    $this->event($page, self::SWITCHED, ChatbotProvider::BOTCAKE, $condition, $error, ['gateway' => $from, 'chosen' => $chosen] + $fields);
+                });
             }
-            DB::transaction(function () use ($page, $condition, $error, $fields) {
-                $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::BOTCAKE);
-                $this->event($page, self::SWITCHED, ChatbotProvider::BOTCAKE, $condition, $error, $fields);
-            });
             // Ang ebidensya ng lipat (bilang at ID lang; ang error ay HTTP at Meta code lang, walang text ng mensahe).
-            Log::warning('forbeast watch: switched', ['page' => $page, 'condition' => $condition, 'error' => $error] + $evidence);
+            Log::warning('forbeast watch: switched', ['page' => $page, 'condition' => $condition, 'error' => $error, 'from' => $from, 'to' => $to ?? ChatbotProvider::BOTCAKE] + $evidence);
             // Ang maayos na health bago ang lipat ay hindi binibilang sa balik: nagsisimula ang bilang pagkatapos nito.
-            $this->reset($page, 'fails', 'no_answer', 'health', 'healthy');
+            $this->reset($page, $from, 'fails', 'no_answer', 'health', 'healthy');
             Cache::forget('forbeast-watch:cannot:' . $hash);
             $this->runStandby($page);
         } finally {
@@ -383,43 +419,87 @@ class ForbeastWatch
         }
     }
 
+    /** Ang kabilang gateway na malilipatan ng page mula $from, o null. */
+    private function target(string $page, string $from): ?string
+    {
+        $to = Gateways::other($from);
+
+        return Gateways::setUp($to) && app(ForbeastPageSetup::class)->on($to)->ready($page) && $this->healthy($page, $to) ? $to : null;
+    }
+
     /**
-     * Ang balik sa Forbeast ng page na inilipat ng bantay (mayGoBack): ang health check ng page, at kapag back_minutes na
-     * itong sunod-sunod na maayos (konektado, makapagpadala, inbound_lag_seconds < lag_seconds o wala), ibinabalik gaya ng
-     * lipat (PageSettings::set ng provider, may event "switched_back" at ang ebidensya). Sa scheduled command lang.
+     * Ang sariling pili ng page (ang binabalikan): ang chosen ng huling lipat ng bantay na hindi pa binabago ng tao (kapag
+     * lipat sa loob ng lipat), kung hindi ay ang gateway na iniiwan ngayon.
+     */
+    private function chosen(string $page, string $current): string
+    {
+        [$event, $e] = $this->lastSwitch($page);
+
+        return $event !== null && Gateways::valid($e['chosen'] ?? null) ? $e['chosen'] : $current;
+    }
+
+    /**
+     * Ang huling lipat ng bantay na kusang ibinabalik at walang nagpalit ng provider o gateway pagkatapos nito (laging panalo
+     * ang tao). @return array{0: ?PageSetting, 1: array}
+     */
+    private function lastSwitch(string $page): array
+    {
+        $rows = fn (string $key) => $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key);
+        // Ang send lag alarm (ForbeastSendHealth) ay sumusulat din dito: hindi ito lipat, kaya nilalaktawan.
+        $event = $rows(self::KEY)->orderByDesc('id')->limit(20)->get()->first(fn ($s) => !self::alarm($s));
+        if ($event === null || !self::returnable($event)) return [null, []];
+        foreach (['provider', Gateways::KEY] as $key) {
+            $row = $rows($key)->where('active', true)->orderByDesc('id')->first(['id']);
+            if ($row !== null && $row->id > $event->id) return [null, []];
+        }
+
+        return [$event, (array) json_decode((string) $event->plainValue(), true)];
+    }
+
+    /**
+     * Ang balik sa sariling pili ng page (ang chosen) ng page na inilipat ng bantay (mayGoBack): mula sa Botcake, o mula sa
+     * kabilang gateway. Ang health check ng chosen, at kapag back_minutes na itong sunod-sunod na maayos (konektado,
+     * makapagpadala, inbound_lag_seconds < lag_seconds o wala), ibinabalik gaya ng lipat (PageSettings::set ng provider at
+     * ng gateway, may event "switched_back" at ang ebidensya). Sa scheduled command lang.
      */
     public function switchBack(string $page): void
     {
         // Ang health ay sinusukat kahit nasa puwang pa ng huling balik (back_gap_minutes): ang puwang ay sa mismong balik lang.
-        if (!$this->mayGoBack($page, false)) return;
-        $this->health($page);
-        $streak = Cache::get($this->counter($page, 'healthy'));
+        $chosen = $this->mayGoBack($page, false);
+        if ($chosen === null) return;
+        $this->health($page, $chosen);
+        $streak = Cache::get($this->counter($page, 'healthy', $chosen));
         if (!is_array($streak) || (int) $streak['since'] > now()->getTimestamp() - self::limit('back_minutes') * 60) return;
 
         $lock = Cache::lock('forbeast-watch:switch:' . sha1($this->settings->pageKey($page)), 60);
         if (!$lock->get()) return;
         try {
-            if (!$this->mayGoBack($page)) return;
+            if ($this->mayGoBack($page) !== $chosen) return;
             $healthy = intdiv(now()->getTimestamp() - (int) $streak['since'], 60);
-            $lag = Cache::get($this->counter($page, 'lag'));
-            DB::transaction(function () use ($page, $healthy, $lag) {
-                $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::GATEWAY);
-                $this->event($page, self::SWITCHED_BACK, ChatbotProvider::GATEWAY, 'healthy', 'back on Forbeast after ' . $healthy . ' min healthy',
-                    ['from' => ChatbotProvider::BOTCAKE, 'healthy_minutes' => $healthy] + ($lag !== null ? ['forbeast_lag' => (int) $lag] : []));
+            $lag = Cache::get($this->counter($page, 'lag', $chosen));
+            $onBotcake = ChatbotProvider::name($page) === ChatbotProvider::BOTCAKE;
+            $from = $onBotcake ? ChatbotProvider::BOTCAKE : Gateways::active($page);
+            DB::transaction(function () use ($page, $healthy, $lag, $chosen, $onBotcake, $from) {
+                if (Gateways::active($page) !== $chosen) $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::KEY, $chosen, false, null, true);
+                if ($onBotcake) $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::GATEWAY);
+                $this->event($page, self::SWITCHED_BACK, $onBotcake ? ChatbotProvider::GATEWAY : $chosen, 'healthy', 'back on ' . Gateways::label($chosen) . ' after ' . $healthy . ' min healthy',
+                    ['from' => $from, 'gateway' => $chosen, 'healthy_minutes' => $healthy] + ($lag !== null ? ['forbeast_lag' => (int) $lag] : []));
             });
-            Log::warning('forbeast watch: switched back', ['page' => $page, 'healthy_minutes' => $healthy, 'forbeast_lag' => $lag]);
-            $this->reset($page, 'fails', 'no_answer', 'health', 'healthy');
+            Log::warning('forbeast watch: switched back', ['page' => $page, 'gateway' => $chosen, 'healthy_minutes' => $healthy, 'forbeast_lag' => $lag]);
+            $this->reset($page, $chosen, 'fails', 'no_answer', 'health', 'healthy');
         } finally {
             $lock->release();
         }
     }
 
-    /** Ang event ay lipat ng bantay na kusang ibinabalik (inbound, padala o health, papuntang Botcake). */
+    /**
+     * Ang event ay lipat ng bantay na kusang ibinabalik (inbound, padala o health; papuntang Botcake o sa kabilang gateway).
+     */
     public static function returnable(PageSetting $event): bool
     {
         $e = json_decode((string) $event->plainValue(), true);
 
-        return is_array($e) && ($e['result'] ?? null) === self::SWITCHED && ($e['to'] ?? null) === ChatbotProvider::BOTCAKE
+        return is_array($e) && ($e['result'] ?? null) === self::SWITCHED && (($e['to'] ?? null) === ChatbotProvider::BOTCAKE || Gateways::valid($e['to'] ?? null))
             && in_array($e['condition'] ?? null, self::BACK_CONDITIONS, true);
     }
 
@@ -432,26 +512,28 @@ class ForbeastWatch
     }
 
     /**
-     * Maaaring ibalik: nasa Botcake, handa ang Forbeast token ng page, ang huling event ay lipat na kusang ibinabalik at walang
-     * nagpalit ng provider pagkatapos nito (laging panalo ang tao), at ($gap) walang balik sa huling back_gap_minutes.
+     * Ang gateway na mababalikan (ang chosen), o null: ang huling event ay lipat na kusang ibinabalik at walang nagpalit ng
+     * provider o gateway pagkatapos nito (laging panalo ang tao), wala pa ang page sa chosen (nasa Botcake, o nasa kabilang
+     * gateway), naka-set up ang chosen at handa ang token ng page doon, at ($gap) walang balik sa huling back_gap_minutes.
+     * Ang lumang event (walang chosen) ay ang aktibong gateway ng page.
      */
-    private function mayGoBack(string $page, bool $gap = true): bool
+    private function mayGoBack(string $page, bool $gap = true): ?string
     {
-        if (ChatbotProvider::name($page) !== ChatbotProvider::BOTCAKE || !app(ForbeastPageSetup::class)->ready($page)) return false;
-        $rows = fn (string $key) => $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key);
-        // Ang send lag alarm (ForbeastSendHealth) ay sumusulat din dito: hindi ito lipat, kaya nilalaktawan.
-        $event = $rows(self::KEY)->orderByDesc('id')->limit(20)->get()->first(fn ($s) => !self::alarm($s));
-        $provider = $rows('provider')->where('active', true)->orderByDesc('id')->first(['id']);
-        if ($event === null || !self::returnable($event) || ($provider !== null && $provider->id > $event->id)) return false;
+        [$event, $e] = $this->lastSwitch($page);
+        if ($event === null) return null;
+        $chosen = Gateways::valid($e['chosen'] ?? null) ? $e['chosen'] : Gateways::active($page);
+        if (ChatbotProvider::name($page) === ChatbotProvider::GATEWAY && Gateways::active($page) === $chosen) return null;
+        if (!Gateways::setUp($chosen) || !app(ForbeastPageSetup::class)->on($chosen)->ready($page)) return null;
+        $rows = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', self::KEY);
 
-        return !$gap || !$rows(self::KEY)->where('created_at', '>=', now()->subMinutes(self::limit('back_gap_minutes')))->get()
-            ->contains(fn ($s) => (json_decode((string) $s->plainValue(), true)['result'] ?? null) === self::SWITCHED_BACK);
+        return !$gap || !$rows->where('created_at', '>=', now()->subMinutes(self::limit('back_gap_minutes')))->get()
+            ->contains(fn ($s) => (json_decode((string) $s->plainValue(), true)['result'] ?? null) === self::SWITCHED_BACK) ? $chosen : null;
     }
 
-    /** Ang sunod-sunod na maayos na health ng page: since = ang unang maayos; nagsisimula ulit kapag pumalya o may puwang. */
-    private function streak(string $page, bool $ok): void
+    /** Ang sunod-sunod na maayos na health ng page sa gateway: since = ang unang maayos; nagsisimula ulit kapag pumalya o may puwang. */
+    private function streak(string $page, bool $ok, string $gateway = Gateways::FORBEAST): void
     {
-        $key = $this->counter($page, 'healthy');
+        $key = $this->counter($page, 'healthy', $gateway);
         if (!$ok) {
             Cache::forget($key);
             return;
@@ -467,16 +549,20 @@ class ForbeastWatch
      * Lipat: habang nasa Botcake ang page. Held at balik: habang nasa Forbeast, sa huling NOTE_HOURS.
      * @return array{at: string, reason: string, label: string}|null
      */
-    public static function note(?PageSetting $event, ?PageSetting $provider, string $current = ChatbotProvider::BOTCAKE): ?array
+    public static function note(?PageSetting $event, ?PageSetting $provider, string $current = ChatbotProvider::BOTCAKE, ?PageSetting $gateway = null): ?array
     {
         if ($event === null || ($provider !== null && $provider->id > $event->id)) return null;
         $e = json_decode((string) $event->plainValue(), true);
         if (!is_array($e)) return null;
         $recent = $current === ChatbotProvider::GATEWAY && $event->created_at?->gte(now()->subHours(self::NOTE_HOURS));
+        // Ang lipat sa kabilang gateway: habang nasa gateway ang page at walang nagpalit ng gateway pagkatapos.
+        $toGateway = Gateways::valid($e['to'] ?? null);
         $label = match ($e['result'] ?? null) {
-            self::SWITCHED => $current === ChatbotProvider::BOTCAKE ? 'Auto-switched' : null,
+            self::SWITCHED => $toGateway
+                ? ($current === ChatbotProvider::GATEWAY && ($gateway === null || $gateway->id <= $event->id) ? 'Auto-switched to ' . Gateways::label($e['to']) : null)
+                : ($current === ChatbotProvider::BOTCAKE ? 'Auto-switched' : null),
             self::HELD => $recent ? 'Held on Forbeast' : null,
-            self::SWITCHED_BACK => $recent ? 'Back on Forbeast' : null,
+            self::SWITCHED_BACK => $recent ? 'Back on ' . Gateways::label($e['gateway'] ?? null) : null,
             default => null,
         };
         if ($label === null) return null;
@@ -484,11 +570,16 @@ class ForbeastWatch
         return ['at' => (string) $event->created_at?->timezone('Asia/Manila')->format('Y-m-d H:i'), 'reason' => self::reason($e), 'label' => $label];
     }
 
-    /** Ang dahilan bilang text: ang kondisyon at ang huling error; ang held at ang balik ay ang error lang (buo na ang dahilan). */
+    /**
+     * Ang dahilan bilang text: ang kondisyon at ang huling error; ang held at ang balik ay ang error lang (buo na ang dahilan).
+     * Ang lipat mula sa ibang gateway ay may pangalan nito sa halip na Forbeast.
+     */
     public static function reason(array $e): string
     {
         if (in_array($e['result'] ?? null, [self::HELD, self::SWITCHED_BACK, self::MOVED], true)) return (string) ($e['error'] ?? '');
         $label = self::REASONS[$e['condition'] ?? ''] ?? (string) ($e['condition'] ?? '');
+        $gw = $e['gateway'] ?? null;
+        if (Gateways::valid($gw) && $gw !== Gateways::FORBEAST) $label = str_replace('Forbeast', Gateways::label($gw), $label);
 
         return $label . (($e['error'] ?? '') !== '' ? ': ' . $e['error'] : '');
     }
@@ -648,21 +739,22 @@ class ForbeastWatch
         return max(1, (int) config('services.gateway.auto_switch.' . $key));
     }
 
-    private function bump(string $page, string $what): int
+    private function bump(string $page, string $gateway, string $what): int
     {
-        $key = $this->counter($page, $what);
+        $key = $this->counter($page, $what, $gateway);
         Cache::add($key, 0, self::COUNT_TTL);
 
         return (int) Cache::increment($key);
     }
 
-    private function reset(string $page, string ...$what): void
+    private function reset(string $page, string $gateway, string ...$what): void
     {
-        foreach ($what as $w) Cache::forget($this->counter($page, $w));
+        foreach ($what as $w) Cache::forget($this->counter($page, $w, $gateway));
     }
 
-    private function counter(string $page, string $what): string
+    /** Ang bilang ng page sa isang gateway (ang sa forbeast ay ang dating susi, walang pangalan ng gateway). */
+    private function counter(string $page, string $what, string $gateway = Gateways::FORBEAST): string
     {
-        return 'forbeast-watch:' . $what . ':' . sha1($this->settings->pageKey($page));
+        return 'forbeast-watch:' . $what . ':' . ($gateway === Gateways::FORBEAST ? '' : $gateway . ':') . sha1($this->settings->pageKey($page));
     }
 }

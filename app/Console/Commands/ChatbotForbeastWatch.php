@@ -4,8 +4,10 @@ namespace App\Console\Commands;
 
 use App\Models\PageSetting;
 use App\Services\Chatbot\ChatbotProvider;
+use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastSendHealth;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\Gateways;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
 use Illuminate\Console\Command;
@@ -14,7 +16,8 @@ use Throwable;
 /**
  * Kada minuto: ang bawat page na nasa Forbeast ay sinusuri (health check at ang mga chat ng Botcake laban sa Forbeast); ang
  * pumapalya ay kusang inililipat sa Botcake (ForbeastWatch), at ang inilipat nito ay ibinabalik kapag maayos na. Binubura rin ang luma nang standby. Walang GATEWAY_URL: walang
- * sinusuri.
+ * sinusuri. Dalawang gateway: ang aktibong gateway ng page ang sinusuri at naglilipat (sa kabilang gateway muna, saka sa
+ * Botcake); ang kabila ay sinusukat lang. Walang naka-set up na gateway (GATEWAY_URL, INCEPXIONBOT_URL): walang sinusuri.
  */
 class ChatbotForbeastWatch extends Command
 {
@@ -37,6 +40,11 @@ class ChatbotForbeastWatch extends Command
         foreach ($pages as $page) {
             try {
                 $watch->health((string) $page);
+                // Ang kabilang gateway (naka-set up, may token ang page doon): sinusukat lang, para alam kung handa itong lipatan.
+                $active = Gateways::active((string) $page);
+                foreach (Gateways::setUpList() as $g) {
+                    if ($g !== $active && app(ForbeastPageSetup::class)->on($g)->token((string) $page) !== '') $watch->health((string) $page, $g);
+                }
                 $pageId = trim((string) $settings->get((string) $page, 'botcake', 'page_id'));
                 if ($pageId !== '') $watch->inbound((string) $page, $pageId);
             } catch (Throwable $e) {
