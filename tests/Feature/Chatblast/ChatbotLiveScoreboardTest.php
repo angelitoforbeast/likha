@@ -172,7 +172,7 @@ class ChatbotLiveScoreboardTest extends ChatblastTestCase
             ['message', 'Page Tres', 'botcake'],
             ['order', 'Page Dos', 'incepxionbot'],
         ], array_map(fn ($e) => [$e['type'], $e['page'], $e['bot']], $out['events']));
-        foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id', 'bot'], array_keys($e));
+        foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id', 'bot', ...($e['type'] === 'order' ? ['amount'] : [])], array_keys($e));
     }
 
     public function test_S_196_4_the_counters_come_from_a_5_s_shared_cache_and_a_poll_never_rescans_the_day(): void
