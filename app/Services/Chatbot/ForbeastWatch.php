@@ -31,6 +31,11 @@ use Throwable;
  *
  * Bawat lipat, hindi makalipat, held at balik ay itinatala sa chatbot.auto_switch ng page (JSON: result, from, to, condition,
  * error, at mga dagdag na field), kasama ng history ng page settings; ito rin ang event feed (/api/chatbot/provider-events).
+ *
+ * Dalawang gateway (Gateways): ang aktibong gateway ng page ang binabantayan, at ang bawat gateway ay may sariling bilang
+ * at health. Ang pumapalyang gateway ay inililipat muna sa kabilang gateway (naka-set up, gumagana ang token ng page doon,
+ * maayos ang huling health), saka lang sa Botcake; ang inbound ay diretso sa Botcake. Ang event ay may "gateway" (ang
+ * iniwan) at "chosen" (ang sariling pili ng page), at ang balik ay sa chosen pagkatapos ng back_minutes na maayos ito.
  */
 class ForbeastWatch
 {
