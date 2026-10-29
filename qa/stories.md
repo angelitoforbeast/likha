@@ -3230,3 +3230,22 @@ Tests: `tests/Feature/Chatblast/GatewayPerPageTest.php`, existing Chatblast, Bot
 | S-194.7 (P1) | Given a page without a working token on the other gateway, Then it is not moved there | `test_S_194_7…` | passed |
 | S-194.8 (P1) | The Pages screen shows and sets the gateway (only set-up gateways with a working token), and the Connections popup has the Incepxionbot card | `test_S_194_8…` | passed |
 | S-194.9 (P1) | Given Incepxion with only incepxionbot set up, Then it is the gateway of every page; a page with only an incepxionbot token is listed | `test_S_194_9…`, `test_S_194_9b…` | passed |
+
+## S-196 The owner watches the bot on a TV scoreboard: input to the AI core to output and orders, per bot
+
+As the owner, I want /chatbot/live on the office TV to read from across the room: four huge numbers (Replies today, Avg reply time, Orders today, Active chats), a neural map where each bot's messages flow into the AI core and replies, follow-ups and orders flow out, and a calm 9-line Latest stream, all with today's real totals, so I see which bot carries the traffic.
+
+Slice 196 (amendment 1: the neural map replaces the stage grid). Threat model: no new route or input; the feed's page_id and cursor are untrusted and already validated; page names and Forbeast's answer are untrusted text (Blade escaping / textContent / numbers only); config and page rows are trusted. New write: a `_via` key in inbound chat payloads, set by the server (a Botcake param cannot set it). Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotLiveScoreboardTest.php`, `GatewayPerPageTest::test_S_196_3…`, `BotcakeChatTest::test_S_196_3…`, `MetaReplySpeedTest::test_S_196_8…`, existing `ChatbotLiveTest` and the Chatblast suite, headless Chrome evidence.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-196.1 (P1) | Given a day of fixtures on three bots, Then the feed and the page show Replies today 6 (+4 in 5 min), Avg reply time 2.4 s, Orders today 2, Active chats 3, in per bot 4 / 3 / 2 (+1 unknown), out per bot 2 / 3 / 1, the last order (page, time, bot), and the neural map's paths; on Incepxion the title and core carry the site name | `test_S_196_1_the_four_big_numbers…`, `test_S_196_1_on_incepxion…` | passed |
+| S-196.2 (P1) | When a reply is sent via incepxionbot, Then it lands in Bot 2's output, and every event carries its bot | `test_S_196_2_replies_sent_through_incepxionbot…` | passed |
+| S-196.3 (P1) | When a chat arrives from Forbeast, Incepxionbot or Botcake, Then it is marked `_via` with that bot (a Botcake param cannot change it), and older rows count by their old payload, else unknown | `GatewayPerPageTest::test_S_196_3…`, `BotcakeChatTest::test_S_196_3…`, S-196.1 | passed |
+| S-196.4 (P1) | Within 5 s every viewer gets the cached counters (no query); a refresh counts only rows since the settled edge (never from midnight); the running total advances once per row, resets at midnight, and a confirmation that comes late counts once after the 30-minute recount | `test_S_196_4_the_counters_come_from_a_5_s_shared_cache…`, `test_S_196_4_a_late_confirmation…` | passed |
+| S-196.5 (P1) | Given Forbeast down, timing out or not linked, Then Avg reply time shows "—" with the reason and the rest works; Bot 1 shows "not linked" without Forbeast; a page not on Forbeast says so | `test_S_196_5_forbeast_down_or_not_linked…`, `test_S_196_5_a_page_not_on_forbeast…` | passed |
+| S-196.6 (P1) | The page has no app switcher, nav or problems banner, and a small "Exit TV mode" link | `test_S_196_6_tv_mode…` | passed |
+| S-196.7 (P1) | At 390 px there is no sideways scroll (the map turns vertical) | `test_S_196_7…` and headless Chrome at 390 px | passed |
+| S-196.8 (P1) | The Speed section says "by another app or a person", with the hint that Botcake replies count there | `MetaReplySpeedTest::test_S_196_8…` | passed |
+| S-196.9 (P1) | Existing suites pass | `tests/Feature/Chatblast` | passed |
