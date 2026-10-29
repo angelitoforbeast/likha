@@ -3188,9 +3188,9 @@ Tests: `tests/Feature/Chatblast/AdGroupAllValuesTest.php`, the 172/174/181 tests
 
 | Case | Given / When / Then | Test | Status |
 |---|---|---|---|
-| S-192.1 (P1) | Given an Ad-based page and a group that sets Fill-Up Form, Loop 3 Form and Prompt 1, When a customer whose latest ad is in the group runs the flow, Then the group's form texts are sent and the AI gets the group's prompt; a customer without a group gets the page's | `test_S_192_1…` | open |
-| S-192.2 (P1) | Given a group that leaves a value empty (or clears it), Then that value is the page value | `test_S_192_2…` | open |
-| S-192.3 (P1) | Given a group, Then every value column of the page row (and the page's AI choice) is in the group's editable keys, and saving each one stores it; wrong values are refused like on the page | `test_S_192_3…` | open |
-| S-192.4 (P1) | When a group is given an identity or switch key (token, provider, On/Off, Botcake ID, Ad-based mode, auto-switch, FLOW text, SHOP DETAILS, site-only AI, name, ads), Then it is refused with "… is the page's own setting (identity or a switch) …" and nothing is written | `test_S_192_4…` (data sets) | open |
-| S-192.5 (P1) | Given a Page-based page with a group, Then every customer gets the page values (forms and prompts too) | `test_S_192_5…` | open |
-| S-192.6 (P1) | Existing Chatblast, Botcake and PageSettings suites add no new failures | full run | open |
+| S-192.1 (P1) | Given an Ad-based page and a group that sets Fill-Up Form, Loop 3 Form and Prompt 1, When a customer whose latest ad is in the group runs the flow, Then the group's form texts are sent and the AI gets the group's prompt; a customer without a group gets the page's | `test_S_192_1…` | passed |
+| S-192.2 (P1) | Given a group that leaves a value empty (or clears it), Then that value is the page value | `test_S_192_2…` | passed |
+| S-192.3 (P1) | Given a group, Then every value column of the page row (and the page's AI choice) is in the group's editable keys, and saving each one stores it; wrong values are refused like on the page | `test_S_192_3…` | passed |
+| S-192.4 (P1) | When a group is given an identity or switch key (token, provider, On/Off, Botcake ID, Ad-based mode, auto-switch, FLOW text, SHOP DETAILS, site-only AI, name, ads), Then it is refused with "… is the page's own setting (identity or a switch) …" and nothing is written | `test_S_192_4…` (data sets) | passed |
+| S-192.5 (P1) | Given a Page-based page with a group, Then every customer gets the page values (forms and prompts too) | `test_S_192_5…` | passed |
+| S-192.6 (P1) | Existing Chatblast, Botcake and PageSettings suites add no new failures | full run | passed |
