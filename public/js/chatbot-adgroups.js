@@ -94,7 +94,10 @@
 
     /** Ang editor ng isang value ng group; blangko = ang default. */
     function editValue(page, g, k, pageValue) {
-      var input = k.kind === 'image' ? el('input', {type: 'url', class: INPUT, autocomplete: 'off', placeholder: 'https://…'}) : el('textarea', {rows: '6', class: INPUT});
+      // Ang mapipili (AI provider, fallback): select na ang una ay ang default; ang iba pang AI (model, timeout): isang linya.
+      var input = k.options ? el('select', {class: INPUT}, [el('option', {value: '', text: '(use the default)'})].concat(k.options.map(function (o) { return el('option', {value: o[0], text: o[1]}); })))
+        : k.kind === 'image' ? el('input', {type: 'url', class: INPUT, autocomplete: 'off', placeholder: 'https://…'})
+        : k.kind === 'ai' ? el('input', {type: 'text', class: INPUT, autocomplete: 'off'}) : el('textarea', {rows: '6', class: INPUT});
       input.value = (g.values || {})[k.key] || '';
       var err = el('p', {class: 'mt-1 min-h-[1rem] text-xs text-red-600', 'aria-live': 'polite'});
       var save = el('button', {type: 'button', class: 'cb-btn cb-btn-primary cb-btn-sm', text: 'Save'});
@@ -239,19 +242,29 @@
       return list.concat([el('div', {class: 'mt-1 flex flex-wrap items-start gap-2'}, [typed, add])]);
     }
 
-    /** Ang cell ng group: ang sariling value, o ang default (malabo, "uses default"); ang page-only ay "page value". */
+    /** Ang page value ng isang key (ang default ng group): ang cell ng page, o ang AI ng page (r.ai; blangko = ang site default). */
+    function pageValue(r, key) {
+      if (key.indexOf('ai_') === 0) {
+        var a = r.ai || {};
+        var v = {ai_provider: a.label, ai_fallback: a.fallback, ai_local_model: a.local_model, ai_local_timeout: a.local_timeout != null ? a.local_timeout + ' s' : null}[key];
+        return v == null || v === '' ? 'site default' : String(v);
+      }
+      return String(r.cells[key] == null ? '' : r.cells[key]);
+    }
+
+    /** Ang cell ng group: ang sariling value, o ang default (malabo, "uses default"); ang hindi value ng group ay "page value". */
     function groupCell(page, r, g, c, keys) {
       var td = el('td', {class: TD});
       if (c.kind === 'auto') { td.append(el('span', {class: 'text-slate-400', text: 'Built from the group\'s item'})); return td; }
       var k = keys[c.key];
       if (!k) { td.append(el('span', {class: 'italic text-slate-400', text: 'page value'})); return td; }
-      var own = (g.values || {})[c.key], def = String(r.cells[c.key] == null ? '' : r.cells[c.key]);
+      var own = (g.values || {})[c.key], def = pageValue(r, c.key);
       var show = own != null && own !== ''
         ? el('span', {class: 'cb-txt text-slate-900', text: own})
         : el('span', {class: 'block'}, [el('span', {class: 'cb-txt text-slate-400', text: def || '(empty)'}), el('span', {class: 'block text-[11px] italic text-slate-400', text: 'uses default'})]);
       var edit = el('button', {type: 'button', class: 'shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
         'aria-label': 'Edit ' + c.label + ' of ' + g.name, title: 'Edit ' + c.label, text: '✎'});
-      edit.addEventListener('click', function () { editValue(page, g, {key: c.key, label: c.label, kind: c.kind}, def); });
+      edit.addEventListener('click', function () { editValue(page, g, k, def); });
       td.append(el('div', {class: 'flex items-start gap-1'}, [el('div', {class: 'min-w-0 flex-1'}, show), edit]));
       return td;
     }
@@ -295,7 +308,7 @@
         el('td', {class: 'stick-1 ' + TD + ' font-medium break-words' + muted}, [
           el('div', {class: 'flex items-start gap-1'}, [el('span', {'aria-hidden': 'true', class: 'text-slate-400', text: '↳'}), el('span', {class: 'min-w-0 break-words', text: g.name})]),
           el('div', {class: 'font-normal text-slate-500', text: plural(g.ads.length, 'ad') + (g.all_off ? ' · all ads off' : '')})]),
-        el('td', {class: 'stick-2 ' + TD}),
+        el('td', {class: 'stick-2 ' + TD + muted}, aiButton(page, r, g, keys)),
         el('td', {class: 'stick-3 ' + TD + muted}, flowSelect(page, g, flows)),
         el('td', {class: 'stick-4 ' + TD}),
         el('td', {class: TD}), el('td', {class: TD}), el('td', {class: TD}),
@@ -399,11 +412,29 @@
       return out;
     }
 
+    /** Ang AI ng group sa row nito (gaya ng "AI:" ng page): ang pindot ay ang listahan ng AI na may ✎. */
+    function aiButton(page, r, g, keys) {
+      var own = (g.values || {}).ai_provider, opt = own && keys.ai_provider ? (keys.ai_provider.options || []).find(function (o) { return o[0] === own; }) : null;
+      var b = el('button', {type: 'button', class: 'block max-w-[9rem] truncate rounded border border-slate-300 bg-white px-1 py-0.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+        'aria-label': 'AI of ' + g.name, title: 'Edit the AI of ' + g.name, text: '✎ AI: ' + (own ? (opt ? opt[1] : own) : 'default')});
+      b.addEventListener('click', function () {
+        openModal('AI · ' + g.name, 'Empty values use the page\'s AI.', valueList(page, r, g, keys, function (key) { return key.indexOf('ai_') === 0; }));
+      });
+      return b;
+    }
+
     /** Ang mga value ng group sa Edit: bawat key na maitatakda ng group, ang sariling value o ang default (malabo), at ✎. */
     function valuesBlock(page, r, g, d) {
-      var keys = valueKeys(d);
-      var items = Object.keys(keys).map(function (key) {
-        var k = keys[key], own = (g.values || {})[key], def = String(r.cells[key] == null ? '' : r.cells[key]);
+      var list = valueList(page, r, g, valueKeys(d), function () { return true; });
+      list.prepend(el('li', {class: 'flex items-center gap-2 py-1'}, [el('div', {class: 'w-28 shrink-0 font-medium text-slate-600', text: 'FLOW'}), flowSelect(page, g, d.flows || [])]));
+      return list;
+    }
+
+    function valueList(page, r, g, keys, pick) {
+      var items = Object.keys(keys).filter(pick).map(function (key) {
+        var k = keys[key], own = (g.values || {})[key], def = pageValue(r, key);
+        var opt = own && k.options ? k.options.find(function (o) { return o[0] === own; }) : null;
+        if (opt) own = opt[1]; // OpenAI / Local / None, gaya ng sa page
         var edit = el('button', {type: 'button', class: 'shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
           'aria-label': 'Edit ' + k.label + ' of ' + g.name, title: 'Edit ' + k.label, text: '✎'});
         edit.addEventListener('click', function () { editValue(page, g, k, def); });
@@ -412,7 +443,6 @@
           : el('div', {class: 'line-clamp-2 whitespace-pre-line break-words text-slate-400'}, [el('span', {class: 'italic', text: 'uses default: '}), def || '(empty)']);
         return el('li', {class: 'flex items-start gap-2 py-1'}, [el('div', {class: 'w-28 shrink-0 break-words font-medium text-slate-600', text: k.label}), el('div', {class: 'min-w-0 flex-1'}, show), edit]);
       });
-      items.unshift(el('li', {class: 'flex items-center gap-2 py-1'}, [el('div', {class: 'w-28 shrink-0 font-medium text-slate-600', text: 'FLOW'}), flowSelect(page, g, d.flows || [])]));
       return el('ul', {class: 'mt-1 divide-y divide-slate-100'}, items);
     }
 
