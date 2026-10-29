@@ -66,7 +66,7 @@
     </section>
 
     <section aria-labelledby="lv-h-log">
-        <h2 id="lv-h-log" class="mb-2 text-sm font-semibold text-slate-200">Latest events</h2>
+        <h2 id="lv-h-log" class="mb-2 text-sm font-semibold text-slate-200">Latest events <span class="font-normal lv-muted">(newest first)</span></h2>
         <ol class="lv-log" data-live-log><li class="lv-muted" data-live-empty>Waiting for the next event…</li></ol>
     </section>
 </div>
@@ -124,6 +124,7 @@
     .lv-node-dot.is-blink { opacity: 1; }
     .lv-label { fill: #e2e8f0; font-weight: 600; text-anchor: middle; font-family: ui-sans-serif, system-ui, sans-serif; }
     .lv-count { fill: var(--tone); font-weight: 700; text-anchor: middle; font-family: ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+    .lv-start { text-anchor: start; }
     .lv-small { fill: var(--lv-muted); text-anchor: middle; font-family: ui-sans-serif, system-ui, sans-serif; }
     .lv-cluster.is-hit .lv-halo { fill: color-mix(in srgb, var(--tone) 28%, transparent); stroke-opacity: 1; }
     .lv-cluster .lv-halo { transition: fill .5s, stroke-opacity .5s; }
@@ -175,9 +176,9 @@
         wide: {w: 1000, h: 520, font: 18, big: 24, pulse: 7,
             core: [500, 275, 74], ai: [500, 92, 32], inq: [165, 275, 96], fu: [842, 138, 84], ord: [842, 410, 84],
             links: {inq: 'M 262 275 C 330 275 360 275 424 275', fu: 'M 558 230 C 640 170 690 140 757 138', ord: 'M 558 320 C 640 380 690 410 757 410', ai: 'M 500 199 L 500 126'}},
-        narrow: {w: 400, h: 660, font: 16, big: 21, pulse: 6,
-            core: [200, 335, 64], ai: [342, 335, 30], inq: [200, 100, 84], fu: [100, 562, 78], ord: [300, 562, 78],
-            links: {inq: 'M 200 185 C 200 220 200 240 200 269', fu: 'M 165 389 C 140 430 115 460 104 483', ord: 'M 235 389 C 260 430 285 460 296 483', ai: 'M 266 335 L 310 335'}},
+        narrow: {w: 400, h: 690, aiCount: 'below', font: 16, big: 21, pulse: 6,
+            core: [200, 360, 64], ai: [342, 360, 30], inq: [200, 125, 84], fu: [100, 590, 78], ord: [300, 590, 78],
+            links: {inq: 'M 200 210 C 200 245 200 265 200 294', fu: 'M 165 414 C 140 455 115 485 104 511', ord: 'M 235 414 C 260 455 285 485 296 511', ai: 'M 266 360 L 310 360'}},
     };
     let L, layoutKey, svg, layer, paths = {}, nodes = {}, counts = {};
     const el = (name, attrs = {}, parent) => {
@@ -236,7 +237,8 @@
         const ai = el('g', {class: 'lv-ai lv-tone-ai', 'data-node': 'ai'}, svg);
         el('circle', {cx: ax, cy: ay, r: ar, class: 'lv-ai-node'}, ai);
         text(ai, ax, ay + 2, 'lv-label', L.font, 'AI');
-        counts.ai = text(ai, ax, ay + ar + L.font + 2, 'lv-count', L.font, '0');
+        // Ang bilang ng AI: sa kanan ng node (malapad; ang linya ay patayo) o sa ilalim nito (makitid; ang linya ay pahiga).
+        counts.ai = L.aiCount === 'below' ? text(ai, ax, ay + ar + L.font + 2, 'lv-count', L.font, '0') : text(ai, ax + ar + 12, ay + 7, 'lv-count lv-start', L.font + 2, '0');
         nodes.ai = {g: ai};
 
         const [cx, cy, cr] = L.core;
@@ -246,7 +248,7 @@
         el('circle', {cx, cy, r: cr, class: 'lv-heart'}, core);
         text(core, cx, cy - 6, 'lv-label', L.font + 2, 'Likha Bot');
         const status = text(core, cx, cy + L.font, 'lv-small', L.font - 4, 'listening');
-        counts.confirmed = text(core, cx, cy + cr + 16 + L.font + 6, 'lv-small', L.font - 3, '');
+        counts.confirmed = text(core, cx, cy + L.font * 2 + 4, 'lv-small', L.font - 4, '');
         nodes.core = {g: core, ring, status};
         layer = el('g', {class: 'lv-pulses'}, svg);
         if (live.last) setCounts(live.last);
@@ -255,7 +257,7 @@
     function setCounts(c) {
         live.last = c;
         for (const [k, t] of Object.entries(counts)) {
-            if (k === 'confirmed') t.textContent = fmt(c.confirmed.today) + ' confirmed today';
+            if (k === 'confirmed') t.textContent = fmt(c.confirmed.today) + ' confirmed';
             else if (c[k]) t.textContent = fmt(c[k].today);
         }
         for (const e of root.querySelectorAll('[data-live-count]')) {
