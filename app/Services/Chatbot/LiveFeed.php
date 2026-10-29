@@ -26,6 +26,8 @@ class LiveFeed
     public const CAP = 200;
     /** Ang kumpirmasyon ng Meta at ang sagot ng AI ay ibinibigay kapag 5 segundo na ang lumipas mula sa oras nito. */
     public const LAG_SECONDS = 5;
+    /** Ang id cursor ay hindi hihigit sa ganitong layo mula sa pinakamataas na id (mas marami kaysa sa 15 minuto ng anumang table). */
+    public const MAX_ID_BACK = 20000;
     public const TYPES = ['message', 'confirmed', 'follow_up', 'ai', 'order'];
     /** Ang cursor ng bawat pinagmulan: id lang, o oras|id. */
     public const CURSORS = ['chat' => 'id', 'seq' => 'id', 'order' => 'id', 'ok' => 'moment', 'ai' => 'moment'];
@@ -56,7 +58,8 @@ class LiveFeed
      */
     public function counts(?string $page): array
     {
-        return Cache::flexible('chatbot-live:v1:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page));
+        return Cache::flexible('chatbot-live:v1:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page),
+            ['seconds' => 15]); // ang lock ng refresh ay may expiry: ang namatay na worker ay hindi humaharang nang habambuhay
     }
 
     private function buildCounts(?string $page): array
@@ -185,18 +188,21 @@ class LiveFeed
 
     /**
      * Ang cursor na ipinadala, na-check, at kung galing sa page (true) o ang dulo ngayon (false: wala o sira). Id: digits,
-     * hindi lampas sa pinakamataas na id ng table. Oras|id: "Y-m-d H:i:s|id", hindi lampas sa $upTo. Ang dulo: ang
-     * pinakamataas na id, o $upTo|0.
+     * hindi lampas sa pinakamataas na id ng table; ang napakaluma ay itinataas sa MAX_ID_BACK bago ang pinakamataas (para
+     * maliit na range lang ng primary key ang mababasa, kahit ano ang piliin ng MySQL). Oras|id: "Y-m-d H:i:s|id" na totoong
+     * petsa at oras, hindi lampas sa $upTo. Ang dulo: ang pinakamataas na id, o $upTo|0.
      * @return array{0: string, 1: bool}
      */
     private static function cursor(string $key, mixed $v, string $table, string $upTo): array
     {
         if (self::CURSORS[$key] === 'id') {
             $max = (int) DB::table($table)->max('id');
+            if (!is_string($v) || !ctype_digit($v) || strlen($v) > 18 || (int) $v > $max) return [(string) $max, false];
 
-            return is_string($v) && ctype_digit($v) && strlen($v) <= 18 && (int) $v <= $max ? [(string) (int) $v, true] : [(string) $max, false];
+            return [(string) max((int) $v, $max - self::MAX_ID_BACK), true];
         }
-        if (is_string($v) && preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\|(\d{1,18})$/', $v, $m) && $m[1] <= $upTo) return [$m[1] . '|' . (int) $m[2], true];
+        if (is_string($v) && preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\|(\d{1,18})$/', $v, $m) && $m[1] <= $upTo
+            && ($d = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $m[1])) && $d->format('Y-m-d H:i:s') === $m[1]) return [$m[1] . '|' . (int) $m[2], true];
 
         return [$upTo . '|0', false];
     }

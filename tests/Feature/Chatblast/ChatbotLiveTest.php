@@ -179,7 +179,7 @@ class ChatbotLiveTest extends ChatblastTestCase
         $this->assertSame([['confirmed', '2026-10-21 12:30:17', (int) $open]],
             array_map(fn ($e) => [$e['type'], $e['at'], $e['id']], $this->getJson('/chatbot/live/feed?' . http_build_query(['cursor' => $next['cursor']]))->json('events')));
         // Ang sira o lampas na cursor ay ang dulo ngayon (walang event, walang error).
-        foreach ([['chat' => '99999999'], ['ok' => '2099-01-01 00:00:00|1'], ['chat' => '<script>'], ['ai' => ['x']], 'x'] as $bad) {
+        foreach ([['chat' => '99999999'], ['ok' => '2099-01-01 00:00:00|1'], ['ok' => '2026-02-30 25:99:99|1'], ['ai' => '2026-10-21 12:00:00|1x'], ['chat' => '<script>'], ['ai' => ['x']], 'x'] as $bad) {
             $this->getJson('/chatbot/live/feed?' . http_build_query(['cursor' => $bad]))->assertOk()->assertJsonPath('events', []);
         }
     }
