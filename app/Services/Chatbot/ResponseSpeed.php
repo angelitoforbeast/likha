@@ -35,7 +35,7 @@ class ResponseSpeed
         $bot = $q['bot'] ?? null;
 
         return ['date' => $date, 'page_id' => is_string($page) && ctype_digit($page) && strlen($page) <= 30 ? $page : null,
-            'bot' => is_string($bot) && in_array($bot, ChatbotConnections::BOTS, true) ? $bot : null];
+            'bot' => is_string($bot) && in_array($bot, ChatbotConnections::bots(), true) ? $bot : null];
     }
 
     public function output(array $q): array
@@ -145,8 +145,10 @@ class ResponseSpeed
         $spans = BotHealth::flowSpans();
 
         // Ang mga mensahe muna (para ang sagot lang ng mga customer na ito ang babasahin), sa magkakahiwalay na listahan ng
-        // scalar para magaan ang buong araw: page:PSID, oras, oras sa araw, bot (true = Forbeast), nasa bot.
+        // scalar para magaan ang buong araw: page:PSID, oras, oras sa araw, bot (Botcake, o ang gateway ng page), nasa bot.
         [$keys, $ats, $hrs, $fbs, $ons] = [[], [], [], [], []];
+        $names = \App\Models\BotcakeChat::pageMap();
+        $gwOf = [];
         $chats = DB::table('botcake_chats')->where('received_at', '>=', $start)->where('received_at', '<', $end)
             ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor();
         foreach ($chats as $c) {
@@ -156,7 +158,10 @@ class ResponseSpeed
             $keys[] = $c->page_id . ':' . $c->psid;
             $ats[] = strtotime($c->received_at);
             $hrs[] = (int) substr($c->received_at, 11, 2);
-            $fbs[] = ($payload['source'] ?? null) === 'gateway';
+            // Ang chat mula sa gateway: ang aktibong gateway ng page (ang sumasagot).
+            $fbs[] = ($payload['source'] ?? null) === 'gateway'
+                ? ($gwOf[(string) $c->page_id] ??= Gateways::label(isset($names[(string) $c->page_id]) ? Gateways::active($names[(string) $c->page_id]) : Gateways::default()))
+                : ChatbotConnections::BOTS[0];
             $ons[] = self::hadFlow($spans, (string) $c->page_id, $c->received_at);
         }
         $want = [];
@@ -167,8 +172,8 @@ class ResponseSpeed
         $push = ['hours' => array_fill(0, 24, $pushBlank), 'total' => $pushBlank];
         $replies = $this->replies($start, $until, $f['page_id'], $want, function (object $r) use (&$push, $end, $f): void {
             if ($r->sent_at >= $end) return;
-            $forbeast = ($r->via ?? null) === ChatbotProvider::FORBEAST;
-            if ($f['bot'] !== null && $f['bot'] !== ChatbotConnections::BOTS[$forbeast ? 1 : 0]) return;
+            $forbeast = Gateways::valid($r->via ?? null); // alinmang gateway: may oras ng Meta (send_status)
+            if ($f['bot'] !== null && $f['bot'] !== ChatbotProvider::viaLabel((string) ($r->via ?? ''))) return;
             $confirmed = in_array($r->confirmed_status ?? null, SendStatus::DELIVERED, true) && ($r->confirmed_at ?? null) !== null;
             foreach ([&$push['hours'][(int) substr($r->sent_at, 11, 2)], &$push['total']] as &$b) {
                 // Ang Botcake ay walang oras ng Meta (sabay ang padala): bilang lang, hiwalay.
@@ -188,7 +193,7 @@ class ResponseSpeed
         $blank = ['n' => 0, 'off' => 0, 'unconfirmed' => 0, 'secs' => [], 'ai' => [], 'flow' => [], 'ai_time' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
-        $byBot = array_fill_keys(ChatbotConnections::BOTS, $blank);
+        $byBot = array_fill_keys(ChatbotConnections::bots(), $blank);
         $add = function (array &$b, bool $on, ?int $secs, bool $confirmed, ?int $chat) use ($ai): void {
             if (!$on) {
                 $b['off']++;
@@ -208,7 +213,8 @@ class ResponseSpeed
         };
         foreach ($keys as $i => $key) {
             [$secs, $confirmed, $chat] = $ons[$i] ? self::firstReply($replies, $key, $ats[$i]) : [null, true, null];
-            $bot = ChatbotConnections::BOTS[$fbs[$i] ? 1 : 0];
+            $bot = $fbs[$i];
+            $byBot[$bot] ??= $blank;
             $add($byBot[$bot], $ons[$i], $secs, $confirmed, $chat);
             if ($f['bot'] !== null && $f['bot'] !== $bot) continue;
             $add($hours[$hrs[$i]], $ons[$i], $secs, $confirmed, $chat);
@@ -510,7 +516,7 @@ class ResponseSpeed
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->orderBy('sent_at')->orderBy('id')->select($cols)->cursor();
         foreach ($rows as $r) {
             $real = $confirm && in_array($r->confirmed_status, SendStatus::DELIVERED, true) && $r->confirmed_at !== null;
-            $botcake = ($via ? $r->via : null) !== ChatbotProvider::FORBEAST;
+            $botcake = !Gateways::valid($via ? $r->via : null);
             $out[$r->page_id . ':' . $r->psid . ':' . (int) $r->sequence_step][] = ['at' => strtotime($r->sent_at), 'seq' => (int) $r->sequence_id,
                 'delivered' => in_array($r->status, SendStatus::DELIVERED, true), 'meta' => $real && !$botcake ? strtotime($r->confirmed_at) : null, 'botcake' => $botcake];
         }

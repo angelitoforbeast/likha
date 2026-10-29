@@ -11,6 +11,7 @@ use App\Services\Chatbot\ChatEchoes;
 use App\Services\Chatbot\ChatMessageCleaner;
 use App\Services\Chatbot\CommentReplies;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\Gateways;
 use App\Services\Chatbot\SendStatus;
 use App\Services\PageSettings;
 use Illuminate\Bus\Queueable;
@@ -24,6 +25,11 @@ use Illuminate\Support\Facades\Cache;
  * nasa gateway (chatbot.provider) ay iniimbak bilang chat gaya ng mula sa Botcake, saka ang parehong kasunod
  * (ChatbotInbound). Isang beses lang kada mid (o event_id kapag walang mid), pati laban sa chat na naimbak na ng Botcake.
  * Ang ibang event, at ang event ng page na nasa Botcake, ay binibilang lang (walang takbo).
+ *
+ * Dalawang gateway (Gateways): ang parehong mensahe ng Meta ay dumarating mula sa dalawa (isa kada app). Ang mid ay iisa
+ * sa dalawa, kaya ang unang dating lang ang pinoproseso. Walang mid (hal. referral): ang susi ay ang page, customer, uri at
+ * oras ng Meta (iisa sa dalawang app), bago ang event_id (sariling bilang ng bawat gateway, kaya may pangalan ng gateway
+ * ang ref ng hindi forbeast). Ang chat mula sa hindi forbeast ay may payload.gateway.
  */
 class HandleGatewayEvent implements ShouldQueue
 {
@@ -38,7 +44,7 @@ class HandleGatewayEvent implements ShouldQueue
     }
 
     /** Ang mga field na ginagamit lang, may hangganan ang haba (ang laman ng event ay galing sa customer). */
-    public static function fields(array $e): array
+    public static function fields(array $e, string $gateway = Gateways::FORBEAST): array
     {
         $s = fn ($v, int $max) => is_scalar($v) ? mb_substr(mb_scrub(trim((string) $v), 'UTF-8'), 0, $max) : null;
         $attachments = [];
@@ -63,7 +69,9 @@ class HandleGatewayEvent implements ShouldQueue
             'from_id' => $s($e['from_id'] ?? null, 64), 'is_reply' => (bool) ($e['is_reply'] ?? false), 'is_page_author' => (bool) ($e['is_page_author'] ?? false),
             // Ang oras ng pagpasok sa queue: ang tagal bago ito naproseso ang lag ng Likha (ForbeastWatch::ingested).
             'queued_at' => now()->getTimestamp(),
-        ] + (($e['type'] ?? null) === 'send_status' ? ['send' => self::send($e['send'] ?? null, $s)] : []);
+        ] + (($e['type'] ?? null) === 'send_status' ? ['send' => self::send($e['send'] ?? null, $s)] : [])
+            // Ang gateway na naghatid (wala = forbeast, gaya ng dati).
+            + ($gateway !== Gateways::FORBEAST && Gateways::valid($gateway) ? ['gateway' => $gateway] : []);
     }
 
     /** Ang send ng send_status (SendStatus): ang mga field na ginagamit lang. */
@@ -128,22 +136,34 @@ class HandleGatewayEvent implements ShouldQueue
             self::count('no_id');
             return;
         }
-        $ref = $e['mid'] ?: 'gw-event-' . $e['event_id'];
-        // Ang standby na kopya ng Botcake (hindi tumakbo) ay hindi ulit: ang Forbeast ang sasagot.
+        $gw = Gateways::valid($e['gateway'] ?? null) ? $e['gateway'] : Gateways::FORBEAST;
+        // Ang event_id ay sariling bilang ng gateway: ang ref ng hindi forbeast ay may pangalan nito (walang banggaan).
+        $ref = $e['mid'] ?: ($gw === Gateways::FORBEAST ? 'gw-event-' : 'gw-' . $gw . '-event-') . $e['event_id'];
+        // Walang mid: ang susi na iisa sa dalawang gateway (page, customer, uri at oras ng Meta), kapag may oras at kapag
+        // dalawa ang naka-set up na gateway (iisang gateway: gaya ng dati, ang event_id lang).
+        $meta = !$e['mid'] && is_int($e['timestamp'] ?? null) && count(Gateways::setUpList()) > 1 ?'gateway-events:meta:' . sha1($e['page_id'] . '|' . $e['psid'] . '|' . $e['type'] . '|' . $e['timestamp']) : null;
+        // Ang standby na kopya ng Botcake (hindi tumakbo) ay hindi ulit: ang gateway ang sasagot.
         $stored = BotcakeChat::where('message_id', $ref)->get(['id', 'payload'])->contains(fn ($c) => !ForbeastWatch::standby($c));
         if (!Cache::add('gateway-events:seen:' . sha1($ref), 1, self::DEDUPE_SECONDS) || $stored) {
+            self::count('duplicate');
+            return;
+        }
+        if ($meta !== null && !Cache::add($meta, 1, self::DEDUPE_SECONDS)) {
             self::count('duplicate');
             return;
         }
 
         try {
             $message = $this->message($e, $payload);
+            if ($gw !== Gateways::FORBEAST) $payload['gateway'] = $gw;
             $chat = BotcakeChat::create([
                 'page_id' => (string) $e['page_id'], 'page_name' => $pageName, 'psid' => (string) $e['psid'], 'name' => $this->name($settings, $pageName, $e),
                 'message' => $message, 'message_id' => $ref, 'payload' => $payload, 'received_at' => now(),
             ]);
         } catch (\Throwable $ex) {
-            Cache::forget('gateway-events:seen:' . sha1($ref)); // hindi naimbak: ang ulit ng job ay tatanggapin
+            // hindi naimbak: ang ulit ng job (o ang kopya mula sa kabilang gateway) ay tatanggapin
+            Cache::forget('gateway-events:seen:' . sha1($ref));
+            if ($meta !== null) Cache::forget($meta);
             throw $ex;
         }
         self::count((string) $e['type']);

@@ -28,6 +28,6 @@ class ChatbotSpeedController extends Controller
         $meta = $this->meta->output($out['filters'], $out['dates']['today']);
         if ($meta['chart'] !== null) $out['charts']['meta'] = $meta['chart'];
 
-        return view('chatbot.speed', $out + ['meta' => $meta, 'pages' => $pages, 'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS]);
+        return view('chatbot.speed', $out + ['meta' => $meta, 'pages' => $pages, 'bots' => \App\Services\Chatbot\ChatbotConnections::bots()]);
     }
 }

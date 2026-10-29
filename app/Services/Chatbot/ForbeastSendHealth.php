@@ -112,7 +112,8 @@ class ForbeastSendHealth
         $out = [];
         $rows = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)->orderBy('id')->get();
         foreach ($rows as $s) {
-            if ($s->plainValue() !== ChatbotProvider::GATEWAY) continue;
+            // Ang sa Forbeast lang (ang health na ito ay ng Forbeast): ang page na nasa incepxionbot ay hindi.
+            if ($s->plainValue() !== ChatbotProvider::GATEWAY || Gateways::active((string) $s->page_name) !== Gateways::FORBEAST) continue;
             $id = trim((string) $this->settings->get((string) $s->page_name, 'botcake', 'page_id'));
             if ($id !== '' && !isset($out[$id])) $out[$id] = (string) $s->page_name;
         }

@@ -129,12 +129,13 @@ class BotHealth
 
         return ['page_id' => is_string($page) && ctype_digit($page) && strlen($page) <= 30 ? $page : null,
             'from' => $from->toDateString(), 'to' => $to->toDateString(),
-            'bot' => is_string($bot) && in_array($bot, ChatbotConnections::BOTS, true) ? $bot : null];
+            'bot' => is_string($bot) && in_array($bot, ChatbotConnections::bots(), true) ? $bot : null];
     }
 
     /**
-     * Ang bot ng bawat page ngayon (page ID => Botcake o Forbeast): chatbot.provider = gateway ay Forbeast, ang iba at
-     * ang walang setting ay Botcake. Ngayon lang: ang page na lumipat sa araw ay buong araw sa bot nito ngayon.
+     * Ang bot ng bawat page ngayon (page ID => Botcake, Forbeast o Incepxionbot): chatbot.provider = gateway ay ang aktibong
+     * gateway ng page (chatbot.gateway, o ang default), ang iba at ang walang setting ay Botcake. Ngayon lang: ang page na
+     * lumipat sa araw ay buong araw sa bot nito ngayon.
      */
     public static function botOfPages(): array
     {
@@ -142,9 +143,12 @@ class BotHealth
         $gateway = \App\Models\PageSetting::where('provider', \App\Services\ChatbotFields::PROVIDER)->where('key', 'provider')->where('active', true)
             ->get(['page_name', 'value', 'is_secret'])->filter(fn ($s) => $s->plainValue() === ChatbotProvider::GATEWAY)
             ->map(fn ($s) => $settings->pageKey((string) $s->page_name))->flip();
+        $chosen = \App\Models\PageSetting::where('provider', \App\Services\ChatbotFields::PROVIDER)->where('key', Gateways::KEY)->where('active', true)->orderBy('id')
+            ->get(['page_name', 'value', 'is_secret'])->mapWithKeys(fn ($s) => [$settings->pageKey((string) $s->page_name) => (string) $s->plainValue()]);
         $out = [];
         foreach (BotcakeChat::pageMap() as $id => $name) {
-            $out[(string) $id] = isset($gateway[$settings->pageKey((string) $name)]) ? ChatbotConnections::BOTS[1] : ChatbotConnections::BOTS[0];
+            $key = $settings->pageKey((string) $name);
+            $out[(string) $id] = isset($gateway[$key]) ? Gateways::label(Gateways::valid($chosen[$key] ?? null) && Gateways::setUp($chosen[$key]) ? $chosen[$key] : Gateways::default()) : ChatbotConnections::BOTS[0];
         }
 
         return $out;
@@ -466,7 +470,7 @@ class BotHealth
     {
         $switches = $this->switches($yesterday, $today, $page);
         $out = [];
-        foreach (ChatbotConnections::BOTS as $bot) {
+        foreach (ChatbotConnections::bots() as $bot) {
             [$m] = $this->metrics($yesterday, $today, self::scope($page, $bot, $botOf));
             $row = ['bot' => $bot];
             foreach (['today' => $today, 'yesterday' => $yesterday] as $label => $d) {
@@ -500,7 +504,9 @@ class BotHealth
             if ($only !== null && $settings->pageKey((string) $s->page_name) !== $only) continue;
             $j = json_decode((string) $s->plainValue(), true);
             if (!is_array($j) || ($j['result'] ?? null) !== ForbeastWatch::SWITCHED) continue;
-            $bot = ($j['from'] ?? null) === ChatbotProvider::GATEWAY ? ChatbotConnections::BOTS[1] : ChatbotConnections::BOTS[0];
+            // Ang lipat sa kabilang gateway ay hindi "switched to Botcake".
+            if (Gateways::valid($j['to'] ?? null)) continue;
+            $bot = ($j['from'] ?? null) === ChatbotProvider::GATEWAY ? Gateways::label($j['gateway'] ?? null) : ChatbotConnections::BOTS[0];
             $day = $s->created_at->toDateString();
             $out[$day][$bot] = ($out[$day][$bot] ?? 0) + 1;
         }
@@ -533,7 +539,7 @@ class BotHealth
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
             ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
             ->groupBy('c.id', 'c.page_id', 'c.received_at')->selectRaw('c.id, c.page_id, c.received_at, MIN(r.sent_at) as first_at'
-                . ($real ? ", MIN(CASE WHEN r.confirmed_status IN ('" . implode("', '", SendStatus::DELIVERED) . "') THEN r.confirmed_at WHEN r.via = 'forbeast' THEN NULL ELSE r.sent_at END) as real_at" : ''))->get();
+                . ($real ? ", MIN(CASE WHEN r.confirmed_status IN ('" . implode("', '", SendStatus::DELIVERED) . "') THEN r.confirmed_at WHEN r.via IN ('" . implode("', '", Gateways::ALL) . "') THEN NULL ELSE r.sent_at END) as real_at" : ''))->get();
         foreach ($rows as $r) {
             if (!self::hadFlow($spans[(string) $r->page_id], $r->received_at)) continue;
             $secs = $r->first_at === null ? null : max(0, strtotime($r->first_at) - strtotime($r->received_at));

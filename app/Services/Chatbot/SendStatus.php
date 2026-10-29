@@ -52,7 +52,7 @@ class SendStatus
         if ($accepted === null || !ctype_digit((string) $e['psid'])) return null;
         $at = strtotime($accepted);
 
-        return $q()->where('psid', (int) $e['psid'])->whereNull('client_ref')->whereNull('confirmed_status')->where('via', ChatbotProvider::FORBEAST)
+        return $q()->where('psid', (int) $e['psid'])->whereNull('client_ref')->whereNull('confirmed_status')->whereIn('via', Gateways::ALL)
             ->where('status', 'sent')->whereBetween('sent_at', [date('Y-m-d H:i:s', $at - self::NEAR_SECONDS), date('Y-m-d H:i:s', $at + self::NEAR_SECONDS)])
             ->get($cols)->sortBy(fn ($r) => [abs(strtotime($r->sent_at) - $at), $r->id])->first();
     }

@@ -7,8 +7,8 @@ use Illuminate\Support\Facades\Http;
 use Throwable;
 
 /**
- * Ang sagot sa comment sa Forbeast Gateway, gamit ang key na gaya ng GatewayProvider (ang Forbeast token ng page, o ang
- * global GATEWAY_KEY): POST /v1/pages/{page}/comments/{comment}/reply {message} (public) at …/private-reply {text}
+ * Ang sagot sa comment sa aktibong gateway ng page, gamit ang key na gaya ng GatewayProvider (ang token ng page sa gateway
+ * na iyon, o ang global key nito): POST /v1/pages/{page}/comments/{comment}/reply {message} (public) at …/private-reply {text}
  * (ang isang private message sa nag-comment). Walang retry: ang Meta ay isang private reply lang kada comment.
  * Ang sagot ng Forbeast ay untrusted: maikling text lang ang itinatabi, hindi kailanman ang key.
  */
@@ -37,12 +37,15 @@ class GatewayComments
 
     private function post(string $pageName, string $pageId, string $commentId, string $what, array $body): array
     {
-        $url = rtrim((string) config('services.gateway.url'), '/');
-        $key = app(ForbeastPageSetup::class)->token($pageName);
-        if ($key === '') $key = trim((string) config('services.gateway.key'));
-        if ($url === '' || $key === '') return ['status' => 'failed', 'error' => GatewayProvider::NOT_SET_UP, 'http' => null, 'comment_id' => null, 'code' => 'not_set_up'];
+        // Ang aktibong gateway ng page lang (hindi kailanman ang dalawa), gamit ang token ng page doon o ang global key nito.
+        $gw = Gateways::active($pageName);
+        $c = Gateways::config($gw);
+        $url = $c['url'];
+        $key = app(ForbeastPageSetup::class)->on($gw)->token($pageName);
+        if ($key === '') $key = $c['key'];
+        if ($url === '' || $key === '') return ['status' => 'failed', 'error' => GatewayProvider::notSetUp($gw), 'http' => null, 'comment_id' => null, 'code' => 'not_set_up'];
 
-        $timeout = max(1, (int) config('services.gateway.timeout', 10));
+        $timeout = max(1, $c['timeout']);
         try {
             $res = Http::withToken($key)->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout)
                 ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/comments/' . rawurlencode($commentId) . '/' . $what, $body);
@@ -77,7 +80,8 @@ class GatewayComments
             $http === 429 => self::THROTTLED,
             default => 'failed',
         };
-        $why = $http === 0 ? 'Forbeast did not answer' : ($error !== null ? 'Forbeast said "' . $error . ($detail !== null ? ': ' . $detail : '') . '"' : 'Forbeast refused it');
+        $l = Gateways::label($gw);
+        $why = $http === 0 ? $l . ' did not answer' : ($error !== null ? $l . ' said "' . $error . ($detail !== null ? ': ' . $detail : '') . '"' : $l . ' refused it');
         if (($code = $str($json['meta_code'] ?? null, 10)) !== null) $why .= ' (Meta #' . $code . ')';
 
         return ['status' => $status, 'error' => $why . ' (HTTP ' . $http . ')', 'http' => $http ?: null, 'comment_id' => null,

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Chatbot\ForbeastSite;
+use App\Services\Chatbot\Gateways;
 use App\Services\Chatbot\PageTransfers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,12 +14,17 @@ use Illuminate\Http\Request;
  * "<X-Gateway-Timestamp>.<raw body>"> (GET: walang laman ang body) gamit ang FORBEAST_SITE_SECRET, at ang timestamp ay
  * hanggang 300 s ang layo. Walang key o secret = 503 not_linked; anumang mali sa pirma = 401 bad_signature. Ang
  * X-Gateway-Transfer ay ang id ng paglipat (nasa history ng page). Lahat ng galing sa request ay untrusted: text lang.
+ * Dalawang gateway: sinusuri ng site secret ng bawat naka-link na gateway (FORBEAST_SITE_SECRET, INCEPXIONBOT_SITE_SECRET),
+ * at ang adopt ay isinusulat ang token sa gateway na tumawag.
  */
 class GatewaySiteController extends Controller
 {
     private const MAX_SKEW = 300;
     /** 500 customer field na may mahabang value ay kasya. */
     private const MAX_BODY = 16777216;
+
+    /** Ang gateway na pumirma sa request (ang site secret nito ang tumugma). */
+    private string $gateway = Gateways::FORBEAST;
 
     public function __construct(private PageTransfers $transfers)
     {
@@ -39,7 +45,7 @@ class GatewaySiteController extends Controller
         ]);
         if ($errors) return self::json(PageTransfers::invalid($errors));
 
-        return self::json($this->transfers->adopt($metaPageId, $name, $token, $mode, $this->transfer($request), $actor));
+        return self::json($this->transfers->adopt($metaPageId, $name, $token, $mode, $this->transfer($request), $actor, $this->gateway));
     }
 
     public function export(Request $request, string $metaPageId): JsonResponse
@@ -115,8 +121,9 @@ class GatewaySiteController extends Controller
     /** Ang sagot kapag hindi tatanggapin ang request (hindi naka-link, malaki, maling page id o pirma), o null. */
     private function refused(Request $request, string $metaPageId, ?string &$raw): ?JsonResponse
     {
-        $secret = ForbeastSite::secret();
-        if ($secret === '') return self::json(PageTransfers::error(503, 'not_linked', 'This site is not linked to Forbeast.'));
+        // Ang site secret ng bawat naka-link na gateway (forbeast muna): ang tumugma ang tumawag.
+        $secrets = array_filter(array_combine(Gateways::ALL, array_map(fn ($g) => ForbeastSite::secret($g), Gateways::ALL)), fn ($s) => $s !== '');
+        if ($secrets === []) return self::json(PageTransfers::error(503, 'not_linked', 'This site is not linked to Forbeast.'));
         if ((int) $request->server('CONTENT_LENGTH') > self::MAX_BODY || strlen($raw = (string) $request->getContent()) > self::MAX_BODY) {
             return self::json(PageTransfers::error(413, 'too_large', 'The request body is too large.'));
         }
@@ -124,10 +131,14 @@ class GatewaySiteController extends Controller
         $given = strtolower((string) $request->header('X-Gateway-Signature'));
         if (str_starts_with($given, 'sha256=')) $given = substr($given, 7);
         $body = $request->isMethod('GET') ? '' : $raw;
-        if ($given === '' || !preg_match('/^\d{1,12}$/', $ts) || abs(time() - (int) $ts) > self::MAX_SKEW
-            || !hash_equals(hash_hmac('sha256', $ts . '.' . $body, $secret), $given)) {
-            return self::json(PageTransfers::error(401, 'bad_signature', 'The signature does not match.'));
+        $by = null;
+        if ($given !== '' && preg_match('/^\d{1,12}$/', $ts) && abs(time() - (int) $ts) <= self::MAX_SKEW) {
+            foreach ($secrets as $g => $secret) {
+                if (hash_equals(hash_hmac('sha256', $ts . '.' . $body, $secret), $given)) { $by = $g; break; }
+            }
         }
+        if ($by === null) return self::json(PageTransfers::error(401, 'bad_signature', 'The signature does not match.'));
+        $this->gateway = $by;
         if (!preg_match('/^\d{1,20}$/', $metaPageId)) return self::json(PageTransfers::error(404, 'unknown_page', 'This page is not on this site.'));
 
         return null;

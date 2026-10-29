@@ -73,6 +73,7 @@
      data-restore-url="{{ route('chatbot.restore') }}"
      data-changes-url="{{ route('chatbot.changes') }}"
      data-provider-url="{{ route('chatbot.provider') }}"
+     data-gateway-url="{{ route('chatbot.gateway') }}"
      data-ag-url="{{ route('chatbot.ad-groups') }}" data-ag-add-url="{{ route('chatbot.ad-groups.add') }}" data-ag-delete-url="{{ route('chatbot.ad-groups.delete') }}"
      data-ag-history-url="{{ route('chatbot.ad-groups.history') }}" data-ag-restore-url="{{ route('chatbot.ad-groups.restore') }}"
      data-ag-mode-url="{{ route('chatbot.ad-groups.mode') }}" data-ag-value-url="{{ route('chatbot.ad-groups.value') }}" data-ag-remove-ad-url="{{ route('chatbot.ad-groups.remove-ad') }}" data-ag-ad-url="{{ route('chatbot.ad-groups.ad') }}"
@@ -282,7 +283,7 @@
                 <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <div class="grid gap-3 p-4 sm:grid-cols-2">
-                @foreach(['botcake' => 'Botcake', 'forbeast' => 'Forbeast'] as $p => $label)
+                @foreach(['botcake' => 'Botcake', 'forbeast' => 'Forbeast'] + (\App\Services\Chatbot\Gateways::setUp('incepxionbot') ? ['incepxionbot' => 'Incepxionbot'] : []) as $p => $label)
                 <form class="conn-card min-w-0 rounded-lg border border-slate-200 p-3" data-provider="{{ $p }}" autocomplete="off">
                     <div class="mb-2 flex items-center justify-between gap-2"><span class="font-semibold">{{ $label }}</span><span class="conn-state text-xs"></span></div>
                     <label class="flex flex-col text-xs text-slate-600">Page ID
@@ -299,7 +300,7 @@
                         <button class="cb-btn cb-btn-primary cb-btn-sm">Save and test</button>
                         <button type="button" class="conn-test cb-btn cb-btn-sm">Test</button>
                         @if($p === 'botcake')<button type="button" class="conn-fix cb-btn cb-btn-sm">Fix chat block</button>@endif
-                        @if($p === 'forbeast')<button type="button" class="conn-clear cb-btn cb-btn-sm">Clear</button>@endif
+                        @if($p !== 'botcake')<button type="button" class="conn-clear cb-btn cb-btn-sm">Clear</button>@endif
                     </div>
                 </form>
                 @endforeach
@@ -441,11 +442,14 @@
     // ---- Header filters (gaya ng Google Sheets): bawat column ay may listahan ng value; AND sa pagitan ng mga column. ----
     // hfOn[key] = ang mga value na naka-check; wala = lahat. Ang Connected ay may sariling filter (cf, sa itaas).
     const PROVIDER_LABEL = {botcake: 'Botcake', gateway: 'Forbeast'};
+    // Ang gateway ng page (chatbot.gateway): ang "gateway" na provider ay ang pangalan ng aktibong gateway ng row.
+    const GATEWAY_LABEL = {forbeast: 'Forbeast', incepxionbot: 'Incepxionbot'};
+    const provLabel = (r, p) => p === 'gateway' ? (GATEWAY_LABEL[r.gateway] || PROVIDER_LABEL.gateway) : PROVIDER_LABEL.botcake;
     const checkKind = r => { const c = checks.get(r.page); return !c || !c.status ? 'Not checked' : (c.status === 'none' ? 'No flow' : (c.status !== 'ok' ? 'x' : (c.warnings?.length ? 'warn' : 'ok'))); };
     const FILTERS = {
         page: {label: 'Page', values: r => [r.page]},
         active: {label: 'Active', values: r => [r.active ? 'On' : 'Off']},
-        bot: {label: 'Bot', values: r => [PROVIDER_LABEL[r.provider] || 'Botcake']},
+        bot: {label: 'Bot', values: r => [provLabel(r, r.provider)]},
         connected: {label: 'Connected', values: r => (r.connected || []).length ? r.connected : ['None']},
         flow: {label: 'Flow', values: r => [r.cells.flow || 'No flow']},
         check: {label: 'Check', values: r => [checkKind(r)]},
@@ -863,7 +867,7 @@
         ]);
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
-        td.append(b, providerSelect(r), aiButton(r));
+        td.append(b, providerSelect(r), gatewaySelect(r), aiButton(r));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
@@ -914,8 +918,10 @@
     }
     const connCard = p => document.querySelector('#conn .conn-card[data-provider="' + p + '"]');
     function paintConnections(data) {
-        for (const p of ['botcake', 'forbeast']) {
-            const c = data[p] || {}, card = connCard(p), state = card.querySelector('.conn-state');
+        for (const p of ['botcake', 'forbeast', 'incepxionbot']) {
+            const c = data[p] || {}, card = connCard(p);
+            if (!card) continue; // ang pangalawang gateway: kapag naka-set up lang
+            const state = card.querySelector('.conn-state');
             card.elements.page_id.value = c.page_id || '';
             card.elements.token.value = '';
             card.querySelector('.conn-token').textContent = c.token ? '(saved ' + c.token + ')' : '(none)';
@@ -972,7 +978,7 @@
             if (res.status === 409) connMsg(card, 'Not changed.', false);
             else if (!res.ok) connMsg(card, (d.name ? 'Provider page: ' + d.name + '. ' : '') + (d.error || d.message || 'Not saved (' + res.status + ').'), false);
             else if (path.endsWith('-test')) connMsg(card, 'Test: ' + d.status + (d.chat_block ? ' · chat block ' + d.chat_block : '') + (d.error ? ' · ' + d.error : ''), d.status === 'ok' && (!d.chat_block || d.chat_block === 'on'));
-            else if (path === 'forbeast-clear') connMsg(card, 'Forbeast token removed.', true);
+            else if (path.endsWith('-clear')) connMsg(card, (GATEWAY_LABEL[card.dataset.provider] || 'Forbeast') + ' token removed.', true);
             else if (d.chat_block && !d.chat_block.ok) connMsg(card, 'Token saved. Chat block: ' + d.chat_block.error, false);
             else connMsg(card, path === 'chat-block' ? 'Chat block applied.' : 'Saved and connected' + (d.name ? ' (' + d.name + ')' : '') + '.', true);
         } catch (e) { connMsg(card, 'No connection: not changed.', false); }
@@ -986,9 +992,10 @@
     document.querySelector('#conn .conn-fix').addEventListener('click', () => connSave(connCard('botcake'), 'chat-block', {}));
     // Test: ang naka-save na token (at ang chat block ng Botcake), kahit kailan; walang isinusulat sa provider.
     document.querySelectorAll('#conn .conn-test').forEach(b => b.addEventListener('click', () => { const card = b.closest('.conn-card'); connSave(card, card.dataset.provider + '-test', {}); }));
-    document.querySelector('#conn .conn-clear').addEventListener('click', () => {
-        if (confirm('Remove the Forbeast token of ' + connPage + ' and disconnect the page from Forbeast?')) connSave(connCard('forbeast'), 'forbeast-clear', {});
-    });
+    document.querySelectorAll('#conn .conn-clear').forEach(b => b.addEventListener('click', () => {
+        const card = b.closest('.conn-card'), l = GATEWAY_LABEL[card.dataset.provider] || 'Forbeast';
+        if (confirm('Remove the ' + l + ' token of ' + connPage + ' and disconnect the page from ' + l + '?')) connSave(card, card.dataset.provider + '-clear', {});
+    }));
 
     function pickBox(r) {
         const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'aria-label': 'Select ' + r.page});
@@ -1007,9 +1014,10 @@
     $('bulk-apply').addEventListener('click', async () => {
         const names = [...picked].filter(p => rows.some(r => r.page === p)), want = $('bulk-provider').value;
         if (!names.length) return;
-        const notReady = want === 'gateway' ? names.filter(p => !rows.find(r => r.page === p)?.forbeast?.ready) : [];
+        // Gateway: ang bawat page ay may gumaganang token sa sarili nitong gateway (Forbeast o Incepxionbot).
+        const notReady = want === 'gateway' ? names.filter(p => { const r = rows.find(x => x.page === p); return !(r?.gateways || []).includes(r?.gateway); }) : [];
         if (notReady.length) { notice(NEEDS_TOKEN + ': ' + notReady.join(', '), 'text-red-600'); return; }
-        const label = want === 'gateway' ? 'Forbeast' : 'Botcake';
+        const label = want === 'gateway' ? [...new Set(names.map(p => provLabel(rows.find(x => x.page === p) || {}, 'gateway')))].join(' / ') : 'Botcake';
         if (!confirm('Send and receive the chats of these ' + names.length + ' page' + (names.length === 1 ? '' : 's') + ' through ' + label + '?\n\n' + names.join('\n'))) return;
         $('bulk-apply').disabled = true;
         try {
@@ -1030,21 +1038,46 @@
     }
 
     // Ang Bot ng page (kung saan dumadaan ang chat at sagot): ang mga kumpletong koneksyon lang (Connected), kasama ang
-    // kasalukuyan. Isa lang: text, walang select. Forbeast ay kailangan ding naka-set up (GATEWAY_URL).
+    // kasalukuyan. Isa lang: text, walang select. Ang gateway (Forbeast o Incepxionbot, ang aktibo ng page) ay kailangan
+    // ding naka-set up (GATEWAY_URL, INCEPXIONBOT_URL).
     function providerSelect(r) {
         const current = r.provider || 'botcake';
-        const options = ['botcake', 'gateway'].filter(p => p === current || ((r.connected || []).includes(PROVIDER_LABEL[p]) && (p !== 'gateway' || gatewayReady)));
-        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + PROVIDER_LABEL[current]});
+        const options = ['botcake', 'gateway'].filter(p => p === current || ((r.connected || []).includes(provLabel(r, p)) && (p !== 'gateway' || gatewayReady)));
+        if (options.length < 2) return el('div', {class: 'mt-1 text-xs text-slate-600', title: 'Replies via', text: 'Bot: ' + provLabel(r, current)});
         const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Bot of ' + r.page, title: 'Replies via'},
             [el('option', {value: 'botcake', text: 'Botcake'}), el('option', {value: 'gateway', text: 'Forbeast'})].filter(o => options.includes(o.value)));
+        // Ang gateway option ay ang pangalan ng aktibong gateway ng page (Forbeast o Incepxionbot).
+        for (const o of sel.options) if (o.value === 'gateway') o.textContent = provLabel(r, 'gateway');
         sel.value = current;
         sel.addEventListener('change', async () => {
             const want = sel.value;
-            if (!confirm('Switch ' + r.page + ' from ' + PROVIDER_LABEL[current] + ' to ' + PROVIDER_LABEL[want] + '?')) { sel.value = current; return; }
+            if (!confirm('Switch ' + r.page + ' from ' + provLabel(r, current) + ' to ' + provLabel(r, want) + '?')) { sel.value = current; return; }
             sel.disabled = true;
             try {
                 const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
                 if (ok) { r.provider = data.provider; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
+            } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
+            render();
+        });
+        return sel;
+    }
+
+    // Aling gateway ang sumasagot (kapag gateway ang Bot): ang mga naka-set up na may gumaganang token ng page, kasama ang
+    // kasalukuyan. Isa lang: walang select (nasa "Bot:" na ang pangalan). Ang pili ng tao ay hindi ibinabalik ng bantay.
+    function gatewaySelect(r) {
+        const current = r.gateway || 'forbeast';
+        const options = [...new Set([current, ...(r.gateways || [])])];
+        if (r.provider !== 'gateway' || options.length < 2 || !url.gatewayUrl) return document.createTextNode('');
+        const sel = el('select', {class: 'mt-1 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs', 'aria-label': 'Gateway of ' + r.page, title: 'Gateway'},
+            options.map(g => el('option', {value: g, text: 'via ' + (GATEWAY_LABEL[g] || g)})));
+        sel.value = current;
+        sel.addEventListener('change', async () => {
+            const want = sel.value;
+            if (!confirm('Send the replies of ' + r.page + ' through ' + (GATEWAY_LABEL[want] || want) + ' instead of ' + (GATEWAY_LABEL[current] || current) + '?')) { sel.value = current; return; }
+            sel.disabled = true;
+            try {
+                const {ok, data} = await post(url.gatewayUrl, {page_name: r.page, gateway: want});
+                if (ok) { r.gateway = data.gateway; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
             render();
         });

@@ -22,12 +22,16 @@ class GatewayTyping
     public static function start(string $pageName, string $pageId, string $psid): void
     {
         try {
-            if (!config('services.gateway.typing', true) || !BotcakeOutbox::enabled()) return;
+            if (!BotcakeOutbox::enabled()) return;
             if (ChatbotProvider::name($pageName) !== ChatbotProvider::GATEWAY) return;
-            // Ang URL at key ay gaya ng padala (GatewayProvider): ang token ng page, o ang global GATEWAY_KEY.
-            $url = rtrim((string) config('services.gateway.url'), '/');
-            $key = app(ForbeastPageSetup::class)->token($pageName);
-            if ($key === '') $key = trim((string) config('services.gateway.key'));
+            // Ang aktibong gateway ng page lang, ang URL at key ay gaya ng padala (GatewayProvider): ang token ng page doon, o
+            // ang global key ng gateway. Ang typing ay off kada gateway (GATEWAY_TYPING, INCEPXIONBOT_TYPING).
+            $gw = Gateways::active($pageName);
+            $c = Gateways::config($gw);
+            if (!$c['typing']) return;
+            $url = $c['url'];
+            $key = app(ForbeastPageSetup::class)->on($gw)->token($pageName);
+            if ($key === '') $key = $c['key'];
             if ($url === '' || $key === '') return;
             if (!Cache::add('gateway-typing:' . $pageId . ':' . $psid, 1, self::ONCE_SECONDS)) return;
         } catch (Throwable $e) {
