@@ -11,7 +11,6 @@ use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotSequences;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowGraph;
-use App\Services\Chatbot\GatewayTyping;
 use App\Services\PageSettings;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -54,7 +53,8 @@ class GatewayTypingTest extends ChatblastTestCase
             'database/migrations/2026_10_28_100000_create_chatbot_ai_requests_table.php',
             'database/migrations/2026_10_29_100000_create_botcake_send_requests_table.php',
         ]]);
-        config(['services.chatbot.replies_enabled' => true, 'services.gateway.url' => self::GW, 'services.gateway.key' => self::KEY,
+        // Ang typing ay off sa ibang tests (phpunit.xml GATEWAY_TYPING=false); dito ay On, gaya ng default.
+        config(['services.gateway.typing' => true, 'services.chatbot.replies_enabled' => true, 'services.gateway.url' => self::GW, 'services.gateway.key' => self::KEY,
             'services.gateway.webhook_secret' => 'gw-secret', 'services.botcake.chat_ips' => ['203.171.22.6'], 'services.botcake.chat_ip_mode' => 'log']);
         $this->travelTo('2026-10-29 10:00:00');
         $this->page('Page Uno', '1001');
@@ -72,6 +72,7 @@ class GatewayTypingTest extends ChatblastTestCase
             self::GW . '/v1/pages/*/typing' => function (HttpRequest $r, array $options) {
                 $this->typingOptions[] = $options;
                 if ($this->typing === 'timeout') throw new ConnectionException('cURL error 28: Operation timed out');
+                if ($this->typing === 'bug') throw new \RuntimeException('not a connection error');
 
                 return $this->typing === '500' ? Http::response(['error' => 'boom'], 500) : Http::response(['ok' => true], 202);
             },
@@ -225,7 +226,54 @@ class GatewayTypingTest extends ChatblastTestCase
 
     public function test_S_191_5_the_switch_is_on_by_default(): void
     {
-        $this->assertTrue(config('services.gateway.typing'));
-        $this->assertTrue(class_exists(GatewayTyping::class));
+        // Walang GATEWAY_TYPING sa env (ang phpunit.xml ay false): ang default ng config/services.php ay On.
+        $saved = [$_ENV['GATEWAY_TYPING'] ?? null, $_SERVER['GATEWAY_TYPING'] ?? null, getenv('GATEWAY_TYPING')];
+        unset($_ENV['GATEWAY_TYPING'], $_SERVER['GATEWAY_TYPING']);
+        putenv('GATEWAY_TYPING');
+        try {
+            $this->assertNull(env('GATEWAY_TYPING'));
+            $this->assertTrue((require config_path('services.php'))['gateway']['typing']);
+        } finally {
+            if ($saved[0] !== null) $_ENV['GATEWAY_TYPING'] = $saved[0];
+            if ($saved[1] !== null) $_SERVER['GATEWAY_TYPING'] = $saved[1];
+            if ($saved[2] !== false) putenv('GATEWAY_TYPING=' . $saved[2]);
+        }
+        $this->assertFalse((require config_path('services.php'))['gateway']['typing'], 'GATEWAY_TYPING=false turns it off');
+    }
+
+    public function test_S_191_1_a_page_with_its_own_forbeast_token_calls_typing_with_that_token(): void
+    {
+        app(PageSettings::class)->set('Page Uno', 'forbeast', 'token', 'fbp_page_uno_token_191', true, null, true);
+        $this->forbeast();
+
+        $calls = $this->typingCalls();
+        $this->assertCount(1, $calls);
+        $this->assertTrue($calls[0]->hasHeader('Authorization', 'Bearer fbp_page_uno_token_191'), 'the same key as the send');
+        $sent = Http::recorded(fn (HttpRequest $r) => str_ends_with($r->url(), '/messages'))->first()[0];
+        $this->assertTrue($sent->hasHeader('Authorization', 'Bearer fbp_page_uno_token_191'));
+    }
+
+    public function test_S_191_3_no_call_when_replies_are_off_or_forbeast_is_not_set_up(): void
+    {
+        config(['services.chatbot.replies_enabled' => false]);
+        $this->forbeast('Hello');
+        config(['services.chatbot.replies_enabled' => true, 'services.gateway.key' => '']);
+        $this->forbeast('Hello', [], '1001', '6012345678900001'); // walang token at walang key
+        config(['services.gateway.key' => self::KEY, 'services.gateway.url' => '']);
+        $this->forbeast('Hello', [], '1001', '6012345678900002'); // walang URL
+
+        $this->assertSame([], $this->typingOptions);
+        $this->assertSame(0, $this->counted('calls'));
+    }
+
+    public function test_S_191_4_a_non_connection_error_is_reported_and_the_reply_still_sent(): void
+    {
+        $this->typing = 'bug';
+        $this->forbeast('Hello');
+
+        $this->assertCount(1, $this->typingOptions);
+        $this->assertSame(['/v1/pages/1001/messages'], $this->gatewayOrder());
+        $this->assertSame(1, $this->sentReplies());
+        $this->assertSame([1, 1], [$this->counted('calls'), $this->counted('failed')]);
     }
 }

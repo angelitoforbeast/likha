@@ -2,6 +2,7 @@
 
 namespace App\Services\Chatbot;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -37,8 +38,11 @@ class GatewayTyping
         self::count('calls');
         try {
             $ok = self::call($url, $key, $pageId, $psid);
-        } catch (Throwable) {
+        } catch (ConnectionException) {
             $ok = false; // timeout, walang koneksyon: binabalewala
+        } catch (Throwable $e) {
+            report($e); // hindi koneksyon (hal. sirang code): nakikita sa log, tuloy pa rin ang takbo
+            $ok = false;
         }
         if (!$ok) self::count('failed');
     }

@@ -30,5 +30,7 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <!-- Ang typing ng Forbeast (spec 191) ay off sa tests: walang tawag palabas sa fake na HTTP na kulang; GatewayTypingTest ang nag-o-On. -->
+        <env name="GATEWAY_TYPING" value="false"/>
     </php>
 </phpunit>
