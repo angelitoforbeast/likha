@@ -38,11 +38,14 @@ class MetaReplySpeed
         if ($f['bot'] === ChatbotConnections::BOTS[0]) return ['state' => 'botcake'] + $blank;
         if (!ForbeastSite::linked()) return ['state' => 'not_linked'] + $blank;
         try {
-            $day = $this->day($f['date'], $f['page_id'], $today);
+            $started = microtime(true);
+            $day = $this->day($f['date'], $f['page_id'], $today, self::TIMEOUT);
             if (!$day['ok']) return ['state' => 'error', 'error' => $day['error'], 'at' => $day['at']] + $blank;
-            // Ang reference ng chart: ang naunang araw, parehong page, kinuha sa parehong paraan. Kapag hindi ito
+            // Ang reference ng chart: ang naunang araw, parehong page, kinuha sa parehong paraan pero sa natitira lang
+            // sa 5 s (hindi bababa sa 1 s), para hindi maghintay ang screen nang dalawang buong timeout. Kapag hindi ito
             // sumagot, wala lang ang dotted na linya.
-            $prev = $this->day(CarbonImmutable::parse($f['date'])->subDay()->toDateString(), $f['page_id'], $today);
+            $left = max(1, self::TIMEOUT - (int) ceil(microtime(true) - $started));
+            $prev = $this->day(CarbonImmutable::parse($f['date'])->subDay()->toDateString(), $f['page_id'], $today, $left);
         } catch (Throwable $e) {
             report($e);
 
@@ -54,18 +57,20 @@ class MetaReplySpeed
     }
 
     /** @return array{ok: true, hours: array, total: array}|array{ok: false, error: string, at: string} */
-    private function day(string $date, ?string $page, string $today): array
+    private function day(string $date, ?string $page, string $today, int $timeout): array
     {
         $key = 'meta-reply-speed:v1:' . md5(json_encode([$date, $page]));
         $hit = Cache::get($key);
         if (is_array($hit) && isset($hit['ok'])) return $hit;
 
-        $res = $this->site->replySpeed($date, $page, self::TIMEOUT);
+        $res = $this->site->replySpeed($date, $page, $timeout);
         $read = $res['ok'] ? self::read($res['body']) : null;
         $out = $read !== null ? ['ok' => true] + $read : ['ok' => false, 'at' => now()->format('H:i:s'),
             'error' => match (true) {
                 $res['ok'] => 'Its answer could not be read.',
-                $res['status'] === 0 => 'No answer within ' . self::TIMEOUT . ' s.',
+                $res['status'] === 0 => 'No answer within ' . $timeout . ' s.',
+                // Ang page na wala sa Forbeast (hal. nasa Botcake, o sa kabilang site) ay hindi "hindi sumagot".
+                $res['status'] === 404 && ($res['body']['error'] ?? null) === 'unknown_page' => 'This page is not on Forbeast for this site.',
                 default => (string) $res['error'],
             }];
         Cache::put($key, $out, !$out['ok'] ? self::FAILED_CACHE_SECONDS : ($date === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS));

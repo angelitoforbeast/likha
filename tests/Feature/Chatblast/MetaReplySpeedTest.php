@@ -59,10 +59,25 @@ class MetaReplySpeedTest extends ChatblastTestCase
     private const TODAY = ['messages' => 4, 'bot_answered' => 3, 'person_answered' => 1, 'unanswered' => 0, 'avg_s' => 3.4, 'median_s' => 3, 'p90_s' => 5.1, 'max_s' => 6, 'meta_to_forbeast_avg_s' => 2.6];
     private const YESTERDAY = ['messages' => 2, 'bot_answered' => 2, 'person_answered' => 0, 'unanswered' => 0, 'avg_s' => 5, 'median_s' => 5, 'p90_s' => 7, 'max_s' => 7, 'meta_to_forbeast_avg_s' => 2.4];
 
+    private mixed $next = null;
+    private bool $faked = false;
+
+    /**
+     * Ang isasagot ng fake na Forbeast mula ngayon. Iisang stub lang ang nirerehistro: ang Http::fake ay nagdadagdag ng
+     * stub at ang una ang nananalo, kaya ang pagpapalit ay sa $next.
+     */
+    private function answer(mixed $a): void
+    {
+        $this->next = $a;
+        if ($this->faked) return;
+        $this->faked = true;
+        Http::fake([self::URL => fn (Request $r) => $this->next instanceof \Closure ? ($this->next)($r) : $this->next]);
+    }
+
     /** Ang fake na Forbeast: ngayon (hanggang 12:00) at kahapon (buong araw), ayon sa date ng tawag. */
     private function fakeForbeast(): void
     {
-        Http::fake([self::URL => function (Request $r) {
+        $this->answer(function (Request $r) {
             $q = $r->data();
             $page = $q['page_id'] ?? null;
 
@@ -71,7 +86,7 @@ class MetaReplySpeedTest extends ChatblastTestCase
                 '2026-10-20' => Http::response(self::day('2026-10-20', $page, 23, self::YESTERDAY)),
                 default => Http::response(self::day((string) ($q['date'] ?? ''), $page, 23, ['messages' => 0] + self::TODAY)),
             };
-        }]);
+        });
     }
 
     /** Ang screen bilang CEO: [data ng mga chart, response]. Ang cache ay hindi binubura (para sa S-193.6). */
@@ -202,8 +217,9 @@ class MetaReplySpeedTest extends ChatblastTestCase
             'not json' => fn () => Http::response('<html>bad gateway</html>', 200),
             'wrong shape' => fn () => Http::response(['hours' => 'x', 'total' => ['messages' => 'many']], 200),
         ];
+        $n = 0;
         foreach ($cases as $name => $answer) {
-            Http::fake([self::URL => $answer()]);
+            $this->answer($answer());
             Cache::flush();
             [$c, $res] = $this->screen('page_id=1001');
             $html = $res->getContent();
@@ -214,10 +230,79 @@ class MetaReplySpeedTest extends ChatblastTestCase
             // Ang ibang bahagi ng screen ay gaya ng dati.
             foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('<canvas id="sp-chart-' . $k . '"', $html, "$name $k");
             // Isang tawag lang: ang naunang araw ay hindi na tinatawag kapag hindi sumagot ang araw.
-            Http::assertSentCount(1);
+            Http::assertSentCount(++$n);
         }
         // Ang tawag ay may hangganang 5 s.
         $this->assertSame(5, MetaReplySpeed::TIMEOUT);
+    }
+
+    public function test_S_193_5_hostile_values_are_dropped_and_forbeast_text_is_escaped(): void
+    {
+        // Ang bawat field na mali ang uri o negatibo: 0 ang bilang, walang oras.
+        $bad = ['messages' => -3, 'bot_answered' => '7', 'person_answered' => 1.5, 'unanswered' => null, 'avg_s' => '3.4', 'median_s' => -1, 'p90_s' => true, 'max_s' => [9], 'meta_to_forbeast_avg_s' => 'x'];
+        $this->answer(Http::response(self::day('2026-10-21', null, 12, $bad)));
+        [$c, $res] = $this->screen();
+        $m = $res->viewData('meta');
+        $this->assertSame('ok', $m['state']);
+        $this->assertSame(['hour' => 10, 'messages' => 0, 'bot_answered' => 0, 'person_answered' => 0, 'unanswered' => 0,
+            'avg' => null, 'median' => null, 'p90' => null, 'max' => null, 'meta_to_forbeast_avg' => null], $m['hours'][10]);
+        $this->assertNull($c['meta']['series']['avg'][10]);
+
+        // Ang hugis na hindi mabasa: ang oras na lampas sa 23, oras na text, at mga oras na hindi listahan.
+        $ok = self::day('2026-10-21', null, 12, self::TODAY);
+        foreach (['hour 24' => [['hour' => 24] + self::TODAY], 'hour text' => [['hour' => '10'] + self::TODAY], 'not a list' => ['a' => ['hour' => 10] + self::TODAY]] as $name => $hours) {
+            $this->answer(Http::response(['hours' => $hours] + $ok));
+            Cache::flush();
+            [, $res] = $this->screen();
+            $this->assertStringContainsString('Its answer could not be read.', self::text(self::section($res->getContent())), $name);
+        }
+
+        // Ang text ng Forbeast ay escaped at putol sa 200.
+        $this->answer(Http::response(['message' => '<script>alert(1)</script>' . str_repeat('y', 300)], 500));
+        Cache::flush();
+        [, $res] = $this->screen();
+        $s = self::section($res->getContent());
+        $this->assertStringNotContainsString('<script>alert', $s);
+        $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $s);
+        $this->assertStringNotContainsString(str_repeat('y', 200), $s);
+    }
+
+    public function test_S_193_5_a_page_forbeast_does_not_know_says_so(): void
+    {
+        $this->answer(Http::response(['error' => 'unknown_page'], 404));
+        [, $res] = $this->screen('page_id=1002');
+
+        $this->assertStringContainsString('This page is not on Forbeast for this site.', self::text(self::section($res->getContent())));
+    }
+
+    public function test_S_193_3_when_only_the_previous_day_fails_the_day_is_still_drawn(): void
+    {
+        $this->answer(fn (Request $r) => ($r->data()['date'] ?? null) === '2026-10-21'
+            ? Http::response(self::day('2026-10-21', null, 12, self::TODAY)) : Http::response([], 500));
+        [$c, $res] = $this->screen();
+
+        $this->assertSame('ok', $res->viewData('meta')['state']);
+        $this->assertEquals(3.4, $c['meta']['series']['avg'][10]);
+        $this->assertSame(array_fill(0, 24, null), $c['meta']['prev']['avg']);
+        Http::assertSentCount(2);
+    }
+
+    public function test_S_193_5_the_calls_have_a_5_s_limit_together(): void
+    {
+        // Ang araw ay may 5 s; ang naunang araw ay ang natitira sa 5 s (hindi bababa sa 1 s), kaya ang screen ay hindi
+        // naghihintay nang higit sa mga 6 s kahit mabagal ang Forbeast.
+        $site = \Mockery::mock(\App\Services\Chatbot\ForbeastSite::class);
+        $site->shouldReceive('replySpeed')->once()->with('2026-10-21', null, 5)->andReturnUsing(function () {
+            usleep(1_200_000);
+
+            return ['ok' => true, 'status' => 200, 'body' => self::day('2026-10-21', null, 12, self::TODAY), 'error' => null];
+        });
+        $site->shouldReceive('replySpeed')->once()->with('2026-10-20', null, \Mockery::on(fn ($t) => $t >= 1 && $t <= 3))
+            ->andReturn(['ok' => true, 'status' => 200, 'body' => self::day('2026-10-20', null, 23, self::YESTERDAY), 'error' => null]);
+        $this->app->instance(\App\Services\Chatbot\ForbeastSite::class, $site);
+
+        [$c] = $this->screen();
+        $this->assertEquals(5, $c['meta']['prev']['avg'][10]);
     }
 
     public function test_S_193_6_a_second_load_makes_no_http_call_until_the_cache_ends(): void
@@ -240,7 +325,7 @@ class MetaReplySpeedTest extends ChatblastTestCase
 
     public function test_S_193_6_a_failed_answer_is_kept_a_minute_so_a_down_forbeast_does_not_slow_every_load(): void
     {
-        Http::fake([self::URL => Http::failedConnection()]);
+        $this->answer(Http::failedConnection());
         $this->screen();
         $this->screen();
         Http::assertSentCount(1);
