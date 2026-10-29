@@ -15,7 +15,7 @@
     $site = \App\Services\Chatbot\ForbeastSite::label(\App\Services\Chatbot\ForbeastSite::self());
     // Ang paliwanag sa ilalim ng average na reply time, ayon sa estado ng Forbeast (iisa sa server at sa script).
     $notes = [
-        'ok' => 'Customer sent → reply sent, on Meta’s clock',
+        'ok' => 'Customer sent → reply sent',
         'none' => 'No Forbeast replies yet today',
         'not_linked' => 'Not linked to Forbeast',
         'not_on_forbeast' => 'This page is not on Forbeast',
@@ -67,7 +67,7 @@
             <div><h2>Orders today</h2><b class="v" data-live-count="orders">{{ $n($c['orders']['today']) }}</b><small class="{{ $up('orders') }}" data-live-up="orders"><b><i>▲ </i>+<span data-live-recent="orders">{{ $n($c['orders']['recent']) }}</span></b> in the last 5 min</small></div>
             <span class="plus" data-live-plus aria-hidden="true"></span></div>
         <div class="kpi k4"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-4 3-6 6.5-6s6.5 2 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.5.7 3.5 2.5 3.5 6"/></svg>
-            <div><h2>Active chats</h2><b class="v" data-live-count="active">{{ $n($c['active']) }}</b><small>customers who messaged in the last 5 min</small></div></div>
+            <div><h2>Active chats</h2><b class="v" data-live-count="active">{{ $n($c['active']) }}</b><small>Messaged in the last 5 min</small></div></div>
     </section>
 
     <section class="net" aria-label="Neural network">
@@ -254,7 +254,7 @@
     @media (max-width: 900px) {
         .vp { height: auto; min-height: 100vh; overflow: visible; }
         .stage { position: static; width: auto; height: auto; transform: none !important; display: flex; flex-direction: column; padding-bottom: 30px; }
-        .net { display: none; } .mob { display: grid; }
+        .net { display: none; } .mob { display: grid; grid-template-columns: minmax(0, 1fr); }
         .top, .kpis, .act { position: relative; left: auto; top: auto; width: auto; height: auto; }
         .top { flex-wrap: wrap; gap: 6px 14px; padding: 12px 14px; } .top h1 { font-size: 26px; } .logo { width: 30px; height: 30px; } .lv-status { font-size: 18px; }
         .top .sp { margin-left: 0; flex-wrap: wrap; gap: 8px 12px; width: 100%; } .lv-filter { flex-wrap: wrap; gap: 8px; width: 100%; }

@@ -130,12 +130,11 @@
     <text class="t sub s26" x="604" y="724">Orders recorded</text>
     <text class="t big s t-ordf" x="604" y="790" data-live-count="orders">{{ $n($c['orders']['today']) }}</text>
     <text class="t sub s21" x="604" y="826">Last: <tspan data-live-last-order>{{ $lastText }}</tspan></text>
-    <text class="t sub s26" x="900" y="724">Order value today</text>
+    <text class="t sub s26" x="900" y="724">Order value today (COD)</text>
     <text class="t big s t-ordf" x="900" y="790"><tspan class="peso-sign">₱</tspan><tspan dx="6" data-live-count="peso">{{ $n($c['order_value']['today']) }}</tspan></text>
-    <text class="t sub s21" x="900" y="826">known COD of today’s orders</text>
-    <text class="t sub s20 end" x="1480" y="740" data-live-unknown="in" @if(!$c['bots']['in']['unknown']) hidden @endif>+<tspan data-live-count="in-unknown">{{ $n($c['bots']['in']['unknown']) }}</tspan> messages from before the bot was recorded</text>
-    <text class="t sub s20 end" x="1480" y="768" data-live-unknown="out" @if(!$c['bots']['out']['unknown']) hidden @endif>+<tspan data-live-count="out-unknown">{{ $n($c['bots']['out']['unknown']) }}</tspan> replies with no bot recorded</text>
-    <text class="t sub s21 end" x="1480" y="826">Inputs → {{ strtoupper($site) }} BOT → designated bot</text>
+    <text class="t sub s20 end" x="1480" y="716" data-live-unknown="in" @if(!$c['bots']['in']['unknown']) hidden @endif>+<tspan data-live-count="in-unknown">{{ $n($c['bots']['in']['unknown']) }}</tspan> messages from before the bot was recorded</text>
+    <text class="t sub s20 end" x="1480" y="744" data-live-unknown="out" @if(!$c['bots']['out']['unknown']) hidden @endif>+<tspan data-live-count="out-unknown">{{ $n($c['bots']['out']['unknown']) }}</tspan> replies with no bot recorded</text>
+    <text class="t sub s21 end" x="1480" y="800">Inputs → {{ strtoupper($site) }} BOT → designated bot</text>
 
     <g data-lights aria-hidden="true"></g>
 </svg>
