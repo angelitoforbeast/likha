@@ -209,6 +209,15 @@ Schedule::command('rts:learn')
     ->dailyAt('04:40')
     ->withoutOverlapping();
 
+// Mira RTS araw-araw: ang tantya ng final RTS ng bawat page+item (gamit ang rate ng 04:40) at ang accuracy ng mga tantya
+// 7 at 14 araw na ang nakalipas. 06:00 Manila: malayo sa night Astra step (03:00–03:45), na tinatanggihan din ng command.
+// Ligtas ulitin: isang beses lang bawat araw ang bawat page+item.
+Schedule::command('rts:daily-estimate')
+    ->timezone('Asia/Manila')
+    ->dailyAt(\App\Services\AnalystRtsDaily::RUN_AT)
+    ->withoutOverlapping(60)
+    ->onOneServer();
+
 // Order encode (spec 130): ang paghahambing ng mga shadow na order sa DATABASE row ng sheet, kada 10 minuto. Walang gagawin kung
 // walang order na naka-shadow.
 Schedule::command('order-encode:compare')
