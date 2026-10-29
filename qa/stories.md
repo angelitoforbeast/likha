@@ -3239,13 +3239,13 @@ Tests: `tests/Feature/Chatblast/FlowTemplateCodesTest.php`, existing Chatblast, 
 
 | Case | Given / When / Then | Test | Status |
 |---|---|---|---|
-| S-195.1 (P1) | Given staff with flow access, When they create a code for a published flow, Then it is `LK-XXXX-XX`, shown with Copy on the flow's screen and in the Flow list; regenerate replaces it; revoke removes it; an unpublished flow gets no code; staff without access get 403 | `test_S_195_1…` | pending |
-| S-195.2 (P1) | When Forbeast GETs a code (any letter case) for a page, Then the flow (id, name, steps, updated_at) and the fields it needs come back grouped, with required ones marked and this page's current values; the flow's own texts are not sent | `test_S_195_2…` | pending |
-| S-195.3 (P1) | When Forbeast POSTs the code for a page, Then the page's flow rows change, the page history says "via Forbeast: with code …, by <user>", and existing values (also ones the new flow does not use) are untouched | `test_S_195_3…` | pending |
-| S-195.4 (P1) | Given a revoked or unknown code, Then GET and POST are 404 `unknown_code` and nothing changes; a page already linked keeps its flow | `test_S_195_4…` | pending |
-| S-195.5 (P1) | Given a page that is not on this site, Then every flow endpoint is 404 `unknown_page` | `test_S_195_5…` | pending |
-| S-195.6 (P1) | Given an unsigned call or one signed with a wrong secret, Then 401 `bad_signature` and nothing changes | `test_S_195_6…` | pending |
-| S-195.7 (P1) | When Forbeast PUTs values, Then they read back `updated_by: forbeast` (Likha edits read `likha`), the Pages screen marks them "via Forbeast", and a needed field outside the old list (e.g. a Prompt the flow reads) can be filled | `test_S_195_7…` | pending |
-| S-195.8 (P1) | Given two pages on one flow, When staff publish a change to the flow, Then both pages run the new version | `test_S_195_8…` | pending |
-| S-195.9 (P1) | Given a flow using Seq N or Seq Img N, Then both come back adjacent as a pair with `pair: N`, only the used one required | `test_S_195_9…` | pending |
-| S-195.10 (P1) | Existing suites pass (`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings`) | full run | pending |
+| S-195.1 (P1) | Given staff with flow access, When they create a code for a published flow, Then it is `LK-XXXX-XX`, shown with Copy on the flow's screen and in the Flow list; regenerate replaces it; revoke removes it; an unpublished flow or a sequence-step flow gets no code; staff without access get 403 | `test_S_195_1…` | passed |
+| S-195.2 (P1) | When Forbeast GETs a code (any letter case) for a page, Then the flow (id, name, steps, updated_at) and the fields it needs come back grouped, with required ones marked and this page's current values; the flow's own texts are not sent | `test_S_195_2…` | passed |
+| S-195.3 (P1) | When Forbeast POSTs the code for a page, Then the page's flow rows change, the page history says "via Forbeast: with code …, by <user>", and existing values (also ones the new flow does not use) are untouched | `test_S_195_3…` | passed |
+| S-195.4 (P1) | Given a revoked or unknown code, Then GET and POST are 404 `unknown_code` and nothing changes; a page already linked keeps its flow | `test_S_195_4…` | passed |
+| S-195.5 (P1) | Given a page that is not on this site, Then every flow endpoint is 404 `unknown_page` | `test_S_195_5…` | passed |
+| S-195.6 (P1) | Given an unsigned call or one signed with a wrong secret, Then 401 `bad_signature` and nothing changes | `test_S_195_6…` | passed |
+| S-195.7 (P1) | When Forbeast PUTs values, Then they read back `updated_by: forbeast` (Likha edits read `likha`), the Pages screen marks them "via Forbeast", and a needed field outside the old list (e.g. a Prompt the flow reads) can be filled, while system keys (flow, flow_id, provider, gateway, active, ai_*, auto_switch, SHOP DETAILS) stay refused even when the flow names them | `test_S_195_7…` (two tests) | passed |
+| S-195.8 (P1) | Given two pages on one flow, When staff publish a change to the flow, Then both pages run the new version | `test_S_195_8…` | passed |
+| S-195.9 (P1) | Given a flow using Seq N or Seq Img N, Then both come back adjacent as a pair with `pair: N`, only the used one required | `test_S_195_9…` | passed |
+| S-195.10 (P1) | Existing suites pass (`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings`) | full run | passed |
