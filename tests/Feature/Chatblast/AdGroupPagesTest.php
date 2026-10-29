@@ -26,6 +26,7 @@ class AdGroupPagesTest extends ChatblastTestCase
             'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
             'database/migrations/2025_07_15_232022_create_ads_manager_reports_table.php',
             'database/migrations/2025_07_17_222429_add_headline_and_body_to_ads_manager_reports_table.php',
+            'database/migrations/2025_07_17_224216_rename_body_to_body_ad_settings_in_ads_manager_reports_table.php',
         ]]);
         $this->travelTo('2026-10-20 10:00:00');
         $this->page('Page P', '1001');

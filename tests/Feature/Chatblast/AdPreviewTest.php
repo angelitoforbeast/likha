@@ -25,6 +25,7 @@ class AdPreviewTest extends ChatblastTestCase
             'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
             'database/migrations/2025_07_15_232022_create_ads_manager_reports_table.php',
             'database/migrations/2025_07_17_222429_add_headline_and_body_to_ads_manager_reports_table.php',
+            'database/migrations/2025_07_17_224216_rename_body_to_body_ad_settings_in_ads_manager_reports_table.php',
         ]]);
         Schema::create('ad_campaign_creatives', function (Blueprint $t) {
             $t->id();
@@ -87,7 +88,7 @@ class AdPreviewTest extends ChatblastTestCase
         $this->preview('222')->assertOk()->assertJson(['link' => 'https://fb.watch/abc123/', 'headline' => 'Campaign headline', 'from_campaign' => true]);
 
         // Ang body na wala sa creative ay mula sa report; ang link na hindi https na Facebook ay hindi ini-embed.
-        DB::table('ads_manager_reports')->where('ad_id', '222')->update(['body' => 'Report body']);
+        DB::table('ads_manager_reports')->where('ad_id', '222')->update(['body_ad_settings' => 'Report body']);
         $this->preview('222')->assertOk()->assertJson(['body' => 'Report body']);
         DB::table('ad_campaign_creatives')->insert(['ad_id' => '111', 'campaign_id' => 'c111', 'created_at' => now(), 'updated_at' => now()]);
         foreach (['javascript:alert(1)', 'https://evilfacebook.com/x', 'https://facebook.com.evil.com/x', 'http://www.facebook.com/x', 'https://www.facebook.com/reel/1'] as $link) {
