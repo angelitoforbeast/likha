@@ -3230,3 +3230,20 @@ Tests: `tests/Feature/Chatblast/GatewayPerPageTest.php`, existing Chatblast, Bot
 | S-194.7 (P1) | Given a page without a working token on the other gateway, Then it is not moved there | `test_S_194_7…` | passed |
 | S-194.8 (P1) | The Pages screen shows and sets the gateway (only set-up gateways with a working token), and the Connections popup has the Incepxionbot card | `test_S_194_8…` | passed |
 | S-194.9 (P1) | Given Incepxion with only incepxionbot set up, Then it is the gateway of every page; a page with only an incepxionbot token is listed | `test_S_194_9…`, `test_S_194_9b…` | passed |
+## S-197 Mira RTS every day, checked against reality every day
+
+As the owner, I want the Mira RTS of each page+item refreshed every morning as an estimate of its final RTS, and its accuracy checked every day, so that I can judge ads and the Set RTS before the J&T statuses settle.
+
+Slice 197. Threat model: no new way in; the run is a scheduled command over trusted tables, the analyst API (own key) is unchanged apart from tagging its rows. Risk tier: medium.
+Tests: `tests/Feature/RtsProjection/AnalystRtsDailyTest.php`, `tests/Feature/RtsProjection/RtsAsOfTest.php`, existing RtsProjection and OwnerPrivate suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-197.1 (P1) | When the 06:00 run runs, Then every page+item with orders from the first day of last month to today gets a Mira RTS (source auto, rounded to 0.5) with an auto reason (trend and Set RTS gap when large); an item whose key is too long is skipped whole and the rest still run | `test_S_197_P1_1…` (3 tests) | passed |
+| S-197.2 (P1) | Given 60% in transit at a young age, Then the estimate is above the RTS so far, per p(age) | `test_S_197_P1_2…` | passed |
+| S-197.3 (P1) | Given the analyst writes a value after 06:00, Then it stays until the next 06:00 run (a value before 06:00 is replaced); history keeps every value with its source | `test_S_197_P1_3…` | passed |
+| S-197.4 (P1) | Given orders that became final, Then the 7- and 14-day-old estimates (the analyst's if she adjusted that day) are compared with the actual RTS of the same orders, shown in the "Mira RTS accuracy" column with the last 7 days on hover, and the feed has a daily mean absolute error | `test_S_197_P1_4…` (3 tests) | passed |
+| S-197.5 (P1) | When an estimate is made as of a past date, Then only statuses and rates known then are used | `test_S_197_P1_5…` (2 tests) | passed |
+| S-197.6 (P1) | When the run runs again the same day, Then no history is added | `test_S_197_P1_6…` | passed |
+| S-197.7 (P1) | Existing suites pass (no new failures vs the base) | full `tests/Feature` run | passed |
+| S-197.8 | During 03:00–03:45 the command refuses to run; `--as-of` prints a replay and writes nothing | `test_S_197_never_runs…`, `test_S_197_as_of_replay…` | passed |
