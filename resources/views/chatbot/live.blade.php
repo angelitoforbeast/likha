@@ -4,13 +4,15 @@
 
 @php
     $c = $feed['counts'];
-    // Ang mga hanay ng bawat bot: [pangalan, paliwanag, kulay].
+    // Ang mga bot: [pangalan, paliwanag, kulay].
     $bots = [
         'forbeast' => ['Bot 1', 'Forbeast', 'b1'],
         'incepxionbot' => ['Bot 2', 'Incepxionbot', 'b2'],
         'botcake' => ['Botcake', 'fallback', 'bc'],
     ];
     $linked = $c['linked'] + ['botcake' => true];
+    // Ang pangalan ng site (Likha o Incepxion), ayon sa APP_URL.
+    $site = \App\Services\Chatbot\ForbeastSite::label(\App\Services\Chatbot\ForbeastSite::self());
     // Ang paliwanag sa ilalim ng average na reply time, ayon sa estado ng Forbeast (iisa sa server at sa script).
     $notes = [
         'ok' => 'customer sent → our reply sent, on Meta’s clock (Forbeast pages)',
@@ -21,14 +23,27 @@
     $rt = $c['reply_time'];
     $rtNote = $notes[$rt['state'] === 'ok' && $rt['seconds'] === null ? 'none' : $rt['state']] ?? $notes['error'];
     $last = $c['last_order'];
-    $lastText = $last ? $last['page'] . ' · ' . $last['at'] . ($last['bot'] ? ' · ' . $bots[$last['bot']][0] : '') : 'No order yet today';
+    $lastText = $last ? mb_strimwidth($last['page'], 0, 24, '…') . ' · ' . $last['at'] . ($last['bot'] ? ' · ' . $bots[$last['bot']][0] : '') : 'no order yet today';
     $n = fn ($v) => number_format((int) $v);
+    // Ang dalawang ayos ng neural map (viewBox units): malapad para sa TV, makitid (patayo) para sa telepono.
+    $maps = [
+        'wide' => ['key' => 'wide', 'w' => 1200, 'h' => 660, 'core' => [600, 330, 96], 'hub' => 24, 'scale' => 1, 'big' => 30, 'inq' => [40, 40],
+            'bots' => ['forbeast' => [200, 185], 'incepxionbot' => [200, 350], 'botcake' => [200, 515]], 'fu' => [1000, 175], 'ord' => [1000, 480],
+            'paths' => ['forbeast' => 'M 224 185 C 360 185 420 300 506 318', 'incepxionbot' => 'M 224 350 C 340 350 420 336 504 334',
+                'botcake' => 'M 224 515 C 360 515 420 370 506 345', 'fu' => 'M 694 318 C 790 300 860 175 974 175', 'ord' => 'M 694 345 C 790 360 860 480 974 480'],
+            'replies' => ['forbeast' => [432, 258], 'incepxionbot' => [410, 326], 'botcake' => [432, 424]], 'unknown' => [40, 640], 'last' => [1000, 594]],
+        'narrow' => ['key' => 'narrow', 'w' => 400, 'h' => 830, 'core' => [200, 430, 74], 'hub' => 18, 'scale' => .38, 'big' => 22, 'inq' => [20, 34],
+            'bots' => ['forbeast' => [70, 190], 'incepxionbot' => [200, 190], 'botcake' => [330, 190]], 'fu' => [100, 690], 'ord' => [300, 690],
+            'paths' => ['forbeast' => 'M 70 272 C 70 330 150 340 186 360', 'incepxionbot' => 'M 200 272 L 200 356', 'botcake' => 'M 330 272 C 330 330 250 340 214 360',
+                'fu' => 'M 185 503 C 160 580 110 600 100 672', 'ord' => 'M 215 503 C 240 580 290 600 300 672'],
+            'replies' => ['forbeast' => [70, 258], 'incepxionbot' => [200, 258], 'botcake' => [330, 258]], 'unknown' => [20, 74], 'last' => [200, 808]],
+    ];
 @endphp
 
 @section('content')
 <div class="lv" data-live data-live-board>
     <header class="lv-top">
-        <h1>LIKHA LIVE</h1>
+        <h1>{{ strtoupper($site) }} LIVE</h1>
         <span class="lv-status" data-live-status="live"><i aria-hidden="true"></i><span data-live-state>LIVE</span></span>
         <form method="GET" action="{{ route('chatbot.live') }}" class="lv-filter" aria-label="Filters">
             <label for="lv-page">Page</label>
@@ -50,41 +65,17 @@
     </section>
 
     <main class="lv-board">
-        <section class="lv-stages" aria-label="Flow from input to orders">
-            <div class="lv-sh lv-sh-in">INPUT <span class="lv-arr" aria-hidden="true">▶</span><em>Customer nag-message · <span data-live-count="messages">{{ $n($c['messages']['today']) }}</span> today</em></div>
-            <div class="lv-sh lv-sh-pr">PROCESS <span class="lv-arr" aria-hidden="true">▶</span><em>Bot nag-iisip (flow + AI)</em></div>
-            <div class="lv-sh lv-sh-out">OUTPUT <span class="lv-arr" aria-hidden="true">▶</span><em>Bot sumagot · confirmed ng Meta</em></div>
-            <div class="lv-sh lv-sh-ord">ORDERS<em>Resulta</em></div>
-
-            @foreach($bots as $bot => [$name, $sub, $tone])
-                <div class="lv-cell lv-in {{ $tone }}" style="grid-row: {{ $loop->iteration + 1 }}" data-bot-row="{{ $bot }}" data-linked="{{ $linked[$bot] ? 1 : 0 }}" data-cell="in-{{ $bot }}">
-                    <span class="lv-tag">{{ strtoupper($name) }}<em>{{ $sub }}</em></span>
-                    <b data-live-count="in-{{ $bot }}">{{ $n($c['bots']['in'][$bot]) }}</b><span class="lv-off">not linked</span>
-                    <span class="lv-sub">messages in</span>
-                </div>
-                <div class="lv-rail {{ $tone }}" style="grid-row: {{ $loop->iteration + 1 }}" data-rail="{{ $bot }}" aria-hidden="true"></div>
-                <div class="lv-cell lv-out {{ $tone }}" style="grid-row: {{ $loop->iteration + 1 }}" data-linked="{{ $linked[$bot] ? 1 : 0 }}" data-cell="out-{{ $bot }}">
-                    <span class="lv-tag">{{ strtoupper($name) }}<em>{{ $sub }}</em></span>
-                    <b data-live-count="out-{{ $bot }}">{{ $n($c['bots']['out'][$bot]) }}</b><span class="lv-off">not linked</span>
-                    <span class="lv-sub">replies confirmed</span>
-                </div>
+        <section class="lv-map" aria-label="Neural map">
+            <div class="lv-map-head"><span>NEURAL MAP</span><em>live activity · today's totals</em></div>
+            @foreach($maps as $L)
+                @include('chatbot.partials.live-map', ['L' => $L])
             @endforeach
-            <p class="lv-unknown lv-unknown-in" data-live-unknown="in" @if(!$c['bots']['in']['unknown']) hidden @endif>+<span data-live-count="in-unknown">{{ $n($c['bots']['in']['unknown']) }}</span> from before the bot was recorded</p>
-            <p class="lv-unknown lv-unknown-out" data-live-unknown="out" @if(!$c['bots']['out']['unknown']) hidden @endif>+<span data-live-count="out-unknown">{{ $n($c['bots']['out']['unknown']) }}</span> with no bot recorded</p>
-
-            <div class="lv-core" data-live-core>
-                <div class="lv-ring"><span>LIKHA BOT</span></div>
-                <h3>AI ANSWERS TODAY</h3>
-                <div class="lv-ai" data-live-flash="ai"><span data-live-count="ai">{{ $n($c['ai']['today']) }}</span></div>
-                <h3>FOLLOW-UPS SENT</h3>
-                <div class="lv-fu" data-live-flash="follow_ups"><span data-live-count="follow_ups">{{ $n($c['follow_ups']['today']) }}</span></div>
-            </div>
-
-            <div class="lv-ords" data-live-flash="orders">
-                <h3>ORDERS SAVED</h3>
-                <b data-live-count="orders">{{ $n($c['orders']['today']) }}</b>
-                <div class="lv-last">Last order<br><span data-live-last-order>{{ $lastText }}</span></div>
-            </div>
+            <ul class="lv-legend" aria-label="Legend">
+                <li><i class="b1"></i><i class="b2"></i><i class="bc"></i>message → core</li>
+                <li><i class="ok"></i>reply confirmed → bot</li>
+                <li><i class="fu"></i>follow-up</li>
+                <li><i class="ord"></i>order</li>
+            </ul>
         </section>
 
         <aside class="lv-stream" aria-labelledby="lv-h-log">
@@ -100,9 +91,9 @@
 
 @push('styles')
 <style>
-    /* Scoreboard sa TV: itim, malalaking numero na nababasa mula sa kabilang dulo ng kuwarto; 1920 × 1080 ang target, at
-       isang column sa makitid na screen (390 px). Ang laki ay sumusunod sa lapad ng screen (rem mula sa vw). */
-    :root { --bg: #05070a; --panel: #0b1016; --ink: #f3efe6; --mut: #8b94a3; --line: #1c2430;
+    /* Scoreboard sa TV: madilim na navy, malalaking numero sa itaas na nababasa mula sa kabilang dulo ng kuwarto, ang neural
+       map sa gitna at ang 9 na linya ng Latest sa kanan; 1920 × 1080 ang target, at isang column sa telepono (390 px). */
+    :root { --bg: #0a101c; --panel: #0d1626; --ink: #eef2f7; --mut: #8592a6; --line: #1a2638; --net: #2b4566;
         --b1: #38bdf8; --b2: #a3e635; --bc: #94a3b8; --ai: #f472b6; --fu: #a78bfa; --ord: #fbbf24; --ok: #34d399;
         --f: "Bahnschrift", "DIN Condensed", "Arial Narrow", "Segoe UI", system-ui, sans-serif; }
     * { box-sizing: border-box; margin: 0; }
@@ -135,51 +126,62 @@
     .lv-kpi.r b { color: var(--ok); } .lv-kpi.t b { color: #fff; } .lv-kpi.o b { color: var(--ord); } .lv-kpi.c b { color: var(--b1); }
 
     .lv-board { flex: 1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); min-height: 0; }
-    .lv-stages { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, .85fr); grid-template-rows: auto repeat(3, minmax(0, 1fr)) auto;
-        position: relative; border-right: 1px solid var(--line); }
-    .lv-sh { grid-row: 1; padding: .6rem 1.2rem; font-size: 1rem; letter-spacing: .2em; font-weight: 700; border-bottom: 1px solid var(--line); color: var(--mut); min-width: 0; }
-    .lv-sh em { display: block; font-style: normal; letter-spacing: .02em; font-weight: 400; font-size: .8rem; opacity: .8; }
-    .lv-arr { float: right; color: var(--line); }
-    .lv-sh-in { grid-column: 1; } .lv-sh-pr { grid-column: 2; } .lv-sh-out { grid-column: 3; } .lv-sh-ord { grid-column: 4; }
-    .b1 { --c: var(--b1); } .b2 { --c: var(--b2); } .bc { --c: var(--bc); }
-    .lv-cell { min-width: 0; padding: .6rem 1.2rem; border-bottom: 1px solid var(--line); position: relative; z-index: 2; display: flex; flex-direction: column; justify-content: flex-start; }
-    .lv-in { grid-column: 1; } .lv-out { grid-column: 3; }
-    .lv-tag { font-size: .95rem; letter-spacing: .12em; font-weight: 700; color: var(--c); }
-    .lv-tag em { font-style: normal; color: var(--mut); letter-spacing: .02em; font-weight: 400; margin-left: .4em; }
-    .lv-cell b { font-size: clamp(2.4rem, 3.7vw, 6.2rem); line-height: 1.05; font-weight: 700; color: var(--c); transition: color .5s; white-space: nowrap; }
-    .lv-cell.is-flash b { color: #fff; }
-    .lv-sub { font-size: .85rem; color: var(--mut); }
-    .lv-off { display: none; font-size: 1.4rem; color: var(--mut); letter-spacing: .08em; padding: .6em 0; }
-    .lv-cell[data-linked="0"] b, .lv-cell[data-linked="0"] .lv-sub { display: none; }
-    .lv-cell[data-linked="0"] .lv-off { display: block; }
-    .lv-cell[data-linked="0"] .lv-tag { opacity: .55; }
-    .lv-rail { grid-column: 1 / 4; align-self: end; height: 2px; margin-bottom: 1.1rem; background: linear-gradient(90deg, var(--c), transparent 90%); opacity: .5; position: relative; z-index: 1; }
-    .lv-pk { position: absolute; top: -5px; left: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 14px var(--c); }
-    .lv-unknown { grid-row: 5; font-size: .8rem; color: var(--mut); padding: .3rem 1.2rem; min-width: 0; }
-    .lv-unknown-in { grid-column: 1; } .lv-unknown-out { grid-column: 3; }
+    .lv-map { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: .5rem .8rem .3rem; }
+    .lv-map-head { display: flex; gap: .8rem; align-items: baseline; font-size: .85rem; letter-spacing: .2em; font-weight: 700; color: var(--b1); }
+    .lv-map-head em { font-style: normal; font-weight: 400; color: var(--mut); letter-spacing: .1em; font-size: .75rem; }
+    .lv-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem 1.4rem; list-style: none; padding: .3rem 0 0; font-size: .75rem; color: var(--mut); }
+    .lv-legend i { display: inline-block; width: 1.2em; height: 2px; margin-right: .3em; vertical-align: middle; background: var(--c); }
+    .lv-legend i + i { margin-left: -.1em; }
 
-    .lv-core { grid-column: 2; grid-row: 2 / 6; z-index: 3; min-width: 0; background: radial-gradient(circle at 50% 42%, #0f2a22, var(--panel) 70%);
-        border-left: 1px solid var(--line); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: .3rem; padding: 1rem; }
-    .lv-ring { margin-bottom: 1.2rem; width: min(12rem, 60%); aspect-ratio: 1; border-radius: 50%; border: 3px solid var(--ok); display: grid; place-items: center; position: relative; animation: lv-beat 3.6s ease-in-out infinite; transition: box-shadow .4s; }
-    .lv-ring::after { content: ""; position: absolute; inset: -14px; border-radius: 50%; border: 2px dashed rgba(52, 211, 153, .4); animation: lv-spin 30s linear infinite; }
-    .lv-ring span { font-size: 1.3rem; font-weight: 700; letter-spacing: .12em; }
-    .lv-core.is-busy .lv-ring { box-shadow: 0 0 40px rgba(52, 211, 153, .55); }
-    .lv-core h3, .lv-ords h3 { font-size: .9rem; letter-spacing: .16em; color: var(--mut); font-weight: 400; }
-    .lv-ai { font-size: clamp(2.2rem, 3.4vw, 5.6rem); font-weight: 700; color: var(--ai); line-height: 1; transition: color .5s; }
-    .lv-fu { font-size: 1.8rem; font-weight: 700; color: var(--fu); transition: color .5s; }
-    .lv-ai.is-flash, .lv-fu.is-flash { color: #fff; }
-
-    .lv-ords { grid-column: 4; grid-row: 2 / 6; z-index: 3; min-width: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 1rem; gap: .4rem;
-        background: linear-gradient(180deg, rgba(251, 191, 36, .05), transparent); }
-    .lv-ords b { font-size: clamp(4rem, 8vw, 13rem); line-height: 1; color: var(--ord); font-weight: 700; transition: transform .3s; white-space: nowrap; }
-    .lv-ords.is-flash b { transform: scale(1.06); }
-    .lv-last { font-size: .85rem; color: var(--mut); min-height: 2.6em; }
-    .lv-last span { font-size: 1.05rem; color: var(--ord); overflow-wrap: anywhere; }
+    /* Ang neural map (SVG). */
+    .nm { display: block; width: 100%; flex: 1; min-height: 0; margin-top: .3rem; font-family: var(--f); }
+    .nm-narrow { display: none; }
+    .b1 { --c: var(--b1); } .b2 { --c: var(--b2); } .bc { --c: var(--bc); } .fu { --c: var(--fu); } .ord { --c: var(--ord); } .ok { --c: var(--ok); }
+    .nm-bg { fill: var(--panel); }
+    .nm-gridline { fill: none; stroke: #131f33; stroke-width: 1; }
+    .nm-bracket { fill: none; stroke: #2a3a52; stroke-width: 2; }
+    .nm-line { stroke: var(--c); stroke-opacity: .22; stroke-width: 1; }
+    .nm-node { fill: var(--panel); stroke: var(--c); stroke-opacity: .7; stroke-width: 1.4; }
+    .nm-dot { fill: var(--c); fill-opacity: .8; }
+    .nm-tw { animation: nm-tw 5s ease-in-out infinite alternate; }
+    .nm-path { fill: none; stroke: var(--c); stroke-opacity: .35; stroke-width: 1.6; }
+    .nm-halo { fill: none; stroke: var(--c); stroke-opacity: .25; stroke-width: 1; stroke-dasharray: 3 5; }
+    .nm-hub { fill: color-mix(in srgb, var(--c) 14%, var(--panel)); stroke: var(--c); stroke-width: 2; transition: fill .4s; }
+    .nm-icon { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .nm-cluster.is-hit .nm-hub { fill: color-mix(in srgb, var(--c) 55%, var(--panel)); }
+    .nm-cluster.is-hit .nm-halo { stroke-opacity: .9; }
+    .nm text { font-family: var(--f); }
+    .nm-h { fill: var(--c, var(--b1)); font-size: 20px; font-weight: 700; letter-spacing: .2em; }
+    .nm-cluster .nm-h { text-anchor: middle; }
+    .nm-sub { fill: var(--mut); font-size: 12px; letter-spacing: .08em; }
+    .nm-mid { text-anchor: middle; }
+    .nm-tag { fill: var(--c); font-size: 14px; font-weight: 700; letter-spacing: .12em; text-anchor: middle; }
+    .nm-tag2 { fill: var(--mut); font-weight: 400; font-size: 11px; }
+    .nm-count { fill: var(--c); font-weight: 700; text-anchor: middle; }
+    .nm-off { display: none; fill: var(--mut); font-size: 14px; letter-spacing: .08em; text-anchor: middle; }
+    [data-linked="0"] .nm-count, .nm-reply[data-linked="0"] { display: none; }
+    [data-linked="0"] .nm-off { display: inline; }
+    .nm-cluster[data-linked="0"] { opacity: .5; }
+    .nm-reply { fill: var(--ok); font-size: 14px; font-weight: 700; text-anchor: middle; }
+    .nm-last { fill: var(--ord); font-size: 15px; text-anchor: middle; }
+    .nm-core-arc { fill: none; stroke: var(--b1); stroke-opacity: .3; stroke-width: 2; stroke-dasharray: 120 40 30 60; }
+    .nm-core-spin { fill: none; stroke: var(--fu); stroke-opacity: .55; stroke-width: 2.5; stroke-dasharray: 90 30 10 30; transform-box: fill-box; transform-origin: center; animation: nm-spin 40s linear infinite; }
+    .nm-core-ring { stroke: var(--b1); stroke-opacity: .8; stroke-width: 2.5; transform-box: fill-box; transform-origin: center; animation: nm-beat 4s ease-in-out infinite; transition: stroke .4s; }
+    .nm-core-inner { fill: none; stroke: var(--fu); stroke-opacity: .35; stroke-width: 1; stroke-dasharray: 2 6; }
+    .nm-core-name { fill: #fff; font-weight: 700; letter-spacing: .14em; text-anchor: middle; }
+    .nm-core-sub { fill: var(--mut); letter-spacing: .45em; text-anchor: middle; }
+    .nm-core-ai { fill: var(--ai); font-weight: 700; text-anchor: middle; letter-spacing: .05em; }
+    .nm-core.is-hit .nm-core-ring { stroke: #fff; filter: drop-shadow(0 0 10px rgba(56, 189, 248, .8)); }
+    .nm-narrow .nm-h { font-size: 16px; }
+    .nm-narrow .nm-tag { font-size: 12px; }
+    .nm-narrow .nm-reply { font-size: 12px; }
+    .nm-narrow .nm-sub { font-size: 11px; }
+    .nm-narrow .nm-last { font-size: 13px; }
 
     .lv-stream { padding: .6rem 1.2rem; display: flex; flex-direction: column; min-width: 0; }
     .lv-stream h2 { font-size: 1rem; letter-spacing: .2em; color: var(--mut); padding-bottom: .5rem; border-bottom: 1px solid var(--line); margin-bottom: .4rem; font-weight: 700; }
     .lv-stream ol { list-style: none; padding: 0; display: grid; grid-template-rows: repeat(9, minmax(0, 1fr)); flex: 1; }
-    .lv-stream li { display: grid; grid-template-columns: auto 6.6em minmax(0, 1fr); gap: .7rem; align-items: baseline; border-bottom: 1px solid #0f151d; font-size: 1rem; min-width: 0; animation: lv-in .6s both; }
+    .lv-stream li { display: grid; grid-template-columns: auto 6.6em minmax(0, 1fr); gap: .7rem; align-items: baseline; border-bottom: 1px solid #111b2b; font-size: 1rem; min-width: 0; animation: lv-in .6s both; }
     .lv-stream li:nth-child(n+6) { opacity: .7; } .lv-stream li:nth-child(n+8) { opacity: .45; }
     .lv-stream li.lv-empty { display: block; color: var(--mut); border: 0; }
     .lv-stream time { color: var(--mut); }
@@ -189,13 +191,14 @@
     .t-order { font-weight: 700; }
 
     @keyframes lv-ping { 0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, .6); } 100% { box-shadow: 0 0 0 .8rem rgba(52, 211, 153, 0); } }
-    @keyframes lv-beat { 50% { transform: scale(1.04); } }
-    @keyframes lv-spin { to { transform: rotate(360deg); } }
     @keyframes lv-in { from { opacity: 0; } }
+    @keyframes nm-tw { from { opacity: .35; } to { opacity: 1; } }
+    @keyframes nm-spin { to { transform: rotate(360deg); } }
+    @keyframes nm-beat { 50% { transform: scale(1.025); } }
 
     /* Malapad: isang screen, walang scroll ng page (ang stream ay 9 na linya lang). */
     @media (min-width: 901px) { .lv { height: 100vh; } .lv-board { overflow: hidden; } }
-    /* Makitid (telepono, 390 px): isang column, ayon sa daloy: input, process, output, orders, saka ang stream. */
+    /* Makitid (telepono, 390 px): isang column; ang mapa ay patayo (bot sa itaas, core sa gitna, follow-up at orders sa ibaba). */
     @media (max-width: 900px) {
         .lv-top { padding: .6rem 1rem; }
         .lv-sp { margin-left: 0; }
@@ -204,22 +207,15 @@
         .lv-kpi:nth-child(2) { border-right: 0; }
         .lv-kpi b { font-size: clamp(2rem, 10vw, 3rem); }
         .lv-board { display: block; }
-        .lv-stages { display: flex; flex-direction: column; border-right: 0; }
-        .lv-sh-in { order: 1; } .lv-in { order: 2; } .lv-unknown-in { order: 3; } .lv-sh-pr { order: 4; } .lv-core { order: 5; }
-        .lv-sh-out { order: 6; } .lv-out { order: 7; } .lv-unknown-out { order: 8; } .lv-sh-ord { order: 9; } .lv-ords { order: 10; }
-        .lv-rail, .lv-arr { display: none; }
-        .lv-cell { padding: .6rem 1rem; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem; }
-        .lv-cell b { font-size: 2.4rem; }
-        .lv-cell .lv-sub { display: none; }
-        .lv-off { padding: 0; font-size: 1rem; }
-        .lv-core, .lv-ords { padding: 1.2rem; }
-        .lv-ords b { font-size: 5rem; }
+        .lv-map { border-right: 0; padding: .5rem .5rem .3rem; }
+        .nm-wide { display: none; }
+        .nm-narrow { display: block; flex: none; height: auto; }
         .lv-stream { padding: .8rem 1rem; }
         .lv-stream ol { grid-template-rows: none; }
         .lv-stream li { padding: .4rem 0; grid-template-columns: auto 5.6em minmax(0, 1fr); gap: .5rem; }
     }
-    /* Reduced motion: walang gumagalaw (walang tuldok sa riles, tibok, ikot o fade); ang kulay lang ang nagbabago, at ang
-       mga bilang ay gumagana pa rin. */
+    /* Reduced motion: walang gumagalaw (walang ilaw sa path, tibok, ikot o kislap); ang kulay lang ng tinamaan ang
+       nagbabago, at ang mga bilang ay gumagana pa rin. */
     @media (prefers-reduced-motion: reduce) {
         *, *::before, *::after { animation: none !important; transition: none !important; }
     }
@@ -228,21 +224,26 @@
 
 @push('scripts')
 <script>
-// /chatbot/live: ang feed ay pino-poll kada 5 segundo (tumitigil kapag nakatago ang tab), at ang bawat bagong event ay may
-// maikling galaw. Tumatakbo ito buong araw sa TV: walang listahang lumalaki (ang stream ay 9 na linya, ang mga tuldok sa
-// riles ay may hangganan at inaalis pagdating). Ang text mula sa server (pangalan ng page) ay textContent lang.
+// /chatbot/live: ang feed ay pino-poll kada 5 segundo (tumitigil kapag nakatago ang tab); ang bawat bagong event ay isang
+// ilaw sa neural map: ang mensahe mula sa cluster ng bot papunta sa core; ang kumpirmadong sagot, follow-up at order mula
+// sa core palabas. Tumatakbo ito buong araw sa TV, kaya walang lumalaking DOM: hanggang 30 ilaw na ginagamit muli (ang
+// sobra ay hindi na iginuguhit), iisang animation loop, at 9 na linya lang sa stream. Ang text mula sa server (pangalan ng
+// page) ay textContent lang.
 (() => {
     const boot = JSON.parse(document.getElementById('live-data').textContent);
     const root = document.querySelector('[data-live]');
     const mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-    const live = window.likhaLive = {reduced: !!(mq && mq.matches), cursor: boot.cursor, counts: boot.counts, timer: null, inflight: false, fail: 0, dots: 0};
-    const MAX_DOTS = 24, LOG_LINES = 9;
+    const live = window.likhaLive = {reduced: !!(mq && mq.matches), cursor: boot.cursor, counts: boot.counts, timer: null, inflight: false, fail: 0, active: 0, sampled: 0};
+    const LIGHTS = 30, LOG_LINES = 9, MAX_PER_POLL = 60, TRAVEL = 1800;
     const LABEL = {message: 'MESSAGE', confirmed: 'REPLY', ai: 'AI', follow_up: 'FOLLOW-UP', order: 'ORDER'};
+    const COLOR = {forbeast: '--b1', incepxionbot: '--b2', botcake: '--bc', confirmed: '--ok', follow_up: '--fu', order: '--ord'};
     const fmt = n => Number(n || 0).toLocaleString('en-US');
-    const one = s => root.querySelector(s);
+    const all = s => root.querySelectorAll(s);
+    const css = v => getComputedStyle(root).getPropertyValue(v).trim() || '#fff';
+    const toggle = (e, on) => on ? e.removeAttribute('hidden') : e.setAttribute('hidden', '');
 
     function put(key, value, attr = 'data-live-count') {
-        for (const e of root.querySelectorAll('[' + attr + '="' + key + '"]')) if (e.textContent !== value) e.textContent = value;
+        for (const e of all('[' + attr + '="' + key + '"]')) if (e.textContent !== value) e.textContent = value;
     }
     function setCounts(c) {
         live.counts = c;
@@ -254,63 +255,97 @@
         put('follow_ups', fmt(c.follow_ups.today));
         const rt = c.reply_time || {state: 'error', seconds: null};
         put('reply_time', rt.seconds === null ? '—' : Number(rt.seconds).toFixed(1));
-        one('[data-live-unit]').hidden = rt.seconds === null;
+        for (const e of all('[data-live-unit]')) toggle(e, rt.seconds !== null);
         put('reply_time', boot.notes[rt.state === 'ok' && rt.seconds === null ? 'none' : rt.state] || boot.notes.error, 'data-live-note');
         for (const side of ['in', 'out']) {
             for (const bot of Object.keys(boot.bots)) put(side + '-' + bot, fmt(c.bots[side][bot]));
             put(side + '-unknown', fmt(c.bots[side].unknown));
-            one('[data-live-unknown="' + side + '"]').hidden = !c.bots[side].unknown;
+            for (const e of all('[data-live-unknown="' + side + '"]')) toggle(e, !!c.bots[side].unknown);
         }
         for (const bot of Object.keys(boot.bots)) {
-            const on = bot === 'botcake' || !!(c.linked && c.linked[bot]);
-            for (const side of ['in', 'out']) one('[data-cell="' + side + '-' + bot + '"]').dataset.linked = on ? '1' : '0';
+            const on = bot === 'botcake' || !!(c.linked && c.linked[bot]) ? '1' : '0';
+            for (const e of all('[data-bot-row="' + bot + '"], [data-reply-row="' + bot + '"]')) e.setAttribute('data-linked', on);
         }
-        const o = c.last_order;
-        one('[data-live-last-order]').textContent = o ? o.page + ' · ' + o.at + (o.bot && boot.bots[o.bot] ? ' · ' + boot.bots[o.bot] : '') : 'No order yet today';
+        const o = c.last_order, page = o ? (o.page.length > 24 ? o.page.slice(0, 23) + '…' : o.page) : '';
+        const last = o ? page + ' · ' + o.at + (o.bot && boot.bots[o.bot] ? ' · ' + boot.bots[o.bot] : '') : 'no order yet today';
+        for (const e of all('[data-live-last-order]')) if (e.textContent !== last) e.textContent = last;
     }
 
-    function flash(e, ms = 700) {
-        if (!e) return;
-        e.classList.add('is-flash');
-        clearTimeout(e._lvT);
-        e._lvT = setTimeout(() => e.classList.remove('is-flash'), ms);
+    // Ang nakikitang mapa (malapad o makitid) at ang mga ilaw nito: iisang hanay ng LIGHTS na bilog, ginagamit muli.
+    const maps = {};
+    for (const svg of all('[data-map]')) {
+        const layer = svg.querySelector('[data-lights]'), pool = [];
+        for (let i = 0; i < LIGHTS; i++) {
+            const g = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            g.setAttribute('r', svg.dataset.map === 'wide' ? 5 : 4);
+            g.setAttribute('filter', 'url(#nm-glow-' + svg.dataset.map + ')');
+            g.style.display = 'none';
+            layer.appendChild(g);
+            pool.push({el: g, busy: false});
+        }
+        const paths = {};
+        for (const p of svg.querySelectorAll('[data-path]')) paths[p.dataset.path] = {el: p, len: p.getTotalLength()};
+        maps[svg.dataset.map] = {svg, pool, paths};
     }
-    function busy() {
-        const core = one('[data-live-core]');
-        core.classList.add('is-busy');
-        clearTimeout(live.busyT);
-        live.busyT = setTimeout(() => core.classList.remove('is-busy'), 1600);
+    const visible = () => Object.values(maps).find(m => m.svg.getBoundingClientRect().width > 0);
+    const moving = [];
+    let raf = 0;
+    function frame(now) {
+        for (let i = moving.length - 1; i >= 0; i--) {
+            const m = moving[i], k = Math.min(1, (now - m.t0) / m.dur);
+            const pt = m.path.el.getPointAtLength(m.path.len * (m.out ? k : 1 - k));
+            m.light.el.setAttribute('cx', pt.x); m.light.el.setAttribute('cy', pt.y);
+            if (k >= 1) {
+                m.light.el.style.display = 'none';
+                m.light.busy = false;
+                moving.splice(i, 1);
+                live.active--;
+                hit(m.map, m.target);
+            }
+        }
+        raf = moving.length ? requestAnimationFrame(frame) : 0;
     }
-    // Isang tuldok sa riles ng bot, mula input hanggang output, kasing-tagal ng average na reply time (1.2 hanggang 8 s).
-    function ride(bot) {
-        const rail = one('[data-rail="' + bot + '"]');
-        if (live.reduced || document.hidden || live.dots >= MAX_DOTS || !rail || !rail.offsetParent) return;
-        const dot = document.createElement('i');
-        if (!dot.animate) return;
-        dot.className = 'lv-pk';
-        rail.appendChild(dot);
-        live.dots++;
-        const s = live.counts.reply_time && live.counts.reply_time.seconds;
-        const ms = Math.min(8000, Math.max(1200, (s || 2.5) * 1000));
-        const a = dot.animate([{left: '0%'}, {left: '100%'}], {duration: ms, easing: 'linear'});
-        const done = () => { if (dot.isConnected) { dot.remove(); live.dots--; } };
-        a.onfinish = done;
-        a.oncancel = done;
+    // Isang ilaw sa path: out = mula sa core palabas, kung hindi ay papasok sa core. Walang bakanteng ilaw = hindi iginuguhit.
+    function travel(map, pathKey, out, color, target) {
+        const path = map.paths[pathKey];
+        if (!path) return;
+        if (live.reduced || document.hidden) { hit(map, target); return; }
+        const light = map.pool.find(l => !l.busy);
+        if (!light) { live.sampled++; hit(map, target); return; }
+        light.busy = true;
+        light.el.setAttribute('fill', css(color));
+        light.el.style.display = '';
+        live.active++;
+        moving.push({map, path, light, out, target, t0: performance.now(), dur: TRAVEL});
+        if (!raf) raf = requestAnimationFrame(frame);
+    }
+    function hit(map, target) {
+        const g = map.svg.querySelector('[data-hit="' + target + '"]');
+        if (!g) return;
+        g.classList.add('is-hit');
+        clearTimeout(g._lvT);
+        g._lvT = setTimeout(() => g.classList.remove('is-hit'), 600);
     }
     function show(e) {
+        const map = visible();
+        if (!map) return;
         const bot = e.bot && boot.bots[e.bot] ? e.bot : null;
-        if (e.type === 'message') { if (bot) { flash(one('[data-cell="in-' + bot + '"]')); ride(bot); } busy(); }
-        else if (e.type === 'confirmed') { if (bot) flash(one('[data-cell="out-' + bot + '"]')); }
-        else if (e.type === 'ai') flash(one('[data-live-flash="ai"]'));
-        else if (e.type === 'follow_up') flash(one('[data-live-flash="follow_ups"]'));
-        else if (e.type === 'order') flash(one('[data-live-flash="orders"]'), 900);
+        if (e.type === 'message') bot ? travel(map, bot, false, COLOR[bot], 'core') : hit(map, 'core');
+        else if (e.type === 'confirmed') { if (bot) travel(map, bot, true, COLOR.confirmed, bot); }
+        else if (e.type === 'follow_up') travel(map, 'fu', true, COLOR.follow_up, 'fu');
+        else if (e.type === 'order') travel(map, 'ord', true, COLOR.order, 'ord');
+        else if (e.type === 'ai') hit(map, 'core');
     }
-    // Ang mga event ng isang poll ay ikinakalat sa loob ng ~4 segundo, ayon sa pagkakasunod.
+    // Ang mga event ng isang poll ay ikinakalat sa loob ng ~4 segundo; kapag sobrang dami, isa sa bawat ilan lang ang ilaw
+    // (ang mga order ay laging kasama).
     function play(events) {
-        const gap = Math.min(600, 4200 / Math.max(1, events.length));
-        events.forEach((e, i) => setTimeout(() => show(e), i * gap));
+        const step = Math.ceil(events.length / MAX_PER_POLL);
+        const shown = step > 1 ? events.filter((e, i) => e.type === 'order' || i % step === 0) : events;
+        live.sampled += events.length - shown.length;
+        const gap = Math.min(600, 4200 / Math.max(1, shown.length));
+        shown.forEach((e, i) => setTimeout(() => show(e), i * gap));
     }
-    const logEl = one('[data-live-log]');
+    const logEl = root.querySelector('[data-live-log]');
     function log(events) {
         if (!events.length) return;
         const empty = logEl.querySelector('[data-live-empty]');
@@ -327,7 +362,7 @@
         while (logEl.children.length > LOG_LINES) logEl.lastElementChild.remove();
     }
 
-    const statusEl = one('[data-live-status]');
+    const statusEl = root.querySelector('[data-live-status]');
     function setStatus(state, label) {
         statusEl.dataset.liveStatus = state;
         statusEl.querySelector('[data-live-state]').textContent = label;
@@ -347,7 +382,7 @@
             live.cursor = data.cursor;
             live.fail = 0;
             setCounts(data.counts);
-            one('[data-live-updated]').textContent = data.now;
+            for (const e of all('[data-live-updated]')) e.textContent = data.now;
             log(data.events);
             play(data.events);
             setStatus('live', data.more > 0 ? 'LIVE · +' + fmt(data.more) + ' MORE' : 'LIVE');
@@ -363,8 +398,9 @@
         if (statusEl.dataset.liveStatus === 'off') return;
         if (document.hidden) { clearTimeout(live.timer); setStatus('hidden', 'PAUSED (TAB HIDDEN)'); } else { setStatus('live', 'LIVE'); poll(); }
     });
-    one('[data-live-page]').addEventListener('change', e => e.target.form.submit());
+    root.querySelector('[data-live-page]').addEventListener('change', e => e.target.form.submit());
     if (mq && mq.addEventListener) mq.addEventListener('change', e => { live.reduced = e.matches; });
+    live.show = show;
 
     setCounts(boot.counts);
     live.timer = setTimeout(poll, boot.interval);

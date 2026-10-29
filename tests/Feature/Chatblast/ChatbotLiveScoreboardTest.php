@@ -131,10 +131,24 @@ class ChatbotLiveScoreboardTest extends ChatblastTestCase
             'in-botcake' => '2', 'out-forbeast' => '2', 'out-incepxionbot' => '3', 'out-botcake' => '1', 'ai' => '0', 'follow_ups' => '1'] as $key => $n) {
             $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($n, '#') . '<#', $html, $key);
         }
-        foreach (['INPUT', 'PROCESS', 'OUTPUT', 'ORDERS', 'BOT 1', 'Forbeast', 'BOT 2', 'Incepxionbot', 'BOTCAKE', 'Replies today', 'Avg reply time', 'Orders today', 'Active chats', 'LATEST'] as $label) {
+        foreach (['INQUIRIES', 'LIKHA', 'AI CORE', 'FOLLOW-UP', 'ORDERS', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT', 'BOTCAKE · FALLBACK', 'NEURAL MAP', 'Replies today', 'Avg reply time', 'Orders today', 'Active chats', 'LATEST'] as $label) {
             $this->assertStringContainsString($label, $html);
         }
-        $this->assertStringContainsString('Page Dos · 12:29', $html); // ang huling order
+        $this->assertStringContainsString('Page Dos · 12:29 · Bot 2', $html); // ang huling order
+        // Ang neural map: ang path ng bawat bot papunta sa core, at ng core papunta sa Follow-up at Orders (malapad at makitid).
+        foreach (['forbeast', 'incepxionbot', 'botcake', 'fu', 'ord'] as $path) $this->assertSame(2, substr_count($html, 'data-path="' . $path . '"'), $path);
+    }
+
+    public function test_S_196_1_on_incepxion_the_title_and_core_carry_the_site_name(): void
+    {
+        $this->fakeSpeed(Http::response(self::speedDay(2.4)));
+        config(['app.url' => 'https://incepxion.pro']);
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+
+        $this->assertStringContainsString('<h1>INCEPXION LIVE</h1>', $html);
+        $this->assertMatchesRegularExpression('#class="nm-core-name"[^>]*>INCEPXION<#', $html);
+        $this->assertStringNotContainsString('LIKHA', $html);
     }
 
     public function test_S_196_2_replies_sent_through_incepxionbot_land_in_bot_2s_row_and_events_carry_the_bot(): void
