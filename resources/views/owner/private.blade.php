@@ -1081,6 +1081,18 @@
                     </span>
                   </template>
 
+                  <!-- analyst_rts_acc — Mira RTS accuracy: error (puntos) ng tantya 7 at 14 araw na ang nakalipas; ang huling 7 araw sa hover -->
+                  <template x-if="col.id==='analyst_rts_acc'">
+                    <span>
+                      <template x-if="row.analyst_rts_acc_7 != null || row.analyst_rts_acc_14 != null">
+                        <span :title="!owCompact ? accTip(row) : null" style="font-size:12px;cursor:help;" x-text="accText(row)"></span>
+                      </template>
+                      <template x-if="row.analyst_rts_acc_7 == null && row.analyst_rts_acc_14 == null">
+                        <span style="color:#cbd5e1;">—</span>
+                      </template>
+                    </span>
+                  </template>
+
                   <!-- Mga column na pang-Conditional Formatting lang ng Projected RTS at Mira RTS (nakatago bilang default) -->
                   <template x-if="['rts_gap_pts','rts_gap_abs','mira_rts_error_pts','rts_gap_ratio','analyst_gap_pts','analyst_gap_abs'].includes(col.id)">
                     <span style="color:#111;font-size:12px;" x-text="row[col.id] != null ? Number(row[col.id]).toFixed(1) : '—'"></span>
@@ -2196,6 +2208,7 @@
           { id:'analyst_rts',   label:'Mira RTS',   sort:'analyst_rts_pct',      align:'center', minw:110 },
           { id:'analyst_gap_pts', label:'Mira RTS Gap (Set − Mira)', sort:'analyst_gap_pts', align:'center', minw:90 },
           { id:'analyst_gap_abs', label:'Mira RTS Gap (abs)',        sort:'analyst_gap_abs', align:'center', minw:80 },
+          { id:'analyst_rts_acc', label:'Mira RTS accuracy', sort:'analyst_rts_acc_abs', align:'center', minw:120 },
           { id:'rts_gap_pts',   label:'RTS Gap (Set − Projected)', sort:'rts_gap_pts',   align:'center', minw:90 },
           { id:'rts_gap_abs',   label:'RTS Gap (abs)',        sort:'rts_gap_abs',   align:'center', minw:80 },
           { id:'mira_rts_error_pts', label:'Projected RTS Error (pts)', sort:'mira_rts_error_pts', align:'center', minw:95 },
@@ -2575,6 +2588,9 @@
         } else if (colId === 'analyst_rts') {
           if (row.analyst_rts_pct == null) return null;
           L.push(this.analystTip(row));
+        } else if (colId === 'analyst_rts_acc') {
+          if (!(row.analyst_rts_acc_hist || []).length) return null;
+          L.push(this.accTip(row));
         } else if (colId === 'item_val') {
           if (row.item_value === null || row.item_value === undefined) return null;
           if (row.item_value_source === 'cogs') L.push('cogs');
@@ -2886,8 +2902,19 @@
       // Mira RTS ng analyst: dahilan, kailan tinype, at ang dating value.
       analystTip(row){
         return 'Mira RTS ' + Number(row.analyst_rts_pct).toFixed(1) + '%: ' + (row.analyst_rts_reason || '')
-          + ' (tinype ' + String(row.analyst_rts_at || '').slice(0, 16) + '; dati: '
+          + ' (' + (row.analyst_rts_source === 'auto' ? 'auto ' : 'tinype ') + String(row.analyst_rts_at || '').slice(0, 16) + '; dati: '
           + (row.analyst_rts_prev != null ? Number(row.analyst_rts_prev).toFixed(1) + '%' : '—') + ')';
+      },
+
+      // Mira RTS accuracy: "7d +2.5 · 14d −1.0" (tantya − totoong RTS, puntos).
+      accPts(v){ return v == null ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(1); },
+      accText(row){ return '7d ' + this.accPts(row.analyst_rts_acc_7) + ' · 14d ' + this.accPts(row.analyst_rts_acc_14); },
+      accTip(row){
+        const one = (a) => a ? this.accPts(a.err) + ' (tantya ' + Number(a.est).toFixed(1) + '% vs '
+          + (a.act != null ? Number(a.act).toFixed(1) + '%' : '—') + ', ' + Math.round(a.fin) + '% tapos'
+          + (a.src === 'auto' ? '' : ', inayos ni Mira') + ')' : '—';
+        return 'Mira RTS accuracy: error = tantya − totoong RTS ng parehong mga order (puntos)\n'
+          + (row.analyst_rts_acc_hist || []).map(h => h.d + ': 7d ' + one(h.a7) + ' · 14d ' + one(h.a14)).join('\n');
       },
 
       // Projected RTS: ang paliwanag sa title ng cell.
@@ -3152,6 +3179,7 @@
           case 'rts_set':       return row.rts_pct;
           case 'mira_rts':      return row.mira_rts_pct;
           case 'analyst_rts':   return row.analyst_rts_pct;
+          case 'analyst_rts_acc': return row.analyst_rts_acc_abs;
           case 'proj_profit_mira': return row.projected_profit_mira;
           case 'hold':          return row.hold_units ?? null;
           case 'action':        return row.action_comment ?? null;

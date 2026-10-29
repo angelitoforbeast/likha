@@ -212,6 +212,27 @@ class AnalystRtsDailyTest extends RtsProjectionTestCase
         $this->assertEquals([['d' => '2026-10-23', 'mae_7' => 22.5, 'n_7' => 1, 'mae_14' => 10, 'n_14' => 1]], $feed);
     }
 
+    public function test_S_197_P1_4_owner_private_shows_the_accuracy_column_with_the_last_7_days_in_the_hover(): void
+    {
+        $this->threeRuns();
+        $this->actingAs($this->user());
+
+        $rows = array_column($this->getJson('/owner/private/item-summary?start_date=2026-10-05&end_date=2026-10-05')->assertOk()->json('rows'), null, 'page_key');
+        $row = $rows['page a'];
+        $this->assertEqualsWithDelta(22.5, $row['analyst_rts_acc_7'], 0.001);
+        $this->assertEqualsWithDelta(10.0, $row['analyst_rts_acc_14'], 0.001);
+        $this->assertEqualsWithDelta(22.5, $row['analyst_rts_acc_abs'], 0.001);
+        $this->assertSame(['2026-10-23'], array_column($row['analyst_rts_acc_hist'], 'd'));
+        $this->assertSame('auto', $row['analyst_rts_source']);
+
+        $html = $this->get('/owner/private')->assertOk()->getContent();
+        foreach (["id:'analyst_rts_acc'", "label:'Mira RTS accuracy'", 'accTip(row)', 'accText(row)'] as $needle) {
+            $this->assertStringContainsString($needle, $html, $needle);
+        }
+        $cat = array_column(\App\Http\Controllers\OwnerColumnSettingsController::CATALOG['owner_private'], 'label', 'id');
+        $this->assertSame('Mira RTS accuracy', $cat['analyst_rts_acc']);
+    }
+
     public function test_S_197_never_runs_during_the_night_astra_step(): void
     {
         $this->orders(10, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned');
