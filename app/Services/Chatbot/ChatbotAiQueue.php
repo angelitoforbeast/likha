@@ -76,7 +76,7 @@ class ChatbotAiQueue
             'flow_id' => $run->flowId, 'node_id' => $nodeId, 'run_id' => $run->runId, 'page_name' => $run->pageName, 'model' => $model,
             'messages' => json_encode($messages, JSON_UNESCAPED_UNICODE), 'max_tokens' => $maxTokens,
             'context' => json_encode(['input' => $run->input, 'full_name' => $run->fullName, 'received_at' => $run->receivedAt,
-                'ai_calls' => $run->aiCalls, 'steps' => $run->steps], JSON_UNESCAPED_UNICODE),
+                'ai_calls' => $run->aiCalls, 'steps' => $run->steps, 'ad_group' => $run->adGroup], JSON_UNESCAPED_UNICODE),
             'status' => 'pending', 'deadline_at' => now()->addSeconds(self::timeout()), 'created_at' => now(), 'updated_at' => now(),
         ] + (self::recorded() ? ['path' => 'async'] : []));
         $run->fields->set(CustomerFields::AI, $id);
@@ -165,7 +165,7 @@ class ChatbotAiQueue
     /** Ang text ng walang sagot sa deadline: ang huling provider ng chain ng page ("OpenAI did not answer in time." kapag OpenAI lang). */
     private static function late(object $row): string
     {
-        $chain = ChatbotAiChain::forPage((string) $row->page_name);
+        $chain = ChatbotAiChain::forRow($row);
 
         return ChatbotAiProviders::late($chain ? $chain[array_key_last($chain)]['provider'] : ChatbotAiProviders::OPENAI);
     }

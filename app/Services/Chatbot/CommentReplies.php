@@ -79,7 +79,9 @@ class CommentReplies
         // Muling sinusuri: maaaring pinatay ang bot o inilipat sa Botcake habang naghihintay.
         if (($reason = $this->pageReason($pageName)) !== null) return $this->skip($event, $reason);
 
-        $fields = $this->page->botfields($pageName);
+        // Ang nag-comment na kilalang customer (may chat sa page): ang ad group ng pinakabagong ad niya, gaya ng takbo.
+        $group = ctype_digit((string) $event->from_id) ? app(AdGroups::class)->forCustomer((string) $event->page_id, (string) $event->from_id, $pageName) : null;
+        $fields = $this->page->botfields($pageName, $group);
         // Gaya ng FlowRun: ang botfield na may variable (hal. "Only {{PRICE}} pesos") ay pinupunan muna nang isang antas.
         $run = ['page_id' => (string) $event->page_id, 'page_name' => $pageName, 'current_date' => now('Asia/Manila')->toDateString()];
         $base = ChatbotVars::merge($fields, $run);

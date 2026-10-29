@@ -153,6 +153,23 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertSame(['Hi po! 499 lang po ito.', 'Reply B 499'], [$e->pm_text, $e->reply_text]);
     }
 
+    public function test_S_192_1_a_commenter_whose_latest_ad_is_in_a_group_gets_the_groups_comment_replies(): void
+    {
+        $this->forbeastPage();
+        $this->gateway();
+        CommentReplies::pickUsing(fn (array $options) => $options[0]);
+        $groups = app(\App\Services\Chatbot\AdGroups::class);
+        $groups->setMode('Page Uno', true);
+        $groups->save('Page Uno', null, 'Serum', ['111'], ['comment_pm' => 'Serum PM {{PRICE}}', 'price' => '599']);
+        \App\Models\BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '555', 'name' => 'Ana', 'message' => 'Hi', 'payload' => ['ad_id' => '111'], 'received_at' => now()]);
+
+        $this->comment()->assertOk();                                                                   // from_id 555: ang ad niya ay nasa Serum
+        $this->comment(['comment_id' => '111_333', 'event_id' => 43, 'from_id' => '556'])->assertOk(); // hindi kilala: ang page values
+
+        $this->assertSame(['Serum PM 599', 'Reply A'], [$this->event()->pm_text, $this->event()->reply_text], 'walang Comment Reply 1 ang group: ang sa page');
+        $this->assertSame('Hi po! 499 lang po ito.', $this->event('111_333')->pm_text);
+    }
+
     /** @return array<string, array{0: array, 1: array<int, string>, 2: string, 3: ?string}> values, mga tawag, status, reason */
     public static function parts(): array
     {

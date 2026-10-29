@@ -84,7 +84,7 @@ class ChatbotAiPool extends TicketPool
         $tried = $this->carried[$id] ?? [];
         unset($this->carried[$id]);
         $failed = array_column(array_filter($tried, fn ($a) => !$a['ok']), 'provider');
-        $steps = array_values(array_filter(ChatbotAiChain::forPage((string) $row->page_name), fn ($s) => !in_array($s['provider'], $failed, true)));
+        $steps = array_values(array_filter(ChatbotAiChain::forRow($row), fn ($s) => !in_array($s['provider'], $failed, true)));
         $this->chains[$id] = ['steps' => $steps, 'i' => 0, 'attempts' => $tried, 'token' => 0, 'slot' => null, 'http' => null];
         $this->next($row);
     }

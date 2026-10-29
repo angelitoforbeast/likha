@@ -2,12 +2,23 @@
 
 namespace Tests\Feature\Chatblast;
 
+use App\Models\BotcakeChat;
 use App\Models\ChatbotFlow;
 use App\Models\PageSetting;
 use App\Services\Chatbot\AdGroups;
+use App\Services\Chatbot\ChatbotAiChain;
+use App\Services\Chatbot\ChatbotAiQueue;
+use App\Services\Chatbot\ChatbotPage;
+use App\Services\Chatbot\ChatbotRunner;
+use App\Services\Chatbot\CustomerFields;
+use App\Services\Chatbot\FlowGraph;
+use App\Services\Chatbot\FlowRun;
 use App\Services\ChatbotFields;
 use App\Services\PageSettings;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -17,17 +28,146 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class AdGroupAllValuesTest extends ChatblastTestCase
 {
+    private const SEND = 'https://botcake.io/api/public_api/v1/pages/1001/flows/send_content';
+    private const OPENAI = 'https://api.openai.com/v1/chat/completions';
+    private const LOCAL = 'http://127.0.0.1:11435/v1/chat/completions';
+
     protected function setUp(): void
     {
         parent::setUp();
-        Queue::fake();
         Artisan::call('migrate', ['--path' => [
             'database/migrations/2026_10_20_100000_create_botcake_chats_table.php',
+            'database/migrations/2026_10_22_100000_widen_source_on_botcake_psids.php',
             'database/migrations/2026_10_23_100000_create_chatbot_tables.php',
+            'database/migrations/2026_10_24_100000_add_draft_to_chatbot_flows.php',
+            'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
+            'database/migrations/2026_10_25_100000_create_chatbot_waits_table.php',
+            'database/migrations/2026_10_26_100000_create_chatbot_sequence_tables.php',
+            'database/migrations/2026_10_28_100000_create_chatbot_ai_requests_table.php',
         ]]);
+        config(['services.chatbot.replies_enabled' => true, 'services.botcake.async_sends' => false, 'services.chatbot.ai_async' => false,
+            'services.openai.key' => 'sk-test-not-real', 'services.openai.timeout' => 60,
+            'services.chatbot_ai.providers.local.url' => 'http://127.0.0.1:11435/v1', 'services.chatbot_ai.providers.local.key' => '']);
+        Http::fake([
+            self::SEND => Http::response(['success' => true]),
+            self::OPENAI => Http::response(['choices' => [['message' => ['content' => 'openai answer']]]]),
+            self::LOCAL => Http::response(['choices' => [['message' => ['content' => 'local answer']]]]),
+            '*' => Http::response('not expected', 599),
+        ]);
+        ChatbotAiChain::forget();
         $this->travelTo('2026-10-20 10:00:00');
         $this->page('Precious Lopez', '1001');
-        app(PageSettings::class)->set('Precious Lopez', 'chatbot', 'fill_up_form', 'Page form');
+        $s = app(PageSettings::class);
+        foreach (['fill_up_form' => 'Page form', 'loop_3_form' => 'Page loop', 'prompt_1' => 'Page prompt', 'price' => '199'] as $k => $v) $s->set('Precious Lopez', 'chatbot', $k, $v);
+    }
+
+    /** Ang flow: ang dalawang form, saka ang AI na ang system ay ang Prompt 1 (ipinapadala ang sagot). */
+    private function formAndAiFlow(): void
+    {
+        $flow = ChatbotFlow::create(['name' => 'Form flow', 'graph' => FlowGraph::clean(['nodes' => [
+            ['id' => 'n1', 'type' => 'start'],
+            ['id' => 'n2', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => '{{Fill-Up Form}}|{{Loop 3 Form}}|{{PRICE}}']]]],
+            ['id' => 'n3', 'type' => 'ai', 'config' => ['system' => '{{Prompt 1}}', 'user' => '{{last_input}}', 'save_to' => 'answer', 'history' => 0]],
+            ['id' => 'n4', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => 'AI: {{answer}}']]]],
+        ], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n2'], ['from' => 'n2', 'port' => 'continue', 'to' => 'n3'], ['from' => 'n3', 'port' => 'success', 'to' => 'n4']]])]);
+        DB::table('chatbot_flows')->where('id', $flow->id)->update(['published_at' => now()]);
+        app(ChatbotPage::class)->link('Precious Lopez', $flow->fresh());
+    }
+
+    private function says(string $psid, ?string $ad): void
+    {
+        $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Precious Lopez', 'psid' => $psid, 'name' => 'Ana Cruz', 'message' => 'Hi po',
+            'payload' => $ad === null ? [] : ['ad_id' => $ad], 'received_at' => now()]);
+        app(ChatbotRunner::class)->handle($chat->id);
+    }
+
+    /** @return array<int, string> ang mga text na naipadala sa Botcake para sa PSID */
+    private function sent(string $psid): array
+    {
+        return Http::recorded(fn (HttpRequest $r) => $r->url() === self::SEND && ($r->data()['psid'] ?? null) === $psid)
+            ->map(fn ($p) => $p[0]->data()['data']['content']['messages'][0]['text'] ?? '')->values()->all();
+    }
+
+    /** @return array<int, array{0: string, 1: string}> [aling AI, ang system prompt] ng bawat tawag sa AI */
+    private function aiCalls(): array
+    {
+        return Http::recorded(fn (HttpRequest $r) => in_array($r->url(), [self::OPENAI, self::LOCAL], true))
+            ->map(fn ($p) => [$p[0]->url() === self::LOCAL ? 'local' : 'openai', (string) ($p[0]->data()['messages'][0]['content'] ?? '')])->values()->all();
+    }
+
+    private function serum(array $values): int
+    {
+        $groups = app(AdGroups::class);
+        $groups->setMode('Precious Lopez', true);
+
+        return $groups->save('Precious Lopez', null, 'Serum', ['111'], $values)['id'];
+    }
+
+    public function test_S_192_1_a_group_sets_the_forms_the_prompt_and_the_ai_and_a_customer_without_a_group_gets_the_pages(): void
+    {
+        $this->formAndAiFlow();
+        $this->serum(['fill_up_form' => 'Serum form', 'loop_3_form' => 'Serum loop', 'prompt_1' => 'Serum prompt', 'ai_provider' => 'local', 'ai_local_model' => 'qwen3:14b']);
+
+        $this->says('7001', '111');
+        $this->assertSame(['Serum form|Serum loop|199', 'AI: local answer'], $this->sent('7001'));
+        $this->assertSame([['local', 'Serum prompt']], $this->aiCalls());
+        $this->assertSame('qwen3:14b', Http::recorded(fn (HttpRequest $r) => $r->url() === self::LOCAL)->first()[0]->data()['model']);
+
+        $this->says('7002', '999'); // ad sa walang group
+        $this->says('7003', null);  // walang ad
+        $this->assertSame(['Page form|Page loop|199', 'AI: openai answer'], $this->sent('7002'));
+        $this->assertSame(['Page form|Page loop|199', 'AI: openai answer'], $this->sent('7003'));
+        $this->assertSame([['local', 'Serum prompt'], ['openai', 'Page prompt'], ['openai', 'Page prompt']], $this->aiCalls());
+    }
+
+    public function test_S_192_2_an_empty_group_value_falls_back_to_the_page_value(): void
+    {
+        $this->formAndAiFlow();
+        $id = $this->serum(['fill_up_form' => 'Serum form', 'prompt_1' => 'Serum prompt']);
+        app(AdGroups::class)->setValue('Precious Lopez', $id, 'prompt_1', ''); // binura: ang page value na
+
+        $this->says('7001', '111');
+        $this->assertSame(['Serum form|Page loop|199', 'AI: openai answer'], $this->sent('7001'));
+        $this->assertSame([['openai', 'Page prompt']], $this->aiCalls());
+    }
+
+    public function test_S_192_5_a_page_based_page_ignores_its_groups_values(): void
+    {
+        $this->formAndAiFlow();
+        $this->serum(['fill_up_form' => 'Serum form', 'loop_3_form' => 'Serum loop', 'prompt_1' => 'Serum prompt', 'ai_provider' => 'local']);
+        app(AdGroups::class)->setMode('Precious Lopez', false);
+
+        $this->says('7001', '111');
+        $this->assertSame(['Page form|Page loop|199', 'AI: openai answer'], $this->sent('7001'));
+        $this->assertSame([['openai', 'Page prompt']], $this->aiCalls());
+    }
+
+    public function test_S_192_1_the_inbox_panel_shows_the_customers_group_values(): void
+    {
+        $this->formAndAiFlow();
+        $this->serum(['fill_up_form' => 'Serum form']);
+        foreach (['7001' => '111', '7002' => '999'] as $psid => $ad) {
+            BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Precious Lopez', 'psid' => $psid, 'name' => 'Ana', 'message' => 'Hi', 'payload' => ['ad_id' => $ad], 'received_at' => now()]);
+        }
+        $this->actingAs($this->user());
+        $form = fn (string $psid) => collect($this->getJson('/chatbot/inbox/panel?page_id=1001&psid=' . $psid)->assertOk()->json('botfields'))->firstWhere('label', 'Fill-Up Form')['value'] ?? null;
+
+        $this->assertSame('Serum form', $form('7001'));
+        $this->assertSame('Page form', $form('7002'));
+    }
+
+    public function test_S_192_1_the_ai_answered_by_the_pool_uses_the_groups_ai_too(): void
+    {
+        $id = $this->serum(['ai_provider' => 'local', 'ai_local_model' => 'qwen3:14b']);
+        $run = new FlowRun(1, [], 'Precious Lopez', '1001', [], new CustomerFields(1001, 7001), null, 'Hi', 'Ana Cruz', '2026-10-20 18:00');
+        $run->adGroup = $id;
+        ChatbotAiQueue::submit($run, 'n3', 'gpt-4o-mini', [['role' => 'user', 'content' => 'Hi']], 100);
+        $row = DB::table(ChatbotAiQueue::TABLE)->first();
+
+        $this->assertSame(['local', 'openai'], array_column(ChatbotAiChain::forRow($row), 'provider'), 'ang group ng takbo ay kasama ng ticket (Local, saka ang default na fallback)');
+        $this->assertSame('qwen3:14b', ChatbotAiChain::forRow($row)[0]['model']);
+        DB::table(ChatbotAiQueue::TABLE)->update(['context' => json_encode(['input' => 'Hi'])]); // ticket na mula pa bago ito (walang ad_group): ang AI ng page
+        $this->assertSame(['openai'], array_column(ChatbotAiChain::forRow(DB::table(ChatbotAiQueue::TABLE)->first()), 'provider'));
     }
 
     /** Isang tamang value para sa bawat uri ng key (larawan = link, flow = totoong flow, AI = mapipili). */
@@ -46,6 +186,7 @@ class AdGroupAllValuesTest extends ChatblastTestCase
 
     public function test_S_192_3_every_value_column_of_the_page_row_is_a_group_value_and_saves(): void
     {
+        Queue::fake();
         $this->actingAs($this->user());
         app(ChatbotFields::class)->add('Promo Text'); // isang column na idinagdag sa "+ Column"
         $groups = app(AdGroups::class);
@@ -92,6 +233,7 @@ class AdGroupAllValuesTest extends ChatblastTestCase
     #[DataProvider('pageOnly')]
     public function test_S_192_4_identity_and_switch_keys_are_refused_for_a_group(string $key): void
     {
+        Queue::fake();
         $this->actingAs($this->user());
         $id = app(AdGroups::class)->save('Precious Lopez', null, 'Serum', ['111'], [])['id'];
         $before = PageSetting::count();

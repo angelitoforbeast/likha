@@ -391,13 +391,21 @@ class Inbox
         $values = $fields->fields();
         ksort($values);
 
+        // Ang ad group ng customer (Ad-based na page): ang flow at mga value nito ang ipinapakita, gaya ng ginagamit ng takbo.
+        $groups = app(AdGroups::class);
+        $group = $groups->forCustomer($pageId, $psid, $page);
+        $own = $group !== null ? ($groups->groups($page)[$group]['values'] ?? []) : [];
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
-        $flow = ctype_digit($flowId) ? ChatbotFlow::find((int) $flowId, ['id', 'name']) : null;
+        $flow = ctype_digit($own['flow_id'] ?? '') ? ChatbotFlow::find((int) $own['flow_id'], ['id', 'name']) : null; // na-delete: ang flow ng page
+        $flow ??= ctype_digit($flowId) ? ChatbotFlow::find((int) $flowId, ['id', 'name']) : null;
         $botfields = [];
         $labels = array_column(app(ChatbotFields::class)->columns(), 'label', 'key');
         foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get() as $s) {
             if (in_array($s->key, ChatbotFields::RESERVED, true) || $s->key === ShopDetails::KEY) continue; // ang lumang tina-type: hindi na binabasa
             $botfields[$s->key] = ['label' => $labels[$s->key] ?? $s->key, 'value' => (string) $s->plainValue()];
+        }
+        foreach ($own as $key => $value) {
+            if (!in_array($key, ChatbotFields::RESERVED, true)) $botfields[$key] = ['label' => $labels[$key] ?? $key, 'value' => (string) $value];
         }
         $botfields[ShopDetails::KEY] = ['label' => $labels[ShopDetails::KEY] ?? ShopDetails::LABEL, 'value' => ShopDetails::build($page, array_map(fn ($b) => $b['value'], $botfields))];
 

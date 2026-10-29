@@ -64,9 +64,14 @@ class ChatbotAiChain
      * Ang chain ng page: [{provider, model (null = ang model ng node), timeout (null = ang natitirang oras)}].
      * @return array<int, array{provider: string, model: ?string, timeout: ?int}>
      */
-    public static function forPage(string $pageName): array
+    public static function forPage(string $pageName, ?int $group = null): array
     {
         $page = app(PageSettings::class)->all($pageName, self::PROVIDER);
+        // Ang ad group ng customer (AdGroups): ang AI na itinakda nito ang pumapalit sa AI ng page; ang hindi itinakda = ang sa page.
+        if ($group !== null) {
+            $values = app(AdGroups::class)->groups($pageName)[$group]['values'] ?? [];
+            foreach (AdGroups::AI_KEYS as $key) if (isset($values[$key])) $page[$key] = $values[$key];
+        }
         $site = self::site();
         $first = self::providerOf($page, $site);
         $fallback = self::pick($page, $site, 'fallback') ?? ($first === ChatbotAiProviders::OPENAI ? self::NONE : ChatbotAiProviders::OPENAI);
@@ -81,6 +86,17 @@ class ChatbotAiChain
             'model' => self::pick($page, $site, $p . '_model') ?? (string) ChatbotAiProviders::option($p, 'model', ''),
             'timeout' => max(1, (int) (self::pick($page, $site, $p . '_timeout') ?? ChatbotAiProviders::option($p, 'timeout', 8))),
         ], $names);
+    }
+
+    /**
+     * Ang chain ng isang ticket ng pool (chatbot_ai_requests): ang page nito at ang ad group ng takbo na naitala sa context
+     * (ChatbotAiQueue::submit); ang walang group (o ang lumang ticket) = ang AI ng page.
+     */
+    public static function forRow(object $row): array
+    {
+        $group = json_decode((string) ($row->context ?? ''), true)['ad_group'] ?? null;
+
+        return self::forPage((string) $row->page_name, is_int($group) ? $group : null);
     }
 
     /** Isang numero ng site (hal. local_concurrency), o ang default ng provider sa config. */
@@ -182,11 +198,11 @@ class ChatbotAiChain
      * Ang naghihintay na takbo ng chain (Test, sequence, walang pool, CHATBOT_AI_ASYNC=false), sa loob ng $budget segundo.
      * @return array ang resulta ng step at ang record (outcome())
      */
-    public function complete(string $pageName, string $nodeModel, array $messages, int $maxTokens, int $budget = ChatbotAi::TIMEOUT): array
+    public function complete(string $pageName, string $nodeModel, array $messages, int $maxTokens, int $budget = ChatbotAi::TIMEOUT, ?int $group = null): array
     {
         $start = microtime(true);
         $attempts = [];
-        foreach (self::forPage($pageName) as $step) {
+        foreach (self::forPage($pageName, $group) as $step) {
             $p = $step['provider'];
             $model = $step['model'] ?? $nodeModel;
             if ($skip = self::skip($step)) {

@@ -18,7 +18,7 @@ class ChatbotAi
      */
     public function answer(FlowRun $run, string $nodeId, string $model, array $messages, int $maxTokens): array
     {
-        $out = app(ChatbotAiChain::class)->complete($run->pageName, $model, $messages, $maxTokens);
+        $out = app(ChatbotAiChain::class)->complete($run->pageName, $model, $messages, $maxTokens, group: $run->adGroup);
         try {
             ChatbotAiQueue::record($run, $nodeId, $model, $maxTokens, $out);
         } catch (\Throwable $e) {

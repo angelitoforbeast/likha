@@ -219,6 +219,7 @@ class ChatbotTabsController extends Controller
         $message = $this->str($request, 'message', 2000);
         $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $group), $fields, null,
             $message, 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
+        $run->adGroup = $group; // ang AI ng napiling group din
         $engine->run($run, $this->testOutbox($request));
         TestHistory::record($fields, $message, $run);
 
@@ -249,8 +250,10 @@ class ChatbotTabsController extends Controller
         $fields->clear(CustomerFields::TEST_SKIP);
         if (!$node) return response()->json(['ran' => false, 'skip_in' => null, 'error' => 'The waiting step is not in this flow any more.']);
 
-        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $this->testGroup($request, $page)), $fields, null,
+        $group = $this->testGroup($request, $page);
+        $run = new FlowRun($flow->id, $graph, $page, $pageId, $chatbotPage->botfields($page, $group), $fields, null,
             '', 'Test Customer', now('Asia/Manila')->format('Y-m-d H:i'), true);
+        $run->adGroup = $group;
         $run->skippedAfter = FlowGraph::skipLabel((int) FlowGraph::skipMinutes((array) ($node['config'] ?? [])));
         $engine->run($run, $this->testOutbox($request));
         TestHistory::record($fields, null, $run);
