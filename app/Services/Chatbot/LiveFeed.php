@@ -84,7 +84,10 @@ class LiveFeed
         $start = $f($now->copy()->startOfDay());
         $end = $f($now->copy()->startOfDay()->addDay());
         $recent = $f($now->copy()->subSeconds(self::RECENT_SECONDS));
-        $edge = max($start, $f($now->copy()->setTimestamp(intdiv($now->getTimestamp() - self::SETTLE_SECONDS, self::BUCKET_SECONDS) * self::BUCKET_SECONDS)));
+        // Ang naayos na bahagi ay lampas din sa standby window ng gateway watch: ang chat na itinataas o inuulit doon ay may lumang
+        // received_at, kaya hindi pa ito dapat ituring na naayos habang puwede pang dumating ang ganoong row.
+        $settle = max(self::SETTLE_SECONDS, (int) config('services.gateway.auto_switch.standby_minutes', 15) * 60 + 60);
+        $edge = max($start, $f($now->copy()->setTimestamp(intdiv($now->getTimestamp() - $settle, self::BUCKET_SECONDS) * self::BUCKET_SECONDS)));
 
         $key = 'chatbot-live:settled:v1:' . ($page ?? 'all');
         $settled = Cache::get($key);
@@ -92,13 +95,13 @@ class LiveFeed
             $settled = ['day' => $start, 'to' => $start, 'full_at' => $now->getTimestamp(), 'n' => self::tallyZero()];
         }
         if ($settled['to'] < $edge) {
-            $settled['n'] = self::tallyAdd($settled['n'], $this->tally($page, $settled['to'], $edge, $settled['to'], $edge, $edge)['today']);
+            $settled['n'] = self::tallyAdd($settled['n'], $this->tally($page, $settled['to'], $edge, $settled['to'], $edge)['today']);
             $settled['to'] = $edge;
         }
         Cache::put($key, $settled, 86400);
 
         // Ang buhay na bahagi: ang ngayong araw ay mula sa hangganan; ang huling 5 minuto ay hindi pinuputol ng hatinggabi.
-        $live = $this->tally($page, min($edge, $recent), $end, $edge, $recent, $end);
+        $live = $this->tally($page, min($edge, $recent), $end, $edge, $recent);
         $day = self::tallyAdd($settled['n'], $live['today']);
         $pair = fn (string $k) => ['today' => $day[$k], 'recent' => $live['recent'][$k]];
         $sum = fn (string $k, string $part) => array_sum($part === 'today' ? $day[$k] : $live['recent'][$k]);
@@ -131,7 +134,7 @@ class LiveFeed
     private static function tallyAdd(array $a, array $b): array
     {
         foreach ($b as $k => $v) {
-            if (is_array($v)) foreach ($v as $bot => $n) $a[$k][$bot] += $n;
+            if (is_array($v)) foreach ($v as $bot => $n) $a[$k][$bot] = ($a[$k][$bot] ?? 0) + $n;
             else $a[$k] += $v;
         }
 
@@ -144,7 +147,7 @@ class LiveFeed
      * maaga ang simula ng range nito). $hi ay ang dulo ng araw o ang hangganan ng naayos na bahagi.
      * @return array{today: array, recent: array}
      */
-    private function tally(?string $page, string $lo, string $hi, string $today, string $recent, string $end): array
+    private function tally(?string $page, string $lo, string $hi, string $today, string $recent): array
     {
         $out = ['today' => self::tallyZero(), 'recent' => self::tallyZero()];
         $int = fn ($v) => (int) ($v ?? 0);
@@ -169,25 +172,30 @@ class LiveFeed
             'unconfirmed' => "sequence_id IS NULL AND {$delivered} AND confirmed_status IS NULL",
             'follow_ups' => "sequence_id IS NOT NULL AND {$delivered}",
         ];
+        // Ang lumabas kada bot ay isang SUM kada bot (walang GROUP BY): ang range ng sent_at ang laging basa, hindi ang index
+        // na nagsisimula sa via.
+        $known = "'" . implode("','", self::BOTS) . "'";
+        $cols = ['unconfirmed' => $conds['unconfirmed'], 'follow_ups' => $conds['follow_ups']];
+        foreach (self::BOTS as $b) $cols['out_' . $b] = $conds['out'] . " AND via = '{$b}'";
+        $cols['out_unknown'] = $conds['out'] . " AND (via IS NULL OR via NOT IN ({$known}))";
         $sql = [];
         $bind = [];
-        foreach ($conds as $k => $cond) {
+        foreach ($cols as $k => $cond) {
             $sql[] = "SUM(CASE WHEN {$cond} AND sent_at >= ? THEN 1 ELSE 0 END) AS {$k}_today, SUM(CASE WHEN {$cond} AND sent_at >= ? THEN 1 ELSE 0 END) AS {$k}_recent";
             array_push($bind, $today, $recent);
         }
-        foreach (DB::table('chatbot_replies')->where('kind', 'send')->where('sent_at', '>=', $lo)->where('sent_at', '<', $hi)
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->selectRaw('via, ' . implode(', ', $sql), $bind)->groupBy('via')->get() as $r) {
-            foreach (['today', 'recent'] as $part) {
-                $out[$part]['out'][$bot($r->via)] += $int($r->{'out_' . $part});
-                $out[$part]['unconfirmed'] += $int($r->{'unconfirmed_' . $part});
-                $out[$part]['follow_ups'] += $int($r->{'follow_ups_' . $part});
-            }
+        $r = DB::table('chatbot_replies')->where('kind', 'send')->where('sent_at', '>=', $lo)->where('sent_at', '<', $hi)
+            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->selectRaw(implode(', ', $sql), $bind)->first();
+        foreach (['today', 'recent'] as $part) {
+            foreach ([...self::BOTS, 'unknown'] as $b) $out[$part]['out'][$b] = $int($r->{'out_' . $b . '_' . $part});
+            $out[$part]['unconfirmed'] = $int($r->{'unconfirmed_' . $part});
+            $out[$part]['follow_ups'] = $int($r->{'follow_ups_' . $part});
         }
 
         // Ang sagot ng AI: ang tawag na may sagot (answered_at, walang error), hindi ang hinihintay ng Encode order. Ang
         // araw ayon sa created_at (naka-index); ang huling 5 minuto ayon sa oras ng sagot (kasama ang tawag na hanggang 15
         // minuto bago nito ginawa).
-        $aiLo = $recent < $hi ? min($lo, now()->subSeconds(self::RECENT_SECONDS + self::WINDOW_SECONDS)->format('Y-m-d H:i:s')) : $lo;
+        $aiLo = $recent < $hi ? min($lo, date('Y-m-d H:i:s', strtotime($recent) - self::WINDOW_SECONDS)) : $lo;
         $a = DB::table('chatbot_ai_requests')->where('created_at', '>=', $aiLo)->where('created_at', '<', $hi)->whereNotNull('answered_at')->whereNull('error')
             ->where('model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL)->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
             ->selectRaw('SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN answered_at >= ? THEN 1 ELSE 0 END) AS recent', [$today, $recent])
@@ -208,7 +216,8 @@ class LiveFeed
     /**
      * Ang bot na naghatid ng chat, bilang SQL: ang marka (payload._via, mula nang itinatala ito); ang mas lumang row ay ayon
      * sa dating payload (ang galing sa gateway ay may source, at ang galing sa Incepxionbot ay may gateway; ang iba ay
-     * Botcake); walang payload = unknown. Laravel ang bahala sa JSON path ng mysql, pgsql at sqlite.
+     * Botcake, ang parehong tuntunin ng ChatbotProvider at ResponseSpeed); walang payload = unknown. Laravel ang bahala sa
+     * JSON path ng mysql, pgsql at sqlite.
      */
     private static function chatVia(): string
     {

@@ -18,6 +18,7 @@
         'ok' => 'customer sent → our reply sent, on Meta’s clock (Forbeast pages)',
         'none' => 'No Forbeast replies yet today',
         'not_linked' => 'Not linked to Forbeast',
+        'not_on_forbeast' => 'This page is not on Forbeast',
         'error' => 'Forbeast did not answer; trying again within a minute',
     ];
     $rt = $c['reply_time'];
@@ -284,7 +285,8 @@
             pool.push({el: g, busy: false});
         }
         const paths = {};
-        for (const p of svg.querySelectorAll('[data-path]')) paths[p.dataset.path] = {el: p, len: p.getTotalLength()};
+        // Ang haba ng path ay kinukuha sa unang ilaw (ang nakatagong mapa ay walang haba sa ilang browser); hindi ito pumipigil sa pahina.
+        for (const p of svg.querySelectorAll('[data-path]')) paths[p.dataset.path] = {el: p, len: 0};
         maps[svg.dataset.map] = {svg, pool, paths};
     }
     const visible = () => Object.values(maps).find(m => m.svg.getBoundingClientRect().width > 0);
@@ -309,7 +311,8 @@
     function travel(map, pathKey, out, color, target) {
         const path = map.paths[pathKey];
         if (!path) return;
-        if (live.reduced || document.hidden) { hit(map, target); return; }
+        if (!path.len) { try { path.len = path.el.getTotalLength(); } catch (e) { path.len = 0; } }
+        if (live.reduced || document.hidden || !path.len) { hit(map, target); return; }
         const light = map.pool.find(l => !l.busy);
         if (!light) { live.sampled++; hit(map, target); return; }
         light.busy = true;
@@ -375,7 +378,9 @@
         if (boot.page) q.set('page_id', boot.page);
         for (const [k, v] of Object.entries(live.cursor || {})) q.set('cursor[' + k + ']', v);
         try {
-            const res = await fetch(boot.feed + '?' + q, {headers: {Accept: 'application/json'}, credentials: 'same-origin', cache: 'no-store'});
+            // Ang request na nabitin (hal. nawala ang Wi-Fi ng TV) ay pinuputol pagkalipas ng 15 s, kaya tuloy ang ulit.
+            const res = await fetch(boot.feed + '?' + q, {headers: {Accept: 'application/json'}, credentials: 'same-origin', cache: 'no-store',
+                signal: window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined});
             if ([401, 403, 419].includes(res.status)) { setStatus('off', 'SIGNED OUT: RELOAD'); return; }
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();

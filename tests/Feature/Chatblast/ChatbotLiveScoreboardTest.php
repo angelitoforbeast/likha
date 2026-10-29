@@ -244,6 +244,36 @@ class ChatbotLiveScoreboardTest extends ChatblastTestCase
         $this->assertStringContainsString('not linked', $html);
     }
 
+    public function test_S_196_5_a_page_not_on_forbeast_or_a_timeout_also_shows_a_dash_with_the_right_note(): void
+    {
+        $this->fakeSpeed(Http::response(['error' => 'unknown_page'], 404));
+        $this->assertSame(['state' => 'not_on_forbeast', 'seconds' => null], $this->counts('1003')['reply_time']);
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        Cache::flush();
+        $this->assertStringContainsString('This page is not on Forbeast', $this->get('/chatbot/live?page_id=1003')->assertOk()->getContent());
+
+        Cache::flush();
+        Http::fake([self::SPEED => fn () => throw new \Illuminate\Http\Client\ConnectionException('timed out')]);
+        $c = $this->counts();
+        $this->assertSame(['state' => 'error', 'seconds' => null], $c['reply_time']);
+        $this->assertSame(6, $c['confirmed']['today']);
+    }
+
+    public function test_S_196_4_a_late_confirmation_counts_once_after_the_settled_part_is_recounted(): void
+    {
+        $this->fakeSpeed(Http::response(self::speedDay(2.4)));
+        // Ipinadala 12:00, kumpirmado lang ng Meta pagkalipas ng 20 minuto (lampas na sa naayos na hangganan).
+        $late = $this->reply('1001', 'forbeast', '2026-10-21 12:00:00', ['confirmed_at' => null, 'confirmed_status' => null]);
+        $this->travelTo('2026-10-21 12:40:00');
+        $this->assertSame(['forbeast' => 2, 'incepxionbot' => 3, 'botcake' => 1, 'unknown' => 0], $this->counts()['bots']['out']);
+        DB::table('chatbot_replies')->where('id', $late)->update(['confirmed_at' => '2026-10-21 12:20:00', 'confirmed_status' => 'sent']);
+
+        $this->travelTo('2026-10-21 13:20:00'); // lampas 30 minuto mula sa huling buong bilang
+        $this->assertSame(['forbeast' => 3, 'incepxionbot' => 3, 'botcake' => 1, 'unknown' => 0], $this->counts()['bots']['out']);
+        $this->travel(11)->seconds();
+        $this->assertSame(['today' => 7, 'recent' => 0], $this->counts()['confirmed']);
+    }
+
     public function test_S_196_6_tv_mode_hides_the_navigation_and_banners_with_a_small_exit_link(): void
     {
         $this->fakeSpeed(Http::response(self::speedDay(2.4)));

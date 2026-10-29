@@ -17,6 +17,8 @@ class MetaReplySpeed
 {
     public const TIMEOUT = 5;
     public const LIVE_TIMEOUT = 3;
+    /** Ang sagot ng Forbeast sa page na hindi nito kilala para sa site na ito (hal. nasa Botcake). */
+    public const UNKNOWN_PAGE = 'This page is not on Forbeast for this site.';
     public const TODAY_CACHE_SECONDS = 120;
     public const PAST_CACHE_SECONDS = 1800;
     public const FAILED_CACHE_SECONDS = 60;
@@ -75,7 +77,9 @@ class MetaReplySpeed
             return ['state' => 'error', 'seconds' => null];
         }
 
-        return $day['ok'] ? ['state' => 'ok', 'seconds' => $day['total']['avg']] : ['state' => 'error', 'seconds' => null];
+        if ($day['ok']) return ['state' => 'ok', 'seconds' => $day['total']['avg']];
+
+        return ['state' => $day['error'] === self::UNKNOWN_PAGE ? 'not_on_forbeast' : 'error', 'seconds' => null];
     }
 
     /** @return array{ok: true, hours: array, total: array}|array{ok: false, error: string, at: string} */
@@ -92,7 +96,7 @@ class MetaReplySpeed
                 $res['ok'] => 'Its answer could not be read.',
                 $res['status'] === 0 => 'No answer within ' . $timeout . ' s.',
                 // Ang page na wala sa Forbeast (hal. nasa Botcake, o sa kabilang site) ay hindi "hindi sumagot".
-                $res['status'] === 404 && ($res['body']['error'] ?? null) === 'unknown_page' => 'This page is not on Forbeast for this site.',
+                $res['status'] === 404 && ($res['body']['error'] ?? null) === 'unknown_page' => self::UNKNOWN_PAGE,
                 default => (string) $res['error'],
             }];
         Cache::put($key, $out, !$out['ok'] ? self::FAILED_CACHE_SECONDS : ($date === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS));
