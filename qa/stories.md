@@ -3162,3 +3162,19 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveTest.php`, existing Chatblast suite, 
 | S-190.6 (P1) | Existing Chatblast suites pass | `tests/Feature/Chatblast` | passed |
 | S-190.7 (P2) | At 390 px the counters and the map (stacked layout) render with no horizontal scroll | headless Chrome at 390 px | passed |
 | S-190.8 (P2) | With reduced motion, Then no travelling pulse is drawn (no heartbeat, ring spin or flow either); the counters still update and the nodes still light up | `test_S_190_8…` (CSS and script hook) and headless Chrome (pulses counted during Preview) | passed |
+
+## S-191 The customer sees "typing…" while the bot is thinking
+
+As a customer writing to a page on Forbeast, I want to see "typing…" as soon as the bot starts working on my message, so I know an answer is coming while the flow and the AI run.
+
+Slice 191. Threat model: no new input; the call goes out to the configured Forbeast gateway with the page's existing send credentials, carrying only the page ID and the customer's PSID (no message text). Any answer, error or timeout from the gateway is ignored. Risk tier: low (one fire-and-forget outbound call at the start of a run, behind a config switch; no change to flows or sending).
+Tests: `tests/Feature/Chatblast/GatewayTypingTest.php`, existing Chatblast and Botcake suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-191.1 (P1) | Given a gateway (Forbeast) page with the bot On, When a customer message starts a run that will answer, Then exactly one `POST {gateway}/v1/pages/{page_id}/typing` with `{"psid": …}` and the send API's Bearer key is made before the run's first step (before its send), with connect and total timeout ≤ 1.5 s | `test_S_191_1…` | passed |
+| S-191.2 (P1) | When the same customer sends two messages within 15 s, Then one typing call (another customer gets their own; after 15 s a new call) and every message is still answered | `test_S_191_2…` | passed |
+| S-191.3 (P1) | Given a Botcake page, a bot Off page, an ignored attachment, a paused customer, a Test run or a sequence step, Then no typing call | `test_S_191_3…` | passed |
+| S-191.4 (P1) | When the typing endpoint times out or returns 500, Then the run continues and the reply is sent as before; the failure is counted | `test_S_191_4…` | passed |
+| S-191.5 (P1) | When `services.gateway.typing` (GATEWAY_TYPING) is false, Then no call; it is on by default | `test_S_191_5…` | passed |
+| S-191.6 (P1) | Existing Chatblast and Botcake suites add no new failures | `tests/Feature/Chatblast tests/Feature/Botcake` | see result |

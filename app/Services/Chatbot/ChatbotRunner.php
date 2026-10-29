@@ -68,6 +68,8 @@ class ChatbotRunner
                     ChatbotEvents::skipped((int) $c->page_id, (int) $c->psid, $c->id, $flow->id, 'chat too old');
                     continue;
                 }
+                // Sasagutin ang chat: "typing…" sa customer habang nag-iisip ang bot (Forbeast lang; hindi humaharang).
+                GatewayTyping::start((string) $c->page_name, (string) $c->page_id, (string) $c->psid);
                 $botfields ??= $this->page->botfields((string) $c->page_name, $group);
 
                 $run = new FlowRun($flow->id, $flow->graph, (string) $c->page_name, (string) $c->page_id, $botfields, $fields, $c->id,

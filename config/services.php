@@ -199,6 +199,8 @@ return [
         'key' => env('GATEWAY_KEY'),
         'webhook_secret' => env('GATEWAY_WEBHOOK_SECRET'),
         'timeout' => (int) env('GATEWAY_TIMEOUT', 10),
+        // Ang "typing…" sa simula ng takbo para sa mensahe ng customer (GatewayTyping, Forbeast 028); false = walang tawag.
+        'typing' => (bool) env('GATEWAY_TYPING', true),
         // Kusang lipat sa Botcake kapag pumapalya ang Forbeast (ForbeastWatch): ilang sunod na palya, at ang mga window.
         'auto_switch' => [
             'failed_sends' => (int) env('GATEWAY_SWITCH_FAILED_SENDS', 5),
