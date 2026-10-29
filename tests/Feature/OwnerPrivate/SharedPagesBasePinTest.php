@@ -14,10 +14,10 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class SharedPagesBasePinTest extends OwnerPrivateTestCase
 {
-    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute, at ang limang delivery column ng campaigns (ad_delivered … ad_rts_pct) kasama ang "Walang ad id" at "Total ng page (ayon sa order)" na linya ng expand, ang POST at tanda ng delivery-only na campaign, at ang RTS / DEL / INT (orders) na cell na pumalit sa lima, at ang Mira RTS at Profit (Mira RTS) na column (cell, totals at ang dalawang bagong entry sa column settings), at ang limang column ng Conditional Formatting ng Mira RTS (gap, error, ratio, orders) kasama ang seeded na rule at ang pagtanggal ng hard-coded na pulang kulay, at ang Prof 1D (Mira) na column, at nang alisin ang native title na umuulit sa hover box ng compact (title attribute lang ang diff). */
+    /** sha1 ng normalised render ng CEO, galing sa base commit; muling na-pin nang idagdag ang PROF(1D)-M column (bagong cell at column id lang ang diff), at nang idagdag ang "tie" mark sa Item cell at ang "tie(s) resolved" na mensahe ng recompute, at ang limang delivery column ng campaigns (ad_delivered … ad_rts_pct) kasama ang "Walang ad id" at "Total ng page (ayon sa order)" na linya ng expand, ang POST at tanda ng delivery-only na campaign, at ang RTS / DEL / INT (orders) na cell na pumalit sa lima, at ang Mira RTS at Profit (Mira RTS) na column (cell, totals at ang dalawang bagong entry sa column settings), at ang limang column ng Conditional Formatting ng Mira RTS (gap, error, ratio, orders) kasama ang seeded na rule at ang pagtanggal ng hard-coded na pulang kulay, at ang Prof 1D (Mira) na column, at nang alisin ang native title na umuulit sa hover box ng compact (title attribute lang ang diff), at ang Mira RTS accuracy na column (cell, hover, column def at ang entry sa column settings). */
     private const BASE = [
-        '/owner/private' => '1ea66d9b9b010d10088f83ca5a0d110bef4a60fc',
-        '/owner/column-settings/owner-private' => 'e96a455e931795742053cf82580540786b962e5a',
+        '/owner/private' => 'ee118e76ea925d18104b5dc790e253b4c51b3f9b',
+        '/owner/column-settings/owner-private' => '1ad34a6887e7e4d4e4504a2ca5782cef006ab95f',
     ];
 
     protected function setUp(): void

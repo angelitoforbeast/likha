@@ -54,8 +54,28 @@ class RtsProjection
     /** Kinukuwenta ulit ang rate table at sine-save. Mga order na tapos (Delivered/Returned/For Return) lang, may status_logs. */
     public function learn(): array
     {
-        $now = Carbon::now(self::TZ);
+        $table = $this->learnTable(Carbon::now(self::TZ));
+
+        // Kasya sa TEXT: ibaba muna ang mga item na pinakakaunti ang sample.
+        while (strlen(json_encode($table)) > self::MAX_JSON && $table['items']) {
+            $least = array_keys($table['items']);
+            usort($least, fn ($a, $b) => array_sum(array_column($table['items'][$a], 'n')) <=> array_sum(array_column($table['items'][$b], 'n')));
+            unset($table['items'][$least[0]]);
+        }
+        AppSetting::set(self::KEY, json_encode($table));
+
+        return $table;
+    }
+
+    /**
+     * Ang rate table na alam sa oras na $now (hindi sine-save). $asOf = true: ang kinalabasan ng order ay ang state nito sa
+     * status logs noong $now (hindi ang kasalukuyang status), at mga order na nai-submit hanggang $now lang, para walang
+     * silip sa hinaharap kapag nakaraang araw ang $now.
+     */
+    public function learnTable(Carbon $now, bool $asOf = false): array
+    {
         $since = $now->copy()->subWeeks(self::LEARN_WEEKS)->toDateTimeString();
+        $at = $now->toDateTimeString();
         $aliases = new ItemAliasResolver();
         $pooled = [];
         $items = [];
@@ -64,16 +84,18 @@ class RtsProjection
         DB::table('from_jnts as j')
             ->join('macro_output as mo', 'mo.waybill', '=', 'j.waybill_number')
             ->where('j.submission_time', '>=', $since)
+            ->when($asOf, fn ($q) => $q->where('j.submission_time', '<=', $at))
             ->whereNotNull('j.status_logs')
             ->select('j.id', 'j.status', 'j.submission_time', 'j.status_logs', 'mo.PAGE', 'mo.ITEM_NAME')
-            ->chunkById(1000, function ($chunk) use (&$pooled, &$items, &$seen, $now, $aliases) {
+            ->chunkById(1000, function ($chunk) use (&$pooled, &$items, &$seen, $now, $at, $asOf, $aliases) {
                 foreach ($chunk as $o) {
                     if (isset($seen[$o->id])) continue;
                     $seen[$o->id] = true;
 
-                    $outcome = self::statusClass($o->status);
+                    $logs = $asOf ? $this->logs($o->status_logs) : null;
+                    $outcome = $asOf ? ($logs ? $this->stateAt($logs, $at) : null) : self::statusClass($o->status);
                     if (!in_array($outcome, ['D', 'R', 'F'], true)) continue;
-                    $logs = $this->logs($o->status_logs);
+                    $logs ??= $this->logs($o->status_logs);
                     if (!$logs) continue;   // walang history = hindi alam ang state sa bawat edad
 
                     $sub = Carbon::parse($o->submission_time, self::TZ);
@@ -98,26 +120,20 @@ class RtsProjection
                 if ($c[0] >= self::MIN_ITEM_SAMPLES) $outItems[$key][$age] = $cell($c);
             }
         }
-        $table = ['learned_at' => $now->toDateTimeString(), 'pooled' => array_map($cell, $pooled), 'items' => $outItems];
-
-        // Kasya sa TEXT: ibaba muna ang mga item na pinakakaunti ang sample.
-        while (strlen(json_encode($table)) > self::MAX_JSON && $table['items']) {
-            $least = array_keys($table['items']);
-            usort($least, fn ($a, $b) => array_sum(array_column($table['items'][$a], 'n')) <=> array_sum(array_column($table['items'][$b], 'n')));
-            unset($table['items'][$least[0]]);
-        }
-        AppSetting::set(self::KEY, json_encode($table));
-
-        return $table;
+        return ['learned_at' => $now->toDateTimeString(), 'pooled' => array_map($cell, $pooled), 'items' => $outItems];
     }
 
     /**
      * Isang row bawat page+item ng mga order na ts_date nasa $from..$to. Key: "page||canonical item".
+     * $asOf: ang projection na alam lang sa oras na iyon: mga order hanggang sa araw na iyon, ang state ng bawat isa ay ang
+     * huling status log hanggang doon (wala pang J&T state kung hindi pa nai-submit), ang edad ay hanggang doon, at ang
+     * p(edad) ay natutunan mula sa alam noon (learnTable). Walang $asOf = ngayon, kasalukuyang status at naka-save na rate.
      */
-    public function rows(string $from, string $to): array
+    public function rows(string $from, string $to, ?Carbon $asOf = null): array
     {
-        $now = Carbon::now(self::TZ);
-        $rates = $this->rates();
+        $now = $asOf ? $asOf->copy()->setTimezone(self::TZ) : Carbon::now(self::TZ);
+        $rates = $asOf ? $this->learnTable($now, true) : $this->rates();
+        if ($asOf && $to > $now->toDateString()) $to = $now->toDateString();
         $aliases = new ItemAliasResolver();
         $rows = [];
         $seen = [];
@@ -126,7 +142,7 @@ class RtsProjection
             ->leftJoin('from_jnts as j', 'j.waybill_number', '=', 'mo.waybill')
             ->whereBetween('mo.ts_date', [$from, $to])
             ->whereNotNull('mo.waybill')->where('mo.waybill', '!=', '')
-            ->select('mo.waybill', 'mo.PAGE', 'mo.ITEM_NAME', 'j.status', 'j.submission_time');
+            ->select(array_merge(['mo.waybill', 'mo.PAGE', 'mo.ITEM_NAME', 'j.status', 'j.submission_time'], $asOf ? ['j.status_logs'] : []));
 
         foreach ($q->cursor() as $o) {
             if (isset($seen[$o->waybill])) continue;
@@ -141,7 +157,7 @@ class RtsProjection
             ];
             $r['orders']++;
 
-            $class = self::statusClass($o->status);
+            $class = $asOf ? $this->classAt($o, $now) : self::statusClass($o->status);
             if ($class === null) {
                 $r['unmatched']++;
                 unset($r);
@@ -165,13 +181,14 @@ class RtsProjection
             unset($r);
         }
 
-        $set = $this->setRts();
+        $set = $this->setRts($now->toDateString());
         $by = $this->lastSetBy();
         foreach ($rows as $key => &$r) {
             $m = $r['matched'];
             $r['projected_rts'] = ($m > 0 && !$r['no_rate'])
                 ? round(($r['returned'] + $r['for_return'] + $r['transit_rts']) / $m * 100, 2) : null;
             $r['in_transit_pct'] = $m > 0 ? round($r['in_transit'] / $m * 100, 2) : null;
+            $r['in_transit_age'] = $r['in_transit'] > 0 ? round($r['transit_age_sum'] / $r['in_transit'], 1) : null;
             $r['actual_rts'] = $r['resolved_old'] > 0 ? round($r['returned_old'] / $r['resolved_old'] * 100, 2) : null;
             $r['error_pts'] = $r['projected_rts'] !== null
                 ? self::expectedError($r['in_transit'] > 0 ? $r['transit_age_sum'] / $r['in_transit'] : self::MAX_AGE, $r['projected_rts'], $m) : null;
@@ -254,14 +271,22 @@ class RtsProjection
         return $state;
     }
 
-    /** Kasalukuyang Set RTS% bawat page+item (pinakabagong effective_date na ≤ ngayon, may RTS). */
-    private function setRts(): array
+    /** State (D/R/F/T) ng order sa oras na $at mula sa status logs; null kung wala itong J&T state o hindi pa nai-submit noon. */
+    private function classAt(object $o, Carbon $at): ?string
+    {
+        if (self::statusClass($o->status) === null || !$o->submission_time || Carbon::parse($o->submission_time, self::TZ)->gt($at)) return null;
+
+        return $this->stateAt($this->logs($o->status_logs), $at->toDateTimeString());
+    }
+
+    /** Set RTS% bawat page+item noong $date (pinakabagong effective_date na ≤ $date, may RTS). */
+    private function setRts(string $date): array
     {
         if (!Schema::hasTable('page_item_settings')) return [];
         $aliases = new ItemAliasResolver();
         $out = [];
         $q = DB::table('page_item_settings')->whereNotNull('rts_pct')
-            ->where('effective_date', '<=', Carbon::now(self::TZ)->toDateString())
+            ->where('effective_date', '<=', $date)
             ->orderByDesc('effective_date')->orderByDesc('id')
             ->select('page_name', 'item_name', 'rts_pct');
         foreach ($q->cursor() as $s) {
