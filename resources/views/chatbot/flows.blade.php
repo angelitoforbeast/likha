@@ -24,12 +24,13 @@
     @else
         <div class="cb-card overflow-x-auto">
             <table class="cb-table">
-                <thead><tr><th>Flow</th><th>Used by</th><th class="w-40">Updated</th><th class="w-64">Actions</th></tr></thead>
+                <thead><tr><th>Flow</th><th>Used by</th><th class="w-32">Template code</th><th class="w-40">Updated</th><th class="w-64">Actions</th></tr></thead>
                 <tbody>
                 @foreach($flows as $f)
                     <tr data-id="{{ $f->id }}" data-name="{{ $f->name }}">
                         <td class="break-words"><a href="{{ route('chatbot.flows.edit', $f->id) }}" class="font-medium text-blue-700 hover:underline">{{ $f->name }}</a></td>
                         <td class="break-words text-slate-600">{{ implode(', ', $usedBy[(string) $f->id] ?? []) ?: '—' }}</td>
+                        <td class="whitespace-nowrap font-mono text-xs text-slate-700">{{ $f->template_code ?: '—' }}</td>
                         <td class="text-xs text-slate-500">{{ $f->updated_at?->timezone('Asia/Manila')->format('Y-m-d H:i') }}</td>
                         <td class="whitespace-nowrap">
                             <a href="{{ route('chatbot.flows.edit', $f->id) }}" class="cb-btn cb-btn-sm">Edit</a>

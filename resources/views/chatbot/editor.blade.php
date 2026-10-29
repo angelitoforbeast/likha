@@ -67,7 +67,21 @@
         <button type="button" class="cb-btn cb-btn-sm" id="discard" disabled>Discard draft</button>
         <button type="button" class="cb-btn cb-btn-sm" id="history">History</button>
         <a href="{{ route('chatbot.test', ['flow' => $flow->id, 'version' => 'draft']) }}" class="cb-btn cb-btn-sm" id="preview">Preview / Test</a>
+        <button type="button" class="cb-btn cb-btn-sm" id="code-open" aria-expanded="false" aria-controls="code-box">Template code</button>
         <span id="status" class="text-xs text-slate-500" aria-live="polite"></span>
+    </div>
+    {{-- Ang template code: ipinapaste ng Forbeast user para itali ang page niya sa flow na ito (nakatali, hindi kopya). --}}
+    <div id="code-box" class="mb-2 hidden rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+         data-url="{{ route('chatbot.flows.code', $flow->id) }}" data-code="{{ $flow->template_code ?? '' }}">
+        <p class="mb-2 text-xs text-slate-500">A Forbeast user pastes this code to give their page this flow. The page follows every publish of this flow. Revoke or regenerate stops the code for new pages; pages already on this flow keep it.</p>
+        <div class="flex flex-wrap items-center gap-2">
+            <code id="code-value" class="rounded bg-slate-100 px-2 py-0.5 font-mono text-sm">{{ $flow->template_code ?? 'No code' }}</code>
+            <button type="button" class="cb-btn cb-btn-sm" data-code-act="copy">Copy</button>
+            <button type="button" class="cb-btn cb-btn-sm" data-code-act="create">Create code</button>
+            <button type="button" class="cb-btn cb-btn-sm" data-code-act="regenerate">Regenerate</button>
+            <button type="button" class="cb-btn cb-btn-sm text-red-700" data-code-act="revoke">Revoke</button>
+            <span id="code-note" class="text-xs" aria-live="polite"></span>
+        </div>
     </div>
     <div id="conflict" class="mb-2 hidden flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
         <span>This draft changed since you opened it. Reload, or overwrite?</span>
@@ -1012,6 +1026,46 @@
         current = snapshot(); setState(data);
         applyView(); render(); fit();
     }).catch(() => status('Could not load the flow.', 'text-red-600'));
+})();
+</script>
+<script>
+// Ang template code: hiwalay sa canvas (walang draft o version), isang tawag bawat pindot.
+(function () {
+    const box = document.getElementById('code-box'), open = document.getElementById('code-open');
+    const value = document.getElementById('code-value'), note = document.getElementById('code-note');
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    let code = box.dataset.code || '';
+    const say = (t, cls) => { note.className = 'text-xs ' + cls; note.textContent = t; };
+    const paint = () => {
+        value.textContent = code || 'No code';
+        box.querySelector('[data-code-act="copy"]').hidden = !code;
+        box.querySelector('[data-code-act="create"]').hidden = !!code;
+        box.querySelector('[data-code-act="regenerate"]').hidden = !code;
+        box.querySelector('[data-code-act="revoke"]').hidden = !code;
+    };
+    open.addEventListener('click', () => {
+        const shown = box.classList.toggle('hidden') === false;
+        open.setAttribute('aria-expanded', shown ? 'true' : 'false');
+    });
+    box.querySelectorAll('[data-code-act]').forEach(b => b.addEventListener('click', async () => {
+        const act = b.dataset.codeAct;
+        if (act === 'copy') {
+            try { await navigator.clipboard.writeText(code); say('Copied.', 'text-green-700'); } catch (e) { say('Select the code and copy it.', 'text-slate-600'); }
+            return;
+        }
+        if (act === 'regenerate' && !confirm('Make a new code? ' + code + ' stops working for new pages. Pages already on this flow keep it.')) return;
+        if (act === 'revoke' && !confirm('Revoke ' + code + '? It stops working for new pages. Pages already on this flow keep it.')) return;
+        b.disabled = true;
+        try {
+            const r = await fetch(box.dataset.url, {method: act === 'revoke' ? 'DELETE' : 'POST', headers: {'Accept': 'application/json', 'X-CSRF-TOKEN': csrf}});
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) { say(data.error || data.message || 'Not done.', 'text-red-600'); return; }
+            code = data.code || '';
+            say(act === 'revoke' ? 'Revoked.' : 'New code ready.', 'text-green-700');
+            paint();
+        } catch (e) { say('No connection: not changed.', 'text-red-600'); } finally { b.disabled = false; }
+    }));
+    paint();
 })();
 </script>
 @endsection
