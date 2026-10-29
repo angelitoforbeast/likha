@@ -156,6 +156,8 @@ class HandleGatewayEvent implements ShouldQueue
         try {
             $message = $this->message($e, $payload);
             if ($gw !== Gateways::FORBEAST) $payload['gateway'] = $gw;
+            // Ang marka ng pinagmulan (forbeast / incepxionbot / botcake), sa bawat chat: ang pumasok kada bot sa Live.
+            $payload['_via'] = $gw;
             $chat = BotcakeChat::create([
                 'page_id' => (string) $e['page_id'], 'page_name' => $pageName, 'psid' => (string) $e['psid'], 'name' => $this->name($settings, $pageName, $e),
                 'message' => $message, 'message_id' => $ref, 'payload' => $payload, 'received_at' => now(),

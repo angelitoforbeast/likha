@@ -200,6 +200,18 @@ class GatewayPerPageTest extends ChatblastTestCase
         $this->assertSame(['incepxionbot', 'Bot (Incepxionbot)'], [\App\Services\Chatbot\ChatEchoes::sender('99887766'), \App\Services\Chatbot\ChatEchoes::label('incepxionbot')]);
     }
 
+    public function test_S_196_3_an_inbound_chat_is_marked_with_the_gateway_that_delivered_it(): void
+    {
+        Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);
+        $this->greeting();
+
+        $this->event('/api/gateway/events', self::GW_SECRET, ['mid' => 'm_fb1', 'event_id' => 1])->assertOk();
+        $this->event('/api/gateway/events/incepxionbot', self::IXB_SECRET, ['mid' => 'm_ixb1', 'event_id' => 2])->assertOk();
+
+        $this->assertSame([['m_fb1', 'forbeast'], ['m_ixb1', 'incepxionbot']],
+            BotcakeChat::orderBy('id')->get()->map(fn ($c) => [$c->message_id, $c->payload['_via'] ?? null])->all());
+    }
+
     public function test_S_194_3_the_same_message_from_both_gateways_is_processed_once(): void
     {
         Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);

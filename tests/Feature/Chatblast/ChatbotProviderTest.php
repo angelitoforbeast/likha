@@ -181,21 +181,21 @@ class ChatbotProviderTest extends ChatblastTestCase
         Queue::assertPushed(MarkChatbotReplied::class, 1);
     }
 
-    /** Ang ibang anyo ng event: [ang event, ang message, ang payload na inaasahan]. */
+    /** Ang ibang anyo ng event: [ang event, ang message, ang payload na inaasahan (kasama ang marka ng pinagmulan)]. */
     public static function shapes(): array
     {
         return [
             'referral without mid, from an ad' => [['type' => 'referral', 'mid' => null, 'text' => null, 'referral' => ['ad_id' => '6045246247433', 'ref' => null, 'source' => 'ADS']],
-                null, ['source' => 'gateway', 'ad_id' => '6045246247433'], 'gw-event-18342'],
+                null, ['source' => 'gateway', 'ad_id' => '6045246247433', '_via' => 'forbeast'], 'gw-event-18342'],
             'postback' => [['type' => 'postback', 'mid' => null, 'text' => null, 'postback' => ['title' => 'Order now', 'payload' => 'ORDER']],
-                'Order now', ['source' => 'gateway', 'postback' => 'ORDER'], 'gw-event-18342'],
+                'Order now', ['source' => 'gateway', 'postback' => 'ORDER', '_via' => 'forbeast'], 'gw-event-18342'],
             // Ang uri at link ng attachment ay naitatabi (payload.attachment) para sa susunod na transcribe o paglalarawan.
             'photo' => [['text' => null, 'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg']]],
-                '[Photo]', ['source' => 'gateway', 'attachment' => ['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'image_url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'm_AbC1'],
+                '[Photo]', ['source' => 'gateway', 'attachment' => ['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg'], 'image_url' => 'https://scontent.xx.fbcdn.net/v/t1/p.jpg', '_via' => 'forbeast'], 'm_AbC1'],
             'like sticker' => [['text' => null, 'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/851587_369239346556147_162929011_n.png']]],
-                '👍', ['source' => 'gateway', 'attachment' => ['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/851587_369239346556147_162929011_n.png']], 'm_AbC1'],
+                '👍', ['source' => 'gateway', 'attachment' => ['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/v/t39.1997-6/851587_369239346556147_162929011_n.png'], '_via' => 'forbeast'], 'm_AbC1'],
             'video, ad id not digits' => [['text' => null, 'attachments' => [['type' => 'video', 'url' => 'https://v.example.test/v.mp4']], 'referral' => ['ad_id' => 'x<1>']],
-                '[Video]', ['source' => 'gateway', 'attachment' => ['type' => 'video', 'url' => 'https://v.example.test/v.mp4']], 'm_AbC1'],
+                '[Video]', ['source' => 'gateway', 'attachment' => ['type' => 'video', 'url' => 'https://v.example.test/v.mp4'], '_via' => 'forbeast'], 'm_AbC1'],
         ];
     }
 

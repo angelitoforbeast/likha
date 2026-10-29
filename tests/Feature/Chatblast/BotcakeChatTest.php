@@ -129,7 +129,14 @@ class BotcakeChatTest extends ChatblastTestCase
         $this->assertArrayNotHasKey('message', $row->payload);
         $this->assertSame(2000, mb_strlen($row->payload['long'] ?? ''));
         $this->assertTrue(mb_check_encoding($row->payload['bad'], 'UTF-8'));
-        $this->assertCount(50, $row->payload);
+        $this->assertCount(50, array_diff_key($row->payload, ['_via' => true])); // 50 na param, at ang marka ng pinagmulan
+    }
+
+    public function test_S_196_3_a_botcake_chat_is_marked_botcake_and_a_param_cannot_change_the_mark(): void
+    {
+        $this->chat(['_via' => 'forbeast', 'source' => 'gateway'])->assertOk();
+
+        $this->assertSame('botcake', BotcakeChat::sole()->payload['_via']);
     }
 
     public function test_S_059_14_stored_name_and_text_show_as_text_not_html(): void
