@@ -72,7 +72,10 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
     {
         $events = $this->feed($q + ['cursor' => ['order' => '0']])['events'];
 
-        return array_column(array_filter($events, fn ($e) => $e['type'] === 'order'), 'amount', 'id');
+        $out = array_column(array_filter($events, fn ($e) => $e['type'] === 'order'), 'amount', 'id');
+        ksort($out);
+
+        return $out;
     }
 
     /** Ang araw: 4 na order (2 may halaga), at mga encode na hindi dapat magpahiram ng COD. */
@@ -101,8 +104,14 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
     public function test_S_199_1_an_order_carries_the_cod_of_its_encoded_order_and_never_another_customers(): void
     {
         $ids = $this->seedOrders();
+        // Ang ikalawang order ng parehong customer na wala pang sariling encode: hindi hinihiram ang COD ng naunang order.
+        $ids['second'] = $this->botOrder('1001', 7001, '2026-10-21 12:20:00', 'kkkk1111');
+        // Ang "second order not accepted": ang row ay sa ibang order, kaya walang halaga.
+        $ids['refused'] = $this->botOrder('1002', 7007, '2026-10-21 12:21:00', 'mmmm1111');
+        $this->encode('Page Dos', 7007, 'mmmm1111', '2026-10-21 12:21:00', 'done', '880', null, ['not_accepted' => 99]);
 
-        $this->assertSame([$ids['paid'] => 1149, $ids['none'] => null, $ids['blank'] => null, $ids['later_run'] => 2050.5], $this->amounts());
+        $this->assertSame([$ids['paid'] => 1149, $ids['none'] => null, $ids['blank'] => null, $ids['later_run'] => 2050.5, $ids['second'] => null, $ids['refused'] => null],
+            $this->amounts());
     }
 
     public function test_S_199_2_an_order_encoded_later_gets_its_amount_on_a_later_read_and_counts_once(): void
