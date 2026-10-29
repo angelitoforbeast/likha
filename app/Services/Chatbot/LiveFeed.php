@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * /chatbot/live: ang ginagawa ng bot ngayon, para sa animated na mapa. Dalawang bahagi:
  * - ang mga bilang ngayong araw (Manila) at sa huling 5 minuto: mensahe, sagot na kumpirmado ng Meta (at ang naipadala
- *   pero hindi pa kumpirmado), follow-up (sequence), sagot ng AI at order; naka-cache 10 segundo kada page filter;
+ *   pero hindi pa kumpirmado), follow-up (sequence), sagot ng AI at order; hanggang 10 segundo ang tanda, kada page filter;
  * - ang mga bagong event mula sa cursor na ipinadala ng page, kada pinagmulan: id ng botcake_chats (message), id ng
  *   chatbot_replies (follow_up), id ng chatbot_events na order (order), at (oras, id) ng kumpirmasyon ng Meta (confirmed)
  *   at ng sagot ng AI (ai), dahil ang dalawang iyon ay nangyayari pagkatapos maisulat ang row.
@@ -24,6 +24,8 @@ class LiveFeed
     /** Ang event ay hinahanap sa mga row ng huling 15 minuto lang (ang lumang cursor ay hindi nagbabasa ng buong table). */
     public const WINDOW_SECONDS = 900;
     public const CAP = 200;
+    /** Ang kumpirmasyon ng Meta at ang sagot ng AI ay ibinibigay kapag 5 segundo na ang lumipas mula sa oras nito. */
+    public const LAG_SECONDS = 5;
     public const TYPES = ['message', 'confirmed', 'follow_up', 'ai', 'order'];
     /** Ang cursor ng bawat pinagmulan: id lang, o oras|id. */
     public const CURSORS = ['chat' => 'id', 'seq' => 'id', 'order' => 'id', 'ok' => 'moment', 'ai' => 'moment'];
@@ -45,12 +47,16 @@ class LiveFeed
         return ['counts' => $this->counts($page), 'events' => $events, 'more' => $more, 'cursor' => $cursor, 'now' => now()->format('H:i:s')];
     }
 
-    // ── mga bilang ─────────────────────────────────────────────────────────────────────────────────────────────────
+    // â”€â”€ mga bilang â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    /** Ang mga bilang ngayong araw at sa huling 5 minuto, naka-cache 10 segundo kada page. */
+    /**
+     * Ang mga bilang ngayong araw at sa huling 5 minuto, kada page, hindi lalampas sa 10 segundo ang tanda: sariwa nang 5
+     * segundo; mula 5 hanggang 10 ay ibinibigay pa ang luma habang kinukuwenta ang bago pagkatapos ng sagot (Cache::flexible),
+     * kaya ang poll kada 5 segundo ay halos hindi naghihintay sa pagbilang; lampas 10 ay kinukuwenta muna.
+     */
     public function counts(?string $page): array
     {
-        return Cache::remember('chatbot-live:v1:' . ($page ?? 'all'), self::CACHE_SECONDS, fn () => $this->buildCounts($page));
+        return Cache::flexible('chatbot-live:v1:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page));
     }
 
     private function buildCounts(?string $page): array
@@ -111,7 +117,7 @@ class LiveFeed
         ];
     }
 
-    // ── mga event ──────────────────────────────────────────────────────────────────────────────────────────────────
+    // â”€â”€ mga event â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
      * Ang mga pinagmulan ng event: type, ang query (may page filter at sa huling 15 minuto), ang column ng oras ng event,
@@ -135,8 +141,10 @@ class LiveFeed
     }
 
     /**
-     * Ang mga event pagkatapos ng cursor, ayon sa oras. Ang cursor na wala o sira ay ang dulo ngayon (walang event sa unang
-     * poll, ang susunod lang). Kada pinagmulan: hanggang CAP + 1 na row; kapag lampas, ang bilang ng lahat at ang pinakabagong
+     * Ang mga event pagkatapos ng cursor, ayon sa oras. Ang cursor na wala o sira ay ang dulo ngayon, walang event (ang unang
+     * poll ay walang event, ang susunod lang). Ang (oras, id) ay hanggang LAG_SECONDS bago ngayon lang: ang kumpirmasyon ng
+     * Meta na dumating nang ilang segundo pagkatapos ng oras nito, o hindi sunod-sunod, ay nahuhuli pa; ang oras na lampas
+     * ngayon ay hinihintay. Kada pinagmulan: hanggang CAP + 1 na row; kapag lampas, ang bilang ng lahat at ang pinakabagong
      * CAP. Kapag lampas sa CAP ang lahat ng event, ang pinakabagong CAP ang ibinabalik at ang iba ay nasa $more.
      * @return array{0: array<int, array{type: string, at: string, page: string, id: int}>, 1: int, 2: array<string, string>}
      */
@@ -144,22 +152,24 @@ class LiveFeed
     {
         $now = now();
         $since = $now->copy()->subSeconds(self::WINDOW_SECONDS)->format('Y-m-d H:i:s');
+        $upTo = $now->copy()->subSeconds(self::LAG_SECONDS)->format('Y-m-d H:i:s');
         $names = BotcakeChat::pageMap();
         $events = [];
         $more = 0;
         $out = [];
         foreach ($this->sources($page, $since) as $key => [$type, $q, $at]) {
-            $table = $q->from;
-            $cursor = self::cursor($key, $in[$key] ?? null, $table, $now);
-            $after = fn () => self::after(clone $q, $key, $cursor, $at);
+            $byId = self::CURSORS[$key] === 'id';
+            [$cursor, $given] = self::cursor($key, $in[$key] ?? null, $q->from, $upTo);
+            $out[$key] = $cursor;
+            if (!$given) continue;
+            $after = fn () => self::after(clone $q, $byId, $cursor, $at, $upTo);
             $cols = ['id', 'page_id', $at . ' as at'];
-            $rows = $after()->orderBy(self::CURSORS[$key] === 'id' ? 'id' : $at)->orderBy('id')->limit(self::CAP + 1)->get($cols);
+            $rows = $after()->orderBy($byId ? 'id' : $at)->orderBy('id')->limit(self::CAP + 1)->get($cols);
             if ($rows->count() > self::CAP) {
                 $more += $after()->count() - self::CAP;
-                $rows = $after()->orderByDesc(self::CURSORS[$key] === 'id' ? 'id' : $at)->orderByDesc('id')->limit(self::CAP)->get($cols)->reverse()->values();
+                $rows = $after()->orderByDesc($byId ? 'id' : $at)->orderByDesc('id')->limit(self::CAP)->get($cols)->reverse()->values();
             }
-            $last = $rows->last();
-            $out[$key] = $last === null ? $cursor : (self::CURSORS[$key] === 'id' ? (string) $last->id : $last->at . '|' . $last->id);
+            if ($last = $rows->last()) $out[$key] = $byId ? (string) $last->id : $last->at . '|' . $last->id;
             foreach ($rows as $r) {
                 $events[] = ['type' => $type, 'at' => (string) $r->at, 'page' => $names[(string) $r->page_id] ?? 'Page ' . $r->page_id, 'id' => (int) $r->id];
             }
@@ -174,29 +184,29 @@ class LiveFeed
     }
 
     /**
-     * Ang cursor na ipinadala, na-check: id (digits, hindi lampas sa pinakamataas na id ng table) o "Y-m-d H:i:s|id" (hindi
-     * lampas ngayon). Wala o sira: ang dulo ngayon (ang pinakamataas na id, o ngayon|0).
+     * Ang cursor na ipinadala, na-check, at kung galing sa page (true) o ang dulo ngayon (false: wala o sira). Id: digits,
+     * hindi lampas sa pinakamataas na id ng table. Oras|id: "Y-m-d H:i:s|id", hindi lampas sa $upTo. Ang dulo: ang
+     * pinakamataas na id, o $upTo|0.
+     * @return array{0: string, 1: bool}
      */
-    private static function cursor(string $key, mixed $v, string $table, \Carbon\Carbon $now): string
+    private static function cursor(string $key, mixed $v, string $table, string $upTo): array
     {
         if (self::CURSORS[$key] === 'id') {
             $max = (int) DB::table($table)->max('id');
 
-            return is_string($v) && ctype_digit($v) && strlen($v) <= 18 && (int) $v <= $max ? (string) (int) $v : (string) $max;
+            return is_string($v) && ctype_digit($v) && strlen($v) <= 18 && (int) $v <= $max ? [(string) (int) $v, true] : [(string) $max, false];
         }
-        // Ang oras ng Meta ay maaaring ilang segundo na lampas sa orasan ng server: hanggang 1 minuto ang tinatanggap.
-        if (is_string($v) && preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\|(\d{1,18})$/', $v, $m)
-            && $m[1] <= $now->copy()->addMinute()->format('Y-m-d H:i:s')) return $m[1] . '|' . (int) $m[2];
+        if (is_string($v) && preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\|(\d{1,18})$/', $v, $m) && $m[1] <= $upTo) return [$m[1] . '|' . (int) $m[2], true];
 
-        return $now->format('Y-m-d H:i:s') . '|0';
+        return [$upTo . '|0', false];
     }
 
-    /** Ang mga row pagkatapos ng cursor: id > cursor, o (oras, id) > cursor. */
-    private static function after(Builder $q, string $key, string $cursor, string $at): Builder
+    /** Ang mga row pagkatapos ng cursor: id > cursor, o (oras, id) > cursor at ang oras ay hanggang $upTo. */
+    private static function after(Builder $q, bool $byId, string $cursor, string $at, string $upTo): Builder
     {
-        if (self::CURSORS[$key] === 'id') return $q->where('id', '>', (int) $cursor);
+        if ($byId) return $q->where('id', '>', (int) $cursor);
         [$t, $id] = explode('|', $cursor);
 
-        return $q->where(fn ($w) => $w->where($at, '>', $t)->orWhere(fn ($x) => $x->where($at, '=', $t)->where('id', '>', (int) $id)));
+        return $q->where($at, '<=', $upTo)->where(fn ($w) => $w->where($at, '>', $t)->orWhere(fn ($x) => $x->where($at, '=', $t)->where('id', '>', (int) $id)));
     }
 }

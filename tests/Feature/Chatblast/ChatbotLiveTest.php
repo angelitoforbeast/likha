@@ -125,6 +125,14 @@ class ChatbotLiveTest extends ChatblastTestCase
         $this->assertSame(['today' => 3, 'recent' => 2], $c['ai']);
         $this->assertSame(['today' => 2, 'recent' => 1], $c['orders']);
         $this->assertSame('12:30:00', $c['as_of']);
+
+        // Hindi lalampas sa 10 segundo ang tanda ng mga bilang: sa loob nito ay ang naka-cache, lampas ay bago.
+        $this->chat('1002', '7008', '2026-10-21 12:30:00');
+        $this->travel(4)->seconds();
+        $this->assertSame(3, app(LiveFeed::class)->counts(null)['messages']['today']);
+        $this->travel(7)->seconds();
+        $c = app(LiveFeed::class)->counts(null);
+        $this->assertSame([4, '12:30:11'], [$c['messages']['today'], $c['as_of']]);
     }
 
     public function test_S_190_3_given_the_cursor_only_newer_events_come_in_time_order_typed_and_without_names_or_text(): void
@@ -135,7 +143,7 @@ class ChatbotLiveTest extends ChatblastTestCase
         $this->assertSame([], $first['events']);
         $this->assertSame(0, $first['more']);
 
-        $this->travelTo('2026-10-21 12:30:10');
+        $this->travelTo('2026-10-21 12:30:20');
         $this->chat('1001', '7004', '2026-10-21 12:30:01');
         $this->ai('1002', '2026-10-21 12:30:02', '2026-10-21 12:30:03');
         $this->reply('1002', '2026-10-21 12:30:05');
@@ -161,8 +169,15 @@ class ChatbotLiveTest extends ChatblastTestCase
         foreach (['Juan', 'Magkano', 'sagot', 'Hello', '7004'] as $private) $this->assertStringNotContainsString($private, $res->getContent());
         $this->assertSame(0, $out['more']);
 
-        // Ang susunod na poll mula sa bagong cursor: wala nang uulit.
-        $this->assertSame([], $this->getJson('/chatbot/live/feed?' . http_build_query(['cursor' => $out['cursor']]))->json('events'));
+        // Ang susunod na poll mula sa bagong cursor: wala nang uulit. Ang kumpirmasyon na 3 segundo pa lang ang tanda ay
+        // hinihintay (LAG_SECONDS), at lalabas sa susunod na poll kahit mas maaga ang oras nito kaysa sa poll.
+        $open = DB::table('chatbot_replies')->where('sent_at', '2026-10-21 12:30:09')->value('id');
+        DB::table('chatbot_replies')->where('id', $open)->update(['confirmed_at' => '2026-10-21 12:30:17', 'confirmed_status' => 'sent']);
+        $next = $this->getJson('/chatbot/live/feed?' . http_build_query(['cursor' => $out['cursor']]))->json();
+        $this->assertSame([], $next['events']);
+        $this->travelTo('2026-10-21 12:30:25');
+        $this->assertSame([['confirmed', '2026-10-21 12:30:17', (int) $open]],
+            array_map(fn ($e) => [$e['type'], $e['at'], $e['id']], $this->getJson('/chatbot/live/feed?' . http_build_query(['cursor' => $next['cursor']]))->json('events')));
         // Ang sira o lampas na cursor ay ang dulo ngayon (walang event, walang error).
         foreach ([['chat' => '99999999'], ['ok' => '2099-01-01 00:00:00|1'], ['chat' => '<script>'], ['ai' => ['x']], 'x'] as $bad) {
             $this->getJson('/chatbot/live/feed?' . http_build_query(['cursor' => $bad]))->assertOk()->assertJsonPath('events', []);
@@ -209,7 +224,7 @@ class ChatbotLiveTest extends ChatblastTestCase
         $this->assertSame(0, $this->feed(['page_id' => '1003'])['counts']['messages']['today']);
 
         $cursor = $this->feed(['page_id' => '1001'])['cursor'];
-        $this->travelTo('2026-10-21 12:30:10');
+        $this->travelTo('2026-10-21 12:30:20');
         $this->chat('1001', '7004', '2026-10-21 12:30:01');
         $this->chat('1002', '7005', '2026-10-21 12:30:02');
         $this->botOrder('1002', '2026-10-21 12:30:03');
