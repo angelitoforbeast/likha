@@ -1,0 +1,21 @@
+# Brief 195: flow template codes — a Forbeast user pastes a code and the page gets that Likha flow
+
+## Why
+Page owners use Forbeast (the gateway app); the flows live in Likha. Today a Forbeast user cannot choose a flow for their page, so a page connected through Forbeast does nothing useful until staff set it up in Likha. The owner (2026-10-29): give each flow a template code (e.g. "Main Flow from CBB"); the user pastes it in Forbeast, the page gets that flow, the fields the flow needs appear, and they can be filled in Forbeast or in Likha (both sides).
+
+## Decisions (do not reopen)
+| # | Decision | Why |
+|---|---|---|
+| 1 | **Codes:** each flow can have a template code, created by staff with flow-edit permission from the flow's screen ("Template code" button: create, copy, revoke, regenerate). Format `LK-XXXX-XX` (unambiguous letters/digits, case-insensitive). Stored without a new table if the flow already has a settings/meta store; otherwise the smallest addition (a column on the flows table). A revoked code stops working for new uses; pages already using the flow keep it. | Lean schema; staff control. |
+| 2 | **Linked, not copied:** applying a code sets the page's flow to that flow (the same page row staff set today). Editing the flow in Likha changes every page that uses it. One flow per page (the page's main flow). | Owner: update once, all follow. |
+| 3 | **Values kept:** applying or changing a code never deletes existing page values; fields the new flow doesn't use stay stored and simply aren't shown as needed. | Nothing lost. |
+| 4 | **Fields a flow needs:** computed from the flow (every botfield/page value it reads, through the same resolver as spec 192), each with: key, label (human name), group (Product, Forms and messages, Sequence, Comment replies, Shop details, Other), type (text, long text, image, number), required (the flow cannot run correctly without it), hint, max_length, read_only (computed values like Shop details), current value, updated_at and updated_by source ("likha" or "forbeast"). Sequence n and Seq Img n are returned as pairs. | Forbeast shows them grouped with required first. |
+| 5 | **Gateway API** (signed exactly like the existing `/gateway/pages/{metaPageId}/values` calls, per gateway secret from 194): `GET /gateway/flow-codes/{code}?page={metaPageId}` → `{code, flow: {id, name, steps, updated_at}, fields: [...as above, with this page's current values]}` or 404 `unknown_code`; `POST /gateway/pages/{metaPageId}/flow` `{code}` → applies it, returns the same shape; `GET /gateway/pages/{metaPageId}/flow` → the page's current flow (null if none) + fields. Extend the existing values GET to include the metadata of decision 4 (backwards compatible: old fields stay). The values PUT records updated_by = forbeast. Only pages of this site (and, for a gateway, pages that gateway serves) — another site's page → 404. | One contract for Forbeast spec 031. |
+| 6 | **Likha side:** the Pages screen shows each page's flow name and code; staff can still set the flow as today; the page values screen marks values last changed from Forbeast. Every apply is written to the page history ("Flow set from Forbeast with code …, by <Forbeast user if sent>"). | Both sides, auditable. |
+| 7 | Applies to Incepxion (same code). No change to flow logic, sending, or the gateway switch. | Narrow. |
+
+## Cases (S-195)
+P1: .1 staff create a code for a flow, copy it, revoke it; .2 GET with the code returns the flow and its fields grouped with required ones marked and current values; .3 POST applies it: the page's flow row changes, history written, existing values untouched; .4 a revoked or unknown code → 404, nothing changes; .5 a page of another site → 404; .6 unsigned/wrong-secret call → 401; .7 values PUT from Forbeast records updated_by forbeast and Likha shows it; .8 editing the flow in Likha changes what every page using it runs; .9 Seq n with Seq Img n returned as pairs; .10 existing suites pass.
+
+## Done when
+P1 pass; `tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings` add no new failures vs 8705e881 (record the baseline). Result with the exact JSON contract (examples), the field metadata rules, migrations (if any), deploy notes, and that it applies to Incepxion. End with "195: <done|blocked> — <one line>".
