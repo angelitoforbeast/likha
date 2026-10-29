@@ -141,11 +141,7 @@ class ChatbotPageCheck
         if ($flow === null) return $setup ? ['status' => 'x', 'reasons' => $setup] + $out : $out;
 
         $columns = $this->fields->columns();
-        $byName = [];
-        foreach ($columns as $c) {
-            $byName[ChatbotVars::norm($c['key'])] = $c['key'];
-            $byName[ChatbotVars::norm($c['label'])] = $c['key'];
-        }
+        $byName = self::byName($columns);
         $labels = array_column($columns, 'label', 'key');
         $values = [];
         foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get() as $s) {
@@ -153,18 +149,7 @@ class ChatbotPageCheck
         }
         $values[ShopDetails::KEY] = ShopDetails::build($page, $values); // binubuo: ang kulang na bahagi ay X ng content check
 
-        // Ginagamit: mula sa mga graph, saka ang botfield na binabanggit ng ginagamit na botfield (hanggang wala nang bago).
-        $used = [];
-        foreach ($this->graphs($flow) as $graph) {
-            foreach (self::names($graph) as $n) if (isset($byName[$n])) $used[$byName[$n]] = true;
-        }
-        for ($todo = array_keys($used); $todo; ) {
-            $key = array_shift($todo);
-            foreach (self::names($values[$key] ?? '') as $n) {
-                if (isset($byName[$n]) && !isset($used[$byName[$n]])) { $used[$byName[$n]] = true; $todo[] = $byName[$n]; }
-            }
-        }
-        unset($used['flow']);
+        $used = self::usedKeys($flow, $columns, $values);
 
         $reasons = [];
         if ($on && Schema::hasTable('chatbot_sequence_steps') && ChatbotSequenceStep::where('flow_id', $flow->id)->exists()) {
@@ -231,8 +216,45 @@ class ChatbotPageCheck
         return ['status' => $reasons ? 'x' : 'ok', 'reasons' => $reasons, 'warnings' => $warnings, 'content' => $content] + $out;
     }
 
+    /**
+     * Ang mga botfield na ginagamit ng flow: mula sa mga graph (ang flow at ang mga flow ng sequence nito), saka ang
+     * botfield na binabanggit ng ginagamit na botfield sa $values ng page (hanggang wala nang bago). Ang FLOW ay hindi.
+     * @param array<int, array{key: string, label: string}> $columns ChatbotFields::columns()
+     * @param array<string, string> $values botfield key => value ng page
+     * @return array<string, true>
+     */
+    public static function usedKeys(ChatbotFlow $flow, array $columns, array $values): array
+    {
+        $byName = self::byName($columns);
+        $used = [];
+        foreach (self::graphs($flow) as $graph) {
+            foreach (self::names($graph) as $n) if (isset($byName[$n])) $used[$byName[$n]] = true;
+        }
+        for ($todo = array_keys($used); $todo; ) {
+            $key = array_shift($todo);
+            foreach (self::names($values[$key] ?? '') as $n) {
+                if (isset($byName[$n]) && !isset($used[$byName[$n]])) { $used[$byName[$n]] = true; $todo[] = $byName[$n]; }
+            }
+        }
+        unset($used['flow']);
+
+        return $used;
+    }
+
+    /** Ang botfield key ayon sa pangalan (key o label, naka-norm), gaya ng hanap ng takbo. @return array<string, string> */
+    private static function byName(array $columns): array
+    {
+        $byName = [];
+        foreach ($columns as $c) {
+            $byName[ChatbotVars::norm($c['key'])] = $c['key'];
+            $byName[ChatbotVars::norm($c['label'])] = $c['key'];
+        }
+
+        return $byName;
+    }
+
     /** @return array<int, array> ang published na graph ng flow at ng mga flow ng sequence na sinu-subscribe nito */
-    private function graphs(ChatbotFlow $flow): array
+    private static function graphs(ChatbotFlow $flow): array
     {
         $graphs = [];
         $todo = [$flow];

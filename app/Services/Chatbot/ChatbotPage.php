@@ -50,19 +50,22 @@ class ChatbotPage
         return app(AdGroups::class);
     }
 
-    /** Itali ang page sa isang flow (o alisin kapag null): ang pangalan (FLOW, para makita) at ang id (para tumakbo). */
-    public function link(string $page, ?ChatbotFlow $flow, ?int $userId = null): void
+    /**
+     * Itali ang page sa isang flow (o alisin kapag null): ang pangalan (FLOW, para makita) at ang id (para tumakbo).
+     * $source: ang sumulat mula sa labas ng Likha (hal. ang template code mula sa Forbeast), para sa history.
+     */
+    public function link(string $page, ?ChatbotFlow $flow, ?int $userId = null, ?string $source = null): void
     {
         if ($flow === null) {
             foreach (['flow', 'flow_id'] as $key) {
                 foreach ($this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('key', $key)->where('active', true)->get() as $s) {
-                    $this->settings->deactivate($s, $userId);
+                    $this->settings->deactivate($s, $userId, $source);
                 }
             }
             return;
         }
-        $this->settings->set($page, ChatbotFields::PROVIDER, 'flow', $flow->name, false, $userId);
-        $this->settings->set($page, ChatbotFields::PROVIDER, 'flow_id', (string) $flow->id, false, $userId, true);
+        $this->settings->set($page, ChatbotFields::PROVIDER, 'flow', $flow->name, false, $userId, false, $source);
+        $this->settings->set($page, ChatbotFields::PROVIDER, 'flow_id', (string) $flow->id, false, $userId, true, $source);
     }
 
     /** @return array<int, string> ang mga page na nakatali sa flow na ito (ayon sa id) */
