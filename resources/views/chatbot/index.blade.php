@@ -1211,6 +1211,8 @@
                     : el('span', {class: 'min-w-0 break-words ' + (r.flow_text ? 'text-amber-800' : 'text-slate-400'), text: r.flow_text ? 'Not linked: ' + r.flow_text : 'No flow'}),
                 edit,
             ]));
+            // Ang template code ng flow (ang ipinapaste sa Forbeast), kapag mayroon.
+            if (value && r.flow_code) td.append(el('span', {class: 'block font-mono text-xs text-slate-500', text: r.flow_code, title: 'Template code of this flow'}));
             if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
             return td;
         }
@@ -1241,6 +1243,8 @@
         const edit = el('button', {type: 'button', class: 'cb-edit shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500', 'aria-label': 'Edit ' + c.label, title: 'Edit ' + c.label, text: '✎'});
         td.append(el('div', {class: 'flex items-start gap-1'}, [el('div', {class: 'min-w-0 flex-1'}, show), edit]));
         if (m) td.append(el('span', {class: 'block text-xs ' + m.cls, text: m.text, title: m.title || null}));
+        // Ang value na huling isinulat mula sa Forbeast (page values API): sino, sa title.
+        else if (!p && value && r.from_forbeast && r.from_forbeast[c.key]) td.append(el('span', {class: 'block text-xs text-indigo-700', text: 'via Forbeast', title: 'Last changed from Forbeast: ' + r.from_forbeast[c.key]}));
         // Ang lapis lang ang nagbubukas ng editor (ang text sa textarea ng modal, dahil inaalis ng input ang line break; ang
         // image ay sa URL editor). Ang click (o Enter / Space) sa cell ay nagbubukas o nagsasara ng row.
         const open = () => c.kind === 'image' ? startEdit(td, r, c) : openLong(r, c);
@@ -1300,6 +1304,8 @@
             if (!ok) marks.set(k, {text: '!', cls: 'text-red-600', title: data.error || data.message || ('Not saved (' + status + ')')});
             else {
                 if (data.value == null) delete r.cells[c.key]; else r.cells[c.key] = data.value;
+                // Ang bagong sulat ay mula sa Likha: wala na ang "via Forbeast" ng cell (maliban kung walang nagbago).
+                if (data.status !== 'unchanged' && r.from_forbeast) delete r.from_forbeast[c.key];
                 marks.set(k, {text: data.status === 'unchanged' ? '✓' : 'Saved', cls: 'text-green-600'});
                 setTimeout(() => { if (marks.get(k)?.cls === 'text-green-600') { marks.delete(k); if (!editing) render(); } }, 2500);
             }

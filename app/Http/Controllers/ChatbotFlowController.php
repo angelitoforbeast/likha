@@ -67,7 +67,7 @@ class ChatbotFlowController extends Controller
             ->groupBy(fn ($s) => (string) $s->plainValue())->map(fn ($g) => $g->pluck('page_name')->sort()->values()->all());
 
         return view('chatbot.flows', [
-            'flows' => ChatbotFlow::orderBy('name')->get(['id', 'name', 'updated_at']),
+            'flows' => ChatbotFlow::orderBy('name')->get(array_merge(['id', 'name', 'updated_at'], Schema::hasColumn('chatbot_flows', 'template_code') ? ['template_code'] : [])),
             'usedBy' => $usedBy,
             'repliesOn' => BotcakeOutbox::enabled(),
         ]);
@@ -129,6 +129,36 @@ class ChatbotFlowController extends Controller
         });
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Gawa o palit ng template code (ang luma ay hindi na gumagana). Ang published na flow lang: ang page na binigyan ng
+     * code ng hindi pa naipa-publish na flow ay walang tatakbo.
+     */
+    public function issueCode(int $id)
+    {
+        $this->checkAccess();
+        $flow = ChatbotFlow::findOrFail($id);
+        if ($flow->published_at === null) return response()->json(['error' => 'Publish this flow first: a page given its code would run nothing.'], 422);
+        // Ang step ng sequence ay hindi main flow (ang Check ay X kapag ganito ang flow ng page).
+        if (Schema::hasTable('chatbot_sequence_steps') && \App\Models\ChatbotSequenceStep::where('flow_id', $flow->id)->exists()) {
+            return response()->json(['error' => 'This flow is a sequence step, not a main flow: a page cannot run it as its flow.'], 422);
+        }
+        $code = $flow->issueTemplateCode();
+        \Illuminate\Support\Facades\Log::info('ChatbotFlow: template code issued', ['flow_id' => $flow->id, 'by' => Auth::id()]);
+
+        return response()->json(['id' => $flow->id, 'code' => $code]);
+    }
+
+    /** Bawi ng template code: hindi na magagamit sa bagong page; ang mga page na nakatali na ay hindi ginagalaw. */
+    public function revokeCode(int $id)
+    {
+        $this->checkAccess();
+        $flow = ChatbotFlow::findOrFail($id);
+        $flow->revokeTemplateCode();
+        \Illuminate\Support\Facades\Log::info('ChatbotFlow: template code revoked', ['flow_id' => $flow->id, 'by' => Auth::id()]);
+
+        return response()->json(['id' => $flow->id, 'code' => null]);
     }
 
     public function edit(int $id)
