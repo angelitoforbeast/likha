@@ -3194,3 +3194,21 @@ Tests: `tests/Feature/Chatblast/AdGroupAllValuesTest.php`, the 172/174/181 tests
 | S-192.4 (P1) | When a group is given an identity or switch key (token, provider, On/Off, Botcake ID, Ad-based mode, auto-switch, FLOW text, SHOP DETAILS, site-only AI, name, ads), Then it is refused with "… is the page's own setting (identity or a switch) …" and nothing is written | `test_S_192_4…` (data sets) | passed |
 | S-192.5 (P1) | Given a Page-based page with a group, Then every customer gets the page values (forms and prompts too) | `test_S_192_5…` | passed |
 | S-192.6 (P1) | Existing Chatblast, Botcake and PageSettings suites add no new failures | full run | passed |
+
+## S-193 The owner reads the real reply time on Meta's clock first on the Speed screen
+
+As the owner, I want the Speed screen to open with the reply time from the customer's message sent to our reply sent, both on Meta's clock (Forbeast's numbers), by hour with its chart and the previous day as reference, so I read the number the customer actually feels, including Meta → Forbeast → Likha.
+
+Slice 193. Threat model: no new input on the screen (the same query string as S-182: date, page_id, bot). New outbound read: GET {GATEWAY_URL}/v1/site/reply-speed with the site key; its answer is untrusted and only whole numbers and finite non-negative seconds are kept (anything else is "could not be read"); Forbeast's error text is shown escaped and cut to 200 characters. Risk tier: medium (a new integration call on an existing read-only screen; no writes, no new route).
+Tests: `tests/Feature/Chatblast/MetaReplySpeedTest.php`, existing `ResponseSpeedTest` and Chatblast suite, headless Chrome evidence.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-193.1 (P1) | Given Forbeast answers a day (10:00: 4 messages, 3 bot answered, 1 by a person, avg 3.4 s, median 3 s, p90 5.1 s, max 6 s, Meta → Forbeast 2.6 s; hours after 12:00 omitted), When the owner opens /chatbot/speed, Then the first section "Reply time at Meta…" shows that table by hour (future hours blank) with its Day row, the summary line, and its chart (average, median dashed, p90; null = gap); a line says only Forbeast pages are in it and how many of the day's messages went through Botcake | `test_S_193_1_the_table_and_chart_show_the_forbeast_hours_and_day_total`, `test_S_193_1_only_forbeast_pages_are_in_it_and_the_botcake_chats_are_counted` | passed |
+| S-193.2 (P1) | When a page is chosen, Then the call carries `page_id` (and the site key); without a page it carries only the date | `test_S_193_2_the_page_filter_passes_page_id` | passed |
+| S-193.3 (P1) | Then the previous day is fetched the same way and drawn as the thin dotted reference | `test_S_193_3_the_previous_day_is_drawn_as_reference` | passed |
+| S-193.4 (P1) | Given no GATEWAY_URL or no site key, Then the section says "Not linked to Forbeast" and nothing is called; given the Bot filter Botcake, Then it says "Botcake gives no Meta times" and nothing is called | `test_S_193_4_not_linked_shows_so_and_calls_nothing`, `test_S_193_4_the_botcake_filter_says_botcake_gives_no_meta_times` | passed |
+| S-193.5 (P1) | Given Forbeast times out, answers 500 or 404, or sends something unreadable, Then the page renders (200) with every other section as before and this section says "Forbeast did not answer (HH:MM:SS)" with the reason; the previous day is not called after the day failed | `test_S_193_5_forbeast_down_slow_or_refusing_still_renders_the_page` | passed |
+| S-193.6 (P1) | When the screen is loaded again, Then no HTTP call is made until the cache ends (today 2 minutes, past days 30 minutes); a failed answer is kept 1 minute | `test_S_193_6_a_second_load_makes_no_http_call_until_the_cache_ends`, `test_S_193_6_a_failed_answer_is_kept_a_minute_so_a_down_forbeast_does_not_slow_every_load` | passed |
+| S-193.7 (P1) | Existing Speed tests pass unchanged | `tests/Feature/Chatblast/ResponseSpeedTest.php`, `tests/Feature/Chatblast` | passed |
+| S-193.8 (P1) | At 390 px the new section has no horizontal page scroll (the table scrolls in its box, the chart follows the width) | `test_S_193_8_the_table_scrolls_inside_its_box_and_the_chart_follows_the_screen_width` and headless Chrome at 390 px | passed |
