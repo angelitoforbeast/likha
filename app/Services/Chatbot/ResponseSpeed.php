@@ -60,8 +60,14 @@ class ResponseSpeed
     private function day(array $f, string $today): array
     {
         $ttl = $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
+        $key = 'response-speed:v2:' . md5(json_encode($f));
+        $hit = Cache::get($key);
+        if ($hit !== null) return $hit;
+        $out = $this->build($f, $today);
+        // Ang araw na hindi nakuwenta ang Sequences ay sinusubukan ulit pagkalipas ng 2 minuto, hindi ng 30.
+        Cache::put($key, $out, empty($out['sequences']['too_large']) ? $ttl : min($ttl, self::TODAY_CACHE_SECONDS));
 
-        return Cache::remember('response-speed:v2:' . md5(json_encode($f)), $ttl, fn () => $this->build($f, $today));
+        return $out;
     }
 
     /**
@@ -149,9 +155,8 @@ class ResponseSpeed
         [$keys, $ats, $hrs, $fbs, $ons] = [[], [], [], [], []];
         $names = \App\Models\BotcakeChat::pageMap();
         $gwOf = [];
-        $chats = DB::table('botcake_chats')->where('received_at', '>=', $start)->where('received_at', '<', $end)
-            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor();
-        foreach ($chats as $c) {
+        foreach (self::windows($start, $end) as [$a, $b]) foreach (DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)
+            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor() as $c) {
             $payload = json_decode((string) $c->payload, true) ?: [];
             // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast.
             if (!empty($payload['_ignored']) || !empty($payload['_standby'])) continue;
@@ -230,8 +235,50 @@ class ResponseSpeed
             'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
             'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
                 'total' => self::pushRow($push['total'])],
-            'sequences' => $this->sequences($f, $start, $end, $nowHour),
+            'sequences' => $this->sequencesSection($f, $start, $end, $nowHour),
         ];
+    }
+
+    /**
+     * Ang Sequences, o ang tala na hindi ito nakuwenta (too_large) kapag lumampas sa badyet ng memory o nagka-error: ang
+     * ibang section ng screen ay buo pa rin, hindi 500.
+     */
+    private function sequencesSection(array $f, string $start, string $end, int $nowHour): array
+    {
+        try {
+            return $this->sequences($f, $start, $end, $nowHour);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return ['too_large' => true, 'hours' => array_fill(0, 24, null), 'total' => null, 'slowest' => []];
+        }
+    }
+
+    /**
+     * Ang [$from, $to) na hinati kada oras. Ang MySQL driver ay hawak ang buong resulta ng isang query sa memory kahit
+     * cursor, kaya ang buong araw ay binabasa nang paisa-isang oras; ang pagkakasunod (kapag may orderBy) ay pareho.
+     * @return \Generator<int, array{0: string, 1: string}>
+     */
+    private static function windows(string $from, string $to): \Generator
+    {
+        for ($a = $from, $t = strtotime($from); $a < $to; $a = $b) {
+            $t += 3600;
+            $b = min(date('Y-m-d H:i:s', $t), $to);
+            yield [$a, $b];
+        }
+    }
+
+    /** Ang memory na puwedeng abutin ng request habang kinukuwenta ang Sequences: 3/4 ng memory_limit (walang hangganan kapag -1). */
+    protected function sequenceBudget(): int
+    {
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+
+        return $limit > 0 ? intdiv($limit * 3, 4) : PHP_INT_MAX;
+    }
+
+    private static function checkBudget(int $budget): void
+    {
+        if (memory_get_usage() > $budget) throw new \OverflowException('Speed: the sequences section is over its memory budget.');
     }
 
     /** Ang isang oras o ang araw ng pushed → sent sa Meta: pushed (Forbeast), measured, average, median, p90, max, unconfirmed, botcake. */
@@ -290,12 +337,12 @@ class ResponseSpeed
         if (!$want && $each === null) return $out;
         $confirm = ChatbotReply::hasConfirm();
         $cols = array_merge(['page_id', 'psid', 'chat_id', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : [], ChatbotReply::hasVia() ? ['via'] : []);
-        $rows = DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)
-            ->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
+        $seqCol = Schema::hasColumn('chatbot_replies', 'sequence_id');
+        foreach (self::windows($startAt, $endAt) as [$a, $b]) foreach (DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)
+            ->where('sent_at', '>=', $a)->where('sent_at', '<', $b)
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
-            ->when(Schema::hasColumn('chatbot_replies', 'sequence_id'), fn ($q) => $q->whereNull('sequence_id'))
-            ->orderBy('sent_at')->orderBy('id')->select($cols)->cursor();
-        foreach ($rows as $r) {
+            ->when($seqCol, fn ($q) => $q->whereNull('sequence_id'))
+            ->orderBy('sent_at')->orderBy('id')->select($cols)->cursor() as $r) {
             if ($each !== null) $each($r);
             $k = $r->page_id . ':' . $r->psid;
             if (!isset($want[$k])) continue;
@@ -395,89 +442,150 @@ class ResponseSpeed
      */
     private function sequences(array $f, string $start, string $end, int $nowHour): array
     {
+        $budget = $this->sequenceBudget();
         $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
-        $slow = [];
         $late = date('Y-m-d H:i:s', strtotime($end) + self::STEP_LATE_SECONDS);
-        $events = DB::table('chatbot_events')->where('type', 'sequence')->where('created_at', '>=', $start)->where('created_at', '<', $late)
-            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', (int) $f['page_id']))->get(['page_id', 'psid', 'detail', 'created_at'])
-            ->map(fn ($e) => [$e, json_decode((string) $e->detail, true)])->filter(fn ($x) => is_array($x[1]) && in_array($x[1]['op'] ?? null, ['ran', 'skipped', 'failed'], true));
-        $sends = $this->stepSends(date('Y-m-d H:i:s', strtotime($start) - self::STEP_PUSH_SECONDS), $late, $f['page_id']);
+        // Dalawang basa ng mga event ng araw, walang hawak na row: una ang mga customer, page at sequence (para sa
+        // kasaysayan nila) at ang unang takbo ng bawat customer + sequence; pangalawa ang bilang.
+        [$pages, $psids, $names, $first] = [[], [], [], []];
+        $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d) use (&$pages, &$psids, &$names, &$first): void {
+            $pages[(int) $e->page_id] = true;
+            $psids[(int) $e->psid] = true;
+            $name = (string) ($d['name'] ?? '');
+            $names[$name] = true;
+            $k = $e->page_id . ':' . $e->psid . ':' . $name;
+            if (!isset($first[$k]) || (string) $e->created_at < $first[$k]) $first[$k] = (string) $e->created_at;
+        });
+        $before = $this->stepHistory(array_keys($pages), array_keys($psids), $first, $late, $budget);
+        $delays = $this->stepDelays(array_map('strval', array_keys($names)));
+        unset($pages, $psids, $names, $first);
+        $sends = $this->stepSends(date('Y-m-d H:i:s', strtotime($start) - self::STEP_PUSH_SECONDS), $late, $f['page_id'], $budget);
         $botOf = $f['bot'] !== null ? BotHealth::botOfPages() : [];
-        $names = \App\Models\BotcakeChat::pageMap();
-        [$before, $delays] = $this->stepHistory($events->all(), $late);
+        // Ang 20 pinakamabagal lang ang hawak: min-heap ng [delay, pushed, -bilang], ang pinakamahina ang nasa itaas. Ang
+        // tabla ay ayon sa pagkakabasa (oras ng takbo, ID), gaya ng dati.
+        $slow = new \SplMinHeap();
+        $n = 0;
 
-        foreach ($events as [$e, $d]) {
+        $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d) use ($f, $start, $end, $before, $delays, $sends, $botOf, $slow, &$n, &$hours, &$total): void {
+            $n++;
             $due = self::originalDue($e, $d, $before, $delays);
             $at = $due ?? (string) $e->created_at;
-            if ($at < $start || $at >= $end) continue;
-            if ($f['bot'] !== null && ($botOf[(string) $e->page_id] ?? ChatbotConnections::BOTS[0]) !== $f['bot']) continue;
+            if ($at < $start || $at >= $end) return;
+            if ($f['bot'] !== null && ($botOf[(string) $e->page_id] ?? ChatbotConnections::BOTS[0]) !== $f['bot']) return;
 
-            $x = ['op' => $d['op'], 'push' => null, 'meta' => null, 'botcake' => false];
+            $op = $d['op'];
             $row = null;
-            if ($d['op'] === 'ran') {
-                $row = self::stepSend($sends[$e->page_id . ':' . $e->psid . ':' . (int) ($d['step'] ?? 0)] ?? [], $d['sequence_id'] ?? null, strtotime((string) $e->created_at));
-                $x['op'] = $row === null ? 'none' : ($row['delivered'] ? 'sent' : 'failed');
+            if ($op === 'ran') {
+                $row = self::stepSend($sends[$e->page_id . ':' . $e->psid . ':' . (int) ($d['step'] ?? 0)] ?? '', $d['sequence_id'] ?? null, strtotime((string) $e->created_at));
+                $op = $row === null ? 'none' : ($row['delivered'] ? 'sent' : 'failed');
             }
             $h = &$hours[(int) substr($at, 11, 2)];
             foreach ([&$h, &$total] as &$b) {
                 $b['due']++;
-                if (isset($b[$x['op']])) $b[$x['op']]++;
-                if ($x['op'] !== 'sent') continue;
+                if (isset($b[$op])) $b[$op]++;
+                if ($op !== 'sent') continue;
                 if ($due !== null) $b['push'][] = max(0, $row['pushed'] - strtotime($due));
                 if ($row['meta'] !== null) $b['meta'][] = max(0, $row['meta'] - $row['pushed']);
                 if ($row['botcake']) $b['botcake']++;
             }
             unset($b, $h);
-            if ($x['op'] === 'sent') {
-                $sent = $row['meta'] ?? ($row['botcake'] ? $row['pushed'] : null);
-                $slow[] = ['page' => $names[(string) $e->page_id] ?? 'Page ' . $e->page_id, 'sequence' => mb_substr((string) ($d['name'] ?? ''), 0, 120), 'step' => (int) ($d['step'] ?? 0),
-                    'scheduled' => $due, 'pushed' => date('Y-m-d H:i:s', $row['pushed']), 'sent' => $sent === null ? null : date('Y-m-d H:i:s', $sent),
-                    'scheduled_to_pushed' => $due === null ? null : max(0, $row['pushed'] - strtotime($due)),
-                    'pushed_to_meta' => $row['meta'] === null ? null : max(0, $row['meta'] - $row['pushed']),
-                    'delay' => max(0, ($sent ?? $row['pushed']) - strtotime($due ?? date('Y-m-d H:i:s', $row['pushed']))), 'sent_is_pushed' => $row['botcake']];
+            if ($op !== 'sent') return;
+            $sent = $row['meta'] ?? ($row['botcake'] ? $row['pushed'] : null);
+            $item = [max(0, ($sent ?? $row['pushed']) - strtotime($due ?? date('Y-m-d H:i:s', $row['pushed']))), $row['pushed'], -$n,
+                [$e->page_id, (string) ($d['name'] ?? ''), (int) ($d['step'] ?? 0), $due, $row, $sent]];
+            if ($slow->count() < self::SLOWEST) {
+                $slow->insert($item);
+            } elseif ($item > $slow->top()) {
+                $slow->extract();
+                $slow->insert($item);
             }
-        }
-        usort($slow, fn ($a, $b) => [$b['delay'], $b['pushed']] <=> [$a['delay'], $a['pushed']]);
+        });
+
+        $top = [];
+        foreach ($slow as $item) $top[] = $item;
+        usort($top, fn ($a, $b) => [$b[0], $b[1], $b[2]] <=> [$a[0], $a[1], $a[2]]);
+        $pageNames = \App\Models\BotcakeChat::pageMap();
+        $slowest = array_map(function (array $item) use ($pageNames): array {
+            [$delay, , , [$page, $name, $step, $due, $row, $sent]] = $item;
+
+            return ['page' => $pageNames[(string) $page] ?? 'Page ' . $page, 'sequence' => mb_substr($name, 0, 120), 'step' => $step,
+                'scheduled' => $due, 'pushed' => date('Y-m-d H:i:s', $row['pushed']), 'sent' => $sent === null ? null : date('Y-m-d H:i:s', $sent),
+                'scheduled_to_pushed' => $due === null ? null : max(0, $row['pushed'] - strtotime($due)),
+                'pushed_to_meta' => $row['meta'] === null ? null : max(0, $row['meta'] - $row['pushed']),
+                'delay' => $delay, 'sent_is_pushed' => $row['botcake']];
+        }, $top);
 
         $out = fn ($b) => ['due' => $b['due'], 'sent' => $b['sent'], 'failed' => $b['failed'], 'skipped' => $b['skipped'], 'no_message' => $b['none'], 'botcake' => $b['botcake'],
             'scheduled_to_pushed' => self::delayStats($b['push']), 'pushed_to_meta' => self::delayStats($b['meta'])];
 
         return ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + $out($hours[$h]), range(0, 23)), 'total' => $out($total),
-            'slowest' => array_slice($slow, 0, self::SLOWEST)];
+            'slowest' => $slowest];
+    }
+
+    /**
+     * Ang mga sequence event ng takbo (ran, skipped, failed) sa [$from, $to), ayon sa oras at ID, isa-isang ibinibigay sa
+     * $each kasama ang detail; kada oras ang query at walang row na itinatago.
+     */
+    private function stepEvents(?string $page, string $from, string $to, int $budget, \Closure $each): void
+    {
+        foreach (self::windows($from, $to) as [$a, $b]) {
+            $rows = DB::table('chatbot_events')->where('type', 'sequence')->where('created_at', '>=', $a)->where('created_at', '<', $b)
+                ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->orderBy('created_at')->orderBy('id')->select(['page_id', 'psid', 'detail', 'created_at'])->cursor();
+            foreach ($rows as $e) {
+                $d = json_decode((string) $e->detail, true);
+                if (is_array($d) && in_array($d['op'] ?? null, ['ran', 'skipped', 'failed'], true)) $each($e, $d);
+            }
+            self::checkBudget($budget);
+        }
     }
 
     /**
      * Para sa orihinal na due ng bawat step: ang mga naunang sequence event ng parehong customer at sequence (subscribed,
      * ran, skipped, failed: ang mga sandaling itinakda ng subscribe at ng advance ang next_send_at), kada page:PSID:pangalan,
-     * ayon sa oras; at ang delay ng bawat step (sequence ID:position => [amount, unit]).
-     * @return array{0: array<string, string[]>, 1: array<string, array{0: int, 1: string}>}
+     * ayon sa oras, bilang isang string na hinati ng "\n". Ang mga customer + sequence na may step ngayong araw lang
+     * ($first: ang unang takbo nila), at bago ang unang takbong iyon ay ang huli lang ang kailangan.
+     * @return array<string, string>
      */
-    private function stepHistory(array $events, string $until): array
+    private function stepHistory(array $pages, array $psids, array $first, string $until, int $budget): array
     {
         $before = [];
-        $pages = array_values(array_unique(array_map(fn ($x) => (int) $x[0]->page_id, $events)));
-        $psids = array_values(array_unique(array_map(fn ($x) => (int) $x[0]->psid, $events)));
         foreach (array_chunk($psids, 500) as $chunk) {
             $rows = DB::table('chatbot_events')->where('type', 'sequence')->whereIn('page_id', $pages)->whereIn('psid', $chunk)->where('created_at', '<', $until)
-                ->orderBy('created_at')->orderBy('id')->get(['page_id', 'psid', 'detail', 'created_at']);
+                ->orderBy('created_at')->orderBy('id')->select(['page_id', 'psid', 'detail', 'created_at'])->cursor();
             foreach ($rows as $r) {
                 $d = json_decode((string) $r->detail, true);
                 if (!is_array($d) || !is_string($d['name'] ?? null) || !in_array($d['op'] ?? null, ['subscribed', 'ran', 'skipped', 'failed'], true)) continue;
-                $before[$r->page_id . ':' . $r->psid . ':' . $d['name']][] = (string) $r->created_at;
+                $k = $r->page_id . ':' . $r->psid . ':' . $d['name'];
+                if (!isset($first[$k])) continue;
+                $t = (string) $r->created_at;
+                if ($t < $first[$k] || !isset($before[$k])) $before[$k] = $t;
+                else $before[$k] .= "\n" . $t;
             }
+            self::checkBudget($budget);
         }
+
+        return $before;
+    }
+
+    /**
+     * Ang delay ng bawat step ng mga sequence na may pangalang $names (sequence ID:position => [amount, unit]) at ang ID
+     * ng bawat pangalan (name:pangalan => ID).
+     * @return array<string, array{0: int, 1: string}|int>
+     */
+    private function stepDelays(array $names): array
+    {
         $delays = [];
-        if ($events && Schema::hasTable('chatbot_sequence_steps')) {
-            $ids = DB::table('chatbot_sequences')->whereIn('name', array_values(array_unique(array_map(fn ($x) => (string) ($x[1]['name'] ?? ''), $events))))->pluck('id', 'name');
+        if ($names && Schema::hasTable('chatbot_sequence_steps')) {
+            $ids = DB::table('chatbot_sequences')->whereIn('name', $names)->pluck('id', 'name');
             foreach (DB::table('chatbot_sequence_steps')->whereIn('sequence_id', $ids->values()->all())->get(['sequence_id', 'position', 'delay_amount', 'delay_unit']) as $s) {
                 $delays[$s->sequence_id . ':' . $s->position] = [(int) $s->delay_amount, (string) $s->delay_unit];
             }
             foreach ($ids as $name => $id) $delays['name:' . $name] = (int) $id;
         }
 
-        return [$before, $delays];
+        return $delays;
     }
 
     /**
@@ -492,7 +600,8 @@ class ResponseSpeed
         $id = is_int($d['sequence_id'] ?? null) ? $d['sequence_id'] : ($delays['name:' . $name] ?? null);
         $delay = $id !== null ? ($delays[$id . ':' . (int) ($d['step'] ?? 0)] ?? null) : null;
         $prev = null;
-        foreach ($before[$e->page_id . ':' . $e->psid . ':' . $name] ?? [] as $t) {
+        $history = $before[$e->page_id . ':' . $e->psid . ':' . $name] ?? null;
+        foreach ($history === null ? [] : explode("\n", $history) as $t) {
             if ($t >= (string) $e->created_at) break;
             $prev = $t;
         }
@@ -501,24 +610,38 @@ class ResponseSpeed
         return ChatbotSequences::dueAt(\Carbon\Carbon::parse($prev), $delay[0], $delay[1])->format('Y-m-d H:i:s');
     }
 
+    /** Ang laki ng isang padala sa stepSends(): pack('JJJC') = sent_at, sequence ID, oras ng Meta, flags. */
+    private const SEND_BYTES = 25;
+    private const SEND_DELIVERED = 1;
+    private const SEND_BOTCAKE = 2;
+    private const SEND_META = 4;
+
     /**
-     * Ang mga padala ng sequence step (kind send), kada page:PSID:step, ayon sa sent_at.
-     * @return array<string, array<int, array{at: int, seq: int, delivered: bool, meta: ?int, botcake: bool}>>
+     * Ang mga padala ng sequence step (kind send), kada page:PSID:step, ayon sa sent_at. Siksik para magaan ang buong
+     * araw: bawat padala ay SEND_BYTES sa isang string (sent_at, sequence ID, oras ng Meta kapag Forbeast at kumpirmado,
+     * flags), binabasa ng stepSend().
+     * @return array<string, string>
      */
-    private function stepSends(string $startAt, string $endAt, ?string $page): array
+    private function stepSends(string $startAt, string $endAt, ?string $page, int $budget): array
     {
         if (!Schema::hasColumn('chatbot_replies', 'sequence_id')) return [];
         $confirm = ChatbotReply::hasConfirm();
         $via = ChatbotReply::hasVia();
         $cols = array_merge(['page_id', 'psid', 'sequence_id', 'sequence_step', 'status', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : [], $via ? ['via'] : []);
         $out = [];
-        $rows = DB::table('chatbot_replies')->where('kind', 'send')->whereNotNull('sequence_id')->where('sent_at', '>=', $startAt)->where('sent_at', '<', $endAt)
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->orderBy('sent_at')->orderBy('id')->select($cols)->cursor();
-        foreach ($rows as $r) {
-            $real = $confirm && in_array($r->confirmed_status, SendStatus::DELIVERED, true) && $r->confirmed_at !== null;
-            $botcake = !Gateways::valid($via ? $r->via : null);
-            $out[$r->page_id . ':' . $r->psid . ':' . (int) $r->sequence_step][] = ['at' => strtotime($r->sent_at), 'seq' => (int) $r->sequence_id,
-                'delivered' => in_array($r->status, SendStatus::DELIVERED, true), 'meta' => $real && !$botcake ? strtotime($r->confirmed_at) : null, 'botcake' => $botcake];
+        foreach (self::windows($startAt, $endAt) as [$a, $b]) {
+            $rows = DB::table('chatbot_replies')->where('kind', 'send')->whereNotNull('sequence_id')->where('sent_at', '>=', $a)->where('sent_at', '<', $b)
+                ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->orderBy('sent_at')->orderBy('id')->select($cols)->cursor();
+            foreach ($rows as $r) {
+                $real = $confirm && in_array($r->confirmed_status, SendStatus::DELIVERED, true) && $r->confirmed_at !== null;
+                $botcake = !Gateways::valid($via ? $r->via : null);
+                $meta = $real && !$botcake;
+                $k = $r->page_id . ':' . $r->psid . ':' . (int) $r->sequence_step;
+                $out[$k] ??= '';
+                $out[$k] .= pack('JJJC', strtotime($r->sent_at), (int) $r->sequence_id, $meta ? strtotime($r->confirmed_at) : 0,
+                    (in_array($r->status, SendStatus::DELIVERED, true) ? self::SEND_DELIVERED : 0) | ($botcake ? self::SEND_BOTCAKE : 0) | ($meta ? self::SEND_META : 0));
+            }
+            self::checkBudget($budget);
         }
 
         return $out;
@@ -529,14 +652,22 @@ class ResponseSpeed
      * unang padala; ang sent sa Meta ay ang sa unang naipadala. null kapag walang padala.
      * @return array{pushed: int, delivered: bool, meta: ?int, botcake: bool}|null
      */
-    private static function stepSend(array $sends, mixed $sequenceId, int $ranAt): ?array
+    private static function stepSend(string $sends, mixed $sequenceId, int $ranAt): ?array
     {
-        $mine = array_values(array_filter($sends, fn ($s) => $s['at'] <= $ranAt && $s['at'] >= $ranAt - self::STEP_PUSH_SECONDS
-            && (!is_int($sequenceId) || $s['seq'] === $sequenceId)));
-        if (!$mine) return null;
-        $first = current(array_filter($mine, fn ($s) => $s['delivered'])) ?: null;
+        $pushed = $first = null;
+        for ($o = 0, $len = strlen($sends); $o < $len; $o += self::SEND_BYTES) {
+            $s = unpack('Jat/Jseq/Jmeta/Cflags', $sends, $o);
+            if ($s['at'] > $ranAt || $s['at'] < $ranAt - self::STEP_PUSH_SECONDS || (is_int($sequenceId) && $s['seq'] !== $sequenceId)) continue;
+            $pushed ??= $s;
+            if ($s['flags'] & self::SEND_DELIVERED) {
+                $first = $s;
+                break;
+            }
+        }
+        if ($pushed === null) return null;
 
-        return ['pushed' => $mine[0]['at'], 'delivered' => $first !== null, 'meta' => $first['meta'] ?? null, 'botcake' => $first['botcake'] ?? $mine[0]['botcake']];
+        return ['pushed' => $pushed['at'], 'delivered' => $first !== null, 'meta' => $first !== null && ($first['flags'] & self::SEND_META) ? $first['meta'] : null,
+            'botcake' => (bool) (($first ?? $pushed)['flags'] & self::SEND_BOTCAKE)];
     }
 
     /** Bilang, average, p90 at max ng mga delay (segundo). */

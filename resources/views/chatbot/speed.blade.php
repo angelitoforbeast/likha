@@ -186,6 +186,9 @@
 
     <section aria-labelledby="h-seq">
         <h2 id="h-seq" class="mb-1 text-base font-semibold">Sequences by hour due</h2>
+        @if(!empty($sequences['too_large']))
+        <p class="text-sm text-slate-600" data-sp-note="sequences">Sequences section too large to compute now. The other sections are complete; this one tries again within 2 minutes.</p>
+        @else
         @php($st = $sequences['total'])
         <p class="text-sm tabular-nums text-slate-600" data-sp-summary="sequences">Day: {{ number_format($st['due']) }} due · {{ number_format($st['sent']) }} sent · {{ number_format($st['failed']) }} failed · {{ number_format($st['skipped']) }} skipped; scheduled → pushed avg {{ $sec($st['scheduled_to_pushed']['avg']) }} · p90 {{ $sec($st['scheduled_to_pushed']['p90']) }} · max {{ $sec($st['scheduled_to_pushed']['max']) }}; pushed → sent at Meta: {{ number_format($st['pushed_to_meta']['n']) }} steps · avg {{ $sec($st['pushed_to_meta']['avg']) }} · p90 {{ $sec($st['pushed_to_meta']['p90']) }} · max {{ $sec($st['pushed_to_meta']['max']) }}</p>
         @include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
@@ -240,6 +243,7 @@
             </table>
         </div>
         </details>
+        @endif
     </section>
 </div>
 

@@ -3249,3 +3249,18 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveScoreboardTest.php`, `GatewayPerPageT
 | S-196.7 (P1) | At 390 px there is no sideways scroll (the map turns vertical) | `test_S_196_7…` and headless Chrome at 390 px | passed |
 | S-196.8 (P1) | The Speed section says "by another app or a person", with the hint that Botcake replies count there | `MetaReplySpeedTest::test_S_196_8…` | passed |
 | S-196.9 (P1) | Existing suites pass | `tests/Feature/Chatblast` | passed |
+
+## S-198 The owner's Speed page still opens late on a busy day
+
+As the owner, I want /chatbot/speed to open at night on a day with 150,000 sequence steps and 40,000 chats, with the same numbers as before, so the page does not die with "Allowed memory size exhausted" as the day grows.
+
+Slice 198. Threat model: no new input (the same query string as S-182: date, page_id, bot); the rows read are the site's own. Risk tier: medium (business logic on a trusted read-only screen; no writes, no new route).
+Tests: `tests/Feature/Chatblast/SpeedMemoryTest.php`, existing `ResponseSpeedTest`, `MetaReplySpeedTest` and the Chatblast suite.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-198.1 (P1) | Given a day with 150,000 sequence events (50,000 customers × 3 steps, each subscribed earlier), their step sends and 40,000 chats with replies, When the owner opens the day, Then it renders under 192 MB peak and every number (hours, day, bots, push, sequences, slowest, charts) is the one the old code gave | `test_S_198_1_a_late_day_volume_renders_under_192_mb_with_the_same_numbers` | passed |
+| S-198.2 (P1) | Given 34 sent steps with ties on delay and pushed time, Then the slowest 20 are the same rows in the same order as the old code (ties in the order the steps ran, then ID) | `test_S_198_2_the_slowest_20_are_the_same_rows_in_the_same_order_as_before` | passed |
+| S-198.3 (P1) | The existing Speed tests pass unchanged | `ResponseSpeedTest`, `MetaReplySpeedTest` (unchanged files) | passed |
+| S-198.4 (P1) | Given the Sequences section goes over its memory budget or fails, Then the page still renders (200) with every other section and the note "Sequences section too large to compute now"; that answer is kept 2 minutes, not 30, so a past day is computed again soon | `test_S_198_4_a_sequences_section_over_its_budget_or_failing_leaves_the_rest_of_the_page` | passed |
+| S-198.5 (P1) | `tests/Feature/Chatblast` has no new failures against 5b99fef7 | full folder run | passed |
