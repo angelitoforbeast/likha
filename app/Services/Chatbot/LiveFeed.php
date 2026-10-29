@@ -342,11 +342,13 @@ class LiveFeed
             ->get(['e.page', 'e.psid', 'e.run_id', 'e.status', 'e.macro_output_id', 'e.created_at', 'e.input->not_accepted as not_accepted', 'm.COD as cod'])
             ->filter(fn ($e) => $e->not_accepted === null);
 
-        // Ang mga takbong may sariling order event (ang encode nila ay hindi ipinapahiram sa ibang order).
-        $runs = DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $from)
-            ->whereIn('psid', array_values(array_unique(array_map(fn ($o) => (int) $o['psid'], $orders))))->pluck('detail->run as run')->filter()->values()->all();
+        // Ang mga takbong may sariling order event (ang encode nila ay hindi ipinapahiram sa ibang order), mula 24 oras bago: ang
+        // encode ng naunang order ay maaaring dumating pagkatapos ng susunod na order.
+        $runs = DB::table('chatbot_events')->whereIn('page_id', array_values(array_unique(array_map(fn ($o) => (int) $o['page_id'], $orders))))
+            ->whereIn('psid', array_values(array_unique(array_map(fn ($o) => (int) $o['psid'], $orders))))
+            ->where('type', 'order')->where('created_at', '>=', date('Y-m-d H:i:s', strtotime($from) - 86400))->pluck('detail->run as run')->filter()->values()->all();
         foreach ($orders as $id => $o) {
-            $lo =date('Y-m-d H:i:s', strtotime($o['at']) - 600);
+            $lo = date('Y-m-d H:i:s', strtotime($o['at']) - 600);
             $hi = date('Y-m-d H:i:s', strtotime($o['at']) + 86400);
             $mine = $rows->filter(fn ($e) => (string) $e->psid === $o['psid'] && $e->page === ($names[$o['page_id']] ?? null)
                 && (string) $e->created_at >= $lo && (string) $e->created_at <= $hi)->values();

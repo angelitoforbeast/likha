@@ -109,8 +109,12 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
         // Ang "second order not accepted": ang row ay sa ibang order, kaya walang halaga.
         $ids['refused'] = $this->botOrder('1002', 7007, '2026-10-21 12:21:00', 'mmmm1111');
         $this->encode('Page Dos', 7007, 'mmmm1111', '2026-10-21 12:21:00', 'done', '880', null, ['not_accepted' => 99]);
+        // Ang encode ng naunang order (11:00) na dumating pagkatapos ng susunod na order: sa naunang order pa rin, hindi ipinapahiram.
+        $this->botOrder('1001', 7010, '2026-10-21 11:00:00', 'nnnn1111');
+        $this->encode('Page Uno', 7010, 'nnnn1111', '2026-10-21 12:22:00', 'done', '640');
+        $ids['late'] = $this->botOrder('1001', 7010, '2026-10-21 12:18:00', 'pppp1111');
 
-        $this->assertSame([$ids['paid'] => 1149, $ids['none'] => null, $ids['blank'] => null, $ids['later_run'] => 2050.5, $ids['second'] => null, $ids['refused'] => null],
+        $this->assertSame([$ids['paid'] => 1149, $ids['none'] => null, $ids['blank'] => null, $ids['later_run'] => 2050.5, $ids['second'] => null, $ids['refused'] => null, $ids['late'] => null],
             $this->amounts());
     }
 

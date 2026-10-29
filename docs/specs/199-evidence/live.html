@@ -18,6 +18,8 @@
     * { box-sizing: border-box; margin: 0; }
     html, body { background: var(--void); color: var(--ink); font-family: var(--txt); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
     body { overflow-x: hidden; }
+    ::selection { background: rgba(53,200,255,.35); color: #fff; }
+    .sel option { background: #061424; color: var(--ink); }
     [hidden] { display: none !important; }
     .vp { position: relative; height: 100vh; overflow: hidden; background: radial-gradient(1000px 700px at 40% 62%, rgba(30,110,190,.20), transparent 70%), var(--void); }
     .stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
