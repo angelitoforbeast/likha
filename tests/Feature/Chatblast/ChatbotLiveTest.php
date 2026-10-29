@@ -107,9 +107,9 @@ class ChatbotLiveTest extends ChatblastTestCase
 
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
         $html = $this->get('/chatbot/live')->assertOk()->getContent();
-        $this->assertMatchesRegularExpression('#href="http://localhost/chatbot/live"[^>]*>\s*Live#', $html); // nasa nav ng Chatbot
+        $this->assertStringContainsString('data-tv-exit', $html); // TV mode: walang nav; ang link sa nav ay nasa ibang Chatbot page (ChatbotTabsTest)
         $this->assertMatchesRegularExpression('#data-live-count="messages"[^>]*>3<#', $html);
-        $this->assertStringContainsString('id="live-map"', $html);
+        $this->assertStringContainsString('data-live-board', $html);
         $this->assertStringContainsString('id="live-data"', $html);
         $this->getJson('/chatbot/live/feed')->assertOk()->assertJsonPath('counts.messages.today', 3);
     }
@@ -165,7 +165,7 @@ class ChatbotLiveTest extends ChatblastTestCase
             ['order', '2026-10-21 12:30:09', 'Page Uno'],
         ], array_map(fn ($e) => [$e['type'], $e['at'], $e['page']], $out['events']));
         $this->assertSame((int) $late, $out['events'][4]['id']);
-        foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id'], array_keys($e));
+        foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id', 'bot'], array_keys($e)); // ang bot: ang naghatid o sumagot
         foreach (['Juan', 'Magkano', 'sagot', 'Hello', '7004'] as $private) $this->assertStringNotContainsString($private, $res->getContent());
         $this->assertSame(0, $out['more']);
 

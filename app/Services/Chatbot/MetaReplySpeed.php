@@ -16,6 +16,7 @@ use Throwable;
 class MetaReplySpeed
 {
     public const TIMEOUT = 5;
+    public const LIVE_TIMEOUT = 3;
     public const TODAY_CACHE_SECONDS = 120;
     public const PAST_CACHE_SECONDS = 1800;
     public const FAILED_CACHE_SECONDS = 60;
@@ -54,6 +55,27 @@ class MetaReplySpeed
 
         return ['hours' => $day['hours'], 'total' => $day['total'],
             'chart' => self::chart($day['hours'], $prev['ok'] ? $prev['hours'] : array_fill(0, 24, null))] + $blank;
+    }
+
+    /**
+     * Ang average ngayong araw (segundo, orasan ng Meta) para sa Live page, mula sa parehong cache ng screen na ito. state:
+     * ok (seconds ay null kapag wala pang sagot ngayong araw), not_linked (walang tawag) o error (hindi sumagot ang Forbeast).
+     * Mas maikli ang hangganan ng tawag: ang Live ay pino-poll, at ang pagkuha ay kadalasang pagkatapos na ng sagot.
+     * @return array{state: string, seconds: ?float}
+     */
+    public function todayAverage(?string $page): array
+    {
+        if (!ForbeastSite::linked()) return ['state' => 'not_linked', 'seconds' => null];
+        try {
+            $today = now()->toDateString();
+            $day = $this->day($today, $page, $today, self::LIVE_TIMEOUT);
+        } catch (Throwable $e) {
+            report($e);
+
+            return ['state' => 'error', 'seconds' => null];
+        }
+
+        return $day['ok'] ? ['state' => 'ok', 'seconds' => $day['total']['avg']] : ['state' => 'error', 'seconds' => null];
     }
 
     /** @return array{ok: true, hours: array, total: array}|array{ok: false, error: string, at: string} */
