@@ -139,8 +139,9 @@ class HandleGatewayEvent implements ShouldQueue
         $gw = Gateways::valid($e['gateway'] ?? null) ? $e['gateway'] : Gateways::FORBEAST;
         // Ang event_id ay sariling bilang ng gateway: ang ref ng hindi forbeast ay may pangalan nito (walang banggaan).
         $ref = $e['mid'] ?: ($gw === Gateways::FORBEAST ? 'gw-event-' : 'gw-' . $gw . '-event-') . $e['event_id'];
-        // Walang mid: ang susi na iisa sa dalawang gateway (page, customer, uri at oras ng Meta), kapag may oras.
-        $meta = !$e['mid'] && is_int($e['timestamp'] ?? null) ? 'gateway-events:meta:' . sha1($e['page_id'] . '|' . $e['psid'] . '|' . $e['type'] . '|' . $e['timestamp']) : null;
+        // Walang mid: ang susi na iisa sa dalawang gateway (page, customer, uri at oras ng Meta), kapag may oras at kapag
+        // dalawa ang naka-set up na gateway (iisang gateway: gaya ng dati, ang event_id lang).
+        $meta = !$e['mid'] && is_int($e['timestamp'] ?? null) && count(Gateways::setUpList()) > 1 ?'gateway-events:meta:' . sha1($e['page_id'] . '|' . $e['psid'] . '|' . $e['type'] . '|' . $e['timestamp']) : null;
         // Ang standby na kopya ng Botcake (hindi tumakbo) ay hindi ulit: ang gateway ang sasagot.
         $stored = BotcakeChat::where('message_id', $ref)->get(['id', 'payload'])->contains(fn ($c) => !ForbeastWatch::standby($c));
         if (!Cache::add('gateway-events:seen:' . sha1($ref), 1, self::DEDUPE_SECONDS) || $stored) {

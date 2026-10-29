@@ -13,9 +13,9 @@ use Throwable;
  * page, ang history, at ang take / request / accept / decline / cancel na may actor. Lahat ng sagot ay untrusted: text lang.
  * Walang key, secret o GATEWAY_URL = hindi naka-link (walang tawag).
  *
- * Dalawang gateway: bawat isa ay may sariling site key at secret (FORBEAST_SITE_*, INCEPXIONBOT_SITE_*). Ang tawag tungkol
- * sa isang page ay sa aktibong gateway ng page kapag naka-link ito; ang iba (ang listahan, ang sagot sa request) ay sa
- * unang naka-link na gateway (forbeast muna).
+ * Dalawang gateway: bawat isa ay may sariling site key at secret (FORBEAST_SITE_*, INCEPXIONBOT_SITE_*). Ang lahat ng
+ * tawag ay sa iisang gateway (gateway(): forbeast muna), para iisa ang talaan ng may-ari; ang papasok na tawag
+ * (GatewaySiteController) ay tinatanggap mula sa alinmang naka-link.
  */
 class ForbeastSite
 {
@@ -49,13 +49,12 @@ class ForbeastSite
     }
 
     /**
-     * Ang gateway ng tawag: ang aktibong gateway ng page ($metaPageId, kapag kilala dito at naka-link), kung hindi ay ang unang
-     * naka-link (forbeast muna); null = walang naka-link.
+     * Ang gateway ng lahat ng tawag ng site: ang unang naka-link (forbeast muna; incepxionbot kapag ito lang). Iisang talaan ng
+     * may-ari: ang listahan, ang take, ang request at ang sagot ay laging sa iisang gateway, kaya hindi nahahati ang mga
+     * request sa dalawang talaan. null = walang naka-link.
      */
-    public static function gateway(?string $metaPageId = null): ?string
+    public static function gateway(): ?string
     {
-        $page = $metaPageId !== null ? (\App\Models\BotcakeChat::pageMap()[$metaPageId] ?? null) : null;
-        if ($page !== null && self::linked($g = Gateways::active($page))) return $g;
         foreach (Gateways::ALL as $g) if (self::linked($g)) return $g;
 
         return null;
@@ -101,19 +100,19 @@ class ForbeastSite
     /** @return array{ok: bool, status: int, body: array, error: ?string} */
     public function history(string $metaPageId): array
     {
-        return $this->call('GET', '/v1/site/transfers', ['page' => $metaPageId], $metaPageId);
+        return $this->call('GET', '/v1/site/transfers', ['page' => $metaPageId]);
     }
 
     /** @return array{ok: bool, status: int, body: array, error: ?string} */
     public function take(string $metaPageId, string $actor, string $phrase): array
     {
-        return $this->call('POST', '/v1/site/pages/' . rawurlencode($metaPageId) . '/take', ['actor' => $actor, 'phrase' => $phrase], $metaPageId);
+        return $this->call('POST', '/v1/site/pages/' . rawurlencode($metaPageId) . '/take', ['actor' => $actor, 'phrase' => $phrase]);
     }
 
     /** @return array{ok: bool, status: int, body: array, error: ?string} */
     public function request(string $metaPageId, string $actor, string $phrase): array
     {
-        return $this->call('POST', '/v1/site/pages/' . rawurlencode($metaPageId) . '/transfers', ['actor' => $actor, 'phrase' => $phrase], $metaPageId);
+        return $this->call('POST', '/v1/site/pages/' . rawurlencode($metaPageId) . '/transfers', ['actor' => $actor, 'phrase' => $phrase]);
     }
 
     /**
@@ -125,10 +124,10 @@ class ForbeastSite
         return $this->call('POST', '/v1/site/transfers/' . rawurlencode($transferId) . '/' . $verb, ['actor' => $actor] + ($phrase !== null ? ['phrase' => $phrase] : []));
     }
 
-    /** @return array{ok: bool, status: int, body: array, error: ?string} $metaPageId: ang page ng tawag (ang gateway nito). */
-    private function call(string $method, string $path, array $data = [], ?string $metaPageId = null): array
+    /** @return array{ok: bool, status: int, body: array, error: ?string} */
+    private function call(string $method, string $path, array $data = []): array
     {
-        $gw = self::gateway($metaPageId);
+        $gw = self::gateway();
         if ($gw === null) return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'This site is not linked to Forbeast.'];
         $c = Gateways::config($gw);
         try {

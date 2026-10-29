@@ -47,13 +47,17 @@ class ChatbotForbeastWatch extends Command
                 }
                 $pageId = trim((string) $settings->get((string) $page, 'botcake', 'page_id'));
                 if ($pageId !== '') $watch->inbound((string) $page, $pageId);
+                // Pagkalipat sa kabilang gateway: ang pumalyang sagot na naitala pagkatapos ng lipat ay sinasagot nang isang beses.
+                $watch->rerunAfterSwitch((string) $page);
             } catch (Throwable $e) {
                 report($e); // isang page lang ang apektado
             }
         }
         // Ang page na inilipat ng bantay sa Botcake (inbound o padala): ibinabalik sa Forbeast kapag matagal nang maayos ang health.
         $back = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)->where('active', true)->orderBy('id')->get()
-            ->filter(fn ($s) => ForbeastWatch::returnable($s) || ForbeastWatch::alarm($s))->pluck('page_name')->unique(fn ($p) => $settings->pageKey((string) $p));
+            // Pati ang held at hindi makalipat: ang page sa kabilang gateway ay may lipat pa ring babalikan sa ilalim nito.
+            ->filter(fn ($s) => ForbeastWatch::returnable($s) || ForbeastWatch::alarm($s)
+                || in_array(json_decode((string) $s->plainValue(), true)['result'] ?? null, [ForbeastWatch::HELD, ForbeastWatch::CANNOT], true))->pluck('page_name')->unique(fn ($p) => $settings->pageKey((string) $p));
         foreach ($back as $page) {
             try {
                 $watch->switchBack((string) $page);

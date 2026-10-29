@@ -94,12 +94,6 @@ class Gateways
         return $gateway === self::INCEPXIONBOT ? self::FORBEAST : self::INCEPXIONBOT;
     }
 
-    /** Ang pinangalanang via (chatbot_replies.via, payload ng chat) ng gateway: forbeast o incepxionbot. */
-    public static function isVia(?string $via): bool
-    {
-        return self::valid($via);
-    }
-
     /** Ang mga gateway na mapipili sa page: naka-set up at gumagana ang token ng page doon. @return array<int, string> */
     public static function readyFor(string $page): array
     {

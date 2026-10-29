@@ -280,6 +280,88 @@ class GatewayPerPageTest extends ChatblastTestCase
         $this->assertSame(['switched', 'gateway', 'botcake', 'forbeast'], [$e['result'], $e['from'], $e['to'], $e['gateway']]);
     }
 
+    public function test_S_194_5b_sends_failing_on_both_with_good_health_checks_end_on_botcake_not_flipping(): void
+    {
+        Queue::fake();
+        $this->watch();
+        $this->send[self::GW] = 500;
+        for ($i = 0; $i < 3; $i++) $this->sendNow();
+        $this->assertSame('incepxionbot', Gateways::active('Page Uno'));
+
+        $this->send[self::IXB] = 500;
+        $this->travel(1)->minutes();
+        $this->watch(); // ang health ng forbeast ay maayos ulit, pero kaaalis lang ng page doon
+        for ($i = 0; $i < 3; $i++) $this->sendNow();
+
+        $this->assertSame('botcake', ChatbotProvider::name('Page Uno'));
+        $this->assertSame([['incepxionbot', 'forbeast'], ['botcake', 'incepxionbot']], array_map(fn ($e) => [$e['to'], $e['gateway']], $this->events()));
+    }
+
+    public function test_S_194_4c_a_late_failure_of_the_gateway_already_left_does_not_move_the_page_again(): void
+    {
+        Queue::fake();
+        $this->watch();
+        $this->send[self::GW] = 500;
+        for ($i = 0; $i < 3; $i++) $this->sendNow();
+
+        app(ForbeastWatch::class)->switch('Page Uno', 'connection_error', 'HTTP 400 (Meta #4)', [], [], 'forbeast');
+
+        $this->assertSame(['gateway', 'incepxionbot'], [ChatbotProvider::name('Page Uno'), Gateways::active('Page Uno')]);
+        $this->assertCount(1, $this->events());
+    }
+
+    public function test_S_194_4d_customers_whose_reply_failed_are_answered_once_through_the_new_gateway(): void
+    {
+        Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class]);
+        $this->greeting();
+        $this->watch();
+        $this->send[self::GW] = 500;
+        $psids = ['6012345678900001', '6012345678900002', '6012345678900003'];
+        foreach ($psids as $psid) {
+            $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => 'Hi', 'message_id' => 'm_' . $psid,
+                'payload' => ['source' => 'gateway'], 'received_at' => now()]);
+            app(\App\Services\Chatbot\ChatbotRunner::class)->handle($chat->id);
+        }
+        $this->assertSame('incepxionbot', Gateways::active('Page Uno'));
+        // Ang padalang nagpalipat ay naitala pagkatapos ng lipat: sa susunod na minuto ito sinasagot.
+        $this->travel(1)->minutes();
+        $this->watch();
+        $this->watch();
+
+        $reruns = BotcakeChat::whereNull('message_id')->get();
+        $this->assertSame($psids, $reruns->pluck('psid')->sort()->values()->all(), 'once per customer');
+        Queue::assertPushed(RunChatbotFlow::class, 3);
+    }
+
+    public function test_S_194_4e_a_held_event_on_the_second_gateway_keeps_the_way_back(): void
+    {
+        Queue::fake();
+        $this->watch();
+        $this->send[self::GW] = 500;
+        for ($i = 0; $i < 3; $i++) $this->sendNow();
+        app(ForbeastWatch::class)->event('Page Uno', ForbeastWatch::HELD, null, 'inbound', 'held: likely not delivered by Meta');
+        $this->send[self::GW] = 200;
+
+        for ($i = 0; $i <= 30; $i++) {
+            $this->travel(1)->minutes();
+            $this->watch();
+        }
+
+        $this->assertSame('forbeast', Gateways::active('Page Uno'));
+    }
+
+    public function test_S_194_9b_a_page_with_only_an_incepxionbot_token_is_on_the_list(): void
+    {
+        Queue::fake();
+        $this->actingAs($this->user());
+        app(PageSettings::class)->set('Page Ocho', 'botcake', 'page_id', '8008');
+        $this->connect('incepxionbot', 'ixb_ocho_token', 'Page Ocho');
+
+        $row = collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Ocho');
+        $this->assertSame(['incepxionbot'], $row['gateways'] ?? null);
+        $this->postJson('/chatbot/gateway', ['page_name' => 'Page Ocho', 'gateway' => 'incepxionbot'])->assertOk();
+    }
+
     public function test_S_194_6_an_event_signed_with_the_other_gateways_secret_is_401(): void
     {
         Queue::fake();
