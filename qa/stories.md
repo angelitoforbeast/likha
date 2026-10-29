@@ -3144,3 +3144,21 @@ Tests: `tests/Feature/Chatblast/ResponseSpeedTest.php`, existing Chatblast suite
 | S-188.5 (P2) | At 390 px the charts are readable and the page does not scroll sideways, with tables closed and open | headless Chrome render at 390 px | passed |
 | S-188.6 (P1, amendment 188-1) | When the page opens, Then each chart shows only its average (chart 2: the With AI and No AI averages) and the previous day's average; median, p90, max and AI time are in the legend but hidden until clicked | `test_S_188_6…` (chart data and script) and headless Chrome (visible datasets per chart) | passed |
 | S-188.7 (P1, amendment 188-1) | Given a day whose typical hourly average is 6 s and one hour at 363 s, Then the axis top is 3 × 6 = 18 → 20 s (at least 10 s, rounded up to a clean number; the previous day's averages when today has fewer than 3 hours), and the 363 s hour is drawn at the top edge with a "363 s" label and its real value in the tooltip | `test_S_188_7…` (axis top) and headless Chrome (clamped point, label and tooltip) | passed |
+
+## S-190 The owner watches the bot work live on an animated map
+
+As the owner, I want a Live tab under Chatbot that counts today's messages, confirmed replies, follow-ups, AI answers and orders, and animates each real event on a map (Inquiries → Likha Bot core → Follow-up / Orders, with an AI node), so I can see the bot working right now.
+
+Slice 190. Threat model: untrusted input is the query string of `/chatbot/live` and `/chatbot/live/feed` (`page_id`, `cursor[chat|seq|order|ok|ai]`), validated as digits or `Y-m-d H:i:s|id` and otherwise ignored. Page names (owner-authored page settings) reach the page only as escaped Blade text or `textContent`. No customer names or message text leave the server on this screen. Risk tier: medium (a new read-only JSON endpoint behind the existing Chatbot access; no writes).
+Tests: `tests/Feature/Chatblast/ChatbotLiveTest.php`, existing Chatblast suite, headless Chrome evidence.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-190.1 (P1) | Given a role without Chatbot access, Then /chatbot/live and /chatbot/live/feed are 403; a CEO sees the page, the Live link in the Chatbot nav, the counters and the map | `test_S_190_1…` | passed |
+| S-190.2 (P1) | Given today's fixture rows, Then the feed's counters equal them: messages 3 (2 in the last 5 min; standby copies and yesterday left out), replies confirmed by Meta 3 (2), sent but not confirmed 1, follow-ups 2 (1), AI answers 3 (2; not pending, failed or Encode order), orders 2 (1) | `test_S_190_2…` | passed |
+| S-190.3 (P1) | Given the cursor of the last poll, When new rows arrive, Then only the newer events come back in time order (message, ai, confirmed, follow_up, a late Meta confirmation of an older reply, order), each with type, time, page name and id only (no customer name, message or reply text); the next poll from the new cursor returns none; a broken or future cursor starts from now | `test_S_190_3…` | passed |
+| S-190.4 (P1) | Given 230 new messages (or 150 messages + 100 follow-ups), Then the poll returns the newest 200 in time order and "+30 more" (or "+50 more"), and the next poll starts after them | `test_S_190_4…` | passed |
+| S-190.5 (P1) | When a page is chosen, Then the counters and the events are that page's only; a broken page filter means all pages | `test_S_190_5…` | passed |
+| S-190.6 (P1) | Existing Chatblast suites pass | `tests/Feature/Chatblast` | passed |
+| S-190.7 (P2) | At 390 px the counters and the map (stacked layout) render with no horizontal scroll | headless Chrome at 390 px | passed |
+| S-190.8 (P2) | With reduced motion, Then no travelling pulse is drawn (no heartbeat, ring spin or flow either); the counters still update and the nodes still light up | `test_S_190_8…` (CSS and script hook) and headless Chrome (pulses counted during Preview) | passed |

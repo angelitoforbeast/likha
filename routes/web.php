@@ -341,6 +341,9 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::post('/health/thresholds', [\App\Http\Controllers\ChatbotHealthController::class, 'saveThresholds'])->middleware('throttle:30,1,chatbot-health-thresholds')->name('health.thresholds');
     Route::post('/health/attachments', [\App\Http\Controllers\ChatbotHealthController::class, 'saveAttachments'])->middleware('throttle:30,1,chatbot-health-attachments')->name('health.attachments');
     Route::get('/speed', [\App\Http\Controllers\ChatbotSpeedController::class, 'index'])->middleware('throttle:60,1,chatbot-speed')->name('speed');
+    // Live: ang mapa ng ginagawa ng bot ngayon; ang feed ay pino-poll kada 5 segundo ng bawat bukas na tab.
+    Route::get('/live', [\App\Http\Controllers\ChatbotLiveController::class, 'index'])->middleware('throttle:60,1,chatbot-live')->name('live');
+    Route::get('/live/feed', [\App\Http\Controllers\ChatbotLiveController::class, 'feed'])->middleware('throttle:120,1,chatbot-live-feed')->name('live.feed');
     Route::get('/test', [\App\Http\Controllers\ChatbotTabsController::class, 'test'])->name('test');
     Route::post('/test/send', [\App\Http\Controllers\ChatbotTabsController::class, 'testSend'])->middleware('throttle:30,1,chatbot-test')->name('test.send');
     Route::post('/test/reset', [\App\Http\Controllers\ChatbotTabsController::class, 'testReset'])->middleware('throttle:30,1,chatbot-test')->name('test.reset');

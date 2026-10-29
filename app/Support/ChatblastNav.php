@@ -61,6 +61,7 @@ class ChatblastNav
             ['label' => 'Results', 'url' => '/chatbot/results', 'active' => request()->is('chatbot/results*')],
             ['label' => 'Health', 'url' => '/chatbot/health', 'active' => request()->is('chatbot/health*')],
             ['label' => 'Speed', 'url' => '/chatbot/speed', 'active' => request()->is('chatbot/speed*')],
+            ['label' => 'Live', 'url' => '/chatbot/live', 'active' => request()->is('chatbot/live*')],
             ['label' => 'Test', 'url' => '/chatbot/test', 'active' => request()->is('chatbot/test*')],
         ];
         // Owners (kung aling site ang may-ari ng bawat page): CEO at marketing lang, gaya ng ChatbotOwnersController.
