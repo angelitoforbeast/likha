@@ -134,7 +134,7 @@ class AdGroupAllValuesTest extends ChatblastTestCase
     public function test_S_192_5_a_page_based_page_ignores_its_groups_values(): void
     {
         $this->formAndAiFlow();
-        $this->serum(['fill_up_form' => 'Serum form', 'loop_3_form' => 'Serum loop', 'prompt_1' => 'Serum prompt', 'ai_provider' => 'local']);
+        $this->serum(['fill_up_form' => 'Serum form', 'loop_3_form' => 'Serum loop', 'prompt_1' => 'Serum prompt', 'ai_provider' => 'local', 'ai_local_model' => 'qwen3:14b']);
         app(AdGroups::class)->setMode('Precious Lopez', false);
 
         $this->says('7001', '111');
@@ -154,6 +154,41 @@ class AdGroupAllValuesTest extends ChatblastTestCase
 
         $this->assertSame('Serum form', $form('7001'));
         $this->assertSame('Page form', $form('7002'));
+    }
+
+    public function test_S_192_1_the_run_resumed_after_the_pool_keeps_the_group_it_asked_with(): void
+    {
+        $flow = ChatbotFlow::create(['name' => 'After AI', 'graph' => FlowGraph::clean(['nodes' => [
+            ['id' => 'n1', 'type' => 'start'],
+            ['id' => 'n3', 'type' => 'ai', 'config' => ['user' => '{{last_input}}', 'save_to' => 'answer', 'history' => 0]],
+            ['id' => 'n4', 'type' => 'send', 'config' => ['items' => [['type' => 'text', 'value' => '{{answer}}|{{Fill-Up Form}}']]]],
+        ], 'edges' => [['from' => 'n1', 'port' => 'next', 'to' => 'n3'], ['from' => 'n3', 'port' => 'success', 'to' => 'n4']]])]);
+        DB::table('chatbot_flows')->where('id', $flow->id)->update(['published_at' => now()]);
+        app(ChatbotPage::class)->link('Precious Lopez', $flow->fresh());
+        $a = $this->serum(['fill_up_form' => 'Serum form']);
+        app(AdGroups::class)->save('Precious Lopez', null, 'Toner', ['222'], ['fill_up_form' => 'Toner form']);
+        // Ang tanong sa AI ay sa Serum (hal. sequence na naka-pin), pero ang pinakabagong ad ng customer ay nasa Toner na.
+        BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Precious Lopez', 'psid' => '7001', 'name' => 'Ana', 'message' => 'Hi', 'payload' => ['ad_id' => '222'], 'received_at' => now()]);
+        $ticket = ['request_id' => 'req-192-1', 'page_id' => 1001, 'psid' => 7001, 'chat_id' => null, 'flow_id' => $flow->id, 'node_id' => 'n3'];
+        DB::table(ChatbotAiQueue::TABLE)->insert(['request_id' => 'req-192-1', 'page_id' => 1001, 'psid' => 7001, 'chat_id' => null, 'flow_id' => $flow->id, 'node_id' => 'n3',
+            'page_name' => 'Precious Lopez', 'model' => 'gpt-4o-mini', 'messages' => '[]', 'max_tokens' => 100, 'status' => 'answered', 'answer' => 'Opo',
+            'context' => json_encode(['input' => 'Hi', 'full_name' => 'Ana', 'received_at' => '2026-10-20 18:00', 'ai_calls' => 1, 'steps' => 1, 'ad_group' => $a]),
+            'deadline_at' => now()->addMinute(), 'created_at' => now(), 'updated_at' => now()]);
+        (new CustomerFields(1001, 7001))->set(CustomerFields::AI, 'req-192-1');
+
+        $this->assertSame('done', app(ChatbotRunner::class)->resumeAi($ticket));
+        $this->assertSame(['Opo|Serum form'], $this->sent('7001'));
+    }
+
+    public function test_S_192_3_a_group_cannot_pick_local_when_no_local_model_is_set_anywhere(): void
+    {
+        config(['services.chatbot_ai.providers.local.model' => '']);
+        $id = $this->serum([]);
+        $groups = app(AdGroups::class);
+
+        $this->assertSame('AI provider: ' . \App\Services\Chatbot\ChatbotAiSettings::NO_MODEL, $groups->setValue('Precious Lopez', $id, 'ai_provider', 'local')['error'] ?? null);
+        $this->assertTrue($groups->setValue('Precious Lopez', $id, 'ai_local_model', 'qwen3:14b')['ok']);
+        $this->assertTrue($groups->setValue('Precious Lopez', $id, 'ai_provider', 'local')['ok'], 'may model na ang group');
     }
 
     public function test_S_192_1_the_ai_answered_by_the_pool_uses_the_groups_ai_too(): void

@@ -225,7 +225,7 @@ class AdGroups
             $groups = $this->groups($page);
             if ($id !== null && !isset($groups[$id])) return ['ok' => false, 'error' => 'This group was deleted.'];
             [$name, $ads, $values] = $build($groups[$id] ?? null);
-            if (($error = $this->invalid($name, $ads, $values)) !== null) return ['ok' => false, 'error' => $error];
+            if (($error = $this->invalid($name, $ads, $values, $page, $groups[$id]['values'] ?? [])) !== null) return ['ok' => false, 'error' => $error];
             foreach ($ads as $ad) {
                 foreach ($groups as $other) {
                     if ($other['id'] !== $id && in_array($ad, $other['ads'], true)) return ['ok' => false, 'error' => 'Ad ' . $ad . ' is already in the group "' . $other['name'] . '".'];
@@ -243,7 +243,7 @@ class AdGroups
     }
 
     /** Ang mali sa pangalan, ads o values, o null; ang pangalan at ads ay inaayos (iisang espasyo, walang ulit, ayos). */
-    private function invalid(string &$name, array &$ads, array $values): ?string
+    private function invalid(string &$name, array &$ads, array $values, string $page, array $own): ?string
     {
         $name = trim(preg_replace('/\s+/u', ' ', $name));
         if ($name === '') return 'Give the group a name.';
@@ -267,8 +267,30 @@ class AdGroups
             if ($ai && ($err = self::aiError($key, $value))) return $err;
             if (!$ai && ($err = ChatbotFields::valueError($key, $value))) return $key . ': ' . $err;
         }
+        $aiKey = array_key_first(array_intersect_key($values, array_flip(self::AI_KEYS)));
+        if ($aiKey !== null && $this->localWithoutModel($page, $own, $values)) return ChatbotAiSettings::LABELS[$aiKey] . ': ' . ChatbotAiSettings::NO_MODEL;
 
         return null;
+    }
+
+    /**
+     * Gaya ng sa page (ChatbotAiSettings): ang AI ng group (ang bago, ang naka-save, saka ang sa page) ay gumagamit ng Local
+     * pero walang Local model kahit saan (group, page, site, config).
+     */
+    private function localWithoutModel(string $page, array $own, array $values): bool
+    {
+        $ai = $this->settings->all($page, ChatbotAiChain::PROVIDER);
+        foreach (self::AI_KEYS as $key) {
+            $v = trim((string) (array_key_exists($key, $values) ? $values[$key] : ($own[$key] ?? '')));
+            if ($v !== '') $ai[$key] = $v;
+        }
+        $site = ChatbotAiChain::site();
+        $provider = ChatbotAiChain::providerOf($ai, $site);
+        $fallback = (string) ($ai['ai_fallback'] ?? $site['fallback'] ?? '');
+        if ($provider !== ChatbotAiProviders::LOCAL && !in_array(ChatbotAiProviders::LOCAL, explode(',', $fallback), true)) return false;
+        $model = $ai['ai_local_model'] ?? $site['local_model'] ?? (string) ChatbotAiProviders::option(ChatbotAiProviders::LOCAL, 'model', '');
+
+        return trim((string) $model) === '';
     }
 
     /** Ang mali sa AI ng group: gaya ng sa page (ChatbotAiSettings::clean), pero ang "default" ay ang blangko (ang sa page). */

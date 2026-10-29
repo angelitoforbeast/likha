@@ -243,8 +243,8 @@
     }
 
     /** Ang page value ng isang key (ang default ng group): ang cell ng page, o ang AI ng page (r.ai; blangko = ang site default). */
-    function pageValue(r, key) {
-      if (key.indexOf('ai_') === 0) {
+    function pageValue(r, key, kind) {
+      if (kind === 'ai') {
         var a = r.ai || {};
         var v = {ai_provider: a.label, ai_fallback: a.fallback, ai_local_model: a.local_model, ai_local_timeout: a.local_timeout != null ? a.local_timeout + ' s' : null}[key];
         return v == null || v === '' ? 'site default' : String(v);
@@ -258,7 +258,7 @@
       if (c.kind === 'auto') { td.append(el('span', {class: 'text-slate-400', text: 'Built from the group\'s item'})); return td; }
       var k = keys[c.key];
       if (!k) { td.append(el('span', {class: 'italic text-slate-400', text: 'page value'})); return td; }
-      var own = (g.values || {})[c.key], def = pageValue(r, c.key);
+      var own = (g.values || {})[c.key], def = pageValue(r, c.key, k.kind);
       var show = own != null && own !== ''
         ? el('span', {class: 'cb-txt text-slate-900', text: own})
         : el('span', {class: 'block'}, [el('span', {class: 'cb-txt text-slate-400', text: def || '(empty)'}), el('span', {class: 'block text-[11px] italic text-slate-400', text: 'uses default'})]);
@@ -418,7 +418,7 @@
       var b = el('button', {type: 'button', class: 'block max-w-[9rem] truncate rounded border border-slate-300 bg-white px-1 py-0.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
         'aria-label': 'AI of ' + g.name, title: 'Edit the AI of ' + g.name, text: '✎ AI: ' + (own ? (opt ? opt[1] : own) : 'default')});
       b.addEventListener('click', function () {
-        openModal('AI · ' + g.name, 'Empty values use the page\'s AI.', valueList(page, r, g, keys, function (key) { return key.indexOf('ai_') === 0; }));
+        openModal('AI · ' + g.name, 'Empty values use the page\'s AI.', valueList(page, r, g, keys, function (key) { return keys[key].kind === 'ai'; }));
       });
       return b;
     }
@@ -432,7 +432,7 @@
 
     function valueList(page, r, g, keys, pick) {
       var items = Object.keys(keys).filter(pick).map(function (key) {
-        var k = keys[key], own = (g.values || {})[key], def = pageValue(r, key);
+        var k = keys[key], own = (g.values || {})[key], def = pageValue(r, key, k.kind);
         var opt = own && k.options ? k.options.find(function (o) { return o[0] === own; }) : null;
         if (opt) own = opt[1]; // OpenAI / Local / None, gaya ng sa page
         var edit = el('button', {type: 'button', class: 'shrink-0 rounded px-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',

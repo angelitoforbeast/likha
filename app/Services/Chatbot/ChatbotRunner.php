@@ -227,13 +227,16 @@ class ChatbotRunner
 
             if ($fields->get(CustomerFields::AI) !== $mark . $row->request_id) return $drop('the run moved on', false);
             if ($fields->get(CustomerFields::BOT_PAUSED) === '1') return $drop('the bot paused', true);
-            $group = $this->groups->forCustomer($pageId, $psid, (string) $row->page_name);
+            // Ang group na naitala sa ticket (ang takbong nagtanong, hal. ang naka-pin ng sequence) habang ginagamit pa ng page;
+            // ang walang naitala (lumang ticket o page values noon) ay ayon sa pinakabagong ad ngayon.
+            $ctx = (array) json_decode((string) $row->context, true);
+            $asked = $ctx['ad_group'] ?? null;
+            $group = is_int($asked) && isset($this->groups->activeGroups((string) $row->page_name)[$asked]) ? $asked : $this->groups->forCustomer($pageId, $psid, (string) $row->page_name);
             $flow = $this->page->flow((string) $row->page_name, $group);
             $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
             if (!$flow || $flow->id !== (int) $row->flow_id || !in_array($node['type'] ?? '', $nodeTypes, true)) return $drop('the flow changed', true);
             $fields->clear(CustomerFields::AI);
 
-            $ctx = (array) json_decode((string) $row->context, true);
             $run = new FlowRun($flow->id, $flow->graph, (string) $row->page_name, $pageId, $this->page->botfields((string) $row->page_name, $group), $fields,
                 $row->chat_id !== null ? (int) $row->chat_id : null, (string) ($ctx['input'] ?? ''), (string) ($ctx['full_name'] ?? ''), (string) ($ctx['received_at'] ?? ''));
             $run->adGroup = $group;

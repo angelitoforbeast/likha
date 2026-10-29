@@ -67,7 +67,7 @@ class BotcakeSendQueue
             'flow_id' => $run->flowId, 'node_id' => $nodeId, 'run_id' => $run->runId,
             'payload' => json_encode(['messages' => $messages] + ($run->tags ? ['tags' => $run->tags] : []), JSON_UNESCAPED_UNICODE),
             'context' => json_encode(['input' => $run->input, 'full_name' => $run->fullName, 'received_at' => $run->receivedAt,
-                'ai_calls' => $run->aiCalls, 'steps' => $run->steps], JSON_UNESCAPED_UNICODE),
+                'ai_calls' => $run->aiCalls, 'steps' => $run->steps, 'ad_group' => $run->adGroup], JSON_UNESCAPED_UNICODE),
             'status' => 'pending', 'deadline_at' => now()->addSeconds(self::CHATBOT_SECONDS), 'created_at' => now(), 'updated_at' => now(),
         ]);
         $run->fields->set(CustomerFields::AI, self::MARK . $id);
