@@ -70,7 +70,8 @@ class GatewayPageValuesTest extends ChatblastTestCase
         $this->assertSame($expected, $fields->pluck('key')->all());
 
         $main = $fields->firstWhere('key', 'main_flow');
-        $this->assertSame(['key' => 'main_flow', 'label' => 'Main Flow', 'type' => 'text', 'value' => 'Hello {{name}}', 'editable' => true], array_diff_key($main, ['updated_at' => 1]));
+        // Ang dating mga key ay buo pa (may mga dagdag na paglalarawan na ngayon, hal. group at required).
+        $this->assertEquals(['key' => 'main_flow', 'label' => 'Main Flow', 'type' => 'text', 'value' => 'Hello {{name}}', 'editable' => true], array_intersect_key($main, array_flip(['key', 'label', 'type', 'value', 'editable'])));
         $this->assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', $main['updated_at']);
         $this->assertSame(['label' => 'PRICE', 'type' => 'text', 'value' => '198'], array_intersect_key($fields->firstWhere('key', 'price'), ['label' => 1, 'type' => 1, 'value' => 1]));
         $this->assertSame(['type' => 'textarea', 'value' => 'Step one'], array_intersect_key($fields->firstWhere('key', 'seq_1'), ['type' => 1, 'value' => 1]));

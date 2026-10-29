@@ -3249,3 +3249,22 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveScoreboardTest.php`, `GatewayPerPageT
 | S-196.7 (P1) | At 390 px there is no sideways scroll (the map turns vertical) | `test_S_196_7…` and headless Chrome at 390 px | passed |
 | S-196.8 (P1) | The Speed section says "by another app or a person", with the hint that Botcake replies count there | `MetaReplySpeedTest::test_S_196_8…` | passed |
 | S-196.9 (P1) | Existing suites pass | `tests/Feature/Chatblast` | passed |
+## S-195 A Forbeast user pastes a template code and the page gets that Likha flow
+
+As a page owner on Forbeast, I want to paste a flow's template code, so that my page runs that Likha flow and I see and fill the fields it needs, in Forbeast or in Likha.
+
+Slice 195. Threat model: every `/api/gateway/*` request (path, query, headers, body, the code) is untrusted until the signature verifies against one of the page's own gateway secrets; staff screens are behind login and `/chatblast` access; config, migrations and the owner's page rows are trusted. New surface: `GET /api/gateway/flow-codes/{code}`, `GET` and `POST /api/gateway/pages/{metaPageId}/flow`, `POST` and `DELETE /chatbot/flows/{id}/code`. Risk tier: high (new signed routes), medium for the rest.
+Tests: `tests/Feature/Chatblast/FlowTemplateCodesTest.php`, existing Chatblast, Botcake and PageSettings suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-195.1 (P1) | Given staff with flow access, When they create a code for a published flow, Then it is `LK-XXXX-XX`, shown with Copy on the flow's screen and in the Flow list; regenerate replaces it; revoke removes it; an unpublished flow or a sequence-step flow gets no code; staff without access get 403 | `test_S_195_1…` | passed |
+| S-195.2 (P1) | When Forbeast GETs a code (any letter case) for a page, Then the flow (id, name, steps, updated_at) and the fields it needs come back grouped, with required ones marked and this page's current values; the flow's own texts are not sent | `test_S_195_2…` | passed |
+| S-195.3 (P1) | When Forbeast POSTs the code for a page, Then the page's flow rows change, the page history says "via Forbeast: with code …, by <user>", and existing values (also ones the new flow does not use) are untouched | `test_S_195_3…` | passed |
+| S-195.4 (P1) | Given a revoked or unknown code, Then GET and POST are 404 `unknown_code` and nothing changes; a page already linked keeps its flow | `test_S_195_4…` | passed |
+| S-195.5 (P1) | Given a page that is not on this site, Then every flow endpoint is 404 `unknown_page` | `test_S_195_5…` | passed |
+| S-195.6 (P1) | Given an unsigned call or one signed with a wrong secret, Then 401 `bad_signature` and nothing changes | `test_S_195_6…` | passed |
+| S-195.7 (P1) | When Forbeast PUTs values, Then they read back `updated_by: forbeast` (Likha edits read `likha`), the Pages screen marks them "via Forbeast", and a needed field outside the old list (e.g. a Prompt the flow reads) can be filled, while system keys (flow, flow_id, provider, gateway, active, ai_*, auto_switch, SHOP DETAILS) stay refused even when the flow names them | `test_S_195_7…` (two tests) | passed |
+| S-195.8 (P1) | Given two pages on one flow, When staff publish a change to the flow, Then both pages run the new version | `test_S_195_8…` | passed |
+| S-195.9 (P1) | Given a flow using Seq N or Seq Img N, Then both come back adjacent as a pair with `pair: N`, only the used one required | `test_S_195_9…` | passed |
+| S-195.10 (P1) | Existing suites pass (`tests/Feature/Chatblast tests/Feature/Botcake tests/Feature/PageSettings`) | full run | passed |

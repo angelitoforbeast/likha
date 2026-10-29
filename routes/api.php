@@ -19,6 +19,10 @@ Route::post('/gateway/events/{gateway}', [\App\Http\Controllers\GatewayEventCont
 // Ang mga botfield ng page, binabasa at pinapalitan mula sa Forbeast (pinirmahan ng webhook secret ng page lang, may timestamp).
 Route::get('/gateway/pages/{metaPageId}/values', [\App\Http\Controllers\GatewayPageValuesController::class, 'show']);
 Route::put('/gateway/pages/{metaPageId}/values', [\App\Http\Controllers\GatewayPageValuesController::class, 'update']);
+// Ang template code ng flow mula sa Forbeast (parehong pirma ng page): basa ng code, at basa at pagtali ng flow ng page.
+Route::get('/gateway/flow-codes/{code}', [\App\Http\Controllers\GatewayPageValuesController::class, 'flowCode']);
+Route::get('/gateway/pages/{metaPageId}/flow', [\App\Http\Controllers\GatewayPageValuesController::class, 'pageFlow']);
+Route::post('/gateway/pages/{metaPageId}/flow', [\App\Http\Controllers\GatewayPageValuesController::class, 'applyFlow']);
 // Ang paglipat ng page sa pagitan ng dalawang partner site, inuutos ng Forbeast (pinirmahan ng FORBEAST_SITE_SECRET, may timestamp).
 Route::prefix('/gateway/site/pages/{metaPageId}')->controller(\App\Http\Controllers\GatewaySiteController::class)->group(function () {
     Route::post('/adopt', 'adopt');

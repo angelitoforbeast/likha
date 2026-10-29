@@ -100,6 +100,8 @@ class ChatbotController extends Controller
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
+        // Ang template code ng bawat flow na mayroon (ipinapakita sa FLOW ng page).
+        $flowCodes = Schema::hasColumn('chatbot_flows', 'template_code') ? \App\Models\ChatbotFlow::whereNotNull('template_code')->pluck('template_code', 'id') : collect();
         // Ang Check: ang naka-cache lang (ang wala pa ay kinukuha ng page isa-isa sa /chatbot/check).
         $check = app(ChatbotPageCheck::class);
         $prints = $check->prints();
@@ -116,6 +118,7 @@ class ChatbotController extends Controller
             $flowId = null;
             $provider = ChatbotProvider::BOTCAKE;
             $providerRow = $autoSwitch = $gatewayRow = null;
+            $forbeastBy = []; // botfield key => sino sa Forbeast ang huling sumulat ng kasalukuyang value
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
@@ -128,7 +131,11 @@ class ChatbotController extends Controller
                     $providerRow = $s;
                 } elseif ($s->key === Gateways::KEY) $gatewayRow = $s;
                 elseif ($s->key === ForbeastWatch::KEY) $autoSwitch = $s;
-                else $cells[$s->key] = $s->plainValue();
+                else {
+                    $cells[$s->key] = $s->plainValue();
+                    if ($s->key !== 'flow' && (string) $s->source !== '') $forbeastBy[$s->key] = (string) $s->source;
+                    else unset($forbeastBy[$s->key]);
+                }
             }
             // FLOW: ang flow na talagang nakatali (ayon sa id). Ang lumang text na hindi nakatali ay hiwalay, para
             // makita na hindi ito tumatakbo at mapili ang flow.
@@ -143,6 +150,9 @@ class ChatbotController extends Controller
                 // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
                 'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
+                'flow_code' => $linked !== null ? ($flowCodes[$flowId] ?? null) : null,
+                // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
+                'from_forbeast' => (object) $forbeastBy,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
                 // Ang mga kumpletong koneksyon (Connected column at ang Bot na mapipili).

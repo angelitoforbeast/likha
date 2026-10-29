@@ -20,7 +20,7 @@ class PageValues
     private const HEAD = ['main_flow', 'main_flow_2', 'fill_up_form', 'loop_3_form', 'item_name_in_jnt_dashboard', 'price', 'quantity', 'picture'];
     private const TAIL = ['comment_reply_1', 'comment_reply_2', 'comment_reply_3', 'comment_pm', 'after_order_1'];
 
-    public function __construct(private PageSettings $settings, private ChatbotFields $fields)
+    public function __construct(private PageSettings $settings, private ChatbotFields $fields, private FlowFields $flowFields)
     {
     }
 
@@ -29,10 +29,13 @@ class PageValues
         return $source !== null && $source !== '' ? self::VIA . $source : null;
     }
 
-    /** @return array<string, string> key => label (gaya ng nasa /chatbot), sa ayos ng kontrata */
-    public function columns(): array
+    /**
+     * @param array<int, array{key: string, label: string}>|null $all ChatbotFields::columns(), kapag nabasa na
+     * @return array<string, string> key => label (gaya ng nasa /chatbot), sa ayos ng kontrata
+     */
+    public function columns(?array $all = null): array
     {
-        $labels = array_column($this->fields->columns(), 'label', 'key');
+        $labels = array_column($all ?? $this->fields->columns(), 'label', 'key');
         $numbered = function (string $prefix) use ($labels): array {
             $keys = array_values(array_filter(array_keys($labels), fn ($k) => (bool) preg_match('/^' . $prefix . '\d+$/', (string) $k)));
             usort($keys, fn ($a, $b) => (int) substr($a, strlen($prefix)) <=> (int) substr($b, strlen($prefix)));
@@ -47,32 +50,25 @@ class PageValues
         return $out;
     }
 
-    /** @return array<string, string> ang mga key na napapalitan (lahat maliban sa SHOP DETAILS) */
-    public function editable(?array $columns = null): array
+    /**
+     * Ang mga key na napapalitan: lahat ng nasa listahan maliban sa SHOP DETAILS, at ang iba pang botfield na kailangan ng
+     * flow ng page ($needed, key => label; hal. isang Prompt na binabasa ng flow), para mapunan ang bawat kailangan.
+     * @return array<string, string>
+     */
+    public function editable(?array $columns = null, array $needed = []): array
     {
-        return array_diff_key($columns ?? $this->columns(), [ShopDetails::KEY => true]);
+        return array_diff_key(($columns ?? $this->columns()) + $needed, [ShopDetails::KEY => true]);
     }
 
-    /** @return array<int, array{key: string, label: string, type: string, value: ?string, editable: bool, updated_at: ?string}> */
-    public function read(string $page, ?array $columns = null): array
+    /**
+     * Ang mga field ng listahan na may value ng page (FlowFields::field). $required: key => bool, ayon sa flow ng page.
+     * @return array<int, array<string, mixed>>
+     */
+    public function read(string $page, ?array $columns = null, array $required = []): array
     {
-        // Ayon sa id: ang pinakabagong active row ang masusunod sa parehong key, gaya ng PageSettings::get.
-        $rows = $this->settings->pageQuery($page)->where('provider', ChatbotFields::PROVIDER)->where('active', true)->orderBy('id')->get()->keyBy('key');
-        $at = fn ($s) => $s?->created_at?->toIso8601String();
+        $rows = $this->flowFields->rows($page);
         $out = [];
-        foreach ($columns ?? $this->columns() as $key => $label) {
-            if ($key === ShopDetails::KEY) {
-                $parts = array_filter(array_map(fn ($k) => $rows[$k] ?? null, array_combine(ShopDetails::PARTS, ShopDetails::PARTS)));
-                $last = collect($parts)->sortBy('created_at')->last();
-                $out[] = ['key' => $key, 'label' => $label, 'type' => 'textarea',
-                    'value' => ShopDetails::build($page, array_map(fn ($s) => (string) $s->plainValue(), $parts)), 'editable' => false, 'updated_at' => $at($last)];
-                continue;
-            }
-            $s = $rows[$key] ?? null;
-            $kind = ChatbotFields::kind($key);
-            $out[] = ['key' => $key, 'label' => $label, 'type' => $kind === 'image' ? 'image' : ($kind === 'long' ? 'textarea' : 'text'),
-                'value' => $s?->plainValue(), 'editable' => true, 'updated_at' => $at($s)];
-        }
+        foreach ($columns ?? $this->columns() as $key => $label) $out[] = $this->flowFields->field($key, $label, $page, $rows, $required[$key] ?? false);
 
         return $out;
     }
