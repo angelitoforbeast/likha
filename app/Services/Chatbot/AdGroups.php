@@ -525,7 +525,7 @@ class AdGroups
         $cols = ['headline', 'body_ad_settings', 'ad_link'];
         $hasCreatives = \Illuminate\Support\Facades\Schema::hasTable('ad_campaign_creatives');
         $report = \Illuminate\Support\Facades\Schema::hasTable('ads_manager_reports')
-            ? DB::table('ads_manager_reports')->where('ad_id', $ad)->orderByDesc('day')->orderByDesc('id')->first(['headline', 'body', 'campaign_id']) : null;
+            ? DB::table('ads_manager_reports')->where('ad_id', $ad)->orderByDesc('day')->orderByDesc('id')->first(['headline', 'body_ad_settings', 'campaign_id']) : null;
         $cre = $hasCreatives ? DB::table('ad_campaign_creatives')->where('ad_id', $ad)->first($cols) : null;
         $fromCampaign = false;
         if (!$cre && $hasCreatives && $report && $report->campaign_id) {
@@ -537,7 +537,7 @@ class AdGroups
         $text = fn (...$v) => (string) (collect($v)->first(fn ($x) => trim((string) $x) !== '') ?? '');
 
         return ['ad_id' => $ad, 'name' => ($this->adNames([$ad])[$ad] ?? '') ?: null,
-            'headline' => $text($cre->headline ?? null, $report->headline ?? null), 'body' => $text($cre->body_ad_settings ?? null, $report->body ?? null),
+            'headline' => $text($cre->headline ?? null, $report->headline ?? null), 'body' => $text($cre->body_ad_settings ?? null, $report->body_ad_settings ?? null),
             'link' => $facebook ? $link : null, 'from_campaign' => $fromCampaign];
     }
 
