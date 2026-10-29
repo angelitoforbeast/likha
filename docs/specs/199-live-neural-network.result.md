@@ -23,7 +23,7 @@ The Live feed (`LiveFeed`) now gives every `order` event an `amount`: the COD of
 | S-199.7 | `ChatbotLiveRulesTest` (4 tests: money packet / "+1 ORDER", burst merge none dropped, hold and never count down, reduced motion) | pass — `OK (4 tests, 37 assertions)` |
 | S-199.8 | `ChatbotLiveNetworkTest::test_S_199_8_the_query_count_of_a_poll_does_not_grow_with_the_number_of_events` | pass (same run) |
 | S-199.9 | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest` | pass — `OK (6 tests, 77 assertions)`, `OK (9 tests, 99 assertions)` |
-| S-199.10 | `tests/Feature` full run vs the baseline | SUITE_RESULT |
+| S-199.10 | `tests/Feature` full run vs the baseline | pass — `Tests: 3674, Assertions: 70841, Failures: 2` (ExampleTest, ItemTableFitScriptTest: the known baseline) |
 
 Red runs (one line each): S-199.1–.5 `Undefined array key "order_value"` / `"sequences"` / missing `amount` key before the feed change; S-199.1 second-order case `+ 5 => 1149` before the fallback fix, and the late-encode case `+ 8 => 640` before the 24 h run window; S-199.6 failed on the old view (no `name="bot"` select); S-199.7 `node:fs` (rules file not yet written); S-199.8 passed from the start (it guards growth, nothing to fail before the change).
 
@@ -36,7 +36,7 @@ Red runs (one line each): S-199.1–.5 `Undefined array key "order_value"` / `"s
 
 ## Done-when checklist
 - [x] All P1 cases pass with tests — the case table above; the four Live test files run green (outputs above).
-- [x] The full suite adds no new failures vs 59b39b46 — SUITE_LINE
+- [x] The full suite adds no new failures vs 59b39b46 — baseline on this branch before code: `Tests: 3663, Assertions: 70712, Failures: 3` (ExampleTest, ItemTableFitScriptTest, and AstraReplayCommandTest S_31_3 "changes no file", which tripped because files were edited during that run; it passes in the final run); final: `Tests: 3674, Assertions: 70841, Failures: 2` (the two known). The last fix landed during the final run, so `tests/Feature/Chatblast` ran again on the final tree: `OK, but there were issues! Tests: 1469, Assertions: 50800, PHPUnit Deprecations: 52, Skipped: 1` (the issues are deprecations).
 - [x] Rendered evidence page `docs/specs/199-evidence/live.html` that opens on its own and plays the money animation with simulated events — the real Blade view rendered with real-shaped fake data by `docs/specs/199-evidence/build.php`, the rules script inlined, `fetch` replaced by a simulator (orders with a COD, without one, then a burst of three; a late COD rolls the total without a second packet). Links point to `http://localhost/...` only.
 - [x] Screenshots at 1920×1080 and 390 px — `live-1920.png` (a "+₱599" money packet mid-flight on Bot 1's link) and `live-390.png` (through `frame390.html`, because headless Chrome on Windows has a minimum window width wider than 390 px).
 - [x] Measured query count and time per poll — see Tests.
@@ -90,7 +90,7 @@ Two-way door. Additive feed fields (`amount` on order events, `counts.order_valu
 ## Tests
 - New: `ChatbotLiveNetworkTest` (S-199.1–.6, .8; sqlite in memory), `ChatbotLiveRulesTest` (S-199.7; runs `tests/js/call.cjs` on `public/js/chatbot-live-rules.js` in node, the repo's existing pattern for page JS; skipped when node is missing).
 - Query count and time per poll (sqlite in memory, 40 orders + 40 messages, 80 events in the poll; measured with a throwaway test, not committed): counts cached = 10 queries, 1.7 ms; counts refresh after 11 s = 18 queries, 2.8 ms; first count of the day (cold) = 26 queries, 10 ms. The count does not grow with events (S-199.8). Real MySQL timings were not measured (no production access in this run).
-- Full suite: SUITE_DETAIL
+- Full suite (`vendor/bin/phpunit tests/Feature`): `Tests: 3674, Assertions: 70841, Failures: 2, PHPUnit Deprecations: 92, Skipped: 4`; failures: `ExampleTest::test_the_application_returns_a_successful_response` and `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`, both in the baseline. Chatblast on the final tree: 1469 tests, all pass.
 
 ## Open questions
 None blocking. For the owner to confirm when convenient: the bot filter leaves the KPI totals page-wide (see Rulings).
@@ -104,6 +104,6 @@ None blocking. For the owner to confirm when convenient: the bot filter leaves t
 - Measure the Live feed on production MySQL (queries and ms per poll on a busy day) — the timings here are sqlite — normal.
 
 ## Progress
-- Run 1: data (amount, order value, sequences, bot filter), rules JS, page, evidence, review (one loop, plus one re-check), polish — STATUS_LINE
+- Run 1: data (amount, order value, sequences, bot filter), rules JS, page, evidence, review (one loop, plus one re-check), polish, full suite — done: all P1 cases pass, the suite has only the two known baseline failures, nothing pushed.
 
 199: done — the Live page is a neural network room with the order's COD flowing into the totals; all P1 cases pass with tests
