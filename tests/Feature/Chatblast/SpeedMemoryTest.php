@@ -73,13 +73,19 @@ class SpeedMemoryTest extends ChatblastTestCase
             $n = $i % 3;
             $event = fn (int $t, array $d) => ['page_id' => $page, 'psid' => $psid, 'type' => 'sequence', 'created_at' => $at($t), 'detail' => json_encode($d + ['name' => $names[$n]])];
             $prev = $day - 600 + ($i * 1543) % 64800;
+            // Bawat ika-10 ay may naunang takbo kahapon (subscribe at step 1): ang huli lang bago ang takbo ngayon ang binibilang.
+            if ($i % 10 === 0) {
+                $buf['chatbot_events'][] = $event($prev - 86400, ['op' => 'subscribed']);
+                $buf['chatbot_events'][] = $event($prev - 86400 + 1200, ['op' => 'ran', 'step' => 1, 'sequence_id' => $seqs[$n]]);
+            }
             $buf['chatbot_events'][] = $event($prev, ['op' => 'subscribed']);
             foreach ([1 => 20, 2 => 40, 3 => 60] as $k => $min) {
                 $due = $prev + $min * 60;
                 $ran = $due + ($i * 7 + $k * 13) % 300;
                 $r = ($i * 3 + $k) % 20;
                 $op = $r === 0 ? 'skipped' : ($r === 1 ? 'failed' : 'ran');
-                $buf['chatbot_events'][] = $event($ran, ['op' => $op, 'step' => $k, 'sequence_id' => $seqs[$n], 'due' => $at($due + ($i % 5) * 60)]);
+                // Bawat ika-50 ay lumang event na walang sequence_id (ang sequence ay ayon sa pangalan).
+                $buf['chatbot_events'][] = $event($ran, ['op' => $op, 'step' => $k, 'due' => $at($due + ($i % 5) * 60)] + ($i % 50 ? ['sequence_id' => $seqs[$n]] : []));
                 if ($op === 'ran' && ($i + $k) % 29 !== 0) {
                     $pushed = $ran - ($i % 9) - 1;
                     $send = ['page_id' => $page, 'psid' => $psid, 'node_id' => 'n1', 'kind' => 'send', 'sequence_id' => $seqs[$n], 'sequence_step' => $k,
@@ -126,10 +132,12 @@ class SpeedMemoryTest extends ChatblastTestCase
         Cache::flush();
         gc_collect_cycles();
         memory_reset_peak_usage();
+        $base = memory_get_usage();
         $t = microtime(true);
         $res = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk();
         $secs = round(microtime(true) - $t, 1);
-        $peak = memory_get_peak_usage();
+        // Ang memory ng request mismo: sa buong suite ay may dala nang memory ang proseso mula sa ibang test.
+        $peak = memory_get_peak_usage() - $base;
         $n = self::numbers($res);
 
         $s = $n['sequences']['total'];
@@ -138,7 +146,8 @@ class SpeedMemoryTest extends ChatblastTestCase
         $this->assertSame([382, '2026-10-21 18:46:45'], [$n['sequences']['slowest'][0]['delay'], $n['sequences']['slowest'][0]['pushed']]);
         // Lahat ng iba pang numero (bawat oras, bawat bot, ang push, ang 20 pinakamabagal at ang mga chart): ang fingerprint ng lumang code.
         $this->assertSame('2aed0348c883fd4283b20bf8e706a451', md5(json_encode($n)));
-        $this->assertLessThan(192 * 1048576, $peak, 'peak ' . round($peak / 1048576, 1) . " MB in $secs s");
+        // 192 MB sa kabuuan kapag mag-isa ang test (mga 58 MB ang PHPUnit at Laravel bago ang request): 128 MB ang sa request.
+        $this->assertLessThan(128 * 1048576, $peak, 'request peak ' . round($peak / 1048576, 1) . " MB in $secs s");
     }
 
     /**
@@ -171,6 +180,25 @@ class SpeedMemoryTest extends ChatblastTestCase
         $this->assertSame('["Seq 32","Seq 34","Seq 31","Seq 33","Seq 13","Seq 14","Seq 15","Seq 16","Seq 17","Seq 18","Seq 19","Seq 20","Seq 21","Seq 22","Seq 03","Seq 08","Seq 02","Seq 07","Seq 12","Seq 01"]', json_encode(array_column($slow, 'sequence')));
         $this->assertSame(['page' => 'Page Uno', 'sequence' => 'Seq 32', 'step' => 1, 'scheduled' => '2026-10-21 10:00:00', 'pushed' => '2026-10-21 10:09:50', 'sent' => '2026-10-21 10:20:00',
             'scheduled_to_pushed' => 590, 'pushed_to_meta' => 610, 'delay' => 1200, 'sent_is_pushed' => false], $slow[0]);
+    }
+
+    public function test_S_198_1_a_step_written_while_the_page_reads_is_not_counted_half(): void
+    {
+        // Gaya ng dati, ang mga event ng araw ay ang nakita bago basahin ang mga padala: ang step na naisulat (padala at
+        // event) habang binabasa ang mga padala ay sa susunod na load na, hindi "no message" o walang kasaysayan ngayon.
+        foreach (range(1, 3) as $n) $this->tieStep($n, 0, 900, 300);
+        $done = false;
+        DB::listen(function ($q) use (&$done): void {
+            if ($done || !str_contains($q->sql, 'from "chatbot_replies"') || !str_contains($q->sql, '"sequence_id" is not null')) return;
+            $done = true;
+            $this->tieStep(4, 5, 900, 3600);
+        });
+        $this->actingAs($this->user('CEO', 'ceo-198d@example.test'));
+        Cache::flush();
+        $s = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk()->viewData('sequences')['total'];
+
+        $this->assertTrue($done);
+        $this->assertSame([3, 3, 0], [$s['due'], $s['sent'], $s['no_message']]);
     }
 
     public function test_S_198_4_a_sequences_section_over_its_budget_or_failing_leaves_the_rest_of_the_page(): void

@@ -278,7 +278,7 @@ class ResponseSpeed
 
     private static function checkBudget(int $budget): void
     {
-        if (memory_get_usage() > $budget) throw new \OverflowException('Speed: the sequences section is over its memory budget.');
+        if (memory_get_usage(true) > $budget) throw new \OverflowException('Speed: the sequences section is over its memory budget.');
     }
 
     /** Ang isang oras o ang araw ng pushed → sent sa Meta: pushed (Forbeast), measured, average, median, p90, max, unconfirmed, botcake. */
@@ -448,9 +448,11 @@ class ResponseSpeed
         $total = $blank;
         $late = date('Y-m-d H:i:s', strtotime($end) + self::STEP_LATE_SECONDS);
         // Dalawang basa ng mga event ng araw, walang hawak na row: una ang mga customer, page at sequence (para sa
-        // kasaysayan nila) at ang unang takbo ng bawat customer + sequence; pangalawa ang bilang.
+        // kasaysayan nila) at ang unang takbo ng bawat customer + sequence; pangalawa ang bilang. Ang pangalawa ay ang mga
+        // event lang na nakita ng una (hanggang sa ID nito): ang padala ay isinusulat bago ang event, kaya bawat bilang na
+        // event ay may padala na nang basahin ang mga padala, gaya ng dati.
         [$pages, $psids, $names, $first] = [[], [], [], []];
-        $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d) use (&$pages, &$psids, &$names, &$first): void {
+        $maxId = $this->stepEvents($f['page_id'], $start, $late, $budget, function (object $e, array $d) use (&$pages, &$psids, &$names, &$first): void {
             $pages[(int) $e->page_id] = true;
             $psids[(int) $e->psid] = true;
             $name = (string) ($d['name'] ?? '');
@@ -501,7 +503,7 @@ class ResponseSpeed
                 $slow->extract();
                 $slow->insert($item);
             }
-        });
+        }, $maxId);
 
         $top = [];
         foreach ($slow as $item) $top[] = $item;
@@ -526,19 +528,25 @@ class ResponseSpeed
 
     /**
      * Ang mga sequence event ng takbo (ran, skipped, failed) sa [$from, $to), ayon sa oras at ID, isa-isang ibinibigay sa
-     * $each kasama ang detail; kada oras ang query at walang row na itinatago.
+     * $each kasama ang detail; kada oras ang query at walang row na itinatago. $upTo: ang mga event hanggang sa ID na ito
+     * lang. Ibinabalik ang pinakamataas na ID na nabasa (0 kapag wala).
      */
-    private function stepEvents(?string $page, string $from, string $to, int $budget, \Closure $each): void
+    private function stepEvents(?string $page, string $from, string $to, int $budget, \Closure $each, ?int $upTo = null): int
     {
+        $maxId = 0;
         foreach (self::windows($from, $to) as [$a, $b]) {
             $rows = DB::table('chatbot_events')->where('type', 'sequence')->where('created_at', '>=', $a)->where('created_at', '<', $b)
-                ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->orderBy('created_at')->orderBy('id')->select(['page_id', 'psid', 'detail', 'created_at'])->cursor();
+                ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->when($upTo !== null, fn ($q) => $q->where('id', '<=', $upTo))
+                ->orderBy('created_at')->orderBy('id')->select(['id', 'page_id', 'psid', 'detail', 'created_at'])->cursor();
             foreach ($rows as $e) {
+                $maxId = max($maxId, (int) $e->id);
                 $d = json_decode((string) $e->detail, true);
                 if (is_array($d) && in_array($d['op'] ?? null, ['ran', 'skipped', 'failed'], true)) $each($e, $d);
             }
             self::checkBudget($budget);
         }
+
+        return $maxId;
     }
 
     /**
