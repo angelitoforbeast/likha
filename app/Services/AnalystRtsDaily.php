@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Http\Controllers\OwnerPrivateController;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -96,7 +97,7 @@ class AnalystRtsDaily
                 't' => $r['in_transit_pct'], 'age' => $r['in_transit_age'],
                 'acc' => $acc[$key] ?? (object) [],
             ];
-            $keep = isset($analystToday[$key]);
+            $keep = isset($analystToday[$key]) && ($analystToday[$key]->source ?? null) !== 'auto';
             try {
                 DB::transaction(function () use ($settings, $r, $canon, $day, $keep, $trend, $key) {
                     $page = $r['page'];
@@ -106,8 +107,10 @@ class AnalystRtsDaily
                     $settings->set($page, AnalystRts::PROVIDER, AnalystRts::REASON . $canon, self::reason($day, $trend[$key]['projected_rts'] ?? null, $r['set_rts']), system: true, source: 'auto');
                 });
                 $sum[$keep ? 'kept' : 'written']++;
-            } catch (\InvalidArgumentException $e) {
+            } catch (\Throwable $e) {
+                // Isang item lang ang pumalya (hal. lampas 100 character ang key): itinatala, at tuloy ang iba.
                 $sum['failed']++;
+                Log::warning('rts:daily-estimate: item failed', ['page' => $r['page'], 'item' => $r['item'], 'error' => $e->getMessage()]);
             }
         }
         if ($sum['written'] + $sum['kept'] > 0) OwnerPrivateController::bumpCacheVersion();

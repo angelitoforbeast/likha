@@ -233,6 +233,51 @@ class AnalystRtsDailyTest extends RtsProjectionTestCase
         $this->assertSame('Mira RTS accuracy', $cat['analyst_rts_acc']);
     }
 
+    public function test_S_197_P1_4_an_estimate_the_analyst_adjusted_that_day_is_the_one_measured(): void
+    {
+        $this->setting('Page A', 'Item A');
+        $this->orders(40, 'Page A', 'Item A', '2026-10-05 12:00:00', 'In Transit');
+        $wb = $this->waybills('Page A', 'Item A');
+        $this->runAt('2026-10-16 06:00:00');                       // auto 50
+        Carbon::setTestNow(Carbon::parse('2026-10-16 12:00:00', 'Asia/Manila'));
+        $this->analystPost('Page A', 'Item A', 45, 'Inayos.');
+        $this->setStatus(array_slice($wb, 0, 16), 'Returned');
+        $this->setStatus(array_slice($wb, 16), 'Delivered');       // 40%
+        $this->runAt('2026-10-23 06:00:00');
+
+        $a7 = $this->day('Page A', 'Item A')['acc']['7'];
+        $this->assertSame('mira', $a7['src']);
+        $this->assertEqualsWithDelta(45.0, $a7['est'], 0.001);
+        $this->assertEqualsWithDelta(5.0, $a7['err'], 0.001);
+    }
+
+    public function test_S_197_P1_1_the_reason_names_the_21_day_trend_and_the_set_rts_gap_when_large(): void
+    {
+        DB::table('page_item_settings')->insert(['page_name' => 'Page A', 'item_name' => 'Item A', 'rts_pct' => 20,
+            'effective_date' => '2026-09-01', 'mode_cod_int' => 599]);
+        $this->orders(20, 'Page A', 'Item A', '2026-09-10 12:00:00', 'Returned');
+        $this->orders(80, 'Page A', 'Item A', '2026-09-10 12:00:00', 'Delivered');
+        $this->orders(50, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned');
+        $this->orders(50, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered');
+        $this->runAt('2026-10-23 06:00:00');
+
+        // Buong range 35%, huling 21 araw 50%, Set RTS 20%.
+        $reason = $this->active('rts_reason:', 'Page A', 'Item A')->value;
+        $this->assertStringContainsString('Huling 21 araw 50% vs buong range 35% (+15.0 pts).', $reason);
+        $this->assertStringContainsString('Set RTS 20%: -15.0 pts ang agwat.', $reason);
+    }
+
+    public function test_S_197_P1_1_an_item_whose_key_is_too_long_is_skipped_whole_and_the_rest_still_run(): void
+    {
+        $long = 'Item '.str_repeat('x', 95);
+        $this->orders(10, 'Page A', $long, '2026-10-20 12:00:00', 'Returned');
+        $this->orders(10, 'Page A', 'Item B', '2026-10-20 12:00:00', 'Returned');
+        $this->runAt('2026-10-23 06:00:00');
+
+        $this->assertSame(0, DB::table('page_settings')->where('key', 'like', '%xxxx%')->count());
+        $this->assertSame('100', $this->active('rts_pct:', 'Page A', 'Item B')->value);
+    }
+
     public function test_S_197_never_runs_during_the_night_astra_step(): void
     {
         $this->orders(10, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned');
