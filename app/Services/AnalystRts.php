@@ -18,26 +18,39 @@ class AnalystRts
     public const REASON = 'rts_reason:';
     private const TZ = 'Asia/Manila';
 
-    /** Ang key ng analyst na tinatanggap ng PageSettings (may item name sa dulo, kaya hindi pasok sa karaniwang key rule). */
+    /**
+     * Ang key ng analyst na tinatanggap ng PageSettings (may item name sa dulo, kaya hindi pasok sa karaniwang key rule):
+     * ang value, ang dahilan, at ang day row ng araw-araw na tantya (AnalystRtsDaily).
+     */
     public static function isKey(string $provider, string $key): bool
     {
-        return $provider === self::PROVIDER && (str_starts_with($key, self::PCT) || str_starts_with($key, self::REASON)) && strlen($key) > strlen(self::PCT);
+        return $provider === self::PROVIDER && strlen($key) > strlen(self::PCT)
+            && (str_starts_with($key, self::PCT) || str_starts_with($key, self::REASON) || str_starts_with($key, AnalystRtsDaily::DAY));
     }
 
-    /** Pinakahuling tinype bawat page+item: itemKey => [pct, reason, at, prev]. */
+    /** Ang value na isinusulat: hanggang 2 decimal, walang trailing zero (hal. "33", "32.5"). */
+    public static function format(float $pct): string
+    {
+        return rtrim(rtrim(number_format(round($pct, 2), 2, '.', ''), '0'), '.');
+    }
+
+    /** Pinakahuling value bawat page+item: itemKey => [pct, reason, at, prev, source (auto = ang araw-araw na run)]. */
     public function all(): array
     {
         if (!Schema::hasTable('page_settings')) return [];
 
         $out = [];
         $reasons = [];
+        $cols = ['page_name', 'key', 'value', 'created_at'];
+        if (Schema::hasColumn('page_settings', 'source')) $cols[] = 'source';
         $rows = DB::table('page_settings')->where('provider', self::PROVIDER)->where('active', true)
-            ->orderBy('id')->get(['page_name', 'key', 'value', 'created_at']);
+            ->orderBy('id')->get($cols);
         foreach ($rows as $r) {
             $pk = strtolower(trim((string) $r->page_name));
             if (str_starts_with($r->key, self::PCT)) {
                 $out[$pk . '||' . substr($r->key, strlen(self::PCT))] = [
                     'pct' => (float) $r->value, 'reason' => null, 'at' => $r->created_at ? (string) $r->created_at : null, 'prev' => null,
+                    'source' => $r->source ?? null,
                 ];
             } elseif (str_starts_with($r->key, self::REASON)) {
                 $reasons[$pk . '||' . substr($r->key, strlen(self::REASON))] = (string) $r->value;
@@ -75,12 +88,13 @@ class AnalystRts
         if (!$target) return 'Walang page+item na ganito sa settings.';
 
         $canon = $aliases->canonicalKey($item);
-        $value = rtrim(rtrim(number_format(round($pct, 2), 2, '.', ''), '0'), '.');
+        $value = self::format($pct);
         $settings = new PageSettings();
         try {
+            // source "mira": tinype ng analyst (ang araw-araw na run ay "auto").
             DB::transaction(function () use ($settings, $target, $canon, $value, $reason) {
-                $settings->set((string) $target->page_name, self::PROVIDER, self::PCT . $canon, $value, system: true);
-                $settings->set((string) $target->page_name, self::PROVIDER, self::REASON . $canon, $reason, system: true);
+                $settings->set((string) $target->page_name, self::PROVIDER, self::PCT . $canon, $value, system: true, source: 'mira');
+                $settings->set((string) $target->page_name, self::PROVIDER, self::REASON . $canon, $reason, system: true, source: 'mira');
             });
         } catch (\InvalidArgumentException $e) {
             return $e->getMessage();

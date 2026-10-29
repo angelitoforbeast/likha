@@ -98,6 +98,8 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'analyst_rts',   'label' => 'Mira RTS'],
             ['id' => 'analyst_gap_pts', 'label' => 'Mira RTS Gap (Set − Mira)'],
             ['id' => 'analyst_gap_abs', 'label' => 'Mira RTS Gap (abs)'],
+            // Error (puntos) ng Mira RTS 7 at 14 araw na ang nakalipas laban sa totoong RTS ng parehong mga order (AnalystRtsDaily).
+            ['id' => 'analyst_rts_acc', 'label' => 'Mira RTS accuracy'],
             // Para sa Conditional Formatting ng Projected RTS (target o compare_col); nakatago hanggang buksan.
             ['id' => 'rts_gap_pts',   'label' => 'RTS Gap (Set − Projected)'],
             ['id' => 'rts_gap_abs',   'label' => 'RTS Gap (abs)'],
@@ -251,7 +253,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_1d_m', 'proj_prof_1d_mira', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
-            'rts_set', 'mira_rts', 'analyst_rts', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason',
+            'rts_set', 'mira_rts', 'analyst_rts', 'analyst_rts_acc', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason',
             'stock', 'incoming', 'units_per_day', 'doi', 'order_qty', 'lifecycle',
         ],
         'campaigns' => [

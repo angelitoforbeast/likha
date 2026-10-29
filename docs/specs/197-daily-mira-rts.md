@@ -1,0 +1,20 @@
+# Brief 197: Mira RTS every day — an estimate of each page+item's final RTS, checked against reality every day
+
+## Why
+"Mira RTS" on /owner/private is meant to be the estimated FINAL RTS% of each page+item, so the owner can judge ads and the Set RTS before J&T statuses settle. Today it is typed in by the analyst only now and then (last on 2026-10-23), so it goes stale. The owner (2026-10-29): it must be refreshed every day, over the same data he checks (last month plus this month), learning from how earlier orders ended (e.g. an item at 20% RTS / 20% delivered / 60% in transit that ended at 60% RTS / 40% delivered), and its accuracy must be compared every day, not monthly.
+
+## Decisions (do not reopen)
+| # | Decision | Why |
+|---|---|---|
+| 1 | **Daily estimate at 06:00 Manila** (scheduler, one server, idempotent): for every page+item with orders from the first day of last month to today, compute the estimated final RTS% with the existing RtsProjection method (Returned and For Return as RTS; Delivered as delivered; In transit/Delivering weighted by p(age) learned from finished orders, item-specific where it has enough finished orders, pooled otherwise; the learning window as RtsProjection uses today). Write it as the Mira RTS value (analyst rts_pct:<item>, source "auto") with an automatic reason in Taglish (≤500 chars): matched orders, % final, % still in transit and their average age, the trend of the last 21 days vs the whole range when they differ by more than 3 points, and the gap to Set RTS when ≥3 points. Round to 0.5. | The owner's definition, refreshed daily without a person. |
+| 2 | **The analyst can still adjust**: a value written by the analyst API (source "mira") on the same day after 06:00 stays until the next 06:00 run; its reason is kept. The next run writes a fresh auto value (history keeps every value). | Mira reviews at noon; the formula restarts daily. |
+| 3 | **Daily snapshot for accuracy** without a new table: every day's value is already kept as a replaced row in page_settings history; make sure the history keeps the value, its date, its source, and the inputs needed (matched, final %, in-transit %), e.g. in the reason or a JSON value on the same row. | Daily comparison needs the past estimates. |
+| 4 | **Daily accuracy check** (same 06:00 run, after the estimate): for each page+item, take the estimate made 7 days ago and 14 days ago, and compare with the actual RTS of the same order set now that those orders are (mostly) final: report error in points and how final the set is now. Show it on /owner/private as a new column "Mira RTS accuracy" (catalogued like the others, hideable), with a hover listing the last 7 daily errors, and an overall line (average absolute error across items, by day) in the RTS check feed. | The owner wants accuracy every day. |
+| 5 | Load: the run uses indexed date ranges and the existing projection data paths; state its runtime on realistic volume (about 47 page+items, 2 months of orders). Never runs during the 03:00–03:45 night Astra step. | Production safety. |
+| 6 | Applies to Incepxion. No change to Set RTS, ads, profit formulas or orders. | Narrow. |
+
+## Cases (S-197)
+P1: .1 the 06:00 run writes a Mira RTS for every page+item with orders in range, with an auto reason; .2 an item with 60% in transit at young age gets a higher estimate than its RTS-so-far, per p(age); .3 an analyst value written after 06:00 survives until the next run and is then replaced (history keeps both); .4 the accuracy column shows the 7- and 14-day-old estimates vs actual for a fixture whose orders became final; .5 no look-ahead: an estimate computed "as of" a past date uses only statuses known then (test with status logs); .6 rerunning the same day doesn't duplicate history; .7 existing suites pass.
+
+## Done when
+P1 pass; `tests/Feature` areas touched add no new failures vs 8705e881 (record the baseline). Result with the runtime measurement, the reason text format, the accuracy definition, deploy notes (scheduler, migrations if any). End with "197: <done|blocked> — <one line>".

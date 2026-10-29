@@ -201,6 +201,17 @@ class OwnerPrivateController extends Controller
         }
     }
 
+    /** Accuracy ng Mira RTS bawat page+item (AnalystRtsDaily). Best effort: [] kapag pumalya, hindi dapat masira ang page. */
+    protected function analystAccuracy(): array
+    {
+        try {
+            return (new \App\Services\AnalystRtsDaily())->recent();
+        } catch (\Throwable $e) {
+            \Log::warning('analystAccuracy failed: '.$e->getMessage());
+            return [];
+        }
+    }
+
     /** Current version sentinel (lazy-init kung blank pa). */
     private function cacheVersion(): string
     {
@@ -1820,6 +1831,7 @@ class OwnerPrivateController extends Controller
         $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
         $rtsProj = $this->projectedRtsRows($startDate, $endDate);
         $analystRts = (new \App\Services\AnalystRts())->all();
+        $analystAcc = $this->analystAccuracy();
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
@@ -2391,6 +2403,7 @@ class OwnerPrivateController extends Controller
             // Mira RTS ng analyst (tinype niya, may dahilan) at ang gap nito sa Set RTS.
             $analyst         = $analystRts[$pk.'||'.$dominantKey] ?? null;
             $analystGap      = ($rtsPct !== null && $analyst) ? round($rtsPct - $analyst['pct'], 2) : null;
+            $acc             = $analystAcc[$pk.'||'.$dominantKey] ?? null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
             // alias-aware aggregation sa jntStatsMap builder above).
@@ -2778,6 +2791,12 @@ class OwnerPrivateController extends Controller
                 'analyst_rts_reason'        => $analyst['reason'] ?? null,
                 'analyst_rts_at'            => $analyst['at'] ?? null,
                 'analyst_rts_prev'          => $analyst['prev'] ?? null,
+                'analyst_rts_source'        => $analyst['source'] ?? null,
+                // Mira RTS accuracy: error (puntos) ng tantya 7 at 14 araw na ang nakalipas; hist = huling 7 araw para sa hover.
+                'analyst_rts_acc_7'         => $acc['e7'] ?? null,
+                'analyst_rts_acc_14'        => $acc['e14'] ?? null,
+                'analyst_rts_acc_abs'       => isset($acc['e7']) ? abs($acc['e7']) : null,
+                'analyst_rts_acc_hist'      => $acc['hist'] ?? [],
                 'analyst_gap_pts'           => $analystGap,
                 'analyst_gap_abs'           => $analystGap !== null ? abs($analystGap) : null,
                 'mira_rts_pct'              => $miraRts,

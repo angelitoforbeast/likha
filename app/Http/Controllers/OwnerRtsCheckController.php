@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\AnalystRts;
+use App\Services\AnalystRtsDaily;
 use App\Services\ColFormatRules;
 use App\Services\RtsProjection;
 use Carbon\Carbon;
@@ -63,6 +64,8 @@ class OwnerRtsCheckController extends Controller
             'to' => $to,
             'rates_learned_at' => $projection->rates()['learned_at'] ?? null,
             'rows' => array_map(fn ($r) => array_intersect_key(array_replace(array_flip(self::FIELDS), $r), array_flip(self::FIELDS)), $rows),
+            // Accuracy ng Mira RTS bawat araw: average na absolute error (puntos) ng mga tantya 7 at 14 araw na ang nakalipas.
+            'accuracy' => (new AnalystRtsDaily())->overall(),
         ]);
     }
 }
