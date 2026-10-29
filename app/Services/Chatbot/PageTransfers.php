@@ -72,8 +72,10 @@ class PageTransfers
     // ---- adopt ----
 
     /** @return array{http: int, body: array} */
-    public function adopt(string $metaPageId, string $name, string $token, string $mode, string $transferId, ?string $actor): array
+    public function adopt(string $metaPageId, string $name, string $token, string $mode, string $transferId, ?string $actor, string $gateway = Gateways::FORBEAST): array
     {
+        // Ang token ay sa gateway na nagpadala nito (ang site secret nito ang tumugma); ang page ay sasagot doon.
+        $gateway = Gateways::valid($gateway) ? $gateway : Gateways::FORBEAST;
         $page = $this->page($metaPageId);
         if ($page === null) {
             if ($this->clash($name, $metaPageId)) return self::error(409, 'name_taken', 'Another page here already uses this name.');
@@ -81,16 +83,18 @@ class PageTransfers
         }
         $source = $mode === 'take' ? 'taken by ' . ($actor ?? 'Forbeast (transfer ' . $transferId . ')') : $this->from($transferId);
 
-        DB::transaction(function () use ($page, $metaPageId, $token, $mode, $source, $transferId) {
+        DB::transaction(function () use ($page, $metaPageId, $token, $mode, $source, $transferId, $gateway) {
             $this->settings->set($page, 'botcake', 'page_id', $metaPageId, false, null, true, $source);
             $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', ChatbotProvider::GATEWAY, false, null, true, $source);
-            $this->settings->set($page, ForbeastPageSetup::PROVIDER, 'token', $token, true, null, true, $source);
+            $this->settings->set($page, $gateway, 'token', $token, true, null, true, $source);
+            // Ang page na dinala ng hindi default na gateway ay sasagot sa gateway na iyon (ang may token).
+            if ($gateway !== Gateways::active($page)) $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::KEY, $gateway, false, null, true, $source);
             // Ang take: Off hanggang ayusin at i-On ng CEO. Ang transfer: ang On/Off na kinopya sa values.
             if ($mode === 'take') $this->settings->set($page, ChatbotFields::PROVIDER, 'active', '0', false, null, true, $source);
             // Ang switch ng paglipat na ito (kailan): ang row na tinapos dito pagkatapos nito ay hindi binubuksan ulit ng catch-up.
             $this->settings->set($page, self::HOLD_PROVIDER, self::ADOPTED_KEY, $transferId, false, null, true, $source);
         });
-        $res = $this->forbeast->connect($page);
+        $res = $this->forbeast->on($gateway)->connect($page);
         if ($res['status'] !== 'ok') return self::error(502, 'connect_failed', 'The page was saved but not connected: ' . ($res['error'] ?? $res['status']));
 
         return ['http' => 200, 'body' => ['ok' => true, 'page' => $page, 'bot' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') === '0' ? 'off' : 'on']];
@@ -491,8 +495,8 @@ class PageTransfers
                 DB::table(BotcakeSendQueue::TABLE)->where('page_id', $pageId)->where('kind', 'chatbot')->whereIn('status', ['pending', 'sending', 'done', 'failed'])
                     ->update(['status' => 'resumed', 'error' => 'page transferred', 'updated_at' => now()]);
             }
-            // Ang Forbeast connection ng page: inactive, naiiwan bilang history (walang DELETE: nailipat na ng Forbeast ang webhook).
-            $this->deactivate($page, ForbeastPageSetup::PROVIDER, ['token', 'webhook_secret', 'token_status', 'permissions'], $reason);
+            // Ang koneksyon ng page sa bawat gateway: inactive, naiiwan bilang history (walang DELETE: nailipat na ng gateway ang webhook).
+            foreach (Gateways::ALL as $gw) $this->deactivate($page, $gw, Gateways::PAGE_KEYS, $reason);
             // Wala nang hold: kapag bumalik ang page dito balang araw, ang bagong subscribe ay hindi held.
             $this->deactivate($page, self::HOLD_PROVIDER, [self::HOLD_KEY], $reason);
 

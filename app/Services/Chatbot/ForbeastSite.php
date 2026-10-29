@@ -12,6 +12,10 @@ use Throwable;
  * may-ari ng bawat page. Ang mga tawag dito (GATEWAY_URL + /v1/site/..., Bearer FORBEAST_SITE_KEY) ay ang listahan ng
  * page, ang history, at ang take / request / accept / decline / cancel na may actor. Lahat ng sagot ay untrusted: text lang.
  * Walang key, secret o GATEWAY_URL = hindi naka-link (walang tawag).
+ *
+ * Dalawang gateway: bawat isa ay may sariling site key at secret (FORBEAST_SITE_*, INCEPXIONBOT_SITE_*). Ang lahat ng
+ * tawag ay sa iisang gateway (gateway(): forbeast muna), para iisa ang talaan ng may-ari; ang papasok na tawag
+ * (GatewaySiteController) ay tinatanggap mula sa alinmang naka-link.
  */
 class ForbeastSite
 {
@@ -29,16 +33,31 @@ class ForbeastSite
         'too_many_requests' => 'Too many requests to Forbeast. Wait a minute and try again.',
     ];
 
-    public static function linked(): bool
+    /** May naka-link na gateway ($gateway: ang gateway na iyon lang): may site key, site secret at URL. */
+    public static function linked(?string $gateway = null): bool
     {
-        return trim((string) config('services.forbeast_site.key')) !== '' && trim((string) config('services.forbeast_site.secret')) !== ''
-            && self::baseUrl() !== '';
+        if ($gateway === null) return self::gateway() !== null;
+        $c = Gateways::config($gateway);
+
+        return Gateways::valid($gateway) && $c['site_key'] !== '' && $c['site_secret'] !== '' && $c['url'] !== '';
     }
 
-    /** Ang secret na pumipirma sa /api/gateway/site/... ('' = hindi naka-link). */
-    public static function secret(): string
+    /** Ang secret na pumipirma sa /api/gateway/site/... ng gateway ('' = hindi naka-link). */
+    public static function secret(string $gateway = Gateways::FORBEAST): string
     {
-        return self::linked() ? trim((string) config('services.forbeast_site.secret')) : '';
+        return self::linked($gateway) ? Gateways::config($gateway)['site_secret'] : '';
+    }
+
+    /**
+     * Ang gateway ng lahat ng tawag ng site: ang unang naka-link (forbeast muna; incepxionbot kapag ito lang). Iisang talaan ng
+     * may-ari: ang listahan, ang take, ang request at ang sagot ay laging sa iisang gateway, kaya hindi nahahati ang mga
+     * request sa dalawang talaan. null = walang naka-link.
+     */
+    public static function gateway(): ?string
+    {
+        foreach (Gateways::ALL as $g) if (self::linked($g)) return $g;
+
+        return null;
     }
 
     /**
@@ -115,19 +134,16 @@ class ForbeastSite
         return $this->call('GET', '/v1/site/reply-speed', ['date' => $date] + ($pageId !== null ? ['page_id' => $pageId] : []), $timeout);
     }
 
-    private static function baseUrl(): string
-    {
-        return rtrim((string) config('services.gateway.url'), '/');
-    }
-
     /** @return array{ok: bool, status: int, body: array, error: ?string} */
     private function call(string $method, string $path, array $data = [], int $timeout = self::TIMEOUT): array
     {
-        if (!self::linked()) return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'This site is not linked to Forbeast.'];
+        $gw = self::gateway();
+        if ($gw === null) return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'This site is not linked to Forbeast.'];
+        $c = Gateways::config($gw);
         try {
-            $http = Http::withToken(trim((string) config('services.forbeast_site.key')))->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout);
+            $http = Http::withToken($c['site_key'])->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout);
             /** @var Response $res */
-            $res = $method === 'GET' ? $http->get(self::baseUrl() . $path, $data) : $http->post(self::baseUrl() . $path, $data);
+            $res = $method === 'GET' ? $http->get($c['url'] . $path, $data) : $http->post($c['url'] . $path, $data);
         } catch (ConnectionException) {
             return ['ok' => false, 'status' => 0, 'body' => [], 'error' => 'Forbeast did not answer.'];
         } catch (Throwable $e) {

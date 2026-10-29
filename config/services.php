@@ -229,6 +229,21 @@ return [
         ],
     ],
 
+    // Ang pangalawang gateway (incepxionbot.com: parehong Forbeast software, ibang Meta app). Kapareho ng gateway at ng
+    // forbeast_site sa itaas; walang URL = hindi naka-set up. Ang mga bilang ng kusang lipat at echo ay ang sa gateway.
+    // app_id: ang Meta app ng incepxionbot, para makilala ang echo nito (Bot Health). Ang mga event nito ay sa
+    // /api/gateway/events/incepxionbot (ang webhook na inilalagay ng Likha kada page).
+    'incepxionbot' => [
+        'url' => rtrim((string) env('INCEPXIONBOT_URL', ''), '/'),
+        'key' => env('INCEPXIONBOT_KEY'),
+        'webhook_secret' => env('INCEPXIONBOT_WEBHOOK_SECRET'),
+        'timeout' => (int) env('INCEPXIONBOT_TIMEOUT', 10),
+        'typing' => (bool) env('INCEPXIONBOT_TYPING', true),
+        'site_key' => env('INCEPXIONBOT_SITE_KEY'),
+        'site_secret' => env('INCEPXIONBOT_SITE_SECRET'),
+        'app_id' => env('INCEPXIONBOT_APP_ID'),
+    ],
+
     // Ang site na ito bilang "site system" ng Forbeast (kung sino ang may-ari ng bawat page, at ang paglipat ng page sa
     // kabilang site): ang fbs_ key (Bearer sa /v1/site/...) at ang secret na pumipirma sa /api/gateway/site/...
     // Walang laman ang alinman = hindi naka-link: ang Owners screen ay sinasabi ito at ang mga endpoint ay 503.

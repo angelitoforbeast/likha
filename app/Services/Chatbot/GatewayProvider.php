@@ -8,23 +8,51 @@ use Illuminate\Support\Facades\Http;
 use Throwable;
 
 /**
- * Ang padala sa Forbeast Gateway: POST /v1/pages/{page_id}/messages (Bearer key). Ang 2xx ay tinanggap ng gateway (siya
+ * Ang padala sa gateway (Forbeast software): POST /v1/pages/{page_id}/messages (Bearer key) sa aktibong gateway ng page
+ * (Gateways::active, o ang ibinigay sa constructor): isa lang, hindi kailanman pareho. Ang 2xx ay tinanggap ng gateway (siya
  * ang nag-aayos ng pagkakasunod kada PSID at ng rate kada page). Walang retry dito: ang parehong client_ref ay hindi
- * nadodoble sa gateway. Ang key ay ang Forbeast token ng page, o ang global GATEWAY_KEY. Walang URL o key: failed, walang tawag.
+ * nadodoble sa gateway. Ang key ay ang token ng page sa gateway na iyon, o ang global key ng gateway (GATEWAY_KEY,
+ * INCEPXIONBOT_KEY). Walang URL o key: failed, walang tawag.
  */
 class GatewayProvider implements MessagingProvider
 {
     public const NOT_SET_UP = 'Forbeast is not set up (GATEWAY_URL is empty, or no Forbeast token and no GATEWAY_KEY).';
 
+    /** Ang gateway na huling ginamit (para sa via ng padala). */
+    private ?string $last = null;
+
+    public function __construct(private ?string $gateway = null)
+    {
+    }
+
+    /** Ang gateway ng provider na ito: ang ibinigay, o ang ginamit sa huling padala; null = hindi pa alam. */
+    public function gateway(): ?string
+    {
+        return $this->gateway ?? $this->last;
+    }
+
+    /** Ang error kapag hindi naka-set up ang gateway (walang tawag). */
+    public static function notSetUp(string $gateway): string
+    {
+        if ($gateway === Gateways::FORBEAST) return self::NOT_SET_UP;
+        $l = Gateways::label($gateway);
+        $env = strtoupper($gateway);
+
+        return $l . ' is not set up (' . $env . '_URL is empty, or no ' . $l . ' token and no ' . $env . '_KEY).';
+    }
+
     public function send(string $pageName, string $pageId, string $psid, array $messages, string $clientRef, string $messagingType = self::RESPONSE): array
     {
-        $url = rtrim((string) config('services.gateway.url'), '/'); // may carry a path prefix (e.g. https://host/api)
-        // Ang Forbeast token ng page (sariling page lang ang sakop); kung wala, ang global GATEWAY_KEY.
-        $key = app(ForbeastPageSetup::class)->token($pageName);
-        if ($key === '') $key = trim((string) config('services.gateway.key'));
-        if ($url === '' || $key === '') return ['status' => 'failed', 'error' => self::NOT_SET_UP, 'http' => null];
+        $gw = $this->gateway ?? Gateways::active($pageName);
+        $this->last = $gw;
+        $c = Gateways::config($gw);
+        $url = $c['url']; // may carry a path prefix (e.g. https://host/api)
+        // Ang token ng page sa gateway na ito (sariling page lang ang sakop); kung wala, ang global key ng gateway.
+        $key = app(ForbeastPageSetup::class)->on($gw)->token($pageName);
+        if ($key === '') $key = $c['key'];
+        if ($url === '' || $key === '') return ['status' => 'failed', 'error' => self::notSetUp($gw), 'http' => null];
 
-        $timeout = max(1, (int) config('services.gateway.timeout', 10));
+        $timeout = max(1, $c['timeout']);
         try {
             $res = Http::withToken($key)->acceptJson()->connectTimeout(min(5, $timeout))->timeout($timeout)
                 ->post($url . '/v1/pages/' . rawurlencode($pageId) . '/messages',
@@ -38,9 +66,9 @@ class GatewayProvider implements MessagingProvider
         }
 
         $o = $this->outcome($r, $key);
-        // Ang bantay ng Forbeast (kusang lipat sa Botcake): hindi kailanman humaharang sa padala.
+        // Ang bantay ng gateway (kusang lipat sa kabilang gateway o sa Botcake): hindi kailanman humaharang sa padala.
         try {
-            app(ForbeastWatch::class)->afterSend($pageName, $o, $r['body']);
+            app(ForbeastWatch::class)->afterSend($pageName, $o, $r['body'], $gw);
         } catch (Throwable $e) {
             report($e);
         }

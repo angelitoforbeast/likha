@@ -50,6 +50,7 @@
                 <option value="">Both</option>
                 <option value="botcake" @selected($f['via'] === 'botcake')>Botcake</option>
                 <option value="forbeast" @selected($f['via'] === 'forbeast')>Forbeast</option>
+                @if(\App\Services\Chatbot\Gateways::setUp('incepxionbot'))<option value="incepxionbot" @selected($f['via'] === 'incepxionbot')>Incepxionbot</option>@endif
             </select>
         </label>
         <button class="cb-btn cb-btn-primary">Show</button>
@@ -86,7 +87,7 @@
                 <tbody>
                 @foreach($by_via as $via => $s)
                     <tr>
-                        <td>{{ $via === 'forbeast' ? 'Forbeast' : 'Botcake' }}</td>
+                        <td>{{ \App\Services\Chatbot\ChatbotProvider::viaLabel($via) }}</td>
                         <td class="text-right tabular-nums">{{ number_format($s['chats']) }}</td>
                         <td class="text-right tabular-nums">{{ number_format($s['sent']) }}</td>
                         <td class="text-right tabular-nums">{{ $pct($s['replied_pct']) }}</td>

@@ -3212,3 +3212,21 @@ Tests: `tests/Feature/Chatblast/MetaReplySpeedTest.php`, existing `ResponseSpeed
 | S-193.6 (P1) | When the screen is loaded again, Then no HTTP call is made until the cache ends (today 2 minutes, past days 30 minutes); a failed answer is kept 1 minute | `test_S_193_6_a_second_load_makes_no_http_call_until_the_cache_ends`, `test_S_193_6_a_failed_answer_is_kept_a_minute_so_a_down_forbeast_does_not_slow_every_load` | passed |
 | S-193.7 (P1) | Existing Speed tests pass unchanged | `tests/Feature/Chatblast/ResponseSpeedTest.php`, `tests/Feature/Chatblast` | passed |
 | S-193.8 (P1) | At 390 px the new section has no horizontal page scroll (the table scrolls in its box, the chart follows the width) | `test_S_193_8_the_table_scrolls_inside_its_box_and_the_chart_follows_the_screen_width` and headless Chrome at 390 px | passed |
+## S-194 Each page replies through Forbeast or Incepxionbot and switches on its own
+
+As the owner, I want a second gateway (Incepxionbot: the same Forbeast software with a second Meta app), so that when one gateway stalls the pages keep replying through the other, with Botcake as the last fallback, and a customer never gets two replies.
+
+Slice 194. Threat model: event, page-values and site request bodies and headers are untrusted until the signature verifies against one gateway's own secret; env/config and the owner's page rows are trusted. New surface: `POST /api/gateway/events/incepxionbot`, `POST /chatbot/gateway`. Risk tier: high (webhook signatures), medium for the rest.
+Tests: `tests/Feature/Chatblast/GatewayPerPageTest.php`, existing Chatblast, Botcake, PageSettings and NightRun suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-194.1 (P1) | Given no second gateway, Then everything behaves as before (existing suites) and the incepxionbot path is closed | `test_S_194_1…`, full run | passed |
+| S-194.2 (P1) | Given a page set to incepxionbot, Then sends, typing and comment replies go only to incepxionbot with its token, and the reply records via incepxionbot | `test_S_194_2…`, `test_S_194_2b…` | passed |
+| S-194.3 (P1) | When the same customer message arrives from both gateways (with a mid, or a referral without one), Then it is processed once; page values and site calls accept each gateway's own secret | `test_S_194_3…`, `test_S_194_3b…` | passed |
+| S-194.4 (P1) | When the active gateway stalls, Then the page moves to the other healthy gateway with a history row, and back after 30 healthy minutes; a manual choice is not moved back; a late failure of the gateway left does not move it again; customers whose reply failed are answered once on the new gateway; a held event does not lose the way back | `test_S_194_4…`, `4b`, `4c`, `4d`, `4e` | passed |
+| S-194.5 (P1) | When both gateways stall (health failing, or sends failing with good health checks), Then Botcake, as today | `test_S_194_5…`, `test_S_194_5b…` | passed |
+| S-194.6 (P1) | When an event is signed with the other gateway's secret, Then 401 | `test_S_194_6…` | passed |
+| S-194.7 (P1) | Given a page without a working token on the other gateway, Then it is not moved there | `test_S_194_7…` | passed |
+| S-194.8 (P1) | The Pages screen shows and sets the gateway (only set-up gateways with a working token), and the Connections popup has the Incepxionbot card | `test_S_194_8…` | passed |
+| S-194.9 (P1) | Given Incepxion with only incepxionbot set up, Then it is the gateway of every page; a page with only an incepxionbot token is listed | `test_S_194_9…`, `test_S_194_9b…` | passed |

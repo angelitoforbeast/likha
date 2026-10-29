@@ -13,6 +13,7 @@ use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
 use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastWatch;
+use App\Services\Chatbot\Gateways;
 use App\Services\Chatbot\PageValues;
 use App\Services\Chatbot\PasteFieldAi;
 use App\Services\Chatbot\ShopDetails;
@@ -95,7 +96,7 @@ class ChatbotController extends Controller
         $pages = $this->pages();
 
         $byPage = PageSetting::where('active', true)->whereIn('provider', ['botcake', ChatbotFields::PROVIDER])
-            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider', ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
+            ->whereIn('key', array_merge(['page_id', 'active', 'flow_id', 'provider', Gateways::KEY, ForbeastWatch::KEY], array_column($columns, 'key')))->orderBy('id')->get()
             ->groupBy(fn ($s) => $this->settings->pageKey($s->page_name));
         $stats = $this->chatStats();
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
@@ -114,7 +115,7 @@ class ChatbotController extends Controller
             $active = true;
             $flowId = null;
             $provider = ChatbotProvider::BOTCAKE;
-            $providerRow = $autoSwitch = null;
+            $providerRow = $autoSwitch = $gatewayRow = null;
             foreach ($byPage[$this->settings->pageKey($page)] ?? [] as $s) {
                 if ($s->provider === 'botcake') {
                     if ($s->key === 'page_id') $pageId = (string) $s->plainValue();
@@ -125,7 +126,8 @@ class ChatbotController extends Controller
                 elseif ($s->key === 'provider') {
                     $provider = $s->plainValue() === ChatbotProvider::GATEWAY ? ChatbotProvider::GATEWAY : ChatbotProvider::BOTCAKE;
                     $providerRow = $s;
-                } elseif ($s->key === ForbeastWatch::KEY) $autoSwitch = $s;
+                } elseif ($s->key === Gateways::KEY) $gatewayRow = $s;
+                elseif ($s->key === ForbeastWatch::KEY) $autoSwitch = $s;
                 else $cells[$s->key] = $s->plainValue();
             }
             // FLOW: ang flow na talagang nakatali (ayon sa id). Ang lumang text na hindi nakatali ay hiwalay, para
@@ -137,7 +139,9 @@ class ChatbotController extends Controller
             $rows[] = [
                 'page' => $page, 'page_id' => $pageId, 'active' => $active, 'provider' => $provider, 'cells' => (object) $cells,
                 // Kusang lumipat sa Botcake, held o ibinalik sa Forbeast (ForbeastWatch), hanggang may magpalit nang mano-mano.
-                'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider),
+                'auto_switched' => ForbeastWatch::note($autoSwitch, $providerRow, $provider, $gatewayRow),
+                // Aling gateway ang sumasagot kapag gateway ang provider, at ang mapipili (naka-set up at gumagana ang token ng page).
+                'gateway' => Gateways::active($page), 'gateways' => Gateways::readyFor($page),
                 'flow_text' => $linked === null && $text !== null && $text !== '' ? $text : null,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
                 'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
@@ -157,7 +161,8 @@ class ChatbotController extends Controller
         }
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
-            'bots' => \App\Services\Chatbot\ChatbotConnections::BOTS, 'ai_site' => $ai->site()]);
+            'gateway_labels' => Gateways::LABELS,
+            'bots' => \App\Services\Chatbot\ChatbotConnections::bots(), 'ai_site' => $ai->site()]);
     }
 
     /** Auto-save ng isang botfield. Blangko = burahin. Last write wins. */
@@ -315,12 +320,40 @@ class ChatbotController extends Controller
         if ($provider === ChatbotProvider::GATEWAY && !ChatbotProvider::gatewayReady()) {
             return response()->json(['error' => 'Forbeast is not set up yet.'], 422);
         }
-        // Forbeast: ang bawat page ay may gumaganang token (o may global GATEWAY_KEY).
-        $missing = $provider === ChatbotProvider::GATEWAY ? array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->ready($p)) : [];
+        // Gateway: ang bawat page ay may gumaganang token sa aktibong gateway nito (forbeast, o incepxionbot).
+        $missing = $provider === ChatbotProvider::GATEWAY ? array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->on(Gateways::active($p))->ready($p)) : [];
         if ($missing) return response()->json(['error' => ForbeastPageSetup::NEEDS_TOKEN . ': ' . implode(', ', array_slice(array_values($missing), 0, 10))], 422);
         $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, 'provider', $provider, false, Auth::id())['status'], $pages));
 
         return response()->json(['status' => reset($status), 'provider' => $provider, 'pages' => array_values($pages)]);
+    }
+
+    /**
+     * Aling gateway ang sumasagot (chatbot.gateway) kapag gateway ang provider ng page: forbeast o incepxionbot, naka-set up
+     * at may gumaganang token ang page doon. Lahat o wala, may history (ang user). Ang pili ng tao ay hindi kailanman
+     * ibinabalik ng bantay.
+     */
+    public function gateway(Request $request)
+    {
+        $this->checkAccess();
+        $names = $request->input('page_names');
+        $names = is_array($names) ? array_values($names) : [$request->input('page_name')];
+        $gateway = strtolower($this->str($request, 'gateway', 20));
+        if (count($names) < 1 || count($names) > self::MAX_BULK_PAGES) return response()->json(['error' => 'Pick 1 to ' . self::MAX_BULK_PAGES . ' pages.'], 422);
+        $pages = [];
+        foreach ($names as $name) {
+            $page = is_scalar($name) ? $this->listedPage(mb_substr(trim((string) $name), 0, 255)) : null;
+            if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
+            $pages[$page] = $page;
+        }
+        if (!Gateways::valid($gateway) || !Gateways::setUp($gateway)) {
+            return response()->json(['error' => 'Pick ' . implode(' or ', array_map(fn ($g) => Gateways::label($g), Gateways::setUpList()) ?: ['a gateway that is set up']) . '.'], 422);
+        }
+        $missing = array_filter($pages, fn ($p) => !app(ForbeastPageSetup::class)->on($gateway)->ready($p));
+        if ($missing) return response()->json(['error' => 'Add the ' . Gateways::label($gateway) . ' token first: ' . implode(', ', array_slice(array_values($missing), 0, 10))], 422);
+        $status = DB::transaction(fn () => array_map(fn ($page) => $this->settings->set($page, ChatbotFields::PROVIDER, Gateways::KEY, $gateway, false, Auth::id(), true)['status'], $pages));
+
+        return response()->json(['status' => reset($status), 'gateway' => $gateway, 'pages' => array_values($pages)]);
     }
 
     /**
@@ -359,12 +392,19 @@ class ChatbotController extends Controller
         if ($provider === '') return response()->json($connections->info($page));
 
         $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
+        // Ang pangalawang gateway: ang card nito ay kapag naka-set up lang (INCEPXIONBOT_URL).
+        if (str_starts_with($provider, Gateways::INCEPXIONBOT) && !Gateways::setUp(Gateways::INCEPXIONBOT)) {
+            return response()->json(['error' => Gateways::label(Gateways::INCEPXIONBOT) . ' is not set up yet.'], 422);
+        }
         $res = match ($provider) {
             'botcake' => $connections->saveBotcake(...$args),
             'forbeast' => $connections->saveForbeast(...$args),
+            'incepxionbot' => $connections->saveForbeast(...[...$args, Gateways::INCEPXIONBOT]),
             'botcake-test' => $connections->testBotcake($page, Auth::id()),
             'forbeast-test' => $connections->testForbeast($page, Auth::id()),
+            'incepxionbot-test' => $connections->testForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             'forbeast-clear' => $connections->clearForbeast($page, Auth::id()),
+            'incepxionbot-clear' => $connections->clearForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
 
@@ -688,12 +728,15 @@ class ChatbotController extends Controller
     private function pages(): array
     {
         $pages = $this->settings->pagesWith('botcake', ['page_id', 'token']);
-        // Ang page na kinuha mula sa Forbeast (Owners) ay walang Botcake token: Meta page ID at Forbeast token lang.
+        // Ang page na kinuha mula sa gateway (Owners) ay walang Botcake token: Meta page ID at token ng gateway lang
+        // (forbeast, o incepxionbot).
         $listed = array_map(fn ($p) => $this->settings->pageKey($p), $pages);
         $withId = array_map(fn ($p) => $this->settings->pageKey($p), $this->settings->pagesWith('botcake', ['page_id']));
-        foreach ($this->settings->pagesWith(ForbeastPageSetup::PROVIDER, ['token']) as $p) {
-            $key = $this->settings->pageKey($p);
-            if (in_array($key, $withId, true) && !in_array($key, $listed, true)) $pages[] = $p;
+        foreach (Gateways::ALL as $gw) {
+            foreach ($this->settings->pagesWith($gw, ['token']) as $p) {
+                $key = $this->settings->pageKey($p);
+                if (in_array($key, $withId, true) && !in_array($key, $listed, true)) { $pages[] = $p; $listed[] = $key; }
+            }
         }
         usort($pages, 'strcasecmp');
 
