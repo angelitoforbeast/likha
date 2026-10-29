@@ -16,6 +16,9 @@ use Throwable;
 class MetaReplySpeed
 {
     public const TIMEOUT = 5;
+    public const LIVE_TIMEOUT = 3;
+    /** Ang sagot ng Forbeast sa page na hindi nito kilala para sa site na ito (hal. nasa Botcake). */
+    public const UNKNOWN_PAGE = 'This page is not on Forbeast for this site.';
     public const TODAY_CACHE_SECONDS = 120;
     public const PAST_CACHE_SECONDS = 1800;
     public const FAILED_CACHE_SECONDS = 60;
@@ -56,6 +59,29 @@ class MetaReplySpeed
             'chart' => self::chart($day['hours'], $prev['ok'] ? $prev['hours'] : array_fill(0, 24, null))] + $blank;
     }
 
+    /**
+     * Ang average ngayong araw (segundo, orasan ng Meta) para sa Live page, mula sa parehong cache ng screen na ito. state:
+     * ok (seconds ay null kapag wala pang sagot ngayong araw), not_linked (walang tawag) o error (hindi sumagot ang Forbeast).
+     * Mas maikli ang hangganan ng tawag: ang Live ay pino-poll, at ang pagkuha ay kadalasang pagkatapos na ng sagot.
+     * @return array{state: string, seconds: ?float}
+     */
+    public function todayAverage(?string $page): array
+    {
+        if (!ForbeastSite::linked()) return ['state' => 'not_linked', 'seconds' => null];
+        try {
+            $today = now()->toDateString();
+            $day = $this->day($today, $page, $today, self::LIVE_TIMEOUT);
+        } catch (Throwable $e) {
+            report($e);
+
+            return ['state' => 'error', 'seconds' => null];
+        }
+
+        if ($day['ok']) return ['state' => 'ok', 'seconds' => $day['total']['avg']];
+
+        return ['state' => $day['error'] === self::UNKNOWN_PAGE ? 'not_on_forbeast' : 'error', 'seconds' => null];
+    }
+
     /** @return array{ok: true, hours: array, total: array}|array{ok: false, error: string, at: string} */
     private function day(string $date, ?string $page, string $today, int $timeout): array
     {
@@ -70,7 +96,7 @@ class MetaReplySpeed
                 $res['ok'] => 'Its answer could not be read.',
                 $res['status'] === 0 => 'No answer within ' . $timeout . ' s.',
                 // Ang page na wala sa Forbeast (hal. nasa Botcake, o sa kabilang site) ay hindi "hindi sumagot".
-                $res['status'] === 404 && ($res['body']['error'] ?? null) === 'unknown_page' => 'This page is not on Forbeast for this site.',
+                $res['status'] === 404 && ($res['body']['error'] ?? null) === 'unknown_page' => self::UNKNOWN_PAGE,
                 default => (string) $res['error'],
             }];
         Cache::put($key, $out, !$out['ok'] ? self::FAILED_CACHE_SECONDS : ($date === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS));
@@ -116,7 +142,7 @@ class MetaReplySpeed
             $out['series'][$k] = $col($hours, $k);
             $out['prev'][$k] = $col($prev, $k);
         }
-        foreach (['messages' => 'messages', 'bot answered' => 'bot_answered', 'by a person' => 'person_answered', 'unanswered' => 'unanswered'] as $label => $k) {
+        foreach (['messages' => 'messages', 'bot answered' => 'bot_answered', 'by another app or a person' => 'person_answered', 'unanswered' => 'unanswered'] as $label => $k) {
             $out['counts'][$label] = $col($hours, $k);
             $out['prev_counts'][$label] = $col($prev, $k);
         }

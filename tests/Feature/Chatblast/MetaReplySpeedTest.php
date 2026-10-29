@@ -133,12 +133,12 @@ class MetaReplySpeedTest extends ChatblastTestCase
         $this->assertNull($m['hours'][13]);
         $this->assertSame(4, $m['total']['messages']);
         // Ang table: lahat ng column at ang Day na row.
-        foreach (['Messages', 'Bot answered', 'By a person', 'Unanswered', 'Average', 'Median', 'p90', 'Max', 'Meta → Forbeast avg'] as $col) {
+        foreach (['Messages', 'Bot answered', 'By another app or a person', 'Unanswered', 'Average', 'Median', 'p90', 'Max', 'Meta → Forbeast avg'] as $col) {
             $this->assertStringContainsString('>' . $col . '</th>', html_entity_decode($s), $col);
         }
         $this->assertMatchesRegularExpression('#<tr data-hour="10">\s*<td[^>]*>10:00</td>\s*<td[^>]*>4</td>\s*<td[^>]*>3</td>\s*<td[^>]*>1</td>\s*<td[^>]*>0</td>\s*<td[^>]*>3.4 s</td>\s*<td[^>]*>3 s</td>\s*<td[^>]*>5.1 s</td>\s*<td[^>]*>6 s</td>\s*<td[^>]*>2.6 s</td>#', $s);
         $this->assertMatchesRegularExpression('#<tr class="font-semibold"[^>]*><td>Day</td>\s*<td[^>]*>4</td>#', $s);
-        $this->assertStringContainsString('Day: 4 messages · 3 bot answered · 1 by a person · 0 unanswered · avg 3.4 s · median 3 s · p90 5.1 s · max 6 s · Meta → Forbeast avg 2.6 s', self::text($s));
+        $this->assertStringContainsString('Day: 4 messages · 3 bot answered · 1 by another app or a person · 0 unanswered · avg 3.4 s · median 3 s · p90 5.1 s · max 6 s · Meta → Forbeast avg 2.6 s', self::text($s));
         // Ang chart: average, median at p90 mula sa table; ang hinaharap ay puwang.
         $this->assertStringContainsString('<canvas id="sp-chart-meta"', $s);
         $this->assertSame(['avg', 'median', 'p90'], array_keys($c['meta']['series']));
@@ -147,6 +147,20 @@ class MetaReplySpeedTest extends ChatblastTestCase
         $this->assertNull($c['meta']['series']['avg'][13]);
         $this->assertSame(4, $c['meta']['counts']['messages'][10]);
         $this->assertStringContainsString("meta: [['avg', 'Average'", $html);
+    }
+
+    public function test_S_196_8_the_person_column_says_another_app_or_a_person_with_the_botcake_hint(): void
+    {
+        $this->fakeForbeast();
+        [$c, $res] = $this->screen();
+        $s = self::section($res->getContent());
+        $text = self::text($s);
+
+        $this->assertStringContainsString('1 by another app or a person ·', $text);
+        $this->assertStringContainsString('>By another app or a person</th>', html_entity_decode($s));
+        $this->assertStringContainsString('Botcake replies count here', $text);
+        $this->assertArrayHasKey('by another app or a person', $c['meta']['counts']);
+        $this->assertDoesNotMatchRegularExpression('/\bby a person\b/i', preg_replace('/another app or a person/i', '', $text));
     }
 
     public function test_S_193_1_only_forbeast_pages_are_in_it_and_the_botcake_chats_are_counted(): void

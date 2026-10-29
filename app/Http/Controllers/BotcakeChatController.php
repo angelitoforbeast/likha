@@ -163,6 +163,8 @@ class BotcakeChatController extends Controller
         // Ang marka ng standby ay sa system lang (hindi galing sa param ng Botcake).
         unset($payload['_standby']);
         if ($standby) $payload['_standby'] = true;
+        // Ang marka ng pinagmulan, gaya ng sa gateway (ang pumasok kada bot sa Live): laging botcake, hindi galing sa param.
+        $payload['_via'] = ChatbotProvider::BOTCAKE;
 
         if (!$this->isDuplicate($f)) {
             $chat = BotcakeChat::create($f + ['page_name' => $pageName, 'payload' => $payload, 'received_at' => now()]);
