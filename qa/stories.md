@@ -3300,3 +3300,23 @@ Tests: `tests/Feature/RtsProjection/AnalystRtsDailyTest.php`, `tests/Feature/Rts
 | S-197.6 (P1) | When the run runs again the same day, Then no history is added | `test_S_197_P1_6…` | passed |
 | S-197.7 (P1) | Existing suites pass (no new failures vs the base) | full `tests/Feature` run | passed |
 | S-197.8 | During 03:00–03:45 the command refuses to run; `--as-of` prints a replay and writes nothing | `test_S_197_never_runs…`, `test_S_197_as_of_replay…` | passed |
+
+## S-199 The office TV shows the bot as a living neural network, and an order's money flows into the totals
+
+As the owner, I want /chatbot/live to look like a calm neural network room (inputs into the bot core, the core out to each bot, AI answers as their own step) and to see money flow in when an order comes (a peso amount travels into the totals and they count up), with every label real data.
+
+Slice 199. Threat model: trusted = signed-in staff who may open the Live page; untrusted = the query parameters (`page_id`, `bot`, cursors) and page names (escaped text). No new route. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotLiveNetworkTest.php`, `tests/Feature/Chatblast/ChatbotLiveRulesTest.php` (node, `public/js/chatbot-live-rules.js`), existing `ChatbotLiveTest` and `ChatbotLiveScoreboardTest`, headless Chrome evidence.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-199.1 (P1) | Given order events, When the feed is read, Then an order whose encoded order has a COD carries that `amount`; one without an encoded order or without a COD, a "not accepted" encode, another customer's encode on the same page, or another order's encode of the same customer gives null | `test_S_199_1_an_order_carries_the_cod…` | passed |
+| S-199.2 (P1) | Given an order encoded after the event, Then it reads null first and its amount on a later read; `counts.order_value.today` rises then and never counts it twice | `test_S_199_2_an_order_encoded_later…` | passed |
+| S-199.3 (P1) | `counts.order_value.today` / `.recent` equal the sum of known amounts of today's / the last 5 minutes' order events (Manila day), page filter applied | `test_S_199_3_the_order_value_is_the_sum…` | passed |
+| S-199.4 (P1) | The top-3 sequences are today's real names and counts by follow-ups sent, ordered by count; fewer than 3 shows what exists; none is empty | `test_S_199_4_the_top_three_sequences…` | passed |
+| S-199.5 (P1) | The `bot` filter narrows the per-bot counts and the events; `all`, an unknown value or an array equal no filter | `test_S_199_5_the_bot_filter…` | passed |
+| S-199.6 (P1) | The page renders the header, KPI strip, neural network (inputs, core with 60-tick clock and signals, AI node, three bot hubs, Orders node), bottom strip and Live activity with their data hooks, and every number of the spec-196 scoreboard; no customer names or text, no outside font or script, no blur | `test_S_199_6_the_page_renders_every_section…` | passed |
+| S-199.7 (P1) | An order with an amount plays the money packet with "+₱N" and rolls Orders and Order value; null shows "+1 ORDER" and adds no peso; a burst is merged (one packet per 1.5 s), none dropped; numbers hold for the landing and never count down inside a minute; reduced motion shows values without packets | `ChatbotLiveRulesTest` (4 tests) | passed |
+| S-199.8 (P1) | The feed's query count per poll does not grow with the number of events | `test_S_199_8_the_query_count…` | passed |
+| S-199.9 (P1) | Existing spec-190/196 tests pass (moved labels and paths updated) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest` | passed |
+| S-199.10 (P1) | The full suite adds no new failures vs 59b39b46 | `tests/Feature` | see result |
