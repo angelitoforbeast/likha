@@ -113,7 +113,7 @@ MySQL was not measured, because workers have no server access. TODO.md says what
 ## Tests
 - **Baseline at f4708e63** (the spec only, same code as 8705e881), `tests/Feature/Chatblast`: OK, 1431 tests, 50,378 assertions, 1 skipped, 52 PHPUnit deprecations (`baseline-196.txt`).
 - **After the build and the amendment (58904e11):** OK, 1441 tests, 50,478 assertions, 1 skipped (`chatblast-196-stage.txt`).
-- **Final:** FINAL_LINE
+- **Final (77e3d4ad):** OK, 1443 tests, 50,486 assertions, 1 skipped (the same one), the same 52 deprecations (`chatblast-196-final.txt`). No new failures against the baseline.
 
 ## Story changes
 - Added S-196 (.1–.9) to `qa/stories.md`. S-196.1 also covers the site name on Incepxion (amendment). S-196.4 adds the late-confirmation case and S-196.5 the not-on-Forbeast and timeout cases (both from review).
