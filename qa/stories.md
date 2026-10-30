@@ -3320,3 +3320,21 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveNetworkTest.php`, `tests/Feature/Chat
 | S-199.8 (P1) | The feed's query count per poll does not grow with the number of events | `test_S_199_8_the_query_count…` | passed |
 | S-199.9 (P1) | Existing spec-190/196 tests pass (moved labels and paths updated) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest` | passed |
 | S-199.10 (P1) | The full suite adds no new failures vs 59b39b46 | `tests/Feature` | see result |
+
+## S-202 A double reply is urgent only when both main flows answer a new customer
+
+As the owner, I want the problems panel to turn a page orange for double replies only when Chatbot Builder's main flow (or Botcake) and the Likha bot's main flow both answer a new customer, and to see the leftover CBB replies to old customers (sequences and loops) as white lines that drain.
+
+Slice 202. Threat model: trusted = signed-in staff; no new input, route or table. Risk tier: low-medium (a wrong rule would hide a real double).
+Tests: `tests/Feature/Chatblast/DoubleReplyUrgentTest.php`, existing `ChatEchoTest` and `ProblemsPanelTest`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-202.1a (P1) | Given a customer whose first chat on the page came in the last 60 min, When CBB and the page's main flow both answer it, Then the page is orange with "Main flow double: 1 new customer answered by both CBB and the Likha bot in the last 60 min" and an inbox link to that customer (no name or text); at most 3 example links | `test_S_202_1a…` | pending |
+| S-202.1b (P1) | Given the same new customer, When the Likha reply is a sequence send or comes from a flow that is not the page's main flow (nor an active ad group's), Then it is not a main-flow double | `test_S_202_1b…` | pending |
+| S-202.2a (P1) | Given an old customer (earlier chats, or a CBB echo before the first chat), When CBB and the Likha bot both reply within 60 s, Then the page gets a white "1 leftover CBB reply to old customers (sequence/loop) in the last 60 min" and no orange | `test_S_202_2a…` | pending |
+| S-202.3a (P1) | Bot Health "Who answered" shows main-flow doubles, leftovers, new customers and answered by CBB with the same numbers as the panel | `test_S_202_3a…` | pending |
+| S-202.4a (P1) | Given many new customers CBB never answers and many leftover doubles on old ones, Then the page is never orange for doubles | `test_S_202_4a…` | pending |
+| S-202.5a (P1) | The echo build's query count is the same for 1 pair and for 40 pairs and customers | `test_S_202_5a…` | pending |
+| S-202.6a (P2) | The page's double line shows "new customers: X, answered by CBB: Y" for the window | `test_S_202_6a…` | pending |
+| S-202.7 (P1) | Existing ChatEchoes and ProblemsPanel tests pass; the full tests/Feature suite adds no new failures vs 8506b25c | `ChatEchoTest`, `ProblemsPanelTest`, `tests/Feature` | pending |
