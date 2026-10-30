@@ -104,12 +104,14 @@
 
   // Ang loot ng isang money action: may halaga = 6 na barya, at ang halaga ay hinati sa 6 na bahagi (buong piso, ang sobra sa
   // mga unang barya, ang sentimo sa huli) para umakyat ang kabuuan sa bawat paglapag at eksaktong ang halaga sa dulo; walang
-  // halaga = isang "+1" na plate, walang piso. Reduced motion: walang barya, ang buong halaga ay isang hakbang.
+  // halaga = isang plate na "+1" (o "+N" kapag N na order ang pinagsama: opts.orders), walang piso. Reduced motion: walang
+  // barya, ang buong halaga ay isang hakbang.
   var COINS = 6, STAGGER = 110, BURST = 380, ARC = 900;
   function round2(v) { return Math.round(v * 100) / 100; }
   function loot(pesos, opts) {
     var reduced = !!(opts && opts.reduced), amount = round2(Math.max(0, Number(pesos) || 0));
-    if (amount <= 0) return {coins: reduced ? 0 : 1, plate: !reduced, parts: [0], label: '+1', peso: 0};
+    var orders = Math.max(1, Math.floor(Number(opts && opts.orders) || 1));
+    if (amount <= 0) return {coins: reduced ? 0 : 1, plate: !reduced, parts: [0], label: '+' + orders, peso: 0};
     var label = '+' + peso(amount);
     if (reduced) return {coins: 0, plate: false, parts: [amount], label: label, peso: amount};
     var base = Math.floor(amount / COINS), extra = round2(amount - base * COINS), whole = Math.floor(extra), parts = [];
@@ -118,12 +120,64 @@
     return {coins: COINS, plate: false, parts: parts, label: label, peso: amount};
   }
 
-  // Kailan lalapag ang bawat barya mula sa simula ng pagsabog (ms): lumalabas nang 110 ms ang pagitan, 380 ms ang pagsabog, 900 ms ang arko.
-  function landings(n) {
-    var out = [];
-    for (var i = 0; i < n; i++) out.push(i * STAGGER + BURST + ARC);
+  // Kailan lalapag ang bawat barya mula sa simula ng pagsabog (ms): ang pagitan ng labas, ang pagsabog at ang lipad (default:
+  // 110, 380 at 900 ms; ang vault ay mas malayo, kaya ibinibigay ng page ang sarili nitong oras).
+  function landings(n, opts) {
+    var o = opts || {}, gap = o.gap || STAGGER, burst = o.burst || BURST, fly = o.fly || ARC, out = [];
+    for (var i = 0; i < n; i++) out.push(i * gap + burst + fly);
     return out;
   }
+
+  // Ang taas ng patong ng barya sa vault: isang disc kada PHP 5,000 ng order value ngayong araw, hanggang 14 (walang target).
+  var DISC = 5000, DISCS = 14;
+  function discs(total) { return Math.max(0, Math.min(DISCS, Math.floor((Number(total) || 0) / DISC))); }
+
+  // Ang radar: bawat customer ay tuldok. Ang anggulo ay mula sa key (pareho bawat poll), ang layo sa gitna ay ang tanda ng huling
+  // mensahe (gitna = ngayon, gilid = 5 minuto). FNV-1a ng key, hinati sa 2^32.
+  var WINDOW = 300;
+  function angleOf(k) {
+    var h = 2166136261, s = String(k);
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return h / 4294967296 * 2 * Math.PI;
+  }
+  function dotPos(k, ageSeconds) {
+    var a = Math.max(0, Number(ageSeconds) || 0);
+    return {ang: angleOf(k), r: Math.min(.95, .12 + .83 * a / WINDOW)};
+  }
+
+  // Ang mga tuldok ng isang poll laban sa nakita na: ang bagong customer (new) na ngayon lang lumitaw ay isang blip (ping, at ang
+  // pangalan kapag mayroon), isang beses lang. Ang unang laman ng page ay walang blip (luma na ang mga iyon); ang lampas sa 5 minuto
+  // ay wala na. Ang state: {seen: {k: true}, booted}.
+  function track(state, dots, opts) {
+    var st = state && typeof state === 'object' ? state : {seen: {}, booted: false}, max = (opts && opts.max) || 8, seen = {}, blips = [];
+    (Array.isArray(dots) ? dots : []).forEach(function (d) {
+      if (!d || typeof d.k !== 'string' || !(Number(d.ago) <= WINDOW)) return;
+      seen[d.k] = true;
+      if (st.booted && d.new === true && !(st.seen && st.seen[d.k]) && blips.length < max) blips.push({k: d.k, name: typeof d.name === 'string' && d.name ? d.name : null});
+    });
+    return {state: {seen: seen, booted: true}, blips: blips};
+  }
+
+  // Ang pinanggagalingan ng barya: ang pinakabatang gintong tuldok (order) ng bot; null = ang gitna ng radar.
+  function goldDot(dots) {
+    var best = null;
+    (Array.isArray(dots) ? dots : []).forEach(function (d) { if (d && d.s === 'order' && (best === null || d.ago < best.ago)) best = d; });
+    return best ? best.k : null;
+  }
+
+  // Ang mga cell ng hex ng AI pagbukas ng page: ang sagot ng AI sa huling minuto ay anim na hati ng 10 s (m[0] = pinakabago).
+  // Bawat sagot ay isang tanda (ms) na nakakalat sa loob ng hati nito, pinakabago muna, hanggang max (ang dami ng cell).
+  function aiCells(minute, max) {
+    var out = [], cap = max || 30;
+    (Array.isArray(minute) ? minute : []).slice(0, 6).forEach(function (n, i) {
+      var k = Math.max(0, Math.floor(Number(n) || 0));
+      for (var j = 0; j < k; j++) out.push(Math.round((i + (j + 0.5) / k) * 10000));
+    });
+    return out.slice(0, cap);
+  }
+
+  // Ang 2D/3D na ipinapakita: sa TV mode ay laging 2D (ang maliliit na label ay nababasa mula sa malayo), anuman ang napili.
+  function viewFor(saved, tv) { return tv ? '2d' : (saved === '3d' ? '3d' : '2d'); }
 
   // Ang 2D/3D na napili sa browser na ito (localStorage, o anumang key/value na object). Walang storage, sira o ibang value = 2D.
   var VIEW_KEY = 'likha-live-view';
@@ -142,5 +196,5 @@
   }
 
   root.LiveRules = {num: num, peso: peso, route: route, label: label, schedule: schedule, settle: settle, land: land, roll: roll, signals: signals,
-    loot: loot, landings: landings, readView: readView, saveView: saveView};
+    loot: loot, landings: landings, readView: readView, saveView: saveView, discs: discs, dotPos: dotPos, track: track, goldDot: goldDot, aiCells: aiCells, viewFor: viewFor};
 })(typeof self !== 'undefined' ? self : this);

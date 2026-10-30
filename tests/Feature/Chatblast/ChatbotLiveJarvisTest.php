@@ -173,18 +173,18 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $n = $this->notes();
 
         $this->assertSame([
-            ['name' => 'Ana Reyes', 'tag' => 'CHATTING', 'at' => '12:28'],
-            ['name' => 'Cara Lim', 'tag' => 'AI', 'at' => '12:28'],
-            ['name' => 'Ben Cruz', 'tag' => 'ORDERED', 'at' => '12:12'],
-            ['name' => 'Dan Uy', 'tag' => 'CHATTING', 'at' => '09:00'],
+            ['name' => 'Ana R.', 'tag' => 'CHATTING', 'at' => '12:28'],
+            ['name' => 'Cara L.', 'tag' => 'AI', 'at' => '12:28'],
+            ['name' => 'Ben C.', 'tag' => 'ORDERED', 'at' => '12:12'],
+            ['name' => 'Dan U.', 'tag' => 'CHATTING', 'at' => '09:00'],
         ], $n['forbeast']['customers']);
         // Ana ay customer din ng Botcake (follow-up 11:00): nasa dalawang bot.
         $this->assertSame([
             ['name' => 'Customer · Page Dos', 'tag' => 'ORDERED', 'at' => '12:29'],
-            ['name' => 'Ana Reyes', 'tag' => 'CHATTING', 'at' => '11:00'],
+            ['name' => 'Ana R.', 'tag' => 'CHATTING', 'at' => '11:00'],
         ], $n['botcake']['customers']);
-        $this->assertSame([['name' => 'Fe Go', 'tag' => 'ORDERED', 'at' => '12:29']], $n['incepxionbot']['customers']);
-        $this->assertSame([['name' => 'Ana Reyes', 'tag' => 'CHATTING', 'at' => '11:00']], $this->notes(['page_id' => '1001'])['botcake']['customers']);
+        $this->assertSame([['name' => 'Fe G.', 'tag' => 'ORDERED', 'at' => '12:29']], $n['incepxionbot']['customers']);
+        $this->assertSame([['name' => 'Ana R.', 'tag' => 'CHATTING', 'at' => '11:00']], $this->notes(['page_id' => '1001'])['botcake']['customers']);
 
         // Sa susunod na refresh: ang bagong chat ni Eve ay nasa itaas, ang pinakaluma (Dan) ay wala na; ang sagot na AI kay
         // Ana ay ginagawa siyang AI. Ang kahapon ay hindi kailanman lumalabas.
@@ -192,10 +192,10 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $this->chat('1001', '7005', '2026-10-21 12:30:05', 'forbeast', 'Eve Tan');
         $this->reply('1001', '7001', '2026-10-21 12:30:02', 'forbeast', ['content' => self::AI_REPLY]);
         $this->assertSame([
-            ['name' => 'Eve Tan', 'tag' => 'CHATTING', 'at' => '12:30'],
-            ['name' => 'Ana Reyes', 'tag' => 'AI', 'at' => '12:30'],
-            ['name' => 'Cara Lim', 'tag' => 'AI', 'at' => '12:28'],
-            ['name' => 'Ben Cruz', 'tag' => 'ORDERED', 'at' => '12:12'],
+            ['name' => 'Eve T.', 'tag' => 'CHATTING', 'at' => '12:30'],
+            ['name' => 'Ana R.', 'tag' => 'AI', 'at' => '12:30'],
+            ['name' => 'Cara L.', 'tag' => 'AI', 'at' => '12:28'],
+            ['name' => 'Ben C.', 'tag' => 'ORDERED', 'at' => '12:12'],
         ], $this->notes()['forbeast']['customers']);
 
         // Bagong araw: ang mga customer kahapon ay wala na.
@@ -213,15 +213,25 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $this->chat('1001', '7040', '2026-10-21 12:29:40', 'forbeast', 'Gil Ad', [\App\Services\Chatbot\ChatbotInbound::AD_OPEN => true, 'ad_id' => '120001']);
         $n = $this->notes();
 
-        $this->assertNotContains('Gil Ad', array_column($n['forbeast']['customers'], 'name'));
+        // Spec 205: ang pangalan ay unang pangalan at inisyal ("Gil A.").
+        $this->assertNotContains('Gil A.', array_column($n['forbeast']['customers'], 'name'));
         $this->assertSame(2, $n['forbeast']['chatting']);
         $this->assertSame(['type' => 'message', 'page' => 'Page Uno', 'at' => '12:28'], $n['forbeast']['last']);
 
         $this->travel(11)->seconds();
         $this->chat('1001', '7040', '2026-10-21 12:30:05', 'forbeast', 'Gil Ad');
         $n = $this->notes();
-        $this->assertSame(['name' => 'Gil Ad', 'tag' => 'CHATTING', 'at' => '12:30'], $n['forbeast']['customers'][0]);
+        $this->assertSame(['name' => 'Gil A.', 'tag' => 'CHATTING', 'at' => '12:30'], $n['forbeast']['customers'][0]);
         $this->assertSame(3, $n['forbeast']['chatting']);
+        // Ang radar (spec 205): ang pagbukas ng ad ay hindi mensahe, kaya ang ad na binuksan bago ang 5 minuto ay hindi nag-aalis
+        // ng "bago" sa customer na ngayon lang sumulat.
+        $this->chat('1001', '7041', '2026-10-21 12:20:00', 'forbeast', 'Hal Ad', [\App\Services\Chatbot\ChatbotInbound::AD_OPEN => true, 'ad_id' => '120001']);
+        $this->chat('1001', '7041', '2026-10-21 12:30:06', 'forbeast', 'Hal Ad');
+        Cache::flush();
+        $radar = $this->radar()['forbeast'];
+        $dot = fn (string $psid) => array_map(fn ($d) => [$d['new'], $d['name']], array_values(array_filter($radar, fn ($d) => $d['k'] === self::key('1001', $psid))));
+        $this->assertSame([[true, 'Gil A.']], $dot('7040'));
+        $this->assertSame([[true, 'Hal A.']], $dot('7041'));
     }
 
     public function test_S_200_3_a_stored_name_is_shown_else_customer_and_the_page_short_name_and_nothing_private_leaves_the_server(): void
@@ -233,7 +243,7 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $this->chat('1001', '97531864201', '2026-10-21 12:22:00', 'forbeast', 'Old Name');
         $this->chat('1001', '97531864201', '2026-10-21 12:23:00', 'forbeast', 'New Name');
 
-        $this->assertSame(['New Name', 'Maria <b>Santos</b>', 'Customer · Likha Home Essent…'], array_column($this->notes()['forbeast']['customers'], 'name'));
+        $this->assertSame(['New N.', 'Maria S.', 'Customer · Likha Home Essent…'], array_column($this->notes()['forbeast']['customers'], 'name'));
 
         // Ang JSON ng feed at ang page: walang PSID, telepono, address o text ng mensahe; ang pangalan ay escaped sa page.
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
@@ -242,8 +252,8 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         foreach ([$json, $html] as $body) {
             foreach (['24680135791', '13579246801', '97531864201', '0917', 'Blk 5', 'Magkano'] as $private) $this->assertStringNotContainsString($private, $body, $private);
         }
-        $this->assertStringContainsString('New Name', $json);
-        $this->assertStringContainsString('Maria &lt;b&gt;Santos&lt;/b&gt;', $html);
+        $this->assertStringContainsString('New N.', $json);
+        $this->assertStringNotContainsString('Santos', $json); // spec 205: unang pangalan at inisyal lang
         $this->assertStringNotContainsString('Maria <b>Santos', $html);
     }
 
@@ -254,41 +264,31 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
         $html = $this->get('/chatbot/live')->assertOk()->getContent();
 
-        // Header: pangalan, live, page at bot filter, orasan ng Manila, 3D, TV mode, labas.
-        foreach (['<h1>LIKHA LIVE</h1>', 'data-live-status="live"', 'data-live-page', 'data-live-bot', 'data-live-clock', 'data-live-updated',
-            'data-live-3d', 'aria-pressed="false"', 'data-live-fullscreen', 'data-tv-exit'] as $s) $this->assertStringContainsString($s, $html, $s);
-        // Ang reactor: umiikot na singsing, 60 guhit ng 5-minutong orasan, scan band, gintong core na may halaga, order, +N at Last.
-        foreach (['rot rot-a', 'rot rot-b', 'rot rot-c', 'class="scanb"', 'data-live-core', 'Order value today · COD', 'data-live-last-order', 'data-live-shock', 'data-live-coins', 'data-live-plus'] as $s) {
+        // Header (spec 205): pangalan, live na tuldok, ang filter sa likod ng isang funnel, orasan, 3D, TV mode, labas.
+        foreach (['<h1>LIKHA LIVE</h1>', 'data-live-status="live"', 'data-live-filter', 'aria-expanded="false"', 'data-live-page', 'data-live-bot', 'data-live-clock', 'data-live-updated',
+            'data-live-3d', 'aria-pressed="false"', 'data-live-fullscreen', 'data-tv-exit', 'data-live-core', 'data-live-coins', 'data-live-plus', 'data-live-last-order'] as $s) {
             $this->assertStringContainsString($s, $html, $s);
         }
-        $this->assertSame(60, preg_match_all('#<line [^>]*/>#', explode('</g>', explode('<g data-live-ticks', $html, 2)[1], 2)[0]));
-        $this->assertStringContainsString('Last: <tspan data-live-last-order>Page Dos · 12:29 · Bot 2</tspan>', $html);
-        // Bawat numero ng spec 199 ay nasa sariling hook, na may tamang laman.
+        // Bawat numero ng spec 199 ay nasa sariling hook (sa panel o sa card nito), na may tamang laman.
         foreach (['replies' => '4', 'orders' => '3', 'peso' => '3,200', 'messages' => '8', 'ai' => '2', 'follow_ups' => '1', 'active' => '4', 'signals' => '11',
             'in-forbeast' => '6', 'out-forbeast' => '3', 'in-botcake' => '1', 'out-botcake' => '1', 'in-incepxionbot' => '1', 'out-incepxionbot' => '0', 'in-unknown' => '0', 'out-unknown' => '0',
             'reply_time' => '2.4'] as $key => $v) {
             $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($v, '#') . '<#', $html, $key);
         }
         foreach (['data-live-recent="replies"', 'data-live-recent="orders"', 'data-live-note="reply_time"', 'data-live-unit', 'data-live-unknown="in"', 'data-live-unknown="out"',
-            'data-live-kpi="orders"', 'data-live-seq="0"', 'data-live-log'] as $s) $this->assertStringContainsString($s, $html, $s);
-        foreach (['Replies today', 'Avg reply time', 'BOT 1', 'Orders today', 'Active chats', 'INQUIRIES RECEIVED TODAY', 'AI ANSWERS', 'FOLLOW-UPS SENT', 'signals · last 5 min', 'LIVE ACTIVITY'] as $s) {
-            $this->assertStringContainsString($s, $html, $s);
-        }
-        // Ang mga bot: hub na may IN / OUT at pipe papasok at palabas, at NOTES; ang dormant ay dashed (data-linked 0), hindi pula.
+            'data-live-kpi="orders"', 'data-live-seq="0"', 'data-live-split="other"', 'data-live-split="no_amount"'] as $s) $this->assertStringContainsString($s, $html, $s);
+        $this->assertStringNotContainsString('data-live-ticker', $html); // ang icon ticker ay inalis (spec 205, pagkatapos ng design review)
+        // Ang mga bot: ang dormant ay data-linked 0 (dim, hindi pula); ang notes ng bawat bot ay nasa card nito.
         foreach (['forbeast' => '1', 'incepxionbot' => '0', 'botcake' => '1'] as $bot => $on) {
             $this->assertMatchesRegularExpression('#data-bot-row="' . $bot . '" data-linked="' . $on . '"#', $html, $bot);
-            foreach (['-in', '-out'] as $dir) $this->assertSame(1, substr_count($html, 'data-path="' . $bot . $dir . '"'), $bot . $dir);
             $this->assertStringContainsString('data-note="' . $bot . '"', $html);
         }
-        foreach (['BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT', 'BOTCAKE · FALLBACK', 'DORMANT', 'none while not linked', 'Latest customers', 'Last activity'] as $s) $this->assertStringContainsString($s, $html, $s);
-        // Ang notes ng Bot 1 mula sa server (unang laman bago ang poll).
         $notes = explode('data-note="incepxionbot"', explode('data-note="forbeast"', $html, 2)[1], 2)[0];
-        foreach (['data-n="chatting">2<', 'data-n="ai">2<', 'data-n="avg">2.4 s<', 'data-n="orders">1<', 'data-n="value">₱1,149<', 'data-n="last">Inquiry · Page Uno · 12:28<',
-            '<b>Ana Reyes</b><em class="t-chatting">CHATTING</em><time>12:28</time>', '<b>Ben Cruz</b><em class="t-ordered">ORDERED</em><time>12:12</time>'] as $s) {
+        foreach (['data-n="chatting">2<', 'data-n="ai">2<', 'data-n="avg">2.4 s<', 'data-n="orders">1<', 'data-n="value">₱1,149<', 'data-n="last">Inquiry · Page Uno · 12:28<'] as $s) {
             $this->assertStringContainsString($s, $notes, $s);
         }
-        // Dalawang kulay lang, walang pula; walang blur, backdrop-filter, font o script mula sa labas.
-        foreach (['#ff6262', '--bad', 'backdrop-filter', 'filter: blur', 'fonts.googleapis', 'cdn.'] as $s) $this->assertStringNotContainsString($s, $html, $s);
+        // Walang pula; walang blur, backdrop-filter, shadowBlur, font o script mula sa labas.
+        foreach (['#ff6262', '--bad', 'backdrop-filter', 'filter: blur', 'shadowBlur', 'fonts.googleapis', 'cdn.'] as $s) $this->assertStringNotContainsString($s, $html, $s);
     }
 
     /** Ang page sa araw na may usapan at customer ang Bot 1 (gaya ng Likha), naka-render bilang HTML. */
@@ -312,8 +312,9 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
     {
         $html = $this->busyPage();
 
-        // Ang lumang kopya ng rules sa cache ng browser (walang readView) ang pumatay sa script: ang URL ay may bersyon na ng file.
-        $this->assertMatchesRegularExpression('#<script src="[^"]*/js/chatbot-live-rules\.js\?v=' . filemtime(public_path('js/chatbot-live-rules.js')) . '"></script>#', $html);
+        // Ang lumang kopya ng rules sa cache ng browser (walang readView) ang pumatay sa script: ang URL ay may bersyon na ng file
+        // (spec 205: mula sa laman ng file, kaya nagbabago kasama nito).
+        $this->assertMatchesRegularExpression('#<script src="[^"]*/js/chatbot-live-rules\.js\?v=' . substr(md5_file(public_path('js/chatbot-live-rules.js')), 0, 10) . '"></script>#', $html);
         // Walang hindi-ASCII na titik sa JS (ang ₱, ·, … at — ay \u escape), kahit maling charset ang ibigay ng server.
         $this->assertSame(0, preg_match('/[^\x00-\x7F]/', file_get_contents(public_path('js/chatbot-live-rules.js'))), 'rules file is ASCII');
         $this->assertSame(0, preg_match('/[^\x00-\x7F]/', self::pageScript($html)), 'page script is ASCII');
@@ -348,8 +349,9 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         }
         $this->assertSame(['ran' => ['clock', 'poll'], 'logs' => ['notes: R.readView is not a function'], 'v' => 42], $out['value'] ?? $out);
 
-        // Bawat hakbang ng pagsisimula ay dumadaan sa step runner, kaya ang isang sirang bahagi ay hindi pumapatay sa iba.
-        foreach (["step('counts'", "step('view'", "step('tv'", "step('clock'", "step('ticks'", "step('notes'", "step('plan'", "step('log'", "step('loot'"] as $s) {
+        // Bawat hakbang ng pagsisimula ay dumadaan sa step runner, kaya ang isang sirang bahagi ay hindi pumapatay sa iba. Sa spec 205
+        // ay wala na ang 5-minutong orasan at ang LIVE ACTIVITY; ang radar at ang pagguhit ng bawat panel ay sariling hakbang.
+        foreach (["step('counts'", "step('view'", "step('tv'", "step('clock'", "step('radar'", "step('notes'", "step('plan'", "step('draw'", "step('loot'"] as $s) {
             $this->assertStringContainsString($s, $script, $s);
         }
         $this->assertMatchesRegularExpression('#live\.timer = setTimeout\(poll, boot\.interval\);\s*\}\)\(\);\s*$#', $script);
@@ -381,5 +383,277 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $manyWarm = $count(false);
 
         $this->assertSame([$oneCold, $oneWarm], [$manyCold, $manyWarm]);
+    }
+
+    // ── Spec 205: ang radar ng bawat bot (Jarvis E) ──────────────────────────────────────────────────────────────────────
+
+    private function radar(array $q = []): array
+    {
+        return app(LiveFeed::class)->feed($q)['counts']['radar'];
+    }
+
+    /** Ang radar na walang key (ang key ay sinusuri nang hiwalay): [ago, state, new, name] kada tuldok. */
+    private static function dots(array $list): array
+    {
+        return array_map(fn ($d) => [$d['ago'], $d['s'], $d['new'], $d['name']], $list);
+    }
+
+    private static function key(string $page, string $psid): string
+    {
+        return substr(hash_hmac('sha256', $page . '|' . $psid, (string) config('app.key')), 0, 12);
+    }
+
+    public function test_S_205_2_each_bots_radar_is_its_customers_of_the_last_five_minutes_with_state_and_new_and_the_filters_apply(): void
+    {
+        $this->seedDay();
+        // Ben (may order kanina) ay nag-message ulit 12:29:40: hindi bago, ginto. Dee 12:26: ang AI niya ay may error lang, kaya chat.
+        $this->chat('1001', '7002', '2026-10-21 12:29:40', 'forbeast', 'Ben Cruz');
+        $dee = $this->chat('1001', '7040', '2026-10-21 12:26:00', 'forbeast', 'Dee Santos');
+        $this->ai($dee, '1001', '7040', '2026-10-21 12:26:05', ['error' => 'timeout']);
+        $r = $this->radar();
+
+        // Pinakabago muna; ago = segundo mula sa huling mensahe hanggang 12:30:00.
+        $this->assertSame([[20, 'order', false, null], [90, 'chat', true, 'Ana R.'], [120, 'ai', true, 'Cara L.'], [240, 'chat', true, 'Dee S.']], self::dots($r['forbeast']));
+        $this->assertSame([[240, 'order', true, null]], self::dots($r['botcake'])); // walang pangalan kahit saan: walang tag
+        $this->assertSame([[60, 'order', true, 'Fe G.']], self::dots($r['incepxionbot']));
+        $this->assertSame([self::key('1001', '7002'), self::key('1001', '7001'), self::key('1002', '7003'), self::key('1001', '7040')], array_column($r['forbeast'], 'k'));
+        $this->assertSame(count($r['forbeast']), app(LiveFeed::class)->feed([])['counts']['notes']['forbeast']['chatting']);
+
+        // Page filter: Page Uno lang.
+        $uno = $this->radar(['page_id' => '1001']);
+        $this->assertSame([[20, 'order', false, null], [90, 'chat', true, 'Ana R.'], [240, 'chat', true, 'Dee S.']], self::dots($uno['forbeast']));
+        $this->assertSame([], $uno['botcake']);
+
+        // Bot filter: ang ibang bot ay walang tuldok.
+        $only = $this->radar(['bot' => 'botcake']);
+        $this->assertSame([[], [], [[240, 'order', true, null]]], [$only['forbeast'], $only['incepxionbot'], self::dots($only['botcake'])]);
+
+        // Dormant na Bot 2: walang tuldok. Lampas 5 minuto: wala na sa radar.
+        config(['services.incepxionbot.url' => '']);
+        Cache::flush();
+        $this->assertSame([], $this->radar()['incepxionbot']);
+        $this->travelTo('2026-10-21 12:34:30');
+        $this->assertSame([[290, 'order', false, null]], self::dots($this->radar()['forbeast']));
+    }
+
+    public function test_S_205_5_names_are_first_name_and_initial_only_escaped_and_nothing_private_is_in_the_json_or_the_page(): void
+    {
+        $this->chat('1001', '13579246801', '2026-10-21 12:27:00', 'forbeast', 'Maria <b>Santos</b> Dela Cruz');
+        $this->chat('1001', '24680135791', '2026-10-21 12:28:00', 'forbeast', '"Joy" & Co');
+        $this->chat('1001', '97531864201', '2026-10-21 12:29:00', 'forbeast', 'Ñino');
+        $this->chat('1001', '86420975311', '2026-10-21 12:29:30', 'forbeast', '  ');
+
+        $this->assertSame(['', 'Ñino', '"Joy" C.', 'Maria C.'], array_map(fn ($d) => (string) $d['name'], $this->radar()['forbeast']));
+        $this->assertSame(['Customer · Page Uno', 'Ñino', '"Joy" C.', 'Maria C.'], array_column(app(LiveFeed::class)->feed([])['counts']['notes']['forbeast']['customers'], 'name'));
+
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $json = $this->getJson('/chatbot/live/feed')->assertOk()->getContent();
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        foreach ([$json, $html] as $body) {
+            foreach (['13579246801', '24680135791', '97531864201', '86420975311', 'Santos', 'Dela', '0917', 'Blk 5', 'Magkano'] as $private) $this->assertStringNotContainsString($private, $body, $private);
+        }
+        $this->assertStringContainsString('Maria C.', $json);
+        // Sa page ang JSON ng unang laman ay naka-escape (walang hilaw na < o " mula sa pangalan).
+        $this->assertStringNotContainsString('"Joy"', $html);
+        $this->assertStringContainsString('\u0022Joy\u0022 C.', $html);
+    }
+
+    public function test_S_205_6_the_query_count_of_a_poll_does_not_grow_with_radar_customers(): void
+    {
+        $count = function (bool $cold) {
+            if ($cold) Cache::flush();
+            $n = 0;
+            DB::listen(function () use (&$n) { $n++; });
+            $f = app(LiveFeed::class)->feed(['cursor' => ['chat' => '0', 'seq' => '0', 'order' => '0', 'ok' => '2026-10-21 12:00:00|0', 'ai' => '2026-10-21 12:00:00|0']]);
+
+            return [$n, count($f['counts']['radar']['forbeast']) + count($f['counts']['radar']['botcake'])];
+        };
+        $this->seedDay();
+        $one = [$count(true)];
+        $this->travel(11)->seconds();
+        $one[] = $count(false);
+        $this->travelTo('2026-10-21 12:30:00');
+        for ($i = 0; $i < 90; $i++) {
+            $psid = (string) (9000 + $i);
+            $chat = $this->chat('1001', $psid, '2026-10-21 12:2' . (6 + $i % 4) . ':' . str_pad((string) ($i % 60), 2, '0', STR_PAD_LEFT), $i % 3 ? 'forbeast' : 'botcake', 'Name ' . $i . ' Last');
+            if ($i % 2) $this->ai($chat, '1001', $psid, '2026-10-21 12:29:0' . ($i % 10));
+            if ($i % 5 === 0) $this->botOrder('1001', $psid, '2026-10-21 12:29:3' . ($i % 10), $i % 3 ? 'forbeast' : 'botcake');
+        }
+        $many = [$count(true)];
+        $this->travel(11)->seconds();
+        $many[] = $count(false);
+
+        $this->assertSame(array_column($one, 0), array_column($many, 0));
+        $this->assertSame([3, 3], array_column($one, 1));
+        $this->assertSame([93, 93], array_column($many, 1));
+    }
+
+    public function test_S_205_1_every_panel_of_comp_e_renders_with_its_canvas_spoke_card_and_data_hooks_and_the_scripts_carry_a_version(): void
+    {
+        $this->seedDay();
+        config(['services.incepxionbot.url' => '']); // Bot 2 dormant
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+
+        // Siyam na panel sa mga spoke, bawat isa ay may canvas, spoke, card (hover / tap / focus) at hugis (gitna, laki, gilid).
+        foreach (['forbeast', 'botcake', 'incepxionbot', 'ai', 'seq', 'replies', 'vault', 'avg', 'chats'] as $p) {
+            $this->assertMatchesRegularExpression('#<div class="it pn[^"]*" data-pn="' . $p . '"[^>]*data-geo="\d+,\d+,\d+,\d+,\d+"[^>]*tabindex="0"[^>]*aria-describedby="lv-card-' . $p . '"#', $html, $p);
+            $this->assertStringContainsString('id="lv-card-' . $p . '"', $html, $p);
+            $this->assertSame(1, substr_count($html, 'data-spoke="' . $p . '"'), $p);
+            $panel = explode('<!--/pn-->', explode('data-pn="' . $p . '"', $html, 2)[1], 2)[0];
+            $this->assertStringContainsString('<canvas', $panel, $p);
+        }
+        // Ang globo (bot core, signals) at ang vault (ginto, order value at bilang ng order); walang icon ticker (spec 205, pagkatapos ng design review).
+        $this->assertMatchesRegularExpression('#data-live-core[^>]*>.*<canvas#s', $html);
+        $this->assertMatchesRegularExpression('#class="nm-core-name"[^>]*>LIKHA<#', $html);
+        $this->assertMatchesRegularExpression('#data-pn="vault"[^>]*data-live-kpi="orders"#', $html);
+        $this->assertStringNotContainsString('data-live-ticker', $html);
+        // Ang nakikitang salita ng mga panel: isa o dalawang salita bawat isa.
+        preg_match_all('#<span class="lb[^"]*"[^>]*>([^<]*)</span>#', $html, $m);
+        $this->assertSame(['BOT 1', 'IN', 'OUT', 'BOTCAKE', 'IN', 'OUT', 'BOT 2', 'IN', 'OUT', 'AI', 'FOLLOW-UPS', 'REPLIES', 'ORDERS', 'AVG REPLY', 'CHATS', 'BOT'], $m[1]);
+        foreach (['LIVE ACTIVITY', 'Latest customers', '5-MIN CLOCK'] as $s) $this->assertStringNotContainsString($s, $html, $s);
+        // Ang script ng page ay may version mula sa laman ng file: ang lumang kopya sa cache ng browser ay hindi na ginagamit.
+        $v = substr(md5_file(public_path('js/chatbot-live-rules.js')), 0, 10);
+        $this->assertStringContainsString('js/chatbot-live-rules.js?v=' . $v . '"', $html);
+        $this->assertSame(0, preg_match('#<script src="[^"?]*"#', $html));
+    }
+
+    public function test_S_205_4_each_panels_card_carries_every_number_moved_off_the_screen(): void
+    {
+        $this->seedDay();
+        config(['services.incepxionbot.url' => '']); // Bot 2 dormant
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $card = fn (string $id) => explode('</dl>', explode('id="lv-card-' . $id . '"', $html, 2)[1], 2)[0];
+
+        $want = [
+            'core' => ['Likha bot', 'data-live-count="signals">11<', 'Inquiries received today', 'data-live-count="messages">8<', 'data-live-recent="messages">5<', 'data-live-count="active">4<'],
+            'vault' => ['Order value today · COD', 'data-live-count="peso">3,200<', 'data-live-count="orders">3<', 'data-live-recent="orders">2<', 'data-live-recent="peso">2,051<',
+                'data-live-last-order>Page Dos · 12:29 · Bot 2<', 'One disc', '₱5,000'],
+            'replies' => ['Replies today', 'data-live-count="replies">4<', 'data-live-recent="replies">3<'],
+            'ai' => ['AI answers today', 'data-live-count="ai">2<', 'data-live-recent="ai">1<'],
+            'seq' => ['Follow-ups sent today', 'data-live-count="follow_ups">1<', 'data-live-recent="follow_ups">0<', '<span>Sequence #5</span><b>1</b>'],
+            'avg' => ['Avg reply time', 'data-live-count="reply_time">2.4<', 'Customer sent → reply sent', 'Bot 1 only'],
+            'chats' => ['Active chats', 'data-live-count="active">4<', 'data-chat="forbeast">2<', 'data-chat="botcake">1<', 'data-chat="incepxionbot">0<'],
+            'forbeast' => ['Bot 1 · Forbeast', 'data-n="state">Connected<', 'data-live-count="in-forbeast">6<', 'data-live-count="out-forbeast">3<', 'data-n="chatting">2<', 'data-n="ai">2<',
+                'data-n="avg">2.4 s<', 'data-n="orders">1<', 'data-n="value">₱1,149<', 'data-n="last">Inquiry · Page Uno · 12:28<'],
+            'botcake' => ['Botcake · Fallback', 'data-n="state">Fallback<', 'data-live-count="in-botcake">1<', 'data-live-count="out-botcake">1<', 'data-n="chatting">1<', 'data-n="ai">0<',
+                'data-n="orders">1<', 'data-n="value">₱0<', 'data-n="last">Order · Page Dos · 12:29<'],
+            'incepxionbot' => ['Bot 2 · Incepxionbot', 'data-n="state">Not linked<', 'data-live-count="in-incepxionbot">1<', 'data-live-count="out-incepxionbot">0<'],
+            'clock' => ['Today · Manila', 'data-live-updated>12:30:00<'],
+        ];
+        foreach ($want as $id => $strings) foreach ($strings as $s) $this->assertStringContainsString($s, $card($id), $id . ': ' . $s);
+        // Ang mga card ay nakatago hanggang hover / tap / focus.
+        $this->assertSame(11, preg_match_all('#<div class="card[^"]*" id="lv-card-[a-z]+" role="tooltip" hidden>#', $html));
+    }
+
+    // ── Spec 205, pagkatapos ng design review: ang order ay nagtutugma (kada bot + walang bot = kabuuan) ───────────────────────────────────────
+
+    /** Ang bilang ng order kada bot, ang "Other / no bot", ang "without amount", ang kabuuan at ang halaga. */
+    private function split(array $q = []): array
+    {
+        $c = app(LiveFeed::class)->feed($q)['counts'];
+
+        return [array_map(fn ($n) => $n['orders'], $c['notes']), $c['order_split']['other'], $c['order_split']['no_amount'], $c['orders']['today'], $c['order_value']['today']];
+    }
+
+    public function test_S_205_10_per_bot_orders_plus_other_equal_the_total_after_a_gap_in_polling_and_orders_without_cod_are_counted(): void
+    {
+        // 09:00: may nanonood; isang order ng Bot 1 na may COD.
+        $this->travelTo('2026-10-21 09:00:00');
+        $this->botOrder('1001', '7101', '2026-10-21 08:50:00', 'forbeast', '2,000');
+        $this->assertSame([['forbeast' => 1, 'incepxionbot' => 0, 'botcake' => 0], 0, 0, 1, 2000], $this->split());
+
+        // Walang nanonood mula 09:00 hanggang 12:30 (higit sa 15 minuto): ang mga order sa pagitan ay kasama pa rin. Isang order na
+        // walang bot (takbo na walang via) at walang COD; isang Botcake na walang COD.
+        $this->botOrder('1001', '7102', '2026-10-21 10:00:00', 'forbeast', '500');
+        DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => 7103, 'type' => 'order', 'detail' => json_encode(['run' => 'r7103']),
+            'created_at' => '2026-10-21 10:30:00']);
+        $this->botOrder('1002', '7104', '2026-10-21 11:00:00', 'botcake');
+        $this->travelTo('2026-10-21 12:30:00');
+        $this->seedDay(); // + Bot 1 12:12 (COD 1,149), Botcake 12:29 (walang COD), Bot 2 12:29:30 (COD 2,050.50); kahapon: hindi kasama
+        [$bots, $other, $noAmount, $total, $value] = $this->split();
+        $this->assertSame(['forbeast' => 3, 'incepxionbot' => 1, 'botcake' => 2], $bots);
+        $this->assertSame([1, 3, 7], [$other, $noAmount, $total]);
+        $this->assertSame($total, array_sum($bots) + $other);
+        $this->assertSame(5699.5, $value);
+
+        // Bot filter: ang ibang bot ay napupunta sa "Other"; ang kabuuan ay sa page pa rin.
+        [$bots, $other, $noAmount, $total] = $this->split(['bot' => 'botcake']);
+        $this->assertSame([['forbeast' => 0, 'incepxionbot' => 0, 'botcake' => 2], 5, 3, 7], [$bots, $other, $noAmount, $total]);
+
+        // Page filter: Page Uno lang (08:50, 10:00, 10:30 na walang bot, 12:12).
+        [$bots, $other, $noAmount, $total] = $this->split(['page_id' => '1001']);
+        $this->assertSame([['forbeast' => 3, 'incepxionbot' => 0, 'botcake' => 0], 1, 1, 4], [$bots, $other, $noAmount, $total]);
+
+        // Hindi naka-link ang Bot 2: ang order nito ay walang bot sa screen, kaya "Other".
+        config(['services.incepxionbot.url' => '']);
+        Cache::flush();
+        [$bots, $other, $noAmount, $total] = $this->split();
+        $this->assertSame([['forbeast' => 3, 'incepxionbot' => 0, 'botcake' => 2], 2, 3, 7], [$bots, $other, $noAmount, $total]);
+        $this->assertSame($total, array_sum($bots) + $other);
+
+        // Ang card ng vault: ang "Other / no bot" at ang "Without amount", na may data hook para sa bawat poll.
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $card = explode('</dl>', explode('id="lv-card-vault"', $html, 2)[1], 2)[0];
+        foreach (['<dt>Orders today</dt><dd data-live-count="orders">7<', '<dt>Other / no bot</dt><dd data-live-split="other">2<',
+            '<dt>Without amount</dt><dd data-live-split="no_amount">3<'] as $s) $this->assertStringContainsString($s, $card, $s);
+        $this->assertStringContainsString('"order_split":{"other":2,"no_amount":3}', $html);
+    }
+
+    public function test_S_205_14_the_replies_gauge_card_says_it_is_pace_against_todays_average_and_not_a_goal(): void
+    {
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $card = explode('</dl>', explode('id="lv-card-replies"', $html, 2)[1], 2)[0];
+        foreach (['<dt>Gauge shows</dt><dd>pace, not a goal</dd>', "<dt>Pace</dt><dd>last 5 min vs today's average 5 min</dd>",
+            '<dt>Half / full</dt><dd>usual pace / double or more</dd>'] as $s) $this->assertStringContainsString($s, $card, $s);
+        foreach (['target', 'Target', 'goal reached', 'quota'] as $s) $this->assertStringNotContainsString($s, $card, $s);
+    }
+
+    public function test_S_205_11_tv_mode_renders_2d_through_the_rules_and_3d_labels_grow_with_the_fold(): void
+    {
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        // Ang ipinapakita ay LiveRules.viewFor(napili, TV): sa TV ay 2D, hindi binabago ang naka-save; ang TV ay agad 2D (K = 0).
+        foreach (["const goal = () => R.viewFor(want ? '3d' : '2d', tvOn) === '3d' ? 1 : 0;", 'tvOn = on; root.classList.toggle(\'tv\', on);', 'if (on) K = 0;',
+            'setTv(true); hideCard();', "if (!document.fullscreenElement) setTv(false);"] as $s) $this->assertStringContainsString($s, $html, $s);
+        $this->assertSame(1, substr_count($html, 'R.saveView('), 'only the 3D button saves the choice');
+        // Ang label ay lumalaki sa 3D ayon sa K (sinukat sa headless Chrome: ≥ 18 px sa 1920 × 1080, nasa result).
+        foreach (['.lb { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }', 'transform: translateX(-50%) scale(var(--lk, 1)); transform-origin: 50% 100%;', '--lk: 1 !important;'] as $s) $this->assertStringContainsString($s, $html, $s);
+        $this->assertStringContainsString("world.style.setProperty('--lk', (1 + LK * K).toFixed(3));", $html);
+        $this->assertMatchesRegularExpression('#const LK = \.3;#', $html);
+    }
+
+    public function test_S_205_12_the_counts_carry_the_ai_answers_of_the_last_minute_in_ten_second_slices_for_the_hex_on_load(): void
+    {
+        // Ngayon 12:30:00; ang hati ay mula 12:29:55 (ang mas bago ay darating bilang event sa unang poll) pabalik, 10 s bawat isa.
+        $chat = $this->chat('1001', '7050', '2026-10-21 12:28:00', 'forbeast', 'Gia Cruz');
+        foreach (['12:29:50', '12:29:47', '12:29:40', '12:28:58'] as $t) $this->ai($chat, '1001', '7050', '2026-10-21 ' . $t);
+        $this->ai($chat, '1002', '7050', '2026-10-21 12:29:46');                                    // ibang page
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:29:57');                                    // darating bilang event
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:28:50');                                    // lampas isang minuto
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:29:30', ['error' => 'timeout']);            // hindi sagot
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:29:20', ['model' => \App\Services\OrderEncode\FlowEncode::MODEL]); // Encode order
+
+        $this->assertSame([3, 1, 0, 0, 0, 1], app(LiveFeed::class)->feed([])['counts']['ai_minute']);
+        $this->assertSame([2, 1, 0, 0, 0, 1], app(LiveFeed::class)->feed(['page_id' => '1001'])['counts']['ai_minute']);
+        // Ang page ay may laman na nito pagbukas, at ang script ay nag-iilaw mula rito bago ang unang poll.
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $this->assertStringContainsString('"ai_minute":[3,1,0,0,0,1]', $html);
+        $this->assertStringContainsString('for (const age of R.aiCells(c.ai_minute, 30).reverse()) hexLit[(hexN++ * 11) % 30] = now() - age - lag * 1000;', $html);
+        $this->assertStringContainsString("setCounts(boot.counts, boot.now);\n    lightFrom(boot.counts, boot.now);", $html);
+    }
+
+    public function test_S_205_13_the_icon_ticker_is_gone_from_the_page_and_its_drawing(): void
+    {
+        $this->seedDay();
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        foreach (['data-live-ticker', 'class="tk"', '.tk {', 'tkCv', 'dTk', 'tick(', 'R.icon', 'ticker'] as $s) $this->assertStringNotContainsString($s, $html, $s);
+        // Ang ibang event ay buhay pa rin: packet sa spoke, hex ng AI, barya ng order.
+        foreach (["fire('chats', -1, '#5dff9c')", "hexLit[(hexN++ * 11) % 30] = now();", "if (a.type === 'order') { cash(a); return; }"] as $s) $this->assertStringContainsString($s, $html, $s);
     }
 }

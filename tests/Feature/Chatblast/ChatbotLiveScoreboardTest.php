@@ -131,12 +131,13 @@ class ChatbotLiveScoreboardTest extends ChatblastTestCase
             'in-botcake' => '2', 'out-forbeast' => '2', 'out-incepxionbot' => '3', 'out-botcake' => '1', 'ai' => '0', 'follow_ups' => '1'] as $key => $n) {
             $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($n, '#') . '<#', $html, $key);
         }
-        foreach (['INQUIRIES', 'LIKHA', 'AI ANSWERS', 'FOLLOW-UP', ' orders · ', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT', 'BOTCAKE · FALLBACK', 'Replies today', 'Avg reply time', 'Orders today', 'Active chats', 'LIVE ACTIVITY'] as $label) {
+        // Spec 205: ang mga label ay nasa panel (isa o dalawang salita) at sa card nito.
+        foreach (['Inquiries received today', 'LIKHA', 'AI answers today', 'Follow-ups sent today', 'Bot 1 · Forbeast', 'Bot 2 · Incepxionbot', 'Botcake · Fallback', 'Replies today', 'Avg reply time', 'Orders today', 'Active chats'] as $label) {
             $this->assertStringContainsString($label, $html);
         }
         $this->assertStringContainsString('Page Dos · 12:29 · Bot 2', $html); // ang huling order
-        // Ang HUD (spec 200): ang path papasok at palabas ng bawat bot, at ng AI at follow-ups.
-        foreach (['forbeast-in', 'forbeast-out', 'incepxionbot-in', 'incepxionbot-out', 'botcake-in', 'botcake-out', 'seq', 'ai'] as $path) $this->assertSame(1, substr_count($html, 'data-path="' . $path . '"'), $path);
+        // Ang spoke ng bawat bot, ng AI at ng follow-ups.
+        foreach (['forbeast', 'incepxionbot', 'botcake', 'seq', 'ai'] as $path) $this->assertSame(1, substr_count($html, 'data-spoke="' . $path . '"'), $path);
     }
 
     public function test_S_196_1_on_incepxion_the_title_and_core_carry_the_site_name(): void
@@ -241,7 +242,7 @@ class ChatbotLiveScoreboardTest extends ChatblastTestCase
         Http::assertNothingSent();
         $html = $this->get('/chatbot/live')->assertOk()->getContent();
         $this->assertMatchesRegularExpression('#data-bot-row="forbeast"[^>]*data-linked="0"#', $html);
-        $this->assertStringContainsString('not linked', $html);
+        $this->assertStringContainsString('data-n="state">Not linked<', $html);
     }
 
     public function test_S_196_5_a_page_not_on_forbeast_or_a_timeout_also_shows_a_dash_with_the_right_note(): void
