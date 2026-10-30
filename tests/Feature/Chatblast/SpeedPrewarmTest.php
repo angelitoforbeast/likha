@@ -385,6 +385,27 @@ class SpeedPrewarmTest extends ChatblastTestCase
         $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20, 2026-10-21; too large 2026-10-20 sequences, 2026-10-21 sequences in \d+\.\d s$#', $lines[0][1]);
     }
 
+    public function test_S_201_3_a_sequences_call_over_its_time_budget_answers_too_large_in_time(): void
+    {
+        // Ang web request ay may hangganang oras (bago ang 30 s ng php-fpm): lampas dito, ang tala na too_large (200), hindi
+        // ang timeout ng server; ang ibang section ay buo. Ang takbo ng warm (console) ay walang hangganang oras.
+        $this->assertLessThan(30, ResponseSpeed::SEQUENCE_SECONDS);
+        $this->app->instance(ResponseSpeed::class, new class extends ResponseSpeed {
+            protected function sequenceSeconds(): ?float
+            {
+                return 0.0;
+            }
+        });
+        $this->ceo();
+        Cache::flush();
+        $page = $this->get('/chatbot/speed?date=2026-10-20')->assertOk();
+        $this->assertGreaterThan(0, $page->viewData('total')['messages']);
+        $s = $this->getJson('/chatbot/speed/sequences?date=2026-10-20')->assertOk()->json();
+        $this->assertTrue($s['sequences']['too_large']);
+        $this->assertStringContainsString('Sequences section too large to compute now', $s['html']);
+        $this->getJson('/chatbot/speed/sequences?date=2026-10-20&part=chart')->assertOk()->assertJsonPath('seq.series.avg.10', null);
+    }
+
     public function test_S_201_4_the_page_and_the_sequences_endpoint_give_the_numbers_of_the_old_screen(): void
     {
         $before = json_decode((string) file_get_contents(self::SNAPSHOT), true);

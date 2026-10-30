@@ -456,9 +456,25 @@ class ResponseSpeed
         return $limit > 0 ? intdiv($limit * 3, 4) : PHP_INT_MAX;
     }
 
-    private static function checkBudget(int $budget): void
+    /**
+     * Ang hangganang oras ng Sequences sa isang web request (segundo): bago ang 30 s ng php-fpm, para ang sagot ay ang tala
+     * na too_large at hindi ang timeout ng server. Ang console (ang warm ng default na view) ay walang hangganan.
+     */
+    public const SEQUENCE_SECONDS = 20;
+
+    /** Ang segundo na puwedeng gamitin ng Sequences sa request na ito; null = walang hangganan (console). */
+    protected function sequenceSeconds(): ?float
+    {
+        return app()->runningInConsole() ? null : (float) self::SEQUENCE_SECONDS;
+    }
+
+    /** Ang oras (microtime) na hindi na dapat lampasan ng kuwenta ng Sequences na tumatakbo; null = walang hangganan. */
+    private ?float $sequenceDeadline = null;
+
+    private function checkBudget(int $budget): void
     {
         if (memory_get_usage(true) > $budget) throw new \OverflowException('Speed: the sequences section is over its memory budget.');
+        if ($this->sequenceDeadline !== null && microtime(true) > $this->sequenceDeadline) throw new \OverflowException('Speed: the sequences section is over its time budget.');
     }
 
     /** Ang isang oras o ang araw ng pushed → sent sa Meta: pushed (Forbeast), measured, average, median, p90, max, unconfirmed, botcake. */
@@ -689,6 +705,8 @@ class ResponseSpeed
     private function sequences(array $f, string $start, string $end, int $nowHour): array
     {
         $budget = $this->sequenceBudget();
+        $secs = $this->sequenceSeconds();
+        $this->sequenceDeadline = $secs === null ? null : microtime(true) + $secs;
         $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
@@ -789,7 +807,7 @@ class ResponseSpeed
                 $d = json_decode((string) $e->detail, true);
                 if (is_array($d) && in_array($d['op'] ?? null, ['ran', 'skipped', 'failed'], true)) $each($e, $d);
             }
-            self::checkBudget($budget);
+            $this->checkBudget($budget);
         }
 
         return $maxId;
@@ -817,7 +835,7 @@ class ResponseSpeed
                 if ($t < $first[$k] || !isset($before[$k])) $before[$k] = $t;
                 else $before[$k] .= "\n" . $t;
             }
-            self::checkBudget($budget);
+            $this->checkBudget($budget);
         }
 
         return $before;
@@ -895,7 +913,7 @@ class ResponseSpeed
                 $out[$k] .= pack('JJJC', strtotime($r->sent_at), (int) $r->sequence_id, $meta ? strtotime($r->confirmed_at) : 0,
                     (in_array($r->status, SendStatus::DELIVERED, true) ? self::SEND_DELIVERED : 0) | ($botcake ? self::SEND_BOTCAKE : 0) | ($meta ? self::SEND_META : 0));
             }
-            self::checkBudget($budget);
+            $this->checkBudget($budget);
         }
 
         return $out;
