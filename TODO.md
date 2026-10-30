@@ -1512,3 +1512,9 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **Unbounded reads that grow by about 17k rows a year each:** `AnalystRts::all()` reads every replaced `rts_pct` row for "dati"; `dayRowsSince` filters `created_at` without an index; each `rows()` pass also reads `page_item_settings` and its log for Set RTS and "set by". Reason: fine at today's size (the run took about 5 s on 88.5k orders); bound "dati" to the latest replaced row per key, or add a `(provider, created_at)` index, when page_settings passes about 100k rows.
 - **`--as-of` replays at the end of the day**, not at 06:00, and an order with a status but no status logs counts as in transit. Reason: the replay is a check of the method with no look-ahead past that day, not a copy of the stored value.
 - **No lock around the "already done today" check**, so a manual run at the same second as the 06:00 run can write twice. Reason: the scheduler has `withoutOverlapping` and `onOneServer`; manual runs are by a trusted operator.
+
+## Live page order value (spec 199), accepted review minors
+
+- **Orders still without an amount are re-resolved on every counts refresh all day** (one `order_encodes` read from the earliest open order). Reason: bounded to one indexed query per 5–10 s refresh and reset each day; drop orders older than a few hours from the retry if late-day reads grow.
+- **The "not accepted" filter relies on the key being absent** (`input.not_accepted` SQL NULL). Reason: the encode code always writes a row id there; a JSON `null` written in future would hide that encode on MySQL.
+- **The fallback join can still lend a COD** when the same customer's earlier order is more than 24 h older than the resolve window and its encode lands after a later order. Reason: needs two orders of one customer plus an encode lagging more than a day; orders are counted once per customer per 24 h.

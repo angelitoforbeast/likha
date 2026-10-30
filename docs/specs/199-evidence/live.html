@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="evidence">
+    <title>Chatbot · Live</title>
+    <style>
+    /* Ang Live bilang neural network room: isang canvas na 1920 × 1080 na pinapalaki o pinapaliit sa screen (ang KPI, ang
+       network at ang timeline ay iisang coordinate space), madilim na navy, kulay sa node, link at numero lang. Ang font ay
+       Saira / IBM Plex Mono kapag naka-install sa TV, kung hindi ay ang system font (Bahnschrift, saka ang iba). */
+    :root { --void: #040a14; --line: rgba(120,190,255,.16); --line2: rgba(120,190,255,.30); --ink: #f2f8ff; --mut: #8ea6bf;
+        --inq: #35c8ff; --seq: #a566ff; --out: #2af0c0; --ai: #ff5fa8; --ord: #ffbf2f; --chip: #ffd77a; --bad: #ff6262;
+        --num: "Saira Condensed", "Bahnschrift Condensed", "Bahnschrift", "Roboto Condensed", "Arial Narrow", sans-serif;
+        --txt: "Saira", "Bahnschrift", "Segoe UI", "Roboto", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+        --ease: cubic-bezier(.16,1,.3,1); }
+    * { box-sizing: border-box; margin: 0; }
+    html, body { background: var(--void); color: var(--ink); font-family: var(--txt); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+    body { overflow-x: hidden; }
+    ::selection { background: rgba(53,200,255,.35); color: #fff; }
+    .sel option { background: #061424; color: var(--ink); }
+    [hidden] { display: none !important; }
+    .vp { position: relative; height: 100vh; overflow: hidden; background: radial-gradient(1000px 700px at 40% 62%, rgba(30,110,190,.20), transparent 70%), var(--void); }
+    .stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+    .mob { display: none; }
+    .t-inq { --c: var(--inq); } .t-seq { --c: var(--seq); } .t-out { --c: var(--out); } .t-ai { --c: var(--ai); } .t-ord { --c: var(--ord); } .t-dim { --c: #7f93ab; }
+
+    /* Ang header. */
+    .top { position: absolute; left: 0; top: 0; width: 1920px; height: 72px; display: flex; align-items: center; gap: 28px; padding: 0 48px; border-bottom: 1px solid var(--line); }
+    .logo { width: 46px; height: 46px; flex: none; fill: var(--out); }
+    .top h1 { font: 700 40px/1 var(--txt); letter-spacing: .14em; white-space: nowrap; }
+    .lv-status { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font: 500 26px/1 var(--txt); letter-spacing: .08em; white-space: nowrap; }
+    .lv-status i { width: 14px; height: 14px; border-radius: 50%; background: var(--out); animation: ping 2s infinite; }
+    .lv-status[data-live-status="hidden"] { color: var(--ord); } .lv-status[data-live-status="hidden"] i { background: var(--ord); }
+    .lv-status[data-live-status="error"], .lv-status[data-live-status="off"] { color: var(--bad); }
+    .lv-status[data-live-status="error"] i, .lv-status[data-live-status="off"] i { background: var(--bad); }
+    .lv-status:not([data-live-status="live"]) i { animation: none; }
+    .top .sp { margin-left: auto; display: flex; align-items: center; gap: 24px; min-width: 0; }
+    .lv-filter { display: flex; gap: 16px; min-width: 0; }
+    .sel { font: 500 24px var(--txt); color: var(--ink); background: rgba(8,24,44,.8); border: 1px solid var(--line2); padding: 8px 16px; border-radius: 6px; max-width: 340px; min-width: 0; }
+    .clock { border-left: 1px solid var(--line2); padding-left: 24px; font: 500 18px/1.15 var(--txt); color: var(--mut); white-space: nowrap; }
+    .clock b { display: block; font: 600 32px/1.1 var(--txt); color: var(--ink); }
+    .tvb { font: 500 24px var(--txt); color: var(--ink); background: rgba(8,24,44,.8); border: 1px solid var(--line2); padding: 10px 20px; border-radius: 6px; cursor: pointer; }
+    .exit { color: var(--mut); font-size: 18px; text-decoration: underline; text-underline-offset: .2em; white-space: nowrap; }
+    .exit:hover, .exit:focus-visible, .tvb:hover { color: var(--ink); }
+    .sel:focus-visible, .tvb:focus-visible, .exit:focus-visible { outline: 3px solid var(--inq); outline-offset: 2px; }
+
+    /* Ang apat na KPI. */
+    .kpis { position: absolute; left: 0; top: 72px; width: 1920px; height: 160px; display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+    .kpi { position: relative; display: flex; align-items: center; gap: 18px; padding: 0 26px 0 48px; border-right: 1px solid var(--line); min-width: 0; }
+    .kpi:last-child { border-right: 0; }
+    .kpi > div { min-width: 0; }
+    .kpi svg.ic { flex: none; width: 50px; height: 50px; fill: none; stroke: var(--c); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .kpi h2 { font: 500 25px/1 var(--txt); color: var(--mut); letter-spacing: .04em; white-space: nowrap; }
+    .kpi .bt { display: inline-block; border: 1px solid var(--line2); border-radius: 4px; padding: 1px 8px; margin-left: 8px; color: var(--ink); font-size: 18px; vertical-align: 2px; }
+    .kpi .v { display: block; font: 700 88px/.95 var(--num); color: var(--ink); margin: 4px 0 0; white-space: nowrap; }
+    .kpi .v u { font: 600 46px var(--num); text-decoration: none; color: var(--mut); margin-left: 6px; }
+    .kpi small { display: block; font: 400 22px/1.15 var(--txt); color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kpi small.wrap { white-space: normal; max-height: 2.3em; }
+    .kpi small > b { color: var(--c); font-weight: 600; }
+    .kpi small:not(.up) > b i { display: none; }
+    .kpi.k1 { --c: var(--out); } .kpi.k2 { --c: var(--inq); } .kpi.k3 { --c: var(--ord); } .kpi.k4 { --c: var(--inq); }
+    .kpi.cash { animation: kcash 1.4s var(--ease); }
+    @keyframes kcash { 0%, 30% { background: radial-gradient(400px 160px at 30% 50%, rgba(255,191,47,.30), transparent 70%); } 100% { background: none; } }
+    .kpi .plus { position: absolute; left: 330px; top: 12px; font: 700 40px var(--num); color: var(--chip); opacity: 0; white-space: nowrap; pointer-events: none; }
+    .kpi .plus.go { animation: plus 1.8s var(--ease); }
+    .kpi .plus.still { opacity: 1; }
+    @keyframes plus { 0% { opacity: 0; transform: translateY(16px); } 18% { opacity: 1; } 100% { opacity: 0; transform: translateY(-30px); } }
+
+    /* Ang network. */
+    .net { position: absolute; left: 0; top: 232px; width: 1500px; height: 848px; }
+    .nm { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: block; }
+    .net .bar { position: absolute; left: 48px; top: 12px; right: 40px; display: flex; align-items: baseline; gap: 22px; }
+    .net .bar h2 { font: 700 28px/1 var(--txt); letter-spacing: .3em; }
+    .net .bar h2::before { content: ""; display: inline-block; width: 5px; height: 24px; background: var(--inq); margin-right: 16px; vertical-align: -3px; }
+    .net .bar > span { font-size: 24px; color: var(--mut); }
+    .leg { margin-left: auto; display: flex; gap: 26px; font-size: 24px; color: var(--ink); }
+    .leg i { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: var(--c); margin-right: 9px; vertical-align: -1px; }
+    .nm-dust line { stroke: #5b9bd5; stroke-opacity: .12; } .nm-dust circle { fill: #5b9bd5; fill-opacity: .35; }
+    .nm-cl .lk { stroke: var(--c); stroke-opacity: .34; stroke-width: 1.2; } .nm-cl .nd { fill: var(--c); } .nm-cl .nr { fill: #061222; stroke: var(--c); stroke-width: 1.5; }
+    .tw { animation: tw 4.5s ease-in-out infinite alternate; }
+    @keyframes tw { from { opacity: .25; } to { opacity: 1; } }
+    .wire { fill: none; stroke: var(--c); stroke-width: 2.6; stroke-opacity: .55; }
+    .wire[data-linked="0"] { stroke-dasharray: 7 10; stroke-opacity: .45; stroke: var(--mut); }
+    .nm-amb circle { fill: var(--c); opacity: .9; } .nm-amb circle[data-linked="0"] { opacity: 0; }
+    .hub .bg { fill: #061424; stroke: var(--c); stroke-width: 3.2; transition: stroke .4s; }
+    .hub .halo { fill: none; stroke: var(--c); stroke-opacity: .35; stroke-dasharray: 3 6; }
+    .hub .ic { fill: none; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .hub.is-hit .bg { stroke: #fff; }
+    .hub.is-hit.long .bg { stroke: var(--chip); }
+    .nm-bot .off, .mc .off { display: none; }
+    .nm-bot[data-linked="0"] .on, .mc[data-linked="0"] .on { display: none; }
+    .nm-bot[data-linked="0"] .off { display: inline; } .mc[data-linked="0"] .off { display: inline; } .mc[data-linked="0"] b.off { display: block; }
+    .nm-bot[data-linked="0"] .hub .bg { stroke-opacity: .5; stroke-dasharray: 7 8; stroke-width: 2.4; stroke: var(--mut); }
+    .nm-bot[data-linked="0"] .hub .ic, .nm-bot[data-linked="0"] .hub .halo { stroke: var(--mut); }
+    .nm-bot[data-linked="0"] .hub .halo { animation: none; stroke-opacity: .3; }
+    .spin { animation: spin 80s linear infinite; transform-box: fill-box; transform-origin: center; }
+    .spin2 { animation: spin 50s linear infinite reverse; transform-box: fill-box; transform-origin: center; }
+    .breathe { animation: breathe 5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes breathe { 50% { transform: scale(1.015); } }
+    @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(42,240,192,.6); } 100% { box-shadow: 0 0 0 14px rgba(42,240,192,0); } }
+    .nm-core .c-faint { fill: none; stroke: var(--out); stroke-opacity: .12; }
+    .nm-core .c-arc { fill: none; stroke: var(--out); stroke-opacity: .6; stroke-width: 3; stroke-dasharray: 300 80; }
+    .nm-core .c-arc2 { fill: none; stroke: var(--seq); stroke-opacity: .55; stroke-width: 2; stroke-dasharray: 90 28 8 28; }
+    .nm-core [data-live-ticks] line { stroke: var(--out); stroke-width: 2.4; stroke-opacity: .14; }
+    .nm-core .ring { fill: #06182c; stroke: var(--out); stroke-width: 4; transition: stroke .3s; }
+    .nm-core.is-hit .ring { stroke: #fff; }
+    .wave { fill: none; stroke: var(--out); stroke-width: 3; opacity: 0; transform-box: fill-box; transform-origin: center; }
+    .wave.go { animation: wave 1s var(--ease); }
+    @keyframes wave { 0% { opacity: .8; transform: scale(1); } 100% { opacity: 0; transform: scale(1.4); } }
+    .t { font-family: var(--txt); fill: var(--ink); } .t.c { text-anchor: middle; } .t.end { text-anchor: end; }
+    .nm-core-name { font: 700 36px var(--txt); letter-spacing: .06em; fill: var(--ink); text-anchor: middle; }
+    .cap { font: 700 26px var(--txt); letter-spacing: .14em; fill: var(--c); }
+    .sub { font: 400 24px var(--txt); fill: var(--mut); }
+    .s20 { font-size: 20px; } .s21 { font-size: 21px; } .s22 { font-size: 22px; } .s26 { font-size: 26px; }
+    .big { font: 700 76px var(--num); fill: var(--ink); } .big.s { font-size: 64px; }
+    .t-ordf { fill: var(--ord); } .peso-sign { font-size: 44px; }
+    .bname { font: 600 22px var(--txt); letter-spacing: .04em; }
+    .st { font: 500 23px var(--txt); fill: var(--out); } .st.off { fill: var(--mut); }
+    .dorm { font: 700 44px var(--num); fill: #7f93ab; letter-spacing: .14em; }
+    .seqn { font: 500 21px var(--txt); fill: #c9a8ff; paint-order: stroke; stroke: var(--void); stroke-width: 5; }
+    .strip { stroke: var(--line); stroke-width: 1.5; } .dot { fill: var(--c); }
+    .pk { font: 700 30px var(--num); fill: var(--chip); paint-order: stroke; stroke: var(--void); stroke-width: 6; text-anchor: middle; }
+    .flick { animation: flick 1.1s var(--ease); }
+    @keyframes flick { 0% { opacity: .5; } 100% { opacity: 1; } }
+
+    /* Ang timeline. */
+    .act { position: absolute; left: 1500px; top: 232px; width: 420px; height: 848px; border-left: 2px solid rgba(53,200,255,.45); padding: 12px 40px 0 28px; }
+    .act h2 { font: 700 28px/1 var(--txt); letter-spacing: .3em; display: flex; align-items: center; gap: 16px; padding: 6px 0 16px; border-bottom: 1px solid var(--line); }
+    .act h2 i { width: 14px; height: 14px; border-radius: 50%; background: var(--out); animation: ping 2s infinite; }
+    .tl { list-style: none; padding: 0; position: relative; margin-top: 8px; }
+    .tl:not(:empty)::before { content: ""; position: absolute; left: 92px; top: 12px; bottom: 0; width: 1px; background: var(--line2); }
+    .tl li { position: relative; display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 0 24px; height: 84px; border-bottom: 1px solid rgba(120,190,255,.07); padding-top: 10px; animation: lin .8s var(--ease) both; }
+    .tl time { font: 400 18px var(--mono); color: var(--mut); padding-top: 3px; }
+    .tl li::before { content: ""; position: absolute; left: 86px; top: 18px; width: 13px; height: 13px; border-radius: 50%; background: var(--c); }
+    .tl .tx { padding-left: 6px; min-width: 0; }
+    .tl .l1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .tl .ch { flex: none; font: 600 16px/1 var(--txt); letter-spacing: .08em; color: var(--c); border: 1px solid var(--c); border-radius: 20px; padding: 3px 9px; }
+    .tl .ti { font: 600 26px/1.15 var(--txt); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl .de { display: block; font: 400 21px/1.25 var(--txt); color: var(--mut); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl li:nth-child(n+6) { opacity: .7; } .tl li:nth-child(n+8) { opacity: .45; }
+    .listen { position: absolute; left: 28px; bottom: 22px; display: flex; align-items: center; gap: 14px; font-size: 24px; color: var(--mut); }
+    .listen i { width: 13px; height: 13px; border-radius: 50%; background: var(--out); }
+    .ty-message { --c: var(--inq); } .ty-follow_up { --c: var(--seq); } .ty-confirmed { --c: var(--out); } .ty-ai { --c: var(--ai); } .ty-order { --c: var(--ord); }
+    @keyframes lin { from { opacity: 0; transform: translateX(14px); } }
+
+    /* Telepono (390 px): walang canvas; isang column ng mga card, at ang timeline sa dulo. */
+    @media (max-width: 900px) {
+        .vp { height: auto; min-height: 100vh; overflow: visible; }
+        .stage { position: static; width: auto; height: auto; transform: none !important; display: flex; flex-direction: column; padding-bottom: 30px; }
+        .net { display: none; } .mob { display: grid; grid-template-columns: minmax(0, 1fr); }
+        .top, .kpis, .act { position: relative; left: auto; top: auto; width: auto; height: auto; }
+        .top { flex-wrap: wrap; gap: 6px 14px; padding: 12px 14px; } .top h1 { font-size: 26px; } .logo { width: 30px; height: 30px; } .lv-status { font-size: 18px; }
+        .top .sp { margin-left: 0; flex-wrap: wrap; gap: 8px 12px; width: 100%; } .lv-filter { flex-wrap: wrap; gap: 8px; width: 100%; }
+        .sel, .tvb { font-size: 16px; padding: 6px 10px; } .sel { flex: 1 1 140px; max-width: none; }
+        .clock { border: 0; padding: 0; font-size: 14px; } .clock b { font-size: 20px; } .exit { font-size: 15px; }
+        .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi { padding: 12px 14px; gap: 10px; border-bottom: 1px solid var(--line); } .kpi:nth-child(2) { border-right: 0; }
+        .kpi small { white-space: normal; font-size: 14px; } .kpi svg.ic { display: none; } .kpi h2 { font-size: 15px; white-space: normal; } .kpi .bt { font-size: 12px; }
+        .kpi .v { font-size: 52px; } .kpi .v u { font-size: 24px; } .kpi .plus { left: 12px; top: 4px; font-size: 26px; }
+        .act { border-left: 0; border-top: 2px solid rgba(53,200,255,.45); padding: 12px 14px 56px; order: 6; }
+        .act h2 { font-size: 18px; } .tl:not(:empty)::before { left: 84px; } .tl li { grid-template-columns: 70px minmax(0, 1fr); height: 74px; gap: 0 18px; } .tl li::before { left: 78px; }
+        .tl .ti { font-size: 19px; } .tl time { font-size: 14px; } .tl .de { font-size: 15px; } .tl .ch { font-size: 12px; } .listen { left: 14px; bottom: 16px; font-size: 16px; }
+        .mob { padding: 10px 14px; gap: 10px; order: 5; }
+        .mc { border: 1px solid var(--line2); border-radius: 6px; padding: 10px 14px; background: linear-gradient(180deg, rgba(12,36,64,.7), rgba(6,18,34,.7)); position: relative; min-width: 0; transition: border-color .6s; }
+        .mc h3 { font: 700 15px/1.1 var(--txt); letter-spacing: .12em; color: var(--c); padding-right: 96px; }
+        .mrow .mc h3 { padding-right: 0; }
+        .mc > b, .mc b { white-space: nowrap; display: block; font: 700 48px/1 var(--num); margin-top: 4px; }
+        .mc small { display: block; font-size: 14px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mc small span { display: inline; font: inherit; margin: 0; }
+        .mc .chip { position: absolute; right: 12px; top: 10px; font-size: 14px; color: var(--c); }
+        .mc[data-linked="0"] { opacity: .65; border-style: dashed; --c: var(--mut); } .mc[data-linked="0"] b.off { font-size: 30px; color: var(--mut); }
+        .mc.flash { border-color: var(--c); }
+        .mrow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .mcore { text-align: center; padding: 16px; } .mcore h3 { font-size: 20px; padding-right: 0; } .mcore b { font-size: 56px; }
+    }
+    /* Reduced motion: walang boot, daloy, kislap, ikot, packet, shockwave o pag-akyat ng numero; ang kulay lang ng gilid
+       ng tinamaan ang nagbabago, at ang chip ng order ay nakatayo nang 4 na segundo. */
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+        .nm-amb { display: none; }
+    }
+</style>
+<script>
+// EVIDENCE ONLY: pekeng /chatbot/live/feed. Bawat poll (5 s): ilang mensahe at sagot, AI, minsan follow-up; isang order bawat
+// poll (salit-salit: may COD, walang COD pa, at isang sunod-sunod na 3 order), at ang COD ng naunang order na walang halaga ay
+// dumarating sa susunod na poll (ang kabuuan lang ang umaakyat, walang pangalawang packet).
+(() => {
+  const pages = ['Sample Page 03', 'Sample Page 07', 'Sample Page 11', 'Sample Page 12'];
+  let id = 100, n = 0, late = 0;
+  const pad = v => String(v).padStart(2, '0');
+  const stamp = () => { const d = new Date(); return '2026-10-30 ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  window.fetch = async () => {
+    const c = JSON.parse(JSON.stringify(window.likhaLive.counts)), ev = [], at = stamp();
+    n++;
+    const add = (type, bot, extra = {}) => ev.push(Object.assign({type, at, page: pick(pages), id: ++id, bot}, extra));
+    for (let i = 0; i < 3; i++) {
+      const bot = Math.random() < .2 ? 'botcake' : 'forbeast';
+      add('message', bot); c.messages.today++; c.bots.in[bot]++;
+      if (Math.random() < .45) { add('ai', null); c.ai.today++; }
+      add('confirmed', bot); c.confirmed.today++; c.bots.out[bot]++;
+    }
+    if (n % 2 === 0) { add('follow_up', 'forbeast'); c.follow_ups.today++; }
+    if (late) { c.order_value.today += late; late = 0; }
+    const order = (amount, bot = 'forbeast') => { add('order', bot, {amount}); c.orders.today++; if (amount !== null) c.order_value.today += amount; };
+    const k = n % 4;
+    if (k === 1) order(499 + Math.floor(Math.random() * 20) * 50);
+    else if (k === 2) { order(null, 'botcake'); late = 1299; }
+    else if (k === 3) { order(1149); order(null); order(2050); }
+    c.last_order = {page: ev.filter(e => e.type === 'order').map(e => e.page).pop() || c.last_order.page, at: at.slice(11, 16), bot: 'forbeast'};
+    c.orders.recent = Math.min(9, c.orders.recent + (k ? 1 : 0));
+    const d = new Date();
+    return {status: 200, ok: true, json: async () => ({counts: c, events: ev, more: 0, cursor: window.likhaLive.cursor, now: pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds())})};
+  };
+})();
+</script>
+</head>
+<body data-tv>
+<div class="vp" data-live data-live-board>
+<div class="stage" data-live-stage>
+
+    <header class="top">
+        <svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 20 24 4l4 4-18 16zM12 34 36 10l4 4-24 24zM22 40 44 20v8L26 44z"/></svg>
+        <h1>LIKHA LIVE</h1>
+        <span class="lv-status" data-live-status="live"><i aria-hidden="true"></i><span data-live-state>LIVE</span></span>
+        <span class="sp">
+            <form method="GET" action="http://localhost/chatbot/live" class="lv-filter" aria-label="Filters">
+                <select class="sel" name="page_id" aria-label="Page" data-live-page>
+                    <option value="">All pages</option>
+                    <option value="1003" >Sample Page 03</option><option value="1007" >Sample Page 07</option><option value="1011" >Sample Page 11</option><option value="1012" >Sample Page 12</option>                </select>
+                <select class="sel" name="bot" aria-label="Bot" data-live-bot>
+                    <option value="">All bots</option>
+                    <option value="forbeast" >Bot 1 · Forbeast</option><option value="incepxionbot" >Bot 2 · Incepxionbot</option><option value="botcake" >Botcake · Fallback</option>                </select>
+                <noscript><button class="sel">Show</button></noscript>
+            </form>
+            <span class="clock">Today · Manila · updated <time data-live-updated>14:26:23</time><b data-live-clock>14:26:23</b></span>
+            <button class="tvb" type="button" data-live-fullscreen hidden>TV mode</button>
+            <a href="http://localhost/chatbot/speed" class="exit" data-tv-exit>Exit TV mode</a>
+        </span>
+    </header>
+
+    <section class="kpis" aria-label="Today">
+        <div class="kpi k1"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v12H11l-5 4v-4H3z"/></svg>
+            <div><h2>Replies today</h2><b class="v" data-live-count="replies">6,412</b><small class="up" data-live-up="replies"><b><i>▲ </i>+<span data-live-recent="replies">40</span></b> in the last 5 min</small></div></div>
+        <div class="kpi k2"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 3h5M12 3v3"/></svg>
+            <div><h2>Avg reply time <span class="bt">Bot 1</span></h2><b class="v"><span data-live-count="reply_time">7.5</span><u data-live-unit >s</u></b><small class="wrap" data-live-note="reply_time">Customer sent → reply sent</small></div></div>
+        <div class="kpi k3" data-live-kpi="orders"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/></svg>
+            <div><h2>Orders today</h2><b class="v" data-live-count="orders">37</b><small class="up" data-live-up="orders"><b><i>▲ </i>+<span data-live-recent="orders">2</span></b> in the last 5 min</small></div>
+            <span class="plus" data-live-plus aria-hidden="true"></span></div>
+        <div class="kpi k4"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-4 3-6 6.5-6s6.5 2 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.5.7 3.5 2.5 3.5 6"/></svg>
+            <div><h2>Active chats</h2><b class="v" data-live-count="active">14</b><small>Messaged in the last 5 min</small></div></div>
+    </section>
+
+    <section class="net" aria-label="Neural network">
+        <svg class="nm" viewBox="0 0 1500 848" data-map="wide" role="img" aria-label="Neural network: inputs into the Likha bot core, out to each bot">
+    <defs><filter id="nm-glow" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <g class="nm-dust" aria-hidden="true">
+                                                                                                     <line x1="1150.4" y1="275.3" x2="1228.8" y2="342.1"/>         <line x1="1150.4" y1="275.3" x2="1093.9" y2="328.1"/>    <line x1="1150.4" y1="275.3" x2="1045.1" y2="245.3"/>                  <line x1="1150.4" y1="275.3" x2="1143" y2="387.6"/>          <line x1="1150.4" y1="275.3" x2="1112.4" y2="354.7"/>                                                                 <line x1="985.9" y1="136.4" x2="1022.9" y2="209.7"/>                          <line x1="368.7" y1="346" x2="400.9" y2="324.4"/> <line x1="368.7" y1="346" x2="257.8" y2="366.5"/>   <line x1="368.7" y1="346" x2="302" y2="332.2"/>                                                                            <line x1="600.9" y1="541.4" x2="585" y2="468.4"/>                                        <line x1="1351.2" y1="488" x2="1390.6" y2="526.5"/>                     <line x1="1351.2" y1="488" x2="1373.8" y2="398.9"/>                                <line x1="1351.2" y1="488" x2="1332.5" y2="481.4"/>                                                         <line x1="253" y1="191" x2="208.9" y2="217.1"/>                  <line x1="414.9" y1="524" x2="362.4" y2="514.3"/>                                                                          <line x1="542.3" y1="96.9" x2="553.5" y2="197.4"/>                  <line x1="542.3" y1="96.9" x2="521.4" y2="173.4"/>       <line x1="542.3" y1="96.9" x2="529.1" y2="123.9"/>                                            <line x1="1350.6" y1="303.9" x2="1373.8" y2="398.9"/>               <line x1="1350.6" y1="303.9" x2="1406" y2="230.9"/>                      <line x1="1350.6" y1="303.9" x2="1377.7" y2="229.5"/>     <line x1="155.9" y1="373.7" x2="145.2" y2="424.2"/>         <line x1="155.9" y1="373.7" x2="257.8" y2="366.5"/>                  <line x1="155.9" y1="373.7" x2="144.2" y2="379.6"/>                     <line x1="155.9" y1="373.7" x2="223.5" y2="454.4"/>                                                             <line x1="1390.6" y1="526.5" x2="1332.5" y2="481.4"/>                                       <line x1="362.4" y1="514.3" x2="269" y2="442.1"/>                                                                        <line x1="692.1" y1="258.7" x2="685.1" y2="331.1"/>     <line x1="692.1" y1="258.7" x2="656.3" y2="252.2"/>                               <line x1="145.2" y1="424.2" x2="230.3" y2="508.8"/> <line x1="145.2" y1="424.2" x2="144.2" y2="379.6"/>                     <line x1="145.2" y1="424.2" x2="223.5" y2="454.4"/>              <line x1="824.3" y1="637.7" x2="913.2" y2="606.7"/>              <line x1="824.3" y1="637.7" x2="755.1" y2="714.5"/>                        <line x1="824.3" y1="637.7" x2="855.9" y2="526.5"/>         <line x1="824.3" y1="637.7" x2="748.1" y2="586.4"/>        <line x1="479.7" y1="236.1" x2="400.9" y2="324.4"/>  <line x1="479.7" y1="236.1" x2="553.5" y2="197.4"/>                  <line x1="479.7" y1="236.1" x2="521.4" y2="173.4"/>                                                      <line x1="1009.8" y1="518.8" x2="1010.8" y2="508.9"/>   <line x1="1009.8" y1="518.8" x2="1117.3" y2="466.5"/>        <line x1="1009.8" y1="518.8" x2="998" y2="414.7"/>                                      <line x1="265" y1="617.4" x2="230.3" y2="508.8"/>                                                                              <line x1="1405.5" y1="648.7" x2="1367.9" y2="727"/>                                                                                           <line x1="913.2" y1="606.7" x2="855.9" y2="526.5"/>               <line x1="400.9" y1="324.4" x2="302" y2="332.2"/>                                               <line x1="257.8" y1="366.5" x2="302" y2="332.2"/>               <line x1="257.8" y1="366.5" x2="144.2" y2="379.6"/>    <line x1="257.8" y1="366.5" x2="269" y2="442.1"/>                 <line x1="257.8" y1="366.5" x2="223.5" y2="454.4"/>                          <line x1="553.5" y1="197.4" x2="521.4" y2="173.4"/>       <line x1="553.5" y1="197.4" x2="529.1" y2="123.9"/>                <line x1="553.5" y1="197.4" x2="656.3" y2="252.2"/>                                    <line x1="1228.8" y1="342.1" x2="1143" y2="387.6"/>          <line x1="1228.8" y1="342.1" x2="1112.4" y2="354.7"/>                       <line x1="302" y1="332.2" x2="269" y2="442.1"/>                                     <line x1="1176.7" y1="652.8" x2="1192.9" y2="665.7"/>             <line x1="1176.7" y1="652.8" x2="1136.8" y2="670.8"/>   <line x1="1176.7" y1="652.8" x2="1148.6" y2="589"/>                       <line x1="652.9" y1="411.8" x2="585" y2="468.4"/>                        <line x1="652.9" y1="411.8" x2="685.1" y2="331.1"/>                                                    <line x1="783.5" y1="435.8" x2="867.3" y2="486.6"/>                            <line x1="783.5" y1="435.8" x2="855.9" y2="526.5"/>                                       <line x1="867.3" y1="486.6" x2="855.9" y2="526.5"/>                       <line x1="1373.8" y1="398.9" x2="1466.1" y2="380"/>                    <line x1="1373.8" y1="398.9" x2="1332.5" y2="481.4"/>         <line x1="506.2" y1="387.6" x2="585" y2="468.4"/>                                      <line x1="1093.9" y1="328.1" x2="1045.1" y2="245.3"/>            <line x1="1093.9" y1="328.1" x2="1018.6" y2="307.7"/>      <line x1="1093.9" y1="328.1" x2="1143" y2="387.6"/>          <line x1="1093.9" y1="328.1" x2="1112.4" y2="354.7"/>                    <line x1="755.1" y1="714.5" x2="657.9" y2="694.1"/>                                                      <line x1="964.2" y1="295.6" x2="1045.1" y2="245.3"/>            <line x1="964.2" y1="295.6" x2="1018.6" y2="307.7"/>             <line x1="964.2" y1="295.6" x2="1022.9" y2="209.7"/>                   <line x1="1045.1" y1="245.3" x2="1018.6" y2="307.7"/>             <line x1="1045.1" y1="245.3" x2="1022.9" y2="209.7"/>                    <line x1="1192.9" y1="665.7" x2="1136.8" y2="670.8"/>   <line x1="1192.9" y1="665.7" x2="1148.6" y2="589"/>                    <line x1="230.3" y1="508.8" x2="269" y2="442.1"/>                 <line x1="230.3" y1="508.8" x2="223.5" y2="454.4"/>                             <line x1="144.2" y1="379.6" x2="223.5" y2="454.4"/>               <line x1="521.4" y1="173.4" x2="529.1" y2="123.9"/>                        <line x1="1010.8" y1="508.9" x2="1117.3" y2="466.5"/>        <line x1="1010.8" y1="508.9" x2="998" y2="414.7"/>                                                           <line x1="269" y1="442.1" x2="223.5" y2="454.4"/>                  <line x1="1117.3" y1="466.5" x2="1143" y2="387.6"/>          <line x1="1117.3" y1="466.5" x2="1112.4" y2="354.7"/>                          <line x1="1406" y1="230.9" x2="1377.7" y2="229.5"/>      <line x1="117" y1="215.3" x2="47.3" y2="185.7"/>    <line x1="117" y1="215.3" x2="208.9" y2="217.1"/>    <line x1="117" y1="215.3" x2="51.6" y2="120"/>                                  <line x1="1018.6" y1="307.7" x2="998" y2="414.7"/>         <line x1="1018.6" y1="307.7" x2="1022.9" y2="209.7"/>   <line x1="1018.6" y1="307.7" x2="1112.4" y2="354.7"/>                          <line x1="1136.8" y1="670.8" x2="1148.6" y2="589"/>                       <line x1="47.3" y1="185.7" x2="51.6" y2="120"/>                                                  <line x1="1143" y1="387.6" x2="1112.4" y2="354.7"/>                                             <line x1="685.1" y1="331.1" x2="656.3" y2="252.2"/>                                                           <circle cx="30.1" cy="530.4" r="2.2"/><circle cx="1150.4" cy="275.3" r="2.2"/><circle cx="985.9" cy="136.4" r="2.2"/><circle cx="368.7" cy="346" r="2.2"/><circle cx="600.9" cy="541.4" r="2.2"/><circle cx="1351.2" cy="488" r="2.2"/><circle cx="253" cy="191" r="2.2"/><circle cx="414.9" cy="524" r="2.2"/><circle cx="542.3" cy="96.9" r="2.2"/><circle cx="1350.6" cy="303.9" r="2.2"/><circle cx="155.9" cy="373.7" r="2.2"/><circle cx="1390.6" cy="526.5" r="2.2"/><circle cx="362.4" cy="514.3" r="2.2"/><circle cx="692.1" cy="258.7" r="2.2"/><circle cx="145.2" cy="424.2" r="2.2"/><circle cx="824.3" cy="637.7" r="2.2"/><circle cx="479.7" cy="236.1" r="2.2"/><circle cx="1009.8" cy="518.8" r="2.2"/><circle cx="265" cy="617.4" r="2.2"/><circle cx="1405.5" cy="648.7" r="2.2"/><circle cx="368.7" cy="708.9" r="2.2"/><circle cx="913.2" cy="606.7" r="2.2"/><circle cx="400.9" cy="324.4" r="2.2"/><circle cx="257.8" cy="366.5" r="2.2"/><circle cx="553.5" cy="197.4" r="2.2"/><circle cx="1228.8" cy="342.1" r="2.2"/><circle cx="302" cy="332.2" r="2.2"/><circle cx="1176.7" cy="652.8" r="2.2"/><circle cx="652.9" cy="411.8" r="2.2"/><circle cx="816.3" cy="282" r="2.2"/><circle cx="783.5" cy="435.8" r="2.2"/><circle cx="867.3" cy="486.6" r="2.2"/><circle cx="1373.8" cy="398.9" r="2.2"/><circle cx="506.2" cy="387.6" r="2.2"/><circle cx="1093.9" cy="328.1" r="2.2"/><circle cx="755.1" cy="714.5" r="2.2"/><circle cx="585" cy="468.4" r="2.2"/><circle cx="964.2" cy="295.6" r="2.2"/><circle cx="1045.1" cy="245.3" r="2.2"/><circle cx="1192.9" cy="665.7" r="2.2"/><circle cx="230.3" cy="508.8" r="2.2"/><circle cx="144.2" cy="379.6" r="2.2"/><circle cx="521.4" cy="173.4" r="2.2"/><circle cx="1010.8" cy="508.9" r="2.2"/><circle cx="1466.1" cy="380" r="2.2"/><circle cx="269" cy="442.1" r="2.2"/><circle cx="1117.3" cy="466.5" r="2.2"/><circle cx="1406" cy="230.9" r="2.2"/><circle cx="117" cy="215.3" r="2.2"/><circle cx="529.1" cy="123.9" r="2.2"/><circle cx="1018.6" cy="307.7" r="2.2"/><circle cx="657.9" cy="694.1" r="2.2"/><circle cx="1136.8" cy="670.8" r="2.2"/><circle cx="47.3" cy="185.7" r="2.2"/><circle cx="998" cy="414.7" r="2.2"/><circle cx="1148.6" cy="589" r="2.2"/><circle cx="1143" cy="387.6" r="2.2"/><circle cx="208.9" cy="217.1" r="2.2"/><circle cx="1180.3" cy="114.6" r="2.2"/><circle cx="855.9" cy="526.5" r="2.2"/><circle cx="685.1" cy="331.1" r="2.2"/><circle cx="51.6" cy="120" r="2.2"/><circle cx="223.5" cy="454.4" r="2.2"/><circle cx="1022.9" cy="209.7" r="2.2"/><circle cx="1332.5" cy="481.4" r="2.2"/><circle cx="656.3" cy="252.2" r="2.2"/><circle cx="1112.4" cy="354.7" r="2.2"/><circle cx="1367.9" cy="727" r="2.2"/><circle cx="748.1" cy="586.4" r="2.2"/><circle cx="1377.7" cy="229.5" r="2.2"/>    </g>
+            <g class="nm-cl t-inq" aria-hidden="true">
+            <line class="lk" x1="230" y1="215" x2="245.6" y2="143.4"/><line class="lk" x1="230" y1="215" x2="274.9" y2="191.6"/><line class="lk" x1="230" y1="215" x2="208.5" y2="141.3"/><line class="lk" x1="230" y1="215" x2="225.4" y2="276.6"/><line class="lk" x1="230" y1="215" x2="194.2" y2="283.2"/><line class="lk" x1="230" y1="215" x2="183.8" y2="186.3"/><line class="lk" x1="230" y1="215" x2="189.4" y2="174.3"/><line class="lk" x1="230" y1="215" x2="269.4" y2="243.6"/><line class="lk" x1="230" y1="215" x2="234.5" y2="274.3"/><line class="lk" x1="230" y1="215" x2="277.9" y2="200"/><line class="lk" x1="230" y1="215" x2="274.8" y2="265"/><line class="lk" x1="230" y1="215" x2="283.7" y2="268.1"/><line class="lk" x1="230" y1="215" x2="225.9" y2="168.2"/><line class="lk" x1="230" y1="215" x2="192.1" y2="164.2"/><line class="lk" x1="230" y1="215" x2="222.5" y2="285.2"/><line class="lk" x1="230" y1="215" x2="283.2" y2="187"/><line class="lk" x1="230" y1="215" x2="229.1" y2="160.1"/><line class="lk" x1="230" y1="215" x2="304.6" y2="234.4"/><line class="lk" x1="230" y1="215" x2="227.3" y2="262.8"/><line class="lk" x1="230" y1="215" x2="171.6" y2="254.2"/><line class="lk" x1="308.7" y1="192.2" x2="274.9" y2="191.6"/><line class="lk" x1="308.7" y1="192.2" x2="277.9" y2="200"/><line class="lk" x1="308.7" y1="192.2" x2="283.2" y2="187"/><line class="lk" x1="308.7" y1="192.2" x2="304.6" y2="234.4"/><line class="lk" x1="245.6" y1="143.4" x2="274.9" y2="191.6"/><line class="lk" x1="245.6" y1="143.4" x2="208.5" y2="141.3"/><line class="lk" x1="245.6" y1="143.4" x2="225.9" y2="168.2"/><line class="lk" x1="245.6" y1="143.4" x2="192.1" y2="164.2"/><line class="lk" x1="245.6" y1="143.4" x2="283.2" y2="187"/><line class="lk" x1="245.6" y1="143.4" x2="229.1" y2="160.1"/><line class="lk" x1="274.9" y1="191.6" x2="269.4" y2="243.6"/><line class="lk" x1="274.9" y1="191.6" x2="277.9" y2="200"/><line class="lk" x1="274.9" y1="191.6" x2="225.9" y2="168.2"/><line class="lk" x1="274.9" y1="191.6" x2="283.2" y2="187"/><line class="lk" x1="274.9" y1="191.6" x2="229.1" y2="160.1"/><line class="lk" x1="274.9" y1="191.6" x2="304.6" y2="234.4"/><line class="lk" x1="208.5" y1="141.3" x2="167.1" y2="154.6"/><line class="lk" x1="208.5" y1="141.3" x2="183.8" y2="186.3"/><line class="lk" x1="208.5" y1="141.3" x2="189.4" y2="174.3"/><line class="lk" x1="208.5" y1="141.3" x2="225.9" y2="168.2"/><line class="lk" x1="208.5" y1="141.3" x2="192.1" y2="164.2"/><line class="lk" x1="208.5" y1="141.3" x2="229.1" y2="160.1"/><line class="lk" x1="225.4" y1="276.6" x2="194.2" y2="283.2"/><line class="lk" x1="225.4" y1="276.6" x2="269.4" y2="243.6"/><line class="lk" x1="225.4" y1="276.6" x2="234.5" y2="274.3"/><line class="lk" x1="225.4" y1="276.6" x2="274.8" y2="265"/><line class="lk" x1="225.4" y1="276.6" x2="177.9" y2="275.2"/><line class="lk" x1="225.4" y1="276.6" x2="222.5" y2="285.2"/><line class="lk" x1="225.4" y1="276.6" x2="227.3" y2="262.8"/><line class="lk" x1="194.2" y1="283.2" x2="234.5" y2="274.3"/><line class="lk" x1="194.2" y1="283.2" x2="177.9" y2="275.2"/><line class="lk" x1="194.2" y1="283.2" x2="222.5" y2="285.2"/><line class="lk" x1="194.2" y1="283.2" x2="227.3" y2="262.8"/><line class="lk" x1="194.2" y1="283.2" x2="171.6" y2="254.2"/><line class="lk" x1="167.1" y1="154.6" x2="183.8" y2="186.3"/><line class="lk" x1="167.1" y1="154.6" x2="189.4" y2="174.3"/><line class="lk" x1="167.1" y1="154.6" x2="192.1" y2="164.2"/><line class="lk" x1="183.8" y1="186.3" x2="189.4" y2="174.3"/><line class="lk" x1="183.8" y1="186.3" x2="225.9" y2="168.2"/><line class="lk" x1="183.8" y1="186.3" x2="192.1" y2="164.2"/><line class="lk" x1="183.8" y1="186.3" x2="229.1" y2="160.1"/><line class="lk" x1="189.4" y1="174.3" x2="225.9" y2="168.2"/><line class="lk" x1="189.4" y1="174.3" x2="192.1" y2="164.2"/><line class="lk" x1="189.4" y1="174.3" x2="229.1" y2="160.1"/><line class="lk" x1="269.4" y1="243.6" x2="234.5" y2="274.3"/><line class="lk" x1="269.4" y1="243.6" x2="277.9" y2="200"/><line class="lk" x1="269.4" y1="243.6" x2="274.8" y2="265"/><line class="lk" x1="269.4" y1="243.6" x2="283.7" y2="268.1"/><line class="lk" x1="269.4" y1="243.6" x2="304.6" y2="234.4"/><line class="lk" x1="269.4" y1="243.6" x2="227.3" y2="262.8"/><line class="lk" x1="234.5" y1="274.3" x2="274.8" y2="265"/><line class="lk" x1="234.5" y1="274.3" x2="283.7" y2="268.1"/><line class="lk" x1="234.5" y1="274.3" x2="177.9" y2="275.2"/><line class="lk" x1="234.5" y1="274.3" x2="222.5" y2="285.2"/><line class="lk" x1="234.5" y1="274.3" x2="227.3" y2="262.8"/><line class="lk" x1="277.9" y1="200" x2="283.2" y2="187"/><line class="lk" x1="277.9" y1="200" x2="304.6" y2="234.4"/><line class="lk" x1="274.8" y1="265" x2="283.7" y2="268.1"/><line class="lk" x1="274.8" y1="265" x2="222.5" y2="285.2"/><line class="lk" x1="274.8" y1="265" x2="304.6" y2="234.4"/><line class="lk" x1="274.8" y1="265" x2="227.3" y2="262.8"/><line class="lk" x1="283.7" y1="268.1" x2="304.6" y2="234.4"/><line class="lk" x1="283.7" y1="268.1" x2="227.3" y2="262.8"/><line class="lk" x1="225.9" y1="168.2" x2="192.1" y2="164.2"/><line class="lk" x1="225.9" y1="168.2" x2="229.1" y2="160.1"/><line class="lk" x1="192.1" y1="164.2" x2="229.1" y2="160.1"/><line class="lk" x1="148.5" y1="233.4" x2="177.9" y2="275.2"/><line class="lk" x1="148.5" y1="233.4" x2="171.6" y2="254.2"/><line class="lk" x1="177.9" y1="275.2" x2="222.5" y2="285.2"/><line class="lk" x1="177.9" y1="275.2" x2="227.3" y2="262.8"/><line class="lk" x1="177.9" y1="275.2" x2="171.6" y2="254.2"/><line class="lk" x1="222.5" y1="285.2" x2="227.3" y2="262.8"/><line class="lk" x1="283.2" y1="187" x2="304.6" y2="234.4"/><line class="lk" x1="227.3" y1="262.8" x2="171.6" y2="254.2"/>            <circle class="nr tw" cx="308.7" cy="192.2" r="7" style="animation-delay:-0s"/><circle class="nd tw" cx="308.7" cy="192.2" r="2.6" style="animation-delay:-0s"/><circle class="nd" cx="245.6" cy="143.4" r="3.2" style="animation-delay:-0.45s"/><circle class="nd" cx="274.9" cy="191.6" r="3.2" style="animation-delay:-0.9s"/><circle class="nd tw" cx="208.5" cy="141.3" r="3.2" style="animation-delay:-1.35s"/><circle class="nr" cx="225.4" cy="276.6" r="7" style="animation-delay:-2.4s"/><circle class="nd" cx="225.4" cy="276.6" r="2.6" style="animation-delay:-1.8s"/><circle class="nd" cx="194.2" cy="283.2" r="3.2" style="animation-delay:-2.25s"/><circle class="nd tw" cx="167.1" cy="154.6" r="3.2" style="animation-delay:-2.7s"/><circle class="nd" cx="183.8" cy="186.3" r="3.2" style="animation-delay:-3.15s"/><circle class="nr tw" cx="189.4" cy="174.3" r="7" style="animation-delay:-4.8s"/><circle class="nd" cx="189.4" cy="174.3" r="2.6" style="animation-delay:-3.6s"/><circle class="nd tw" cx="269.4" cy="243.6" r="3.2" style="animation-delay:-4.05s"/><circle class="nd" cx="234.5" cy="274.3" r="3.2" style="animation-delay:-4.5s"/><circle class="nd" cx="277.9" cy="200" r="3.2" style="animation-delay:-4.95s"/><circle class="nr" cx="274.8" cy="265" r="7" style="animation-delay:-7.2s"/><circle class="nd tw" cx="274.8" cy="265" r="2.6" style="animation-delay:-5.4s"/><circle class="nd" cx="283.7" cy="268.1" r="3.2" style="animation-delay:-5.85s"/><circle class="nd" cx="225.9" cy="168.2" r="3.2" style="animation-delay:-6.3s"/><circle class="nd tw" cx="192.1" cy="164.2" r="3.2" style="animation-delay:-6.75s"/><circle class="nr tw" cx="148.5" cy="233.4" r="7" style="animation-delay:-9.6s"/><circle class="nd" cx="148.5" cy="233.4" r="2.6" style="animation-delay:-7.2s"/><circle class="nd" cx="177.9" cy="275.2" r="3.2" style="animation-delay:-7.65s"/><circle class="nd tw" cx="222.5" cy="285.2" r="3.2" style="animation-delay:-8.1s"/><circle class="nd" cx="283.2" cy="187" r="3.2" style="animation-delay:-8.55s"/><circle class="nr" cx="229.1" cy="160.1" r="7" style="animation-delay:-12s"/><circle class="nd" cx="229.1" cy="160.1" r="2.6" style="animation-delay:-9s"/><circle class="nd tw" cx="304.6" cy="234.4" r="3.2" style="animation-delay:-9.45s"/><circle class="nd" cx="227.3" cy="262.8" r="3.2" style="animation-delay:-9.9s"/><circle class="nd" cx="171.6" cy="254.2" r="3.2" style="animation-delay:-10.35s"/>        </g>
+            <g class="nm-cl t-seq" aria-hidden="true">
+            <line class="lk" x1="230" y1="560" x2="229.8" y2="613.2"/><line class="lk" x1="230" y1="560" x2="189.2" y2="606.6"/><line class="lk" x1="230" y1="560" x2="282.6" y2="560.6"/><line class="lk" x1="230" y1="560" x2="240.8" y2="507.5"/><line class="lk" x1="230" y1="560" x2="232.4" y2="510.6"/><line class="lk" x1="230" y1="560" x2="247.7" y2="605.6"/><line class="lk" x1="230" y1="560" x2="168.5" y2="580"/><line class="lk" x1="230" y1="560" x2="227.5" y2="617"/><line class="lk" x1="230" y1="560" x2="204.1" y2="504.2"/><line class="lk" x1="230" y1="560" x2="178.2" y2="555"/><line class="lk" x1="230" y1="560" x2="275.7" y2="523"/><line class="lk" x1="230" y1="560" x2="251.4" y2="619.5"/><line class="lk" x1="230" y1="560" x2="191.7" y2="609.8"/><line class="lk" x1="230" y1="560" x2="296" y2="561.3"/><line class="lk" x1="230" y1="560" x2="216.4" y2="514"/><line class="lk" x1="230" y1="560" x2="167.8" y2="586.3"/><line class="lk" x1="230" y1="560" x2="205.7" y2="609.2"/><line class="lk" x1="230" y1="560" x2="172.2" y2="536.7"/><line class="lk" x1="230" y1="560" x2="197.1" y2="607.6"/><line class="lk" x1="230" y1="560" x2="297.5" y2="559.1"/><line class="lk" x1="230" y1="560" x2="199.6" y2="610.2"/><line class="lk" x1="229.8" y1="613.2" x2="189.2" y2="606.6"/><line class="lk" x1="229.8" y1="613.2" x2="247.7" y2="605.6"/><line class="lk" x1="229.8" y1="613.2" x2="227.5" y2="617"/><line class="lk" x1="229.8" y1="613.2" x2="251.4" y2="619.5"/><line class="lk" x1="229.8" y1="613.2" x2="191.7" y2="609.8"/><line class="lk" x1="229.8" y1="613.2" x2="205.7" y2="609.2"/><line class="lk" x1="229.8" y1="613.2" x2="197.1" y2="607.6"/><line class="lk" x1="229.8" y1="613.2" x2="199.6" y2="610.2"/><line class="lk" x1="189.2" y1="606.6" x2="168.5" y2="580"/><line class="lk" x1="189.2" y1="606.6" x2="227.5" y2="617"/><line class="lk" x1="189.2" y1="606.6" x2="178.2" y2="555"/><line class="lk" x1="189.2" y1="606.6" x2="191.7" y2="609.8"/><line class="lk" x1="189.2" y1="606.6" x2="167.8" y2="586.3"/><line class="lk" x1="189.2" y1="606.6" x2="205.7" y2="609.2"/><line class="lk" x1="189.2" y1="606.6" x2="197.1" y2="607.6"/><line class="lk" x1="189.2" y1="606.6" x2="199.6" y2="610.2"/><line class="lk" x1="282.6" y1="560.6" x2="247.7" y2="605.6"/><line class="lk" x1="282.6" y1="560.6" x2="297.3" y2="534.1"/><line class="lk" x1="282.6" y1="560.6" x2="275.7" y2="523"/><line class="lk" x1="282.6" y1="560.6" x2="296" y2="561.3"/><line class="lk" x1="282.6" y1="560.6" x2="297.5" y2="559.1"/><line class="lk" x1="240.8" y1="507.5" x2="232.4" y2="510.6"/><line class="lk" x1="240.8" y1="507.5" x2="204.1" y2="504.2"/><line class="lk" x1="240.8" y1="507.5" x2="275.7" y2="523"/><line class="lk" x1="240.8" y1="507.5" x2="216.4" y2="514"/><line class="lk" x1="232.4" y1="510.6" x2="204.1" y2="504.2"/><line class="lk" x1="232.4" y1="510.6" x2="275.7" y2="523"/><line class="lk" x1="232.4" y1="510.6" x2="216.4" y2="514"/><line class="lk" x1="247.7" y1="605.6" x2="227.5" y2="617"/><line class="lk" x1="247.7" y1="605.6" x2="251.4" y2="619.5"/><line class="lk" x1="247.7" y1="605.6" x2="191.7" y2="609.8"/><line class="lk" x1="247.7" y1="605.6" x2="205.7" y2="609.2"/><line class="lk" x1="247.7" y1="605.6" x2="197.1" y2="607.6"/><line class="lk" x1="247.7" y1="605.6" x2="199.6" y2="610.2"/><line class="lk" x1="168.5" y1="580" x2="178.2" y2="555"/><line class="lk" x1="168.5" y1="580" x2="191.7" y2="609.8"/><line class="lk" x1="168.5" y1="580" x2="167.8" y2="586.3"/><line class="lk" x1="168.5" y1="580" x2="205.7" y2="609.2"/><line class="lk" x1="168.5" y1="580" x2="172.2" y2="536.7"/><line class="lk" x1="168.5" y1="580" x2="197.1" y2="607.6"/><line class="lk" x1="168.5" y1="580" x2="199.6" y2="610.2"/><line class="lk" x1="297.3" y1="534.1" x2="275.7" y2="523"/><line class="lk" x1="297.3" y1="534.1" x2="296" y2="561.3"/><line class="lk" x1="297.3" y1="534.1" x2="297.5" y2="559.1"/><line class="lk" x1="227.5" y1="617" x2="251.4" y2="619.5"/><line class="lk" x1="227.5" y1="617" x2="191.7" y2="609.8"/><line class="lk" x1="227.5" y1="617" x2="205.7" y2="609.2"/><line class="lk" x1="227.5" y1="617" x2="197.1" y2="607.6"/><line class="lk" x1="227.5" y1="617" x2="199.6" y2="610.2"/><line class="lk" x1="204.1" y1="504.2" x2="178.2" y2="555"/><line class="lk" x1="204.1" y1="504.2" x2="216.4" y2="514"/><line class="lk" x1="204.1" y1="504.2" x2="172.2" y2="536.7"/><line class="lk" x1="178.2" y1="555" x2="191.7" y2="609.8"/><line class="lk" x1="178.2" y1="555" x2="216.4" y2="514"/><line class="lk" x1="178.2" y1="555" x2="167.8" y2="586.3"/><line class="lk" x1="178.2" y1="555" x2="172.2" y2="536.7"/><line class="lk" x1="178.2" y1="555" x2="197.1" y2="607.6"/><line class="lk" x1="275.7" y1="523" x2="296" y2="561.3"/><line class="lk" x1="275.7" y1="523" x2="297.5" y2="559.1"/><line class="lk" x1="251.4" y1="619.5" x2="205.7" y2="609.2"/><line class="lk" x1="251.4" y1="619.5" x2="197.1" y2="607.6"/><line class="lk" x1="251.4" y1="619.5" x2="199.6" y2="610.2"/><line class="lk" x1="191.7" y1="609.8" x2="167.8" y2="586.3"/><line class="lk" x1="191.7" y1="609.8" x2="205.7" y2="609.2"/><line class="lk" x1="191.7" y1="609.8" x2="197.1" y2="607.6"/><line class="lk" x1="191.7" y1="609.8" x2="199.6" y2="610.2"/><line class="lk" x1="296" y1="561.3" x2="297.5" y2="559.1"/><line class="lk" x1="216.4" y1="514" x2="172.2" y2="536.7"/><line class="lk" x1="167.8" y1="586.3" x2="205.7" y2="609.2"/><line class="lk" x1="167.8" y1="586.3" x2="172.2" y2="536.7"/><line class="lk" x1="167.8" y1="586.3" x2="197.1" y2="607.6"/><line class="lk" x1="167.8" y1="586.3" x2="199.6" y2="610.2"/><line class="lk" x1="205.7" y1="609.2" x2="197.1" y2="607.6"/><line class="lk" x1="205.7" y1="609.2" x2="199.6" y2="610.2"/><line class="lk" x1="197.1" y1="607.6" x2="199.6" y2="610.2"/>            <circle class="nr tw" cx="229.8" cy="613.2" r="7" style="animation-delay:-0s"/><circle class="nd tw" cx="229.8" cy="613.2" r="2.6" style="animation-delay:-0s"/><circle class="nd" cx="189.2" cy="606.6" r="3.2" style="animation-delay:-0.45s"/><circle class="nd" cx="282.6" cy="560.6" r="3.2" style="animation-delay:-0.9s"/><circle class="nd tw" cx="240.8" cy="507.5" r="3.2" style="animation-delay:-1.35s"/><circle class="nr" cx="232.4" cy="510.6" r="7" style="animation-delay:-2.4s"/><circle class="nd" cx="232.4" cy="510.6" r="2.6" style="animation-delay:-1.8s"/><circle class="nd" cx="247.7" cy="605.6" r="3.2" style="animation-delay:-2.25s"/><circle class="nd tw" cx="168.5" cy="580" r="3.2" style="animation-delay:-2.7s"/><circle class="nd" cx="297.3" cy="534.1" r="3.2" style="animation-delay:-3.15s"/><circle class="nr tw" cx="227.5" cy="617" r="7" style="animation-delay:-4.8s"/><circle class="nd" cx="227.5" cy="617" r="2.6" style="animation-delay:-3.6s"/><circle class="nd tw" cx="204.1" cy="504.2" r="3.2" style="animation-delay:-4.05s"/><circle class="nd" cx="178.2" cy="555" r="3.2" style="animation-delay:-4.5s"/><circle class="nd" cx="275.7" cy="523" r="3.2" style="animation-delay:-4.95s"/><circle class="nr" cx="251.4" cy="619.5" r="7" style="animation-delay:-7.2s"/><circle class="nd tw" cx="251.4" cy="619.5" r="2.6" style="animation-delay:-5.4s"/><circle class="nd" cx="191.7" cy="609.8" r="3.2" style="animation-delay:-5.85s"/><circle class="nd" cx="296" cy="561.3" r="3.2" style="animation-delay:-6.3s"/><circle class="nd tw" cx="216.4" cy="514" r="3.2" style="animation-delay:-6.75s"/><circle class="nr tw" cx="167.8" cy="586.3" r="7" style="animation-delay:-9.6s"/><circle class="nd" cx="167.8" cy="586.3" r="2.6" style="animation-delay:-7.2s"/><circle class="nd" cx="205.7" cy="609.2" r="3.2" style="animation-delay:-7.65s"/><circle class="nd tw" cx="172.2" cy="536.7" r="3.2" style="animation-delay:-8.1s"/><circle class="nd" cx="197.1" cy="607.6" r="3.2" style="animation-delay:-8.55s"/><circle class="nr" cx="297.5" cy="559.1" r="7" style="animation-delay:-12s"/><circle class="nd" cx="297.5" cy="559.1" r="2.6" style="animation-delay:-9s"/><circle class="nd tw" cx="199.6" cy="610.2" r="3.2" style="animation-delay:-9.45s"/>        </g>
+            <g class="nm-cl t-out" aria-hidden="true">
+            <line class="lk" x1="1150" y1="168" x2="1136.1" y2="102.9"/><line class="lk" x1="1150" y1="168" x2="1201.1" y2="192.4"/><line class="lk" x1="1150" y1="168" x2="1088.8" y2="138.3"/><line class="lk" x1="1150" y1="168" x2="1102.6" y2="196"/><line class="lk" x1="1150" y1="168" x2="1123.2" y2="207.2"/><line class="lk" x1="1150" y1="168" x2="1173.8" y2="126.4"/><line class="lk" x1="1150" y1="168" x2="1180.4" y2="206.9"/><line class="lk" x1="1150" y1="168" x2="1200.1" y2="168.8"/><line class="lk" x1="1150" y1="168" x2="1198" y2="120.1"/><line class="lk" x1="1150" y1="168" x2="1106.3" y2="141"/><line class="lk" x1="1150" y1="168" x2="1095.7" y2="198"/><line class="lk" x1="1150" y1="168" x2="1205.4" y2="176.3"/><line class="lk" x1="1150" y1="168" x2="1097.3" y2="154.3"/><line class="lk" x1="1150" y1="168" x2="1087" y2="177.8"/><line class="lk" x1="1150" y1="168" x2="1173.4" y2="123.2"/><line class="lk" x1="1150" y1="168" x2="1197.4" y2="187.8"/><line class="lk" x1="1136.1" y1="102.9" x2="1173.8" y2="126.4"/><line class="lk" x1="1136.1" y1="102.9" x2="1106.3" y2="141"/><line class="lk" x1="1136.1" y1="102.9" x2="1173.4" y2="123.2"/><line class="lk" x1="1149.1" y1="242" x2="1123.2" y2="207.2"/><line class="lk" x1="1149.1" y1="242" x2="1180.4" y2="206.9"/><line class="lk" x1="1201.1" y1="192.4" x2="1226.1" y2="166.1"/><line class="lk" x1="1201.1" y1="192.4" x2="1180.4" y2="206.9"/><line class="lk" x1="1201.1" y1="192.4" x2="1200.1" y2="168.8"/><line class="lk" x1="1201.1" y1="192.4" x2="1205.4" y2="176.3"/><line class="lk" x1="1201.1" y1="192.4" x2="1197.4" y2="187.8"/><line class="lk" x1="1088.8" y1="138.3" x2="1106.3" y2="141"/><line class="lk" x1="1088.8" y1="138.3" x2="1097.3" y2="154.3"/><line class="lk" x1="1088.8" y1="138.3" x2="1087" y2="177.8"/><line class="lk" x1="1102.6" y1="196" x2="1123.2" y2="207.2"/><line class="lk" x1="1102.6" y1="196" x2="1106.3" y2="141"/><line class="lk" x1="1102.6" y1="196" x2="1095.7" y2="198"/><line class="lk" x1="1102.6" y1="196" x2="1097.3" y2="154.3"/><line class="lk" x1="1102.6" y1="196" x2="1087" y2="177.8"/><line class="lk" x1="1123.2" y1="207.2" x2="1180.4" y2="206.9"/><line class="lk" x1="1123.2" y1="207.2" x2="1095.7" y2="198"/><line class="lk" x1="1123.2" y1="207.2" x2="1087" y2="177.8"/><line class="lk" x1="1173.8" y1="126.4" x2="1200.1" y2="168.8"/><line class="lk" x1="1173.8" y1="126.4" x2="1198" y2="120.1"/><line class="lk" x1="1173.8" y1="126.4" x2="1173.4" y2="123.2"/><line class="lk" x1="1226.1" y1="166.1" x2="1200.1" y2="168.8"/><line class="lk" x1="1226.1" y1="166.1" x2="1198" y2="120.1"/><line class="lk" x1="1226.1" y1="166.1" x2="1205.4" y2="176.3"/><line class="lk" x1="1226.1" y1="166.1" x2="1197.4" y2="187.8"/><line class="lk" x1="1180.4" y1="206.9" x2="1200.1" y2="168.8"/><line class="lk" x1="1180.4" y1="206.9" x2="1205.4" y2="176.3"/><line class="lk" x1="1180.4" y1="206.9" x2="1197.4" y2="187.8"/><line class="lk" x1="1200.1" y1="168.8" x2="1198" y2="120.1"/><line class="lk" x1="1200.1" y1="168.8" x2="1205.4" y2="176.3"/><line class="lk" x1="1200.1" y1="168.8" x2="1173.4" y2="123.2"/><line class="lk" x1="1200.1" y1="168.8" x2="1197.4" y2="187.8"/><line class="lk" x1="1198" y1="120.1" x2="1205.4" y2="176.3"/><line class="lk" x1="1198" y1="120.1" x2="1173.4" y2="123.2"/><line class="lk" x1="1106.3" y1="141" x2="1095.7" y2="198"/><line class="lk" x1="1106.3" y1="141" x2="1097.3" y2="154.3"/><line class="lk" x1="1106.3" y1="141" x2="1087" y2="177.8"/><line class="lk" x1="1095.7" y1="198" x2="1097.3" y2="154.3"/><line class="lk" x1="1095.7" y1="198" x2="1087" y2="177.8"/><line class="lk" x1="1205.4" y1="176.3" x2="1197.4" y2="187.8"/><line class="lk" x1="1097.3" y1="154.3" x2="1087" y2="177.8"/>            <circle class="nr tw" cx="1136.1" cy="102.9" r="7" style="animation-delay:-0s"/><circle class="nd tw" cx="1136.1" cy="102.9" r="2.6" style="animation-delay:-0s"/><circle class="nd" cx="1149.1" cy="242" r="3.2" style="animation-delay:-0.45s"/><circle class="nd" cx="1201.1" cy="192.4" r="3.2" style="animation-delay:-0.9s"/><circle class="nd tw" cx="1088.8" cy="138.3" r="3.2" style="animation-delay:-1.35s"/><circle class="nr" cx="1102.6" cy="196" r="7" style="animation-delay:-2.4s"/><circle class="nd" cx="1102.6" cy="196" r="2.6" style="animation-delay:-1.8s"/><circle class="nd" cx="1123.2" cy="207.2" r="3.2" style="animation-delay:-2.25s"/><circle class="nd tw" cx="1173.8" cy="126.4" r="3.2" style="animation-delay:-2.7s"/><circle class="nd" cx="1226.1" cy="166.1" r="3.2" style="animation-delay:-3.15s"/><circle class="nr tw" cx="1180.4" cy="206.9" r="7" style="animation-delay:-4.8s"/><circle class="nd" cx="1180.4" cy="206.9" r="2.6" style="animation-delay:-3.6s"/><circle class="nd tw" cx="1200.1" cy="168.8" r="3.2" style="animation-delay:-4.05s"/><circle class="nd" cx="1198" cy="120.1" r="3.2" style="animation-delay:-4.5s"/><circle class="nd" cx="1106.3" cy="141" r="3.2" style="animation-delay:-4.95s"/><circle class="nr" cx="1095.7" cy="198" r="7" style="animation-delay:-7.2s"/><circle class="nd tw" cx="1095.7" cy="198" r="2.6" style="animation-delay:-5.4s"/><circle class="nd" cx="1205.4" cy="176.3" r="3.2" style="animation-delay:-5.85s"/><circle class="nd" cx="1097.3" cy="154.3" r="3.2" style="animation-delay:-6.3s"/><circle class="nd tw" cx="1087" cy="177.8" r="3.2" style="animation-delay:-6.75s"/><circle class="nr tw" cx="1173.4" cy="123.2" r="7" style="animation-delay:-9.6s"/><circle class="nd" cx="1173.4" cy="123.2" r="2.6" style="animation-delay:-7.2s"/><circle class="nd" cx="1197.4" cy="187.8" r="3.2" style="animation-delay:-7.65s"/>        </g>
+            <g class="nm-cl t-out" aria-hidden="true">
+            <line class="lk" x1="1150" y1="530" x2="1155.1" y2="462.6"/><line class="lk" x1="1150" y1="530" x2="1208.7" y2="512.6"/><line class="lk" x1="1150" y1="530" x2="1087.7" y2="544.1"/><line class="lk" x1="1150" y1="530" x2="1198.7" y2="567.3"/><line class="lk" x1="1150" y1="530" x2="1201" y2="521.2"/><line class="lk" x1="1150" y1="530" x2="1159.9" y2="577.2"/><line class="lk" x1="1150" y1="530" x2="1205.5" y2="510.1"/><line class="lk" x1="1150" y1="530" x2="1183.2" y2="582.7"/><line class="lk" x1="1150" y1="530" x2="1195.8" y2="558.8"/><line class="lk" x1="1150" y1="530" x2="1118" y2="571"/><line class="lk" x1="1082" y1="571.4" x2="1087.7" y2="544.1"/><line class="lk" x1="1082" y1="571.4" x2="1067.5" y2="539.4"/><line class="lk" x1="1082" y1="571.4" x2="1074.5" y2="538.1"/><line class="lk" x1="1082" y1="571.4" x2="1118" y2="571"/><line class="lk" x1="1155.1" y1="462.6" x2="1115.4" y2="461.4"/><line class="lk" x1="1208.7" y1="512.6" x2="1210.7" y2="481.4"/><line class="lk" x1="1208.7" y1="512.6" x2="1198.7" y2="567.3"/><line class="lk" x1="1208.7" y1="512.6" x2="1201" y2="521.2"/><line class="lk" x1="1208.7" y1="512.6" x2="1228.5" y2="511.4"/><line class="lk" x1="1208.7" y1="512.6" x2="1230" y2="532.3"/><line class="lk" x1="1208.7" y1="512.6" x2="1205.5" y2="510.1"/><line class="lk" x1="1208.7" y1="512.6" x2="1195.8" y2="558.8"/><line class="lk" x1="1087.7" y1="544.1" x2="1067.5" y2="539.4"/><line class="lk" x1="1087.7" y1="544.1" x2="1074.5" y2="538.1"/><line class="lk" x1="1087.7" y1="544.1" x2="1118" y2="571"/><line class="lk" x1="1210.7" y1="481.4" x2="1201" y2="521.2"/><line class="lk" x1="1210.7" y1="481.4" x2="1228.5" y2="511.4"/><line class="lk" x1="1210.7" y1="481.4" x2="1230" y2="532.3"/><line class="lk" x1="1210.7" y1="481.4" x2="1205.5" y2="510.1"/><line class="lk" x1="1198.7" y1="567.3" x2="1201" y2="521.2"/><line class="lk" x1="1198.7" y1="567.3" x2="1159.9" y2="577.2"/><line class="lk" x1="1198.7" y1="567.3" x2="1230" y2="532.3"/><line class="lk" x1="1198.7" y1="567.3" x2="1198.3" y2="583.8"/><line class="lk" x1="1198.7" y1="567.3" x2="1205.5" y2="510.1"/><line class="lk" x1="1198.7" y1="567.3" x2="1183.2" y2="582.7"/><line class="lk" x1="1198.7" y1="567.3" x2="1195.8" y2="558.8"/><line class="lk" x1="1201" y1="521.2" x2="1228.5" y2="511.4"/><line class="lk" x1="1201" y1="521.2" x2="1230" y2="532.3"/><line class="lk" x1="1201" y1="521.2" x2="1205.5" y2="510.1"/><line class="lk" x1="1201" y1="521.2" x2="1195.8" y2="558.8"/><line class="lk" x1="1228.5" y1="511.4" x2="1230" y2="532.3"/><line class="lk" x1="1228.5" y1="511.4" x2="1205.5" y2="510.1"/><line class="lk" x1="1228.5" y1="511.4" x2="1195.8" y2="558.8"/><line class="lk" x1="1159.9" y1="577.2" x2="1198.3" y2="583.8"/><line class="lk" x1="1159.9" y1="577.2" x2="1183.2" y2="582.7"/><line class="lk" x1="1159.9" y1="577.2" x2="1195.8" y2="558.8"/><line class="lk" x1="1159.9" y1="577.2" x2="1118" y2="571"/><line class="lk" x1="1230" y1="532.3" x2="1205.5" y2="510.1"/><line class="lk" x1="1230" y1="532.3" x2="1195.8" y2="558.8"/><line class="lk" x1="1198.3" y1="583.8" x2="1183.2" y2="582.7"/><line class="lk" x1="1198.3" y1="583.8" x2="1195.8" y2="558.8"/><line class="lk" x1="1205.5" y1="510.1" x2="1195.8" y2="558.8"/><line class="lk" x1="1183.2" y1="582.7" x2="1195.8" y2="558.8"/><line class="lk" x1="1067.5" y1="539.4" x2="1074.5" y2="538.1"/><line class="lk" x1="1074.5" y1="538.1" x2="1118" y2="571"/>            <circle class="nr tw" cx="1082" cy="571.4" r="7" style="animation-delay:-0s"/><circle class="nd tw" cx="1082" cy="571.4" r="2.6" style="animation-delay:-0s"/><circle class="nd" cx="1155.1" cy="462.6" r="3.2" style="animation-delay:-0.45s"/><circle class="nd" cx="1208.7" cy="512.6" r="3.2" style="animation-delay:-0.9s"/><circle class="nd tw" cx="1087.7" cy="544.1" r="3.2" style="animation-delay:-1.35s"/><circle class="nr" cx="1210.7" cy="481.4" r="7" style="animation-delay:-2.4s"/><circle class="nd" cx="1210.7" cy="481.4" r="2.6" style="animation-delay:-1.8s"/><circle class="nd" cx="1198.7" cy="567.3" r="3.2" style="animation-delay:-2.25s"/><circle class="nd tw" cx="1201" cy="521.2" r="3.2" style="animation-delay:-2.7s"/><circle class="nd" cx="1228.5" cy="511.4" r="3.2" style="animation-delay:-3.15s"/><circle class="nr tw" cx="1159.9" cy="577.2" r="7" style="animation-delay:-4.8s"/><circle class="nd" cx="1159.9" cy="577.2" r="2.6" style="animation-delay:-3.6s"/><circle class="nd tw" cx="1115.4" cy="461.4" r="3.2" style="animation-delay:-4.05s"/><circle class="nd" cx="1230" cy="532.3" r="3.2" style="animation-delay:-4.5s"/><circle class="nd" cx="1198.3" cy="583.8" r="3.2" style="animation-delay:-4.95s"/><circle class="nr" cx="1205.5" cy="510.1" r="7" style="animation-delay:-7.2s"/><circle class="nd tw" cx="1205.5" cy="510.1" r="2.6" style="animation-delay:-5.4s"/><circle class="nd" cx="1183.2" cy="582.7" r="3.2" style="animation-delay:-5.85s"/><circle class="nd" cx="1195.8" cy="558.8" r="3.2" style="animation-delay:-6.3s"/><circle class="nd tw" cx="1067.5" cy="539.4" r="3.2" style="animation-delay:-6.75s"/><circle class="nr tw" cx="1074.5" cy="538.1" r="7" style="animation-delay:-9.6s"/><circle class="nd" cx="1074.5" cy="538.1" r="2.6" style="animation-delay:-7.2s"/><circle class="nd" cx="1118" cy="571" r="3.2" style="animation-delay:-7.65s"/>        </g>
+            <g class="nm-cl t-dim" aria-hidden="true">
+            <line class="lk" x1="1150" y1="348" x2="1138" y2="400.8"/><line class="lk" x1="1150" y1="348" x2="1187" y2="385.8"/><line class="lk" x1="1150" y1="348" x2="1094.1" y2="348.3"/><line class="lk" x1="1150" y1="348" x2="1171.7" y2="301.2"/><line class="lk" x1="1150" y1="348" x2="1157.3" y2="294.9"/><line class="lk" x1="1150" y1="348" x2="1117.1" y2="308.2"/><line class="lk" x1="1150" y1="348" x2="1137.4" y2="297"/><line class="lk" x1="1150" y1="348" x2="1102.5" y2="369.2"/><line class="lk" x1="1150" y1="348" x2="1202.9" y2="369.1"/><line class="lk" x1="1150" y1="348" x2="1131.1" y2="300.8"/><line class="lk" x1="1138" y1="400.8" x2="1187" y2="385.8"/><line class="lk" x1="1138" y1="400.8" x2="1102.5" y2="369.2"/><line class="lk" x1="1187" y1="385.8" x2="1202.9" y2="369.1"/><line class="lk" x1="1094.1" y1="348.3" x2="1117.1" y2="308.2"/><line class="lk" x1="1094.1" y1="348.3" x2="1102.5" y2="369.2"/><line class="lk" x1="1171.7" y1="301.2" x2="1157.3" y2="294.9"/><line class="lk" x1="1171.7" y1="301.2" x2="1117.1" y2="308.2"/><line class="lk" x1="1171.7" y1="301.2" x2="1137.4" y2="297"/><line class="lk" x1="1171.7" y1="301.2" x2="1131.1" y2="300.8"/><line class="lk" x1="1157.3" y1="294.9" x2="1117.1" y2="308.2"/><line class="lk" x1="1157.3" y1="294.9" x2="1137.4" y2="297"/><line class="lk" x1="1157.3" y1="294.9" x2="1131.1" y2="300.8"/><line class="lk" x1="1117.1" y1="308.2" x2="1137.4" y2="297"/><line class="lk" x1="1117.1" y1="308.2" x2="1131.1" y2="300.8"/><line class="lk" x1="1137.4" y1="297" x2="1131.1" y2="300.8"/>            <circle class="nr tw" cx="1138" cy="400.8" r="7" style="animation-delay:-0s"/><circle class="nd tw" cx="1138" cy="400.8" r="2.6" style="animation-delay:-0s"/><circle class="nd" cx="1187" cy="385.8" r="3.2" style="animation-delay:-0.45s"/><circle class="nd" cx="1094.1" cy="348.3" r="3.2" style="animation-delay:-0.9s"/><circle class="nd tw" cx="1171.7" cy="301.2" r="3.2" style="animation-delay:-1.35s"/><circle class="nr" cx="1157.3" cy="294.9" r="7" style="animation-delay:-2.4s"/><circle class="nd" cx="1157.3" cy="294.9" r="2.6" style="animation-delay:-1.8s"/><circle class="nd" cx="1117.1" cy="308.2" r="3.2" style="animation-delay:-2.25s"/><circle class="nd tw" cx="1137.4" cy="297" r="3.2" style="animation-delay:-2.7s"/><circle class="nd" cx="1102.5" cy="369.2" r="3.2" style="animation-delay:-3.15s"/><circle class="nr tw" cx="1202.9" cy="369.1" r="7" style="animation-delay:-4.8s"/><circle class="nd" cx="1202.9" cy="369.1" r="2.6" style="animation-delay:-3.6s"/><circle class="nd tw" cx="1131.1" cy="300.8" r="3.2" style="animation-delay:-4.05s"/>        </g>
+            <g class="nm-cl t-inq" aria-hidden="true">
+            <line class="lk" x1="612.4" y1="207.4" x2="645.3" y2="197.3"/><line class="lk" x1="612.4" y1="207.4" x2="632.4" y2="208.6"/><line class="lk" x1="514.7" y1="292.7" x2="558.6" y2="272.5"/><line class="lk" x1="514.7" y1="292.7" x2="532" y2="281.5"/><line class="lk" x1="514.7" y1="292.7" x2="548.9" y2="251"/><line class="lk" x1="514.7" y1="292.7" x2="551.2" y2="273.4"/><line class="lk" x1="514.7" y1="292.7" x2="537.8" y2="313.6"/><line class="lk" x1="558.6" y1="272.5" x2="532" y2="281.5"/><line class="lk" x1="558.6" y1="272.5" x2="548.9" y2="251"/><line class="lk" x1="558.6" y1="272.5" x2="564.2" y2="256.9"/><line class="lk" x1="558.6" y1="272.5" x2="551.2" y2="273.4"/><line class="lk" x1="558.6" y1="272.5" x2="537.8" y2="313.6"/><line class="lk" x1="640" y1="505.8" x2="631.8" y2="498.1"/><line class="lk" x1="640" y1="505.8" x2="599.1" y2="490.2"/><line class="lk" x1="640" y1="505.8" x2="600.4" y2="485.8"/><line class="lk" x1="640" y1="505.8" x2="642.1" y2="495.5"/><line class="lk" x1="845.1" y1="316.9" x2="840.8" y2="355.8"/><line class="lk" x1="845.1" y1="316.9" x2="852.7" y2="281.8"/><line class="lk" x1="845.1" y1="316.9" x2="842.2" y2="263.5"/><line class="lk" x1="845.1" y1="316.9" x2="852.3" y2="308.2"/><line class="lk" x1="845.1" y1="316.9" x2="843.1" y2="266.5"/><line class="lk" x1="845.1" y1="316.9" x2="843.2" y2="276.6"/><line class="lk" x1="845.1" y1="316.9" x2="835.1" y2="304.3"/><line class="lk" x1="845.1" y1="316.9" x2="829.8" y2="287.6"/><line class="lk" x1="555.1" y1="462.8" x2="558.8" y2="437.9"/><line class="lk" x1="555.1" y1="462.8" x2="586" y2="462.7"/><line class="lk" x1="555.1" y1="462.8" x2="585.3" y2="476.8"/><line class="lk" x1="555.1" y1="462.8" x2="581" y2="451.1"/><line class="lk" x1="555.1" y1="462.8" x2="599.1" y2="490.2"/><line class="lk" x1="555.1" y1="462.8" x2="546.6" y2="444.8"/><line class="lk" x1="555.1" y1="462.8" x2="600.4" y2="485.8"/><line class="lk" x1="555.1" y1="462.8" x2="535.1" y2="413.1"/><line class="lk" x1="558.8" y1="437.9" x2="586" y2="462.7"/><line class="lk" x1="558.8" y1="437.9" x2="585.3" y2="476.8"/><line class="lk" x1="558.8" y1="437.9" x2="581" y2="451.1"/><line class="lk" x1="558.8" y1="437.9" x2="546.6" y2="444.8"/><line class="lk" x1="558.8" y1="437.9" x2="535.1" y2="413.1"/><line class="lk" x1="783.1" y1="230.6" x2="746.4" y2="203.4"/><line class="lk" x1="783.1" y1="230.6" x2="783.1" y2="241.2"/><line class="lk" x1="783.1" y1="230.6" x2="757.7" y2="208"/><line class="lk" x1="586" y1="462.7" x2="631.8" y2="498.1"/><line class="lk" x1="586" y1="462.7" x2="585.3" y2="476.8"/><line class="lk" x1="586" y1="462.7" x2="581" y2="451.1"/><line class="lk" x1="586" y1="462.7" x2="599.1" y2="490.2"/><line class="lk" x1="586" y1="462.7" x2="546.6" y2="444.8"/><line class="lk" x1="586" y1="462.7" x2="600.4" y2="485.8"/><line class="lk" x1="532" y1="281.5" x2="548.9" y2="251"/><line class="lk" x1="532" y1="281.5" x2="564.2" y2="256.9"/><line class="lk" x1="532" y1="281.5" x2="551.2" y2="273.4"/><line class="lk" x1="532" y1="281.5" x2="537.8" y2="313.6"/><line class="lk" x1="548.9" y1="251" x2="564.2" y2="256.9"/><line class="lk" x1="548.9" y1="251" x2="551.2" y2="273.4"/><line class="lk" x1="631.8" y1="498.1" x2="585.3" y2="476.8"/><line class="lk" x1="631.8" y1="498.1" x2="599.1" y2="490.2"/><line class="lk" x1="631.8" y1="498.1" x2="600.4" y2="485.8"/><line class="lk" x1="631.8" y1="498.1" x2="642.1" y2="495.5"/><line class="lk" x1="564.2" y1="256.9" x2="551.2" y2="273.4"/><line class="lk" x1="551.2" y1="273.4" x2="537.8" y2="313.6"/><line class="lk" x1="840.8" y1="355.8" x2="852.3" y2="308.2"/><line class="lk" x1="840.8" y1="355.8" x2="835.1" y2="304.3"/><line class="lk" x1="840.8" y1="355.8" x2="852.5" y2="392.2"/><line class="lk" x1="852.7" y1="281.8" x2="842.2" y2="263.5"/><line class="lk" x1="852.7" y1="281.8" x2="852.3" y2="308.2"/><line class="lk" x1="852.7" y1="281.8" x2="843.1" y2="266.5"/><line class="lk" x1="852.7" y1="281.8" x2="843.2" y2="276.6"/><line class="lk" x1="852.7" y1="281.8" x2="835.1" y2="304.3"/><line class="lk" x1="852.7" y1="281.8" x2="829.8" y2="287.6"/><line class="lk" x1="585.3" y1="476.8" x2="581" y2="451.1"/><line class="lk" x1="585.3" y1="476.8" x2="599.1" y2="490.2"/><line class="lk" x1="585.3" y1="476.8" x2="546.6" y2="444.8"/><line class="lk" x1="585.3" y1="476.8" x2="600.4" y2="485.8"/><line class="lk" x1="645.3" y1="197.3" x2="669.1" y2="194"/><line class="lk" x1="645.3" y1="197.3" x2="632.4" y2="208.6"/><line class="lk" x1="782.8" y1="457.3" x2="822.5" y2="419"/><line class="lk" x1="782.8" y1="457.3" x2="752.5" y2="471.9"/><line class="lk" x1="581" y1="451.1" x2="599.1" y2="490.2"/><line class="lk" x1="581" y1="451.1" x2="546.6" y2="444.8"/><line class="lk" x1="581" y1="451.1" x2="600.4" y2="485.8"/><line class="lk" x1="669.1" y1="194" x2="632.4" y2="208.6"/><line class="lk" x1="599.1" y1="490.2" x2="600.4" y2="485.8"/><line class="lk" x1="599.1" y1="490.2" x2="642.1" y2="495.5"/><line class="lk" x1="706.2" y1="489.8" x2="752.5" y2="471.9"/><line class="lk" x1="532.2" y1="375" x2="526.3" y2="368.1"/><line class="lk" x1="532.2" y1="375" x2="535.1" y2="413.1"/><line class="lk" x1="822.5" y1="419" x2="850.3" y2="426.9"/><line class="lk" x1="822.5" y1="419" x2="852.5" y2="392.2"/><line class="lk" x1="746.4" y1="203.4" x2="783.1" y2="241.2"/><line class="lk" x1="746.4" y1="203.4" x2="757.7" y2="208"/><line class="lk" x1="537.8" y1="313.6" x2="526.3" y2="368.1"/><line class="lk" x1="842.2" y1="263.5" x2="852.3" y2="308.2"/><line class="lk" x1="842.2" y1="263.5" x2="843.1" y2="266.5"/><line class="lk" x1="842.2" y1="263.5" x2="843.2" y2="276.6"/><line class="lk" x1="842.2" y1="263.5" x2="835.1" y2="304.3"/><line class="lk" x1="842.2" y1="263.5" x2="829.8" y2="287.6"/><line class="lk" x1="852.3" y1="308.2" x2="843.1" y2="266.5"/><line class="lk" x1="852.3" y1="308.2" x2="843.2" y2="276.6"/><line class="lk" x1="852.3" y1="308.2" x2="835.1" y2="304.3"/><line class="lk" x1="852.3" y1="308.2" x2="829.8" y2="287.6"/><line class="lk" x1="546.6" y1="444.8" x2="535.1" y2="413.1"/><line class="lk" x1="783.1" y1="241.2" x2="757.7" y2="208"/><line class="lk" x1="526.3" y1="368.1" x2="535.1" y2="413.1"/><line class="lk" x1="843.1" y1="266.5" x2="843.2" y2="276.6"/><line class="lk" x1="843.1" y1="266.5" x2="835.1" y2="304.3"/><line class="lk" x1="843.1" y1="266.5" x2="829.8" y2="287.6"/><line class="lk" x1="843.2" y1="276.6" x2="835.1" y2="304.3"/><line class="lk" x1="843.2" y1="276.6" x2="829.8" y2="287.6"/><line class="lk" x1="600.4" y1="485.8" x2="642.1" y2="495.5"/><line class="lk" x1="835.1" y1="304.3" x2="829.8" y2="287.6"/><line class="lk" x1="850.3" y1="426.9" x2="852.5" y2="392.2"/>            <circle class="nr tw" cx="612.4" cy="207.4" r="7" style="animation-delay:-0s"/><circle class="nd tw" cx="612.4" cy="207.4" r="2.6" style="animation-delay:-0s"/><circle class="nd" cx="514.7" cy="292.7" r="3.2" style="animation-delay:-0.45s"/><circle class="nd" cx="558.6" cy="272.5" r="3.2" style="animation-delay:-0.9s"/><circle class="nd tw" cx="640" cy="505.8" r="3.2" style="animation-delay:-1.35s"/><circle class="nr" cx="845.1" cy="316.9" r="7" style="animation-delay:-2.4s"/><circle class="nd" cx="845.1" cy="316.9" r="2.6" style="animation-delay:-1.8s"/><circle class="nd" cx="555.1" cy="462.8" r="3.2" style="animation-delay:-2.25s"/><circle class="nd tw" cx="558.8" cy="437.9" r="3.2" style="animation-delay:-2.7s"/><circle class="nd" cx="783.1" cy="230.6" r="3.2" style="animation-delay:-3.15s"/><circle class="nr tw" cx="586" cy="462.7" r="7" style="animation-delay:-4.8s"/><circle class="nd" cx="586" cy="462.7" r="2.6" style="animation-delay:-3.6s"/><circle class="nd tw" cx="532" cy="281.5" r="3.2" style="animation-delay:-4.05s"/><circle class="nd" cx="548.9" cy="251" r="3.2" style="animation-delay:-4.5s"/><circle class="nd" cx="631.8" cy="498.1" r="3.2" style="animation-delay:-4.95s"/><circle class="nr" cx="564.2" cy="256.9" r="7" style="animation-delay:-7.2s"/><circle class="nd tw" cx="564.2" cy="256.9" r="2.6" style="animation-delay:-5.4s"/><circle class="nd" cx="551.2" cy="273.4" r="3.2" style="animation-delay:-5.85s"/><circle class="nd" cx="840.8" cy="355.8" r="3.2" style="animation-delay:-6.3s"/><circle class="nd tw" cx="852.7" cy="281.8" r="3.2" style="animation-delay:-6.75s"/><circle class="nr tw" cx="585.3" cy="476.8" r="7" style="animation-delay:-9.6s"/><circle class="nd" cx="585.3" cy="476.8" r="2.6" style="animation-delay:-7.2s"/><circle class="nd" cx="645.3" cy="197.3" r="3.2" style="animation-delay:-7.65s"/><circle class="nd tw" cx="782.8" cy="457.3" r="3.2" style="animation-delay:-8.1s"/><circle class="nd" cx="581" cy="451.1" r="3.2" style="animation-delay:-8.55s"/><circle class="nr" cx="669.1" cy="194" r="7" style="animation-delay:-12s"/><circle class="nd" cx="669.1" cy="194" r="2.6" style="animation-delay:-9s"/><circle class="nd tw" cx="599.1" cy="490.2" r="3.2" style="animation-delay:-9.45s"/><circle class="nd" cx="706.2" cy="489.8" r="3.2" style="animation-delay:-9.9s"/><circle class="nd" cx="532.2" cy="375" r="3.2" style="animation-delay:-10.35s"/><circle class="nr tw" cx="822.5" cy="419" r="7" style="animation-delay:-14.4s"/><circle class="nd tw" cx="822.5" cy="419" r="2.6" style="animation-delay:-10.8s"/><circle class="nd" cx="746.4" cy="203.4" r="3.2" style="animation-delay:-11.25s"/><circle class="nd" cx="537.8" cy="313.6" r="3.2" style="animation-delay:-11.7s"/><circle class="nd tw" cx="842.2" cy="263.5" r="3.2" style="animation-delay:-12.15s"/><circle class="nr" cx="852.3" cy="308.2" r="7" style="animation-delay:-16.8s"/><circle class="nd" cx="852.3" cy="308.2" r="2.6" style="animation-delay:-12.6s"/><circle class="nd" cx="546.6" cy="444.8" r="3.2" style="animation-delay:-13.05s"/><circle class="nd tw" cx="783.1" cy="241.2" r="3.2" style="animation-delay:-13.5s"/><circle class="nd" cx="526.3" cy="368.1" r="3.2" style="animation-delay:-13.95s"/><circle class="nr tw" cx="757.7" cy="208" r="7" style="animation-delay:-19.2s"/><circle class="nd" cx="757.7" cy="208" r="2.6" style="animation-delay:-14.4s"/><circle class="nd tw" cx="843.1" cy="266.5" r="3.2" style="animation-delay:-14.85s"/><circle class="nd" cx="752.5" cy="471.9" r="3.2" style="animation-delay:-15.3s"/><circle class="nd" cx="843.2" cy="276.6" r="3.2" style="animation-delay:-15.75s"/><circle class="nr" cx="600.4" cy="485.8" r="7" style="animation-delay:-21.6s"/><circle class="nd tw" cx="600.4" cy="485.8" r="2.6" style="animation-delay:-16.2s"/><circle class="nd" cx="835.1" cy="304.3" r="3.2" style="animation-delay:-16.65s"/><circle class="nd" cx="829.8" cy="287.6" r="3.2" style="animation-delay:-17.1s"/><circle class="nd tw" cx="642.1" cy="495.5" r="3.2" style="animation-delay:-17.55s"/><circle class="nr tw" cx="632.4" cy="208.6" r="7" style="animation-delay:-24s"/><circle class="nd" cx="632.4" cy="208.6" r="2.6" style="animation-delay:-18s"/><circle class="nd" cx="850.3" cy="426.9" r="3.2" style="animation-delay:-18.45s"/><circle class="nd tw" cx="535.1" cy="413.1" r="3.2" style="animation-delay:-18.9s"/><circle class="nd" cx="852.5" cy="392.2" r="3.2" style="animation-delay:-19.35s"/>        </g>
+    
+    
+    <g class="nm-wires">
+                    <path id="nm-w-inq" class="wire t-inq" d="M 274 215 C 400 235 450 310 562 348" data-path="inq" />
+                    <path id="nm-w-seq" class="wire t-seq" d="M 274 560 C 400 548 450 440 566 380" data-path="seq" />
+                    <path id="nm-w-forbeast" class="wire t-out" d="M 818 316 C 940 308 990 168 1112 168" data-path="forbeast"  data-reply-row="forbeast" data-linked="1" />
+                    <path id="nm-w-incepxionbot" class="wire t-out" d="M 820 348 C 940 348 1010 348 1112 348" data-path="incepxionbot"  data-reply-row="incepxionbot" data-linked="0" />
+                    <path id="nm-w-botcake" class="wire t-out" d="M 818 380 C 940 388 990 530 1112 530" data-path="botcake"  data-reply-row="botcake" data-linked="1" />
+                    <path id="nm-w-ai" class="wire t-ai" d="M 690 137 L 690 220" data-path="ai" />
+                    <path id="nm-w-ord" class="wire t-ord" d="M 690 480 C 690 580 560 640 560 722" data-path="ord" />
+            </g>
+    <g class="nm-amb" data-live-amb aria-hidden="true">
+                                    <circle class="t-inq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-inq"/></animateMotion></circle>
+                            <circle class="t-inq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-inq"/></animateMotion></circle>
+                            <circle class="t-inq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-inq"/></animateMotion></circle>
+                            <circle class="t-inq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-inq"/></animateMotion></circle>
+                                                <circle class="t-seq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-seq"/></animateMotion></circle>
+                            <circle class="t-seq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-seq"/></animateMotion></circle>
+                            <circle class="t-seq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-seq"/></animateMotion></circle>
+                            <circle class="t-seq" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-seq"/></animateMotion></circle>
+                                                <circle class="t-out" r="3.4"  data-reply-row="forbeast" data-linked="1" ><animateMotion dur="4s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-forbeast"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="forbeast" data-linked="1" ><animateMotion dur="4s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-forbeast"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="forbeast" data-linked="1" ><animateMotion dur="4s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-forbeast"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="forbeast" data-linked="1" ><animateMotion dur="4s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-forbeast"/></animateMotion></circle>
+                                                <circle class="t-out" r="3.4"  data-reply-row="incepxionbot" data-linked="0" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-incepxionbot"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="incepxionbot" data-linked="0" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-incepxionbot"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="incepxionbot" data-linked="0" ><animateMotion dur="3s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-incepxionbot"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="incepxionbot" data-linked="0" ><animateMotion dur="3s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-incepxionbot"/></animateMotion></circle>
+                                                <circle class="t-out" r="3.4"  data-reply-row="botcake" data-linked="1" ><animateMotion dur="3.5s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-botcake"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="botcake" data-linked="1" ><animateMotion dur="3.5s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-botcake"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="botcake" data-linked="1" ><animateMotion dur="3.5s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-botcake"/></animateMotion></circle>
+                            <circle class="t-out" r="3.4"  data-reply-row="botcake" data-linked="1" ><animateMotion dur="3.5s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-botcake"/></animateMotion></circle>
+                                                <circle class="t-ai" r="3.4" ><animateMotion dur="4s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-ai"/></animateMotion></circle>
+                            <circle class="t-ai" r="3.4" ><animateMotion dur="4s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-ai"/></animateMotion></circle>
+                            <circle class="t-ai" r="3.4" ><animateMotion dur="4s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-ai"/></animateMotion></circle>
+                            <circle class="t-ai" r="3.4" ><animateMotion dur="4s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-ai"/></animateMotion></circle>
+                                                <circle class="t-ord" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0s"><mpath href="#nm-w-ord"/></animateMotion></circle>
+                            <circle class="t-ord" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-0.8s"><mpath href="#nm-w-ord"/></animateMotion></circle>
+                            <circle class="t-ord" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-1.6s"><mpath href="#nm-w-ord"/></animateMotion></circle>
+                            <circle class="t-ord" r="3.4" ><animateMotion dur="3s" repeatCount="indefinite" begin="-2.4s"><mpath href="#nm-w-ord"/></animateMotion></circle>
+                        </g>
+
+    
+    <g class="nm-core" data-hit="core" data-live-core>
+        <circle cx="690" cy="348" r="196" class="c-faint"/>
+        <g class="spin"><circle cx="690" cy="348" r="188" class="c-arc"/></g>
+        <g class="spin2"><circle cx="690" cy="348" r="138" class="c-arc2"/></g>
+        <g data-live-ticks aria-hidden="true">
+                                            <line x1="690" y1="198" x2="690" y2="189"/>
+                                            <line x1="705.7" y1="198.8" x2="706.6" y2="189.9"/>
+                                            <line x1="721.2" y1="201.3" x2="723.1" y2="192.5"/>
+                                            <line x1="736.4" y1="205.3" x2="739.1" y2="196.8"/>
+                                            <line x1="751" y1="211" x2="754.7" y2="202.7"/>
+                                            <line x1="765" y1="218.1" x2="769.5" y2="210.3"/>
+                                            <line x1="778.2" y1="226.6" x2="783.5" y2="219.4"/>
+                                            <line x1="790.4" y1="236.5" x2="796.4" y2="229.8"/>
+                                            <line x1="801.5" y1="247.6" x2="808.2" y2="241.6"/>
+                                            <line x1="811.4" y1="259.8" x2="818.6" y2="254.5"/>
+                                            <line x1="819.9" y1="273" x2="827.7" y2="268.5"/>
+                                            <line x1="827" y1="287" x2="835.3" y2="283.3"/>
+                                            <line x1="832.7" y1="301.6" x2="841.2" y2="298.9"/>
+                                            <line x1="836.7" y1="316.8" x2="845.5" y2="314.9"/>
+                                            <line x1="839.2" y1="332.3" x2="848.1" y2="331.4"/>
+                                            <line x1="840" y1="348" x2="849" y2="348"/>
+                                            <line x1="839.2" y1="363.7" x2="848.1" y2="364.6"/>
+                                            <line x1="836.7" y1="379.2" x2="845.5" y2="381.1"/>
+                                            <line x1="832.7" y1="394.4" x2="841.2" y2="397.1"/>
+                                            <line x1="827" y1="409" x2="835.3" y2="412.7"/>
+                                            <line x1="819.9" y1="423" x2="827.7" y2="427.5"/>
+                                            <line x1="811.4" y1="436.2" x2="818.6" y2="441.5"/>
+                                            <line x1="801.5" y1="448.4" x2="808.2" y2="454.4"/>
+                                            <line x1="790.4" y1="459.5" x2="796.4" y2="466.2"/>
+                                            <line x1="778.2" y1="469.4" x2="783.5" y2="476.6"/>
+                                            <line x1="765" y1="477.9" x2="769.5" y2="485.7"/>
+                                            <line x1="751" y1="485" x2="754.7" y2="493.3"/>
+                                            <line x1="736.4" y1="490.7" x2="739.1" y2="499.2"/>
+                                            <line x1="721.2" y1="494.7" x2="723.1" y2="503.5"/>
+                                            <line x1="705.7" y1="497.2" x2="706.6" y2="506.1"/>
+                                            <line x1="690" y1="498" x2="690" y2="507"/>
+                                            <line x1="674.3" y1="497.2" x2="673.4" y2="506.1"/>
+                                            <line x1="658.8" y1="494.7" x2="656.9" y2="503.5"/>
+                                            <line x1="643.6" y1="490.7" x2="640.9" y2="499.2"/>
+                                            <line x1="629" y1="485" x2="625.3" y2="493.3"/>
+                                            <line x1="615" y1="477.9" x2="610.5" y2="485.7"/>
+                                            <line x1="601.8" y1="469.4" x2="596.5" y2="476.6"/>
+                                            <line x1="589.6" y1="459.5" x2="583.6" y2="466.2"/>
+                                            <line x1="578.5" y1="448.4" x2="571.8" y2="454.4"/>
+                                            <line x1="568.6" y1="436.2" x2="561.4" y2="441.5"/>
+                                            <line x1="560.1" y1="423" x2="552.3" y2="427.5"/>
+                                            <line x1="553" y1="409" x2="544.7" y2="412.7"/>
+                                            <line x1="547.3" y1="394.4" x2="538.8" y2="397.1"/>
+                                            <line x1="543.3" y1="379.2" x2="534.5" y2="381.1"/>
+                                            <line x1="540.8" y1="363.7" x2="531.9" y2="364.6"/>
+                                            <line x1="540" y1="348" x2="531" y2="348"/>
+                                            <line x1="540.8" y1="332.3" x2="531.9" y2="331.4"/>
+                                            <line x1="543.3" y1="316.8" x2="534.5" y2="314.9"/>
+                                            <line x1="547.3" y1="301.6" x2="538.8" y2="298.9"/>
+                                            <line x1="553" y1="287" x2="544.7" y2="283.3"/>
+                                            <line x1="560.1" y1="273" x2="552.3" y2="268.5"/>
+                                            <line x1="568.6" y1="259.8" x2="561.4" y2="254.5"/>
+                                            <line x1="578.5" y1="247.6" x2="571.8" y2="241.6"/>
+                                            <line x1="589.6" y1="236.5" x2="583.6" y2="229.8"/>
+                                            <line x1="601.8" y1="226.6" x2="596.5" y2="219.4"/>
+                                            <line x1="615" y1="218.1" x2="610.5" y2="210.3"/>
+                                            <line x1="629" y1="211" x2="625.3" y2="202.7"/>
+                                            <line x1="643.6" y1="205.3" x2="640.9" y2="196.8"/>
+                                            <line x1="658.8" y1="201.3" x2="656.9" y2="192.5"/>
+                                            <line x1="674.3" y1="198.8" x2="673.4" y2="189.9"/>
+                    </g>
+        <circle class="wave" cx="690" cy="348" r="132" data-live-wave/>
+        <g class="breathe"><circle class="ring" cx="690" cy="348" r="132"/></g>
+        <text class="nm-core-name" x="690" y="318">LIKHA<tspan> BOT</tspan></text>
+        <text class="t c sub s21" x="690" y="350">Process · prepare · route</text>
+        <text class="t c big s" x="690" y="408" data-live-count="signals">171</text>
+        <text class="t c sub s21" x="690" y="436">signals · last 5 min</text>
+    </g>
+
+    
+    <g class="hub t-inq" transform="translate(230 215)" data-hit="inq"><circle class="halo spin" r="56"/><circle class="bg" r="42"/><path class="ic" d="M -13 -11 h 26 v 17 h -15 l -8 7 v -7 h -3 z" transform="scale(1.4)"/></g>
+    <text class="t c cap t-inq" x="230" y="96">CUSTOMER INQUIRIES</text>
+    <text class="t c big" x="230" y="362" data-live-count="messages">7,912</text>
+    <text class="t c sub" x="230" y="394">received today</text>
+    <g class="hub t-seq" transform="translate(230 560)" data-hit="seq"><circle class="halo spin" r="56"/><circle class="bg" r="42"/><path class="ic" d="M -12 2 a 12 12 0 1 0 3.5 -8.5 M -10 -14 v 6 h 6 M 0 -6 v 7 l 5 3" transform="scale(1.4)"/></g>
+    <text class="t c cap t-seq" x="230" y="440">FOLLOW-UP SEQUENCES</text>
+    <text class="t c sub" x="230" y="468">Top today, by follow-ups sent</text>
+            <text class="t seqn" x="318" y="604" data-live-seq="0">Pa-remind sa COD · 5,120</text>
+            <text class="t seqn" x="318" y="630" data-live-seq="1">Last call promo · 3,904</text>
+            <text class="t seqn" x="318" y="656" data-live-seq="2">Bumalik po kayo · 1,877</text>
+    
+    
+    <g class="hub t-ai" transform="translate(690 113)" data-hit="ai"><circle class="halo spin" r="38"/><circle class="bg" r="24"/><path class="ic" d="M 0 -11 v 22 M -11 0 h 22" transform="scale(.8)"/></g>
+    <text class="t cap t-ai" x="738" y="98">AI ANSWERS</text>
+    <text class="t big s" x="738" y="152" data-live-count="ai">3,087</text>
+
+    
+                    <g class="nm-bot" data-bot-row="forbeast" data-linked="1">
+            <g class="hub t-out" transform="translate(1150 168)" data-hit="forbeast">
+                <circle class="halo spin" r="48"/><circle class="bg" r="34"/>
+                <path class="ic on" d="M 14 -13 L -14 0 L -3 3 L 0 14 Z M -3 3 L 14 -13" transform="scale(1.13)"/><path class="ic off" d="M -7 -14 v 9 M 7 -14 v 9 M -12 -5 h 24 v 5 a 12 12 0 0 1 -24 0 z M 0 12 v 10" transform="scale(1.13)"/>
+            </g>
+            <text class="t bname" x="1204" y="122">BOT 1 · FORBEAST</text>
+            <text class="t st on" x="1204" y="152">● Connected</text>
+            <text class="t st off" x="1204" y="152">○ Not linked</text>
+            <text class="t big s on" x="1204" y="210" data-live-count="out-forbeast">6,228</text>
+            <text class="t sub s22 on" x="1204" y="238">replies sent · <tspan data-live-count="in-forbeast">7,704</tspan> in</text>
+            <text class="t dorm off" x="1204" y="206">DORMANT</text>
+            <text class="t sub s21 off" x="1204" y="234">not linked · <tspan data-live-count="out-forbeast">6,228</tspan> sent · <tspan data-live-count="in-forbeast">7,704</tspan> in</text>
+        </g>
+                    <g class="nm-bot" data-bot-row="incepxionbot" data-linked="0">
+            <g class="hub t-out" transform="translate(1150 348)" data-hit="incepxionbot">
+                <circle class="halo spin" r="48"/><circle class="bg" r="34"/>
+                <path class="ic on" d="M 14 -13 L -14 0 L -3 3 L 0 14 Z M -3 3 L 14 -13" transform="scale(1.13)"/><path class="ic off" d="M -7 -14 v 9 M 7 -14 v 9 M -12 -5 h 24 v 5 a 12 12 0 0 1 -24 0 z M 0 12 v 10" transform="scale(1.13)"/>
+            </g>
+            <text class="t bname" x="1204" y="302">BOT 2 · INCEPXIONBOT</text>
+            <text class="t st on" x="1204" y="332">● Connected</text>
+            <text class="t st off" x="1204" y="332">○ Not linked</text>
+            <text class="t big s on" x="1204" y="390" data-live-count="out-incepxionbot">0</text>
+            <text class="t sub s22 on" x="1204" y="418">replies sent · <tspan data-live-count="in-incepxionbot">0</tspan> in</text>
+            <text class="t dorm off" x="1204" y="386">DORMANT</text>
+            <text class="t sub s21 off" x="1204" y="414">not linked · <tspan data-live-count="out-incepxionbot">0</tspan> sent · <tspan data-live-count="in-incepxionbot">0</tspan> in</text>
+        </g>
+                    <g class="nm-bot" data-bot-row="botcake" data-linked="1">
+            <g class="hub t-out" transform="translate(1150 530)" data-hit="botcake">
+                <circle class="halo spin" r="48"/><circle class="bg" r="34"/>
+                <path class="ic on" d="M 14 -13 L -14 0 L -3 3 L 0 14 Z M -3 3 L 14 -13" transform="scale(1.13)"/><path class="ic off" d="M -7 -14 v 9 M 7 -14 v 9 M -12 -5 h 24 v 5 a 12 12 0 0 1 -24 0 z M 0 12 v 10" transform="scale(1.13)"/>
+            </g>
+            <text class="t bname" x="1204" y="484">BOTCAKE · FALLBACK</text>
+            <text class="t st on" x="1204" y="514">● Fallback</text>
+            <text class="t st off" x="1204" y="514">○ Not linked</text>
+            <text class="t big s on" x="1204" y="572" data-live-count="out-botcake">184</text>
+            <text class="t sub s22 on" x="1204" y="600">replies sent · <tspan data-live-count="in-botcake">208</tspan> in</text>
+            <text class="t dorm off" x="1204" y="568">DORMANT</text>
+            <text class="t sub s21 off" x="1204" y="596">not linked · <tspan data-live-count="out-botcake">184</tspan> sent · <tspan data-live-count="in-botcake">208</tspan> in</text>
+        </g>
+    
+    
+    <g class="hub t-ord" transform="translate(560 743)" data-hit="ord" data-live-flash="orders"><circle class="halo spin" r="34"/><circle class="bg" r="20"/><path class="ic" d="M 0 -11 v 22 M -11 0 h 22" transform="scale(.66)"/></g>
+
+    
+    <line class="strip" x1="30" y1="676" x2="1480" y2="676"/>
+    <circle cx="70" cy="752" r="16" class="dot t-seq"/>
+    <text class="t sub s26" x="114" y="724">Follow-ups sent</text>
+    <text class="t big s" x="114" y="790" data-live-count="follow_ups">12,305</text>
+    <text class="t sub s26" x="604" y="724">Orders recorded</text>
+    <text class="t big s t-ordf" x="604" y="790" data-live-count="orders">37</text>
+    <text class="t sub s21" x="604" y="826">Last: <tspan data-live-last-order>Sample Page 03 · 14:26 · Bot 1</tspan></text>
+    <text class="t sub s26" x="900" y="724">Order value today (COD)</text>
+    <text class="t big s t-ordf" x="900" y="790"><tspan class="peso-sign">₱</tspan><tspan dx="6" data-live-count="peso">41,860</tspan></text>
+    <text class="t sub s20 end" x="1480" y="716" data-live-unknown="in"  hidden >+<tspan data-live-count="in-unknown">0</tspan> messages from before the bot was recorded</text>
+    <text class="t sub s20 end" x="1480" y="744" data-live-unknown="out"  hidden >+<tspan data-live-count="out-unknown">0</tspan> replies with no bot recorded</text>
+    <text class="t sub s21 end" x="1480" y="800">Inputs → LIKHA BOT → designated bot</text>
+
+    <g data-lights aria-hidden="true"></g>
+</svg>
+        <div class="bar"><h2>NEURAL NETWORK</h2><span>Live signals · today’s activity</span>
+            <div class="leg" aria-label="Legend"><span class="t-inq"><i></i>Inquiries</span><span class="t-seq"><i></i>Sequences</span><span class="t-out"><i></i>Outbound</span><span class="t-ai"><i></i>AI</span><span class="t-ord"><i></i>Orders</span></div></div>
+    </section>
+
+    
+    <div class="mob" aria-label="Network (phone)">
+        <div class="mc mcore t-out" data-live-card="core"><h3>LIKHA BOT</h3><small>Process · prepare · route</small><b data-live-count="signals">171</b><small>signals · last 5 min</small></div>
+        <div class="mrow">
+            <div class="mc t-inq" data-live-card="inq"><h3>CUSTOMER INQUIRIES</h3><b data-live-count="messages">7,912</b><small>received today</small></div>
+            <div class="mc t-ai" data-live-card="ai"><h3>AI ANSWERS</h3><b data-live-count="ai">3,087</b><small>its own step</small></div>
+        </div>
+                    <div class="mc t-out" data-bot-row="forbeast" data-linked="1" data-live-card="forbeast">
+                <h3>BOT 1 · FORBEAST</h3><span class="chip on">● Connected</span><span class="chip off">○ Not linked</span>
+                <b class="on" data-live-count="out-forbeast">6,228</b><b class="off">DORMANT</b>
+                <small>replies sent · <span data-live-count="in-forbeast">7,704</span> in<span class="off"> · no traffic while not linked</span></small>
+            </div>
+                    <div class="mc t-out" data-bot-row="incepxionbot" data-linked="0" data-live-card="incepxionbot">
+                <h3>BOT 2 · INCEPXIONBOT</h3><span class="chip on">● Connected</span><span class="chip off">○ Not linked</span>
+                <b class="on" data-live-count="out-incepxionbot">0</b><b class="off">DORMANT</b>
+                <small>replies sent · <span data-live-count="in-incepxionbot">0</span> in<span class="off"> · no traffic while not linked</span></small>
+            </div>
+                    <div class="mc t-out" data-bot-row="botcake" data-linked="1" data-live-card="botcake">
+                <h3>BOTCAKE · FALLBACK</h3><span class="chip on">● Fallback</span><span class="chip off">○ Not linked</span>
+                <b class="on" data-live-count="out-botcake">184</b><b class="off">DORMANT</b>
+                <small>replies sent · <span data-live-count="in-botcake">208</span> in<span class="off"> · no traffic while not linked</span></small>
+            </div>
+                <div class="mrow">
+            <div class="mc t-seq" data-live-card="seq"><h3>FOLLOW-UPS SENT</h3><b data-live-count="follow_ups">12,305</b>
+                <small data-live-seq="0">Pa-remind sa COD · 5,120</small></div>
+            <div class="mc t-ord" data-live-card="ord"><h3>ORDER VALUE</h3><b>₱ <span data-live-count="peso">41,860</span></b><small>orders recorded: <span data-live-count="orders">37</span></small></div>
+        </div>
+    </div>
+
+    <aside class="act" aria-labelledby="lv-h-log">
+        <h2 id="lv-h-log">LIVE ACTIVITY <i aria-hidden="true"></i></h2>
+        <ol class="tl" data-live-log></ol>
+        <div class="listen"><i aria-hidden="true"></i>Listening for new events</div>
+    </aside>
+
+</div>
+</div>
+
+<script type="application/json" id="live-data">{"feed":"\/chatbot\/live\/feed","page":null,"bot":null,"cursor":{"chat":"1","seq":"1","order":"1","ok":"2026-10-30 14:26:18|0","ai":"2026-10-30 14:26:18|0"},"counts":{"messages":{"today":7912,"recent":46},"confirmed":{"today":6412,"recent":40},"unconfirmed":{"today":12,"recent":3},"follow_ups":{"today":12305,"recent":61},"ai":{"today":3087,"recent":22},"orders":{"today":37,"recent":2},"bots":{"in":{"forbeast":7704,"incepxionbot":0,"botcake":208,"unknown":0},"out":{"forbeast":6228,"incepxionbot":0,"botcake":184,"unknown":0}},"active":14,"reply_time":{"state":"ok","seconds":7.5},"last_order":{"page":"Sample Page 03","at":"14:26","bot":"forbeast"},"order_value":{"today":41860,"recent":2298},"sequences":[{"name":"Pa-remind sa COD","n":5120},{"name":"Last call promo","n":3904},{"name":"Bumalik po kayo","n":1877}],"linked":{"forbeast":true,"incepxionbot":false},"as_of":"14:26:23"},"interval":5000,"site":"Likha","bots":{"forbeast":"Bot 1","incepxionbot":"Bot 2","botcake":"Botcake"},"notes":{"ok":"Customer sent \u2192 reply sent","none":"No Forbeast replies yet today","not_linked":"Not linked to Forbeast","not_on_forbeast":"This page is not on Forbeast","error":"Forbeast did not answer; trying again within a minute"}}</script>
+<script>// Ang mga tuntunin ng /chatbot/live na puwedeng magkamali nang walang nakakakita: kung aling event ang may ilaw at saan ito
+// dadaan, ang money packet ng order (ang chip, ang pagsasama ng sunod-sunod na order, walang order na nawawala), at kung
+// kailan aakyat o bababa ang nakikitang bilang. Purong function lang: walang DOM, walang orasan, walang global na binabasa,
+// kaya napapatakbo rin ng node para sa mga test. Plain na script, hindi module: iisang pangalan ang inilalagay, ang LiveRules.
+(function (root) {
+  'use strict';
+
+  var BOTS = ['forbeast', 'incepxionbot', 'botcake'];
+
+  function botOf(e) { return e && BOTS.indexOf(e.bot) >= 0 ? e.bot : null; }
+
+  // 1234567.8 → "1,234,568": sariling formatter para pareho ang labas sa browser at sa node.
+  function num(v) {
+    var n = Math.round(Number(v) || 0), s = String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (n < 0 ? '-' : '') + s;
+  }
+
+  function peso(v) { return '₱' + num(v); }
+
+  // Ang dadaanan ng ilaw: [path, pasulong]. Ang path ng input (inq, seq, ai) ay papunta sa core; ang path ng bot at ng
+  // Orders ay mula sa core palabas.
+  function route(e) {
+    var bot = botOf(e);
+    if (e.type === 'message') return [['inq', true]];
+    if (e.type === 'ai') return [['ai', true]];
+    if (e.type === 'confirmed') return bot ? [[bot, true]] : [];
+    if (e.type === 'follow_up') return bot ? [['seq', true], [bot, true]] : [['seq', true]];
+    if (e.type === 'order') return bot ? [[bot, false], ['ord', true]] : [['ord', true]];
+    return [];
+  }
+
+  // Ang chip ng money packet: ang alam na halaga lang (hindi kailanman tinatantiya); walang halaga = "+1 ORDER".
+  function label(orders) {
+    var n = orders.length, known = orders.filter(function (o) { return typeof o.amount === 'number' && isFinite(o.amount); });
+    var sum = known.reduce(function (a, o) { return a + o.amount; }, 0);
+    if (known.length) return '+' + peso(sum) + (n > 1 ? ' · ' + n + ' orders' : '');
+    return n > 1 ? '+' + n + ' ORDERS' : '+1 ORDER';
+  }
+
+  function sumKnown(orders) {
+    return orders.reduce(function (a, o) { return a + (typeof o.amount === 'number' && isFinite(o.amount) ? o.amount : 0); }, 0);
+  }
+
+  // Ang plano ng isang poll. Ang hindi order: ikinakalat sa ~4 s; kapag lampas sa max, isa sa bawat ilan lang (sampled ang
+  // iba). Ang order: isang money packet kada slot (1.5 s), hanggang sa kasya sa 5 s ng poll; ang sobra ay pinagsasama sa
+  // huling packet, kaya walang order na nawawala. Reduced motion: walang packet; ang hit at ang chip ay agad (at: 0).
+  function schedule(events, opts) {
+    var o = opts || {}, reduced = !!o.reduced, slot = o.slot || 1500, max = o.max || 60, spread = o.spread || 4200, poll = o.poll || 5000;
+    var list = Array.isArray(events) ? events : [];
+    var orders = list.filter(function (e) { return e && e.type === 'order'; });
+    var rest = list.filter(function (e) { return e && e.type !== 'order'; });
+    var step = Math.ceil(rest.length / max), shown = step > 1 ? rest.filter(function (e, i) { return i % step === 0; }) : rest;
+    var gap = Math.min(600, spread / Math.max(1, shown.length));
+    var actions = shown.map(function (e, i) {
+      return {kind: reduced ? 'hit' : 'packet', at: reduced ? 0 : Math.round(i * gap), type: e.type, bot: botOf(e), route: route(e), event: e};
+    });
+    var slots = Math.max(1, Math.floor(poll / slot));
+    var groups = orders.length <= slots ? orders.map(function (x) { return [x]; })
+      : orders.slice(0, slots - 1).map(function (x) { return [x]; }).concat([orders.slice(slots - 1)]);
+    groups.forEach(function (g, i) {
+      actions.push({kind: reduced ? 'instant' : 'money', at: reduced ? 0 : i * slot, type: 'order', bot: botOf(g[0]), route: route(g[0]),
+        label: label(g), orders: g.length, peso: sumKnown(g), event: g[g.length - 1]});
+    });
+    actions.sort(function (a, b) { return a.at - b.at; });
+    return {actions: actions, sampled: rest.length - shown.length};
+  }
+
+  // Ang nakikitang bilang laban sa bilang ng server. Pataas: hinihintay hanggang `hold` ms (ang packet na paparating ang
+  // magpapaakyat; ang hold na 0 ay tuloy agad). Pababa: hindi sa loob ng isang minuto mula sa huling pag-akyat (ang lokal na
+  // pag-akyat ay nauuna sa cache ng server); pagkatapos noon, ang server ang sinusunod (hal. bagong araw).
+  function settle(st, server, now, hold, floor) {
+    var s = {shown: st.shown, server: server, heldSince: st.heldSince, lastUp: st.lastUp};
+    var f = floor === undefined ? 60000 : floor;
+    if (server > s.shown) {
+      if (s.heldSince === null || s.heldSince === undefined) s.heldSince = now;
+      if (!hold || now - s.heldSince >= hold) { s.shown = server; s.heldSince = null; s.lastUp = now; }
+    } else {
+      s.heldSince = null;
+      if (server < s.shown && (s.lastUp === null || s.lastUp === undefined || now - s.lastUp >= f)) s.shown = server;
+    }
+    return s;
+  }
+
+  // Ang paglapag ng packet: ang nakikita ay umaakyat agad nang delta; ang hinihintay na bilang ng server ay naabot na.
+  function land(st, delta, now) {
+    var s = {shown: st.shown + (Number(delta) || 0), server: st.server, heldSince: st.heldSince, lastUp: st.lastUp};
+    if (delta > 0) s.lastUp = now;
+    if (s.server === null || s.server === undefined || s.server <= s.shown) s.heldSince = null;
+    return s;
+  }
+
+  // Ang bilang habang umaakyat: ease-out-expo mula sa dati papunta sa bago, t mula 0 hanggang 1.
+  function roll(from, to, t) {
+    var k = t >= 1 ? 1 : t <= 0 ? 0 : 1 - Math.pow(2, -10 * t);
+    return from + (to - from) * k;
+  }
+
+  // Ang "signals · last 5 min" ng core: ang kabuuan ng mga bilang sa huling 5 minuto (walang bagong query).
+  function signals(c) {
+    var r = function (k) { return c && c[k] ? Number(c[k].recent) || 0 : 0; };
+    return r('messages') + r('confirmed') + r('follow_ups') + r('ai') + r('orders');
+  }
+
+  root.LiveRules = {num: num, peso: peso, route: route, label: label, schedule: schedule, settle: settle, land: land, roll: roll, signals: signals};
+})(typeof self !== 'undefined' ? self : this);
+</script>
+<script>
+// /chatbot/live: ang feed ay pino-poll kada 5 segundo (tumitigil kapag nakatago ang tab). Ang bawat bagong event ay isang
+// ilaw na dumadaan sa totoong link (LiveRules.schedule ang nagpapasya ng ruta, ng pagsasama ng mga order at ng chip); ang
+// mga bilang ay umaakyat mula sa nakikita papunta sa bago (LiveRules.settle / land: ang order ay naghihintay sa packet at
+// hindi bumababa sa loob ng isang minuto). Tumatakbo ito buong araw sa TV, kaya walang lumalaking DOM: 30 packet na ginagamit
+// muli, iisang animation loop, 8 na linya ng timeline. Ang text mula sa server (pangalan ng page) ay textContent lang.
+(() => {
+    const R = window.LiveRules;
+    const boot = JSON.parse(document.getElementById('live-data').textContent);
+    const root = document.querySelector('[data-live]');
+    const stage = root.querySelector('[data-live-stage]');
+    const mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    const live = window.likhaLive = {reduced: !!(mq && mq.matches), cursor: boot.cursor, counts: boot.counts, timer: null, inflight: false, fail: 0, active: 0, sampled: 0, st: {}};
+    const LIGHTS = 30, LOG_LINES = 8, HOP = 1900;
+    const TYPE = {message: ['INCOMING', 'Inquiry received'], confirmed: ['SENT', 'Reply sent'], follow_up: ['SEQUENCE', 'Follow-up sent'], ai: ['AI', 'AI answered'], order: ['ORDER', 'Order recorded']};
+    const COLOR = {message: '--inq', ai: '--ai', confirmed: '--out', follow_up: '--seq', order: '--ord'};
+    const all = s => root.querySelectorAll(s);
+    const css = v => getComputedStyle(root).getPropertyValue(v).trim() || '#fff';
+    const toggle = (e, on) => on ? e.removeAttribute('hidden') : e.setAttribute('hidden', '');
+    const now = () => performance.now();
+
+    // ── ang canvas: 1920 × 1080 na pinalaki sa screen, at ang mabagal na paglipat laban sa burn-in (hanggang 4 px, isang hakbang kada minuto) ──
+    const DRIFT = [[0, 0], [2, 1], [4, 2], [3, 4], [1, 3], [-1, 4], [-3, 2], [-4, 0], [-2, -2], [1, -3]];
+    let drift = 0;
+    function fit() {
+        if (innerWidth <= 900) { stage.style.transform = ''; return; }
+        const s = Math.min(innerWidth / 1920, innerHeight / 1080), [dx, dy] = DRIFT[drift % DRIFT.length];
+        stage.style.transform = 'translate(' + ((innerWidth - 1920 * s) / 2 + dx) + 'px,' + ((innerHeight - 1080 * s) / 2 + dy) + 'px) scale(' + s + ')';
+    }
+    addEventListener('resize', fit);
+    setInterval(() => { drift++; fit(); }, 60000);
+    fit();
+
+    // ── ang mga bilang: bawat isa ay may nakikita at server; umaakyat nang paunti-unti (isang animation loop para sa lahat) ──
+    const day = (k, f, hold = 0, dur = 900) => ({k, f, hold, floor: 60000, dur});
+    const win = (k, f) => ({k, f, hold: 0, floor: 0, dur: 900});
+    const NUMS = [
+        day('replies', c => c.confirmed.today), day('orders', c => c.orders.today, 8000, 1200),
+        day('peso', c => c.order_value ? c.order_value.today : 0, 8000, 1400), day('messages', c => c.messages.today),
+        day('ai', c => c.ai.today), day('follow_ups', c => c.follow_ups.today),
+        win('active', c => c.active), win('signals', c => R.signals(c)),
+    ];
+    for (const side of ['in', 'out']) for (const b of [...Object.keys(boot.bots), 'unknown']) NUMS.push(day(side + '-' + b, c => c.bots[side][b]));
+    const spec = {};
+    for (const n of NUMS) spec[n.k] = n;
+    const shown = {}, rolls = {};
+    let rollRaf = 0;
+    function paint(k, v) {
+        const text = R.num(v);
+        for (const e of all('[data-live-count="' + k + '"]')) if (e.textContent !== text) e.textContent = text;
+    }
+    function rollTick(t) {
+        for (const k of Object.keys(rolls)) {
+            const r = rolls[k], q = Math.min(1, (t - r.t0) / r.dur);
+            paint(k, R.roll(r.from, r.to, q));
+            if (q >= 1) delete rolls[k];
+        }
+        rollRaf = Object.keys(rolls).length ? requestAnimationFrame(rollTick) : 0;
+    }
+    function show(k, v) {
+        const from = shown[k] === undefined ? v : shown[k];
+        shown[k] = v;
+        if (from === v) return;
+        if (live.reduced || document.hidden) { paint(k, v); return; }
+        rolls[k] = {from: rolls[k] ? R.roll(rolls[k].from, rolls[k].to, Math.min(1, (now() - rolls[k].t0) / rolls[k].dur)) : from, to: v, t0: now(), dur: spec[k].dur};
+        for (const e of all('[data-live-count="' + k + '"]')) { e.classList.remove('flick'); void e.getBoundingClientRect(); e.classList.add('flick'); }
+        if (!rollRaf) rollRaf = requestAnimationFrame(rollTick);
+    }
+    function settleAll() {
+        const t = Date.now();
+        for (const n of NUMS) {
+            const server = Number(n.f(live.counts)) || 0;
+            live.st[n.k] = live.st[n.k] ? R.settle(live.st[n.k], server, t, n.hold, n.floor) : {shown: server, server, heldSince: null, lastUp: null};
+            show(n.k, live.st[n.k].shown);
+        }
+    }
+    function landOrders(count, pesos) {
+        const t = Date.now();
+        live.st.orders = R.land(live.st.orders, count, t);
+        live.st.peso = R.land(live.st.peso, pesos, t);
+        show('orders', live.st.orders.shown);
+        show('peso', live.st.peso.shown);
+    }
+    function put(key, value, attr) {
+        for (const e of all('[' + attr + '="' + key + '"]')) if (e.textContent !== value) e.textContent = value;
+    }
+    function setCounts(c) {
+        live.counts = c;
+        settleAll();
+        for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders']]) {
+            put(k, R.num(c[src].recent), 'data-live-recent');
+            for (const e of all('[data-live-up="' + k + '"]')) e.classList.toggle('up', c[src].recent > 0);
+        }
+        const rt = c.reply_time || {state: 'error', seconds: null};
+        put('reply_time', rt.seconds === null ? '—' : Number(rt.seconds).toFixed(1), 'data-live-count');
+        for (const e of all('[data-live-unit]')) toggle(e, rt.seconds !== null);
+        put('reply_time', boot.notes[rt.state === 'ok' && rt.seconds === null ? 'none' : rt.state] || boot.notes.error, 'data-live-note');
+        for (const side of ['in', 'out']) for (const e of all('[data-live-unknown="' + side + '"]')) toggle(e, !!c.bots[side].unknown);
+        for (const bot of Object.keys(boot.bots)) {
+            const on = bot === 'botcake' || !!(c.linked && c.linked[bot]) ? '1' : '0';
+            for (const e of all('[data-bot-row="' + bot + '"], [data-reply-row="' + bot + '"]')) e.setAttribute('data-linked', on);
+        }
+        const o = c.last_order, page = o ? (o.page.length > 24 ? o.page.slice(0, 23) + '…' : o.page) : '';
+        put('', o ? page + ' · ' + o.at + (o.bot && boot.bots[o.bot] ? ' · ' + boot.bots[o.bot] : '') : 'no order yet today', 'data-live-last-order');
+        const seqs = c.sequences || [];
+        for (let i = 0; i < 3; i++) {
+            const s = seqs[i], text = s ? (s.name.length > 18 ? s.name.slice(0, 17) + '…' : s.name) + ' · ' + R.num(s.n) : '';
+            for (const e of all('[data-live-seq="' + i + '"]')) if (e.textContent !== text) e.textContent = text;
+        }
+    }
+
+    // ── ang 5-minutong orasan sa core: 60 guhit, isa kada 5 s; ang ulo ay "ngayon", ang guhit na may event ay maliwanag at kumukupas ──
+    const ticks = [...all('[data-live-ticks] line')], bucket = new Array(60).fill(0), slotOf = new Array(60).fill(-1);
+    const head = () => Math.floor(Date.now() / 5000);
+    function mark() { const h = head(), i = h % 60; if (slotOf[i] !== h) { slotOf[i] = h; bucket[i] = 0; } bucket[i]++; }
+    function paintTicks() {
+        const h = head();
+        ticks.forEach((l, i) => {
+            const age = ((h % 60) - i + 60) % 60, n = slotOf[i] === h - age ? bucket[i] : 0, a = i * 6 * Math.PI / 180, len = 9 + Math.min(n, 4) * 4 + (age === 0 ? 7 : 0);
+            l.setAttribute('x2', (690 + Math.sin(a) * (150 + len)).toFixed(1)); l.setAttribute('y2', (348 - Math.cos(a) * (150 + len)).toFixed(1));
+            l.style.stroke = age === 0 ? '#fff' : ''; l.style.strokeWidth = age === 0 ? 4 : '';
+            l.style.strokeOpacity = age === 0 ? 1 : n ? Math.max(.25, .95 - age / 70) : '';
+        });
+    }
+
+    // ── ang mga packet: 30 na ginagamit muli (ulo na may glow, buntot na 3 bilog, chip ng order), iisang animation loop ──
+    const svg = root.querySelector('[data-map]');
+    const NS = 'http://www.w3.org/2000/svg';
+    const mk = (n, a, p) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; };
+    const paths = {}, pool = [], moving = [];
+    if (svg) {
+        for (const p of svg.querySelectorAll('[data-path]')) paths[p.dataset.path] = {el: p, len: 0};
+        const layer = svg.querySelector('[data-lights]');
+        for (let i = 0; i < LIGHTS; i++) {
+            const g = mk('g', {style: 'display:none'}, layer), tail = [1, 2, 3].map(j => mk('circle', {r: 6 - j * 1.4, opacity: .55 / j}, g));
+            pool.push({g, tail, dot: mk('circle', {r: 7, filter: 'url(#nm-glow)'}, g), text: mk('text', {class: 'pk'}, g), busy: false});
+        }
+    }
+    const len = p => { if (!p.len) { try { p.len = p.el.getTotalLength(); } catch (e) { p.len = 0; } } return p.len; };
+    const visible = () => svg && svg.getBoundingClientRect().width > 0;
+    let raf = 0, lastWave = 0;
+    function frame(t) {
+        for (let i = moving.length - 1; i >= 0; i--) {
+            const m = moving[i], q = Math.min(1, (t - m.t0) / m.dur);
+            [m.l.dot, ...m.l.tail].forEach((c, j) => { const p = m.at(Math.max(0, q - j * .022) * m.total); c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); });
+            if (m.label) { const p = m.at(q * m.total); m.l.text.setAttribute('x', p.x); m.l.text.setAttribute('y', p.y - 24); }
+            if (m.mid && q >= .47) { m.mid(); m.mid = null; }
+            if (q >= 1) { m.l.g.style.display = 'none'; m.l.busy = false; moving.splice(i, 1); live.active--; m.done(); }
+        }
+        raf = moving.length ? requestAnimationFrame(frame) : 0;
+    }
+    // Isang packet sa ruta ([path, pasulong], ...). Walang mapang nakikita, walang bakanteng packet o nakatago ang tab: ang dulo agad.
+    function travel(route, color, dur, done, label, mid) {
+        const segs = route.map(([k, fwd]) => paths[k] && {p: paths[k], fwd}).filter(Boolean);
+        if (live.reduced || document.hidden || !visible() || !segs.length || segs.some(s => !len(s.p))) { if (mid) mid(); done(); return; }
+        const l = pool.find(x => !x.busy);
+        if (!l) { live.sampled++; if (mid) mid(); done(); return; }
+        const total = segs.reduce((a, s) => a + s.p.len, 0);
+        const at = d => { let k = d; for (const s of segs) { if (k <= s.p.len) return s.p.el.getPointAtLength(s.fwd ? k : s.p.len - k); k -= s.p.len; } const s = segs[segs.length - 1]; return s.p.el.getPointAtLength(s.fwd ? s.p.len : 0); };
+        l.busy = true;
+        const c = css(color);
+        l.dot.setAttribute('fill', c); l.dot.setAttribute('r', label ? 10 : 7);
+        l.tail.forEach((e, j) => { e.setAttribute('fill', c); e.setAttribute('r', (label ? 8 : 6) - (j + 1) * 1.4); });
+        l.text.textContent = label || '';
+        l.g.style.display = '';
+        live.active++;
+        moving.push({l, at, total, dur, done, label, mid, t0: now()});
+        if (!raf) raf = requestAnimationFrame(frame);
+    }
+    function hit(target, ms = 600, cls = '') {
+        for (const g of all('[data-hit="' + target + '"], [data-live-card="' + target + '"]')) {
+            g.classList.add(g.dataset.liveCard ? 'flash' : 'is-hit');
+            if (cls) g.classList.add(cls);
+            clearTimeout(g._lvT);
+            g._lvT = setTimeout(() => g.classList.remove('is-hit', 'flash', 'long'), ms);
+        }
+    }
+    function wave() {
+        const w = root.querySelector('[data-live-wave]'), t = now();
+        if (!w || live.reduced || t - lastWave < 400) return;
+        lastWave = t;
+        w.classList.remove('go'); void w.getBoundingClientRect(); w.classList.add('go');
+    }
+    // Ang pagdating ng order: ang Orders, Orders recorded at Order value ay umaakyat, ang KPI ay kumikinang na ginto at ang chip ay lumulutang.
+    function cash(a) {
+        landOrders(a.orders, a.peso);
+        hit('ord', 1400, 'long');
+        const k = root.querySelector('[data-live-kpi="orders"]'), plus = root.querySelector('[data-live-plus]');
+        if (k && !live.reduced) { k.classList.remove('cash'); void k.offsetWidth; k.classList.add('cash'); }
+        if (!plus) return;
+        clearTimeout(plus._lvT);
+        plus.textContent = a.label;
+        plus.classList.remove('go', 'still'); void plus.offsetWidth;
+        plus.classList.add(live.reduced ? 'still' : 'go');
+        plus._lvT = setTimeout(() => plus.classList.remove('still', 'go'), live.reduced ? 4000 : 1800);
+    }
+    function act(a) {
+        const bot = a.bot;
+        mark();
+        if (a.type === 'order') {
+            if (a.kind === 'instant') { cash(a); return; }
+            travel(a.route, COLOR.order, 3200, () => cash(a), a.label, () => { hit('core'); wave(); });
+            return;
+        }
+        const land = {
+            message: () => { hit('core'); hit('inq'); wave(); },
+            ai: () => { hit('ai'); hit('core'); wave(); },
+            confirmed: () => { if (bot) hit(bot); },
+            follow_up: () => { hit('seq'); if (bot) hit(bot); },
+        }[a.type] || (() => hit('core'));
+        if (a.kind === 'hit') { land(); return; }
+        travel(a.route, COLOR[a.type], a.type === 'follow_up' ? 3000 : a.type === 'ai' ? 1000 : HOP, land);
+    }
+    function play(events) {
+        const plan = R.schedule(events, {reduced: live.reduced || !visible()});
+        live.sampled += plan.sampled;
+        for (const a of plan.actions) a.at ? setTimeout(() => act(a), a.at) : act(a);
+    }
+
+    // ── ang timeline: 8 na linya, ang pinakabago sa itaas ──
+    const logEl = root.querySelector('[data-live-log]');
+    function log(events) {
+        for (const e of events.slice(-LOG_LINES)) {
+            const [chip, desc] = TYPE[e.type] || ['EVENT', 'Event'];
+            const li = document.createElement('li');
+            li.className = 'ty-' + (TYPE[e.type] ? e.type : 'message');
+            const t = document.createElement('time'); t.textContent = String(e.at).slice(11, 19);
+            const tx = document.createElement('div'); tx.className = 'tx';
+            const l1 = document.createElement('div'); l1.className = 'l1';
+            const ch = document.createElement('span'); ch.className = 'ch'; ch.textContent = chip;
+            const ti = document.createElement('span'); ti.className = 'ti'; ti.textContent = e.bot && boot.bots[e.bot] ? boot.bots[e.bot] : boot.site;
+            const de = document.createElement('span'); de.className = 'de';
+            de.textContent = desc + ' · ' + e.page + (e.type === 'order' && typeof e.amount === 'number' ? ' · ' + R.peso(e.amount) : '');
+            l1.append(ch, ti); tx.append(l1, de); li.append(t, tx);
+            logEl.prepend(li);
+        }
+        while (logEl.children.length > LOG_LINES) logEl.lastElementChild.remove();
+    }
+
+    const statusEl = root.querySelector('[data-live-status]');
+    function setStatus(state, label) {
+        statusEl.dataset.liveStatus = state;
+        statusEl.querySelector('[data-live-state]').textContent = label;
+    }
+    async function poll() {
+        clearTimeout(live.timer);
+        if (document.hidden || live.inflight) return;
+        live.inflight = true;
+        const q = new URLSearchParams();
+        if (boot.page) q.set('page_id', boot.page);
+        if (boot.bot) q.set('bot', boot.bot);
+        for (const [k, v] of Object.entries(live.cursor || {})) q.set('cursor[' + k + ']', v);
+        try {
+            // Ang request na nabitin (hal. nawala ang Wi-Fi ng TV) ay pinuputol pagkalipas ng 15 s, kaya tuloy ang ulit.
+            const res = await fetch(boot.feed + '?' + q, {headers: {Accept: 'application/json'}, credentials: 'same-origin', cache: 'no-store',
+                signal: window.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined});
+            if ([401, 403, 419].includes(res.status)) { setStatus('off', 'SIGNED OUT: RELOAD'); return; }
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            live.cursor = data.cursor;
+            live.fail = 0;
+            setCounts(data.counts);
+            for (const e of all('[data-live-updated]')) e.textContent = data.now;
+            log(data.events);
+            play(data.events);
+            setStatus('live', data.more > 0 ? 'LIVE · +' + R.num(data.more) + ' MORE' : 'LIVE');
+        } catch (e) {
+            live.fail++;
+            setStatus('error', 'RECONNECTING…');
+        } finally {
+            live.inflight = false;
+        }
+        if (!document.hidden && statusEl.dataset.liveStatus !== 'off') live.timer = setTimeout(poll, live.fail ? Math.min(30000, boot.interval * 2 ** live.fail) : boot.interval);
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (statusEl.dataset.liveStatus === 'off') return;
+        if (document.hidden) { clearTimeout(live.timer); setStatus('hidden', 'PAUSED (TAB HIDDEN)'); } else { setStatus('live', 'LIVE'); poll(); }
+    });
+    for (const s of all('[data-live-page], [data-live-bot]')) s.addEventListener('change', e => e.target.form.submit());
+    function motion(reduced) {
+        live.reduced = reduced;
+        if (svg && svg.pauseAnimations) reduced ? svg.pauseAnimations() : svg.unpauseAnimations();
+    }
+    if (mq && mq.addEventListener) mq.addEventListener('change', e => motion(e.matches));
+    motion(live.reduced);
+
+    // TV mode: buong screen (kapag kaya ng browser).
+    const fs = root.querySelector('[data-live-fullscreen]');
+    if (fs && document.documentElement.requestFullscreen) {
+        toggle(fs, true);
+        fs.addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}));
+        document.addEventListener('fullscreenchange', () => { fs.textContent = document.fullscreenElement ? 'Exit full screen' : 'TV mode'; });
+    }
+    // Ang orasan ng Manila, kada segundo; ang mga bilang na hinihintay ang packet ay sinusuri rin kada segundo.
+    const clock = root.querySelector('[data-live-clock]');
+    function second() {
+        try { clock.textContent = new Date().toLocaleTimeString('en-GB', {timeZone: 'Asia/Manila', hour12: false}); } catch (e) { /* ang huling oras ng server ang naiiwan */ }
+        paintTicks();
+        if (['orders', 'peso'].some(k => live.st[k] && live.st[k].heldSince !== null)) settleAll();
+    }
+    live.play = play; live.setCounts = setCounts; live.log = log;
+
+    setCounts(boot.counts);
+    second();
+    setInterval(second, 1000);
+    live.timer = setTimeout(poll, new URLSearchParams(location.search).has("now") ? 300 : boot.interval);
+})();
+</script>
+</body>
+</html>

@@ -165,7 +165,7 @@ class ChatbotLiveTest extends ChatblastTestCase
             ['order', '2026-10-21 12:30:09', 'Page Uno'],
         ], array_map(fn ($e) => [$e['type'], $e['at'], $e['page']], $out['events']));
         $this->assertSame((int) $late, $out['events'][4]['id']);
-        foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id', 'bot'], array_keys($e)); // ang bot: ang naghatid o sumagot
+        foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id', 'bot', ...($e['type'] === 'order' ? ['amount'] : [])], array_keys($e)); // ang bot: ang naghatid o sumagot
         foreach (['Juan', 'Magkano', 'sagot', 'Hello', '7004'] as $private) $this->assertStringNotContainsString($private, $res->getContent());
         $this->assertSame(0, $out['more']);
 

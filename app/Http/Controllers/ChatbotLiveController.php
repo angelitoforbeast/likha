@@ -21,9 +21,9 @@ class ChatbotLiveController extends Controller
         $pages = array_flip(BotcakeChat::pageMap());
         ksort($pages, SORT_NATURAL | SORT_FLAG_CASE);
         // Ang unang laman: ang mga bilang at ang cursor ngayon, para ang unang poll ay tuloy mula sa pagbukas ng page.
-        $feed = $this->live->feed(['page_id' => $request->query('page_id')]);
+        $feed = $this->live->feed(['page_id' => $request->query('page_id'), 'bot' => $request->query('bot')]);
 
-        return view('chatbot.live', ['feed' => $feed, 'pages' => $pages, 'page' => LiveFeed::page($request->query())]);
+        return view('chatbot.live', ['feed' => $feed, 'pages' => $pages, 'page' => LiveFeed::page($request->query()), 'bot' => LiveFeed::bot($request->query())]);
     }
 
     public function feed(Request $request)
