@@ -2,16 +2,20 @@
 
 namespace Tests\Feature\Chatblast;
 
+use App\Jobs\HandleGatewayEvent;
 use App\Jobs\MarkChatbotReplied;
 use App\Jobs\RunChatbotFlow;
 use App\Models\BotcakeChat;
 use App\Models\BotcakePsid;
 use App\Models\ChatbotFlow;
 use App\Models\ChatbotReply;
+use App\Models\ChatbotSequence;
+use App\Services\BotcakeChatGuard;
 use App\Services\Chatbot\AdGroups;
 use App\Services\Chatbot\ChatbotInbound;
 use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotRunner;
+use App\Services\Chatbot\ChatbotSequences;
 use App\Services\Chatbot\CustomerFields;
 use App\Services\Chatbot\FlowGraph;
 use App\Services\PageSettings;
@@ -24,9 +28,9 @@ use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Ang pagbukas ng ad (referral ng Forbeast Gateway) ay itinatala lang: ang unang mensahe (o postback) ng customer ang
- * nagsisimula ng Main Flow, kasama ang ad ng referral. Sa Ad-based na page, ang unang mensahe ng bagong customer na wala
- * pang ad ay naghihintay nang hanggang 2 s sa referral. Fake na HTTP; walang tawag sa totoong gateway.
+ * Ang pagbukas ng ad (referral ng Forbeast Gateway) ay itinatala lang, bago ang 200: ang unang mensahe (o postback) ng
+ * customer ang nagsisimula ng Main Flow, kasama ang ad ng referral. Ang tanong na hindi naihatid (send_status failed) ay
+ * itinatanong ulit sa susunod na mensahe. Fake na HTTP; walang tawag sa totoong gateway.
  */
 class AdOpenWaitTest extends ChatblastTestCase
 {
@@ -36,6 +40,7 @@ class AdOpenWaitTest extends ChatblastTestCase
     private const PSID = '6012345678901234';
     private const AD_X = '6045246247433';
     private const AD_Y = '6045246247999';
+    private const OPENING = 'Hello po! PROMO 199';
 
     private int $eventId = 18000;
     private int $ran = 0;
@@ -50,8 +55,12 @@ class AdOpenWaitTest extends ChatblastTestCase
             'database/migrations/2026_10_24_100000_add_draft_to_chatbot_flows.php',
             'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
             'database/migrations/2026_10_25_100000_create_chatbot_waits_table.php',
+            'database/migrations/2026_10_26_100000_create_chatbot_sequence_tables.php',
             'database/migrations/2026_10_30_098000_add_raw_to_chatbot_replies.php',
             'database/migrations/2026_10_30_100000_add_results_to_chatbot_replies.php',
+            'database/migrations/2026_11_06_100000_add_chat_index_to_chatbot_replies.php',
+            'database/migrations/2026_11_09_100000_add_via_to_chatbot_replies.php',
+            'database/migrations/2026_11_11_100000_add_real_send_to_chatbot_replies.php',
         ]]);
         config([
             'services.chatbot.replies_enabled' => true, 'services.chatbot.ai_async' => false,
@@ -77,20 +86,32 @@ class AdOpenWaitTest extends ChatblastTestCase
         app(ChatbotPage::class)->link('Page Uno', $flow->fresh());
     }
 
-    /** Ang event ng gateway (pinirmahan), bawat isa may sariling event_id at oras ng Meta. */
-    private function event(array $e): void
+    /** Ang event ng gateway, bawat isa may sariling event_id, mid at oras ng Meta. */
+    private function shape(array $e): array
     {
         $id = ++$this->eventId;
-        $body = json_encode($e + ['kind' => 'event', 'event_id' => $id, 'page_id' => '1001', 'psid' => self::PSID, 'type' => 'message',
+
+        return $e + ['kind' => 'event', 'event_id' => $id, 'page_id' => '1001', 'psid' => self::PSID, 'type' => 'message',
             'mid' => 'm_' . $id, 'timestamp' => 1761800000000 + $id, 'text' => 'Hm', 'attachments' => [], 'referral' => null,
-            'postback' => null, 'is_echo' => false, 'app_id' => null, 'attempt' => 1]);
+            'postback' => null, 'is_echo' => false, 'app_id' => null, 'attempt' => 1];
+    }
+
+    /** Ipinapadala sa /api/gateway/events, pinirmahan. */
+    private function event(array $e): void
+    {
+        $body = json_encode($this->shape($e));
         $this->call('POST', '/api/gateway/events', [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json',
             'HTTP_X_GATEWAY_SIGNATURE' => 'sha256=' . hash_hmac('sha256', $body, self::SECRET)], $body)->assertOk();
     }
 
+    private static function ref(string $ad = self::AD_X): array
+    {
+        return ['type' => 'referral', 'mid' => null, 'text' => null, 'referral' => ['ad_id' => $ad, 'ref' => null, 'source' => 'ADS']];
+    }
+
     private function referral(string $ad = self::AD_X, array $extra = []): void
     {
-        $this->event($extra + ['type' => 'referral', 'mid' => null, 'text' => null, 'referral' => ['ad_id' => $ad, 'ref' => null, 'source' => 'ADS']]);
+        $this->event($extra + self::ref($ad));
     }
 
     private function says(string $text, array $extra = []): void
@@ -98,7 +119,7 @@ class AdOpenWaitTest extends ChatblastTestCase
         $this->event($extra + ['text' => $text]);
     }
 
-    /** @return array<int, RunChatbotFlow> ang mga job na naipila mula sa huling tawag */
+    /** @return array<int, RunChatbotFlow> ang mga job ng flow na naipila mula sa huling tawag */
     private function newJobs(): array
     {
         $jobs = Queue::pushed(RunChatbotFlow::class)->values()->all();
@@ -134,8 +155,12 @@ class AdOpenWaitTest extends ChatblastTestCase
         $g->save('Page Uno', null, 'Item Y', [self::AD_Y], ['price' => '799']);
     }
 
-    public function test_S_204_1_an_ad_open_alone_is_recorded_with_its_ad_and_starts_nothing(): void
+    public function test_S_204_1_an_ad_open_alone_is_recorded_with_its_ad_and_is_not_a_reply_or_a_run(): void
     {
+        $seq = ChatbotSequence::create(['name' => 'Follow', 'active' => true, 'exit_on_reply' => true]);
+        DB::table('chatbot_sequence_subscriptions')->insert(['sequence_id' => $seq->id, 'page_id' => 1001, 'psid' => (int) self::PSID, 'status' => 'active',
+            'next_send_at' => now()->addHour(), 'created_at' => now(), 'updated_at' => now()]);
+
         $this->referral();
 
         $chat = BotcakeChat::sole();
@@ -143,8 +168,8 @@ class AdOpenWaitTest extends ChatblastTestCase
         $this->assertNull($chat->message);
         $this->assertSame(1, $this->counted('referral'));
         Queue::assertNotPushed(RunChatbotFlow::class);
-        // Ang Results ay bumabasa nito gaya ng dati (ang oras na backfill ay ganoon din).
-        Queue::assertPushed(MarkChatbotReplied::class, 1);
+        Queue::assertNotPushed(MarkChatbotReplied::class);
+        $this->assertSame('active', DB::table('chatbot_sequence_subscriptions')->where('sequence_id', $seq->id)->value('status'));
         $this->assertSame([], $this->sent());
         $this->assertNull((new CustomerFields(1001, (int) self::PSID))->get(CustomerFields::LAST_CHAT));
     }
@@ -155,12 +180,12 @@ class AdOpenWaitTest extends ChatblastTestCase
         $this->travel(5)->seconds();
         $this->says('Hm');
         $jobs = $this->newJobs();
-        $this->assertCount(1, $jobs);
         $message = BotcakeChat::where('message', 'Hm')->sole();
-        $this->assertSame([$message->id, null], [$jobs[0]->chatId, $jobs[0]->delay]);
+        $this->assertSame([$message->id], array_map(fn ($j) => $j->chatId, $jobs));
+        Queue::assertPushed(MarkChatbotReplied::class, 1); // ang mensahe ay sagot gaya ng dati
 
         app(ChatbotRunner::class)->handle($jobs[0]->chatId);
-        $this->assertSame(['Hello po! PROMO 199'], $this->sent());
+        $this->assertSame([self::OPENING], $this->sent());
         $this->assertSame([self::AD_X, $message->id], [ChatbotReply::sole()->ad_id, ChatbotReply::sole()->chat_id]);
     }
 
@@ -171,13 +196,12 @@ class AdOpenWaitTest extends ChatblastTestCase
         $this->referral();
         $this->referral(extra: ['event_id' => $this->eventId, 'attempt' => 2]); // ang ulit ng parehong event
         $this->assertSame([], $this->newJobs());
-        $this->assertSame(1, $this->counted('duplicate'));
+        $this->assertSame([1, 1], [BotcakeChat::whereNull('message')->count(), $this->counted('duplicate')]);
 
         $this->travel(10)->seconds();
         $this->says('Magkano po?');
         $this->work();
-        $this->work();
-        $this->assertSame(['Hello po! PROMO 199', 'Got: Magkano po?'], $this->sent());
+        $this->assertSame([self::OPENING, 'Got: Magkano po?'], $this->sent());
         $last = BotcakeChat::orderByDesc('id')->first();
         $this->assertSame((string) $last->id, (new CustomerFields(1001, (int) self::PSID))->get(CustomerFields::LAST_CHAT));
     }
@@ -186,43 +210,36 @@ class AdOpenWaitTest extends ChatblastTestCase
     {
         $this->says('Hi');
         $this->work();
-        $fields = new CustomerFields(1001, (int) self::PSID);
-        $before = [$fields->get(CustomerFields::WAIT), $fields->get(CustomerFields::LAST_CHAT), DB::table('chatbot_waits')->count()];
+        $state = fn () => [(new CustomerFields(1001, (int) self::PSID))->get(CustomerFields::WAIT), (new CustomerFields(1001, (int) self::PSID))->get(CustomerFields::LAST_CHAT),
+            DB::table('chatbot_waits')->count()];
+        $before = $state();
 
         $this->travel(1)->minutes();
         $this->referral(self::AD_Y);
         $this->assertSame([], $this->newJobs());
-        $fields = new CustomerFields(1001, (int) self::PSID);
-        $this->assertSame($before, [$fields->get(CustomerFields::WAIT), $fields->get(CustomerFields::LAST_CHAT), DB::table('chatbot_waits')->count()]);
+        $this->assertSame($before, $state());
 
         // Ang ad open ay hindi sagot: ang paghihintay ay natatapos bilang "walang sagot".
         $this->travel(61)->minutes();
         Artisan::call('chatbot:resume-skipped');
-        $this->assertSame(['Hello po! PROMO 199', 'Still there?'], $this->sent());
+        $this->assertSame([self::OPENING, 'Still there?'], $this->sent());
     }
 
     public function test_S_204_5_a_postback_starts_the_flow_as_today_and_the_botcake_webhook_path_is_unchanged(): void
     {
-        $this->adBased();
         $this->event(['type' => 'postback', 'mid' => null, 'text' => null, 'postback' => ['title' => 'Order now', 'payload' => 'ORDER']]);
-        $jobs = $this->newJobs();
-        // Ang postback ng bagong customer na walang ad sa Ad-based na page ay naghihintay din sa referral (S-204.9).
-        $this->assertSame(1, count($jobs));
-        app(ChatbotRunner::class)->handle($jobs[0]->chatId);
-        $this->assertSame(['Hello po! PROMO 199'], $this->sent());
+        $this->work();
+        $this->assertSame([self::OPENING], $this->sent());
 
-        // Botcake webhook (page na nasa Botcake): agad, walang paghihintay, kahit Ad-based na may group.
+        // Botcake webhook (page na nasa Botcake): ang chat ay tumatakbo at sagot gaya ng dati.
         $this->page('Page Dos', '1002');
         app(PageSettings::class)->set('Page Dos', 'botcake', 'chat.key', 'page-key-dos-test-a1s2d3f4g5h6j7k8', true, null, true);
         app(ChatbotPage::class)->link('Page Dos', ChatbotFlow::sole());
-        app(AdGroups::class)->setMode('Page Dos', true);
-        app(AdGroups::class)->save('Page Dos', null, 'Item X', [self::AD_X], ['price' => '499']);
         config(['services.botcake.chat_ips' => ['203.171.22.6'], 'services.botcake.chat_ip_mode' => 'log']);
         $this->withServerVariables(['REMOTE_ADDR' => '203.171.22.6'])->postJson('/api/botcake/chat',
             ['page_id' => '1002', 'psid' => '7009', 'name' => 'Ana Cruz', 'message' => 'Hello po'], ['X-Chat-Key' => 'page-key-dos-test-a1s2d3f4g5h6j7k8'])->assertOk();
-        $jobs = $this->newJobs();
-        $this->assertCount(1, $jobs);
-        $this->assertNull($jobs[0]->delay);
+        $this->assertCount(1, $this->newJobs());
+        Queue::assertPushed(MarkChatbotReplied::class, 2);
     }
 
     public static function adCases(): array
@@ -232,8 +249,8 @@ class AdOpenWaitTest extends ChatblastTestCase
             'X then Y then message: the newer ad wins' => [true, [['ref', self::AD_X], ['ref', self::AD_Y], ['say', null]], 'Hello po! PROMO 799'],
             'a message that carries its own referral: that ad' => [true, [['ref', self::AD_X], ['say', self::AD_Y]], 'Hello po! PROMO 799'],
             'no referral, Botcake\'s ad of the customer: the fallback' => [true, [['psid_ad', self::AD_X], ['say', null]], 'Hello po! PROMO 499'],
-            'no referral and no known ad: page values' => [true, [['say', null]], 'Hello po! PROMO 199'],
-            'page-based page: page values' => [false, [['ref', self::AD_X], ['say', null]], 'Hello po! PROMO 199'],
+            'no referral and no known ad: page values' => [true, [['say', null]], self::OPENING],
+            'page-based page: page values' => [false, [['ref', self::AD_X], ['say', null]], self::OPENING],
         ];
     }
 
@@ -255,57 +272,67 @@ class AdOpenWaitTest extends ChatblastTestCase
         $this->assertSame([$reply], $this->sent());
     }
 
-    public function test_S_204_9_on_an_ad_based_page_a_new_customers_first_message_waits_up_to_2_s_for_the_referral(): void
+    public function test_S_204_9_the_referral_is_stored_before_the_200_so_the_queued_message_finds_its_ad(): void
     {
         $this->adBased();
-        // Unang dating ang mensahe: naghihintay (2 s).
-        $this->says('Hm');
-        $held = $this->newJobs();
-        $this->assertCount(1, $held);
-        $this->assertSame(2, (int) now()->diffInSeconds($held[0]->delay));
+        // Ang mga job ng event ay nasa queue (hindi pa tumatakbo), gaya ng sabay-sabay na mga worker.
+        Queue::fake([RunChatbotFlow::class, MarkChatbotReplied::class, HandleGatewayEvent::class]);
 
-        // Dumating ang referral sa loob ng paghihintay: tumatakbo na agad, ang ad ang sagot, isang beses lang.
-        $this->travel(1)->seconds();
         $this->referral(self::AD_Y);
-        $released = $this->newJobs();
-        $this->assertCount(1, $released);
-        $this->assertSame([$held[0]->chatId, null], [$released[0]->chatId, $released[0]->delay]);
-        app(ChatbotRunner::class)->handle($released[0]->chatId);
-        app(ChatbotRunner::class)->handle($held[0]->chatId); // ang naantalang job: wala nang ginagawa
+        $this->assertSame([self::AD_Y], BotcakeChat::pluck('payload')->map(fn ($p) => $p['ad_id'])->all(), 'naimbak bago ang 200');
+        Queue::assertNotPushed(HandleGatewayEvent::class);
+
+        $this->travel(1)->seconds();
+        $this->says('Hm');
+        Queue::assertPushed(HandleGatewayEvent::class, 1);
+        $this->assertSame(1, BotcakeChat::count(), 'ang mensahe ay nasa queue pa');
+
+        Queue::pushed(HandleGatewayEvent::class)->first()->handle(app(PageSettings::class), app(BotcakeChatGuard::class));
+        $this->work();
         $this->assertSame(['Hello po! PROMO 799'], $this->sent());
         $this->assertSame(1, ChatbotReply::count());
-
-        // Walang referral: ang fallback pagkatapos ng paghihintay.
-        $this->says('Hello', ['psid' => '6012345678900001']);
-        $alone = $this->newJobs();
-        $this->assertSame(2, (int) now()->diffInSeconds($alone[0]->delay));
-        $this->travel(2)->seconds();
-        app(ChatbotRunner::class)->handle($alone[0]->chatId);
-        $this->assertSame('Hello po! PROMO 199', $this->sent()[1]);
     }
 
-    public static function noHold(): array
+    public static function orders(): array
+    {
+        return ['referral stored first' => [['ref', 'say']], 'message stored first' => [['say', 'ref']]];
+    }
+
+    #[DataProvider('orders')]
+    public function test_S_204_9_the_event_jobs_in_either_order_give_the_ads_reply_and_one_start(array $order): void
+    {
+        $this->adBased();
+        $jobs = ['ref' => new HandleGatewayEvent(HandleGatewayEvent::fields($this->shape(self::ref(self::AD_Y)))),
+            'say' => new HandleGatewayEvent(HandleGatewayEvent::fields($this->shape(['text' => 'Hm'])))];
+        foreach ($order as $k) $jobs[$k]->handle(app(PageSettings::class), app(BotcakeChatGuard::class));
+        $this->work();
+        $this->work();
+
+        $this->assertSame(['Hello po! PROMO 799'], $this->sent());
+    }
+
+    public static function sendStatuses(): array
     {
         return [
-            'page-based page' => ['page'],
-            'Ad-based page with no groups' => ['no_groups'],
-            'returning customer' => ['returning'],
-            'the message carries its own ad' => ['own_ad'],
+            'failed (551): asked again' => [['status' => 'failed', 'sent_count' => 0, 'error' => 'This person isn\'t available right now.', 'error_code' => 551, 'error_subcode' => 1545041], [self::OPENING, self::OPENING]],
+            'partial with nothing sent: asked again' => [['status' => 'partial', 'sent_count' => 0], [self::OPENING, self::OPENING]],
+            'partial with some sent: the answer' => [['status' => 'partial', 'sent_count' => 1], [self::OPENING, 'Got: Magkano po?']],
+            'sent: the answer' => [['status' => 'sent', 'sent_count' => 1], [self::OPENING, 'Got: Magkano po?']],
         ];
     }
 
-    #[DataProvider('noHold')]
-    public function test_S_204_9_no_hold_where_the_ad_is_known_or_not_needed(string $case): void
+    #[DataProvider('sendStatuses')]
+    public function test_S_204_11_a_question_that_comes_back_failed_is_asked_again_on_the_next_message(array $send, array $sent): void
     {
-        if ($case !== 'page') app(AdGroups::class)->setMode('Page Uno', true);
-        if (in_array($case, ['returning', 'own_ad'], true)) $this->adBased();
-        if ($case === 'returning') {
-            BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => self::PSID, 'message' => 'Hi kahapon', 'payload' => [], 'received_at' => now()->subDay()]);
-        }
-        $this->says('Hm', $case === 'own_ad' ? ['referral' => ['ad_id' => self::AD_X, 'source' => 'ADS']] : []);
+        $this->says('Hm');
+        $this->work();
+        $reply = ChatbotReply::sole();
+        $this->event(['type' => 'send_status', 'mid' => null, 'text' => null, 'send' => $send + ['client_ref' => $reply->client_ref, 'accepted_at' => '2026-10-30T06:57:00.000Z',
+            'sent_at' => '2026-10-30T06:57:01.000Z', 'message_count' => 2, 'error' => null, 'error_code' => null, 'error_subcode' => null]]);
 
-        $jobs = $this->newJobs();
-        $this->assertCount(1, $jobs);
-        $this->assertNull($jobs[0]->delay);
+        $this->travel(5)->seconds();
+        $this->says('Magkano po?');
+        $this->work();
+        $this->assertSame($sent, $this->sent());
     }
 }

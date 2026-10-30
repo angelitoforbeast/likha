@@ -71,6 +71,11 @@ class AdOpenReadersTest extends ChatblastTestCase
         $this->assertSame(0, collect($echoes['pages'])->sum('unanswered'));
 
         $this->assertSame(1, app(LiveFeed::class)->counts(null)['messages']['today']);
+        // Ang aktibong chat (huling 5 minuto): ang sumulat lang, hindi ang nagbukas lang ng ad.
+        $this->chat('7010', '2026-10-21 12:28:00', true);
+        $this->chat('7011', '2026-10-21 12:29:00');
+        $this->travel(11)->seconds();
+        $this->assertSame(1, app(LiveFeed::class)->counts(null)['active']);
     }
 
     public function test_S_204_7_health_shows_the_customers_who_opened_an_ad_and_never_wrote_per_day(): void

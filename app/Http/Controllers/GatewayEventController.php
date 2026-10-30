@@ -96,6 +96,21 @@ class GatewayEventController extends Controller
             return response()->json(['ok' => true, 'accepted' => count($batch)]);
         }
 
+        // Ang pagbukas ng ad (referral) ay iniimbak bago ang 200: ang gateway ay nagpapadala ng mensahe ng parehong customer
+        // pagkatapos lang ng 2xx na ito, kaya ang row ng ad ay nauuna sa takbo ng unang mensahe (ang ad ng sagot, AdGroups).
+        // Ang queue ay sabay-sabay ang mga worker, kaya roon ay maaaring mauna ang mensahe. Magaan ito: walang takbo.
+        if (($event['type'] ?? null) === 'referral' && ($event['is_echo'] ?? false) !== true) {
+            try {
+                // Tuwiran (hindi dispatchSync): walang dinadaanang queue, kaya laging bago ang 200.
+                app()->call([new HandleGatewayEvent(HandleGatewayEvent::fields($event, $gw)), 'handle']);
+            } catch (\Throwable $e) {
+                report($e);
+                return response()->json(['ok' => false], 500); // inuulit ng gateway; ang mensahe ay naghihintay sa likod nito
+            }
+
+            return response()->json(['ok' => true]);
+        }
+
         HandleGatewayEvent::dispatch(HandleGatewayEvent::fields($event, $gw));
 
         return response()->json(['ok' => true]);

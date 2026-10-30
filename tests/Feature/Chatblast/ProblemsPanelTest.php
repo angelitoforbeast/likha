@@ -181,6 +181,7 @@ class ProblemsPanelTest extends ChatblastTestCase
         }
         $this->chat('1004', '6999', '2026-10-27 11:45:00');
         $this->chat('1001', '6998', '2026-10-27 11:20:00'); // lampas 30 minuto: wala pa ring chat sa huling 30
+        $this->chat('1001', '6997', '2026-10-27 11:50:00', ['_ad_open' => true]); // S-204.6: ang pagbukas ng ad ay hindi chat
         app(PageSettings::class)->set('Page Dos', 'chatbot', 'active', '0', false, null, true);
 
         $this->actingAs($this->user());

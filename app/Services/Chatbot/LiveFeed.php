@@ -259,10 +259,10 @@ class LiveFeed
             . Gateways::INCEPXIONBOT . "' ELSE '" . Gateways::FORBEAST . "' END) WHEN payload IS NOT NULL THEN '" . ChatbotProvider::BOTCAKE . "' ELSE 'unknown' END)";
     }
 
-    /** Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto. */
+    /** Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto (hindi ang pagbukas ng ad lang). */
     private function active(?string $page, string $recent, string $end): int
     {
-        return (int) DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')
+        return (int) DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')->whereNull('payload->' . ChatbotInbound::AD_OPEN)
             ->when($page !== null, fn ($q) => $q->where('page_id', $page))
             ->groupBy('page_id')->selectRaw('COUNT(DISTINCT psid) AS n')->pluck('n')->sum();
     }

@@ -170,8 +170,7 @@ class HandleGatewayEvent implements ShouldQueue
         }
         self::count((string) $e['type']);
         // Ang pagbukas ng ad ay itinatala lang; ang mensahe o postback ng customer ang nagsisimula ng takbo.
-        if ($e['type'] === 'referral') ChatbotInbound::adOpened($chat);
-        else ChatbotInbound::afterStore($chat, $pageName, waitForAd: true);
+        if ($e['type'] !== 'referral') ChatbotInbound::afterStore($chat, $pageName);
     }
 
     /** Ang pangalan: sa botcake_psids (page + PSID), saka sa huling chat na may pangalan; kung wala, blangko. */

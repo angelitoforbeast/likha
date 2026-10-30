@@ -211,7 +211,8 @@ class ProblemsPanel
         if (!Schema::hasTable('botcake_chats')) return [];
         $c = config('services.chatbot.problems');
         $minutes = max(1, (int) $c['no_chats_minutes']);
-        $recent = BotcakeChat::active()->where('received_at', '>=', now()->subMinutes($minutes))->pluck('page_id')->map(fn ($id) => (string) $id)->flip();
+        // Ang pagbukas ng ad (ChatbotInbound::AD_OPEN) ay hindi chat ng customer: dito at sa karaniwang bilang sa ibaba.
+        $recent = BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->where('received_at', '>=', now()->subMinutes($minutes))->pluck('page_id')->map(fn ($id) => (string) $id)->flip();
         $guard = app(BotcakeChatGuard::class);
         $out = [];
         foreach ($this->usual()['chats'] as $id => $perHour) {
@@ -243,7 +244,7 @@ class ProblemsPanel
                 [$f, $t] = [$from->format('Y-m-d H:i:s'), $to->format('Y-m-d H:i:s')];
                 foreach ($speed->pageSeconds($f, $t, $t) as $id => $list) $secs[$id] = array_merge($secs[$id] ?? [], $list);
                 // Binibilang sa PHP (isang oras lang ng page_id): walang COUNT o GROUP BY sa botcake_chats.
-                foreach (BotcakeChat::active()->where('received_at', '>=', $f)->where('received_at', '<', $t)->pluck('page_id') as $id) {
+                foreach (BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->where('received_at', '>=', $f)->where('received_at', '<', $t)->pluck('page_id') as $id) {
                     $chats[(string) $id] = ($chats[(string) $id] ?? 0) + 1;
                 }
             }
