@@ -51,3 +51,17 @@ Tasks 1-2 share `HandleGatewayEvent` / `ChatbotInbound` / `ChatbotRunner`, so th
 - S-204.7 the daily figure.
 - S-204.8 (204-1) Ad-based: referral X then message → group of X; X then Y then message → Y; message with its own referral → that ad; no referral → today's fallback (botcake_psids / page values); page-based unchanged.
 - S-204.9 (204-2) Ad-based new customer: message first → held 2 s (delayed job + key); referral within the hold → released at once, ad reply, one start; no referral → fallback after the hold; page-based, returning customer, message with ad → no hold.
+
+## After amendments 204-1, 204-2, 204-3 (this section wins over the design above)
+- 204-3 drops the 2 s hold of 204-2. The order is guaranteed instead: `GatewayEventController` runs `HandleGatewayEvent`
+  for a single `referral` event inside the request (direct `handle`, no queue) before answering 200. Forbeast posts the
+  customer's next event only after that 2xx, so the referral row exists before the message's queued job can run, and
+  `AdGroups::latestAd` (newest ad among the last 50 chats, unchanged) gives the ad's reply. A failure answers 500 and the
+  gateway retries (dedupe keys are released on a failed store, as before).
+- A referral is not a reply: no `afterStore` at all (no sequence exit, no `MarkChatbotReplied`, no run).
+- Readers also skip `_ad_open` in `LiveFeed::active` and `ProblemsPanel` quiet / usual chats (204-3 A2). Ad-group lists
+  (`AdGroups` seen / overview) still count the row as an ad open.
+- 204-3 A3: `SendStatus::receive` marks `__wait_unsent` when a send of the step the customer is waiting on comes back
+  `failed`, or `partial` with nothing sent; the next message then re-asks that step (existing `FlowEngine` path).
+- Cases: S-204.9 becomes "referral stored before the 200; jobs in either order give the ad's reply once"; S-204.11 is the
+  failed-question re-ask.
