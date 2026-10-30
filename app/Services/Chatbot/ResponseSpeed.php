@@ -132,14 +132,20 @@ class ResponseSpeed
         $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f)));
         if (!is_array($list)) {
             $this->day($f, $today, 0, true);
-            $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f))) ?? [];
+            $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f))) ?? ['counts' => [], 'items' => []];
         }
-        if ($hour !== null) $list = array_values(array_filter($list, fn ($r) => (int) substr($r['at'], 11, 2) === $hour));
+        $items = $list['items'];
+        if ($hour !== null) $items = array_values(array_filter($items, fn ($r) => (int) substr($r['at'], 11, 2) === $hour));
 
-        return ['filters' => $f, 'hour' => $hour, 'total' => count($list), 'items' => array_slice($list, 0, self::NOT_SENT_SHOWN)];
+        return ['filters' => $f, 'hour' => $hour, 'total' => $hour === null ? array_sum($list['counts']) : (int) ($list['counts'][$hour] ?? 0),
+            'items' => array_slice($items, 0, self::NOT_SENT_SHOWN)];
     }
 
-    /** Ang Sequences ng isang araw at filter, sariling cache: ang hindi nakuwenta (too_large) ay sinusubukan ulit pagkalipas ng 2 minuto, hindi ng 30. */
+    /**
+     * Ang Sequences ng isang araw at filter, sariling cache: ang hindi nakuwenta (too_large) ay sinusubukan ulit pagkalipas
+     * ng 2 minuto, hindi ng 30. Ang pre-warm ($extra > 0) ay hindi nagsusulat ng too_large: ang badyet ng CLI ay hindi ang
+     * sa web, kaya ang endpoint ang susubok nito sa sariling badyet (at ang naunang buong sagot ay hindi napapalitan).
+     */
     private function sequencesDay(array $f, string $today, int $extra = 0): array
     {
         $key = self::SEQUENCES_KEY . md5(json_encode($f));
@@ -148,7 +154,8 @@ class ResponseSpeed
             if ($hit !== null) return $hit;
         }
         $out = $this->buildSequences($f, $today);
-        Cache::put($key, $out, empty($out['too_large']) ? self::ttl($f, $today) + $extra : self::TODAY_CACHE_SECONDS);
+        if (empty($out['too_large'])) Cache::put($key, $out, self::ttl($f, $today) + $extra);
+        elseif ($extra === 0) Cache::put($key, $out, self::TODAY_CACHE_SECONDS);
 
         return $out;
     }
@@ -167,13 +174,13 @@ class ResponseSpeed
      * parehong key na binabasa ng page, hindi binabasa ang cache. Bawat bahagi ay sariling try: ang pumalya ay ini-report
      * at hindi isinusulat (ang page ang kukuwenta nito gaya ng dati). Ang kahapon muna: ito ang reference ng mga chart ng
      * ngayon. Pagkalipas ng hatinggabi ay walang tala ang bagong kahapon, kaya agad itong kinukuwenta ulit bilang buong araw.
-     * @return array{warmed: string[], failed: string[]}
+     * @return array{warmed: string[], failed: string[], too_large: string[]}
      */
     public function warmDefault(): array
     {
         $today = now()->toDateString();
         $yesterday = CarbonImmutable::parse($today)->subDay()->toDateString();
-        $out = ['warmed' => [], 'failed' => []];
+        $out = ['warmed' => [], 'failed' => [], 'too_large' => []];
         $at = Cache::get(self::WARM_STAMP_KEY . $yesterday);
         if (!is_int($at) || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS) {
             if ($this->warm($yesterday, $today, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::PAST_CACHE_SECONDS + self::WARM_GRACE_SECONDS);
@@ -183,7 +190,10 @@ class ResponseSpeed
         return $out;
     }
 
-    /** Ang dalawang entry ng isang araw ng default na view. true kapag buo ang dalawa (walang pumalya, nakuwenta ang Sequences). */
+    /**
+     * Ang dalawang entry ng isang araw ng default na view. true kapag naisulat ang entry ng page (ang tala ng kahapon ay
+     * ayon dito: ang Sequences na hindi nakuwenta ay kinukuwenta ng endpoint, hindi ng bawat takbo).
+     */
     private function warm(string $date, string $today, array &$out): bool
     {
         $f = self::filters(['date' => $date]);
@@ -196,19 +206,13 @@ class ResponseSpeed
             $out['failed'][] = $date;
             $ok = false;
         }
-        // Ang error sa loob ng Sequences ay nagiging too_large (gaya sa page, 2 minuto lang); ang try ay para sa pagsulat sa cache.
+        // Ang error sa loob ng Sequences ay nagiging too_large (hindi isinusulat ng warm); ang try ay para sa pagsulat sa cache.
         try {
             $seq = $this->sequencesDay($f, $today, self::WARM_GRACE_SECONDS);
-            if (empty($seq['too_large'])) {
-                $out['warmed'][] = $date . ' sequences';
-            } else {
-                $out['failed'][] = $date . ' sequences (too large)';
-                $ok = false;
-            }
+            $out[empty($seq['too_large']) ? 'warmed' : 'too_large'][] = $date . ' sequences';
         } catch (\Throwable $e) {
             report($e);
             $out['failed'][] = $date . ' sequences';
-            $ok = false;
         }
 
         return $ok;
@@ -392,8 +396,15 @@ class ResponseSpeed
                 'attempts' => $tries, 'wait' => $secs, 'code' => $err[0] ?? null, 'subcode' => $err[1] ?? null,
                 'inbox' => route('chatbot.inbox', ['page_id' => $page, 'psid' => $psid], false)];
         }
-        // Pinakabago muna; ang tabla ay ayon sa page at link, para pareho ang ayos anuman ang pagkabasa ng mga row.
+        // Pinakabago muna; ang tabla ay ayon sa page at link, para pareho ang ayos anuman ang pagkabasa ng mga row. Kada oras
+        // ay ang NOT_SENT_SHOWN na pinakabago lang ang itinatabi (ang bilang ay ang lahat), para maliit ang cache sa araw ng
+        // malawakang pagpalya; ang pinakabagong NOT_SENT_SHOWN ng buong araw ay nasa mga ito rin.
         usort($list, fn ($x, $y) => [$y['at'], $x['page'], $x['inbox']] <=> [$x['at'], $y['page'], $y['inbox']]);
+        $counts = array_fill(0, 24, 0);
+        $list = array_values(array_filter($list, function ($r) use (&$counts) {
+            return ++$counts[(int) substr($r['at'], 11, 2)] <= self::NOT_SENT_SHOWN;
+        }));
+        $list = ['counts' => $counts, 'items' => $list];
 
         $nowHour = $f['date'] === $today ? (int) now()->format('G') : 23;
 
@@ -502,27 +513,28 @@ class ResponseSpeed
 
     /**
      * Ang mga pumalyang padala ng Main Flow o AI (hindi sequence) sa customer mula sa mensahe ($at): bago ang unang
-     * naipadalang sagot kapag may sagot ($answered), o sa loob ng MAX_WAIT_SECONDS kapag wala. [bilang, [code, subcode]
-     * ng Meta ng huli]; [0, null] kapag wala.
+     * naipadalang sagot kapag may sagot ($answered; ayon sa pagkakasunod ng pagbasa, sent_at at ID, kaya pati ang pumalya
+     * sa parehong segundo ng sagot), o sa loob ng MAX_WAIT_SECONDS kapag wala. [bilang, [code, subcode] ng Meta ng huli];
+     * [0, null] kapag wala.
      */
     private static function failedBefore(array $replies, string $key, int $at, bool $answered): array
     {
         $fails = $replies['failed_at'][$key] ?? [];
         if (!$fails) return [0, null];
-        $until = $at + self::MAX_WAIT_SECONDS + 1;
+        $lo = 0;
         if ($answered) {
             $times = $replies['at'][$key];
-            [$lo, $hi] = [0, count($times)];
+            $hi = count($times);
             while ($lo < $hi) {
                 $mid = intdiv($lo + $hi, 2);
                 $times[$mid] >= $at ? $hi = $mid : $lo = $mid + 1;
             }
-            $until = $times[$lo];
         }
         [$n, $last] = [0, null];
         foreach ($fails as $i => $t) {
-            if ($t >= $until) break;
             if ($t < $at) continue;
+            // failed_pos: ilang naipadala ng customer ang nabasa bago ang pumalyang ito; lampas sa unang sagot = pagkatapos na nito.
+            if ($answered ? $replies['failed_pos'][$key][$i] > $lo : $t > $at + self::MAX_WAIT_SECONDS) break;
             $n++;
             $last = $i;
         }
@@ -550,12 +562,12 @@ class ResponseSpeed
      * totoong oras mula rito pababa (sunod-sunod ang padala kada PSID, pero hindi umaasa rito). Mga scalar lang, para
      * magaan ang isang buong araw. $each: tinatawag sa bawat row ng query (lahat ng customer), para sa ibang bilang mula
      * sa parehong pagbasa (ang naipadala lang). $failed: pati ang pumalyang padala, sa parehong query, bilang failed_at
-     * (sent_at) at failed_err ([code, subcode] ng Meta) kada customer na $want.
+     * (sent_at), failed_err ([code, subcode] ng Meta) at failed_pos (ilang naipadala ang nauna rito) kada customer na $want.
      * @return array{at: array<string, int[]>, real: array<string, int[]>, confirmed: array<string, bool[]>, chat: array<string, array<int, ?int>>, failed_at: array<string, int[]>, failed_err: array<string, array>}
      */
     private function replies(string $startAt, string $endAt, ?string $page, array $want, ?\Closure $each = null, bool $failed = false): array
     {
-        $out = ['at' => [], 'real' => [], 'confirmed' => [], 'chat' => [], 'failed_at' => [], 'failed_err' => []];
+        $out = ['at' => [], 'real' => [], 'confirmed' => [], 'chat' => [], 'failed_at' => [], 'failed_err' => [], 'failed_pos' => []];
         if (!$want && $each === null) return $out;
         $confirm = ChatbotReply::hasConfirm();
         $cols = array_merge(['page_id', 'psid', 'chat_id', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : [], ChatbotReply::hasVia() ? ['via'] : [], $failed ? ['status', 'error'] : []);
@@ -569,6 +581,7 @@ class ResponseSpeed
                 $k = $r->page_id . ':' . $r->psid;
                 if (isset($want[$k])) {
                     $out['failed_at'][$k][] = strtotime($r->sent_at);
+                    $out['failed_pos'][$k][] = count($out['at'][$k] ?? []);
                     $out['failed_err'][$k][] = self::metaError($r->error);
                 }
                 continue;

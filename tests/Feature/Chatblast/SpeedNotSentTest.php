@@ -84,6 +84,10 @@ class SpeedNotSentTest extends ChatblastTestCase
         // Kahapon: isang hindi naipadala.
         $this->chat('1001', '7010', '2026-10-20 15:00:00');
         $this->send('1001', '7010', '2026-10-20 15:00:04', 'failed', ['error' => 'Forbeast could not send (#200)']);
+        // Kahapon: pumalya at naipadala sa parehong segundo (ang pumalya ang nauna, mas mababang ID): naipadala pagkatapos ng pumalya.
+        $this->chat('1002', '7011', '2026-10-20 16:00:00');
+        $this->send('1002', '7011', '2026-10-20 16:00:05', 'failed', ['error' => 'Botcake refused (HTTP 500)']);
+        $this->send('1002', '7011', '2026-10-20 16:00:05');
     }
 
     private function out(array $q = []): array
@@ -126,7 +130,7 @@ class SpeedNotSentTest extends ChatblastTestCase
         $this->assertSame([0, 1], [$o['by_bot']['Botcake']['not_sent']['never'], $o['by_bot']['Botcake']['not_sent']['late']]);
         $this->assertSame(['never' => 0, 'late' => 1, 'attempts' => 1, 'late_avg' => 120.0], $this->out(['bot' => 'Botcake'])['total']['not_sent']);
         $this->assertSame(['never' => 1, 'late' => 1, 'attempts' => 3, 'late_avg' => 41.0], $this->out(['page_id' => '1001'])['total']['not_sent']);
-        $this->assertSame(['never' => 1, 'late' => 0, 'attempts' => 1, 'late_avg' => null], $this->out(['date' => '2026-10-20'])['total']['not_sent']);
+        $this->assertSame(['never' => 1, 'late' => 1, 'attempts' => 2, 'late_avg' => 5.0], $this->out(['date' => '2026-10-20'])['total']['not_sent']);
         // Ang chart ng reply time: ang bilang kada oras (puwang ang hindi pa naaabot).
         $c = $this->out()['charts']['reply'];
         $this->assertSame([0, 1, 2, 0, null], [$c['not_sent'][9], $c['not_sent'][10], $c['not_sent'][11], $c['not_sent'][12], $c['not_sent'][13]]);
@@ -176,7 +180,8 @@ class SpeedNotSentTest extends ChatblastTestCase
         $this->assertSame([], $at('hour=9'));
         $this->assertSame(['2026-10-21 11:00:00'], $at('page_id=1002'));
         $this->assertSame(['2026-10-21 11:30:00', '2026-10-21 10:10:00'], $at('bot=Forbeast'));
-        $this->assertSame(['2026-10-20 15:00:00'], $at('date=2026-10-20'));
+        $this->assertSame(['2026-10-20 16:00:00', '2026-10-20 15:00:00'], $at('date=2026-10-20'));
+        $this->assertSame(1, $this->getJson('/chatbot/speed/not-sent?date=2026-10-20&hour=16')->json('total'));
         // Ang maling oras ay ang buong araw.
         foreach (['hour=24', 'hour=x', 'hour[]=1', 'hour=-1'] as $q) $this->assertNull($this->getJson('/chatbot/speed/not-sent?' . $q)->assertOk()->json('hour'), $q);
         // Ang access ay gaya ng page.

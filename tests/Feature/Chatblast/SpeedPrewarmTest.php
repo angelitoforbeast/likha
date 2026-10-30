@@ -361,6 +361,30 @@ class SpeedPrewarmTest extends ChatblastTestCase
         $this->assertNotNull(Cache::get(ResponseSpeed::PAGE_KEY . md5(json_encode($today))));
     }
 
+    public function test_S_201_5_a_sequences_answer_over_the_budget_is_not_written_by_the_warm_run(): void
+    {
+        // Ang Sequences ay lampas sa badyet sa takbo ng warm (hal. mas maliit ang memory_limit ng CLI): hindi ito isinusulat,
+        // kaya ang endpoint ang kukuwenta nito (sa sariling badyet nito); ang page part ay naisulat, at ang kahapon ay may tala.
+        Cache::flush();
+        $this->app->instance(ResponseSpeed::class, new class extends ResponseSpeed {
+            protected function sequenceBudget(): int
+            {
+                return 0;
+            }
+        });
+        $lines = $this->warmLog(fn () => $this->assertSame(0, Artisan::call('chatbot:speed-warm')));
+
+        foreach (['2026-10-20', '2026-10-21'] as $d) {
+            $f = ResponseSpeed::filters(['date' => $d]);
+            $this->assertNull(Cache::get(ResponseSpeed::SEQUENCES_KEY . md5(json_encode($f))), "$d sequences not written");
+            $this->assertNotNull(Cache::get(ResponseSpeed::PAGE_KEY . md5(json_encode($f))), "$d page written");
+        }
+        $this->assertIsInt(Cache::get(ResponseSpeed::WARM_STAMP_KEY . '2026-10-20'));
+        $this->assertCount(1, $lines);
+        $this->assertSame('warning', $lines[0][0]);
+        $this->assertMatchesRegularExpression('#^chatbot:speed-warm warmed 2026-10-20, 2026-10-21; too large 2026-10-20 sequences, 2026-10-21 sequences in \d+\.\d s$#', $lines[0][1]);
+    }
+
     public function test_S_201_4_the_page_and_the_sequences_endpoint_give_the_numbers_of_the_old_screen(): void
     {
         $before = json_decode((string) file_get_contents(self::SNAPSHOT), true);

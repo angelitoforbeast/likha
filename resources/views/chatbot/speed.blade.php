@@ -122,7 +122,7 @@
         </details>
         {{-- Ang listahan ng Not sent: binubuksan lang kapag binuksan ang kahon (mula sa cache ng page, kada araw o oras). --}}
         <details class="sp-table mt-3" data-sp-notsent="{{ route('chatbot.speed.not-sent', $keep + ['date' => $f['date']], false) }}">
-            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show the Not sent list</span><span class="sp-hide">Hide the Not sent list</span> <span class="text-xs font-normal text-slate-500" data-sp-summary="not-sent">({{ number_format($total['not_sent']['never']) }} never sent · {{ number_format($total['not_sent']['late']) }} sent late · {{ number_format($total['not_sent']['attempts']) }} failed tries)</span></summary>
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show the Not sent list</span><span class="sp-hide">Hide the Not sent list</span> <span class="text-xs font-normal text-slate-500" data-sp-summary="not-sent">({{ number_format($total['not_sent']['never']) }} never sent · {{ number_format($total['not_sent']['late']) }} sent late)</span></summary>
             <div data-sp-notsent-body>
                 <p class="text-sm text-slate-600" role="status">Loading the list…</p>
             </div>
