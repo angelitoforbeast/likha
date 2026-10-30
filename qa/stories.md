@@ -3320,3 +3320,23 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveNetworkTest.php`, `tests/Feature/Chat
 | S-199.8 (P1) | The feed's query count per poll does not grow with the number of events | `test_S_199_8_the_query_count…` | passed |
 | S-199.9 (P1) | Existing spec-190/196 tests pass (moved labels and paths updated) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest` | passed |
 | S-199.10 (P1) | The full suite adds no new failures vs 59b39b46 | `tests/Feature` | see result |
+
+## S-204 The Main Flow starts on the customer's first message, not on the ad click
+
+As the owner, I want the bot to answer only once the customer has chatted, so the opening (image and greeting) is the first thing a customer who came from an ad receives, with the reply of that ad on Ad-based pages.
+
+Slice 204 (with amendments 204-1 and 204-2). Threat model: trusted = signed Forbeast gateway events; the event fields stay customer data. No new route. Risk tier: medium-high.
+Tests: `tests/Feature/Chatblast/AdOpenWaitTest.php`, existing `ChatbotProviderTest`, `GatewayPerPageTest`, `AdGroupRunTest`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-204.1 (P1) | Given a gateway page, When a referral (ad open) arrives alone, Then the chat row is stored as today with its ad_id and the ad-open mark, it is counted, and no run starts and nothing is sent | `test_S_204_1…` | open |
+| S-204.2 (P1) | Given an ad open, When the customer's first message arrives, Then the Main Flow starts from its first step on that message (the opening is the first send) and the send carries the referral's ad_id | `test_S_204_2…` | open |
+| S-204.3 (P1) | Given a message that started the flow, When the referral arrives after it (or a duplicate referral arrives), Then no second start; a later message runs once and the ad open is passed over | `test_S_204_3…` | open |
+| S-204.4 (P1) | Given a customer inside a running flow (a wait step pending), When a referral arrives, Then the run is unchanged: no run, and the wait timeout still fires as "no reply" | `test_S_204_4…` | open |
+| S-204.5 (P1) | A postback starts the flow as today; the Botcake webhook path is unchanged | `test_S_204_5…` | open |
+| S-204.6 (P1) | Given an ad open followed by a message, Then Health inbound, Speed, "not answered" (echoes) and Live inquiries count one customer message, and an ad open alone is not an unanswered message | `test_S_204_6…` | open |
+| S-204.7 (P2) | Given ad opens on a day, Then Health shows per day the customers who opened an ad and never wrote ("Ad opens without a message"); a message up to 60 s before the ad open counts as writing | `test_S_204_7…` | open |
+| S-204.8 (P1) | Given an Ad-based page: referral for ad X then message → the reply of ad X's group; X then Y then message → Y; a message that carries its own referral → that ad; no referral → today's fallback; a Page-based page → page values | `test_S_204_8…` | open |
+| S-204.9 (P1) | Given an Ad-based page with groups and a new customer, When the message arrives before the referral, Then its start is held up to 2 s; a referral inside the hold releases it at once with the ad's reply and the flow starts once; no referral → the fallback after the hold; Page-based page, returning customer or a message with its own ad → no hold | `test_S_204_9…` | open |
+| S-204.10 (P1) | The full `tests/Feature` run adds no new failures vs 8506b25c | `tests/Feature` | open |
