@@ -131,6 +131,8 @@
     <div class="card gold" id="lv-card-vault" role="tooltip" hidden><h3>Order value today · COD</h3><dl>
         <div><dt>Order value</dt><dd>₱<span data-live-count="peso">{{ $n($c['order_value']['today'] ?? 0) }}</span></dd></div>
         <div><dt>Orders today</dt><dd data-live-count="orders">{{ $n($c['orders']['today']) }}</dd></div>
+        <div><dt>Other / no bot</dt><dd data-live-split="other">{{ $n($c['order_split']['other'] ?? 0) }}</dd></div>
+        <div><dt>Without amount</dt><dd data-live-split="no_amount">{{ $n($c['order_split']['no_amount'] ?? 0) }}</dd></div>
         <div><dt>Orders, last 5 min</dt><dd class="{{ $up('orders') }}" data-live-up="orders">+<span data-live-recent="orders">{{ $n($c['orders']['recent']) }}</span></dd></div>
         <div><dt>Value, last 5 min</dt><dd>+₱<span data-live-recent="peso">{{ $n($c['order_value']['recent'] ?? 0) }}</span></dd></div>
         <div><dt>Last order</dt><dd data-live-last-order>{{ $lastText }}</dd></div>
@@ -139,7 +141,9 @@
     <div class="card" id="lv-card-replies" role="tooltip" hidden><h3>Replies today</h3><dl>
         <div><dt>Confirmed by Meta</dt><dd data-live-count="replies">{{ $n($c['confirmed']['today']) }}</dd></div>
         <div><dt>Last 5 min</dt><dd class="{{ $up('confirmed') }}" data-live-up="replies">+<span data-live-recent="replies">{{ $n($c['confirmed']['recent']) }}</span></dd></div>
-        <div><dt>Gauge</dt><dd>last 5 min vs today's pace</dd></div>
+        <div data-live-pace><dt>Gauge shows</dt><dd>pace, not a goal</dd></div>
+        <div><dt>Pace</dt><dd>last 5 min vs today's average 5 min</dd></div>
+        <div><dt>Half / full</dt><dd>usual pace / double or more</dd></div>
     </dl></div>
     <div class="card" id="lv-card-ai" role="tooltip" hidden><h3>AI answers today</h3><dl>
         <div><dt>Answered</dt><dd data-live-count="ai">{{ $n($c['ai']['today']) }}</dd></div>
@@ -516,6 +520,8 @@
     function setCounts(c, nowText) {
         live.counts = c;
         settleAll();
+        // Ang hati ng order sa card ng vault: walang bot sa screen, at walang COD (wala sa piso).
+        for (const k of ['other', 'no_amount']) put(k, R.num(c.order_split ? c.order_split[k] : 0), 'data-live-split');
         for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders'], ['messages', 'messages'], ['ai', 'ai'], ['follow_ups', 'follow_ups']]) put(k, R.num(c[src].recent), 'data-live-recent');
         put('peso', R.num(c.order_value ? c.order_value.recent : 0), 'data-live-recent');
         for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders']]) for (const e of all('[data-live-up="' + k + '"]')) e.classList.toggle('up', c[src].recent > 0);

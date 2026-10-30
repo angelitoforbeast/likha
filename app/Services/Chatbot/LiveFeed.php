@@ -83,7 +83,12 @@ class LiveFeed
         foreach (['in', 'out'] as $dir) {
             foreach ($counts['bots'][$dir] as $b => $n) if ($b !== $bot) $counts['bots'][$dir][$b] = 0;
         }
-        foreach ($counts['notes'] ?? [] as $b => $note) if ($b !== $bot) $counts['notes'][$b] = self::noteZero($note['linked']);
+        foreach ($counts['notes'] ?? [] as $b => $note) {
+            if ($b === $bot) continue;
+            // Ang order ng hindi napiling bot ay "Other" na sa card ng vault, kaya tugma pa rin ang kada bot + other = kabuuan.
+            if (isset($counts['order_split'])) $counts['order_split']['other'] += $note['orders'];
+            $counts['notes'][$b] = self::noteZero($note['linked']);
+        }
         foreach ($counts['radar'] ?? [] as $b => $dots) if ($b !== $bot) $counts['radar'][$b] = [];
 
         return $counts;
@@ -165,6 +170,8 @@ class LiveFeed
             'sequences' => $this->topSequences($day['seqs']),
             'linked' => $linked,
             'notes' => $this->notes($page, $start, $end, $settle, $linked + [ChatbotProvider::BOTCAKE => true], $chatting, $day['ai_bots'], $replyTime),
+            // Ang order na walang bot sa screen at ang walang halaga, para ang kada bot + other = ang kabuuan sa card ng vault.
+            'order_split' => $this->orderSplit($linked + [ChatbotProvider::BOTCAKE => true]),
             // Ang radar ng bawat bot: ang mga customer na nag-message sa huling 5 minuto; ang hindi naka-link ay walang tuldok.
             'radar' => array_map(fn ($bot) => ($linked + [ChatbotProvider::BOTCAKE => true])[$bot] ? ($radar[$bot] ?? []) : [], array_combine(self::BOTS, self::BOTS)),
             'as_of' => $now->format('H:i:s'),
@@ -546,11 +553,15 @@ class LiveFeed
     private function orderValue(?string $page, string $start, string $end, string $recent): array
     {
         // Ang bot ng order (detail.via) ay itinatabi rin: ang order at halaga kada bot sa notes, at ang tag na ORDERED.
-        $key = 'chatbot-live:order-value:v2:' . ($page ?? 'all');
+        // Binabasa mula 15 minuto bago ang huling basa (to), hindi bago ngayon: kapag walang nanonood nang higit sa 15 minuto, ang
+        // mga order sa pagitan ay naiiwan noon sa listahan (nasa kabuuan, pero wala sa kahit anong bot at sa piso). v3: ang lumang
+        // listahan na may butas ay binubuo ulit.
+        $key = 'chatbot-live:order-value:v3:' . ($page ?? 'all');
         $s = Cache::get($key);
-        $fresh = !is_array($s) || ($s['day'] ?? null) !== $start;
-        if ($fresh) $s = ['day' => $start, 'orders' => []];
-        $since = $fresh ? $start : max($start, now()->subSeconds(self::WINDOW_SECONDS)->format('Y-m-d H:i:s'));
+        $fresh = !is_array($s) || ($s['day'] ?? null) !== $start || !isset($s['to']);
+        if ($fresh) $s = ['day' => $start, 'to' => $start, 'orders' => []];
+        $since = $fresh ? $start : max($start, date('Y-m-d H:i:s', strtotime($s['to']) - self::WINDOW_SECONDS));
+        $s['to'] = now()->format('Y-m-d H:i:s');
         foreach (DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $since)->where('created_at', '<', $end)
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->get(['id', 'page_id', 'psid', 'created_at as at', 'detail->run as run', 'detail->via as bot']) as $o) {
             $s['orders'][(int) $o->id] ??= ['page_id' => (string) $o->page_id, 'psid' => (string) $o->psid, 'at' => (string) $o->at, 'run' => $o->run,
@@ -564,6 +575,23 @@ class LiveFeed
         $sum = fn (string $from) => self::number(array_sum(array_map(fn ($o) => $o['at'] >= $from ? (float) $o['amount'] : 0.0, $s['orders'])));
 
         return ['today' => $sum($start), 'recent' => $sum($recent)];
+    }
+
+    /**
+     * Ang hati ng mga order ng araw para sa card ng vault: ang "other" ay ang order na walang bot na nasa screen (walang via sa
+     * event, o bot na hindi naka-link dito), at ang "no_amount" ay ang order na wala pang COD na numero (wala sa piso na kabuuan).
+     * Mula sa parehong listahan ng order-value, kaya walang dagdag na query.
+     * @param array<string, bool> $linked
+     */
+    private function orderSplit(array $linked): array
+    {
+        $other = $none = 0;
+        foreach ($this->dayOrders as $o) {
+            if ($o['bot'] === null || !($linked[$o['bot']] ?? false)) $other++;
+            if ($o['amount'] === null) $none++;
+        }
+
+        return ['other' => $other, 'no_amount' => $none];
     }
 
     /**

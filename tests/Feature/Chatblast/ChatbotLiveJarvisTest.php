@@ -448,4 +448,69 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         // Ang mga card ay nakatago hanggang hover / tap / focus.
         $this->assertSame(11, preg_match_all('#<div class="card[^"]*" id="lv-card-[a-z]+" role="tooltip" hidden>#', $html));
     }
+
+    // ── Amendment 205-1: ang order ay nagtutugma (kada bot + walang bot = kabuuan) ───────────────────────────────────────
+
+    /** Ang bilang ng order kada bot, ang "Other / no bot", ang "without amount", ang kabuuan at ang halaga. */
+    private function split(array $q = []): array
+    {
+        $c = app(LiveFeed::class)->feed($q)['counts'];
+
+        return [array_map(fn ($n) => $n['orders'], $c['notes']), $c['order_split']['other'], $c['order_split']['no_amount'], $c['orders']['today'], $c['order_value']['today']];
+    }
+
+    public function test_S_205_10_per_bot_orders_plus_other_equal_the_total_after_a_gap_in_polling_and_orders_without_cod_are_counted(): void
+    {
+        // 09:00: may nanonood; isang order ng Bot 1 na may COD.
+        $this->travelTo('2026-10-21 09:00:00');
+        $this->botOrder('1001', '7101', '2026-10-21 08:50:00', 'forbeast', '2,000');
+        $this->assertSame([['forbeast' => 1, 'incepxionbot' => 0, 'botcake' => 0], 0, 0, 1, 2000], $this->split());
+
+        // Walang nanonood mula 09:00 hanggang 12:30 (higit sa 15 minuto): ang mga order sa pagitan ay kasama pa rin. Isang order na
+        // walang bot (takbo na walang via) at walang COD; isang Botcake na walang COD.
+        $this->botOrder('1001', '7102', '2026-10-21 10:00:00', 'forbeast', '500');
+        DB::table('chatbot_events')->insert(['page_id' => 1001, 'psid' => 7103, 'type' => 'order', 'detail' => json_encode(['run' => 'r7103']),
+            'created_at' => '2026-10-21 10:30:00']);
+        $this->botOrder('1002', '7104', '2026-10-21 11:00:00', 'botcake');
+        $this->travelTo('2026-10-21 12:30:00');
+        $this->seedDay(); // + Bot 1 12:12 (COD 1,149), Botcake 12:29 (walang COD), Bot 2 12:29:30 (COD 2,050.50); kahapon: hindi kasama
+        [$bots, $other, $noAmount, $total, $value] = $this->split();
+        $this->assertSame(['forbeast' => 3, 'incepxionbot' => 1, 'botcake' => 2], $bots);
+        $this->assertSame([1, 3, 7], [$other, $noAmount, $total]);
+        $this->assertSame($total, array_sum($bots) + $other);
+        $this->assertSame(5699.5, $value);
+
+        // Bot filter: ang ibang bot ay napupunta sa "Other"; ang kabuuan ay sa page pa rin.
+        [$bots, $other, $noAmount, $total] = $this->split(['bot' => 'botcake']);
+        $this->assertSame([['forbeast' => 0, 'incepxionbot' => 0, 'botcake' => 2], 5, 3, 7], [$bots, $other, $noAmount, $total]);
+
+        // Page filter: Page Uno lang (08:50, 10:00, 10:30 na walang bot, 12:12).
+        [$bots, $other, $noAmount, $total] = $this->split(['page_id' => '1001']);
+        $this->assertSame([['forbeast' => 3, 'incepxionbot' => 0, 'botcake' => 0], 1, 1, 4], [$bots, $other, $noAmount, $total]);
+
+        // Hindi naka-link ang Bot 2: ang order nito ay walang bot sa screen, kaya "Other".
+        config(['services.incepxionbot.url' => '']);
+        Cache::flush();
+        [$bots, $other, $noAmount, $total] = $this->split();
+        $this->assertSame([['forbeast' => 3, 'incepxionbot' => 0, 'botcake' => 2], 2, 3, 7], [$bots, $other, $noAmount, $total]);
+        $this->assertSame($total, array_sum($bots) + $other);
+
+        // Ang card ng vault: ang "Other / no bot" at ang "Without amount", na may data hook para sa bawat poll.
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $card = explode('</dl>', explode('id="lv-card-vault"', $html, 2)[1], 2)[0];
+        foreach (['<dt>Orders today</dt><dd data-live-count="orders">7<', '<dt>Other / no bot</dt><dd data-live-split="other">2<',
+            '<dt>Without amount</dt><dd data-live-split="no_amount">3<'] as $s) $this->assertStringContainsString($s, $card, $s);
+        $this->assertStringContainsString('"order_split":{"other":2,"no_amount":3}', $html);
+    }
+
+    public function test_S_205_14_the_replies_gauge_card_says_it_is_pace_against_todays_average_and_not_a_goal(): void
+    {
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $card = explode('</dl>', explode('id="lv-card-replies"', $html, 2)[1], 2)[0];
+        foreach (['<dt>Gauge shows</dt><dd>pace, not a goal</dd>', "<dt>Pace</dt><dd>last 5 min vs today's average 5 min</dd>",
+            '<dt>Half / full</dt><dd>usual pace / double or more</dd>'] as $s) $this->assertStringContainsString($s, $card, $s);
+        foreach (['target', 'Target', 'goal reached', 'quota'] as $s) $this->assertStringNotContainsString($s, $card, $s);
+    }
 }
