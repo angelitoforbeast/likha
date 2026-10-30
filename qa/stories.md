@@ -3301,6 +3301,28 @@ Tests: `tests/Feature/RtsProjection/AnalystRtsDailyTest.php`, `tests/Feature/Rts
 | S-197.7 (P1) | Existing suites pass (no new failures vs the base) | full `tests/Feature` run | passed |
 | S-197.8 | During 03:00–03:45 the command refuses to run; `--as-of` prints a replay and writes nothing | `test_S_197_never_runs…`, `test_S_197_as_of_replay…` | passed |
 
+## S-203 Mira RTS counts only the orders at the item's latest price
+
+As the owner, I want the daily Mira RTS of each page+item computed only from the orders at its latest price, and told "not enough yet" when that price has too few orders, so that an old promo price does not pull the number I use for ads.
+
+Slice 203. Threat model: no new input and no new route; the run is the existing scheduled command over trusted tables, the owner page only shows two more fields. Risk tier: medium.
+Tests: `tests/Feature/RtsProjection/LatestPriceTest.php`, existing `tests/Feature/RtsProjection` (spec 197) and `tests/Feature/OwnerPrivate` suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-203.1.1 (P1) | Given one page+item sold at ₱249 (Sep) and then ₱199 (Oct), When the 06:00 run runs, Then the projection, estimate and day row use only the ₱199 orders (25%, not 37.5% of all prices) and the day row records price 199 | `test_S_203_1_1…` | passed |
+| S-203.1.2 (P1) | Given orders inserted out of date order, a newest order without a COD, and two prices on the same day, Then the latest price is the COD of the newest order by ts_date, then by id, ignoring orders without a COD; the COD is read like the owner page on MySQL (₱, commas, spaces removed, leading number only) | `test_S_203_1_2…` | passed |
+| S-203.1.3 (P1) | Given another page with the same item at another price, Then each page keeps its own latest price and orders | `test_S_203_1_3…` | passed |
+| S-203.1.4 (P1) | The 21-day trend in the reason compares the same price (an older price inside the 21 days is left out) | `test_S_203_1_4…` | passed |
+| S-203.2.1 (P1) | Given fewer than 30 matched orders at the latest price, When the run runs, Then there is no Mira RTS (the earlier value and reason are no longer active), the day row has the price, the count and no estimate, the owner page cell shows "—" with the hover "Latest price ₱199: only 10 orders, not enough yet", a rerun adds no rows, and an item with no J&T-matched order and no value gets no row | `test_S_203_2_1…` | passed |
+| S-203.2.2 (P1) | Given the analyst typed a value after 06:00, When a run finds too few orders that day, Then her value and reason stay | `test_S_203_2_2…` | passed |
+| S-203.3.1 (P1) | The reason says "… order na may J&T status sa ₱199 …" and the owner page gives the price, so the hover reads "Mira RTS 25.0% (₱199 orders only): Auto 06:00: …" for an auto value | `test_S_203_3_1…` | passed |
+| S-203.4.1 (P1) | The p(age) learned for the page+item still applies to its in-transit orders at the latest price | `test_S_203_4_1…` | passed |
+| S-203.5.1 (P1) | Day rows written before this change stay byte for byte and are measured on all prices; new day rows record their price and are measured on that price only | `test_S_203_5_1…` | passed |
+| S-203.5.2 (P1) | A not-enough day still records the 7/14-day accuracy of the older estimates | `test_S_203_5_2…` | passed |
+| S-203.6.1 (P1) | `rts:daily-estimate --as-of` uses the latest price known that day (₱249 as of Oct 15, ₱199 now), prints it, and writes nothing | `test_S_203_6_1…` | passed |
+| S-203.7 (P1) | Existing spec-197 tests kept; full `tests/Feature` adds no failure vs 8506b25c | `tests/Feature` run | passed |
+
 ## S-199 The office TV shows the bot as a living neural network, and an order's money flows into the totals
 
 As the owner, I want /chatbot/live to look like a calm neural network room (inputs into the bot core, the core out to each bot, AI answers as their own step) and to see money flow in when an order comes (a peso amount travels into the totals and they count up), with every label real data.
