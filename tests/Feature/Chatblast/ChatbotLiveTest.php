@@ -166,7 +166,9 @@ class ChatbotLiveTest extends ChatblastTestCase
         ], array_map(fn ($e) => [$e['type'], $e['at'], $e['page']], $out['events']));
         $this->assertSame((int) $late, $out['events'][4]['id']);
         foreach ($out['events'] as $e) $this->assertSame(['type', 'at', 'page', 'id', 'bot', ...($e['type'] === 'order' ? ['amount'] : [])], array_keys($e)); // ang bot: ang naghatid o sumagot
-        foreach (['Juan', 'Magkano', 'sagot', 'Hello', '7004'] as $private) $this->assertStringNotContainsString($private, $res->getContent());
+        // Ang event ay walang pangalan; ang pangalan ng customer ay nasa notes ng bot lang (spec 200). Walang text o PSID kahit saan.
+        $this->assertStringNotContainsString('Juan', json_encode($out['events']));
+        foreach (['Magkano', 'sagot', 'Hello', '7004'] as $private) $this->assertStringNotContainsString($private, $res->getContent());
         $this->assertSame(0, $out['more']);
 
         // Ang susunod na poll mula sa bagong cursor: wala nang uulit. Ang kumpirmasyon na 3 segundo pa lang ang tanda ay

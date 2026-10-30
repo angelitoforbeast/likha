@@ -41,6 +41,12 @@ class LiveFeed
     public const BUCKET_SECONDS = 600;
     /** Ang naayos na bahagi ay binibilang ulit nang buo kada 30 minuto (ang huling kumpirmasyon at sagot ay maisasama). */
     public const RECOUNT_SECONDS = 1800;
+    /** Ang notes ng bawat bot: ilang pinakabagong customer ang ipinapakita, at ilan ang itinatabi (para eksakto ang 4 na iyon). */
+    public const NOTE_CUSTOMERS = 4;
+    public const NOTE_KEEP = 30;
+
+    /** Ang mga order ng araw (mula sa listahan ng order-value ng huling refresh): id => page_id, psid, at, run, bot, amount. */
+    private array $dayOrders = [];
 
     /** Ang page filter: page ID na digits lang, o null (lahat). */
     public static function page(array $q): ?string
@@ -68,15 +74,22 @@ class LiveFeed
         return ['counts' => self::narrow($this->counts($page), $bot), 'events' => $events, 'more' => $more, 'cursor' => $cursor, 'now' => now()->format('H:i:s')];
     }
 
-    /** Sa bot filter: ang pumasok at lumabas ng napiling bot lang (ang iba ay 0); ang kabuuan ay sa page pa rin. */
+    /** Sa bot filter: ang pumasok at lumabas, at ang notes, ng napiling bot lang (ang iba ay 0 at walang customer); ang kabuuan ay sa page pa rin. */
     private static function narrow(array $counts, ?string $bot): array
     {
         if ($bot === null) return $counts;
         foreach (['in', 'out'] as $dir) {
             foreach ($counts['bots'][$dir] as $b => $n) if ($b !== $bot) $counts['bots'][$dir][$b] = 0;
         }
+        foreach ($counts['notes'] ?? [] as $b => $note) if ($b !== $bot) $counts['notes'][$b] = self::noteZero($note['linked']);
 
         return $counts;
+    }
+
+    /** Ang walang laman na notes ng isang bot (ang hindi naka-link, o ang hindi napili sa bot filter). */
+    private static function noteZero(bool $linked): array
+    {
+        return ['linked' => $linked, 'chatting' => 0, 'ai' => 0, 'avg' => null, 'orders' => 0, 'value' => 0, 'last' => null, 'customers' => []];
     }
 
     // â”€â”€ mga bilang â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -88,7 +101,7 @@ class LiveFeed
      */
     public function counts(?string $page): array
     {
-        return Cache::flexible('chatbot-live:v3:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page),
+        return Cache::flexible('chatbot-live:v4:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page),
             ['seconds' => 15]); // ang lock ng refresh ay may expiry: ang namatay na worker ay hindi humaharang nang habambuhay
     }
 
@@ -110,7 +123,7 @@ class LiveFeed
         $settle = max(self::SETTLE_SECONDS, (int) config('services.gateway.auto_switch.standby_minutes', 15) * 60 + 60);
         $edge = max($start, $f($now->copy()->setTimestamp(intdiv($now->getTimestamp() - $settle, self::BUCKET_SECONDS) * self::BUCKET_SECONDS)));
 
-        $key = 'chatbot-live:settled:v2:' . ($page ?? 'all');
+        $key = 'chatbot-live:settled:v3:' . ($page ?? 'all');
         $settled = Cache::get($key);
         if (!is_array($settled) || ($settled['day'] ?? null) !== $start || ($settled['to'] ?? '') > $edge || ($settled['full_at'] ?? 0) < $now->getTimestamp() - self::RECOUNT_SECONDS) {
             $settled = ['day' => $start, 'to' => $start, 'full_at' => $now->getTimestamp(), 'n' => self::tallyZero()];
@@ -127,6 +140,11 @@ class LiveFeed
         $pair = fn (string $k) => ['today' => $day[$k], 'recent' => $live['recent'][$k]];
         $sum = fn (string $k, string $part) => array_sum($part === 'today' ? $day[$k] : $live['recent'][$k]);
 
+        [$active, $chatting] = $this->active($page, $recent, $end);
+        $replyTime = app(MetaReplySpeed::class)->todayAverage($page);
+        $orderValue = $this->orderValue($page, $start, $end, $recent);
+        $linked = [Gateways::FORBEAST => Gateways::setUp(Gateways::FORBEAST), Gateways::INCEPXIONBOT => Gateways::setUp(Gateways::INCEPXIONBOT)];
+
         return [
             'messages' => ['today' => $sum('in', 'today'), 'recent' => $sum('in', 'recent')],
             'confirmed' => ['today' => $sum('out', 'today'), 'recent' => $sum('out', 'recent')],
@@ -136,14 +154,171 @@ class LiveFeed
             'orders' => $pair('orders'),
             // Kada bot: ang pumasok ayon sa gateway na naghatid, ang lumabas ayon sa chatbot_replies.via.
             'bots' => ['in' => $day['in'], 'out' => $day['out']],
-            'active' => $this->active($page, $recent, $end),
-            'reply_time' => app(MetaReplySpeed::class)->todayAverage($page),
+            'active' => $active,
+            'reply_time' => $replyTime,
             'last_order' => $this->lastOrder($page, $start, $end),
-            'order_value' => $this->orderValue($page, $start, $end, $recent),
+            'order_value' => $orderValue,
             'sequences' => $this->topSequences($day['seqs']),
-            'linked' => [Gateways::FORBEAST => Gateways::setUp(Gateways::FORBEAST), Gateways::INCEPXIONBOT => Gateways::setUp(Gateways::INCEPXIONBOT)],
+            'linked' => $linked,
+            'notes' => $this->notes($page, $start, $end, $settle, $linked + [ChatbotProvider::BOTCAKE => true], $chatting, $day['ai_bots'], $replyTime),
             'as_of' => $now->format('H:i:s'),
         ];
+    }
+
+    /**
+     * Ang notes ng bawat bot ngayong araw: ilang customer ang nag-message sa bot sa huling 5 minuto, ilang sagot ng AI (ang bot
+     * ng chat na nagpatakbo nito), ang average na reply time (Forbeast lang ang may sukat), ang order at ang alam na halaga nito
+     * (ang listahan ng order-value), ang huling ginawa ng bot, at ang 4 na pinakabagong customer nito na may pangalan at tag.
+     * Ang hindi naka-link na bot ay walang laman.
+     * @param array<string, bool> $linked
+     * @param array<string, int> $chatting
+     * @param array<string, int> $ai
+     */
+    private function notes(?string $page, string $start, string $end, int $settle, array $linked, array $chatting, array $ai, array $replyTime): array
+    {
+        $state = $this->customerState($page, $start, $end, $settle);
+        $orders = $this->dayOrders;
+        $pages = BotcakeChat::pageMap();
+        $top = [];
+        foreach (self::BOTS as $bot) {
+            $list = $state['bots'][$bot] ?? [];
+            uksort($list, fn ($a, $b) => [$list[$b], $a] <=> [$list[$a], $b]);
+            $top[$bot] = array_slice($list, 0, self::NOTE_CUSTOMERS, true);
+        }
+        [$names, $aiLast] = $this->customerFacts($top, $start, $end, $pages);
+        $ordered = [];
+        foreach ($orders as $o) $ordered[$o['bot'] . '|' . $o['page_id'] . '|' . $o['psid']] = true;
+
+        $out = [];
+        foreach (self::BOTS as $bot) {
+            if (!$linked[$bot]) {
+                $out[$bot] = self::noteZero(false);
+                continue;
+            }
+            $mine = array_filter($orders, fn ($o) => $o['bot'] === $bot);
+            $last = $state['last'][$bot] ?? null;
+            $customers = [];
+            foreach ($top[$bot] as $key => $at) {
+                $tag = isset($ordered[$bot . '|' . $key]) ? 'ORDERED' : (($aiLast[$bot . '|' . $key] ?? false) ? 'AI' : 'CHATTING');
+                $customers[] = ['name' => $names[$key], 'tag' => $tag, 'at' => substr($at, 11, 5)];
+            }
+            $out[$bot] = [
+                'linked' => true,
+                'chatting' => $chatting[$bot] ?? 0,
+                'ai' => $ai[$bot] ?? 0,
+                'avg' => $bot === Gateways::FORBEAST ? $replyTime['seconds'] : null,
+                'orders' => count($mine),
+                'value' => self::number(array_sum(array_map(fn ($o) => (float) $o['amount'], $mine))),
+                'last' => $last === null ? null : ['type' => $last['type'], 'page' => $pages[$last['page_id']] ?? 'Page ' . $last['page_id'], 'at' => substr($last['at'], 11, 5)],
+                'customers' => $customers,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Ang mga customer ng bawat bot ngayong araw (page|psid => oras ng huling event) at ang huling ginawa ng bawat bot, naka-cache
+     * kada page filter at araw. Bawat refresh ay binabasa lang ang mga row mula 16 minuto bago ang huling basa (ang event na
+     * naisulat nang huli, gaya ng chat na itinaas mula sa standby), apat na naka-grupong query sa naka-index na oras: ang
+     * mensahe (bot ng gateway na naghatid), ang naipadalang sagot o follow-up (via), ang order (detail.via) at ang sagot ng AI
+     * (bot ng chat nito). Ang pagsasama ay ang pinakahuling oras kada customer; NOTE_KEEP lang kada bot ang itinatabi (ang 4
+     * na pinakabago ay eksakto pa rin: ang natanggal ay may 30 na mas bago, at ang bagong event nito ay ibinabalik ito). Ang
+     * unang basa ng araw (o kapag nawala ang cache) ay ang buong araw, minsan, gaya ng listahan ng order-value.
+     * @return array{day: string, to: string, bots: array<string, array<string, string>>, last: array<string, array{type: string, page_id: string, at: string}>}
+     */
+    private function customerState(?string $page, string $start, string $end, int $settle): array
+    {
+        $key = 'chatbot-live:customers:v1:' . ($page ?? 'all');
+        $s = Cache::get($key);
+        $fresh = !is_array($s) || ($s['day'] ?? null) !== $start;
+        if ($fresh) $s = ['day' => $start, 'to' => $start, 'bots' => [], 'last' => []];
+        $since = $fresh ? $start : max($start, date('Y-m-d H:i:s', strtotime($s['to']) - $settle - 60));
+        $pid = fn (Builder $q, string $col, bool $text = false) => $page === null ? $q : $q->where($col, $text ? $page : (int) $page);
+        $g = DB::connection()->getQueryGrammar();
+        $rows = [];
+
+        $via = self::chatVia();
+        foreach ($pid(DB::table('botcake_chats'), 'page_id', true)->where('received_at', '>=', $since)->where('received_at', '<', $end)->whereNull('payload->_standby')
+            ->selectRaw($via . ' AS bot, page_id, psid, MAX(received_at) AS at')->groupByRaw($via . ', page_id, psid')->get() as $r) $rows[] = [$r, 'message'];
+
+        $seq = 'CASE WHEN sequence_id IS NULL THEN 0 ELSE 1 END';
+        foreach ($pid(DB::table('chatbot_replies'), 'page_id')->where('sent_at', '>=', $since)->where('sent_at', '<', $end)->where('kind', 'send')
+            ->whereIn('status', SendStatus::DELIVERED)->whereIn('via', self::BOTS)
+            ->selectRaw("via AS bot, page_id, psid, {$seq} AS seq, MAX(sent_at) AS at")->groupByRaw("via, page_id, psid, {$seq}")->get() as $r) $rows[] = [$r, $r->seq ? 'follow_up' : 'reply'];
+
+        $ov = $g->wrap('detail->via');
+        foreach ($pid(DB::table('chatbot_events'), 'page_id')->where('type', 'order')->where('created_at', '>=', $since)->where('created_at', '<', $end)
+            ->selectRaw("{$ov} AS bot, page_id, psid, MAX(created_at) AS at")->groupByRaw("{$ov}, page_id, psid")->get() as $r) $rows[] = [$r, 'order'];
+
+        $cv = self::chatVia('c.');
+        $aiLo = date('Y-m-d H:i:s', strtotime($since) - self::WINDOW_SECONDS);
+        foreach ($pid(DB::table('chatbot_ai_requests as a'), 'a.page_id')->join('botcake_chats as c', 'c.id', '=', 'a.chat_id')
+            ->where('a.created_at', '>=', $aiLo)->where('a.created_at', '<', $end)->where('a.answered_at', '>=', $since)->whereNull('a.error')
+            ->where('a.model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL)
+            ->selectRaw("{$cv} AS bot, a.page_id AS page_id, a.psid AS psid, MAX(a.answered_at) AS at")->groupByRaw("{$cv}, a.page_id, a.psid")->get() as $r) $rows[] = [$r, 'ai'];
+
+        foreach ($rows as [$r, $type]) {
+            if (!in_array($r->bot, self::BOTS, true) || $r->at === null) continue;
+            $at = substr((string) $r->at, 0, 19);
+            $k = (string) $r->page_id . '|' . (string) $r->psid;
+            if ($at > ($s['bots'][$r->bot][$k] ?? '')) $s['bots'][$r->bot][$k] = $at;
+            if ($at > ($s['last'][$r->bot]['at'] ?? '')) $s['last'][$r->bot] = ['type' => $type, 'page_id' => (string) $r->page_id, 'at' => $at];
+        }
+        foreach ($s['bots'] as $b => $list) {
+            arsort($list);
+            $s['bots'][$b] = array_slice($list, 0, self::NOTE_KEEP, true);
+        }
+        $s['to'] = now()->format('Y-m-d H:i:s');
+        Cache::put($key, $s, 86400);
+
+        return $s;
+    }
+
+    /**
+     * Ang pangalan ng bawat customer sa listahan at kung sagot ng AI ang huling sagot ng bawat bot sa kanila, sa ilang basa para
+     * sa lahat (hindi kada customer). Ang pangalan: ang pinakabagong may laman na botcake_chats.name ngayong araw (isinusulat sa
+     * bawat mensahe: ang full name mula sa Botcake, o ang mula sa botcake_psids / naunang chat sa gateway); kung wala, ang
+     * fb_name sa botcake_psids ng parehong page (gaya ng gateway); kung wala pa rin, "Customer · <page>" (hindi kailanman ang
+     * PSID). Ang sagot ng AI: ang huling naipadalang sagot ng bot ngayong araw ay may "ai_text" (ang marka ng mensaheng gawa sa
+     * sagot ng AI, sa ating talaan lang).
+     * @param array<string, array<string, string>> $top bot => page|psid => oras
+     * @return array{0: array<string, string>, 1: array<string, bool>}
+     */
+    private function customerFacts(array $top, string $start, string $end, array $pages): array
+    {
+        $keys = [];
+        foreach ($top as $list) foreach ($list as $k => $at) $keys[$k] = explode('|', $k, 2);
+        if (!$keys) return [[], []];
+        $pageIds = array_values(array_unique(array_column($keys, 0)));
+        $psids = array_values(array_unique(array_column($keys, 1)));
+
+        $names = [];
+        foreach (DB::table('botcake_chats')->whereIn('page_id', $pageIds)->whereIn('psid', $psids)->where('received_at', '>=', $start)->where('received_at', '<', $end)
+            ->whereNotNull('name')->where('name', '<>', '')->orderBy('id')->get(['page_id', 'psid', 'name']) as $r) {
+            $k = $r->page_id . '|' . $r->psid;
+            if (isset($keys[$k]) && trim((string) $r->name) !== '') $names[$k] = trim((string) $r->name);
+        }
+        $settings = app(\App\Services\PageSettings::class);
+        $unnamed = array_diff_key($keys, $names);
+        $known = [];
+        foreach (DB::table('botcake_psids')->whereIn('psid', array_values(array_unique(array_column($unnamed, 1))))->where('fb_name', '<>', '')->orderBy('id')
+            ->get(['page', 'psid', 'fb_name']) as $r) $known[$settings->pageKey((string) $r->page) . '|' . $r->psid] = trim((string) $r->fb_name);
+        foreach ($unnamed as $k => [$pageId, $psid]) {
+            $pageName = $pages[$pageId] ?? null;
+            $names[$k] = ($pageName !== null ? ($known[$settings->pageKey($pageName) . '|' . $psid] ?? '') : '') ?: 'Customer · ' . mb_strimwidth($pageName ?? 'Page ' . $pageId, 0, 18, '…');
+        }
+
+        $lastIds = DB::table('chatbot_replies')->whereIn('page_id', array_map('intval', $pageIds))->whereIn('psid', array_map('intval', $psids))
+            ->where('sent_at', '>=', $start)->where('sent_at', '<', $end)->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)->whereIn('via', self::BOTS)
+            ->groupBy('via', 'page_id', 'psid')->selectRaw('via, page_id, psid, MAX(id) AS id')->get();
+        $content = DB::getDriverName() === 'pgsql' ? 'CAST(content AS TEXT)' : 'content';
+        $isAi = DB::table('chatbot_replies')->whereIn('id', $lastIds->pluck('id')->map(fn ($v) => (int) $v)->all())
+            ->selectRaw("id, CASE WHEN {$content} LIKE ? THEN 1 ELSE 0 END AS ai", ['%"ai_text"%'])->pluck('ai', 'id');
+        $aiLast = [];
+        foreach ($lastIds as $r) $aiLast[$r->via . '|' . $r->page_id . '|' . $r->psid] = (int) ($isAi[$r->id] ?? 0) === 1;
+
+        return [$names, $aiLast];
     }
 
     /** Ang walang laman na bilang: kada bot ang pumasok at lumabas, at ang iba ay isang numero. */
@@ -151,7 +326,7 @@ class LiveFeed
     {
         $bots = array_fill_keys([...self::BOTS, 'unknown'], 0);
 
-        return ['in' => $bots, 'out' => $bots, 'unconfirmed' => 0, 'follow_ups' => 0, 'ai' => 0, 'orders' => 0, 'seqs' => []];
+        return ['in' => $bots, 'out' => $bots, 'unconfirmed' => 0, 'follow_ups' => 0, 'ai' => 0, 'orders' => 0, 'seqs' => [], 'ai_bots' => $bots];
     }
 
     private static function tallyAdd(array $a, array $b): array
@@ -224,14 +399,18 @@ class LiveFeed
 
         // Ang sagot ng AI: ang tawag na may sagot (answered_at, walang error), hindi ang hinihintay ng Encode order. Ang
         // araw ayon sa created_at (naka-index); ang huling 5 minuto ayon sa oras ng sagot (kasama ang tawag na hanggang 15
-        // minuto bago nito ginawa).
+        // minuto bago nito ginawa). Kada bot: ang bot ng chat na nagpatakbo ng AI (primary key ng botcake_chats; walang chat = unknown).
         $aiLo = $recent < $hi ? min($lo, date('Y-m-d H:i:s', strtotime($recent) - self::WINDOW_SECONDS)) : $lo;
-        $a = DB::table('chatbot_ai_requests')->where('created_at', '>=', $aiLo)->where('created_at', '<', $hi)->whereNotNull('answered_at')->whereNull('error')
-            ->where('model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL)->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
-            ->selectRaw('SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN answered_at >= ? THEN 1 ELSE 0 END) AS recent', [$today, $recent])
-            ->first();
-        $out['today']['ai'] = $int($a->today);
-        $out['recent']['ai'] = $int($a->recent);
+        $cv = self::chatVia('c.');
+        foreach (DB::table('chatbot_ai_requests as a')->leftJoin('botcake_chats as c', 'c.id', '=', 'a.chat_id')
+            ->where('a.created_at', '>=', $aiLo)->where('a.created_at', '<', $hi)->whereNotNull('a.answered_at')->whereNull('a.error')
+            ->where('a.model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL)->when($page !== null, fn ($q) => $q->where('a.page_id', (int) $page))
+            ->selectRaw("{$cv} AS bot, SUM(CASE WHEN a.created_at >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN a.answered_at >= ? THEN 1 ELSE 0 END) AS recent", [$today, $recent])
+            ->groupByRaw($cv)->get() as $a) {
+            $out['today']['ai'] += $int($a->today);
+            $out['recent']['ai'] += $int($a->recent);
+            $out['today']['ai_bots'][$bot($a->bot)] += $int($a->today);
+        }
 
         // Ang order na naitala ng bot ("Counts as an order"), gaya ng Results at Bot Health.
         [$sql, $bind] = $marks('created_at');
@@ -249,22 +428,34 @@ class LiveFeed
      * Botcake, ang parehong tuntunin ng ChatbotProvider at ResponseSpeed); walang payload = unknown. Laravel ang bahala sa
      * JSON path ng mysql, pgsql at sqlite.
      */
-    private static function chatVia(): string
+    private static function chatVia(string $t = ''): string
     {
         $g = DB::connection()->getQueryGrammar();
-        [$via, $source, $gateway] = [$g->wrap('payload->_via'), $g->wrap('payload->source'), $g->wrap('payload->gateway')];
+        [$via, $source, $gateway, $payload] = [$g->wrap($t . 'payload->_via'), $g->wrap($t . 'payload->source'), $g->wrap($t . 'payload->gateway'), $g->wrap($t . 'payload')];
         $known = "'" . implode("','", self::BOTS) . "'";
 
         return "(CASE WHEN {$via} IN ({$known}) THEN {$via} WHEN {$source} = 'gateway' THEN (CASE WHEN {$gateway} = '" . Gateways::INCEPXIONBOT . "' THEN '"
-            . Gateways::INCEPXIONBOT . "' ELSE '" . Gateways::FORBEAST . "' END) WHEN payload IS NOT NULL THEN '" . ChatbotProvider::BOTCAKE . "' ELSE 'unknown' END)";
+            . Gateways::INCEPXIONBOT . "' ELSE '" . Gateways::FORBEAST . "' END) WHEN {$payload} IS NOT NULL THEN '" . ChatbotProvider::BOTCAKE . "' ELSE 'unknown' END)";
     }
 
-    /** Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto. */
-    private function active(?string $page, string $recent, string $end): int
+    /**
+     * Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto, at kada bot (ang customer na dumaan sa
+     * dalawang bot ay nasa dalawa, pero isa lang sa kabuuan). Isang basa: ang mga customer ng huling 5 minuto kada bot.
+     * @return array{0: int, 1: array<string, int>}
+     */
+    private function active(?string $page, string $recent, string $end): array
     {
-        return (int) DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')
+        $via = self::chatVia();
+        $all = [];
+        $bots = [];
+        foreach (DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')
             ->when($page !== null, fn ($q) => $q->where('page_id', $page))
-            ->groupBy('page_id')->selectRaw('COUNT(DISTINCT psid) AS n')->pluck('n')->sum();
+            ->selectRaw($via . ' AS bot, page_id, psid')->groupByRaw($via . ', page_id, psid')->get() as $r) {
+            $all[$r->page_id . '|' . $r->psid] = true;
+            $bots[$r->bot] = ($bots[$r->bot] ?? 0) + 1;
+        }
+
+        return [count($all), $bots];
     }
 
     /** Ang huling order ngayong araw: page, oras (HH:MM) at bot. Walang halaga ang order ng bot, kaya wala rito. */
@@ -299,18 +490,21 @@ class LiveFeed
      */
     private function orderValue(?string $page, string $start, string $end, string $recent): array
     {
-        $key = 'chatbot-live:order-value:v1:' . ($page ?? 'all');
+        // Ang bot ng order (detail.via) ay itinatabi rin: ang order at halaga kada bot sa notes, at ang tag na ORDERED.
+        $key = 'chatbot-live:order-value:v2:' . ($page ?? 'all');
         $s = Cache::get($key);
         $fresh = !is_array($s) || ($s['day'] ?? null) !== $start;
         if ($fresh) $s = ['day' => $start, 'orders' => []];
         $since = $fresh ? $start : max($start, now()->subSeconds(self::WINDOW_SECONDS)->format('Y-m-d H:i:s'));
         foreach (DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $since)->where('created_at', '<', $end)
-            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->get(['id', 'page_id', 'psid', 'created_at as at', 'detail->run as run']) as $o) {
-            $s['orders'][(int) $o->id] ??= ['page_id' => (string) $o->page_id, 'psid' => (string) $o->psid, 'at' => (string) $o->at, 'run' => $o->run, 'amount' => null];
+            ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))->get(['id', 'page_id', 'psid', 'created_at as at', 'detail->run as run', 'detail->via as bot']) as $o) {
+            $s['orders'][(int) $o->id] ??= ['page_id' => (string) $o->page_id, 'psid' => (string) $o->psid, 'at' => (string) $o->at, 'run' => $o->run,
+                'bot' => in_array($o->bot, self::BOTS, true) ? $o->bot : null, 'amount' => null];
         }
         $open = array_filter($s['orders'], fn ($o) => $o['amount'] === null);
         foreach ($this->amounts($open) as $id => $amount) $s['orders'][$id]['amount'] = $amount;
         Cache::put($key, $s, 86400);
+        $this->dayOrders = $s['orders'];
 
         $sum = fn (string $from) => self::number(array_sum(array_map(fn ($o) => $o['at'] >= $from ? (float) $o['amount'] : 0.0, $s['orders'])));
 
