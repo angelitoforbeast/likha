@@ -3338,3 +3338,22 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatb
 | S-200.6 (P1) | The page renders every section of the HUD with its data hooks, and every number spec 199 shows is still there | `test_S_200_6_…` | passed |
 | S-200.7 (P1) | The existing spec-199/196 Live tests pass (changed assertions listed) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest`, `ChatbotLiveNetworkTest`, `ChatbotLiveRulesTest` | passed |
 | S-200.8 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` | see result |
+
+## S-205 The office TV is a hologram wall: graphics first, almost no text, the money in its own vault
+
+As the owner, I want /chatbot/live to read like the hologram wall in the film (a glowing bot core, radars where every chatting customer is a dot, gauges and arcs instead of tables) with almost no text on screen, and the COD money in its own gold vault, while every number I had before stays one hover or tap away.
+
+Slice 205. Threat model: trusted = signed-in staff who may open the Live page; untrusted = the query parameters (`page_id`, `bot`, cursors), page names and customer names (escaped text, `textContent` / canvas `fillText` only). No new route. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatblast/ChatbotLiveRulesTest.php` (node, `public/js/chatbot-live-rules.js`), the existing Live tests, headless Chrome evidence (`docs/specs/205-evidence/`).
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-205.1 (P1) | The page renders every panel of comp E (Bot 1, Botcake, Bot 2, AI hex, follow-up arcs, replies / avg reply / chats gauges, the vault, the globe, the icon ticker) with its canvas, spoke, card and data hooks; the page's script carries a version from its content | `test_S_205_1_…`, `test_S_205_1_the_ticker_…` | passed |
+| S-205.2 (P1) | Given seeded chats, AI answers and orders, When the counts are read, Then each bot's radar lists its customers of the last 5 minutes (age, chat / AI / ordered, new today, short name only when new), newest first; page and bot filters apply; a dormant bot is empty; in the browser a dot keeps its angle, sits by age, and a new customer blips once | `test_S_205_2_…` (both files) | passed |
+| S-205.3 (P1) | Loot to the vault: one disc per ₱5,000 up to 14; an amount bursts six coins ("+₱N"), no amount one "+1" plate ("+N" when merged), bursts merged and none dropped, no count-down inside a minute, reduced motion without coins | `test_S_205_3_…`, the S-199.7 / S-200.5 rule tests | passed |
+| S-205.4 (P1) | Each panel's card carries every number moved off the screen (recent "+N in 5 min", last order, inquiries total, per-bot AI / orders / value / last activity, sequence names with counts, bot full names and status) | `test_S_205_4_…` | passed |
+| S-205.5 (P1) | Names are first name and initial only, everywhere in the feed; escaped; no PSID, phone, address or message text in the JSON or the page | `test_S_205_5_…` | passed |
+| S-205.6 (P1) | The query count of a poll does not grow with radar customers | `test_S_205_6_…` | passed |
+| S-205.7 (P1) | 3D: no panel overlaps another and every panel stays between the header and the ticker at both orbit extremes and through the 2D-to-3D fold | headless Chrome hit-test (`live.html?hit`) | passed |
+| S-205.8 (P1) | The existing Live tests pass (changed assertions listed in the result) | the Live test files | passed |
+| S-205.9 (P1) | Full tests/Feature adds no new failures against 43a4e713 | full run | passed |
