@@ -129,9 +129,10 @@ class RtsProjection
      * huling status log hanggang doon (wala pang J&T state kung hindi pa nai-submit), ang edad ay hanggang doon, at ang
      * p(edad) ay natutunan mula sa alam noon (learnTable). Walang $asOf = ngayon, kasalukuyang status at naka-save na rate.
      *
-     * $price: null = lahat ng presyo; 'latest' = ang mga order lang sa pinakabagong presyo ng page+item (ang COD ng
-     * pinakabagong order, ts_date tapos id, hanggang $to); [itemKey => presyo] = ang presyong iyon lang para sa mga key na
-     * nakalista, lahat para sa iba. May "price" (buong piso, o null) ang row kapag sinala.
+     * $price: null = lahat ng presyo; 'latest' = ang mga order lang sa pinakabagong presyo ng page+item (latestPrice(),
+     * hanggang $to); [itemKey => presyo] = ang presyong iyon lang para sa mga key na nakalista, lahat para sa iba. Kapag
+     * sinala, kasama ang mga order na buong multiple ng presyo (2×, 3× = ilang piraso), at may "price" (buong piso, o
+     * null) ang row.
      */
     public function rows(string $from, string $to, ?Carbon $asOf = null, string|array|null $price = null): array
     {
@@ -141,7 +142,8 @@ class RtsProjection
         $aliases = new ItemAliasResolver();
         $buckets = [];   // itemKey => [presyo => bilang]
         $labels = [];
-        $newest = [];    // itemKey => [ts_date, id, presyo] ng pinakabagong order na may presyo
+        $daily = [];     // itemKey => [ts_date => [presyo => bilang]] ng mga order na may presyo
+        $lastAt = [];    // itemKey => [presyo => [ts_date, id]] ng pinakabagong order sa presyong iyon
         $seen = [];
 
         $q = DB::table('macro_output as mo')
@@ -159,7 +161,8 @@ class RtsProjection
             $cod = self::price($o->COD);
             if ($cod > 0) {
                 $at = [substr((string) $o->ts_date, 0, 10), (int) $o->id];
-                if (!isset($newest[$key]) || $at > array_slice($newest[$key], 0, 2)) $newest[$key] = [$at[0], $at[1], $cod];
+                $daily[$key][$at[0]][$cod] = ($daily[$key][$at[0]][$cod] ?? 0) + 1;
+                if (!isset($lastAt[$key][$cod]) || $at > $lastAt[$key][$cod]) $lastAt[$key][$cod] = $at;
             }
             $r = &$buckets[$key][$cod];
             $r ??= self::emptyCounts();
@@ -195,13 +198,15 @@ class RtsProjection
                 $rows[$key] = $labels[$key] + self::sumCounts($byPrice);
                 continue;
             }
-            $pick = $price === 'latest' ? ($newest[$key][2] ?? null) : (array_key_exists($key, $price) ? $price[$key] : false);
+            $pick = $price === 'latest'
+                ? (isset($daily[$key]) ? self::latestPrice($daily[$key], $lastAt[$key]) : null)
+                : (array_key_exists($key, $price) ? $price[$key] : false);
             if ($pick === false) {
                 // Walang naitalang presyo para sa key na ito (hal. day row bago nagkaroon ng presyo): lahat, gaya noon.
                 $rows[$key] = $labels[$key] + self::sumCounts($byPrice) + ['price' => null];
                 continue;
             }
-            $rows[$key] = $labels[$key] + ($pick !== null && isset($byPrice[(int) $pick]) ? $byPrice[(int) $pick] : self::emptyCounts())
+            $rows[$key] = $labels[$key] + ($pick !== null ? self::atPrice($byPrice, (int) $pick) : self::emptyCounts())
                 + ['price' => $pick !== null ? (int) $pick : null];
         }
 
@@ -238,6 +243,36 @@ class RtsProjection
         $s = str_replace(['₱', ',', ' '], '', (string) $cod);
 
         return preg_match('/^\d+(\.\d+)?/', $s, $m) ? (int) round((float) $m[0]) : 0;
+    }
+
+    /**
+     * Ang pinakabagong presyo: ang pinakamadalas na COD sa pinakabagong araw ng order (hindi ang iisang pinakabagong
+     * order, para hindi ito maitakda ng isang 2-piraso, typo o kasabay na promo). Tabla → ang mas marami sa huling 3 araw
+     * ng order, tapos ang may mas bagong order. $daily: [ts_date => [presyo => bilang]], $lastAt: [presyo => [ts_date, id]].
+     */
+    public static function latestPrice(array $daily, array $lastAt): ?int
+    {
+        if (!$daily) return null;
+        krsort($daily, SORT_STRING);
+        $counts = reset($daily);
+        $cands = array_keys($counts, max($counts), true);
+        if (count($cands) > 1) {
+            $three = array_slice($daily, 0, 3, true);
+            $sum = fn ($p) => array_sum(array_map(fn ($day) => $day[$p] ?? 0, $three));
+            $best = max(array_map($sum, $cands));
+            $cands = array_values(array_filter($cands, fn ($p) => $sum($p) === $best));
+        }
+        usort($cands, fn ($a, $b) => $lastAt[$b] <=> $lastAt[$a]);
+
+        return (int) $cands[0];
+    }
+
+    /** Bilang ng mga order sa presyong iyon at sa mga buong multiple nito (2×, 3×: ilang piraso sa isang order). */
+    private static function atPrice(array $byPrice, int $p): array
+    {
+        $parts = array_filter($byPrice, fn ($c, $cod) => $p > 0 && $cod >= $p && $cod % $p === 0, ARRAY_FILTER_USE_BOTH);
+
+        return self::sumCounts($parts);
     }
 
     private static function emptyCounts(): array

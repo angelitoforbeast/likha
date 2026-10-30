@@ -103,25 +103,60 @@ class LatestPriceTest extends RtsProjectionTestCase
         $this->assertEqualsWithDelta(25.0, $day['est'], 0.001);
     }
 
-    public function test_S_203_1_2_the_latest_price_is_the_newest_order_by_date_then_by_id(): void
+    public function test_S_203_1_2_the_latest_price_is_the_most_common_cod_of_the_newest_order_day_with_tie_breaks(): void
     {
-        // Ang mas bago (Okt 20, ₱199) ay naunang naipasok; ang mas luma (Set 10, ₱249) ay mas marami at mas mataas ang id.
+        // Ang mas bagong araw (Okt 20, ₱199) ay naunang naipasok; ang mas luma (Set 10, ₱249) ay mas marami at mas mataas ang id.
         $this->orders(30, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
         $this->orders(50, 'Page A', 'Item A', '2026-09-10 12:00:00', 'Delivered', [], '249');
         $this->order('Page A', 'Item A', '2026-10-22 12:00:00', 'Delivered', [], '');      // walang COD: hindi presyo
-        // Parehong araw: ang huling naipasok ang pinakabago. Ang COD na may ₱ at comma ay nililinis.
+        // Tabla sa pinakabagong araw: ang mas marami sa huling 3 araw ng order ang panalo. Ang COD na may ₱ at comma ay nililinis.
         $this->orders(30, 'Page B', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
         $this->orders(30, 'Page B', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '₱1,299.00');
         $this->orders(5, 'Page B', 'Item A', '2026-10-01 12:00:00', 'Delivered', [], '1299');
+        // Tabla pa rin sa 3 araw: ang may mas bagong order (huling naipasok).
+        $this->orders(20, 'Page C', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
+        $this->orders(20, 'Page C', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '249');
 
         $rows = (new RtsProjection())->rows('2026-09-01', '2026-10-23', null, 'latest');
         $this->assertSame([199, 30], [$rows[$this->k('Page A', 'Item A')]['price'], $rows[$this->k('Page A', 'Item A')]['matched']]);
         $this->assertSame([1299, 35], [$rows[$this->k('Page B', 'Item A')]['price'], $rows[$this->k('Page B', 'Item A')]['matched']]);
+        $this->assertSame([249, 20], [$rows[$this->k('Page C', 'Item A')]['price'], $rows[$this->k('Page C', 'Item A')]['matched']]);
 
         // Gaya ng basa ng owner page sa MySQL: ang numero sa simula lang.
         foreach (['199' => 199, '₱ 1,299.00' => 1299, '199.50' => 200, '499+50sf' => 499, '' => 0, 'n/a' => 0] as $cod => $want) {
             $this->assertSame($want, RtsProjection::price((string) $cod), (string) $cod);
         }
+    }
+
+    public function test_S_203_1_5_one_398_order_on_the_newest_day_among_199s_leaves_the_price_at_199(): void
+    {
+        $this->orders(30, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
+        $this->order('Page A', 'Item A', '2026-10-20 18:00:00', 'Delivered', [], '398');   // ang pinakabagong order mismo
+
+        $this->assertSame(199, (new RtsProjection())->rows('2026-09-01', '2026-10-23', null, 'latest')[$this->k('Page A', 'Item A')]['price']);
+    }
+
+    public function test_S_203_1_6_a_day_of_three_199s_and_one_249_gives_199(): void
+    {
+        $this->orders(30, 'Page A', 'Item A', '2026-10-10 12:00:00', 'Delivered', [], '199');
+        $this->orders(3, 'Page A', 'Item A', '2026-10-21 12:00:00', 'Delivered', [], '199');
+        $this->order('Page A', 'Item A', '2026-10-21 18:00:00', 'Delivered', [], '249');   // ang pinakabagong order
+
+        $this->runAt('2026-10-23 06:00:00');
+
+        $day = $this->dayRows('Page A', 'Item A')[0];
+        $this->assertSame([199, 33], [$day['price'], $day['m']]);
+    }
+
+    public function test_S_203_1_7_a_multi_piece_order_at_a_multiple_of_the_price_counts_under_that_price(): void
+    {
+        $this->orders(30, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
+        $this->orders(2, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned', [], '398');    // 2 piraso
+        $this->order('Page A', 'Item A', '2026-10-20 12:00:00', 'Returned', [], '597');        // 3 piraso
+        $this->orders(5, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned', [], '249');    // ibang presyo: hindi kasama
+
+        $r = (new RtsProjection())->rows('2026-09-01', '2026-10-23', null, 'latest')[$this->k('Page A', 'Item A')];
+        $this->assertSame([199, 33, 3, 30], [$r['price'], $r['matched'], $r['returned'], $r['delivered']]);
     }
 
     public function test_S_203_1_4_the_21_day_trend_in_the_reason_compares_the_same_price(): void
