@@ -295,16 +295,18 @@
         .stage { position: relative; width: 100%; height: auto; transform: none !important; overflow: visible; padding-bottom: 24px;
             background: radial-gradient(ellipse 120% 60% at 50% 30%, #0c2c47, #02060c 70%); }
         .bg, .rb, .coins { display: none; }
-        .hd { position: relative; width: 100%; height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px; }
+        .stage { display: flex; flex-direction: column; }
+        .hd { position: relative; order: -2; width: 100%; height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px; }
+        .hd [data-live-3d] { display: none; }
         .hd h1 { font-size: 30px; } .clk { font-size: 28px; }
-        .fp { position: relative; right: auto; top: auto; margin: 0 16px; flex-wrap: wrap; }
+        .fp { position: relative; order: -1; right: auto; top: auto; margin: 0 16px 12px; flex-wrap: wrap; }
         .fp .sel { max-width: 100%; }
         .cam { position: relative; perspective: none; }
         .world { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; transform: none !important; padding: 0 16px; }
         .it { position: relative; left: auto; top: auto; margin: 0 !important; transform: none !important; flex: none; }
         .it[data-pn="vault"] { order: 1; } .orb { order: 2; } .it[data-pn="forbeast"] { order: 3; } .it[data-pn="botcake"] { order: 4; } .it[data-pn="incepxionbot"] { order: 5; }
         .it[data-pn="ai"] { order: 6; } .it[data-pn="seq"] { order: 7; } .it[data-pn="replies"] { order: 8; } .it[data-pn="avg"] { order: 9; } .it[data-pn="chats"] { order: 10; }
-        .tk { position: relative; left: auto; top: auto; display: block; width: calc(100% - 32px); margin: 12px 16px 0; }
+        .tk { position: relative; order: 1; left: auto; top: auto; display: block; width: calc(100% - 32px); margin: 12px 16px 0; }
         .card { max-width: calc(100vw - 32px); min-width: 0; }
         body { overflow-x: hidden; }
     }
@@ -355,7 +357,10 @@
     const glow = (c, s, x, y, r, a) => { c.globalAlpha = a; c.drawImage(s, x - r, y - r, 2 * r, 2 * r); c.globalAlpha = 1; };
 
     // ── ang mga panel: ang hugis ay mula sa server (data-geo), ang dulo ng spoke ay ang gilid na nakaharap sa globo ──
-    const O = {x: 960, y: 585}, S15 = 1.45, CR = 795, TH = 548;
+    const O = {x: 960, y: 585}, CR = 795, TH = 548;
+    // Sa 3D: ang taas at laki ng panel sa cylinder, ang layo ng camera at ang angat ng mundo. Sinukat sa dulo ng ugoy (±7°): ang
+    // bawat panel ay buo sa pagitan ng header at ng ticker, at walang panel na tumatakip sa iba.
+    const YS = 1.3, PS = 1.3, BACK = -290, LIFT = -8;
     const PN = [...all('[data-pn]')].map(el => {
         const [cx, cy, w, h, ins] = el.dataset.geo.split(',').map(Number);
         return {id: el.dataset.pn, el, cx, cy, w, h, ins, or: el.dataset.or, cv: el.querySelector('canvas'), c: null, M: {X: 0, Y: 0, Z: 0, rot: 0, sc: 1}};
@@ -392,10 +397,11 @@
     function toWorld(p, lx, ly) { const M = p.M, c = Math.cos(M.rot), s = Math.sin(M.rot); return [M.X + M.sc * lx * c, M.Y + M.sc * ly, M.Z - M.sc * lx * s]; }
     function layout(t) {
         const sway = live.reduced ? 0 : 1, orbit = 7 * sway * Math.sin(t / 9500 + 4), tilt = 4 + 2 * sway * Math.sin(t / 7000);
-        world.style.transform = K > .001 ? 'translateY(' + (2 * K).toFixed(1) + 'px) translateZ(' + (-240 * K).toFixed(1) + 'px) rotateX(' + (tilt * K).toFixed(2) + 'deg) rotateY(' + (orbit * K).toFixed(2) + 'deg)' : '';
-        live.orbit = orbit * K;
+        world.style.transform = K > .001 ? 'translateY(' + (LIFT * K).toFixed(1) + 'px) translateZ(' + (BACK * K).toFixed(1) + 'px) rotateX(' + (tilt * K).toFixed(2) + 'deg) rotateY(' + (orbit * K * K * K).toFixed(2) + 'deg)' : '';
+        // Ang ugoy ay lumalaki lang sa dulo ng pagtiklop (K³): sa gitna ng paglipat ay walang panel na dumadaan sa kapitbahay.
+        live.orbit = orbit * K * K * K;
         for (const p of PN) {
-            const X = lerp(p.dx, CR * Math.sin(p.th), K), Y = lerp(p.dy, p.dy * S15, K), Z = lerp(0, -CR * Math.cos(p.th), K), rot = -p.th * K, sc = lerp(1, S15, K);
+            const X = lerp(p.dx, CR * Math.sin(p.th), K), Y = lerp(p.dy, p.dy * YS, K), Z = lerp(0, -CR * Math.cos(p.th), K), rot = -p.th * K, sc = lerp(1, PS, K * K); // ang laki ay sumusunod sa dulo (K²): walang sulok na nagdidikit sa gitna ng pagtiklop
             p.M = {X, Y, Z, rot, sc};
             p.el.style.transform = 'translate3d(' + X.toFixed(2) + 'px,' + Y.toFixed(2) + 'px,' + Z.toFixed(2) + 'px) rotateY(' + rot.toFixed(4) + 'rad) scale(' + sc.toFixed(4) + ')';
         }
@@ -749,10 +755,14 @@
         }
         c.globalCompositeOperation = 'source-over';
         // Ang pangalan ng bagong customer: unang pangalan at inisyal, 3.5 s lang (fillText: text, hindi HTML).
+        // Ang mga bagong customer ay nagsisimula malapit sa gitna: ang tag na tatama sa nauna ay ibinababa (walang patong na pangalan).
+        const placed = [];
         for (const d of tags) {
             c.globalAlpha = d.b < 2600 ? 1 : 1 - (d.b - 2600) / 900;
             c.font = '600 18px ' + FS;
             const tw = c.measureText(d.name).width, right = d.x < cx, bx = right ? d.x + 16 : d.x - 16 - tw - 14;
+            for (let i = 0; i < 6 && placed.some(q => bx < q[0] + q[2] && q[0] < bx + tw + 14 && Math.abs(q[1] - d.y) < 28); i++) d.y += 28;
+            placed.push([bx, d.y, tw + 14]);
             c.fillStyle = 'rgba(3,28,44,.92)'; rpath(c, [[bx, d.y - 14], [bx + tw + 14, d.y - 14], [bx + tw + 14, d.y + 12], [bx, d.y + 12]], 6); c.fill();
             c.strokeStyle = 'rgba(93,255,156,.7)'; c.lineWidth = 1.2; c.stroke();
             c.fillStyle = '#d8ffe8'; c.textAlign = 'left'; c.fillText(d.name, bx + 7, d.y + 5);
