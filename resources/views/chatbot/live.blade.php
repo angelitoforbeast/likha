@@ -32,6 +32,9 @@
     // Ang "signals · last 5 min" ng core: ang kabuuan ng mga bilang sa huling 5 minuto.
     $signals = $c['messages']['recent'] + $c['confirmed']['recent'] + $c['follow_ups']['recent'] + $c['ai']['recent'] + $c['orders']['recent'];
     $up = fn (string $k) => $c[$k]['recent'] > 0 ? 'up' : '';
+    // Ang bersyon ng rules file (oras ng file): bagong URL sa bawat deploy na nagbago nito, kaya hindi na ginagamit ng TV ang lumang
+    // kopya sa cache (ang lumang kopya na walang readView ay pumapatay sa script).
+    $rulesVersion = is_file(public_path('js/chatbot-live-rules.js')) ? filemtime(public_path('js/chatbot-live-rules.js')) : 0;
     // Ang notes ng bawat bot (ang huling ginawa bilang text, iisa sa script).
     $kinds = ['message' => 'Inquiry', 'reply' => 'Reply', 'follow_up' => 'Follow-up', 'order' => 'Order', 'ai' => 'AI answer'];
     $lastOf = fn (?array $l) => $l ? ($kinds[$l['type']] ?? 'Event') . ' · ' . $l['page'] . ' · ' . $l['at'] : '—';
@@ -463,16 +466,29 @@
 @endpush
 
 @push('scripts')
-<script src="{{ asset('js/chatbot-live-rules.js') }}"></script>
+<script src="{{ asset('js/chatbot-live-rules.js') }}?v={{ $rulesVersion }}"></script>
 <script>
 // /chatbot/live: ang feed ay pino-poll kada 5 segundo (tumitigil kapag nakatago ang tab). Ang galaw na laging tumatakbo (ikot ng
+// ASCII lang ang script na ito (ang piso, tuldok sa gitna, ellipsis at dash ay \u escape). Bawat hakbang ng pagsisimula at ng poll
+// ay dumadaan sa step(): ang sirang bahagi (hal. lumang rules file sa cache na walang readView) ay isang beses nilo-log at ang iba
+// (orasan, poll, 3D, TV mode) ay tuloy.
 // mga singsing, scan band, streak sa bawat buhay na link) ay CSS; ang script ay para sa data: ang mga bilang (umaakyat, hindi
 // bumababa sa loob ng isang minuto: LiveRules.settle / land), ang loot ng order (LiveRules.schedule / loot: mga barya mula sa hub
 // papunta sa core, ang kabuuan ay umaakyat sa bawat paglapag), ang notes ng bawat bot, ang 5-minutong orasan at ang 3D na camera.
 // Buong araw ito sa TV: walang lumalaking DOM (12 barya na ginagamit muli, 8 linya ng activity, 4 na customer kada bot), at ang
 // animation loop ay tumatakbo lang habang may gumagalaw. Ang text mula sa server (pangalan ng page o customer) ay textContent lang.
 (() => {
-    const R = window.LiveRules;
+    /* live-step:start */
+    function makeStep(log) {
+        var seen = {};
+        return function (name, fn) {
+            try { return fn(); } catch (e) { if (!seen[name]) { seen[name] = true; log(name, e); } return undefined; }
+        };
+    }
+    /* live-step:end */
+    const step = makeStep((name, e) => { if (window.console) console.error('Live: ' + name + ' failed; the rest keeps running.', e); });
+    const R = window.LiveRules || {};
+    const DOT = ' \u00B7 ', DASH = '\u2014', ELL = '\u2026';
     const boot = JSON.parse(document.getElementById('live-data').textContent);
     const root = document.querySelector('[data-live]');
     const stage = root.querySelector('[data-live-stage]');
@@ -490,7 +506,7 @@
     const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
     function again(e, cls) { e.classList.remove(cls); void e.getBoundingClientRect(); e.classList.add(cls); }
 
-    // ── ang stage: 1920 × 1080 na pinalaki sa screen, at ang mabagal na paglipat laban sa burn-in (hanggang 4 px, isang hakbang kada minuto) ──
+    // -- ang stage: 1920 x 1080 na pinalaki sa screen, at ang mabagal na paglipat laban sa burn-in (hanggang 4 px, isang hakbang kada minuto) --
     const DRIFT = [[0, 0], [2, 1], [3, -2], [1, 3], [-1, 2], [-3, 3], [-2, -1], [2, 2], [-1, -3], [0, 1]];
     let drift = 0;
     function fit() {
@@ -503,7 +519,7 @@
     fit();
     if (!live.reduced) { stage.classList.add('boot'); setTimeout(() => stage.classList.remove('boot'), 2600); }
 
-    // ── ang mga bilang: bawat isa ay may nakikita at server; umaakyat nang paunti-unti (iisang animation loop para sa lahat) ──
+    // -- ang mga bilang: bawat isa ay may nakikita at server; umaakyat nang paunti-unti (iisang animation loop para sa lahat) --
     const day = (k, f, hold = 0, dur = 900) => ({k, f, hold, floor: 60000, dur});
     const win = (k, f) => ({k, f, hold: 0, floor: 0, dur: 900});
     const NUMS = [
@@ -553,11 +569,11 @@
         for (const e of all('[' + attr + '="' + key + '"]')) if (e.textContent !== value) e.textContent = value;
     }
 
-    // ── ang notes ng bawat bot: ang mga numero, ang huling ginawa at ang 4 na pinakabagong customer ──
+    // -- ang notes ng bawat bot: ang mga numero, ang huling ginawa at ang 4 na pinakabagong customer --
     const held = {};
     function noteText(n) {
-        return {chatting: R.num(n.chatting), ai: R.num(n.ai), avg: n.avg === null || n.avg === undefined ? '—' : Number(n.avg).toFixed(1) + ' s', orders: R.num(n.orders),
-            value: R.peso(n.value), last: n.last ? (boot.kinds[n.last.type] || 'Event') + ' · ' + n.last.page + ' · ' + n.last.at : '—'};
+        return {chatting: R.num(n.chatting), ai: R.num(n.ai), avg: n.avg === null || n.avg === undefined ? DASH : Number(n.avg).toFixed(1) + ' s', orders: R.num(n.orders),
+            value: R.peso(n.value), last: n.last ? (boot.kinds[n.last.type] || 'Event') + DOT + n.last.page + DOT + n.last.at : DASH};
     }
     function setNote(bot, n) {
         const el = root.querySelector('[data-note="' + bot + '"]');
@@ -583,49 +599,60 @@
         }
         toggle(el.querySelector('[data-cl-none]'), !rows.length);
     }
-    for (const li of all('[data-cl] li')) li.dataset.sig = li.children[0].textContent + '|' + li.children[1].textContent + '|' + li.children[2].textContent;
+    step('notes', () => { for (const li of all('[data-cl] li')) li.dataset.sig = li.children[0].textContent + '|' + li.children[1].textContent + '|' + li.children[2].textContent; });
     function setNotes(notes) {
         for (const bot of Object.keys(boot.bots)) {
             const n = notes && notes[bot];
             if (!n) continue;
             // Ang notes ng bot na may paparating na barya ay hinihintay ang paglapag (ang ORDERED at ang halaga ay sabay ng loot).
             if (held[bot]) { held[bot].note = n; continue; }
-            setNote(bot, n);
+            step('notes', () => setNote(bot, n));
         }
     }
 
+    // Bawat bahagi ay sariling hakbang: ang sirang data o lumang rules sa isang panel ay hindi pumipigil sa iba.
     function setCounts(c) {
         live.counts = c;
-        settleAll();
-        for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders']]) {
-            put(k, R.num(c[src].recent), 'data-live-recent');
-            for (const e of all('[data-live-up="' + k + '"]')) e.classList.toggle('up', c[src].recent > 0);
-        }
-        const rt = c.reply_time || {state: 'error', seconds: null};
-        put('reply_time', rt.seconds === null ? '—' : Number(rt.seconds).toFixed(1), 'data-live-count');
-        for (const e of all('[data-live-unit]')) toggle(e, rt.seconds !== null);
-        put('reply_time', boot.notes[rt.state === 'ok' && rt.seconds === null ? 'none' : rt.state] || boot.notes.error, 'data-live-note');
-        for (const side of ['in', 'out']) for (const e of all('[data-live-unknown="' + side + '"]')) toggle(e, !!c.bots[side].unknown);
-        for (const bot of Object.keys(boot.bots)) {
-            const on = bot === 'botcake' || !!(c.linked && c.linked[bot]) ? '1' : '0';
-            for (const e of all('[data-bot-row="' + bot + '"]')) e.setAttribute('data-linked', on);
-        }
-        const o = c.last_order, page = o ? (o.page.length > 24 ? o.page.slice(0, 23) + '…' : o.page) : '';
-        put('', o ? page + ' · ' + o.at + (o.bot && boot.bots[o.bot] ? ' · ' + boot.bots[o.bot] : '') : 'no order yet today', 'data-live-last-order');
-        const seqs = c.sequences || [];
-        for (let i = 0; i < 3; i++) {
-            const s = seqs[i];
-            for (const e of all('[data-live-seq="' + i + '"]')) {
-                toggle(e, !!s);
-                if (s && e.children[0].textContent !== s.name) e.children[0].textContent = s.name;
-                if (s && e.children[1].textContent !== R.num(s.n)) e.children[1].textContent = R.num(s.n);
+        step('numbers', settleAll);
+        step('recent', () => {
+            for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders']]) {
+                put(k, R.num(c[src].recent), 'data-live-recent');
+                for (const e of all('[data-live-up="' + k + '"]')) e.classList.toggle('up', c[src].recent > 0);
             }
-        }
-        for (const e of all('[data-live-seq-none]')) toggle(e, !seqs.length);
+        });
+        step('reply time', () => {
+            const rt = c.reply_time || {state: 'error', seconds: null};
+            put('reply_time', rt.seconds === null ? DASH : Number(rt.seconds).toFixed(1), 'data-live-count');
+            for (const e of all('[data-live-unit]')) toggle(e, rt.seconds !== null);
+            put('reply_time', boot.notes[rt.state === 'ok' && rt.seconds === null ? 'none' : rt.state] || boot.notes.error, 'data-live-note');
+        });
+        step('bots', () => {
+            for (const side of ['in', 'out']) for (const e of all('[data-live-unknown="' + side + '"]')) toggle(e, !!c.bots[side].unknown);
+            for (const bot of Object.keys(boot.bots)) {
+                const on = bot === 'botcake' || !!(c.linked && c.linked[bot]) ? '1' : '0';
+                for (const e of all('[data-bot-row="' + bot + '"]')) e.setAttribute('data-linked', on);
+            }
+        });
+        step('last order', () => {
+            const o = c.last_order, page = o ? (o.page.length > 24 ? o.page.slice(0, 23) + ELL : o.page) : '';
+            put('', o ? page + DOT + o.at + (o.bot && boot.bots[o.bot] ? DOT + boot.bots[o.bot] : '') : 'no order yet today', 'data-live-last-order');
+        });
+        step('sequences', () => {
+            const seqs = c.sequences || [];
+            for (let i = 0; i < 3; i++) {
+                const s = seqs[i];
+                for (const e of all('[data-live-seq="' + i + '"]')) {
+                    toggle(e, !!s);
+                    if (s && e.children[0].textContent !== s.name) e.children[0].textContent = s.name;
+                    if (s && e.children[1].textContent !== R.num(s.n)) e.children[1].textContent = R.num(s.n);
+                }
+            }
+            for (const e of all('[data-live-seq-none]')) toggle(e, !seqs.length);
+        });
         setNotes(c.notes);
     }
 
-    // ── ang 5-minutong orasan: 60 guhit, isa kada 5 s; ang ulo ay puti, ang may event ay maliwanag at kumukupas, ang order ay ginto ──
+    // -- ang 5-minutong orasan: 60 guhit, isa kada 5 s; ang ulo ay puti, ang may event ay maliwanag at kumukupas, ang order ay ginto --
     const ticks = [...all('[data-live-ticks] line')], bucket = new Array(60).fill(0), slotOf = new Array(60).fill(-1), gold = new Array(60).fill(-1);
     const head = () => Math.floor(Date.now() / 5000);
     function mark(order) { const h = head(), i = h % 60; if (slotOf[i] !== h) { slotOf[i] = h; bucket[i] = 0; } bucket[i]++; if (order) gold[i] = h; }
@@ -640,7 +667,7 @@
         });
     }
 
-    // ── ang loot: 12 barya na ginagamit muli, iisang animation loop habang may lumilipad ──
+    // -- ang loot: 12 barya na ginagamit muli, iisang animation loop habang may lumilipad --
     const coinLayer = root.querySelector('[data-live-coins]'), burstEl = root.querySelector('[data-live-burst]'), shockEl = root.querySelector('[data-live-shock]');
     const rimEl = root.querySelector('[data-live-rim]'), glowEl = root.querySelector('[data-live-glow]'), valueEl = root.querySelector('[data-live-value]'), plus = root.querySelector('[data-live-plus]');
     const pool = [];
@@ -648,7 +675,7 @@
         const g = mk('g', {style: 'display:none'}, coinLayer), coin = mk('g', {}, g), plate = mk('g', {}, g);
         mk('circle', {r: 30, fill: 'url(#lv-coin)', stroke: '#ffe9a8', 'stroke-width': 2}, coin);
         mk('circle', {r: 22, fill: 'none', stroke: '#6a4a0c', 'stroke-width': 2, 'stroke-dasharray': '3 3'}, coin);
-        mk('text', {y: 13, 'font-size': 36, fill: '#3a2603'}, coin).textContent = '₱';
+        mk('text', {y: 13, 'font-size': 36, fill: '#3a2603'}, coin).textContent = '\u20B1';
         mk('rect', {x: -34, y: -19, width: 68, height: 38, rx: 3, fill: 'url(#lv-coin)', stroke: '#6a4a0c', 'stroke-width': 2}, plate);
         mk('text', {y: 10, 'font-size': 28, fill: '#2a1a02'}, plate).textContent = '+1';
         pool.push({g, coin, plate, busy: false});
@@ -760,13 +787,16 @@
         if (!h || --h.n > 0) return;
         clearTimeout(h.timer);
         delete held[bot];
-        if (h.note) setNote(bot, h.note);
+        if (h.note) step('notes', () => setNote(bot, h.note));
+    }
+    function run(a) {
+        if (a.type === 'order') step('loot', () => act(a)); else step('events', () => act(a));
     }
     function play(plan) {
-        for (const a of plan.actions) a.at ? setTimeout(() => act(a), a.at) : act(a);
+        for (const a of plan.actions) a.at ? setTimeout(() => run(a), a.at) : run(a);
     }
 
-    // ── ang LIVE ACTIVITY: 8 na linya, ang pinakabago sa itaas ──
+    // -- ang LIVE ACTIVITY: 8 na linya, ang pinakabago sa itaas --
     const logEl = root.querySelector('[data-live-log]');
     function log(events) {
         for (const e of events.slice(-LOG_LINES)) {
@@ -777,7 +807,7 @@
             const t = document.createElement('time'); t.textContent = String(e.at).slice(11, 19);
             const ch = document.createElement('span'); ch.className = 'ch'; ch.textContent = chip + (e.type === 'order' && typeof e.amount === 'number' ? ' +' + R.peso(e.amount) : '');
             const b = document.createElement('span'); b.className = 'b'; b.textContent = e.bot && boot.bots[e.bot] ? boot.bots[e.bot] : boot.site;
-            const d = document.createElement('div'); d.className = 'd'; d.textContent = desc + ' · ' + e.page;
+            const d = document.createElement('div'); d.className = 'd'; d.textContent = desc + DOT + e.page;
             a.append(t, ch, b); li.append(a, d);
             logEl.prepend(li);
         }
@@ -810,16 +840,17 @@
             const data = await res.json();
             live.cursor = data.cursor;
             live.fail = 0;
-            const plan = schedule(data.events);
-            setCounts(data.counts);
+            const events = Array.isArray(data.events) ? data.events : [];
+            const plan = step('plan', () => schedule(events)) || {actions: []};
+            step('counts', () => setCounts(data.counts));
             for (const e of all('[data-live-updated]')) e.textContent = data.now;
-            log(data.events);
-            play(plan);
-            setStatus('live', data.more > 0 ? 'LIVE · +' + R.num(data.more) + ' MORE' : 'LIVE');
-            beat();
+            step('log', () => log(events));
+            step('play', () => play(plan));
+            setStatus('live', data.more > 0 ? 'LIVE' + DOT + '+' + (R.num ? R.num(data.more) : data.more) + ' MORE' : 'LIVE');
+            step('beat', beat);
         } catch (e) {
             live.fail++;
-            setStatus('error', 'RECONNECTING…');
+            setStatus('error', 'RECONNECTING' + ELL);
         } finally {
             live.inflight = false;
         }
@@ -831,13 +862,18 @@
     });
     for (const s of all('[data-live-page], [data-live-bot]')) s.addEventListener('change', e => e.target.form.submit());
 
-    // ── 3D: CSS perspective; ang camera ay lumalapit at umiikot nang dahan-dahan (isang transform sa isang element kada frame,
-    // habang 3D lang). Ang pinili ay naaalala ng browser na ito; 2D ang default. ──
+    // -- 3D: CSS perspective; ang camera ay lumalapit at umiikot nang dahan-dahan (isang transform sa isang element kada frame,
+    // habang 3D lang). Ang pinili ay naaalala ng browser na ito; 2D ang default. --
     let store = null;
     try { store = window.localStorage; } catch (e) { store = null; }
     const b3 = root.querySelector('[data-live-3d]');
-    let want = R.readView(store) === '3d' ? 1 : 0, k3 = 0, camRaf = 0;
+    let want = 0, k3 = 0, camRaf = 0;
+    step('view', () => { want = R.readView(store) === '3d' ? 1 : 0; });
     function cam(t) {
+        camRaf = 0;
+        step('camera', () => camera(t));
+    }
+    function camera(t) {
         k3 = live.reduced ? want : k3 + (want - k3) * .05;
         if (Math.abs(want - k3) < .002) k3 = want;
         const sway = live.reduced ? 0 : 1, rx = k3 * (32 + 3 * sway * Math.sin(t / 9000)), ry = k3 * k3 * k3 * 11 * sway * Math.sin(t / 11000 - 1.9);
@@ -854,32 +890,35 @@
         want = mode === '3d' && !phone() ? 1 : 0;
         b3.setAttribute('aria-pressed', want ? 'true' : 'false');
         b3.textContent = want ? '2D' : '3D';
-        if (save) R.saveView(store, want ? '3d' : '2d');
+        if (save) step('view', () => R.saveView(store, want ? '3d' : '2d'));
         if (!camRaf) camRaf = requestAnimationFrame(cam);
     }
-    b3.addEventListener('click', () => view(want ? '2d' : '3d', true));
-    view(want ? '3d' : '2d', false);
+    step('view', () => {
+        b3.addEventListener('click', () => step('view', () => view(want ? '2d' : '3d', true)));
+        view(want ? '3d' : '2d', false);
+    });
 
     function motion(reduced) { live.reduced = reduced; if (!camRaf) camRaf = requestAnimationFrame(cam); }
     if (mq && mq.addEventListener) mq.addEventListener('change', e => motion(e.matches));
 
     // TV mode: buong screen (kapag kaya ng browser).
-    const fs = root.querySelector('[data-live-fullscreen]');
-    if (fs && document.documentElement.requestFullscreen) {
+    step('tv', () => {
+        const fs = root.querySelector('[data-live-fullscreen]');
+        if (!fs || !document.documentElement.requestFullscreen) return;
         toggle(fs, true);
         fs.addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {}));
         document.addEventListener('fullscreenchange', () => { fs.textContent = document.fullscreenElement ? 'Exit full screen' : 'TV mode'; });
-    }
+    });
     // Ang orasan ng Manila, kada segundo; ang mga bilang na hinihintay ang barya ay sinusuri rin kada segundo.
     const clock = root.querySelector('[data-live-clock]');
     function second() {
-        try { clock.textContent = new Date().toLocaleTimeString('en-GB', {timeZone: 'Asia/Manila', hour12: false}); } catch (e) { /* ang huling oras ng server ang naiiwan */ }
-        paintTicks();
-        if (['orders', 'peso'].some(k => live.st[k] && live.st[k].heldSince !== null)) settleAll();
+        step('clock', () => { clock.textContent = new Date().toLocaleTimeString('en-GB', {timeZone: 'Asia/Manila', hour12: false}); });
+        step('ticks', paintTicks);
+        step('numbers', () => { if (['orders', 'peso'].some(k => live.st[k] && live.st[k].heldSince !== null)) settleAll(); });
     }
     live.play = events => play(schedule(events)); live.setCounts = setCounts; live.log = log; live.view = view;
 
-    setCounts(boot.counts);
+    step('counts', () => setCounts(boot.counts));
     second();
     setInterval(second, 1000);
     live.timer = setTimeout(poll, boot.interval);
