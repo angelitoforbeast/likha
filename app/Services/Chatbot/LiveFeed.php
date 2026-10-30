@@ -44,6 +44,8 @@ class LiveFeed
     /** Ang notes ng bawat bot: ilang pinakabagong customer ang ipinapakita, at ilan ang itinatabi (para eksakto ang 4 na iyon). */
     public const NOTE_CUSTOMERS = 4;
     public const NOTE_KEEP = 30;
+    /** Ang radar ng bawat bot: hanggang ganito karaming tuldok (ang pinakabago); ang eksaktong bilang ay nasa notes. */
+    public const RADAR_CAP = 150;
 
     /** Ang mga order ng araw (mula sa listahan ng order-value ng huling refresh): id => page_id, psid, at, run, bot, amount. */
     private array $dayOrders = [];
@@ -82,6 +84,7 @@ class LiveFeed
             foreach ($counts['bots'][$dir] as $b => $n) if ($b !== $bot) $counts['bots'][$dir][$b] = 0;
         }
         foreach ($counts['notes'] ?? [] as $b => $note) if ($b !== $bot) $counts['notes'][$b] = self::noteZero($note['linked']);
+        foreach ($counts['radar'] ?? [] as $b => $dots) if ($b !== $bot) $counts['radar'][$b] = [];
 
         return $counts;
     }
@@ -101,7 +104,7 @@ class LiveFeed
      */
     public function counts(?string $page): array
     {
-        return Cache::flexible('chatbot-live:v4:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page),
+        return Cache::flexible('chatbot-live:v5:' . ($page ?? 'all'), [intdiv(self::CACHE_SECONDS, 2), self::CACHE_SECONDS], fn () => $this->buildCounts($page),
             ['seconds' => 15]); // ang lock ng refresh ay may expiry: ang namatay na worker ay hindi humaharang nang habambuhay
     }
 
@@ -140,9 +143,10 @@ class LiveFeed
         $pair = fn (string $k) => ['today' => $day[$k], 'recent' => $live['recent'][$k]];
         $sum = fn (string $k, string $part) => array_sum($part === 'today' ? $day[$k] : $live['recent'][$k]);
 
-        [$active, $chatting] = $this->active($page, $recent, $end);
-        $replyTime = app(MetaReplySpeed::class)->todayAverage($page);
+        // Ang order-value muna: ang mga order ng araw ang nagsasabi kung aling tuldok ng radar ang ginto.
         $orderValue = $this->orderValue($page, $start, $end, $recent);
+        [$active, $chatting, $radar] = $this->active($page, $start, $recent, $end);
+        $replyTime = app(MetaReplySpeed::class)->todayAverage($page);
         $linked = [Gateways::FORBEAST => Gateways::setUp(Gateways::FORBEAST), Gateways::INCEPXIONBOT => Gateways::setUp(Gateways::INCEPXIONBOT)];
 
         return [
@@ -161,6 +165,8 @@ class LiveFeed
             'sequences' => $this->topSequences($day['seqs']),
             'linked' => $linked,
             'notes' => $this->notes($page, $start, $end, $settle, $linked + [ChatbotProvider::BOTCAKE => true], $chatting, $day['ai_bots'], $replyTime),
+            // Ang radar ng bawat bot: ang mga customer na nag-message sa huling 5 minuto; ang hindi naka-link ay walang tuldok.
+            'radar' => array_map(fn ($bot) => ($linked + [ChatbotProvider::BOTCAKE => true])[$bot] ? ($radar[$bot] ?? []) : [], array_combine(self::BOTS, self::BOTS)),
             'as_of' => $now->format('H:i:s'),
         ];
     }
@@ -298,13 +304,13 @@ class LiveFeed
         foreach (DB::table('botcake_chats')->whereIn('page_id', $pageIds)->whereIn('psid', $psids)->where('received_at', '>=', $start)->where('received_at', '<', $end)
             ->whereNotNull('name')->where('name', '<>', '')->orderBy('id')->get(['page_id', 'psid', 'name']) as $r) {
             $k = $r->page_id . '|' . $r->psid;
-            if (isset($keys[$k]) && trim((string) $r->name) !== '') $names[$k] = trim((string) $r->name);
+            if (isset($keys[$k]) && ($short = self::shortName($r->name)) !== null) $names[$k] = $short;
         }
         $settings = app(\App\Services\PageSettings::class);
         $unnamed = array_diff_key($keys, $names);
         $known = [];
         foreach (DB::table('botcake_psids')->whereIn('psid', array_values(array_unique(array_column($unnamed, 1))))->where('fb_name', '<>', '')->orderBy('id')
-            ->get(['page', 'psid', 'fb_name']) as $r) $known[$settings->pageKey((string) $r->page) . '|' . $r->psid] = trim((string) $r->fb_name);
+            ->get(['page', 'psid', 'fb_name']) as $r) $known[$settings->pageKey((string) $r->page) . '|' . $r->psid] = (string) self::shortName($r->fb_name);
         foreach ($unnamed as $k => [$pageId, $psid]) {
             $pageName = $pages[$pageId] ?? null;
             $names[$k] = ($pageName !== null ? ($known[$settings->pageKey($pageName) . '|' . $psid] ?? '') : '') ?: 'Customer · ' . mb_strimwidth($pageName ?? 'Page ' . $pageId, 0, 18, '…');
@@ -440,23 +446,71 @@ class LiveFeed
     }
 
     /**
-     * Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto, at kada bot (ang customer na dumaan sa
-     * dalawang bot ay nasa dalawa, pero isa lang sa kabuuan). Isang basa: ang mga customer ng huling 5 minuto kada bot.
-     * @return array{0: int, 1: array<string, int>}
+     * Ang aktibong chat at ang radar: ilang customer (page + PSID) ang nag-message sa huling 5 minuto, kada bot (ang customer na
+     * dumaan sa dalawang bot ay nasa dalawa, pero isa lang sa kabuuan), at ang bawat isa bilang tuldok ng radar ng bot. Iisang
+     * naka-grupong basa pa rin, kahit ilan ang customer: kada customer ang oras ng huling mensahe, isang pangalan, kung may
+     * sagot ng AI sa kanya sa huling 5 minuto, at kung bago siya ngayong araw (walang mensahe bago ang 5 minuto). Ang dalawang
+     * huli ay EXISTS sa naka-index na (page_id, psid) ng chatbot_ai_requests at (page_id, psid, received_at) ng botcake_chats.
+     * Ginto (order) ang customer na may order ng parehong bot ngayong araw (ang listahan ng order-value).
+     * @return array{0: int, 1: array<string, int>, 2: array<string, array<int, array{k: string, ago: int, s: string, new: bool, name: ?string}>>}
      */
-    private function active(?string $page, string $recent, string $end): array
+    private function active(?string $page, string $start, string $recent, string $end): array
     {
-        $via = self::chatVia();
+        $g = DB::connection()->getQueryGrammar();
+        $via = self::chatVia('c.');
+        // Ang page_id at psid ng chatbot_ai_requests ay numero, ang sa botcake_chats ay text: cast para magamit ang index.
+        $int = fn (string $col) => match (DB::getDriverName()) {
+            'pgsql' => "CAST({$col} AS BIGINT)", 'mysql', 'mariadb' => "CAST({$col} AS UNSIGNED)", default => "CAST({$col} AS INTEGER)",
+        };
+        $ai = "CASE WHEN EXISTS (SELECT 1 FROM chatbot_ai_requests a WHERE a.page_id = {$int('c.page_id')} AND a.psid = {$int('c.psid')}"
+            . ' AND a.answered_at >= ? AND a.error IS NULL AND a.model <> ?) THEN 1 ELSE 0 END';
+        $new = "CASE WHEN EXISTS (SELECT 1 FROM botcake_chats p WHERE p.page_id = c.page_id AND p.psid = c.psid AND p.received_at >= ? AND p.received_at < ?"
+            . ' AND ' . $g->wrap('p.payload->_standby') . ' IS NULL) THEN 0 ELSE 1 END';
+        $ordered = [];
+        foreach ($this->dayOrders as $o) if ($o['bot'] !== null) $ordered[$o['bot'] . '|' . $o['page_id'] . '|' . $o['psid']] = true;
+        $now = now()->getTimestamp();
         $all = [];
         $bots = [];
-        foreach (DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')
-            ->when($page !== null, fn ($q) => $q->where('page_id', $page))
-            ->selectRaw($via . ' AS bot, page_id, psid')->groupByRaw($via . ', page_id, psid')->get() as $r) {
+        $radar = [];
+        foreach (DB::table('botcake_chats as c')->where('c.received_at', '>=', $recent)->where('c.received_at', '<', $end)->whereNull('c.payload->_standby')
+            ->when($page !== null, fn ($q) => $q->where('c.page_id', $page))
+            ->selectRaw("{$via} AS bot, c.page_id AS page_id, c.psid AS psid, MAX(c.received_at) AS at, MAX(c.name) AS name, {$ai} AS ai, {$new} AS fresh",
+                [$recent, \App\Services\OrderEncode\FlowEncode::MODEL, $start, $recent])
+            ->groupByRaw("{$via}, c.page_id, c.psid")->get() as $r) {
             $all[$r->page_id . '|' . $r->psid] = true;
             $bots[$r->bot] = ($bots[$r->bot] ?? 0) + 1;
+            // Walang PSID (sirang row): binibilang, pero hindi tuldok.
+            if (!in_array($r->bot, self::BOTS, true) || (string) $r->psid === '' || (string) $r->page_id === '') continue;
+            $fresh = (int) $r->fresh === 1;
+            $radar[$r->bot][] = ['k' => self::customerKey((string) $r->page_id, (string) $r->psid), 'ago' => max(0, $now - strtotime(substr((string) $r->at, 0, 19))),
+                's' => isset($ordered[$r->bot . '|' . $r->page_id . '|' . $r->psid]) ? 'order' : ((int) $r->ai === 1 ? 'ai' : 'chat'),
+                'new' => $fresh, 'name' => $fresh ? self::shortName($r->name) : null];
+        }
+        foreach ($radar as $b => $dots) {
+            usort($dots, fn ($x, $y) => [$x['ago'], $x['k']] <=> [$y['ago'], $y['k']]);
+            $radar[$b] = array_slice($dots, 0, self::RADAR_CAP);
         }
 
-        return [count($all), $bots];
+        return [count($all), $bots, $radar];
+    }
+
+    /** Ang tanda ng customer sa radar: hindi PSID, hindi maibabalik sa PSID (HMAC ng app key), pero pareho bawat poll. */
+    private static function customerKey(string $pageId, string $psid): string
+    {
+        return substr(hash_hmac('sha256', $pageId . '|' . $psid, (string) config('app.key')), 0, 12);
+    }
+
+    /**
+     * Ang pangalan sa TV: unang pangalan at inisyal ng huling salita ("Maria Dela Cruz" → "Maria C."); walang laman = null.
+     * Ang tag (hal. <b>) ay tinatanggal muna; ang iba ay text pa rin (textContent / fillText lang sa page).
+     */
+    private static function shortName(mixed $name): ?string
+    {
+        $words = preg_split('/\s+/u', trim(strip_tags((string) $name)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (!$words) return null;
+        $first = mb_strimwidth($words[0], 0, 16, '…');
+
+        return count($words) > 1 ? $first . ' ' . mb_strtoupper(mb_substr(end($words), 0, 1)) . '.' : $first;
     }
 
     /** Ang huling order ngayong araw: page, oras (HH:MM) at bot. Walang halaga ang order ng bot, kaya wala rito. */
