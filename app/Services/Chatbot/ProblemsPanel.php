@@ -37,7 +37,7 @@ class ProblemsPanel
 
     /**
      * Ang mga page na may problema (pinaka-urgent muna) at ilan ang urgent; null kapag wala.
-     * @return array{pages: array<int, array{page: string, level: string, lines: array<int, array{level: string, text: string, links: array<int, array{0: string, 1: string}>}>}>, urgent: int}|null
+     * @return array{pages: array<int, array{page: string, level: string, lines: array<int, array{level: string, text: string, links: array<int, array{0: string, 1: string}>}>}>, urgent: int, doubles: bool}|null
      */
     public function panel(): ?array
     {
@@ -53,9 +53,10 @@ class ProblemsPanel
             'quiet' => $this->safely(fn () => $this->quiet(), []),
             'sending' => $this->safely(fn () => array_map(fn ($p) => $this->settings->pageKey($p), app(Chatblast::class)->sendingPages()), []),
         ]);
+        $echoes = $this->safely(fn () => $this->echoes(), []);
         $lines = array_merge(
             $this->safely(fn () => $this->sends(), []),
-            $this->safely(fn () => $this->echoes(), []),
+            $echoes,
             $own['events'], $own['slow'], $own['quiet'],
             $this->safely(fn () => $this->setup($own['sending']), []),
         );
@@ -76,7 +77,9 @@ class ProblemsPanel
         usort($pages, fn ($a, $b) => [$rank[$a['level']], -$count($a, 'red'), -$count($a, 'orange'), -count($a['lines']), mb_strtolower($a['page'])]
             <=> [$rank[$b['level']], -$count($b, 'red'), -$count($b, 'orange'), -count($b['lines']), mb_strtolower($b['page'])]);
 
-        return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => $p['level'] !== 'white'))];
+        // doubles: may linya ng dobleng sagot (ang hindi pula sa echo), para lumabas lang ang paliwanag ng "bago" kapag kailangan.
+        return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => $p['level'] !== 'white')),
+            'doubles' => (bool) array_filter($echoes, fn ($l) => $l['level'] !== 'red')];
     }
 
     private function safely(callable $fn, mixed $fallback): mixed

@@ -115,8 +115,10 @@
                     </ul>
                 </li>
             @endforeach
-            {{-- Ang "bago" ay mula sa talaan ng Likha lang, kaya sinasabi rito kung ano ang kasama. --}}
-            <li class="pt-1 text-xs text-slate-500" data-help="doubles">Main flow double: a new customer (first message to the page in Likha's records, in the last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} min) answered by both CBB (Chatbot Builder or Botcake) and the Likha bot's main flow. A customer already known to Chatbot Builder but new to Likha counts as new. Leftover: every other double reply, e.g. old customers still in a CBB sequence or loop; not urgent.</li>
+            {{-- Ang "bago" ay mula sa talaan ng Likha lang, kaya sinasabi rito kung ano ang kasama (kapag may linya ng doble). --}}
+            @if($cbProblems['doubles'] ?? false)
+                <li class="pt-1 text-xs text-slate-500" data-help="doubles">Main flow double: a new customer (first message to the page in Likha's records, in the last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} min) answered by both CBB (Chatbot Builder or Botcake) and the Likha bot's main flow. A customer already known to Chatbot Builder but new to Likha counts as new. Leftover: every other double reply, e.g. old customers still in a CBB sequence or loop; not urgent.</li>
+            @endif
         </ol>
     </div>
 @endif
