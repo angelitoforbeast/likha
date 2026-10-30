@@ -187,7 +187,7 @@ class ChatEchoes
             // Ang pagbukas ng ad ay nasa window pa rin (doon nagiging bagong customer), pero hindi mensahe: walang sagot na hinihintay.
             $inWindow[(string) $c->page_id][(string) $c->psid] = true;
             if ($c->received_at->getTimestamp() > $cut) continue;
-            if (!empty($c->payload[ChatbotInbound::AD_OPEN]) || is_string($c->payload['_ignored'] ?? null) ||($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null)) continue;
+            if (!empty($c->payload[ChatbotInbound::AD_OPEN]) || is_string($c->payload['_ignored'] ?? null) || ($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null)) continue;
             $at = $c->received_at->getTimestamp();
             $answered = ($echoes[$c->page_id . '|' . $c->psid] ?? collect())->contains(fn ($x) => $x['at'] >= $at - self::EARLY_SECONDS && $x['at'] <= $at + $wait);
             if ($answered) continue;
@@ -260,15 +260,18 @@ class ChatEchoes
      * Ang mga bagong customer ng window kada page, mula sa sariling talaan ng Likha (walang tawag sa Botcake o CBB):
      * - bago: ang unang chat niya sa page (botcake_chats, lahat ng row; ang ad referral at postback ay naiimbak din bilang
      *   chat) ay nasa window, at walang echo ng CBB sa kanya bago iyon (sa 30 araw ng echo). Ang kilala na ng CBB pero
-     *   bago sa Likha (bago pa ang talaan) ay bago.
-     * - sinagot ng CBB: may echo ng CBB sa [unang chat − EARLY, unang chat + wait] (ang parehong sukat ng "nasagot").
+     *   bago sa Likha (bago pa ang talaan) ay bago. Ang customer ng ad ay bago mula sa pagbukas ng ad (spec 204: ang
+     *   _ad_open na row ang una niya).
+     * - sinagot ng CBB: may echo ng CBB sa [unang chat − EARLY, unang mensahe + wait] (ang parehong sukat ng "nasagot"). Ang
+     *   unang mensahe ay ang unang row na hindi pagbukas ng ad (ang unang chat kung wala): ang CBB ay sumasagot sa pagbukas,
+     *   ang Likha bot ay sa unang mensahe lang (spec 204), na minsan ilang minuto pagkatapos.
      * - main-flow double: sinagot ng CBB at, sa parehong sukat, may naipadalang sagot ang Likha bot mula sa main flow ng
      *   page: chatbot_replies na send, sent, walang sequence_id, at ang flow_id ay ang flow ng page (chatbot.flow_id) o ng
      *   active na ad group nito (ang tumatakbo para sa bagong customer, ChatbotPage::flow).
      * Tatlong query ng data lang, hindi kada pares o customer: ang unang chat (isang grouped query), ang lumang echo ng CBB at
      * sagot ng Likha (kapag may bagong customer na sinagot ng CBB).
      * @param array<string, array<string, true>> $customers page => psid ng may chat sa window
-     * @return array<string, array{new: int, cbb: int, main: array<string, int>}> page => bilang, at psid => oras ng unang chat
+     * @return array<string, array{new: int, cbb: int, main: array<string, int>}> page => bilang, at psid => oras ng unang mensahe
      */
     private function newCustomers(array $names, Carbon $since, int $wait, array $customers, $echoes): array
     {
@@ -278,14 +281,17 @@ class ChatEchoes
         $from = $since->getTimestamp();
         $cbb = fn ($x) => in_array($x['sender'], self::CBB, true);
         $new = [];
-        foreach (BotcakeChat::query()->whereIn('page_id', array_map('strval', array_keys($customers)))->whereIn('psid', $psids)->groupBy('page_id', 'psid')
-            ->selectRaw('page_id, psid, MIN(received_at) AS first_at')->toBase()->get() as $f) {
+        $query = BotcakeChat::query();
+        $adOpen = $query->getQuery()->getGrammar()->wrap('payload->' . ChatbotInbound::AD_OPEN);
+        foreach ($query->whereIn('page_id', array_map('strval', array_keys($customers)))->whereIn('psid', $psids)->groupBy('page_id', 'psid')
+            ->selectRaw("page_id, psid, MIN(received_at) AS first_at, MIN(CASE WHEN {$adOpen} IS NULL THEN received_at END) AS first_message")->toBase()->get() as $f) {
             [$id, $psid] = [(string) $f->page_id, (string) $f->psid];
             $first = strtotime((string) $f->first_at); // ang oras ng DB ay sa app timezone (ang default ng PHP), gaya ng Carbon::parse
+            $message = $f->first_message === null ? $first : strtotime((string) $f->first_message);
             if (!isset($customers[$id][$psid]) || $first < $from) continue;
             $list = $echoes[$id . '|' . $psid] ?? collect();
             if ($list->contains(fn ($x) => $cbb($x) && $x['at'] < $first - self::EARLY_SECONDS)) continue;
-            $new[$id][$psid] = $first;
+            $new[$id][$psid] = [$first, $message];
         }
         if (!$new) return [];
 
@@ -299,11 +305,11 @@ class ChatEchoes
         $answered = [];
         foreach ($new as $id => $list) {
             $out[$id] = ['new' => count($list), 'cbb' => 0, 'main' => []];
-            foreach ($list as $psid => $first) {
-                $in = fn ($x) => $x['at'] >= $first - self::EARLY_SECONDS && $x['at'] <= $first + $wait;
+            foreach ($list as $psid => [$first, $message]) {
+                $in = fn ($x) => $x['at'] >= $first - self::EARLY_SECONDS && $x['at'] <= $message + $wait;
                 if (!($echoes[$id . '|' . $psid] ?? collect())->contains(fn ($x) => $cbb($x) && $in($x))) continue;
                 $out[$id]['cbb']++;
-                $answered[$id][(string) $psid] = $first;
+                $answered[$id][(string) $psid] = [$first, $message];
             }
         }
         if (!$answered || !Schema::hasColumn('chatbot_replies', 'sequence_id')) return $out;
@@ -323,10 +329,10 @@ class ChatEchoes
             ->where('sent_at', '>=', $since->copy()->subSeconds(self::EARLY_SECONDS)->format('Y-m-d H:i:s'))->get(['page_id', 'psid', 'flow_id', 'sent_at']);
         foreach ($replies as $rep) {
             [$id, $psid] = [(string) $rep->page_id, (string) $rep->psid];
-            $first = $answered[$id][$psid] ?? null;
+            [$first, $message] = $answered[$id][$psid] ?? [null, null];
             $sent = strtotime((string) $rep->sent_at);
-            if ($first === null || !isset($flows[$id][(string) $rep->flow_id]) || $sent < $first - self::EARLY_SECONDS || $sent > $first + $wait) continue;
-            $out[$id]['main'][$psid] = $first;
+            if ($first === null || !isset($flows[$id][(string) $rep->flow_id]) || $sent < $first - self::EARLY_SECONDS || $sent > $message + $wait) continue;
+            $out[$id]['main'][$psid] = $message;
         }
 
         return $out;

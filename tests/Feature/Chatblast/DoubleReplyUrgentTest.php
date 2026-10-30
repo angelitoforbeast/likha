@@ -245,4 +245,37 @@ class DoubleReplyUrgentTest extends ChatblastTestCase
         $this->assertSame([3, 2, 1], [$row['new_customers'], $row['cbb_new'], $row['main_doubles']]);
         $this->assertStringEndsWith('(new customers: 3, answered by CBB: 2)', $this->doubleLines()[0]['text']);
     }
+
+    /** Ang pagbukas ng ad (spec 204): row na may _ad_open, hindi mensahe. */
+    private function adOpen(string $psid, string $at): void
+    {
+        DB::table('botcake_chats')->insert(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => '',
+            'payload' => json_encode(['source' => 'gateway', 'ad_id' => '6045246247433', \App\Services\Chatbot\ChatbotInbound::AD_OPEN => true]), 'received_at' => $at]);
+    }
+
+    /**
+     * Specs 202 at 204: ang customer ng ad ay bago mula sa pagbukas ng ad (ang unang row niya), pero ang sukat ng sagot ay
+     * mula sa pagbukas hanggang sa unang tunay na mensahe + wait: ang CBB ay sumasagot sa pagbukas, ang Likha bot sa unang
+     * mensahe (minsan ilang minuto pagkatapos). Ang halimbawa ay ang oras ng unang mensahe.
+     */
+    public function test_S_202_6b_an_ad_click_customer_is_new_at_the_ad_open_and_the_reply_window_runs_to_the_first_message(): void
+    {
+        // 7701: bukas ng ad 11:20, CBB sumagot 11:20:02; unang mensahe 11:27 (7 min, lampas sa 5 min na wait), Likha 11:27:05.
+        $this->adOpen('7701', '2026-10-27 11:20:00');
+        $this->echo('7701', 'chatbot_builder', '2026-10-27 11:20:02');
+        $this->chat('7701', '2026-10-27 11:27:00');
+        $this->reply('7701', '2026-10-27 11:27:05');
+        $this->echo('7701', 'forbeast', '2026-10-27 11:27:06');
+        // 7702: bukas ng ad lang, sinagot ng CBB; walang mensahe (bago, sinagot ng CBB, hindi hindi-nasagot).
+        $this->adOpen('7702', '2026-10-27 11:30:00');
+        $this->echo('7702', 'chatbot_builder', '2026-10-27 11:30:02');
+        // 7703: bukas ng ad bago ang window (10:50): hindi bago kahit ang unang mensahe ay nasa window; ang doble ay leftover.
+        $this->adOpen('7703', '2026-10-27 10:50:00');
+        $this->doubled('7703', '11:10');
+
+        $row = $this->row();
+        $this->assertSame([2, 2, 1, 1, 0], [$row['new_customers'], $row['cbb_new'], $row['main_doubles'], $row['leftovers'], $row['unanswered']]);
+        $this->assertSame([['at' => '2026-10-27 11:27:00', 'inbox' => '/chatbot/inbox?page_id=1001&psid=7701']], $row['main_examples']);
+        $this->assertStringEndsWith('(new customers: 2, answered by CBB: 2)', $this->doubleLines()[0]['text']);
+    }
 }
