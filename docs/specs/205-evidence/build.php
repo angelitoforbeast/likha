@@ -10,7 +10,10 @@
  * URL: ?now[=ms] = unang poll pagkalipas ng 0.3 s o ng ms; ?shot = frame bilang timer (headless); ?d3 = bukas sa 3D;
  * ?card=<panel> = naka-focus ang panel at bukas ang card nito;
  * ?orbit=<ms> = idinadagdag sa oras ng frame (ang dulo ng ugoy ng 3D); ?hit = sinusukat ang overlap ng mga panel at kung nasa
- * screen ang lahat (sa data-hit ng <html>); ?wc = binibilang ang salita at numero na nakikita (sa data-wc ng <html>).
+ * screen ang lahat (sa data-hit ng <html>); ?wc = binibilang ang salita at numero na nakikita (sa data-wc ng <html>);
+ * ?save3d = may naka-save na 3D sa browser bago bumukas ang page; ?tv = TV mode pagbukas (gaya ng pindot sa TV, walang
+ * fullscreen); ?lbl[=ms] = ang taas sa screen ng bawat label ng panel (ang malayong gilid, sa data-lbl ng <html>), at ang
+ * ipinapakita (K, sa data-view).
  * Patakbuhin mula sa root ng repo: php docs/specs/205-evidence/build.php
  */
 
@@ -30,7 +33,8 @@ for ($i = 0; $i < 68; $i++) $b1[] = $dot($i, (int) (4 + $i * 4.3), $i % 23 === 5
 $bc = [$dot(900, 40, 'ai'), $dot(901, 130, 'order'), $dot(902, 220, 'chat')];
 $counts = [
     'messages' => ['today' => 12293, 'recent' => 61], 'confirmed' => ['today' => 17896, 'recent' => 222], 'unconfirmed' => ['today' => 12, 'recent' => 3],
-    'follow_ups' => ['today' => 22699, 'recent' => 74], 'ai' => ['today' => 9421, 'recent' => 40], 'orders' => ['today' => 262, 'recent' => 3],
+    'follow_ups' => ['today' => 22699, 'recent' => 74], 'ai' => ['today' => 9421, 'recent' => 40], 'orders' => ['today' => 270, 'recent' => 3],
+    'ai_minute' => [3, 2, 4, 1, 2, 1], 'order_split' => ['other' => 8, 'no_amount' => 31],
     'bots' => ['in' => $bots(11582, 0, 711, 0), 'out' => $bots(17893, 0, 3, 0)], 'active' => 71,
     'reply_time' => ['state' => 'ok', 'seconds' => 5.4], 'last_order' => ['page' => 'Sample Page 07', 'at' => '11:52', 'bot' => 'forbeast'],
     'order_value' => ['today' => 62456, 'recent' => 1797],
@@ -94,7 +98,7 @@ $sim = <<<'JS'
     const order = (amount, bot = 'forbeast') => {
       const e = add('order', bot, {amount}), note = c.notes[bot];
       c.orders.today++; note.orders++;
-      if (amount !== null) { c.order_value.today += amount; note.value += amount; }
+      if (amount !== null) { c.order_value.today += amount; note.value += amount; } else c.order_split.no_amount++;
       const k = bot === 'forbeast' && fresh ? fresh : pick([...crowd[bot].keys()]);
       crowd[bot].get(k).s = 'order'; crowd[bot].get(k).lastAt = Date.now();
       note.last = {type: 'order', page: e.page, at: hm};
@@ -111,6 +115,27 @@ $sim = <<<'JS'
     c.as_of = t;
     return {status: 200, ok: true, json: async () => ({counts: c, events: ev, more: 0, cursor: window.likhaLive.cursor, now: t})};
   };
+  // ?save3d: ang browser ay may naka-save na 3D bago bumukas ang page. ?tv: TV mode pagbukas (ang setTv ng page, walang fullscreen).
+  if (Q.has('save3d')) try { localStorage.setItem('likha-live-view', '3d'); } catch (e) { document.documentElement.dataset.err = 'no localStorage'; }
+  if (Q.has('tv')) window.addEventListener('DOMContentLoaded', () => window.likhaLive.tv(true));
+  // ?lbl: ang taas sa screen (px ng 1920 × 1080) ng bawat label ng panel, sa malayong gilid nito (ang mas maliit sa kaliwa at kanan,
+  // dahil sa 3D ay nakatagilid ang panel); line-height 1, kaya ang taas ng kahon ay ang laki ng font.
+  if (Q.has('lbl')) setTimeout(() => {
+    const sr = document.querySelector('[data-live-stage]').getBoundingClientRect(), s = sr.width / 1920, out = [];
+    for (const el of document.querySelectorAll('[data-pn] .lb, .orb .core .lb, .orb .nm-core-name')) {
+      if (!el.getBoundingClientRect().height) continue;
+      if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+      const hs = ['left', 'right'].map(side => { const p = document.createElement('i'); p.style.cssText = 'position:absolute;top:0;width:0;height:100%;' + side + ':0';
+        el.appendChild(p); const h = p.getBoundingClientRect().height / s; p.remove(); return h; });
+      out.push([(el.closest('[data-pn]') ? el.closest('[data-pn]').dataset.pn : 'core') + ':' + el.textContent.trim(), Math.round(Math.min(...hs) * 10) / 10]);
+    }
+    const min = Math.min(...out.map(x => x[1]));
+    document.documentElement.dataset.lbl = JSON.stringify({min, labels: out.map(x => x.join('=')).join(' ')});
+  }, +Q.get('lbl') || 4000);
+  if (Q.has('lbl') || Q.has('tv')) setTimeout(() => {
+    let saved = null; try { saved = localStorage.getItem('likha-live-view'); } catch (e) { saved = 'none'; }
+    document.documentElement.dataset.view = JSON.stringify({saved, tv: document.querySelector('[data-live]').classList.contains('tv'), K: Math.round(window.likhaLive.shown() * 1000) / 1000});
+  }, +Q.get('lbl') || 3000);
   // ?card=<panel>: naka-focus ang panel (gaya ng Tab), kaya nakikita ang card nito.
   if (Q.has('card')) setTimeout(() => { const el = Q.get('card') === 'core' ? document.querySelector('.orbhit') : document.querySelector('[data-pn="' + Q.get('card') + '"]'); el.focus(); }, 2600);
   // ?hit: bawat 6 px ng 1920 × 1080, ilang panel ang nasa puntong iyon (overlap = 2 o higit), at kung nasa screen ang bawat panel.
@@ -121,7 +146,8 @@ $sim = <<<'JS'
       const hit = new Set(document.elementsFromPoint(x, y).map(e => e.closest('[data-pn]')).filter(Boolean));
       pts++; if (hit.size > 1) { over++; pairs.add([...hit].map(e => e.dataset.pn).sort().join('+')); }
     }
-    // Sa 1920 × 1080 ng stage (hindi ng window): ang panel ay dapat buo sa pagitan ng header (76 px) at ng ticker (1046 px).
+    // Sa 1920 × 1080 ng stage (hindi ng window): ang panel ay dapat buo sa pagitan ng header (76 px) at ng 1046 px (ang dating
+    // ticker; wala na ito, pero ang hangganan ay pinanatili para pareho ang sukat sa S-205.7).
     const sr = document.querySelector('[data-live-stage]').getBoundingClientRect(), s = sr.width / 1920;
     const box = pn.map(e => { const r = e.getBoundingClientRect(); return [e.dataset.pn, [(r.left - sr.left) / s, (r.top - sr.top) / s, (r.right - sr.left) / s, (r.bottom - sr.top) / s].map(Math.round)]; });
     const off = box.filter(([, b]) => b[0] < 0 || b[1] < 76 || b[2] > 1920 || b[3] > 1046).map(([k, b]) => k + ':' + b.join(','));

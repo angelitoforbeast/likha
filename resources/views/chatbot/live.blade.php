@@ -235,7 +235,8 @@
     .lb { position: absolute; font: 700 20px/1 var(--semi); letter-spacing: 4px; color: var(--mut); white-space: nowrap; }
     /* Sa 3D ay lumiliit at tumatagilid ang panel, kaya ang label ay pinapalaki ayon sa K (--lk, mula sa script): bawat label ay
        hindi bababa sa 18 px sa 1920 × 1080. Lumalaki pataas at pakanan, palayo sa numero sa ilalim nito. */
-    .lb, .nm-core-name { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }
+    .lb { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }
+    .it[data-pn="avg"] .lb { transform-origin: 100% 100%; } /* ang mahabang AVG REPLY ay lumalaki pakaliwa, para nasa loob ng panel */
     .bot .nm { font-size: 24px; color: #bfeaff; top: 30px; }
     .bot.big .nm { left: 60px; } .bot.big.mir .nm { left: auto; right: 54px; }
     .bot.big .n { font-size: 62px; left: 342px; } .bot.big.mir .n { left: 38px; }
@@ -259,8 +260,9 @@
     .plus.go { animation: lift 1.8s ease-out forwards; } .plus.still { opacity: 1; }
     @keyframes lift { 0% { opacity: 0; transform: translateY(14px); } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-26px); } }
     .orb .sig { left: 350px; top: 282px; font-size: 128px; color: #052b45; letter-spacing: 1px; transform: translateX(-50%); }
-    .orb .core { position: absolute; left: 350px; top: 414px; transform: translateX(-50%); display: flex; gap: 8px; font: 700 20px/1 var(--semi); letter-spacing: 5px; color: #1d587d; white-space: nowrap; }
-    .orb .core .lb { position: static; color: #1d587d; letter-spacing: 5px; }
+    /* Ang pangalan ng core ay pinapalaki nang buo sa 3D (hindi kada salita, para hindi magdikit ang dalawang salita). */
+    .orb .core { position: absolute; left: 350px; top: 414px; transform: translateX(-50%) scale(var(--lk, 1)); transform-origin: 50% 100%; display: flex; gap: 8px; font: 700 20px/1 var(--semi); letter-spacing: 5px; color: #1d587d; white-space: nowrap; }
+    .orb .core .lb { position: static; color: #1d587d; letter-spacing: 5px; transform: none; }
 
     .hd { position: absolute; left: 0; top: 0; width: 1920px; height: 76px; display: flex; align-items: center; padding: 0 40px; gap: 20px; z-index: 5; }
     .hd h1 { font: 700 40px/1 var(--cond); letter-spacing: .09em; }

@@ -22,7 +22,6 @@
     .stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden; background: var(--ground); }
     .tv { cursor: none; }
     .bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
-    .tk { position: absolute; left: 40px; top: 1048px; width: 1840px; height: 28px; pointer-events: none; }
     .cam { position: absolute; inset: 0; perspective: 1500px; perspective-origin: 960px 585px; }
     .world { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: 960px 585px; }
     .it { position: absolute; left: 960px; top: 585px; }
@@ -49,6 +48,10 @@
     /* Ang text sa mga panel: ang numero (condensed) at isa o dalawang salitang label. */
     .n { position: absolute; font-family: var(--cond); font-weight: 700; line-height: 1; white-space: nowrap; color: var(--ink); }
     .lb { position: absolute; font: 700 20px/1 var(--semi); letter-spacing: 4px; color: var(--mut); white-space: nowrap; }
+    /* Sa 3D ay lumiliit at tumatagilid ang panel, kaya ang label ay pinapalaki ayon sa K (--lk, mula sa script): bawat label ay
+       hindi bababa sa 18 px sa 1920 × 1080. Lumalaki pataas at pakanan, palayo sa numero sa ilalim nito. */
+    .lb { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }
+    .it[data-pn="avg"] .lb { transform-origin: 100% 100%; } /* ang mahabang AVG REPLY ay lumalaki pakaliwa, para nasa loob ng panel */
     .bot .nm { font-size: 24px; color: #bfeaff; top: 30px; }
     .bot.big .nm { left: 60px; } .bot.big.mir .nm { left: auto; right: 54px; }
     .bot.big .n { font-size: 62px; left: 342px; } .bot.big.mir .n { left: 38px; }
@@ -72,8 +75,9 @@
     .plus.go { animation: lift 1.8s ease-out forwards; } .plus.still { opacity: 1; }
     @keyframes lift { 0% { opacity: 0; transform: translateY(14px); } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-26px); } }
     .orb .sig { left: 350px; top: 282px; font-size: 128px; color: #052b45; letter-spacing: 1px; transform: translateX(-50%); }
-    .orb .core { position: absolute; left: 350px; top: 414px; transform: translateX(-50%); display: flex; gap: 8px; font: 700 20px/1 var(--semi); letter-spacing: 5px; color: #1d587d; white-space: nowrap; }
-    .orb .core .lb { position: static; color: #1d587d; letter-spacing: 5px; }
+    /* Ang pangalan ng core ay pinapalaki nang buo sa 3D (hindi kada salita, para hindi magdikit ang dalawang salita). */
+    .orb .core { position: absolute; left: 350px; top: 414px; transform: translateX(-50%) scale(var(--lk, 1)); transform-origin: 50% 100%; display: flex; gap: 8px; font: 700 20px/1 var(--semi); letter-spacing: 5px; color: #1d587d; white-space: nowrap; }
+    .orb .core .lb { position: static; color: #1d587d; letter-spacing: 5px; transform: none; }
 
     .hd { position: absolute; left: 0; top: 0; width: 1920px; height: 76px; display: flex; align-items: center; padding: 0 40px; gap: 20px; z-index: 5; }
     .hd h1 { font: 700 40px/1 var(--cond); letter-spacing: .09em; }
@@ -120,11 +124,10 @@
         .fp { position: relative; order: -1; right: auto; top: auto; margin: 0 16px 12px; flex-wrap: wrap; }
         .fp .sel { max-width: 100%; }
         .cam { position: relative; perspective: none; }
-        .world { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; transform: none !important; padding: 0 16px; }
+        .world { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; transform: none !important; padding: 0 16px; --lk: 1 !important; }
         .it { position: relative; left: auto; top: auto; margin: 0 !important; transform: none !important; flex: none; }
         .it[data-pn="vault"] { order: 1; } .orb { order: 2; } .it[data-pn="forbeast"] { order: 3; } .it[data-pn="botcake"] { order: 4; } .it[data-pn="incepxionbot"] { order: 5; }
         .it[data-pn="ai"] { order: 6; } .it[data-pn="seq"] { order: 7; } .it[data-pn="replies"] { order: 8; } .it[data-pn="avg"] { order: 9; } .it[data-pn="chats"] { order: 10; }
-        .tk { position: relative; order: 1; left: auto; top: auto; display: block; width: calc(100% - 32px); margin: 12px 16px 0; }
         .card { max-width: calc(100vw - 32px); min-width: 0; }
         body { overflow-x: hidden; }
     }
@@ -170,7 +173,7 @@
     const order = (amount, bot = 'forbeast') => {
       const e = add('order', bot, {amount}), note = c.notes[bot];
       c.orders.today++; note.orders++;
-      if (amount !== null) { c.order_value.today += amount; note.value += amount; }
+      if (amount !== null) { c.order_value.today += amount; note.value += amount; } else c.order_split.no_amount++;
       const k = bot === 'forbeast' && fresh ? fresh : pick([...crowd[bot].keys()]);
       crowd[bot].get(k).s = 'order'; crowd[bot].get(k).lastAt = Date.now();
       note.last = {type: 'order', page: e.page, at: hm};
@@ -187,6 +190,27 @@
     c.as_of = t;
     return {status: 200, ok: true, json: async () => ({counts: c, events: ev, more: 0, cursor: window.likhaLive.cursor, now: t})};
   };
+  // ?save3d: ang browser ay may naka-save na 3D bago bumukas ang page. ?tv: TV mode pagbukas (ang setTv ng page, walang fullscreen).
+  if (Q.has('save3d')) try { localStorage.setItem('likha-live-view', '3d'); } catch (e) { document.documentElement.dataset.err = 'no localStorage'; }
+  if (Q.has('tv')) window.addEventListener('DOMContentLoaded', () => window.likhaLive.tv(true));
+  // ?lbl: ang taas sa screen (px ng 1920 × 1080) ng bawat label ng panel, sa malayong gilid nito (ang mas maliit sa kaliwa at kanan,
+  // dahil sa 3D ay nakatagilid ang panel); line-height 1, kaya ang taas ng kahon ay ang laki ng font.
+  if (Q.has('lbl')) setTimeout(() => {
+    const sr = document.querySelector('[data-live-stage]').getBoundingClientRect(), s = sr.width / 1920, out = [];
+    for (const el of document.querySelectorAll('[data-pn] .lb, .orb .core .lb, .orb .nm-core-name')) {
+      if (!el.getBoundingClientRect().height) continue;
+      if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+      const hs = ['left', 'right'].map(side => { const p = document.createElement('i'); p.style.cssText = 'position:absolute;top:0;width:0;height:100%;' + side + ':0';
+        el.appendChild(p); const h = p.getBoundingClientRect().height / s; p.remove(); return h; });
+      out.push([(el.closest('[data-pn]') ? el.closest('[data-pn]').dataset.pn : 'core') + ':' + el.textContent.trim(), Math.round(Math.min(...hs) * 10) / 10]);
+    }
+    const min = Math.min(...out.map(x => x[1]));
+    document.documentElement.dataset.lbl = JSON.stringify({min, labels: out.map(x => x.join('=')).join(' ')});
+  }, +Q.get('lbl') || 4000);
+  if (Q.has('lbl') || Q.has('tv')) setTimeout(() => {
+    let saved = null; try { saved = localStorage.getItem('likha-live-view'); } catch (e) { saved = 'none'; }
+    document.documentElement.dataset.view = JSON.stringify({saved, tv: document.querySelector('[data-live]').classList.contains('tv'), K: Math.round(window.likhaLive.shown() * 1000) / 1000});
+  }, +Q.get('lbl') || 3000);
   // ?card=<panel>: naka-focus ang panel (gaya ng Tab), kaya nakikita ang card nito.
   if (Q.has('card')) setTimeout(() => { const el = Q.get('card') === 'core' ? document.querySelector('.orbhit') : document.querySelector('[data-pn="' + Q.get('card') + '"]'); el.focus(); }, 2600);
   // ?hit: bawat 6 px ng 1920 × 1080, ilang panel ang nasa puntong iyon (overlap = 2 o higit), at kung nasa screen ang bawat panel.
@@ -197,7 +221,8 @@
       const hit = new Set(document.elementsFromPoint(x, y).map(e => e.closest('[data-pn]')).filter(Boolean));
       pts++; if (hit.size > 1) { over++; pairs.add([...hit].map(e => e.dataset.pn).sort().join('+')); }
     }
-    // Sa 1920 × 1080 ng stage (hindi ng window): ang panel ay dapat buo sa pagitan ng header (76 px) at ng ticker (1046 px).
+    // Sa 1920 × 1080 ng stage (hindi ng window): ang panel ay dapat buo sa pagitan ng header (76 px) at ng 1046 px (ang dating
+    // ticker; wala na ito, pero ang hangganan ay pinanatili para pareho ang sukat sa S-205.7).
     const sr = document.querySelector('[data-live-stage]').getBoundingClientRect(), s = sr.width / 1920;
     const box = pn.map(e => { const r = e.getBoundingClientRect(); return [e.dataset.pn, [(r.left - sr.left) / s, (r.top - sr.top) / s, (r.right - sr.left) / s, (r.bottom - sr.top) / s].map(Math.round)]; });
     const off = box.filter(([, b]) => b[0] < 0 || b[1] < 76 || b[2] > 1920 || b[3] > 1046).map(([k, b]) => k + ':' + b.join(','));
@@ -270,7 +295,7 @@
     <div class="it pn vault" data-pn="vault" data-live-kpi="orders" data-geo="960,945,420,190,34" data-or="B" tabindex="0" role="group" aria-label="Order value today" aria-describedby="lv-card-vault" style="width:420px;height:190px;margin:-95px 0 0 -210px">
         <canvas></canvas>
         <b class="n total" data-vault-total>₱<span data-live-count="peso">62,456</span></b>
-        <span class="orders"><b class="n" data-live-count="orders">262</b><span class="lb">ORDERS</span></span>
+        <span class="orders"><b class="n" data-live-count="orders">270</b><span class="lb">ORDERS</span></span>
         <div class="plus" data-live-plus aria-hidden="true"></div>
     </div><!--/pn-->
     <div class="it pn gauge" data-pn="avg" data-geo="1330,945,250,190,30" data-or="B" tabindex="0" role="group" aria-label="Avg reply" aria-describedby="lv-card-avg" style="width:250px;height:190px;margin:-95px 0 0 -125px">
@@ -290,7 +315,6 @@
     <div class="coins" data-live-coins aria-hidden="true"></div>
 </div></div>
 
-    <canvas class="tk" width="1840" height="28" data-live-ticker aria-hidden="true"></canvas>
 
     <header class="hd">
         <svg class="logo" viewBox="0 0 46 36" aria-hidden="true"><path d="M2 4h34M2 16h42M2 28h26"/></svg>
@@ -325,7 +349,9 @@
     </dl></div>
     <div class="card gold" id="lv-card-vault" role="tooltip" hidden><h3>Order value today · COD</h3><dl>
         <div><dt>Order value</dt><dd>₱<span data-live-count="peso">62,456</span></dd></div>
-        <div><dt>Orders today</dt><dd data-live-count="orders">262</dd></div>
+        <div><dt>Orders today</dt><dd data-live-count="orders">270</dd></div>
+        <div><dt>Other / no bot</dt><dd data-live-split="other">8</dd></div>
+        <div><dt>Without amount</dt><dd data-live-split="no_amount">31</dd></div>
         <div><dt>Orders, last 5 min</dt><dd class="up" data-live-up="orders">+<span data-live-recent="orders">3</span></dd></div>
         <div><dt>Value, last 5 min</dt><dd>+₱<span data-live-recent="peso">1,797</span></dd></div>
         <div><dt>Last order</dt><dd data-live-last-order>Sample Page 07 · 11:52 · Bot 1</dd></div>
@@ -334,7 +360,9 @@
     <div class="card" id="lv-card-replies" role="tooltip" hidden><h3>Replies today</h3><dl>
         <div><dt>Confirmed by Meta</dt><dd data-live-count="replies">17,896</dd></div>
         <div><dt>Last 5 min</dt><dd class="up" data-live-up="replies">+<span data-live-recent="replies">222</span></dd></div>
-        <div><dt>Gauge</dt><dd>last 5 min vs today's pace</dd></div>
+        <div data-live-pace><dt>Gauge shows</dt><dd>pace, not a goal</dd></div>
+        <div><dt>Pace</dt><dd>last 5 min vs today's average 5 min</dd></div>
+        <div><dt>Half / full</dt><dd>usual pace / double or more</dd></div>
     </dl></div>
     <div class="card" id="lv-card-ai" role="tooltip" hidden><h3>AI answers today</h3><dl>
         <div><dt>Answered</dt><dd data-live-count="ai">9,421</dd></div>
@@ -393,7 +421,7 @@
 </div>
 </div>
 
-<script type="application/json" id="live-data">{"feed":"\/chatbot\/live\/feed","page":null,"bot":null,"cursor":{"chat":"1","seq":"1","order":"1","ok":"2026-10-30 11:52:15|0","ai":"2026-10-30 11:52:15|0"},"counts":{"messages":{"today":12293,"recent":61},"confirmed":{"today":17896,"recent":222},"unconfirmed":{"today":12,"recent":3},"follow_ups":{"today":22699,"recent":74},"ai":{"today":9421,"recent":40},"orders":{"today":262,"recent":3},"bots":{"in":{"forbeast":11582,"incepxionbot":0,"botcake":711,"unknown":0},"out":{"forbeast":17893,"incepxionbot":0,"botcake":3,"unknown":0}},"active":71,"reply_time":{"state":"ok","seconds":5.4},"last_order":{"page":"Sample Page 07","at":"11:52","bot":"forbeast"},"order_value":{"today":62456,"recent":1797},"sequences":[{"name":"Preorder Sequence","n":14210},{"name":"Abandoned Cart","n":5871},{"name":"Restock Notice","n":2618}],"linked":{"forbeast":true,"incepxionbot":false},"notes":{"forbeast":{"linked":true,"chatting":68,"ai":9418,"avg":5.4,"orders":260,"value":61857,"last":{"type":"message","page":"Sample Page 12","at":"11:52"},"customers":[{"name":"Liza F.","tag":"ORDERED","at":"11:52"},{"name":"Jose C.","tag":"CHATTING","at":"11:52"},{"name":"Jenny R.","tag":"AI","at":"11:51"},{"name":"Carlo M.","tag":"CHATTING","at":"11:51"}]},"incepxionbot":{"linked":false,"chatting":0,"ai":0,"avg":null,"orders":0,"value":0,"last":null,"customers":[]},"botcake":{"linked":true,"chatting":3,"ai":3,"avg":null,"orders":2,"value":599,"last":{"type":"message","page":"Sample Page 15","at":"11:49"},"customers":[{"name":"Mark B.","tag":"CHATTING","at":"11:50"},{"name":"Ana R.","tag":"AI","at":"11:49"},{"name":"Ryan A.","tag":"CHATTING","at":"11:47"}]}},"radar":{"forbeast":[{"k":"b0fce403c178","ago":4,"s":"chat","new":false,"name":null},{"k":"a9f7e97965d6","ago":8,"s":"chat","new":false,"name":null},{"k":"9ab62b5ef34a","ago":12,"s":"ai","new":false,"name":null},{"k":"0a3d72134fb3","ago":16,"s":"chat","new":false,"name":null},{"k":"cb7524d79232","ago":21,"s":"chat","new":false,"name":null},{"k":"25ea1682e164","ago":25,"s":"order","new":false,"name":null},{"k":"5a34d1edaea4","ago":29,"s":"chat","new":false,"name":null},{"k":"4d3a21d8c684","ago":34,"s":"ai","new":false,"name":null},{"k":"7cd1d2b54911","ago":38,"s":"chat","new":false,"name":null},{"k":"a3098322f75f","ago":42,"s":"chat","new":false,"name":null},{"k":"47cfc27c36f0","ago":47,"s":"chat","new":false,"name":null},{"k":"99c91b979d23","ago":51,"s":"chat","new":false,"name":null},{"k":"5c385d6d334e","ago":55,"s":"ai","new":false,"name":null},{"k":"d0a4f1984f1e","ago":59,"s":"chat","new":false,"name":null},{"k":"0ae79a56a8ff","ago":64,"s":"chat","new":false,"name":null},{"k":"d4e99aaa1f75","ago":68,"s":"chat","new":false,"name":null},{"k":"e77aa1b8a24d","ago":72,"s":"chat","new":false,"name":null},{"k":"4d41ca3ae901","ago":77,"s":"ai","new":false,"name":null},{"k":"856deecf45fa","ago":81,"s":"chat","new":false,"name":null},{"k":"647e24fdbfcb","ago":85,"s":"chat","new":false,"name":null},{"k":"801886d15a07","ago":90,"s":"chat","new":false,"name":null},{"k":"a4157eabf485","ago":94,"s":"chat","new":false,"name":null},{"k":"99ff292e2379","ago":98,"s":"ai","new":false,"name":null},{"k":"de118786b5cd","ago":102,"s":"chat","new":false,"name":null},{"k":"f13904a0edbe","ago":107,"s":"chat","new":false,"name":null},{"k":"5f7478e52782","ago":111,"s":"chat","new":false,"name":null},{"k":"8557acbd605d","ago":115,"s":"chat","new":false,"name":null},{"k":"f1852259718f","ago":120,"s":"ai","new":false,"name":null},{"k":"074d5d17d831","ago":124,"s":"order","new":false,"name":null},{"k":"081b16bcd52a","ago":128,"s":"chat","new":false,"name":null},{"k":"d81fee488733","ago":133,"s":"chat","new":false,"name":null},{"k":"048b821311c9","ago":137,"s":"chat","new":false,"name":null},{"k":"8c6aa8068da0","ago":141,"s":"ai","new":false,"name":null},{"k":"feb6b720fb72","ago":145,"s":"chat","new":false,"name":null},{"k":"f621871c9066","ago":150,"s":"chat","new":false,"name":null},{"k":"157f62a2be53","ago":154,"s":"chat","new":false,"name":null},{"k":"0605032afdb4","ago":158,"s":"chat","new":false,"name":null},{"k":"61adaa589829","ago":163,"s":"ai","new":false,"name":null},{"k":"628cc8fc94ab","ago":167,"s":"chat","new":false,"name":null},{"k":"8cecbb717800","ago":171,"s":"chat","new":false,"name":null},{"k":"6943cef214dd","ago":176,"s":"chat","new":false,"name":null},{"k":"cf84131f9058","ago":180,"s":"chat","new":false,"name":null},{"k":"e8536def9dd3","ago":184,"s":"ai","new":false,"name":null},{"k":"caee5b6ac87e","ago":188,"s":"chat","new":false,"name":null},{"k":"18a2ed0bbf9c","ago":193,"s":"chat","new":false,"name":null},{"k":"044f2a6eda89","ago":197,"s":"chat","new":false,"name":null},{"k":"2eee138f866e","ago":201,"s":"chat","new":false,"name":null},{"k":"8be96794c21e","ago":206,"s":"ai","new":false,"name":null},{"k":"f3024e1e60e8","ago":210,"s":"chat","new":false,"name":null},{"k":"b7163ce9548a","ago":214,"s":"chat","new":false,"name":null},{"k":"9a7a9f2793a7","ago":219,"s":"chat","new":false,"name":null},{"k":"70283c4bb47a","ago":223,"s":"order","new":false,"name":null},{"k":"3f7d7ba72a68","ago":227,"s":"ai","new":false,"name":null},{"k":"61c9e7fb675f","ago":231,"s":"chat","new":false,"name":null},{"k":"9b432723daa1","ago":236,"s":"chat","new":false,"name":null},{"k":"cfb89ffd5805","ago":240,"s":"chat","new":false,"name":null},{"k":"15faa2ce0bb8","ago":244,"s":"chat","new":false,"name":null},{"k":"9620f1cef1aa","ago":249,"s":"ai","new":false,"name":null},{"k":"0fe197f2ce4d","ago":253,"s":"chat","new":false,"name":null},{"k":"4fbda18b0514","ago":257,"s":"chat","new":false,"name":null},{"k":"c603462598a5","ago":262,"s":"chat","new":false,"name":null},{"k":"c51a2a823244","ago":266,"s":"chat","new":false,"name":null},{"k":"01162b46e26c","ago":270,"s":"ai","new":false,"name":null},{"k":"2f11c63dfd08","ago":274,"s":"chat","new":false,"name":null},{"k":"88da64cd4516","ago":279,"s":"chat","new":false,"name":null},{"k":"cf30c5a9bfb1","ago":283,"s":"chat","new":false,"name":null},{"k":"178c7757b433","ago":287,"s":"chat","new":false,"name":null},{"k":"17b9d2ad2691","ago":292,"s":"ai","new":false,"name":null}],"incepxionbot":[],"botcake":[{"k":"4a17f132602c","ago":40,"s":"ai","new":false,"name":null},{"k":"72c4d9170866","ago":130,"s":"order","new":false,"name":null},{"k":"e256f832cae2","ago":220,"s":"chat","new":false,"name":null}]},"as_of":"11:52:20"},"now":"11:52:20","interval":5000,"site":"Likha","bots":{"forbeast":"Bot 1","incepxionbot":"Bot 2","botcake":"Botcake"},"states":{"forbeast":"Connected","incepxionbot":"Connected","botcake":"Fallback"},"notes":{"ok":"Customer sent \u2192 reply sent","none":"No Forbeast replies yet today","not_linked":"Not linked to Forbeast","not_on_forbeast":"This page is not on Forbeast","error":"Forbeast did not answer; trying again within a minute"},"kinds":{"message":"Inquiry","reply":"Reply","follow_up":"Follow-up","order":"Order","ai":"AI answer"}}</script>
+<script type="application/json" id="live-data">{"feed":"\/chatbot\/live\/feed","page":null,"bot":null,"cursor":{"chat":"1","seq":"1","order":"1","ok":"2026-10-30 11:52:15|0","ai":"2026-10-30 11:52:15|0"},"counts":{"messages":{"today":12293,"recent":61},"confirmed":{"today":17896,"recent":222},"unconfirmed":{"today":12,"recent":3},"follow_ups":{"today":22699,"recent":74},"ai":{"today":9421,"recent":40},"orders":{"today":270,"recent":3},"ai_minute":[3,2,4,1,2,1],"order_split":{"other":8,"no_amount":31},"bots":{"in":{"forbeast":11582,"incepxionbot":0,"botcake":711,"unknown":0},"out":{"forbeast":17893,"incepxionbot":0,"botcake":3,"unknown":0}},"active":71,"reply_time":{"state":"ok","seconds":5.4},"last_order":{"page":"Sample Page 07","at":"11:52","bot":"forbeast"},"order_value":{"today":62456,"recent":1797},"sequences":[{"name":"Preorder Sequence","n":14210},{"name":"Abandoned Cart","n":5871},{"name":"Restock Notice","n":2618}],"linked":{"forbeast":true,"incepxionbot":false},"notes":{"forbeast":{"linked":true,"chatting":68,"ai":9418,"avg":5.4,"orders":260,"value":61857,"last":{"type":"message","page":"Sample Page 12","at":"11:52"},"customers":[{"name":"Liza F.","tag":"ORDERED","at":"11:52"},{"name":"Jose C.","tag":"CHATTING","at":"11:52"},{"name":"Jenny R.","tag":"AI","at":"11:51"},{"name":"Carlo M.","tag":"CHATTING","at":"11:51"}]},"incepxionbot":{"linked":false,"chatting":0,"ai":0,"avg":null,"orders":0,"value":0,"last":null,"customers":[]},"botcake":{"linked":true,"chatting":3,"ai":3,"avg":null,"orders":2,"value":599,"last":{"type":"message","page":"Sample Page 15","at":"11:49"},"customers":[{"name":"Mark B.","tag":"CHATTING","at":"11:50"},{"name":"Ana R.","tag":"AI","at":"11:49"},{"name":"Ryan A.","tag":"CHATTING","at":"11:47"}]}},"radar":{"forbeast":[{"k":"b0fce403c178","ago":4,"s":"chat","new":false,"name":null},{"k":"a9f7e97965d6","ago":8,"s":"chat","new":false,"name":null},{"k":"9ab62b5ef34a","ago":12,"s":"ai","new":false,"name":null},{"k":"0a3d72134fb3","ago":16,"s":"chat","new":false,"name":null},{"k":"cb7524d79232","ago":21,"s":"chat","new":false,"name":null},{"k":"25ea1682e164","ago":25,"s":"order","new":false,"name":null},{"k":"5a34d1edaea4","ago":29,"s":"chat","new":false,"name":null},{"k":"4d3a21d8c684","ago":34,"s":"ai","new":false,"name":null},{"k":"7cd1d2b54911","ago":38,"s":"chat","new":false,"name":null},{"k":"a3098322f75f","ago":42,"s":"chat","new":false,"name":null},{"k":"47cfc27c36f0","ago":47,"s":"chat","new":false,"name":null},{"k":"99c91b979d23","ago":51,"s":"chat","new":false,"name":null},{"k":"5c385d6d334e","ago":55,"s":"ai","new":false,"name":null},{"k":"d0a4f1984f1e","ago":59,"s":"chat","new":false,"name":null},{"k":"0ae79a56a8ff","ago":64,"s":"chat","new":false,"name":null},{"k":"d4e99aaa1f75","ago":68,"s":"chat","new":false,"name":null},{"k":"e77aa1b8a24d","ago":72,"s":"chat","new":false,"name":null},{"k":"4d41ca3ae901","ago":77,"s":"ai","new":false,"name":null},{"k":"856deecf45fa","ago":81,"s":"chat","new":false,"name":null},{"k":"647e24fdbfcb","ago":85,"s":"chat","new":false,"name":null},{"k":"801886d15a07","ago":90,"s":"chat","new":false,"name":null},{"k":"a4157eabf485","ago":94,"s":"chat","new":false,"name":null},{"k":"99ff292e2379","ago":98,"s":"ai","new":false,"name":null},{"k":"de118786b5cd","ago":102,"s":"chat","new":false,"name":null},{"k":"f13904a0edbe","ago":107,"s":"chat","new":false,"name":null},{"k":"5f7478e52782","ago":111,"s":"chat","new":false,"name":null},{"k":"8557acbd605d","ago":115,"s":"chat","new":false,"name":null},{"k":"f1852259718f","ago":120,"s":"ai","new":false,"name":null},{"k":"074d5d17d831","ago":124,"s":"order","new":false,"name":null},{"k":"081b16bcd52a","ago":128,"s":"chat","new":false,"name":null},{"k":"d81fee488733","ago":133,"s":"chat","new":false,"name":null},{"k":"048b821311c9","ago":137,"s":"chat","new":false,"name":null},{"k":"8c6aa8068da0","ago":141,"s":"ai","new":false,"name":null},{"k":"feb6b720fb72","ago":145,"s":"chat","new":false,"name":null},{"k":"f621871c9066","ago":150,"s":"chat","new":false,"name":null},{"k":"157f62a2be53","ago":154,"s":"chat","new":false,"name":null},{"k":"0605032afdb4","ago":158,"s":"chat","new":false,"name":null},{"k":"61adaa589829","ago":163,"s":"ai","new":false,"name":null},{"k":"628cc8fc94ab","ago":167,"s":"chat","new":false,"name":null},{"k":"8cecbb717800","ago":171,"s":"chat","new":false,"name":null},{"k":"6943cef214dd","ago":176,"s":"chat","new":false,"name":null},{"k":"cf84131f9058","ago":180,"s":"chat","new":false,"name":null},{"k":"e8536def9dd3","ago":184,"s":"ai","new":false,"name":null},{"k":"caee5b6ac87e","ago":188,"s":"chat","new":false,"name":null},{"k":"18a2ed0bbf9c","ago":193,"s":"chat","new":false,"name":null},{"k":"044f2a6eda89","ago":197,"s":"chat","new":false,"name":null},{"k":"2eee138f866e","ago":201,"s":"chat","new":false,"name":null},{"k":"8be96794c21e","ago":206,"s":"ai","new":false,"name":null},{"k":"f3024e1e60e8","ago":210,"s":"chat","new":false,"name":null},{"k":"b7163ce9548a","ago":214,"s":"chat","new":false,"name":null},{"k":"9a7a9f2793a7","ago":219,"s":"chat","new":false,"name":null},{"k":"70283c4bb47a","ago":223,"s":"order","new":false,"name":null},{"k":"3f7d7ba72a68","ago":227,"s":"ai","new":false,"name":null},{"k":"61c9e7fb675f","ago":231,"s":"chat","new":false,"name":null},{"k":"9b432723daa1","ago":236,"s":"chat","new":false,"name":null},{"k":"cfb89ffd5805","ago":240,"s":"chat","new":false,"name":null},{"k":"15faa2ce0bb8","ago":244,"s":"chat","new":false,"name":null},{"k":"9620f1cef1aa","ago":249,"s":"ai","new":false,"name":null},{"k":"0fe197f2ce4d","ago":253,"s":"chat","new":false,"name":null},{"k":"4fbda18b0514","ago":257,"s":"chat","new":false,"name":null},{"k":"c603462598a5","ago":262,"s":"chat","new":false,"name":null},{"k":"c51a2a823244","ago":266,"s":"chat","new":false,"name":null},{"k":"01162b46e26c","ago":270,"s":"ai","new":false,"name":null},{"k":"2f11c63dfd08","ago":274,"s":"chat","new":false,"name":null},{"k":"88da64cd4516","ago":279,"s":"chat","new":false,"name":null},{"k":"cf30c5a9bfb1","ago":283,"s":"chat","new":false,"name":null},{"k":"178c7757b433","ago":287,"s":"chat","new":false,"name":null},{"k":"17b9d2ad2691","ago":292,"s":"ai","new":false,"name":null}],"incepxionbot":[],"botcake":[{"k":"4a17f132602c","ago":40,"s":"ai","new":false,"name":null},{"k":"72c4d9170866","ago":130,"s":"order","new":false,"name":null},{"k":"e256f832cae2","ago":220,"s":"chat","new":false,"name":null}]},"as_of":"11:52:20"},"now":"11:52:20","interval":5000,"site":"Likha","bots":{"forbeast":"Bot 1","incepxionbot":"Bot 2","botcake":"Botcake"},"states":{"forbeast":"Connected","incepxionbot":"Connected","botcake":"Fallback"},"notes":{"ok":"Customer sent \u2192 reply sent","none":"No Forbeast replies yet today","not_linked":"Not linked to Forbeast","not_on_forbeast":"This page is not on Forbeast","error":"Forbeast did not answer; trying again within a minute"},"kinds":{"message":"Inquiry","reply":"Reply","follow_up":"Follow-up","order":"Order","ai":"AI answer"}}</script>
 <script>// Ang mga tuntunin ng /chatbot/live na puwedeng magkamali nang walang nakakakita: kung aling event ang may ilaw at saan ito
 // dadaan, ang money packet ng order (ang chip, ang pagsasama ng sunod-sunod na order, walang order na nawawala), at kung
 // kailan aakyat o bababa ang nakikitang bilang. Purong function lang: walang DOM, walang orasan, walang global na binabasa,
@@ -560,9 +588,19 @@
     return best ? best.k : null;
   }
 
-  // Ang icon ng event sa ticker (isang hanay ng icon, walang text).
-  var ICONS = {message: 'in', confirmed: 'sent', ai: 'ai', follow_up: 'seq', order: 'order'};
-  function icon(e) { return e && ICONS.hasOwnProperty(e.type) ? ICONS[e.type] : null; }
+  // Ang mga cell ng hex ng AI pagbukas ng page: ang sagot ng AI sa huling minuto ay anim na hati ng 10 s (m[0] = pinakabago).
+  // Bawat sagot ay isang tanda (ms) na nakakalat sa loob ng hati nito, pinakabago muna, hanggang max (ang dami ng cell).
+  function aiCells(minute, max) {
+    var out = [], cap = max || 30;
+    (Array.isArray(minute) ? minute : []).slice(0, 6).forEach(function (n, i) {
+      var k = Math.max(0, Math.floor(Number(n) || 0));
+      for (var j = 0; j < k; j++) out.push(Math.round((i + (j + 0.5) / k) * 10000));
+    });
+    return out.slice(0, cap);
+  }
+
+  // Ang 2D/3D na ipinapakita: sa TV mode ay laging 2D (ang maliliit na label ay nababasa mula sa malayo), anuman ang napili.
+  function viewFor(saved, tv) { return tv ? '2d' : (saved === '3d' ? '3d' : '2d'); }
 
   // Ang 2D/3D na napili sa browser na ito (localStorage, o anumang key/value na object). Walang storage, sira o ibang value = 2D.
   var VIEW_KEY = 'likha-live-view';
@@ -581,7 +619,7 @@
   }
 
   root.LiveRules = {num: num, peso: peso, route: route, label: label, schedule: schedule, settle: settle, land: land, roll: roll, signals: signals,
-    loot: loot, landings: landings, readView: readView, saveView: saveView, discs: discs, dotPos: dotPos, track: track, goldDot: goldDot, icon: icon};
+    loot: loot, landings: landings, readView: readView, saveView: saveView, discs: discs, dotPos: dotPos, track: track, goldDot: goldDot, aiCells: aiCells, viewFor: viewFor};
 })(typeof self !== 'undefined' ? self : this);
 </script>
 <script>
@@ -590,7 +628,7 @@
 // text sa bawat panel (umaakyat, hindi bumababa sa loob ng isang minuto: LiveRules.settle / land). Ang radar ng bawat bot ay ang
 // mga customer ng huling 5 minuto (LiveRules.track / dotPos); ang order ay mga barya mula sa tuldok ng customer, dumadaan sa globo,
 // papunta sa vault (LiveRules.schedule / loot / landings). Buong araw ito sa TV: walang lumalaking DOM (12 barya at 2 packet kada
-// spoke na ginagamit muli, hanggang 90 icon sa ticker). Ang text mula sa server (pangalan ng page o customer) ay textContent o
+// spoke na ginagamit muli). Ang text mula sa server (pangalan ng page o customer) ay textContent o
 // fillText lang, hindi kailanman HTML.
 (() => {
     const R = window.LiveRules;
@@ -625,8 +663,10 @@
     // ── ang mga panel: ang hugis ay mula sa server (data-geo), ang dulo ng spoke ay ang gilid na nakaharap sa globo ──
     const O = {x: 960, y: 585}, CR = 795, TH = 548;
     // Sa 3D: ang taas at laki ng panel sa cylinder, ang layo ng camera at ang angat ng mundo. Sinukat sa dulo ng ugoy (±7°): ang
-    // bawat panel ay buo sa pagitan ng header at ng ticker, at walang panel na tumatakip sa iba.
+    // bawat panel ay buo sa pagitan ng header at ng ibaba ng screen, at walang panel na tumatakip sa iba.
     const YS = 1.3, PS = 1.3, BACK = -290, LIFT = -8;
+    // Ang dagdag na laki ng label sa buong 3D (sinukat: ang pinakamaliit, ORDERS ng vault, ay 15 px kung wala nito at 18.8 px dito).
+    const LK = .3;
     const PN = [...all('[data-pn]')].map(el => {
         const [cx, cy, w, h, ins] = el.dataset.geo.split(',').map(Number);
         return {id: el.dataset.pn, el, cx, cy, w, h, ins, or: el.dataset.or, cv: el.querySelector('canvas'), c: null, M: {X: 0, Y: 0, Z: 0, rot: 0, sc: 1}};
@@ -641,7 +681,7 @@
         else if (p.or === 'T') { p.ay = hh - 3; p.ax = cl(ux * hh / Math.abs(uy), -(hw - p.ins - 8), hw - p.ins - 8); }
         else { p.ay = -hh + 3; p.ax = cl(ux * hh / Math.abs(uy), -(hw - p.ins - 8), hw - p.ins - 8); }
     }
-    const orb = root.querySelector('[data-live-core]'), orbCv = orb.querySelector('canvas'), bgCv = root.querySelector('[data-live-bg]'), tkCv = root.querySelector('[data-live-ticker]');
+    const orb = root.querySelector('[data-live-core]'), orbCv = orb.querySelector('canvas'), bgCv = root.querySelector('[data-live-bg]');
     // Ang radar sa loob ng panel ng bot: gitna at radius.
     const geo = p => p.w > 400 ? {cx: p.or === 'R' ? p.w - 176 : 176, cy: 222, R: 142} : {cx: 130, cy: 132, R: 88};
     const isOn = b => !!PM[b] && PM[b].el.dataset.linked === '1';
@@ -659,11 +699,15 @@
     // ── 2D ↔ 3D: ang mga panel ay nakalatag sa isang cylinder sa paligid ng globo; isang factor K (0 hanggang 1) ang paghalo ──
     let store = null;
     try { store = window.localStorage; } catch (e) { store = null; }
-    let want = R.readView(store) === '3d' ? 1 : 0, K = want, dirty = true;
+    // want = ang napili sa browser na ito; sa TV mode ay 2D pa rin ang ipinapakita (LiveRules.viewFor), hindi binabago ang napili.
+    let want = R.readView(store) === '3d' ? 1 : 0, tvOn = false, dirty = true;
+    const goal = () => R.viewFor(want ? '3d' : '2d', tvOn) === '3d' ? 1 : 0;
+    let K = goal();
     function toWorld(p, lx, ly) { const M = p.M, c = Math.cos(M.rot), s = Math.sin(M.rot); return [M.X + M.sc * lx * c, M.Y + M.sc * ly, M.Z - M.sc * lx * s]; }
     function layout(t) {
         const sway = live.reduced ? 0 : 1, orbit = 7 * sway * Math.sin(t / 9500 + 4), tilt = 4 + 2 * sway * Math.sin(t / 7000);
-        world.style.transform = K > .001 ? 'translateY(' + (LIFT * K).toFixed(1) + 'px) translateZ(' + (BACK * K).toFixed(1) + 'px) rotateX(' + (tilt * K).toFixed(2) + 'deg) rotateY(' + (orbit * K * K * K).toFixed(2) + 'deg)' : '';
+        world.style.setProperty('--lk', (1 + LK * K).toFixed(3));
+        world.style.transform = K > .001 ?'translateY(' + (LIFT * K).toFixed(1) + 'px) translateZ(' + (BACK * K).toFixed(1) + 'px) rotateX(' + (tilt * K).toFixed(2) + 'deg) rotateY(' + (orbit * K * K * K).toFixed(2) + 'deg)' : '';
         // Ang ugoy ay lumalaki lang sa dulo ng pagtiklop (K³): sa gitna ng paglipat ay walang panel na dumadaan sa kapitbahay.
         live.orbit = orbit * K * K * K;
         for (const p of PN) {
@@ -782,6 +826,8 @@
     function setCounts(c, nowText) {
         live.counts = c;
         settleAll();
+        // Ang hati ng order sa card ng vault: walang bot sa screen, at walang COD (wala sa piso).
+        for (const k of ['other', 'no_amount']) put(k, R.num(c.order_split ? c.order_split[k] : 0), 'data-live-split');
         for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders'], ['messages', 'messages'], ['ai', 'ai'], ['follow_ups', 'follow_ups']]) put(k, R.num(c[src].recent), 'data-live-recent');
         put('peso', R.num(c.order_value ? c.order_value.recent : 0), 'data-live-recent');
         for (const [k, src] of [['replies', 'confirmed'], ['orders', 'orders']]) for (const e of all('[data-live-up="' + k + '"]')) e.classList.toggle('up', c[src].recent > 0);
@@ -813,7 +859,7 @@
         setRadar(c, nowText);
     }
 
-    // ── ang mga packet sa spoke (isa kada event, mula sa pool) at ang ticker ng icon ──
+    // ── ang mga packet sa spoke (isa kada event, mula sa pool) ──
     function fire(id, dir, col) {
         const s = SP[id];
         if (!s || !s.pk.length || calm()) return;
@@ -831,9 +877,14 @@
             k.el.style.transform = 'translateX(' + ((k.dir > 0 ? p : 1 - p) * SP[id].L).toFixed(1) + 'px)';
         }
     }
-    const ticker = [], hexLit = new Array(30).fill(-1e9);
+    // Ang hex ng AI: isang cell kada sagot, kumukupas sa isang minuto. Pagbukas ng page ay may ilaw na agad mula sa sagot ng huling
+    // minuto (counts.ai_minute, kasama sa unang laman ng page), kaya hindi madilim ang panel pagka-reload.
+    const hexLit = new Array(30).fill(-1e9);
     let hexN = 0;
-    function tick(kind) { if (!kind) return; ticker.push({kind, t: now()}); if (ticker.length > 90) ticker.shift(); }
+    function lightFrom(c, nowText) {
+        const a = hms(c.as_of), b = hms(nowText), lag = a === null || b === null ? 0 : cl(((b - a) + 86400) % 86400, 0, 60);
+        for (const age of R.aiCells(c.ai_minute, 30).reverse()) hexLit[(hexN++ * 11) % 30] = now() - age - lag * 1000;
+    }
 
     // ── ang loot: mga barya mula sa tuldok ng customer (o sa gitna ng radar), dumadaan sa globo, papunta sa vault ──
     const GAP = 150, POP = 300, FLY = 1100;
@@ -917,7 +968,6 @@
 
     function hit(name) { const p = PM[name]; if (p) p.hitAt = now(); }
     function act(a) {
-        tick(R.icon(a.event));
         if (a.type === 'order') { cash(a); return; }
         const bot = a.bot && PM[a.bot] ? a.bot : null;
         if (a.type === 'message') { if (bot) fire(bot, -1, '#e9fbff'); fire('chats', -1, '#5dff9c'); }
@@ -1195,33 +1245,15 @@
         c.setLineDash([2, 9]); for (const R0 of [330, 470, 650, 860]) { c.strokeStyle = 'rgba(111,216,255,.1)'; c.beginPath(); c.arc(960, 585, R0, 0, TAU); c.stroke(); } c.setLineDash([]);
         c.fillStyle = 'rgba(111,216,255,.06)'; for (let i = 0; i < 60; i++) { c.beginPath(); c.arc(H(i, 91) * 1920, H(i, 92) * 1080, 1.5, 0, TAU); c.fill(); }
     }
-    // Ang ticker: isang hanay ng icon (pababang arrow = pumasok, pataas = sagot, hexagon = AI, arko = follow-up, barya = order), 26 px/s pakaliwa.
-    function dTk(t) {
-        const c = tkCv.getContext('2d'), W = tkW, v = .026;
-        c.clearRect(0, 0, W, 28);
-        c.lineWidth = 2.2; c.lineCap = 'round'; c.lineJoin = 'round';
-        while (ticker.length && W - 10 - (t - ticker[0].t) * v < 10) ticker.shift();
-        for (const e of ticker) {
-            const x = W - 10 - (t - e.t) * v, k = e.kind;
-            c.globalAlpha = cl(Math.min(x / 160, (W - x) / 40)) * (k === 'order' ? 1 : .8);
-            c.strokeStyle = '#6fd8ff';
-            if (k === 'in') { c.beginPath(); c.moveTo(x, 6); c.lineTo(x, 20); c.moveTo(x - 6, 14); c.lineTo(x, 21); c.lineTo(x + 6, 14); c.stroke(); }
-            else if (k === 'sent') { c.strokeStyle = '#35c8ff'; c.beginPath(); c.moveTo(x, 22); c.lineTo(x, 8); c.moveTo(x - 6, 14); c.lineTo(x, 7); c.lineTo(x + 6, 14); c.stroke(); }
-            else if (k === 'ai') { hex(c, x, 14, 9); c.stroke(); }
-            else if (k === 'seq') { c.beginPath(); c.arc(x, 14, 8, -Math.PI * .8, Math.PI * .3); c.stroke(); }
-            else { c.fillStyle = '#ffc247'; c.strokeStyle = '#ffe08f'; c.beginPath(); c.arc(x, 14, 11, 0, TAU); c.fill(); c.stroke(); c.fillStyle = '#6e4200'; c.beginPath(); c.arc(x, 14, 3.2, 0, TAU); c.fill(); }
-        }
-        c.globalAlpha = 1;
-    }
     const DRAW = {forbeast: dBot, botcake: dBot, incepxionbot: dBot, ai: dAI, seq: dFU, replies: dRep, avg: dAvg, chats: dAct, vault: dVault};
     function draw(t) {
         for (const p of PN) if (p.c) DRAW[p.id](p, t);
-        dOrb(orbCv.c, t); dTk(now());
+        dOrb(orbCv.c, t);
     }
 
     // ── ang stage: 1920 × 1080 na pinalaki sa screen, at ang mabagal na paglipat laban sa burn-in (hanggang 3 px, isang hakbang kada minuto) ──
     const DRIFT = [[0, 0], [2, 1], [3, -2], [1, 3], [-1, 2], [-3, 3], [-2, -1], [2, 2], [-1, -3], [0, 1]];
-    let drift = 0, SC = 1, RS = 1, tkW = 1840;
+    let drift = 0, SC = 1, RS = 1;
     function alloc() {
         const z = el => phone() ? Math.min(1, (innerWidth - 32) / el) : 1;
         for (const p of PN) {
@@ -1232,8 +1264,6 @@
         orb.style.zoom = phone() ? z(700) : '';
         const ors = phone() ? Math.max(1, (devicePixelRatio || 1) * z(700)) : RS;
         orbCv.width = orbCv.height = Math.round(700 * ors); orbCv.c = orbCv.getContext('2d'); orbCv.c.setTransform(ors, 0, 0, ors, 0, 0);
-        tkW = phone() ? Math.max(100, innerWidth - 32) : 1840;
-        tkCv.width = Math.round(tkW * RS); tkCv.height = Math.round(28 * RS); tkCv.getContext('2d').setTransform(RS, 0, 0, RS, 0, 0);
     }
     function fit() {
         if (phone()) { stage.style.transform = ''; RS = 1; SC = 1; alloc(); dirty = true; draw(0); return; }
@@ -1255,8 +1285,9 @@
         rollTick(now());
         if (!phone()) {
             const k0 = K;
-            K = live.reduced ? want : K + (want - K) * .06;
-            if (Math.abs(want - K) < .002) K = want;
+            const G = goal();
+            K = live.reduced ? G : K + (G - K) * .06;
+            if (Math.abs(G - K) < .002) K = G;
             if (dirty || K !== k0 || (K > 0 && !live.reduced)) { layout(t); dirty = false; }
             packets(t);
         }
@@ -1347,12 +1378,20 @@
     }
     b3.addEventListener('click', () => view(want ? '2d' : '3d', true));
     const tv = root.querySelector('[data-live-fullscreen]');
+    // TV mode: laging 2D agad (walang tiklop), dahil sa 3D ay lumiliit at tumatagilid ang maliliit na label; paglabas ay bumabalik
+    // ang napili ng browser.
+    function setTv(on) {
+        if (tvOn === on) return;
+        tvOn = on; root.classList.toggle('tv', on);
+        if (on) K = 0;
+        dirty = true; kick();
+    }
     tv.addEventListener('click', () => {
-        root.classList.add('tv'); hideCard();
+        setTv(true); hideCard();
         if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
     });
-    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) root.classList.remove('tv'); });
-    addEventListener('keydown', e => { if (e.key === 'Escape') { root.classList.remove('tv'); hideCard(); if (fp.classList.contains('on')) fb.click(); } });
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) setTv(false); });
+    addEventListener('keydown', e => { if (e.key === 'Escape') { setTv(false); hideCard(); if (fp.classList.contains('on')) fb.click(); } });
     function motion(reduced) { live.reduced = reduced; dirty = true; kick(); }
     if (mq && mq.addEventListener) mq.addEventListener('change', e => motion(e.matches));
 
@@ -1364,11 +1403,13 @@
         if (['orders', 'peso'].some(k => live.st[k] && live.st[k].heldSince !== null)) settleAll();
         if (live.reduced || phone()) kick();
     }
-    live.play = events => play(schedule(events)); live.setCounts = setCounts; live.view = view; live.panels = PN;
+    live.play = events => play(schedule(events)); live.setCounts = setCounts; live.view = view; live.tv = setTv; live.panels = PN;
+    live.shown = () => K;
 
     fit();
     view(want ? '3d' : '2d', false);
     setCounts(boot.counts, boot.now);
+    lightFrom(boot.counts, boot.now);
     second();
     setInterval(second, 1000);
     kick();

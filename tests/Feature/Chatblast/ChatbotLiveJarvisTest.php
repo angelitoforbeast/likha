@@ -524,7 +524,7 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
             'setTv(true); hideCard();', "if (!document.fullscreenElement) setTv(false);"] as $s) $this->assertStringContainsString($s, $html, $s);
         $this->assertSame(1, substr_count($html, 'R.saveView('), 'only the 3D button saves the choice');
         // Ang label ay lumalaki sa 3D ayon sa K (sinukat sa headless Chrome: ≥ 18 px sa 1920 × 1080, nasa result).
-        $this->assertStringContainsString('.lb, .nm-core-name { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }', $html);
+        foreach (['.lb { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }', 'transform: translateX(-50%) scale(var(--lk, 1)); transform-origin: 50% 100%;', '--lk: 1 !important;'] as $s) $this->assertStringContainsString($s, $html, $s);
         $this->assertStringContainsString("world.style.setProperty('--lk', (1 + LK * K).toFixed(3));", $html);
         $this->assertMatchesRegularExpression('#const LK = \.3;#', $html);
     }
