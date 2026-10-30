@@ -112,9 +112,9 @@ Red runs (one line each): data `S_205_2/5/6` — `ErrorException: Undefined arra
 
 ## Open questions
 
-1. Replies gauge: is "last 5 minutes against today's average pace" the meaning wanted for the arc (no yesterday data, no target)?
-2. Fonts: on a non-Windows TV the numbers fall back to Roboto Condensed / Arial Narrow / sans-serif. If the TV is not Windows and the look matters, a condensed face (e.g. Saira Condensed, SIL OFL) would have to be added to the repo, which needs a download: yes or no?
-3. Coins start at the bot's youngest gold dot, not necessarily the customer who just ordered (order events carry no customer). Fine, or add the customer key to order events (changes two older event-shape assertions)?
+1. Replies gauge: is "last 5 minutes against today's average pace" the meaning wanted for the arc (no yesterday data, no target)? — settled by Amendment 205-1: yes, pace; the card now says so.
+2. Fonts: on a non-Windows TV the numbers fall back to Roboto Condensed / Arial Narrow / sans-serif. If the TV is not Windows and the look matters, a condensed face (e.g. Saira Condensed, SIL OFL) would have to be added to the repo, which needs a download: yes or no? — settled by Amendment 205-1: the font stays as it is.
+3. Coins start at the bot's youngest gold dot, not necessarily the customer who just ordered (order events carry no customer). Fine, or add the customer key to order events (changes two older event-shape assertions)? — settled by Amendment 205-1: the coin keeps starting at the youngest gold dot.
 
 ## Process suggestions
 
@@ -126,4 +126,57 @@ Red runs (one line each): data `S_205_2/5/6` — `ErrorException: Undefined arra
 - Run the Live page on the office TV for a day and check frame rate and heat (normal).
 - Measure the feed on production MySQL on a busy day, especially the radar read's two `EXISTS` (normal).
 
-205: done — Live page rebuilt as comp E (radars, vault, gauges, icon ticker, cards), 44 tokens on screen, radar from the same one query, 3D on screen without overlaps, all P1 cases pass
+## Amendment 205-1
+
+**Date:** 2026-10-30/31 · **Commits:** `aae76003` (orders add up, pace wording), `342ccee8` (TV in 2D, 3D labels, AI hex on load, no ticker), `8146402c` (label fit, evidence, screenshots), `6daa51ee` (stories), plus this result.
+
+### Changes
+
+| # | Change | Where |
+|---|---|---|
+| 1 | The day's order list (the source of each bot's order count, the "ordered" gold dots and the peso total) now reads from 15 minutes before its own last read instead of 15 minutes before now, so orders placed while nobody had the page open are kept. Its cache key moved to `chatbot-live:order-value:v3` so a deploy rebuilds the full day once. The counts carry `order_split` = `other` (orders with no bot on this screen: no `via` on the event, or a bot that is not linked here) and `no_amount` (orders with no encoded COD number). With the bot filter, the other bots' orders are added to `other`, so the shown bot + other = total under every filter. The vault card shows "Other / no bot" and "Without amount" (data hooks `data-live-split`, updated every poll). No new query. | `app/Services/Chatbot/LiveFeed.php` (`orderValue`, `orderSplit`, `narrow`), `live.blade.php` (vault card, `setCounts`) |
+| 2 | TV mode always shows 2D: what is shown is `LiveRules.viewFor(saved, tv)`; entering TV snaps to 2D, leaving it returns to the browser's saved choice, which TV never changes. In 3D every label grows with the fold (`--lk` = 1 + 0.3 K; labels scale up and away from their number; the core name scales as one; AVG REPLY grows inward). Measured at 1920 × 1080 in 3D: smallest label 18.8 px (vault ORDERS at the +7° orbit end), all others 19–32 px; before: 15 px. | `chatbot-live-rules.js` (`viewFor`), `live.blade.php` (`goal`, `setTv`, `LK`, `.lb` CSS) |
+| 3 | The counts carry `ai_minute`: the AI answers of the last minute in six 10-second slices (newest first, ending 5 s before now, since newer answers arrive as events on the first poll). They are six more `SUM(CASE …)` columns of the AI read that already runs, so no new query. On load the page lights one hex cell per answer at its age (`LiveRules.aiCells`), then continues from live events as before. | `LiveFeed.php` (`tally`), `chatbot-live-rules.js` (`aiCells`), `live.blade.php` (`lightFrom`) |
+| 4 | The bottom-right icon ticker is removed: the canvas element, its CSS (stage and phone), its drawing, its event queue and the `icon` rule. The other event effects (spoke packets, AI hex, coins) are unchanged. No card text described the ticker, so no card changed. | `live.blade.php`, `chatbot-live-rules.js` |
+| 5 | The Replies card says: "Gauge shows: pace, not a goal", "Pace: last 5 min vs today's average 5 min", "Half / full: usual pace / double or more". | `live.blade.php` |
+
+### Cause of the order gap (item 1)
+
+It was a bug in the per-bot count, not orders without a bot. The orders total on the vault comes from a running tally that never skips a stretch of time. Each bot's order count (and the peso total) comes from a second, cached list of the day's orders, and every refresh only added the orders of the last 15 minutes. The refresh runs only while someone has the Live page open, so when the page was closed for more than 15 minutes (for example the TV off for a while), the orders placed in that time were never added to the list: they were in the 707 but in no bot, and their COD was missing from the peso total. Reproduced in `test_S_205_10_…`: before the fix the test saw Bot 1 = 1 and Botcake = 1 where the right answer was 3 and 2. Ruled out: a time-window difference between the two counts (both are today, page filter, same table and type) and Botcake not linked (Botcake is always on screen). Orders that genuinely have no bot can still happen (an order event without `via`, which today's order node always writes, or an order of a bot that is not linked on this server, e.g. Bot 2), and those are the "Other / no bot" line. Not checked on production data (no server access in this job): after deploy, "Other / no bot" should be near 0 on Likha; a large number there would point to something else.
+
+### Tests
+
+- New: `ChatbotLiveJarvisTest::test_S_205_10_per_bot_orders_plus_other_equal_the_total_after_a_gap_in_polling_and_orders_without_cod_are_counted` (fixture: orders by three bots, one without `via`, three without COD, a 3.5-hour gap without polls; asserts per bot + other = total = 7, without amount = 3, value ₱5,699.50, the bot filter, the page filter, Bot 2 unlinked → other, and the card lines); `test_S_205_11_tv_mode_renders_2d_through_the_rules_and_3d_labels_grow_with_the_fold`; `test_S_205_12_the_counts_carry_the_ai_answers_of_the_last_minute_in_ten_second_slices_for_the_hex_on_load`; `test_S_205_13_the_icon_ticker_is_gone_from_the_page_and_its_drawing`; `test_S_205_14_the_replies_gauge_card_says_it_is_pace_against_todays_average_and_not_a_goal`; `ChatbotLiveRulesTest::test_S_205_11_tv_mode_shows_2d_whatever_the_browser_saved_and_outside_tv_the_saved_choice_still_applies`, `test_S_205_12_on_load_the_ai_hex_lights_one_cell_per_answer_of_the_last_minute_by_age`, `test_S_205_13_the_rules_no_longer_carry_the_ticker_icon`.
+- Removed: `ChatbotLiveRulesTest::test_S_205_1_the_ticker_draws_one_icon_per_event_type` (the ticker is gone).
+- Changed assertions: `ChatbotLiveJarvisTest::test_S_205_1` and `test_S_200_6`, `ChatbotLiveNetworkTest::test_S_199_6` now assert that `data-live-ticker` is absent; `test_S_200_6` also checks the two `data-live-split` hooks.
+- Red runs: `S_205_10` — `Undefined array key "order_split"`, then (with the split but before the fix) `'forbeast' => 1 … 'botcake' => 1` against 3 and 2; `S_205_1x` rules — `no function: icon` on the old ticker test after the rule was removed (test replaced).
+- Live files (`php vendor/bin/phpunit tests/Feature/Chatblast/<File>.php`): `ChatbotLiveJarvisTest` OK (15 tests, 298 assertions), `ChatbotLiveRulesTest` OK (12, 163), `ChatbotLiveNetworkTest` OK (7, 81), `ChatbotLiveScoreboardTest` OK (9, 93), `ChatbotLiveTest` OK (6, 77).
+- Full `tests/Feature`: `Tests: 3697, Assertions: 71252, Failures: 2, Skipped: 4` — only the two known failures (`ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`); no new failure, and the NightRun time-limit test passed this time.
+- `S-205.6` (query count does not grow with radar customers) still passes; items 1 and 3 add no query.
+
+### Commands and evidence
+
+- `php docs/specs/205-evidence/build.php` → `wrote 109327 bytes`. New switches: `?save3d` (a saved 3D choice before the page opens), `?tv` (TV mode on load, without fullscreen), `?lbl[=ms]` (on-screen height of every panel label at its far edge, in `data-lbl`; what is shown, in `data-view`). The fake counts carry `ai_minute` and `order_split` (270 orders = Bot 1 260 + Botcake 2 + other 8; 31 without amount).
+- TV with saved 3D: `chrome --headless=new --window-size=1920,1080 --virtual-time-budget=5000 --dump-dom "file:///…/live.html?now=1500&shot&save3d&tv&lbl=3000"` → `data-view={"saved":"3d","tv":true,"K":0}`; without `tv`: `{"saved":"3d","tv":false,"K":1}`.
+- Labels in 3D: `…/live.html?now=1500&shot&d3&orbit=<ms>&lbl=5000` at 11 orbit phases (both extremes and 9 between) → smallest label 18.8 px (ORDERS, +7°), 19.5 px at −7°; in 2D the smallest is 19 px (unchanged).
+- Hit-test (S-205.7): `…/live.html?now=1500&shot&d3&orbit=1768&hit=5000` and `orbit=31600` → `overlapping: 0, outside: []` at −7° and +7°; also 0 / [] at fold moments 400, 500, 700, 900, 1100, 1300, 1600, 2000, 2500 ms and orbit phases −4.52° and +2.4° (51,988 points each). At 300 ms the first frame has not been laid out yet (all panels at the centre); the base commit's evidence page shows the same 5,084 points at 300 ms, so this is the measuring moment, not a regression.
+- No script errors (`data-err` absent) at 1920 × 1080 and 390 px, in 2D, 3D and TV.
+- Screenshots (`chrome --headless=new --hide-scrollbars --window-size=1920,1080 --virtual-time-budget=<ms> --screenshot=<file> "file:///…/live.html?<switches>"`):
+  - `docs/specs/205-evidence/live-1920-a1.png` — 2D, vault card open (`now=1500&shot&card=vault`, 3300 ms): Orders today 271, Other / no bot 8, Without amount 31.
+  - `docs/specs/205-evidence/live-1920-tv-a1.png` — TV mode with a saved 3D choice (`save3d&tv&now=1500&shot`, 3300 ms): 2D, no filter / 3D / TV / exit controls.
+  - `docs/specs/205-evidence/live-1920-3d-a1.png` — 3D at the +7° orbit end (`now=1500&shot&d3&orbit=31600`, 5000 ms): every label ≥ 18.8 px.
+  - `docs/specs/205-evidence/live-1920-reload-a1.png` — right after load, before the first poll (`shot`, 800 ms): 13 AI hex cells lit from `ai_minute` [3, 2, 4, 1, 2, 1].
+
+### Story changes
+
+- S-205.1: the icon ticker removed from the panel list; its ticker test removed (see S-205.13).
+- S-205.7: "between the header and the ticker" → "between the header and y = 1046 px (where the ticker was)"; the measurement is unchanged.
+- Added S-205.10 to S-205.14 (items 1, 2, 3, 4, 5).
+
+### Notes
+
+- The vault's "Orders today" still holds while coins are landing (up to 8 s, as before); the two new lines update on each poll, so for a few seconds after an order the card's lines can be one ahead of the held total.
+- The old screenshots (`live-1920.png`, `live-1920-3d*.png`, `live-390.png`, `live-1920-card-forbeast.png`) still show the ticker; they are the record of the first build and were not retaken.
+- Deploy: still no migration. The order-value cache key is now `v3`; the first refresh after deploy reads the whole day once (one query on today's order events, plus the COD lookup for orders without an amount).
+
+205: done — Live page rebuilt as comp E (radars, vault, gauges, cards), 44 tokens on screen, radar from the same one query, 3D on screen without overlaps, all P1 cases pass; Amendment 205-1: per-bot orders + Other / no bot = total (polling-gap bug fixed), TV always 2D with 3D labels ≥ 18 px, AI hex lit on load, icon ticker removed, Replies card says pace
