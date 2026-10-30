@@ -133,7 +133,12 @@ class ProblemsPanel
         return $out;
     }
 
-    /** Ang hindi nasagot (pula, kapag sapat ang dami gaya ng Health) at ang dobleng sagot (orange) mula sa echo. */
+    /**
+     * Ang hindi nasagot (pula, kapag sapat ang dami gaya ng Health) at ang dobleng sagot mula sa echo: orange lang ang
+     * main-flow double (bagong customer na sinagot ng CBB at ng main flow ng Likha bot, kaya parehong naka-On ang dalawang
+     * main flow); puti ang leftover (lumang customer na nasa sequence o loop pa ng CBB, mauubos din). Ang bilang ng bagong
+     * customer at ng sinagot ng CBB ay nasa unang linya ng doble.
+     */
     private function echoes(): array
     {
         $out = [];
@@ -142,11 +147,18 @@ class ProblemsPanel
                 $out[] = self::line($e['page'], 'red', $e['unanswered'] . ' customers not answered in ' . ChatEchoes::limit('unanswered_minutes') . ' min',
                     [['Inbox', $e['examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
             }
-            if ($e['doubles'] > 0) {
-                $x = $e['double_examples'][0] ?? null;
-                $out[] = self::line($e['page'], 'orange', $e['doubles'] . ' double ' . ($e['doubles'] === 1 ? 'reply' : 'replies') . ' in the last '
-                    . ChatEchoes::HEALTH_MINUTES . ' min' . ($x ? ' (' . $x['senders'] . ')' : ''),
-                    [['Inbox', $x['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
+            $numbers = ' (new customers: ' . $e['new_customers'] . ', answered by CBB: ' . $e['cbb_new'] . ')';
+            $window = ' in the last ' . ChatEchoes::HEALTH_MINUTES . ' min';
+            if ($e['main_doubles'] > 0) {
+                $links = [];
+                foreach ($e['main_examples'] as $i => $x) $links[] = ['Example ' . ($i + 1), $x['inbox']];
+                $out[] = self::line($e['page'], 'orange', 'Main flow double: ' . $e['main_doubles'] . ' new ' . ($e['main_doubles'] === 1 ? 'customer' : 'customers')
+                    . ' answered by both CBB and the Likha bot' . $window . $numbers, [...$links, self::health($e['page_id'], 'who-answered')]);
+            }
+            if ($e['leftovers'] > 0) {
+                $out[] = self::line($e['page'], 'white', $e['leftovers'] . ' leftover CBB ' . ($e['leftovers'] === 1 ? 'reply' : 'replies')
+                    . ' to old customers (sequence/loop)' . $window . ($e['main_doubles'] > 0 ? '' : $numbers),
+                    [['Inbox', $e['leftover_examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
             }
         }
 

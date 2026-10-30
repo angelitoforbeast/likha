@@ -117,15 +117,18 @@
         @if($echoes['pages'])
             <div class="cb-card overflow-x-auto">
                 <table class="cb-table" data-list="who-answered">
-                    <thead><tr><th>Page</th><th class="text-right">Not answered in {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min</th><th>Latest</th><th class="text-right">Double replies</th><th>Latest</th></tr></thead>
+                    <thead><tr><th>Page</th><th class="text-right">Not answered in {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min</th><th>Latest</th><th class="text-right">Main flow doubles</th><th>Latest</th><th class="text-right">Leftover doubles</th><th>Latest</th><th>New customers</th></tr></thead>
                     <tbody>
                     @foreach($echoes['pages'] as $e)
                         <tr data-echo-page="{{ $e['page_id'] }}">
                             <td class="font-medium">{{ $e['page'] }}</td>
                             <td class="text-right">{{ $e['unanswered'] }}@if($e['unanswered_messages'] > $e['unanswered'])<div class="text-xs text-slate-500">{{ $e['unanswered_messages'] }} messages</div>@endif</td>
                             <td class="text-xs">@foreach($e['examples'] as $x)<a href="{{ $x['inbox'] }}" class="block whitespace-nowrap text-blue-700 hover:underline">{{ substr($x['at'], 11, 5) }} · Customer in Inbox</a>@endforeach</td>
-                            <td class="text-right">{{ $e['doubles'] }}</td>
-                            <td class="text-xs">@foreach($e['double_examples'] as $x)<a href="{{ $x['inbox'] }}" class="block whitespace-nowrap text-blue-700 hover:underline">{{ substr($x['at'], 11, 5) }} · {{ $x['senders'] }}</a>@endforeach</td>
+                            <td class="text-right" data-main-doubles="{{ $e['main_doubles'] }}">{{ $e['main_doubles'] }}</td>
+                            <td class="text-xs">@foreach($e['main_examples'] as $x)<a href="{{ $x['inbox'] }}" class="block whitespace-nowrap text-blue-700 hover:underline">{{ substr($x['at'], 11, 5) }} · New customer in Inbox</a>@endforeach</td>
+                            <td class="text-right" data-leftovers="{{ $e['leftovers'] }}">{{ $e['leftovers'] }}</td>
+                            <td class="text-xs">@foreach($e['leftover_examples'] as $x)<a href="{{ $x['inbox'] }}" class="block whitespace-nowrap text-blue-700 hover:underline">{{ substr($x['at'], 11, 5) }} · {{ $x['senders'] }}</a>@endforeach</td>
+                            <td class="whitespace-nowrap text-xs">{{ $e['new_customers'] }} new, {{ $e['cbb_new'] }} answered by CBB</td>
                         </tr>
                     @endforeach
                     </tbody>
@@ -134,7 +137,7 @@
         @else
             <p class="cb-card px-3 py-2 text-sm text-slate-600" data-list="who-answered">{{ $echoes['measured'] ? 'Every customer was answered, no double replies in the last hour.' : 'No echoes yet: Forbeast has not sent any page echo in the last 24 hours.' }}</p>
         @endif
-        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} minutes, from Meta's echo of every message a page sends (any app or a person). Not answered: a customer message with no echo from any sender within {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min (bot-On pages with echoes; attachments the bot ignores are left out). Double reply: two different apps answering one customer within {{ \App\Services\Chatbot\ChatEchoes::limit('double_seconds') }} s.</p>
+        <p class="text-xs text-slate-500">Last {{ \App\Services\Chatbot\ChatEchoes::HEALTH_MINUTES }} minutes, from Meta's echo of every message a page sends (any app or a person). Not answered: a customer message with no echo from any sender within {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min (bot-On pages with echoes; attachments the bot ignores are left out). Double reply: two different apps answering one customer within {{ \App\Services\Chatbot\ChatEchoes::limit('double_seconds') }} s. Main flow double (urgent): a new customer, whose first message to the page in Likha's records came in this window, answered by both CBB (Chatbot Builder or Botcake) and the Likha bot's main flow within {{ \App\Services\Chatbot\ChatEchoes::limit('unanswered_minutes') }} min; a customer already known to Chatbot Builder but new to Likha counts as new. Leftover doubles (not urgent): every other double reply, e.g. old customers still in a CBB sequence or loop. New customers: how many came in this window and how many of them CBB answered; a CBB whose main flow is off answers none.</p>
     </section>
 
     <form method="GET" action="{{ route('chatbot.health') }}" class="cb-filters flex flex-wrap items-end gap-3 text-sm" aria-label="Filters">
