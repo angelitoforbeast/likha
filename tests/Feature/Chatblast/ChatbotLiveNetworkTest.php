@@ -225,16 +225,15 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
             'data-live-count="active"', 'data-live-unknown="in"', 'data-live-unknown="out"', 'data-live-last-order', 'data-live-plus', 'data-live-kpi="orders"'] as $s) {
             $this->assertStringContainsString($s, $html, $s);
         }
-        // Ang HUD (spec 200): ang kabuuang inquiry, ang core at ang orasan nito, AI, follow-ups, ang tatlong bot na may in at out na path.
-        foreach (['INQUIRIES RECEIVED TODAY', 'FOLLOW-UPS SENT', 'AI ANSWERS', 'signals · last 5 min', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT',
-            'BOTCAKE · FALLBACK', 'DORMANT', ' orders · ', 'Order value today', 'LIVE ACTIVITY', 'Listening for new events'] as $s) {
+        // Ang HUD (spec 205): ang mga pangalan at label ay nasa card ng bawat panel (hover / tap); ang spoke ng bawat panel mula sa globo.
+        foreach (['Inquiries received today', 'Follow-ups sent today', 'AI answers today', 'Signals · last 5 min', 'Bot 1 · Forbeast', 'Bot 2 · Incepxionbot',
+            'Botcake · Fallback', 'Order value today', 'data-pn="vault"', 'data-live-core'] as $s) {
             $this->assertStringContainsString($s, $html, $s);
         }
-        foreach (['seq', 'ai', 'forbeast-in', 'forbeast-out', 'incepxionbot-in', 'incepxionbot-out', 'botcake-in', 'botcake-out'] as $p) $this->assertSame(1, substr_count($html, 'data-path="' . $p . '"'), $p);
-        $this->assertSame(60, preg_match_all('#<line [^>]*/>#', explode('</g>', explode('<g data-live-ticks', $html, 2)[1], 2)[0]));
+        foreach (['seq', 'ai', 'forbeast', 'incepxionbot', 'botcake'] as $p) $this->assertSame(1, substr_count($html, 'data-spoke="' . $p . '"'), $p);
         $this->assertMatchesRegularExpression('#data-live-seq="0"[^>]*><span>Pa-remind</span><b>1</b>#', $html);
         $this->assertMatchesRegularExpression('#data-bot-row="incepxionbot"[^>]*data-linked="[01]"#', $html);
-        $this->assertStringContainsString('data-live-log', $html);
+        $this->assertStringContainsString('data-live-ticker', $html);
         // Privacy at TV: walang pangalan o mensahe ng customer; walang font o script mula sa labas; walang blur.
         foreach (['Juan Dela Cruz', 'Magkano', 'fonts.googleapis', 'cdn.', 'backdrop-filter', 'filter: blur'] as $s) $this->assertStringNotContainsString($s, $html, $s);
         $this->assertStringContainsString('js/chatbot-live-rules.js', $html);
