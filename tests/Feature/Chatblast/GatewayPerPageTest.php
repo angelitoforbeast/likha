@@ -228,7 +228,8 @@ class GatewayPerPageTest extends ChatblastTestCase
         $this->assertCount(2, $chats);
         $this->assertSame(['m_AbC1', 'incepxionbot'], [$chats[0]->message_id, $chats[0]->payload['gateway'] ?? null]);
         $this->assertSame(['gw-event-500', null], [$chats[1]->message_id, $chats[1]->payload['gateway'] ?? null]);
-        Queue::assertPushed(RunChatbotFlow::class, 2);
+        // Ang mensahe lang ang tumatakbo; ang pagbukas ng ad ay itinatala lang.
+        Queue::assertPushed(RunChatbotFlow::class, 1);
     }
 
     public function test_S_194_4_a_stalled_gateway_moves_the_page_to_the_other_one_and_back_after_30_healthy_minutes(): void

@@ -169,7 +169,9 @@ class HandleGatewayEvent implements ShouldQueue
             throw $ex;
         }
         self::count((string) $e['type']);
-        ChatbotInbound::afterStore($chat, $pageName);
+        // Ang pagbukas ng ad ay itinatala lang; ang mensahe o postback ng customer ang nagsisimula ng takbo.
+        if ($e['type'] === 'referral') ChatbotInbound::adOpened($chat);
+        else ChatbotInbound::afterStore($chat, $pageName, waitForAd: true);
     }
 
     /** Ang pangalan: sa botcake_psids (page + PSID), saka sa huling chat na may pangalan; kung wala, blangko. */
@@ -189,6 +191,8 @@ class HandleGatewayEvent implements ShouldQueue
     {
         $payload = ['source' => 'gateway'];
         if ($e['ad_id'] !== null && preg_match('/^\d{1,64}$/', $e['ad_id'])) $payload['ad_id'] = $e['ad_id'];
+        // Ang pagbukas ng ad (walang isinulat ang customer): binabasa ang ad gaya ng dati, pero hindi ito sinasagot.
+        if ($e['type'] === 'referral') $payload[ChatbotInbound::AD_OPEN] = true;
         if ($e['quick_reply'] !== null && $e['quick_reply'] !== '') $payload['quick_reply'] = $e['quick_reply'];
         if ($e['type'] === 'postback') {
             $payload['postback'] = $e['postback']['payload'];

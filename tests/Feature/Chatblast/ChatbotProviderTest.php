@@ -186,7 +186,7 @@ class ChatbotProviderTest extends ChatblastTestCase
     {
         return [
             'referral without mid, from an ad' => [['type' => 'referral', 'mid' => null, 'text' => null, 'referral' => ['ad_id' => '6045246247433', 'ref' => null, 'source' => 'ADS']],
-                null, ['source' => 'gateway', 'ad_id' => '6045246247433', '_via' => 'forbeast'], 'gw-event-18342'],
+                null, ['source' => 'gateway', 'ad_id' => '6045246247433', '_ad_open' => true, '_via' => 'forbeast'], 'gw-event-18342'],
             'postback' => [['type' => 'postback', 'mid' => null, 'text' => null, 'postback' => ['title' => 'Order now', 'payload' => 'ORDER']],
                 'Order now', ['source' => 'gateway', 'postback' => 'ORDER', '_via' => 'forbeast'], 'gw-event-18342'],
             // Ang uri at link ng attachment ay naitatabi (payload.attachment) para sa susunod na transcribe o paglalarawan.
@@ -213,7 +213,9 @@ class ChatbotProviderTest extends ChatblastTestCase
 
         $chat = BotcakeChat::sole();
         $this->assertSame([$message, $payload, $ref], [$chat->message, $chat->payload, $chat->message_id]);
-        Queue::assertPushed(RunChatbotFlow::class, 1);
+        // Ang pagbukas ng ad ay itinatala lang (walang takbo); ang iba ay tumatakbo nang isang beses.
+        if (($event['type'] ?? null) === 'referral') Queue::assertNotPushed(RunChatbotFlow::class);
+        else Queue::assertPushed(RunChatbotFlow::class, 1);
     }
 
     public function test_S_111_4c_bot_off_no_ids_bad_json_or_a_big_body_store_nothing(): void
