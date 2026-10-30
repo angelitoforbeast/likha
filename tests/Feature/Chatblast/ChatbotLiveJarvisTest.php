@@ -245,7 +245,8 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
             $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($v, '#') . '<#', $html, $key);
         }
         foreach (['data-live-recent="replies"', 'data-live-recent="orders"', 'data-live-note="reply_time"', 'data-live-unit', 'data-live-unknown="in"', 'data-live-unknown="out"',
-            'data-live-kpi="orders"', 'data-live-seq="0"', 'data-live-ticker'] as $s) $this->assertStringContainsString($s, $html, $s);
+            'data-live-kpi="orders"', 'data-live-seq="0"', 'data-live-split="other"', 'data-live-split="no_amount"'] as $s) $this->assertStringContainsString($s, $html, $s);
+        $this->assertStringNotContainsString('data-live-ticker', $html); // ang icon ticker ay inalis (spec 205, pagkatapos ng design review)
         // Ang mga bot: ang dormant ay data-linked 0 (dim, hindi pula); ang notes ng bawat bot ay nasa card nito.
         foreach (['forbeast' => '1', 'incepxionbot' => '0', 'botcake' => '1'] as $bot => $on) {
             $this->assertMatchesRegularExpression('#data-bot-row="' . $bot . '" data-linked="' . $on . '"#', $html, $bot);
@@ -405,11 +406,11 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
             $panel = explode('<!--/pn-->', explode('data-pn="' . $p . '"', $html, 2)[1], 2)[0];
             $this->assertStringContainsString('<canvas', $panel, $p);
         }
-        // Ang globo (bot core, signals) at ang vault (ginto, order value at bilang ng order), ang ticker ng icon.
+        // Ang globo (bot core, signals) at ang vault (ginto, order value at bilang ng order); walang icon ticker (spec 205, pagkatapos ng design review).
         $this->assertMatchesRegularExpression('#data-live-core[^>]*>.*<canvas#s', $html);
         $this->assertMatchesRegularExpression('#class="nm-core-name"[^>]*>LIKHA<#', $html);
         $this->assertMatchesRegularExpression('#data-pn="vault"[^>]*data-live-kpi="orders"#', $html);
-        $this->assertMatchesRegularExpression('#<canvas [^>]*data-live-ticker#', $html);
+        $this->assertStringNotContainsString('data-live-ticker', $html);
         // Ang nakikitang salita ng mga panel: isa o dalawang salita bawat isa.
         preg_match_all('#<span class="lb[^"]*"[^>]*>([^<]*)</span>#', $html, $m);
         $this->assertSame(['BOT 1', 'IN', 'OUT', 'BOTCAKE', 'IN', 'OUT', 'BOT 2', 'IN', 'OUT', 'AI', 'FOLLOW-UPS', 'REPLIES', 'ORDERS', 'AVG REPLY', 'CHATS', 'BOT'], $m[1]);
@@ -449,7 +450,7 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $this->assertSame(11, preg_match_all('#<div class="card[^"]*" id="lv-card-[a-z]+" role="tooltip" hidden>#', $html));
     }
 
-    // ── Amendment 205-1: ang order ay nagtutugma (kada bot + walang bot = kabuuan) ───────────────────────────────────────
+    // ── Spec 205, pagkatapos ng design review: ang order ay nagtutugma (kada bot + walang bot = kabuuan) ───────────────────────────────────────
 
     /** Ang bilang ng order kada bot, ang "Other / no bot", ang "without amount", ang kabuuan at ang halaga. */
     private function split(array $q = []): array
@@ -512,5 +513,50 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         foreach (['<dt>Gauge shows</dt><dd>pace, not a goal</dd>', "<dt>Pace</dt><dd>last 5 min vs today's average 5 min</dd>",
             '<dt>Half / full</dt><dd>usual pace / double or more</dd>'] as $s) $this->assertStringContainsString($s, $card, $s);
         foreach (['target', 'Target', 'goal reached', 'quota'] as $s) $this->assertStringNotContainsString($s, $card, $s);
+    }
+
+    public function test_S_205_11_tv_mode_renders_2d_through_the_rules_and_3d_labels_grow_with_the_fold(): void
+    {
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        // Ang ipinapakita ay LiveRules.viewFor(napili, TV): sa TV ay 2D, hindi binabago ang naka-save; ang TV ay agad 2D (K = 0).
+        foreach (["const goal = () => R.viewFor(want ? '3d' : '2d', tvOn) === '3d' ? 1 : 0;", 'tvOn = on; root.classList.toggle(\'tv\', on);', 'if (on) K = 0;',
+            'setTv(true); hideCard();', "if (!document.fullscreenElement) setTv(false);"] as $s) $this->assertStringContainsString($s, $html, $s);
+        $this->assertSame(1, substr_count($html, 'R.saveView('), 'only the 3D button saves the choice');
+        // Ang label ay lumalaki sa 3D ayon sa K (sinukat sa headless Chrome: ≥ 18 px sa 1920 × 1080, nasa result).
+        $this->assertStringContainsString('.lb, .nm-core-name { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }', $html);
+        $this->assertStringContainsString("world.style.setProperty('--lk', (1 + LK * K).toFixed(3));", $html);
+        $this->assertMatchesRegularExpression('#const LK = \.3;#', $html);
+    }
+
+    public function test_S_205_12_the_counts_carry_the_ai_answers_of_the_last_minute_in_ten_second_slices_for_the_hex_on_load(): void
+    {
+        // Ngayon 12:30:00; ang hati ay mula 12:29:55 (ang mas bago ay darating bilang event sa unang poll) pabalik, 10 s bawat isa.
+        $chat = $this->chat('1001', '7050', '2026-10-21 12:28:00', 'forbeast', 'Gia Cruz');
+        foreach (['12:29:50', '12:29:47', '12:29:40', '12:28:58'] as $t) $this->ai($chat, '1001', '7050', '2026-10-21 ' . $t);
+        $this->ai($chat, '1002', '7050', '2026-10-21 12:29:46');                                    // ibang page
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:29:57');                                    // darating bilang event
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:28:50');                                    // lampas isang minuto
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:29:30', ['error' => 'timeout']);            // hindi sagot
+        $this->ai($chat, '1001', '7050', '2026-10-21 12:29:20', ['model' => \App\Services\OrderEncode\FlowEncode::MODEL]); // Encode order
+
+        $this->assertSame([3, 1, 0, 0, 0, 1], app(LiveFeed::class)->feed([])['counts']['ai_minute']);
+        $this->assertSame([2, 1, 0, 0, 0, 1], app(LiveFeed::class)->feed(['page_id' => '1001'])['counts']['ai_minute']);
+        // Ang page ay may laman na nito pagbukas, at ang script ay nag-iilaw mula rito bago ang unang poll.
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        $this->assertStringContainsString('"ai_minute":[3,1,0,0,0,1]', $html);
+        $this->assertStringContainsString('for (const age of R.aiCells(c.ai_minute, 30).reverse()) hexLit[(hexN++ * 11) % 30] = now() - age - lag * 1000;', $html);
+        $this->assertStringContainsString("setCounts(boot.counts, boot.now);\n    lightFrom(boot.counts, boot.now);", $html);
+    }
+
+    public function test_S_205_13_the_icon_ticker_is_gone_from_the_page_and_its_drawing(): void
+    {
+        $this->seedDay();
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+        foreach (['data-live-ticker', 'class="tk"', '.tk {', 'tkCv', 'dTk', 'tick(', 'R.icon', 'ticker'] as $s) $this->assertStringNotContainsString($s, $html, $s);
+        // Ang ibang event ay buhay pa rin: packet sa spoke, hex ng AI, barya ng order.
+        foreach (["fire('chats', -1, '#5dff9c')", "hexLit[(hexN++ * 11) % 30] = now();", "if (a.type === 'order') { cash(a); return; }"] as $s) $this->assertStringContainsString($s, $html, $s);
     }
 }

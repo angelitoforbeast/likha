@@ -233,7 +233,7 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
         foreach (['seq', 'ai', 'forbeast', 'incepxionbot', 'botcake'] as $p) $this->assertSame(1, substr_count($html, 'data-spoke="' . $p . '"'), $p);
         $this->assertMatchesRegularExpression('#data-live-seq="0"[^>]*><span>Pa-remind</span><b>1</b>#', $html);
         $this->assertMatchesRegularExpression('#data-bot-row="incepxionbot"[^>]*data-linked="[01]"#', $html);
-        $this->assertStringContainsString('data-live-ticker', $html);
+        $this->assertStringNotContainsString('data-live-ticker', $html); // ang icon ticker ay inalis (spec 205, pagkatapos ng design review)
         // Privacy at TV: walang pangalan o mensahe ng customer; walang font o script mula sa labas; walang blur.
         foreach (['Juan Dela Cruz', 'Magkano', 'fonts.googleapis', 'cdn.', 'backdrop-filter', 'filter: blur'] as $s) $this->assertStringNotContainsString($s, $html, $s);
         $this->assertStringContainsString('js/chatbot-live-rules.js', $html);

@@ -226,10 +226,34 @@ class ChatbotLiveRulesTest extends TestCase
         $this->assertNull($noGold);
     }
 
-    public function test_S_205_1_the_ticker_draws_one_icon_per_event_type(): void
+    // ── Spec 205, pagkatapos ng design review: TV, hex ng AI, walang ticker ──
+
+    public function test_S_205_11_tv_mode_shows_2d_whatever_the_browser_saved_and_outside_tv_the_saved_choice_still_applies(): void
     {
-        $e = fn (string $type) => ['type' => $type, 'at' => '2026-10-21 12:29:00', 'page' => 'Page Uno', 'id' => 1, 'bot' => 'forbeast'];
-        $this->assertSame(['in', 'sent', 'ai', 'seq', 'order', null], $this->js([['icon', $e('message')], ['icon', $e('confirmed')], ['icon', $e('ai')], ['icon', $e('follow_up')],
-            ['icon', $e('order')], ['icon', $e('other')]]));
+        [$tv3d, $tv2d, $tvNone, $out3d, $out2d, $outNone, $outOdd, $saved] = $this->js([
+            ['viewFor', '3d', true], ['viewFor', '2d', true], ['viewFor', null, true], ['viewFor', '3d', false], ['viewFor', '2d', false], ['viewFor', null, false],
+            ['viewFor', '<script>', false], ['readView', ['likha-live-view' => '3d']],
+        ]);
+        $this->assertSame(['2d', '2d', '2d'], [$tv3d, $tv2d, $tvNone]);
+        $this->assertSame(['3d', '2d', '2d', '2d'], [$out3d, $out2d, $outNone, $outOdd]);
+        $this->assertSame('3d', $saved); // ang TV ay hindi nagbabago ng naka-save
+    }
+
+    public function test_S_205_12_on_load_the_ai_hex_lights_one_cell_per_answer_of_the_last_minute_by_age(): void
+    {
+        [$some, $many, $none, $odd] = $this->js([['aiCells', [2, 1, 0, 0, 0, 1], 30], ['aiCells', [40, 5], 30], ['aiCells', null, 30], ['aiCells', ['x', -2, 1.9], 30]]);
+        // Pinakabago muna; bawat sagot ay nasa gitna ng bahagi nito sa hati ng 10 s.
+        $this->assertSame([2500, 7500, 15000, 55000], $some);
+        $this->assertCount(30, $many);           // hanggang sa dami ng cell
+        $this->assertSame(125, $many[0]);       // 40 sa unang 10 s: ang una ay 0.125 s
+        $this->assertSame([], $none);
+        $this->assertSame([25000], $odd);        // ang hindi numero at negatibo ay wala; ang 1.9 ay isa
+    }
+
+    public function test_S_205_13_the_rules_no_longer_carry_the_ticker_icon(): void
+    {
+        $rules = file_get_contents(public_path('js/chatbot-live-rules.js'));
+        $this->assertStringNotContainsString('icon', $rules);
+        $this->assertStringNotContainsString('ticker', $rules);
     }
 }

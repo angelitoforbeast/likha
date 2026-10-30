@@ -160,6 +160,8 @@ class LiveFeed
             'unconfirmed' => $pair('unconfirmed'),
             'follow_ups' => $pair('follow_ups'),
             'ai' => $pair('ai'),
+            // Ang sagot ng AI sa huling minuto, kada 10 segundo (pinakabago muna): ang hex ay may ilaw agad pagbukas ng page.
+            'ai_minute' => $live['minute'],
             'orders' => $pair('orders'),
             // Kada bot: ang pumasok ayon sa gateway na naghatid, ang lumabas ayon sa chatbot_replies.via.
             'bots' => ['in' => $day['in'], 'out' => $day['out']],
@@ -416,14 +418,26 @@ class LiveFeed
         // minuto bago nito ginawa). Kada bot: ang bot ng chat na nagpatakbo ng AI (primary key ng botcake_chats; walang chat = unknown).
         $aiLo = $recent < $hi ? min($lo, date('Y-m-d H:i:s', strtotime($recent) - self::WINDOW_SECONDS)) : $lo;
         $cv = self::chatVia('c.');
+        // Ang huling minuto sa anim na hati ng 10 segundo (m0 = pinakabago), sa parehong query: ang hex ng AI ay may ilaw agad
+        // pagbukas ng page (bago pa ang unang event), walang dagdag na query. Nagsisimula LAG_SECONDS bago ngayon: ang mas bago
+        // ay darating bilang event sa unang poll (ang cursor ng AI), kaya hindi dalawang beses umiilaw.
+        $nowTs = strtotime($recent) + self::RECENT_SECONDS - self::LAG_SECONDS;
+        $mSql = $mBind = [];
+        for ($i = 0; $i < 6; $i++) {
+            $mSql[] = "SUM(CASE WHEN a.answered_at >= ? AND a.answered_at < ? THEN 1 ELSE 0 END) AS m{$i}";
+            array_push($mBind, date('Y-m-d H:i:s', $nowTs - 10 * ($i + 1)), date('Y-m-d H:i:s', $nowTs - 10 * $i));
+        }
+        $out['minute'] = array_fill(0, 6, 0);
         foreach (DB::table('chatbot_ai_requests as a')->leftJoin('botcake_chats as c', 'c.id', '=', 'a.chat_id')
             ->where('a.created_at', '>=', $aiLo)->where('a.created_at', '<', $hi)->whereNotNull('a.answered_at')->whereNull('a.error')
             ->where('a.model', '<>', \App\Services\OrderEncode\FlowEncode::MODEL)->when($page !== null, fn ($q) => $q->where('a.page_id', (int) $page))
-            ->selectRaw("{$cv} AS bot, SUM(CASE WHEN a.created_at >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN a.answered_at >= ? THEN 1 ELSE 0 END) AS recent", [$today, $recent])
+            ->selectRaw("{$cv} AS bot, SUM(CASE WHEN a.created_at >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN a.answered_at >= ? THEN 1 ELSE 0 END) AS recent, "
+                . implode(', ', $mSql), [$today, $recent, ...$mBind])
             ->groupByRaw($cv)->get() as $a) {
             $out['today']['ai'] += $int($a->today);
             $out['recent']['ai'] += $int($a->recent);
             $out['today']['ai_bots'][$bot($a->bot)] += $int($a->today);
+            for ($i = 0; $i < 6; $i++) $out['minute'][$i] += $int($a->{'m' . $i});
         }
 
         // Ang order na naitala ng bot ("Counts as an order"), gaya ng Results at Bot Health.

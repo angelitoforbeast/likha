@@ -93,7 +93,6 @@
     <div class="coins" data-live-coins aria-hidden="true"></div>
 </div></div>
 
-    <canvas class="tk" width="1840" height="28" data-live-ticker aria-hidden="true"></canvas>
 
     <header class="hd">
         <svg class="logo" viewBox="0 0 46 36" aria-hidden="true"><path d="M2 4h34M2 16h42M2 28h26"/></svg>
@@ -208,7 +207,6 @@
     .stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden; background: var(--ground); }
     .tv { cursor: none; }
     .bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
-    .tk { position: absolute; left: 40px; top: 1048px; width: 1840px; height: 28px; pointer-events: none; }
     .cam { position: absolute; inset: 0; perspective: 1500px; perspective-origin: 960px 585px; }
     .world { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: 960px 585px; }
     .it { position: absolute; left: 960px; top: 585px; }
@@ -235,6 +233,9 @@
     /* Ang text sa mga panel: ang numero (condensed) at isa o dalawang salitang label. */
     .n { position: absolute; font-family: var(--cond); font-weight: 700; line-height: 1; white-space: nowrap; color: var(--ink); }
     .lb { position: absolute; font: 700 20px/1 var(--semi); letter-spacing: 4px; color: var(--mut); white-space: nowrap; }
+    /* Sa 3D ay lumiliit at tumatagilid ang panel, kaya ang label ay pinapalaki ayon sa K (--lk, mula sa script): bawat label ay
+       hindi bababa sa 18 px sa 1920 × 1080. Lumalaki pataas at pakanan, palayo sa numero sa ilalim nito. */
+    .lb, .nm-core-name { transform-origin: 0 100%; transform: scale(var(--lk, 1)); }
     .bot .nm { font-size: 24px; color: #bfeaff; top: 30px; }
     .bot.big .nm { left: 60px; } .bot.big.mir .nm { left: auto; right: 54px; }
     .bot.big .n { font-size: 62px; left: 342px; } .bot.big.mir .n { left: 38px; }
@@ -306,11 +307,10 @@
         .fp { position: relative; order: -1; right: auto; top: auto; margin: 0 16px 12px; flex-wrap: wrap; }
         .fp .sel { max-width: 100%; }
         .cam { position: relative; perspective: none; }
-        .world { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; transform: none !important; padding: 0 16px; }
+        .world { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; transform: none !important; padding: 0 16px; --lk: 1 !important; }
         .it { position: relative; left: auto; top: auto; margin: 0 !important; transform: none !important; flex: none; }
         .it[data-pn="vault"] { order: 1; } .orb { order: 2; } .it[data-pn="forbeast"] { order: 3; } .it[data-pn="botcake"] { order: 4; } .it[data-pn="incepxionbot"] { order: 5; }
         .it[data-pn="ai"] { order: 6; } .it[data-pn="seq"] { order: 7; } .it[data-pn="replies"] { order: 8; } .it[data-pn="avg"] { order: 9; } .it[data-pn="chats"] { order: 10; }
-        .tk { position: relative; order: 1; left: auto; top: auto; display: block; width: calc(100% - 32px); margin: 12px 16px 0; }
         .card { max-width: calc(100vw - 32px); min-width: 0; }
         body { overflow-x: hidden; }
     }
@@ -328,7 +328,7 @@
 // text sa bawat panel (umaakyat, hindi bumababa sa loob ng isang minuto: LiveRules.settle / land). Ang radar ng bawat bot ay ang
 // mga customer ng huling 5 minuto (LiveRules.track / dotPos); ang order ay mga barya mula sa tuldok ng customer, dumadaan sa globo,
 // papunta sa vault (LiveRules.schedule / loot / landings). Buong araw ito sa TV: walang lumalaking DOM (12 barya at 2 packet kada
-// spoke na ginagamit muli, hanggang 90 icon sa ticker). Ang text mula sa server (pangalan ng page o customer) ay textContent o
+// spoke na ginagamit muli). Ang text mula sa server (pangalan ng page o customer) ay textContent o
 // fillText lang, hindi kailanman HTML.
 (() => {
     const R = window.LiveRules;
@@ -363,8 +363,10 @@
     // ── ang mga panel: ang hugis ay mula sa server (data-geo), ang dulo ng spoke ay ang gilid na nakaharap sa globo ──
     const O = {x: 960, y: 585}, CR = 795, TH = 548;
     // Sa 3D: ang taas at laki ng panel sa cylinder, ang layo ng camera at ang angat ng mundo. Sinukat sa dulo ng ugoy (±7°): ang
-    // bawat panel ay buo sa pagitan ng header at ng ticker, at walang panel na tumatakip sa iba.
+    // bawat panel ay buo sa pagitan ng header at ng ibaba ng screen, at walang panel na tumatakip sa iba.
     const YS = 1.3, PS = 1.3, BACK = -290, LIFT = -8;
+    // Ang dagdag na laki ng label sa buong 3D (sinukat: ang pinakamaliit, ORDERS ng vault, ay 15 px kung wala nito at 18.8 px dito).
+    const LK = .3;
     const PN = [...all('[data-pn]')].map(el => {
         const [cx, cy, w, h, ins] = el.dataset.geo.split(',').map(Number);
         return {id: el.dataset.pn, el, cx, cy, w, h, ins, or: el.dataset.or, cv: el.querySelector('canvas'), c: null, M: {X: 0, Y: 0, Z: 0, rot: 0, sc: 1}};
@@ -379,7 +381,7 @@
         else if (p.or === 'T') { p.ay = hh - 3; p.ax = cl(ux * hh / Math.abs(uy), -(hw - p.ins - 8), hw - p.ins - 8); }
         else { p.ay = -hh + 3; p.ax = cl(ux * hh / Math.abs(uy), -(hw - p.ins - 8), hw - p.ins - 8); }
     }
-    const orb = root.querySelector('[data-live-core]'), orbCv = orb.querySelector('canvas'), bgCv = root.querySelector('[data-live-bg]'), tkCv = root.querySelector('[data-live-ticker]');
+    const orb = root.querySelector('[data-live-core]'), orbCv = orb.querySelector('canvas'), bgCv = root.querySelector('[data-live-bg]');
     // Ang radar sa loob ng panel ng bot: gitna at radius.
     const geo = p => p.w > 400 ? {cx: p.or === 'R' ? p.w - 176 : 176, cy: 222, R: 142} : {cx: 130, cy: 132, R: 88};
     const isOn = b => !!PM[b] && PM[b].el.dataset.linked === '1';
@@ -397,11 +399,15 @@
     // ── 2D ↔ 3D: ang mga panel ay nakalatag sa isang cylinder sa paligid ng globo; isang factor K (0 hanggang 1) ang paghalo ──
     let store = null;
     try { store = window.localStorage; } catch (e) { store = null; }
-    let want = R.readView(store) === '3d' ? 1 : 0, K = want, dirty = true;
+    // want = ang napili sa browser na ito; sa TV mode ay 2D pa rin ang ipinapakita (LiveRules.viewFor), hindi binabago ang napili.
+    let want = R.readView(store) === '3d' ? 1 : 0, tvOn = false, dirty = true;
+    const goal = () => R.viewFor(want ? '3d' : '2d', tvOn) === '3d' ? 1 : 0;
+    let K = goal();
     function toWorld(p, lx, ly) { const M = p.M, c = Math.cos(M.rot), s = Math.sin(M.rot); return [M.X + M.sc * lx * c, M.Y + M.sc * ly, M.Z - M.sc * lx * s]; }
     function layout(t) {
         const sway = live.reduced ? 0 : 1, orbit = 7 * sway * Math.sin(t / 9500 + 4), tilt = 4 + 2 * sway * Math.sin(t / 7000);
-        world.style.transform = K > .001 ? 'translateY(' + (LIFT * K).toFixed(1) + 'px) translateZ(' + (BACK * K).toFixed(1) + 'px) rotateX(' + (tilt * K).toFixed(2) + 'deg) rotateY(' + (orbit * K * K * K).toFixed(2) + 'deg)' : '';
+        world.style.setProperty('--lk', (1 + LK * K).toFixed(3));
+        world.style.transform = K > .001 ?'translateY(' + (LIFT * K).toFixed(1) + 'px) translateZ(' + (BACK * K).toFixed(1) + 'px) rotateX(' + (tilt * K).toFixed(2) + 'deg) rotateY(' + (orbit * K * K * K).toFixed(2) + 'deg)' : '';
         // Ang ugoy ay lumalaki lang sa dulo ng pagtiklop (K³): sa gitna ng paglipat ay walang panel na dumadaan sa kapitbahay.
         live.orbit = orbit * K * K * K;
         for (const p of PN) {
@@ -553,7 +559,7 @@
         setRadar(c, nowText);
     }
 
-    // ── ang mga packet sa spoke (isa kada event, mula sa pool) at ang ticker ng icon ──
+    // ── ang mga packet sa spoke (isa kada event, mula sa pool) ──
     function fire(id, dir, col) {
         const s = SP[id];
         if (!s || !s.pk.length || calm()) return;
@@ -571,9 +577,14 @@
             k.el.style.transform = 'translateX(' + ((k.dir > 0 ? p : 1 - p) * SP[id].L).toFixed(1) + 'px)';
         }
     }
-    const ticker = [], hexLit = new Array(30).fill(-1e9);
+    // Ang hex ng AI: isang cell kada sagot, kumukupas sa isang minuto. Pagbukas ng page ay may ilaw na agad mula sa sagot ng huling
+    // minuto (counts.ai_minute, kasama sa unang laman ng page), kaya hindi madilim ang panel pagka-reload.
+    const hexLit = new Array(30).fill(-1e9);
     let hexN = 0;
-    function tick(kind) { if (!kind) return; ticker.push({kind, t: now()}); if (ticker.length > 90) ticker.shift(); }
+    function lightFrom(c, nowText) {
+        const a = hms(c.as_of), b = hms(nowText), lag = a === null || b === null ? 0 : cl(((b - a) + 86400) % 86400, 0, 60);
+        for (const age of R.aiCells(c.ai_minute, 30).reverse()) hexLit[(hexN++ * 11) % 30] = now() - age - lag * 1000;
+    }
 
     // ── ang loot: mga barya mula sa tuldok ng customer (o sa gitna ng radar), dumadaan sa globo, papunta sa vault ──
     const GAP = 150, POP = 300, FLY = 1100;
@@ -657,7 +668,6 @@
 
     function hit(name) { const p = PM[name]; if (p) p.hitAt = now(); }
     function act(a) {
-        tick(R.icon(a.event));
         if (a.type === 'order') { cash(a); return; }
         const bot = a.bot && PM[a.bot] ? a.bot : null;
         if (a.type === 'message') { if (bot) fire(bot, -1, '#e9fbff'); fire('chats', -1, '#5dff9c'); }
@@ -935,33 +945,15 @@
         c.setLineDash([2, 9]); for (const R0 of [330, 470, 650, 860]) { c.strokeStyle = 'rgba(111,216,255,.1)'; c.beginPath(); c.arc(960, 585, R0, 0, TAU); c.stroke(); } c.setLineDash([]);
         c.fillStyle = 'rgba(111,216,255,.06)'; for (let i = 0; i < 60; i++) { c.beginPath(); c.arc(H(i, 91) * 1920, H(i, 92) * 1080, 1.5, 0, TAU); c.fill(); }
     }
-    // Ang ticker: isang hanay ng icon (pababang arrow = pumasok, pataas = sagot, hexagon = AI, arko = follow-up, barya = order), 26 px/s pakaliwa.
-    function dTk(t) {
-        const c = tkCv.getContext('2d'), W = tkW, v = .026;
-        c.clearRect(0, 0, W, 28);
-        c.lineWidth = 2.2; c.lineCap = 'round'; c.lineJoin = 'round';
-        while (ticker.length && W - 10 - (t - ticker[0].t) * v < 10) ticker.shift();
-        for (const e of ticker) {
-            const x = W - 10 - (t - e.t) * v, k = e.kind;
-            c.globalAlpha = cl(Math.min(x / 160, (W - x) / 40)) * (k === 'order' ? 1 : .8);
-            c.strokeStyle = '#6fd8ff';
-            if (k === 'in') { c.beginPath(); c.moveTo(x, 6); c.lineTo(x, 20); c.moveTo(x - 6, 14); c.lineTo(x, 21); c.lineTo(x + 6, 14); c.stroke(); }
-            else if (k === 'sent') { c.strokeStyle = '#35c8ff'; c.beginPath(); c.moveTo(x, 22); c.lineTo(x, 8); c.moveTo(x - 6, 14); c.lineTo(x, 7); c.lineTo(x + 6, 14); c.stroke(); }
-            else if (k === 'ai') { hex(c, x, 14, 9); c.stroke(); }
-            else if (k === 'seq') { c.beginPath(); c.arc(x, 14, 8, -Math.PI * .8, Math.PI * .3); c.stroke(); }
-            else { c.fillStyle = '#ffc247'; c.strokeStyle = '#ffe08f'; c.beginPath(); c.arc(x, 14, 11, 0, TAU); c.fill(); c.stroke(); c.fillStyle = '#6e4200'; c.beginPath(); c.arc(x, 14, 3.2, 0, TAU); c.fill(); }
-        }
-        c.globalAlpha = 1;
-    }
     const DRAW = {forbeast: dBot, botcake: dBot, incepxionbot: dBot, ai: dAI, seq: dFU, replies: dRep, avg: dAvg, chats: dAct, vault: dVault};
     function draw(t) {
         for (const p of PN) if (p.c) DRAW[p.id](p, t);
-        dOrb(orbCv.c, t); dTk(now());
+        dOrb(orbCv.c, t);
     }
 
     // ── ang stage: 1920 × 1080 na pinalaki sa screen, at ang mabagal na paglipat laban sa burn-in (hanggang 3 px, isang hakbang kada minuto) ──
     const DRIFT = [[0, 0], [2, 1], [3, -2], [1, 3], [-1, 2], [-3, 3], [-2, -1], [2, 2], [-1, -3], [0, 1]];
-    let drift = 0, SC = 1, RS = 1, tkW = 1840;
+    let drift = 0, SC = 1, RS = 1;
     function alloc() {
         const z = el => phone() ? Math.min(1, (innerWidth - 32) / el) : 1;
         for (const p of PN) {
@@ -972,8 +964,6 @@
         orb.style.zoom = phone() ? z(700) : '';
         const ors = phone() ? Math.max(1, (devicePixelRatio || 1) * z(700)) : RS;
         orbCv.width = orbCv.height = Math.round(700 * ors); orbCv.c = orbCv.getContext('2d'); orbCv.c.setTransform(ors, 0, 0, ors, 0, 0);
-        tkW = phone() ? Math.max(100, innerWidth - 32) : 1840;
-        tkCv.width = Math.round(tkW * RS); tkCv.height = Math.round(28 * RS); tkCv.getContext('2d').setTransform(RS, 0, 0, RS, 0, 0);
     }
     function fit() {
         if (phone()) { stage.style.transform = ''; RS = 1; SC = 1; alloc(); dirty = true; draw(0); return; }
@@ -995,8 +985,9 @@
         rollTick(now());
         if (!phone()) {
             const k0 = K;
-            K = live.reduced ? want : K + (want - K) * .06;
-            if (Math.abs(want - K) < .002) K = want;
+            const G = goal();
+            K = live.reduced ? G : K + (G - K) * .06;
+            if (Math.abs(G - K) < .002) K = G;
             if (dirty || K !== k0 || (K > 0 && !live.reduced)) { layout(t); dirty = false; }
             packets(t);
         }
@@ -1087,12 +1078,20 @@
     }
     b3.addEventListener('click', () => view(want ? '2d' : '3d', true));
     const tv = root.querySelector('[data-live-fullscreen]');
+    // TV mode: laging 2D agad (walang tiklop), dahil sa 3D ay lumiliit at tumatagilid ang maliliit na label; paglabas ay bumabalik
+    // ang napili ng browser.
+    function setTv(on) {
+        if (tvOn === on) return;
+        tvOn = on; root.classList.toggle('tv', on);
+        if (on) K = 0;
+        dirty = true; kick();
+    }
     tv.addEventListener('click', () => {
-        root.classList.add('tv'); hideCard();
+        setTv(true); hideCard();
         if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
     });
-    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) root.classList.remove('tv'); });
-    addEventListener('keydown', e => { if (e.key === 'Escape') { root.classList.remove('tv'); hideCard(); if (fp.classList.contains('on')) fb.click(); } });
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) setTv(false); });
+    addEventListener('keydown', e => { if (e.key === 'Escape') { setTv(false); hideCard(); if (fp.classList.contains('on')) fb.click(); } });
     function motion(reduced) { live.reduced = reduced; dirty = true; kick(); }
     if (mq && mq.addEventListener) mq.addEventListener('change', e => motion(e.matches));
 
@@ -1104,11 +1103,13 @@
         if (['orders', 'peso'].some(k => live.st[k] && live.st[k].heldSince !== null)) settleAll();
         if (live.reduced || phone()) kick();
     }
-    live.play = events => play(schedule(events)); live.setCounts = setCounts; live.view = view; live.panels = PN;
+    live.play = events => play(schedule(events)); live.setCounts = setCounts; live.view = view; live.tv = setTv; live.panels = PN;
+    live.shown = () => K;
 
     fit();
     view(want ? '3d' : '2d', false);
     setCounts(boot.counts, boot.now);
+    lightFrom(boot.counts, boot.now);
     second();
     setInterval(second, 1000);
     kick();

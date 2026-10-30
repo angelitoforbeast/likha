@@ -164,9 +164,19 @@
     return best ? best.k : null;
   }
 
-  // Ang icon ng event sa ticker (isang hanay ng icon, walang text).
-  var ICONS = {message: 'in', confirmed: 'sent', ai: 'ai', follow_up: 'seq', order: 'order'};
-  function icon(e) { return e && ICONS.hasOwnProperty(e.type) ? ICONS[e.type] : null; }
+  // Ang mga cell ng hex ng AI pagbukas ng page: ang sagot ng AI sa huling minuto ay anim na hati ng 10 s (m[0] = pinakabago).
+  // Bawat sagot ay isang tanda (ms) na nakakalat sa loob ng hati nito, pinakabago muna, hanggang max (ang dami ng cell).
+  function aiCells(minute, max) {
+    var out = [], cap = max || 30;
+    (Array.isArray(minute) ? minute : []).slice(0, 6).forEach(function (n, i) {
+      var k = Math.max(0, Math.floor(Number(n) || 0));
+      for (var j = 0; j < k; j++) out.push(Math.round((i + (j + 0.5) / k) * 10000));
+    });
+    return out.slice(0, cap);
+  }
+
+  // Ang 2D/3D na ipinapakita: sa TV mode ay laging 2D (ang maliliit na label ay nababasa mula sa malayo), anuman ang napili.
+  function viewFor(saved, tv) { return tv ? '2d' : (saved === '3d' ? '3d' : '2d'); }
 
   // Ang 2D/3D na napili sa browser na ito (localStorage, o anumang key/value na object). Walang storage, sira o ibang value = 2D.
   var VIEW_KEY = 'likha-live-view';
@@ -185,5 +195,5 @@
   }
 
   root.LiveRules = {num: num, peso: peso, route: route, label: label, schedule: schedule, settle: settle, land: land, roll: roll, signals: signals,
-    loot: loot, landings: landings, readView: readView, saveView: saveView, discs: discs, dotPos: dotPos, track: track, goldDot: goldDot, icon: icon};
+    loot: loot, landings: landings, readView: readView, saveView: saveView, discs: discs, dotPos: dotPos, track: track, goldDot: goldDot, aiCells: aiCells, viewFor: viewFor};
 })(typeof self !== 'undefined' ? self : this);
