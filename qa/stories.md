@@ -3338,3 +3338,24 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatb
 | S-200.6 (P1) | The page renders every section of the HUD with its data hooks, and every number spec 199 shows is still there | `test_S_200_6_…` | passed |
 | S-200.7 (P1) | The existing spec-199/196 Live tests pass (changed assertions listed) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest`, `ChatbotLiveNetworkTest`, `ChatbotLiveRulesTest` | passed |
 | S-200.8 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` | see result |
+
+## S-204 The Main Flow starts on the customer's first message, not on the ad click
+
+As the owner, I want the bot to answer only once the customer has chatted, so the opening (image and greeting) is the first thing a customer who came from an ad receives, with the reply of that ad on Ad-based pages.
+
+Slice 204 (with amendments 204-1, 204-2 and 204-3; 204-3 replaced 204-2's 2 s hold). Threat model: trusted = signed Forbeast gateway events; the event fields stay customer data. No new route. Risk tier: medium-high.
+Tests: `tests/Feature/Chatblast/AdOpenWaitTest.php`, `tests/Feature/Chatblast/AdOpenReadersTest.php`, changed or extended `ChatbotProviderTest`, `GatewayPerPageTest`, `ProblemsPanelTest`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-204.1 (P1) | Given a gateway page, When a referral (ad open) arrives alone, Then the chat row is stored as today with its ad_id and the ad-open mark, it is counted, no run starts, nothing is sent, and it is not a reply (no sequence exit, no Results reply) | `test_S_204_1…` | passed |
+| S-204.2 (P1) | Given an ad open, When the customer's first message arrives, Then the Main Flow starts from its first step on that message (the opening is the first send) and the send carries the referral's ad_id | `test_S_204_2…` | passed |
+| S-204.3 (P1) | Given a message that started the flow, When the referral arrives after it (or a repeated referral arrives), Then no second start; a later message runs once and the ad open is passed over | `test_S_204_3…` | passed |
+| S-204.4 (P1) | Given a customer inside a running flow (a wait step pending), When a referral arrives, Then the run is unchanged and the wait timeout still fires as "no reply"; its 24-hour window is measured from the last message, not the ad open | `test_S_204_4…` (2 tests) | passed |
+| S-204.5 (P1) | A postback starts the flow as today; the Botcake webhook path is unchanged | `test_S_204_5…` | passed |
+| S-204.6 (P1) | Given ad opens, Then Health inbound and its slowest list, Speed, "not answered" (echoes), Live inquiries and active chats, the problems panel's "no chats" check, the Results backfill and the failed-reply re-run do not take an ad open for a customer message | `test_S_204_6…` (2 tests), `test_S_184_5…`, `test_S_194_4d…` | passed |
+| S-204.7 (P2) | Given ad opens on a day, Then Health shows per day the customers who opened an ad and never wrote ("Ad opens without a message"); a message up to 60 s before the ad open counts as writing | `test_S_204_7…` | passed |
+| S-204.8 (P1) | Given an Ad-based page: referral for ad X then message → the reply of ad X's group; X then Y then message → Y; a message that carries its own referral → that ad; no referral → today's fallback; a Page-based page → page values | `test_S_204_8…` (6 rows) | passed |
+| S-204.9 (P1) | Given a referral POST, Then its row is stored before the 200 (the gateway posts the next event only after it), so the queued first message finds the ad; event jobs handled in either order give the ad's reply once; a referral that fails to store answers 500 and the gateway's retry is stored once | `test_S_204_9…` (4 tests) | passed |
+| S-204.10 (P1) | The full `tests/Feature` run adds no new failures vs 8506b25c | `tests/Feature` | see result |
+| S-204.11 (P1) | Given a question step waiting for a reply, When its send comes back failed (or partial with nothing sent), Then the next message asks it again once and the message after is the answer; a partial with something sent, a sent status, a failure after the customer moved on, or a failed manual reply mark nothing; a failure written during a run does not outlive the wait | `test_S_204_11…` (6 tests) | passed |

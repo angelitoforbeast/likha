@@ -158,8 +158,9 @@ class ResponseSpeed
         foreach (self::windows($start, $end) as [$a, $b]) foreach (DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)
             ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor() as $c) {
             $payload = json_decode((string) $c->payload, true) ?: [];
-            // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast.
-            if (!empty($payload['_ignored']) || !empty($payload['_standby'])) continue;
+            // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast; ang
+            // pagbukas ng ad ay hindi mensahe (ang mensahe kasunod nito ang sinasagot).
+            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !empty($payload[ChatbotInbound::AD_OPEN])) continue;
             $keys[] = $c->page_id . ':' . $c->psid;
             $ats[] = strtotime($c->received_at);
             $hrs[] = (int) substr($c->received_at, 11, 2);
@@ -303,7 +304,7 @@ class ResponseSpeed
         $chats = DB::table('botcake_chats')->where('received_at', '>=', $from)->where('received_at', '<', $to)->select(['page_id', 'psid', 'received_at', 'payload'])->cursor();
         foreach ($chats as $c) {
             $payload = json_decode((string) $c->payload, true) ?: [];
-            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !self::hadFlow($spans, (string) $c->page_id, $c->received_at)) continue;
+            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !empty($payload[ChatbotInbound::AD_OPEN]) || !self::hadFlow($spans, (string) $c->page_id, $c->received_at)) continue;
             $keys[] = [(string) $c->page_id, $c->page_id . ':' . $c->psid];
             $ats[] = strtotime($c->received_at);
         }

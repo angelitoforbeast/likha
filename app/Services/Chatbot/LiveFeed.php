@@ -353,9 +353,9 @@ class LiveFeed
         $marks = fn (string $col) => [sprintf('SUM(CASE WHEN %s >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN %1$s >= ? THEN 1 ELSE 0 END) AS recent', $col), [$today, $recent]];
         $bot = fn ($v) => in_array($v, self::BOTS, true) ? $v : 'unknown';
 
-        // Ang pumasok: hindi ang standby na kopya; ang bot ay ang marka ng gateway na naghatid (chatVia).
+        // Ang pumasok: hindi ang standby na kopya at hindi ang pagbukas ng ad (hindi mensahe); ang bot ay ang marka ng gateway na naghatid (chatVia).
         [$sql, $bind] = $marks('received_at');
-        foreach (DB::table('botcake_chats')->where('received_at', '>=', $lo)->where('received_at', '<', $hi)->whereNull('payload->_standby')
+        foreach (DB::table('botcake_chats')->where('received_at', '>=', $lo)->where('received_at', '<', $hi)->whereNull('payload->_standby')->whereNull('payload->' . ChatbotInbound::AD_OPEN)
             ->when($page !== null, fn ($q) => $q->where('page_id', $page))
             ->selectRaw(self::chatVia() . ' AS bot, ' . $sql, $bind)->groupByRaw(self::chatVia())->get() as $r) {
             $out['today']['in'][$bot($r->bot)] += $int($r->today);
@@ -440,8 +440,9 @@ class LiveFeed
     }
 
     /**
-     * Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto, at kada bot (ang customer na dumaan sa
-     * dalawang bot ay nasa dalawa, pero isa lang sa kabuuan). Isang basa: ang mga customer ng huling 5 minuto kada bot.
+     * Ang aktibong chat: ilang customer (page + PSID) ang nag-message sa huling 5 minuto (hindi ang pagbukas ng ad lang), at
+     * kada bot (ang customer na dumaan sa dalawang bot ay nasa dalawa, pero isa lang sa kabuuan). Isang basa: ang mga customer
+     * ng huling 5 minuto kada bot.
      * @return array{0: int, 1: array<string, int>}
      */
     private function active(?string $page, string $recent, string $end): array
@@ -449,7 +450,7 @@ class LiveFeed
         $via = self::chatVia();
         $all = [];
         $bots = [];
-        foreach (DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')
+        foreach (DB::table('botcake_chats')->where('received_at', '>=', $recent)->where('received_at', '<', $end)->whereNull('payload->_standby')->whereNull('payload->' . ChatbotInbound::AD_OPEN)
             ->when($page !== null, fn ($q) => $q->where('page_id', $page))
             ->selectRaw($via . ' AS bot, page_id, psid')->groupByRaw($via . ', page_id, psid')->get() as $r) {
             $all[$r->page_id . '|' . $r->psid] = true;
@@ -590,7 +591,7 @@ class LiveFeed
         $delivered = SendStatus::DELIVERED;
 
         return [
-            'chat' => ['message', $pid(DB::table('botcake_chats')->where('received_at', '>=', $since)->whereNull('payload->_standby')), 'received_at', self::chatVia()],
+            'chat' => ['message', $pid(DB::table('botcake_chats')->where('received_at', '>=', $since)->whereNull('payload->_standby')->whereNull('payload->' . ChatbotInbound::AD_OPEN)), 'received_at', self::chatVia()],
             'seq' => ['follow_up', $pid(DB::table('chatbot_replies')->where('sent_at', '>=', $since)->where('kind', 'send')->whereNotNull('sequence_id')->whereIn('status', $delivered)), 'sent_at', 'via'],
             'order' => ['order', $pid(DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $since)), 'created_at',
                 DB::connection()->getQueryGrammar()->wrap('detail->via')],

@@ -48,6 +48,7 @@
         ['Comments replied', 'comments_replied', '', null],
         ['Comments failed', 'comments_failed', '', null],
         ['Attachments ignored', 'ignored', '', null],
+        ['Ad opens without a message', 'ad_opens', '', null],
     ];
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot'], 'from' => $f['from'], 'to' => $f['to']], fn ($v) => $v !== null);
