@@ -334,6 +334,9 @@ class GatewayPerPageTest extends ChatblastTestCase
             $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => 'Hi', 'message_id' => 'm_' . $psid,
                 'payload' => ['source' => 'gateway'], 'received_at' => now()]);
             app(\App\Services\Chatbot\ChatbotRunner::class)->handle($chat->id);
+            // S-204.6: ang pagbukas ng ad pagkatapos ng pumalyang sagot ay hindi mas bagong chat (sinasagot pa rin ang customer).
+            if ($psid === $psids[0]) BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => null, 'message_id' => 'gw-event-204',
+                'payload' => ['source' => 'gateway', 'ad_id' => '6045246247433', \App\Services\Chatbot\ChatbotInbound::AD_OPEN => true], 'received_at' => now()]);
         }
         $this->assertSame('incepxionbot', Gateways::active('Page Uno'));
         // Ang padalang nagpalipat ay naitala pagkatapos ng lipat: sa susunod na minuto ito sinasagot.

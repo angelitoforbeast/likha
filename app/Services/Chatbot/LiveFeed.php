@@ -177,9 +177,9 @@ class LiveFeed
         $marks = fn (string $col) => [sprintf('SUM(CASE WHEN %s >= ? THEN 1 ELSE 0 END) AS today, SUM(CASE WHEN %1$s >= ? THEN 1 ELSE 0 END) AS recent', $col), [$today, $recent]];
         $bot = fn ($v) => in_array($v, self::BOTS, true) ? $v : 'unknown';
 
-        // Ang pumasok: hindi ang standby na kopya; ang bot ay ang marka ng gateway na naghatid (chatVia).
+        // Ang pumasok: hindi ang standby na kopya at hindi ang pagbukas ng ad (hindi mensahe); ang bot ay ang marka ng gateway na naghatid (chatVia).
         [$sql, $bind] = $marks('received_at');
-        foreach (DB::table('botcake_chats')->where('received_at', '>=', $lo)->where('received_at', '<', $hi)->whereNull('payload->_standby')
+        foreach (DB::table('botcake_chats')->where('received_at', '>=', $lo)->where('received_at', '<', $hi)->whereNull('payload->_standby')->whereNull('payload->' . ChatbotInbound::AD_OPEN)
             ->when($page !== null, fn ($q) => $q->where('page_id', $page))
             ->selectRaw(self::chatVia() . ' AS bot, ' . $sql, $bind)->groupByRaw(self::chatVia())->get() as $r) {
             $out['today']['in'][$bot($r->bot)] += $int($r->today);
@@ -395,7 +395,7 @@ class LiveFeed
         $delivered = SendStatus::DELIVERED;
 
         return [
-            'chat' => ['message', $pid(DB::table('botcake_chats')->where('received_at', '>=', $since)->whereNull('payload->_standby')), 'received_at', self::chatVia()],
+            'chat' => ['message', $pid(DB::table('botcake_chats')->where('received_at', '>=', $since)->whereNull('payload->_standby')->whereNull('payload->' . ChatbotInbound::AD_OPEN)), 'received_at', self::chatVia()],
             'seq' => ['follow_up', $pid(DB::table('chatbot_replies')->where('sent_at', '>=', $since)->where('kind', 'send')->whereNotNull('sequence_id')->whereIn('status', $delivered)), 'sent_at', 'via'],
             'order' => ['order', $pid(DB::table('chatbot_events')->where('type', 'order')->where('created_at', '>=', $since)), 'created_at',
                 DB::connection()->getQueryGrammar()->wrap('detail->via')],

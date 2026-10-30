@@ -23,6 +23,8 @@ class BotHealth
     public const MAX_DAYS = 31;
     public const LIST_LIMIT = 20;
     public const BURST_SECONDS = 10;
+    /** Ang mensaheng nauna sa referral nang hanggang ganito ay sagot pa rin sa pagbukas ng ad (magkasabay na dating). */
+    public const AD_OPEN_LEAD_SECONDS = 60;
 
     /** Ang mga dahilan ng pumalyang padala, sa pagkakasunod na sinusuri (ang una na tumama ang panalo). */
     public const REASONS = [
@@ -449,16 +451,54 @@ class BotHealth
         $ignored = DB::table('chatbot_events')->where('type', 'ignored')->where('created_at', '>=', $startAt)->where('created_at', '<', $endAt)
             ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
             ->selectRaw('DATE(created_at) as d, COUNT(*) as n')->groupBy('d')->pluck('n', 'd')->map(fn ($n) => (int) $n)->all();
+        $adOpens = $this->adOpensWithoutMessage($startAt, $endAt, $pages);
 
         $metrics = [];
         for ($d = CarbonImmutable::parse($start); $d->toDateString() <= $end; $d = $d->addDay()) {
             $k = $d->toDateString();
             $metrics[$k] = $this->dayMetrics($inbound['days'][$k] ?? [], $replies[$k] ?? [], $ai[$k] ?? [], $orders[$k] ?? 0)
                 + ['comments_in' => $comments[$k]['in'] ?? 0, 'comments_replied' => $comments[$k]['sent'] ?? 0, 'comments_failed' => $comments[$k]['failed'] ?? 0,
-                    'ignored' => $ignored[$k] ?? 0];
+                    'ignored' => $ignored[$k] ?? 0, 'ad_opens' => $adOpens[$k] ?? 0];
         }
 
         return [$metrics, $inbound];
+    }
+
+    /**
+     * Kada araw: ang mga customer (page + PSID) na nagbukas ng ad (ChatbotInbound::AD_OPEN) at hindi sumulat, kaya walang
+     * sagot ang bot. "Sumulat" = may chat siya sa page mula AD_OPEN_LEAD_SECONDS bago ang unang pagbukas niya sa araw na
+     * iyon hanggang ngayon (minsan nauuna ang mensahe sa referral).
+     * @return array<string, int>
+     */
+    private function adOpensWithoutMessage(string $startAt, string $endAt, ?array $pages): array
+    {
+        $opens = [];
+        foreach (DB::table('botcake_chats')->whereNotNull('payload->' . ChatbotInbound::AD_OPEN)->where('received_at', '>=', $startAt)->where('received_at', '<', $endAt)
+            ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+            ->selectRaw('page_id, psid, DATE(received_at) as d, MIN(received_at) as first_at')->groupBy('page_id', 'psid', 'd')->get() as $r) {
+            $opens[$r->page_id . '|' . $r->psid][] = [(string) $r->d, strtotime((string) $r->first_at)];
+        }
+        if (!$opens) return [];
+
+        $since = date('Y-m-d H:i:s', strtotime($startAt) - self::AD_OPEN_LEAD_SECONDS);
+        $wrote = [];
+        $psids = array_values(array_unique(array_map(fn ($k) => explode('|', $k, 2)[1], array_keys($opens))));
+        foreach (array_chunk($psids, 1000) as $chunk) {
+            foreach (DB::table('botcake_chats')->whereIn('psid', $chunk)->where('received_at', '>=', $since)
+                ->whereNull('payload->' . ChatbotInbound::AD_OPEN)->whereNull('payload->_standby')
+                ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
+                ->selectRaw('page_id, psid, MAX(received_at) as last_at')->groupBy('page_id', 'psid')->get() as $r) {
+                $wrote[$r->page_id . '|' . $r->psid] = strtotime((string) $r->last_at);
+            }
+        }
+        $out = [];
+        foreach ($opens as $key => $days) {
+            foreach ($days as [$day, $at]) {
+                if (($wrote[$key] ?? 0) < $at - self::AD_OPEN_LEAD_SECONDS) $out[$day] = ($out[$day] ?? 0) + 1;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -538,6 +578,7 @@ class BotHealth
                 ->when($real, fn ($j) => $j->whereIn('r.status', SendStatus::DELIVERED), fn ($j) => $j->where('r.status', 'sent')))
             ->whereIn('c.page_id', $answered)->where('c.received_at', '>=', $startAt)->where('c.received_at', '<', $endAt)
             ->whereNull('c.payload->_ignored') // ang attachment lang ay sadyang hindi sinasagot: hindi "not answered"
+            ->whereNull('c.payload->' . ChatbotInbound::AD_OPEN) // ang pagbukas ng ad ay hindi mensahe: walang sagot na hinihintay
             ->groupBy('c.id', 'c.page_id', 'c.received_at')->selectRaw('c.id, c.page_id, c.received_at, MIN(r.sent_at) as first_at'
                 . ($real ? ", MIN(CASE WHEN r.confirmed_status IN ('" . implode("', '", SendStatus::DELIVERED) . "') THEN r.confirmed_at WHEN r.via IN ('" . implode("', '", Gateways::ALL) . "') THEN NULL ELSE r.sent_at END) as real_at" : ''))->get();
         foreach ($rows as $r) {

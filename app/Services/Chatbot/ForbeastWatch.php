@@ -504,7 +504,8 @@ class ForbeastWatch
             $c = $list->last();
             try {
                 $fields = new CustomerFields((int) $pageId, (int) $psid);
-                $skip = BotcakeChat::where('page_id', $pageId)->where('psid', (string) $psid)->where('id', '>', $c->id)->exists() ? 'newer_chat'
+                // Ang mas bagong pagbukas ng ad ay hindi mas bagong chat: hindi ito sinasagot.
+                $skip = BotcakeChat::where('page_id', $pageId)->where('psid', (string) $psid)->where('id', '>', $c->id)->whereNull('payload->' . ChatbotInbound::AD_OPEN)->exists() ? 'newer_chat'
                     : (ChatbotReply::where('page_id', (int) $pageId)->where('psid', (int) $psid)->where('kind', 'send')->where('status', 'sent')
                         ->where('sent_at', '>=', ($c->received_at ?? now())->copy()->subSeconds(self::REPLIED_GRACE))->exists() ? 'already_answered'
                     : ((int) $fields->get(CustomerFields::LAST_CHAT) !== $c->id || ChatbotAiQueue::pending($fields) ? 'pending' : null));

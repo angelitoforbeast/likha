@@ -169,7 +169,8 @@ class ChatEchoes
             ->orderBy('received_at')->get(['id', 'page_id', 'psid', 'message', 'payload', 'received_at']);
         $missed = $firstAt = [];
         foreach ($chats as $c) {
-            if (is_string($c->payload['_ignored'] ?? null) || ($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null)) continue;
+            // Ang pagbukas ng ad ay hindi mensahe: walang sagot na hinihintay.
+            if (!empty($c->payload[ChatbotInbound::AD_OPEN]) || is_string($c->payload['_ignored'] ?? null) || ($ignoring && ChatAttachments::type($c->message, (array) $c->payload) !== null)) continue;
             $at = $c->received_at->getTimestamp();
             $answered = ($echoes[$c->page_id . '|' . $c->psid] ?? collect())->contains(fn ($x) => $x['at'] >= $at - self::EARLY_SECONDS && $x['at'] <= $at + $wait);
             if ($answered) continue;
