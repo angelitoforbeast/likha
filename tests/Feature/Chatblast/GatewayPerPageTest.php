@@ -228,7 +228,8 @@ class GatewayPerPageTest extends ChatblastTestCase
         $this->assertCount(2, $chats);
         $this->assertSame(['m_AbC1', 'incepxionbot'], [$chats[0]->message_id, $chats[0]->payload['gateway'] ?? null]);
         $this->assertSame(['gw-event-500', null], [$chats[1]->message_id, $chats[1]->payload['gateway'] ?? null]);
-        Queue::assertPushed(RunChatbotFlow::class, 2);
+        // Ang mensahe lang ang tumatakbo; ang pagbukas ng ad ay itinatala lang.
+        Queue::assertPushed(RunChatbotFlow::class, 1);
     }
 
     public function test_S_194_4_a_stalled_gateway_moves_the_page_to_the_other_one_and_back_after_30_healthy_minutes(): void
@@ -333,6 +334,9 @@ class GatewayPerPageTest extends ChatblastTestCase
             $chat = BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => 'Hi', 'message_id' => 'm_' . $psid,
                 'payload' => ['source' => 'gateway'], 'received_at' => now()]);
             app(\App\Services\Chatbot\ChatbotRunner::class)->handle($chat->id);
+            // S-204.6: ang pagbukas ng ad pagkatapos ng pumalyang sagot ay hindi mas bagong chat (sinasagot pa rin ang customer).
+            if ($psid === $psids[0]) BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => $psid, 'message' => null, 'message_id' => 'gw-event-204',
+                'payload' => ['source' => 'gateway', 'ad_id' => '6045246247433', \App\Services\Chatbot\ChatbotInbound::AD_OPEN => true], 'received_at' => now()]);
         }
         $this->assertSame('incepxionbot', Gateways::active('Page Uno'));
         // Ang padalang nagpalipat ay naitala pagkatapos ng lipat: sa susunod na minuto ito sinasagot.

@@ -37,7 +37,7 @@ class ProblemsPanel
 
     /**
      * Ang mga page na may problema (pinaka-urgent muna) at ilan ang urgent; null kapag wala.
-     * @return array{pages: array<int, array{page: string, level: string, lines: array<int, array{level: string, text: string, links: array<int, array{0: string, 1: string}>}>}>, urgent: int}|null
+     * @return array{pages: array<int, array{page: string, level: string, lines: array<int, array{level: string, text: string, links: array<int, array{0: string, 1: string}>}>}>, urgent: int, doubles: bool}|null
      */
     public function panel(): ?array
     {
@@ -53,9 +53,10 @@ class ProblemsPanel
             'quiet' => $this->safely(fn () => $this->quiet(), []),
             'sending' => $this->safely(fn () => array_map(fn ($p) => $this->settings->pageKey($p), app(Chatblast::class)->sendingPages()), []),
         ]);
+        $echoes = $this->safely(fn () => $this->echoes(), []);
         $lines = array_merge(
             $this->safely(fn () => $this->sends(), []),
-            $this->safely(fn () => $this->echoes(), []),
+            $echoes,
             $own['events'], $own['slow'], $own['quiet'],
             $this->safely(fn () => $this->setup($own['sending']), []),
         );
@@ -76,7 +77,9 @@ class ProblemsPanel
         usort($pages, fn ($a, $b) => [$rank[$a['level']], -$count($a, 'red'), -$count($a, 'orange'), -count($a['lines']), mb_strtolower($a['page'])]
             <=> [$rank[$b['level']], -$count($b, 'red'), -$count($b, 'orange'), -count($b['lines']), mb_strtolower($b['page'])]);
 
-        return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => $p['level'] !== 'white'))];
+        // doubles: may linya ng dobleng sagot (ang hindi pula sa echo), para lumabas lang ang paliwanag ng "bago" kapag kailangan.
+        return ['pages' => $pages, 'urgent' => count(array_filter($pages, fn ($p) => $p['level'] !== 'white')),
+            'doubles' => (bool) array_filter($echoes, fn ($l) => $l['level'] !== 'red')];
     }
 
     private function safely(callable $fn, mixed $fallback): mixed
@@ -133,7 +136,12 @@ class ProblemsPanel
         return $out;
     }
 
-    /** Ang hindi nasagot (pula, kapag sapat ang dami gaya ng Health) at ang dobleng sagot (orange) mula sa echo. */
+    /**
+     * Ang hindi nasagot (pula, kapag sapat ang dami gaya ng Health) at ang dobleng sagot mula sa echo: orange lang ang
+     * main-flow double (bagong customer na sinagot ng CBB at ng main flow ng Likha bot, kaya parehong naka-On ang dalawang
+     * main flow); puti ang leftover (lumang customer na nasa sequence o loop pa ng CBB, mauubos din). Ang bilang ng bagong
+     * customer at ng sinagot ng CBB ay nasa unang linya ng doble.
+     */
     private function echoes(): array
     {
         $out = [];
@@ -142,11 +150,18 @@ class ProblemsPanel
                 $out[] = self::line($e['page'], 'red', $e['unanswered'] . ' customers not answered in ' . ChatEchoes::limit('unanswered_minutes') . ' min',
                     [['Inbox', $e['examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
             }
-            if ($e['doubles'] > 0) {
-                $x = $e['double_examples'][0] ?? null;
-                $out[] = self::line($e['page'], 'orange', $e['doubles'] . ' double ' . ($e['doubles'] === 1 ? 'reply' : 'replies') . ' in the last '
-                    . ChatEchoes::HEALTH_MINUTES . ' min' . ($x ? ' (' . $x['senders'] . ')' : ''),
-                    [['Inbox', $x['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
+            $numbers = ' (new customers: ' . $e['new_customers'] . ', answered by CBB: ' . $e['cbb_new'] . ')';
+            $window = ' in the last ' . ChatEchoes::HEALTH_MINUTES . ' min';
+            if ($e['main_doubles'] > 0) {
+                $links = [];
+                foreach ($e['main_examples'] as $i => $x) $links[] = ['Example ' . ($i + 1), $x['inbox']];
+                $out[] = self::line($e['page'], 'orange', 'Main flow double: ' . $e['main_doubles'] . ' new ' . ($e['main_doubles'] === 1 ? 'customer' : 'customers')
+                    . ' answered by both CBB and the Likha bot' . $window . $numbers, [...$links, self::health($e['page_id'], 'who-answered')]);
+            }
+            if ($e['leftovers'] > 0) {
+                $out[] = self::line($e['page'], 'white', $e['leftovers'] . ' leftover CBB ' . ($e['leftovers'] === 1 ? 'reply' : 'replies')
+                    . ' to old customers (sequence/loop)' . $window . ($e['main_doubles'] > 0 ? '' : $numbers),
+                    [['Inbox', $e['leftover_examples'][0]['inbox'] ?? self::inbox($e['page_id'])[1]], self::health($e['page_id'], 'who-answered')]);
             }
         }
 
@@ -211,7 +226,8 @@ class ProblemsPanel
         if (!Schema::hasTable('botcake_chats')) return [];
         $c = config('services.chatbot.problems');
         $minutes = max(1, (int) $c['no_chats_minutes']);
-        $recent = BotcakeChat::active()->where('received_at', '>=', now()->subMinutes($minutes))->pluck('page_id')->map(fn ($id) => (string) $id)->flip();
+        // Ang pagbukas ng ad (ChatbotInbound::AD_OPEN) ay hindi chat ng customer: dito at sa karaniwang bilang sa ibaba.
+        $recent = BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->where('received_at', '>=', now()->subMinutes($minutes))->pluck('page_id')->map(fn ($id) => (string) $id)->flip();
         $guard = app(BotcakeChatGuard::class);
         $out = [];
         foreach ($this->usual()['chats'] as $id => $perHour) {
@@ -243,7 +259,7 @@ class ProblemsPanel
                 [$f, $t] = [$from->format('Y-m-d H:i:s'), $to->format('Y-m-d H:i:s')];
                 foreach ($speed->pageSeconds($f, $t, $t) as $id => $list) $secs[$id] = array_merge($secs[$id] ?? [], $list);
                 // Binibilang sa PHP (isang oras lang ng page_id): walang COUNT o GROUP BY sa botcake_chats.
-                foreach (BotcakeChat::active()->where('received_at', '>=', $f)->where('received_at', '<', $t)->pluck('page_id') as $id) {
+                foreach (BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->where('received_at', '>=', $f)->where('received_at', '<', $t)->pluck('page_id') as $id) {
                     $chats[(string) $id] = ($chats[(string) $id] ?? 0) + 1;
                 }
             }

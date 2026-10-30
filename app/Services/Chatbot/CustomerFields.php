@@ -53,6 +53,8 @@ class CustomerFields
         if (($this->values[$key] ?? null) === $value) return;
 
         if (!str_starts_with($key, '__')) $this->changes[] = ['key' => $key, 'from' => $this->values[$key] ?? null, 'to' => $value];
+        // Bagong paghihintay: walang lumang "hindi naihatid" (ang pumalya ngayon ay itinatakda pagkatapos nito).
+        if ($key === self::WAIT) $this->forgetUnsent();
         $this->values[$key] = $value;
         DB::table('chatbot_customer_values')->upsert(
             [['page_id' => $this->pageId, 'psid' => $this->psid, 'key' => $key, 'value' => $value, 'updated_at' => now()]],
@@ -72,8 +74,18 @@ class CustomerFields
         if ($key === self::WAIT) {
             ChatbotWaits::forget($this->pageId, $this->psid);
             $this->clear(self::TEST_SKIP);
-            $this->clear(self::WAIT_UNSENT);
+            $this->forgetUnsent();
         }
+    }
+
+    /**
+     * Ang __wait_unsent ay binubura kahit wala sa nabasa ng takbong ito: ang send_status (SendStatus) ay naisusulat ito
+     * habang tumatakbo ang takbo, kaya ang lumang marka ay hindi dapat maiwan para sa susunod na paghihintay.
+     */
+    private function forgetUnsent(): void
+    {
+        unset($this->values[self::WAIT_UNSENT]);
+        DB::table('chatbot_customer_values')->where('page_id', $this->pageId)->where('psid', $this->psid)->where('key', self::WAIT_UNSENT)->delete();
     }
 
     /**

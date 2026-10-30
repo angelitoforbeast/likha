@@ -9,9 +9,16 @@ use App\Models\BotcakeChat;
 /**
  * Ang kasunod ng bawat bagong chat ng customer, mula man sa Botcake (/api/botcake/chat) o sa Forbeast Gateway
  * (/api/gateway/events): iisang daan, para pareho ang sequence, Results at takbo ng flow.
+ *
+ * Ang pagbukas ng ad (referral ng gateway, may marka AD_OPEN) ay hindi dumadaan dito: hindi ito sagot ng customer (walang
+ * sequence exit, walang Results) at walang takbo, dahil tinatanggihan ng Meta ang padala bago sumulat ang customer. Ang
+ * unang mensahe niya ang nagsisimula ng Main Flow, at ang ad ay nakukuha ng AdGroups::latestAd mula sa row ng referral.
  */
 class ChatbotInbound
 {
+    /** Ang marka sa payload ng chat na pagbukas ng ad (referral): itinatala para sa ad, hindi mensahe ng customer. */
+    public const AD_OPEN = '_ad_open';
+
     public static function afterStore(BotcakeChat $chat, string $pageName): void
     {
         // Sumagot ang customer: alisin sa mga sequence ng page na may "exit when the customer replies".

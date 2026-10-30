@@ -54,8 +54,9 @@ class ChatbotRunner
             $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {
                 $fields->set(CustomerFields::LAST_CHAT, (string) $c->id);
-                // Ang attachment lang na hindi sinagot (ChatAttachments): nilalampasan, hindi kailanman pinapatakbo.
-                if (!empty($c->payload['_ignored'])) continue;
+                // Ang attachment lang na hindi sinagot (ChatAttachments) at ang pagbukas ng ad (ChatbotInbound::AD_OPEN):
+                // nilalampasan, hindi kailanman pinapatakbo.
+                if (!empty($c->payload['_ignored']) || !empty($c->payload[ChatbotInbound::AD_OPEN])) continue;
                 $flow = $this->page->flow((string) $c->page_name, $group);
                 if (!$flow || !is_array($flow->graph)) continue;
                 // Tao ang sumasagot sa customer na ito (/chatbot/inbox): tapos na ang chat, walang takbo.
@@ -107,10 +108,11 @@ class ChatbotRunner
         try {
             $fields = new CustomerFields((int) $wait->page_id, (int) $wait->psid);
             if (ChatbotAiQueue::pending($fields)) return 'waiting';
-            // Ang standby (kopya ng Botcake habang nasa Forbeast) at ang attachment lang na hindi sinagot ay hindi sagot na tatakbo.
+            // Ang standby (kopya ng Botcake habang nasa Forbeast), ang attachment lang na hindi sinagot at ang pagbukas ng ad
+            // ay hindi sagot na tatakbo.
             $unrun = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)
                 ->where('id', '>', (int) $fields->get(CustomerFields::LAST_CHAT))->get(['id', 'payload', 'received_at'])
-                ->reject(fn ($c) => ForbeastWatch::standby($c) || !empty($c->payload['_ignored']));
+                ->reject(fn ($c) => ForbeastWatch::standby($c) || !empty($c->payload['_ignored']) || !empty($c->payload[ChatbotInbound::AD_OPEN]));
             // Ang sagot na tatakbo pa ang nananaig. Ang luma na (hindi na tatakbo, hal. lampas sa retry ng job) ay hindi
             // humaharang: sumagot ang customer, kaya walang skip (sa ibaba).
             if ($unrun->contains(fn ($c) => $c->received_at && $c->received_at->gte(now()->subMinutes(self::STALE_MINUTES)))) return 'waiting';
@@ -119,8 +121,9 @@ class ChatbotRunner
             // Natapos na ang paghihintay sa ibang paraan (sagot, "clear all fields", ibang wait): wala nang gagawin.
             if ($fields->get(CustomerFields::WAIT) !== $wait->flow_id . ':' . $wait->node_id) return 'gone';
 
+            // Ang huling isinulat ng customer (ang input at ang 24 oras): hindi ang pagbukas ng ad, na hindi mensahe.
             $last = BotcakeChat::where('page_id', (string) $wait->page_id)->where('psid', (string) $wait->psid)->orderByDesc('id')->limit(50)->get()
-                ->first(fn ($c) => !ForbeastWatch::standby($c));
+                ->first(fn ($c) => !ForbeastWatch::standby($c) && empty($c->payload[ChatbotInbound::AD_OPEN]));
             $group = $last && $last->page_name !== null ? $this->groups->forCustomer((string) $wait->page_id, (string) $wait->psid, (string) $last->page_name) : null;
             $flow = $last && $last->page_name !== null ? $this->page->flow((string) $last->page_name, $group) : null;
             $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $wait->node_id);

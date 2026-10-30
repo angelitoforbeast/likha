@@ -14,7 +14,7 @@
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot']], fn ($v) => $v !== null);
     $day = fn ($d) => route('chatbot.speed', $keep + ['date' => $d], false);
-    $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', 'Max', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot'];
+    $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', 'Max', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot', 'Never sent', 'Sent late', 'Late avg'];
 @endphp
 
 @section('content')
@@ -115,10 +115,17 @@
             </table>
         </div>
         <p class="mt-2 text-xs text-slate-500">
-            Hour = when the customer's message arrived (Manila). Answered = a bot reply to the same customer within 24 hours that was sent (failed, test and sequence sends are not replies). ≤ 30 s / 1 min / 5 min are counted against all messages. Attachments the bot ignores by design are left out. Not on bot = messages on a page without a flow at that time; they are not in the other numbers. The Forbeast and Botcake rows are for the whole day and follow the page filter only.
+            Hour = when the customer's message arrived (Manila). Answered = a bot reply to the same customer within 24 hours that was sent (failed, test and sequence sends are not replies). ≤ 30 s / 1 min / 5 min are counted against all messages. Attachments the bot ignores by design are left out. Not on bot = messages on a page without a flow at that time; they are not in the other numbers. The Forbeast and Botcake rows are for the whole day and follow the page filter only. Never sent and Sent late = messages whose Main Flow or AI reply failed to send (a failed send, not a sequence step or a test): Never sent = no reply went through within 24 hours; Sent late = a reply went through after one or more failed tries, Late avg = their average wait. They are still in the other numbers (the average included); the red bars on the chart are their count per hour.
             @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a confirmed sent time (a Forbeast reply not confirmed yet, or a reply recorded before sent times were kept): their time is when Likha handed the reply over.@endif
             @if($refused_off) {{ number_format($refused_off) }} messages came in on pages with the bot Off and were not stored.@endif
         </p>
+        </details>
+        {{-- Ang listahan ng Not sent: binubuksan lang kapag binuksan ang kahon (mula sa cache ng page, kada araw o oras). --}}
+        <details class="sp-table mt-3" data-sp-notsent="{{ route('chatbot.speed.not-sent', $keep + ['date' => $f['date']], false) }}">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show the Not sent list</span><span class="sp-hide">Hide the Not sent list</span> <span class="text-xs font-normal text-slate-500" data-sp-summary="not-sent">({{ number_format($total['not_sent']['never']) }} never sent · {{ number_format($total['not_sent']['late']) }} sent late)</span></summary>
+            <div data-sp-notsent-body>
+                <p class="text-sm text-slate-600" role="status">Loading the list…</p>
+            </div>
         </details>
     </section>
 
@@ -184,66 +191,12 @@
         </details>
     </section>
 
-    <section aria-labelledby="h-seq">
+    {{-- Ang Sequences ay binubuksan pagkatapos lumabas ng page (ito ang pinakamabigat kuwentahin): ang laman at ang chart ay mula sa sariling endpoint nito, parehong filter. --}}
+    <section aria-labelledby="h-seq" data-sp-seq="{{ route('chatbot.speed.sequences', $keep + ['date' => $f['date']], false) }}">
         <h2 id="h-seq" class="mb-1 text-base font-semibold">Sequences by hour due</h2>
-        @if(!empty($sequences['too_large']))
-        <p class="text-sm text-slate-600" data-sp-note="sequences">Sequences section too large to compute now. The other sections are complete; this one tries again within 2 minutes.</p>
-        @else
-        @php($st = $sequences['total'])
-        <p class="text-sm tabular-nums text-slate-600" data-sp-summary="sequences">Day: {{ number_format($st['due']) }} due · {{ number_format($st['sent']) }} sent · {{ number_format($st['failed']) }} failed · {{ number_format($st['skipped']) }} skipped; scheduled → pushed avg {{ $sec($st['scheduled_to_pushed']['avg']) }} · p90 {{ $sec($st['scheduled_to_pushed']['p90']) }} · max {{ $sec($st['scheduled_to_pushed']['max']) }}; pushed → sent at Meta: {{ number_format($st['pushed_to_meta']['n']) }} steps · avg {{ $sec($st['pushed_to_meta']['avg']) }} · p90 {{ $sec($st['pushed_to_meta']['p90']) }} · max {{ $sec($st['pushed_to_meta']['max']) }}</p>
-        @include('chatbot.partials.speed-chart', ['id' => 'seq', 'title' => 'Sequences by hour due: pushed → sent at Meta, average and p90', 'label' => 'Average and p90 of sequence steps from pushed to sent at Meta per hour, with the previous day as reference'])
-        <details class="sp-table mt-3" data-sp-table="sequences">
-            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show table</span><span class="sp-hide">Hide table</span></summary>
-        <div class="cb-card overflow-x-auto">
-            <table class="cb-table min-w-[56rem]" data-table="sequences">
-                <thead>
-                    <tr><th></th><th colspan="5"></th><th colspan="4" class="!text-center">Scheduled → pushed</th><th colspan="4" class="!text-center">Pushed → sent at Meta</th></tr>
-                    <tr><th>Hour</th>@foreach(['Due', 'Sent', 'Failed', 'Skipped', 'No message', 'Steps', 'Average', 'p90', 'Max', 'Steps', 'Average', 'p90', 'Max'] as $c)<th class="!text-right">{{ $c }}</th>@endforeach</tr>
-                </thead>
-                <tbody>
-                @foreach($sequences['hours'] as $h => $r)
-                    <tr data-hour="{{ $h }}">
-                        <td class="tabular-nums">{{ str_pad($h, 2, '0', STR_PAD_LEFT) }}:00</td>
-                        @if($r === null)
-                            @for($i = 0; $i < 13; $i++)<td></td>@endfor
-                        @else
-                            @include('chatbot.partials.speed-seq-cells', ['r' => $r])
-                        @endif
-                    </tr>
-                @endforeach
-                </tbody>
-                <tfoot><tr class="font-semibold"><td>Day</td>@include('chatbot.partials.speed-seq-cells', ['r' => $sequences['total']])</tr></tfoot>
-            </table>
+        <div data-sp-seq-body>
+            <p class="text-sm text-slate-600" role="status" data-sp-seq-state="loading">Loading sequences…</p>
         </div>
-        <p class="mt-2 text-xs text-slate-500">
-            Scheduled = when the step was due. Pushed = when Likha handed the step's first message to Forbeast or Botcake. Sent at Meta = the sent time Forbeast reports (send_status). Botcake sends at once, so its sent time is the pushed time: those steps ({{ number_format($sequences['total']['botcake']) }} in this view) are not in "Pushed → sent at Meta". Scheduled is the step's own delay from the customer's previous step (or from joining the sequence), so waiting for the AI, a busy lock or a paused bot shows as delay. No message = the step ran but its flow sent nothing. Steps with no earlier history and no recorded due time have no scheduled time.
-        </p>
-        </details>
-        <details class="sp-table mt-3" data-sp-table="sequence-slowest">
-            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show slowest steps</span><span class="sp-hide">Hide slowest steps</span></summary>
-        <h3 class="mb-2 mt-2 text-sm font-semibold">Slowest steps of the day</h3>
-        <div class="cb-card overflow-x-auto">
-            <table class="cb-table min-w-[52rem]" data-table="sequence-slowest">
-                <thead><tr><th>Page</th><th>Sequence</th><th class="!text-right">Step</th><th>Scheduled</th><th>Pushed</th><th>Sent at Meta</th><th class="!text-right">Delay</th></tr></thead>
-                <tbody>
-                @forelse($sequences['slowest'] as $s)
-                    <tr>
-                        <td>{{ $s['page'] }}</td>
-                        <td>{{ $s['sequence'] }}</td>
-                        <td class="text-right tabular-nums">{{ $s['step'] }}</td>
-                        <td class="tabular-nums">{{ $s['scheduled'] ? substr($s['scheduled'], 11) : '—' }}</td>
-                        <td class="tabular-nums">{{ substr($s['pushed'], 11) }}@if($s['scheduled_to_pushed'] !== null) <span class="text-xs text-slate-500">+{{ $s['scheduled_to_pushed'] }} s</span>@endif</td>
-                        <td class="tabular-nums">@if($s['sent']){{ substr($s['sent'], 11) }}@if($s['sent_is_pushed']) <span class="text-xs text-slate-500">(Botcake: = pushed)</span>@else <span class="text-xs text-slate-500">+{{ $s['pushed_to_meta'] }} s</span>@endif @else — <span class="text-xs text-slate-500">(not confirmed)</span>@endif</td>
-                        <td class="text-right tabular-nums">{{ $s['delay'] }} s</td>
-                    </tr>
-                @empty
-                    <tr><td colspan="7" class="text-slate-500">No sequence steps sent this day.</td></tr>
-                @endforelse
-                </tbody>
-            </table>
-        </div>
-        </details>
-        @endif
     </section>
 </div>
 
@@ -260,17 +213,17 @@
 @push('scripts')
 <script>
 // Sarado ang mga table sa simula; ang binuksan ay naaalala ng browser na ito (localStorage). Kapag walang storage
-// (private window o naka-block), sarado lang ang lahat.
-document.querySelectorAll('details[data-sp-table]').forEach(d => {
+// (private window o naka-block), sarado lang ang lahat. Function, dahil ang mga table ng Sequences ay dumarating mamaya.
+window.spRemember = root => root.querySelectorAll('details[data-sp-table]').forEach(d => {
     const key = 'chatbot-speed-table:' + d.dataset.spTable;
     try { if (localStorage.getItem(key) === 'open') d.open = true; } catch (e) { /* walang storage */ }
     d.addEventListener('toggle', () => { try { d.open ? localStorage.setItem(key, 'open') : localStorage.removeItem(key); } catch (e) { /* hindi maaalala */ } });
 });
+window.spRemember(document);
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
 (() => {
-    if (!window.Chart) return;
     const data = JSON.parse(document.getElementById('sp-data').textContent);
     const pad = h => String(h).padStart(2, '0');
     const fmt = v => v === null || v === undefined ? '—' : (Math.round(v * 10) / 10).toLocaleString() + ' s';
@@ -284,10 +237,11 @@ document.querySelectorAll('details[data-sp-table]').forEach(d => {
         push: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2], ['max', 'Max (right axis)', '#dc2626', false, 1.5, 'y2']],
         seq: [['avg', 'Average', '#2563eb', false, 2.5], ['p90', 'p90', '#d97706', false, 2]],
     };
-    for (const [id, lines] of Object.entries(charts)) {
+    // Isang chart (id) mula sa data nito (c) at sa mga petsa ng data (date, prev_date). Walang Chart.js: walang chart.
+    const draw = (id, c, data) => {
+        const lines = charts[id];
         const el = document.getElementById('sp-chart-' + id);
-        const c = data[id];
-        if (!el || !c) continue;
+        if (!window.Chart || !lines || !el || !c) return;
         // Spec 188-1: ang average lang ang nakikita sa simula (c.shown); ang iba ay nasa legend, nakatago. Ang y-axis ay
         // hanggang c.top (mga 3 × ang karaniwang average): ang lampas ay iginuguhit sa taas (tatsulok) na may tunay na
         // value bilang label at sa tooltip (real). Ang right axis (max) ay may sariling sukat, hindi pinuputol.
@@ -298,9 +252,13 @@ document.querySelectorAll('details[data-sp-table]').forEach(d => {
             tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)}))
             .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: clamp(c.prev[key], axis), real: c.prev[key], borderColor: color + '66',
                 backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)})));
+        // Ang bilang ng Not sent kada oras (chart ng reply time): pulang bar sa kanang axis, para makita ang biglang dami.
+        if (c.not_sent) sets.push({type: 'bar', label: 'Not sent (right axis)', data: c.not_sent, real: c.not_sent, count: true, backgroundColor: '#dc262655', borderColor: '#dc2626',
+            borderWidth: 1, yAxisID: 'y2', order: 10});
         const counts = (part, i) => Object.entries(c[part] || {}).map(([k, v]) => k + ' ' + (v[i] ?? '—')).join(', ');
         const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, max: c.top, title: {display: true, text: 'seconds'}}};
         if (lines.some(l => l[5] === 'y2')) scales.y2 = {display: 'auto', beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
+        if (c.not_sent) scales.y2 = {display: 'auto', beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, ticks: {precision: 0}, title: {display: true, text: 'not sent, messages'}};
         // Ang label ng value na lampas sa taas: ang una ay sa itaas ng gilid, ang kasunod sa parehong oras ay pababa.
         const overLabels = {id: 'spOver', afterDatasetsDraw(chart) {
             const {ctx, chartArea} = chart;
@@ -326,13 +284,62 @@ document.querySelectorAll('details[data-sp-table]').forEach(d => {
                 legend: {position: 'bottom', labels: {boxWidth: 12, boxHeight: 2, font: {size: 11}}},
                 tooltip: {callbacks: {
                     title: items => items.length ? pad(items[0].dataIndex) + ':00–' + pad(items[0].dataIndex) + ':59' : '',
-                    label: item => item.dataset.label + ': ' + fmt(item.dataset.real[item.dataIndex]),
+                    label: item => item.dataset.label + ': ' + (item.dataset.count ? (item.dataset.real[item.dataIndex] ?? '—') : fmt(item.dataset.real[item.dataIndex])),
                     footer: items => items.length ? [data.date + ': ' + counts('counts', items[0].dataIndex), data.prev_date + ': ' + counts('prev_counts', items[0].dataIndex)] : [],
                 }},
             },
             scales,
         }});
+    };
+    for (const id of Object.keys(charts)) draw(id, data[id], data);
+
+    // Ang Sequences: ang section muna (HTML at mga numero), saka ang chart nito (kasama ang naunang araw). Ang pumalyang
+    // tawag ay may Retry; ang ibang section ay buo na.
+    const get = async url => {
+        const r = await fetch(url, {headers: {Accept: 'application/json'}, credentials: 'same-origin'});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    };
+
+    // Ang listahan ng Not sent: sa unang bukas ng kahon, at kapag pinalitan ang oras; ang pumalya ay may Retry.
+    const ns = document.querySelector('[data-sp-notsent]');
+    if (ns) {
+        const nsBody = ns.querySelector('[data-sp-notsent-body]');
+        const loadList = async hour => {
+            nsBody.innerHTML = '<p class="text-sm text-slate-600" role="status">Loading the list…</p>';
+            try {
+                const url = new URL(ns.dataset.spNotsent, location.href);
+                if (hour !== '') url.searchParams.set('hour', hour);
+                nsBody.innerHTML = (await get(url)).html;
+                nsBody.querySelector('[data-sp-notsent-hour]')?.addEventListener('change', e => loadList(e.target.value));
+            } catch (e) {
+                nsBody.innerHTML = '<p class="text-sm text-amber-700" role="alert">The list did not load. <button type="button" class="cb-btn" data-sp-notsent-retry>Retry</button></p>';
+                nsBody.querySelector('[data-sp-notsent-retry]').addEventListener('click', () => loadList(hour));
+            }
+        };
+        let listed = false;
+        ns.addEventListener('toggle', () => { if (ns.open && !listed) { listed = true; loadList(''); } });
     }
+
+    const box = document.querySelector('[data-sp-seq]');
+    if (!box) return;
+    const body = box.querySelector('[data-sp-seq-body]');
+    const load = async () => {
+        body.innerHTML = '<p class="text-sm text-slate-600" role="status" data-sp-seq-state="loading">Loading sequences…</p>';
+        try {
+            const url = new URL(box.dataset.spSeq, location.href);
+            const s = await get(url);
+            body.innerHTML = s.html;
+            window.spRemember(body);
+            url.searchParams.set('part', 'chart');
+            const c = await get(url);
+            draw('seq', c.seq, c);
+        } catch (e) {
+            body.innerHTML = '<p class="text-sm text-amber-700" role="alert" data-sp-seq-state="error">Sequences did not load. The other sections are complete. <button type="button" class="cb-btn" data-sp-seq-retry>Retry</button></p>';
+            body.querySelector('[data-sp-seq-retry]').addEventListener('click', load);
+        }
+    };
+    load();
 })();
 </script>
 @endpush

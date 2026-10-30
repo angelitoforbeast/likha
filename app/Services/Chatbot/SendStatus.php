@@ -36,14 +36,35 @@ class SendStatus
         if ($status !== 'sent') $set += ['status' => $status, 'error' => mb_substr(self::error($s), 0, 255)];
         if ($reply->client_ref === null && $s['client_ref'] !== null && $s['client_ref'] !== '') $set['client_ref'] = $s['client_ref'];
 
-        return DB::table('chatbot_replies')->where('id', $reply->id)->whereNull('confirmed_status')->update($set) === 1 ? 'send_status' : 'send_status_repeat';
+        if (DB::table('chatbot_replies')->where('id', $reply->id)->whereNull('confirmed_status')->update($set) !== 1) return 'send_status_repeat';
+        // Walang naihatid sa customer: kung ang padala ay ang tanong na hinihintay pa ang sagot, itatanong ulit.
+        if ($status === 'failed' || ($status === 'partial' && $s['sent_count'] === 0)) $this->unsent($reply);
+
+        return 'send_status';
+    }
+
+    /**
+     * Ang tanong ng hakbang na naghihintay (__wait) ay hindi naihatid: ang susunod na mensahe ng customer ay hindi ang sagot
+     * nito (WAIT_UNSENT; FlowEngine ang nagtatanong ulit). Kapag lumipat na ang paghihintay (sumagot, ibang hakbang), wala.
+     * Ang pagkabigo rito ay hindi pumipigil sa talaan ng send_status.
+     */
+    private function unsent(object $reply): void
+    {
+        try {
+            if ($reply->kind !== 'send' || $reply->flow_id === null || $reply->node_id === null || !ctype_digit((string) $reply->psid)) return;
+            $fields = new CustomerFields((int) $reply->page_id, (int) $reply->psid);
+            $wait = $reply->flow_id . ':' . $reply->node_id;
+            if ($fields->get(CustomerFields::WAIT) === $wait) $fields->set(CustomerFields::WAIT_UNSENT, $wait);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     private function match(array $e): ?object
     {
         $s = $e['send'];
         $q = fn () => DB::table('chatbot_replies')->where('page_id', (int) $e['page_id'])->whereIn('kind', ['send', 'manual']);
-        $cols = ['id', 'client_ref', 'confirmed_status', 'sent_at'];
+        $cols = ['id', 'client_ref', 'confirmed_status', 'sent_at', 'kind', 'page_id', 'psid', 'flow_id', 'node_id'];
         if ($s['client_ref'] !== null && $s['client_ref'] !== '') {
             $r = $q()->where('client_ref', $s['client_ref'])->first($cols);
             if ($r) return $r;

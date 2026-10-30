@@ -3301,6 +3301,31 @@ Tests: `tests/Feature/RtsProjection/AnalystRtsDailyTest.php`, `tests/Feature/Rts
 | S-197.7 (P1) | Existing suites pass (no new failures vs the base) | full `tests/Feature` run | passed |
 | S-197.8 | During 03:00–03:45 the command refuses to run; `--as-of` prints a replay and writes nothing | `test_S_197_never_runs…`, `test_S_197_as_of_replay…` | passed |
 
+## S-203 Mira RTS counts only the orders at the item's latest price
+
+As the owner, I want the daily Mira RTS of each page+item computed only from the orders at its latest price, and told "not enough yet" when that price has too few orders, so that an old promo price does not pull the number I use for ads.
+
+Slice 203. Threat model: no new input and no new route; the run is the existing scheduled command over trusted tables, the owner page only shows two more fields. Risk tier: medium.
+Tests: `tests/Feature/RtsProjection/LatestPriceTest.php`, existing `tests/Feature/RtsProjection` (spec 197) and `tests/Feature/OwnerPrivate` suites.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-203.1.1 (P1) | Given one page+item sold at ₱249 (Sep) and then ₱199 (Oct), When the 06:00 run runs, Then the projection, estimate and day row use only the ₱199 orders (25%, not 37.5% of all prices) and the day row records price 199 | `test_S_203_1_1…` | passed |
+| S-203.1.2 (P1) | Given orders inserted out of date order and a newest order without a COD, Then the latest price is the most common COD of the newest order day (orders without a COD ignored); a tie goes to the higher count over the last 3 order days, then to the price with the newer order; the COD is read like the owner page on MySQL (₱, commas, spaces removed, leading number only) | `test_S_203_1_2…` | passed |
+| S-203.1.5 (P1) | Given ₱199 orders and one ₱398 order (the newest) on the newest day, Then the latest price is ₱199 | `test_S_203_1_5…` | passed |
+| S-203.1.6 (P1) | Given a newest day of ₱199×3 and ₱249×1 (the ₱249 newest), Then the latest price is ₱199 | `test_S_203_1_6…` | passed |
+| S-203.1.7 (P1) | Given ₱199 orders with 2-piece ₱398 and 3-piece ₱597 orders, Then those count under ₱199 (another price such as ₱249 does not) | `test_S_203_1_7…` | passed |
+| S-203.1.3 (P1) | Given another page with the same item at another price, Then each page keeps its own latest price and orders | `test_S_203_1_3…` | passed |
+| S-203.1.4 (P1) | The 21-day trend in the reason compares the same price (an older price inside the 21 days is left out) | `test_S_203_1_4…` | passed |
+| S-203.2.1 (P1) | Given fewer than 30 matched orders at the latest price, When the run runs, Then there is no Mira RTS (the earlier value and reason are no longer active), the day row has the price, the count and no estimate, the owner page cell shows "—" with the hover "Latest price ₱199: only 10 orders, not enough yet", a rerun adds no rows, and an item with no J&T-matched order and no value gets no row | `test_S_203_2_1…` | passed |
+| S-203.2.2 (P1) | Given the analyst typed a value after 06:00, When a run finds too few orders that day, Then her value and reason stay | `test_S_203_2_2…` | passed |
+| S-203.3.1 (P1) | The reason says "… order na may J&T status sa ₱199 …" and the owner page gives the price, so the hover reads "Mira RTS 25.0% (₱199 orders only): Auto 06:00: …" for an auto value | `test_S_203_3_1…` | passed |
+| S-203.4.1 (P1) | The p(age) learned for the page+item still applies to its in-transit orders at the latest price | `test_S_203_4_1…` | passed |
+| S-203.5.1 (P1) | Day rows written before this change stay byte for byte and are measured on all prices; new day rows record their price and are measured on that price only | `test_S_203_5_1…` | passed |
+| S-203.5.2 (P1) | A not-enough day still records the 7/14-day accuracy of the older estimates | `test_S_203_5_2…` | passed |
+| S-203.6.1 (P1) | `rts:daily-estimate --as-of` uses the latest price known that day (₱249 as of Oct 15, ₱199 now), prints it, and writes nothing | `test_S_203_6_1…` | passed |
+| S-203.7 (P1) | Existing spec-197 tests kept; full `tests/Feature` adds no failure vs 8506b25c | `tests/Feature` run | passed |
+
 ## S-199 The office TV shows the bot as a living neural network, and an order's money flows into the totals
 
 As the owner, I want /chatbot/live to look like a calm neural network room (inputs into the bot core, the core out to each bot, AI answers as their own step) and to see money flow in when an order comes (a peso amount travels into the totals and they count up), with every label real data.
@@ -3338,3 +3363,72 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatb
 | S-200.6 (P1) | The page renders every section of the HUD with its data hooks, and every number spec 199 shows is still there | `test_S_200_6_…` | passed |
 | S-200.7 (P1) | The existing spec-199/196 Live tests pass (changed assertions listed) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest`, `ChatbotLiveNetworkTest`, `ChatbotLiveRulesTest` | passed |
 | S-200.8 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` | see result |
+
+## S-204 The Main Flow starts on the customer's first message, not on the ad click
+
+As the owner, I want the bot to answer only once the customer has chatted, so the opening (image and greeting) is the first thing a customer who came from an ad receives, with the reply of that ad on Ad-based pages.
+
+Slice 204 (with amendments 204-1, 204-2 and 204-3; 204-3 replaced 204-2's 2 s hold). Threat model: trusted = signed Forbeast gateway events; the event fields stay customer data. No new route. Risk tier: medium-high.
+Tests: `tests/Feature/Chatblast/AdOpenWaitTest.php`, `tests/Feature/Chatblast/AdOpenReadersTest.php`, changed or extended `ChatbotProviderTest`, `GatewayPerPageTest`, `ProblemsPanelTest`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-204.1 (P1) | Given a gateway page, When a referral (ad open) arrives alone, Then the chat row is stored as today with its ad_id and the ad-open mark, it is counted, no run starts, nothing is sent, and it is not a reply (no sequence exit, no Results reply) | `test_S_204_1…` | passed |
+| S-204.2 (P1) | Given an ad open, When the customer's first message arrives, Then the Main Flow starts from its first step on that message (the opening is the first send) and the send carries the referral's ad_id | `test_S_204_2…` | passed |
+| S-204.3 (P1) | Given a message that started the flow, When the referral arrives after it (or a repeated referral arrives), Then no second start; a later message runs once and the ad open is passed over | `test_S_204_3…` | passed |
+| S-204.4 (P1) | Given a customer inside a running flow (a wait step pending), When a referral arrives, Then the run is unchanged and the wait timeout still fires as "no reply"; its 24-hour window is measured from the last message, not the ad open | `test_S_204_4…` (2 tests) | passed |
+| S-204.5 (P1) | A postback starts the flow as today; the Botcake webhook path is unchanged | `test_S_204_5…` | passed |
+| S-204.6 (P1) | Given ad opens, Then Health inbound and its slowest list, Speed, "not answered" (echoes), Live inquiries and active chats, the problems panel's "no chats" check, the Results backfill and the failed-reply re-run do not take an ad open for a customer message | `test_S_204_6…` (2 tests), `test_S_184_5…`, `test_S_194_4d…` | passed |
+| S-204.7 (P2) | Given ad opens on a day, Then Health shows per day the customers who opened an ad and never wrote ("Ad opens without a message"); a message up to 60 s before the ad open counts as writing | `test_S_204_7…` | passed |
+| S-204.8 (P1) | Given an Ad-based page: referral for ad X then message → the reply of ad X's group; X then Y then message → Y; a message that carries its own referral → that ad; no referral → today's fallback; a Page-based page → page values | `test_S_204_8…` (6 rows) | passed |
+| S-204.9 (P1) | Given a referral POST, Then its row is stored before the 200 (the gateway posts the next event only after it), so the queued first message finds the ad; event jobs handled in either order give the ad's reply once; a referral that fails to store answers 500 and the gateway's retry is stored once | `test_S_204_9…` (4 tests) | passed |
+| S-204.10 (P1) | The full `tests/Feature` run adds no new failures vs 8506b25c | `tests/Feature` | see result |
+| S-204.11 (P1) | Given a question step waiting for a reply, When its send comes back failed (or partial with nothing sent), Then the next message asks it again once and the message after is the answer; a partial with something sent, a sent status, a failure after the customer moved on, or a failed manual reply mark nothing; a failure written during a run does not outlive the wait | `test_S_204_11…` (6 tests) | passed |
+
+## S-202 A double reply is urgent only when both main flows answer a new customer
+
+As the owner, I want the problems panel to turn a page orange for double replies only when Chatbot Builder's main flow (or Botcake) and the Likha bot's main flow both answer a new customer, and to see the leftover CBB replies to old customers (sequences and loops) as white lines that drain.
+
+Slice 202. Threat model: trusted = signed-in staff; no new input, route or table. Risk tier: low-medium (a wrong rule would hide a real double).
+Tests: `tests/Feature/Chatblast/DoubleReplyUrgentTest.php`, existing `ChatEchoTest` and `ProblemsPanelTest`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-202.1a (P1) | Given a customer whose first chat on the page came in the last 60 min, When CBB and the page's main flow both answer it, Then the page is orange with "Main flow double: 1 new customer answered by both CBB and the Likha bot in the last 60 min" and an inbox link to that customer (no name or text); at most 3 example links | `test_S_202_1a…` | passed |
+| S-202.1b (P1) | Given the same new customer, When the Likha reply is a sequence send or comes from a flow that is not the page's main flow (nor an active ad group's), Then it is not a main-flow double | `test_S_202_1b…` | passed |
+| S-202.2a (P1) | Given an old customer (earlier chats, or a CBB echo before the first chat), When CBB and the Likha bot both reply within 60 s, Then the page gets a white "1 leftover CBB reply to old customers (sequence/loop) in the last 60 min" and no orange | `test_S_202_2a…` | passed |
+| S-202.3a (P1) | Bot Health "Who answered" shows main-flow doubles, leftovers, new customers and answered by CBB with the same numbers as the panel | `test_S_202_3a…` | passed |
+| S-202.4a (P1) | Given many new customers CBB never answers and many leftover doubles on old ones, Then the page is never orange for doubles | `test_S_202_4a…` | passed |
+| S-202.5a (P1) | The echo build's query count is the same for 1 pair and for 40 pairs and customers | `test_S_202_5a…` | passed |
+| S-202.6a (P2) | The page's double line shows "new customers: X, answered by CBB: Y" for the window | `test_S_202_6a…` | passed |
+| S-202.7 (P1) | Existing ChatEchoes and ProblemsPanel tests pass; the full tests/Feature suite adds no new failures vs 8506b25c | `ChatEchoTest`, `ProblemsPanelTest`, `tests/Feature` | see result |
+
+## S-201 The Speed page opens fast: today's numbers kept warm, Sequences loaded after the page
+
+As the owner, I want /chatbot/speed to open at once, with Sequences arriving a moment later, and to see when Main Flow or AI replies really were not sent, so that I do not wait 12 to 35 seconds for the page and I can find where long waits come from.
+
+Slice 201 (with amendment 1). Threat model: trusted = signed-in staff with the Speed permission; untrusted = the query string (date, page_id, bot, part, hour) of the page and of the two new endpoints (`/chatbot/speed/sequences`, `/chatbot/speed/not-sent`), which use the page's permission check and filter cleaning; stored error text of a send is data (only the Meta code digits are read). Risk tier: medium.
+Tests: `tests/Feature/Chatblast/SpeedPrewarmTest.php`, `tests/Feature/Chatblast/SpeedNotSentTest.php`, and the existing `ResponseSpeedTest`, `SpeedMemoryTest`, `MetaReplySpeedTest` (moved to read Sequences from the endpoint).
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-201.1 (P1) | Given the warm run ran, When the default view (today, no page, no bot) is opened (page, Sequences section, Sequences chart), Then no query touches botcake_chats, chatbot_replies, chatbot_events or chatbot_ai_requests, the numbers equal a cold build, and the entries still serve 4 minutes later without a run | `test_S_201_1_the_warm_run_fills_the_default_view_so_opening_it_reads_no_big_table` | passed |
+| S-201.1 (P1) | Today is rebuilt on every run (a new message shows after the next run); yesterday only when its last warm is 20 minutes old; after midnight the new yesterday is rebuilt at once as a whole day | `test_S_201_1_today_is_rebuilt_every_run_and_yesterday_only_when_due` | passed |
+| S-201.1 (P1) | The schedule runs `chatbot:speed-warm` every 2 minutes, without overlapping (10 min), on one server, in the background | `test_S_201_1_the_schedule_runs_the_warm_every_two_minutes_once_at_a_time` | passed |
+| S-201.2 (P1) | When a past, filtered day is opened, Then the page reads no chatbot_events and has the hours, AI and push sections, the Sequences heading with a loading line, the endpoint URL with the same filters, and an error line with Retry; the endpoint returns the section HTML (summary, chart canvas, both tables) and, as `part=chart`, the chart | `test_S_201_2_the_page_does_not_wait_for_sequences_and_loads_them_after` | passed |
+| S-201.2 (P1) | The endpoint is 403 for a role without the Speed page, a redirect for a guest; a bad date, page, bot or part is cleaned as on the page (today, all) | `test_S_201_2_the_endpoint_has_the_page_access_and_cleans_its_query` | passed |
+| S-201.3 (P1) | The section call reads the sequence events of the chosen day only (to 06:00 the next day), the chart call those of the previous day only; repeated calls read nothing | `test_S_201_3_each_sequences_call_computes_at_most_one_day` | passed |
+| S-201.3 (P1) | A web Sequences call over its time budget (20 s, before php-fpm's 30 s) answers 200 with "too large to compute now"; the page is complete | `test_S_201_3_a_sequences_call_over_its_time_budget_answers_too_large_in_time` | passed |
+| S-201.3 (P1) | Over the memory budget or failing, the endpoint answers too large (200), the page is complete, and the day is tried again after 2 minutes | `test_S_198_4_a_sequences_section_over_its_budget_or_failing_leaves_the_rest_of_the_page` (moved to the endpoint) | passed |
+| S-201.4 (P1) | For six filter sets (all, page, bot, past day, past day + page, two days back + bot), the page data and the endpoint's Sequences and chart equal the base code's `output()` (recorded on 8506b25c), apart from the new Not sent figures; the spec 198 volume fingerprint is unchanged | `test_S_201_4_the_page_and_the_sequences_endpoint_give_the_numbers_of_the_old_screen`, `test_S_198_1_a_late_day_volume_renders_under_192_mb_with_the_same_numbers` | passed |
+| S-201.4 (P1) | The Not sent counts come from the same hourly reads: 96 reads of chatbot_replies for a day and its reference day, whatever the number of messages | `test_S_201_4_the_not_sent_counts_come_from_the_same_hourly_reads` | passed |
+| S-201.5 (P1) | Given the warm lock is held, When a run starts, Then it reads nothing, writes nothing and logs one "skipped" line | `test_S_201_5_a_run_while_the_last_one_is_going_skips_and_logs_one_line` | passed |
+| S-201.5 (P1) | Each run logs one line with what it warmed and its seconds, and releases the lock | `test_S_201_5_each_run_logs_one_line_with_its_time` | passed |
+| S-201.5 (P1) | Given a read fails during the run, Then the failed part is reported and not written, the other part is written, one warning line names it, the command exits 1, and the page builds that part on demand | `test_S_201_5_a_failing_part_is_reported_not_written_and_the_page_builds_it_on_demand` | passed |
+| S-201.5 (P1) | Given Sequences go over the budget in the warm run, Then nothing is written for them (the endpoint computes them in its own budget), the page parts and yesterday's stamp are written, one warning line says "too large", the command exits 0 | `test_S_201_5_a_sequences_answer_over_the_budget_is_not_written_by_the_warm_run` | passed |
+| S-201.6 (P2) | Cold and warm time and query count, page and Sequences, today and a past day, before vs after | measured, in the result | done |
+| S-201.7 (P1) | Given a chat stored twice (same page, PSID and received time), Then it is one message (and one reply time) in the hours, the bots and the problems banner's slow check; a Botcake copy next to the real chat is still one; another second is another message | `test_S_201_7_a_chat_stored_twice_counts_as_one_message` | passed |
+| S-201.8 (P1) | A message with failed Main Flow or AI sends (not sequence, not test, not before the message) is Never sent when no reply went through within 24 h, Sent late when one went through after (count, average wait, failed tries, a failure in the same second as the reply included); per hour, per day, per bot, with the page and bot filters; still in the average; a red bar per hour on the reply chart; three columns in the hours table | `test_S_201_8_not_sent_splits_never_answered_from_answered_after_a_failure` | passed |
+| S-201.9 (P1) | The Not sent list: newest first, message time, page, bot, never/late, failed tries, wait, the Meta code/subcode of the last failure, an inbox link; no customer text and no error text; by hour (a bad hour = whole day), page, bot and day; 403 like the page | `test_S_201_9_the_not_sent_list_newest_first_with_page_bot_error_attempts_and_inbox_link` | passed |
+| S-201.9 (P1) | The page has a closed "Not sent list" box with the day's counts; the list loads when it is opened (and on an hour change), from the page's cache without reading the big tables | `test_S_201_9_the_page_loads_the_list_when_it_is_opened` | passed |
+| S-201.10 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` (3,691 tests, the 2 known failures only) | passed |

@@ -128,33 +128,44 @@ class RtsProjection
      * $asOf: ang projection na alam lang sa oras na iyon: mga order hanggang sa araw na iyon, ang state ng bawat isa ay ang
      * huling status log hanggang doon (wala pang J&T state kung hindi pa nai-submit), ang edad ay hanggang doon, at ang
      * p(edad) ay natutunan mula sa alam noon (learnTable). Walang $asOf = ngayon, kasalukuyang status at naka-save na rate.
+     *
+     * $price: null = lahat ng presyo; 'latest' = ang mga order lang sa pinakabagong presyo ng page+item (latestPrice(),
+     * hanggang $to); [itemKey => presyo] = ang presyong iyon lang para sa mga key na nakalista, lahat para sa iba. Kapag
+     * sinala, kasama ang mga order na buong multiple ng presyo (2×, 3× = ilang piraso), at may "price" (buong piso, o
+     * null) ang row.
      */
-    public function rows(string $from, string $to, ?Carbon $asOf = null): array
+    public function rows(string $from, string $to, ?Carbon $asOf = null, string|array|null $price = null): array
     {
         $now = $asOf ? $asOf->copy()->setTimezone(self::TZ) : Carbon::now(self::TZ);
         $rates = $asOf ? $this->learnTable($now, true) : $this->rates();
         if ($asOf && $to > $now->toDateString()) $to = $now->toDateString();
         $aliases = new ItemAliasResolver();
-        $rows = [];
+        $buckets = [];   // itemKey => [presyo => bilang]
+        $labels = [];
+        $daily = [];     // itemKey => [ts_date => [presyo => bilang]] ng mga order na may presyo
+        $lastAt = [];    // itemKey => [presyo => [ts_date, id]] ng pinakabagong order sa presyong iyon
         $seen = [];
 
         $q = DB::table('macro_output as mo')
             ->leftJoin('from_jnts as j', 'j.waybill_number', '=', 'mo.waybill')
             ->whereBetween('mo.ts_date', [$from, $to])
             ->whereNotNull('mo.waybill')->where('mo.waybill', '!=', '')
-            ->select(array_merge(['mo.waybill', 'mo.PAGE', 'mo.ITEM_NAME', 'j.status', 'j.submission_time'], $asOf ? ['j.status_logs'] : []));
+            ->select(array_merge(['mo.id', 'mo.ts_date', 'mo.COD', 'mo.waybill', 'mo.PAGE', 'mo.ITEM_NAME', 'j.status', 'j.submission_time'], $asOf ? ['j.status_logs'] : []));
 
         foreach ($q->cursor() as $o) {
             if (isset($seen[$o->waybill])) continue;
             $seen[$o->waybill] = true;
 
             $key = self::itemKey((string) $o->PAGE, (string) $o->ITEM_NAME, $aliases);
-            $r = &$rows[$key];
-            $r ??= [
-                'page' => trim((string) $o->PAGE), 'item' => trim((string) $o->ITEM_NAME),
-                'orders' => 0, 'unmatched' => 0, 'matched' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0,
-                'in_transit' => 0, 'transit_age_sum' => 0, 'resolved_old' => 0, 'returned_old' => 0, 'transit_rts' => 0.0, 'no_rate' => false,
-            ];
+            $labels[$key] ??= ['page' => trim((string) $o->PAGE), 'item' => trim((string) $o->ITEM_NAME)];
+            $cod = self::price($o->COD);
+            if ($cod > 0) {
+                $at = [substr((string) $o->ts_date, 0, 10), (int) $o->id];
+                $daily[$key][$at[0]][$cod] = ($daily[$key][$at[0]][$cod] ?? 0) + 1;
+                if (!isset($lastAt[$key][$cod]) || $at > $lastAt[$key][$cod]) $lastAt[$key][$cod] = $at;
+            }
+            $r = &$buckets[$key][$cod];
+            $r ??= self::emptyCounts();
             $r['orders']++;
 
             $class = $asOf ? $this->classAt($o, $now) : self::statusClass($o->status);
@@ -181,6 +192,24 @@ class RtsProjection
             unset($r);
         }
 
+        $rows = [];
+        foreach ($buckets as $key => $byPrice) {
+            if ($price === null) {
+                $rows[$key] = $labels[$key] + self::sumCounts($byPrice);
+                continue;
+            }
+            $pick = $price === 'latest'
+                ? (isset($daily[$key]) ? self::latestPrice($daily[$key], $lastAt[$key]) : null)
+                : (array_key_exists($key, $price) ? $price[$key] : false);
+            if ($pick === false) {
+                // Walang naitalang presyo para sa key na ito (hal. day row bago nagkaroon ng presyo): lahat, gaya noon.
+                $rows[$key] = $labels[$key] + self::sumCounts($byPrice) + ['price' => null];
+                continue;
+            }
+            $rows[$key] = $labels[$key] + ($pick !== null ? self::atPrice($byPrice, (int) $pick) : self::emptyCounts())
+                + ['price' => $pick !== null ? (int) $pick : null];
+        }
+
         $set = $this->setRts($now->toDateString());
         $by = $this->lastSetBy();
         foreach ($rows as $key => &$r) {
@@ -203,6 +232,66 @@ class RtsProjection
         unset($r);
 
         return $rows;
+    }
+
+    /**
+     * COD ng order sa buong piso, gaya ng basa ng owner page sa MySQL: tanggal ang ₱, comma at espasyo, tapos ang numero
+     * sa simula lang (ang "499+50sf" ay 499, hindi 49950). 0 kapag wala o hindi numero.
+     */
+    public static function price(mixed $cod): int
+    {
+        $s = str_replace(['₱', ',', ' '], '', (string) $cod);
+
+        return preg_match('/^\d+(\.\d+)?/', $s, $m) ? (int) round((float) $m[0]) : 0;
+    }
+
+    /**
+     * Ang pinakabagong presyo: ang pinakamadalas na COD sa pinakabagong araw ng order (hindi ang iisang pinakabagong
+     * order, para hindi ito maitakda ng isang 2-piraso, typo o kasabay na promo). Tabla → ang mas marami sa huling 3 araw
+     * ng order, tapos ang may mas bagong order. $daily: [ts_date => [presyo => bilang]], $lastAt: [presyo => [ts_date, id]].
+     */
+    public static function latestPrice(array $daily, array $lastAt): ?int
+    {
+        if (!$daily) return null;
+        krsort($daily, SORT_STRING);
+        $counts = reset($daily);
+        $cands = array_keys($counts, max($counts), true);
+        if (count($cands) > 1) {
+            $three = array_slice($daily, 0, 3, true);
+            $sum = fn ($p) => array_sum(array_map(fn ($day) => $day[$p] ?? 0, $three));
+            $best = max(array_map($sum, $cands));
+            $cands = array_values(array_filter($cands, fn ($p) => $sum($p) === $best));
+        }
+        usort($cands, fn ($a, $b) => $lastAt[$b] <=> $lastAt[$a]);
+
+        return (int) $cands[0];
+    }
+
+    /** Bilang ng mga order sa presyong iyon at sa mga buong multiple nito (2×, 3×: ilang piraso sa isang order). */
+    private static function atPrice(array $byPrice, int $p): array
+    {
+        $parts = array_filter($byPrice, fn ($c, $cod) => $p > 0 && $cod >= $p && $cod % $p === 0, ARRAY_FILTER_USE_BOTH);
+
+        return self::sumCounts($parts);
+    }
+
+    private static function emptyCounts(): array
+    {
+        return [
+            'orders' => 0, 'unmatched' => 0, 'matched' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0,
+            'in_transit' => 0, 'transit_age_sum' => 0, 'resolved_old' => 0, 'returned_old' => 0, 'transit_rts' => 0.0, 'no_rate' => false,
+        ];
+    }
+
+    /** Pinagsamang bilang ng lahat ng presyo. */
+    private static function sumCounts(array $byPrice): array
+    {
+        $sum = self::emptyCounts();
+        foreach ($byPrice as $c) {
+            foreach ($c as $f => $v) $sum[$f] = $f === 'no_rate' ? ($sum[$f] || $v) : $sum[$f] + $v;
+        }
+
+        return $sum;
     }
 
     /** Karaniwang error (puntos) ng projection ayon sa average na edad ng mga in transit, mula sa backtest: ~3 sa day 3, ~1 sa day 5, ~0.5 sa day 7 pataas. */
