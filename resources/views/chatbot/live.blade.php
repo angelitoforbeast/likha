@@ -5,10 +5,12 @@
 @php
     $c = $feed['counts'];
     // Ang mga bot: [pangalan, paliwanag, estado kapag naka-link, gitna (x, y) ng hub sa 1920 × 1080, ang notes (itaas, taas), lalim sa 3D].
+    // Ang lalim ay bumababa mula sa itaas pababa (Bot 1 60, Bot 2 30, Botcake 0): sa 3D ang mas mataas na layer ay umaangat sa
+    // screen, kaya ang bot sa itaas ang pinakamataas at walang plate na tumatakip sa kapitbahay o sa KPI sa buong ugoy (±11°, rotateX 29–35°).
     $bots = [
-        'forbeast' => ['Bot 1', 'Forbeast', 'Connected', 490, 445, 104, 372, 70],
-        'incepxionbot' => ['Bot 2', 'Incepxionbot', 'Connected', 430, 620, 486, 158, 10],
-        'botcake' => ['Botcake', 'fallback', 'Fallback', 490, 795, 660, 372, 120],
+        'forbeast' => ['Bot 1', 'Forbeast', 'Connected', 490, 445, 104, 372, 60],
+        'incepxionbot' => ['Bot 2', 'Incepxionbot', 'Connected', 430, 620, 486, 158, 30],
+        'botcake' => ['Botcake', 'fallback', 'Fallback', 490, 795, 660, 372, 0],
     ];
     $linked = $c['linked'] + ['botcake' => true];
     // Ang pangalan ng site (Likha o Incepxion), ayon sa APP_URL.
@@ -838,8 +840,12 @@
     function cam(t) {
         k3 = live.reduced ? want : k3 + (want - k3) * .05;
         if (Math.abs(want - k3) < .002) k3 = want;
-        const sway = live.reduced ? 0 : 1, rx = k3 * (32 + 3 * sway * Math.sin(t / 9000)), ry = k3 * 11 * sway * Math.sin(t / 11000 - 1.9);
-        world.style.transform = k3 > .001 ? 'translateZ(' + (k3 * -230).toFixed(1) + 'px) rotateX(' + rx.toFixed(2) + 'deg) rotateY(' + ry.toFixed(2) + 'deg)' : '';
+        const sway = live.reduced ? 0 : 1, rx = k3 * (32 + 3 * sway * Math.sin(t / 9000)), ry = k3 * k3 * k3 * 11 * sway * Math.sin(t / 11000 - 1.9);
+        // Sa 3D ang mundo ay lumalayo nang 330 px at bumababa nang 70 px (buo na sa unang ikatlo ng paglipat, at mas baba pa nang
+        // kaunti sa gitna nito), at ang ugoy ay lumalaki lang sa dulo ng paglipat: ang nakatagilid na notes ng Bot 1 ay hindi umaabot
+        // sa KPI sa itaas, walang plate na tumatakip sa iba sa anumang punto ng paglipat o ng ugoy, at sa 3D ay buo ang lahat sa screen.
+        const ty = 70 * Math.min(1, k3 * 3) + 30 * Math.sin(Math.PI * k3);
+        world.style.transform = k3 > .001 ? 'translateY(' + ty.toFixed(1) + 'px) translateZ(' + (k3 * -330).toFixed(1) + 'px) rotateX(' + rx.toFixed(2) + 'deg) rotateY(' + ry.toFixed(2) + 'deg)' : '';
         world.style.setProperty('--k', k3.toFixed(3));
         // Habang 3D: ang pag-ikot ay tuloy (maliban sa reduced motion); sa 2D ay tumitigil ang loop pagkalapag.
         camRaf = (want && !live.reduced) || k3 !== want ? requestAnimationFrame(cam) : 0;

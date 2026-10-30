@@ -56,7 +56,8 @@ $sim = <<<'JS'
   const Q = new URLSearchParams(location.search);
   // ?shot: ang headless Chrome na may virtual time ay halos hindi nagpapatakbo ng requestAnimationFrame; para sa screenshot lang,
   // ang frame ay timer na 16 ms (ang parehong code ng page ang tumatakbo).
-  if (Q.has('shot')) window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);
+  // ?orbit=<ms>: idinadagdag sa oras ng frame, para makuha ang dulo ng ugoy ng 3D camera sa screenshot (ang barya ay agad lumalapag).
+  if (Q.has('shot')) { const off = +Q.get('orbit') || 0; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now() + off), 16); }
   const pages = ['Sample Page 03', 'Sample Page 07', 'Sample Page 12', 'Sample Page 15'];
   const names = ['Maria Santos', 'Paolo Garcia', 'Nina Castillo', 'Rey Navarro', 'Jose Dela Cruz', 'Carlo Mendoza', 'Jenny Ramos', 'Liza Fernandez', 'Mark Bautista', 'Ana Reyes'];
   let id = 100, n = 0;

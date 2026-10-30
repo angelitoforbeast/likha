@@ -33,7 +33,7 @@ Red runs (one line each): S-200.1–.3 `ErrorException: Undefined array key "not
 - [x] All P1 cases pass with tests — case table; outputs above.
 - [x] No new suite failures — baseline before code `Tests: 3674, Assertions: 70841, Failures: 2` (ExampleTest, ItemTableFitScriptTest); final in Tests.
 - [x] Rendered evidence page `docs/specs/200-evidence/live.html` with real-shaped fake data that opens on its own and plays the loot, the notes and the 3D toggle — the real Blade view rendered by `docs/specs/200-evidence/build.php` with fake counts and notes (made-up names), the rules script inlined, `fetch` replaced by a simulator (an order with a COD, one without, a burst of three; the notes move customers to the top and mark ORDERED). `?now[=ms]` polls early, `?d3` opens in 3D, `?noamt` makes the first order a "+1", `?shot` swaps animation frames for timers (headless screenshots only).
-- [x] Screenshots — `live-1920.png` (2D at 1920×1080: coins landing, the total rolling from ₱62,456 toward ₱63,055, Orders 263, Bot 1's newest customer ORDERED), `live-1920-3d.png` (3D, the same moment), `live-390.png` (390 px through `frame390.html`: header, KPIs 2×2, the gold core card, each bot card with its notes below, AI, follow-ups, inquiries, signals, activity).
+- [x] Screenshots — `live-1920.png` (2D at 1920×1080: coins landing, the total rolling from ₱62,456 toward ₱63,055, Orders 263, Bot 1's newest customer ORDERED), `live-1920-3d.png` (3D, the same moment), `live-1920-3d-orbit-plus11.png` and `live-1920-3d-orbit-minus11.png` (3D at both ends of the orbit, rotateY +11° / −11°; no plate overlaps another), `live-390.png` (390 px through `frame390.html`: header, KPIs 2×2, the gold core card, each bot card with its notes below, AI, follow-ups, inquiries, signals, activity).
 - [x] Query count and time per poll — see Tests.
 - [x] Name-source ruling — Rulings.
 - [x] Deploy notes — no migration (Deploy notes).
@@ -42,7 +42,7 @@ Red runs (one line each): S-200.1–.3 `ErrorException: Undefined array key "not
 ## How to run
 - Tests: `php vendor/bin/phpunit tests/Feature/Chatblast --filter ChatbotLive` (node is needed for `ChatbotLiveRulesTest`).
 - Evidence: `php docs/specs/200-evidence/build.php`, then open `docs/specs/200-evidence/live.html?now` in a browser; press 3D / 2D in the header.
-- Screenshots (headless Chrome): `chrome --headless=new --window-size=1920,1080 --virtual-time-budget=3380 --screenshot=live-1920.png "file:///…/live.html?now=2000&shot"` (add `&d3` for 3D; `frame390.html` with `--window-size=390,2900` for the phone).
+- Screenshots (headless Chrome): `chrome --headless=new --window-size=1920,1080 --virtual-time-budget=3380 --screenshot=live-1920.png "file:///…/live.html?now=2000&shot"` (add `&d3` for 3D, `&orbit=34579` / `&orbit=69136` for the +11° / −11° ends of the orbit; `frame390.html` with `--window-size=390,2900` for the phone).
 
 ## Rulings
 - **Name source.** 1) the newest non-empty `botcake_chats.name` of that page + PSID today: both entry points write it with every message (the Botcake JSON API sends the customer's Facebook full name; the gateway writes the name from `botcake_psids`, else the customer's previous named chat), so it is the name the system itself resolved, refreshed every message; 2) else `botcake_psids.fb_name` for that PSID on the same page (matched by page key, as the gateway does), for customers whose only events today are bot-side (reply, follow-up, order); 3) else "Customer · <page name cut to 18 characters>", never the PSID. Not used: the encoded order's receiver name (`macro_output`): it is the shipping receiver, sits beside the address and phone, and can differ from the person chatting. Tested in S-200.2 (the `botcake_psids` fallback; the same PSID's row on another page is ignored) and S-200.3 (the newest named chat wins over an older one and over a later empty one; no name gives "Customer · Likha Home Essent…").
@@ -55,11 +55,11 @@ Red runs (one line each): S-200.1–.3 `ErrorException: Undefined array key "not
 - **Fonts.** Comp D's system faces (Bahnschrift, Cascadia Mono / Consolas), nothing loaded; downloads are out of this job (same as 199).
 - **Impeccable.** The skill's context launcher was not run: it downloads its engine on first use, and downloads are not allowed here. The build followed comp D directly plus the skill's craft floor and polish reference (themed selection and focus rings, tabular numerals, contrast, states: no follow-ups yet, no customers yet, empty activity, dormant, reconnecting, signed out).
 - **Removed** `resources/views/chatbot/partials/live-map.blade.php` (199's network partial, no longer included anywhere).
+- **3D without overlap.** Comp D's depths (Bot 1 70, Bot 2 10, Botcake 120) let the Botcake notes and hub rise over Bot 2's in 3D. The bot groups now step down in depth from top to bottom (Bot 1 60, Bot 2 30, Botcake 0: in a tilted view a higher layer rises on screen, so the top bot is the highest), and the camera pulls back 330 px (was 230) and lowers the world 70 px, so Bot 1's tilted notes stay clear of the flat KPI row and Botcake's stay on screen. The orbit keeps comp D's ±11° sway and 32 ± 3° tilt; during the ~1 s switch the sway grows only at the end (k³) and the world dips 30 px mid-switch. Checked in headless Chrome by hit-testing every pair of plates (notes, hubs, KPIs, header, satellites, activity) with `elementsFromPoint` on a 2 px grid over their overlap: zero shared points at the orbit extremes (rotateY −11° / +11°, rotateX 29° / 35°) and over a sweep of rotateY −11…+11° × rotateX 29/32/35° × switch progress 5–100 %; at rest in 3D every plate is inside the screen (during the switch the Botcake notes can dip up to ~30 px below the edge for a moment).
 
 ## Deferred minors
 - The always-on CSS parts (ring rotation, scan band, streaks) run all day on the TV; they are compositor animations on a handful of elements. Not measured on the TV box itself.
 - The headless screenshots needed `?shot` (timers instead of animation frames) because headless Chrome with a virtual time budget barely runs `requestAnimationFrame`; the page itself is unchanged.
-- In 3D the Botcake notes plate (nearest the camera) overlaps the Bot 2 notes during part of the orbit, as in the comp's 3D capture.
 
 ## Merge danger
 - `LiveFeed` cache keys moved (`chatbot-live:v4`, `settled:v3`, `order-value:v2`, new `customers:v1`), so after deploy the first refresh per page filter recounts the day once; the old keys expire on their own (24 h).
@@ -96,5 +96,6 @@ Red runs (one line each): S-200.1–.3 `ErrorException: Undefined array key "not
 - Run 1, stage rules: loot split, coin landing times, saved 3D view in `chatbot-live-rules.js`.
 - Run 1, stage page: the HUD view, motion, 3D and the 390 px cards; moved selectors in the 196/199 tests; S-200.6.
 - Run 1, stage evidence and polish: evidence page, screenshots, measured query counts, full suite. Status: done.
+- Run 2, send-back (3D overlap): bot depths 60 / 30 / 0, camera pull-back 330 px and a 70 px drop in 3D, sway grows at the end of the switch; overlap hit-test zero at the orbit extremes; new orbit-extreme screenshots; Live tests `Tests: 34, Assertions: 485`, no failures. Status: done.
 
 200: done — Live page rebuilt as the comp-D Jarvis HUD with per-bot notes, named latest customers, loot and a remembered 3D toggle; all P1 cases pass, no new suite failures

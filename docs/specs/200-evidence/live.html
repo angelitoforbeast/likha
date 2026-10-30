@@ -241,7 +241,8 @@
   const Q = new URLSearchParams(location.search);
   // ?shot: ang headless Chrome na may virtual time ay halos hindi nagpapatakbo ng requestAnimationFrame; para sa screenshot lang,
   // ang frame ay timer na 16 ms (ang parehong code ng page ang tumatakbo).
-  if (Q.has('shot')) window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 16);
+  // ?orbit=<ms>: idinadagdag sa oras ng frame, para makuha ang dulo ng ugoy ng 3D camera sa screenshot (ang barya ay agad lumalapag).
+  if (Q.has('shot')) { const off = +Q.get('orbit') || 0; window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now() + off), 16); }
   const pages = ['Sample Page 03', 'Sample Page 07', 'Sample Page 12', 'Sample Page 15'];
   const names = ['Maria Santos', 'Paolo Garcia', 'Nina Castillo', 'Rey Navarro', 'Jose Dela Cruz', 'Carlo Mendoza', 'Jenny Ramos', 'Liza Fernandez', 'Mark Bautista', 'Ana Reyes'];
   let id = 100, n = 0;
@@ -417,7 +418,7 @@
     </section>
 
     
-                    <div class="grp g-bot g-forbeast" style="--z:70" data-bot-row="forbeast" data-linked="1">
+                    <div class="grp g-bot g-forbeast" style="--z:60" data-bot-row="forbeast" data-linked="1">
             <svg class="lyr" viewBox="0 0 1920 1080" aria-hidden="true">
                 <path class="pipe bp" pathLength="1" d="M710 431 L766.4 431" data-path="forbeast-in"/>
                 <path class="pipe bp" pathLength="1" d="M738.7 459 L710 459" data-path="forbeast-out"/>
@@ -461,7 +462,7 @@
                 <div class="off"><div class="l"><span class="mono">Chatting · orders · AI</span><b>—</b></div><div class="l"><span class="mono">Latest customers</span><b class="sm">none while not linked</b></div></div>
             </section>
         </div>
-                    <div class="grp g-bot g-incepxionbot" style="--z:10" data-bot-row="incepxionbot" data-linked="0">
+                    <div class="grp g-bot g-incepxionbot" style="--z:30" data-bot-row="incepxionbot" data-linked="0">
             <svg class="lyr" viewBox="0 0 1920 1080" aria-hidden="true">
                 <path class="pipe bp" pathLength="1" d="M650 606 L680.4 606" data-path="incepxionbot-in"/>
                 <path class="pipe bp" pathLength="1" d="M680.4 634 L650 634" data-path="incepxionbot-out"/>
@@ -501,7 +502,7 @@
                 <div class="off"><div class="l"><span class="mono">Chatting · orders · AI</span><b>—</b></div><div class="l"><span class="mono">Latest customers</span><b class="sm">none while not linked</b></div></div>
             </section>
         </div>
-                    <div class="grp g-bot g-botcake" style="--z:120" data-bot-row="botcake" data-linked="1">
+                    <div class="grp g-bot g-botcake" style="--z:0" data-bot-row="botcake" data-linked="1">
             <svg class="lyr" viewBox="0 0 1920 1080" aria-hidden="true">
                 <path class="pipe bp" pathLength="1" d="M710 781 L738.7 781" data-path="botcake-in"/>
                 <path class="pipe bp" pathLength="1" d="M766.4 809 L710 809" data-path="botcake-out"/>
@@ -1119,8 +1120,12 @@
     function cam(t) {
         k3 = live.reduced ? want : k3 + (want - k3) * .05;
         if (Math.abs(want - k3) < .002) k3 = want;
-        const sway = live.reduced ? 0 : 1, rx = k3 * (32 + 3 * sway * Math.sin(t / 9000)), ry = k3 * 11 * sway * Math.sin(t / 11000 - 1.9);
-        world.style.transform = k3 > .001 ? 'translateZ(' + (k3 * -230).toFixed(1) + 'px) rotateX(' + rx.toFixed(2) + 'deg) rotateY(' + ry.toFixed(2) + 'deg)' : '';
+        const sway = live.reduced ? 0 : 1, rx = k3 * (32 + 3 * sway * Math.sin(t / 9000)), ry = k3 * k3 * k3 * 11 * sway * Math.sin(t / 11000 - 1.9);
+        // Sa 3D ang mundo ay lumalayo nang 330 px at bumababa nang 70 px (buo na sa unang ikatlo ng paglipat, at mas baba pa nang
+        // kaunti sa gitna nito), at ang ugoy ay lumalaki lang sa dulo ng paglipat: ang nakatagilid na notes ng Bot 1 ay hindi umaabot
+        // sa KPI sa itaas, walang plate na tumatakip sa iba sa anumang punto ng paglipat o ng ugoy, at sa 3D ay buo ang lahat sa screen.
+        const ty = 70 * Math.min(1, k3 * 3) + 30 * Math.sin(Math.PI * k3);
+        world.style.transform = k3 > .001 ? 'translateY(' + ty.toFixed(1) + 'px) translateZ(' + (k3 * -330).toFixed(1) + 'px) rotateX(' + rx.toFixed(2) + 'deg) rotateY(' + ry.toFixed(2) + 'deg)' : '';
         world.style.setProperty('--k', k3.toFixed(3));
         // Habang 3D: ang pag-ikot ay tuloy (maliban sa reduced motion); sa 2D ay tumitigil ang loop pagkalapag.
         camRaf = (want && !live.reduced) || k3 !== want ? requestAnimationFrame(cam) : 0;
