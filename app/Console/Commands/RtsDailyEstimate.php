@@ -32,16 +32,17 @@ class RtsDailyEstimate extends Command
             $at = Carbon::parse($asOf, 'Asia/Manila')->endOfDay();
             if ($at->gt($now)) $at = $now;
             $rows = (new AnalystRtsDaily())->estimates($at);
-            $this->table(['Page', 'Item', 'Matched', 'In transit %', 'Projected', 'Estimate'], array_map(
-                fn ($r) => [$r['page'], $r['item'], $r['matched'], $r['in_transit_pct'], $r['projected_rts'], $r['estimate']], array_values($rows)));
+            $this->table(['Page', 'Item', 'Price', 'Matched', 'In transit %', 'Projected', 'Estimate'], array_map(
+                fn ($r) => [$r['page'], $r['item'], $r['price'], $r['matched'], $r['in_transit_pct'], $r['projected_rts'],
+                    $r['estimate'] ?? 'not enough yet'], array_values($rows)));
 
             return self::SUCCESS;
         }
 
         $t = microtime(true);
         $sum = (new AnalystRtsDaily())->run();
-        $this->info(sprintf('Written %d, kept (analyst) %d, skipped %d, failed %d in %.1fs.',
-            $sum['written'], $sum['kept'], $sum['skipped'], $sum['failed'], microtime(true) - $t));
+        $this->info(sprintf('Written %d, kept (analyst) %d, not enough at the latest price %d, skipped %d, failed %d in %.1fs.',
+            $sum['written'], $sum['kept'], $sum['low'], $sum['skipped'], $sum['failed'], microtime(true) - $t));
 
         return self::SUCCESS;
     }

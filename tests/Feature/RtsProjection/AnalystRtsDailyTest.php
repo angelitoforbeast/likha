@@ -91,8 +91,8 @@ class AnalystRtsDailyTest extends RtsProjectionTestCase
         $this->orders(30, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned');
         $this->orders(30, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered');
         $this->orders(40, 'Page A', 'Item A', '2026-10-20 12:00:00', 'In Transit');
-        $this->orders(3, 'Page A', 'Item B', '2026-09-15 12:00:00', 'Returned');   // nakaraang buwan: kasama
-        $this->orders(6, 'Page A', 'Item B', '2026-09-15 12:00:00', 'Delivered');
+        $this->orders(10, 'Page A', 'Item B', '2026-09-15 12:00:00', 'Returned');   // nakaraang buwan: kasama (30 order: sapat)
+        $this->orders(20, 'Page A', 'Item B', '2026-09-15 12:00:00', 'Delivered');
         $this->orders(5, 'Page C', 'Item C', '2026-08-20 12:00:00', 'Returned');   // bago ang nakaraang buwan: hindi
 
         $this->runAt('2026-10-23 06:00:00');
@@ -270,8 +270,8 @@ class AnalystRtsDailyTest extends RtsProjectionTestCase
     public function test_S_197_P1_1_an_item_whose_key_is_too_long_is_skipped_whole_and_the_rest_still_run(): void
     {
         $long = 'Item '.str_repeat('x', 95);
-        $this->orders(10, 'Page A', $long, '2026-10-20 12:00:00', 'Returned');
-        $this->orders(10, 'Page A', 'Item B', '2026-10-20 12:00:00', 'Returned');
+        $this->orders(30, 'Page A', $long, '2026-10-20 12:00:00', 'Returned');
+        $this->orders(30, 'Page A', 'Item B', '2026-10-20 12:00:00', 'Returned');
         $this->runAt('2026-10-23 06:00:00');
 
         $this->assertSame(0, DB::table('page_settings')->where('key', 'like', '%xxxx%')->count());

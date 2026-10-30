@@ -47,13 +47,13 @@ abstract class RtsProjectionTestCase extends MacroOutputTestCase
     }
 
     /**
-     * Isang order na may J&T row. $logs: [[to, batch_at], ...]. Ang ts_date ay ang araw ng $sub.
+     * Isang order na may J&T row. $logs: [[to, batch_at], ...]. Ang ts_date ay ang araw ng $sub. $cod: ang COD ng order.
      */
-    protected function order(string $page, string $item, string $sub, string $status, array $logs = []): void
+    protected function order(string $page, string $item, string $sub, string $status, array $logs = [], string $cod = '599'): void
     {
         $wb = 'WB'.(++$this->wb);
         DB::table('macro_output')->insert([
-            'PAGE' => $page, 'ITEM_NAME' => $item, 'STATUS' => 'Proceed', 'COD' => '599',
+            'PAGE' => $page, 'ITEM_NAME' => $item, 'STATUS' => 'Proceed', 'COD' => $cod,
             'waybill' => $wb, 'ts_date' => substr($sub, 0, 10),
         ]);
         DB::table('from_jnts')->insert([
@@ -62,10 +62,10 @@ abstract class RtsProjectionTestCase extends MacroOutputTestCase
         ]);
     }
 
-    protected function orders(int $n, string $page, string $item, string $sub, string $status, array $logs = []): void
+    protected function orders(int $n, string $page, string $item, string $sub, string $status, array $logs = [], string $cod = '599'): void
     {
         for ($i = 0; $i < $n; $i++) {
-            $this->order($page, $item, $sub, $status, $logs);
+            $this->order($page, $item, $sub, $status, $logs, $cod);
         }
     }
 

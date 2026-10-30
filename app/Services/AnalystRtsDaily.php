@@ -46,51 +46,78 @@ class AnalystRtsDaily
         return [$day->copy()->startOfMonth()->subMonthNoOverflow()->toDateString(), $day->toDateString()];
     }
 
-    /** Tantya bawat page+item, walang isinusulat. $asOf: ang alam lang noong oras na iyon (para sa replay). */
+    /**
+     * Tantya bawat page+item sa pinakabagong presyo nito, walang isinusulat. $asOf: ang alam lang noong oras na iyon
+     * (para sa replay), kasama ang pinakabagong presyo noon. Kulang sa order sa presyong iyon = estimate null.
+     */
     public function estimates(?Carbon $asOf = null): array
     {
         $at = $asOf ?? Carbon::now(self::TZ);
         [$from, $to] = self::range($at);
         $out = [];
-        foreach ($this->projection->rows($from, $to, $asOf) as $key => $r) {
-            if ($r['projected_rts'] === null || $r['matched'] === 0) continue;
-            $out[$key] = $r + ['estimate' => self::half($r['projected_rts'])];
+        foreach ($this->projection->rows($from, $to, $asOf, 'latest') as $key => $r) {
+            if (self::enough($r) && $r['projected_rts'] === null) continue;
+            $out[$key] = $r + ['estimate' => self::enough($r) ? self::half($r['projected_rts']) : null];
         }
 
         return $out;
     }
 
     /**
+     * Sapat ang order sa pinakabagong presyo: kasing dami ng kailangan ng feed at ng kulay (MIN_MATCHED_FLAG). Kapag
+     * kulang, walang tantya: mas masama ang maling numero kaysa "not enough yet", kaya walang balik sa lahat ng presyo.
+     */
+    public static function enough(array $r): bool
+    {
+        return $r['matched'] >= RtsProjection::MIN_MATCHED_FLAG;
+    }
+
+    /** Ang hover ng walang-tantya na cell. */
+    public static function lowNote(?int $price, int $matched): string
+    {
+        return sprintf('Latest price %s: only %d orders, not enough yet', $price !== null ? '₱' . number_format($price) : 'unknown', $matched);
+    }
+
+    /**
      * Ang run ng 06:00. Bawat page+item na may tantya: ang day row ng araw na ito (isang beses lang bawat araw), at ang
      * auto na value at dahilan, maliban kung ang analyst ay nag-type na ngayong araw mula 06:00 (iyon ang naiiwan hanggang
-     * sa susunod na run).
-     * @return array{written:int, kept:int, skipped:int, failed:int}
+     * sa susunod na run). Mga order lang sa pinakabagong presyo ng page+item; kulang = walang value (ang dating value at
+     * dahilan ay hindi na active) at isang day row na may presyo at bilang lang.
+     * @return array{written:int, kept:int, low:int, skipped:int, failed:int}
      */
     public function run(): array
     {
         $now = Carbon::now(self::TZ);
         $today = $now->toDateString();
         [$from, $to] = self::range($now);
-        $sum = ['written' => 0, 'kept' => 0, 'skipped' => 0, 'failed' => 0];
+        $sum = ['written' => 0, 'kept' => 0, 'low' => 0, 'skipped' => 0, 'failed' => 0];
         if (!Schema::hasTable('page_settings')) return $sum;
 
-        $rows = $this->projection->rows($from, $to);
-        $trend = $this->projection->rows($now->copy()->subDays(self::TREND_DAYS - 1)->toDateString(), $to);
+        $rows = $this->projection->rows($from, $to, null, 'latest');
+        // Ang huling 21 araw ay sa parehong presyo, para pareho ang pinaghahambing ng dahilan.
+        $trend = $this->projection->rows($now->copy()->subDays(self::TREND_DAYS - 1)->toDateString(), $to, null, array_map(fn ($r) => $r['price'], $rows));
         $acc = $this->accuracyFor($now);
         $doneToday = $this->dayRowsOn($today);
         $analystToday = $this->pctWrittenSince($now->copy()->setTimeFromTimeString(self::RUN_AT));
         $settings = new PageSettings();
+        $shown = (new AnalystRts())->all();
 
         foreach ($rows as $key => $r) {
-            if ($r['projected_rts'] === null || $r['matched'] === 0 || isset($doneToday[$key])) {
+            $low = !self::enough($r);
+            // Walang order na may J&T status at walang value na aalisin: walang masasabi, kaya walang row araw-araw.
+            $nothing = $low && $r['matched'] === 0 && !isset($shown[$key]);
+            if ((!$low && $r['projected_rts'] === null) || $nothing || isset($doneToday[$key])) {
                 $sum['skipped']++;
                 continue;
             }
             $canon = explode('||', $key, 2)[1];
-            $est = self::half($r['projected_rts']);
             $m = $r['matched'];
-            $day = [
-                'd' => $today, 'from' => $from, 'to' => $to, 'est' => $est, 'proj' => $r['projected_rts'], 'm' => $m,
+            $day = $low ? [
+                'd' => $today, 'from' => $from, 'to' => $to, 'price' => $r['price'], 'est' => null, 'm' => $m,
+                'acc' => $acc[$key] ?? (object) [],   // ang sukat ng mga lumang tantya ay itinatala pa rin
+            ] : [
+                'd' => $today, 'from' => $from, 'to' => $to, 'price' => $r['price'], 'est' => self::half($r['projected_rts']),
+                'proj' => $r['projected_rts'], 'm' => $m,
                 'fin' => round(($m - $r['in_transit']) / $m * 100, 2),
                 'rts' => round(($r['returned'] + $r['for_return']) / $m * 100, 2),
                 'del' => round($r['delivered'] / $m * 100, 2),
@@ -99,21 +126,28 @@ class AnalystRtsDaily
             ];
             $keep = isset($analystToday[$key]) && ($analystToday[$key]->source ?? null) !== 'auto';
             try {
-                DB::transaction(function () use ($settings, $r, $canon, $day, $keep, $trend, $key) {
+                DB::transaction(function () use ($settings, $r, $canon, $day, $keep, $low, $trend, $key) {
                     $page = $r['page'];
                     $settings->set($page, AnalystRts::PROVIDER, self::DAY . $canon, json_encode($day), system: true, source: 'auto');
                     if ($keep) return;
+                    if ($low) {
+                        // Walang tantya sa kulang na order: ang lumang value (hal. mula sa lahat ng presyo) ay hindi na ipinapakita.
+                        $old = $settings->pageQuery($page)->where('provider', AnalystRts::PROVIDER)
+                            ->whereIn('key', [AnalystRts::PCT . $canon, AnalystRts::REASON . $canon])->where('active', true)->get();
+                        foreach ($old as $s) $settings->deactivate($s, source: 'auto');
+                        return;
+                    }
                     $settings->set($page, AnalystRts::PROVIDER, AnalystRts::PCT . $canon, AnalystRts::format($day['est']), system: true, source: 'auto');
                     $settings->set($page, AnalystRts::PROVIDER, AnalystRts::REASON . $canon, self::reason($day, $trend[$key]['projected_rts'] ?? null, $r['set_rts']), system: true, source: 'auto');
                 });
-                $sum[$keep ? 'kept' : 'written']++;
+                $sum[$keep ? 'kept' : ($low ? 'low' : 'written')]++;
             } catch (\Throwable $e) {
                 // Isang item lang ang pumalya (hal. lampas 100 character ang key): itinatala, at tuloy ang iba.
                 $sum['failed']++;
                 Log::warning('rts:daily-estimate: item failed', ['page' => $r['page'], 'item' => $r['item'], 'error' => $e->getMessage()]);
             }
         }
-        if ($sum['written'] + $sum['kept'] > 0) OwnerPrivateController::bumpCacheVersion();
+        if ($sum['written'] + $sum['kept'] + $sum['low'] > 0) OwnerPrivateController::bumpCacheVersion();
 
         return $sum;
     }
@@ -122,8 +156,8 @@ class AnalystRtsDaily
     public static function reason(array $day, ?float $trendProj, ?float $setRts): string
     {
         $n = fn (float $v) => rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.');
-        $s = sprintf('Auto %s: %d order na may J&T status (%s–%s). %s%% tapos na (RTS %s%%, delivered %s%%); %s%% nasa biyahe pa',
-            self::RUN_AT, $day['m'], Carbon::parse($day['from'])->format('M j'), Carbon::parse($day['to'])->format('M j'),
+        $s = sprintf('Auto %s: %d order na may J&T status%s (%s–%s). %s%% tapos na (RTS %s%%, delivered %s%%); %s%% nasa biyahe pa',
+            self::RUN_AT, $day['m'], isset($day['price']) ? ' sa ₱' . number_format((int) $day['price']) : '', Carbon::parse($day['from'])->format('M j'), Carbon::parse($day['to'])->format('M j'),
             $n($day['fin']), $n($day['rts']), $n($day['del']), $n((float) $day['t']));
         if ($day['age'] !== null) $s .= ', avg ' . $n($day['age']) . ' araw';
         $s .= '. Tantya ng final RTS: ' . $n($day['est']) . '%.';
@@ -155,13 +189,20 @@ class AnalystRtsDaily
             foreach ($days as $key => $day) $sets[$day['from'] . '|' . $day['to']][$key] = $day;
             foreach ($sets as $range => $group) {
                 [$from, $to] = explode('|', $range);
-                $current = $this->projection->rows($from, $to);
+                // Sinusukat sa presyong ginamit ng day row; ang mga row bago nagkaroon ng presyo ay sa lahat, gaya noong isinulat.
+                $prices = [];
+                foreach ($group as $key => $day) {
+                    if (array_key_exists('price', $day)) $prices[$key] = $day['price'];
+                }
+                $current = $this->projection->rows($from, $to, null, $prices);
                 foreach ($group as $key => $day) {
                     $r = $current[$key] ?? null;
                     if (!$r || $r['matched'] === 0) continue;
+                    $est = isset($inForce[$key]) ? $inForce[$key]['pct'] : ($day['est'] ?? null);
+                    if ($est === null) continue;   // walang tantya noong araw na iyon (kulang sa order)
+                    $est = (float) $est;
                     $done = $r['delivered'] + $r['returned'] + $r['for_return'];
                     $act = $done > 0 ? round(($r['returned'] + $r['for_return']) / $done * 100, 2) : null;
-                    $est = isset($inForce[$key]) ? $inForce[$key]['pct'] : (float) $day['est'];
                     $out[$key][(string) $age] = [
                         'd' => $d, 'est' => $est, 'src' => isset($inForce[$key]) ? $inForce[$key]['src'] : 'auto',
                         'act' => $act, 'fin' => round($done / $r['matched'] * 100, 2), 'm' => $r['matched'],
@@ -176,7 +217,8 @@ class AnalystRtsDaily
 
     /**
      * Para sa /owner/private: itemKey => [e7, e14 (ng pinakabagong araw), hist = mga araw na may accuracy, pinakabago muna,
-     * hanggang HISTORY_DAYS].
+     * hanggang HISTORY_DAYS, price = ang presyong ginamit ng pinakabagong day row, note = ang "not enough yet" kapag
+     * kulang ang order noon].
      */
     public function recent(): array
     {
@@ -189,8 +231,12 @@ class AnalystRtsDaily
                 if (!$acc) continue;
                 $hist[] = ['d' => $d] + array_combine(array_map(fn ($a) => 'a' . $a, array_keys($acc)), array_values($acc));
             }
-            if (!$hist) continue;
-            $out[$key] = ['e7' => $hist[0]['a7']['err'] ?? null, 'e14' => $hist[0]['a14']['err'] ?? null, 'hist' => $hist];
+            $last = reset($byDay);
+            $price = isset($last['price']) ? (int) $last['price'] : null;
+            $note = array_key_exists('price', $last) && ($last['est'] ?? null) === null ? self::lowNote($price, (int) ($last['m'] ?? 0)) : null;
+            if (!$hist && $price === null && $note === null) continue;
+            $out[$key] = ['e7' => $hist[0]['a7']['err'] ?? null, 'e14' => $hist[0]['a14']['err'] ?? null, 'hist' => $hist,
+                'price' => $price, 'note' => $note];
         }
 
         return $out;
@@ -257,11 +303,15 @@ class AnalystRtsDaily
         return $out;
     }
 
-    /** Ang huling Mira RTS na isinulat sa araw na iyon bawat page+item: itemKey => [pct, src]. */
+    /**
+     * Ang Mira RTS na isinulat sa araw na iyon at nakatayo pa sa dulo nito, bawat page+item: itemKey => [pct, src]. Ang
+     * pinalitan o inalis sa parehong araw (hal. inalis ng run dahil kulang ang order) ay hindi ang tantya ng araw na iyon.
+     */
     private function pctWrittenOn(string $date): array
     {
         $out = [];
-        foreach ($this->pctRows(Carbon::parse($date, self::TZ)->startOfDay(), Carbon::parse($date, self::TZ)->endOfDay()) as $key => $r) {
+        $end = Carbon::parse($date, self::TZ)->endOfDay();
+        foreach ($this->pctRows(Carbon::parse($date, self::TZ)->startOfDay(), $end, false, $end) as $key => $r) {
             $out[$key] = ['pct' => (float) $r->value, 'src' => $r->source ?? 'mira'];
         }
 
@@ -275,7 +325,7 @@ class AnalystRtsDaily
     }
 
     /** itemKey => pinakabagong rts_pct row na isinulat sa pagitan. */
-    private function pctRows(Carbon $since, ?Carbon $until = null, bool $activeOnly = false): array
+    private function pctRows(Carbon $since, ?Carbon $until = null, bool $activeOnly = false, ?Carbon $standingAt = null): array
     {
         $cols = ['page_name', 'key', 'value'];
         if (Schema::hasColumn('page_settings', 'source')) $cols[] = 'source';
@@ -283,6 +333,7 @@ class AnalystRtsDaily
             ->where('created_at', '>=', $since->toDateTimeString());
         if ($until) $q->where('created_at', '<=', $until->toDateTimeString());
         if ($activeOnly) $q->where('active', true);
+        if ($standingAt) $q->where(fn ($w) => $w->whereNull('replaced_at')->orWhere('replaced_at', '>', $standingAt->toDateTimeString()));
         $out = [];
         foreach ($q->orderBy('id')->get($cols) as $r) {
             $out[strtolower(trim((string) $r->page_name)) . '||' . substr($r->key, strlen(AnalystRts::PCT))] = $r;

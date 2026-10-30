@@ -1076,7 +1076,7 @@
                               x-text="Number(row.analyst_rts_pct).toFixed(1)+'%'"></span>
                       </template>
                       <template x-if="row.analyst_rts_pct == null">
-                        <span style="color:#cbd5e1;">—</span>
+                        <span :title="!owCompact ? (row.analyst_rts_note || null) : null" :style="row.analyst_rts_note ? 'color:#cbd5e1;cursor:help;' : 'color:#cbd5e1;'">—</span>
                       </template>
                     </span>
                   </template>
@@ -2899,9 +2899,11 @@
         }
       },
 
-      // Mira RTS ng analyst: dahilan, kailan tinype, at ang dating value.
+      // Mira RTS ng analyst: ang presyong binilang (auto lang), dahilan, kailan tinype, at ang dating value.
       analystTip(row){
-        return 'Mira RTS ' + Number(row.analyst_rts_pct).toFixed(1) + '%: ' + (row.analyst_rts_reason || '')
+        const price = row.analyst_rts_source === 'auto' && row.analyst_rts_price != null
+          ? ' (₱' + Number(row.analyst_rts_price).toLocaleString('en-US') + ' orders only)' : '';
+        return 'Mira RTS ' + Number(row.analyst_rts_pct).toFixed(1) + '%' + price + ': ' + (row.analyst_rts_reason || '')
           + ' (' + (row.analyst_rts_source === 'auto' ? 'auto ' : 'tinype ') + String(row.analyst_rts_at || '').slice(0, 16) + '; dati: '
           + (row.analyst_rts_prev != null ? Number(row.analyst_rts_prev).toFixed(1) + '%' : '—') + ')';
       },

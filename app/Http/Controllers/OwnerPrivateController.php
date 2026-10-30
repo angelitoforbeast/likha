@@ -2792,6 +2792,9 @@ class OwnerPrivateController extends Controller
                 'analyst_rts_at'            => $analyst['at'] ?? null,
                 'analyst_rts_prev'          => $analyst['prev'] ?? null,
                 'analyst_rts_source'        => $analyst['source'] ?? null,
+                // Ang presyong ginamit ng tantya, at ang "not enough yet" kapag walang value dahil kulang ang order sa presyong iyon.
+                'analyst_rts_price'         => $acc['price'] ?? null,
+                'analyst_rts_note'          => $analyst ? null : ($acc['note'] ?? null),
                 // Mira RTS accuracy: error (puntos) ng tantya 7 at 14 araw na ang nakalipas; hist = huling 7 araw para sa hover.
                 'analyst_rts_acc_7'         => $acc['e7'] ?? null,
                 'analyst_rts_acc_14'        => $acc['e14'] ?? null,
