@@ -5,7 +5,7 @@ existing scheduled command over trusted tables; the only change is which orders 
 
 ## Design
 
-- **Latest price** of a page+item = the COD of its newest order (newest `ts_date`, then highest `macro_output.id`)
+- **Latest price** of a page+item = the most common COD of its newest order day (ties: higher count over the last 3 order days, then the newer order; orders at a whole multiple of it count under it; this replaces the first draft, "the COD of its newest order", after review)
   among the orders `RtsProjection::rows()` already reads (waybill set, ts_date in range), cleaned like the owner page
   does (₱, commas and spaces removed) and rounded to whole pesos. Only orders with a positive COD can be "the newest".
   Why the order's COD (ruling in the result): `macro_output` has no quantity column, so "COD per quantity" does not

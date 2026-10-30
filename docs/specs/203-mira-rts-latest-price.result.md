@@ -7,7 +7,7 @@
 
 ## Summary
 
-The daily Mira RTS (`rts:daily-estimate`, 06:00) now uses only the orders at each page+item's latest price. The latest price is the COD of the item's newest order. This applies to the projected RTS, the in-transit share, the estimate, the reason and hover, and the 7/14-day accuracy check.
+The daily Mira RTS (`rts:daily-estimate`, 06:00) now uses only the orders at each page+item's latest price. The latest price is the most common COD among the item's orders on its newest order day, so one odd order (a 2-piece order, a typo, a parallel promo) cannot set it. Orders at a whole multiple of that price (2×, 3×: multi-piece orders) count under it. This applies to the projected RTS, the in-transit share, the estimate, the reason and hover, and the 7/14-day accuracy check.
 
 - **Too few orders.** When the latest price has fewer than 30 matched orders, there is no estimate. The run removes the earlier value from view, and the empty "—" cell's hover says "Latest price ₱X: only N orders, not enough yet". It never falls back to all prices.
 - **Price in the hover.** The hover names the price: "Mira RTS 25.0% (₱199 orders only): Auto 06:00: 40 order na may J&T status sa ₱199 …".
@@ -22,7 +22,10 @@ The owner page's "Projected RTS" column and the RTS-check feed still count all p
 | Case | Test | Result |
 |---|---|---|
 | S-203.1.1 newest price only | `LatestPriceTest::test_S_203_1_1_the_estimate_counts_only_the_orders_at_the_newest_price` | pass |
-| S-203.1.2 newest order by date then id; COD read like the owner page | `test_S_203_1_2_the_latest_price_is_the_newest_order_by_date_then_by_id` | pass |
+| S-203.1.2 most common COD of the newest order day; ties by the last 3 order days, then the newer order; COD read like the owner page | `test_S_203_1_2_the_latest_price_is_the_most_common_cod_of_the_newest_order_day_with_tie_breaks` | pass |
+| S-203.1.5 one ₱398 order on the newest day among ₱199s → ₱199 | `test_S_203_1_5_one_398_order_on_the_newest_day_among_199s_leaves_the_price_at_199` | pass |
+| S-203.1.6 a day of ₱199×3 and ₱249×1 → ₱199 | `test_S_203_1_6_a_day_of_three_199s_and_one_249_gives_199` | pass |
+| S-203.1.7 a 2-piece ₱398 (and 3-piece ₱597) order counts under ₱199 | `test_S_203_1_7_a_multi_piece_order_at_a_multiple_of_the_price_counts_under_that_price` | pass |
 | S-203.1.3 another page stays separate | `test_S_203_1_3_another_page_with_the_same_item_keeps_its_own_latest_price` | pass |
 | S-203.1.4 the 21-day trend compares the same price | `test_S_203_1_4_the_21_day_trend_in_the_reason_compares_the_same_price` | pass |
 | S-203.2.1 too few gives "not enough yet", no fallback | `test_S_203_2_1_too_few_orders_at_the_latest_price_gives_not_enough_yet_and_no_fallback` | pass |
@@ -41,6 +44,7 @@ Red runs before the code:
   - S-203.1.2 with `'499+50sf'` read as 49950;
   - S-203.2.1 with 5 rows instead of 4 (the item with no matched orders still got a row).
 - S-203.1.4 and S-203.2.2 were added at the review. Both already passed on the previous commit; they are coverage tests.
+- Most-common-COD rule (commit f1eea5a1), tests first: S-203.1.5 failed with "398 is identical to 199", and S-203.1.6 and S-203.1.7 failed on the price, count and returned arrays. The reworked S-203.1.2 already passed on the newest-order rule (its fixture gives the same answer under both rules).
 
 ## Story changes
 
@@ -48,6 +52,7 @@ Red runs before the code:
   - The spec's cases are split into numbered cases.
   - Three cases were added after the review: S-203.1.4, S-203.2.2 and S-203.5.2.
   - Case S-203.1.2 also covers COD parsing.
+  - After review, story .1's "the selling price of its newest order" became "the most common COD of the newest order day". Ties go to the higher count over the last 3 order days, then to the newer order, and orders at a whole multiple of the price count under it. S-203.1.2 is reworded for this, and S-203.1.5, S-203.1.6 and S-203.1.7 are added.
 - Changed assertions in the spec-197 tests (`tests/Feature/RtsProjection/AnalystRtsDailyTest.php`). The intent of each test is unchanged; only the order counts were raised to the 30-order minimum the estimate now needs:
   - `test_S_197_P1_1_the_0600_run_writes…`: Item B goes from 3 R + 6 D to 10 R + 20 D. It is the same 33.33% → 33.5, with 30 orders.
   - `test_S_197_P1_1_an_item_whose_key_is_too_long…`: the long item and Item B go from 10 to 30 Returned each.
@@ -59,8 +64,8 @@ Red runs before the code:
 
 ## Done-when checklist
 
-- [x] P1 cases pass: `php vendor/bin/phpunit tests/Feature/RtsProjection` → `OK (54 tests, 352 assertions)`.
-- [x] The full `tests/Feature` run adds no new failures vs 8506b25c: `Tests: 3685, Assertions: 70915, Failures: 2, Skipped: 4` — only the two known base failures, `ExampleTest::test_the_application_returns_a_successful_response` and `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`.
+- [x] P1 cases pass: `php vendor/bin/phpunit tests/Feature/RtsProjection` → `OK (57 tests, 357 assertions)`.
+- [x] The full `tests/Feature` run adds no new failures vs 8506b25c: `Tests: 3688, Assertions: 70920, Failures: 2, Skipped: 4`, only the two known base failures (`ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`).
 - [x] Price-source ruling: see Rulings.
 - [x] Before/after example for a seeded item: see Rulings, "Before / after".
 - [x] Deploy notes: see Deploy notes.
@@ -74,12 +79,18 @@ Red runs before the code:
 
 ## Rulings
 
-1. **The price comes from the order's COD.** The latest price of a page+item is the COD of its newest order: the newest `ts_date`, then the highest `macro_output.id`. It is counted among the orders the projection already reads (waybill set, `ts_date` in the range). The COD is rounded to whole pesos and read the way the owner page reads it on MySQL: ₱, commas and spaces removed, then the leading number. Orders without a COD are never "the newest". The other candidates were weaker:
+1. **The price comes from the order's COD.** The latest price of a page+item is the most common COD among its orders on its newest order day (`ts_date`), counted among the orders the projection already reads (waybill set, `ts_date` in the range). Orders without a COD are ignored.
+   - **Ties:** the higher count over the last 3 order days wins, then the price with the newer order (`ts_date`, then `macro_output.id`).
+   - **Multi-piece orders:** orders whose COD is a whole multiple of that price (₱398 and ₱597 for ₱199) count under that price, for the estimate and for its accuracy check.
+   - **Reading the COD:** it is rounded to whole pesos and read the way the owner page reads it on MySQL: ₱, commas and spaces removed, then the leading number.
+   - **Why not the single newest order:** one odd order (a 2-piece ₱398, a typo, a parallel promo) would set the price, flip the cell to "not enough yet", and could switch between days.
+
+   The other fields were weaker:
    - **COD per quantity:** `macro_output` has no quantity column, so this cannot be computed.
    - **The owner page's PRICE column:** this is the mode COD over the page's date range (`mode_cod`, the most common price), not the newest one. During a promo switch it still shows the old price.
    - **The item setting** (`page_item_settings.mode_cod_int` / promo): staff write it when they save a Set RTS. It can be days old and does not exist for every item.
 
-   The COD is what the customer pays, and it sits in the same row the projection counts. Matching is exact on whole pesos: ₱199 and ₱199.00 match, ₱199 and ₱200 do not.
+   The COD is what the customer pays, and it sits in the same row the projection counts. Matching is exact on whole pesos (or a whole multiple): ₱199 and ₱199.00 match, ₱199 and ₱200 do not.
 2. **"Enough" is `matched ≥ RtsProjection::MIN_MATCHED_FLAG` (30) at the latest price.** The code already uses this number to decide when an RTS number is worth acting on (the conditional-formatting ratio and the RTS-check feed). Before this change, the daily run's only rule was "at least 1 matched order".
    - So an item with fewer than 30 matched orders in total also gets "not enough yet" now, not only an item whose price changed.
    - The not-enough run takes the earlier value and reason out of view (`active = false`, kept as history), unless the analyst typed a value today from 06:00.
@@ -120,20 +131,15 @@ Red runs before the code:
 - Baseline on 8506b25c (known): 2 failures, `ExampleTest` and `ItemTableFitScriptTest`.
   - My first baseline run started while I was editing files, so it showed 2 more failures (`AstraReplayCommandTest`, which watches files, and `SharedPagesBasePinTest`).
   - Rerun on their own: `AstraReplayCommandTest` → OK (19 tests). `SharedPagesBasePinTest` with the base Blade file → OK. The pin moved only because of the Blade change, and it is re-pinned.
-- `tests/Feature/RtsProjection`: `OK (54 tests, 352 assertions)`.
-- Full `tests/Feature` on the final tree: `Tests: 3685, Assertions: 70915, Failures: 2, Skipped: 4` — only the two known base failures, `ExampleTest::test_the_application_returns_a_successful_response` and `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`.
+- `tests/Feature/RtsProjection`: `OK (57 tests, 357 assertions)`.
+- Full `tests/Feature` on the final tree (f1eea5a1): `Tests: 3688, Assertions: 70920, Failures: 2, Skipped: 4`, only the two known base failures (`ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`).
 
 ## Open questions
 
-1. **Is one newest order enough to set the latest price?**
-   - The spec says "the selling price of its newest order", and that is what is built.
-   - The risk: if the newest order of an item is a 2-piece order (₱398), a typo, or a second promo that runs at the same time as the main one, that order becomes the latest price. With few orders at that price, the cell shows "not enough yet" even though the item has many orders at its main price. It can switch between days.
-   - The alternative: the latest price could be the newest price that has at least K orders (e.g., the newest price seen on at least 5 orders in the last 3 days), or the mode COD of the newest day.
-   - This needs a decision. It is a one-function change in `RtsProjection::rows()`.
-2. **Should items with fewer than 30 matched orders in total also lose their Mira RTS?**
-   - Under the spec's rule (fewer than 30 = "not enough yet"), yes: small items that used to get an estimate from 1 to 29 orders now show "—" with the note.
-   - The alternative: only apply the rule when the price changed. That would keep a small-number estimate for small items. Today it is the uniform rule.
-3. **Should the owner page's separate "Projected RTS" column and the RTS-check feed rows also move to the latest price?** They are left on all prices (Ruling 4). Say if they should follow.
+The earlier question "is one newest order enough to set the latest price?" was decided at review: no. The fix is in commit f1eea5a1 (Ruling 1). Two choices stay as built. They are listed here for the owner:
+
+1. **Small items lose their Mira RTS too.** The "not enough yet" rule (fewer than 30 matched orders at the latest price) applies to every item, not only to items whose price changed. Small items that used to get an estimate from 1 to 29 orders now show "—" with the note. As built: it applies to all items.
+2. **The owner page's separate "Projected RTS" column and the RTS-check feed rows stay on all prices** (Ruling 4). As built: only the Mira RTS moves to the latest price.
 
 ## Process suggestions
 
@@ -141,10 +147,12 @@ Red runs before the code:
 
 ## Proposed tasks
 
-- If open question 1 goes to "newest price with at least K orders", that is a small follow-up spec: one function and three tests.
+- None.
 
 ## Progress
 
 - Run 1: spec, result skeleton, plan; tests first (8 red); per-price buckets in `RtsProjection::rows()`, latest-price daily run, not-enough state, owner page fields; spec-197 tests adjusted; review (2 majors, 4 minors). Fixed: accuracy on not-enough days, COD read like MySQL, no rows for items with nothing to say, the value standing at the end of the day. Major 2 (a single newest order sets the price) is open question 1. Full suite: `Tests: 3685, Assertions: 70915, Failures: 2, Skipped: 4` — only the two known base failures, `ExampleTest::test_the_application_returns_a_successful_response` and `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`.
 
-203: done — the daily Mira RTS counts only the latest price's orders (newest order's COD), says "not enough yet" below 30, and the suite adds no failures
+- Run 2: the latest price is now the most common COD of the newest order day (ties: last 3 order days, then the newer order), and multi-piece orders at a whole multiple count under it. Tests first: 3 new cases red, then green. `tests/Feature/RtsProjection`: `OK (57 tests, 357 assertions)`. Full suite: `Tests: 3688, Assertions: 70920, Failures: 2, Skipped: 4`, only the two known base failures (`ExampleTest::test_the_application_returns_a_successful_response`, `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`).
+
+203: done — the daily Mira RTS counts only the latest price's orders (most common COD of the newest order day, multiples included), says "not enough yet" below 30, and the suite adds no failures
