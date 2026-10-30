@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\DB;
  */
 class SpeedPrewarmTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     protected const SNAPSHOT = __DIR__ . '/fixtures/speed-201-before.json';
 
     /** Ang mga filter na inihahambing sa lumang code: lahat, page, bot, lumang araw, lumang araw + page, dalawang araw bago + bot. */
@@ -368,7 +370,8 @@ class SpeedPrewarmTest extends ChatblastTestCase
             $old = $before[$name];
             $this->assertGreaterThan(0, $old['sequences']['total']['due'] + $old['total']['messages'], "$name has data");
             Cache::flush();
-            $page = self::plain(app(ResponseSpeed::class)->output($q));
+            // Lahat ng numero maliban sa bagong Not sent (ang fixture ay walang pumalyang padala ng Main Flow o AI).
+            $page = self::plain(self::withoutNotSent(app(ResponseSpeed::class)->output($q)));
             $wantPage = $old;
             unset($wantPage['sequences'], $wantPage['charts']['seq']);
             $this->assertSame($wantPage, $page, "$name: page");

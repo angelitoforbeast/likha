@@ -45,6 +45,15 @@ class ChatbotSpeedController extends Controller
         return response()->json($out + ['html' => view('chatbot.partials.speed-sequences', ['sequences' => $out['sequences'], 'charts' => ['prev_date' => $prev]])->render()]);
     }
 
+    /** Ang listahan ng Not sent (pinakabago muna) ng araw o ng isang oras (?hour=0–23), parehong filter at access ng page. */
+    public function notSent(Request $request)
+    {
+        $this->authorizeSpeed();
+        $out = $this->speed->notSentOutput($request->query());
+
+        return response()->json($out + ['html' => view('chatbot.partials.speed-not-sent', $out)->render()]);
+    }
+
     private function authorizeSpeed(): void
     {
         $raw = Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '';

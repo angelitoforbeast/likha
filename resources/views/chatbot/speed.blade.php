@@ -14,7 +14,7 @@
     $f = $filters;
     $keep = array_filter(['page_id' => $f['page_id'], 'bot' => $f['bot']], fn ($v) => $v !== null);
     $day = fn ($d) => route('chatbot.speed', $keep + ['date' => $d], false);
-    $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', 'Max', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot'];
+    $cols = ['Messages', 'Answered', 'Unanswered', 'Average', 'Median', 'p90', 'Max', '≤ 30 s', '≤ 1 min', '≤ 5 min', 'Not on bot', 'Never sent', 'Sent late', 'Late avg'];
 @endphp
 
 @section('content')
@@ -115,10 +115,17 @@
             </table>
         </div>
         <p class="mt-2 text-xs text-slate-500">
-            Hour = when the customer's message arrived (Manila). Answered = a bot reply to the same customer within 24 hours that was sent (failed, test and sequence sends are not replies). ≤ 30 s / 1 min / 5 min are counted against all messages. Attachments the bot ignores by design are left out. Not on bot = messages on a page without a flow at that time; they are not in the other numbers. The Forbeast and Botcake rows are for the whole day and follow the page filter only.
+            Hour = when the customer's message arrived (Manila). Answered = a bot reply to the same customer within 24 hours that was sent (failed, test and sequence sends are not replies). ≤ 30 s / 1 min / 5 min are counted against all messages. Attachments the bot ignores by design are left out. Not on bot = messages on a page without a flow at that time; they are not in the other numbers. The Forbeast and Botcake rows are for the whole day and follow the page filter only. Never sent and Sent late = messages whose Main Flow or AI reply failed to send (a failed send, not a sequence step or a test): Never sent = no reply went through within 24 hours; Sent late = a reply went through after one or more failed tries, Late avg = their average wait. They are still in the other numbers (the average included); the red bars on the chart are their count per hour.
             @if($total['unconfirmed'] > 0) {{ number_format($total['unconfirmed']) }} answered without a confirmed sent time (a Forbeast reply not confirmed yet, or a reply recorded before sent times were kept): their time is when Likha handed the reply over.@endif
             @if($refused_off) {{ number_format($refused_off) }} messages came in on pages with the bot Off and were not stored.@endif
         </p>
+        </details>
+        {{-- Ang listahan ng Not sent: binubuksan lang kapag binuksan ang kahon (mula sa cache ng page, kada araw o oras). --}}
+        <details class="sp-table mt-3" data-sp-notsent="{{ route('chatbot.speed.not-sent', $keep + ['date' => $f['date']], false) }}">
+            <summary class="cursor-pointer select-none py-1 text-sm font-medium text-blue-700"><span class="sp-show">Show the Not sent list</span><span class="sp-hide">Hide the Not sent list</span> <span class="text-xs font-normal text-slate-500" data-sp-summary="not-sent">({{ number_format($total['not_sent']['never']) }} never sent · {{ number_format($total['not_sent']['late']) }} sent late · {{ number_format($total['not_sent']['attempts']) }} failed tries)</span></summary>
+            <div data-sp-notsent-body>
+                <p class="text-sm text-slate-600" role="status">Loading the list…</p>
+            </div>
         </details>
     </section>
 
@@ -245,9 +252,13 @@ window.spRemember(document);
             tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)}))
             .concat(lines.map(([key, label, color, , , axis]) => ({label: label + ' (' + data.prev_date + ')', data: clamp(c.prev[key], axis), real: c.prev[key], borderColor: color + '66',
                 backgroundColor: color + '66', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, pointHitRadius: 4, tension: .25, spanGaps: false, yAxisID: axis || 'y', hidden: !c.shown.includes(key)})));
+        // Ang bilang ng Not sent kada oras (chart ng reply time): pulang bar sa kanang axis, para makita ang biglang dami.
+        if (c.not_sent) sets.push({type: 'bar', label: 'Not sent (right axis)', data: c.not_sent, real: c.not_sent, count: true, backgroundColor: '#dc262655', borderColor: '#dc2626',
+            borderWidth: 1, yAxisID: 'y2', order: 10});
         const counts = (part, i) => Object.entries(c[part] || {}).map(([k, v]) => k + ' ' + (v[i] ?? '—')).join(', ');
         const scales = {x: {ticks: {maxRotation: 0, autoSkipPadding: 6}}, y: {beginAtZero: true, max: c.top, title: {display: true, text: 'seconds'}}};
         if (lines.some(l => l[5] === 'y2')) scales.y2 = {display: 'auto', beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, title: {display: true, text: 'max, seconds'}};
+        if (c.not_sent) scales.y2 = {display: 'auto', beginAtZero: true, position: 'right', grid: {drawOnChartArea: false}, ticks: {precision: 0}, title: {display: true, text: 'not sent, messages'}};
         // Ang label ng value na lampas sa taas: ang una ay sa itaas ng gilid, ang kasunod sa parehong oras ay pababa.
         const overLabels = {id: 'spOver', afterDatasetsDraw(chart) {
             const {ctx, chartArea} = chart;
@@ -273,7 +284,7 @@ window.spRemember(document);
                 legend: {position: 'bottom', labels: {boxWidth: 12, boxHeight: 2, font: {size: 11}}},
                 tooltip: {callbacks: {
                     title: items => items.length ? pad(items[0].dataIndex) + ':00–' + pad(items[0].dataIndex) + ':59' : '',
-                    label: item => item.dataset.label + ': ' + fmt(item.dataset.real[item.dataIndex]),
+                    label: item => item.dataset.label + ': ' + (item.dataset.count ? (item.dataset.real[item.dataIndex] ?? '—') : fmt(item.dataset.real[item.dataIndex])),
                     footer: items => items.length ? [data.date + ': ' + counts('counts', items[0].dataIndex), data.prev_date + ': ' + counts('prev_counts', items[0].dataIndex)] : [],
                 }},
             },
@@ -284,14 +295,35 @@ window.spRemember(document);
 
     // Ang Sequences: ang section muna (HTML at mga numero), saka ang chart nito (kasama ang naunang araw). Ang pumalyang
     // tawag ay may Retry; ang ibang section ay buo na.
-    const box = document.querySelector('[data-sp-seq]');
-    if (!box) return;
-    const body = box.querySelector('[data-sp-seq-body]');
     const get = async url => {
         const r = await fetch(url, {headers: {Accept: 'application/json'}, credentials: 'same-origin'});
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
     };
+
+    // Ang listahan ng Not sent: sa unang bukas ng kahon, at kapag pinalitan ang oras; ang pumalya ay may Retry.
+    const ns = document.querySelector('[data-sp-notsent]');
+    if (ns) {
+        const nsBody = ns.querySelector('[data-sp-notsent-body]');
+        const loadList = async hour => {
+            nsBody.innerHTML = '<p class="text-sm text-slate-600" role="status">Loading the list…</p>';
+            try {
+                const url = new URL(ns.dataset.spNotsent, location.href);
+                if (hour !== '') url.searchParams.set('hour', hour);
+                nsBody.innerHTML = (await get(url)).html;
+                nsBody.querySelector('[data-sp-notsent-hour]')?.addEventListener('change', e => loadList(e.target.value));
+            } catch (e) {
+                nsBody.innerHTML = '<p class="text-sm text-amber-700" role="alert">The list did not load. <button type="button" class="cb-btn" data-sp-notsent-retry>Retry</button></p>';
+                nsBody.querySelector('[data-sp-notsent-retry]').addEventListener('click', () => loadList(hour));
+            }
+        };
+        let listed = false;
+        ns.addEventListener('toggle', () => { if (ns.open && !listed) { listed = true; loadList(''); } });
+    }
+
+    const box = document.querySelector('[data-sp-seq]');
+    if (!box) return;
+    const body = box.querySelector('[data-sp-seq-body]');
     const load = async () => {
         body.innerHTML = '<p class="text-sm text-slate-600" role="status" data-sp-seq-state="loading">Loading sequences…</p>';
         try {

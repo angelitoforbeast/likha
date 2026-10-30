@@ -25,6 +25,20 @@ trait LoadsSpeedSequences
         return $out;
     }
 
+    /**
+     * Ang mga numero nang walang "Not sent" (bago ito sa screen, wala sa lumang code): para sa paghahambing ng lahat ng
+     * iba pang numero sa lumang code.
+     */
+    protected static function withoutNotSent(array $v): array
+    {
+        foreach ($v as $k => $x) {
+            if ($k === 'not_sent') unset($v[$k]);
+            elseif (is_array($x)) $v[$k] = self::withoutNotSent($x);
+        }
+
+        return $v;
+    }
+
     /** Ang JSON ng endpoint: ang section ({filters, sequences, html}) o ang chart ({date, prev_date, seq}). */
     protected function speedSequences(string $query = '', bool $chart = false): array
     {
