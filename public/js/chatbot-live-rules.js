@@ -101,5 +101,45 @@
     return r('messages') + r('confirmed') + r('follow_ups') + r('ai') + r('orders');
   }
 
-  root.LiveRules = {num: num, peso: peso, route: route, label: label, schedule: schedule, settle: settle, land: land, roll: roll, signals: signals};
+  // Ang loot ng isang money action: may halaga = 6 na barya, at ang halaga ay hinati sa 6 na bahagi (buong piso, ang sobra sa
+  // mga unang barya, ang sentimo sa huli) para umakyat ang kabuuan sa bawat paglapag at eksaktong ang halaga sa dulo; walang
+  // halaga = isang "+1" na plate, walang piso. Reduced motion: walang barya, ang buong halaga ay isang hakbang.
+  var COINS = 6, STAGGER = 110, BURST = 380, ARC = 900;
+  function round2(v) { return Math.round(v * 100) / 100; }
+  function loot(pesos, opts) {
+    var reduced = !!(opts && opts.reduced), amount = round2(Math.max(0, Number(pesos) || 0));
+    if (amount <= 0) return {coins: reduced ? 0 : 1, plate: !reduced, parts: [0], label: '+1', peso: 0};
+    var label = '+' + peso(amount);
+    if (reduced) return {coins: 0, plate: false, parts: [amount], label: label, peso: amount};
+    var base = Math.floor(amount / COINS), extra = round2(amount - base * COINS), whole = Math.floor(extra), parts = [];
+    for (var i = 0; i < COINS; i++) parts.push(base + (i < whole ? 1 : 0));
+    parts[COINS - 1] = round2(parts[COINS - 1] + extra - whole);
+    return {coins: COINS, plate: false, parts: parts, label: label, peso: amount};
+  }
+
+  // Kailan lalapag ang bawat barya mula sa simula ng pagsabog (ms): lumalabas nang 110 ms ang pagitan, 380 ms ang pagsabog, 900 ms ang arko.
+  function landings(n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(i * STAGGER + BURST + ARC);
+    return out;
+  }
+
+  // Ang 2D/3D na napili sa browser na ito (localStorage, o anumang key/value na object). Walang storage, sira o ibang value = 2D.
+  var VIEW_KEY = 'likha-live-view';
+  function readView(store) {
+    try {
+      var v = typeof store.getItem === 'function' ? store.getItem(VIEW_KEY) : store[VIEW_KEY];
+      return v === '3d' ? '3d' : '2d';
+    } catch (e) { return '2d'; }
+  }
+  function saveView(store, mode) {
+    try {
+      var v = mode === '3d' ? '3d' : '2d';
+      if (typeof store.setItem === 'function') store.setItem(VIEW_KEY, v); else store[VIEW_KEY] = v;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  root.LiveRules = {num: num, peso: peso, route: route, label: label, schedule: schedule, settle: settle, land: land, roll: roll, signals: signals,
+    loot: loot, landings: landings, readView: readView, saveView: saveView};
 })(typeof self !== 'undefined' ? self : this);
