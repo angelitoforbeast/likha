@@ -3320,3 +3320,21 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveNetworkTest.php`, `tests/Feature/Chat
 | S-199.8 (P1) | The feed's query count per poll does not grow with the number of events | `test_S_199_8_the_query_count…` | passed |
 | S-199.9 (P1) | Existing spec-190/196 tests pass (moved labels and paths updated) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest` | passed |
 | S-199.10 (P1) | The full suite adds no new failures vs 59b39b46 | `tests/Feature` | see result |
+
+## S-200 The office TV is a Jarvis HUD with notes and the latest customers of every bot
+
+As the owner, I want /chatbot/live to look like a real Jarvis HUD (a gold reactor with the day's order value, rings and a map that always move, a 3D button, money that drops like game loot into the total) and, beside every bot, notes with its numbers and the customers it is talking to, by name.
+
+Slice 200. Threat model: trusted = signed-in staff who may open the Live page; untrusted = the query parameters (`page_id`, `bot`, cursors), page names and customer names (escaped text). No new route. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatblast/ChatbotLiveRulesTest.php` (node, `public/js/chatbot-live-rules.js`), the existing Live tests, headless Chrome evidence.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-200.1 (P1) | Given seeded events on each bot today, When the counts are read, Then each bot's notes (chatting now, AI answered, orders today, order value, last activity) equal the hand-counted values; the page filter and the bot filter apply; a dormant (not linked) bot returns zeros | `test_S_200_1_…` | passed |
+| S-200.2 (P1) | The latest customers are the 4 most recent distinct customers per bot, newest first, tagged ORDERED > AI > CHATTING, with the time of their last event; a customer on two bots appears under each; another day's customers never appear | `test_S_200_2_…` | passed |
+| S-200.3 (P1) | The stored name is shown when present; absent, "Customer · <page short name>"; no PSID, phone, address or message text in the feed JSON or the page | `test_S_200_3_…` | passed |
+| S-200.4 (P1) | The feed's query count per poll does not grow with the number of events or customers | `test_S_200_4_…` | passed |
+| S-200.5 (P1) | Loot: an amount bursts coins with "+₱N" and rolls the total per landing; null drops one "+1" plate and no pesos; bursts merged, none dropped; no count-down inside a minute; reduced motion without coins; the 3D toggle is saved and restored, default 2D | `ChatbotLiveRulesTest` | passed |
+| S-200.6 (P1) | The page renders every section of the HUD with its data hooks, and every number spec 199 shows is still there | `test_S_200_6_…` | passed |
+| S-200.7 (P1) | The existing spec-199/196 Live tests pass (changed assertions listed) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest`, `ChatbotLiveNetworkTest`, `ChatbotLiveRulesTest` | passed |
+| S-200.8 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` | see result |

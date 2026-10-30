@@ -225,14 +225,14 @@ class ChatbotLiveNetworkTest extends ChatblastTestCase
             'data-live-count="active"', 'data-live-unknown="in"', 'data-live-unknown="out"', 'data-live-last-order', 'data-live-plus', 'data-live-kpi="orders"'] as $s) {
             $this->assertStringContainsString($s, $html, $s);
         }
-        // Ang network: mga input, ang core at ang orasan nito, ang AI node, ang tatlong bot, ang Orders; bawat link ay isang path.
-        foreach (['NEURAL NETWORK', 'CUSTOMER INQUIRIES', 'FOLLOW-UP SEQUENCES', 'AI ANSWERS', 'signals · last 5 min', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT',
-            'BOTCAKE · FALLBACK', 'DORMANT', 'Follow-ups sent', 'Orders recorded', 'Order value today', 'LIVE ACTIVITY', 'Listening for new events'] as $s) {
+        // Ang HUD (spec 200): ang kabuuang inquiry, ang core at ang orasan nito, AI, follow-ups, ang tatlong bot na may in at out na path.
+        foreach (['INQUIRIES RECEIVED TODAY', 'FOLLOW-UPS SENT', 'AI ANSWERS', 'signals · last 5 min', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT',
+            'BOTCAKE · FALLBACK', 'DORMANT', ' orders · ', 'Order value today', 'LIVE ACTIVITY', 'Listening for new events'] as $s) {
             $this->assertStringContainsString($s, $html, $s);
         }
-        foreach (['inq', 'seq', 'ai', 'ord', 'forbeast', 'incepxionbot', 'botcake'] as $p) $this->assertSame(1, substr_count($html, 'data-path="' . $p . '"'), $p);
+        foreach (['seq', 'ai', 'forbeast-in', 'forbeast-out', 'incepxionbot-in', 'incepxionbot-out', 'botcake-in', 'botcake-out'] as $p) $this->assertSame(1, substr_count($html, 'data-path="' . $p . '"'), $p);
         $this->assertSame(60, preg_match_all('#<line [^>]*/>#', explode('</g>', explode('<g data-live-ticks', $html, 2)[1], 2)[0]));
-        $this->assertMatchesRegularExpression('#data-live-seq="0"[^>]*>Pa-remind · 1<#', $html);
+        $this->assertMatchesRegularExpression('#data-live-seq="0"[^>]*><span>Pa-remind</span><b>1</b>#', $html);
         $this->assertMatchesRegularExpression('#data-bot-row="incepxionbot"[^>]*data-linked="[01]"#', $html);
         $this->assertStringContainsString('data-live-log', $html);
         // Privacy at TV: walang pangalan o mensahe ng customer; walang font o script mula sa labas; walang blur.
