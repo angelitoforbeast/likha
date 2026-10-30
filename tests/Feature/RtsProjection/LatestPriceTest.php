@@ -117,6 +117,25 @@ class LatestPriceTest extends RtsProjectionTestCase
         $rows = (new RtsProjection())->rows('2026-09-01', '2026-10-23', null, 'latest');
         $this->assertSame([199, 30], [$rows[$this->k('Page A', 'Item A')]['price'], $rows[$this->k('Page A', 'Item A')]['matched']]);
         $this->assertSame([1299, 35], [$rows[$this->k('Page B', 'Item A')]['price'], $rows[$this->k('Page B', 'Item A')]['matched']]);
+
+        // Gaya ng basa ng owner page sa MySQL: ang numero sa simula lang.
+        foreach (['199' => 199, '₱ 1,299.00' => 1299, '199.50' => 200, '499+50sf' => 499, '' => 0, 'n/a' => 0] as $cod => $want) {
+            $this->assertSame($want, RtsProjection::price((string) $cod), (string) $cod);
+        }
+    }
+
+    public function test_S_203_1_4_the_21_day_trend_in_the_reason_compares_the_same_price(): void
+    {
+        $this->orders(20, 'Page A', 'Item A', '2026-09-20 12:00:00', 'Returned', [], '199');    // bago ang 21 araw
+        $this->orders(20, 'Page A', 'Item A', '2026-09-20 12:00:00', 'Delivered', [], '199');
+        $this->orders(40, 'Page A', 'Item A', '2026-10-10 12:00:00', 'Returned', [], '249');    // sa 21 araw, ibang presyo
+        $this->orders(10, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Returned', [], '199');
+        $this->orders(30, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
+
+        $this->runAt('2026-10-23 06:00:00');
+
+        // ₱199: buong range 30 ÷ 80 = 37.5%, huling 21 araw 10 ÷ 40 = 25% (hindi 62.5% na kasama ang ₱249).
+        $this->assertStringContainsString('Huling 21 araw 25% vs buong range 37.5% (-12.5 pts).', $this->active('rts_reason:', 'Page A', 'Item A')->value);
     }
 
     public function test_S_203_1_3_another_page_with_the_same_item_keeps_its_own_latest_price(): void
@@ -151,6 +170,8 @@ class LatestPriceTest extends RtsProjectionTestCase
         $this->assertSame(['2026-10-23', 199, 10, null], [$day['d'], $day['price'], $day['m'], $day['est']]);
         $this->assertSame('Latest price ₱199: only 10 orders, not enough yet', AnalystRtsDaily::lowNote(199, 10));
 
+        // Walang order na may J&T status at walang value na aalisin: walang row.
+        $this->orders(3, 'Page Z', 'Item Z', '2026-10-20 12:00:00', '');
         // Isang rerun ngayong araw: walang bagong row.
         $count = DB::table('page_settings')->count();
         $this->runAt('2026-10-23 09:00:00');
@@ -163,6 +184,43 @@ class LatestPriceTest extends RtsProjectionTestCase
         $this->assertNull($row['analyst_rts_pct']);
         $this->assertSame('Latest price ₱199: only 10 orders, not enough yet', $row['analyst_rts_note']);
         $this->assertStringContainsString('row.analyst_rts_note', $this->get('/owner/private')->assertOk()->getContent());
+    }
+
+    public function test_S_203_2_2_an_analyst_value_typed_after_0600_stays_on_a_not_enough_day(): void
+    {
+        config(['services.analyst_rts.key' => 'analyst-key']);
+        DB::table('page_item_settings')->insert(['page_name' => 'Page A', 'item_name' => 'Item A', 'rts_pct' => 30,
+            'effective_date' => '2026-09-01', 'mode_cod_int' => 199]);
+        $this->orders(40, 'Page A', 'Item A', '2026-09-10 12:00:00', 'Delivered', [], '249');
+        $this->orders(10, 'Page A', 'Item A', '2026-10-20 12:00:00', 'Delivered', [], '199');
+        Carbon::setTestNow(Carbon::parse('2026-10-23 07:00:00', 'Asia/Manila'));
+        $this->postJson('/api/owner/analyst-rts', ['rows' => [['page' => 'Page A', 'item' => 'Item A', 'rts_pct' => 35, 'reason' => 'Bagong presyo.']]],
+            ['X-ANALYST-RTS-KEY' => 'analyst-key'])->assertOk()->assertJson(['saved' => 1]);
+
+        $this->runAt('2026-10-23 08:00:00');                       // huling run: kulang ang ₱199
+
+        $this->assertSame(['35', 'mira'], [$this->active('rts_pct:', 'Page A', 'Item A')->value, $this->active('rts_pct:', 'Page A', 'Item A')->source]);
+        $this->assertSame('Bagong presyo.', $this->active('rts_reason:', 'Page A', 'Item A')->value);
+        $this->assertSame([199, null], [$this->dayRows('Page A', 'Item A')[0]['price'], $this->dayRows('Page A', 'Item A')[0]['est']]);
+    }
+
+    public function test_S_203_5_2_a_not_enough_day_still_records_the_accuracy_of_older_estimates(): void
+    {
+        $this->orders(40, 'Page A', 'Item A', '2026-10-05 12:00:00', 'In Transit', [], '199');
+        $this->runAt('2026-10-16 06:00:00');                       // ₱199: 50
+        $wb = DB::table('macro_output')->where('COD', '199')->orderBy('id')->pluck('waybill')->all();
+        DB::table('from_jnts')->whereIn('waybill_number', array_slice($wb, 0, 10))->update(['status' => 'Returned']);
+        DB::table('from_jnts')->whereIn('waybill_number', array_slice($wb, 10))->update(['status' => 'Delivered']);
+        $this->orders(5, 'Page A', 'Item A', '2026-10-22 12:00:00', 'Delivered', [], '249');   // bagong presyo, kulang pa
+
+        $this->runAt('2026-10-23 06:00:00');
+
+        $day = $this->dayRows('Page A', 'Item A')[1];
+        $this->assertSame([249, null], [$day['price'], $day['est']]);
+        // Ang tantya ng Okt 16 (₱199, 50%) laban sa totoong ₱199 (25%), kahit kulang ang ₱249 ngayon.
+        $this->assertSame(['2026-10-16', 40], [$day['acc']['7']['d'], $day['acc']['7']['m']]);
+        $this->assertEqualsWithDelta(25.0, $day['acc']['7']['err'], 0.001);
+        $this->assertSame(['2026-10-23'], array_column((new AnalystRtsDaily())->recent()[$this->k('Page A', 'Item A')]['hist'], 'd'));
     }
 
     public function test_S_203_3_1_the_tooltip_names_the_price(): void

@@ -100,16 +100,22 @@ class AnalystRtsDaily
         $doneToday = $this->dayRowsOn($today);
         $analystToday = $this->pctWrittenSince($now->copy()->setTimeFromTimeString(self::RUN_AT));
         $settings = new PageSettings();
+        $shown = (new AnalystRts())->all();
 
         foreach ($rows as $key => $r) {
             $low = !self::enough($r);
-            if ((!$low && $r['projected_rts'] === null) || isset($doneToday[$key])) {
+            // Walang order na may J&T status at walang value na aalisin: walang masasabi, kaya walang row araw-araw.
+            $nothing = $low && $r['matched'] === 0 && !isset($shown[$key]);
+            if ((!$low && $r['projected_rts'] === null) || $nothing || isset($doneToday[$key])) {
                 $sum['skipped']++;
                 continue;
             }
             $canon = explode('||', $key, 2)[1];
             $m = $r['matched'];
-            $day = $low ? ['d' => $today, 'from' => $from, 'to' => $to, 'price' => $r['price'], 'est' => null, 'm' => $m] : [
+            $day = $low ? [
+                'd' => $today, 'from' => $from, 'to' => $to, 'price' => $r['price'], 'est' => null, 'm' => $m,
+                'acc' => $acc[$key] ?? (object) [],   // ang sukat ng mga lumang tantya ay itinatala pa rin
+            ] : [
                 'd' => $today, 'from' => $from, 'to' => $to, 'price' => $r['price'], 'est' => self::half($r['projected_rts']),
                 'proj' => $r['projected_rts'], 'm' => $m,
                 'fin' => round(($m - $r['in_transit']) / $m * 100, 2),
@@ -297,11 +303,15 @@ class AnalystRtsDaily
         return $out;
     }
 
-    /** Ang huling Mira RTS na isinulat sa araw na iyon bawat page+item: itemKey => [pct, src]. */
+    /**
+     * Ang Mira RTS na isinulat sa araw na iyon at nakatayo pa sa dulo nito, bawat page+item: itemKey => [pct, src]. Ang
+     * pinalitan o inalis sa parehong araw (hal. inalis ng run dahil kulang ang order) ay hindi ang tantya ng araw na iyon.
+     */
     private function pctWrittenOn(string $date): array
     {
         $out = [];
-        foreach ($this->pctRows(Carbon::parse($date, self::TZ)->startOfDay(), Carbon::parse($date, self::TZ)->endOfDay()) as $key => $r) {
+        $end = Carbon::parse($date, self::TZ)->endOfDay();
+        foreach ($this->pctRows(Carbon::parse($date, self::TZ)->startOfDay(), $end, false, $end) as $key => $r) {
             $out[$key] = ['pct' => (float) $r->value, 'src' => $r->source ?? 'mira'];
         }
 
@@ -315,7 +325,7 @@ class AnalystRtsDaily
     }
 
     /** itemKey => pinakabagong rts_pct row na isinulat sa pagitan. */
-    private function pctRows(Carbon $since, ?Carbon $until = null, bool $activeOnly = false): array
+    private function pctRows(Carbon $since, ?Carbon $until = null, bool $activeOnly = false, ?Carbon $standingAt = null): array
     {
         $cols = ['page_name', 'key', 'value'];
         if (Schema::hasColumn('page_settings', 'source')) $cols[] = 'source';
@@ -323,6 +333,7 @@ class AnalystRtsDaily
             ->where('created_at', '>=', $since->toDateTimeString());
         if ($until) $q->where('created_at', '<=', $until->toDateTimeString());
         if ($activeOnly) $q->where('active', true);
+        if ($standingAt) $q->where(fn ($w) => $w->whereNull('replaced_at')->orWhere('replaced_at', '>', $standingAt->toDateTimeString()));
         $out = [];
         foreach ($q->orderBy('id')->get($cols) as $r) {
             $out[strtolower(trim((string) $r->page_name)) . '||' . substr($r->key, strlen(AnalystRts::PCT))] = $r;

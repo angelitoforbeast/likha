@@ -229,12 +229,15 @@ class RtsProjection
         return $rows;
     }
 
-    /** COD ng order sa buong piso, nilinis gaya ng owner page (₱, comma, espasyo); 0 kapag wala o hindi numero. */
+    /**
+     * COD ng order sa buong piso, gaya ng basa ng owner page sa MySQL: tanggal ang ₱, comma at espasyo, tapos ang numero
+     * sa simula lang (ang "499+50sf" ay 499, hindi 49950). 0 kapag wala o hindi numero.
+     */
     public static function price(mixed $cod): int
     {
-        $n = preg_replace('/[^0-9.\-]/', '', (string) $cod);
+        $s = str_replace(['₱', ',', ' '], '', (string) $cod);
 
-        return is_numeric($n) ? max(0, (int) round((float) $n)) : 0;
+        return preg_match('/^\d+(\.\d+)?/', $s, $m) ? (int) round((float) $m[0]) : 0;
     }
 
     private static function emptyCounts(): array
