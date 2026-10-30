@@ -15,7 +15,9 @@ use Illuminate\Support\Facades\Schema;
  * nito na talagang naipadala: ang oras ng Meta mula sa send_status (confirmed_at) kapag mayroon, kung wala ay ang sent_at
  * ng talaan (binibilang bilang "unconfirmed"). Hindi ang delivered o seen: oras iyon ng telepono ng customer, hindi ng bot.
  * Dalawang query na may petsa sa index (botcake_chats.received_at at chatbot_replies.sent_at), ang pagtutugma ay sa PHP;
- * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto.
+ * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto. Ang dobleng tala ng isang mensahe ay
+ * isa lang; ang pumalyang padala sa parehong pagbasa ang "Not sent". Ang Sequences ay sariling cache at endpoint
+ * (sequencesOutput), at ang default na view ay pinapainit ng chatbot:speed-warm (warmDefault).
  */
 class ResponseSpeed
 {
@@ -38,6 +40,27 @@ class ResponseSpeed
             'bot' => is_string($bot) && in_array($bot, ChatbotConnections::bots(), true) ? $bot : null];
     }
 
+    /** Ang mga chart ng page mismo; ang sa Sequences ay galing sa sariling endpoint nito (sequencesOutput). */
+    private const PAGE_CHARTS = ['reply', 'ai', 'push'];
+    /**
+     * Ang dalawang cache: ang mga numero ng page (walang Sequences) at ang Sequences. Ang bersyon sa key ay pinapalitan
+     * kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
+     */
+    public const PAGE_KEY = 'response-speed:v3:';
+    public const SEQUENCES_KEY = 'response-speed-seq:v1:';
+    /** Ang listahan ng "Not sent" ng isang araw at filter: isinusulat kasabay ng entry ng page (iisang kuwenta). */
+    public const NOT_SENT_KEY = 'response-speed-not-sent:v1:';
+    /** Ang pinakamaraming row ng listahan na ipinapakita (ang pinakabago); ang bilang ay ang lahat. */
+    public const NOT_SENT_SHOWN = 200;
+    /**
+     * Ang isinusulat ng pre-warm ay mas matagal nang kaunti kaysa sa sariling TTL ng page, para hindi ito mag-expire sa
+     * pagitan ng dalawang takbo (kada 2 minuto, at ang takbo mismo ay ilang segundo).
+     */
+    public const WARM_GRACE_SECONDS = 180;
+    /** Ang kahapon ay halos hindi na nagbabago: pinapainit ulit kapag ganito na katagal ang huling init nito. */
+    public const YESTERDAY_WARM_SECONDS = 1200;
+    public const WARM_STAMP_KEY = 'response-speed:warmed:';
+
     public function output(array $q): array
     {
         $f = self::filters($q);
@@ -50,32 +73,158 @@ class ResponseSpeed
         return $out + ['dates' => ['today' => $today, 'yesterday' => CarbonImmutable::parse($today)->subDay()->toDateString(),
             'prev' => $day->subDay()->toDateString(), 'next' => $f['date'] < $today ? $day->addDay()->toDateString() : null],
             'refused_off' => $f['page_id'] === null && $f['bot'] === null ? $this->refusedOff($f['date']) : null,
-            'charts' => self::charts($out, $prev)];
+            'charts' => self::charts($out, $prev, self::PAGE_CHARTS)];
     }
 
     /**
-     * Ang mga numero ng isang araw at filter, naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto). Ang bersyon sa key
-     * ay pinapalitan kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
+     * Ang Sequences ng /chatbot/speed, hiwalay sa page (ito ang pinakamabigat): walang $chart, ang araw lang
+     * ({filters, sequences}); may $chart, ang chart nito ({date, prev_date, seq}) mula sa araw at sa naunang araw. Bawat
+     * tawag ay hindi lalampas sa isang araw ng Sequences na kinukuwenta (ang araw ay naka-cache na mula sa unang tawag).
      */
-    private function day(array $f, string $today): array
+    public function sequencesOutput(array $q, bool $chart = false): array
     {
-        $ttl = $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
-        $key = 'response-speed:v2:' . md5(json_encode($f));
-        $hit = Cache::get($key);
-        if ($hit !== null) return $hit;
+        $f = self::filters($q);
+        $today = now()->toDateString();
+        $seq = $this->sequencesDay($f, $today);
+        if (!$chart) return ['filters' => $f, 'sequences' => $seq];
+        $pf = ['date' => CarbonImmutable::parse($f['date'])->subDay()->toDateString()] + $f;
+
+        return self::charts(['filters' => $f, 'sequences' => $seq], ['filters' => $pf, 'sequences' => $this->sequencesDay($pf, $today)], ['seq']);
+    }
+
+    private static function ttl(array $f, string $today): int
+    {
+        return $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
+    }
+
+    /**
+     * Ang mga numero ng isang araw at filter (walang Sequences), naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto,
+     * dagdag ang $extra ng pre-warm). Ang listahan ng "Not sent" ay sariling key, isinusulat muna (kaya kapag may entry ang
+     * page ay may listahan din). $fresh: hindi binabasa ang cache.
+     */
+    private function day(array $f, string $today, int $extra = 0, bool $fresh = false): array
+    {
+        $key = self::PAGE_KEY . md5(json_encode($f));
+        if (!$fresh) {
+            $hit = Cache::get($key);
+            if ($hit !== null) return $hit;
+        }
         $out = $this->build($f, $today);
-        // Ang araw na hindi nakuwenta ang Sequences ay sinusubukan ulit pagkalipas ng 2 minuto, hindi ng 30.
-        Cache::put($key, $out, empty($out['sequences']['too_large']) ? $ttl : min($ttl, self::TODAY_CACHE_SECONDS));
+        $ttl = self::ttl($f, $today) + $extra;
+        Cache::put(self::NOT_SENT_KEY . md5(json_encode($f)), $out['not_sent_list'], $ttl);
+        unset($out['not_sent_list']);
+        Cache::put($key, $out, $ttl);
 
         return $out;
     }
 
     /**
+     * Ang listahan ng "Not sent" ng /chatbot/speed (pinakabago muna), ng buong araw o ng isang oras ($q['hour'], 0–23;
+     * iba = buong araw), mula sa cache ng page; kapag wala, kinukuwenta ang araw (at ang entry ng page kasabay).
+     * @return array{filters: array, hour: ?int, total: int, items: array}
+     */
+    public function notSentOutput(array $q): array
+    {
+        $f = self::filters($q);
+        $today = now()->toDateString();
+        $h = $q['hour'] ?? null;
+        $hour = is_string($h) && ctype_digit($h) && strlen($h) <= 2 && (int) $h <= 23 ? (int) $h : null;
+        $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f)));
+        if (!is_array($list)) {
+            $this->day($f, $today, 0, true);
+            $list = Cache::get(self::NOT_SENT_KEY . md5(json_encode($f))) ?? ['counts' => [], 'items' => []];
+        }
+        $items = $list['items'];
+        if ($hour !== null) $items = array_values(array_filter($items, fn ($r) => (int) substr($r['at'], 11, 2) === $hour));
+
+        return ['filters' => $f, 'hour' => $hour, 'total' => $hour === null ? array_sum($list['counts']) : (int) ($list['counts'][$hour] ?? 0),
+            'items' => array_slice($items, 0, self::NOT_SENT_SHOWN)];
+    }
+
+    /**
+     * Ang Sequences ng isang araw at filter, sariling cache: ang hindi nakuwenta (too_large) ay sinusubukan ulit pagkalipas
+     * ng 2 minuto, hindi ng 30. Ang pre-warm ($extra > 0) ay hindi nagsusulat ng too_large: ang badyet ng CLI ay hindi ang
+     * sa web, kaya ang endpoint ang susubok nito sa sariling badyet (at ang naunang buong sagot ay hindi napapalitan).
+     */
+    private function sequencesDay(array $f, string $today, int $extra = 0): array
+    {
+        $key = self::SEQUENCES_KEY . md5(json_encode($f));
+        if ($extra === 0) {
+            $hit = Cache::get($key);
+            if ($hit !== null) return $hit;
+        }
+        $out = $this->buildSequences($f, $today);
+        if (empty($out['too_large'])) Cache::put($key, $out, self::ttl($f, $today) + $extra);
+        elseif ($extra === 0) Cache::put($key, $out, self::TODAY_CACHE_SECONDS);
+
+        return $out;
+    }
+
+    private function buildSequences(array $f, string $today): array
+    {
+        $start = $f['date'] . ' 00:00:00';
+        $end = CarbonImmutable::parse($f['date'])->addDay()->toDateString() . ' 00:00:00';
+
+        return $this->sequencesSection($f, $start, $end, $f['date'] === $today ? (int) now()->format('G') : 23);
+    }
+
+    /**
+     * Ang pre-warm ng default na view (walang page, walang bot): ang kahapon kapag oras na (walang tala na buo itong
+     * napainit bilang lumang araw, o YESTERDAY_WARM_SECONDS na ang tala), saka ang ngayon (bawat takbo). Sinusulat sa
+     * parehong key na binabasa ng page, hindi binabasa ang cache. Bawat bahagi ay sariling try: ang pumalya ay ini-report
+     * at hindi isinusulat (ang page ang kukuwenta nito gaya ng dati). Ang kahapon muna: ito ang reference ng mga chart ng
+     * ngayon. Pagkalipas ng hatinggabi ay walang tala ang bagong kahapon, kaya agad itong kinukuwenta ulit bilang buong araw.
+     * @return array{warmed: string[], failed: string[], too_large: string[]}
+     */
+    public function warmDefault(): array
+    {
+        $today = now()->toDateString();
+        $yesterday = CarbonImmutable::parse($today)->subDay()->toDateString();
+        $out = ['warmed' => [], 'failed' => [], 'too_large' => []];
+        $at = Cache::get(self::WARM_STAMP_KEY . $yesterday);
+        if (!is_int($at) || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS) {
+            if ($this->warm($yesterday, $today, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::PAST_CACHE_SECONDS + self::WARM_GRACE_SECONDS);
+        }
+        $this->warm($today, $today, $out);
+
+        return $out;
+    }
+
+    /**
+     * Ang dalawang entry ng isang araw ng default na view. true kapag naisulat ang entry ng page (ang tala ng kahapon ay
+     * ayon dito: ang Sequences na hindi nakuwenta ay kinukuwenta ng endpoint, hindi ng bawat takbo).
+     */
+    private function warm(string $date, string $today, array &$out): bool
+    {
+        $f = self::filters(['date' => $date]);
+        $ok = true;
+        try {
+            $this->day($f, $today, self::WARM_GRACE_SECONDS, true);
+            $out['warmed'][] = $date;
+        } catch (\Throwable $e) {
+            report($e);
+            $out['failed'][] = $date;
+            $ok = false;
+        }
+        // Ang error sa loob ng Sequences ay nagiging too_large (hindi isinusulat ng warm); ang try ay para sa pagsulat sa cache.
+        try {
+            $seq = $this->sequencesDay($f, $today, self::WARM_GRACE_SECONDS);
+            $out[empty($seq['too_large']) ? 'warmed' : 'too_large'][] = $date . ' sequences';
+        } catch (\Throwable $e) {
+            report($e);
+            $out['failed'][] = $date . ' sequences';
+        }
+
+        return $ok;
+    }
+
+    /**
      * Ang data ng mga chart, galing mismo sa mga table (kaya pareho ang numero): kada chart ang serye ng araw (24 na
      * value, null = puwang: walang numero o hindi pa naaabot ang oras), ang parehong serye ng naunang araw (prev) bilang
-     * reference, at ang bilang sa likod ng bawat punto (counts, prev_counts) para sa tooltip.
+     * reference, at ang bilang sa likod ng bawat punto (counts, prev_counts) para sa tooltip. $only: ang mga chart na ito
+     * lang (null = lahat).
      */
-    public static function charts(array $day, array $prev): array
+    public static function charts(array $day, array $prev, ?array $only = null): array
     {
         $col = fn (array $rows, callable $get) => array_map(fn ($r) => $r === null ? null : $get($r), $rows);
         $defs = [
@@ -94,7 +243,11 @@ class ResponseSpeed
                 'avg' => fn ($r) => $r['pushed_to_meta']['avg'], 'p90' => fn ($r) => $r['pushed_to_meta']['p90'],
             ], ['steps' => fn ($r) => $r['pushed_to_meta']['n']]],
         ];
+        if ($only !== null) $defs = array_intersect_key($defs, array_flip($only));
         $out = ['date' => $day['filters']['date'], 'prev_date' => $prev['filters']['date']];
+        // Ang bilang ng "Not sent" kada oras (hindi naipadala + naipadala pagkatapos ng pumalya), sariling axis sa chart ng
+        // reply time para makita ang biglang dami; ang naunang araw ay walang ganito.
+        if (isset($defs['reply'])) $out['reply']['not_sent'] = $col($day['hours'], fn ($r) => $r['not_sent']['never'] + $r['not_sent']['late']);
         foreach ($defs as $key => [$rows, $series, $counts]) {
             foreach (['series' => $day, 'prev' => $prev] as $part => $o) {
                 foreach ($series as $k => $get) $out[$key][$part][$k] = $col($rows($o), $get);
@@ -155,21 +308,27 @@ class ResponseSpeed
         [$keys, $ats, $hrs, $fbs, $ons] = [[], [], [], [], []];
         $names = \App\Models\BotcakeChat::pageMap();
         $gwOf = [];
-        foreach (self::windows($start, $end) as [$a, $b]) foreach (DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)
-            ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor() as $c) {
-            $payload = json_decode((string) $c->payload, true) ?: [];
-            // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast; ang
-            // pagbukas ng ad ay hindi mensahe (ang mensahe kasunod nito ang sinasagot).
-            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !empty($payload[ChatbotInbound::AD_OPEN])) continue;
-            $keys[] = $c->page_id . ':' . $c->psid;
-            $ats[] = strtotime($c->received_at);
-            $hrs[] = (int) substr($c->received_at, 11, 2);
-            // Ang chat mula sa gateway: ang aktibong gateway ng page (ang sumasagot).
-            $fbs[] = ($payload['source'] ?? null) === 'gateway'
-                ? ($gwOf[(string) $c->page_id] ??= Gateways::label(isset($names[(string) $c->page_id]) ? Gateways::active($names[(string) $c->page_id]) : Gateways::default()))
-                : ChatbotConnections::BOTS[0];
-            $ons[] = self::hadFlow($spans, (string) $c->page_id, $c->received_at);
+        foreach (self::windows($start, $end) as [$a, $b]) {
+            // Ang dobleng tala ng parehong mensahe ay parehong oras, kaya nasa iisang window: sapat ang tanda kada window.
+            $seen = [];
+            foreach (DB::table('botcake_chats')->where('received_at', '>=', $a)->where('received_at', '<', $b)
+                ->when($f['page_id'] !== null, fn ($q) => $q->where('page_id', $f['page_id']))->select(['page_id', 'psid', 'received_at', 'payload'])->cursor() as $c) {
+                $payload = json_decode((string) $c->payload, true) ?: [];
+                // Ang attachment lang ay sadyang hindi sinasagot; ang standby ay kopya ng Botcake sa page na nasa Forbeast; ang
+                // pagbukas ng ad ay hindi mensahe (ang mensahe kasunod nito ang sinasagot). Bago ang tanda ng doble: ang pagbukas
+                // at ang mensahe sa parehong segundo ay hindi doble.
+                if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !empty($payload[ChatbotInbound::AD_OPEN]) || self::seenTwice($seen, $c)) continue;
+                $keys[] = $c->page_id . ':' . $c->psid;
+                $ats[] = strtotime($c->received_at);
+                $hrs[] = (int) substr($c->received_at, 11, 2);
+                // Ang chat mula sa gateway: ang aktibong gateway ng page (ang sumasagot).
+                $fbs[] = ($payload['source'] ?? null) === 'gateway'
+                    ? ($gwOf[(string) $c->page_id] ??= Gateways::label(isset($names[(string) $c->page_id]) ? Gateways::active($names[(string) $c->page_id]) : Gateways::default()))
+                    : ChatbotConnections::BOTS[0];
+                $ons[] = self::hadFlow($spans, (string) $c->page_id, $c->received_at);
+            }
         }
+        unset($seen);
         $want = [];
         foreach ($keys as $i => $k) if ($ons[$i]) $want[$k] = true;
         $until = date('Y-m-d H:i:s', strtotime($end) + self::MAX_WAIT_SECONDS);
@@ -192,20 +351,26 @@ class ResponseSpeed
                 else $b['unconfirmed']++;
             }
             unset($b);
-        });
+        }, true);
         unset($want);
         $ai = $this->aiTimes($start, $until, $f['page_id']);
 
-        $blank = ['n' => 0, 'off' => 0, 'unconfirmed' => 0, 'secs' => [], 'ai' => [], 'flow' => [], 'ai_time' => []];
+        $blank = ['n' => 0, 'off' => 0, 'unconfirmed' => 0, 'secs' => [], 'ai' => [], 'flow' => [], 'ai_time' => [], 'never' => 0, 'attempts' => 0, 'late' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
         $byBot = array_fill_keys(ChatbotConnections::bots(), $blank);
-        $add = function (array &$b, bool $on, ?int $secs, bool $confirmed, ?int $chat) use ($ai): void {
+        // $tries: ilang pumalyang padala bago ang sagot (o ng walang sagot); kasama pa rin sa average gaya ng ibang mensahe.
+        $add = function (array &$b, bool $on, ?int $secs, bool $confirmed, ?int $chat, int $tries) use ($ai): void {
             if (!$on) {
                 $b['off']++;
                 return;
             }
             $b['n']++;
+            if ($tries > 0) {
+                $b['attempts'] += $tries;
+                if ($secs === null) $b['never']++;
+                else $b['late'][] = $secs;
+            }
             if ($secs === null) return;
             $b['secs'][] = $secs;
             if (!$confirmed) $b['unconfirmed']++;
@@ -217,15 +382,31 @@ class ResponseSpeed
                 $b['flow'][] = $secs;
             }
         };
+        $list = [];
         foreach ($keys as $i => $key) {
             [$secs, $confirmed, $chat] = $ons[$i] ? self::firstReply($replies, $key, $ats[$i]) : [null, true, null];
+            [$tries, $err] = $ons[$i] ? self::failedBefore($replies, $key, $ats[$i], $secs !== null) : [0, null];
             $bot = $fbs[$i];
             $byBot[$bot] ??= $blank;
-            $add($byBot[$bot], $ons[$i], $secs, $confirmed, $chat);
+            $add($byBot[$bot], $ons[$i], $secs, $confirmed, $chat, $tries);
             if ($f['bot'] !== null && $f['bot'] !== $bot) continue;
-            $add($hours[$hrs[$i]], $ons[$i], $secs, $confirmed, $chat);
-            $add($total, $ons[$i], $secs, $confirmed, $chat);
+            $add($hours[$hrs[$i]], $ons[$i], $secs, $confirmed, $chat, $tries);
+            $add($total, $ons[$i], $secs, $confirmed, $chat, $tries);
+            if ($tries === 0) continue;
+            [$page, $psid] = explode(':', $key, 2);
+            $list[] = ['at' => date('Y-m-d H:i:s', $ats[$i]), 'page' => $names[$page] ?? 'Page ' . $page, 'bot' => $bot, 'kind' => $secs === null ? 'never' : 'late',
+                'attempts' => $tries, 'wait' => $secs, 'code' => $err[0] ?? null, 'subcode' => $err[1] ?? null,
+                'inbox' => route('chatbot.inbox', ['page_id' => $page, 'psid' => $psid], false)];
         }
+        // Pinakabago muna; ang tabla ay ayon sa page at link, para pareho ang ayos anuman ang pagkabasa ng mga row. Kada oras
+        // ay ang NOT_SENT_SHOWN na pinakabago lang ang itinatabi (ang bilang ay ang lahat), para maliit ang cache sa araw ng
+        // malawakang pagpalya; ang pinakabagong NOT_SENT_SHOWN ng buong araw ay nasa mga ito rin.
+        usort($list, fn ($x, $y) => [$y['at'], $x['page'], $x['inbox']] <=> [$x['at'], $y['page'], $y['inbox']]);
+        $counts = array_fill(0, 24, 0);
+        $list = array_values(array_filter($list, function ($r) use (&$counts) {
+            return ++$counts[(int) substr($r['at'], 11, 2)] <= self::NOT_SENT_SHOWN;
+        }));
+        $list = ['counts' => $counts, 'items' => $list];
 
         $nowHour = $f['date'] === $today ? (int) now()->format('G') : 23;
 
@@ -236,7 +417,7 @@ class ResponseSpeed
             'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
             'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
                 'total' => self::pushRow($push['total'])],
-            'sequences' => $this->sequencesSection($f, $start, $end, $nowHour),
+            'not_sent_list' => $list,
         ];
     }
 
@@ -277,9 +458,25 @@ class ResponseSpeed
         return $limit > 0 ? intdiv($limit * 3, 4) : PHP_INT_MAX;
     }
 
-    private static function checkBudget(int $budget): void
+    /**
+     * Ang hangganang oras ng Sequences sa isang web request (segundo): bago ang 30 s ng php-fpm, para ang sagot ay ang tala
+     * na too_large at hindi ang timeout ng server. Ang console (ang warm ng default na view) ay walang hangganan.
+     */
+    public const SEQUENCE_SECONDS = 20;
+
+    /** Ang segundo na puwedeng gamitin ng Sequences sa request na ito; null = walang hangganan (console). */
+    protected function sequenceSeconds(): ?float
+    {
+        return app()->runningInConsole() ? null : (float) self::SEQUENCE_SECONDS;
+    }
+
+    /** Ang oras (microtime) na hindi na dapat lampasan ng kuwenta ng Sequences na tumatakbo; null = walang hangganan. */
+    private ?float $sequenceDeadline = null;
+
+    private function checkBudget(int $budget): void
     {
         if (memory_get_usage(true) > $budget) throw new \OverflowException('Speed: the sequences section is over its memory budget.');
+        if ($this->sequenceDeadline !== null && microtime(true) > $this->sequenceDeadline) throw new \OverflowException('Speed: the sequences section is over its time budget.');
     }
 
     /** Ang isang oras o ang araw ng pushed → sent sa Meta: pushed (Forbeast), measured, average, median, p90, max, unconfirmed, botcake. */
@@ -302,9 +499,10 @@ class ResponseSpeed
         $spans = BotHealth::flowSpans();
         [$keys, $ats] = [[], []];
         $chats = DB::table('botcake_chats')->where('received_at', '>=', $from)->where('received_at', '<', $to)->select(['page_id', 'psid', 'received_at', 'payload'])->cursor();
+        $seen = [];
         foreach ($chats as $c) {
             $payload = json_decode((string) $c->payload, true) ?: [];
-            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !empty($payload[ChatbotInbound::AD_OPEN]) || !self::hadFlow($spans, (string) $c->page_id, $c->received_at)) continue;
+            if (!empty($payload['_ignored']) || !empty($payload['_standby']) || !empty($payload[ChatbotInbound::AD_OPEN]) || !self::hadFlow($spans, (string) $c->page_id, $c->received_at) || self::seenTwice($seen, $c)) continue;
             $keys[] = [(string) $c->page_id, $c->page_id . ':' . $c->psid];
             $ats[] = strtotime($c->received_at);
         }
@@ -318,6 +516,58 @@ class ResponseSpeed
         return $out;
     }
 
+    /**
+     * Ang parehong mensahe na naitala nang dalawang beses (parehong page, PSID at oras ng dating, karaniwang magkasunod na
+     * ID) ay isang mensahe lang: ang doble ay dodoble rin ang bigat ng sagot nito sa average. true kapag nakita na.
+     */
+    private static function seenTwice(array &$seen, object $c): bool
+    {
+        $k = $c->page_id . ':' . $c->psid . ':' . $c->received_at;
+        if (isset($seen[$k])) return true;
+        $seen[$k] = true;
+
+        return false;
+    }
+
+    /**
+     * Ang mga pumalyang padala ng Main Flow o AI (hindi sequence) sa customer mula sa mensahe ($at): bago ang unang
+     * naipadalang sagot kapag may sagot ($answered; ayon sa pagkakasunod ng pagbasa, sent_at at ID, kaya pati ang pumalya
+     * sa parehong segundo ng sagot), o sa loob ng MAX_WAIT_SECONDS kapag wala. [bilang, [code, subcode] ng Meta ng huli];
+     * [0, null] kapag wala.
+     */
+    private static function failedBefore(array $replies, string $key, int $at, bool $answered): array
+    {
+        $fails = $replies['failed_at'][$key] ?? [];
+        if (!$fails) return [0, null];
+        $lo = 0;
+        if ($answered) {
+            $times = $replies['at'][$key];
+            $hi = count($times);
+            while ($lo < $hi) {
+                $mid = intdiv($lo + $hi, 2);
+                $times[$mid] >= $at ? $hi = $mid : $lo = $mid + 1;
+            }
+        }
+        [$n, $last] = [0, null];
+        foreach ($fails as $i => $t) {
+            if ($t < $at) continue;
+            // failed_pos: ilang naipadala ng customer ang nabasa bago ang pumalyang ito; lampas sa unang sagot = pagkatapos na nito.
+            if ($answered ? $replies['failed_pos'][$key][$i] > $lo : $t > $at + self::MAX_WAIT_SECONDS) break;
+            $n++;
+            $last = $i;
+        }
+
+        return [$n, $last === null ? null : $replies['failed_err'][$key][$last]];
+    }
+
+    /** Ang code at subcode ng Meta mula sa error ng padala ("… (#551) subcode 1545041"); ang ibang teksto ay hindi kinukuha. */
+    private static function metaError(?string $error): array
+    {
+        $error = (string) $error;
+
+        return [preg_match('/\(#(\d{1,9})\)/', $error, $m) ? (int) $m[1] : null, preg_match('/\bsubcode (\d{1,12})\b/', $error, $m) ? (int) $m[1] : null];
+    }
+
     private static function hadFlow(array $spans, string $page, string $at): bool
     {
         return isset($spans[$page]) && BotHealth::hadFlow($spans[$page], $at);
@@ -329,21 +579,31 @@ class ResponseSpeed
      * kumpirmado (confirmed) at ang chat ng takbo (chat). Ang real, confirmed at chat ng bawat isa ay ang sa pinakamaagang
      * totoong oras mula rito pababa (sunod-sunod ang padala kada PSID, pero hindi umaasa rito). Mga scalar lang, para
      * magaan ang isang buong araw. $each: tinatawag sa bawat row ng query (lahat ng customer), para sa ibang bilang mula
-     * sa parehong pagbasa.
-     * @return array{at: array<string, int[]>, real: array<string, int[]>, confirmed: array<string, bool[]>, chat: array<string, array<int, ?int>>}
+     * sa parehong pagbasa (ang naipadala lang). $failed: pati ang pumalyang padala, sa parehong query, bilang failed_at
+     * (sent_at), failed_err ([code, subcode] ng Meta) at failed_pos (ilang naipadala ang nauna rito) kada customer na $want.
+     * @return array{at: array<string, int[]>, real: array<string, int[]>, confirmed: array<string, bool[]>, chat: array<string, array<int, ?int>>, failed_at: array<string, int[]>, failed_err: array<string, array>}
      */
-    private function replies(string $startAt, string $endAt, ?string $page, array $want, ?\Closure $each = null): array
+    private function replies(string $startAt, string $endAt, ?string $page, array $want, ?\Closure $each = null, bool $failed = false): array
     {
-        $out = ['at' => [], 'real' => [], 'confirmed' => [], 'chat' => []];
+        $out = ['at' => [], 'real' => [], 'confirmed' => [], 'chat' => [], 'failed_at' => [], 'failed_err' => [], 'failed_pos' => []];
         if (!$want && $each === null) return $out;
         $confirm = ChatbotReply::hasConfirm();
-        $cols = array_merge(['page_id', 'psid', 'chat_id', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : [], ChatbotReply::hasVia() ? ['via'] : []);
+        $cols = array_merge(['page_id', 'psid', 'chat_id', 'sent_at'], $confirm ? ['confirmed_at', 'confirmed_status'] : [], ChatbotReply::hasVia() ? ['via'] : [], $failed ? ['status', 'error'] : []);
         $seqCol = Schema::hasColumn('chatbot_replies', 'sequence_id');
-        foreach (self::windows($startAt, $endAt) as [$a, $b]) foreach (DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', SendStatus::DELIVERED)
+        foreach (self::windows($startAt, $endAt) as [$a, $b]) foreach (DB::table('chatbot_replies')->where('kind', 'send')->whereIn('status', $failed ? [...SendStatus::DELIVERED, 'failed'] : SendStatus::DELIVERED)
             ->where('sent_at', '>=', $a)->where('sent_at', '<', $b)
             ->when($page !== null, fn ($q) => $q->where('page_id', (int) $page))
             ->when($seqCol, fn ($q) => $q->whereNull('sequence_id'))
             ->orderBy('sent_at')->orderBy('id')->select($cols)->cursor() as $r) {
+            if ($failed && $r->status === 'failed') {
+                $k = $r->page_id . ':' . $r->psid;
+                if (isset($want[$k])) {
+                    $out['failed_at'][$k][] = strtotime($r->sent_at);
+                    $out['failed_pos'][$k][] = count($out['at'][$k] ?? []);
+                    $out['failed_err'][$k][] = self::metaError($r->error);
+                }
+                continue;
+            }
             if ($each !== null) $each($r);
             $k = $r->page_id . ':' . $r->psid;
             if (!isset($want[$k])) continue;
@@ -424,7 +684,10 @@ class ResponseSpeed
         $t = self::stats($b['ai_time']);
 
         return $out + ['not_on_bot' => $b['off'], 'unconfirmed' => $b['unconfirmed'], 'with_ai' => self::stats($b['ai']), 'no_ai' => self::stats($b['flow']),
-            'ai_time' => ['avg' => $t['avg'], 'p90' => $t['p90'], 'max' => $t['max']]];
+            'ai_time' => ['avg' => $t['avg'], 'p90' => $t['p90'], 'max' => $t['max']],
+            // Not sent: hindi kailanman naipadala (never), naipadala pagkatapos ng pumalya (late, at ang average na hintay nito),
+            // at ang bilang ng mga pumalyang padala (attempts).
+            'not_sent' => ['never' => $b['never'], 'late' => count($b['late']), 'attempts' => $b['attempts'], 'late_avg' => self::stats($b['late'])['avg']]];
     }
 
     // ── mga sequence ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -444,6 +707,8 @@ class ResponseSpeed
     private function sequences(array $f, string $start, string $end, int $nowHour): array
     {
         $budget = $this->sequenceBudget();
+        $secs = $this->sequenceSeconds();
+        $this->sequenceDeadline = $secs === null ? null : microtime(true) + $secs;
         $blank = ['due' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'none' => 0, 'botcake' => 0, 'push' => [], 'meta' => []];
         $hours = array_fill(0, 24, $blank);
         $total = $blank;
@@ -544,7 +809,7 @@ class ResponseSpeed
                 $d = json_decode((string) $e->detail, true);
                 if (is_array($d) && in_array($d['op'] ?? null, ['ran', 'skipped', 'failed'], true)) $each($e, $d);
             }
-            self::checkBudget($budget);
+            $this->checkBudget($budget);
         }
 
         return $maxId;
@@ -572,7 +837,7 @@ class ResponseSpeed
                 if ($t < $first[$k] || !isset($before[$k])) $before[$k] = $t;
                 else $before[$k] .= "\n" . $t;
             }
-            self::checkBudget($budget);
+            $this->checkBudget($budget);
         }
 
         return $before;
@@ -650,7 +915,7 @@ class ResponseSpeed
                 $out[$k] .= pack('JJJC', strtotime($r->sent_at), (int) $r->sequence_id, $meta ? strtotime($r->confirmed_at) : 0,
                     (in_array($r->status, SendStatus::DELIVERED, true) ? self::SEND_DELIVERED : 0) | ($botcake ? self::SEND_BOTCAKE : 0) | ($meta ? self::SEND_META : 0));
             }
-            self::checkBudget($budget);
+            $this->checkBudget($budget);
         }
 
         return $out;

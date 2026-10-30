@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Http;
  */
 class MetaReplySpeedTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     private const URL = 'https://forbeast.example.test/api/v1/site/reply-speed*';
 
     protected function setUp(): void
@@ -241,8 +243,9 @@ class MetaReplySpeedTest extends ChatblastTestCase
             $this->assertMatchesRegularExpression('#Forbeast did not answer \(12:30(:\d\d)?\)#', $s, $name);
             $this->assertArrayNotHasKey('meta', $c, $name);
             $this->assertStringNotContainsString('sp-chart-meta', $html, $name);
-            // Ang ibang bahagi ng screen ay gaya ng dati.
-            foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('<canvas id="sp-chart-' . $k . '"', $html, "$name $k");
+            // Ang ibang bahagi ng screen ay gaya ng dati (ang Sequences ay mula sa sariling endpoint nito).
+            $full = $this->withSequences($html);
+            foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('<canvas id="sp-chart-' . $k . '"', $full, "$name $k");
             // Isang tawag lang: ang naunang araw ay hindi na tinatawag kapag hindi sumagot ang araw.
             Http::assertSentCount(++$n);
         }

@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\DB;
  */
 class ResponseSpeedTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -84,8 +86,10 @@ class ResponseSpeedTest extends ChatblastTestCase
     private function out(array $q = []): array
     {
         Cache::flush();
+        $s = app(ResponseSpeed::class);
 
-        return app(ResponseSpeed::class)->output($q);
+        // Ang Sequences ay mula sa sariling endpoint nito; kasama rito para buo ang mga numero ng screen.
+        return $s->output($q) + ['sequences' => $s->sequencesOutput($q)['sequences']];
     }
 
     public function test_S_182_1_the_hour_row_uses_the_first_reply_actually_sent(): void
@@ -309,7 +313,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame(1, $this->out(['page_id' => '1002'])['sequences']['total']['due']);
 
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
-        $html = $this->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->speedPage();
         $this->assertStringContainsString('data-table="sequences"', $html);
         $this->assertStringContainsString('data-table="sequence-slowest"', $html);
     }
@@ -335,15 +339,20 @@ class ResponseSpeedTest extends ChatblastTestCase
 
     private ?object $ceo = null;
 
-    /** Ang screen bilang CEO: ang data ng mga chart (ang JSON sa sp-data) at ang response (ang data ng mga table). */
+    /**
+     * Ang screen bilang CEO: ang data ng mga chart (ang JSON sa sp-data, kasama ang chart ng Sequences mula sa endpoint
+     * nito), ang response (ang data ng mga table) at ang Sequences mula sa endpoint.
+     */
     private function screen(string $query = ''): array
     {
         Cache::flush();
         $this->actingAs($this->ceo ??= $this->user('CEO', 'ceo-charts@example.test'));
         $res = $this->get('/chatbot/speed' . ($query !== '' ? '?' . $query : ''))->assertOk();
         $this->assertSame(1, preg_match('#<script type="application/json" id="sp-data">(.*?)</script>#s', $res->getContent(), $m));
+        $c = json_decode($m[1], true);
+        $c['seq'] = $this->speedSequences($query, true)['seq'];
 
-        return [json_decode($m[1], true), $res];
+        return [$c, $res, $this->speedSequences($query)['sequences']];
     }
 
     /** Ang isang column ng isang table bilang serye ng chart: null ang oras na blangko (hindi pa naaabot). */
@@ -405,14 +414,14 @@ class ResponseSpeedTest extends ChatblastTestCase
     public function test_S_185_5_chart_4_matches_the_sequences_pushed_to_meta_columns(): void
     {
         $this->seedSteps();
-        [$c, $res] = $this->screen();
-        $rows = $res->viewData('sequences')['hours'];
+        [$c, $res, $seq] = $this->screen();
+        $rows = $seq['hours'];
 
         $this->assertSame(['avg', 'p90'], array_keys($c['seq']['series']));
         foreach (['avg', 'p90'] as $k) $this->assertEquals(self::col($rows, fn ($r) => $r['pushed_to_meta'][$k]), $c['seq']['series'][$k], $k);
         $this->assertEquals([62.5, 120], [$c['seq']['series']['avg'][10], $c['seq']['series']['p90'][10]]);
         $this->assertSame(self::col($rows, fn ($r) => $r['pushed_to_meta']['n']), $c['seq']['counts']['steps']);
-        $this->assertStringContainsString('id="sp-chart-seq"', $res->getContent());
+        $this->assertStringContainsString('id="sp-chart-seq"', $this->withSequences($res->getContent()));
     }
 
     public function test_S_185_6_the_page_bot_and_day_filters_change_all_charts(): void
@@ -424,12 +433,12 @@ class ResponseSpeedTest extends ChatblastTestCase
         [$all] = $this->screen();
 
         foreach (['page_id=1002', 'bot=Botcake', 'date=2026-10-20'] as $q) {
-            [$c, $res] = $this->screen($q);
+            [$c, $res, $seq] = $this->screen($q);
             $hours = $res->viewData('hours');
             $this->assertEquals(self::col($hours, fn ($r) => $r['avg']), $c['reply']['series']['avg'], "$q reply");
             $this->assertEquals(self::col($hours, fn ($r) => $r['with_ai']['avg']), $c['ai']['series']['with_ai_avg'], "$q ai");
             $this->assertEquals(self::col($res->viewData('push')['hours'], fn ($r) => $r['avg']), $c['push']['series']['avg'], "$q push");
-            $this->assertEquals(self::col($res->viewData('sequences')['hours'], fn ($r) => $r['pushed_to_meta']['avg']), $c['seq']['series']['avg'], "$q seq");
+            $this->assertEquals(self::col($seq['hours'], fn ($r) => $r['pushed_to_meta']['avg']), $c['seq']['series']['avg'], "$q seq");
             foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertNotEquals($all[$k]['series'], $c[$k]['series'], "$q changes $k");
         }
         [$fb] = $this->screen('bot=Forbeast');
@@ -441,13 +450,13 @@ class ResponseSpeedTest extends ChatblastTestCase
     public function test_S_185_7_access_as_before(): void
     {
         $this->actingAs($this->user('Data Encoder', 'enc@example.test'))->get('/chatbot/speed')->assertForbidden();
-        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
         foreach (['reply', 'ai', 'push', 'seq'] as $k) $this->assertStringContainsString('id="sp-chart-' . $k . '"', $html);
     }
 
     public function test_S_185_9_each_chart_sits_with_its_table_and_fits_a_phone(): void
     {
-        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
         // Spec 188: ang chart ay nasa itaas na ng sariling table (walang ibang table sa pagitan), sa kahong sumusunod sa
         // lapad ng screen.
         foreach (['hours' => 'reply', 'ai' => 'ai', 'push' => 'push', 'sequences' => 'seq'] as $table => $chart) {
@@ -596,7 +605,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     public function test_S_188_1_the_charts_show_and_every_table_is_in_a_closed_details(): void
     {
         $this->seedSteps();
-        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
         $d = self::details($html);
 
         $this->assertSame(['hours', 'ai', 'push', 'sequences', 'sequence-slowest'], array_keys($d));
@@ -622,7 +631,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->seedAi();
         $this->seedSteps();
         $res = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk();
-        $html = $res->getContent();
+        $html = $this->withSequences($res->getContent());
         $sec = fn ($v) => $v === null ? '—' : rtrim(rtrim(number_format($v, 1), '0'), '.') . ' s';
 
         $this->assertSame('Day: 4 messages · 3 answered · avg 32.3 s · median 20 s · p90 72 s · max 72 s', self::summary($html, 'hours'));
@@ -637,7 +646,7 @@ class ResponseSpeedTest extends ChatblastTestCase
         $this->assertSame("Day: {$p['pushed']} pushed (Forbeast) · {$p['measured']} measured · avg {$sec($p['avg'])} · median {$sec($p['median'])} · p90 {$sec($p['p90'])} · max {$sec($p['max'])} · {$p['unconfirmed']} not confirmed yet · {$p['botcake']} Botcake (no Meta time)", self::summary($html, 'push'));
         $this->assertStringContainsString('measured · avg 2 s', self::summary($html, 'push'));
 
-        $s = $res->viewData('sequences')['total'];
+        $s = $this->speedSequences()['sequences']['total'];
         $this->assertSame("Day: {$s['due']} due · {$s['sent']} sent · {$s['failed']} failed · {$s['skipped']} skipped; scheduled → pushed avg {$sec($s['scheduled_to_pushed']['avg'])} · p90 {$sec($s['scheduled_to_pushed']['p90'])} · max {$sec($s['scheduled_to_pushed']['max'])}; pushed → sent at Meta: {$s['pushed_to_meta']['n']} steps · avg {$sec($s['pushed_to_meta']['avg'])} · p90 {$sec($s['pushed_to_meta']['p90'])} · max {$sec($s['pushed_to_meta']['max'])}", self::summary($html, 'sequences'));
         $this->assertStringEndsWith('2 steps · avg 62.5 s · p90 120 s · max 120 s', self::summary($html, 'sequences'));
     }
@@ -645,7 +654,7 @@ class ResponseSpeedTest extends ChatblastTestCase
     public function test_S_188_3_opening_a_table_shows_the_same_table_with_its_notes(): void
     {
         $this->seedSteps();
-        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->get('/chatbot/speed')->assertOk()->getContent();
+        $html = $this->actingAs($this->user('CEO', 'ceo@example.test'))->speedPage();
         $d = self::details($html);
 
         // Ang table ay ang dati (sa kahong nag-i-scroll, may Day na row), at ang paliwanag nito ay kasama sa loob.
