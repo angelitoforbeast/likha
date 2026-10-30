@@ -139,8 +139,8 @@ class ResponseSpeed
         $yesterday = CarbonImmutable::parse($today)->subDay()->toDateString();
         $out = ['warmed' => [], 'failed' => []];
         $at = Cache::get(self::WARM_STAMP_KEY . $yesterday);
-        if (!is_int($at) || time() - $at >= self::YESTERDAY_WARM_SECONDS) {
-            if ($this->warm($yesterday, $today, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, time(), self::PAST_CACHE_SECONDS + self::WARM_GRACE_SECONDS);
+        if (!is_int($at) || now()->getTimestamp() - $at >= self::YESTERDAY_WARM_SECONDS) {
+            if ($this->warm($yesterday, $today, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, now()->getTimestamp(), self::PAST_CACHE_SECONDS + self::WARM_GRACE_SECONDS);
         }
         $this->warm($today, $today, $out);
 

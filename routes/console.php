@@ -96,6 +96,14 @@ Schedule::command('chatbot:sequence-tick')
     ->everyMinute()
     ->withoutOverlapping(5);
 
+// Chatbot Speed (/chatbot/speed): ang default na view ng ngayon (at ng kahapon kapag oras na) ay kinukuwenta bago ito mag-expire,
+// para ang nagbubukas ng page ay hindi naghihintay ng buong kuwenta (mga 12 s sa isang abalang araw). Isang takbo lang sa isang server.
+Schedule::command('chatbot:speed-warm')
+    ->everyTwoMinutes()
+    ->withoutOverlapping(10) // 10 min: ang takbong nag-crash ay hindi haharang nang matagal
+    ->onOneServer()
+    ->runInBackground(); // ilang segundo: hindi pinaghihintay ang ibang job ng parehong minuto
+
 // Chatbot content check (/chatbot/pages Check: item, presyo, larawan, ad video laban sa orders): naka-queue ang takbo,
 // gabi-gabi 02:40 Manila. Ang bago o nabagong value lang ang itinatanong sa AI.
 Schedule::command('chatbot:content-check')
