@@ -131,12 +131,12 @@ class ChatbotLiveScoreboardTest extends ChatblastTestCase
             'in-botcake' => '2', 'out-forbeast' => '2', 'out-incepxionbot' => '3', 'out-botcake' => '1', 'ai' => '0', 'follow_ups' => '1'] as $key => $n) {
             $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($n, '#') . '<#', $html, $key);
         }
-        foreach (['INQUIRIES', 'LIKHA', 'AI ANSWERS', 'FOLLOW-UP', 'Orders recorded', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT', 'BOTCAKE · FALLBACK', 'NEURAL NETWORK', 'Replies today', 'Avg reply time', 'Orders today', 'Active chats', 'LIVE ACTIVITY'] as $label) {
+        foreach (['INQUIRIES', 'LIKHA', 'AI ANSWERS', 'FOLLOW-UP', ' orders · ', 'BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT', 'BOTCAKE · FALLBACK', 'Replies today', 'Avg reply time', 'Orders today', 'Active chats', 'LIVE ACTIVITY'] as $label) {
             $this->assertStringContainsString($label, $html);
         }
         $this->assertStringContainsString('Page Dos · 12:29 · Bot 2', $html); // ang huling order
-        // Ang neural network: ang path ng bawat bot, ng mga input (inquiries, sequences, AI) at ng Orders; iisang canvas na lang.
-        foreach (['forbeast', 'incepxionbot', 'botcake', 'inq', 'seq', 'ai', 'ord'] as $path) $this->assertSame(1, substr_count($html, 'data-path="' . $path . '"'), $path);
+        // Ang HUD (spec 200): ang path papasok at palabas ng bawat bot, at ng AI at follow-ups.
+        foreach (['forbeast-in', 'forbeast-out', 'incepxionbot-in', 'incepxionbot-out', 'botcake-in', 'botcake-out', 'seq', 'ai'] as $path) $this->assertSame(1, substr_count($html, 'data-path="' . $path . '"'), $path);
     }
 
     public function test_S_196_1_on_incepxion_the_title_and_core_carry_the_site_name(): void

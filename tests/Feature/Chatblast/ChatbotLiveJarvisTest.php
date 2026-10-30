@@ -226,6 +226,50 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         $this->assertStringNotContainsString('Maria <b>Santos', $html);
     }
 
+    public function test_S_200_6_the_page_renders_every_section_of_the_hud_with_its_hooks_and_every_number_of_spec_199(): void
+    {
+        $this->seedDay();
+        config(['services.incepxionbot.url' => '']); // Bot 2 dormant
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+        $html = $this->get('/chatbot/live')->assertOk()->getContent();
+
+        // Header: pangalan, live, page at bot filter, orasan ng Manila, 3D, TV mode, labas.
+        foreach (['<h1>LIKHA LIVE</h1>', 'data-live-status="live"', 'data-live-page', 'data-live-bot', 'data-live-clock', 'data-live-updated',
+            'data-live-3d', 'aria-pressed="false"', 'data-live-fullscreen', 'data-tv-exit'] as $s) $this->assertStringContainsString($s, $html, $s);
+        // Ang reactor: umiikot na singsing, 60 guhit ng 5-minutong orasan, scan band, gintong core na may halaga, order, +N at Last.
+        foreach (['rot rot-a', 'rot rot-b', 'rot rot-c', 'class="scanb"', 'data-live-core', 'Order value today · COD', 'data-live-last-order', 'data-live-shock', 'data-live-coins', 'data-live-plus'] as $s) {
+            $this->assertStringContainsString($s, $html, $s);
+        }
+        $this->assertSame(60, preg_match_all('#<line [^>]*/>#', explode('</g>', explode('<g data-live-ticks', $html, 2)[1], 2)[0]));
+        $this->assertStringContainsString('Last: <tspan data-live-last-order>Page Dos · 12:29 · Bot 2</tspan>', $html);
+        // Bawat numero ng spec 199 ay nasa sariling hook, na may tamang laman.
+        foreach (['replies' => '4', 'orders' => '3', 'peso' => '3,200', 'messages' => '8', 'ai' => '2', 'follow_ups' => '1', 'active' => '4', 'signals' => '11',
+            'in-forbeast' => '6', 'out-forbeast' => '3', 'in-botcake' => '1', 'out-botcake' => '1', 'in-incepxionbot' => '1', 'out-incepxionbot' => '0', 'in-unknown' => '0', 'out-unknown' => '0',
+            'reply_time' => '2.4'] as $key => $v) {
+            $this->assertMatchesRegularExpression('#data-live-count="' . $key . '"[^>]*>' . preg_quote($v, '#') . '<#', $html, $key);
+        }
+        foreach (['data-live-recent="replies"', 'data-live-recent="orders"', 'data-live-note="reply_time"', 'data-live-unit', 'data-live-unknown="in"', 'data-live-unknown="out"',
+            'data-live-kpi="orders"', 'data-live-seq="0"', 'data-live-log'] as $s) $this->assertStringContainsString($s, $html, $s);
+        foreach (['Replies today', 'Avg reply time', 'BOT 1', 'Orders today', 'Active chats', 'INQUIRIES RECEIVED TODAY', 'AI ANSWERS', 'FOLLOW-UPS SENT', 'signals · last 5 min', 'LIVE ACTIVITY'] as $s) {
+            $this->assertStringContainsString($s, $html, $s);
+        }
+        // Ang mga bot: hub na may IN / OUT at pipe papasok at palabas, at NOTES; ang dormant ay dashed (data-linked 0), hindi pula.
+        foreach (['forbeast' => '1', 'incepxionbot' => '0', 'botcake' => '1'] as $bot => $on) {
+            $this->assertMatchesRegularExpression('#data-bot-row="' . $bot . '" data-linked="' . $on . '"#', $html, $bot);
+            foreach (['-in', '-out'] as $dir) $this->assertSame(1, substr_count($html, 'data-path="' . $bot . $dir . '"'), $bot . $dir);
+            $this->assertStringContainsString('data-note="' . $bot . '"', $html);
+        }
+        foreach (['BOT 1 · FORBEAST', 'BOT 2 · INCEPXIONBOT', 'BOTCAKE · FALLBACK', 'DORMANT', 'none while not linked', 'Latest customers', 'Last activity'] as $s) $this->assertStringContainsString($s, $html, $s);
+        // Ang notes ng Bot 1 mula sa server (unang laman bago ang poll).
+        $notes = explode('data-note="incepxionbot"', explode('data-note="forbeast"', $html, 2)[1], 2)[0];
+        foreach (['data-n="chatting">2<', 'data-n="ai">2<', 'data-n="avg">2.4 s<', 'data-n="orders">1<', 'data-n="value">₱1,149<', 'data-n="last">Inquiry · Page Uno · 12:28<',
+            '<b>Ana Reyes</b><em class="t-chatting">CHATTING</em><time>12:28</time>', '<b>Ben Cruz</b><em class="t-ordered">ORDERED</em><time>12:12</time>'] as $s) {
+            $this->assertStringContainsString($s, $notes, $s);
+        }
+        // Dalawang kulay lang, walang pula; walang blur, backdrop-filter, font o script mula sa labas.
+        foreach (['#ff6262', '--bad', 'backdrop-filter', 'filter: blur', 'fonts.googleapis', 'cdn.'] as $s) $this->assertStringNotContainsString($s, $html, $s);
+    }
+
     public function test_S_200_4_the_query_count_of_a_poll_does_not_grow_with_events_or_customers(): void
     {
         $count = function (bool $cold) {
