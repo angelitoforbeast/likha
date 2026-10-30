@@ -481,14 +481,19 @@ class BotHealth
         if (!$opens) return [];
 
         $since = date('Y-m-d H:i:s', strtotime($startAt) - self::AD_OPEN_LEAD_SECONDS);
-        $wrote = [];
-        $psids = array_values(array_unique(array_map(fn ($k) => explode('|', $k, 2)[1], array_keys($opens))));
-        foreach (array_chunk($psids, 1000) as $chunk) {
-            foreach (DB::table('botcake_chats')->whereIn('psid', $chunk)->where('received_at', '>=', $since)
-                ->whereNull('payload->' . ChatbotInbound::AD_OPEN)->whereNull('payload->_standby')
-                ->when($pages !== null, fn ($q) => $q->whereIn('page_id', $pages))
-                ->selectRaw('page_id, psid, MAX(received_at) as last_at')->groupBy('page_id', 'psid')->get() as $r) {
-                $wrote[$r->page_id . '|' . $r->psid] = strtotime((string) $r->last_at);
+        $wrote = $byPage = [];
+        foreach (array_keys($opens) as $key) {
+            [$pageId, $psid] = explode('|', $key, 2);
+            $byPage[$pageId][] = $psid;
+        }
+        // Kada page: ang page_id muna sa query, para magamit ang index ng page + PSID (hindi ang buong table).
+        foreach ($byPage as $pageId => $psids) {
+            foreach (array_chunk($psids, 1000) as $chunk) {
+                foreach (DB::table('botcake_chats')->where('page_id', (string) $pageId)->whereIn('psid', $chunk)->where('received_at', '>=', $since)
+                    ->whereNull('payload->' . ChatbotInbound::AD_OPEN)->whereNull('payload->_standby')
+                    ->selectRaw('psid, MAX(received_at) as last_at')->groupBy('psid')->get() as $r) {
+                    $wrote[$pageId . '|' . $r->psid] = strtotime((string) $r->last_at);
+                }
             }
         }
         $out = [];
@@ -781,7 +786,8 @@ class BotHealth
         foreach (DB::table('chatbot_replies')->whereIn('chat_id', $ids)->where('kind', 'send')->where('status', 'sent')->orderBy('sent_at')->orderBy('id')->get(['id', 'chat_id', 'node_id']) as $r) {
             $first[$r->chat_id] ??= $r;
         }
-        $near = DB::table('botcake_chats')->whereIn('psid', $chats->pluck('psid')->unique()->all())
+        // Ang pagbukas ng ad bago ang mensahe ay hindi sunod-sunod na mensahe (burst).
+        $near = DB::table('botcake_chats')->whereIn('psid', $chats->pluck('psid')->unique()->all())->whereNull('payload->' . ChatbotInbound::AD_OPEN)
             ->where('received_at', '>=', date('Y-m-d H:i:s', strtotime(min(array_column($top, 'at'))) - self::BURST_SECONDS))
             ->where('received_at', '<=', max(array_column($top, 'first')))->get(['id', 'page_id', 'psid', 'received_at']);
 

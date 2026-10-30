@@ -98,4 +98,22 @@ class AdOpenReadersTest extends ChatblastTestCase
         $this->assertSame(0, $days['2026-10-20']['ad_opens']); // 7005 sumulat pagkatapos
         $this->assertSame(0, $days['2026-10-19']['ad_opens']);
     }
+
+    public function test_S_204_6_an_ad_open_is_not_a_reply_for_results_or_a_burst_on_health(): void
+    {
+        // Results (hourly backfill): ang pagbukas ng ad ay hindi sagot sa naunang padala; ang mensahe ay sagot.
+        $reply = DB::table('chatbot_replies')->insertGetId(['page_id' => 1001, 'psid' => 7020, 'node_id' => 'n2', 'kind' => 'send', 'status' => 'sent',
+            'sent_at' => '2026-10-21 11:00:00', 'via' => 'forbeast']);
+        $this->chat('7020', '2026-10-21 11:30:00', true);
+        Artisan::call('chatbot:replied-backfill');
+        $this->assertNull(DB::table('chatbot_replies')->where('id', $reply)->value('replied_at'));
+        $this->chat('7020', '2026-10-21 11:40:00');
+        Artisan::call('chatbot:replied-backfill');
+        $this->assertSame('2026-10-21 11:40:00', substr((string) DB::table('chatbot_replies')->where('id', $reply)->value('replied_at'), 0, 19));
+
+        // Ang pinakamabagal na listahan: ang mensahe ng 7001 (5 s pagkatapos ng pagbukas ng ad) ay hindi "burst".
+        $message = DB::table('botcake_chats')->where('psid', '7001')->where('message', 'Hm')->value('id');
+        $slow = collect(app(BotHealth::class)->output([])['slow'])->firstWhere('chat_id', $message);
+        $this->assertFalse($slow['burst']);
+    }
 }

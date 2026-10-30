@@ -99,9 +99,27 @@ class AdOpenWaitTest extends ChatblastTestCase
     /** Ipinapadala sa /api/gateway/events, pinirmahan. */
     private function event(array $e): void
     {
+        $this->postEvent($e)->assertOk();
+    }
+
+    private function postEvent(array $e): \Illuminate\Testing\TestResponse
+    {
         $body = json_encode($this->shape($e));
-        $this->call('POST', '/api/gateway/events', [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json',
-            'HTTP_X_GATEWAY_SIGNATURE' => 'sha256=' . hash_hmac('sha256', $body, self::SECRET)], $body)->assertOk();
+
+        return $this->call('POST', '/api/gateway/events', [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json',
+            'HTTP_X_GATEWAY_SIGNATURE' => 'sha256=' . hash_hmac('sha256', $body, self::SECRET)], $body);
+    }
+
+    /** Ang send_status ng Forbeast para sa isang padala. */
+    private function sendStatus(?string $clientRef, array $send): void
+    {
+        $this->event(['type' => 'send_status', 'mid' => null, 'text' => null, 'send' => $send + ['client_ref' => $clientRef, 'accepted_at' => '2026-10-30T06:57:00.000Z',
+            'sent_at' => '2026-10-30T06:57:01.000Z', 'message_count' => 2, 'sent_count' => 0, 'error' => null, 'error_code' => null, 'error_subcode' => null]]);
+    }
+
+    private function unsentMark(): ?string
+    {
+        return (new CustomerFields(1001, (int) self::PSID))->get(CustomerFields::WAIT_UNSENT);
     }
 
     private static function ref(string $ad = self::AD_X): array
@@ -334,5 +352,90 @@ class AdOpenWaitTest extends ChatblastTestCase
         $this->says('Magkano po?');
         $this->work();
         $this->assertSame($sent, $this->sent());
+    }
+
+    public function test_S_204_11_the_failed_question_is_asked_again_once_and_a_late_or_manual_failure_marks_nothing(): void
+    {
+        $this->says('Hm');
+        $this->work();
+        $this->sendStatus(ChatbotReply::sole()->client_ref, ['status' => 'failed']);
+        $this->says('Magkano po?');
+        $this->work();
+        $this->says('Isa po');
+        $this->work();
+        $this->assertSame([self::OPENING, self::OPENING, 'Got: Isa po'], $this->sent(), 'isang beses lang itinatanong ulit');
+
+        // Ang pumalya na dumating pagkatapos lumampas ang customer sa paghihintay: walang marka.
+        $this->travel(1)->minutes();
+        $this->says('Hello ulit');
+        $this->work();
+        $opening = ChatbotReply::where('node_id', 'n2')->orderByDesc('id')->first();
+        $this->says('Dalawa');
+        $this->work();
+        $this->sendStatus($opening->client_ref, ['status' => 'failed']);
+        $this->assertNull($this->unsentMark());
+
+        // Ang manual na sagot (Inbox) na pumalya habang naghihintay ang flow: hindi ang tanong ng flow.
+        $this->says('Hello pa');
+        $this->work();
+        $wait = (new CustomerFields(1001, (int) self::PSID))->get(CustomerFields::WAIT);
+        [$flowId, $node] = explode(':', (string) $wait);
+        DB::table('chatbot_replies')->insert(['page_id' => 1001, 'psid' => (int) self::PSID, 'flow_id' => (int) $flowId, 'node_id' => $node, 'kind' => 'manual',
+            'status' => 'sent', 'sent_at' => now(), 'via' => 'forbeast', 'client_ref' => 'likha-manual-204']);
+        $this->sendStatus('likha-manual-204', ['status' => 'failed']);
+        $this->assertNull($this->unsentMark());
+    }
+
+    public function test_S_204_11_a_failure_written_while_a_run_is_in_progress_does_not_outlive_the_wait(): void
+    {
+        $this->says('Hm');
+        $this->work();
+        // Ang takbo ng susunod na mensahe ay nabasa na ang mga field nito; habang tumatakbo, dumating ang pumalyang send_status.
+        $run = new CustomerFields(1001, (int) self::PSID);
+        $this->sendStatus(ChatbotReply::sole()->client_ref, ['status' => 'failed']);
+        $this->assertNotNull($this->unsentMark());
+        $run->clear(CustomerFields::WAIT);
+        $this->assertNull($this->unsentMark());
+
+        // Ang bagong paghihintay ay nagsisimula nang walang lumang marka.
+        $stale = new CustomerFields(1001, (int) self::PSID);
+        $stale->set(CustomerFields::WAIT_UNSENT, 'old');
+        (new CustomerFields(1001, (int) self::PSID))->set(CustomerFields::WAIT, '1:n2');
+        $this->assertNull($this->unsentMark());
+    }
+
+    public function test_S_204_9_a_referral_that_fails_to_store_answers_500_and_its_retry_is_stored_once(): void
+    {
+        $this->adBased();
+        $fail = true;
+        BotcakeChat::creating(function () use (&$fail) {
+            if ($fail) {
+                $fail = false;
+                throw new \RuntimeException('database blip');
+            }
+        });
+
+        $this->postEvent(self::ref(self::AD_Y))->assertStatus(500);
+        $this->assertSame(0, BotcakeChat::count());
+        $this->referral(self::AD_Y, ['event_id' => $this->eventId, 'timestamp' => 1761800000000 + $this->eventId, 'attempt' => 2]); // ang ulit ng gateway
+        $this->assertSame(1, BotcakeChat::count());
+
+        $this->says('Hm');
+        $this->work();
+        $this->assertSame(['Hello po! PROMO 799'], $this->sent());
+    }
+
+    public function test_S_204_4_the_wait_timeout_measures_the_24_hour_window_from_the_last_message_not_from_an_ad_open(): void
+    {
+        $fields = fn () => new CustomerFields(1001, (int) self::PSID);
+        $this->says('Hi');
+        $this->work();
+        $this->travel(24 * 60 + 50)->minutes();
+        $this->referral();
+        $this->travel(15)->minutes();
+        Artisan::call('chatbot:resume-skipped');
+
+        $this->assertSame([self::OPENING], $this->sent(), 'sarado na ang 24 oras mula sa huling mensahe');
+        $this->assertNull($fields()->get(CustomerFields::WAIT));
     }
 }

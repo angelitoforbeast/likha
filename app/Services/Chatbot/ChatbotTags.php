@@ -210,7 +210,8 @@ class ChatbotTags
             ->chunkById(1000, function ($rows) use (&$n) {
                 foreach ($rows as $r) {
                     $sent = Carbon::parse($r->sent_at);
-                    $chat = BotcakeChat::active()->where('page_id', (string) $r->page_id)->where('psid', (string) $r->psid)
+                    // Ang pagbukas ng ad (ChatbotInbound::AD_OPEN) ay hindi sagot ng customer.
+                    $chat = BotcakeChat::active()->whereNull('payload->' . ChatbotInbound::AD_OPEN)->where('page_id', (string) $r->page_id)->where('psid', (string) $r->psid)
                         ->where('received_at', '>', $sent)->where('received_at', '<=', $sent->copy()->addHours(self::REPLY_HOURS))
                         ->orderBy('received_at')->value('received_at');
                     if ($chat === null) continue;
