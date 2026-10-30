@@ -3330,11 +3330,11 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatb
 
 | Case | Given / When / Then | Test | Status |
 |---|---|---|---|
-| S-200.1 (P1) | Given seeded events on each bot today, When the counts are read, Then each bot's notes (chatting now, AI answered, orders today, order value, last activity) equal the hand-counted values; the page filter and the bot filter apply; a dormant (not linked) bot returns zeros | `test_S_200_1_…` | open |
-| S-200.2 (P1) | The latest customers are the 4 most recent distinct customers per bot, newest first, tagged ORDERED > AI > CHATTING, with the time of their last event; a customer on two bots appears under each; another day's customers never appear | `test_S_200_2_…` | open |
-| S-200.3 (P1) | The stored name is shown when present; absent, "Customer · <page short name>"; no PSID, phone, address or message text in the feed JSON or the page | `test_S_200_3_…` | open |
-| S-200.4 (P1) | The feed's query count per poll does not grow with the number of events or customers | `test_S_200_4_…` | open |
-| S-200.5 (P1) | Loot: an amount bursts coins with "+₱N" and rolls the total per landing; null drops one "+1" plate and no pesos; bursts merged, none dropped; no count-down inside a minute; reduced motion without coins; the 3D toggle is saved and restored, default 2D | `ChatbotLiveRulesTest` | open |
-| S-200.6 (P1) | The page renders every section of the HUD with its data hooks, and every number spec 199 shows is still there | `test_S_200_6_…` | open |
-| S-200.7 (P1) | The existing spec-199/196 Live tests pass (changed assertions listed) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest`, `ChatbotLiveNetworkTest`, `ChatbotLiveRulesTest` | open |
-| S-200.8 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` | open |
+| S-200.1 (P1) | Given seeded events on each bot today, When the counts are read, Then each bot's notes (chatting now, AI answered, orders today, order value, last activity) equal the hand-counted values; the page filter and the bot filter apply; a dormant (not linked) bot returns zeros | `test_S_200_1_…` | passed |
+| S-200.2 (P1) | The latest customers are the 4 most recent distinct customers per bot, newest first, tagged ORDERED > AI > CHATTING, with the time of their last event; a customer on two bots appears under each; another day's customers never appear | `test_S_200_2_…` | passed |
+| S-200.3 (P1) | The stored name is shown when present; absent, "Customer · <page short name>"; no PSID, phone, address or message text in the feed JSON or the page | `test_S_200_3_…` | passed |
+| S-200.4 (P1) | The feed's query count per poll does not grow with the number of events or customers | `test_S_200_4_…` | passed |
+| S-200.5 (P1) | Loot: an amount bursts coins with "+₱N" and rolls the total per landing; null drops one "+1" plate and no pesos; bursts merged, none dropped; no count-down inside a minute; reduced motion without coins; the 3D toggle is saved and restored, default 2D | `ChatbotLiveRulesTest` | passed |
+| S-200.6 (P1) | The page renders every section of the HUD with its data hooks, and every number spec 199 shows is still there | `test_S_200_6_…` | passed |
+| S-200.7 (P1) | The existing spec-199/196 Live tests pass (changed assertions listed) | `ChatbotLiveTest`, `ChatbotLiveScoreboardTest`, `ChatbotLiveNetworkTest`, `ChatbotLiveRulesTest` | passed |
+| S-200.8 (P1) | The full `tests/Feature` suite adds no new failures vs 8506b25c | `tests/Feature` | see result |

@@ -259,7 +259,8 @@ class LiveFeed
             ->selectRaw("{$cv} AS bot, a.page_id AS page_id, a.psid AS psid, MAX(a.answered_at) AS at")->groupByRaw("{$cv}, a.page_id, a.psid")->get() as $r) $rows[] = [$r, 'ai'];
 
         foreach ($rows as [$r, $type]) {
-            if (!in_array($r->bot, self::BOTS, true) || $r->at === null) continue;
+            // Walang PSID (sirang row): hindi customer na maipapakita.
+            if (!in_array($r->bot, self::BOTS, true) || $r->at === null || (string) $r->psid === '' || (string) $r->page_id === '') continue;
             $at = substr((string) $r->at, 0, 19);
             $k = (string) $r->page_id . '|' . (string) $r->psid;
             if ($at > ($s['bots'][$r->bot][$k] ?? '')) $s['bots'][$r->bot][$k] = $at;
