@@ -270,6 +270,70 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         foreach (['#ff6262', '--bad', 'backdrop-filter', 'filter: blur', 'fonts.googleapis', 'cdn.'] as $s) $this->assertStringNotContainsString($s, $html, $s);
     }
 
+    /** Ang page sa araw na may usapan at customer ang Bot 1 (gaya ng Likha), naka-render bilang HTML. */
+    private function busyPage(): string
+    {
+        $this->seedDay();
+        $this->actingAs($this->user('CEO', 'ceo@example.test'));
+
+        return $this->get('/chatbot/live')->assertOk()->getContent();
+    }
+
+    /** Ang inline na script ng page (ang huling <script> na walang src). */
+    private static function pageScript(string $html): string
+    {
+        preg_match_all('#<script>(.*?)</script>#s', $html, $m);
+
+        return end($m[1]);
+    }
+
+    public function test_S_200_6_the_page_loads_the_rules_file_with_a_version_that_changes_with_the_file(): void
+    {
+        $html = $this->busyPage();
+
+        // Ang lumang kopya ng rules sa cache ng browser (walang readView) ang pumatay sa script: ang URL ay may bersyon na ng file.
+        $this->assertMatchesRegularExpression('#<script src="[^"]*/js/chatbot-live-rules\.js\?v=' . filemtime(public_path('js/chatbot-live-rules.js')) . '"></script>#', $html);
+        // Walang hindi-ASCII na titik sa JS (ang ₱, ·, … at — ay \u escape), kahit maling charset ang ibigay ng server.
+        $this->assertSame(0, preg_match('/[^\x00-\x7F]/', file_get_contents(public_path('js/chatbot-live-rules.js'))), 'rules file is ASCII');
+        $this->assertSame(0, preg_match('/[^\x00-\x7F]/', self::pageScript($html)), 'page script is ASCII');
+    }
+
+    public function test_S_200_6_a_failing_start_up_step_is_logged_once_and_does_not_stop_the_clock_the_poll_3d_or_tv_mode(): void
+    {
+        $script = self::pageScript($this->busyPage());
+        $this->assertSame(1, preg_match('#/\* live-step:start \*/(.*?)/\* live-step:end \*/#s', $script, $m), 'step runner');
+        // Ang mismong step runner ng page, pinatakbo sa node: ang nabigong hakbang ay isang beses lang nilo-log, ang iba ay tuloy.
+        $file = tempnam(sys_get_temp_dir(), 'live-step') . '.js';
+        file_put_contents($file, $m[1] . <<<'JS'
+            self.LiveStep = {trial: function () {
+              var logs = [], ran = [];
+              var step = makeStep(function (name, e) { logs.push(name + ': ' + e.message); });
+              step('notes', function () { throw new Error('R.readView is not a function'); });
+              step('clock', function () { ran.push('clock'); });
+              step('notes', function () { throw new Error('again'); });
+              var v = step('poll', function () { ran.push('poll'); return 42; });
+              return {ran: ran, logs: logs, v: v};
+            }};
+            JS);
+        try {
+            $p = new \Symfony\Component\Process\Process(['node', base_path('tests/js/call.cjs'), $file, 'LiveStep']);
+            $p->setInput(json_encode([['fn' => 'trial', 'args' => []]]));
+            $p->run();
+            if (!$p->isSuccessful() && str_contains($p->getErrorOutput() . $p->getOutput(), 'not recognized')) $this->markTestSkipped('node not found');
+            $this->assertTrue($p->isSuccessful(), 'node: ' . $p->getErrorOutput());
+            $out = json_decode($p->getOutput(), true)[0];
+        } finally {
+            @unlink($file);
+        }
+        $this->assertSame(['ran' => ['clock', 'poll'], 'logs' => ['notes: R.readView is not a function'], 'v' => 42], $out['value'] ?? $out);
+
+        // Bawat hakbang ng pagsisimula ay dumadaan sa step runner, kaya ang isang sirang bahagi ay hindi pumapatay sa iba.
+        foreach (["step('counts'", "step('view'", "step('tv'", "step('clock'", "step('ticks'", "step('notes'", "step('plan'", "step('log'", "step('loot'"] as $s) {
+            $this->assertStringContainsString($s, $script, $s);
+        }
+        $this->assertMatchesRegularExpression('#live\.timer = setTimeout\(poll, boot\.interval\);\s*\}\)\(\);\s*$#', $script);
+    }
+
     public function test_S_200_4_the_query_count_of_a_poll_does_not_grow_with_events_or_customers(): void
     {
         $count = function (bool $cold) {

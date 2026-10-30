@@ -9,13 +9,14 @@
 
   function botOf(e) { return e && BOTS.indexOf(e.bot) >= 0 ? e.bot : null; }
 
-  // 1234567.8 → "1,234,568": sariling formatter para pareho ang labas sa browser at sa node.
+  // 1234567.8 -> "1,234,568": sariling formatter para pareho ang labas sa browser at sa node.
   function num(v) {
     var n = Math.round(Number(v) || 0), s = String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return (n < 0 ? '-' : '') + s;
   }
 
-  function peso(v) { return '₱' + num(v); }
+  // Ang piso at ang tuldok sa gitna ay \u escape: ASCII lang ang file, kaya tama kahit walang charset ang ibigay ng server.
+  function peso(v) { return '\u20B1' + num(v); }
 
   // Ang dadaanan ng ilaw: [path, pasulong]. Ang path ng input (inq, seq, ai) ay papunta sa core; ang path ng bot at ng
   // Orders ay mula sa core palabas.
@@ -33,7 +34,7 @@
   function label(orders) {
     var n = orders.length, known = orders.filter(function (o) { return typeof o.amount === 'number' && isFinite(o.amount); });
     var sum = known.reduce(function (a, o) { return a + o.amount; }, 0);
-    if (known.length) return '+' + peso(sum) + (n > 1 ? ' · ' + n + ' orders' : '');
+    if (known.length) return '+' + peso(sum) + (n > 1 ? ' \u00B7 ' + n + ' orders' : '');
     return n > 1 ? '+' + n + ' ORDERS' : '+1 ORDER';
   }
 
@@ -95,7 +96,7 @@
     return from + (to - from) * k;
   }
 
-  // Ang "signals · last 5 min" ng core: ang kabuuan ng mga bilang sa huling 5 minuto (walang bagong query).
+  // Ang "signals - last 5 min" ng core: ang kabuuan ng mga bilang sa huling 5 minuto (walang bagong query).
   function signals(c) {
     var r = function (k) { return c && c[k] ? Number(c[k].recent) || 0 : 0; };
     return r('messages') + r('confirmed') + r('follow_ups') + r('ai') + r('orders');

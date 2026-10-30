@@ -42,7 +42,7 @@ $pages = ['Sample Page 03' => '1003', 'Sample Page 07' => '1007', 'Sample Page 1
 
 $html = view('chatbot.live', ['feed' => $feed, 'pages' => $pages, 'page' => null, 'bot' => null])->render();
 $rules = file_get_contents(__DIR__ . '/../../../public/js/chatbot-live-rules.js');
-$html = preg_replace('#<script src="[^"]*chatbot-live-rules\.js"></script>#', '<script>' . str_replace('$', '\$', $rules) . '</script>', $html, 1, $n);
+$html = preg_replace('#<script src="[^"]*chatbot-live-rules\.js[^"]*"></script>#', '<script>' . str_replace('$', '\$', $rules) . '</script>', $html, 1, $n);
 if ($n !== 1) throw new RuntimeException('rules script tag not found');
 $html = preg_replace('#<meta name="csrf-token" content="[^"]*">#', '<meta name="csrf-token" content="evidence">', $html);
 
