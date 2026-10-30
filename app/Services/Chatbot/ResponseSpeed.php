@@ -38,6 +38,23 @@ class ResponseSpeed
             'bot' => is_string($bot) && in_array($bot, ChatbotConnections::bots(), true) ? $bot : null];
     }
 
+    /** Ang mga chart ng page mismo; ang sa Sequences ay galing sa sariling endpoint nito (sequencesOutput). */
+    private const PAGE_CHARTS = ['reply', 'ai', 'push'];
+    /**
+     * Ang dalawang cache: ang mga numero ng page (walang Sequences) at ang Sequences. Ang bersyon sa key ay pinapalitan
+     * kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
+     */
+    public const PAGE_KEY = 'response-speed:v3:';
+    public const SEQUENCES_KEY = 'response-speed-seq:v1:';
+    /**
+     * Ang isinusulat ng pre-warm ay mas matagal nang kaunti kaysa sa sariling TTL ng page, para hindi ito mag-expire sa
+     * pagitan ng dalawang takbo (kada 2 minuto, at ang takbo mismo ay ilang segundo).
+     */
+    public const WARM_GRACE_SECONDS = 180;
+    /** Ang kahapon ay halos hindi na nagbabago: pinapainit ulit kapag ganito na katagal ang huling init nito. */
+    public const YESTERDAY_WARM_SECONDS = 1200;
+    public const WARM_STAMP_KEY = 'response-speed:warmed:';
+
     public function output(array $q): array
     {
         $f = self::filters($q);
@@ -50,32 +67,124 @@ class ResponseSpeed
         return $out + ['dates' => ['today' => $today, 'yesterday' => CarbonImmutable::parse($today)->subDay()->toDateString(),
             'prev' => $day->subDay()->toDateString(), 'next' => $f['date'] < $today ? $day->addDay()->toDateString() : null],
             'refused_off' => $f['page_id'] === null && $f['bot'] === null ? $this->refusedOff($f['date']) : null,
-            'charts' => self::charts($out, $prev)];
+            'charts' => self::charts($out, $prev, self::PAGE_CHARTS)];
     }
 
     /**
-     * Ang mga numero ng isang araw at filter, naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto). Ang bersyon sa key
-     * ay pinapalitan kapag nagbago ang hugis ng laman, para hindi mabasa ng bagong code ang lumang entry pagkatapos ng deploy.
+     * Ang Sequences ng /chatbot/speed, hiwalay sa page (ito ang pinakamabigat): walang $chart, ang araw lang
+     * ({filters, sequences}); may $chart, ang chart nito ({date, prev_date, seq}) mula sa araw at sa naunang araw. Bawat
+     * tawag ay hindi lalampas sa isang araw ng Sequences na kinukuwenta (ang araw ay naka-cache na mula sa unang tawag).
      */
+    public function sequencesOutput(array $q, bool $chart = false): array
+    {
+        $f = self::filters($q);
+        $today = now()->toDateString();
+        $seq = $this->sequencesDay($f, $today);
+        if (!$chart) return ['filters' => $f, 'sequences' => $seq];
+        $pf = ['date' => CarbonImmutable::parse($f['date'])->subDay()->toDateString()] + $f;
+
+        return self::charts(['filters' => $f, 'sequences' => $seq], ['filters' => $pf, 'sequences' => $this->sequencesDay($pf, $today)], ['seq']);
+    }
+
+    private static function ttl(array $f, string $today): int
+    {
+        return $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
+    }
+
+    /** Ang mga numero ng isang araw at filter (walang Sequences), naka-cache (ngayon 2 minuto, ang lumang araw 30 minuto). */
     private function day(array $f, string $today): array
     {
-        $ttl = $f['date'] === $today ? self::TODAY_CACHE_SECONDS : self::PAST_CACHE_SECONDS;
-        $key = 'response-speed:v2:' . md5(json_encode($f));
+        $key = self::PAGE_KEY . md5(json_encode($f));
         $hit = Cache::get($key);
         if ($hit !== null) return $hit;
         $out = $this->build($f, $today);
-        // Ang araw na hindi nakuwenta ang Sequences ay sinusubukan ulit pagkalipas ng 2 minuto, hindi ng 30.
-        Cache::put($key, $out, empty($out['sequences']['too_large']) ? $ttl : min($ttl, self::TODAY_CACHE_SECONDS));
+        Cache::put($key, $out, self::ttl($f, $today));
 
         return $out;
+    }
+
+    /** Ang Sequences ng isang araw at filter, sariling cache: ang hindi nakuwenta (too_large) ay sinusubukan ulit pagkalipas ng 2 minuto, hindi ng 30. */
+    private function sequencesDay(array $f, string $today, int $extra = 0): array
+    {
+        $key = self::SEQUENCES_KEY . md5(json_encode($f));
+        if ($extra === 0) {
+            $hit = Cache::get($key);
+            if ($hit !== null) return $hit;
+        }
+        $out = $this->buildSequences($f, $today);
+        Cache::put($key, $out, empty($out['too_large']) ? self::ttl($f, $today) + $extra : self::TODAY_CACHE_SECONDS);
+
+        return $out;
+    }
+
+    private function buildSequences(array $f, string $today): array
+    {
+        $start = $f['date'] . ' 00:00:00';
+        $end = CarbonImmutable::parse($f['date'])->addDay()->toDateString() . ' 00:00:00';
+
+        return $this->sequencesSection($f, $start, $end, $f['date'] === $today ? (int) now()->format('G') : 23);
+    }
+
+    /**
+     * Ang pre-warm ng default na view (walang page, walang bot): ang kahapon kapag oras na (walang tala na buo itong
+     * napainit bilang lumang araw, o YESTERDAY_WARM_SECONDS na ang tala), saka ang ngayon (bawat takbo). Sinusulat sa
+     * parehong key na binabasa ng page, hindi binabasa ang cache. Bawat bahagi ay sariling try: ang pumalya ay ini-report
+     * at hindi isinusulat (ang page ang kukuwenta nito gaya ng dati). Ang kahapon muna: ito ang reference ng mga chart ng
+     * ngayon. Pagkalipas ng hatinggabi ay walang tala ang bagong kahapon, kaya agad itong kinukuwenta ulit bilang buong araw.
+     * @return array{warmed: string[], failed: string[]}
+     */
+    public function warmDefault(): array
+    {
+        $today = now()->toDateString();
+        $yesterday = CarbonImmutable::parse($today)->subDay()->toDateString();
+        $out = ['warmed' => [], 'failed' => []];
+        $at = Cache::get(self::WARM_STAMP_KEY . $yesterday);
+        if (!is_int($at) || time() - $at >= self::YESTERDAY_WARM_SECONDS) {
+            if ($this->warm($yesterday, $today, $out)) Cache::put(self::WARM_STAMP_KEY . $yesterday, time(), self::PAST_CACHE_SECONDS + self::WARM_GRACE_SECONDS);
+        }
+        $this->warm($today, $today, $out);
+
+        return $out;
+    }
+
+    /** Ang dalawang entry ng isang araw ng default na view. true kapag buo ang dalawa (walang pumalya, nakuwenta ang Sequences). */
+    private function warm(string $date, string $today, array &$out): bool
+    {
+        $f = self::filters(['date' => $date]);
+        $ok = true;
+        try {
+            Cache::put(self::PAGE_KEY . md5(json_encode($f)), $this->build($f, $today), self::ttl($f, $today) + self::WARM_GRACE_SECONDS);
+            $out['warmed'][] = $date;
+        } catch (\Throwable $e) {
+            report($e);
+            $out['failed'][] = $date;
+            $ok = false;
+        }
+        // Ang error sa loob ng Sequences ay nagiging too_large (gaya sa page, 2 minuto lang); ang try ay para sa pagsulat sa cache.
+        try {
+            $seq = $this->sequencesDay($f, $today, self::WARM_GRACE_SECONDS);
+            if (empty($seq['too_large'])) {
+                $out['warmed'][] = $date . ' sequences';
+            } else {
+                $out['failed'][] = $date . ' sequences (too large)';
+                $ok = false;
+            }
+        } catch (\Throwable $e) {
+            report($e);
+            $out['failed'][] = $date . ' sequences';
+            $ok = false;
+        }
+
+        return $ok;
     }
 
     /**
      * Ang data ng mga chart, galing mismo sa mga table (kaya pareho ang numero): kada chart ang serye ng araw (24 na
      * value, null = puwang: walang numero o hindi pa naaabot ang oras), ang parehong serye ng naunang araw (prev) bilang
-     * reference, at ang bilang sa likod ng bawat punto (counts, prev_counts) para sa tooltip.
+     * reference, at ang bilang sa likod ng bawat punto (counts, prev_counts) para sa tooltip. $only: ang mga chart na ito
+     * lang (null = lahat).
      */
-    public static function charts(array $day, array $prev): array
+    public static function charts(array $day, array $prev, ?array $only = null): array
     {
         $col = fn (array $rows, callable $get) => array_map(fn ($r) => $r === null ? null : $get($r), $rows);
         $defs = [
@@ -94,6 +203,7 @@ class ResponseSpeed
                 'avg' => fn ($r) => $r['pushed_to_meta']['avg'], 'p90' => fn ($r) => $r['pushed_to_meta']['p90'],
             ], ['steps' => fn ($r) => $r['pushed_to_meta']['n']]],
         ];
+        if ($only !== null) $defs = array_intersect_key($defs, array_flip($only));
         $out = ['date' => $day['filters']['date'], 'prev_date' => $prev['filters']['date']];
         foreach ($defs as $key => [$rows, $series, $counts]) {
             foreach (['series' => $day, 'prev' => $prev] as $part => $o) {
@@ -235,7 +345,6 @@ class ResponseSpeed
             'by_bot' => array_map(fn ($x) => self::row($x), $byBot),
             'push' => ['hours' => array_map(fn ($h) => $h > $nowHour ? null : ['hour' => $h] + self::pushRow($push['hours'][$h]), range(0, 23)),
                 'total' => self::pushRow($push['total'])],
-            'sequences' => $this->sequencesSection($f, $start, $end, $nowHour),
         ];
     }
 

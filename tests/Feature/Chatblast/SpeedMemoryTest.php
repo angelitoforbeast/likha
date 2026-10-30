@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\DB;
  */
 class SpeedMemoryTest extends ChatblastTestCase
 {
+    use LoadsSpeedSequences;
+
     private const DAY = '2026-10-21';
 
     protected function setUp(): void
@@ -117,11 +119,14 @@ class SpeedMemoryTest extends ChatblastTestCase
         $this->flush($buf, true);
     }
 
-    /** Ang mga numero ng screen (lahat ng table at chart) bilang isang fingerprint, para makita ang kahit isang ibang numero. */
-    private static function numbers($res): array
+    /**
+     * Ang mga numero ng screen (lahat ng table at chart) bilang isang fingerprint, para makita ang kahit isang ibang numero.
+     * Ang Sequences at ang chart nito ay mula sa sariling endpoint ($seq, $chart), sa dating lugar sa fingerprint.
+     */
+    private static function numbers($res, array $seq, array $chart): array
     {
         return ['hours' => $res->viewData('hours'), 'total' => $res->viewData('total'), 'by_bot' => $res->viewData('by_bot'), 'push' => $res->viewData('push'),
-            'sequences' => $res->viewData('sequences'), 'charts' => $res->viewData('charts')];
+            'sequences' => $seq['sequences'], 'charts' => $res->viewData('charts') + ['seq' => $chart['seq']]];
     }
 
     public function test_S_198_1_a_late_day_volume_renders_under_192_mb_with_the_same_numbers(): void
@@ -134,11 +139,14 @@ class SpeedMemoryTest extends ChatblastTestCase
         memory_reset_peak_usage();
         $base = memory_get_usage();
         $t = microtime(true);
+        // Ang page, saka ang dalawang tawag ng script nito sa Sequences (ang section, saka ang chart).
         $res = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk();
+        $seq = $this->speedSequences('date=' . self::DAY);
+        $chart = $this->speedSequences('date=' . self::DAY, true);
         $secs = round(microtime(true) - $t, 1);
         // Ang memory ng request mismo: sa buong suite ay may dala nang memory ang proseso mula sa ibang test.
         $peak = memory_get_peak_usage() - $base;
-        $n = self::numbers($res);
+        $n = self::numbers($res, $seq, $chart);
 
         $s = $n['sequences']['total'];
         $this->assertSame([150000, 126142, 11703, 7500, 4655, 63070, 126142, 56063], [$s['due'], $s['sent'], $s['failed'], $s['skipped'], $s['no_message'], $s['botcake'], $s['scheduled_to_pushed']['n'], $s['pushed_to_meta']['n']]);
@@ -175,7 +183,7 @@ class SpeedMemoryTest extends ChatblastTestCase
         foreach (range(31, 34) as $n) $this->tieStep($n, $n % 2, 1200, 590);
         $this->actingAs($this->user('CEO', 'ceo-198b@example.test'));
         Cache::flush();
-        $slow = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk()->viewData('sequences')['slowest'];
+        $slow = $this->speedSequences('date=' . self::DAY)['sequences']['slowest'];
 
         $this->assertSame('["Seq 32","Seq 34","Seq 31","Seq 33","Seq 13","Seq 14","Seq 15","Seq 16","Seq 17","Seq 18","Seq 19","Seq 20","Seq 21","Seq 22","Seq 03","Seq 08","Seq 02","Seq 07","Seq 12","Seq 01"]', json_encode(array_column($slow, 'sequence')));
         $this->assertSame(['page' => 'Page Uno', 'sequence' => 'Seq 32', 'step' => 1, 'scheduled' => '2026-10-21 10:00:00', 'pushed' => '2026-10-21 10:09:50', 'sent' => '2026-10-21 10:20:00',
@@ -195,7 +203,7 @@ class SpeedMemoryTest extends ChatblastTestCase
         });
         $this->actingAs($this->user('CEO', 'ceo-198d@example.test'));
         Cache::flush();
-        $s = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk()->viewData('sequences')['total'];
+        $s = $this->speedSequences('date=' . self::DAY)['sequences']['total'];
 
         $this->assertTrue($done);
         $this->assertSame([3, 3, 0], [$s['due'], $s['sent'], $s['no_message']]);
@@ -225,7 +233,7 @@ class SpeedMemoryTest extends ChatblastTestCase
         foreach (['over', 'error'] as $mode) {
             Cache::flush();
             $res = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk();
-            $html = $res->getContent();
+            $html = $this->withSequences($res->getContent());
 
             $this->assertStringContainsString('Sequences section too large to compute now', $html);
             $this->assertStringNotContainsString('data-table="sequences"', $html);
@@ -233,14 +241,16 @@ class SpeedMemoryTest extends ChatblastTestCase
             $this->assertSame(1, $res->viewData('total')['answered']); // ang ibang section ay buo
             foreach (['hours', 'ai', 'push'] as $table) $this->assertStringContainsString('data-table="' . $table . '"', $html);
             $this->assertStringContainsString('id="sp-data"', $html);
+            // Ang chart ng Sequences ay sumasagot pa rin (walang punto), hindi 500.
+            $this->assertSame([], array_filter($this->speedSequences('date=' . self::DAY, true)['seq']['series']['avg'], fn ($v) => $v !== null));
         }
 
         // Hindi naka-cache nang 30 minuto ang kulang na sagot ng lumang araw: pagkalipas ng 2 minuto ay kinukuwenta ulit.
         $mode = 'normal';
-        $this->assertStringContainsString('Sequences section too large', $this->get('/chatbot/speed?date=' . self::DAY)->getContent());
+        $this->assertTrue($this->speedSequences('date=' . self::DAY)['sequences']['too_large']);
         $this->travel(121)->seconds();
-        $res = $this->get('/chatbot/speed?date=' . self::DAY)->assertOk();
-        $this->assertStringNotContainsString('Sequences section too large', $res->getContent());
-        $this->assertSame(3, $res->viewData('sequences')['total']['sent']);
+        $seq = $this->speedSequences('date=' . self::DAY);
+        $this->assertStringNotContainsString('Sequences section too large', $seq['html']);
+        $this->assertSame(3, $seq['sequences']['total']['sent']);
     }
 }
