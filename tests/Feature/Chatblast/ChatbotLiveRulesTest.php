@@ -173,4 +173,63 @@ class ChatbotLiveRulesTest extends TestCase
         $this->assertFalse($saveBroken);
         $this->assertSame(['likha-live-view' => '2d'], $after[1][0]);
     }
+
+    // ── Spec 205 (Jarvis E): ang vault, ang loot papunta roon, ang radar at ang ticker ──
+
+    public function test_S_205_3_the_vault_stacks_one_disc_per_five_thousand_up_to_a_max_and_the_loot_says_plus_amount_or_plus_orders(): void
+    {
+        [$zero, $under, $one, $many, $cap, $bad, $paid, $none, $three, $calmThree, $times, $timesE] = $this->js([
+            ['discs', 0], ['discs', 4999.99], ['discs', 5000], ['discs', 63055], ['discs', 9000000], ['discs', 'x'],
+            ['loot', 599, ['orders' => 1]], ['loot', 0, ['orders' => 1]], ['loot', 0, ['orders' => 3]], ['loot', null, ['orders' => 3, 'reduced' => true]],
+            ['landings', 6], ['landings', 6, ['gap' => 150, 'burst' => 300, 'fly' => 1100]],
+        ]);
+
+        $this->assertSame([0, 0, 1, 12, 14, 0], [$zero, $under, $one, $many, $cap, $bad]);
+        $this->assertSame(['+₱599', 6, false], [$paid['label'], $paid['coins'], $paid['plate']]);
+        $this->assertSame(['+1', 1, true, 0], [$none['label'], $none['coins'], $none['plate'], $none['peso']]);
+        // Pinagsamang 3 order na wala pang halaga: isang plate na "+3"; reduced motion: walang plate, ang label pa rin.
+        $this->assertSame(['+3', 1, true], [$three['label'], $three['coins'], $three['plate']]);
+        $this->assertSame(['+3', 0, false], [$calmThree['label'], $calmThree['coins'], $calmThree['plate']]);
+        // Ang dating oras (spec 200) ay pareho; ang E ay 150 ms ang pagitan, 300 ms ang labas at 1.1 s ang lipad sa globo.
+        $this->assertSame([1280, 1390, 1500, 1610, 1720, 1830], $times);
+        $this->assertSame([1400, 1550, 1700, 1850, 2000, 2150], $timesE);
+    }
+
+    public function test_S_205_2_radar_dots_sit_by_age_at_a_stable_angle_blip_once_for_a_new_customer_and_gold_comes_from_the_youngest_order(): void
+    {
+        $dots = [['k' => 'a1b2c3d4e5f6', 'ago' => 0, 's' => 'chat', 'new' => true, 'name' => 'Ana R.'],
+            ['k' => '0f0f0f0f0f0f', 'ago' => 150, 's' => 'order', 'new' => false, 'name' => null],
+            ['k' => '123456789abc', 'ago' => 40, 's' => 'order', 'new' => true, 'name' => null],
+            ['k' => 'ffffffffffff', 'ago' => 400, 's' => 'ai', 'new' => true, 'name' => 'Old O.']];
+        [$p0, $p1, $pOld, $again, $boot, $first, $second, $gold, $noGold] = $this->js([
+            ['dotPos', 'a1b2c3d4e5f6', 0], ['dotPos', 'a1b2c3d4e5f6', 150], ['dotPos', 'a1b2c3d4e5f6', 999], ['dotPos', 'a1b2c3d4e5f6', 0],
+            ['track', null, $dots], ['track', ['seen' => [], 'booted' => true], $dots], ['track', ['seen' => ['a1b2c3d4e5f6' => true, '123456789abc' => true, '0f0f0f0f0f0f' => true], 'booted' => true], $dots],
+            ['goldDot', $dots], ['goldDot', [$dots[0]]],
+        ]);
+
+        // Ang anggulo ay pareho bawat poll (mula sa key); ang layo sa gitna ay ang tanda (gitna = ngayon, gilid = 5 minuto).
+        $this->assertSame($p0['ang'], $again['ang']);
+        $this->assertSame($p0['ang'], $p1['ang']);
+        $this->assertGreaterThanOrEqual(0, $p0['ang']);
+        $this->assertLessThan(2 * M_PI, $p0['ang']);
+        $this->assertEqualsWithDelta(0.12, $p0['r'], 1e-9);
+        $this->assertEqualsWithDelta(0.535, $p1['r'], 1e-9);
+        $this->assertEqualsWithDelta(0.95, $pOld['r'], 1e-9);
+        // Ang unang laman ng page ay walang blip; pagkatapos, ang bagong customer lang, isang beses; ang lampas sa 5 minuto ay wala.
+        $this->assertSame([], $boot['blips']);
+        $this->assertTrue($boot['state']['booted']);
+        $this->assertSame([['k' => 'a1b2c3d4e5f6', 'name' => 'Ana R.'], ['k' => '123456789abc', 'name' => null]], $first['blips']);
+        $this->assertSame([], $second['blips']);
+        $this->assertSame(['a1b2c3d4e5f6', '0f0f0f0f0f0f', '123456789abc'], array_keys($first['state']['seen']));
+        // Ang barya ay lumalabas sa pinakabatang gintong tuldok ng bot (o sa gitna kapag wala).
+        $this->assertSame('123456789abc', $gold);
+        $this->assertNull($noGold);
+    }
+
+    public function test_S_205_1_the_ticker_draws_one_icon_per_event_type(): void
+    {
+        $e = fn (string $type) => ['type' => $type, 'at' => '2026-10-21 12:29:00', 'page' => 'Page Uno', 'id' => 1, 'bot' => 'forbeast'];
+        $this->assertSame(['in', 'sent', 'ai', 'seq', 'order', null], $this->js([['icon', $e('message')], ['icon', $e('confirmed')], ['icon', $e('ai')], ['icon', $e('follow_up')],
+            ['icon', $e('order')], ['icon', $e('other')]]));
+    }
 }
