@@ -77,3 +77,19 @@ Review: one `skeptic-reviewer`-style pass (standard depth) on the whole diff aft
 - S-201.5 the lock held: one "skipped" log line, nothing written; an exception in one part: reported, one log line
   naming it, that entry not written, the page builds it on demand; one log line per run with its seconds.
 - S-201.6 measurements in the result.
+
+## Amendment 1 (added during the build)
+- A1, one message per (page_id, psid, received_at): `build()` and `pageSeconds()` skip a chat already seen with the same
+  key (after the attachment and standby rules), tracked per hourly window (a duplicate has the same time, so the same
+  window).
+- A3, Not sent: the hourly `chatbot_replies` read also takes `status = failed` rows (same query, `status` IN list grows by
+  one, `status` and `error` selected), kept per customer with their read position. Per message: the failed sends from
+  the message to its first delivered reply (by read order, so a same-second retry counts) make it "Sent late"; with no
+  reply in 86,400 s, the failed sends in that window make it "Never sent". Rows get
+  `not_sent {never, late, attempts, late_avg}`; the reply chart gets `not_sent` (a red bar on its own right axis); the
+  hours table gets three columns. The list (newest first; newest 200 per hour kept, with per-hour counts) is written by
+  the same build under its own key and served by `GET /chatbot/speed/not-sent?date&page_id&bot&hour`, loaded when the
+  "Not sent list" box is opened. Only the Meta code and subcode digits are read from the stored error text.
+- Review follow-ups: the warm run never writes a `too_large` Sequences answer; a web Sequences call has a 20 s time
+  budget (answers `too_large` before php-fpm's 30 s); the command caps an unlimited CLI memory_limit at 512M so the
+  3/4 budget holds.
