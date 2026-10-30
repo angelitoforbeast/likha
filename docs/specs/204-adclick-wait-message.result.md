@@ -159,7 +159,7 @@ Not in TODO.md: in the Inbox, a customer who only clicked shows as waiting. This
 - **Baseline 8506b25c, `tests/Feature`:** 3674 tests, 70841 assertions, 2 failures:
   - `ExampleTest::test_the_application_returns_a_successful_response`
   - `ItemTableFitScriptTest::test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`
-- **This branch, `tests/Feature`:** FULL_RUN_PLACEHOLDER
+- **This branch (abd697e8), `tests/Feature`:** 3699 tests (25 new), 70955 assertions, 2 failures. They are the same two as the baseline (ExampleTest, ItemTableFitScriptTest), so there are no new failures. Command: `php vendor/bin/phpunit tests/Feature`. Last line: "Tests: 3699, Assertions: 70955, Failures: 2, PHPUnit Deprecations: 92, Skipped: 4."
 - **`tests/Feature/Chatblast`:** 1494 tests OK. Only deprecations remain, as on the base.
 - **Review:** a skeptic reviewer did one adversarial pass and a re-check of fix loop 1. Five majors were found and fixed: the backfill, the stale `__wait_unsent`, the Health query per page, and two missing tests (500 path, re-ask guards). One more major was this result and the stories, done now. The minors are fixed or accepted in TODO.md.
 
@@ -175,6 +175,6 @@ Not in TODO.md: in the Inbox, a customer who only clicked shows as waiting. This
 - Add `BotcakeChat::customerMessages()` and move the readers to it, as a separate legacy refactor spec.
 
 ## Progress
-- Run 1: spec, result skeleton, plan and stories committed. Then the trigger path, the readers, the Health figure, amendments 204-1 to 204-3, the skeptic review and fix loop 1 (re-checked: no blocker or major left). Full suite: see Tests. Status: done.
+- Run 1: spec, result skeleton, plan and stories committed. Then the trigger path, the readers, the Health figure, amendments 204-1 to 204-3, the skeptic review and fix loop 1 (re-checked: no blocker or major left). Full tests/Feature: 3699 tests, only the 2 known failures. Status: done.
 
 204: done — the ad open is recorded only (stored before the 200, not a reply); the customer's first message starts the Main Flow with the ad's reply, failed questions are re-asked, and Health shows ad opens without a message
