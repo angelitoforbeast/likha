@@ -15,7 +15,9 @@ use Illuminate\Support\Facades\Schema;
  * nito na talagang naipadala: ang oras ng Meta mula sa send_status (confirmed_at) kapag mayroon, kung wala ay ang sent_at
  * ng talaan (binibilang bilang "unconfirmed"). Hindi ang delivered o seen: oras iyon ng telepono ng customer, hindi ng bot.
  * Dalawang query na may petsa sa index (botcake_chats.received_at at chatbot_replies.sent_at), ang pagtutugma ay sa PHP;
- * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto.
+ * naka-cache kada (araw, page, bot): ngayon 2 minuto, ang lumang araw 30 minuto. Ang dobleng tala ng isang mensahe ay
+ * isa lang; ang pumalyang padala sa parehong pagbasa ang "Not sent". Ang Sequences ay sariling cache at endpoint
+ * (sequencesOutput), at ang default na view ay pinapainit ng chatbot:speed-warm (warmDefault).
  */
 class ResponseSpeed
 {
