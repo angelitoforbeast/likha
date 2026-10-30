@@ -203,6 +203,27 @@ class ChatbotLiveJarvisTest extends ChatblastTestCase
         foreach ($this->notes() as $bot => $note) $this->assertSame([], $note['customers'], $bot);
     }
 
+    /**
+     * Spec 204 sa notes ng spec 200: ang pagbukas ng ad lang (row na may _ad_open, walang mensahe) ay hindi customer na
+     * "nag-chat": wala sa listahan, sa bilang na nag-chat ngayon at sa huling ginawa ng bot. Ang unang mensahe niya ay naroon.
+     */
+    public function test_S_204_6_an_ad_open_alone_is_not_a_latest_customer_or_the_last_activity_in_the_notes(): void
+    {
+        $this->seedDay();
+        $this->chat('1001', '7040', '2026-10-21 12:29:40', 'forbeast', 'Gil Ad', [\App\Services\Chatbot\ChatbotInbound::AD_OPEN => true, 'ad_id' => '120001']);
+        $n = $this->notes();
+
+        $this->assertNotContains('Gil Ad', array_column($n['forbeast']['customers'], 'name'));
+        $this->assertSame(2, $n['forbeast']['chatting']);
+        $this->assertSame(['type' => 'message', 'page' => 'Page Uno', 'at' => '12:28'], $n['forbeast']['last']);
+
+        $this->travel(11)->seconds();
+        $this->chat('1001', '7040', '2026-10-21 12:30:05', 'forbeast', 'Gil Ad');
+        $n = $this->notes();
+        $this->assertSame(['name' => 'Gil Ad', 'tag' => 'CHATTING', 'at' => '12:30'], $n['forbeast']['customers'][0]);
+        $this->assertSame(3, $n['forbeast']['chatting']);
+    }
+
     public function test_S_200_3_a_stored_name_is_shown_else_customer_and_the_page_short_name_and_nothing_private_leaves_the_server(): void
     {
         $this->page('Likha Home Essentials Official', '1003');

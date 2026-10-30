@@ -238,8 +238,10 @@ class LiveFeed
         $g = DB::connection()->getQueryGrammar();
         $rows = [];
 
+        // Ang mensahe: hindi ang standby na kopya at hindi ang pagbukas ng ad lang (spec 204).
         $via = self::chatVia();
         foreach ($pid(DB::table('botcake_chats'), 'page_id', true)->where('received_at', '>=', $since)->where('received_at', '<', $end)->whereNull('payload->_standby')
+            ->whereNull('payload->' . ChatbotInbound::AD_OPEN)
             ->selectRaw($via . ' AS bot, page_id, psid, MAX(received_at) AS at')->groupByRaw($via . ', page_id, psid')->get() as $r) $rows[] = [$r, 'message'];
 
         $seq = 'CASE WHEN sequence_id IS NULL THEN 0 ELSE 1 END';
