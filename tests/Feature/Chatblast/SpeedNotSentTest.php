@@ -115,6 +115,22 @@ class SpeedNotSentTest extends ChatblastTestCase
         $this->assertSame([300], app(ResponseSpeed::class)->pageSeconds('2026-10-21 10:00:00', '2026-10-21 11:00:00', '2026-10-21 12:30:00')['1002']);
     }
 
+    /**
+     * Specs 201 at 204: ang pagbukas ng ad at ang unang mensahe sa parehong segundo ay hindi doble. Ang pagbukas ay hindi
+     * mensahe at hindi tinatandaan ng dedupe, kaya ang mensahe ay binibilang nang isang beses, sa page at sa banner.
+     */
+    public function test_S_204_6_an_ad_open_in_the_same_second_as_the_first_message_does_not_hide_the_message(): void
+    {
+        $this->chat('1001', '7050', '2026-10-21 12:00:00', ['ad_id' => '6045246247433', \App\Services\Chatbot\ChatbotInbound::AD_OPEN => true]);
+        $this->chat('1001', '7050', '2026-10-21 12:00:00');
+        $this->send('1001', '7050', '2026-10-21 12:00:04');
+
+        $o = $this->out();
+        $this->assertSame([1, 1, 4.0], [$o['hours'][12]['messages'], $o['hours'][12]['answered'], $o['hours'][12]['avg']]);
+        $this->assertSame(9, $o['total']['messages']);
+        $this->assertSame([4], app(ResponseSpeed::class)->pageSeconds('2026-10-21 12:00:00', '2026-10-21 13:00:00', '2026-10-21 12:30:00')['1001']);
+    }
+
     public function test_S_201_8_not_sent_splits_never_answered_from_answered_after_a_failure(): void
     {
         $o = $this->out();
