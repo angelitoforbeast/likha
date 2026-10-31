@@ -65,6 +65,8 @@ class ForbeastPageSetup
         }
         $name = trim((string) ($res->json('name') ?? ''));
         $this->keepScopes($page, self::scopes($res));
+        // Ang pangalan ng page sa Facebook na ibinalik na ng gateway: itinatabi, walang dagdag na tawag.
+        app(FacebookName::class)->fromProbe($page, $pageId, ['status' => 'ok', 'name' => $name, 'id' => is_scalar($res->json('id')) ? (string) $res->json('id') : null], $this->gateway);
 
         $secret = Str::random(64);
         $hook = $this->call(fn () => $this->http($token)->put($base . '/webhook',
@@ -106,9 +108,12 @@ class ForbeastPageSetup
      */
     public function retest(string $page, ?int $userId = null): string
     {
-        $p = $this->probe(trim((string) $this->settings->get($page, 'botcake', 'page_id')), $this->token($page));
+        $pageId = trim((string) $this->settings->get($page, 'botcake', 'page_id'));
+        $p = $this->probe($pageId, $this->token($page));
         if ($p['status'] === 'skipped') return 'skipped';
         if ($p['status'] === 'ok') $this->keepScopes($page, $p['permissions']);
+        // Nabasa ang page (kahit nasa ibang site ang webhook): ang pangalan nito sa Facebook, kapag ito ring page ID.
+        app(FacebookName::class)->fromProbe($page, $pageId, $p, $this->gateway);
         $ours = Gateways::eventsUrl($this->gateway);
         if ($p['status'] === 'ok' && rtrim((string) $p['webhook'], '/') !== $ours) {
             $p = ['status' => 'error', 'error' => $p['webhook'] === null ? 'Webhook not set' : 'Webhook points to ' . (parse_url($p['webhook'], PHP_URL_HOST) ?: 'another site')] + $p;

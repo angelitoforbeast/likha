@@ -716,4 +716,26 @@ Landmark:");
         $this->assertContains('Comment columns: comments are answered only on Forbeast pages', $res['notes']);
         $this->assertSame([], $this->comments($this->content('Page Dos', false), true), 'no comment columns: nothing');
     }
+
+    public function test_S_207_7_an_image_answer_saved_by_another_page_rechecks_a_page_waiting_for_it(): void
+    {
+        // Ang sagot ng AI sa larawan ay walang page sa key: ang dalawang page na may parehong link at item ay iisang sagot.
+        $this->orders('Page Uno', 'SEAT COVER', '299', 3);
+        $this->orders('Page Dos', 'SEAT COVER', '299', 3);
+        foreach (['Page Uno', 'Page Dos'] as $p) $this->settings()->set($p, 'chatbot', 'picture', self::IMG . 'pic.jpg');
+        $this->answers = [self::IMG . 'pic.jpg' => $this->answer('LED STRIP', false, 92)];
+        $wrong = 'PICTURE: looks like LED STRIP, orders: SEAT COVER';
+
+        $res = $this->check('Page Dos');
+        $this->assertSame(1, $res['content']['unchecked'], 'no answer yet');
+        $this->assertNotContains($wrong, $res['reasons']);
+        $row = fn () => collect($this->getJson('/chatbot/data')->assertOk()->json('rows'))->firstWhere('page', 'Page Dos')['check'];
+        $this->assertNotNull($row(), 'cached');
+
+        // Ang content check ng Page Uno ang nagtanong at nagtala ng sagot (sa pangalan ng Page Uno).
+        $this->content('Page Uno', true);
+        $this->assertNull($row(), 'Page Dos waits for that answer: re-checked');
+        $this->assertContains($wrong, $this->check('Page Dos')['reasons']);
+        $this->assertNotNull($row(), 'cached again, now with the answer');
+    }
 }

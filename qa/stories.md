@@ -3474,3 +3474,40 @@ Tests: `tests/Feature/PageSettings/ClearConfirmTest.php`, `tests/Feature/Chatbla
 | S-206.6 (P1) | Secrets in the confirm show the last 4 only; the full token never reaches the page HTML or JSON | `test_S_206_6…` (2 tests) | passed |
 | S-206.7 (P2) | The Botcake Clear is hidden when the page has no Botcake page ID, and the server refuses a Clear then | `test_S_206_7…` | passed |
 | S-206.8 (P1) | The full `tests/Feature` run adds no new failures vs 53478a0b | `tests/Feature` | see result |
+
+## S-207 Connections tests and the Check column without the wait
+
+As staff who set up pages on /chatbot/pages, I want Test, Save and test, Fix chat block and On/Off to answer in about one Botcake round trip per step, and the Check column to load without a request per page, so the Connections modal is not stuck behind the page's sends or 117 checks.
+
+Slice 207. Threat model: trusted = signed-in staff; external = the Botcake API (rate limits, 429, timeouts). No new table, no migration. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotSetupSpeedTest.php`, `tests/Feature/Chatblast/ChatbotCheckCacheTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-207.1 (P1) | Given Botcake fakes where every call takes 500 ms, When Test runs, Then it finishes in under 1.2 s and stores the same token_status, chat_block and keywords (and returns the same JSON) as the base code on the same fakes | `test_S_207_1…` | passed |
+| S-207.2 (P1) | Given the same fakes, When Save and test or Fix chat block runs, Then the Default Reply content is written before it is published, the Default Reply is read once per action, and the JSON equals the base code's | `test_S_207_2…` | passed |
+| S-207.3 (P1) | Given the page's send rate key busy (sends reserved for the next seconds), When Test, Save and test, Fix chat block, On or Off runs, Then it does not wait for the sends, and the sends' rate key is unchanged | `test_S_207_3…` | passed |
+| S-207.4 (P1) | Given a 429 on one read (or on the publish), When the action runs, Then it is retried as by the base code (a read in Test is not retried, a write is), the failed read gives the base code's message, and the other reads' results are still stored | `test_S_207_4…` | passed |
+| S-207.5 (P1) | Given 117 listed pages with warm check caches, When /chatbot/pages loads, Then /chatbot/data carries every page's check and the page makes no /chatbot/check call; with 3 stale pages it makes exactly 3 calls, at most 2 at a time, the rows on screen first | `test_S_207_5…` | passed |
+| S-207.6 (P1) | Given pages on flow A and on flow B with cached checks, When flow A (or a sequence step flow A subscribes to) is edited, Then only the pages on flow A are re-checked; the pages on flow B keep their cached check | `test_S_207_6…` | passed |
+| S-207.7 (P1) | Given seeded pages with and without errors, When they are checked, Then the results equal the base code's for the same data; and a page waiting for a content answer that another page saves (shared image or video answer) is re-checked | `test_S_207_7…` | passed |
+| S-207.8 (P2) | Given a cached check, When Check again is pressed on a row, Then that row is recomputed (fresh) and the next load shows the new result | `test_S_207_8…` | passed |
+| S-207.9 (P1) | Amendment 207-1. Given 117 listed pages (settings, chats, keyword rows, an AI override), When /chatbot/data loads with a cold cache and with a warm one (cache in the database, as in production), Then no query runs once per page, the total stays bounded, and the JSON equals the base code's | `ChatbotDataSpeedTest::test_S_207_9_…` | passed |
+
+## S-208 The page's real Facebook name, with a warning when it differs or the page ID is shared
+
+As staff who set up pages on /chatbot/pages, I want each row to show the page's name as Facebook has it, and a warning when it differs from the typed name or when another row holds the same page ID, so I can see which duplicate row to clear.
+
+Slice 208. Threat model: trusted = signed-in staff; external = the Graph API and the gateways (timeouts, errors); the name from them is text only. Tokens never reach the page or the logs. No new table, no migration. Risk tier: low-medium.
+Tests: `tests/Feature/Chatblast/FacebookNameTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-208.1 (P1) | Given a page with a Forbeast token whose probe returns name "Alaga Natural Collective", When Test runs, Then `facebook.name` is stored with source forbeast (no Graph call), and the row "4RO Alaga Natural Collective" with the same ID shows "Facebook name: Alaga Natural Collective" | `test_S_208_1…` (2 tests: Test, and Save plus a failed gateway Test that tries the others once) | passed |
+| S-208.2 (P1) | Given a page with no gateway token and Meta Ads connections (one expired, one that cannot read the page, one that can), When Botcake Test runs (or "+ Page" with an ID), Then the name is stored with source meta-ads, one Graph call per connection tried, stopping at the first that answers, the token only in the header | `test_S_208_2…` (2 tests, with a rate-limited connection tried once, no wait) | passed |
+| S-208.3 (P1) | Given no source can read the page (Graph 400 #100 for every connection, no gateway token), Then "Facebook name: unknown" with the link to the page on Facebook; the last known name is kept; a name read for another page ID is not kept | `test_S_208_3…` (2 tests) | passed |
+| S-208.4 (P1) | Names equal except for case and extra spaces: no warning | `test_S_208_4…` | passed |
+| S-208.5 (P1) | Two active rows with the same Botcake page ID: both show "Same page ID as <other>", the banner has one line for the pair, and the row whose name matches the Facebook name is marked as the match | `test_S_208_5…` (2 tests, with a name from outside shown as text) | passed |
+| S-208.6 (P1) | Loading /chatbot/pages, /chatbot/data and the Connections popup makes no Graph or gateway call | `test_S_208_6…` | passed |
+| S-208.7 (P1) | The nightly run: one lookup per listed page with an ID (a name the Forbeast retest already read is not asked again), failures recorded as unknown, an exception on one page does not stop the run | `test_S_208_7…` | passed |
+| S-208.8 (P2) | "+ Page" with an ID already used shows the existing "already used by" plus the Facebook name when known | `test_S_208_8…` | passed |

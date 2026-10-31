@@ -26,7 +26,7 @@ class PageSettings
         'chatbot.mock_ai', 'chatbot.mock_ai_latency_ms', 'forbeast.token_status', 'forbeast.webhook_secret', 'forbeast.permissions', 'chatbot.auto_switch',
         'incepxionbot.token_status', 'incepxionbot.webhook_secret', 'incepxionbot.permissions', 'chatbot.gateway', 'botcake.chat_block',
         'chatbot.ai_provider', 'chatbot.ai_fallback', 'chatbot.ai_local_model', 'chatbot.ai_local_timeout', 'chatbot.ai_local_concurrency',
-        'chatbot.ai_breaker_failures', 'chatbot.ai_breaker_seconds', 'chatbot.ai_local_reasoning_effort'];
+        'chatbot.ai_breaker_failures', 'chatbot.ai_breaker_seconds', 'chatbot.ai_local_reasoning_effort', 'facebook.name', 'facebook.name_checked'];
 
     /**
      * Ang chatbot key na mukhang key (api_key, ai_key, …): hindi tinatanggap mula sa page, dahil ang mga key ng AI ay nasa
@@ -291,6 +291,41 @@ class PageSettings
         $this->memo[$pk] = [microtime(true), $map];
 
         return $map;
+    }
+
+    /**
+     * Ang settings ng maraming page nang sabay, para sa listahan na nagbabasa ng get() kada page (hal. /chatbot/data):
+     * isang basa sa cache para sa lahat, at isang query para sa mga wala pa roon, sa parehong laman ng map(). Ang page na
+     * walang nakitang row sa iisang query ay iniiwan sa map() (ang sariling query nito), para walang page na mukhang walang
+     * settings dahil lang sa ibang pagkakasulat ng pangalan. Ang nabasa sa query ay sa memo lang (ang request na ito), hindi
+     * sa cache: ang set() na pumasok habang binabasa ang lahat ng page ay hindi dapat matakpan ng lumang map nang 10 minuto.
+     * @param array<int, string> $pages
+     */
+    public function preload(array $pages): void
+    {
+        $byKey = [];
+        foreach ($pages as $p) $byKey[self::cacheKey($p)] = $this->pageKey($p);
+        if (!$byKey) return;
+        $now = microtime(true);
+        $missing = [];
+        foreach (Cache::many(array_keys($byKey)) as $ck => $map) {
+            if (is_array($map)) $this->memo[$byKey[$ck]] = [$now, $map];
+            else $missing[$byKey[$ck]] = $ck;
+        }
+        if (!$missing) return;
+
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $maps = [];
+        foreach (array_chunk(array_keys($missing), 500) as $chunk) {
+            $rows = PageSetting::selectRaw("LOWER($trim(page_name)) AS pk, id, provider, " . DB::getQueryGrammar()->wrap('key') . ', value, is_secret')
+                ->whereRaw("LOWER($trim(page_name)) IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')', $chunk)
+                ->where('active', true)->orderBy('id')->get();
+            foreach ($rows as $s) {
+                $pk = mb_strtolower((string) $s->pk, 'UTF-8');
+                if (isset($missing[$pk])) $maps[$pk][strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret, (int) $s->id];
+            }
+        }
+        foreach ($maps as $pk => $map) $this->memo[$pk] = [$now, $map];
     }
 
     /** @param array{0: ?string, 1: bool, 2: int} $row */

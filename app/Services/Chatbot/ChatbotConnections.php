@@ -47,6 +47,8 @@ class ChatbotConnections
                 'gateways' => array_values(array_map(fn ($gw) => Gateways::label($gw), array_filter(Gateways::ALL, fn ($gw) => $this->forbeast->on($gw)->token($page) !== '')))],
             'forbeast' => ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, ForbeastPageSetup::PROVIDER),
                 'connected' => $f['connected']],
+            // Ang naitalang pangalan sa Facebook at ang ibang row na may parehong page ID (walang tawag sa labas).
+            'facebook' => app(FacebookName::class)->overview()[$this->settings->pageKey($page)] ?? null,
         ] + (Gateways::setUp(Gateways::INCEPXIONBOT) ? ['incepxionbot' => $this->gatewayCard($page, $pageId, Gateways::INCEPXIONBOT)] : []);
     }
 
@@ -76,13 +78,40 @@ class ChatbotConnections
         foreach ($rows as $s) {
             $v = (string) $s->plainValue();
             if (str_starts_with($v, 'unknown')) continue;
-            if (!str_starts_with($v, 'on ')) return null;
-            [$head, $names] = array_pad(explode(' · ', $v, 2), 2, '');
 
-            return ['names' => trim($names), 'at' => mb_substr(trim(mb_substr($head, 3)), 0, 16)];
+            return self::keywordsLine($v);
         }
 
         return null;
+    }
+
+    /**
+     * Ang keywordsOn() ng lahat ng page sa iisang query (ang listahan ng /chatbot/data), sa parehong patakaran.
+     * @return array<string, ?array{names: string, at: string}> page key (PageSettings::pageKey) => gaya ng keywordsOn()
+     */
+    public function keywordsOnAll(): array
+    {
+        // Ang pinakabagong hindi-unknown na row lang kada page (ang status ay hindi secret), hindi ang buong history.
+        $q = fn () => PageSetting::where('provider', 'botcake')->where('key', 'keywords');
+        $ids = $q()->where('is_secret', false)->where('value', 'not like', 'unknown%')->groupBy('page_name')->selectRaw('MAX(id) AS id')->pluck('id')->all();
+        $out = [];
+        foreach ($q()->whereIn('id', $ids)->orderByDesc('id')->get(['page_name', 'value', 'is_secret']) as $s) {
+            $pk = $this->settings->pageKey((string) $s->page_name);
+            if (array_key_exists($pk, $out)) continue;
+            $v = (string) $s->plainValue();
+            if (!str_starts_with($v, 'unknown')) $out[$pk] = self::keywordsLine($v);
+        }
+
+        return $out;
+    }
+
+    /** Ang isang hindi-unknown na botcake.keywords: ang on (mga pangalan at oras), o null (none). */
+    private static function keywordsLine(string $v): ?array
+    {
+        if (!str_starts_with($v, 'on ')) return null;
+        [$head, $names] = array_pad(explode(' · ', $v, 2), 2, '');
+
+        return ['names' => trim($names), 'at' => mb_substr(trim(mb_substr($head, 3)), 0, 16)];
     }
 
     /** Sira ang chat block ayon sa huling suri (botcake.chat_block). */
@@ -126,16 +155,19 @@ class ChatbotConnections
             ->pluck('page_name')->first(fn ($p) => $this->settings->pageKey($p) !== $this->settings->pageKey($page));
         if ($owner !== null) return $this->fail(422, 'error', "Botcake ID {$pageId} is already used by {$owner}.");
 
-        $client = app(BotcakeClient::class)->once();
+        // Ang token test, ang Default Reply (takeover check) at ang mga keyword ay sabay na basa: walang umaasa sa isa't
+        // isa. Ang resulta ay ginagamit lang kapag gumana ang token, sa parehong ayos ng dati.
+        $reads = ['token' => BotcakeClient::tokenRead($pageId)] + ($confirm ? [] : ['content' => self::read($pageId, '/default_reply/content')]) + $this->keywordReads($pageId);
         try {
-            $test = $client->tokenAndFields($pageId, $token);
+            $r = app(BotcakeClient::class)->forSetup($token)->once()->reads($reads, $token);
+            $test = BotcakeClient::tokenFieldsFrom($r['token']);
         } catch (Throwable $e) {
             if (!$e instanceof BotcakeException) report($e);
             return $this->fail(502, 'error', $e instanceof BotcakeException ? $e->getMessage() : 'Botcake did not answer.');
         }
         if (!$test['ok']) return $this->fail(422, 'invalid', "This token does not work for Botcake page {$pageId}. Nothing was saved.");
 
-        if (!$confirm && ($ask = $this->takeover($client, $pageId, $token, (string) $this->settings->get($page, 'botcake', 'chat.key'))) !== null) return $ask;
+        if (!$confirm && ($ask = $this->takeoverFrom($r['content'], (string) $this->settings->get($page, 'botcake', 'chat.key'))) !== null) return $ask;
 
         if ($pageId !== $this->botcakePageId($page)) {
             $this->settings->set($page, 'botcake', 'page_id', $pageId, false, $userId);
@@ -147,7 +179,7 @@ class ChatbotConnections
         $this->settings->set($page, 'botcake', 'token', $token, true, $userId);
         $this->stamp($page, 'token_status', 'ok', $userId);
 
-        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)] + $this->checkKeywords($page, $client, $pageId, $token, $userId)];
+        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId, true)] + $this->checkKeywords($page, $r, $userId)];
     }
 
     /**
@@ -162,9 +194,12 @@ class ChatbotConnections
         $token = trim((string) $this->settings->get($page, 'botcake', 'token'));
         if ($pageId === '' || $token === '') return $this->fail(422, 'error', 'Save a Botcake Page ID and token first.');
 
-        $client = app(BotcakeClient::class)->once();
+        // Lahat ng basa ay sabay (token, Default Reply at settings nito, keywords, flows); ang resulta ay binabasa at
+        // itinatala sa parehong ayos ng dati: walang ibang itinatala kapag hindi gumana ang token.
         try {
-            $ok = $client->tokenAndFields($pageId, $token)['ok'];
+            $r = app(BotcakeClient::class)->forSetup($token)->once()->reads(['token' => BotcakeClient::tokenRead($pageId),
+                'content' => self::read($pageId, '/default_reply/content'), 'published' => self::read($pageId, '/default_reply')] + $this->keywordReads($pageId), $token);
+            $ok = BotcakeClient::tokenFieldsFrom($r['token'])['ok'];
         } catch (Throwable $e) {
             if (!$e instanceof BotcakeException) report($e);
             $error = $e instanceof BotcakeException ? $e->getMessage() : 'Botcake did not answer.';
@@ -174,10 +209,10 @@ class ChatbotConnections
         $this->stamp($page, 'token_status', $ok ? 'ok' : 'invalid', $userId);
         if (!$ok) return ['http' => 200, 'body' => ['status' => 'invalid', 'error' => 'The token does not work for Botcake page ' . $pageId . '.', 'chat_block' => null]];
 
-        $state = $this->blockState($client, $pageId, $token, (string) $this->settings->get($page, 'botcake', 'chat.key'));
+        $state = $this->blockStateFrom($r['content'], (string) $this->settings->get($page, 'botcake', 'chat.key'));
         [$block, $note] = match (true) {
             // Hindi published: sira lang kapag On ang bot dito; ang page na sadyang Off ay "off".
-            $state === 'ours' => $this->published($client, $pageId, $token) === false
+            $state === 'ours' => self::publishedFrom($r['published']) === false
                 ? ($this->settings->get($page, 'chatbot', 'active') === '0' ? ['off', 'the bot is Off'] : ['unpublished', 'the Default Reply is not published'])
                 : ['on', null],
             $state === 'none' => ['missing', 'no chat block in the Default Reply'],
@@ -188,7 +223,7 @@ class ChatbotConnections
         $this->stamp($page, 'chat_block', $block, $userId, $note);
 
         return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $block, 'block_state' => $state, 'error' => $note]
-            + $this->checkKeywords($page, $client, $pageId, $token, $userId)];
+            + $this->checkKeywords($page, $r, $userId)];
     }
 
     /**
@@ -196,12 +231,13 @@ class ChatbotConnections
      * mensaheng tumama sa keyword ay hindi umaabot sa Default Reply (sa block namin), kaya hindi pa gumagana nang buo ang
      * bot. Basa lang: hindi ito kayang i-off ng API, sa Botcake ito ino-off ng staff. Ang pangalan ng flow ay mula sa
      * GET /flows. Itinatala sa botcake.keywords (on, none o unknown, may user at oras); hindi nito binabago ang token_status.
+     * @param array{keywords: array, flows: array} $r ang dalawang basa ng keywordReads()
      * @return array{keywords: string, keywords_note: ?string}
      */
-    private function checkKeywords(string $page, BotcakeClient $client, string $pageId, string $token, ?int $userId): array
+    private function checkKeywords(string $page, array $r, ?int $userId): array
     {
         try {
-            [$state, $note] = $this->keywords($client, $pageId, $token);
+            [$state, $note] = self::keywords($r['keywords'], $r['flows']);
         } catch (Throwable $e) {
             report($e);
             [$state, $note] = ['unknown', 'could not read the keywords'];
@@ -211,10 +247,29 @@ class ChatbotConnections
         return ['keywords' => $state, 'keywords_note' => $note];
     }
 
-    /** @return array{0: string, 1: ?string} [on, ang mga pangalan ng flow] | [none, null] | [unknown, ang dahilan] */
-    private function keywords(BotcakeClient $client, string $pageId, string $token): array
+    /**
+     * Ang GET /keywords at GET /flows, para sa reads(). Ang flows ay binabasa kasabay (kahit walang naka-on), para hindi
+     * na kailangan ng pangalawang ikot.
+     * @return array{keywords: array{0: string, 1: array}, flows: array{0: string, 1: array}}
+     */
+    private function keywordReads(string $pageId): array
     {
-        $r = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/keywords', [], $token);
+        return ['keywords' => self::read($pageId, '/keywords'), 'flows' => self::read($pageId, '/flows')];
+    }
+
+    /** @return array{0: string, 1: array} ang path ng isang GET ng page (walang query), para sa reads() */
+    private static function read(string $pageId, string $path): array
+    {
+        return ['/pages/' . rawurlencode($pageId) . $path, []];
+    }
+
+    /**
+     * @param array{http: int, body: mixed} $r GET /keywords
+     * @param array{http: int, body: mixed} $f GET /flows
+     * @return array{0: string, 1: ?string} [on, ang mga pangalan ng flow] | [none, null] | [unknown, ang dahilan]
+     */
+    private static function keywords(array $r, array $f): array
+    {
         if ($r['http'] < 200 || $r['http'] >= 300 || !is_array($r['body']) || ($r['body']['success'] ?? null) === false || !is_array($r['body']['data'] ?? null)) {
             return ['unknown', 'could not read the keywords'];
         }
@@ -224,7 +279,6 @@ class ChatbotConnections
         }
         if (!$on) return ['none', null];
 
-        $f = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/flows', [], $token);
         $names = [];
         foreach (is_array($f['body']) && is_array($f['body']['data']['flows'] ?? null) ? $f['body']['data']['flows'] : [] as $flow) {
             if (is_array($flow) && is_scalar($flow['id'] ?? null) && is_string($flow['name'] ?? null)) $names[(string) $flow['id']] = trim($flow['name']);
@@ -243,22 +297,23 @@ class ChatbotConnections
         $pageId = $this->botcakePageId($page);
         $token = trim((string) $this->settings->get($page, 'botcake', 'token'));
         if (!$confirm && $pageId !== '' && $token !== '') {
-            $ask = $this->takeover(app(BotcakeClient::class)->once(), $pageId, $token, (string) $this->settings->get($page, 'botcake', 'chat.key'));
+            $ask = $this->takeover(app(BotcakeClient::class)->forSetup($token)->once(), $pageId, $token, (string) $this->settings->get($page, 'botcake', 'chat.key'));
             if ($ask !== null) return $ask;
         }
 
-        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId)]];
+        return ['http' => 200, 'body' => ['status' => 'ok', 'chat_block' => $this->chatBlock($page, $userId, true)]];
     }
 
     /**
      * Ang takeover check bago isulat ang block sa On at + Page: ang tanong (409) kapag ang Default Reply ay nasa ibang site,
      * o null. Ang hindi masuring sagot ay hindi humaharang dito (gaya ng On at + Page bago ang check na ito); ang
-     * Connections popup lang ang nagtatanong din doon.
+     * Connections popup lang ang nagtatanong din doon. $setup: ang On ng staff, sa rate key ng setup (forSetup).
      */
-    public function guard(string $pageId, string $token, string $chatKey): ?array
+    public function guard(string $pageId, string $token, string $chatKey, bool $setup = false): ?array
     {
         if ($pageId === '' || $token === '') return null;
-        $state = $this->blockState(app(BotcakeClient::class)->once(), $pageId, $token, $chatKey);
+        $client = app(BotcakeClient::class);
+        $state = $this->blockState(($setup ? $client->forSetup($token) : $client)->once(), $pageId, $token, $chatKey);
 
         return in_array($state, ['ours', 'stale', 'none', 'unknown'], true) ? null : $this->askMove($state);
     }
@@ -269,11 +324,14 @@ class ChatbotConnections
         $this->stamp($page, 'chat_block', 'off', $userId);
     }
 
-    /** Isulat ang block at i-publish (BotcakeChatBlock::turnOn, parehong chat.key); itinatala sa botcake.chat_block. */
-    public function chatBlock(string $page, ?int $userId): array
+    /**
+     * Isulat ang block at i-publish (BotcakeChatBlock::turnOn, parehong chat.key); itinatala sa botcake.chat_block.
+     * $setup: pindot ng staff (Save, Fix, On), sa rate key ng setup at hindi sa lane ng mga padala.
+     */
+    public function chatBlock(string $page, ?int $userId, bool $setup = false): array
     {
         try {
-            $r = app(BotcakeChatBlock::class)->turnOn($page, false, $userId);
+            $r = app(BotcakeChatBlock::class)->turnOn($page, false, $userId, $setup);
         } catch (Throwable $e) {
             report($e);
             $r = ['ok' => false, 'error' => 'Could not set up the chat block: Botcake did not answer.'];
@@ -366,7 +424,12 @@ class ChatbotConnections
      */
     public function blockState(BotcakeClient $client, string $pageId, string $token, string $chatKey): string
     {
-        $r = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/default_reply/content', [], $token);
+        return $this->blockStateFrom($client->call('GET', '/pages/' . rawurlencode($pageId) . '/default_reply/content', [], $token), $chatKey);
+    }
+
+    /** Ang blockState() mula sa sagot ng GET /default_reply/content (ng call() o ng reads()). */
+    private function blockStateFrom(array $r, string $chatKey): string
+    {
         if ($r['http'] < 200 || $r['http'] >= 300 || !is_array($r['body']) || ($r['body']['success'] ?? null) === false || !is_array($r['body']['blocks'] ?? null)) return 'unknown';
         $ours = mb_strtolower((string) parse_url((string) config('app.url'), PHP_URL_HOST));
         $state = 'none';
@@ -382,10 +445,9 @@ class ChatbotConnections
         return $state;
     }
 
-    /** settings.is_published ng Default Reply (GET /default_reply), o null kapag hindi masabi. */
-    private function published(BotcakeClient $client, string $pageId, string $token): ?bool
+    /** settings.is_published ng Default Reply (ang sagot ng GET /default_reply), o null kapag hindi masabi. */
+    private static function publishedFrom(array $r): ?bool
     {
-        $r = $client->call('GET', '/pages/' . rawurlencode($pageId) . '/default_reply', [], $token);
         $v = is_array($r['body']) ? ($r['body']['settings']['is_published'] ?? null) : null;
 
         return $r['http'] >= 200 && $r['http'] < 300 && is_bool($v) ? $v : null;
@@ -394,7 +456,13 @@ class ChatbotConnections
     /** Ang tanong bago isulat ang block, o null kapag walang ibang site. Hindi masuri = tinatanong din. */
     private function takeover(BotcakeClient $client, string $pageId, string $token, string $chatKey): ?array
     {
-        $state = $this->blockState($client, $pageId, $token, $chatKey);
+        return $this->takeoverFrom($client->call('GET', '/pages/' . rawurlencode($pageId) . '/default_reply/content', [], $token), $chatKey);
+    }
+
+    /** Ang takeover() mula sa sagot ng GET /default_reply/content. */
+    private function takeoverFrom(array $r, string $chatKey): ?array
+    {
+        $state = $this->blockStateFrom($r, $chatKey);
         if (in_array($state, ['ours', 'stale', 'none'], true)) return null;
         if ($state === 'unknown') return ['http' => 409, 'body' => ['status' => 'confirm', 'host' => null,
             'message' => "Could not check whether this page's Default Reply points to another site. Replace it anyway?"]];

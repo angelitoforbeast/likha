@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Support\BotcakeClock;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -42,6 +43,99 @@ class BotcakeClient
         $client->maxRetryAfter = 10;
 
         return $client;
+    }
+
+    /**
+     * Para sa setup ng staff (Test, Save and test, Fix chat block, On/Off): sariling rate key ng page, hiwalay sa lane ng
+     * mga padala (sha1 ng token), kaya ang abalang page ay hindi nagpapabagal sa isang pindot ng staff, at ang setup ay
+     * hindi kumukuha ng puwesto ng mga padala. Pareho pa rin ang retry at timeout.
+     */
+    public function forSetup(string $token): static
+    {
+        $client = clone $this;
+        $client->rateKey = self::setupRateKey($token);
+
+        return $client;
+    }
+
+    /** Ang rate key ng setup ng isang page (token). */
+    public static function setupRateKey(string $token): string
+    {
+        return 'setup:' . sha1($token);
+    }
+
+    /**
+     * Mga GET na sabay-sabay (Http::pool), dahil hindi umaasa ang isa sa isa. Bawat isa ay may retry ng call() (ayon sa
+     * retries, timeout at Retry-After ng client na ito; ang once() ay isang subok lang); ang uulitin ay sabay ulit sa
+     * susunod na ikot, pagkatapos ng pinakamahabang hintay ng ikot. Iisang puwesto sa rate kada ikot: iisang pindot ito.
+     * @param array<string, array{0: string, 1: array}> $reads pangalan => [path, query]
+     * @return array<string, array{http: int, body: mixed, attempts: int}> sa parehong ayos ng $reads
+     */
+    public function reads(array $reads, string $token): array
+    {
+        $out = array_fill_keys(array_keys($reads), null);
+        $todo = array_keys($reads);
+        for ($attempt = 0; $todo; $attempt++) {
+            $this->throttle($token);
+            $res = $live = [];
+            foreach ($todo as $k) {
+                if (($m = $this->mock('GET', $reads[$k][0], $reads[$k][1])) !== null) $res[$k] = $m;
+                else $live[] = $k;
+            }
+            if ($live) {
+                $pooled = Http::pool(function (Pool $pool) use ($live, $reads, $token) {
+                    foreach ($live as $k) {
+                        $pool->as((string) $k)->withHeaders(['access-token' => $token])->acceptJson()->connectTimeout(10)->timeout($this->timeout)
+                            ->get(self::BASE . $reads[$k][0], $reads[$k][1]);
+                    }
+                });
+                // Ang walang sagot (putol, timeout) ay 0, gaya ng call().
+                foreach ($live as $k) $res[$k] = ($pooled[(string) $k] ?? null) instanceof Response ? $pooled[(string) $k] : null;
+            }
+
+            $again = [];
+            $wait = 0.0;
+            foreach ($todo as $k) {
+                $r = $res[$k];
+                $status = $r?->status() ?? 0;
+                $w = self::retryWait($attempt, $status, $r?->header('Retry-After'), false, $this->retries, $this->maxRetryAfter);
+                if ($w === null) {
+                    $out[$k] = ['http' => $status, 'body' => $r ? ($r->json() ?? $r->body()) : null, 'attempts' => $attempt + 1];
+                    continue;
+                }
+                $again[] = $k;
+                $wait = max($wait, $w);
+            }
+            $todo = $again;
+            if ($todo) $this->clock->sleep($wait);
+        }
+
+        return $out;
+    }
+
+    /** Ang custom_fields na basa para sa reads(): ang path at query ng tokenAndFields(). @return array{0: string, 1: array} */
+    public static function tokenRead(string $pageId): array
+    {
+        return ['/pages/' . rawurlencode($pageId) . '/custom_fields', ['page' => 1]];
+    }
+
+    /**
+     * Ang sagot ng tokenAndFields() mula sa isang basa ng reads() (tokenRead): parehong ok, fields at parehong
+     * BotcakeException at mensahe gaya ng get() (401/403 = invalid; ibang hindi 2xx = "Botcake: HTTP N").
+     * @param array{http: int, body: mixed, attempts: int} $r
+     * @return array{ok: bool, fields: ?array<int, array{id: string, name: string}>}
+     */
+    public static function tokenFieldsFrom(array $r): array
+    {
+        $status = $r['http'];
+        if ($status === 401 || $status === 403) return ['ok' => false, 'fields' => null];
+        if ($status < 200 || $status >= 300) {
+            if (!($status === 0 || $status === 429 || $status >= 500)) throw new BotcakeException('Botcake: HTTP ' . $status);
+            $retries = $r['attempts'] - 1;
+            throw new BotcakeException('Botcake: HTTP ' . ($status ?: 'connection error') . ($retries ? ' after ' . $retries . ' retries' : ''), false, $status === 429 ? 'rate_limited' : 'error');
+        }
+
+        return self::fieldsFrom(is_array($r['body']) ? $r['body'] : null);
     }
 
     /**
@@ -228,12 +322,18 @@ class BotcakeClient
     public function tokenAndFields(string $pageId, string $token): array
     {
         try {
-            $body = $this->get('/pages/' . rawurlencode($pageId) . '/custom_fields', ['page' => 1], $token)->json();
+            $body = $this->get(...[...self::tokenRead($pageId), $token])->json();
         } catch (BotcakeException $e) {
             if ($e->auth) return ['ok' => false, 'fields' => null];
             throw $e;
         }
 
+        return self::fieldsFrom($body);
+    }
+
+    /** Ang ok at mga custom field mula sa body ng custom_fields (2xx na sagot). @return array{ok: bool, fields: ?array} */
+    private static function fieldsFrom(mixed $body): array
+    {
         $ok = is_array($body) && ($body['success'] ?? null) === true;
         $list = $ok ? ($body['data'] ?? null) : null;
         if (!is_array($list) || !array_is_list($list)) return ['ok' => $ok, 'fields' => null];

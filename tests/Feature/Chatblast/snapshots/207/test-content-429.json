@@ -1,0 +1,53 @@
+{
+    "json": {
+        "http": 200,
+        "status": "ok",
+        "chat_block": "unknown",
+        "block_state": "unknown",
+        "error": "could not read the Default Reply",
+        "keywords": "on",
+        "keywords_note": "ON DELIVERY SCRIPT",
+        "connections": {
+            "page": "Page Uno",
+            "botcake": {
+                "page_id": "1001",
+                "token": "••••9w2e",
+                "status": "ok 2026-10-31 10:00:00",
+                "tested_at": "2026-10-31 10:00",
+                "chat_block": true,
+                "chat_block_status": "unknown 2026-10-31 10:00:00 · could not read the Default Reply",
+                "keywords_status": "on 2026-10-31 10:00:00 · ON DELIVERY SCRIPT",
+                "keywords_on": {
+                    "names": "ON DELIVERY SCRIPT",
+                    "at": "2026-10-31 10:00"
+                },
+                "connected": true,
+                "gateways": []
+            },
+            "forbeast": {
+                "page_id": "1001",
+                "token": null,
+                "status": null,
+                "tested_at": null,
+                "connected": false
+            },
+            "facebook": {
+                "page": "Page Uno",
+                "page_id": "1001",
+                "name": null,
+                "source": null,
+                "checked_at": null,
+                "differs": false,
+                "same_id": [],
+                "match": null
+            }
+        }
+    },
+    "stored": {
+        "token_status": "ok 2026-10-31 10:00:00",
+        "chat_block": "unknown 2026-10-31 10:00:00 · could not read the Default Reply",
+        "keywords": "on 2026-10-31 10:00:00 · ON DELIVERY SCRIPT",
+        "active": null,
+        "chat_key": "kept-chat-key-123"
+    }
+}

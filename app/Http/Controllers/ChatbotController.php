@@ -11,6 +11,7 @@ use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotPageCheck;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
+use App\Services\Chatbot\FacebookName;
 use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastWatch;
 use App\Services\Chatbot\Gateways;
@@ -102,13 +103,20 @@ class ChatbotController extends Controller
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
         // Ang template code ng bawat flow na mayroon (ipinapakita sa FLOW ng page).
         $flowCodes = Schema::hasColumn('chatbot_flows', 'template_code') ? \App\Models\ChatbotFlow::whereNotNull('template_code')->pluck('template_code', 'id') : collect();
-        // Ang Check: ang naka-cache lang (ang wala pa ay kinukuha ng page isa-isa sa /chatbot/check).
+        // Ang settings ng lahat ng page sa isang basa (cache, saka isang query para sa wala roon): ang get() kada page sa
+        // ibaba ay mula na sa memo, hindi isang basa o query kada page.
+        $this->settings->preload($pages);
+        // Ang Check: ang naka-cache lang, sa isang basa (ang wala pa ay kinukuha ng page sa /chatbot/check, dalawa nang sabay).
         $check = app(ChatbotPageCheck::class);
-        $prints = $check->prints();
+        $checks = $check->cachedMany($pages, $check->prints());
         $forbeast = app(ForbeastPageSetup::class);
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        $keywordsOn = $connections->keywordsOnAll();
         $ai = app(\App\Services\Chatbot\ChatbotAiSettings::class);
+        $aiSite = \App\Services\Chatbot\ChatbotAiChain::site();
         $adGroups = app(\App\Services\Chatbot\AdGroups::class);
+        // Ang naitalang pangalan sa Facebook at ang mga row na may parehong page ID (dalawang query, walang tawag sa labas).
+        $facebook = app(FacebookName::class)->overview();
 
         $rows = [];
         foreach ($pages as $page) {
@@ -154,19 +162,21 @@ class ChatbotController extends Controller
                 // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
                 'from_forbeast' => (object) $forbeastBy,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
-                'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
+                'check' => $checks[$page] ?? null, 'forbeast' => $forbeast->info($page),
                 // Ang mga kumpletong koneksyon (Connected column at ang Bot na mapipili).
                 'connected' => $connections->connected($page),
                 // Ang huling keyword check ng Botcake (on | none | unknown; null kapag hindi pa nasubok o nasa Forbeast ang page).
                 // Ang unknown matapos ang on ay on pa rin: ang hindi nasagot na basa ay hindi nagtatago ng kilalang problema.
                 'botcake_keywords' => $provider !== ChatbotProvider::GATEWAY && ($k = (string) $this->settings->get($page, 'botcake', 'keywords')) !== ''
-                    ? ($connections->keywordsOn($page) !== null ? 'on' : strtok($k, ' ')) : null,
+                    ? (($keywordsOn[$this->settings->pageKey($page)] ?? null) !== null ? 'on' : strtok($k, ' ')) : null,
                 // Aling AI ang sumasagot (ang override ng page o ang site default).
-                'ai' => $ai->row($page),
+                'ai' => $ai->row($page, $aiSite),
                 // Reply values: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga ad group ng page).
                 'reply' => ($adBased = $adGroups->adBased($page)) ? \App\Services\Chatbot\AdGroups::MODE_AD : 'page',
                 // Ad-based lang: ilang bagong ad ang wala pa sa group (ang badge ng nakasarang row; naka-cache, ≤ 5 min).
                 'ad_new' => $adBased ? $adGroups->newUnassigned($page) : null,
+                // Ang pangalan sa Facebook (kapag iba sa pangalan ng row) at ang ibang row na may parehong page ID.
+                'facebook' => $facebook[$this->settings->pageKey($page)] ?? null,
             ];
         }
 
@@ -402,6 +412,7 @@ class ChatbotController extends Controller
         if ($provider === '') return response()->json($connections->info($page));
 
         $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
+        $started = now();
         // Ang pangalawang gateway: ang card nito ay kapag naka-set up lang (INCEPXIONBOT_URL).
         if (str_starts_with($provider, Gateways::INCEPXIONBOT) && !Gateways::setUp(Gateways::INCEPXIONBOT)) {
             return response()->json(['error' => Gateways::label(Gateways::INCEPXIONBOT) . ' is not set up yet.'], 422);
@@ -418,6 +429,15 @@ class ChatbotController extends Controller
             'incepxionbot-clear' => $connections->clearForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
+        // Ang pangalan ng page sa Facebook: sa Botcake Save (naitala) at Test, at sa gateway Save at Test (ang nabasa ng probe
+        // nito ay naitala na, kaya ang iba lang ang sinusubukan kapag hindi). Hindi sa pagbukas ng popup.
+        $skip = match (true) {
+            $provider === 'botcake' && $res['http'] === 200, $provider === 'botcake-test' => [],
+            in_array($provider, ['forbeast-test', 'incepxionbot-test'], true) && $res['http'] === 200 => [strtok($provider, '-')],
+            in_array($provider, ['forbeast', 'incepxionbot'], true) && $res['http'] === 200 => [$provider],
+            default => null,
+        };
+        if ($skip !== null) $this->facebookName($page, $skip, $skip ? $started : null);
 
         return response()->json($res['body'] + ['connections' => $connections->info($this->listedPage($page) ?? $page)], $res['http']);
     }
@@ -430,14 +450,15 @@ class ChatbotController extends Controller
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        // Pindot ng staff: sa rate key ng setup, hindi naghihintay sa mga padala ng page.
         if ($request->boolean('on')) {
             // Ang On ay pinapalitan ang buong Default Reply: ang ibang site ay kailangan ng confirm (ang hindi masuri ay hindi humaharang, gaya ng dati).
             $ask = $request->boolean('confirm') ? null : $connections->guard(trim((string) $this->settings->get($page, 'botcake', 'page_id')),
-                trim((string) $this->settings->get($page, 'botcake', 'token')), (string) $this->settings->get($page, 'botcake', 'chat.key'));
+                trim((string) $this->settings->get($page, 'botcake', 'token')), (string) $this->settings->get($page, 'botcake', 'chat.key'), true);
             if ($ask !== null) return response()->json($ask['body'] + ['active' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0'], $ask['http']);
-            $r = $connections->chatBlock($page, Auth::id());
+            $r = $connections->chatBlock($page, Auth::id(), true);
         } else {
-            $r = app(BotcakeChatBlock::class)->turnOff($page, Auth::id());
+            $r = app(BotcakeChatBlock::class)->turnOff($page, Auth::id(), true);
             if ($r['ok']) $connections->stampOff($page, Auth::id());
         }
 
@@ -461,6 +482,7 @@ class ChatbotController extends Controller
         if ($page === '') return response()->json(['error' => 'The page name is required.'], 422);
         if ($this->listedPage($page) !== null) return response()->json(['error' => 'This page is already on the list.'], 422);
 
+        $idGiven = $pageId !== '';
         $pageId = $pageId !== '' ? $pageId : trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $hasToken = $token !== '' || trim((string) $this->settings->get($page, 'botcake', 'token')) !== '';
         if ($pageId === '' || !$hasToken) return response()->json(['error' => 'A Botcake ID and a token are needed.'], 422);
@@ -468,7 +490,11 @@ class ChatbotController extends Controller
         // Isang Botcake ID, isang page: ang pangalawang page na may parehong ID ay aagaw sa mga chat ng una (mawawala).
         $owner = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)->where('value', $pageId)
             ->pluck('page_name')->first(fn ($p) => $this->settings->pageKey($p) !== $this->settings->pageKey($page));
-        if ($owner !== null) return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}."], 422);
+        if ($owner !== null) {
+            // Ang kilalang pangalan ng ID sa Facebook (naitala na; walang tawag dito), para makita kung aling row ang tama.
+            $fb = collect(app(FacebookName::class)->overview())->first(fn ($o) => $o['page_id'] === $pageId && $o['name'] !== null);
+            return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}." . ($fb ? ' Facebook name: ' . $fb['name'] . '.' : '')], 422);
+        }
         // Ang block ay papalit sa Default Reply: ang ibang site ay kailangan ng confirm bago may isulat.
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         $ask = $request->boolean('confirm') ? null : $connections->guard($pageId, $token !== '' ? $token : trim((string) $this->settings->get($page, 'botcake', 'token')),
@@ -498,6 +524,7 @@ class ChatbotController extends Controller
             $error = 'The token test failed' . ($error ? ' (' . $error . ')' : '') . ', so the bot was not set up and stays Off.';
         }
         if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, Auth::id(), true);
+        if ($idGiven) $this->facebookName($listed);
 
         return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
     }
@@ -754,6 +781,16 @@ class ChatbotController extends Controller
         return $pages;
     }
 
+    /** Ang lookup ng pangalan sa Facebook pagkatapos ng Save o Test: ang pagkabigo nito ay hindi sumisira sa sagot. */
+    private function facebookName(string $page, array $skip = [], ?\DateTimeInterface $since = null): void
+    {
+        try {
+            app(FacebookName::class)->lookup($page, $skip, $since);
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
     /** Ang pangalan (gaya ng naitala) kapag nasa listahan ang page, kung hindi null. */
     private function listedPage(string $page): ?string
     {
@@ -764,8 +801,9 @@ class ChatbotController extends Controller
     }
 
     /**
-     * Ang chats ngayong araw at ang huling chat kada Botcake page ID (naka-cache 1 minuto). Ang huli: isang MAX kada page
-     * sa index na (page_id, received_at), hindi isang GROUP BY sa buong table.
+     * Ang chats ngayong araw at ang huling chat kada Botcake page ID (naka-cache 1 minuto). Ang huli: ang pinakabagong
+     * received_at kada page sa index na (page_id, received_at), hindi isang GROUP BY sa buong table; lahat ng page ay nasa
+     * iisang query (isang subquery kada page), hindi isang query kada page.
      * @return array{today: array<string, int>, last: array<string, string>}
      */
     private function chatStats(): array
@@ -776,9 +814,14 @@ class ChatbotController extends Controller
             $today = BotcakeChat::active()->where('received_at', '>=', now('Asia/Manila')->startOfDay()->timezone(config('app.timezone')))
                 ->whereNotNull('page_id')->selectRaw('page_id, COUNT(*) AS n')->groupBy('page_id')->pluck('n', 'page_id')->map(fn ($n) => (int) $n)->all();
             $last = [];
-            foreach (array_keys(BotcakeChat::pageMap()) as $id) {
-                $at = BotcakeChat::active()->where('page_id', (string) $id)->max('received_at');
-                if ($at) $last[(string) $id] = \Carbon\Carbon::parse($at)->timezone('Asia/Manila')->format('Y-m-d H:i');
+            foreach (array_chunk(array_map('strval', array_keys(BotcakeChat::pageMap())), 100) as $ids) {
+                $q = DB::query();
+                foreach ($ids as $i => $id) {
+                    $q->selectSub(BotcakeChat::active()->where('page_id', $id)->whereNotNull('received_at')->orderByDesc('received_at')->limit(1)->select('received_at'), 'p' . $i);
+                }
+                foreach ((array) $q->first() as $alias => $at) {
+                    if ($at) $last[$ids[(int) substr($alias, 1)]] = \Carbon\Carbon::parse($at)->timezone('Asia/Manila')->format('Y-m-d H:i');
+                }
             }
             return ['today' => $today, 'last' => $last];
         });

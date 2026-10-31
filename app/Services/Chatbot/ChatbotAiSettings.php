@@ -165,14 +165,14 @@ class ChatbotAiSettings
         return ['status' => array_unique($statuses) === ['unchanged'] ? 'unchanged' : 'saved', 'error' => null];
     }
 
-    /** Ang AI ng isang page para sa row ng /chatbot/pages. */
-    public function row(string $page): array
+    /** Ang AI ng isang page para sa row ng /chatbot/pages. $site: ChatbotAiChain::site(), isang basa para sa buong listahan. */
+    public function row(string $page, ?array $site = null): array
     {
         $own = $this->settings->all($page, ChatbotAiChain::PROVIDER);
-        $site = ChatbotAiChain::site();
+        $site ??= ChatbotAiChain::site();
         $provider = ChatbotAiChain::providerOf($own, $site);
         $override = isset($own['ai_provider']) && ChatbotAiProviders::exists((string) $own['ai_provider']);
-        $chain = ChatbotAiChain::forPage($page);
+        $chain = ChatbotAiChain::forPage($page, null, $site);
 
         return [
             'provider' => $provider, 'override' => $override, 'label' => ChatbotAiProviders::label($provider) . ($override ? '' : ' (default)'),

@@ -21,12 +21,18 @@ use Illuminate\Support\Facades\Schema;
  * - Hindi kilala: ang {{X}} sa isang botfield na hindi system variable, botfield o customer field.
  * - Content (PageContentCheck): ang item, presyo, larawan at ad video laban sa item na ino-order; ang naitalang sagot ng AI
  *   lang (walang tawag dito). Ang tiyak na mali ay reason (X); ang hindi sigurado ay warning (amber).
- * Naka-cache 10 minuto kada page, sa key na may bakas ng settings ng page, ng mga flow at ng mga sagot ng content check:
- * ang anumang sulat ay bagong key.
+ * Naka-cache kada page, sa key na mula sa sariling inputs ng page: ang bakas ng settings nito, ng flow nito at ng mga
+ * flow, sequence at step na naaabot ng flow, ng sariling sagot ng content check, at ng mga pangalang kilala ng Check
+ * (botfield, system variable, field na isinusulat ng anumang flow, customer field). Ang sulat sa isa sa mga iyon ay
+ * bagong key para sa page na iyon lang, kaya ang edit ng isang flow ay hindi nagpapasuri ulit sa lahat ng page.
+ * Ang iba (orders, ads, ad video, link ng larawan) ay sumusunod sa oras: isang oras, o 10 minuto habang may link na
+ * hindi pa nasuri.
  */
 class ChatbotPageCheck
 {
-    public const CACHE_SECONDS = 600;
+    public const CACHE_SECONDS = 3600;
+    public const UNCHECKED_SECONDS = 600; // may link ng larawan o content check na hindi pa tapos: susubukan ulit nang mas maaga
+    private const CUSTOMER_KEYS_SECONDS = 600;
     public const MAX_URL_CHECKS = 20;
     public const URL_SECONDS = 20; // ang kabuuang oras ng mga tawag sa link kada takbo: ang lampas ay "not checked yet", hindi timeout ng request
     private const OPTIONAL = '/^(seq_(img_)?(1[1-9]|20)|after_order_(img_)?\d+)$/'; // hindi kailanman Missing: walang laman = walang ipapadala
@@ -39,9 +45,36 @@ class ChatbotPageCheck
     /** Ang naka-cache na resulta (walang bagong kuwenta), o null. $prints: mula sa prints(), para sa maraming page. */
     public function cached(string $page, ?array $prints = null): ?array
     {
-        $hit = Cache::get($this->key($page, $prints));
+        $prints ??= $this->prints($page);
 
-        return is_array($hit) ? $hit : null;
+        return $this->usable(Cache::get($this->key($page, $prints)), $prints);
+    }
+
+    /**
+     * Ang cached() ng maraming page sa iisang basa ng cache (ang listahan ng /chatbot/data).
+     * @param array<int, string> $pages
+     * @return array<string, ?array> page => resulta o null
+     */
+    public function cachedMany(array $pages, array $prints): array
+    {
+        $keys = [];
+        foreach ($pages as $p) $keys[$p] = $this->key($p, $prints);
+        $hits = $keys ? Cache::many(array_values($keys)) : [];
+
+        return array_map(fn ($k) => $this->usable($hits[$k] ?? null, $prints), $keys);
+    }
+
+    /**
+     * Ang naitalang resulta kung magagamit pa. Ang sagot ng AI sa larawan at ad video ay kahati ng ibang page (walang page
+     * sa key ng sagot), kaya ang resultang may content check na hindi pa tapos ay sinusuri ulit kapag may bagong sagot
+     * kahit saan, para hindi manatiling "pass" ang page habang may naitala nang X para dito.
+     */
+    private function usable(mixed $hit, array $prints): ?array
+    {
+        if (!is_array($hit) || !is_array($hit['result'] ?? null)) return null;
+        $waits = (int) ($hit['result']['content']['unchecked'] ?? 0) > 0;
+
+        return $waits && (int) $hit['answers'] < $prints['answers_max'] ? null : $hit['result'];
     }
 
     /**
@@ -49,32 +82,55 @@ class ChatbotPageCheck
      */
     public function check(string $page, bool $fresh = false): array
     {
-        $key = $this->key($page);
-        if (!$fresh && ($hit = Cache::get($key)) && is_array($hit)) return $hit;
+        $prints = $this->prints($page);
+        $key = $this->key($page, $prints);
+        if (!$fresh && ($hit = $this->usable(Cache::get($key), $prints)) !== null) return $hit;
         $res = $this->run($page, $fresh);
-        Cache::put($key, $res, self::CACHE_SECONDS);
+        $waits = $res['unchecked'] > 0 || (int) ($res['content']['unchecked'] ?? 0) > 0;
+        Cache::put($key, ['result' => $res, 'answers' => $prints['answers_max']], $waits ? self::UNCHECKED_SECONDS : self::CACHE_SECONDS);
 
         return $res;
     }
 
     /**
-     * Ang bakas ng bawat page (pinakamataas na id at replaced_at ng settings nito) at ng mga flow at sequence, sa iilang query.
-     * @return array{pages: array<string, string>, flows: string}
+     * Ang bakas ng sariling inputs ng bawat page (o ng isang page), sa iilang query: ang settings (pinakamataas na id at
+     * replaced_at), ang flow nito kasama ang mga naaabot nito, ang sariling sagot ng content check, at ang mga kilalang
+     * pangalan (iisa para sa lahat).
+     * @return array{pages: array<string, string>, flows: array<string, string>, answers: array<string, string>, answers_max: int, known: string}
      */
     public function prints(?string $page = null): array
     {
-        $q = $page === null ? PageSetting::query() : $this->settings->pageQuery($page);
+        $scoped = fn () => $page === null ? PageSetting::query() : $this->settings->pageQuery($page);
         $pages = [];
-        foreach ($q->whereIn('provider', [ChatbotFields::PROVIDER, 'botcake', ForbeastPageSetup::PROVIDER])->selectRaw('page_name, MAX(id) AS max_id, MAX(replaced_at) AS max_replaced')->groupBy('page_name')->get() as $r) {
+        foreach ($scoped()->whereIn('provider', [ChatbotFields::PROVIDER, 'botcake', ForbeastPageSetup::PROVIDER])->selectRaw('page_name, MAX(id) AS max_id, MAX(replaced_at) AS max_replaced')->groupBy('page_name')->get() as $r) {
             $pk = $this->settings->pageKey((string) $r->page_name);
             $pages[$pk] = max($pages[$pk] ?? '', sprintf('%012d|%s', (int) $r->max_id, (string) $r->max_replaced));
         }
+
+        // Ang flow ng page (ang pinakabagong active na flow_id, gaya ng get()) at ang bakas ng lahat ng naaabot nito.
+        $flowPrints = $this->flowPrints();
+        $deps = $flowPrints['deps'];
         $flows = [];
-        foreach (['chatbot_flows', 'chatbot_sequences', 'chatbot_sequence_steps', 'chatbot_content_answers'] as $t) {
-            if (Schema::hasTable($t)) $flows[] = DB::table($t)->max('updated_at') . '#' . DB::table($t)->count();
+        foreach ($scoped()->where('provider', ChatbotFields::PROVIDER)->where('key', 'flow_id')->where('active', true)->orderBy('id')->get() as $s) {
+            $id = trim((string) $s->plainValue());
+            $flows[$this->settings->pageKey((string) $s->page_name)] = $id === '' ? '' : ($deps[(int) $id] ?? 'none:' . $id);
         }
 
-        return ['pages' => $pages, 'flows' => implode('|', $flows)];
+        // Ang mga sagot ng content check ay itinatala kasama ang page na nagtanong.
+        $answers = [];
+        $answersMax = 0;
+        if (Schema::hasTable('chatbot_content_answers')) {
+            foreach (DB::table('chatbot_content_answers')->selectRaw('page_name, MAX(id) AS max_id, COUNT(*) AS n')->groupBy('page_name')->get() as $r) {
+                $pk = $this->settings->pageKey((string) $r->page_name);
+                $answers[$pk] = ($answers[$pk] ?? '') . $r->max_id . '#' . $r->n . ';';
+                $answersMax = max($answersMax, (int) $r->max_id);
+            }
+        }
+
+        $known = array_keys($this->knownNames(self::byName($this->fields->columns()), $flowPrints));
+        sort($known);
+
+        return ['pages' => $pages, 'flows' => $flows, 'answers' => $answers, 'answers_max' => $answersMax, 'known' => sha1(implode("\n", $known))];
     }
 
     private function key(string $page, ?array $prints = null): string
@@ -82,7 +138,68 @@ class ChatbotPageCheck
         $prints ??= $this->prints($page);
         $pk = $this->settings->pageKey($page);
 
-        return 'chatbot:page-check:' . sha1($pk . "\0" . ($prints['pages'][$pk] ?? '') . "\0" . $prints['flows']);
+        return 'chatbot:page-check:' . sha1(implode("\0", [$pk, $prints['pages'][$pk] ?? '', $prints['flows'][$pk] ?? '', $prints['answers'][$pk] ?? '', $prints['known']]));
+    }
+
+    /**
+     * Ang bakas ng bawat flow kasama ang lahat ng binabasa ng Check mula rito (ang mga flow na naaabot sa mga sequence na
+     * sinu-subscribe nito, ang mga sequence at lahat ng step nila, at kung step ito ng anumang sequence), at ang mga field
+     * na isinusulat ng anumang flow (bahagi ng mga kilalang pangalan). Kinukuwenta lang kapag may nagbago sa mga table ng
+     * flow (MAX(updated_at) at COUNT), kaya iisang basa ng mga graph kada pagbabago.
+     * @return array{deps: array<int, string>, saved: array<int, string>}
+     */
+    private function flowPrints(): array
+    {
+        if (!Schema::hasTable('chatbot_flows')) return ['deps' => [], 'saved' => []];
+        $tables = [];
+        foreach (['chatbot_flows', 'chatbot_sequences', 'chatbot_sequence_steps'] as $t) {
+            $tables[] = Schema::hasTable($t) ? DB::table($t)->max('updated_at') . '#' . DB::table($t)->count() : '-';
+        }
+
+        return Cache::remember('chatbot:page-check:flow-prints:' . sha1(implode('|', $tables)), 86400, function () {
+            $flows = ChatbotFlow::get(['id', 'graph', 'draft_graph', 'published_at', 'updated_at'])->keyBy('id');
+            $hasSteps = Schema::hasTable('chatbot_sequence_steps');
+            $steps = $hasSteps ? DB::table('chatbot_sequence_steps')->orderBy('id')->get()->groupBy('sequence_id') : collect();
+            $asStep = $hasSteps ? DB::table('chatbot_sequence_steps')->whereNotNull('flow_id')->distinct()->pluck('flow_id')->map(fn ($id) => (int) $id)->flip() : collect();
+            $seqRows = Schema::hasTable('chatbot_sequences') ? DB::table('chatbot_sequences')->get()->keyBy('id') : collect();
+
+            $deps = [];
+            foreach ($flows as $flow) {
+                // Ang parehong lakad ng graphs(): ang published na graph, ang sequence na sinu-subscribe, ang active na step nito.
+                $reached = [];
+                $seqs = [];
+                $todo = [$flow->id];
+                while ($todo) {
+                    $id = array_shift($todo);
+                    if (isset($reached[$id])) continue;
+                    $f = $flows[$id] ?? null;
+                    $reached[$id] = $f ? [(string) $f->updated_at, (string) $f->published_at] : null;
+                    foreach ((array) (($f && is_array($f->graph) ? $f->graph : [])['nodes'] ?? []) as $n) {
+                        $c = (array) ($n['config'] ?? []);
+                        if (($n['type'] ?? '') !== 'sequence' || ($c['action'] ?? '') !== 'subscribe' || ($seq = (int) ($c['sequence_id'] ?? 0)) <= 0 || isset($seqs[$seq])) continue;
+                        $seqs[$seq] = [$seqRows[$seq] ?? null, $steps[$seq] ?? []];
+                        foreach ($steps[$seq] ?? [] as $st) if ($st->active && $st->flow_id !== null) $todo[] = (int) $st->flow_id;
+                    }
+                }
+                ksort($reached);
+                ksort($seqs);
+                $deps[$flow->id] = sha1(json_encode([$reached, $seqs, isset($asStep[$flow->id])]));
+            }
+
+            $saved = [];
+            foreach ($flows as $f) {
+                foreach ([$f->graph, $f->draft_graph] as $g) {
+                    foreach ((array) ($g['nodes'] ?? []) as $n) {
+                        $c = (array) ($n['config'] ?? []);
+                        foreach ([$c['save_to'] ?? '', ...array_column((array) ($c['ops'] ?? []), 'field'), ...(array) ($c['fields'] ?? [])] as $field) {
+                            if (is_string($field) && ($field = ChatbotVars::norm($field)) !== '') $saved[$field] = true;
+                        }
+                    }
+                }
+            }
+
+            return ['deps' => $deps, 'saved' => array_keys($saved)];
+        });
     }
 
     /**
@@ -306,23 +423,14 @@ class ChatbotPageCheck
      * naitala na sa chatbot_customer_values; ang huli ay naka-cache 10 minuto).
      * @return array<string, true>
      */
-    private function knownNames(array $byName): array
+    private function knownNames(array $byName, ?array $flowPrints = null): array
     {
         $known = array_fill_keys(array_keys($byName), true);
         foreach (ChatbotFlowController::RUN_VARS as $v) $known[ChatbotVars::norm($v)] = true;
         if (!Schema::hasTable('chatbot_flows')) return $known;
 
-        foreach (ChatbotFlow::get(['graph', 'draft_graph']) as $f) {
-            foreach ([$f->graph, $f->draft_graph] as $g) {
-                foreach ((array) ($g['nodes'] ?? []) as $n) {
-                    $c = (array) ($n['config'] ?? []);
-                    foreach ([$c['save_to'] ?? '', ...array_column((array) ($c['ops'] ?? []), 'field'), ...(array) ($c['fields'] ?? [])] as $field) {
-                        if (is_string($field) && ($field = ChatbotVars::norm($field)) !== '') $known[$field] = true;
-                    }
-                }
-            }
-        }
-        $stored = Cache::remember('chatbot:page-check:customer-keys', self::CACHE_SECONDS, fn () => Schema::hasTable('chatbot_customer_values')
+        foreach (($flowPrints ?? $this->flowPrints())['saved'] as $field) $known[$field] = true;
+        $stored = Cache::remember('chatbot:page-check:customer-keys', self::CUSTOMER_KEYS_SECONDS, fn () => Schema::hasTable('chatbot_customer_values')
             ? DB::table('chatbot_customer_values')->distinct()->limit(5000)->pluck('key')->all() : []);
         foreach ($stored as $k) if (!str_starts_with((string) $k, '__')) $known[ChatbotVars::norm((string) $k)] = true;
 
