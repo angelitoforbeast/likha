@@ -42,7 +42,9 @@ class ChatbotConnections
                 'status' => $this->settings->get($page, 'botcake', 'token_status'), 'tested_at' => $this->testedAt($page, 'botcake'),
                 'chat_block' => $this->hasChatBlock($page), 'chat_block_status' => $this->settings->get($page, 'botcake', 'chat_block'),
                 'keywords_status' => $this->settings->get($page, 'botcake', 'keywords'), 'keywords_on' => $this->keywordsOn($page),
-                'connected' => $this->botcakeConnected($page)],
+                'connected' => $this->botcakeConnected($page),
+                // Ang mga gateway na may token: hinahanap nila ang chat ayon sa Botcake page ID, kaya titigil din sa Clear.
+                'gateways' => array_values(array_map(fn ($gw) => Gateways::label($gw), array_filter(Gateways::ALL, fn ($gw) => $this->forbeast->on($gw)->token($page) !== '')))],
             'forbeast' => ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, ForbeastPageSetup::PROVIDER),
                 'connected' => $f['connected']],
         ] + (Gateways::setUp(Gateways::INCEPXIONBOT) ? ['incepxionbot' => $this->gatewayCard($page, $pageId, Gateways::INCEPXIONBOT)] : []);

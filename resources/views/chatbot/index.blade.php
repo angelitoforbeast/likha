@@ -928,7 +928,7 @@
             card.querySelector('.conn-tested').textContent = 'Last test: ' + (c.tested_at ? c.tested_at + ' · ' + (c.status || '') : 'never')
                 + (p === 'botcake' && c.chat_block_status ? ' · chat block: ' + c.chat_block_status : '');
             // Ang Clear ng Botcake: kapag may naka-save na Botcake page ID lang (ang ID na iyon ang nasa tanong).
-            if (p === 'botcake') { card.dataset.pageId = c.page_id || ''; card.querySelector('.conn-clear').hidden = !botcakeClearShown(c); }
+            if (p === 'botcake') { card.dataset.pageId = c.page_id || ''; card.dataset.gateways = JSON.stringify(c.gateways || []); card.querySelector('.conn-clear').hidden = !botcakeClearShown(c); }
             const bad = c.status && !String(c.status).startsWith('ok');
             state.textContent = c.connected ? 'Connected' : (p === 'botcake' && c.token && !c.chat_block ? 'No chat block' : (bad ? c.status : (c.token ? 'Not connected' : 'Not set up')));
             state.className = 'conn-state break-words text-xs ' + (c.connected ? 'text-green-700' : (bad ? 'text-red-600' : 'text-slate-500'));
@@ -999,14 +999,16 @@
     // Ang Clear ng Botcake ay sa Likha lang: walang binabago sa Botcake (ang Default Reply ay maaaring sa ibang row na may
     // parehong Botcake page), kaya ang bot na On ay nananatiling On.
     const botcakeClearShown = c => !!(c && c.page_id);
-    const botcakeClearQuestion = (page, id, on) => 'Remove Botcake page ID ' + id + ' from ' + page + '? This page stops receiving Botcake chats here. Botcake itself is not changed.'
-        + (on ? '\nThe bot of this page is On: it stays On, with no Botcake chats coming in here.' : '');
+    // gateways: ang Forbeast / Incepxionbot na may token; hinahanap nila ang chat ayon sa Botcake page ID, kaya titigil din.
+    const botcakeClearQuestion = (page, id, on, gateways = []) => 'Remove Botcake page ID ' + id + ' from ' + page + '? This page stops receiving Botcake chats here. Botcake itself is not changed.'
+        + (on ? '\nThe bot of this page is On: it stays On, with no Botcake chats coming in here.' : '')
+        + (gateways.length ? '\n' + gateways.join(' and ') + (gateways.length > 1 ? ' also stop for this page: they find' : ' also stops for this page: it finds') + ' its chats by this Botcake page ID.' : '');
     // botcake-clear:end
     document.querySelectorAll('#conn .conn-clear').forEach(b => b.addEventListener('click', () => {
         const card = b.closest('.conn-card'), l = GATEWAY_LABEL[card.dataset.provider] || 'Forbeast';
         if (card.dataset.provider === 'botcake') {
             const id = card.dataset.pageId || '', r = rows.find(x => x.page === connPage);
-            if (id && confirm(botcakeClearQuestion(connPage, id, !!(r && r.active)))) connSave(card, 'botcake-clear', {page_id: id});
+            if (id && confirm(botcakeClearQuestion(connPage, id, !!(r && r.active), JSON.parse(card.dataset.gateways || '[]')))) connSave(card, 'botcake-clear', {page_id: id});
             return;
         }
         if (confirm('Remove the ' + l + ' token of ' + connPage + ' and disconnect the page from ' + l + '?')) connSave(card, card.dataset.provider + '-clear', {});

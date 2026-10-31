@@ -147,6 +147,25 @@ class BotcakeClearTest extends ChatblastTestCase
         $this->assertSame($off . "\nThe bot of this page is On: it stays On, with no Botcake chats coming in here.", $on);
     }
 
+    public function test_S_206_4_the_confirm_names_the_gateways_that_stop_too(): void
+    {
+        Http::fake();
+        $s = $this->settings();
+        $gateways = fn () => $this->getJson('/chatbot/connections?page_name=' . rawurlencode(self::DUP))->assertOk()->json('botcake.gateways');
+        $this->assertSame([], $gateways(), 'no gateway token');
+        $s->set(self::DUP, 'forbeast', 'token', 'fbp-dup-token-test-1x2y', true);
+        $this->assertSame(['Forbeast'], $gateways());
+        $s->set(self::DUP, 'incepxionbot', 'token', 'ixb-dup-token-test-3z4w', true);
+        $this->assertSame(['Forbeast', 'Incepxionbot'], $gateways());
+
+        $q = fn (array $gw) => 'botcakeClearQuestion(' . json_encode(self::DUP) . ', ' . json_encode(self::ID) . ', false, ' . json_encode($gw) . ')';
+        [$none, $forbeast, $both] = $this->popup('[' . $q([]) . ', ' . $q(['Forbeast']) . ', ' . $q(['Forbeast', 'Incepxionbot']) . ']');
+        $base = 'Remove Botcake page ID ' . self::ID . ' from ' . self::DUP . '? This page stops receiving Botcake chats here. Botcake itself is not changed.';
+        $this->assertSame($base, $none);
+        $this->assertSame($base . "\nForbeast also stops for this page: it finds its chats by this Botcake page ID.", $forbeast);
+        $this->assertSame($base . "\nForbeast and Incepxionbot also stop for this page: they find its chats by this Botcake page ID.", $both);
+    }
+
     public function test_S_206_7_no_botcake_id_no_clear(): void
     {
         $this->assertSame([true, false, false], $this->popup('[botcakeClearShown({page_id: ' . json_encode(self::ID) . '}), botcakeClearShown({page_id: ""}), botcakeClearShown({})]'));
