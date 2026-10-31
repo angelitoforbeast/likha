@@ -88,7 +88,7 @@ async function main() {
         const out = [];
         out.push = r => {
             results.push({screen: screen.name, ...r});
-            process.stderr.write(`   ${r.action}: longest ${fmt(r.longest)} ms, frame ${fmt(r.frame)} ms, elapsed ${Math.round(r.elapsed)} ms${r.note ? ' (' + r.note + ')' : ''}\n`);
+            process.stderr.write(`   ${r.action}: longest ${fmt(r.longest)} ms, frame ${fmt(r.frame)} ms, elapsed ${r.elapsed == null ? '-' : Math.round(r.elapsed)} ms${r.note ? ' (' + r.note + ')' : ''}\n`);
             if (args.json) writeFileSync(String(args.json), JSON.stringify(results, null, 2));
             return Array.prototype.push.call(out, r);
         };
@@ -110,7 +110,7 @@ const fmt = v => v == null ? '-' : (v < 50 ? '<50' : String(Math.round(v)));
 function printTable(rows) {
     const head = ['Screen', 'Action', 'Longest task', 'Longest frame', 'Long tasks total', 'Elapsed', 'Target', 'Pass'];
     const body = rows.map(r => [r.screen, r.action, fmt(r.longest), fmt(r.frame), r.total == null ? '-' : String(Math.round(r.total)),
-        r.elapsed == null ? '-' : String(Math.round(r.elapsed)), r.target ? '<' + r.target : '-', r.action === 'ERROR' ? 'ERROR' : (r.target ? ((r.longest || 0) < r.target ? 'yes' : 'NO') : '-')]);
+        r.elapsed == null ? '-' : String(Math.round(r.elapsed)), r.target ? '<' + r.target : '-', r.action === 'ERROR' ? 'ERROR' : (r.target ? ((r.longest || 0) < r.target ? 'yes' : 'NO') : (r.pass === undefined ? '-' : (r.pass ? 'yes' : 'NO')))]);
     const w = head.map((h, i) => Math.max(h.length, ...body.map(b => String(b[i]).length)));
     const line = cells => '| ' + cells.map((c, i) => String(c).padEnd(w[i])).join(' | ') + ' |';
     console.log(line(head));

@@ -70,7 +70,8 @@ export async function startTrace(cdp) {
             for (const e of mine) if (e !== t && e.name !== 'RunTask' && e.ts >= t.ts && e.ts + e.dur <= t.ts + t.dur) inside.set(e.name, (inside.get(e.name) || 0) + e.dur / 1000);
             return `      task ${(t.dur / 1000).toFixed(0)} ms: ` + [...inside].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([k, v]) => k + ' ' + v.toFixed(0)).join(', ');
         });
-        return tasks.join('\n') + '\n    trace (total ms, count, longest ms):\n' + [...by].sort((a, b) => b[1][0] - a[1][0]).map(([k, [t, n, m]]) => `      ${k}: ${t.toFixed(1)} ms, ${n}x, longest ${m.toFixed(1)} ms`).join('\n') + '\n';
+        const longest = mine.filter(e => !e.name.startsWith('V8.GC')).sort((a, b) => b.dur - a.dur).slice(0, 10).map(e => `${e.name} ${(e.dur / 1000).toFixed(0)}@${((e.ts - mine[0].ts) / 1000).toFixed(0)}`).join(', ');
+        return tasks.join('\n') + '\n    longest events (ms@start): ' + longest + '\n    trace (total ms, count, longest ms):\n' + [...by].sort((a, b) => b[1][0] - a[1][0]).map(([k, [t, n, m]]) => `      ${k}: ${t.toFixed(1)} ms, ${n}x, longest ${m.toFixed(1)} ms`).join('\n') + '\n';
     };
 }
 
@@ -115,8 +116,25 @@ async function pages(p, base, out) {
     out.push({action: 'each Check that finishes after load', longest: max(lt), frame: max(loaf), total: sum(lt), count: lt.length, elapsed: checksDone - rendered, target: 50,
         note: 'all ' + (await p.ev(`document.querySelectorAll('#cb-table td[data-check]').length`)) + ' checks done'});
 
+    // The 3-line fade, checked against the text itself: on every closed text cell that has more than 3 lines and on no
+    // other; an open row shows its full text (no fade, no clamp).
+    const fade = `(() => {
+        const cells = [...document.querySelectorAll('#cb-table tbody tr:not(.cb-open):not([hidden]) .cb-txt')];
+        const wrong = cells.filter(t => t.classList.contains('cb-clamped') !== (t.scrollHeight > t.clientHeight + 1)).length;
+        const open = document.querySelector('#cb-table tr.cb-open .cb-txt');
+        const openStyle = open ? getComputedStyle(open) : null;
+        return {cells: cells.length, faded: cells.filter(t => t.classList.contains('cb-clamped')).length, wrong,
+            open: openStyle ? openStyle.display + ', mask ' + (openStyle.maskImage || openStyle.webkitMaskImage) + ', clamp ' + openStyle.webkitLineClamp : null};
+    })()`;
+    const f1 = await p.ev(fade);
+    out.push({action: 'fade check (closed rows)', note: `${f1.faded} of ${f1.cells} text cells faded, ${f1.wrong} wrong`, pass: f1.wrong === 0 && f1.faded > 0 && f1.faded < f1.cells});
     out.push(await measure(p, 'open a row (click a cell)', click(cellOf('Perf Page 005', 'main_flow')), `${row('Perf Page 005')}.classList.contains('cb-open')`));
+    const f2 = await p.ev(fade);
+    out.push({action: 'fade check (open row)', note: 'open row text: ' + f2.open + `; closed rows: ${f2.wrong} wrong`, pass: f2.wrong === 0 && /^block, mask none/.test(f2.open || '')});
     out.push(await measure(p, 'close the row', click(cellOf('Perf Page 005', 'main_flow')), `!${row('Perf Page 005')}.classList.contains('cb-open')`));
+    await sleep(300);
+    const f3 = await p.ev(fade);
+    out.push({action: 'fade check (row closed again)', note: `${f3.faded} of ${f3.cells} faded, ${f3.wrong} wrong`, pass: f3.wrong === 0});
 
     // One cell: the editor's text, then closing it saves it (Saving…, Saved, and the mark cleared 2.5 s later).
     await p.ev(`(() => { ${cellOf('Perf Page 003', 'main_flow_2')}.querySelector('.cb-edit').click(); return true; })()`);
@@ -186,8 +204,8 @@ const SCREEN_LIST = {
     async editor(p, base, out) {
         const id = await p.ev(`fetch('/chatbot').then(r => r.text()).then(t => (t.match(/\\/chatbot\\/flows\\/(\\d+)"[^>]*>\\s*Main Sales Flow/) || t.match(/\\/chatbot\\/flows\\/(\\d+)/) || [])[1])`);
         await loaded(p, out, base, '/chatbot/flows/' + id, `document.querySelectorAll('#world .nd').length > 0`);
-        // Arrange moves every step; the draft saves itself 0.8 s later.
-        out.push(await measure(p, 'Arrange (66 steps) and its save', click(`document.getElementById('arrange')`), `/^Draft saved/.test(document.getElementById('status').textContent)`, {settle: 800}));
+        // Arrange lays out every step (and, when a step moved, the draft saves itself 0.8 s later: inside the 1.5 s watched).
+        out.push(await measure(p, 'Arrange (66 steps)', click(`document.getElementById('arrange')`), 'true', {settle: 1500}));
     },
     async sequences(p, base, out) {
         await loaded(p, out, base, '/chatbot/sequences', `document.readyState === 'complete'`);
