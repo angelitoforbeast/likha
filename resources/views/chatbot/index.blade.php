@@ -412,11 +412,11 @@
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
         columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || []; aiSite = data.ai_site || null;
-        // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha isa-isa pagkatapos ng render.
+        // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha pagkatapos ng render (checkQueue).
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
         render();
-        queueChecks(rows.filter(r => !checks.has(r.page)).map(r => r.page));
+        queueChecks(staleChecks(rows));
     }
 
     function visible() {
@@ -712,12 +712,31 @@
         }
         checking.delete(page); paintCheck(page);
     }
-    // Tatlo nang sabay: ang Check ng page na may larawan ay maaaring ilang segundo (HEAD ng bawat link).
-    function queueChecks(pages) {
+    // check-queue:start
+    // Ang Check ng mga page na walang naka-cache na resulta sa data (ang may resulta ay hindi na tinatanong). Dalawa nang
+    // sabay, para hindi maipon ang mga request sa likod ng Connections at ng ibang tawag ng page; ang susunod ay laging
+    // ang pinili ng pick (ang nasa screen muna).
+    const CHECKS_AT_ONCE = 2;
+    const staleChecks = rows => rows.filter(r => !r.check).map(r => r.page);
+    function checkQueue(pages, run, pick) {
         const todo = [...pages];
-        const next = () => { const p = todo.shift(); return p === undefined ? null : runCheck(p).then(next); };
-        for (let i = 0; i < 3; i++) next();
+        const next = () => {
+            if (!todo.length) return Promise.resolve();
+            const p = pick(todo);
+            todo.splice(todo.indexOf(p), 1);
+            return Promise.resolve(run(p)).then(next, next);
+        };
+        return Promise.all(Array.from({length: Math.min(CHECKS_AT_ONCE, todo.length)}, next));
     }
+    // check-queue:end
+    // Ang susunod na Check: ang row na nakikita sa screen, saka ang ipinapakita ng mga filter, saka ang iba (sa ayos ng listahan).
+    function nextCheck(todo) {
+        const cells = new Map([...table.querySelectorAll('td[data-check]')].map(td => [td.dataset.check, td]));
+        const onScreen = p => { const b = cells.get(p)?.getBoundingClientRect(); return !!b && b.bottom > 0 && b.top < window.innerHeight; };
+        const shown = new Set(visible().map(r => r.page));
+        return todo.find(onScreen) ?? todo.find(p => shown.has(p)) ?? todo[0];
+    }
+    const queueChecks = pages => checkQueue(pages, runCheck, nextCheck);
 
     // ---- Preview, History, Changes (mga modal sa ibabaw) ----
     function dialog(boxId, show) {

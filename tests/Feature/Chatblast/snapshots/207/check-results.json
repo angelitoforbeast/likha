@@ -1,0 +1,149 @@
+{
+    "Page Ok": {
+        "page": "Page Ok",
+        "status": "ok",
+        "reasons": [],
+        "warnings": [],
+        "content": {
+            "expected": null,
+            "findings": [
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "ok",
+                    "reason": "SHOP DETAILS: built from ITEM NAME IN JNT DASHBOARD, PRICE and QUANTITY"
+                }
+            ],
+            "unchecked": 0
+        },
+        "unchecked": 0,
+        "notes": []
+    },
+    "Page Missing": {
+        "page": "Page Missing",
+        "status": "x",
+        "reasons": [
+            "Missing: Prompt 2, PICTURE, Seq Img 1, Seq 1, Seq 4",
+            "SHOP DETAILS: missing ITEM NAME IN JNT DASHBOARD",
+            "SHOP DETAILS: missing QUANTITY"
+        ],
+        "warnings": [],
+        "content": {
+            "expected": null,
+            "findings": [
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "x",
+                    "reason": "SHOP DETAILS: missing ITEM NAME IN JNT DASHBOARD"
+                },
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "x",
+                    "reason": "SHOP DETAILS: missing QUANTITY"
+                }
+            ],
+            "unchecked": 0
+        },
+        "unchecked": 0,
+        "notes": []
+    },
+    "Page Pairs": {
+        "page": "Page Pairs",
+        "status": "x",
+        "reasons": [
+            "Missing: Seq Img 1",
+            "Seq 5 has no Seq Img 5",
+            "Seq Img 6 has no Seq 6"
+        ],
+        "warnings": [],
+        "content": {
+            "expected": null,
+            "findings": [
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "ok",
+                    "reason": "SHOP DETAILS: built from ITEM NAME IN JNT DASHBOARD, PRICE and QUANTITY"
+                }
+            ],
+            "unchecked": 0
+        },
+        "unchecked": 0,
+        "notes": []
+    },
+    "Page Unknown": {
+        "page": "Page Unknown",
+        "status": "x",
+        "reasons": [
+            "PRICE is a link: this column needs text",
+            "Main Flow uses {{Mystery}} (unknown)",
+            "SHOP DETAILS: missing ITEM NAME IN JNT DASHBOARD",
+            "SHOP DETAILS: missing PRICE",
+            "SHOP DETAILS: missing QUANTITY"
+        ],
+        "warnings": [],
+        "content": {
+            "expected": null,
+            "findings": [
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "x",
+                    "reason": "SHOP DETAILS: missing ITEM NAME IN JNT DASHBOARD"
+                },
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "x",
+                    "reason": "SHOP DETAILS: missing PRICE"
+                },
+                {
+                    "kind": "shop",
+                    "field": "SHOP DETAILS",
+                    "level": "x",
+                    "reason": "SHOP DETAILS: missing QUANTITY"
+                }
+            ],
+            "unchecked": 0
+        },
+        "unchecked": 0,
+        "notes": []
+    },
+    "Page No Flow": {
+        "page": "Page No Flow",
+        "status": "x",
+        "reasons": [
+            "No flow: pick a flow in FLOW"
+        ],
+        "warnings": [],
+        "content": null,
+        "unchecked": 0,
+        "notes": []
+    },
+    "Page Draft": {
+        "page": "Page Draft",
+        "status": "x",
+        "reasons": [
+            "Flow not found / not published"
+        ],
+        "warnings": [],
+        "content": null,
+        "unchecked": 0,
+        "notes": []
+    },
+    "Page Off": {
+        "page": "Page Off",
+        "status": "ok",
+        "reasons": [],
+        "warnings": [],
+        "content": {
+            "expected": null,
+            "findings": [],
+            "unchecked": 0
+        },
+        "unchecked": 0,
+        "notes": []
+    }
+}
