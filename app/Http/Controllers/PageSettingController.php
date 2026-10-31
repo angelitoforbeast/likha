@@ -160,6 +160,11 @@ class PageSettingController extends Controller
             if (PageSettings::isSystemKey($provider . '.' . $key)) {
                 return response()->json(['error' => $provider . '.' . $key . ' is written by the system.'], 422);
             }
+            // Ang key na nagkakabit ng page ay nabubura lang sa kumpirmadong clear (clear: true): ang blangko mula sa lumang
+            // tab, paste o script ay hindi pumuputol sa bot.
+            if (!$request->boolean('clear') && PageSettings::clearWarning($provider . '.' . $key, $secret) !== null) {
+                return response()->json(['error' => 'Not cleared: ' . $provider . '.' . $key . ' connects this page. Empty the cell and confirm, or use ⋯ → Clear the value.'], 422);
+            }
             // Binurang Forbeast token: DELETE ng webhook, at kasama ang secret at status nito.
             if ($provider . '.' . $key === 'forbeast.token') {
                 app(ForbeastPageSetup::class)->disconnect($page, Auth::id());

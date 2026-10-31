@@ -46,6 +46,27 @@ class PageSettings
     /** Mga key na laging secret. */
     public const SECRET_KEYS = ['botcake.token', 'botcake.chat.key', 'forbeast.token', 'forbeast.webhook_secret', 'incepxionbot.token', 'incepxionbot.webhook_secret'];
 
+    /**
+     * Ang mga key na nagkakabit ng page (ID, token, secret, chat key, flow): ang pagbura ng isa ay tahimik na pumuputol sa
+     * bot o sa sync, kaya nabubura lang ito nang may kumpirmasyon. Ang sagot ay kung ano ang titigil (para sa tanong), o
+     * null para sa ibang key. Ang iisang listahan para sa page settings at sa Connections.
+     */
+    public static function clearWarning(string $full, bool $secret = false): ?string
+    {
+        $provider = (string) strstr($full, '.', true);
+        $named = [
+            'botcake.page_id'  => 'Botcake chats of this page stop reaching the bot here, and Chatblast and the Botcake sync stop for it.',
+            'botcake.token'    => 'Botcake sends, tests, Chatblast and the sync stop for this page.',
+            'botcake.chat.key' => 'Botcake chats of this page are refused here until the chat block is set up again.',
+            'chatbot.flow_id'  => 'The bot of this page has no flow and stops replying.',
+        ];
+        if (isset($named[$full])) return $named[$full];
+        if (str_ends_with($full, '.page_id')) return 'The ' . $provider . ' connection of this page stops.';
+        if (str_ends_with($full, '.token') || $secret || in_array($full, self::SECRET_KEYS, true)) return $provider . ' stops working for this page.';
+
+        return null;
+    }
+
     public static function isSystemKey(string $full): bool
     {
         return in_array($full, self::SYSTEM_KEYS, true) || self::isDetailKey($full);
