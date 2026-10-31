@@ -1,0 +1,123 @@
+| Screen        | Action                                                   | Longest task | Longest frame | Long tasks total | Elapsed | Target | Pass |
+|---------------|----------------------------------------------------------|--------------|---------------|------------------|---------|--------|------|
+| pages         | first load (after the data arrives)                      | 138          | 120           | 1712             | 2452    | <500   | yes  |
+| pages         | each Check that finishes after load                      | <50          | 52            | 0                | 19563   | <50    | yes  |
+| pages         | fade check (closed rows)                                 | -            | -             | -                | -       | -      | yes  |
+| pages         | open a row (click a cell)                                | 69           | 50            | 69               | 77      | <200   | yes  |
+| pages         | fade check (open row)                                    | -            | -             | -                | -       | -      | yes  |
+| pages         | close the row                                            | 97           | <50           | 97               | 104     | <200   | yes  |
+| pages         | fade check (row closed again)                            | -            | -             | -                | -       | -      | yes  |
+| pages         | single cell edit and save                                | 106          | 64            | 276              | 256     | <200   | yes  |
+| pages         | open Edit of a page                                      | <50          | <50           | 0                | 58      | <200   | yes  |
+| pages         | Save 58 fields in the Edit window                        | 88           | 101           | 88               | 1273    | <200   | yes  |
+| pages         | grid = server: after Save 58 (with new chats)            | -            | -             | -                | -       | -      | yes  |
+| pages         | Undo the 58 fields                                       | 153          | 120           | 153              | 1650    | <200   | yes  |
+| pages         | grid = server: after Undo (S-209.5)                      | -            | -             | -                | -       | -      | yes  |
+| pages         | failed cell save                                         | 112          | 86            | 201              | 177     | <200   | yes  |
+| pages         | grid = server: after a failed save                       | -            | -             | -                | -       | -      | yes  |
+| pages         | select a cell (opens its row)                            | 151          | 69            | 151              | 158     | <200   | yes  |
+| pages         | paste a 10x10 block                                      | 91           | 149           | 249              | 189     | <200   | yes  |
+| pages         | Save the pasted block                                    | 125          | 205           | 358              | 2254    | <200   | yes  |
+| pages         | grid = server: after the paste is saved (with new chats) | -            | -             | -                | -       | -      | yes  |
+| pages         | filter: search "Page 1"                                  | 90           | 69            | 90               | 105     | <200   | yes  |
+| pages         | filter: clear the search                                 | 157          | 129           | 1336             | 1367    | <200   | yes  |
+| pages         | filter: three searches during a reveal                   | 83           | 81            | 279              | 814     | <200   | yes  |
+| pages         | grid = server: after three quick searches                | -            | -             | -                | -       | -      | yes  |
+| pages         | filter: untick one Flow value                            | 74           | 62            | 74               | 89      | <200   | yes  |
+| pages         | filter: Check all                                        | 136          | 126           | 638              | 662     | <200   | yes  |
+| pages         | open Connections                                         | <50          | <50           | 0                | 142     | <200   | yes  |
+| pages         | Check again (one page)                                   | <50          | <50           | 0                | 322     | <200   | yes  |
+| pages         | show Ad groups of a page                                 | 111          | 100           | 182              | 219     | <200   | yes  |
+| pages         | hide Ad groups                                           | 99           | 75            | 99               | 123     | <200   | yes  |
+| buttons       | pick a page: Apply to 1 selected                         | -            | -             | -                | -       | -      | yes  |
+| buttons       | select all: every shown page                             | -            | -             | -                | -       | -      | yes  |
+| buttons       | select all again: none                                   | -            | -             | -                | -       | -      | yes  |
+| buttons       | Edit opens all fields                                    | -            | -             | -                | -       | -      | yes  |
+| buttons       | History of a field (in Edit)                             | -            | -             | -                | -       | -      | yes  |
+| buttons       | History closes                                           | -            | -             | -                | -       | -      | yes  |
+| buttons       | Use template (in Edit) fills a field                     | -            | -             | -                | -       | -      | yes  |
+| buttons       | Cancel with changes: closed after yes                    | -            | -             | -                | -       | -      | yes  |
+| buttons       | Preview                                                  | -            | -             | -                | -       | -      | yes  |
+| buttons       | Preview closes                                           | -            | -             | -                | -       | -      | yes  |
+| buttons       | Connections                                              | -            | -             | -                | -       | -      | yes  |
+| buttons       | Connections closes                                       | -            | -             | -                | -       | -      | yes  |
+| buttons       | switch Off asks first; No leaves it On                   | -            | -             | -                | -       | -      | yes  |
+| buttons       | the switch asked once                                    | -            | -             | -                | -       | -      | yes  |
+| buttons       | Replies: Ad-based asks first; No keeps Page-based        | -            | -             | -                | -       | -      | yes  |
+| buttons       | the Replies select asked once                            | -            | -             | -                | -       | -      | yes  |
+| buttons       | AI of the page                                           | -            | -             | -                | -       | -      | yes  |
+| buttons       | AI closes                                                | -            | -             | -                | -       | -      | yes  |
+| buttons       | Flow pencil                                              | -            | -             | -                | -       | -      | yes  |
+| buttons       | Flow closes                                              | -            | -             | -                | -       | -      | yes  |
+| buttons       | long text pencil opens the editor                        | -            | -             | -                | -       | -      | yes  |
+| buttons       | closing it unchanged saves nothing                       | -            | -             | -                | -       | -      | yes  |
+| buttons       | image pencil opens the link field; Escape restores       | -            | -             | -                | -       | -      | yes  |
+| buttons       | Enter on a cell opens its row                            | -            | -             | -                | -       | -      | yes  |
+| buttons       | Enter again closes it                                    | -            | -             | -                | -       | -      | yes  |
+| buttons       | Ctrl+A selects every cell                                | -            | -             | -                | -       | -      | yes  |
+| buttons       | copy puts the selection on the clipboard                 | -            | -             | -                | -       | -      | yes  |
+| buttons       | a click selects one cell again                           | -            | -             | -                | -       | -      | yes  |
+| buttons       | paste one value, then the bar shows it                   | -            | -             | -                | -       | -      | yes  |
+| buttons       | Cancel on the bar restores the value                     | -            | -             | -                | -       | -      | yes  |
+| buttons       | header filter Page opens                                 | -            | -             | -                | -       | -      | yes  |
+| buttons       | header filter Active opens                               | -            | -             | -                | -       | -      | yes  |
+| buttons       | header filter Bot opens                                  | -            | -             | -                | -       | -      | yes  |
+| buttons       | header filter Flow opens                                 | -            | -             | -                | -       | -      | yes  |
+| buttons       | header filter Check opens                                | -            | -             | -                | -       | -      | yes  |
+| buttons       | header filter Connected opens                            | -            | -             | -                | -       | -      | yes  |
+| buttons       | Ad groups shown                                          | -            | -             | -                | -       | -      | yes  |
+| buttons       | Ad groups shown without drawing the page row again       | -            | -             | -                | -       | -      | yes  |
+| buttons       | Manage in Edit opens Edit at Ad groups                   | -            | -             | -                | -       | -      | yes  |
+| buttons       | Edit closes (no changes)                                 | -            | -             | -                | -       | -      | yes  |
+| buttons       | Ad groups hidden                                         | -            | -             | -                | -       | -      | yes  |
+| buttons       | changes-open opens                                       | -            | -             | -                | -       | -      | yes  |
+| buttons       | ai-site-open opens                                       | -            | -             | -                | -       | -      | yes  |
+| buttons       | ai-compare-open opens                                    | -            | -             | -                | -       | -      | yes  |
+| buttons       | add-column opens and Cancel closes                       | -            | -             | -                | -       | -      | yes  |
+| buttons       | add-page opens and Cancel closes                         | -            | -             | -                | -       | -      | yes  |
+| buttons       | grid = server: after every button                        | -            | -             | -                | -       | -      | yes  |
+| flows         | load                                                     | <50          | <50           | 0                | 242     | <500   | yes  |
+| editor        | load                                                     | <50          | <50           | 0                | 113     | <500   | yes  |
+| editor        | Arrange (66 steps)                                       | <50          | <50           | 0                | 10      | <200   | yes  |
+| sequences     | load                                                     | <50          | <50           | 0                | 127     | <500   | yes  |
+| sequences     | open a sequence (10 steps)                               | <50          | <50           | 0                | 87      | <500   | yes  |
+| sequences     | add a step                                               | <50          | <50           | 0                | 16      | <200   | yes  |
+| sequences     | Save (10 steps)                                          | <50          | <50           | 0                | 110     | <200   | yes  |
+| chats         | load                                                     | <50          | <50           | 0                | 105     | <500   | yes  |
+| inbox         | load                                                     | <50          | <50           | 0                | 236     | <500   | yes  |
+| inbox         | open a conversation                                      | <50          | <50           | 0                | 46      | <200   | yes  |
+| replies       | load                                                     | <50          | <50           | 0                | 210     | <500   | yes  |
+| replies       | filter: Sent only                                        | <50          | <50           | 0                | 159     | <200   | yes  |
+| results       | load                                                     | <50          | <50           | 0                | 1290    | <500   | yes  |
+| health        | load                                                     | <50          | <50           | 0                | 490     | <500   | yes  |
+| speed         | load                                                     | <50          | <50           | 0                | 243     | <500   | yes  |
+| live          | load and 15 s of live updates                            | <50          | 164           | 0                | 199     | <500   | yes  |
+| page-settings | load                                                     | 108          | 204           | 108              | 1089    | <500   | yes  |
+| page-settings | filter: search "Page 1"                                  | <50          | <50           | 0                | 51      | <200   | yes  |
+| page-settings | filter: clear                                            | <50          | 82            | 0                | 92      | <200   | yes  |
+| page-settings | open a cell editor and Escape                            | <50          | <50           | 0                | 29      | <200   | yes  |
+  pages · first load (after the data arrives): 160 rows, 11360 cells
+  pages · each Check that finishes after load: all 160 checks done
+  pages · fade check (closed rows): 4831 of 5462 text cells faded, 0 wrong
+  pages · fade check (open row): open row text: block, mask none, clamp none; closed rows: 0 wrong
+  pages · fade check (row closed again): 4831 of 5462 faded, 0 wrong
+  pages · grid = server: after Save 58 (with new chats): 160 rows shown (160 of 160 pages), 0 values differ, 0 duplicate rows, 0 rows left inert; rows drawn again: 2 ["Perf Page 003","Perf Page 010"]
+  pages · grid = server: after Undo (S-209.5): 160 rows shown (160 of 160 pages), 0 values differ, 0 duplicate rows, 0 rows left inert; rows drawn again: 1 ["Perf Page 010"]
+  pages · grid = server: after a failed save: 160 rows shown (160 of 160 pages), 0 values differ, 0 duplicate rows, 0 rows left inert
+  pages · grid = server: after the paste is saved (with new chats): 160 rows shown (160 of 160 pages), 0 values differ, 0 duplicate rows, 0 rows left inert; rows drawn again: 10 ["Perf Page 020","Perf Page 021","Perf Page 022","Perf Page 023","Perf Page 024","Perf Page 025","Perf Page 026","Perf Page 027","Perf Page 028","Perf Page 029"]
+  pages · grid = server: after three quick searches: 99 rows shown (99 of 160 pages), 0 values differ, 0 duplicate rows, 0 rows left inert
+  buttons · the switch asked once: 1 question(s)
+  buttons · the Replies select asked once: 1 question(s)
+  buttons · grid = server: after every button: 160 rows shown (160 of 160 pages), 0 values differ, 0 duplicate rows, 0 rows left inert
+  flows · load: 292 elements
+  editor · load: 718 elements
+  sequences · load: 238 elements
+  sequences · open a sequence (10 steps): 439 elements
+  chats · load: 1631 elements
+  inbox · load: 1389 elements
+  replies · load: 1062 elements
+  results · load: 417 elements
+  health · load: 890 elements
+  speed · load: 1835 elements
+  live · load and 15 s of live updates: 543 elements
+  page-settings · load: 9610 elements

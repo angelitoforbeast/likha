@@ -3511,3 +3511,20 @@ Tests: `tests/Feature/Chatblast/FacebookNameTest.php`.
 | S-208.6 (P1) | Loading /chatbot/pages, /chatbot/data and the Connections popup makes no Graph or gateway call | `test_S_208_6…` | passed |
 | S-208.7 (P1) | The nightly run: one lookup per listed page with an ID (a name the Forbeast retest already read is not asked again), failures recorded as unknown, an exception on one page does not stop the run | `test_S_208_7…` | passed |
 | S-208.8 (P2) | "+ Page" with an ID already used shows the existing "already used by" plus the Facebook name when known | `test_S_208_8…` | passed |
+
+## S-209 The chatbot pages never hang the browser
+
+As staff who set up bot values on /chatbot/pages, I want every save, edit, paste, filter and check to answer at once, so Chrome never shows "Page Unresponsive" on a big set of pages.
+
+Slice 209. Threat model: trusted = signed-in staff; no new inputs, routes or data. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotNoHangTest.php` (the row cache, the reload merge and the fade measurement, run in Node) and the timing run `node tests/perf/run.mjs` on the seeded set (160 pages x 65 columns, 4,800+ chats): it records the longest main-thread task per action and compares the grid with /chatbot/data after each save.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-209.1 (P1) | Given the seeded set, When 58 fields of one page are saved in the Edit window, Then the window closes, the row shows the new values, the bar reads "Saved 58 fields on 1 page." with Undo, only that page's row is drawn again (also with new chats on half the pages), and the longest task is under 200 ms | timing run: "Save 58 fields…", "grid = server: after Save 58"; `test_S_209_1_and_5…` (2 tests) | passed |
+| S-209.2 (P1) | When /chatbot/pages loads, Then the longest task after the data arrives is under 500 ms, and each Check that finishes afterwards costs under 50 ms | timing run: "first load", "each Check…" | passed |
+| S-209.3 (P1) | A single cell edit, a 10x10 paste and its Save, a filter change, opening Connections and Check again: each under 200 ms; a failed save keeps the old value with its ! mark | timing run | passed |
+| S-209.4 (P1) | The 3-line fade shows on long texts in closed rows and not on short ones; an opened row shows the full text | `test_S_209_4…`; timing run: "fade check" (3 rows) | passed |
+| S-209.5 (P1) | Undo after an Edit-window Save restores the old values and draws only that row again | timing run: "Undo the 58 fields", "grid = server: after Undo"; `test_S_209_1_and_5…` | passed |
+| S-209.6 (P1) | Each other Chatbot screen and /chatblast/page-settings: load and main action measured; any over target fixed | timing run (flows, editor, sequences, chats, inbox, replies, results, health, speed, live, page-settings) | passed (none over target) |
+| S-209.7 (P2) | The timing script runs with one command and prints a table (action, longest task, total) | `node tests/perf/run.mjs` | passed |
