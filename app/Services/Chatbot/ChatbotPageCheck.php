@@ -51,6 +51,20 @@ class ChatbotPageCheck
     }
 
     /**
+     * Ang cached() ng maraming page sa iisang basa ng cache (ang listahan ng /chatbot/data).
+     * @param array<int, string> $pages
+     * @return array<string, ?array> page => resulta o null
+     */
+    public function cachedMany(array $pages, array $prints): array
+    {
+        $keys = [];
+        foreach ($pages as $p) $keys[$p] = $this->key($p, $prints);
+        $hits = $keys ? Cache::many(array_values($keys)) : [];
+
+        return array_map(fn ($k) => $this->usable($hits[$k] ?? null, $prints), $keys);
+    }
+
+    /**
      * Ang naitalang resulta kung magagamit pa. Ang sagot ng AI sa larawan at ad video ay kahati ng ibang page (walang page
      * sa key ng sagot), kaya ang resultang may content check na hindi pa tapos ay sinusuri ulit kapag may bagong sagot
      * kahit saan, para hindi manatiling "pass" ang page habang may naitala nang X para dito.

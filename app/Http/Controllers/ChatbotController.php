@@ -102,12 +102,17 @@ class ChatbotController extends Controller
         $flowNames = Schema::hasTable('chatbot_flows') ? \App\Models\ChatbotFlow::pluck('name', 'id') : collect();
         // Ang template code ng bawat flow na mayroon (ipinapakita sa FLOW ng page).
         $flowCodes = Schema::hasColumn('chatbot_flows', 'template_code') ? \App\Models\ChatbotFlow::whereNotNull('template_code')->pluck('template_code', 'id') : collect();
-        // Ang Check: ang naka-cache lang (ang wala pa ay kinukuha ng page isa-isa sa /chatbot/check).
+        // Ang settings ng lahat ng page sa isang basa (cache, saka isang query para sa wala roon): ang get() kada page sa
+        // ibaba ay mula na sa memo, hindi isang basa o query kada page.
+        $this->settings->preload($pages);
+        // Ang Check: ang naka-cache lang, sa isang basa (ang wala pa ay kinukuha ng page sa /chatbot/check, dalawa nang sabay).
         $check = app(ChatbotPageCheck::class);
-        $prints = $check->prints();
+        $checks = $check->cachedMany($pages, $check->prints());
         $forbeast = app(ForbeastPageSetup::class);
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        $keywordsOn = $connections->keywordsOnAll();
         $ai = app(\App\Services\Chatbot\ChatbotAiSettings::class);
+        $aiSite = \App\Services\Chatbot\ChatbotAiChain::site();
         $adGroups = app(\App\Services\Chatbot\AdGroups::class);
 
         $rows = [];
@@ -154,15 +159,15 @@ class ChatbotController extends Controller
                 // Ang mga value na huling isinulat mula sa Forbeast (ang "via Forbeast" ng cell).
                 'from_forbeast' => (object) $forbeastBy,
                 'last_chat' => $stats['last'][$pageId] ?? null, 'today' => (int) ($stats['today'][$pageId] ?? 0),
-                'check' => $check->cached($page, $prints), 'forbeast' => $forbeast->info($page),
+                'check' => $checks[$page] ?? null, 'forbeast' => $forbeast->info($page),
                 // Ang mga kumpletong koneksyon (Connected column at ang Bot na mapipili).
                 'connected' => $connections->connected($page),
                 // Ang huling keyword check ng Botcake (on | none | unknown; null kapag hindi pa nasubok o nasa Forbeast ang page).
                 // Ang unknown matapos ang on ay on pa rin: ang hindi nasagot na basa ay hindi nagtatago ng kilalang problema.
                 'botcake_keywords' => $provider !== ChatbotProvider::GATEWAY && ($k = (string) $this->settings->get($page, 'botcake', 'keywords')) !== ''
-                    ? ($connections->keywordsOn($page) !== null ? 'on' : strtok($k, ' ')) : null,
+                    ? (($keywordsOn[$this->settings->pageKey($page)] ?? null) !== null ? 'on' : strtok($k, ' ')) : null,
                 // Aling AI ang sumasagot (ang override ng page o ang site default).
-                'ai' => $ai->row($page),
+                'ai' => $ai->row($page, $aiSite),
                 // Reply values: "page" (Page-based, ang default) o "ad" (Ad-based: ang mga ad group ng page).
                 'reply' => ($adBased = $adGroups->adBased($page)) ? \App\Services\Chatbot\AdGroups::MODE_AD : 'page',
                 // Ad-based lang: ilang bagong ad ang wala pa sa group (ang badge ng nakasarang row; naka-cache, ≤ 5 min).
@@ -765,8 +770,9 @@ class ChatbotController extends Controller
     }
 
     /**
-     * Ang chats ngayong araw at ang huling chat kada Botcake page ID (naka-cache 1 minuto). Ang huli: isang MAX kada page
-     * sa index na (page_id, received_at), hindi isang GROUP BY sa buong table.
+     * Ang chats ngayong araw at ang huling chat kada Botcake page ID (naka-cache 1 minuto). Ang huli: ang pinakabagong
+     * received_at kada page sa index na (page_id, received_at), hindi isang GROUP BY sa buong table; lahat ng page ay nasa
+     * iisang query (isang subquery kada page), hindi isang query kada page.
      * @return array{today: array<string, int>, last: array<string, string>}
      */
     private function chatStats(): array
@@ -777,9 +783,14 @@ class ChatbotController extends Controller
             $today = BotcakeChat::active()->where('received_at', '>=', now('Asia/Manila')->startOfDay()->timezone(config('app.timezone')))
                 ->whereNotNull('page_id')->selectRaw('page_id, COUNT(*) AS n')->groupBy('page_id')->pluck('n', 'page_id')->map(fn ($n) => (int) $n)->all();
             $last = [];
-            foreach (array_keys(BotcakeChat::pageMap()) as $id) {
-                $at = BotcakeChat::active()->where('page_id', (string) $id)->max('received_at');
-                if ($at) $last[(string) $id] = \Carbon\Carbon::parse($at)->timezone('Asia/Manila')->format('Y-m-d H:i');
+            foreach (array_chunk(array_map('strval', array_keys(BotcakeChat::pageMap())), 100) as $ids) {
+                $q = DB::query();
+                foreach ($ids as $i => $id) {
+                    $q->selectSub(BotcakeChat::active()->where('page_id', $id)->whereNotNull('received_at')->orderByDesc('received_at')->limit(1)->select('received_at'), 'p' . $i);
+                }
+                foreach ((array) $q->first() as $alias => $at) {
+                    if ($at) $last[$ids[(int) substr($alias, 1)]] = \Carbon\Carbon::parse($at)->timezone('Asia/Manila')->format('Y-m-d H:i');
+                }
             }
             return ['today' => $today, 'last' => $last];
         });

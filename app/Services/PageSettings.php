@@ -293,6 +293,45 @@ class PageSettings
         return $map;
     }
 
+    /**
+     * Ang settings ng maraming page nang sabay, para sa listahan na nagbabasa ng get() kada page (hal. /chatbot/data):
+     * isang basa sa cache para sa lahat, at isang query para sa mga wala pa roon, sa parehong laman ng map(). Ang page na
+     * walang nakitang row sa iisang query ay iniiwan sa map() (ang sariling query nito), para walang page na mukhang walang
+     * settings dahil lang sa ibang pagkakasulat ng pangalan.
+     * @param array<int, string> $pages
+     */
+    public function preload(array $pages): void
+    {
+        $byKey = [];
+        foreach ($pages as $p) $byKey[self::cacheKey($p)] = $this->pageKey($p);
+        if (!$byKey) return;
+        $now = microtime(true);
+        $missing = [];
+        foreach (Cache::many(array_keys($byKey)) as $ck => $map) {
+            if (is_array($map)) $this->memo[$byKey[$ck]] = [$now, $map];
+            else $missing[$byKey[$ck]] = $ck;
+        }
+        if (!$missing) return;
+
+        $trim = DB::getDriverName() === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $maps = [];
+        foreach (array_chunk(array_keys($missing), 500) as $chunk) {
+            $rows = PageSetting::selectRaw("LOWER($trim(page_name)) AS pk, id, provider, " . DB::getQueryGrammar()->wrap('key') . ', value, is_secret')
+                ->whereRaw("LOWER($trim(page_name)) IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')', $chunk)
+                ->where('active', true)->orderBy('id')->get();
+            foreach ($rows as $s) {
+                $pk = mb_strtolower((string) $s->pk, 'UTF-8');
+                if (isset($missing[$pk])) $maps[$pk][strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret, (int) $s->id];
+            }
+        }
+        $put = [];
+        foreach ($maps as $pk => $map) {
+            $this->memo[$pk] = [$now, $map];
+            $put[$missing[$pk]] = $map;
+        }
+        if ($put) Cache::putMany($put, self::CACHE_TTL);
+    }
+
     /** @param array{0: ?string, 1: bool, 2: int} $row */
     private static function plain(array $row): ?string
     {

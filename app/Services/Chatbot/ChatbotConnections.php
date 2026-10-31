@@ -76,13 +76,37 @@ class ChatbotConnections
         foreach ($rows as $s) {
             $v = (string) $s->plainValue();
             if (str_starts_with($v, 'unknown')) continue;
-            if (!str_starts_with($v, 'on ')) return null;
-            [$head, $names] = array_pad(explode(' · ', $v, 2), 2, '');
 
-            return ['names' => trim($names), 'at' => mb_substr(trim(mb_substr($head, 3)), 0, 16)];
+            return self::keywordsLine($v);
         }
 
         return null;
+    }
+
+    /**
+     * Ang keywordsOn() ng lahat ng page sa iisang query (ang listahan ng /chatbot/data), sa parehong patakaran.
+     * @return array<string, ?array{names: string, at: string}> page key (PageSettings::pageKey) => gaya ng keywordsOn()
+     */
+    public function keywordsOnAll(): array
+    {
+        $out = [];
+        foreach (PageSetting::where('provider', 'botcake')->where('key', 'keywords')->orderByDesc('id')->get(['page_name', 'value', 'is_secret']) as $s) {
+            $pk = $this->settings->pageKey((string) $s->page_name);
+            if (array_key_exists($pk, $out)) continue;
+            $v = (string) $s->plainValue();
+            if (!str_starts_with($v, 'unknown')) $out[$pk] = self::keywordsLine($v);
+        }
+
+        return $out;
+    }
+
+    /** Ang isang hindi-unknown na botcake.keywords: ang on (mga pangalan at oras), o null (none). */
+    private static function keywordsLine(string $v): ?array
+    {
+        if (!str_starts_with($v, 'on ')) return null;
+        [$head, $names] = array_pad(explode(' · ', $v, 2), 2, '');
+
+        return ['names' => trim($names), 'at' => mb_substr(trim(mb_substr($head, 3)), 0, 16)];
     }
 
     /** Sira ang chat block ayon sa huling suri (botcake.chat_block). */

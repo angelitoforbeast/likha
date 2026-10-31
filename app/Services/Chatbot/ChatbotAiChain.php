@@ -64,7 +64,7 @@ class ChatbotAiChain
      * Ang chain ng page: [{provider, model (null = ang model ng node), timeout (null = ang natitirang oras)}].
      * @return array<int, array{provider: string, model: ?string, timeout: ?int}>
      */
-    public static function forPage(string $pageName, ?int $group = null): array
+    public static function forPage(string $pageName, ?int $group = null, ?array $site = null): array
     {
         $page = app(PageSettings::class)->all($pageName, self::PROVIDER);
         // Ang ad group ng customer (AdGroups): ang AI na itinakda nito ang pumapalit sa AI ng page; ang hindi itinakda = ang sa page.
@@ -72,7 +72,7 @@ class ChatbotAiChain
             $values = app(AdGroups::class)->groups($pageName)[$group]['values'] ?? [];
             foreach (AdGroups::AI_KEYS as $key) if (isset($values[$key])) $page[$key] = $values[$key];
         }
-        $site = self::site();
+        $site ??= self::site(); // ang listahan ng /chatbot/pages ay nagbibigay ng iisang basa para sa lahat ng page
         $first = self::providerOf($page, $site);
         $fallback = self::pick($page, $site, 'fallback') ?? ($first === ChatbotAiProviders::OPENAI ? self::NONE : ChatbotAiProviders::OPENAI);
         $names = [$first];
