@@ -52,6 +52,8 @@ class ProblemsPanel
             'slow' => $this->safely(fn () => $this->slow(), []),
             'quiet' => $this->safely(fn () => $this->quiet(), []),
             'sending' => $this->safely(fn () => array_map(fn ($p) => $this->settings->pageKey($p), app(Chatblast::class)->sendingPages()), []),
+            // Ang mga row na may parehong page ID: dalawang query, kaya naka-cache rin gaya ng iba (ang banner ay sa bawat screen).
+            'same_ids' => $this->safely(fn () => $this->sameIds(), []),
         ]);
         $echoes = $this->safely(fn () => $this->echoes(), []);
         $lines = array_merge(
@@ -59,6 +61,7 @@ class ProblemsPanel
             $echoes,
             $own['events'], $own['slow'], $own['quiet'],
             $this->safely(fn () => $this->setup($own['sending']), []),
+            $own['same_ids'] ?? [],
         );
         if (!$lines) return null;
 
@@ -268,6 +271,27 @@ class ProblemsPanel
             return ['median' => array_map(fn ($l) => (int) round(BotHealth::median($l)), array_filter($secs, fn ($l) => count($l) >= $min)),
                 'chats' => array_map(fn ($n) => (int) round($n / self::USUAL_DAYS), $chats)];
         });
+    }
+
+    /**
+     * Dalawa o higit pang row na may iisang Botcake page ID (ang chat ay napupunta sa isa lang): isang orange na linya kada
+     * grupo, sa unang row ayon sa pangalan, na nagsasabi kung aling row ang tugma sa pangalan sa Facebook (kung alam).
+     */
+    private function sameIds(): array
+    {
+        $out = $seen = [];
+        $all = app(FacebookName::class)->overview();
+        uasort($all, fn ($a, $b) => strnatcasecmp($a['page'], $b['page']));
+        foreach ($all as $f) {
+            if (!$f['same_id'] || isset($seen[$f['page_id']])) continue;
+            $seen[$f['page_id']] = true;
+            $which = $f['match'] !== null ? $f['match'] . ' matches the Facebook name'
+                : ($f['name'] !== null ? 'no row matches the Facebook name "' . $f['name'] . '"' : 'Facebook name: unknown');
+            $out[] = self::line($f['page'], 'orange', 'Same page ID ' . $f['page_id'] . ' as ' . implode(', ', $f['same_id']) . '; ' . $which,
+                [['Pages', '/chatbot/pages']]);
+        }
+
+        return $out;
     }
 
     /** Ang X ng setup check: orange kapag pinapadalhan ng chatblast ang page, kung hindi ay puti (hindi urgent). */

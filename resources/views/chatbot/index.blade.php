@@ -279,7 +279,7 @@
     <div id="conn" class="fixed inset-0 hidden overflow-y-auto bg-slate-900/30 p-2 sm:p-8" style="z-index: 60" role="dialog" aria-modal="true" aria-labelledby="conn-title">
         <div class="mx-auto w-full max-w-2xl rounded-xl bg-white text-sm shadow-lg">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-                <div class="min-w-0"><div class="flex items-center gap-1"><div id="conn-title" class="break-words font-semibold">Connections</div><span id="conn-fb" class="shrink-0"></span></div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
+                <div class="min-w-0"><div class="flex items-center gap-1"><div id="conn-title" class="break-words font-semibold">Connections</div><span id="conn-fb" class="shrink-0"></span></div><div id="conn-fbname" class="break-words text-xs"></div><div class="text-xs text-slate-500">Paste a token and Save: it is tested right away and saved only when it belongs to this page.</div></div>
                 <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <div class="grid gap-3 p-4 sm:grid-cols-2">
@@ -397,6 +397,21 @@
     const fbLink = (id, page) => /^\d+$/.test(id || '') ? {href: 'https://www.facebook.com/messages/t/' + id, target: '_blank', rel: 'noopener noreferrer',
         title: 'Chat with ' + page + ' on Facebook', 'aria-label': 'Chat with ' + page + ' on Facebook'} : null;
     // fb-link:end
+    // Ang pangalan ng page sa Facebook (naitala ng Test o ng gabi-gabing run, text lang mula sa labas): babala kapag iba sa
+    // pangalan ng row o may ibang row na may parehong page ID, at ang linya ng Connections (may link sa Facebook kapag hindi alam).
+    // facebook-lines:start
+    function facebookLines(f, page, pageId) {
+        if (!f) return {warnings: [], line: '', link: null};
+        const norm = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        const warnings = [];
+        if (f.differs) warnings.push('Facebook name: ' + f.name);
+        if (f.same_id && f.same_id.length) warnings.push('Same page ID as ' + f.same_id.join(', ') + ': ' + (f.match
+            ? (norm(f.match) === norm(page) ? 'this row matches the Facebook name' : f.match + ' matches the Facebook name')
+            : (f.name ? 'no row matches the Facebook name' : 'Facebook name: unknown')));
+        const line = f.name ? 'Facebook name: ' + f.name + (f.source === 'unknown' ? ' (last known; could not read it at ' + f.checked_at + ')' : '') : 'Facebook name: unknown';
+        return {warnings, line, link: f.name ? null : fbLink(pageId, page)};
+    }
+    // facebook-lines:end
     function fbAnchor(r) {
         const a = r ? fbLink(r.page_id, r.page) : null;
         if (!a) return '';
@@ -654,9 +669,10 @@
     // Ang buod ng Check para sa maikling cell (naka-freeze): ang icon, ilang problema (mali at babala) at ang unang linya;
     // null = walang problema o wala pang resulta (ang buong cell na ang ipinapakita).
     // check-summary:start
-    function checkSummary(c) {
-        if (!c || !c.status || c.status === 'none') return null;
-        const reasons = c.status !== 'ok' ? (c.reasons || []) : [], warnings = c.warnings || [];
+    function checkSummary(c, extra = []) {
+        const done = c && c.status && c.status !== 'none';
+        if (!done && !extra.length) return null;
+        const reasons = done && c.status !== 'ok' ? (c.reasons || []) : [], warnings = [...(done ? c.warnings || [] : []), ...extra];
         if (!reasons.length && !warnings.length) return null;
         return {icon: reasons.length ? 'x' : 'warn', count: reasons.length + warnings.length, first: (reasons[0] ?? warnings[0])};
     }
@@ -677,12 +693,15 @@
         // Ang item na pinagkukumparahan at kung saan galing (orders, ads o item settings).
         const exp = c?.content?.expected;
         if (exp) out.push(el('div', {class: 'text-slate-500 break-words', text: 'Item: ' + exp.item + (exp.price !== null ? ' ₱' + exp.price : '') + ' (' + ({orders: 'orders, 3 days', ads: 'ads', item_settings: 'item settings'}[exp.source] || exp.source) + ')'}));
+        // Ang pangalan sa Facebook at ang parehong page ID: babala rin, kasama sa bilang ng maikling cell.
+        const r = rows.find(x => x.page === page), fbWarn = facebookLines(r ? r.facebook : null, page, r ? r.page_id : null).warnings;
+        if (fbWarn.length) out.push(el('div', {class: 'mt-1 flex items-start gap-1', 'data-facebook': ''}, [icon('warn', 'Facebook name warning'), el('ul', {class: 'min-w-0 space-y-0.5 text-amber-700'}, fbWarn.map(t => el('li', {class: 'break-words', text: t})))]));
         if (c && !checking.has(page) && c.status) {
             const again = el('button', {type: 'button', class: 'text-blue-700 underline hover:text-blue-900', text: 'Check again', 'aria-label': 'Check ' + page + ' again'});
             again.addEventListener('click', ev => { ev.stopPropagation(); runCheck(page, true); });
             out.push(el('div', {class: 'mt-1 flex flex-wrap items-center gap-x-2 text-slate-400'}, [c.checked_at ? el('span', {text: c.checked_at}) : null, again]));
         }
-        const sum = FROZEN.matches && !checking.has(page) ? checkSummary(c) : null;
+        const sum = FROZEN.matches && !checking.has(page) ? checkSummary(c, fbWarn) : null;
         if (!sum) { td.replaceChildren(...out); return; }
         // Naka-freeze: isang linya; ang buong listahan (kasama ang Check again) ay sa hover, sa pindot o sa focus.
         const box = el('div', {class: 'cb-chk'});
@@ -937,6 +956,10 @@
     }
     const connCard = p => document.querySelector('#conn .conn-card[data-provider="' + p + '"]');
     function paintConnections(data) {
+        // Ang pangalan sa Facebook (o "unknown", may link sa page sa Facebook) at ang mga babala nito.
+        const fb = facebookLines(data.facebook || null, data.page || connPage, (data.botcake || {}).page_id || null), fbLine = $('conn-fbname');
+        fbLine.replaceChildren(...(fb.line ? [el('span', {class: 'text-slate-600', text: fb.line})] : []), ...(fb.link ? [el('a', {...fb.link, class: 'ml-1 text-blue-700 underline hover:text-blue-900', text: 'Open on Facebook'})] : []),
+            ...fb.warnings.map(t => el('div', {class: 'flex items-start gap-1 text-amber-700'}, [icon('warn', 'Facebook name warning'), el('span', {text: t})])));
         for (const p of ['botcake', 'forbeast', 'incepxionbot']) {
             const c = data[p] || {}, card = connCard(p);
             if (!card) continue; // ang pangalawang gateway: kapag naka-set up lang
@@ -973,6 +996,7 @@
         connPage = page;
         $('conn-title').textContent = 'Connections · ' + page;
         $('conn-fb').replaceChildren(fbAnchor(rows.find(r => r.page === page)));
+        $('conn-fbname').replaceChildren();
         document.querySelectorAll('#conn .conn-msg, #conn .conn-kw').forEach(m => { m.textContent = ''; });
         dialog('conn', true);
         const {ok, status, data} = await getJson(url.connectionsUrl + '?page_name=' + encodeURIComponent(page));

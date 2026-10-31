@@ -11,6 +11,7 @@ use App\Services\Chatbot\ChatbotPage;
 use App\Services\Chatbot\ChatbotPageCheck;
 use App\Services\Chatbot\ChatbotProvider;
 use App\Services\Chatbot\ChatbotVars;
+use App\Services\Chatbot\FacebookName;
 use App\Services\Chatbot\ForbeastPageSetup;
 use App\Services\Chatbot\ForbeastWatch;
 use App\Services\Chatbot\Gateways;
@@ -114,6 +115,8 @@ class ChatbotController extends Controller
         $ai = app(\App\Services\Chatbot\ChatbotAiSettings::class);
         $aiSite = \App\Services\Chatbot\ChatbotAiChain::site();
         $adGroups = app(\App\Services\Chatbot\AdGroups::class);
+        // Ang naitalang pangalan sa Facebook at ang mga row na may parehong page ID (dalawang query, walang tawag sa labas).
+        $facebook = app(FacebookName::class)->overview();
 
         $rows = [];
         foreach ($pages as $page) {
@@ -172,6 +175,8 @@ class ChatbotController extends Controller
                 'reply' => ($adBased = $adGroups->adBased($page)) ? \App\Services\Chatbot\AdGroups::MODE_AD : 'page',
                 // Ad-based lang: ilang bagong ad ang wala pa sa group (ang badge ng nakasarang row; naka-cache, ≤ 5 min).
                 'ad_new' => $adBased ? $adGroups->newUnassigned($page) : null,
+                // Ang pangalan sa Facebook (kapag iba sa pangalan ng row) at ang ibang row na may parehong page ID.
+                'facebook' => $facebook[$this->settings->pageKey($page)] ?? null,
             ];
         }
 
@@ -407,6 +412,7 @@ class ChatbotController extends Controller
         if ($provider === '') return response()->json($connections->info($page));
 
         $args = [$page, $this->str($request, 'page_id', 100), $this->str($request, 'token', 1000), $request->boolean('confirm'), Auth::id()];
+        $started = now();
         // Ang pangalawang gateway: ang card nito ay kapag naka-set up lang (INCEPXIONBOT_URL).
         if (str_starts_with($provider, Gateways::INCEPXIONBOT) && !Gateways::setUp(Gateways::INCEPXIONBOT)) {
             return response()->json(['error' => Gateways::label(Gateways::INCEPXIONBOT) . ' is not set up yet.'], 422);
@@ -423,6 +429,15 @@ class ChatbotController extends Controller
             'incepxionbot-clear' => $connections->clearForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
+        // Ang pangalan ng page sa Facebook: sa Botcake Save (naitala) at Test, at sa gateway Save at Test (ang nabasa ng probe
+        // nito ay naitala na, kaya ang iba lang ang sinusubukan kapag hindi). Hindi sa pagbukas ng popup.
+        $skip = match (true) {
+            $provider === 'botcake' && $res['http'] === 200, $provider === 'botcake-test' => [],
+            in_array($provider, ['forbeast-test', 'incepxionbot-test'], true) && $res['http'] === 200 => [strtok($provider, '-')],
+            in_array($provider, ['forbeast', 'incepxionbot'], true) && $res['http'] === 200 => [$provider],
+            default => null,
+        };
+        if ($skip !== null) $this->facebookName($page, $skip, $skip ? $started : null);
 
         return response()->json($res['body'] + ['connections' => $connections->info($this->listedPage($page) ?? $page)], $res['http']);
     }
@@ -467,6 +482,7 @@ class ChatbotController extends Controller
         if ($page === '') return response()->json(['error' => 'The page name is required.'], 422);
         if ($this->listedPage($page) !== null) return response()->json(['error' => 'This page is already on the list.'], 422);
 
+        $idGiven = $pageId !== '';
         $pageId = $pageId !== '' ? $pageId : trim((string) $this->settings->get($page, 'botcake', 'page_id'));
         $hasToken = $token !== '' || trim((string) $this->settings->get($page, 'botcake', 'token')) !== '';
         if ($pageId === '' || !$hasToken) return response()->json(['error' => 'A Botcake ID and a token are needed.'], 422);
@@ -474,7 +490,11 @@ class ChatbotController extends Controller
         // Isang Botcake ID, isang page: ang pangalawang page na may parehong ID ay aagaw sa mga chat ng una (mawawala).
         $owner = PageSetting::where('provider', 'botcake')->where('key', 'page_id')->where('active', true)->where('value', $pageId)
             ->pluck('page_name')->first(fn ($p) => $this->settings->pageKey($p) !== $this->settings->pageKey($page));
-        if ($owner !== null) return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}."], 422);
+        if ($owner !== null) {
+            // Ang kilalang pangalan ng ID sa Facebook (naitala na; walang tawag dito), para makita kung aling row ang tama.
+            $fb = collect(app(FacebookName::class)->overview())->first(fn ($o) => $o['page_id'] === $pageId && $o['name'] !== null);
+            return response()->json(['error' => "Botcake ID {$pageId} is already used by {$owner}." . ($fb ? ' Facebook name: ' . $fb['name'] . '.' : '')], 422);
+        }
         // Ang block ay papalit sa Default Reply: ang ibang site ay kailangan ng confirm bago may isulat.
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
         $ask = $request->boolean('confirm') ? null : $connections->guard($pageId, $token !== '' ? $token : trim((string) $this->settings->get($page, 'botcake', 'token')),
@@ -504,6 +524,7 @@ class ChatbotController extends Controller
             $error = 'The token test failed' . ($error ? ' (' . $error . ')' : '') . ', so the bot was not set up and stays Off.';
         }
         if (!$on) $this->settings->set($listed, ChatbotFields::PROVIDER, 'active', '0', false, Auth::id(), true);
+        if ($idGiven) $this->facebookName($listed);
 
         return response()->json(['page' => $listed, 'token_test' => $check['status'], 'active' => $on, 'error' => $error]);
     }
@@ -758,6 +779,16 @@ class ChatbotController extends Controller
         usort($pages, 'strcasecmp');
 
         return $pages;
+    }
+
+    /** Ang lookup ng pangalan sa Facebook pagkatapos ng Save o Test: ang pagkabigo nito ay hindi sumisira sa sagot. */
+    private function facebookName(string $page, array $skip = [], ?\DateTimeInterface $since = null): void
+    {
+        try {
+            app(FacebookName::class)->lookup($page, $skip, $since);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /** Ang pangalan (gaya ng naitala) kapag nasa listahan ang page, kung hindi null. */

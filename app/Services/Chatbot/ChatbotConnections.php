@@ -47,6 +47,8 @@ class ChatbotConnections
                 'gateways' => array_values(array_map(fn ($gw) => Gateways::label($gw), array_filter(Gateways::ALL, fn ($gw) => $this->forbeast->on($gw)->token($page) !== '')))],
             'forbeast' => ['page_id' => $pageId, 'token' => $f['token'], 'status' => $f['status'], 'tested_at' => $this->testedAt($page, ForbeastPageSetup::PROVIDER),
                 'connected' => $f['connected']],
+            // Ang naitalang pangalan sa Facebook at ang ibang row na may parehong page ID (walang tawag sa labas).
+            'facebook' => app(FacebookName::class)->overview()[$this->settings->pageKey($page)] ?? null,
         ] + (Gateways::setUp(Gateways::INCEPXIONBOT) ? ['incepxionbot' => $this->gatewayCard($page, $pageId, Gateways::INCEPXIONBOT)] : []);
     }
 

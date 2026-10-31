@@ -28,10 +28,11 @@ class Graph
     /**
      * GET sa isang path (hal. "me/adaccounts") o sa buong URL ng paging.next (graph.facebook.com lang). Ang user token ay
      * may kasamang appsecret_proof, kaya walang silbi ang ninakaw na token kung wala ang app secret. $proof = false para sa
-     * app token (debug_token). @return array ang JSON
+     * app token (debug_token). $tries = 1 at maikling $timeout: isang tawag lang, walang hintay sa rate limit.
+     * @return array ang JSON
      * @throws GraphException
      */
-    public function get(string $pathOrUrl, array $query = [], ?string $token = null, bool $proof = true): array
+    public function get(string $pathOrUrl, array $query = [], ?string $token = null, bool $proof = true, int $tries = self::TRIES, int $timeout = 120): array
     {
         $full = preg_match('#^[a-z][a-z0-9+.-]*://#i', $pathOrUrl) === 1;
         if ($full && !self::isGraphUrl($pathOrUrl)) throw new GraphException('Not followed: a paging link to another host.');
@@ -47,7 +48,7 @@ class Graph
 
         for ($try = 1; ; $try++) {
             try {
-                $req = Http::timeout(120)->acceptJson();
+                $req = Http::timeout($timeout)->acceptJson();
                 if ($token !== null) $req = $req->withToken($token);
                 // Walang query = null: ang [] ay bumubura sa query ng URL (ang "after" ng paging.next).
                 $res = $req->get($url, $query ?: null);
@@ -60,7 +61,7 @@ class Graph
 
             $code = (int) ($json['error']['code'] ?? 0);
             $err  = new GraphException('Graph error ' . $code . ': ' . self::clean((string) ($json['error']['message'] ?? ('HTTP ' . $res->status()))), $code);
-            if (!$err->rateLimited() || $try >= self::TRIES) throw $err;
+            if (!$err->rateLimited() || $try >= $tries) throw $err;
 
             Sleep::for(2 * (4 ** ($try - 1)))->seconds();
         }

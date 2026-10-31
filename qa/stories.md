@@ -3493,3 +3493,21 @@ Tests: `tests/Feature/Chatblast/ChatbotSetupSpeedTest.php`, `tests/Feature/Chatb
 | S-207.7 (P1) | Given seeded pages with and without errors, When they are checked, Then the results equal the base code's for the same data; and a page waiting for a content answer that another page saves (shared image or video answer) is re-checked | `test_S_207_7…` | passed |
 | S-207.8 (P2) | Given a cached check, When Check again is pressed on a row, Then that row is recomputed (fresh) and the next load shows the new result | `test_S_207_8…` | passed |
 | S-207.9 (P1) | Amendment 207-1. Given 117 listed pages (settings, chats, keyword rows, an AI override), When /chatbot/data loads with a cold cache and with a warm one (cache in the database, as in production), Then no query runs once per page, the total stays bounded, and the JSON equals the base code's | `ChatbotDataSpeedTest::test_S_207_9_…` | passed |
+
+## S-208 The page's real Facebook name, with a warning when it differs or the page ID is shared
+
+As staff who set up pages on /chatbot/pages, I want each row to show the page's name as Facebook has it, and a warning when it differs from the typed name or when another row holds the same page ID, so I can see which duplicate row to clear.
+
+Slice 208. Threat model: trusted = signed-in staff; external = the Graph API and the gateways (timeouts, errors); the name from them is text only. Tokens never reach the page or the logs. No new table, no migration. Risk tier: low-medium.
+Tests: `tests/Feature/Chatblast/FacebookNameTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-208.1 (P1) | Given a page with a Forbeast token whose probe returns name "Alaga Natural Collective", When Test runs, Then `facebook.name` is stored with source forbeast (no Graph call), and the row "4RO Alaga Natural Collective" with the same ID shows "Facebook name: Alaga Natural Collective" | `test_S_208_1…` (2 tests: Test, and Save plus a failed gateway Test that tries the others once) | passed |
+| S-208.2 (P1) | Given a page with no gateway token and Meta Ads connections (one expired, one that cannot read the page, one that can), When Botcake Test runs (or "+ Page" with an ID), Then the name is stored with source meta-ads, one Graph call per connection tried, stopping at the first that answers, the token only in the header | `test_S_208_2…` (2 tests, with a rate-limited connection tried once, no wait) | passed |
+| S-208.3 (P1) | Given no source can read the page (Graph 400 #100 for every connection, no gateway token), Then "Facebook name: unknown" with the link to the page on Facebook; the last known name is kept; a name read for another page ID is not kept | `test_S_208_3…` (2 tests) | passed |
+| S-208.4 (P1) | Names equal except for case and extra spaces: no warning | `test_S_208_4…` | passed |
+| S-208.5 (P1) | Two active rows with the same Botcake page ID: both show "Same page ID as <other>", the banner has one line for the pair, and the row whose name matches the Facebook name is marked as the match | `test_S_208_5…` (2 tests, with a name from outside shown as text) | passed |
+| S-208.6 (P1) | Loading /chatbot/pages, /chatbot/data and the Connections popup makes no Graph or gateway call | `test_S_208_6…` | passed |
+| S-208.7 (P1) | The nightly run: one lookup per listed page with an ID (a name the Forbeast retest already read is not asked again), failures recorded as unknown, an exception on one page does not stop the run | `test_S_208_7…` | passed |
+| S-208.8 (P2) | "+ Page" with an ID already used shows the existing "already used by" plus the Facebook name when known | `test_S_208_8…` | passed |

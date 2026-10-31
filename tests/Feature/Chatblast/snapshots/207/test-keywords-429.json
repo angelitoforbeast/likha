@@ -27,6 +27,16 @@
                 "status": null,
                 "tested_at": null,
                 "connected": false
+            },
+            "facebook": {
+                "page": "Page Uno",
+                "page_id": "1001",
+                "name": null,
+                "source": null,
+                "checked_at": null,
+                "differs": false,
+                "same_id": [],
+                "match": null
             }
         }
     },
