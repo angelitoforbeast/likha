@@ -906,7 +906,7 @@
         // ine-edit), naiiwan ang lumang signature para buuin ulit ang row sa susunod na render.
         if (entry && entry.nodes && tds.some(td => entry.nodes[0].contains(td))) {
             const st = rowStates()(entry.r);
-            if (RowCache.withoutCheck(entry.r, st) === entry.base) entry.sig = RowCache.signature(entry.r, st);
+            if (RowCache.withoutCheck(entry.r, st) === entry.base) { entry.sig = RowCache.signature(entry.r, st); entry.main = RowCache.signature(entry.r, {...st, ag: null}); }
         }
     }
     async function runCheck(page, again = false) {

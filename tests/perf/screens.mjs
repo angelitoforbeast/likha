@@ -37,6 +37,7 @@ const GRID_CHECK = `(async () => {
             if (!ok) wrong.push(pg + ' · ' + key);
         }
         if (tr.querySelector('td[data-today]') && tr.querySelector('td[data-today]').textContent !== String(r.today)) wrong.push(pg + ' · Chats today');
+        if (tr.querySelector('td[data-last-chat]') && tr.querySelector('td[data-last-chat]').textContent !== (r.last_chat || '—')) wrong.push(pg + ' · Last chat');
     }
     return {visible, wrong: wrong.slice(0, 5), wrongCount: wrong.length, dupes: [...seen].filter(([, n]) => n > 1).map(([pg]) => pg),
         inert: document.querySelectorAll('#cb-table [inert]').length, count: document.getElementById('count').textContent};
@@ -266,6 +267,91 @@ async function loaded(p, out, base, path, ready, {settle = 1500, action = 'load'
         note: late ? 'NOT FINISHED: ' + late : (await p.ev(`document.getElementsByTagName('*').length`)) + ' elements'});
 }
 
+/**
+ * Every button of the grid on the seeded set: each opens what it opens and closes again, the switch asks first,
+ * and the grid still matches the server at the end. Nothing that calls Botcake or Facebook is pressed (the switch is
+ * answered no; Save and test, Test, Fix chat block and Clear are not pressed). Screenshots go to storage/perf209.
+ */
+async function buttons(p, base, out) {
+    await p.goto(base + '/chatbot/pages');
+    await p.waitFor(`document.querySelectorAll('#cb-table tbody tr[data-page]').length > 0 && !document.querySelector('#cb-table[aria-busy]')`, TIMEOUT);
+    const fs = await import('node:fs');
+    const shot = async name => {
+        const {data} = await p.send('Page.captureScreenshot', {format: 'png'});
+        const dir = (process.env.PERF_ROOT || '.') + '/storage/perf209/shots';
+        fs.mkdirSync(dir, {recursive: true});
+        fs.writeFileSync(dir + '/' + name + '.png', Buffer.from(data, 'base64'));
+    };
+    const visibleBox = id => `!document.getElementById('${id}').classList.contains('hidden')`;
+    const check = async (action, run, ok, wait = 300) => {
+        let pass = false, note = '';
+        try { await p.ev(`(async () => { ${run}; return true; })()`); await sleep(wait); pass = !!(await p.ev(`(async () => { return !!(${ok}); })()`)); } catch (e) { note = e.message.slice(0, 160); }
+        out.push({action, pass, note});
+    };
+    const R = page => row(page);
+    await check('pick a page: Apply to 1 selected', `${R('Perf Page 002')}.querySelector('.cb-pick').click()`, `document.getElementById('bulk-apply').textContent === 'Apply to 1 selected' && !document.getElementById('bulk-apply').disabled`);
+    await check('select all: every shown page', `document.getElementById('sel-all').click()`, `document.getElementById('bulk-apply').textContent === 'Apply to 160 selected' && [...document.querySelectorAll('#cb-table .cb-pick')].every(c => c.checked)`);
+    await check('select all again: none', `document.getElementById('sel-all').click()`, `document.getElementById('bulk-apply').disabled && ![...document.querySelectorAll('#cb-table .cb-pick')].some(c => c.checked)`);
+    await check('Edit opens all fields', `document.querySelector('button[aria-label="Edit Perf Page 002"]').click()`, `${visibleBox('pe')} && document.querySelectorAll('#pe-fields .pe-field').length > 60`);
+    await check('History of a field (in Edit)', `document.querySelector('#pe-fields button[aria-label="History of Main Flow"]').click()`, `${visibleBox('hist')} && document.querySelectorAll('#hist-list li').length > 0`, 800);
+    await shot('history');
+    await check('History closes', `document.querySelector('#hist [data-close-dialog]').click()`, `!${visibleBox('hist')}`);
+    await check('Use template (in Edit) fills a field', `document.querySelector('#pe-fields button[aria-label="Use template for Comment PM"]').click()`, `document.getElementById('pe-save').textContent.startsWith('Save ')`);
+    await check('Cancel with changes: closed after yes', `document.getElementById('pe-cancel').click()`, `!${visibleBox('pe')}`);
+    await check('Preview', `document.querySelector('button[aria-label="Preview Perf Page 002"]').click()`, `${visibleBox('pv')} && document.querySelectorAll('#pv-list section').length > 0`, 800);
+    await check('Preview closes', `document.querySelector('#pv [data-close-dialog]').click()`, `!${visibleBox('pv')}`);
+    await check('Connections', `document.querySelector('button[aria-label="Connections of Perf Page 002"]').click()`, `${visibleBox('conn')} && document.querySelector('#conn .conn-state').textContent !== ''`, 800);
+    await shot('connections');
+    await check('Connections closes', `document.querySelector('#conn [data-close-dialog]').click()`, `!${visibleBox('conn')}`);
+    p.dialogAnswer = false;
+    const asked = () => p.dialogs;
+    let before = asked();
+    await check('switch Off asks first; No leaves it On', `document.querySelector('button[aria-label="Switch off Perf Page 002"]').click()`, `document.querySelector('button[aria-label="Switch off Perf Page 002"]').getAttribute('aria-checked') === 'true'`);
+    out.push({action: 'the switch asked once', pass: asked() - before === 1, note: (asked() - before) + ' question(s)'});
+    before = asked();
+    await check('Replies: Ad-based asks first; No keeps Page-based', `const s = document.querySelector('select[aria-label="Reply values of Perf Page 002"]'); s.value = 'ad'; s.dispatchEvent(new Event('change'))`, `document.querySelector('select[aria-label="Reply values of Perf Page 002"]').value === 'page'`);
+    out.push({action: 'the Replies select asked once', pass: asked() - before === 1, note: (asked() - before) + ' question(s)'});
+    p.dialogAnswer = true;
+    await check('AI of the page', `document.querySelector('button[aria-label^="AI of Perf Page 002"]').click()`, `${visibleBox('ai-box')} && document.getElementById('ai-title').textContent === 'AI for Perf Page 002'`);
+    await check('AI closes', `document.querySelector('#ai-box [data-close-dialog]').click()`, `!${visibleBox('ai-box')}`);
+    await check('Flow pencil', `document.querySelector('button[aria-label="Change the flow of Perf Page 002"]').click()`, `${visibleBox('flow-box')} && document.querySelectorAll('#flow-list label').length > 10`);
+    await check('Flow closes', `document.querySelector('#flow-box [data-close-dialog]').click()`, `!${visibleBox('flow-box')}`);
+    await check('long text pencil opens the editor', `${cellOf('Perf Page 002', 'main_flow')}.querySelector('.cb-edit').click()`, `${visibleBox('long')} && document.getElementById('long-text').value.length > 0`);
+    await check('closing it unchanged saves nothing', `document.getElementById('long-close').click()`, `!${visibleBox('long')} && !${cellOf('Perf Page 002', 'main_flow')}.textContent.includes('Sav')`);
+    await check('image pencil opens the link field; Escape restores', `${cellOf('Perf Page 002', 'seq_img_1')}.querySelector('.cb-edit').click(); ${cellOf('Perf Page 002', 'seq_img_1')}.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))`,
+        `!${cellOf('Perf Page 002', 'seq_img_1')}.querySelector('input') && ${cellOf('Perf Page 002', 'seq_img_1')}.querySelector('img')`);
+    await check('Enter on a cell opens its row', `const td = ${cellOf('Perf Page 002', 'main_flow')}; td.focus(); td.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))`, `${R('Perf Page 002')}.classList.contains('cb-open')`);
+    await p.ev(`(() => { ${cellOf('Perf Page 002', 'main_flow')}.querySelector('.cb-edit').focus(); return true; })()`);
+    await shot('open-row-and-focused-pencil');
+    await check('Enter again closes it', `const td = ${cellOf('Perf Page 002', 'main_flow')}; td.focus(); td.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))`, `!${R('Perf Page 002')}.classList.contains('cb-open')`);
+    await check('Ctrl+A selects every cell', `${cellOf('Perf Page 002', 'main_flow')}.dispatchEvent(new KeyboardEvent('keydown', {key: 'a', ctrlKey: true, bubbles: true}))`, `document.querySelectorAll('#cb-table td.cb-sel').length > 9000`);
+    await check('copy puts the selection on the clipboard', `const dt = new DataTransfer(); ${cellOf('Perf Page 002', 'main_flow')}.dispatchEvent(new ClipboardEvent('copy', {clipboardData: dt, bubbles: true, cancelable: true})); window.__copied = dt.getData('text/plain')`, `window.__copied.split('\\n').length >= 160 && /^Copied /.test(document.getElementById('notice').textContent)`);
+    await check('a click selects one cell again', `${cellOf('Perf Page 002', 'price')}.click(); ${cellOf('Perf Page 002', 'price')}.click()`, `document.querySelectorAll('#cb-table td.cb-sel').length === 1`);
+    await check('paste one value, then the bar shows it', `const dt = new DataTransfer(); dt.setData('text/plain', 'PERF-CANCEL'); ${cellOf('Perf Page 002', 'price')}.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true}))`,
+        `/1 cell changed/.test(document.getElementById('bar-text').textContent) && ${cellOf('Perf Page 002', 'price')}.classList.contains('cb-pending')`);
+    await check('Cancel on the bar restores the value', `document.getElementById('bar-cancel').click()`, `!${cellOf('Perf Page 002', 'price')}.classList.contains('cb-pending') && !${cellOf('Perf Page 002', 'price')}.textContent.includes('PERF-CANCEL')`);
+    for (const f of ['Page', 'Active', 'Bot', 'Flow', 'Check', 'Connected']) {
+        await check('header filter ' + f + ' opens', `document.querySelector('button[aria-label="Filter ${f}"]').click()`, `!document.getElementById('hf').classList.contains('hidden') && document.getElementById('hf-list').children.length > 0`);
+        await p.ev(`(() => { document.getElementById('hf-close').click(); return true; })()`);
+    }
+    await p.ev(MARK_ROWS);
+    await check('Ad groups shown', `document.querySelector('button[aria-label^="Show the ad groups of Perf Page 007"]').click()`, `[...document.querySelectorAll('#cb-table tr.ag-sub')].some(tr => tr.textContent.includes('Manage in Edit'))`, 1000);
+    await shot('ad-groups');
+    await check('Ad groups shown without drawing the page row again', 'true', `!${REBUILT}.length`);
+    await check('Manage in Edit opens Edit at Ad groups', `[...document.querySelectorAll('#cb-table tr.ag-sub button')].find(b => b.textContent === 'Manage in Edit').click()`, `${visibleBox('pe')} && document.getElementById('pe-ag')`, 800);
+    await check('Edit closes (no changes)', `document.getElementById('pe-close').click()`, `!${visibleBox('pe')}`);
+    await check('Ad groups hidden', `document.querySelector('button[aria-label^="Hide the ad groups of Perf Page 007"]').click()`, `!document.querySelector('#cb-table tr.ag-sub')`);
+    for (const [id, box] of [['changes-open', 'chg'], ['ai-site-open', 'ai-box'], ['ai-compare-open', 'ai-compare']]) {
+        await check(id + ' opens', `document.getElementById('${id}').click()`, visibleBox(box), 800);
+        await p.ev(`(() => { document.querySelector('#${box} [data-close-dialog]').click(); return true; })()`);
+    }
+    for (const [id, box] of [['add-column', 'col-box'], ['add-page', 'page-box']]) {
+        await check(id + ' opens and Cancel closes', `document.getElementById('${id}').click(); document.querySelector('#${box} [data-close]').click()`, `!${visibleBox(box)}`);
+    }
+    await shot('grid');
+    await gridCheck(p, out, 'after every button');
+}
+
 const SCREEN_LIST = {
     async flows(p, base, out) {
         await loaded(p, out, base, '/chatbot', `document.readyState === 'complete'`);
@@ -325,5 +411,6 @@ const SCREEN_LIST = {
 
 export const SCREENS = [
     {name: 'pages', path: '/chatbot/pages', run: pages},
+    {name: 'buttons', path: '/chatbot/pages (every button)', run: buttons},
     ...Object.entries(SCREEN_LIST).map(([name, run]) => ({name, path: name, run})),
 ];

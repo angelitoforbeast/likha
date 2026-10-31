@@ -49,9 +49,10 @@ export class Page {
         await p.send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 1, mobile: false});
         await p.send('Page.addScriptToEvaluateOnNewDocument', {source: OBSERVER});
         p.errors = [];
+        p.dialogs = 0; // how many native questions (confirm) the page asked
         cdp.on(msg => { if (msg.sessionId === sessionId && msg.method === 'Runtime.exceptionThrown') p.errors.push(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text); });
-        // Native dialogs (confirm) are answered yes, as staff would.
-        cdp.on(msg => { if (msg.sessionId === sessionId && msg.method === 'Page.javascriptDialogOpening') p.send('Page.handleJavaScriptDialog', {accept: true}).catch(() => {}); });
+        // Native dialogs (confirm) are answered yes, as staff would (p.dialogAnswer = false answers no).
+        cdp.on(msg => { if (msg.sessionId === sessionId && msg.method === 'Page.javascriptDialogOpening') p.dialogs++, p.send('Page.handleJavaScriptDialog', {accept: p.dialogAnswer !== false}).catch(() => {}); });
         return p;
     }
     send(method, params) { return this.cdp.send(method, params, this.sid); }
