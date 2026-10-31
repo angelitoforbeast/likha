@@ -1,0 +1,39 @@
+{
+    "json": {
+        "http": 200,
+        "status": "ok",
+        "chat_block": {
+            "ok": true,
+            "error": null
+        },
+        "connections": {
+            "page": "Page Uno",
+            "botcake": {
+                "page_id": "1001",
+                "token": "••••9w2e",
+                "status": null,
+                "tested_at": null,
+                "chat_block": true,
+                "chat_block_status": "applied 2026-10-31 10:00:00",
+                "keywords_status": null,
+                "keywords_on": null,
+                "connected": false,
+                "gateways": []
+            },
+            "forbeast": {
+                "page_id": "1001",
+                "token": null,
+                "status": null,
+                "tested_at": null,
+                "connected": false
+            }
+        }
+    },
+    "stored": {
+        "token_status": null,
+        "chat_block": "applied 2026-10-31 10:00:00",
+        "keywords": null,
+        "active": "1",
+        "chat_key": "kept-chat-key-123"
+    }
+}

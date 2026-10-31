@@ -430,14 +430,15 @@ class ChatbotController extends Controller
         if ($page === null) return response()->json(['error' => 'This page is not on the chatbot list.'], 422);
 
         $connections = app(\App\Services\Chatbot\ChatbotConnections::class);
+        // Pindot ng staff: sa rate key ng setup, hindi naghihintay sa mga padala ng page.
         if ($request->boolean('on')) {
             // Ang On ay pinapalitan ang buong Default Reply: ang ibang site ay kailangan ng confirm (ang hindi masuri ay hindi humaharang, gaya ng dati).
             $ask = $request->boolean('confirm') ? null : $connections->guard(trim((string) $this->settings->get($page, 'botcake', 'page_id')),
-                trim((string) $this->settings->get($page, 'botcake', 'token')), (string) $this->settings->get($page, 'botcake', 'chat.key'));
+                trim((string) $this->settings->get($page, 'botcake', 'token')), (string) $this->settings->get($page, 'botcake', 'chat.key'), true);
             if ($ask !== null) return response()->json($ask['body'] + ['active' => $this->settings->get($page, ChatbotFields::PROVIDER, 'active') !== '0'], $ask['http']);
-            $r = $connections->chatBlock($page, Auth::id());
+            $r = $connections->chatBlock($page, Auth::id(), true);
         } else {
-            $r = app(BotcakeChatBlock::class)->turnOff($page, Auth::id());
+            $r = app(BotcakeChatBlock::class)->turnOff($page, Auth::id(), true);
             if ($r['ok']) $connections->stampOff($page, Auth::id());
         }
 

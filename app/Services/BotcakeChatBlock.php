@@ -36,7 +36,7 @@ class BotcakeChatBlock
      * 'publish'); sa 'publish' ay naisulat na ang block at naitala na ang key (kailangan iyon ng block).
      * @return array{ok: bool, key: string, step: ?string, error: ?string}
      */
-    public function turnOn(string $page, bool $rotate = false, ?int $userId = null): array
+    public function turnOn(string $page, bool $rotate = false, ?int $userId = null, bool $setup = false): array
     {
         [$pageId, $token] = $this->ids($page);
         $plan = $this->keyPlan($page, $rotate);
@@ -44,7 +44,7 @@ class BotcakeChatBlock
 
         $old = (string) $this->settings->get($page, 'botcake', 'chat.key');
         $key = $plan === 'keep' ? $old : Str::random(48);
-        $client = app(BotcakeClient::class); // bago kada page: sariling rate at retry
+        $client = $this->client($token, $setup); // bago kada page: sariling rate at retry
 
         $r = $client->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply/content', ['name' => 'Default reply', 'blocks' => [$this->block($key)]], $token);
         if (!$this->ok($r)) return ['ok' => false, 'key' => $plan, 'step' => 'write', 'error' => $this->error('write the block', $r)];
@@ -62,12 +62,12 @@ class BotcakeChatBlock
      * I-unpublish ang Default Reply lang (naiiwan ang block at ang key, kaya isang pindot lang ang On ulit).
      * @return array{ok: bool, error: ?string}
      */
-    public function turnOff(string $page, ?int $userId = null): array
+    public function turnOff(string $page, ?int $userId = null, bool $setup = false): array
     {
         [$pageId, $token] = $this->ids($page);
         if ($pageId === '' || $token === '') return ['ok' => false, 'error' => 'The page has no Botcake ID or token.'];
 
-        $r = app(BotcakeClient::class)->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply', ['update' => ['is_published' => false]], $token);
+        $r = $this->client($token, $setup)->call('POST', '/pages/' . rawurlencode($pageId) . '/default_reply', ['update' => ['is_published' => false]], $token);
         if (!$this->ok($r)) return ['ok' => false, 'error' => $this->error('unpublish the Default Reply', $r)];
 
         $this->settings->set($page, 'chatbot', 'active', '0', false, $userId, true);
@@ -93,6 +93,17 @@ class BotcakeChatBlock
                 'buttons' => [],
             ]],
         ];
+    }
+
+    /**
+     * $setup: ang On/Off o Fix ng staff, sa sariling rate key ng setup (BotcakeClient::forSetup), hindi sa lane ng mga
+     * padala ng page; ang botcake:chat-setup at ang ibang tumatawag ay sa lane pa rin.
+     */
+    private function client(string $token, bool $setup): BotcakeClient
+    {
+        $client = app(BotcakeClient::class);
+
+        return $setup ? $client->forSetup($token) : $client;
     }
 
     /** @return array{0: string, 1: string} [Botcake page ID, token] */

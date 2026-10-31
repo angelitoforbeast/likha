@@ -1,0 +1,40 @@
+{
+    "json": {
+        "http": 200,
+        "status": "ok",
+        "chat_block": "on",
+        "block_state": "ours",
+        "error": null,
+        "keywords": "unknown",
+        "keywords_note": "could not read the keywords",
+        "connections": {
+            "page": "Page Uno",
+            "botcake": {
+                "page_id": "1001",
+                "token": "••••9w2e",
+                "status": "ok 2026-10-31 10:00:00",
+                "tested_at": "2026-10-31 10:00",
+                "chat_block": true,
+                "chat_block_status": "on 2026-10-31 10:00:00",
+                "keywords_status": "unknown 2026-10-31 10:00:00 · could not read the keywords",
+                "keywords_on": null,
+                "connected": true,
+                "gateways": []
+            },
+            "forbeast": {
+                "page_id": "1001",
+                "token": null,
+                "status": null,
+                "tested_at": null,
+                "connected": false
+            }
+        }
+    },
+    "stored": {
+        "token_status": "ok 2026-10-31 10:00:00",
+        "chat_block": "on 2026-10-31 10:00:00",
+        "keywords": "unknown 2026-10-31 10:00:00 · could not read the keywords",
+        "active": null,
+        "chat_key": "kept-chat-key-123"
+    }
+}

@@ -1,0 +1,42 @@
+{
+    "json": {
+        "status": "ok",
+        "chat_block": "on",
+        "block_state": "ours",
+        "error": null,
+        "keywords": "on",
+        "keywords_note": "ON DELIVERY SCRIPT",
+        "connections": {
+            "page": "Page Uno",
+            "botcake": {
+                "page_id": "1001",
+                "token": "••••9w2e",
+                "status": "ok 2026-10-31 10:00:00",
+                "tested_at": "2026-10-31 10:00",
+                "chat_block": true,
+                "chat_block_status": "on 2026-10-31 10:00:00",
+                "keywords_status": "on 2026-10-31 10:00:00 · ON DELIVERY SCRIPT",
+                "keywords_on": {
+                    "names": "ON DELIVERY SCRIPT",
+                    "at": "2026-10-31 10:00"
+                },
+                "connected": true,
+                "gateways": []
+            },
+            "forbeast": {
+                "page_id": "1001",
+                "token": null,
+                "status": null,
+                "tested_at": null,
+                "connected": false
+            }
+        }
+    },
+    "stored": {
+        "token_status": "ok 2026-10-31 10:00:00",
+        "chat_block": "on 2026-10-31 10:00:00",
+        "keywords": "on 2026-10-31 10:00:00 · ON DELIVERY SCRIPT",
+        "active": null,
+        "chat_key": "kept-chat-key-123"
+    }
+}
