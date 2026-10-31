@@ -3474,3 +3474,21 @@ Tests: `tests/Feature/PageSettings/ClearConfirmTest.php`, `tests/Feature/Chatbla
 | S-206.6 (P1) | Secrets in the confirm show the last 4 only; the full token never reaches the page HTML or JSON | `test_S_206_6…` (2 tests) | passed |
 | S-206.7 (P2) | The Botcake Clear is hidden when the page has no Botcake page ID, and the server refuses a Clear then | `test_S_206_7…` | passed |
 | S-206.8 (P1) | The full `tests/Feature` run adds no new failures vs 53478a0b | `tests/Feature` | see result |
+
+## S-207 Connections tests and the Check column without the wait
+
+As staff who set up pages on /chatbot/pages, I want Test, Save and test, Fix chat block and On/Off to answer in about one Botcake round trip per step, and the Check column to load without a request per page, so the Connections modal is not stuck behind the page's sends or 117 checks.
+
+Slice 207. Threat model: trusted = signed-in staff; external = the Botcake API (rate limits, 429, timeouts). No new table, no migration. Risk tier: medium.
+Tests: `tests/Feature/Chatblast/ChatbotSetupSpeedTest.php`, `tests/Feature/Chatblast/ChatbotCheckCacheTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-207.1 (P1) | Given Botcake fakes where every call takes 500 ms, When Test runs, Then it finishes in under 1.2 s and stores the same token_status, chat_block and keywords (and returns the same JSON) as the base code on the same fakes | `test_S_207_1…` | open |
+| S-207.2 (P1) | Given the same fakes, When Save and test or Fix chat block runs, Then the Default Reply content is written before it is published, the Default Reply is read once per action, and the JSON equals the base code's | `test_S_207_2…` | open |
+| S-207.3 (P1) | Given the page's send rate key busy (sends reserved for the next seconds), When Test, Save and test, Fix chat block, On or Off runs, Then it does not wait for the sends, and the sends' rate key is unchanged | `test_S_207_3…` | open |
+| S-207.4 (P1) | Given a 429 on one read (or on the publish), When the action runs, Then it is retried as by the base code (a read in Test is not retried, a write is), the failed read gives the base code's message, and the other reads' results are still stored | `test_S_207_4…` | open |
+| S-207.5 (P1) | Given 117 listed pages with warm check caches, When /chatbot/pages loads, Then /chatbot/data carries every page's check and the page makes no /chatbot/check call; with 3 stale pages it makes exactly 3 calls, at most 2 at a time, the rows on screen first | `test_S_207_5…` | open |
+| S-207.6 (P1) | Given pages on flow A and on flow B with cached checks, When flow A (or a sequence step flow A subscribes to) is edited, Then only the pages on flow A are re-checked; the pages on flow B keep their cached check | `test_S_207_6…` | open |
+| S-207.7 (P1) | Given seeded pages with and without errors, When they are checked, Then the results equal the base code's for the same data | `test_S_207_7…` | open |
+| S-207.8 (P2) | Given a cached check, When Check again is pressed on a row, Then that row is recomputed (fresh) and the next load shows the new result | `test_S_207_8…` | open |
