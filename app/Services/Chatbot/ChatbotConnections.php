@@ -335,6 +335,25 @@ class ChatbotConnections
     }
 
     /**
+     * Clear ng Botcake ng page: inaalis ang Botcake page ID, token at chat key nito (may user), para mapalaya ang ID na
+     * hawak ng dobleng row. Walang tawag sa Botcake: ang Default Reply ay maaaring sa ibang row na may parehong Botcake
+     * page, kaya hindi ito ina-unpublish o binabago, at ang On/Off (chatbot.active) at ang chat block ay naiiwan.
+     */
+    public function clearBotcake(string $page, string $pageId, ?int $userId): array
+    {
+        $current = $this->botcakePageId($page);
+        if ($current === '') return $this->fail(422, 'error', 'This page has no Botcake page ID.');
+        // Ang ID na kinumpirma sa popup (page_id): kapag iba na ngayon (lumang tab), walang binubura.
+        if ($pageId !== '' && $pageId !== $current) return $this->fail(422, 'error', "This page's Botcake page ID is now {$current}, not {$pageId}. Nothing was removed; open Connections again.");
+
+        $this->settings->pageQuery($page)->where('provider', 'botcake')->whereIn('key', ['page_id', 'token', 'chat.key'])->where('active', true)
+            ->get()->each(fn ($s) => $this->settings->deactivate($s, $userId));
+        BotcakeChat::forgetPageMap();
+
+        return ['http' => 200, 'body' => ['status' => 'cleared']];
+    }
+
+    /**
      * Ang Default Reply ng page ayon sa GET /default_reply/content (ang may blocks; ang /default_reply ay settings lang):
      * 'ours' (JSON API card papunta sa app na ito, X-Chat-Key = chat.key ng page), 'stale' (sa app na ito pero ibang key),
      * 'none' (walang JSON API card), 'unknown' (walang sagot o kakaibang sagot), o ang host ng ibang site.

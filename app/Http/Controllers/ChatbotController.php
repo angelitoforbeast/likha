@@ -390,7 +390,7 @@ class ChatbotController extends Controller
 
     /**
      * Ang Connections popup ng page (setup roles): GET = ang dalawang card; POST botcake / forbeast = subok, takeover check
-     * (409 hanggang may confirm), saka save; botcake-test / forbeast-test = Test ng naka-save na token; forbeast-clear =
+     * (409 hanggang may confirm), saka save; botcake-test / forbeast-test = Test ng naka-save na token; forbeast-clear / botcake-clear =
      * Clear; chat-block = "Fix chat block". Huling 4 lang ng token.
      */
     public function connections(Request $request, string $provider = '')
@@ -414,6 +414,7 @@ class ChatbotController extends Controller
             'forbeast-test' => $connections->testForbeast($page, Auth::id()),
             'incepxionbot-test' => $connections->testForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             'forbeast-clear' => $connections->clearForbeast($page, Auth::id()),
+            'botcake-clear' => $connections->clearBotcake($page, $args[1], Auth::id()),
             'incepxionbot-clear' => $connections->clearForbeast($page, Auth::id(), Gateways::INCEPXIONBOT),
             default => $connections->fixChatBlock($page, $request->boolean('confirm'), Auth::id()),
         };
