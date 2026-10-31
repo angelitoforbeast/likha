@@ -183,9 +183,14 @@ class PageSettingsGrid
         $rows = $this->settings->pageQuery($page)->where('provider', strtolower(trim($provider)))->where('key', strtolower(trim($key)))
             ->where('active', false)->orderByDesc('id')->limit(50)->get();
         $names = $this->userNames($rows);
+        // Ang nag-clear (replaced_by, isinusulat ng deactivate): para makita kung sino ang nagbura, hindi lang kailan.
+        $hasBy = \Illuminate\Support\Facades\Schema::hasColumn('page_settings', 'replaced_by');
+        $ids = $hasBy ? $rows->pluck('replaced_by')->filter()->unique()->values() : collect();
+        $clearers = $ids->isEmpty() ? collect() : User::whereIn('id', $ids)->pluck('name', 'id');
 
         return $rows->map(fn ($s) => $this->cell($s, $names) + [
             'replaced_at' => $s->replaced_at?->timezone('Asia/Manila')->format('Y-m-d H:i'),
+            'replaced_by' => $hasBy && $s->replaced_by ? ($clearers[$s->replaced_by] ?? 'user #' . $s->replaced_by) : null,
         ])->all();
     }
 
@@ -235,6 +240,8 @@ class PageSettingsGrid
             'secret'   => in_array($key, PageSettings::SECRET_KEYS, true) || isset($secret[$key]),
             'readonly' => PageSettings::isSystemKey($key),
             'group'    => self::group($key),
+            // Ang cell na nagtatanong muna bago mabura (ang text = kung ano ang titigil).
+            'important' => PageSettings::clearWarning($key, in_array($key, PageSettings::SECRET_KEYS, true) || isset($secret[$key])),
         ];
 
         $other = $active->map(fn ($s) => $s->fullKey())->unique()

@@ -1527,3 +1527,9 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **`SendStatus` writes `__wait_unsent` without the customer's run lock.** Reason: a stale mark can no longer outlive its wait (`CustomerFields` deletes it on every clear and every new `__wait`); the remaining window is a failure that lands between a run reading and clearing the wait, which only means one extra re-ask.
 - **No test that ad-group lists keep counting ad-open rows.** Reason: `AdGroups` was not changed; its queries read every row with an `ad_id`.
 - **Customers who only opened an ad still count in `ChatbotResults::chats` and `ChatbotController::chatStats` "chats today"**. Reason: unchanged numbers (distinct customers / rows as before); not named by the spec's reader list.
+
+## Clear confirm and Botcake Clear (spec 206), accepted review minors
+
+- **A partial edit of an important cell still auto-saves on the typing pause** (one stray backspace on `botcake.page_id` saves the shorter ID). Reason: the spec keeps today's auto-save except for an emptied cell; saving important non-secret cells only on leaving the cell is the follow-up.
+- **A column that first appears through the poll (`ensureColumn`) has `important: null`**, so a blank there gets the server's 422 "!" instead of the question until the page is reloaded. Reason: needs a new important key added by someone else after the page opened; the server still refuses the blank, and ⋯ → Clear the value works.
+- **`PageSettingsGrid::history` checks `Schema::hasColumn('page_settings', 'replaced_by')` per request.** Reason: same pattern as `PageSettings::deactivate`; one cheap query on a modal open.

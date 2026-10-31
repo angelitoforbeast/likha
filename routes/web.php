@@ -372,7 +372,7 @@ Route::middleware(['web', 'auth', 'allowed_ip'])->prefix('chatbot')->name('chatb
     Route::get('/ai/compare', [\App\Http\Controllers\ChatbotAiController::class, 'compare'])->middleware('throttle:60,1,chatbot-ai-compare')->name('ai.compare');
     Route::post('/forbeast-token', [\App\Http\Controllers\ChatbotController::class, 'forbeastToken'])->middleware('throttle:30,1,chatbot-forbeast-token')->name('forbeast-token');
     Route::get('/connections', [\App\Http\Controllers\ChatbotController::class, 'connections'])->middleware('throttle:120,1,chatbot-connections')->name('connections');
-    Route::post('/connections/{provider}', [\App\Http\Controllers\ChatbotController::class, 'connections'])->whereIn('provider', ['botcake', 'forbeast', 'chat-block', 'botcake-test', 'forbeast-test', 'forbeast-clear', 'incepxionbot', 'incepxionbot-test', 'incepxionbot-clear'])->middleware('throttle:30,1,chatbot-connections-save')->name('connections.save');
+    Route::post('/connections/{provider}', [\App\Http\Controllers\ChatbotController::class, 'connections'])->whereIn('provider', ['botcake', 'forbeast', 'chat-block', 'botcake-test', 'forbeast-test', 'forbeast-clear', 'botcake-clear', 'incepxionbot', 'incepxionbot-test', 'incepxionbot-clear'])->middleware('throttle:30,1,chatbot-connections-save')->name('connections.save');
     Route::post('/pages', [\App\Http\Controllers\ChatbotController::class, 'addPage'])->middleware('throttle:20,1,chatbot-pages')->name('pages');
     // Owners: kung aling site ang may-ari ng bawat page (Forbeast), at ang take at paglipat. CEO at marketing (take lang),
     // sinusuri sa controller; 10 sulat kada minuto.

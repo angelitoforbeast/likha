@@ -353,7 +353,7 @@
     function ensureColumn(key, secret) {
         if (columns.some(c => c.key === key)) return false;
         const dot = key.indexOf('.');
-        columns.push({key, provider: key.slice(0, dot), name: key.slice(dot + 1), label: key, secret: !!secret, readonly: false, group: 'other'});
+        columns.push({key, provider: key.slice(0, dot), name: key.slice(dot + 1), label: key, secret: !!secret, readonly: false, group: 'other', important: null});
         const known = columns.filter(c => c.label !== c.key), other = columns.filter(c => c.label === c.key);
         other.sort((a, b) => a.key.localeCompare(b.key));
         columns = known.concat(other);
@@ -928,18 +928,36 @@
             if (ed.server) row.cells[ed.key] = ed.server; else delete row.cells[ed.key];
         }
         editing = null;
-        if (doSave) save(ed);
+        if (doSave) save(ed, true);
         if (needsRender) render(); else repaint(ed.pk, ed.key);
     }
 
-    async function save(ed) {
+    // clear-ask:start
+    // Ang tanong bago mabura ang key na nagkakabit ng page; ang value ay ang nasa cell (ang secret ay huling 4 lang).
+    function clearQuestion(row, col, cell) {
+        return 'Clear ' + col.key + ' of ' + row.name + '?\nCurrent value: ' + cell.value + '\n' + col.important;
+    }
+    // Ang ipapadala para sa cell, o null kapag wala. Ang blangkong mahalagang cell (col.important) ay hindi sine-save sa
+    // pause habang nagta-type; sa pag-alis sa cell (leaving) ay tinatanong muna, at Cancel = walang ipinapadala.
+    function cellBody(row, col, cell, value, secret, leaving, ask) {
+        if (secret && value === '') return null; // blangko sa secret = walang palit
+        const body = {page_name: row.name, provider: col.provider, key: col.name, value, is_secret: secret};
+        if (value !== '' || !col.important || !cell) return body;
+        if (!leaving) return null;
+        return ask(clearQuestion(row, col, cell)) ? Object.assign(body, {clear: true}) : null;
+    }
+    // clear-ask:end
+
+    async function save(ed, leaving = false) {
         const value = ed.input.value.trim();
         if (value === ed.original.trim() && !(ed.secret && value !== '')) return;
-        if (ed.secret && value === '') return;
+        const row = rows.get(ed.pk), col = columns.find(c => c.key === ed.key);
+        // Cancel: ang lumang value ang naiiwan sa cell (hindi nagalaw ang row.cells), walang request.
+        const body = cellBody(row, col, row.cells[ed.key], value, ed.secret, leaving, q => confirm(q));
+        if (!body) return;
         ed.original = value;
 
         const id = cellId(ed.pk, ed.key);
-        const row = rows.get(ed.pk), col = columns.find(c => c.key === ed.key);
         const seq = (saveSeq.get(id) || 0) + 1;
         saveSeq.set(id, seq);
         marks.set(id, {text: 'Saving…', cls: 'text-gray-400'});
@@ -949,7 +967,7 @@
             const res = await fetch(url.cellUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf},
-                body: JSON.stringify({page_name: row.name, provider: col.provider, key: col.name, value, is_secret: ed.secret}),
+                body: JSON.stringify(body),
             });
             const data = await res.json().catch(() => ({}));
             // Huling dumating ang sagot ng mas lumang save (hal. mabagal na Botcake): ang mas bagong save ang masusunod.
@@ -1063,7 +1081,7 @@
         const data = await res.json().catch(() => ({history: []}));
         list.replaceChildren(...(data.history || []).map(h => el('li', {class: 'border-b pb-1'}, [
             el('span', {class: 'font-mono break-all', text: h.value}),
-            el('div', {class: 'text-gray-500', text: h.by + ' · ' + h.at + ' → ' + (h.replaced_at || '')}),
+            el('div', {class: 'text-gray-500', text: h.by + ' · ' + h.at + ' → ' + (h.replaced_at || '') + (h.replaced_by ? ' by ' + h.replaced_by : '')}),
         ])));
         if (!list.children.length) list.append(el('li', {class: 'text-gray-400', text: 'No earlier values.'}));
     }
