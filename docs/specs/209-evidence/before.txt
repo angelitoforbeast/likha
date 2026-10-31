@@ -1,0 +1,60 @@
+| Screen        | Action                              | Longest task | Longest frame | Long tasks total | Elapsed | Target | Pass |
+|---------------|-------------------------------------|--------------|---------------|------------------|---------|--------|------|
+| pages         | first load (after the data arrives) | 65999        | 66512         | 66745            | 66594   | <500   | NO   |
+| pages         | each Check that finishes after load | <50          | 81            | 0                | 22895   | <50    | yes  |
+| pages         | open a row (click a cell)           | 157          | 137           | 157              | 174     | <200   | yes  |
+| pages         | close the row                       | 165          | 120           | 165              | 177     | <200   | yes  |
+| pages         | single cell edit and save           | 114154       | 114431        | 313470           | 214846  | <200   | NO   |
+| pages         | open Edit of a page                 | 62           | 102           | 62               | 185     | <200   | yes  |
+| pages         | Save 58 fields in the Edit window   | 80894        | 81595         | 81646            | 82827   | <200   | NO   |
+| pages         | Undo the 58 fields                  | 92665        | 93500         | 93545            | 94807   | <200   | NO   |
+| pages         | select a cell (opens its row)       | 183          | 135           | 183              | 200     | <200   | yes  |
+| pages         | paste a 10x10 block                 | 85379        | 86054         | 86112            | 86209   | <200   | NO   |
+| pages         | Save the pasted block               | 85775        | 86566         | 86602            | 88137   | <200   | NO   |
+| pages         | filter: search "Page 1"             | 8968         | 9140          | 9128             | 9189    | <200   | NO   |
+| pages         | filter: clear the search            | 85497        | 85711         | 85773            | 85820   | <200   | NO   |
+| pages         | filter: untick one Flow value       | 56113        | 65            | 56340            | 56430   | <200   | NO   |
+| pages         | filter: Check all                   | 81408        | 81670         | 81713            | 81779   | <200   | NO   |
+| pages         | open Connections                    | <50          | <50           | 0                | 168     | <200   | yes  |
+| pages         | Check again (one page)              | <50          | 93            | 0                | 256     | <200   | yes  |
+| pages         | show Ad groups of a page            | 94222        | 94416         | 184958           | 185132  | <200   | NO   |
+| pages         | hide Ad groups                      | 76183        | 76425         | 76467            | 76534   | <200   | NO   |
+| flows         | load                                | <50          | <50           | 0                | 200     | <500   | yes  |
+| editor        | load                                | <50          | <50           | 0                | 116     | <500   | yes  |
+| editor        | Arrange (66 steps)                  | <50          | <50           | 0                | 6       | <200   | yes  |
+| editor        | Save draft                          | <50          | <50           | 0                | 2       | <200   | yes  |
+| sequences     | load                                | <50          | <50           | 0                | 86      | <500   | yes  |
+| sequences     | open a sequence (10 steps)          | <50          | <50           | 0                | 86      | <500   | yes  |
+| sequences     | add a step and Save                 | <50          | <50           | 0                | 6       | <200   | yes  |
+| chats         | load                                | <50          | <50           | 0                | 89      | <500   | yes  |
+| inbox         | load                                | <50          | <50           | 0                | 202     | <500   | yes  |
+| inbox         | open a conversation                 | <50          | <50           | 0                | 60      | <200   | yes  |
+| replies       | load                                | <50          | 76            | 0                | 227     | <500   | yes  |
+| replies       | filter: Sent only                   | <50          | <50           | 0                | 900013  | <200   | yes  |
+| results       | load                                | <50          | <50           | 0                | 1158    | <500   | yes  |
+| health        | load                                | <50          | <50           | 0                | 325     | <500   | yes  |
+| speed         | load                                | <50          | <50           | 0                | 194     | <500   | yes  |
+| live          | load and 15 s of live updates       | <50          | <50           | 0                | 167     | <500   | yes  |
+| page-settings | load                                | 87           | 174           | 87               | 885     | <500   | yes  |
+| page-settings | filter: search "Page 1"             | <50          | <50           | 0                | 37      | <200   | yes  |
+| page-settings | filter: clear                       | <50          | 82            | 0                | 88      | <200   | yes  |
+| page-settings | edit a cell and Enter               | <50          | <50           | 0                | 11      | <200   | yes  |
+  pages · first load (after the data arrives): 160 rows, 11360 cells
+  pages · each Check that finishes after load: all 160 checks done
+  flows · load: 292 elements
+  editor · load: 718 elements
+  sequences · load: 238 elements
+  sequences · open a sequence (10 steps): 439 elements
+  chats · load: 1631 elements
+  inbox · load: 1173 elements
+  replies · load: 1062 elements
+  replies · filter: Sent only: NOT FINISHED: timed out waiting for: document.getElementById('rp-count').textContent !== window.__c
+  results · load: 417 elements
+  health · load: 890 elements
+  speed · load: 1835 elements
+  live · load and 15 s of live updates: 543 elements
+  page-settings · load: 9610 elements
+  page-settings · edit a cell and Enter: NOT FINISHED: page error: TypeError: Cannot set properties of null (setting 'value')
+    at <anonymous>:3:86
+    at <anonymous>:4:106 in (() => { 
+            const td = docu

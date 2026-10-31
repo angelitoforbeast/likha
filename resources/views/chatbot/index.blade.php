@@ -27,6 +27,10 @@
     #cb-table .cb-txt.cb-clamped { -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
     #cb-table tr.cb-open .cb-txt { display: block; -webkit-line-clamp: unset; max-height: 15rem; overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
     #cb-table td.cb-cell { cursor: pointer; }
+    /* Ang laman ng bawat value cell ay hiwalay sa pintura (contain: paint): kapag gumalaw ang mga row sa ilalim ng row na
+       bumukas o nagbago, ang cell lang ang inililipat ng browser, hindi bawat bahagi nito (libu-libong cell). Ang 4px ay
+       para buo pa rin ang focus ring ng lapis. */
+    #cb-table td.cb-cell > div { contain: paint; overflow-clip-margin: 4px; }
     /* History at Changes: ang value ay 3 linya kapag sarado ("Show all" para sa buo). */
     .cb-fold { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
     .cb-fold.cb-unfold { display: block; -webkit-line-clamp: unset; }
@@ -422,16 +426,48 @@
         return el('a', {...a, class: 'ml-1 inline-flex shrink-0 rounded align-middle hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'}, svg);
     }
 
+    // row-cache:start
+    // Ang row ng table ay binubuo ulit lang kapag nagbago ang ipinapakita nito: ang signature ay ang data ng row at ang
+    // lahat ng state na nasa row (mark, hindi pa naka-save na paste, error, Check, Ad groups, mga column). Ang reload
+    // (pagkatapos ng Save, Undo o Connections) ay nag-iiwan ng lumang object ng page na walang nagbago, dahil doon
+    // nakaturo ang mga button ng row niya; ang may nagbago (kahit ayos lang ng key) ay ang bagong object at bagong row.
+    // Ang Chats today at Last chat ay nagbabago sa halos bawat reload (bawat bagong chat): hindi sila dahilan para buuin
+    // ulit ang row; isinusulat sila sa lumang object at sa cell mismo (render).
+    const RowCache = {
+        VOLATILE: ['today', 'last_chat'],
+        steady(r) { const out = {...r}; for (const k of RowCache.VOLATILE) delete out[k]; return out; },
+        // Pareho ang data kahit iba ang ayos ng mga key (ang cell na isinulat dito ay nasa dulo ng cells sa server).
+        same: (a, b) => JSON.stringify(RowCache.steady(a), RowCache.sorted) === JSON.stringify(RowCache.steady(b), RowCache.sorted),
+        sorted: (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v,
+        merge(oldRows, newRows) {
+            const old = new Map(oldRows.map(r => [r.page, r]));
+            return newRows.map(n => {
+                const o = old.get(n.page);
+                if (!o || !RowCache.same(o, n)) return n;
+                for (const k of RowCache.VOLATILE) o[k] = n[k];
+                return o;
+            });
+        },
+        signature: (r, state) => JSON.stringify([RowCache.steady(r), state]),
+        // Ang signature nang walang Check: kapag ito lang ang nagbago, ang Check cell lang ang pinipintura (paintCheck).
+        withoutCheck: (r, state) => RowCache.signature({...r, check: null}, {...state, check: null, checking: false}),
+    };
+    // row-cache:end
+
     async function load() {
         const res = await fetch(url.dataUrl, {headers: {'Accept': 'application/json'}});
         if (!res.ok) { notice('Could not load the pages (' + res.status + ').', 'text-red-600'); return; }
         const data = await res.json();
-        columns = data.columns; rows = data.rows; flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || []; aiSite = data.ai_site || null;
+        columns = data.columns; rows = RowCache.merge(rows, data.rows); flows = data.flows || []; gatewayReady = !!data.gateway_ready; bots = data.bots || []; aiSite = data.ai_site || null;
         // Ang naka-cache na Check ay kasama sa data; ang wala pa ay kinukuha pagkatapos ng render (checkQueue).
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
         render();
-        queueChecks(staleChecks(rows));
+        firstPages.clear(); // ang reload na ito ang hinihintay nila
+        // Pagkatapos ng frame ng render: ang pila ay tumitingin kung aling row ang nasa screen (layout), at sa loob ng
+        // parehong task ay buong layout iyon ng bagong table, kasama ang render.
+        const stale = staleChecks(rows);
+        requestAnimationFrame(() => setTimeout(() => queueChecks(stale)));
     }
 
     function visible() {
@@ -546,7 +582,12 @@
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && hfKey) closeFilter(); });
     document.addEventListener('click', e => { if (hfKey && !$('hf').contains(e.target)) closeFilter(); });
 
-    function render() {
+    /** Ang header ng table: binubuo ulit lang kapag nagbago ang mga column o ang mga filter (ang bagong header ay buong layout ng table). */
+    let headKey = null;
+    function header() {
+        const key = JSON.stringify([columns.map(c => c.key + ':' + c.label), Object.keys(hfOn).sort(), CF.active(cf)]);
+        if (key === headKey && table.tHead) return;
+        headKey = key;
         const head = el('tr', {}, [
             el('th', {class: 'stick-1 w-32 min-w-[8rem] sm:w-48 sm:min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, [el('input', {type: 'checkbox', id: 'sel-all', class: 'mr-1 align-middle', 'aria-label': 'Select every page in the list', title: 'Select all in the list'}), 'Page', filterButton('page')]),
             el('th', {class: 'stick-2 min-w-[6rem] w-24 border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500'}, ['Active', filterButton('active'), ' Bot', filterButton('bot')]),
@@ -557,11 +598,139 @@
             el('th', {class: 'min-w-[8rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase text-slate-500', text: 'Last chat'}),
             ...columns.filter(c => c.key !== 'flow').map(c => el('th', {class: 'min-w-[12rem] border-b border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-500', text: c.label})),
         ]);
-        const list = visible();
+        const thead = el('thead', {}, head);
+        if (table.tHead) table.tHead.replaceWith(thead); else table.prepend(thead);
+        $('sel-all').addEventListener('change', ev => { for (const r of visible()) { if (ev.target.checked) picked.add(r.page); else picked.delete(r.page); } render(); });
+    }
+
+    function render() {
+        header();
+        const list = visible(), shown = new Set(list.map(r => r.page));
+        // Ang bawat row ay mula sa cache kapag pareho ang signature; ang nakatago ng filter ay nasa table pa rin (hidden),
+        // kaya ang filter ay nagpapakita at nagtatago lang, at ang Save ay ang row lang ng page na nagbago ang binubuo.
+        // Ang row na bago o nagbago ay binubuo sa reveal (sa ibaba), at ang nakatago ay hindi binubuo hangga't hindi
+        // ipinapakita; hanggang doon, ang dating row ng page (replacing) ay naiiwang nakikita, kaya walang row na nawawala.
+        const states = rowStates(), want = [], keep = new Set(), ops = [];
+        for (const r of rows) {
+            const st = states(r), sig = RowCache.signature(r, st), hit = rowCache.get(r.page), show = shown.has(r.page);
+            let entry = hit;
+            // Ad groups lang ang nagbago (ipinakita, itinago o dumating ang data): ang mga sub-row at ang button lang ang
+            // pinapalitan, hindi ang buong row ng page.
+            if (hit && hit.sig !== sig && hit.sig !== null && hit.r === r && show && hit.nodes && !hit.nodes[0].hidden && !hit.replacing
+                && RowCache.signature(r, {...st, ag: null}) === hit.main) {
+                const [tr, ...oldSubs] = hit.nodes, subs = subRowsOf(r);
+                for (const n of oldSubs) n.remove();
+                tr.after(...subs);
+                tr.querySelector('[data-reply-control]')?.replaceWith(replyControl(r));
+                Object.assign(hit, {sig, base: RowCache.withoutCheck(r, st), nodes: [tr, ...subs]});
+            }
+            if (!hit || hit.sig !== sig || hit.r !== r) {
+                const old = hit && (hit.replacing || (hit.nodes && !hit.nodes[0].hidden ? hit.nodes : null));
+                entry = {sig, base: RowCache.withoutCheck(r, st), main: RowCache.signature(r, {...st, ag: null}), r, nodes: null, replacing: old && old[0].isConnected ? old : null};
+                // Ang dating row habang hinihintay ang bago: nakikita pero hindi na mapipindot (ang mga button nito ay sa lumang data).
+                for (const n of entry.replacing || []) n.inert = true;
+            }
+            rowCache.set(r.page, entry);
+            keep.add(r.page);
+            if (!show) entry.replacing = null;
+            if (entry.replacing) want.push(...entry.replacing);
+            if (entry.nodes) want.push(...entry.nodes);
+            // Ang hidden ay isinusulat lang kapag nagbago (ang parehong value ay style recalc pa rin ng row).
+            if (!show) { for (const n of entry.nodes || []) if (!n.hidden) n.hidden = true; } else if (!entry.nodes || entry.nodes[0].hidden) ops.push(entry);
+            if (entry.nodes) paintVolatile(entry);
+        }
+        // Ang page na kasusulat lang (Save, Undo, paste) ang unang ipinapakita.
+        ops.sort((a, b) => firstPages.has(b.r.page) - firstPages.has(a.r.page));
+        for (const p of [...rowCache.keys()]) if (!keep.has(p)) rowCache.delete(p);
+        if (!table.contains(tbody)) table.append(tbody);
+        placeRows(tbody, want);
+        table.querySelector('tbody.cb-empty')?.remove();
+        $('count').textContent = list.length + ' of ' + rows.length + ' page' + (rows.length === 1 ? '' : 's');
+        if (!rows.length) table.append(el('tbody', {class: 'cb-empty'}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '7', text: 'No page has a Botcake ID and token yet.'}))));
+        for (const entry of rowCache.values()) if (entry.nodes) rowState(entry);
+        paintSel();
+        paintBar();
+        paintPicked();
+        reveal(ops, rows.map(r => r.page));
+    }
+    const firstPages = new Set();
+    /** Ang Chats today at Last chat ng row na mula sa cache (hindi bahagi ng signature). */
+    function paintVolatile(entry) {
+        const set = (sel, text) => { const td = entry.nodes[0].querySelector(sel); if (td && td.textContent !== text) td.textContent = text; };
+        set('td[data-today]', String(entry.r.today));
+        set('td[data-last-chat]', entry.r.last_chat || '—');
+    }
+    /** Ang bukas na row at ang naka-check: sa mga row mismo (hindi bahagi ng signature, para hindi buuin ulit). */
+    function rowState(entry) {
+        for (const tr of entry.nodes) tr.classList.toggle('cb-open', openRow !== null && tr.dataset.page === openRow);
+        const box = entry.nodes[0].querySelector('.cb-pick');
+        if (box) box.checked = picked.has(entry.r.page);
+    }
+    /**
+     * Binubuo at ipinapakita ang mga row ng ops, REVEAL_AT_ONCE kada frame (ang unang bahagi ay ngayon din): ang isang row
+     * ay mga 70 cell na binubuo, saka style at layout, kaya ang 160 row nang sabay ay isang task na lampas sa kalahating
+     * segundo. Ang bagong render ay pumapalit sa naiwang reveal (kinukuwenta nito ulit ang lahat ng hindi pa nakikita).
+     * Habang may hinihintay pa, aria-busy ang table. Ang fade ay sinusukat pagkatapos ng huling bahagi.
+     */
+    const REVEAL_AT_ONCE = 6;
+    let revealRun = 0;
+    function reveal(ops, order) {
+        const run = ++revealRun;
+        const step = later => {
+            if (run !== revealRun) return;
+            // Ang fade ng naunang bahagi (nailatag na sa nakaraang frame, kaya basa lang): ang klase ng libu-libong cell
+            // nang sabay sa dulo ay isa pang mahabang frame.
+            if (later) markClamped();
+            for (const entry of ops.splice(0, REVEAL_AT_ONCE)) {
+                if (!entry.nodes) {
+                    entry.nodes = rowNodes(entry.r);
+                    rowState(entry);
+                    // Sa puwesto ng dating row, o bago ang unang nakalagay na row na kasunod nito sa listahan.
+                    const at = entry.replacing ? entry.replacing[0] : nextPlaced(entry.r.page, order);
+                    for (const n of entry.nodes) tbody.insertBefore(n, at);
+                }
+                for (const n of entry.nodes) n.hidden = false;
+                for (const n of entry.replacing || []) n.remove();
+                entry.replacing = null;
+            }
+            if (ops.length) table.setAttribute('aria-busy', 'true'); else table.removeAttribute('aria-busy');
+            paintSel();
+            requestAnimationFrame(ops.length ? () => step(true) : markClamped);
+        };
+        step(false);
+    }
+    function nextPlaced(page, order) {
+        for (let i = order.indexOf(page) + 1; i < order.length; i++) {
+            const e = rowCache.get(order[i]), first = e && ((e.replacing && e.replacing[0]) || (e.nodes && e.nodes[0]));
+            if (first && first.parentNode === tbody) return first;
+        }
+        return null;
+    }
+    const tbody = el('tbody'), rowCache = new Map(); // page => {sig, r, nodes, replacing}
+    // Ang row na ginalaw na ng sariling kontrol nito (switch, select habang naghihintay): binubuo ulit kahit pareho ang data.
+    // Ang dating row ay naiiwang nakikita hanggang lumabas ang bago (signature na walang katapat).
+    // Ang row object ng page ngayon: ang modal o kontrol na binuksan bago ang reload ay may lumang object ng page.
+    const current = r => rows.find(x => x.page === r.page) || r;
+    const redraw = page => { const hit = rowCache.get(page); if (hit) hit.sig = null; render(); };
+    const agVersion = new Map(); // page => ilang beses nagbago ang data ng Ad groups nito (bahagi ng signature)
+    /** Ang state ng bawat row na wala sa data nito, kada page (isang ikot sa marks at pending para sa lahat ng row). */
+    function rowStates() {
+        const marksBy = new Map(), pendingBy = new Map();
+        for (const [k, m] of marks) { const [page, key] = k.split('\u0000'); if (!marksBy.has(page)) marksBy.set(page, []); marksBy.get(page).push([key, m]); }
+        for (const p of pending.values()) { if (!pendingBy.has(p.page)) pendingBy.set(p.page, []); pendingBy.get(p.page).push([p.key, p.value, p.old]); }
+        const cols = columns.map(c => c.key + ':' + c.kind + ':' + c.label).join(',') + (gatewayReady ? ':gw' : ''), frozen = FROZEN.matches;
+        return r => ({cols, frozen, marks: marksBy.get(r.page) || [], pending: pendingBy.get(r.page) || [], error: errors.get(r.page) || null,
+            check: checks.get(r.page) || null, checking: checking.has(r.page), ag: [AG.isOpen(r.page), agVersion.get(r.page) || 0]});
+    }
+    function subRowsOf(r) {
+        return r.reply === 'ad' && AG.isOpen(r.page) ? AG.subRows(r, {cols: 7 + botCols().length, botCols: botCols(), defaultRow: () => defaultRow(r), manage: () => manageAdGroups(r)}) : [];
+    }
+    /** Ang row ng page at, kapag Ad-based at bukas, ang mga sub-row nito. */
+    function rowNodes(r) {
         // Ang Ad-based na page na bukas: ang mga sub-row nito (chatbot-adgroups.js) sa ilalim mismo ng row ng page; pantingin
         // lang, ang pag-ayos ay sa Edit (Manage in Edit).
-        const subs = r => r.reply === 'ad' && AG.isOpen(r.page) ? AG.subRows(r, {cols: 7 + botCols().length, botCols: botCols(), defaultRow: () => defaultRow(r), manage: () => manageAdGroups(r)}) : [];
-        const body = el('tbody', {}, list.flatMap(r => [el('tr', {'data-page': r.page, class: r.page === openRow ? 'cb-open' : null}, [
+        const subs = subRowsOf(r);
+        return [el('tr', {'data-page': r.page}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null]), replyControl(r)]),
             activeCell(r),
@@ -570,31 +739,41 @@
             // Ang mga kumpletong koneksyon lang, text.
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs'}, [(r.connected || []).join(', ') || '—']
                 .concat(r.botcake_keywords === 'on' ? [el('div', {class: 'break-words text-red-600', title: 'May naka-on na keyword sa Botcake: i-off doon, saka i-Test ulit', text: 'Botcake: keyword on'})] : [])),
-            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
-            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', text: r.last_chat || '—'}),
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', 'data-today': '', text: String(r.today)}),
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', 'data-last-chat': '', text: r.last_chat || '—'}),
             ...columns.filter(c => c.key !== 'flow').map(c => cell(r, c)),
-        ]), ...subs(r)]));
-        $('cb-box').style.setProperty('--cbw', $('cb-box').clientWidth + 'px');
-        table.replaceChildren(el('thead', {}, head), body);
-        $('count').textContent = list.length + ' of ' + rows.length + ' page' + (rows.length === 1 ? '' : 's');
-        if (!rows.length) table.append(el('tbody', {}, el('tr', {}, el('td', {class: 'px-3 py-3 text-slate-500', colspan: '7', text: 'No page has a Botcake ID and token yet.'}))));
-        paintSel();
-        paintBar();
-        paintPicked();
-        $('sel-all').addEventListener('change', ev => { for (const r of visible()) { if (ev.target.checked) picked.add(r.page); else picked.delete(r.page); } render(); });
-        requestAnimationFrame(markClamped);
+        ]), ...subs];
+    }
+    /**
+     * Inilalagay ang mga row sa ayos ng want, ginagalaw lang ang nagbago: inaalis muna ang wala na, saka isinisingit ang
+     * bago sa puwesto nito. Ang row na hindi gumalaw ay hindi inaalis at ibinabalik (ang muling pagkabit ay buong style at
+     * layout ulit ng row).
+     */
+    function placeRows(parent, want) {
+        const wanted = new Set(want);
+        for (const n of [...parent.children]) if (!wanted.has(n)) n.remove();
+        let at = parent.firstElementChild;
+        for (const n of want) {
+            if (n === at) { at = at.nextElementSibling; continue; }
+            parent.insertBefore(n, at);
+        }
     }
 
     // ---- Reply values: Page-based (ang default: page values sa lahat) o Ad-based (ang mga ad group ng page) ----
     const AG = ChatbotAdGroups.create({csrf, urls: {index: url.agUrl, save: url.agUrl, add: url.agAddUrl, del: url.agDeleteUrl, history: url.agHistoryUrl,
-        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: () => { if (!editing) render(); }});
+        restore: url.agRestoreUrl, mode: url.agModeUrl, value: url.agValueUrl, removeAd: url.agRemoveAdUrl, ad: url.agAdUrl}, onChange: page => { agVersion.set(page, (agVersion.get(page) || 0) + 1); if (!editing) render(); }});
     /** Manage in Edit: ang Edit ng page, nakatapat sa Ad groups. */
     function manageAdGroups(r) {
         openPe(r);
         $('pe-ag').scrollIntoView({block: 'start'});
         $('pe-ag-title').focus();
     }
-    window.addEventListener('resize', () => $('cb-box').style.setProperty('--cbw', $('cb-box').clientWidth + 'px'));
+    // Ang lapad ng kahon para sa buong-lapad na sub-row (--cbw): isinusulat lang kapag nagbago.
+    function setBoxWidth(px = $('cb-box').clientWidth) {
+        const w = px + 'px';
+        if ($('cb-box').style.getPropertyValue('--cbw') !== w) $('cb-box').style.setProperty('--cbw', w);
+    }
+    window.addEventListener('resize', () => setBoxWidth());
     function replyControl(r) {
         const sel = el('select', {class: 'mt-0.5 block w-full max-w-[9rem] rounded border border-slate-300 px-1 py-0.5 text-xs text-gray-900', 'aria-label': 'Reply values of ' + r.page,
             title: 'Page-based: the page values for every customer. Ad-based: the values of the customer\'s ad group.'},
@@ -607,7 +786,7 @@
             sel.disabled = true;
             const res = await AG.setMode(r.page, ad);
             if (res.error) errors.set(r.page, res.error); else { r.reply = res.mode; errors.delete(r.page); }
-            render();
+            redraw(r.page);
         });
         const out = [el('div', {class: 'mt-1 text-xs font-normal text-slate-500', text: 'Replies'}), sel];
         if (r.reply === 'ad') {
@@ -618,7 +797,7 @@
             b.addEventListener('click', () => { AG.toggle(r.page); render(); });
             out.push(b);
         }
-        return el('div', {}, out);
+        return el('div', {'data-reply-control': ''}, out);
     }
     /** Ang Default na sub-row ng Ad-based na page: ang page values mismo (parehong mga cell ng row ng page). */
     function defaultRow(r) {
@@ -717,15 +896,30 @@
         box.append(toggle, el('div', {class: 'cb-chk-pop rounded-lg border border-slate-200 bg-white p-2 shadow-lg'}, out));
         td.replaceChildren(box);
     }
+    // Ang Check cell lang ng page ang pinipintura; ang naka-cache na row ay may bagong signature (hindi binubuo ulit sa
+    // susunod na render).
     function paintCheck(page) {
-        table.querySelectorAll('td[data-check]').forEach(td => { if (td.dataset.check === page) fillCheck(td, page); });
+        // Lahat ng cell ng page: kasama ang dating row na nakikita pa habang hinihintay ng bago ang reveal.
+        const tds = [...table.querySelectorAll('td[data-check="' + CSS.escape(page) + '"]')], entry = rowCache.get(page);
+        for (const td of tds) fillCheck(td, page);
+        // Kapag ang Check lang ang nagbago mula nang buuin ang row; kung may iba pa (hal. mark ng pumalyang save habang may
+        // ine-edit), naiiwan ang lumang signature para buuin ulit ang row sa susunod na render.
+        if (entry && entry.nodes && tds.some(td => entry.nodes[0].contains(td))) {
+            const st = rowStates()(entry.r);
+            if (RowCache.withoutCheck(entry.r, st) === entry.base) { entry.sig = RowCache.signature(entry.r, st); entry.main = RowCache.signature(entry.r, {...st, ag: null}); }
+        }
     }
     async function runCheck(page, again = false) {
         checking.add(page); paintCheck(page);
         try {
             const res = again ? await post(url.checkUrl, {page_name: page})
                 : await fetch(url.checkUrl + '?page_name=' + encodeURIComponent(page), {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
-            checks.set(page, res.ok ? res.data : {error: 'Could not check (' + res.status + ')'});
+            // Ang resulta lang (walang page), gaya ng ibabalik ng /chatbot/data sa susunod na reload (ang naka-cache na
+            // Check): kaya ang row ay hindi "nagbago" sa reload at hindi binubuo ulit.
+            const {page: _page, ...result} = res.ok ? res.data : {};
+            checks.set(page, res.ok ? result : {error: 'Could not check (' + res.status + ')'});
+            const row = rows.find(x => x.page === page);
+            if (row && res.ok) row.check = result;
         } catch (e) {
             checks.set(page, {error: 'Could not check: no connection'});
         }
@@ -766,15 +960,17 @@
     ['pv', 'hist', 'chg', 'conn', 'flow-box', 'ai-box', 'ai-compare'].forEach(d => $(d).addEventListener('click', e => { if (e.target === $(d)) dialog(d, false); }));
     const getJson = u => fetch(u, {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
     /** Ang value na 3 linya kapag sarado, may "Show all" kapag may kasunod pa. */
+    // Lahat ng value ng isang listahan ay sinusukat sa iisang frame (basa muna lahat, saka ang mga "Show all").
+    const foldQueue = [];
     function folded(text, cls = '') {
         const box = el('div', {class: 'cb-fold ' + cls, text: text === '' ? '(empty)' : text});
         const wrap = el('div', {class: 'min-w-0'}, box);
-        requestAnimationFrame(() => {
-            if (box.scrollHeight <= box.clientHeight + 1) return;
+        box.foldWrap = wrap;
+        if (foldQueue.push(box) === 1) requestAnimationFrame(() => foldPass(foldQueue.splice(0), b => {
             const more = el('button', {type: 'button', class: 'text-xs text-blue-700 underline', text: 'Show all'});
-            more.addEventListener('click', () => { const open = box.classList.toggle('cb-unfold'); more.textContent = open ? 'Show less' : 'Show all'; });
-            wrap.append(more);
-        });
+            more.addEventListener('click', () => { const open = b.classList.toggle('cb-unfold'); more.textContent = open ? 'Show less' : 'Show all'; });
+            b.foldWrap.append(more);
+        }));
         return wrap;
     }
 
@@ -886,14 +1082,33 @@
     $('chg-next').addEventListener('click', () => { chgPage++; loadChanges(); });
 
     // Ang fade: sa text na lampas sa 3 linya ng row na sarado.
+    // Ang basa pagkatapos ng sulat ay buong layout ng table bawat cell (libu-libong cell: ilang segundo, "Page Unresponsive"):
+    // kaya sukat muna ang lahat (iisang layout), saka ang sulat.
+    // clamp:start
+    function clampPass(cells) {
+        const seen = cells.map(t => [t, t.scrollTop, t.scrollHeight > t.clientHeight + 1]);
+        for (const [t, top, over] of seen) { if (top) t.scrollTop = 0; t.classList.toggle('cb-clamped', over); }
+    }
+    /** Ang mga value na lampas sa 3 linya (basa lahat), saka ang add(box) sa bawat isa. */
+    function foldPass(boxes, add) {
+        for (const b of boxes.filter(b => b.scrollHeight > b.clientHeight + 1)) add(b);
+    }
+    // clamp:end
+    // Ang row na nasukat na sa parehong lapad ng table ay hindi na sinusukat ulit: ang 3 linya ay nakadepende lang sa
+    // laman (bagong row kapag nagbago) at sa lapad ng column (nagbabago ang lapad ng table kapag may column na lumapad o
+    // kumitid). Ang row na isinara ay sinusukat ulit (toggleRow).
     function markClamped() {
-        table.querySelectorAll('tbody tr:not(.cb-open) .cb-txt').forEach(t => { t.scrollTop = 0; t.classList.toggle('cb-clamped', t.scrollHeight > t.clientHeight + 1); });
+        const w = $('cb-box').clientWidth, tw = table.offsetWidth; // basa rin, kasama ng sukat ng mga cell
+        const trs = [...table.querySelectorAll('tbody tr:not(.cb-open):not([hidden])')].filter(tr => tr.cbClampWidth !== tw);
+        clampPass(trs.flatMap(tr => [...tr.querySelectorAll('.cb-txt')]));
+        for (const tr of trs) tr.cbClampWidth = tw;
+        setBoxWidth(w);
     }
 
     /** Buksan ang buong row (isara ang dati), o isara kapag ito na ang bukas. */
     function toggleRow(page) {
         openRow = openRow === page ? null : page;
-        table.querySelectorAll('tbody tr').forEach(tr => tr.classList.toggle('cb-open', tr.dataset.page === openRow));
+        table.querySelectorAll('tbody tr').forEach(tr => { if (tr.classList.contains('cb-open') && tr.dataset.page !== openRow) tr.cbClampWidth = null; tr.classList.toggle('cb-open', tr.dataset.page === openRow); });
         requestAnimationFrame(markClamped);
     }
 
@@ -936,7 +1151,7 @@
     }
     $('flow-q').addEventListener('input', paintFlows);
     $('flow-save').addEventListener('click', () => {
-        const {r, c, value} = flowPick, before = r.cells[c.key] ?? '';
+        const {c, value} = flowPick, r = current(flowPick.r), before = r.cells[c.key] ?? '';
         if (value === before && !(value === '' && r.flow_text)) { dialog('flow-box', false); return; }
         const from = before || (r.flow_text ? 'Not linked: ' + r.flow_text : 'No flow');
         if (!confirm('Change flow: ' + from + ' → ' + (value || 'No flow') + '?')) return;
@@ -1058,7 +1273,7 @@
     }));
 
     function pickBox(r) {
-        const c = el('input', {type: 'checkbox', class: 'mr-1 align-middle', 'aria-label': 'Select ' + r.page});
+        const c = el('input', {type: 'checkbox', class: 'cb-pick mr-1 align-middle', 'aria-label': 'Select ' + r.page});
         c.checked = picked.has(r.page);
         c.addEventListener('change', () => { if (c.checked) picked.add(r.page); else picked.delete(r.page); paintPicked(); });
         return c;
@@ -1117,7 +1332,7 @@
                 const {ok, data} = await post(url.providerUrl, {page_name: r.page, provider: want});
                 if (ok) { r.provider = data.provider; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
-            render();
+            redraw(r.page);
         });
         return sel;
     }
@@ -1139,7 +1354,7 @@
                 const {ok, data} = await post(url.gatewayUrl, {page_name: r.page, gateway: want});
                 if (ok) { r.gateway = data.gateway; r.auto_switched = null; errors.delete(r.page); } else errors.set(r.page, data.error || data.message || 'Not changed.');
             } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
-            render();
+            redraw(r.page);
         });
         return sel;
     }
@@ -1186,7 +1401,7 @@
     $('ai-box').querySelector('[data-close-dialog-alt]').addEventListener('click', () => dialog('ai-box', false));
     $('ai-form').addEventListener('submit', async e => {
         e.preventDefault();
-        const f = e.target, r = aiPage, body = r ? {page_name: r.page} : {};
+        const f = e.target, r = aiPage && current(aiPage), body = r ? {page_name: r.page} : {};
         for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort']) {
             const v = f.elements[k].value.trim();
             // Sa page, ang blangkong model o timeout = bumalik sa default. Sa site, ang binago lang (ang default ng server ay hindi naisusulat).
@@ -1242,6 +1457,7 @@
     }
 
     async function toggle(r, b) {
+        r = current(r);
         const on = !r.active;
         if (!confirm((on ? 'Switch the bot On for ' : 'Switch the bot Off for ') + r.page + '? This changes the live Botcake page.')) return;
         // Lilipat agad ang knob habang naghihintay; ang render() pagkatapos ay sagot ng server (babalik kapag pumalya ang Botcake).
@@ -1253,7 +1469,7 @@
             if (!ok) errors.set(r.page, status === 409 ? 'Not changed.' : (data.error || data.message || 'Not changed.'));
             else { r.active = data.active; if (data.error) errors.set(r.page, data.error); else errors.delete(r.page); }
         } catch (e) { errors.set(r.page, 'No connection: not changed.'); }
-        render();
+        redraw(r.page);
     }
 
     function cell(r, c, extra = '') {
@@ -1323,6 +1539,8 @@
 
     function startEdit(td, r, c) {
         if (editing) finish(true);
+        const hit = rowCache.get(r.page);
+        if (hit) hit.sig = null; // ang cell ay papalitan ng input: ang row ay binubuo ulit sa susunod na render
         const input = el('input', {class: 'w-full min-w-[10rem] rounded border border-blue-500 px-1', autocomplete: 'off', placeholder: c.kind === 'image' ? 'https://…' : ''});
         input.value = r.cells[c.key] ?? '';
         td.replaceChildren(input);
@@ -1345,6 +1563,7 @@
     }
 
     async function save(r, c, value) {
+        r = current(r);
         value = value.trim();
         if (pending.size && c.kind !== 'flow') {
             // Gaya ng paste: ang hindi link sa column ng larawan ay hindi isinasama (tatanggihan ng server ang buong Save).
@@ -1496,6 +1715,7 @@
     }
     function done(res) {
         lastUndo = res.undo.length ? res.undo : null;
+        for (const u of res.undo) firstPages.add(u.page_name ?? u.page);
         notice('Saved ' + plural(res.saved, 'field') + ' on ' + plural(res.pages, 'page') + (res.unchanged ? ' · ' + res.unchanged + ' already had that value' : '') + '.', 'text-green-700');
         load();
     }
@@ -1507,6 +1727,7 @@
         const res = await saveCells(lastUndo);
         btn.disabled = false;
         if (res.error) { notice('Undo failed: ' + res.error, 'text-red-600'); return; }
+        for (const u of lastUndo) firstPages.add(u.page_name ?? u.page);
         lastUndo = null;
         notice('Undone: ' + plural(res.saved, 'field') + ' back to the previous value.', 'text-green-700');
         load();
@@ -1523,10 +1744,18 @@
         if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) return null;
         return {list, cols, top: Math.min(r1, r2), bottom: Math.max(r1, r2), left: Math.min(c1, c2), right: Math.max(c1, c2)};
     }
+    // Ang mga cell lang ng napili (at ng dating napili) ang ginagalaw, hindi bawat cell ng table.
+    let selTds = new Set();
     function paintSel() {
-        const b = selBox(), keys = new Set();
-        if (b) for (let i = b.top; i <= b.bottom; i++) for (let j = b.left; j <= b.right; j++) keys.add(id(b.list[i].page, b.cols[j].key));
-        table.querySelectorAll('tbody td.cb-cell').forEach(td => td.classList.toggle('cb-sel', keys.has(id(td.parentElement.dataset.page, td.dataset.key))));
+        const b = selBox(), now = new Set();
+        if (b) for (let i = b.top; i <= b.bottom; i++) {
+            const page = b.list[i].page, entry = rowCache.get(page);
+            const trs = entry ? [...(entry.nodes || []), ...(entry.replacing || [])].filter(tr => tr.dataset.page === page) : [];
+            for (let j = b.left; j <= b.right; j++) for (const tr of trs) { const td = tr.querySelector('td.cb-cell[data-key="' + CSS.escape(b.cols[j].key) + '"]'); if (td) now.add(td); }
+        }
+        for (const td of selTds) if (!now.has(td)) td.classList.remove('cb-sel');
+        for (const td of now) td.classList.add('cb-sel');
+        selTds = now;
     }
     const typing = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
     table.addEventListener('keydown', e => {
