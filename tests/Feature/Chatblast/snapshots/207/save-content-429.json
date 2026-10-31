@@ -1,0 +1,37 @@
+{
+    "json": {
+        "http": 409,
+        "status": "confirm",
+        "host": null,
+        "message": "Could not check whether this page's Default Reply points to another site. Replace it anyway?",
+        "connections": {
+            "page": "Page Uno",
+            "botcake": {
+                "page_id": "1001",
+                "token": "••••9w2e",
+                "status": null,
+                "tested_at": null,
+                "chat_block": true,
+                "chat_block_status": null,
+                "keywords_status": null,
+                "keywords_on": null,
+                "connected": false,
+                "gateways": []
+            },
+            "forbeast": {
+                "page_id": "1001",
+                "token": null,
+                "status": null,
+                "tested_at": null,
+                "connected": false
+            }
+        }
+    },
+    "stored": {
+        "token_status": null,
+        "chat_block": null,
+        "keywords": null,
+        "active": null,
+        "chat_key": "kept-chat-key-123"
+    }
+}

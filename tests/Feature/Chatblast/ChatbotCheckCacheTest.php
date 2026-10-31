@@ -139,6 +139,10 @@ class ChatbotCheckCacheTest extends ChatblastTestCase
             JS);
         $this->assertSame(['calls' => 0, 'most' => 0, 'started' => []], $out['warm'], 'warm: no /chatbot/check call');
         $this->assertSame(['calls' => 3, 'most' => 2, 'started' => ['Page 050', 'Page 117', 'Page 010']], $out['stale'], '3 calls, 2 at a time, on-screen rows first');
+
+        // Ang orders, ads at link ng larawan ay wala sa key: pagkalipas ng isang oras, sinusuri ulit ang lahat.
+        $this->travel(31)->minutes();
+        $this->assertSame([], array_filter($this->dataChecks()), 'an hour later every check is computed again');
     }
 
     /** @return array<string, array{0: string}> */

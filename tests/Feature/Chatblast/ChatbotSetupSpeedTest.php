@@ -247,6 +247,8 @@ class ChatbotSetupSpeedTest extends ChatblastTestCase
             'Test: 429 on the Default Reply read' => ['test', ['GET /default_reply/content' => [[429, ['success' => false], ['Retry-After' => '1']]]], 'test-content-429'],
             'Test: 500 on the token read' => ['test', ['GET /custom_fields' => [[500, ['success' => false], []]]], 'test-token-500'],
             'Save: 429 on the flows read' => ['save', ['GET /flows' => [[429, ['success' => false], []]]], 'save-flows-429'],
+            'Save: 429 on the token read' => ['save', ['GET /custom_fields' => [[429, ['success' => false], []]]], 'save-token-429'],
+            'Save: 429 on the Default Reply read' => ['save', ['GET /default_reply/content' => [[429, ['success' => false], []]]], 'save-content-429'],
             'Fix: 429 on the publish, then ok' => ['fix', ['POST /default_reply' => [[429, ['success' => false], []], [200, ['success' => true], []]]], 'fix-publish-429'],
         ];
     }
