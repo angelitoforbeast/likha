@@ -25,6 +25,9 @@ const DEBUG_PORT = Number(args['debug-port'] || 9339);
 const PHP = args.php || process.env.PHP || (existsSync('C:/Users/Forbeast/.config/herd/bin/php84/php.exe') ? 'C:/Users/Forbeast/.config/herd/bin/php84/php.exe' : 'php');
 const CHROME = args.chrome || process.env.CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const started = [];
+// The PHP and project folder for tests/perf/churn.php (new chats between actions).
+process.env.PERF_PHP = PHP;
+process.env.PERF_ROOT = root;
 
 const up = async (url, tries = 1) => {
     for (let i = 0; i < tries; i++) {

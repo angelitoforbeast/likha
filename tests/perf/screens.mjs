@@ -1,5 +1,6 @@
 // The screens and actions the timing script measures. Each action: what is done in the page, the condition that
 // shows its result, and how long to keep watching afterwards for trailing work (a re-render a moment later).
+import {spawnSync} from 'node:child_process';
 import {sleep} from './cdp.mjs';
 
 const RUN = Date.now().toString(36); // each run writes new values, so a rerun on the same database still changes them
@@ -10,6 +11,48 @@ const TIMEOUT = Number(process.env.PERF_TIMEOUT || 600000);
 
 const sum = list => list.reduce((a, [, d]) => a + d, 0);
 const max = list => list.reduce((a, [, d]) => Math.max(a, d), 0);
+
+// New chats on half the pages (tests/perf/churn.php), as on a live site: every row's chat counts change on the next reload.
+const churn = () => { if (process.env.PERF_PHP) spawnSync(process.env.PERF_PHP, ['tests/perf/churn.php'], {cwd: process.env.PERF_ROOT, stdio: 'ignore'}); };
+
+// The grid against the server, after an action: every shown row once, its values and chat count as /chatbot/data has
+// them (pasted values not saved yet are skipped), no row left over from before a redraw.
+const GRID_CHECK = `(async () => {
+    const data = await fetch('/chatbot/data', {headers: {Accept: 'application/json'}}).then(r => r.json());
+    const byPage = new Map(data.rows.map(r => [r.page, r]));
+    const seen = new Map(), wrong = [];
+    let visible = 0;
+    for (const tr of document.querySelectorAll('#cb-table tbody tr[data-page]:not(.ag-sub)')) {
+        const pg = tr.dataset.page;
+        seen.set(pg, (seen.get(pg) || 0) + 1);
+        if (tr.hidden) continue;
+        visible++;
+        const r = byPage.get(pg);
+        if (!r) { wrong.push(pg + ': not on the server'); continue; }
+        for (const td of tr.querySelectorAll('td.cb-cell[data-key]')) {
+            const key = td.dataset.key;
+            if (td.classList.contains('cb-pending') || key === 'shop_details') continue;
+            const want = String(r.cells[key] ?? ''), t = td.querySelector('.cb-txt'), link = td.querySelector('span.truncate');
+            const ok = want === '' ? !t && !!link && /^\\+ (set|link)$/.test(link.textContent) : (t ? t.textContent : link ? link.textContent : '') === want;
+            if (!ok) wrong.push(pg + ' · ' + key);
+        }
+        if (tr.querySelector('td[data-today]') && tr.querySelector('td[data-today]').textContent !== String(r.today)) wrong.push(pg + ' · Chats today');
+    }
+    return {visible, wrong: wrong.slice(0, 5), wrongCount: wrong.length, dupes: [...seen].filter(([, n]) => n > 1).map(([pg]) => pg),
+        inert: document.querySelectorAll('#cb-table [inert]').length, count: document.getElementById('count').textContent};
+})()`;
+const MARK_ROWS = `(() => { for (const tr of document.querySelectorAll('#cb-table tbody tr')) tr.perfSeen = true; return true; })()`;
+const REBUILT = `[...document.querySelectorAll('#cb-table tbody tr[data-page]:not(.ag-sub)')].filter(tr => !tr.perfSeen).map(tr => tr.dataset.page)`;
+/** Records the grid check (and, with rebuilt, which rows were drawn again since MARK_ROWS). */
+async function gridCheck(p, out, label, rebuilt = null) {
+    const g = await p.ev(GRID_CHECK);
+    const drawn = rebuilt ? await p.ev(REBUILT) : null;
+    const shown = Number((g.count.match(/^(\d+)/) || [])[1]);
+    const okDrawn = !rebuilt || (drawn.length === rebuilt.length && rebuilt.every(x => drawn.includes(x)));
+    out.push({action: 'grid = server: ' + label, pass: g.wrongCount === 0 && !g.dupes.length && !g.inert && g.visible === shown && okDrawn,
+        note: `${g.visible} rows shown (${g.count}), ${g.wrongCount} values differ${g.wrongCount ? ' ' + JSON.stringify(g.wrong) : ''}, ${g.dupes.length} duplicate rows, ${g.inert} rows left inert`
+            + (drawn ? `; rows drawn again: ${drawn.length} ${JSON.stringify(drawn.slice(0, 12))}` : '')});
+}
 
 /**
  * Runs one action and reads the long tasks and frames that started from just before it until the end of settle.
@@ -148,10 +191,26 @@ async function pages(p, base, out) {
         for (const f of fields) { const i = f.querySelector('.pe-in'); i.value = i.tagName === 'TEXTAREA' ? 'PERF-EDIT ${RUN} ' + f.dataset.key + '\\nsecond line' : 'http://127.0.0.1:8209/favicon.ico?edit=${RUN}-' + f.dataset.key; i.dispatchEvent(new Event('input', {bubbles: true})); }
         return document.getElementById('pe-save').textContent;
     })()`);
+    // New chats everywhere first: the reload after Save brings new chat counts for half the rows, and still only the
+    // saved page is drawn again.
+    churn();
+    await p.ev(MARK_ROWS);
     out.push(await measure(p, 'Save 58 fields in the Edit window', click(`document.getElementById('pe-save')`),
         `document.getElementById('pe').classList.contains('hidden') && /Saved 58 fields on 1 page\\./.test(document.getElementById('bar-text').textContent) && ${cellOf('Perf Page 010', 'main_flow')}.textContent.includes('PERF-EDIT')`, {settle: 800}));
+    // Page 003 too: its cell was edited just before, so its Check is due again (Checking…) after this reload.
+    await gridCheck(p, out, 'after Save 58 (with new chats)', ['Perf Page 003', 'Perf Page 010']);
+    churn();
+    await p.ev(MARK_ROWS);
     out.push(await measure(p, 'Undo the 58 fields', click(`document.getElementById('bar-undo')`),
         `/^Undone: 58 fields/.test(document.getElementById('notice').textContent) && !${cellOf('Perf Page 010', 'main_flow')}.textContent.includes('PERF-EDIT')`, {settle: 800}));
+
+    await gridCheck(p, out, 'after Undo (S-209.5)', ['Perf Page 010']);
+
+    // A failed save (longer than the server takes): the cell keeps its old value and shows the ! mark.
+    await p.ev(`(() => { ${cellOf('Perf Page 004', 'main_flow')}.querySelector('.cb-edit').click(); return true; })()`);
+    out.push(await measure(p, 'failed cell save', `document.getElementById('long-text').value = 'x'.repeat(50001); document.getElementById('long-close').click()`,
+        `${cellOf('Perf Page 004', 'main_flow')}.querySelector('.text-red-600')?.textContent === '!'`, {settle: 500}));
+    await gridCheck(p, out, 'after a failed save');
 
     // A 10 x 10 block pasted from Seq Img 1 to Seq 5 of pages 020–029, then Save.
     out.push(await measure(p, 'select a cell (opens its row)', click(cellOf('Perf Page 020', 'seq_img_1')), `${row('Perf Page 020')}.querySelector('td.cb-sel')`));
@@ -161,14 +220,24 @@ async function pages(p, base, out) {
         const dt = new DataTransfer(); dt.setData('text/plain', lines.join('\\n'));
         ${cellOf('Perf Page 020', 'seq_img_1')}.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true}))`,
         `/100 cells changed on 10 pages/.test(document.getElementById('bar-text').textContent)`));
+    churn();
+    await p.ev(MARK_ROWS);
     out.push(await measure(p, 'Save the pasted block', click(`document.getElementById('bar-save')`),
         `/Saved 100 fields on 10 pages/.test(document.getElementById('bar-text').textContent) && ${cellOf('Perf Page 029', 'seq_5')}.textContent.includes('PERF-PASTE ${RUN} 9-9')`, {settle: 800}));
+
+    await gridCheck(p, out, 'after the paste is saved (with new chats)', Array.from({length: 10}, (_, i) => 'Perf Page 0' + (20 + i)));
 
     // Filters: the search box, and one value of the Flow header filter.
     out.push(await measure(p, 'filter: search "Page 1"', `const f = document.getElementById('f-q'); f.value = 'Page 1'; f.dispatchEvent(new Event('input', {bubbles: true}))`,
         `/^\\d+ of 160/.test(document.getElementById('count').textContent) && !/^160 of/.test(document.getElementById('count').textContent)`));
     out.push(await measure(p, 'filter: clear the search', `const f = document.getElementById('f-q'); f.value = ''; f.dispatchEvent(new Event('input', {bubbles: true}))`,
         `/^160 of 160/.test(document.getElementById('count').textContent)`));
+    // Three searches in a row, each one while the rows of the one before are still coming in.
+    out.push(await measure(p, 'filter: three searches during a reveal', `const f = document.getElementById('f-q'), set = v => { f.value = v; f.dispatchEvent(new Event('input', {bubbles: true})); };
+        set('Page 1'); setTimeout(() => { set(''); setTimeout(() => set('Page 0'), 0); }, 0)`, `/^99 of 160/.test(document.getElementById('count').textContent)`, {settle: 500}));
+    await gridCheck(p, out, 'after three quick searches');
+    await p.ev(`(() => { const f = document.getElementById('f-q'); f.value = ''; f.dispatchEvent(new Event('input', {bubbles: true})); return true; })()`);
+    await p.waitFor(`/^160 of 160/.test(document.getElementById('count').textContent) && !document.querySelector('[aria-busy="true"]')`);
     await p.ev(`(() => { document.querySelector('button[aria-label="Filter Flow"]').click(); return true; })()`);
     out.push(await measure(p, 'filter: untick one Flow value', `[...document.querySelectorAll('#hf-list label')].find(l => l.textContent === 'Short Flow A').querySelector('input').click()`,
         `/^120 of 160/.test(document.getElementById('count').textContent)`));

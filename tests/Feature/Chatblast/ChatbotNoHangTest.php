@@ -58,14 +58,18 @@ class ChatbotNoHangTest extends ChatblastTestCase
                 newB: merged[1] === fresh[1] && merged[1].cells.main_flow === 'Saved B',
                 newD: merged[2] === fresh[2],
                 // Same data, keys in another order: a redraw too many, never one too few.
-                reordered: RowCache.merge([{page: 'A', cells: {a: 1, b: 2}}], [{page: 'A', cells: {b: 2, a: 1}}])[0].cells.a === 1,
+                // Same data, keys in another order (a value saved here comes last in the server's cells): the old object.
+                reordered: (() => { const o = [{page: 'A', cells: {a: 1, b: 2}}]; return RowCache.merge(o, [{page: 'A', cells: {b: 2, a: 1}}])[0] === o[0]; })(),
+                // A new chat only (Chats today, Last chat): the old object is kept and takes the new counts.
+                chats: (() => { const o = {...row('A', 'Hi'), today: 3, last_chat: '10:00'}, m = RowCache.merge([o], [{...row('A', 'Hi'), today: 4, last_chat: '10:05'}])[0]; return m === o && o.today === 4 && o.last_chat === '10:05'; })(),
             }));
             JS);
         $this->assertSame(['A', 'B', 'D'], $out['pages']);
         $this->assertTrue($out['keptA'], 'an unchanged page keeps its row object (its buttons point at it)');
         $this->assertTrue($out['newB'], 'a page whose value changed takes the new object');
         $this->assertTrue($out['newD']);
-        $this->assertTrue($out['reordered']);
+        $this->assertTrue($out['reordered'], 'the same data with keys in another order keeps the row');
+        $this->assertTrue($out['chats'], 'new chat counts alone do not rebuild the row');
     }
 
     public function test_S_209_1_and_5_the_row_signature_changes_with_everything_the_row_shows(): void
@@ -89,10 +93,18 @@ class ChatbotNoHangTest extends ChatblastTestCase
             vary('ad groups loaded', (r2, s2) => { s2.ag = [false, 1]; });
             vary('column added', (r2, s2) => { s2.cols += ',promo'; });
             vary('wide screen', (r2, s2) => { s2.frozen = false; });
-            console.log(JSON.stringify({changed, same: RowCache.signature(structuredClone(r), structuredClone(state)) === base}));
+            const chats = RowCache.signature({...r, today: 9, last_chat: '11:00'}, state) === base;
+            // Without the Check: the same when only the Check changed, different when anything else did too.
+            const wc = RowCache.withoutCheck(r, state);
+            const onlyCheck = RowCache.withoutCheck({...r, check: {status: 'ok'}}, {...state, check: {status: 'ok'}, checking: true}) === wc;
+            const checkAndMark = RowCache.withoutCheck(r, {...state, check: {status: 'ok'}, marks: [['main_flow', '!']]}) !== wc;
+            console.log(JSON.stringify({changed, chats, onlyCheck, checkAndMark, same: RowCache.signature(structuredClone(r), structuredClone(state)) === base}));
             JS);
         $this->assertTrue($out['same'], 'the same row and state give the same signature (the row is kept)');
         foreach ($out['changed'] as $what => $differs) $this->assertTrue($differs, $what . ' redraws the row');
+        $this->assertTrue($out['chats'], 'Chats today and Last chat are painted in place, not a reason to rebuild');
+        $this->assertTrue($out['onlyCheck'], 'a Check result alone keeps the row (its cell is painted)');
+        $this->assertTrue($out['checkAndMark'], 'a Check result with another change still rebuilds the row');
     }
 
     public function test_S_209_4_the_fade_measures_every_cell_before_it_writes_any(): void

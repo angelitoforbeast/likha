@@ -27,6 +27,10 @@
     #cb-table .cb-txt.cb-clamped { -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
     #cb-table tr.cb-open .cb-txt { display: block; -webkit-line-clamp: unset; max-height: 15rem; overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
     #cb-table td.cb-cell { cursor: pointer; }
+    /* Ang laman ng bawat value cell ay hiwalay sa pintura (contain: paint): kapag gumalaw ang mga row sa ilalim ng row na
+       bumukas o nagbago, ang cell lang ang inililipat ng browser, hindi bawat bahagi nito (libu-libong cell). Ang 4px ay
+       para buo pa rin ang focus ring ng lapis. */
+    #cb-table td.cb-cell > div { contain: paint; overflow-clip-margin: 4px; }
     /* History at Changes: ang value ay 3 linya kapag sarado ("Show all" para sa buo). */
     .cb-fold { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
     .cb-fold.cb-unfold { display: block; -webkit-line-clamp: unset; }
@@ -427,12 +431,26 @@
     // lahat ng state na nasa row (mark, hindi pa naka-save na paste, error, Check, Ad groups, mga column). Ang reload
     // (pagkatapos ng Save, Undo o Connections) ay nag-iiwan ng lumang object ng page na walang nagbago, dahil doon
     // nakaturo ang mga button ng row niya; ang may nagbago (kahit ayos lang ng key) ay ang bagong object at bagong row.
+    // Ang Chats today at Last chat ay nagbabago sa halos bawat reload (bawat bagong chat): hindi sila dahilan para buuin
+    // ulit ang row; isinusulat sila sa lumang object at sa cell mismo (render).
     const RowCache = {
+        VOLATILE: ['today', 'last_chat'],
+        steady(r) { const out = {...r}; for (const k of RowCache.VOLATILE) delete out[k]; return out; },
+        // Pareho ang data kahit iba ang ayos ng mga key (ang cell na isinulat dito ay nasa dulo ng cells sa server).
+        same: (a, b) => JSON.stringify(RowCache.steady(a), RowCache.sorted) === JSON.stringify(RowCache.steady(b), RowCache.sorted),
+        sorted: (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v,
         merge(oldRows, newRows) {
             const old = new Map(oldRows.map(r => [r.page, r]));
-            return newRows.map(n => { const o = old.get(n.page); return o && JSON.stringify(o) === JSON.stringify(n) ? o : n; });
+            return newRows.map(n => {
+                const o = old.get(n.page);
+                if (!o || !RowCache.same(o, n)) return n;
+                for (const k of RowCache.VOLATILE) o[k] = n[k];
+                return o;
+            });
         },
-        signature: (r, state) => JSON.stringify([r, state]),
+        signature: (r, state) => JSON.stringify([RowCache.steady(r), state]),
+        // Ang signature nang walang Check: kapag ito lang ang nagbago, ang Check cell lang ang pinipintura (paintCheck).
+        withoutCheck: (r, state) => RowCache.signature({...r, check: null}, {...state, check: null, checking: false}),
     };
     // row-cache:end
 
@@ -445,6 +463,7 @@
         checks.clear();
         for (const r of rows) if (r.check) checks.set(r.page, r.check);
         render();
+        firstPages.clear(); // ang reload na ito ang hinihintay nila
         // Pagkatapos ng frame ng render: ang pila ay tumitingin kung aling row ang nasa screen (layout), at sa loob ng
         // parehong task ay buong layout iyon ng bagong table, kasama ang render.
         const stale = staleChecks(rows);
@@ -593,11 +612,23 @@
         // ipinapakita; hanggang doon, ang dating row ng page (replacing) ay naiiwang nakikita, kaya walang row na nawawala.
         const states = rowStates(), want = [], keep = new Set(), ops = [];
         for (const r of rows) {
-            const sig = RowCache.signature(r, states(r)), hit = rowCache.get(r.page), show = shown.has(r.page);
+            const st = states(r), sig = RowCache.signature(r, st), hit = rowCache.get(r.page), show = shown.has(r.page);
             let entry = hit;
+            // Ad groups lang ang nagbago (ipinakita, itinago o dumating ang data): ang mga sub-row at ang button lang ang
+            // pinapalitan, hindi ang buong row ng page.
+            if (hit && hit.sig !== sig && hit.sig !== null && hit.r === r && show && hit.nodes && !hit.nodes[0].hidden && !hit.replacing
+                && RowCache.signature(r, {...st, ag: null}) === hit.main) {
+                const [tr, ...oldSubs] = hit.nodes, subs = subRowsOf(r);
+                for (const n of oldSubs) n.remove();
+                tr.after(...subs);
+                tr.querySelector('[data-reply-control]')?.replaceWith(replyControl(r));
+                Object.assign(hit, {sig, base: RowCache.withoutCheck(r, st), nodes: [tr, ...subs]});
+            }
             if (!hit || hit.sig !== sig || hit.r !== r) {
                 const old = hit && (hit.replacing || (hit.nodes && !hit.nodes[0].hidden ? hit.nodes : null));
-                entry = {sig, r, nodes: null, replacing: old && old[0].isConnected ? old : null};
+                entry = {sig, base: RowCache.withoutCheck(r, st), main: RowCache.signature(r, {...st, ag: null}), r, nodes: null, replacing: old && old[0].isConnected ? old : null};
+                // Ang dating row habang hinihintay ang bago: nakikita pero hindi na mapipindot (ang mga button nito ay sa lumang data).
+                for (const n of entry.replacing || []) n.inert = true;
             }
             rowCache.set(r.page, entry);
             keep.add(r.page);
@@ -606,7 +637,10 @@
             if (entry.nodes) want.push(...entry.nodes);
             // Ang hidden ay isinusulat lang kapag nagbago (ang parehong value ay style recalc pa rin ng row).
             if (!show) { for (const n of entry.nodes || []) if (!n.hidden) n.hidden = true; } else if (!entry.nodes || entry.nodes[0].hidden) ops.push(entry);
+            if (entry.nodes) paintVolatile(entry);
         }
+        // Ang page na kasusulat lang (Save, Undo, paste) ang unang ipinapakita.
+        ops.sort((a, b) => firstPages.has(b.r.page) - firstPages.has(a.r.page));
         for (const p of [...rowCache.keys()]) if (!keep.has(p)) rowCache.delete(p);
         if (!table.contains(tbody)) table.append(tbody);
         placeRows(tbody, want);
@@ -618,6 +652,13 @@
         paintBar();
         paintPicked();
         reveal(ops, rows.map(r => r.page));
+    }
+    const firstPages = new Set();
+    /** Ang Chats today at Last chat ng row na mula sa cache (hindi bahagi ng signature). */
+    function paintVolatile(entry) {
+        const set = (sel, text) => { const td = entry.nodes[0].querySelector(sel); if (td && td.textContent !== text) td.textContent = text; };
+        set('td[data-today]', String(entry.r.today));
+        set('td[data-last-chat]', entry.r.last_chat || '—');
     }
     /** Ang bukas na row at ang naka-check: sa mga row mismo (hindi bahagi ng signature, para hindi buuin ulit). */
     function rowState(entry) {
@@ -631,7 +672,7 @@
      * segundo. Ang bagong render ay pumapalit sa naiwang reveal (kinukuwenta nito ulit ang lahat ng hindi pa nakikita).
      * Habang may hinihintay pa, aria-busy ang table. Ang fade ay sinusukat pagkatapos ng huling bahagi.
      */
-    const REVEAL_AT_ONCE = 10;
+    const REVEAL_AT_ONCE = 6;
     let revealRun = 0;
     function reveal(ops, order) {
         const run = ++revealRun;
@@ -667,22 +708,28 @@
     }
     const tbody = el('tbody'), rowCache = new Map(); // page => {sig, r, nodes, replacing}
     // Ang row na ginalaw na ng sariling kontrol nito (switch, select habang naghihintay): binubuo ulit kahit pareho ang data.
-    const redraw = page => { rowCache.delete(page); render(); };
+    // Ang dating row ay naiiwang nakikita hanggang lumabas ang bago (signature na walang katapat).
+    // Ang row object ng page ngayon: ang modal o kontrol na binuksan bago ang reload ay may lumang object ng page.
+    const current = r => rows.find(x => x.page === r.page) || r;
+    const redraw = page => { const hit = rowCache.get(page); if (hit) hit.sig = null; render(); };
     const agVersion = new Map(); // page => ilang beses nagbago ang data ng Ad groups nito (bahagi ng signature)
     /** Ang state ng bawat row na wala sa data nito, kada page (isang ikot sa marks at pending para sa lahat ng row). */
     function rowStates() {
         const marksBy = new Map(), pendingBy = new Map();
         for (const [k, m] of marks) { const [page, key] = k.split('\u0000'); if (!marksBy.has(page)) marksBy.set(page, []); marksBy.get(page).push([key, m]); }
         for (const p of pending.values()) { if (!pendingBy.has(p.page)) pendingBy.set(p.page, []); pendingBy.get(p.page).push([p.key, p.value, p.old]); }
-        const cols = columns.map(c => c.key + ':' + c.kind + ':' + c.label).join(','), frozen = FROZEN.matches;
+        const cols = columns.map(c => c.key + ':' + c.kind + ':' + c.label).join(',') + (gatewayReady ? ':gw' : ''), frozen = FROZEN.matches;
         return r => ({cols, frozen, marks: marksBy.get(r.page) || [], pending: pendingBy.get(r.page) || [], error: errors.get(r.page) || null,
             check: checks.get(r.page) || null, checking: checking.has(r.page), ag: [AG.isOpen(r.page), agVersion.get(r.page) || 0]});
+    }
+    function subRowsOf(r) {
+        return r.reply === 'ad' && AG.isOpen(r.page) ? AG.subRows(r, {cols: 7 + botCols().length, botCols: botCols(), defaultRow: () => defaultRow(r), manage: () => manageAdGroups(r)}) : [];
     }
     /** Ang row ng page at, kapag Ad-based at bukas, ang mga sub-row nito. */
     function rowNodes(r) {
         // Ang Ad-based na page na bukas: ang mga sub-row nito (chatbot-adgroups.js) sa ilalim mismo ng row ng page; pantingin
         // lang, ang pag-ayos ay sa Edit (Manage in Edit).
-        const subs = r.reply === 'ad' && AG.isOpen(r.page) ? AG.subRows(r, {cols: 7 + botCols().length, botCols: botCols(), defaultRow: () => defaultRow(r), manage: () => manageAdGroups(r)}) : [];
+        const subs = subRowsOf(r);
         return [el('tr', {'data-page': r.page}, [
             el('td', {class: 'stick-1 border-b border-slate-100 px-3 py-2 align-top font-medium break-words'}, [pickBox(r), r.page, fbAnchor(r), el('div', {class: 'font-mono text-xs text-slate-400', text: r.page_id || ''}),
                 el('div', {class: 'flex flex-wrap gap-1'}, [editButton(r), previewButton(r), url.connectionsUrl ? connectionsButton(r) : null]), replyControl(r)]),
@@ -692,8 +739,8 @@
             // Ang mga kumpletong koneksyon lang, text.
             el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs'}, [(r.connected || []).join(', ') || '—']
                 .concat(r.botcake_keywords === 'on' ? [el('div', {class: 'break-words text-red-600', title: 'May naka-on na keyword sa Botcake: i-off doon, saka i-Test ulit', text: 'Botcake: keyword on'})] : [])),
-            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', text: String(r.today)}),
-            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', text: r.last_chat || '—'}),
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top', 'data-today': '', text: String(r.today)}),
+            el('td', {class: 'border-b border-slate-100 px-3 py-2 align-top text-xs text-slate-500', 'data-last-chat': '', text: r.last_chat || '—'}),
             ...columns.filter(c => c.key !== 'flow').map(c => cell(r, c)),
         ]), ...subs];
     }
@@ -750,7 +797,7 @@
             b.addEventListener('click', () => { AG.toggle(r.page); render(); });
             out.push(b);
         }
-        return el('div', {}, out);
+        return el('div', {'data-reply-control': ''}, out);
     }
     /** Ang Default na sub-row ng Ad-based na page: ang page values mismo (parehong mga cell ng row ng page). */
     function defaultRow(r) {
@@ -855,17 +902,24 @@
         // Lahat ng cell ng page: kasama ang dating row na nakikita pa habang hinihintay ng bago ang reveal.
         const tds = [...table.querySelectorAll('td[data-check="' + CSS.escape(page) + '"]')], entry = rowCache.get(page);
         for (const td of tds) fillCheck(td, page);
-        if (entry && entry.nodes && tds.some(td => entry.nodes[0].contains(td))) entry.sig = RowCache.signature(entry.r, rowStates()(entry.r));
+        // Kapag ang Check lang ang nagbago mula nang buuin ang row; kung may iba pa (hal. mark ng pumalyang save habang may
+        // ine-edit), naiiwan ang lumang signature para buuin ulit ang row sa susunod na render.
+        if (entry && entry.nodes && tds.some(td => entry.nodes[0].contains(td))) {
+            const st = rowStates()(entry.r);
+            if (RowCache.withoutCheck(entry.r, st) === entry.base) entry.sig = RowCache.signature(entry.r, st);
+        }
     }
     async function runCheck(page, again = false) {
         checking.add(page); paintCheck(page);
         try {
             const res = again ? await post(url.checkUrl, {page_name: page})
                 : await fetch(url.checkUrl + '?page_name=' + encodeURIComponent(page), {headers: {'Accept': 'application/json'}}).then(async r => ({ok: r.ok, status: r.status, data: await r.json().catch(() => ({}))}));
-            checks.set(page, res.ok ? res.data : {error: 'Could not check (' + res.status + ')'});
-            // Gaya ng ibabalik ng server sa susunod na reload (ang naka-cache na Check), kaya ang row ay hindi "nagbago".
+            // Ang resulta lang (walang page), gaya ng ibabalik ng /chatbot/data sa susunod na reload (ang naka-cache na
+            // Check): kaya ang row ay hindi "nagbago" sa reload at hindi binubuo ulit.
+            const {page: _page, ...result} = res.ok ? res.data : {};
+            checks.set(page, res.ok ? result : {error: 'Could not check (' + res.status + ')'});
             const row = rows.find(x => x.page === page);
-            if (row && res.ok) row.check = res.data;
+            if (row && res.ok) row.check = result;
         } catch (e) {
             checks.set(page, {error: 'Could not check: no connection'});
         }
@@ -1097,7 +1151,7 @@
     }
     $('flow-q').addEventListener('input', paintFlows);
     $('flow-save').addEventListener('click', () => {
-        const {r, c, value} = flowPick, before = r.cells[c.key] ?? '';
+        const {c, value} = flowPick, r = current(flowPick.r), before = r.cells[c.key] ?? '';
         if (value === before && !(value === '' && r.flow_text)) { dialog('flow-box', false); return; }
         const from = before || (r.flow_text ? 'Not linked: ' + r.flow_text : 'No flow');
         if (!confirm('Change flow: ' + from + ' → ' + (value || 'No flow') + '?')) return;
@@ -1347,7 +1401,7 @@
     $('ai-box').querySelector('[data-close-dialog-alt]').addEventListener('click', () => dialog('ai-box', false));
     $('ai-form').addEventListener('submit', async e => {
         e.preventDefault();
-        const f = e.target, r = aiPage, body = r ? {page_name: r.page} : {};
+        const f = e.target, r = aiPage && current(aiPage), body = r ? {page_name: r.page} : {};
         for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort']) {
             const v = f.elements[k].value.trim();
             // Sa page, ang blangkong model o timeout = bumalik sa default. Sa site, ang binago lang (ang default ng server ay hindi naisusulat).
@@ -1403,6 +1457,7 @@
     }
 
     async function toggle(r, b) {
+        r = current(r);
         const on = !r.active;
         if (!confirm((on ? 'Switch the bot On for ' : 'Switch the bot Off for ') + r.page + '? This changes the live Botcake page.')) return;
         // Lilipat agad ang knob habang naghihintay; ang render() pagkatapos ay sagot ng server (babalik kapag pumalya ang Botcake).
@@ -1484,7 +1539,8 @@
 
     function startEdit(td, r, c) {
         if (editing) finish(true);
-        rowCache.delete(r.page); // ang cell ay papalitan ng input: ang row ay binubuo ulit sa susunod na render
+        const hit = rowCache.get(r.page);
+        if (hit) hit.sig = null; // ang cell ay papalitan ng input: ang row ay binubuo ulit sa susunod na render
         const input = el('input', {class: 'w-full min-w-[10rem] rounded border border-blue-500 px-1', autocomplete: 'off', placeholder: c.kind === 'image' ? 'https://…' : ''});
         input.value = r.cells[c.key] ?? '';
         td.replaceChildren(input);
@@ -1507,6 +1563,7 @@
     }
 
     async function save(r, c, value) {
+        r = current(r);
         value = value.trim();
         if (pending.size && c.kind !== 'flow') {
             // Gaya ng paste: ang hindi link sa column ng larawan ay hindi isinasama (tatanggihan ng server ang buong Save).
@@ -1658,6 +1715,7 @@
     }
     function done(res) {
         lastUndo = res.undo.length ? res.undo : null;
+        for (const u of res.undo) firstPages.add(u.page_name ?? u.page);
         notice('Saved ' + plural(res.saved, 'field') + ' on ' + plural(res.pages, 'page') + (res.unchanged ? ' · ' + res.unchanged + ' already had that value' : '') + '.', 'text-green-700');
         load();
     }
@@ -1669,6 +1727,7 @@
         const res = await saveCells(lastUndo);
         btn.disabled = false;
         if (res.error) { notice('Undo failed: ' + res.error, 'text-red-600'); return; }
+        for (const u of lastUndo) firstPages.add(u.page_name ?? u.page);
         lastUndo = null;
         notice('Undone: ' + plural(res.saved, 'field') + ' back to the previous value.', 'text-green-700');
         load();
