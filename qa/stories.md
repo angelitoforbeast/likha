@@ -3456,3 +3456,21 @@ Tests: `tests/Feature/Chatblast/ChatbotLiveJarvisTest.php`, `tests/Feature/Chatb
 | S-205.12 (P1) | Amendment 205-1. Given AI answers in the last minute, When the page opens, Then the AI hex lights one cell per answer by its age (from the counts in the page, one more aggregate in the existing AI query, no query per cell) and then continues from live events | `ChatbotLiveJarvisTest::test_S_205_12_…`, `ChatbotLiveRulesTest::test_S_205_12_…`, headless Chrome (`live-1920-reload-a1.png`) | passed |
 | S-205.13 (P1) | Amendment 205-1. The bottom-right icon ticker is gone: no element, no drawing, no icon rule; the other event effects (spoke packets, AI hex, coins) stay | `ChatbotLiveJarvisTest::test_S_205_13_…`, `ChatbotLiveRulesTest::test_S_205_13_…` | passed |
 | S-205.14 (P1) | Amendment 205-1. The Replies card says the gauge is pace (last 5 minutes against today's average 5 minutes; half = usual pace, full = double or more), not a goal | `ChatbotLiveJarvisTest::test_S_205_14_…` | passed |
+
+## S-206 Clearing a page's ID, token or key asks first; Botcake gets a Clear in Connections
+
+As staff who set up pages, I want an emptied Botcake ID, token or chat key to ask before it is erased, and a safe Clear for the Botcake page ID in Connections, so one stray backspace or a duplicate row cannot cut a page off the bot.
+
+Slice 206. Threat model: trusted = signed-in staff with access to these pages; untrusted = a stale tab or a scripted blank POST. No new table, no migration. Risk tier: medium.
+Tests: `tests/Feature/PageSettings/ClearConfirmTest.php`, `tests/Feature/Chatblast/BotcakeClearTest.php`.
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-206.1 (P1) | Given /chatblast/page-settings, When `botcake.page_id` of a page is emptied and the cell is left, Then the confirm shows the page, key, current value and what stops working; Cancel keeps the value and sends nothing; the typing pause on an emptied important cell sends nothing and asks nothing | `test_S_206_1…` | passed |
+| S-206.2 (P1) | When the confirm is accepted, Then the row is inactive with replaced_by = the user, and the ⋯ history shows the old value with when and by whom it was cleared | `test_S_206_2…` | passed |
+| S-206.3 (P1) | A POST to the cell route with a blank value for an important key and no `clear: true` is refused (422, the value stays), also with two active rows and odd case or spaces in provider and key; with `clear: true` it clears; a non-important key still clears on a blank; a blank on a secret is still "no change"; the important keys are one rule (`PageSettings::clearWarning`) | `test_S_206_3…` (6 tests) | passed |
+| S-206.4 (P1) | Given two pages with the same Botcake page ID (the duplicate created later), When Connections → Botcake → Clear is confirmed on the duplicate, Then only its page_id, token and chat key are inactive (by the user), the other row keeps its ID, the page map resolves the ID to the other row, the other row's Save no longer says "already used by", and Changes shows the clear with the user; the confirm names the page and the ID and says when the bot is On; a missing or different confirmed ID clears nothing; the access is the Forbeast Clear's | `test_S_206_4…` (3 tests) | passed |
+| S-206.5 (P1) | The Botcake Clear makes no outgoing HTTP call and leaves `chatbot.active` and the chat block row unchanged | `test_S_206_5…` | passed |
+| S-206.6 (P1) | Secrets in the confirm show the last 4 only; the full token never reaches the page HTML or JSON | `test_S_206_6…` (2 tests) | passed |
+| S-206.7 (P2) | The Botcake Clear is hidden when the page has no Botcake page ID, and the server refuses a Clear then | `test_S_206_7…` | passed |
+| S-206.8 (P1) | The full `tests/Feature` run adds no new failures vs 53478a0b | `tests/Feature` | see result |
