@@ -89,8 +89,11 @@ class ChatbotConnections
      */
     public function keywordsOnAll(): array
     {
+        // Ang pinakabagong hindi-unknown na row lang kada page (ang status ay hindi secret), hindi ang buong history.
+        $q = fn () => PageSetting::where('provider', 'botcake')->where('key', 'keywords');
+        $ids = $q()->where('is_secret', false)->where('value', 'not like', 'unknown%')->groupBy('page_name')->selectRaw('MAX(id) AS id')->pluck('id')->all();
         $out = [];
-        foreach (PageSetting::where('provider', 'botcake')->where('key', 'keywords')->orderByDesc('id')->get(['page_name', 'value', 'is_secret']) as $s) {
+        foreach ($q()->whereIn('id', $ids)->orderByDesc('id')->get(['page_name', 'value', 'is_secret']) as $s) {
             $pk = $this->settings->pageKey((string) $s->page_name);
             if (array_key_exists($pk, $out)) continue;
             $v = (string) $s->plainValue();

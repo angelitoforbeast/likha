@@ -297,7 +297,8 @@ class PageSettings
      * Ang settings ng maraming page nang sabay, para sa listahan na nagbabasa ng get() kada page (hal. /chatbot/data):
      * isang basa sa cache para sa lahat, at isang query para sa mga wala pa roon, sa parehong laman ng map(). Ang page na
      * walang nakitang row sa iisang query ay iniiwan sa map() (ang sariling query nito), para walang page na mukhang walang
-     * settings dahil lang sa ibang pagkakasulat ng pangalan.
+     * settings dahil lang sa ibang pagkakasulat ng pangalan. Ang nabasa sa query ay sa memo lang (ang request na ito), hindi
+     * sa cache: ang set() na pumasok habang binabasa ang lahat ng page ay hindi dapat matakpan ng lumang map nang 10 minuto.
      * @param array<int, string> $pages
      */
     public function preload(array $pages): void
@@ -324,12 +325,7 @@ class PageSettings
                 if (isset($missing[$pk])) $maps[$pk][strtolower($s->provider) . '.' . strtolower($s->key)] = [$s->getRawOriginal('value'), (bool) $s->is_secret, (int) $s->id];
             }
         }
-        $put = [];
-        foreach ($maps as $pk => $map) {
-            $this->memo[$pk] = [$now, $map];
-            $put[$missing[$pk]] = $map;
-        }
-        if ($put) Cache::putMany($put, self::CACHE_TTL);
+        foreach ($maps as $pk => $map) $this->memo[$pk] = [$now, $map];
     }
 
     /** @param array{0: ?string, 1: bool, 2: int} $row */
