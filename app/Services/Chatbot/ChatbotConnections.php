@@ -8,6 +8,7 @@ use App\Services\BotcakeChatBlock;
 use App\Services\BotcakeClient;
 use App\Services\BotcakeException;
 use App\Services\PageSettings;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -343,11 +344,14 @@ class ChatbotConnections
     {
         $current = $this->botcakePageId($page);
         if ($current === '') return $this->fail(422, 'error', 'This page has no Botcake page ID.');
-        // Ang ID na kinumpirma sa popup (page_id): kapag iba na ngayon (lumang tab), walang binubura.
-        if ($pageId !== '' && $pageId !== $current) return $this->fail(422, 'error', "This page's Botcake page ID is now {$current}, not {$pageId}. Nothing was removed; open Connections again.");
+        // Ang ID na kinumpirma sa popup (page_id) ay kailangan at dapat ito pa rin: ang lumang tab o ang script na walang ID
+        // ay walang binubura.
+        if ($pageId !== $current) return $this->fail(422, 'error', $pageId === '' ? 'Confirm the Botcake page ID to remove (page_id). Nothing was removed.'
+            : "This page's Botcake page ID is now {$current}, not {$pageId}. Nothing was removed; open Connections again.");
 
-        $this->settings->pageQuery($page)->where('provider', 'botcake')->whereIn('key', ['page_id', 'token', 'chat.key'])->where('active', true)
-            ->get()->each(fn ($s) => $this->settings->deactivate($s, $userId));
+        // Sabay ang tatlo: walang page na naiiwang may token pero walang ID kapag pumalya sa gitna.
+        DB::transaction(fn () => $this->settings->pageQuery($page)->where('provider', 'botcake')->whereIn('key', ['page_id', 'token', 'chat.key'])->where('active', true)
+            ->lockForUpdate()->get()->each(fn ($s) => $this->settings->deactivate($s, $userId)));
         BotcakeChat::forgetPageMap();
 
         return ['http' => 200, 'body' => ['status' => 'cleared']];

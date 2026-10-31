@@ -69,6 +69,8 @@ class BotcakeClearTest extends ChatblastTestCase
 
         // Lumang popup na ibang ID ang kinumpirma: walang binubura.
         $this->postJson('/chatbot/connections/botcake-clear', ['page_name' => self::DUP, 'page_id' => '999'])->assertStatus(422);
+        // Walang kinumpirmang ID (script): walang binubura rin.
+        $this->postJson('/chatbot/connections/botcake-clear', ['page_name' => self::DUP])->assertStatus(422);
         $this->assertSame(self::ID, $this->activeValue(self::DUP, 'botcake', 'page_id'));
 
         $this->clear(self::DUP)->assertOk()->assertJson(['status' => 'cleared', 'connections' => ['page' => self::DUP, 'botcake' => ['page_id' => '', 'token' => null, 'connected' => false]]]);

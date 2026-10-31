@@ -140,6 +140,15 @@ class ClearConfirmTest extends BotcakeApiTestCase
         $this->assertNull($s->get('Alaga Natural Collective', $provider, $key));
     }
 
+    public function test_S_206_3_the_refusal_holds_with_two_active_rows_and_odd_case_or_spaces(): void
+    {
+        // Dalawang active na row (sabay na unang save): ang blangkong walang flag ay walang binubura sa alinman.
+        PageSetting::create(['page_name' => 'Alaga Natural Collective', 'provider' => 'botcake', 'key' => 'page_id', 'value' => '1085660977960440', 'active' => true]);
+
+        $this->cell(['provider' => ' Botcake', 'key' => 'PAGE_ID ', 'value' => '  '])->assertStatus(422);
+        $this->assertSame(2, PageSetting::where('key', 'page_id')->where('active', true)->count());
+    }
+
     public function test_S_206_3_a_blank_on_any_other_key_still_clears_without_the_flag_and_a_secret_blank_changes_nothing(): void
     {
         $this->cell(['key' => 'flow.on_delivery', 'value' => ''])->assertOk()->assertJsonPath('status', 'cleared');
