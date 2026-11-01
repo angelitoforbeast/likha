@@ -1,4 +1,4 @@
-# Plan: spec 213 hold on a burst of no-answer
+# Plan: spec 214 hold on a burst of no-answer
 
 Risk tier: medium (live message routing). Side: backend only. All tasks touch `ForbeastWatch.php` and one test
 file, so none is parallel-safe; they run in order in this worktree. Threat model: nothing new reaches the code
@@ -21,7 +21,7 @@ State lives in the cache next to the existing counters, plus the existing `chatb
   2. hold whose window passed, or ended → switch this page as today;
   3. no hold, burst pages ≥ `burst_pages` (> 0) → start a hold, one `held` event (gateway, page count, pages,
      window), no switch;
-  4. otherwise → switch as today (S-213.1).
+  4. otherwise → switch as today (S-214.1).
   The failed-sends rule (4xx with an answer, and the `fails` counter) is untouched.
 - **Recovery.** A sent message, or a successful health probe `GET /v1/pages/{id}`, from a page in `seen` while the
   hold is open: the hold and the burst list are cleared, `no_answer` and `fails` of every `seen` page reset, one
@@ -31,7 +31,7 @@ State lives in the cache next to the existing counters, plus the existing `chatb
   calls `settleHolds()`: a hold whose window passed is marked ended and every page in `reached` is switched
   with `switch(..., 'no_answer', ...)`, the same event rows and switch-back rule as today. The ended state lasts
   at most an hour, so pages reaching the threshold meanwhile switch at once instead of a second hold.
-- **Cache lost during a hold (S-213.7).** When a page reaches the threshold and no hold is cached, the latest
+- **Cache lost during a hold (S-214.7).** When a page reaches the threshold and no hold is cached, the latest
   `held` row of that gateway inside the window (with no `recovered` row after it) restores the hold with its
   original `since`, so the window is never extended or skipped. If the counters were lost too, pages need three
   new no-answers, and the burst list fills again before that.
@@ -47,10 +47,10 @@ State lives in the cache next to the existing counters, plus the existing `chatb
 
 | # | Task | Cases | Tier | Side |
 |---|---|---|---|---|
-| 1 | Config, burst list, hold start in `afterSend`; per gateway; failed-sends unchanged | S-213.1, .2, .5, .6, .8 | medium | backend |
-| 2 | Recovery from a sent message or a health probe | S-213.3 | medium | backend |
-| 3 | Hold end in the command; restore after a cache loss | S-213.4, .7 | medium | backend |
-| 4 | Feed fields for held and recovered | S-213.9 | low | backend |
+| 1 | Config, burst list, hold start in `afterSend`; per gateway; failed-sends unchanged | S-214.1, .2, .5, .6, .8 | medium | backend |
+| 2 | Recovery from a sent message or a health probe | S-214.3 | medium | backend |
+| 3 | Hold end in the command; restore after a cache loss | S-214.4, .7 | medium | backend |
+| 4 | Feed fields for held and recovered | S-214.9 | low | backend |
 | 5 | Stories in `qa/stories.md`, result, full suite, one skeptic review of the whole diff | all | — | docs |
 
 Tests: `tests/Feature/Chatblast/ForbeastHoldTest.php`, one test per case named after it, Forbeast faked with

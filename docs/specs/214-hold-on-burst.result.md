@@ -1,8 +1,8 @@
-# Result: spec 213 a short outage between the sites does not switch every page to Botcake
+# Result: spec 214 a short outage between the sites does not switch every page to Botcake
 
 ## Status
 
-done (amendment 213-1 included; no open question)
+done (amendment 214-1 included; no open question)
 
 ## Date
 
@@ -10,7 +10,7 @@ done (amendment 213-1 included; no open question)
 
 ## Branch / PR
 
-`feat/213-hold-on-burst` (worktree `.claude/worktrees/hold-213`), based on `vps/main` d05d1b63. Not pushed, no PR.
+`feat/214-hold-on-burst` (worktree `.claude/worktrees/hold-213`), based on `vps/main` d05d1b63. Not pushed, no PR.
 
 ## Summary
 
@@ -33,7 +33,7 @@ A burst of no-answer on many pages of one gateway now holds instead of switching
     after the health checks) or the first no-answer after the window.
   - An ended hold is kept for an hour. Pages that reach the threshold during that hour switch at once, with
     no second hold for the same outage.
-- **Health probes (amendment 213-1).** A health probe of the page's own gateway that gets no answer (or 5xx)
+- **Health probes (amendment 214-1).** A health probe of the page's own gateway that gets no answer (or 5xx)
   joins the same burst and hold as a no-answer send.
   - During a hold, failed probes are counted but switch nothing.
   - 5 or more pages failing probes within `burst_seconds` start a hold (the `held` row has `trigger: health`).
@@ -71,17 +71,17 @@ No file of specs 210/211 is touched.
 
 | Case | Test (`tests/Feature/Chatblast/ForbeastHoldTest.php`) | Result |
 |---|---|---|
-| S-213.1 | `test_S_213_1_one_page_alone_switches_after_three_no_answers_as_today` | pass |
-| S-213.2 | `test_S_213_2_a_burst_on_five_pages_holds_instead_of_switching_with_one_held_event` | pass |
-| S-213.3 | `test_S_213_3_an_answer_from_an_affected_page_ends_the_hold_and_resets_the_counters` (data sets: a sent message, a health probe); `…_a_probe_that_answers_while_sends_still_fail_gives_one_hold_then_pages_switch_as_today`; `…_a_probe_saying_the_page_is_not_connected_does_not_end_the_hold`; `…_an_answer_from_a_page_outside_the_burst_does_not_end_the_hold` | pass |
-| S-213.4 | `test_S_213_4_when_the_hold_ends_without_an_answer_every_page_that_reached_the_threshold_switches` (through `chatbot:forbeast-watch`); `test_S_213_4_the_first_no_answer_after_the_window_ends_the_hold_before_the_command_does` | pass |
-| S-213.5 | `test_S_213_5_refused_sends_with_an_answer_keep_the_failed_sends_rule_and_never_make_a_burst` | pass |
-| S-213.6 | `test_S_213_6_holds_are_per_gateway` | pass |
-| S-213.7 | `test_S_213_7_a_cleared_cache_during_a_hold_resumes_it_and_never_skips_the_window` | pass |
-| S-213.8 | `test_S_213_8_the_window_and_burst_are_config_values_and_zero_pages_turns_the_hold_off` | pass |
-| S-213.9 | `test_S_213_9_the_feed_shows_the_held_and_recovered_events` | pass |
-| S-213.10 | `test_S_213_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together`; `test_S_213_10_a_recovery_resets_the_health_counters_too` | pass |
-| S-213.11 | `test_S_213_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today` | pass |
+| S-214.1 | `test_S_214_1_one_page_alone_switches_after_three_no_answers_as_today` | pass |
+| S-214.2 | `test_S_214_2_a_burst_on_five_pages_holds_instead_of_switching_with_one_held_event` | pass |
+| S-214.3 | `test_S_214_3_an_answer_from_an_affected_page_ends_the_hold_and_resets_the_counters` (data sets: a sent message, a health probe); `…_a_probe_that_answers_while_sends_still_fail_gives_one_hold_then_pages_switch_as_today`; `…_a_probe_saying_the_page_is_not_connected_does_not_end_the_hold`; `…_an_answer_from_a_page_outside_the_burst_does_not_end_the_hold` | pass |
+| S-214.4 | `test_S_214_4_when_the_hold_ends_without_an_answer_every_page_that_reached_the_threshold_switches` (through `chatbot:forbeast-watch`); `test_S_214_4_the_first_no_answer_after_the_window_ends_the_hold_before_the_command_does` | pass |
+| S-214.5 | `test_S_214_5_refused_sends_with_an_answer_keep_the_failed_sends_rule_and_never_make_a_burst` | pass |
+| S-214.6 | `test_S_214_6_holds_are_per_gateway` | pass |
+| S-214.7 | `test_S_214_7_a_cleared_cache_during_a_hold_resumes_it_and_never_skips_the_window` | pass |
+| S-214.8 | `test_S_214_8_the_window_and_burst_are_config_values_and_zero_pages_turns_the_hold_off` | pass |
+| S-214.9 | `test_S_214_9_the_feed_shows_the_held_and_recovered_events` | pass |
+| S-214.10 | `test_S_214_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together`; `test_S_214_10_a_recovery_resets_the_health_counters_too` | pass |
+| S-214.11 | `test_S_214_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today` | pass |
 
 ## Checks (command and output)
 
@@ -122,38 +122,38 @@ PHP is Herd's `php.bat` (PHP 8.4.16). Tests use phpunit.xml (sqlite in memory, a
 Each was watched failing before its code. Each failure is on the assertion, not on a typo or a missing class.
 
 **Slice 1** (hold start, e4e1ce91), on the base code:
-- `test_S_213_2…`: `Failed asserting that two strings are identical.` at ForbeastHoldTest.php:121. The page switched to `botcake`.
-- `test_S_213_5…`: `Failed asserting that actual size 0 matches expected size 1.` at :222. No held row.
-- `test_S_213_6…`: `two strings are identical` at :240.
+- `test_S_214_2…`: `Failed asserting that two strings are identical.` at ForbeastHoldTest.php:121. The page switched to `botcake`.
+- `test_S_214_5…`: `Failed asserting that actual size 0 matches expected size 1.` at :222. No held row.
+- `test_S_214_6…`: `two strings are identical` at :240.
 - `…outside_the_burst…`: `actual size 0 matches expected size 1` at :171.
-- S-213.1 passes on the base code by design. It pins today's behaviour, which the hold must keep.
+- S-214.1 passes on the base code by design. It pins today's behaviour, which the hold must keep.
 
 **Slices 2 and 3** (recovery, hold end, cache loss, e7b557c6), on slice 1's code:
-- `test_S_213_3…` (both data sets): `Failed asserting that actual size 0 matches expected size 1.` at :153. No recovered row.
-- `test_S_213_4…`: `Failed asserting that two arrays are identical.` at :191. No page switched at the window end.
-- `test_S_213_7…`: `two strings are identical` at :255.
-- `test_S_213_8…`: `two strings are identical` at :297. The custom hold never ended.
+- `test_S_214_3…` (both data sets): `Failed asserting that actual size 0 matches expected size 1.` at :153. No recovered row.
+- `test_S_214_4…`: `Failed asserting that two arrays are identical.` at :191. No page switched at the window end.
+- `test_S_214_7…`: `two strings are identical` at :255.
+- `test_S_214_8…`: `two strings are identical` at :297. The custom hold never ended.
 
 **Slice 4** (feed, 1e5456f8), on slice 3's code:
-- `test_S_213_9…`: `Failed asserting that two arrays are identical.` at :311. `gateway` and `page_count` came back `'missing'`, `held_seconds` null.
+- `test_S_214_9…`: `Failed asserting that two arrays are identical.` at :311. `gateway` and `page_count` came back `'missing'`, `held_seconds` null.
 
 **Fix loop 1** (9af6ab81), on 1e5456f8:
 - `…_a_probe_that_answers_while_sends_still_fail…`: `two strings are identical` at :186. Page 1 was held again instead of switching.
 - `…_a_probe_saying_the_page_is_not_connected…`: `two arrays are identical` at :207. A recovered row was written.
-- `test_S_213_4_the_first_no_answer_after_the_window…`: `two arrays are identical` at :260. Page 1 was left on the gateway.
+- `test_S_214_4_the_first_no_answer_after_the_window…`: `two arrays are identical` at :260. Page 1 was left on the gateway.
 
 **Fix loop 2** (009845c0), on 9af6ab81:
 - `…_a_probe_that_answers_while_sends_still_fail…`, with a healthy page's send added: `Failed asserting that two strings are identical.` at :188.
 
 **Amendment 1** (26bf752e), on 009845c0:
-- `test_S_213_10_health_failures_during_a_hold…`: `Failed asserting that two strings are identical.` at :397. The pages switched by health during the hold.
-- `test_S_213_10_a_recovery_resets_the_health_counters_too`: `two strings are identical` at :423. Page 3 switched on the old health count.
-- `test_S_213_11…`: `two strings are identical` at :443. The probe burst switched the pages instead of holding.
-- The single-page part of S-213.11 passes on the earlier code by design (today's behaviour).
+- `test_S_214_10_health_failures_during_a_hold…`: `Failed asserting that two strings are identical.` at :397. The pages switched by health during the hold.
+- `test_S_214_10_a_recovery_resets_the_health_counters_too`: `two strings are identical` at :423. Page 3 switched on the old health count.
+- `test_S_214_11…`: `two strings are identical` at :443. The probe burst switched the pages instead of holding.
+- The single-page part of S-214.11 passes on the earlier code by design (today's behaviour).
 
 ## Done-when checklist
 
-- [x] Cases S-213.1 – S-213.11 pass, each with a test named after it, and the existing ForbeastWatch tests still pass (see Checks).
+- [x] Cases S-214.1 – S-214.11 pass, each with a test named after it, and the existing ForbeastWatch tests still pass (see Checks).
 - [x] The result has a red line for every feat/fix slice, watched before the code (see Red lines).
 - [x] The full suite adds no new failures (see Checks, full suite).
 - [x] `qa/stories.md` has these stories with "Last run" filled, and this result is filled in.
@@ -163,11 +163,11 @@ Each was watched failing before its code. Each failure is on the assertion, not 
 1. **"No answer" keeps its current meaning: HTTP 0 or 5xx** (`$noAnswer` in `afterSend`).
    - Both count toward a burst and both are held.
    - A 4xx with an answer stays on `failed_sends`. It never joins a burst, and it still switches at 5 during
-     a hold (S-213.5).
+     a hold (S-214.5).
 2. **During a hold, a no-answer send does not trigger `failed_sends` either.**
    - It is the same path evidence.
    - Otherwise the 5th no-answer of a held page would switch it through the other rule.
-3. **Recovery needs an answer from a page that was in the burst.** This is S-213.3's "affected page", and it
+3. **Recovery needs an answer from a page that was in the burst.** This is S-214.3's "affected page", and it
    applies to sends too.
    - A success from another page proves nothing about the broken path.
    - Counting it would let a partial outage hold forever.
@@ -205,14 +205,14 @@ Each was watched failing before its code. Each failure is on the assertion, not 
 
 ## Story changes
 
-- **S-213.10 and S-213.11** added by amendment 213-1, red first.
+- **S-214.10 and S-214.11** added by amendment 214-1, red first.
 
 From review, these are extra tests under existing case IDs; no Given / When / Then was changed:
-- **S-213.3**, added from review:
+- **S-214.3**, added from review:
   - a probe that answers while sends still fail (including a healthy page's send in between);
   - a probe that says not connected;
   - an answer from a page outside the burst.
-- **S-213.4**, added from review: the first no-answer after the window ends the hold.
+- **S-214.4**, added from review: the first no-answer after the window ends the hold.
 
 ## Deferred minors
 
@@ -261,7 +261,7 @@ Accepted from review, not fixed:
   - If it is wrong, a real outage keeps pages on the gateway up to `hold_minutes` (default 2) longer before
     they switch, or for one more hold after a probe-only recovery. Since amendment 1 this also covers pages
     whose probes fail.
-  - A single failing page is not affected (S-213.1).
+  - A single failing page is not affected (S-214.1).
 - **Revert:** either of these.
   - Set `GATEWAY_SWITCH_BURST_PAGES=0` for the old behaviour, with no deploy.
   - Revert this branch's code commits.
@@ -270,11 +270,11 @@ Accepted from review, not fixed:
 
 ## Open questions
 
-None. The question about the health rule switching during a hold is closed by amendment 213-1 (Ruling 10,
-cases S-213.10 and S-213.11).
+None. The question about the health rule switching during a hold is closed by amendment 214-1 (Ruling 10,
+cases S-214.10 and S-214.11).
 
 ## Proposed tasks
 
 - Name the gateway in the "Held on …" label (history, Problems panel, page note).
 
-213: done — a burst of no-answer sends or failed health probes on 5+ pages of one gateway now holds 2 min and re-checks before switching; pages over either threshold switch together if it lasts
+214: done — a burst of no-answer sends or failed health probes on 5+ pages of one gateway now holds 2 min and re-checks before switching; pages over either threshold switch together if it lasts

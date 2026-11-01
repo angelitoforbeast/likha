@@ -1534,7 +1534,7 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **A column that first appears through the poll (`ensureColumn`) has `important: null`**, so a blank there gets the server's 422 "!" instead of the question until the page is reloaded. Reason: needs a new important key added by someone else after the page opened; the server still refuses the blank, and ⋯ → Clear the value works.
 - **`PageSettingsGrid::history` checks `Schema::hasColumn('page_settings', 'replaced_by')` per request.** Reason: same pattern as `PageSettings::deactivate`; one cheap query on a modal open.
 
-## Hold on a burst of no-answer (spec 213), accepted review minors
+## Hold on a burst of no-answer (spec 214), accepted review minors
 
 - **A hold's lock that cannot be had within 3 s runs the burst update without it** (a burst entry may be lost or a second `held` row written). Reason: rare, harmless, and a send must never wait longer.
 - **`lastSwitch` reads only the last 20 `auto_switch` rows of a page**, so many held/recovered pairs on the page that started holds could push an older switch out. Reason: a probe-only recovery allows one hold at most now, so the pairs stay few.

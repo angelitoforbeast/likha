@@ -104,7 +104,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->send(1, 2);
     }
 
-    public function test_S_213_1_one_page_alone_switches_after_three_no_answers_as_today(): void
+    public function test_S_214_1_one_page_alone_switches_after_three_no_answers_as_today(): void
     {
         $this->down[self::GW] = ['2001'];
         foreach ([2, 3, 4, 5, 6] as $n) $this->send($n);
@@ -120,7 +120,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         foreach ([2, 3, 4, 5, 6] as $n) $this->assertSame('gateway', $this->provider($n));
     }
 
-    public function test_S_213_2_a_burst_on_five_pages_holds_instead_of_switching_with_one_held_event(): void
+    public function test_S_214_2_a_burst_on_five_pages_holds_instead_of_switching_with_one_held_event(): void
     {
         $this->burst();
 
@@ -147,7 +147,7 @@ class ForbeastHoldTest extends ChatblastTestCase
     }
 
     #[DataProvider('recoveries')]
-    public function test_S_213_3_an_answer_from_an_affected_page_ends_the_hold_and_resets_the_counters(string $via): void
+    public function test_S_214_3_an_answer_from_an_affected_page_ends_the_hold_and_resets_the_counters(string $via): void
     {
         $this->burst();
         $this->send(2, 2);
@@ -171,7 +171,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertCount(1, $this->events(ForbeastWatch::RECOVERED));
     }
 
-    public function test_S_213_3_a_probe_that_answers_while_sends_still_fail_gives_one_hold_then_pages_switch_as_today(): void
+    public function test_S_214_3_a_probe_that_answers_while_sends_still_fail_gives_one_hold_then_pages_switch_as_today(): void
     {
         // Sumasagot ang GET pero hindi ang padala: ang health ang tumapos sa hold, at ang mga padalang pumapalya pa rin ay
         // lumilipat na gaya ng dati, walang pangalawang hold.
@@ -199,7 +199,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertCount(2, $this->events(ForbeastWatch::HELD));
     }
 
-    public function test_S_213_3_a_probe_saying_the_page_is_not_connected_does_not_end_the_hold(): void
+    public function test_S_214_3_a_probe_saying_the_page_is_not_connected_does_not_end_the_hold(): void
     {
         $this->burst();
         $this->down[self::GW] = [];
@@ -212,7 +212,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame('gateway', $this->provider(2));
     }
 
-    public function test_S_213_3_an_answer_from_a_page_outside_the_burst_does_not_end_the_hold(): void
+    public function test_S_214_3_an_answer_from_a_page_outside_the_burst_does_not_end_the_hold(): void
     {
         $this->burst();
         $this->assertCount(1, $this->events(ForbeastWatch::HELD));
@@ -226,7 +226,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame('gateway', $this->provider(2));
     }
 
-    public function test_S_213_4_when_the_hold_ends_without_an_answer_every_page_that_reached_the_threshold_switches(): void
+    public function test_S_214_4_when_the_hold_ends_without_an_answer_every_page_that_reached_the_threshold_switches(): void
     {
         $this->burst();
         $this->send(2, 2);
@@ -252,7 +252,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertCount(1, $this->events(ForbeastWatch::HELD));
     }
 
-    public function test_S_213_4_the_first_no_answer_after_the_window_ends_the_hold_before_the_command_does(): void
+    public function test_S_214_4_the_first_no_answer_after_the_window_ends_the_hold_before_the_command_does(): void
     {
         $this->burst();
         $this->travel(121)->seconds();
@@ -269,7 +269,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame([], $this->events(ForbeastWatch::RECOVERED));
     }
 
-    public function test_S_213_5_refused_sends_with_an_answer_keep_the_failed_sends_rule_and_never_make_a_burst(): void
+    public function test_S_214_5_refused_sends_with_an_answer_keep_the_failed_sends_rule_and_never_make_a_burst(): void
     {
         // 422 sa apat na page: hindi burst, kaya ang Page 1 na walang sagot nang tatlo ay lumilipat gaya ng dati.
         $this->refused = ['2002', '2003', '2004', '2005'];
@@ -295,7 +295,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame(['Page 7', 'failed_sends'], [end($last)['page'], end($last)['condition']]);
     }
 
-    public function test_S_213_6_holds_are_per_gateway(): void
+    public function test_S_214_6_holds_are_per_gateway(): void
     {
         $this->onGateway('Page 7', '2007', 'incepxionbot');
         $this->burst();
@@ -309,7 +309,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame(['forbeast'], array_column($this->events(ForbeastWatch::HELD), 'gateway'));
     }
 
-    public function test_S_213_7_a_cleared_cache_during_a_hold_resumes_it_and_never_skips_the_window(): void
+    public function test_S_214_7_a_cleared_cache_during_a_hold_resumes_it_and_never_skips_the_window(): void
     {
         $this->burst();
         $this->travel(30)->seconds();
@@ -334,7 +334,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertCount(1, $this->events(ForbeastWatch::HELD));
     }
 
-    public function test_S_213_8_the_window_and_burst_are_config_values_and_zero_pages_turns_the_hold_off(): void
+    public function test_S_214_8_the_window_and_burst_are_config_values_and_zero_pages_turns_the_hold_off(): void
     {
         $this->assertSame([2, 5, 60], [config('services.gateway.auto_switch.hold_minutes'), config('services.gateway.auto_switch.burst_pages'),
             config('services.gateway.auto_switch.burst_seconds')]);
@@ -366,7 +366,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame('botcake', $this->provider(6));
     }
 
-    public function test_S_213_9_the_feed_shows_the_held_and_recovered_events(): void
+    public function test_S_214_9_the_feed_shows_the_held_and_recovered_events(): void
     {
         $this->burst();
         $this->travel(20)->seconds();
@@ -387,7 +387,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
     }
 
-    public function test_S_213_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together(): void
+    public function test_S_214_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together(): void
     {
         // Ang hold ay mula sa padala; ang health ng lahat ng page (pati Page 6, wala sa burst) ay pumapalya nang tatlo at higit pa.
         $this->burst();
@@ -407,7 +407,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertCount(1, $this->events(ForbeastWatch::HELD));
     }
 
-    public function test_S_213_10_a_recovery_resets_the_health_counters_too(): void
+    public function test_S_214_10_a_recovery_resets_the_health_counters_too(): void
     {
         $this->burst();
         $this->watch(30);
@@ -423,7 +423,7 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertSame('gateway', $this->provider(3));
     }
 
-    public function test_S_213_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today(): void
+    public function test_S_214_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today(): void
     {
         // Isang page lang ang pumapalya ang health: lipat sa ikatlo, gaya ng dati.
         $this->down[self::GW] = ['2006'];
