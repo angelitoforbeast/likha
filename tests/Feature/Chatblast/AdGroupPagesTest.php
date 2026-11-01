@@ -409,4 +409,125 @@ class AdGroupPagesTest extends ChatblastTestCase
         ] as [$m, $url, $body]) $this->json($m, $url, $body)->assertForbidden();
         $this->assertSame($before, PageSetting::count(), 'walang naisulat');
     }
+
+    /** Ang panel (public/js/chatbot-adgroups.js) sa Node na may maliit na DOM (tests/js/dom-stub.cjs) at ang tunay na JSON ng /chatbot/ad-groups. */
+    private function panelJs(array $fixture, string $script): array
+    {
+        $node = (new \Symfony\Component\Process\ExecutableFinder())->find('node');
+        if ($node === null) $this->markTestSkipped('Node is not installed.');
+        $js = "const STUB = require(" . json_encode(base_path('tests/js/dom-stub.cjs')) . ");\n"
+            . "require(" . json_encode(public_path('js/chatbot-adgroups.js')) . ");\n"
+            . "const FIXTURE = " . json_encode($fixture, JSON_UNESCAPED_UNICODE) . ";\n"
+            . "(async () => {\n" . $script . "\n})().catch(e => { console.error(e && e.stack || e); process.exit(1); });\n";
+        $file = tempnam(sys_get_temp_dir(), 'adgroups') . '.cjs';
+        file_put_contents($file, $js);
+        $p = new \Symfony\Component\Process\Process([$node, $file]);
+        $p->run();
+        @unlink($file);
+        $this->assertTrue($p->isSuccessful(), $p->getErrorOutput());
+
+        return json_decode($p->getOutput(), true);
+    }
+
+    public function test_S_212_4_5_4_6_and_7_4_to_7_9_the_panel_labels_kinds_and_folds_quiet_items_behind_show_hidden(): void
+    {
+        $this->migrateCatalog();
+        $this->actingAs($this->user());
+        $this->catalogRow('40001', '50001', '60001', 'Kababaihan 25+', 'Serum Sale 🌸 <b>');
+        $this->catalogRow('40002', '50002', '60001', 'Kalalakihan ñ', 'Serum Sale 🌸 <b>');
+        $this->report('41000', '2026-10-19', 90);
+        $this->report('40001', '2026-10-19', 80);
+        $this->offFor('40002', 9);
+        $this->offFor('41001', 10);
+        $serum = $this->groupAt(30, 'Serum', ['40001', '50002', '60001', '999999']);
+        $old = $this->groupAt(30, 'Old', ['41001']);
+        $this->chat('7001', '47777', daysAgo: 13);                    // tahimik na ad na wala sa group
+        $this->chat('7002', '47778');                                 // bagong ad na wala sa group
+        $fixture = $this->panel();
+        $this->assertSame(['groups' => 1, 'ids' => 2, 'unassigned' => 1], $fixture['hidden']);
+
+        $out = $this->panelJs($fixture, <<<JS
+            const {find, settle} = STUB;
+            let calls = [], answer = {ok: true, status: 200, data: {ok: true, id: $serum}}, confirms = [], confirmAnswer = false;
+            global.fetch = async (url, o) => {
+                calls.push([url, o && o.body ? JSON.parse(o.body) : null]);
+                const a = o && o.method === 'POST' ? answer : {ok: true, status: 200, data: FIXTURE};
+                return {ok: a.ok, status: a.status, json: async () => a.data};
+            };
+            global.confirm = (m) => { confirms.push(m); return confirmAnswer; };
+            global.prompt = () => null;
+            const urls = {index: '/i', save: '/s', add: '/a', del: '/d', history: '/h', restore: '/r', mode: '/m', value: '/v', removeAd: '/rm', ad: '/ad'};
+            const r = {page: 'Page P', cells: {}, ai: {}};
+            const open = async () => { const AG = ChatbotAdGroups.create({csrf: 'x', urls, onChange() {}}); const host = document.createElement('div'); document.body.replaceChildren(host); await AG.mount(r, host); await settle(); return [AG, host]; };
+            const toggle = (root) => root.querySelector('button[data-ag-hidden-toggle]');
+            const groups = (root) => root.querySelectorAll('div[data-ag-group]').map(d => Number(d.getAttribute('data-ag-group')));
+            const out = {};
+
+            let [AG, host] = await open();
+            out.placeholder = host.querySelector('textarea').getAttribute('placeholder');
+            out.header = host.querySelectorAll('div').filter(d => /^\\d+ ids? in /.test(d.textContent) && !d.children.length).map(d => d.textContent);
+            out.hiddenLine = host.querySelector('span[data-ag-hidden-line]').textContent;
+            out.before = {text: toggle(host).textContent, pressed: toggle(host).getAttribute('aria-pressed'), tag: toggle(host).tagName, type: toggle(host).getAttribute('type'), groups: groups(host),
+                folded: host.querySelector('p[data-ag-folded]').textContent, unassigned: host.querySelectorAll('li[data-ag-id]').map(li => li.getAttribute('data-ag-id'))};
+            toggle(host).click();
+            out.after = {text: toggle(host).textContent, pressed: toggle(host).getAttribute('aria-pressed'), groups: groups(host),
+                oldDim: host.querySelector('div[data-ag-group="$old"]').className.includes('opacity-60'),
+                tags: host.querySelectorAll('span').map(s => s.textContent).filter(t => ['Ad', 'Ad set', 'Campaign', 'Not found in Ads Manager'].includes(t)),
+                rawName: host.textContent.includes('Serum Sale 🌸 <b>') && host.querySelectorAll('b').length === 0, ids: host.querySelectorAll('li[data-ag-id]').length};
+            find(host, 'button', 'Remove').filter(b => b.getAttribute('aria-label') === 'Remove ad set 50002 from Serum')[0].click();
+            out.confirm = confirms.pop();
+
+            // Nananatiling Show hidden sa add, search at remove; ang tinanggihang ID ng nakatagong group ay sinasabing nakatago.
+            const add = (text) => { const t = host.querySelector('div[data-ag-group="$serum"]').querySelector('textarea'); t.value = text; find(host.querySelector('div[data-ag-group="$serum"]'), 'button', 'Add')[0].click(); };
+            answer = {ok: false, status: 422, data: {error: 'Ad 41001 is already in the group "Old".', group: $old}};
+            add('41001'); await settle();
+            out.refused = host.querySelectorAll('p').map(p => p.textContent).find(t => t.startsWith('Ad 41001')) || null;
+            answer = {ok: true, status: 200, data: {ok: true, id: $serum, note: 'Already in this group: 40001.'}};
+            add('40001'); await settle();
+            out.note = host.querySelectorAll('p').map(p => p.textContent).find(t => t.startsWith('Added to')) || null;
+            out.afterAdd = toggle(host).textContent;
+            const search = host.querySelector('input[data-ag-search]'); search.value = '477'; search.dispatch('input');
+            await new Promise(res => setTimeout(res, 350)); await settle();
+            out.afterSearch = toggle(host).textContent;
+            confirmAnswer = true; answer = {ok: true, status: 200, data: {ok: true, id: $serum}};
+            find(host, 'button', 'Remove')[0].click(); await settle();
+            out.afterRemove = toggle(host).textContent;
+
+            // Ang read-only na listahan (sub-rows ng table): parehong pagtatago at mga tag; ang bilang ng group ay hindi nagbabago.
+            [AG, host] = await open();
+            const ctx = {cols: 8, botCols: [], defaultRow: () => document.createElement('tr'), manage() {}};
+            let tbody = document.createElement('tbody'); tbody.append(...AG.subRows(r, ctx));
+            out.readOnly = {groups: tbody.querySelectorAll('tr[data-ag-group]').map(t => Number(t.getAttribute('data-ag-group'))), toggle: toggle(tbody).textContent, count: AG.groupCount('Page P')};
+            toggle(tbody).click();
+            tbody = document.createElement('tbody'); tbody.append(...AG.subRows(r, ctx));
+            out.readOnly.shown = tbody.querySelectorAll('tr[data-ag-group]').map(t => Number(t.getAttribute('data-ag-group')));
+            out.readOnly.tags = tbody.querySelectorAll('span').map(s => s.textContent).filter(t => ['Ad set', 'Campaign'].includes(t));
+            out.readOnly.count = [out.readOnly.count, AG.groupCount('Page P')];
+
+            // Walang nakatago: walang button.
+            const none = JSON.parse(JSON.stringify(FIXTURE));
+            none.hidden = {groups: 0, ids: 0, unassigned: 0};
+            none.groups = none.groups.filter(g => !g.hidden).map(g => ({...g, ads: g.ads.map(a => ({...a, quiet: false}))}));
+            none.unassigned = none.unassigned.map(a => ({...a, quiet: false}));
+            FIXTURE.groups = none.groups; FIXTURE.hidden = none.hidden; FIXTURE.unassigned = none.unassigned;
+            [AG, host] = await open();
+            out.noneToggle = toggle(host) === null;
+            console.log(JSON.stringify(out));
+            JS);
+
+        $this->assertSame('IDs: ad, ad set or campaign; comma, space or new line', $out['placeholder']);
+        $this->assertSame(['4 ids in Serum'], $out['header']);
+        $this->assertStringStartsWith('Hidden: 1 group, 2 ids in groups, 1 ad not in a group', $out['hiddenLine']);
+        $this->assertSame(['text' => 'Show hidden (4)', 'pressed' => 'false', 'tag' => 'BUTTON', 'type' => 'button', 'groups' => [$serum],
+            'folded' => '2 hidden ads (quiet for 7+ days)', 'unassigned' => ['40001', '60001', '47778']], $out['before']);
+        $this->assertSame(['text' => 'Hide again', 'pressed' => 'true', 'groups' => [$serum, $old], 'oldDim' => true,
+            'tags' => ['Ad', 'Ad set', 'Campaign', 'Not found in Ads Manager', 'Ad', 'Ad', 'Ad'], 'rawName' => true, 'ids' => 7], $out['after']);
+        $this->assertNotSame('Show all', substr($out['before']['text'], 0, 8));
+        $this->assertSame('Remove ad set 50002 from "Serum"? Its customers get the page values again.', $out['confirm']);
+        $this->assertStringContainsString('That group is hidden', $out['refused']);
+        $this->assertSame('Added to "Serum". Already in this group: 40001.', $out['note']);
+        $this->assertSame(['Hide again', 'Hide again', 'Hide again'], [$out['afterAdd'], $out['afterSearch'], $out['afterRemove']]);
+        $this->assertSame(['groups' => [$serum], 'toggle' => 'Show hidden (4)', 'count' => [2, 2], 'shown' => [$serum, $old], 'tags' => ['Ad set', 'Campaign']], $out['readOnly']);
+        $this->assertTrue($out['noneToggle']);
+    }
 }
