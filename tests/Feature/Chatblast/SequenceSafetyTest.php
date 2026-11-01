@@ -244,7 +244,30 @@ class SequenceSafetyTest extends SequenceHandoffTestCase
         $this->pool->run(10, fn () => true);
         $this->resumes();
         foreach ([['7001', '1001'], ['8001', '1002']] as [$p, $page]) $this->assertSame(2, (int) $this->sub($seq, $p, $page)->current_step);
-        $this->assertFalse(SequenceSendPool::alive(), 'the beat is gone after a clean stop');
+        $this->assertFalse(SequenceSendPool::capable(), 'no new hand-off to a stopped pool');
+        $this->assertTrue(SequenceSendPool::alive(), 'but it is not taken for dead in the seconds before the next one starts');
+        $this->assertTrue($this->newPool()->start(), 'and the next pool starts at once');
+    }
+
+    public function test_S_215c_1_the_seconds_between_a_clean_exit_and_the_next_pool_are_not_a_dead_pool(): void
+    {
+        $seq = $this->sequence('Restart', [$this->stepFlow(['Hi'])->id]);
+        $this->join($seq, '7001');
+        $this->join($seq, '7002');
+        $this->steps();
+        $this->roundsUntil(1);
+        $this->answerAll();
+        $this->resumes();
+        $this->pool->stop(); // max-time reached; supervisor starts the next one a few seconds later
+        $this->travel(3)->seconds();
+        $this->replyPool->beat();
+        $this->tick();
+        $this->assertSame(0, $this->tickets()->where('status', 'resumed')->whereNotNull('error')->count(), 'nothing cancelled');
+        $this->pool = $this->newPool();
+        $this->assertTrue($this->pool->start());
+        $this->settle(6);
+        foreach (['7001', '7002'] as $p) $this->assertSame(['sent: Hi'], $this->replies($p));
+        Queue::assertPushed(RunChatbotSequenceStep::class, 2);
     }
 
     public function test_S_215c_2_and_3_a_killed_pool_never_resends_a_called_step_and_sends_an_uncalled_one_once(): void

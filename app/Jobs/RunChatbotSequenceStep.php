@@ -43,6 +43,6 @@ class RunChatbotSequenceStep implements ShouldQueue, ShouldBeUniqueUntilProcessi
 
     public function handle(ChatbotSequences $sequences): void
     {
-        $sequences->earlier($this->earlier)->runStep($this->subscriptionId, $this->claim);
+        $sequences->earlier($this->earlier, $this->timeout)->runStep($this->subscriptionId, $this->claim);
     }
 }

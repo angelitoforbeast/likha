@@ -54,12 +54,23 @@ class SequenceSendPool extends TicketPool
     /** Buhay ang pool at ito ang bersyong nagpapadala ng sequence ticket (ang tanda sa beat). */
     public static function capable(): bool
     {
-        return self::alive() && (int) (Cache::get(self::BEAT)['sequence'] ?? 0) === 1;
+        $beat = Cache::get(self::BEAT);
+
+        return self::alive() && (int) ($beat['sequence'] ?? 0) === 1 && empty($beat['stopped']);
     }
 
     protected function beatInfo(): array
     {
         return ['sequence' => 1];
+    }
+
+    /**
+     * Malinis na paghinto (max-time o signal): ang beat ay naiiwan nang may "stopped", kaya walang bagong hand-off (capable),
+     * pero hindi itinuturing na patay ang pool sa ilang segundo bago ang bago (walang kinakansela o binabawi).
+     */
+    public function stop(): void
+    {
+        if ((Cache::get(self::BEAT)['owner'] ?? null) === $this->owner) Cache::put(self::BEAT, ['owner' => $this->owner, 'at' => now()->getTimestamp(), 'stopped' => true], 60);
     }
 
     protected function nowMs(): int
@@ -335,10 +346,17 @@ class SequenceSendPool extends TicketPool
                 $o = BotcakeOutbox::outcome(['http' => $status, 'body' => $body, 'attempts' => $job['attempt'] + 1], $job['secret']) + ['via' => ChatbotProvider::BOTCAKE];
             } else {
                 $o = GatewayProvider::outcome(['http' => $status, 'body' => $body], $job['secret']) + ['via' => (string) $job['gateway']];
-                GatewayAfterSend::dispatch((string) $row->page_name, array_diff_key($o, ['via' => 1]), $body, (string) $job['gateway']);
             }
             $this->forget($id);
             BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['ref' => $job['ref']]);
+            // Pagkatapos maitala ang resulta: ang pumalyang dispatch ay hindi nagiging failed na padala.
+            if ($job['provider'] === ChatbotProvider::GATEWAY) {
+                try {
+                    GatewayAfterSend::dispatch((string) $row->page_name, array_diff_key($o, ['via' => 1]), $body, (string) $job['gateway']);
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            }
         } catch (Throwable $e) {
             $this->failed($row, $e);
         }

@@ -303,6 +303,17 @@ class BotcakeSendQueue
     /** Ang mga node na walang epekto kapag inulit ang step mula sa Start (allowlist; ang Set ay set o clear lang). */
     public const REPEATABLE = ['start', 'condition', 'send', 'end'];
 
+    /** May table na (naka-memo sa app kapag mayroon na: tinatawag ito sa bawat step at padala). */
+    public static function hasTable(): bool
+    {
+        $key = 'botcake-send-queue.table';
+        if (app()->bound($key)) return true;
+        if (!Schema::hasTable(self::TABLE)) return false;
+        app()->instance($key, true);
+
+        return true;
+    }
+
     public static function sequenceCustomer(int|string $pageId, int|string $psid): string
     {
         return 'sequence:' . $pageId . ':' . $psid;
@@ -315,7 +326,7 @@ class BotcakeSendQueue
      */
     public static function sequenceReady(): bool
     {
-        return (bool) config('services.chatbot.sequence_handoff', true) && ChatbotSequences::hasInFlight() && Schema::hasTable(self::TABLE)
+        return (bool) config('services.chatbot.sequence_handoff', true) && ChatbotSequences::hasInFlight() && self::hasTable()
             && SequenceSendPool::capable() && BotcakeSendPool::leavesSequences();
     }
 
@@ -466,7 +477,7 @@ class BotcakeSendQueue
         foreach (DB::table(self::TABLE)->where('status', 'pending')->where('priority', self::SEQUENCE_PRIORITY)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
             if (self::finishSequence($row, null, ['status' => 'failed', 'error' => 'The send pool did not send it in time', 'http' => null])) $out['failed']++;
         }
-        foreach (DB::table(self::TABLE)->where('kind', self::SEQUENCE)->whereIn('status', ['done', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))->orderBy('id')->limit(500)->get() as $row) {
+        foreach (DB::table(self::TABLE)->where('priority', self::SEQUENCE_PRIORITY)->where('kind', self::SEQUENCE)->whereIn('status', ['done', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))->orderBy('id')->limit(500)->get() as $row) {
             DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
             ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
             $out['redispatched']++;

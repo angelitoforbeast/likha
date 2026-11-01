@@ -2,6 +2,7 @@
 
 namespace App\Services\Chatbot;
 
+use App\Jobs\ResumeChatbotSequenceSend;
 use App\Jobs\RunChatbotSequenceStep;
 use App\Models\BotcakeChat;
 use App\Models\ChatbotSequence;
@@ -44,6 +45,8 @@ class ChatbotSequences
     private static ?bool $tables = null; // kada proseso: true lang ang iniimbak (sa ibaba)
     /** Ang stamp ng naunang claim ng susunod na runStep (earlier()), isang beses lang. */
     private ?string $earlier = null;
+    /** Ang timeout ng job na tatakbo (para sa tanda ng tumatakbo), isang beses lang. */
+    private ?int $timeout = null;
 
     public function __construct(private PageSettings $settings, private ChatbotPage $page, private FlowEngine $engine, private BotcakeOutbox $outbox, private AdGroups $groups)
     {
@@ -321,9 +324,10 @@ class ChatbotSequences
     // ---- Step ----
 
     /** Ang stamp ng naunang claim (namatay ang job) para sa susunod na runStep. */
-    public function earlier(?string $at): static
+    public function earlier(?string $at, ?int $timeout = null): static
     {
         $this->earlier = $at;
+        $this->timeout = $timeout;
 
         return $this;
     }
@@ -337,7 +341,7 @@ class ChatbotSequences
      */
     public function runStep(int $subscriptionId, ?string $claim = null): string
     {
-        [$earlier, $this->earlier] = [$this->earlier, null];
+        [$earlier, $this->earlier, $timeout, $this->timeout] = [$this->earlier, null, $this->timeout, null];
         $sub = ChatbotSequenceSubscription::find($subscriptionId);
         if (!$sub || $sub->status !== 'active') return 'gone';
         $inFlight = self::hasInFlight();
@@ -345,7 +349,7 @@ class ChatbotSequences
         $release = fn (array $extra = []) => ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->when($inFlight, fn ($q) => $q->whereNull('send_request_id'))
             ->update($extra + ['dispatched_at' => null, 'updated_at' => now()]);
         // Tumatakbo: hindi ito kinukuha ulit ng tick habang buhay ang job (hanggang sa timeout nito).
-        Cache::put(self::RUNNING . $sub->id, 1, (BotcakeSendQueue::sequenceReady() ? self::HANDOFF_TIMEOUT : self::INLINE_TIMEOUT) + 10);
+        Cache::put(self::RUNNING . $sub->id, 1, ($timeout ?? (BotcakeSendQueue::sequenceReady() ? self::HANDOFF_TIMEOUT : self::INLINE_TIMEOUT)) + 10);
 
         $lock = Cache::lock('chatbot-run:' . $sub->page_id . ':' . $sub->psid, ChatbotRunner::LOCK_SECONDS);
         if (!$lock->get()) {
@@ -369,10 +373,15 @@ class ChatbotSequences
             $stamp = null;
             if ($claim !== null) {
                 $stamp = now()->format('Y-m-d H:i:s');
-                if (!DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->where('status', 'active')->where('dispatched_at', $claim)->update(['dispatched_at' => $stamp])) return 'gone';
+                // Sa parehong segundo ng claim: walang babaguhin (ang MySQL ay nagbibilang ng nabagong row, hindi ng tumugma).
+                if ($stamp === $claim) {
+                    if (!DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->where('status', 'active')->where('dispatched_at', $claim)->exists()) return 'gone';
+                } elseif (!DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->where('status', 'active')->where('dispatched_at', $claim)->update(['dispatched_at' => $stamp])) {
+                    return 'gone';
+                }
             }
             // Isang padala ng sequence lang kada customer: ang may ticket pa sa ibang sequence ay mamaya na.
-            if ($inFlight && Schema::hasTable(BotcakeSendQueue::TABLE) && DB::table(BotcakeSendQueue::TABLE)->where('customer', BotcakeSendQueue::sequenceCustomer($sub->page_id, $sub->psid))
+            if ($inFlight && BotcakeSendQueue::hasTable() && DB::table(BotcakeSendQueue::TABLE)->where('customer', BotcakeSendQueue::sequenceCustomer($sub->page_id, $sub->psid))
                 ->whereIn('status', ['pending', 'sending', 'done', 'failed'])->exists()) {
                 $release(['next_send_at' => now()->addMinutes(self::LOCKED_RETRY_MINUTES)]);
                 return 'locked';
@@ -595,7 +604,8 @@ class ChatbotSequences
         // Ang oras ng ran: hindi mas maaga sa huling padala, at hindi lalampas sa 590 s mula sa unang padala ng step, para ang
         // /chatbot/speed ay laging may padala ng step sa loob ng 600 s bago ang ran.
         $ranAt = function () use ($first, $row): Carbon {
-            $last = Carbon::parse((string) $row->done_at);
+            // + 1 s: ang row ng padala ay isinusulat sa parehong sandali, minsan sa kasunod na segundo.
+            $last = Carbon::parse((string) $row->done_at)->addSecond();
             if ($first === null) return $last;
             $from = Carbon::parse($first);
 
@@ -708,8 +718,11 @@ class ChatbotSequences
     {
         if (!Schema::hasTable(BotcakeSendQueue::TABLE)) return;
         BotcakeSendQueue::sweepSequence();
+        // Patay lang kapag walang beat nang DEAD_POOL_SECONDS (ang malinis na paghinto ay nag-iiwan ng beat na "stopped", kaya ang
+        // ilang segundo bago ang bagong pool ay hindi patay). Ang ticket na kagagalaw lang ay hindi ginagalaw.
         if (!SequenceSendPool::alive(BotcakeSendQueue::DEAD_POOL_SECONDS)) {
-            $rows = DB::table(BotcakeSendQueue::TABLE)->where('kind', BotcakeSendQueue::SEQUENCE)->whereIn('status', ['pending', 'sending'])->whereNull('called_at')->orderBy('id')->limit(self::BATCH)->get();
+            $rows = DB::table(BotcakeSendQueue::TABLE)->where('kind', BotcakeSendQueue::SEQUENCE)->whereIn('status', ['pending', 'sending'])->whereNull('called_at')
+                ->where('updated_at', '<=', now()->subSeconds(BotcakeSendQueue::DEAD_POOL_SECONDS))->orderBy('id')->limit(self::BATCH)->get();
             foreach ($rows as $t) $this->cancel($t, 'The sequence send pool was not running; nothing sent');
             BotcakeSendQueue::recoverSequence(null);
         }
@@ -723,7 +736,8 @@ class ChatbotSequences
             } elseif ($t && $t->status === 'sending') {
                 BotcakeSendQueue::finishSequence($t, $t->claimed_by, ['status' => 'failed', 'error' => BotcakeSendQueue::noAnswer(json_decode((string) $t->result, true)['via'] ?? null), 'http' => null]);
             } elseif ($t && in_array($t->status, ['done', 'failed'], true)) {
-                $this->resumeSend(['request_id' => $t->request_id]);
+                // Ang resume ay sa job (unique), hindi sa tick: ang tick ay hindi tumatagal kahit marami.
+                ResumeChatbotSequenceSend::dispatch(BotcakeSendQueue::sequenceTicket($t));
             } else {
                 $this->abandon($sub, $t);
             }
@@ -761,7 +775,9 @@ class ChatbotSequences
                 return;
             }
             $s = (array) (json_decode((string) ($t->context ?? ''), true)['sequence'] ?? []);
-            $step = $this->stepFrom($seq, (int) ($s['step'] ?? $sub->current_step)) ?? new ChatbotSequenceStep(['position' => (int) $sub->current_step]);
+            // Ang step ng ticket mismo (hindi ang susunod na active mula rito), para walang nalalaktawang step.
+            $step = (isset($s['step']) ? $seq->steps->firstWhere('position', (int) $s['step']) : $this->stepFrom($seq, (int) $sub->current_step))
+                ?? new ChatbotSequenceStep(['position' => (int) ($s['step'] ?? $sub->current_step)]);
             $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => self::NOT_RESENT, 'name' => $seq->name, 'step' => $step->position, 'sequence_id' => (int) $seq->id,
                 'due' => $s['due'] ?? $sub->next_send_at?->format('Y-m-d H:i:s')]);
             if ($t) DB::table(BotcakeSendQueue::TABLE)->where('id', $t->id)->whereIn('status', ['done', 'failed'])->update(['status' => 'resumed', 'resumed_at' => now(), 'updated_at' => now()]);

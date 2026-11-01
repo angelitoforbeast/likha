@@ -68,7 +68,8 @@ abstract class TicketPool
     public function start(): bool
     {
         $beat = Cache::get(static::BEAT);
-        if (is_array($beat) && ($beat['owner'] ?? '') !== $this->owner && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - static::BEAT_FRESH_SECONDS) return false;
+        // Ang beat ng pool na huminto nang malinis ("stopped") ay hindi humaharang sa bagong pool.
+        if (is_array($beat) && empty($beat['stopped']) && ($beat['owner'] ?? '') !== $this->owner && (int) ($beat['at'] ?? 0) > now()->getTimestamp() - static::BEAT_FRESH_SECONDS) return false;
         $this->beat();
         $this->recover();
 
