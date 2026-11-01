@@ -247,21 +247,32 @@
 
     /**
      * Ang linya ng nakatago at ang "Show hidden (N)" / "Hide again" (aria-pressed): ang mga group na tahimik lahat, ang
-     * mga tahimik na ID sa ibang group, at ang tahimik na ads na wala sa group. Walang nakatago: walang button.
+     * mga tahimik na ID sa ibang group, at ang tahimik na ads na wala sa group. Walang nakatago: walang linya at button.
+     * readOnly (ang table): walang listahan ng "Ads not in a group yet" doon, kaya ang button ay sa group at ID lang (ang
+     * nakikita roon); ang tahimik na ads na wala sa group ay binabanggit lang, at itinuturo ang Manage in Edit.
      */
-    function hiddenBar(page) {
-      var st = state(page), h = (st.data && st.data.hidden) || {groups: 0, ids: 0, unassigned: 0}, n = h.groups + h.ids + h.unassigned;
-      if (!n) return null;
-      var parts = [h.groups ? plural(h.groups, 'group') : null, h.ids ? plural(h.ids, 'id') + ' in groups' : null, h.unassigned ? plural(h.unassigned, 'ad') + ' not in a group' : null].filter(Boolean);
-      var b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm min-h-[2rem]', 'aria-pressed': st.showHidden ? 'true' : 'false', 'data-ag-hidden-toggle': page,
-        text: st.showHidden ? 'Hide again' : 'Show hidden (' + n + ')'});
-      b.addEventListener('click', function () {
-        st.showHidden = !st.showHidden;
-        // Itinago ulit: ang naka-tick na tahimik na ad ay hindi na naka-tick (walang naidadagdag na hindi nakikita).
-        if (!st.showHidden) st.data.unassigned.forEach(function (a) { if (a.quiet) st.ticked.delete(a.ad_id); });
-        changed(page); var t = document.querySelector('[data-ag-hidden-toggle="' + CSS.escape(page) + '"]'); if (t) t.focus(); });
+    function hiddenBar(page, readOnly) {
+      var st = state(page), h = (st.data && st.data.hidden) || {groups: 0, ids: 0, unassigned: 0};
+      var why = '(off or no report data for 7+ days, and no messages in 7 days)';
+      var n = h.groups + h.ids + (readOnly ? 0 : h.unassigned);
+      if (!n && !h.unassigned) return null;
+      var parts = [h.groups ? plural(h.groups, 'group') : null, h.ids ? plural(h.ids, 'id') + ' in groups' : null, !readOnly && h.unassigned ? plural(h.unassigned, 'ad') + ' not in a group' : null].filter(Boolean);
+      var text = parts.length ? 'Hidden: ' + parts.join(', ') + ' ' + why + '.' : '';
+      if (readOnly && h.unassigned) {
+        text += (text ? ' ' : '') + plural(h.unassigned, 'ad') + ' not in a group ' + (h.unassigned === 1 ? 'is' : 'are') + ' hidden' + (text ? '' : ' ' + why) + ': see Manage in Edit.';
+      }
+      var view = (readOnly ? 'table:' : 'edit:') + page, b = null;
+      if (n) {
+        b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm min-h-[2rem]', 'aria-pressed': st.showHidden ? 'true' : 'false', 'data-ag-hidden-toggle': view,
+          text: st.showHidden ? 'Hide again' : 'Show hidden (' + n + ')'});
+        b.addEventListener('click', function () {
+          st.showHidden = !st.showHidden;
+          // Itinago ulit: ang naka-tick na tahimik na ad ay hindi na naka-tick (walang naidadagdag na hindi nakikita).
+          if (!st.showHidden) st.data.unassigned.forEach(function (a) { if (a.quiet) st.ticked.delete(a.ad_id); });
+          changed(page); var t = document.querySelector('[data-ag-hidden-toggle="' + CSS.escape(view) + '"]'); if (t) t.focus(); });
+      }
       return el('div', {class: 'mt-1 flex flex-wrap items-center gap-2 text-slate-500'}, [
-        el('span', {'data-ag-hidden-line': '', text: 'Hidden: ' + parts.join(', ') + ' (off or no report data for 7+ days, and no messages in 7 days).'}), b]);
+        el('span', {class: 'min-w-0 break-words', 'data-ag-hidden-line': '', text: text}), b]);
     }
 
     /** Ang mga ad ID ng group; sa Edit (manage) may Remove at kahon para mag-paste ng iba pa. */
@@ -451,7 +462,7 @@
           el('span', {class: 'text-slate-500', text: asOfText(d)}),
           rest != null ? el('span', {class: 'rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-800', text: plural(rest, 'ad') + ' not in a group yet' + (d.new_unassigned ? ' (' + d.new_unassigned + ' new)' : '')}) : null,
           manage]),
-        hiddenBar(page),
+        hiddenBar(page, true),
         noteLine(st)])];
       out.push(ctx.defaultRow());
       visible(page, d.groups).forEach(function (g) {

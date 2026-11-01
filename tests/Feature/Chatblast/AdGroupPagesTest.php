@@ -536,8 +536,120 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->assertStringContainsString('That group is hidden', $out['refused']);
         $this->assertSame('Added to "Serum". Already in this group: 40001.', $out['note']);
         $this->assertSame(['Hide again', 'Hide again', 'Hide again'], [$out['afterAdd'], $out['afterSearch'], $out['afterRemove']]);
-        $this->assertSame(['groups' => [$serum], 'toggle' => 'Show hidden (4)', 'count' => [2, 2], 'shown' => [$serum, $old], 'tags' => ['Ad set', 'Campaign']], $out['readOnly']);
+        $this->assertSame(['groups' => [$serum], 'toggle' => 'Show hidden (3)', 'count' => [2, 2], 'shown' => [$serum, $old], 'tags' => ['Ad set', 'Campaign']], $out['readOnly']);
         $this->assertTrue($out['noneToggle']);
         $this->assertSame(['Add 2 ads to group', 'Add 1 ad to group', ['47778']], [$out['tickedShown'], $out['tickedHidden'], $out['addedTicked']], 'A3: ang nakatagong naka-tick ay hindi idinadagdag');
+    }
+
+    // ---- Spec 213: ang "Show hidden" ng read-only na panel ay sa nakikita lang doon ----
+
+    public function test_S_213_1_to_6_the_read_only_show_hidden_counts_and_reveals_only_groups_and_ids(): void
+    {
+        $out = $this->panelJs([], <<<'JS'
+            const {find, settle} = STUB;
+            // Isang page: {hiddenGroups} nakatagong group, {quietIds} tahimik na ID sa nakikitang group, {unassigned} tahimik na ad na wala sa group.
+            const row = (id, quiet) => ({ad_id: id, kind: 'ad', name: 'Ad ' + id, status: quiet ? 'off' : 'on', off_since: quiet ? '2026-10-01' : null, off_days: quiet ? 19 : null, new: false, customers: 0, last: null, quiet});
+            const make = (hiddenGroups, quietIds, unassigned) => {
+                const groups = [{id: 1, name: 'Visible', hidden: false, all_off: false, values: {}, ads: [row('100', false)].concat(Array.from({length: quietIds}, (_, i) => row('11' + i, true)))}];
+                for (let i = 0; i < hiddenGroups; i++) groups.push({id: 10 + i, name: 'Quiet ' + i, hidden: true, all_off: true, values: {}, ads: [row('20' + i, true)]});
+                return {mode: 'ad', as_of: '2026-10-19', groups, keys: [], flows: [], unassigned: Array.from({length: Math.min(unassigned, 3)}, (_, i) => row('30' + i, true)),
+                    unassigned_total: unassigned, new_unassigned: 0, hidden: {groups: hiddenGroups, ids: quietIds, unassigned}};
+            };
+            let data = null;
+            global.fetch = async (url, o) => ({ok: true, status: 200, json: async () => (o && o.method === 'POST' ? {ok: true, id: 1} : data)});
+            global.confirm = () => false; global.prompt = () => null;
+            const urls = {index: '/i', save: '/s', add: '/a', del: '/d', history: '/h', restore: '/r', mode: '/m', value: '/v', removeAd: '/rm', ad: '/ad'};
+            const r = {page: 'Page P', cells: {}, ai: {}};
+            const ctx = {cols: 8, botCols: [], defaultRow: () => document.createElement('tr'), manage() {}};
+            const toggle = (root) => root.querySelector('button[data-ag-hidden-toggle]');
+            const line = (root) => { const s = root.querySelector('span[data-ag-hidden-line]'); return s ? s.textContent : null; };
+            const table = (AG) => { const t = document.createElement('tbody'); t.append(...AG.subRows(r, ctx)); document.body.replaceChildren(t); return t; };
+            const view = (root) => ({line: line(root), button: toggle(root) && toggle(root).textContent, pressed: toggle(root) && toggle(root).getAttribute('aria-pressed'),
+                groups: root.querySelectorAll('[data-ag-group]').map(x => Number(x.getAttribute('data-ag-group'))).filter((v, i, a) => a.indexOf(v) === i),
+                ids: root.querySelectorAll('li[data-ag-id]').map(x => x.getAttribute('data-ag-id'))});
+            const open = async (fixture) => {
+                data = fixture;
+                const AG = ChatbotAdGroups.create({csrf: 'x', urls, onChange() {}});
+                const host = document.createElement('div'); document.body.replaceChildren(host);
+                await AG.mount(r, host); await settle();
+                return [AG, host];
+            };
+            const out = {};
+
+            // 1. Ang ads lang na wala sa group ang nakatago (gaya ng Precious Lopez, 209).
+            let [AG, host] = await open(make(0, 0, 209));
+            out.c1edit = view(host);
+            toggle(host).click();
+            out.c1editOn = view(host);
+            toggle(host).click();
+            AG.unmount('Page P');
+            out.c1table = view(table(AG));
+
+            // 2. Nakatagong group lang: ang read-only na button ay sa group, at inilalabas ito.
+            [AG, host] = await open(make(1, 0, 0));
+            AG.unmount('Page P');
+            let t = table(AG);
+            out.c2table = view(t);
+            toggle(t).click();
+            out.c2tableOn = view(table(AG));
+            out.c2dim = table(AG).querySelector('tr[data-ag-group="10"]').querySelector('td').className.includes('opacity-60');
+
+            // 3. Halo: 2 group, 3 ID, 50 ad na wala sa group.
+            [AG, host] = await open(make(2, 3, 50));
+            out.c3edit = view(host);
+            AG.unmount('Page P');
+            t = table(AG);
+            out.c3table = view(t);
+            toggle(t).click();
+            out.c3tableOn = view(table(AG));
+
+            // 4. Walang nakatago.
+            [AG, host] = await open(make(0, 0, 0));
+            out.c4edit = view(host);
+            AG.unmount('Page P');
+            out.c4table = view(table(AG));
+
+            // 5. Show hidden sa Edit, saka isinara ang Edit: ang table ay may parehong state, walang nasisira.
+            [AG, host] = await open(make(2, 3, 50));
+            toggle(host).click();
+            AG.unmount('Page P');
+            out.c5table = view(table(AG));
+            [AG, host] = await open(make(0, 0, 209));
+            toggle(host).click();
+            AG.unmount('Page P');
+            out.c5tableOnlyAds = view(table(AG));
+
+            // 6. Ang linya ay nababalot (flex-wrap at break-words) at ang button ay may aria-pressed.
+            [AG, host] = await open(make(2, 3, 50));
+            AG.unmount('Page P');
+            t = table(AG);
+            const sp = t.querySelector('span[data-ag-hidden-line]');
+            out.c6 = {wrap: sp.parentNode.className.includes('flex-wrap'), breaks: sp.className.includes('break-words'), pressed: toggle(t).hasAttribute('aria-pressed')};
+            console.log(JSON.stringify(out));
+            JS);
+
+        $why = '(off or no report data for 7+ days, and no messages in 7 days)';
+        // 1
+        $this->assertSame(['line' => 'Hidden: 209 ads not in a group ' . $why . '.', 'button' => 'Show hidden (209)', 'pressed' => 'false', 'groups' => [1], 'ids' => ['100']], $out['c1edit']);
+        $this->assertSame(['Hide again', 'true'], [$out['c1editOn']['button'], $out['c1editOn']['pressed']]);
+        $this->assertSame(['100', '300', '301', '302'], $out['c1editOn']['ids'], 'ang Edit ay naglalabas ng mga ad na wala sa group');
+        $this->assertSame(['line' => '209 ads not in a group are hidden ' . $why . ': see Manage in Edit.', 'button' => null, 'pressed' => null, 'groups' => [1], 'ids' => ['100']], $out['c1table']);
+        // 2
+        $this->assertSame(['line' => 'Hidden: 1 group ' . $why . '.', 'button' => 'Show hidden (1)', 'pressed' => 'false', 'groups' => [1], 'ids' => ['100']], $out['c2table']);
+        $this->assertSame(['Hide again', 'true', [1, 10]], [$out['c2tableOn']['button'], $out['c2tableOn']['pressed'], $out['c2tableOn']['groups']]);
+        $this->assertTrue($out['c2dim']);
+        // 3
+        $this->assertSame('Show hidden (55)', $out['c3edit']['button']);
+        $this->assertSame(['line' => 'Hidden: 2 groups, 3 ids in groups ' . $why . '. 50 ads not in a group are hidden: see Manage in Edit.', 'button' => 'Show hidden (5)', 'pressed' => 'false', 'groups' => [1], 'ids' => ['100']], $out['c3table']);
+        $this->assertSame([[1, 10, 11], ['100', '110', '111', '112', '200', '201']], [$out['c3tableOn']['groups'], $out['c3tableOn']['ids']], 'ang 2 group at 3 ID ay lumalabas');
+        $this->assertSame('Hide again', $out['c3tableOn']['button']);
+        // 4
+        $this->assertSame([null, null], [$out['c4edit']['line'], $out['c4edit']['button']]);
+        $this->assertSame([null, null], [$out['c4table']['line'], $out['c4table']['button']]);
+        // 5
+        $this->assertSame(['Hide again', 'true', [1, 10, 11]], [$out['c5table']['button'], $out['c5table']['pressed'], $out['c5table']['groups']]);
+        $this->assertSame([null, '209 ads not in a group are hidden ' . $why . ': see Manage in Edit.'], [$out['c5tableOnlyAds']['button'], $out['c5tableOnlyAds']['line']]);
+        // 6
+        $this->assertSame(['wrap' => true, 'breaks' => true, 'pressed' => true], $out['c6']);
     }
 }
