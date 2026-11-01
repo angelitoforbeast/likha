@@ -235,8 +235,9 @@ class AdGroupAllValuesTest extends ChatblastTestCase
             $this->assertTrue($keys->has($key), $key . ' ay value ng group');
         }
         $this->assertSame('FLOW', $keys['flow_id']['label']);
-        $this->assertSame([['openai', 'OpenAI'], ['local', 'Local']], $keys['ai_provider']['options']);
-        $this->assertSame([['openai', 'OpenAI'], ['local', 'Local'], ['none', 'None']], $keys['ai_fallback']['options']);
+        // Spec 210: Claude at DeepSeek ay mapipili rin (ang key ay sa pool ng kumpanya).
+        $this->assertSame([['openai', 'OpenAI'], ['anthropic', 'Claude'], ['deepseek', 'DeepSeek'], ['local', 'Local']], $keys['ai_provider']['options']);
+        $this->assertSame([['openai', 'OpenAI'], ['anthropic', 'Claude'], ['deepseek', 'DeepSeek'], ['local', 'Local'], ['none', 'None']], $keys['ai_fallback']['options']);
 
         $n = 0;
         foreach ($keys as $key => $k) {

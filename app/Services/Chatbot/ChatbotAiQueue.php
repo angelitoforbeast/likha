@@ -48,7 +48,8 @@ class ChatbotAiQueue
     {
         return ['provider' => $res['provider'], 'model_used' => $res['model_used'], 'fell_back' => (bool) $res['fell_back'],
             'fallback_reason' => $res['fallback_reason'], 'ai_attempts' => json_encode($res['attempts'], JSON_UNESCAPED_UNICODE),
-            'latency_ms' => $res['latency_ms'], 'prompt_tokens' => $res['prompt_tokens'], 'completion_tokens' => $res['completion_tokens']];
+            'latency_ms' => $res['latency_ms'], 'prompt_tokens' => $res['prompt_tokens'], 'completion_tokens' => $res['completion_tokens']]
+            + (ChatbotAiUsage::ready() ? ['key_id' => $res['key_id'] ?? null, 'key_label' => $res['key_label'] ?? null, 'key_last4' => $res['key_last4'] ?? null] : []);
     }
 
     /**
