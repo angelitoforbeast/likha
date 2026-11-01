@@ -3528,3 +3528,84 @@ Tests: `tests/Feature/Chatblast/ChatbotNoHangTest.php` (the row cache, the reloa
 | S-209.5 (P1) | Undo after an Edit-window Save restores the old values and draws only that row again | timing run: "Undo the 58 fields", "grid = server: after Undo"; `test_S_209_1_and_5…` | passed |
 | S-209.6 (P1) | Each other Chatbot screen and /chatblast/page-settings: load and main action measured; any over target fixed | timing run (flows, editor, sequences, chats, inbox, replies, results, health, speed, live, page-settings) | passed (none over target) |
 | S-209.7 (P2) | The timing script runs with one command and prints a table (action, longest task, total) | `node tests/perf/run.mjs` | passed |
+
+## S-212 Ad groups match by ad, ad set or campaign id, and quiet groups fold away
+
+As staff who set up Ad-based pages on /chatbot/pages, I want a group to answer customers whether it lists the ad, its ad set or its campaign, and the Ad groups panel to show only what is active, so customers are not left without a reply and the panel stays short.
+
+Slice 212. Threat model: untrusted = customer ad ids from chats and referrals (digits only, 64 at most, lookup cap), Meta's answers (shape checked, ids only stored), ids typed by staff (digits only); trusted = the Meta Ads token and the app settings. No new table, no migration: a looked-up ad's parents go in its `ad_catalog` row. Risk tier: high (the reply path of every Ad-based page).
+Tests: `tests/Feature/Chatblast/AdGroupRunTest.php`, `AdGroupsTest.php`, `AdGroupPagesTest.php` (with the panel script run in Node on `tests/js/dom-stub.cjs`), `CommentRepliesTest.php`. Meta is faked in every lookup case.
+
+Stories: 1 match by ad, ad set or campaign (P1); 2 live lookup, once, stored, never loops (P1); 3 no customer-facing change except replies now going out (P1); 4 the panel labels each id (P2); 5 "Ads not in a group yet" leaves out covered ads (P2); 6 quiet groups and ids fold away (P2); 7 new and hand-added stay visible, Show hidden brings the rest back (P2); 8 a busy page stays fast (P1).
+
+| Case | Given / When / Then | Test | Status |
+|---|---|---|---|
+| S-212.1.1 (P1) | Given a group listing only campaign C, When a customer whose ad is in C chats, Then the group's values are used and the reply goes out | `test_S_212_1_1_1_2_3_2_and_3_6…` (campaign) | passed |
+| S-212.1.2 (P1) | The same with a group listing only ad set S | `test_S_212_1_1_1_2_3_2_and_3_6…` (ad set) | passed |
+| S-212.1.3 (P1) | Groups A (campaign C), B (ad set S in C), C2 (the ad): C2 wins; remove the ad: B; remove S: A; remove C: page values | `test_S_212_1_3_and_1_4…` | passed |
+| S-212.1.4 (P1) | The more specific group has the higher group number: it still wins | `test_S_212_1_3_and_1_4…` | passed |
+| S-212.1.5 (P1) | The customer's ad is in a sibling ad set or another campaign: no match, page values | `test_S_212_1_5…` | passed |
+| S-212.1.6 (P1) | An id already in group "X", at any level, is refused in another group, naming "X" and the kind; an ad in A plus its ad set in B is allowed | `test_S_212_1_6…` | passed |
+| S-212.1.7 (P1) | A double-submitted add stores the id once and says "Already in this group: …" | `test_S_212_1_7…` | passed |
+| S-212.1.8 (P1) | The latest-ad rule (S-172.4) holds, matched through ad, ad set, campaign | `test_S_212_1_8…` (3 data sets) | passed |
+| S-212.1.9 (P1) | Page-based page: no group matches, no lookup | `test_S_212_1_9_2_9_and_3_7…` | passed |
+| S-212.1.10 (P1) | A customer ad id that is not digits only, or longer than 64: ignored, no group, no Meta call, no error | `test_S_212_1_10…` | passed |
+| S-212.1.11 (P1) | Sequence pinning (S-172.6) for a match by campaign | `test_S_212_1_11…` | passed |
+| S-212.1.12 (P1) | A user without /chatblast access: every ad group route (10) returns 403 and writes nothing | `test_S_212_1_12…` | passed |
+| S-212.2.1 (P1) | Given an ad not in reports or the catalog and Meta answering adset_id and campaign_id, When its customer chats and a group lists the campaign, Then the group matches, the reply goes out and the parents are stored in the ad's `ad_catalog` row; the token is sent only in the header | `test_S_212_2_1_and_2_2…` | passed |
+| S-212.2.2 (P1) | After that, 100 more customers and a cache flush: zero more Meta calls | `test_S_212_2_1_and_2_2…` | passed |
+| S-212.2.3 (P1) | An ad already in reports with parents: never a Meta call | `test_S_212_2_3…` | passed |
+| S-212.2.4 (P1) | While one lookup for an ad runs, 19 more customers of that ad make no call of their own (they wait up to 3 s, then page values); 20 in a row make exactly one call | `test_S_212_2_4…` | passed |
+| S-212.2.5 (P1) | Meta says the ad does not exist (or no permission): page values, no error, "not found" remembered for 1 h, asked again after it | `test_S_212_2_5…` | passed |
+| S-212.2.6 (P1) | Meta down (timeout, 5xx, rate limit, expired token): page values, no exception, an `ad_lookup` note in the run log, no retry for 5 min; one try with a 3 s timeout; no Meta Ads connection: page values and a note, no call | `test_S_212_2_6_and_2_10…` (4 data sets), `test_S_212_2_6_and_8_3…`, `test_S_212_2_6_no_meta_connection…` | passed |
+| S-212.2.7 (P1) | Meta back after the wait: the next message matches; a sequence entered during the failure is not pinned to page values and takes the group at its next step | `test_S_212_2_7…` | passed |
+| S-212.2.8 (P1) | 500 different new ad ids in a minute: at most 30 lookups, the rest get page values at once, a known ad still matches, nothing sleeps | `test_S_212_2_8…` | passed |
+| S-212.2.9 (P1) | Page-based pages, Ad-based pages with no groups, exact matches: no lookup | `test_S_212_1_9_2_9_and_3_7…` | passed |
+| S-212.2.10 (P1) | No token in the run log, the logs, the stored rows or the panel JSON | `test_S_212_2_6_and_2_10…`, `test_S_212_4_7_and_2_10…` | passed |
+| S-212.3.1 (P1) | Groups of exact ad ids behave as before: the S-172 and S-174 tests pass (only the "Not an ID" label changed, case 4.5) | `AdGroupRunTest`, `AdGroupsTest`, `AdGroupPagesTest`, `AdBasedPagesTest` | passed |
+| S-212.3.2 (P1) | A group holding a campaign id: a new customer of an ad in it gets the group's reply, not "Nothing to send" | `test_S_212_1_1_1_2_3_2_and_3_6…` | passed |
+| S-212.3.3 (P1) | A chat already answered is not answered again after the change; only new messages match the new way | `test_S_212_3_3…` | passed |
+| S-212.3.4 (P1) | An ad that matches nothing, with empty page values: "Nothing to send" as today | `test_S_212_3_4…` | passed |
+| S-212.3.5 (P1) | A match by ad set or campaign applies where the old match applied: runner, sequences, comment replies and the Test tab (inbox and order sheet call the same `forCustomer`) | `test_S_212_1_1…`, `test_S_212_1_11…`, `CommentRepliesTest::test_S_212_3_5…`, `test_S_212_3_5…` | passed |
+| S-212.3.6 (P1) | A reply reached via the campaign is identical to one via the exact ad id | `test_S_212_1_1_1_2_3_2_and_3_6…` (3 data sets, same text) | passed |
+| S-212.3.7 (P1) | Page-based pages: nothing changes | `test_S_212_1_9_2_9_and_3_7…` | passed |
+| S-212.4.1 (P2) | One id of each kind: rows tagged Ad, Ad set, Campaign, each with its own name; ad set and campaign status On if any ad under it is On, "Off since" the latest of its ads', customers distinct | `test_S_212_4_1_4_2_and_4_3…` | passed |
+| S-212.4.2 (P2) | An unknown id shows "Not found in Ads Manager", is saved and removable | `test_S_212_4_1_4_2_and_4_3…`, Node test | passed |
+| S-212.4.3 (P2) | Names are text (no HTML), Filipino text and emoji intact | `test_S_212_4_1_4_2_and_4_3…`, Node test | passed |
+| S-212.4.4 (P2) | At 390 x 844: no sideways scroll, buttons tappable | browser check (result) | see result |
+| S-212.4.5 (P2) | Placeholder "IDs: ad, ad set or campaign; comma, space or new line", header "N ids in <group>", error "Not an ID (digits only)", the remove confirm names the kind | Node test, `test_S_172_8_typed_ads…` | passed |
+| S-212.4.6 (P2) | The read-only list shows the same tags | Node test | passed |
+| S-212.4.7 (P2) | Opening the panel never calls Meta | `test_S_212_4_7_and_2_10…` | passed |
+| S-212.5.1 (P2) | An ad covered by a group's ad set or campaign is not in "Ads not in a group yet" | `test_S_212_5_1_to_5_7…` | passed |
+| S-212.5.2 (P2) | Remove that ad set from the group: the ad is listed again | `test_S_212_5_1_to_5_7…` | passed |
+| S-212.5.3 (P2) | A sibling ad in an uncovered ad set is listed | `test_S_212_5_1_to_5_7…` | passed |
+| S-212.5.4 (P2) | An ad with unknown parents is listed | `test_S_212_5_1_to_5_7…`, `test_S_212_4_7…` | passed |
+| S-212.5.5 (P2) | Totals, "(N new)", the pages-table badge and "Showing 50 of M" count the filtered list; the New rule is unchanged | `test_S_212_5_1_to_5_7…` | passed |
+| S-212.5.6 (P2) | Search covers only the listed ads | `test_S_212_5_1_to_5_7…` | passed |
+| S-212.5.7 (P2) | A covered ad may be added by hand | `test_S_212_5_1_to_5_7…` | passed |
+| S-212.6.1 (P2) | A group off 10 days, no messages for 10 days, created 30 days ago: hidden and counted in the hidden line | `test_S_212_6_1_to_6_4_6_8_and_6_9…` | passed |
+| S-212.6.2 (P2) | Off but messaged in the last 7 days: visible | `test_S_212_6_1_to_6_4…` | passed |
+| S-212.6.3 (P2) | Off 6 days: visible; off 7 days: hidden (off_days as the panel counts it) | `test_S_212_6_1_to_6_4…` | passed |
+| S-212.6.4 (P2) | A group with one On ad stays visible; its quiet ids fold behind "N hidden ads" | `test_S_212_6_1_to_6_4…`, Node test | passed |
+| S-212.6.5 (P2) | A hidden id that comes back On or gets a message is visible on the next load once the 2 to 5 minute panel caches refresh | `test_S_212_6_5_6_6_6_7_and_6_10…` | passed |
+| S-212.6.6 (P2) | No report data, no message in 7 days, added over 7 days ago: hidden; with a message in 7 days: visible | `test_S_212_6_5…` | passed |
+| S-212.6.7 (P2) | A hidden group still answers its customers; hiding writes no row | `test_S_212_6_5…` | passed |
+| S-212.6.8 (P2) | A group with no ids is never hidden | `test_S_212_6_1_to_6_4…` | passed |
+| S-212.6.9 (P2) | Ids of mixed levels are judged per id, with roll-up | `test_S_212_6_1_to_6_4…` | passed |
+| S-212.6.10 (P2) | A stopped Meta sync does not cause new hiding (status is as of the last report day) | `test_S_212_6_5…` | passed |
+| S-212.6.11 (P2) | 200 groups: counts right, only the 10 active groups in the main view | `test_S_212_6_11_and_7_8…` | passed |
+| S-212.7.1 (P2) | A group just created, with no status or traffic: visible | `test_S_212_7_1_to_7_3…` | passed |
+| S-212.7.2 (P2) | Pasting an id into a hidden group shows it again; its old quiet ids stay folded | `test_S_212_7_1_to_7_3…` | passed |
+| S-212.7.3 (P2) | After 7 more days with no traffic: it folds like any other | `test_S_212_7_1_to_7_3…` | passed |
+| S-212.7.4 (P2) | "Show hidden (N)" with N hidden; on: hidden items dimmed and the button reads "Hide again"; 0 hidden: no button | Node test | passed |
+| S-212.7.5 (P2) | Show hidden stays on through add, search and remove until reload; a new panel starts hidden | Node test | passed |
+| S-212.7.6 (P2) | Rename, History, Remove and Delete work the same on hidden groups | `test_S_212_7_1_to_7_3…` | passed |
+| S-212.7.7 (P2) | Pasting an id that is in a hidden group: the refusal names the group and says it is hidden | `test_S_212_7_1_to_7_3…`, Node test | passed |
+| S-212.7.8 (P2) | The read-only list follows the same hiding; the pages-table badge and group count ignore hiding | Node test, `test_S_212_6_11_and_7_8…` | passed |
+| S-212.7.9 (P2) | At 390 x 844 the button is a keyboard-operable button with `aria-pressed`; its wording differs from "Show all N" | Node test, browser check (result) | passed |
+| S-212.8.1 (P1) | Matching a known ad adds at most 1 cache read and 1 indexed query, with 1 group or 151 | `test_S_212_8_1…` | passed |
+| S-212.8.2 (P1) | 150 groups, 3,000 ids, 100k chats: the panel opens within 1.25x of `vps/main`, queries do not grow with customers or hidden items | timing check (result) | see result |
+| S-212.8.3 (P1) | Meta slow: one try, 3 s timeout, and customers of known ads never wait on it | `test_S_212_2_6_and_8_3…` | passed |
+| S-212.8.4 (P1) | Two saves of the same id: the second, reading under the lock, is refused; nothing half saved | `test_S_212_8_4…` | passed |
+| S-212.8.5 (P1) | A 500-id group of mixed levels saves, matches and lists | `test_S_212_8_5…` | passed |
+| S-212.8.6 (P1) | The lookup store is one `ad_catalog` row per ad, ids only: no token or customer data | `test_S_212_8_6…` | passed |

@@ -278,7 +278,7 @@
         more];
       if (!manage) return list;
       var typed = el('textarea', {rows: '1', class: INPUT + ' font-mono sm:max-w-xs', placeholder: 'IDs: ad, ad set or campaign; comma, space or new line', 'aria-label': 'IDs to add to ' + g.name});
-      var add = el('button', {type: 'button', class: 'cb-btn cb-btn-sm', text: 'Add'});
+      var add = el('button', {type: 'button', class: 'cb-btn cb-btn-sm min-h-[2rem]', text: 'Add'});
       add.addEventListener('click', function () {
         if (!typed.value.trim()) return;
         add.disabled = true;
