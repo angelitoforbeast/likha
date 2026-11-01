@@ -255,7 +255,11 @@
       var parts = [h.groups ? plural(h.groups, 'group') : null, h.ids ? plural(h.ids, 'id') + ' in groups' : null, h.unassigned ? plural(h.unassigned, 'ad') + ' not in a group' : null].filter(Boolean);
       var b = el('button', {type: 'button', class: 'cb-btn cb-btn-sm min-h-[2rem]', 'aria-pressed': st.showHidden ? 'true' : 'false', 'data-ag-hidden-toggle': page,
         text: st.showHidden ? 'Hide again' : 'Show hidden (' + n + ')'});
-      b.addEventListener('click', function () { st.showHidden = !st.showHidden; changed(page); var t = document.querySelector('[data-ag-hidden-toggle="' + CSS.escape(page) + '"]'); if (t) t.focus(); });
+      b.addEventListener('click', function () {
+        st.showHidden = !st.showHidden;
+        // Itinago ulit: ang naka-tick na tahimik na ad ay hindi na naka-tick (walang naidadagdag na hindi nakikita).
+        if (!st.showHidden) st.data.unassigned.forEach(function (a) { if (a.quiet) st.ticked.delete(a.ad_id); });
+        changed(page); var t = document.querySelector('[data-ag-hidden-toggle="' + CSS.escape(page) + '"]'); if (t) t.focus(); });
       return el('div', {class: 'mt-1 flex flex-wrap items-center gap-2 text-slate-500'}, [
         el('span', {'data-ag-hidden-line': '', text: 'Hidden: ' + parts.join(', ') + ' (off or no report data for 7+ days, and no messages in 7 days).'}), b]);
     }

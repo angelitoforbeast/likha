@@ -393,7 +393,7 @@ class Inbox
 
         // Ang ad group ng customer (Ad-based na page): ang flow at mga value nito ang ipinapakita, gaya ng ginagamit ng takbo.
         $groups = app(AdGroups::class);
-        $group = $groups->forCustomer($pageId, $psid, $page);
+        $group = $groups->forCustomer($pageId, $psid, $page, false); // screen lang: walang tawag sa Meta
         $own = $group !== null ? ($groups->groups($page)[$group]['values'] ?? []) : [];
         $flowId = trim((string) $this->settings->get($page, ChatbotFields::PROVIDER, 'flow_id'));
         $flow = ctype_digit($own['flow_id'] ?? '') ? ChatbotFlow::find((int) $own['flow_id'], ['id', 'name']) : null; // na-delete: ang flow ng page

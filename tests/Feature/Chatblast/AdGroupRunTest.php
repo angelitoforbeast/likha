@@ -717,4 +717,60 @@ class AdGroupRunTest extends ChatblastTestCase
         $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id), 'ang pumalyang lookup ay hindi itinatala');
         $this->assertSame(2, DB::table('chatbot_events')->where('psid', 7001)->where('type', 'ad_lookup')->count(), 'pati ang takbo ng skip ay may tala');
     }
+
+    // ---- Amendment 212-1 ----
+
+    public function test_S_212_A1_the_catalog_write_is_queued_after_the_cache_so_a_blocked_write_never_delays_the_match(): void
+    {
+        $this->metaConnection();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN]);
+        $id = $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $g = app(AdGroups::class);
+        // Ang sulat ay naghihintay sa queue (hal. may lock ang import sa ad_catalog): ang sagot ay hindi naghihintay.
+        \Illuminate\Support\Facades\Queue::fake([\App\Jobs\StoreAdCatalogParents::class]);
+        $this->chat('40031', '7001');
+        $this->assertSame($id, $g->forCustomer('1001', '7001', 'Page P'));
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\StoreAdCatalogParents::class,
+            fn ($j) => [$j->adId, $j->adSetId, $j->campaignId, $j->connection, $j->queue] === ['40031', '50005', self::CAMPAIGN, null, null]);
+        $this->assertSame(0, DB::table('ad_catalog')->count(), 'wala pang sulat sa daan ng sagot');
+        $this->chat('40031', '7002');
+        $this->assertSame($id, $g->forCustomer('1001', '7002', 'Page P'));
+        $this->assertSame(1, $this->metaCalls(), 'naka-cache na bago ang sulat: walang pangalawang tawag');
+        // Ang job (default queue) ang sumusulat ng row.
+        (new \App\Jobs\StoreAdCatalogParents('40031', '50005', self::CAMPAIGN))->handle();
+        $this->assertSame(['40031', '50005', self::CAMPAIGN], array_values((array) DB::table('ad_catalog')->first(['ad_id', 'ad_set_id', 'campaign_id'])));
+    }
+
+    public function test_S_212_A1_a_failing_catalog_write_does_not_stop_the_reply_or_cause_a_second_meta_call(): void
+    {
+        $this->metaConnection();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        \Illuminate\Support\Facades\Schema::drop('ad_catalog');   // ang sulat ay babagsak (sync queue sa test: sabay ang job)
+        $this->chat('40032', '7001', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7001'));
+        $this->chat('40032', '7002', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7002'));
+        $this->assertSame(1, $this->metaCalls());
+        $this->assertSame(0, DB::table('chatbot_events')->where('type', 'ad_lookup')->count(), 'hindi ito pumalyang lookup');
+    }
+
+    public function test_S_212_A2_staff_screens_show_the_known_group_and_never_call_meta_or_spend_the_cap(): void
+    {
+        $this->metaConnection();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN]);
+        $id = $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $g = app(AdGroups::class);
+        $this->chat('40033', '7001');
+        $this->assertNull($g->forCustomer('1001', '7001', 'Page P', false), 'hindi pa kilala: page values sa screen');
+        app(\App\Services\Chatbot\Inbox::class)->panel('1001', 'Page P', '7001');
+        $this->assertSame(0, $this->metaCalls());
+        $this->assertSame(0, \Illuminate\Support\Facades\RateLimiter::attempts('chatbot-adgroups:lookup:rate:' . sha1(app(PageSettings::class)->pageKey('Page P'))));
+        // Pagkatapos ng tunay na sagot (may lookup), ang screen ay nagpapakita ng group, walang bagong tawag.
+        $this->chat('40033', '7001', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7001'));
+        $this->assertSame($id, $g->forCustomer('1001', '7001', 'Page P', false));
+        app(\App\Services\Chatbot\Inbox::class)->panel('1001', 'Page P', '7001');
+        $this->assertSame(1, $this->metaCalls());
+    }
 }

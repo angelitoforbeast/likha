@@ -493,6 +493,15 @@ class AdGroupPagesTest extends ChatblastTestCase
             find(host, 'button', 'Remove')[0].click(); await settle();
             out.afterRemove = toggle(host).textContent;
 
+            // Hide again: ang naka-tick na tahimik na ad ay hindi na naka-tick, kaya ang nakikita lang ang naidadagdag.
+            for (const id of ['47777', '47778']) { const cb = host.querySelector('input[id="ag-t-Page_P-' + id + '"]'); cb.checked = true; cb.dispatch('change'); }
+            out.tickedShown = find(host, 'button', /^Add \d+ ads? to group$/)[0].textContent;
+            toggle(host).click();
+            const addTicked = find(host, 'button', /^Add \d+ ads? to group$/)[0];
+            out.tickedHidden = addTicked.textContent;
+            addTicked.click(); await settle();
+            out.addedTicked = calls.filter(c => c[0] === '/a').pop()[1].ads;
+
             // Ang read-only na listahan (sub-rows ng table): parehong pagtatago at mga tag; ang bilang ng group ay hindi nagbabago.
             [AG, host] = await open();
             const ctx = {cols: 8, botCols: [], defaultRow: () => document.createElement('tr'), manage() {}};
@@ -529,5 +538,6 @@ class AdGroupPagesTest extends ChatblastTestCase
         $this->assertSame(['Hide again', 'Hide again', 'Hide again'], [$out['afterAdd'], $out['afterSearch'], $out['afterRemove']]);
         $this->assertSame(['groups' => [$serum], 'toggle' => 'Show hidden (4)', 'count' => [2, 2], 'shown' => [$serum, $old], 'tags' => ['Ad set', 'Campaign']], $out['readOnly']);
         $this->assertTrue($out['noneToggle']);
+        $this->assertSame(['Add 2 ads to group', 'Add 1 ad to group', ['47778']], [$out['tickedShown'], $out['tickedHidden'], $out['addedTicked']], 'A3: ang nakatagong naka-tick ay hindi idinadagdag');
     }
 }

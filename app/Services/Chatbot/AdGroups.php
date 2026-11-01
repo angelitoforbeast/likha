@@ -335,8 +335,14 @@ class AdGroups
         }
         $p = ['adset' => self::digits($json['adset_id'] ?? null), 'campaign' => self::digits($json['campaign_id'] ?? null)];
         if ((isset($json['id']) && (string) $json['id'] !== $ad) || ($p['adset'] === null && $p['campaign'] === null)) return $notFound();
-        $this->storeParents($ad, $p);
+        // Ang cache muna (ang sagot sa customer ay hindi naghihintay sa database), saka ang ad_catalog sa queue: ang import ng
+        // Ads sync ay may lock sa ad_catalog nang matagal, kaya hindi ito isinusulat dito sa daan ng sagot.
         Cache::put(self::PARENTS . $ad, $p, self::PARENTS_TTL);
+        try {
+            \App\Jobs\StoreAdCatalogParents::dispatch($ad, $p['adset'], $p['campaign']);
+        } catch (Throwable $e) {
+            report(new \RuntimeException('Ad parents not queued for the catalog: ' . Graph::clean($e->getMessage())));
+        }
 
         return $p;
     }
@@ -345,16 +351,14 @@ class AdGroups
      * Ang nakita ay isinusulat sa row ng ad sa ad_catalog (isang row kada ad, ID lang): pinupunan ng susunod na upload
      * o sync ang pangalan at mga petsa, at hindi nito pinapalitan ang ID na nandoon na.
      */
-    private function storeParents(string $ad, array $p): void
+    public static function storeParents(string $ad, ?string $adset, ?string $campaign): void
     {
-        try {
-            $now = now();
-            if (DB::table('ad_catalog')->insertOrIgnore(['ad_id' => $ad, 'ad_set_id' => $p['adset'], 'campaign_id' => $p['campaign'], 'created_at' => $now, 'updated_at' => $now])) return;
-            foreach (['ad_set_id' => $p['adset'], 'campaign_id' => $p['campaign']] as $col => $v) {
-                if ($v !== null) DB::table('ad_catalog')->where('ad_id', $ad)->whereNull($col)->update([$col => $v, 'updated_at' => $now]);
-            }
-        } catch (QueryException) {
-            // wala ang ad_catalog: ang cache na lang
+        [$ad, $adset, $campaign] = [self::digits($ad), self::digits($adset), self::digits($campaign)];
+        if ($ad === null || ($adset === null && $campaign === null)) return;
+        $now = now();
+        if (DB::table('ad_catalog')->insertOrIgnore(['ad_id' => $ad, 'ad_set_id' => $adset, 'campaign_id' => $campaign, 'created_at' => $now, 'updated_at' => $now])) return;
+        foreach (['ad_set_id' => $adset, 'campaign_id' => $campaign] as $col => $v) {
+            if ($v !== null) DB::table('ad_catalog')->where('ad_id', $ad)->whereNull($col)->update([$col => $v, 'updated_at' => $now]);
         }
     }
 
@@ -408,13 +412,14 @@ class AdGroups
 
     /**
      * Ang group ng customer ayon sa pinakabagong ad niya, o null (page values). Ang Page-based na page o ang walang group:
-     * walang query.
+     * walang query. $lookup = false: ang screen lang ng staff (Inbox, order sheet): ang kilala o naka-cache na group lang,
+     * walang tawag sa Meta at hindi nauubos ang LOOKUPS_PER_MINUTE ng mga tunay na sagot.
      */
-    public function forCustomer(int|string $pageId, int|string $psid, string $page): ?int
+    public function forCustomer(int|string $pageId, int|string $psid, string $page, bool $lookup = true): ?int
     {
         [$this->lookupNote, $this->unresolved] = [null, false];
         if (!$this->activeGroups($page)) return null;
-        [$group, $this->lookupNote, $this->unresolved] = $this->match($page, $this->latestAd($pageId, $psid, $page), true);
+        [$group, $this->lookupNote, $this->unresolved] = $this->match($page, $this->latestAd($pageId, $psid, $page), $lookup);
 
         return $group;
     }
