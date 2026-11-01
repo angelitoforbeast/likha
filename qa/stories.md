@@ -3717,3 +3717,27 @@ Tests: `tests/Feature/Chatblast/Ai*Test.php` (Http::fake for every provider and 
 | S-210.7.3 | negative | Given a customer message asking for the key, then no secret is reachable (keys never enter a prompt) | `AiKeySecretsTest::test_S_210_7_3_a_customer_asking_for_the_key_reaches_no_secret_because_keys_never_enter_a_prompt` | passed 2026-11-01 |
 | S-210.7.4 | edge | Given every add, edit, test, disable and delete of a key, then it is in the page_settings history with who and when, no key text | `AiKeyScreenTest::test_S_210_7_4_every_add_edit_test_disable_and_delete_is_in_the_history_with_who_and_when_and_no_key_text` | passed 2026-11-01 |
 
+## Slice 211 – Orders to Forbeast
+
+As the owner, I want every order the chatbot writes to the macro to reach Forbeast at the same time, so the page's client sees it in Forbeast's Orders screen.
+
+Slice 211. Threat model: untrusted = Forbeast's answers and the customer's order fields (text only, cut to the contract lengths); trusted = config, env, this repo. The site key goes only in the Authorization header. Risk tier: medium (partner API, customer data). Additive migration: three columns on `order_encodes`, no new table.
+Tests: `tests/Feature/OrderEncode/ForbeastOrdersTest.php` (real FlowEngine and Runner, fake OpenAI, Forbeast faked with `Http::fake`).
+
+### S-211.1 An encoded order reaches Forbeast once and follows its updates (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-211.1.1 | happy | Given an `upload_macro` insert on a page whose `chatbot.gateway` is set up, when the row is written to `macro_output`, then a queued job PUTs the order to that gateway's `/api/v1/site/orders/{ref}` with the A..H values mapped per the contract and `fields` holding the raw values | `test_S_211_1_1…` | passed 2026-11-01 |
+| S-211.1.2 | happy | Given an `encode_order` run, then the order is sent when `LiveOrder` writes `macro_output` (not when queued), so a failed encode is never sent | `test_S_211_1_2…` (2 tests: encode_order, and the encode of an uploaded row) | passed 2026-11-01 |
+| S-211.1.3 | happy | Given an `upload_macro` update of the same `macro_output` row, then the same `ref` is sent with a higher `version`, so Forbeast updates one order | `test_S_211_1_3…` | passed 2026-11-01 |
+| S-211.1.4 | happy | Given pages on the incepxionbot gateway, then their orders go to the incepxionbot gateway | `test_S_211_1_4…` | passed 2026-11-01 |
+| S-211.1.5 | negative | Given a test run (Test mode), then nothing is sent | `test_S_211_1_5…` | passed 2026-11-01 |
+| S-211.1.6 | negative | Given a page with no gateway set up, then nothing is sent and nothing fails | `test_S_211_1_6…` (Botcake page with no gateway row; gateway without a site key) | passed 2026-11-01 |
+| S-211.1.7 | negative | Given `page_not_found` or a 422 from Forbeast, then the send is marked failed with the reason, not retried forever, and the encode and the sheet are unaffected | `test_S_211_1_7…` (404 page_not_found and 422; a 404 without page_not_found is retried) | passed 2026-11-01 |
+| S-211.1.8 | edge | Given the same send retried (queue redelivery, lost reply), then Forbeast answers `duplicate` and it is marked sent | `test_S_211_1_8…` | passed 2026-11-01 |
+| S-211.1.9 | edge | Given Forbeast down, timing out, 5xx or 429, then the send retries with backoff and lands later; encoding never waits for it | `test_S_211_1_9…` (timeout, 503, 500, 429; and the give-up after the retry time) | passed 2026-11-01 |
+| S-211.1.10 | edge | Given 401 (site key changed), then sending pauses and the failure is visible; nothing is dropped | `test_S_211_1_10…` (2 tests: pause, probe and resume; one gateway never holds back the other) | passed 2026-11-01 |
+| S-211.1.11 | edge | Given times, then `ordered_at` carries the Manila offset (+08:00) | `test_S_211_1_11…` | passed 2026-11-01 |
+| S-211.1.12 | edge | Given Filipino text and emoji in name, shop or input, then they are sent unchanged | `test_S_211_1_12…` | passed 2026-11-01 |
+| S-211.1.13 | happy | Given sends that failed for good, then the owner sees them in a short list (order, page, reason, time) with "send again" | `test_S_211_1_13…` (3 tests: list and Send again; never replaces a newer send; stuck queued sends) | passed 2026-11-01 |
+| S-211.1.14 | edge | Given orders from before go-live, then none are sent (no backfill) | `test_S_211_1_14…` | passed 2026-11-01 |

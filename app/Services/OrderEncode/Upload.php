@@ -54,6 +54,8 @@ class Upload
                 $o->input = array_merge((array) $o->input, ['linked' => true]);
                 $in = $this->save($o, $in);
                 if (!$this->live->appendRaw($row, $in)) return $this->notAccepted($o, $row);
+                // Ang Update ay bagong version ng parehong order sa Forbeast (ang row ay may usapan na ng order na ito).
+                app(ForbeastOrders::class)->queue($o, $row, ForbeastOrders::UPLOADED);
 
                 return ['result' => 'updated', 'row' => $id, 'note' => 'Row ' . $id . ' updated with this order\'s messages'];
             }));

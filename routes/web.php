@@ -751,6 +751,9 @@ Route::middleware(['web', 'auth'])->get('/order-encode', [\App\Http\Controllers\
 // Ang lahat ng page (galing sa Likha import) laban sa final na order; ang tatlong setting ng import shadow ay CEO lang.
 Route::middleware(['web', 'auth'])->get('/order-encode/final', [\App\Http\Controllers\OrderEncodeFinalController::class, 'index'])->name('order-encode.final');
 Route::middleware(['web', 'auth'])->post('/order-encode/import-settings', [\App\Http\Controllers\OrderEncodeFinalController::class, 'save'])->name('order-encode.import-settings');
+// Spec 211: ang mga padala ng order sa Forbeast na pumalya o naka-pause, at ang "Send again". CEO lang.
+Route::middleware(['web', 'auth'])->get('/order-encode/forbeast', [\App\Http\Controllers\OrderEncodeForbeastController::class, 'index'])->name('order-encode.forbeast');
+Route::middleware(['web', 'auth'])->post('/order-encode/forbeast/{orderEncode}/resend', [\App\Http\Controllers\OrderEncodeForbeastController::class, 'resend'])->whereNumber('orderEncode')->name('order-encode.forbeast.resend');
 // Ang natutunang address ng encoder (address_notes): CEO lang. Hanapin, aprubahan, tanggihan, palitan ang sagot, bulk approve.
 Route::middleware(['web', 'auth'])->get('/order-encode/notes', [\App\Http\Controllers\OrderEncodeNotesController::class, 'index'])->name('order-encode.notes');
 Route::middleware(['web', 'auth'])->post('/order-encode/notes/bulk', [\App\Http\Controllers\OrderEncodeNotesController::class, 'bulk'])->name('order-encode.notes.bulk');

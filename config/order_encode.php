@@ -27,4 +27,18 @@ return [
         'astra' => 'astra',
         'astra_live' => 'astra-live',
     ],
+    // Ang order na naisulat sa macro_output ay ipinapadala rin sa Forbeast ng gateway ng page (spec 211).
+    'forbeast' => [
+        // Ang go-live (ISO 8601, hal. 2026-11-02T00:00:00+08:00): ang mga row na nagawa mula noon lang ang ipinapadala
+        // (walang backfill). Walang laman = nakapatay.
+        'since' => env('FORBEAST_ORDERS_SINCE'),
+        // Ang pangalan ng site sa ref (<site>-mo-<id>); walang laman = ayon sa app.url (likha / incepxion).
+        'site' => env('FORBEAST_ORDERS_SITE'),
+        // Ilang oras inuulit ang padala na hindi dumarating (Forbeast down, 5xx, 429) bago ito failed.
+        'retry_hours' => (int) env('FORBEAST_ORDERS_RETRY_HOURS', 24),
+        // Ilang minuto walang tawag sa gateway pagkatapos ng 401/403 (site key), bago ang probe ng bantay.
+        'pause_minutes' => (int) env('FORBEAST_ORDERS_PAUSE_MINUTES', 15),
+        // Ang queue ng padala: sa database queue na "default" (may sariling Supervisor group), hindi sa encode.
+        'queue' => env('FORBEAST_ORDERS_QUEUE', 'default'),
+    ],
 ];
