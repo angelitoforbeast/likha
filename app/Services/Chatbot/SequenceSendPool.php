@@ -44,6 +44,7 @@ class SequenceSendPool extends TicketPool
     {
         parent::__construct($handler);
         $this->clock = $clock ?? app(BotcakeClock::class);
+        $this->progressAt = now()->getTimestamp();
     }
 
     public function max(): int
@@ -56,12 +57,32 @@ class SequenceSendPool extends TicketPool
     {
         $beat = Cache::get(self::BEAT);
 
-        return self::alive() && (int) ($beat['sequence'] ?? 0) === 1 && empty($beat['stopped']);
+        return self::alive() && (int) ($beat['sequence'] ?? 0) === 1 && empty($beat['stopped']) && !self::stalled();
     }
+
+    /** Ang huling galaw (may nakuha, may natapos, o walang naghihintay): sa beat, para makita ng tick ang pool na buhay pero hindi umuusad. */
+    private int $progressAt = 0;
+    public const STALL_SECONDS = 300;
+    public const STALLED = 'sequence-send-pool:stalled';
 
     protected function beatInfo(): array
     {
-        return ['sequence' => 1];
+        return ['sequence' => 1, 'progress_at' => $this->progressAt];
+    }
+
+    /** Buhay ang beat pero walang galaw nang STALL_SECONDS habang may naghihintay. */
+    public static function stalled(): bool
+    {
+        $beat = Cache::get(self::BEAT);
+
+        if (!self::alive() || !empty($beat['stopped']) || !isset($beat['progress_at'])) return false;
+        // Nakita nang hindi umuusad (ng tick): hindi pa rin, hangga't walang bagong galaw, kahit naubos na ang naghihintay.
+        if (Cache::get(self::STALLED) === ($beat['owner'] ?? '') . ':' . $beat['progress_at']) return true;
+        // Ang beat muna (walang query sa karaniwang takbo); saka kung may naghihintay talaga.
+        if ((int) $beat['progress_at'] >= now()->getTimestamp() - self::STALL_SECONDS || !BotcakeSendQueue::sequencePending()) return false;
+        Cache::put(self::STALLED, ($beat['owner'] ?? '') . ':' . $beat['progress_at'], 3600);
+
+        return true;
     }
 
     /**
@@ -96,6 +117,8 @@ class SequenceSendPool extends TicketPool
             $this->claimedAt = $now;
             $started = count(BotcakeSendQueue::claim($this->owner, $this->max() - count($this->jobs), fn (object $c) => $this->room($c), fn (object $row) => $this->take($row),
                 $this->fullPages(), [], false, true));
+            // Galaw: may nakuha, o walang hawak at walang naghihintay.
+            if ($started > 0 || (!$this->jobs && !BotcakeSendQueue::sequencePending())) $this->progressAt = now()->getTimestamp();
         }
         $this->lanes();
         $this->pump();
@@ -355,6 +378,7 @@ class SequenceSendPool extends TicketPool
             }
             $this->forget($id);
             BotcakeSendQueue::finishSequence($row, $this->owner, $o + ['ref' => $job['ref']]);
+            $this->progressAt = now()->getTimestamp();
             // Pagkatapos maitala ang resulta: ang pumalyang dispatch ay hindi nagiging failed na padala.
             if ($job['provider'] === ChatbotProvider::GATEWAY) {
                 try {

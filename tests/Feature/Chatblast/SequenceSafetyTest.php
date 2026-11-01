@@ -56,14 +56,24 @@ class SequenceSafetyTest extends SequenceHandoffTestCase
         $this->join($seq, '7001');
         $this->steps();
         $this->assertCount(1, $this->tickets());
-        foreach ([3, 9] as $minutes) { // 12 minutes in all, inside the ticket's 15-minute deadline
-            $this->travel($minutes)->minutes();
-            $this->pool->beat(); // the pool is alive, only slow
-            $this->replyPool->beat();
-            $this->tick();
+        // The pool is alive and working, but this send waits (here: behind the customer's reply, put back every round).
+        $reply = DB::table(BotcakeSendQueue::TABLE)->insertGetId(['request_id' => 'reply-long', 'kind' => 'chatbot', 'priority' => 0, 'customer' => BotcakeSendQueue::chatbotCustomer(1001, 7001),
+            'page_id' => 1001, 'page_name' => 'Page Uno', 'psid' => '7001', 'node_id' => 'n2', 'flow_id' => 1, 'payload' => '{"messages":[]}', 'status' => 'pending',
+            'deadline_at' => now()->addHour(), 'created_at' => now(), 'updated_at' => now()]);
+        foreach ([3, 9] as $minutes) { // a 12-minute wait
+            for ($m = 0; $m < $minutes; $m++) {
+                $this->travel(1)->minutes();
+                $this->round();
+                $this->pool->beat();
+                $this->replyPool->beat();
+                $this->tick();
+            }
         }
         Queue::assertPushed(RunChatbotSequenceStep::class, 1);
-        $this->assertCount(1, $this->tickets());
+        $this->assertCount(2, $this->tickets(), 'still the one sequence ticket (and the reply)');
+        $this->assertSame([], $this->calls);
+        DB::table(BotcakeSendQueue::TABLE)->where('id', $reply)->update(['status' => 'done']);
+        $this->travel(2)->seconds();
         $this->settle(3);
         $this->assertSame(['Hi'], $this->sentTo('7001'));
     }

@@ -67,6 +67,7 @@ class GatewayProvider implements MessagingProvider
         if ($q === null) return ['status' => 'failed', 'error' => self::notSetUp((string) $this->last), 'http' => null];
 
         try {
+            SequenceAttempt::beforeCall(); // ang padala ng sequence step: itinatala bago lumabas
             $res = Http::withToken($q['key'])->acceptJson()->connectTimeout(min(5, $q['timeout']))->timeout($q['timeout'])->post($q['url'], $q['body']);
             $r = ['http' => $res->status(), 'body' => $res->json() ?? $res->body()];
         } catch (ConnectionException) {

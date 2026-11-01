@@ -38,11 +38,19 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         return [['type' => 'sheet', 'config' => ['sheet' => '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcd', 'tab' => 'Orders', 'columns' => ['{{psid}}']]]];
     }
 
-    /** The marker a killed job leaves (its finally never ran), with the row claimable again. */
+    /** The attempt a killed job leaves in its row (its finally never ran), started long enough ago to be dead. */
     private function leftOver(object $seq, string $psid, array $marker): void
     {
         $sub = $this->sub($seq, $psid);
-        Cache::put(ChatbotSequences::attemptKey((int) $sub->id, 1, substr((string) $sub->next_send_at, 0, 19)), $marker, 3600);
+        DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->update(['attempt' => ChatbotSequences::attemptValue(1, substr((string) $sub->next_send_at, 0, 19),
+            $marker['attempts'], $marker['sending'], now()->subMinutes(10)->getTimestamp())]);
+    }
+
+    private function attempt(int $id): ?array
+    {
+        $a = ChatbotSequences::parseAttempt(DB::table('chatbot_sequence_subscriptions')->where('id', $id)->value('attempt'), 1, '2026-11-02 10:00:00');
+
+        return $a === null ? null : ['attempts' => $a['attempts'], 'sending' => $a['sending']];
     }
 
     public function test_S_215_8_and_1b_a_step_killed_after_its_sheet_row_and_before_its_send_is_not_run_again(): void
@@ -57,21 +65,20 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         $this->assertSame([['earlier attempt']], $this->sheetRows, 'no second sheet row');
         $this->assertSame([], $this->calls, 'and no send');
         $this->assertSame(2, (int) $this->sub($seq, '7001')->current_step, 'recorded and advanced');
-        $this->assertContains('Sequence Sheet step 1 failed: ' . ChatbotSequences::NOT_RESENT, $this->events('7001'));
+        $this->assertContains('Sequence Sheet step 1 failed: ' . ChatbotSequences::NOT_RERUN, $this->events('7001'));
     }
 
     public function test_1b_a_live_run_keeps_its_marker_only_while_it_runs(): void
     {
         $seq = $this->sequence('Mark', [$this->stepFlow(['Hi'], $this->sheetStep())->id]);
         $id = $this->join($seq, '7001');
-        $key = ChatbotSequences::attemptKey($id, 1, '2026-11-02 10:00:00');
-        $this->app->instance(ChatbotSheet::class, new class($this, $key) extends ChatbotSheet {
-            public function __construct(private $test, private string $key) {}
-            public function append(string $spreadsheetId, string $tab, array $row): ?string { $this->test->sheetRows[] = Cache::get($this->key); return null; }
+        $this->app->instance(ChatbotSheet::class, new class($this, $id) extends ChatbotSheet {
+            public function __construct(private $test, private int $id) {}
+            public function append(string $spreadsheetId, string $tab, array $row): ?string { $this->test->sheetRows[] = $this->test->attemptOf($this->id); return null; }
         });
         $this->steps();
-        $this->assertSame([['attempts' => 1, 'sending' => false]], $this->sheetRows, 'written when the step starts');
-        $this->assertNull(Cache::get($key), 'gone once the run ends normally (handed off)');
+        $this->assertSame([['attempts' => 1, 'sending' => false]], $this->sheetRows, 'written in the row when the step starts');
+        $this->assertNull($this->attempt($id), 'cleared once the run ends normally (handed off)');
     }
 
     public function test_1b_a_step_with_only_repeatable_nodes_is_run_again_once_then_recorded(): void
@@ -88,7 +95,12 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         $this->assertSame(['sent: Hi'], $this->replies('7001'), 'run again once, sent once');
         $this->assertSame([], $this->replies('7002'), 'not a third time');
         foreach (['7001', '7002'] as $p) $this->assertSame(2, (int) $this->sub($seq, $p)->current_step);
-        $this->assertContains('Sequence Plain step 1 failed: ' . ChatbotSequences::NOT_RESENT, $this->events('7002'));
+        $this->assertContains('Sequence Plain step 1 failed: ' . ChatbotSequences::NOT_RERUN, $this->events('7002'), 'its own reason: nothing was sent');
+    }
+
+    public function attemptOf(int $id): ?array
+    {
+        return $this->attempt($id);
     }
 
     public function test_2_a_job_killed_during_an_inline_call_never_sends_the_step_again(): void
@@ -97,10 +109,9 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         $id = $this->join($seq, '7001');
         $this->pool->stop(); // the pool dropped: the step sends inline
         $this->travel(2)->seconds();
-        $key = ChatbotSequences::attemptKey($id, 1, '2026-11-02 10:00:00');
         $during = null;
-        Http::fake(['botcake.io/*' => function () use ($key, &$during) {
-            $during = Cache::get($key);
+        Http::fake(['botcake.io/*' => function () use ($id, &$during) {
+            $during = $this->attempt($id);
             return Http::response(['success' => true]);
         }]);
         $this->steps();
@@ -131,16 +142,18 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         $this->assertSame(2500, $this->tickets()->count());
 
         $base = \Carbon\Carbon::parse('2026-11-02 10:00:00');
-        for ($t = 0.0; $t <= 1500; $t += 0.1) {
+        for ($i = 0; $i <= 15000; $i++) {
+            $t = $i / 10;
             $this->clock->time = 1000 + $t;
-            if (fmod($t, 1.0) < 0.05) {
+            if ($i % 10 === 0) {
                 \Carbon\Carbon::setTestNow($base->copy()->addSeconds((int) $t));
                 $this->pool->beat();
                 $this->replyPool->beat();
             }
-            if (fmod($t, 60.0) < 0.05) $this->tick(); // the minute tick: sweep, dead pool, backstop
+            if ($i % 600 === 0) $this->tick(); // the minute tick: sweep, dead pool, backstop
             $this->pool->tick();
-            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending') $this->answer($c);
+            // The API answers after 2.9 s: at any time some calls are live, also past 20 minutes.
+            foreach ($this->calls as $c) if ($c['p']->getState() === 'pending' && $this->clock->now() >= $c['t'] + 2.9) $this->answer($c);
             $this->pool->tick(false);
             $this->resumes();
             if (DB::table('chatbot_sequence_subscriptions')->where('status', 'completed')->count() === 2500) break;
@@ -149,7 +162,8 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         $this->assertSame(2500, DB::table('chatbot_replies')->where('status', 'sent')->count(), 'all sent');
         $this->assertSame(0, DB::table('chatbot_replies')->where('status', 'failed')->count(), 'none failed for being late');
         $this->assertSame(2500, DB::table('chatbot_sequence_subscriptions')->where('status', 'completed')->count());
-        $this->assertGreaterThan(15 * 60, $t, 'the last ones went out past the old 15-minute deadline');
+        $this->assertGreaterThan(20 * 60, $t, 'the last ones went out past the old deadline and past the 20-minute backstop');
+        $this->assertSame(0, DB::table(BotcakeSendQueue::TABLE)->where('error', 'like', '%did not answer%')->count(), 'no live call was failed as "no answer"');
     }
 
     public function test_3_a_dead_pool_cancels_waiting_tickets_and_the_tick_sends_them_inline(): void
@@ -168,12 +182,15 @@ class SequenceReRunTest extends SequenceHandoffTestCase
         $this->assertSame(['sent: Hi'], $this->replies('7001'), 'the waiting step went inline');
         $this->assertSame([], $this->replies('7002'), 'side effects already ran: recorded, not run again');
         $this->assertSame('completed', $this->sub($effect, '7002')->status);
-        $this->assertContains('Sequence Effect step 1 failed: ' . ChatbotSequences::NOT_RESENT, $this->events('7002'));
+        $this->assertContains('Sequence Effect step 1 failed: ' . ChatbotSequences::NOT_RERUN, $this->events('7002'));
     }
 
     public function test_5_a_ticket_that_cannot_be_written_gives_the_step_back_to_the_tick_or_records_it(): void
     {
-        DB::statement("CREATE TRIGGER no_ticket BEFORE INSERT ON botcake_send_requests BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
+        // The ticket write fails (the same trigger idea on each database).
+        DB::statement(DB::getDriverName() === 'mysql'
+            ? "CREATE TRIGGER no_ticket BEFORE INSERT ON botcake_send_requests FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'database is locked'"
+            : "CREATE TRIGGER no_ticket BEFORE INSERT ON botcake_send_requests BEGIN SELECT RAISE(ABORT, 'database is locked'); END");
         $plain = $this->sequence('Plain', [$this->stepFlow(['Hi'])->id, [$this->stepFlow(['Two'])->id, 1, 'days']]);
         $effect = $this->sequence('Effect', [$this->stepFlow(['Hi'], [['type' => 'set', 'config' => ['ops' => [['op' => 'append', 'field' => 'n', 'value' => 'x']]]]])->id,
             [$this->stepFlow(['Two'])->id, 1, 'days']]);

@@ -412,6 +412,13 @@ class BotcakeSendQueue
         }, 3);
     }
 
+    /** May sequence ticket bang naghihintay na makuha ngayon (para sa galaw ng pool)? */
+    public static function sequencePending(): bool
+    {
+        return DB::table(self::TABLE)->where('status', 'pending')->where('priority', self::SEQUENCE_PRIORITY)
+            ->where(fn ($q) => $q->whereNull('next_at')->orWhere('next_at', '<=', now()))->exists();
+    }
+
     /** May sagot ba ng bot sa customer na hindi pa tapos (pending o sending) sa botcake:send-pool? Ang sequence ay naghihintay dito. */
     public static function replyOpen(int|string $pageId, int|string $psid): bool
     {
@@ -499,13 +506,21 @@ class BotcakeSendQueue
     {
         $out = ['failed' => 0, 'redispatched' => 0, 'pruned' => 0];
         if (!Schema::hasTable(self::TABLE)) return $out;
-        foreach (DB::table(self::TABLE)->where('priority', self::SEQUENCE_PRIORITY)->where('kind', self::SEQUENCE)->whereIn('status', ['done', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))->orderBy('id')->limit(500)->get() as $row) {
-            DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
-            ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
-            $out['redispatched']++;
+        // Kada status, sa index (status, priority, id): hindi binabasa ang buong table.
+        foreach (['done', 'failed'] as $status) {
+            foreach (DB::table(self::TABLE)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))
+                ->orderBy('id')->limit(500)->get() as $row) {
+                DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
+                ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
+                $out['redispatched']++;
+            }
         }
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->where('kind', self::SEQUENCE)
-            ->whereIn('status', ['resumed', 'failed', 'done'])->orderBy('id')->limit(5000)->delete();
+        // Ang luma (tapos, pumalya, skipped o kinansela = resumed) ay binubura nang paunti-unti, sa index (status, priority, id).
+        foreach (['resumed', 'failed', 'done'] as $status) {
+            $ids = DB::table(self::TABLE)->where('status', $status)->where('priority', self::SEQUENCE_PRIORITY)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))
+                ->orderBy('id')->limit(5000)->pluck('id');
+            if ($ids->isNotEmpty()) $out['pruned'] += DB::table(self::TABLE)->whereIn('id', $ids->all())->delete();
+        }
 
         return $out;
     }
