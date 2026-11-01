@@ -22,10 +22,18 @@ class ChatbotAiKeyController extends Controller
     {
     }
 
-    /** Ang iisang CEO check ng app (trim, pinagsamang espasyo, hindi case-sensitive), gaya ng Horizon at ng remembered login. */
+    /** Ang role ng naka-login (trim at pinagsamang espasyo), gaya ng ibang screen ng /chatbot. */
+    private static function role(): string
+    {
+        $raw = Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '';
+
+        return preg_replace('/\s+/u', ' ', trim((string) $raw));
+    }
+
+    /** CEO lang, sa parehong check ng ibang CEO-only na screen ng /chatbot (role === 'CEO'). */
     public static function allowed(): bool
     {
-        return \App\Listeners\RefuseRememberedLoginUnlessCeo::isCeo(Auth::user());
+        return self::role() === 'CEO';
     }
 
     private function checkAccess(): void
