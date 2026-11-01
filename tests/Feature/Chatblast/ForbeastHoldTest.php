@@ -379,4 +379,75 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertStringContainsString('did not answer', $events[0]['reason']);
         $this->assertStringContainsString('answered again', $events[1]['reason']);
     }
+
+    /** Isang takbo ng chatbot:forbeast-watch (health ng bawat page, saka ang hold), $seconds mula sa nauna. */
+    private function watch(int $seconds = 0): void
+    {
+        if ($seconds > 0) $this->travel($seconds)->seconds();
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+    }
+
+    public function test_S_213_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together(): void
+    {
+        // Ang hold ay mula sa padala; ang health ng lahat ng page (pati Page 6, wala sa burst) ay pumapalya nang tatlo at higit pa.
+        $this->burst();
+        $this->watch(30);
+        $this->watch(30);
+        $this->watch(30);
+        foreach ([1, 2, 3, 4, 5, 6] as $n) $this->assertSame('gateway', $this->provider($n));
+
+        $this->watch(31);
+        foreach ([1, 2, 3, 4, 5, 6] as $n) $this->assertSame('botcake', $this->provider($n));
+        $switched = $this->events(ForbeastWatch::SWITCHED);
+        $this->assertSame(['Page 1' => 'no_answer', 'Page 2' => 'health', 'Page 3' => 'health', 'Page 4' => 'health', 'Page 5' => 'health', 'Page 6' => 'health'],
+            collect($switched)->mapWithKeys(fn ($e) => [$e['page'] => $e['condition']])->sortKeys()->all());
+        $this->assertTrue(collect($switched)->every(fn ($e) => ($e['held_seconds'] ?? 0) >= 120));
+        $row = PageSetting::where('page_name', 'Page 4')->where('key', 'auto_switch')->orderByDesc('id')->first();
+        $this->assertTrue(ForbeastWatch::returnable($row));
+        $this->assertCount(1, $this->events(ForbeastWatch::HELD));
+    }
+
+    public function test_S_213_10_a_recovery_resets_the_health_counters_too(): void
+    {
+        $this->burst();
+        $this->watch(30);
+        $this->watch(30);
+        $this->down[self::GW] = [];
+        $this->send(3);
+        $this->assertCount(1, $this->events(ForbeastWatch::RECOVERED));
+
+        // Bago ang bawi ay dalawa na ang palya ng health ng Page 3; pagkatapos, dalawa pa lang ulit: hindi pa lipat.
+        $this->down[self::GW] = ['2003'];
+        $this->watch(30);
+        $this->watch(30);
+        $this->assertSame('gateway', $this->provider(3));
+    }
+
+    public function test_S_213_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today(): void
+    {
+        // Isang page lang ang pumapalya ang health: lipat sa ikatlo, gaya ng dati.
+        $this->down[self::GW] = ['2006'];
+        $this->watch();
+        $this->watch(30);
+        $this->assertSame('gateway', $this->provider(6));
+        $this->watch(30);
+        $this->assertSame('botcake', $this->provider(6));
+        $this->assertSame([], $this->events(ForbeastWatch::HELD));
+
+        // Lahat ng page ay pumapalya ang health (walang padala): hold sa halip na lipat.
+        $this->travel(5)->minutes();
+        $this->down[self::GW] = ['2001', '2002', '2003', '2004', '2005'];
+        $this->watch();
+        $this->watch(30);
+        $this->watch(30);
+        foreach ([1, 2, 3, 4, 5] as $n) $this->assertSame('gateway', $this->provider($n));
+        $held = $this->events(ForbeastWatch::HELD);
+        $this->assertCount(1, $held);
+        $this->assertSame(['forbeast', 5, 'health'], [$held[0]['gateway'], $held[0]['page_count'], $held[0]['trigger']]);
+
+        // Hindi bumalik: sa dulo ng hold, lahat ng umabot ay lumilipat nang sabay.
+        $this->watch(60);
+        $this->watch(61);
+        foreach ([1, 2, 3, 4, 5] as $n) $this->assertSame('botcake', $this->provider($n));
+    }
 }
