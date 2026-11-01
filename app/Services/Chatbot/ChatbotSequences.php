@@ -31,10 +31,11 @@ class ChatbotSequences
     public const BATCH = 500;
     public const SECONDS = 50;
     public const REDISPATCH_MINUTES = 10; // ang job na namatay sa gitna (padalang naghihintay): kinukuha ulit pagkalipas nito
-    public const STALE_MINUTES = 2;       // gaya nito, kapag ipinapasa ang padala (ang job ay hanggang HANDOFF_TIMEOUT lang)
-    public const HANDOFF_TIMEOUT = 100;   // segundo: mas maikli sa STALE_MINUTES
+    public const STALE_MINUTES = 2;       // gaya nito, kapag ipinapasa ang padala (ang tumatakbong job ay may tanda, RUNNING)
     public const INLINE_TIMEOUT = 280;    // mas maikli sa lock ng customer (ChatbotRunner::LOCK_SECONDS)
-    public const BACKSTOP_MINUTES = 5;    // lampas sa deadline ng ticket: ang naiwang tali ay tinatapos, anuman ang status
+    public const BACKSTOP_MINUTES = 20;   // ang tali na walang galaw nang ganito (hindi ang naghihintay sa buhay na pool) ay tinatapos
+    public const ATTEMPT = 'chatbot-seq-attempt:'; // ang takbo ng step na nagsimula (sub, step, due): naiiwan kapag namatay ang job
+    public const ATTEMPT_TTL = 2 * 86400;
     public const HOLD_MINUTES = 60;       // naka-pause ang bot para sa customer: subukan ulit pagkalipas nito
     public const LOCKED_RETRY_MINUTES = 1;
     public const WINDOW_HOURS = 24;       // Messenger: send_content sa loob ng 24 oras mula sa huling mensahe ng customer
@@ -302,13 +303,16 @@ class ChatbotSequences
                 ->join('chatbot_sequences as q', 'q.id', '=', 's.sequence_id')
                 ->where('s.status', 'active')->where('q.active', true)->where('s.next_send_at', '<=', now())
                 ->where(fn ($w) => $w->whereNull('s.dispatched_at')->orWhere('s.dispatched_at', '<', $stale))
-                ->when($inFlight, fn ($q) => $q->whereNull('s.send_request_id'))
                 ->when($after, fn ($q) => $q->where(fn ($w) => $w->where('s.next_send_at', '>', $after->next_send_at)
                     ->orWhere(fn ($x) => $x->where('s.next_send_at', $after->next_send_at)->where('s.id', '>', $after->id))))
-                ->orderBy('s.next_send_at')->orderBy('s.id')->limit(self::BATCH)->get(['s.id', 's.next_send_at', 's.dispatched_at']);
+                ->orderBy('s.next_send_at')->orderBy('s.id')->limit(self::BATCH)
+                ->get(array_merge(['s.id', 's.next_send_at', 's.dispatched_at'], $inFlight ? ['s.send_request_id'] : []));
             if ($rows->isEmpty()) break;
             $after = $rows->last();
-            $ids = $rows->pluck('id')->map(fn ($id) => (int) $id)->all();
+            $fetched = $rows->count();
+            // Ang nasa himpapawid ay nilalaktawan dito, hindi sa SQL: ang "send_request_id IS NULL" sa WHERE ay nagpapapili sa MySQL
+            // ng index ng column na iyon (ref NULL, filesort) imbes na (status, next_send_at). Ang claim ay sinusuri rin ito.
+            $ids = $rows->filter(fn ($r) => !$inFlight || $r->send_request_id === null)->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
             $earlier = $rows->mapWithKeys(fn ($r) => [(int) $r->id => $r->dispatched_at === null ? null : (string) $r->dispatched_at])->all();
             $stamp = now()->format('Y-m-d H:i:s');
             foreach ($this->claim($ids, $stamp) as $id) {
@@ -316,7 +320,7 @@ class ChatbotSequences
                 RunChatbotSequenceStep::dispatch($id, $stamp, $earlier[$id] ?? null);
                 $queued++;
             }
-        } while (count($ids) === self::BATCH && microtime(true) < $until);
+        } while ($fetched === self::BATCH && microtime(true) < $until);
 
         return $queued;
     }
@@ -349,7 +353,7 @@ class ChatbotSequences
         $release = fn (array $extra = []) => ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->when($inFlight, fn ($q) => $q->whereNull('send_request_id'))
             ->update($extra + ['dispatched_at' => null, 'updated_at' => now()]);
         // Tumatakbo: hindi ito kinukuha ulit ng tick habang buhay ang job (hanggang sa timeout nito).
-        Cache::put(self::RUNNING . $sub->id, 1, ($timeout ?? (BotcakeSendQueue::sequenceReady() ? self::HANDOFF_TIMEOUT : self::INLINE_TIMEOUT)) + 10);
+        Cache::put(self::RUNNING . $sub->id, 1, ($timeout ?? self::INLINE_TIMEOUT) + 10);
 
         $lock = Cache::lock('chatbot-run:' . $sub->page_id . ':' . $sub->psid, ChatbotRunner::LOCK_SECONDS);
         if (!$lock->get()) {
@@ -442,6 +446,17 @@ class ChatbotSequences
                 return $this->advance($sub, $seq, $step, false);
             }
 
+            // Ang naunang takbo ng parehong step (parehong due) ay namatay bago natapos (naiwan ang tanda nito): hindi na inuulit kapag
+            // maaaring may naipadala na (padalang naghintay), may epekto na bago ang unang padala, o naulit na nang isang beses.
+            $attemptKey = self::attemptKey((int) $sub->id, (int) $step->position, $detail['due']);
+            $prev = Cache::get($attemptKey);
+            if (is_array($prev) && (!empty($prev['sending']) || self::preSendEffects((array) $flow->graph) || (int) ($prev['attempts'] ?? 1) >= 2)) {
+                Cache::forget($attemptKey);
+                $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => self::NOT_RESENT] + $detail);
+                return $this->advance($sub, $seq, $step, !empty($prev['sending']));
+            }
+            Cache::put($attemptKey, ['attempts' => (int) ($prev['attempts'] ?? 0) + 1, 'sending' => false], self::ATTEMPT_TTL);
+
             $group = $this->groups->forSequence((int) $seq->id, $fields, $page);
             $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page, $group), $fields, null,
                 '', (string) $last?->name, now()->format('Y-m-d H:i'));
@@ -450,17 +465,21 @@ class ChatbotSequences
             if ($this->groups->lookupNote !== null) $run->event('ad_lookup', null, ['note' => $this->groups->lookupNote]);
             $run->startedBy = 'sequence ' . $seq->name . ' step ' . $step->position;
             [$run->sequenceId, $run->sequenceStep] = [(int) $seq->id, (int) $step->position];
-            if ($inFlight) {
-                $run->sequenceTicket = ['subscription_id' => (int) $sub->id, 'current_step' => (int) $sub->current_step, 'step' => (int) $step->position,
-                    'due' => $detail['due'], 'name' => (string) $seq->name, 'sequence_id' => (int) $seq->id, 'stamp' => $stamp, 'first_sent_at' => null, 'side_effects' => false];
-            }
+            $run->sequenceTicket = ['subscription_id' => (int) $sub->id, 'current_step' => (int) $sub->current_step, 'step' => (int) $step->position,
+                'due' => $detail['due'], 'name' => (string) $seq->name, 'sequence_id' => (int) $seq->id, 'stamp' => $stamp, 'first_sent_at' => null, 'side_effects' => false];
             try {
                 $this->engine->run($run, $this->outbox);
-                if (!$run->sendPending) $run->event('sequence', null, ['op' => 'ran'] + $detail);
             } catch (Throwable $e) {
                 report($e);
                 if (!$run->sendPending) $run->event('sequence', null, ['op' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 150)] + $detail);
+                $run->sequenceTicket['error'] = true;
             }
+            // Hindi naipasa ang padala: walang ran at walang usad dito (handOffFailed).
+            if ($failed = $this->handOffFailed($run, $sub, $seq, $step, null, $detail)) {
+                ChatbotEvents::store($run, $sub->page_id, $sub->psid);
+                return $failed;
+            }
+            if (!$run->sendPending && empty($run->sequenceTicket['error'])) $run->event('sequence', null, ['op' => 'ran'] + $detail);
             ChatbotEvents::store($run, $sub->page_id, $sub->psid);
             // Ipinasa ang padala: ang resume (o ang tick) ang uusad kapag alam na ang resulta.
             if ($run->sendPending) return 'sending';
@@ -469,6 +488,8 @@ class ChatbotSequences
         } finally {
             $lock->release();
             Cache::forget(self::RUNNING . $sub->id);
+            // Natapos ang takbo (hindi pinatay): ang tanda ng takbo ay binubura.
+            if (isset($attemptKey)) Cache::forget($attemptKey);
         }
     }
 
@@ -481,6 +502,73 @@ class ChatbotSequences
         if ($moved && (!$at || $moved->gt($at))) $at = $moved;
 
         return $at ? Carbon::instance($at) : null;
+    }
+
+    public static function attemptKey(int $subscriptionId, int $step, ?string $due): string
+    {
+        return self::ATTEMPT . $subscriptionId . ':' . $step . ':' . ($due ?? '');
+    }
+
+    /**
+     * Bago ang padalang naghihintay (inline) ng step: itinatala sa tanda ng takbo, kaya ang job na namatay sa gitna ng tawag ay
+     * hindi na inuulit (maaaring lumabas na ang mensahe kahit walang row).
+     */
+    public static function markSending(FlowRun $run): void
+    {
+        $s = $run->sequenceTicket;
+        if (!$s) return;
+        $key = self::attemptKey((int) $s['subscription_id'], (int) $s['step'], $s['due'] ?? null);
+        $m = Cache::get($key);
+        if (is_array($m)) Cache::put($key, ['sending' => true] + $m + ['attempts' => 1], self::ATTEMPT_TTL);
+    }
+
+    /** May node ba bago ang unang padala (mula sa Start) na may epekto kapag inulit (ang wala sa allowlist ng BotcakeSendQueue)? */
+    public static function preSendEffects(array $graph): bool
+    {
+        $nodes = [];
+        foreach ($graph['nodes'] ?? [] as $n) $nodes[$n['id']] = $n;
+        $out = [];
+        foreach ($graph['edges'] ?? [] as $e) $out[$e['from']][] = $e['to'];
+        $todo = array_keys(array_filter($nodes, fn ($n) => ($n['type'] ?? '') === 'start'));
+        $seen = [];
+        while ($todo) {
+            $id = array_shift($todo);
+            if (isset($seen[$id]) || !isset($nodes[$id])) continue;
+            $seen[$id] = true;
+            $n = $nodes[$id];
+            if (($n['type'] ?? '') === 'send') continue; // ang unang padala: ang kasunod ay saklaw ng 'sending'
+            if (!BotcakeSendQueue::repeatable($n)) return true;
+            foreach ($out[$id] ?? [] as $to) $todo[] = $to;
+        }
+
+        return false;
+    }
+
+    /**
+     * Ang padalang hindi naipasa (submitSequence): 'moved' = hindi na hawak ng takbo ang step (iba ang nagbago): walang usad;
+     * 'released' = hindi naisulat ang ticket (hal. deadlock): ibinabalik sa tick kapag walang naipadala at walang epekto,
+     * kung hindi ay tinatapos nang walang ulit. null = walang ganito.
+     */
+    private function handOffFailed(FlowRun $run, ChatbotSequenceSubscription $sub, ChatbotSequence $seq, ChatbotSequenceStep $step, ?string $ticket, array $detail): ?string
+    {
+        $s = (array) $run->sequenceTicket;
+        if (!empty($s['moved'])) return 'gone';
+        if (empty($s['released'])) return null;
+        if ($ticket === null && ($s['first_sent_at'] ?? null) === null && !BotcakeSendQueue::sideEffects($run)) {
+            ChatbotSequenceSubscription::whereKey($sub->id)->where('status', 'active')->whereNull('send_request_id')->update(['dispatched_at' => null, 'updated_at' => now()]);
+            return 'locked';
+        }
+        $this->event($sub->page_id, $sub->psid, ['op' => 'failed', 'error' => self::NOT_RESENT] + $detail);
+
+        return $this->advance($sub, $seq, $step, ($s['first_sent_at'] ?? null) !== null, $ticket);
+    }
+
+    /** Isang sequence event na may sariling oras (hal. ang ran, sa oras ng padala). */
+    private function eventAt(int $pageId, int $psid, array $detail, Carbon $at): void
+    {
+        $detail = array_map(fn ($v) => is_string($v) ? mb_substr($v, 0, 200) : $v, $detail);
+        DB::table('chatbot_events')->insert(['page_id' => $pageId, 'psid' => $psid, 'chat_id' => null, 'flow_id' => null, 'node_id' => null, 'type' => 'sequence',
+            'detail' => json_encode($detail + ['run' => bin2hex(random_bytes(4))], JSON_UNESCAPED_UNICODE), 'created_at' => $at]);
     }
 
     /** May padala na ba ang step na ito (sequence + step) sa customer mula sa naunang claim? */
@@ -616,11 +704,7 @@ class ChatbotSequences
         $holder = $sub && $sub->status === 'active' && $sub->send_request_id === $row->request_id && (int) $sub->current_step === (int) $s['current_step'];
         if (!$holder) {
             // Tapos na ang step sa ibang paraan (sumagot, inalis, lumipat ang page): ang naipadala ay naitala na, walang usad.
-            if ($first !== null) {
-                $this->event($pageId, $psid, ['op' => 'ran'] + $detail);
-                $id = DB::table('chatbot_events')->where('page_id', $pageId)->where('psid', $psid)->where('type', 'sequence')->max('id');
-                DB::table('chatbot_events')->where('id', $id)->update(['created_at' => $ranAt()]);
-            }
+            if ($first !== null) $this->eventAt($pageId, $psid, ['op' => 'ran'] + $detail, $ranAt());
             return 'dropped';
         }
         $seq = BotConfigCache::sequence((int) $sub->sequence_id);
@@ -669,13 +753,17 @@ class ChatbotSequences
         $run->ticket = ['request_id' => (string) $row->request_id, 'page_id' => $pageId, 'psid' => $psid, 'chat_id' => null, 'flow_id' => (int) $row->flow_id, 'node_id' => (string) $row->node_id];
         try {
             $this->engine->run($run, $this->outbox);
-            if (!$run->sendPending) {
+            if (!$run->sendPending && empty($run->sequenceTicket['moved']) && empty($run->sequenceTicket['released'])) {
                 $run->event('sequence', null, ['op' => 'ran'] + $detail);
                 $run->events[array_key_last($run->events)]['at'] = $ranAt();
             }
         } catch (Throwable $e) {
             report($e);
             if (!$run->sendPending) $run->event('sequence', null, ['op' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 150)] + $detail);
+        }
+        if ($failed = $this->handOffFailed($run, $sub, $seq, $step, (string) $row->request_id, $detail)) {
+            ChatbotEvents::store($run, $pageId, $psid);
+            return $failed;
         }
         ChatbotEvents::store($run, $pageId, $psid);
         if ($run->sendPending) return 'sending';
@@ -696,6 +784,10 @@ class ChatbotSequences
             case 'bot_paused':
                 $q()->update(['next_send_at' => now()->addMinutes(self::HOLD_MINUTES)] + $base);
                 $this->event($sub->page_id, $sub->psid, ['op' => 'held', 'reason' => 'bot paused'] + $detail);
+                return 'held';
+            case 'page_changed':
+                $q()->update(['next_send_at' => now()->addMinutes(self::HOLD_MINUTES)] + $base);
+                $this->event($sub->page_id, $sub->psid, ['op' => 'held', 'reason' => 'page ID changed'] + $detail);
                 return 'held';
             case 'outside_24h':
                 $q()->where('status', 'active')->update(['status' => 'unsubscribed', 'exit_reason' => 'outside 24h', 'next_send_at' => null] + $base);
@@ -726,13 +818,15 @@ class ChatbotSequences
             foreach ($rows as $t) $this->cancel($t, 'The sequence send pool was not running; nothing sent');
             BotcakeSendQueue::recoverSequence(null);
         }
-        $old = now()->subSeconds(BotcakeSendQueue::SEQUENCE_SECONDS + self::BACKSTOP_MINUTES * 60);
+        $alive = SequenceSendPool::alive(BotcakeSendQueue::DEAD_POOL_SECONDS);
+        $old = now()->subMinutes(self::BACKSTOP_MINUTES);
         $subs = DB::table('chatbot_sequence_subscriptions')->whereNotNull('send_request_id')->where(fn ($q) => $q->whereNull('dispatched_at')->orWhere('dispatched_at', '<', $old))
             ->orderBy('id')->limit(self::BATCH)->get();
         foreach ($subs as $sub) {
             $t = DB::table(BotcakeSendQueue::TABLE)->where('request_id', $sub->send_request_id)->first();
             if ($t && in_array($t->status, ['pending', 'sending'], true) && $t->called_at === null) {
-                $this->cancel($t, 'Not sent in time; nothing sent');
+                // Naghihintay sa buhay na pool: huli lang, hindi nawawala (ang 24 oras at ang subscription ay sinusuri bago ang tawag).
+                if (!$alive) $this->cancel($t, 'The sequence send pool was not running; nothing sent');
             } elseif ($t && $t->status === 'sending') {
                 BotcakeSendQueue::finishSequence($t, $t->claimed_by, ['status' => 'failed', 'error' => BotcakeSendQueue::noAnswer(json_decode((string) $t->result, true)['via'] ?? null), 'http' => null]);
             } elseif ($t && in_array($t->status, ['done', 'failed'], true)) {
@@ -796,14 +890,17 @@ class ChatbotSequences
     public static function settleForMove(int $pageId): void
     {
         if (!self::hasInFlight() || !Schema::hasTable(BotcakeSendQueue::TABLE)) return;
-        $uncalled = DB::table(BotcakeSendQueue::TABLE)->where('page_id', $pageId)->where('kind', BotcakeSendQueue::SEQUENCE)->whereIn('status', ['pending', 'sending'])
-            ->whereNull('called_at')->get(['id', 'request_id']);
-        foreach ($uncalled as $t) {
-            if (DB::table(BotcakeSendQueue::TABLE)->where('id', $t->id)->whereIn('status', ['pending', 'sending'])->whereNull('called_at')
-                ->update(['status' => 'resumed', 'error' => 'page transferred; nothing sent', 'done_at' => now(), 'resumed_at' => now(), 'updated_at' => now()]) !== 1) continue;
-            DB::table('chatbot_sequence_subscriptions')->where('send_request_id', $t->request_id)->update(['send_request_id' => null, 'dispatched_at' => null]);
-        }
-        foreach (DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->whereNotNull('send_request_id')->get() as $sub) {
+        // Naka-lock ang mga row (FOR UPDATE): ang ticket na itinali habang binabasa ay hindi nalalampasan ng snapshot.
+        foreach (DB::table('chatbot_sequence_subscriptions')->where('page_id', $pageId)->whereNotNull('send_request_id')->lockForUpdate()->get() as $sub) {
+            $t = DB::table(BotcakeSendQueue::TABLE)->where('request_id', $sub->send_request_id)->lockForUpdate()->first();
+            // Hindi pa natawag: kinakansela, ang step ay naiiwan para sa bagong site (isang beses doon).
+            if ($t && in_array($t->status, ['pending', 'sending'], true) && $t->called_at === null
+                && DB::table(BotcakeSendQueue::TABLE)->where('id', $t->id)->whereIn('status', ['pending', 'sending'])->whereNull('called_at')
+                    ->update(['status' => 'resumed', 'error' => 'page transferred; nothing sent', 'done_at' => now(), 'resumed_at' => now(), 'updated_at' => now()]) === 1) {
+                DB::table('chatbot_sequence_subscriptions')->where('id', $sub->id)->where('send_request_id', $sub->send_request_id)->update(['send_request_id' => null, 'dispatched_at' => null]);
+                continue;
+            }
+            // Natawag na (o may resulta na): umuusad na ngayon.
             $seq = BotConfigCache::sequence((int) $sub->sequence_id);
             $step = $seq?->steps->first(fn ($s) => $s->active && $s->position >= (int) $sub->current_step);
             $next = $step ? $seq->steps->first(fn ($s) => $s->active && $s->position >= $step->position + 1) : null;

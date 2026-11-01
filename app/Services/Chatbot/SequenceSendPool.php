@@ -262,7 +262,8 @@ class SequenceSendPool extends TicketPool
         $job = $this->jobs[$id] ?? null;
         if ($job === null) return null;
         $row = $job['row'];
-        if (!BotcakeSendQueue::owns($row, $this->owner)) {
+        // Ang ulit (429): hawak pa ba? Ang unang subok ay sinusuri ng kondisyonal na calledSequence mismo.
+        if ($job['attempt'] > 0 && !BotcakeSendQueue::owns($row, $this->owner)) {
             $this->forget($id);
             return null;
         }
@@ -293,6 +294,11 @@ class SequenceSendPool extends TicketPool
                 // Itinatala bago tumawag: hindi na inuulit pagkatapos ng crash.
                 if (!BotcakeSendQueue::calledSequence($row, $this->owner, $via, $job['ref'])) {
                     $this->forget($id);
+                    // Hawak pa ng pool pero wala nang may hawak na subscription (hal. sumagot ang customer): walang padala.
+                    if (BotcakeSendQueue::owns($row, $this->owner)) {
+                        BotcakeSendQueue::finishSequence($row, $this->owner, ['status' => 'skipped', 'error' => 'The customer left the sequence before the send went out', 'http' => null,
+                            'check' => 'not_holder', 'via' => $via, 'ref' => $job['ref']]);
+                    }
                     return null;
                 }
             }

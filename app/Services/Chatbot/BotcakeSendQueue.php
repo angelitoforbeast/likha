@@ -121,7 +121,8 @@ class BotcakeSendQueue
         if ($n <= 0) return [];
         $t = self::TABLE;
         $rows = DB::table("$t as t")->where('t.status', 'pending')->where(fn ($q) => $q->whereNull('t.next_at')->orWhere('t.next_at', '<=', now()))
-            ->where('t.deadline_at', '>', now())
+            // Ang sequence ticket ay walang deadline na nagpapabigo: naghihintay hanggang sa pool (huli, hindi nawawala).
+            ->where(fn ($q) => $sequence ? $q : $q->where('t.deadline_at', '>', now()))
             // Ang page na puno na ang lane ay hindi na isinasama sa SQL: hindi nito mapupuno ang listahan ng kandidato (ang ibang page ay nakikita pa rin).
             ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
             ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
@@ -299,7 +300,7 @@ class BotcakeSendQueue
 
     public const SEQUENCE = 'sequence';
     public const SEQUENCE_PRIORITY = 3;
-    public const SEQUENCE_SECONDS = 900; // ang ticket na hindi naipadala sa loob nito ay failed (ang 24 oras ay sinusuri pa rin bago ang tawag)
+    public const SEQUENCE_SECONDS = 25 * 3600; // talaan lang: ang sequence ticket ay hindi nabibigo dahil huli (ang 24 oras ay sinusuri bago ang tawag)
     /** Ang mga node na walang epekto kapag inulit ang step mula sa Start (allowlist; ang Set ay set o clear lang). */
     public const REPEATABLE = ['start', 'condition', 'send', 'end'];
 
@@ -336,6 +337,15 @@ class BotcakeSendQueue
         return !$run->test && $run->sequenceTicket !== null && $outbox instanceof BotcakeOutbox && BotcakeOutbox::enabled() && self::sequenceReady();
     }
 
+    /** Walang epekto ang node kapag inulit: ang REPEATABLE, at ang Set na set o clear lang. */
+    public static function repeatable(array $node): bool
+    {
+        $type = (string) ($node['type'] ?? '');
+        if (in_array($type, self::REPEATABLE, true)) return true;
+
+        return $type === 'set' && collect((array) ($node['config']['ops'] ?? []))->every(fn ($o) => in_array($o['op'] ?? 'set', ['set', 'clear'], true));
+    }
+
     /** May epekto na ba ang takbo na hindi dapat ulitin (anumang node maliban sa REPEATABLE at sa Set na set/clear lang)? */
     public static function sideEffects(FlowRun $run): bool
     {
@@ -343,11 +353,7 @@ class BotcakeSendQueue
         $nodes = [];
         foreach ($run->graph['nodes'] ?? [] as $n) $nodes[$n['id']] = $n;
         foreach ($run->path as $p) {
-            $type = (string) ($p['type'] ?? '');
-            if (in_array($type, self::REPEATABLE, true)) continue;
-            if ($type === 'set' && collect((array) ($nodes[$p['node']]['config']['ops'] ?? []))->every(fn ($o) => in_array($o['op'] ?? 'set', ['set', 'clear'], true))) continue;
-
-            return true;
+            if (!self::repeatable($nodes[$p['node']] ?? ['type' => $p['type'] ?? ''])) return true;
         }
 
         return false;
@@ -365,6 +371,20 @@ class BotcakeSendQueue
         $run->runId ??= bin2hex(random_bytes(4));
         $side = self::sideEffects($run);
 
+        try {
+            return self::link($run, $nodeId, $messages, $s, $id, $side);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Hal. deadlock sa paglipat ng page, kahit naulit: walang ticket; ang step ay ibinabalik sa tick (handOffFailed).
+            report($e);
+            $run->sequenceTicket = ['released' => true] + $s;
+
+            return null;
+        }
+    }
+
+    /** Ang ticket at ang tali, sa iisang transaksyon (hanggang 3 subok kapag deadlock). */
+    private static function link(FlowRun $run, string $nodeId, array $messages, array $s, string $id, bool $side): ?string
+    {
         return DB::transaction(function () use ($run, $nodeId, $messages, $s, $id, $side) {
             $stamp = now()->format('Y-m-d H:i:s');
             $prev = $s['request_id'] ?? null;
@@ -372,7 +392,10 @@ class BotcakeSendQueue
                 ->when(($s['stamp'] ?? null) !== null, fn ($q) => $q->where('dispatched_at', $s['stamp']))
                 ->where(fn ($q) => $prev === null ? $q->whereNull('send_request_id') : $q->where('send_request_id', $prev))
                 ->update(['send_request_id' => $id, 'dispatched_at' => $stamp, 'updated_at' => now()]);
-            if ($linked !== 1) return null;
+            if ($linked !== 1) {
+                $run->sequenceTicket = ['moved' => true] + $s;
+                return null;
+            }
             $sequence = array_intersect_key($s, array_flip(['subscription_id', 'current_step', 'step', 'due', 'name', 'sequence_id', 'first_sent_at']));
             DB::table(self::TABLE)->insert([
                 'request_id' => $id, 'kind' => self::SEQUENCE, 'priority' => self::SEQUENCE_PRIORITY, 'customer' => self::sequenceCustomer($run->pageId, $run->fields->psid),
@@ -386,7 +409,7 @@ class BotcakeSendQueue
             $run->sequenceTicket = ['request_id' => $id, 'stamp' => $stamp, 'side_effects' => $side] + $s;
 
             return $id;
-        });
+        }, 3);
     }
 
     /** May sagot ba ng bot sa customer na hindi pa tapos (pending o sending) sa botcake:send-pool? Ang sequence ay naghihintay dito. */
@@ -398,7 +421,9 @@ class BotcakeSendQueue
     /** Ang called() ng sequence: itinatala rin ang daan at ang client_ref, para sa talaan kahit mamatay ang pool pagkatapos ng tawag. */
     public static function calledSequence(object $row, string $owner, string $via, string $ref): bool
     {
+        // Kasama ang may hawak (active, ang ticket na ito): ang sagot ng customer na naisulat sa pagitan ay humihinto sa padala.
         return DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)->whereNull('called_at')
+            ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('chatbot_sequence_subscriptions')->where('send_request_id', $row->request_id)->where('status', 'active'))
             ->update(['called_at' => now(), 'result' => json_encode(['via' => $via, 'client_ref' => $ref]), 'updated_at' => now()]) === 1;
     }
 
@@ -418,7 +443,7 @@ class BotcakeSendQueue
         $q = DB::table(self::TABLE)->where('id', $row->id);
         if ($owner !== null) $q->where('status', 'sending')->where('claimed_by', $owner);
         else $q->where('status', 'pending');
-        $called = (array) json_decode((string) DB::table(self::TABLE)->where('id', $row->id)->value('result'), true);
+        $called = isset($o['via'], $o['ref']) ? [] : (array) json_decode((string) DB::table(self::TABLE)->where('id', $row->id)->value('result'), true);
         $o += ['via' => $called['via'] ?? ChatbotProvider::BOTCAKE, 'ref' => $called['client_ref'] ?? null, 'at' => now()->format('Y-m-d H:i:s')];
         $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
             'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
@@ -465,8 +490,8 @@ class BotcakeSendQueue
     }
 
     /**
-     * Ang paglilinis ng mga sequence ticket (ang pool kada 5 s, ang chatbot:sequence-tick kada minuto): ang pending na
-     * lampas sa deadline → failed, saka ang resume; ang done o failed na hindi pa naituloy → resume ulit (unique ang job,
+     * Ang paglilinis ng mga sequence ticket (ang pool kada 5 s, ang chatbot:sequence-tick kada minuto). Ang pending ay hindi
+     * kailanman binibigo dahil huli (huli ay puwede, nawala ay hindi); ang done o failed na hindi pa naituloy → resume ulit (unique ang job,
      * kaya hindi nagpapatong); ang luma → binubura nang paunti-unti.
      * @return array{failed: int, redispatched: int, pruned: int}
      */
@@ -474,9 +499,6 @@ class BotcakeSendQueue
     {
         $out = ['failed' => 0, 'redispatched' => 0, 'pruned' => 0];
         if (!Schema::hasTable(self::TABLE)) return $out;
-        foreach (DB::table(self::TABLE)->where('status', 'pending')->where('priority', self::SEQUENCE_PRIORITY)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
-            if (self::finishSequence($row, null, ['status' => 'failed', 'error' => 'The send pool did not send it in time', 'http' => null])) $out['failed']++;
-        }
         foreach (DB::table(self::TABLE)->where('priority', self::SEQUENCE_PRIORITY)->where('kind', self::SEQUENCE)->whereIn('status', ['done', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))->orderBy('id')->limit(500)->get() as $row) {
             DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
             ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));

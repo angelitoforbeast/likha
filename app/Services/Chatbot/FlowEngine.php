@@ -280,6 +280,7 @@ class FlowEngine
         }
         // Ang step ng sequence: ang padala ay sa chatbot:sequence-pool (Botcake o gateway), at umuusad ang step sa resulta.
         if (BotcakeSendQueue::sequenceAsync($run, $outbox)) return $this->handOffSequence($run, $node['id'], $messages);
+        ChatbotSequences::markSending($run); // ang step na naghihintay sa padala: hindi na inuulit kapag namatay ang job sa tawag
         $res = $outbox->send($run, $node['id'], $messages);
 
         return $this->afterSend($node, $c, $run, ['messages' => $messages, 'status' => $res['status'], 'error' => $res['error']]);
@@ -508,6 +509,7 @@ class FlowEngine
                 return ['port' => null, 'suspend' => true, 'note' => 'AI answered; sending the answer'];
             }
             if (BotcakeSendQueue::sequenceAsync($run, $outbox)) return $this->handOffSequence($run, $node['id'], $msg);
+            ChatbotSequences::markSending($run);
             $sent = $outbox->send($run, $node['id'], $msg);
             $run->sends[] = ['node' => $node['id'], 'messages' => $msg, 'status' => $sent['status'], 'error' => $sent['error']];
         }
