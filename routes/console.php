@@ -201,6 +201,10 @@ Schedule::job(new \App\Jobs\SendChatbotAiUsage())
     ->everyMinute()
     ->name('chatbot-ai-usage')
     ->withoutOverlapping(10);
+Schedule::command('chatbot:ai-load')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->runInBackground();
 
 // Kusang J&T track-sync (JntAutoTrackSync): kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload),
 // 04:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
