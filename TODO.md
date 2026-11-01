@@ -1533,3 +1533,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **A partial edit of an important cell still auto-saves on the typing pause** (one stray backspace on `botcake.page_id` saves the shorter ID). Reason: the spec keeps today's auto-save except for an emptied cell; saving important non-secret cells only on leaving the cell is the follow-up.
 - **A column that first appears through the poll (`ensureColumn`) has `important: null`**, so a blank there gets the server's 422 "!" instead of the question until the page is reloaded. Reason: needs a new important key added by someone else after the page opened; the server still refuses the blank, and ⋯ → Clear the value works.
 - **`PageSettingsGrid::history` checks `Schema::hasColumn('page_settings', 'replaced_by')` per request.** Reason: same pattern as `PageSettings::deactivate`; one cheap query on a modal open.
+
+## Hold on a burst of no-answer (spec 213), accepted review minors
+
+- **The health rule still switches pages during a burst hold** (`health_fails` failed probes in a row). Reason: the spec keeps the health rule as it is; in a path outage where the probes fail too, pages switch by health at about 3 minutes, so a follow-up spec could hold that rule as well.
+- **A hold's lock that cannot be had within 3 s runs the burst update without it** (a burst entry may be lost or a second `held` row written). Reason: rare, harmless, and a send must never wait longer.
+- **`lastSwitch` reads only the last 20 `auto_switch` rows of a page**, so many held/recovered pairs on the page that started holds could push an older switch out. Reason: a probe-only recovery allows one hold at most now, so the pairs stay few.
+- **The first no-answer after the window switches every reached page in that one send job**; if the job dies partway, the pages it did not reach switch on their next no-answer. Reason: same switches as before, only in one job; `settleHolds` covers the case where no send comes.
+- **"Held on Forbeast" is the label for an Incepxionbot hold too** (history, Problems panel, page note). Reason: the reason text names the gateway; the label change touches three readers outside this spec.
