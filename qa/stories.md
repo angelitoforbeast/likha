@@ -3539,17 +3539,17 @@ Tests: `tests/Feature/OrderEncode/ForbeastOrdersTest.php` (real FlowEngine and R
 ### S-211.1 An encoded order reaches Forbeast once and follows its updates (P1)
 | Case | Type | Given / When / Then | Test | Last run |
 |------|------|---------------------|------|----------|
-| S-211.1.1 | happy | Given an `upload_macro` insert on a page whose `chatbot.gateway` is set up, when the row is written to `macro_output`, then a queued job PUTs the order to that gateway's `/api/v1/site/orders/{ref}` with the A..H values mapped per the contract and `fields` holding the raw values | | Not run |
-| S-211.1.2 | happy | Given an `encode_order` run, then the order is sent when `LiveOrder` writes `macro_output` (not when queued), so a failed encode is never sent | | Not run |
-| S-211.1.3 | happy | Given an `upload_macro` update of the same `macro_output` row, then the same `ref` is sent with a higher `version`, so Forbeast updates one order | | Not run |
-| S-211.1.4 | happy | Given pages on the incepxionbot gateway, then their orders go to the incepxionbot gateway | | Not run |
-| S-211.1.5 | negative | Given a test run (Test mode), then nothing is sent | | Not run |
-| S-211.1.6 | negative | Given a page with no gateway set up, then nothing is sent and nothing fails | | Not run |
-| S-211.1.7 | negative | Given `page_not_found` or a 422 from Forbeast, then the send is marked failed with the reason, not retried forever, and the encode and the sheet are unaffected | | Not run |
-| S-211.1.8 | edge | Given the same send retried (queue redelivery, lost reply), then Forbeast answers `duplicate` and it is marked sent | | Not run |
-| S-211.1.9 | edge | Given Forbeast down, timing out, 5xx or 429, then the send retries with backoff and lands later; encoding never waits for it | | Not run |
-| S-211.1.10 | edge | Given 401 (site key changed), then sending pauses and the failure is visible; nothing is dropped | | Not run |
-| S-211.1.11 | edge | Given times, then `ordered_at` carries the Manila offset (+08:00) | | Not run |
-| S-211.1.12 | edge | Given Filipino text and emoji in name, shop or input, then they are sent unchanged | | Not run |
-| S-211.1.13 | happy | Given sends that failed for good, then the owner sees them in a short list (order, page, reason, time) with "send again" | | Not run |
-| S-211.1.14 | edge | Given orders from before go-live, then none are sent (no backfill) | | Not run |
+| S-211.1.1 | happy | Given an `upload_macro` insert on a page whose `chatbot.gateway` is set up, when the row is written to `macro_output`, then a queued job PUTs the order to that gateway's `/api/v1/site/orders/{ref}` with the A..H values mapped per the contract and `fields` holding the raw values | `test_S_211_1_1…` | passed 2026-11-01 |
+| S-211.1.2 | happy | Given an `encode_order` run, then the order is sent when `LiveOrder` writes `macro_output` (not when queued), so a failed encode is never sent | `test_S_211_1_2…` (2 tests: encode_order, and the encode of an uploaded row) | passed 2026-11-01 |
+| S-211.1.3 | happy | Given an `upload_macro` update of the same `macro_output` row, then the same `ref` is sent with a higher `version`, so Forbeast updates one order | `test_S_211_1_3…` | passed 2026-11-01 |
+| S-211.1.4 | happy | Given pages on the incepxionbot gateway, then their orders go to the incepxionbot gateway | `test_S_211_1_4…` | passed 2026-11-01 |
+| S-211.1.5 | negative | Given a test run (Test mode), then nothing is sent | `test_S_211_1_5…` | passed 2026-11-01 |
+| S-211.1.6 | negative | Given a page with no gateway set up, then nothing is sent and nothing fails | `test_S_211_1_6…` (Botcake page with no gateway row; gateway without a site key) | passed 2026-11-01 |
+| S-211.1.7 | negative | Given `page_not_found` or a 422 from Forbeast, then the send is marked failed with the reason, not retried forever, and the encode and the sheet are unaffected | `test_S_211_1_7…` (404 page_not_found and 422; a 404 without page_not_found is retried) | passed 2026-11-01 |
+| S-211.1.8 | edge | Given the same send retried (queue redelivery, lost reply), then Forbeast answers `duplicate` and it is marked sent | `test_S_211_1_8…` | passed 2026-11-01 |
+| S-211.1.9 | edge | Given Forbeast down, timing out, 5xx or 429, then the send retries with backoff and lands later; encoding never waits for it | `test_S_211_1_9…` (timeout, 503, 500, 429; and the give-up after the retry time) | passed 2026-11-01 |
+| S-211.1.10 | edge | Given 401 (site key changed), then sending pauses and the failure is visible; nothing is dropped | `test_S_211_1_10…` (2 tests: pause, probe and resume; one gateway never holds back the other) | passed 2026-11-01 |
+| S-211.1.11 | edge | Given times, then `ordered_at` carries the Manila offset (+08:00) | `test_S_211_1_11…` | passed 2026-11-01 |
+| S-211.1.12 | edge | Given Filipino text and emoji in name, shop or input, then they are sent unchanged | `test_S_211_1_12…` | passed 2026-11-01 |
+| S-211.1.13 | happy | Given sends that failed for good, then the owner sees them in a short list (order, page, reason, time) with "send again" | `test_S_211_1_13…` (3 tests: list and Send again; never replaces a newer send; stuck queued sends) | passed 2026-11-01 |
+| S-211.1.14 | edge | Given orders from before go-live, then none are sent (no backfill) | `test_S_211_1_14…` | passed 2026-11-01 |
