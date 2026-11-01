@@ -3647,7 +3647,7 @@ Tests: `tests/Feature/Chatblast/SequenceHandoffTest.php`, `SequenceSafetyTest.ph
 | S-215.5 (P1) | Given a 5xx or HTTP 0, Then it behaves as today's inline path, with exactly one row per attempt | `SequenceHandoffTest::test_S_215_5…` | passed |
 | S-215.6 (P1) | Given a step with several sends, Then they keep their order, a failed send doesn't stop the next send, and every row carries the sequence id and step | `SequenceHandoffTest::test_S_215_6…` | passed |
 | S-215.7 (P1) | Given "Wait for reply" in a step, Then the step doesn't park | `SequenceHandoffTest::test_S_215_7…` | passed |
-| S-215.8 (P1) | Given AI or Sheet nodes in a step, Then they don't run twice | `SequenceHandoffTest::test_S_215_8…` | passed |
+| S-215.8 (P1) | Given AI or Sheet nodes in a step, Then they don't run twice | `SequenceHandoffTest::test_S_215_8…`, `SequenceReRunTest::test_S_215_8_and_1b…` (killed before the send) | passed |
 | S-215.9 (P1) | Given non-ASCII, 2,000-character and image messages, Then what reaches the API is byte-identical to today's | `SequenceHandoffTest::test_S_215_9…` | passed |
 | S-215.10 (P1) | Given the flag off or the pool down, Then the step sends inline as before | `SequenceHandoffTest::test_S_215_10_and_c_5…` | passed |
 | S-215.11 (P1) | Inbox, Replies and /chatbot/speed show the same fields as today (via, sequence id and step, tags, UPDATE type, due) | `SequenceHandoffTest::test_S_215_11…` | passed |
