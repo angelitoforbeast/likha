@@ -383,6 +383,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -396,7 +398,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 002",
@@ -435,6 +438,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -448,7 +453,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 003",
@@ -514,6 +520,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -527,7 +535,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 004",
@@ -566,6 +575,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -579,7 +590,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 005",
@@ -637,6 +649,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -650,7 +664,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 006",
@@ -689,6 +704,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -702,7 +719,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 007",
@@ -760,6 +778,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -773,7 +793,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 008",
@@ -812,6 +833,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -825,7 +848,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 009",
@@ -891,6 +915,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -904,7 +930,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 010",
@@ -945,6 +972,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -958,7 +987,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 011",
@@ -1016,6 +1046,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1029,7 +1061,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 012",
@@ -1068,6 +1101,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1081,7 +1116,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 013",
@@ -1139,6 +1175,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1152,7 +1190,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 014",
@@ -1191,6 +1230,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1204,7 +1245,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 015",
@@ -1270,6 +1312,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1283,7 +1327,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 016",
@@ -1322,6 +1367,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1335,7 +1382,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 017",
@@ -1393,6 +1441,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1406,7 +1456,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 018",
@@ -1445,6 +1496,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1458,7 +1511,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 019",
@@ -1516,6 +1570,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1529,7 +1585,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 020",
@@ -1570,6 +1627,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1583,7 +1642,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 021",
@@ -1649,6 +1709,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1662,7 +1724,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 022",
@@ -1701,6 +1764,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1714,7 +1779,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 023",
@@ -1772,6 +1838,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1785,7 +1853,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 024",
@@ -1824,6 +1893,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1837,7 +1908,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 025",
@@ -1895,6 +1967,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1908,7 +1982,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 026",
@@ -1947,6 +2022,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -1960,7 +2037,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 027",
@@ -2026,6 +2104,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2039,7 +2119,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 028",
@@ -2078,6 +2159,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2091,7 +2174,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 029",
@@ -2149,6 +2233,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2162,7 +2248,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 030",
@@ -2203,6 +2290,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2216,7 +2305,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 031",
@@ -2274,6 +2364,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2287,7 +2379,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 032",
@@ -2326,6 +2419,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2339,7 +2434,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 033",
@@ -2405,6 +2501,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2418,7 +2516,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 034",
@@ -2457,6 +2556,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2470,7 +2571,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 035",
@@ -2528,6 +2630,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2541,7 +2645,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 036",
@@ -2580,6 +2685,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2593,7 +2700,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 037",
@@ -2651,6 +2759,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2664,7 +2774,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 038",
@@ -2703,6 +2814,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2716,7 +2829,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 039",
@@ -2782,6 +2896,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2795,7 +2911,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 040",
@@ -2836,6 +2953,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2849,7 +2968,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 041",
@@ -2907,6 +3027,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2920,7 +3042,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 042",
@@ -2959,6 +3082,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -2972,7 +3097,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 043",
@@ -3030,6 +3156,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3043,7 +3171,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 044",
@@ -3082,6 +3211,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3095,7 +3226,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 045",
@@ -3161,6 +3293,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3174,7 +3308,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 046",
@@ -3213,6 +3348,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3226,7 +3363,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 047",
@@ -3284,6 +3422,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3297,7 +3437,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 048",
@@ -3336,6 +3477,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3349,7 +3492,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 049",
@@ -3407,6 +3551,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3420,7 +3566,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 050",
@@ -3461,6 +3608,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3474,7 +3623,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 051",
@@ -3540,6 +3690,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3553,7 +3705,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 052",
@@ -3592,6 +3745,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3605,7 +3760,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 053",
@@ -3663,6 +3819,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3676,7 +3834,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 054",
@@ -3715,6 +3874,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3728,7 +3889,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 055",
@@ -3786,6 +3948,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3799,7 +3963,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 056",
@@ -3838,6 +4003,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3851,7 +4018,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 057",
@@ -3917,6 +4085,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3930,7 +4100,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 058",
@@ -3969,6 +4140,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -3982,7 +4155,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 059",
@@ -4040,6 +4214,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4053,7 +4229,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 060",
@@ -4094,6 +4271,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4107,7 +4286,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 061",
@@ -4165,6 +4345,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4178,7 +4360,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 062",
@@ -4217,6 +4400,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4230,7 +4415,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 063",
@@ -4296,6 +4482,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4309,7 +4497,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 064",
@@ -4348,6 +4537,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4361,7 +4552,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 065",
@@ -4419,6 +4611,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4432,7 +4626,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 066",
@@ -4471,6 +4666,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4484,7 +4681,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 067",
@@ -4542,6 +4740,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4555,7 +4755,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 068",
@@ -4594,6 +4795,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4607,7 +4810,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 069",
@@ -4673,6 +4877,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4686,7 +4892,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 070",
@@ -4727,6 +4934,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4740,7 +4949,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 071",
@@ -4798,6 +5008,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4811,7 +5023,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 072",
@@ -4850,6 +5063,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4863,7 +5078,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 073",
@@ -4921,6 +5137,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4934,7 +5152,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 074",
@@ -4973,6 +5192,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -4986,7 +5207,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 075",
@@ -5052,6 +5274,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5065,7 +5289,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 076",
@@ -5104,6 +5329,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5117,7 +5344,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 077",
@@ -5175,6 +5403,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5188,7 +5418,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 078",
@@ -5227,6 +5458,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5240,7 +5473,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 079",
@@ -5298,6 +5532,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5311,7 +5547,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 080",
@@ -5352,6 +5589,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5365,7 +5604,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 081",
@@ -5431,6 +5671,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5444,7 +5686,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 082",
@@ -5483,6 +5726,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5496,7 +5741,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 083",
@@ -5554,6 +5800,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5567,7 +5815,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 084",
@@ -5606,6 +5855,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5619,7 +5870,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 085",
@@ -5677,6 +5929,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5690,7 +5944,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 086",
@@ -5729,6 +5984,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5742,7 +5999,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 087",
@@ -5808,6 +6066,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5821,7 +6081,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 088",
@@ -5860,6 +6121,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5873,7 +6136,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 089",
@@ -5931,6 +6195,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5944,7 +6210,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 090",
@@ -5985,6 +6252,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -5998,7 +6267,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 091",
@@ -6056,6 +6326,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6069,7 +6341,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 092",
@@ -6108,6 +6381,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6121,7 +6396,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 093",
@@ -6187,6 +6463,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6200,7 +6478,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 094",
@@ -6239,6 +6518,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6252,7 +6533,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 095",
@@ -6310,6 +6592,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6323,7 +6607,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 096",
@@ -6362,6 +6647,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6375,7 +6662,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 097",
@@ -6433,6 +6721,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6446,7 +6736,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 098",
@@ -6485,6 +6776,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6498,7 +6791,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 099",
@@ -6564,6 +6858,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6577,7 +6873,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 100",
@@ -6618,6 +6915,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6631,7 +6930,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 101",
@@ -6689,6 +6989,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6702,7 +7004,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 102",
@@ -6741,6 +7044,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6754,7 +7059,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 103",
@@ -6812,6 +7118,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6825,7 +7133,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 104",
@@ -6864,6 +7173,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6877,7 +7188,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 105",
@@ -6943,6 +7255,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -6956,7 +7270,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 106",
@@ -6995,6 +7310,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7008,7 +7325,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 107",
@@ -7066,6 +7384,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7079,7 +7399,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 108",
@@ -7118,6 +7439,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7131,7 +7454,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 109",
@@ -7189,6 +7513,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7202,7 +7528,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 110",
@@ -7243,6 +7570,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7256,7 +7585,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 111",
@@ -7322,6 +7652,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7335,7 +7667,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 112",
@@ -7374,6 +7707,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7387,7 +7722,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 113",
@@ -7445,6 +7781,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7458,7 +7796,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 114",
@@ -7497,6 +7836,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7510,7 +7851,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 115",
@@ -7568,6 +7910,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7581,7 +7925,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 116",
@@ -7620,6 +7965,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7633,7 +7980,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         },
         {
             "page": "Page 117",
@@ -7699,6 +8047,8 @@
                 "fallback": null,
                 "local_model": null,
                 "local_timeout": null,
+                "anthropic_model": null,
+                "deepseek_model": null,
                 "chain": "OpenAI"
             },
             "reply": "page",
@@ -7712,7 +8062,8 @@
                 "differs": false,
                 "same_id": [],
                 "match": null
-            }
+            },
+            "ai_load": null
         }
     ],
     "flows": [
@@ -7736,11 +8087,21 @@
         "breaker_failures": 3,
         "breaker_seconds": 30,
         "local_reasoning_effort": "none",
+        "anthropic_model": "claude-haiku-4-5",
+        "deepseek_model": "deepseek-chat",
         "local_ready": false,
         "providers": [
             {
                 "name": "openai",
                 "label": "OpenAI"
+            },
+            {
+                "name": "anthropic",
+                "label": "Claude"
+            },
+            {
+                "name": "deepseek",
+                "label": "DeepSeek"
             },
             {
                 "name": "local",
