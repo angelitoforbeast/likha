@@ -309,7 +309,7 @@ class ForbeastHoldTest extends ChatblastTestCase
 
         $events = $this->getJson('/api/chatbot/provider-events?since=0', ['X-CHATBOT-EVENTS-KEY' => self::EVENTS_KEY])->assertOk()->json('events');
         $this->assertSame([['held', 'no_answer', 'forbeast', 5, null], ['recovered', 'no_answer', 'forbeast', 5, 20]],
-            array_map(fn ($e) => [$e['result'], $e['condition'], $e['gateway'], $e['page_count'], $e['held_seconds']], $events));
+            array_map(fn ($e) => [$e['result'], $e['condition'], $e['gateway'] ?? 'missing', $e['page_count'] ?? 'missing', $e['held_seconds'] ?? null], $events));
         $this->assertStringContainsString('did not answer', $events[0]['reason']);
         $this->assertStringContainsString('answered again', $events[1]['reason']);
     }
