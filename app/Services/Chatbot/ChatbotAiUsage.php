@@ -10,6 +10,17 @@ use Illuminate\Support\Facades\Schema;
  */
 class ChatbotAiUsage
 {
+    public const PENDING = 'pending';
+    public const NO_GATEWAY = 'no_gateway';
+
+    /** Ang gateway na tatanggap ng usage ng page (chatbot.gateway, o ang default), kapag may URL at site key ito; o null. */
+    public static function gatewayOf(string $page): ?string
+    {
+        $g = Gateways::active($page);
+
+        return Gateways::setUp($g) && Gateways::config($g)['site_key'] !== '' ? $g : null;
+    }
+
     /** May mga column na ng key at gastos (ang migration ng spec 210)? */
     public static function ready(): bool
     {
