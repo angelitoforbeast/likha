@@ -2,7 +2,7 @@
 
 ## Status
 
-done (one open question for the owner, see Open questions)
+done (amendment 213-1 included; no open question)
 
 ## Date
 
@@ -33,6 +33,15 @@ A burst of no-answer on many pages of one gateway now holds instead of switching
     after the health checks) or the first no-answer after the window.
   - An ended hold is kept for an hour. Pages that reach the threshold during that hour switch at once, with
     no second hold for the same outage.
+- **Health probes (amendment 213-1).** A health probe of the page's own gateway that gets no answer (or 5xx)
+  joins the same burst and hold as a no-answer send.
+  - During a hold, failed probes are counted but switch nothing.
+  - 5 or more pages failing probes within `burst_seconds` start a hold (the `held` row has `trigger: health`).
+  - At the hold's end, every page over either threshold (3 no-answers or `health_fails` failed probes) switches
+    in that same step, with condition `no_answer` or `health` (the first it reached) and today's rows and
+    switch-back rule.
+  - A recovery resets both counters.
+  - One page failing probes alone switches as today; a 4xx probe and a "not connected" answer are unchanged.
 - **Per gateway.** forbeast and incepxionbot each have their own burst and hold.
 - **Cache lost during a hold.** The latest `held` row of the gateway (inside the window, with no `recovered`
   after it) restores the hold with its original start. The window is never skipped or stretched.
@@ -71,14 +80,16 @@ No file of specs 210/211 is touched.
 | S-213.7 | `test_S_213_7_a_cleared_cache_during_a_hold_resumes_it_and_never_skips_the_window` | pass |
 | S-213.8 | `test_S_213_8_the_window_and_burst_are_config_values_and_zero_pages_turns_the_hold_off` | pass |
 | S-213.9 | `test_S_213_9_the_feed_shows_the_held_and_recovered_events` | pass |
+| S-213.10 | `test_S_213_10_health_failures_during_a_hold_do_not_switch_and_the_hold_end_switches_both_kinds_together`; `test_S_213_10_a_recovery_resets_the_health_counters_too` | pass |
+| S-213.11 | `test_S_213_11_a_burst_of_failed_probes_starts_a_hold_and_one_page_alone_switches_as_today` | pass |
 
 ## Checks (command and output)
 
 PHP is Herd's `php.bat` (PHP 8.4.16). Tests use phpunit.xml (sqlite in memory, array cache).
 
 - `php -l` on the four changed PHP files: `No syntax errors detected` (each).
-- `vendor/bin/phpunit tests/Feature/Chatblast/ForbeastHoldTest.php`: `OK (14 tests, 95 assertions)`.
-- The existing ForbeastWatch tests, on the final code:
+- `vendor/bin/phpunit tests/Feature/Chatblast/ForbeastHoldTest.php` on 26bf752e (amendment 1): `OK (17 tests, 144 assertions)`.
+- The existing ForbeastWatch tests, run again on 26bf752e:
 
   | Test file | Output |
   |---|---|
@@ -96,7 +107,8 @@ PHP is Herd's `php.bat` (PHP 8.4.16). Tests use phpunit.xml (sqlite in memory, a
     Open questions.
   - Loop 1 (9af6ab81): needs fixes. A healthy page's send cleared the probe marker.
   - Loop 2 (009845c0): **pass**, no blocker or major.
-- Full suite (`vendor/bin/phpunit`) on 009845c0: `Time: 15:55.790`, `Tests: 3989, Assertions: 43543, Failures: 4, PHPUnit Deprecations: 92, Skipped: 4`. No failure is new. Each one was re-run with the four changed source files put back to `d05d1b63`:
+  - Amendment 1 (26bf752e): **pass**, no blocker or major. One minor accepted (Deferred minors: GET 5xx on 5+ pages while sends work).
+- Full suite (`vendor/bin/phpunit`) on 009845c0, before amendment 1 (the amendment asked for the files above to be re-run, not the full suite): `Time: 15:55.790`, `Tests: 3989, Assertions: 43543, Failures: 4, PHPUnit Deprecations: 92, Skipped: 4`. No failure is new. Each one was re-run with the four changed source files put back to `d05d1b63`:
 
   | Failing test | On the base code | What it is |
   |---|---|---|
@@ -133,9 +145,15 @@ Each was watched failing before its code. Each failure is on the assertion, not 
 **Fix loop 2** (009845c0), on 9af6ab81:
 - `…_a_probe_that_answers_while_sends_still_fail…`, with a healthy page's send added: `Failed asserting that two strings are identical.` at :188.
 
+**Amendment 1** (26bf752e), on 009845c0:
+- `test_S_213_10_health_failures_during_a_hold…`: `Failed asserting that two strings are identical.` at :397. The pages switched by health during the hold.
+- `test_S_213_10_a_recovery_resets_the_health_counters_too`: `two strings are identical` at :423. Page 3 switched on the old health count.
+- `test_S_213_11…`: `two strings are identical` at :443. The probe burst switched the pages instead of holding.
+- The single-page part of S-213.11 passes on the earlier code by design (today's behaviour).
+
 ## Done-when checklist
 
-- [x] Cases S-213.1 – S-213.9 pass, each with a test named after it, and the existing ForbeastWatch tests still pass (see Checks).
+- [x] Cases S-213.1 – S-213.11 pass, each with a test named after it, and the existing ForbeastWatch tests still pass (see Checks).
 - [x] The result has a red line for every feat/fix slice, watched before the code (see Red lines).
 - [x] The full suite adds no new failures (see Checks, full suite).
 - [x] `qa/stories.md` has these stories with "Last run" filled, and this result is filled in.
@@ -176,9 +194,20 @@ Each was watched failing before its code. Each failure is on the assertion, not 
    - The pages that had reached the threshold are not known after the loss.
    - They rejoin on their next no-answer.
 
+10. **Failed probes and no-answer sends share one burst list and one hold per gateway** (amendment 1).
+    - A page counts once, whichever way it failed. The amendment's "5+ pages failing probes" is the case
+      where only probes run, for example when there are no customer messages.
+    - Only probes of the page's own gateway count, and only when there was no answer or 5xx, the same as
+      a no-answer send. A 4xx probe and a "not connected" answer keep today's rules.
+11. **A page that reached both thresholds switches with the condition it reached first.**
+12. **The `held` and `recovered` rows keep condition `no_answer` for both kinds of hold.** The new `trigger`
+    field (send or health) tells them apart, so the cache-loss restore and the feed stay unchanged.
+
 ## Story changes
 
-These are extra tests under the same case IDs. No Given / When / Then was changed.
+- **S-213.10 and S-213.11** added by amendment 213-1, red first.
+
+From review, these are extra tests under existing case IDs; no Given / When / Then was changed:
 - **S-213.3**, added from review:
   - a probe that answers while sends still fail (including a healthy page's send in between);
   - a probe that says not connected;
@@ -202,6 +231,10 @@ Accepted from review, not fixed:
   ChatbotController history, the ProblemsPanel and the /chatbot/pages note. The reason text names the right
   gateway.
 
+- **GET failing with 5xx on 5+ pages while sends work** (amendment 1 review). A probe burst starts a hold, and the
+  next send from a burst page ends it and resets the counters, so the feed gets a held+recovered pair about every
+  3 minutes. The pages correctly stay on the gateway, because sends work.
+
 ## Deploy notes
 
 - **No migration and no new table.** The state is in cache keys plus the existing `chatbot.auto_switch` rows:
@@ -221,11 +254,13 @@ Accepted from review, not fixed:
 
 - **Door:**
   - the no-answer branch of `ForbeastWatch::afterSend` (every gateway send that fails without an answer);
+  - `health()` on a probe of the page's own gateway that gets no answer or 5xx;
   - `health()` on a probe that answers connected;
   - one extra step in `chatbot:forbeast-watch`.
 - **Blast radius:** live routing of every chatbot page on both gateways.
   - If it is wrong, a real outage keeps pages on the gateway up to `hold_minutes` (default 2) longer before
-    they switch, or for one more hold after a probe-only recovery.
+    they switch, or for one more hold after a probe-only recovery. Since amendment 1 this also covers pages
+    whose probes fail.
   - A single failing page is not affected (S-213.1).
 - **Revert:** either of these.
   - Set `GATEWAY_SWITCH_BURST_PAGES=0` for the old behaviour, with no deploy.
@@ -235,19 +270,11 @@ Accepted from review, not fixed:
 
 ## Open questions
 
-1. **The health rule still switches every page during a hold.** It is out of scope for this spec and
-   unchanged.
-   - **Why it matters:** the watch command probes every gateway page each minute, and `health_fails=3`
-     switches a page after 3 failed probes. In an outage like the 11:12 one, where the probes also fail, the
-     pages switch by health at about 3 minutes, all in one command run.
-   - **Effect today:** that is later than the old no-answer switches (11:13–11:16), but still before a
-     5-minute outage ends. The hold mainly protects outages shorter than about 3 minutes.
-   - **If `hold_minutes` is raised to 3 or more,** the health rule always switches first.
-   - **Decision needed:** should a later spec hold the health rule too while the gateway is in a burst hold?
+None. The question about the health rule switching during a hold is closed by amendment 213-1 (Ruling 10,
+cases S-213.10 and S-213.11).
 
 ## Proposed tasks
 
-- A follow-up spec that applies the same burst hold to the health-check rule (Open question 1).
 - Name the gateway in the "Held on …" label (history, Problems panel, page note).
 
-213: done — a burst of no-answer on 5+ pages of one gateway now holds 2 min and re-checks before switching; health-rule switching during a hold is an open question
+213: done — a burst of no-answer sends or failed health probes on 5+ pages of one gateway now holds 2 min and re-checks before switching; pages over either threshold switch together if it lasts
