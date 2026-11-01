@@ -587,7 +587,7 @@ class ChatbotSequences
         $ctx = (array) json_decode((string) $row->context, true);
         $s = (array) ($ctx['sequence'] ?? []);
         $r = (array) json_decode((string) $row->result, true);
-        $attempt = !isset($r['check']); // isang totoong subok (may row), hindi ang pagsusuri bago ang tawag
+        $attempt = isset($r['status']) && !isset($r['check']); // isang totoong subok (may row), hindi ang pagsusuri bago ang tawag
         $first = $s['first_sent_at'] ?? ($attempt ? (string) ($r['at'] ?? $row->done_at) : null);
         $detail = ['name' => (string) ($s['name'] ?? ''), 'step' => (int) ($s['step'] ?? 0), 'sequence_id' => (int) ($s['sequence_id'] ?? 0), 'due' => $s['due'] ?? null];
         $pageId = (int) $row->page_id;
@@ -621,6 +621,12 @@ class ChatbotSequences
             return 'gone';
         }
         $step = $seq->steps->firstWhere('position', (int) $s['step']) ?? new ChatbotSequenceStep(['position' => (int) $s['step']]);
+        // Tapos na walang resulta ng pool na ito (hal. kinuha ng lumang pool bilang chatblast): hindi alam kung naipadala, kaya
+        // tinatapos ang step, walang ulit.
+        if (!isset($r['status'])) {
+            $this->event($pageId, $psid, ['op' => 'failed', 'error' => self::NOT_RESENT] + $detail);
+            return $this->advance($sub, $seq, $step, true, (string) $row->request_id);
+        }
 
         if (($r['status'] ?? '') === 'skipped' && isset($r['check'])) {
             // Walang naipadala pa sa step at walang epekto ang takbo: gaya ng pagsusuri sa simula ng step (uulitin mamaya).
