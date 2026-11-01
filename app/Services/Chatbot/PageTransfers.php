@@ -462,7 +462,7 @@ class PageTransfers
             if ($owner !== $transferId) return;
             $this->deactivate($page, self::HOLD_PROVIDER, [self::HOLD_KEY], $source);
             $heldRows()->update(['status' => 'active', 'exit_reason' => null, 'dispatched_at' => null] + ChatbotSequences::unlink());
-        });
+        }, 3); // ulit kapag deadlock (ang pool ay nagla-lock sa ibang ayos)
         PageSettings::forget($page);
 
         return ['http' => 200, 'body' => ['held' => $heldRows()->count()] + ($hold ? ['held_at' => $heldAt] : [])];
@@ -504,7 +504,7 @@ class PageTransfers
             $this->deactivate($page, self::HOLD_PROVIDER, [self::HOLD_KEY], $reason);
 
             return $ended;
-        });
+        }, 3);
         PageSettings::forget($page);
         if (ctype_digit($flowId)) BotConfigCache::forgetFlow((int) $flowId);
 

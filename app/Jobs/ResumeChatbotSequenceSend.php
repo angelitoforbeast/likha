@@ -20,7 +20,7 @@ class ResumeChatbotSequenceSend implements ShouldQueue, ShouldBeUniqueUntilProce
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 100; // ang step ay ipinapasa rin ang susunod na padala; walang hinihintay na API
+    public int $timeout = 280; // gaya ng step job: ang natitirang node ay maaaring may AI o Sheet
     public int $uniqueFor = 900;
 
     /** @param array{request_id: string} $ticket */
