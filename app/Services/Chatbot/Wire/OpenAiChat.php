@@ -14,7 +14,7 @@ class OpenAiChat extends OpenAIAdapter
 {
     use ChatWire;
 
-    public function chatRequest(string $key, string $model, array $messages, int $maxTokens): array
+    public function chatRequest(#[\SensitiveParameter] string $key, string $model, array $messages, int $maxTokens): array
     {
         return ['url' => (string) ChatbotAiProviders::url(ChatbotAiProviders::OPENAI), 'headers' => ['Authorization' => 'Bearer ' . $key, 'Accept' => 'application/json'],
             'body' => $this->chatBody($model, $messages, $maxTokens)];

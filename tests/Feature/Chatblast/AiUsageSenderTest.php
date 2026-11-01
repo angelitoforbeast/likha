@@ -118,7 +118,8 @@ class AiUsageSenderTest extends AiKeyPoolTestCase
     public function test_S_210_5_5_when_forbeast_is_down_rows_stay_pending_and_are_retried_with_backoff_in_order(): void
     {
         $this->costed(3);
-        foreach ([Http::response(['error' => 'server'], 503), Http::failedConnection('cURL error 28: Operation timed out'), Http::response(['error' => 'too_many_requests', 'message' => 'Wait'], 429)] as $i => $fail) {
+        foreach ([Http::response(['error' => 'server'], 503), Http::failedConnection('cURL error 28: Operation timed out'), Http::response(['error' => 'too_many_requests', 'message' => 'Wait'], 429),
+            Http::response('Not Found', 404)] as $i => $fail) { // ang 404 (wala pa ang route): ulit, hindi invalid
             $this->forbeast = [$fail];
             $this->send();
             $this->assertSame(['pending' => 3], $this->statuses(), 'after failure ' . $i);

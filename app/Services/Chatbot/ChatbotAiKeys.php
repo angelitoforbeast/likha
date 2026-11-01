@@ -146,7 +146,7 @@ class ChatbotAiKeys
     // ---- Ang mga kilos ng owner (screen) ----
 
     /** @return array{error: ?string, id: ?string} */
-    public function add(mixed $provider, mixed $label, mixed $key, ?int $userId): array
+    public function add(mixed $provider, mixed $label, #[\SensitiveParameter] mixed $key, ?int $userId): array
     {
         if (!is_string($provider) || !self::pooled($provider)) return ['error' => 'Pick ' . self::providerList() . '.', 'id' => null];
         if (($e = self::keyError($key)) !== null) return ['error' => $e, 'id' => null];
@@ -167,7 +167,7 @@ class ChatbotAiKeys
         return ['error' => null, 'id' => $id];
     }
 
-    public static function keyError(mixed $key): ?string
+    public static function keyError(#[\SensitiveParameter] mixed $key): ?string
     {
         if (!is_string($key) || trim($key) === '') return 'Paste the key.';
         $key = trim($key);
@@ -317,7 +317,8 @@ class ChatbotAiKeys
         Cache::forget('chatbot-ai-key:' . $id . ':fails');
         if ((($this->all()[$id]['health'] ?? [])['state'] ?? 'ok') !== 'down') return;
         $health = $this->freshHealth($id);
-        if (($health['state'] ?? 'ok') !== 'down') return;
+        // Ang nagpapahinga pa (minarkahan habang lumilipad ang tawag na ito) ay hindi nalilinis: ang marka ang huli.
+        if (($health['state'] ?? 'ok') !== 'down' || self::resting($health)) return;
         $this->write($id, 'health', array_replace($health, ['state' => 'ok', 'reason' => null, 'until' => null, 'rest' => 0, 'at' => now()->toIso8601String()]), null);
     }
 

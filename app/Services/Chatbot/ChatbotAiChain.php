@@ -341,7 +341,9 @@ class ChatbotAiChain
     public static function allKeysFailed(array $attempts): bool
     {
         if (!$attempts || array_filter($attempts, fn ($a) => $a['ok'])) return false;
-        $pool = array_filter($attempts, fn ($a) => (($a['key'] ?? null) !== null && !($a['key']['legacy'] ?? false)) || ($a['kind'] ?? null) === 'no_key');
+        // Ang "busy" o "late" na laktaw ay hindi palya ng key: ang tinawag na key na pumalya (o walang magagamit na key) lang.
+        $pool = array_filter($attempts, fn ($a) => (($a['key'] ?? null) !== null && !($a['key']['legacy'] ?? false) && in_array($a['kind'] ?? null, ChatbotAiWire::KEY_KINDS, true))
+            || ($a['kind'] ?? null) === 'no_key');
         $notKey = array_filter($attempts, fn ($a) => in_array($a['kind'] ?? null, ['model', 'request'], true));
 
         return $pool && !$notKey;

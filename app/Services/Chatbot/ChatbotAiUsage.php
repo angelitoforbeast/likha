@@ -127,9 +127,11 @@ class ChatbotAiUsage
         if ($status === 429 || $status >= 500 || $status === 408) return ['state' => 'retry', 'results' => [], 'error' => 'Forbeast answered HTTP ' . $status . '.'];
         $results = $res->json('results');
         // Ang 422 ng buong request (hindi listahan ng 1 hanggang 100): mali ang ipinadala, kaya invalid ang lahat (hindi inuulit).
-        if ($status === 422 || !$res->successful()) {
+        if ($status === 422) {
             return ['state' => 'ok', 'results' => array_map(fn ($r) => ['client_ref' => $r['client_ref'], 'result' => 'invalid'], $records), 'error' => null];
         }
+        // Ang ibang hindi 2xx (hal. 404 kapag wala pa ang route sa Forbeast): ulit na may backoff, walang row na nawawala.
+        if (!$res->successful()) return ['state' => 'retry', 'results' => [], 'error' => 'Forbeast answered HTTP ' . $status . '.'];
 
         return ['state' => 'ok', 'results' => is_array($results) ? $results : [], 'error' => null];
     }

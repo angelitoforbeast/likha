@@ -14,7 +14,7 @@ use Illuminate\Http\Client\Response;
 trait ChatWire
 {
     /** @return array{url: string, headers: array, body: array} */
-    public function chatRequest(string $key, string $model, array $messages, int $maxTokens): array
+    public function chatRequest(#[\SensitiveParameter] string $key, string $model, array $messages, int $maxTokens): array
     {
         return ['url' => $this->baseUrl() . $this->chatPath(), 'headers' => $this->authHeaders($key) + ['Accept' => 'application/json'],
             'body' => $this->chatBody($model, $messages, $maxTokens)];
@@ -29,7 +29,7 @@ trait ChatWire
     }
 
     /** Ang hindi 2xx na sagot: ang normalized na code ng adapter (billing, invalid_credentials, rate_limited, …). */
-    public function readFailure(int $status, string $body, string $key): ProviderResult
+    public function readFailure(int $status, string $body, #[\SensitiveParameter] string $key): ProviderResult
     {
         return $this->httpFailure(new Response(new PsrResponse($status, ['Content-Type' => 'application/json'], $body)), $key, []);
     }

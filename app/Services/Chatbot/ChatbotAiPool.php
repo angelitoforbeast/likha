@@ -151,18 +151,33 @@ class ChatbotAiPool extends TicketPool
         if ($p !== ChatbotAiProviders::OPENAI) {
             $opts = ['connect_timeout' => min(5, $timeout), 'allow_redirects' => false] + $opts;
             $this->after($id, (int) ($timeout * 1000) + 250, fn () => $this->current($id, $token)
-                && $this->attempted($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, true)), null));
+                && $this->safely($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, true)), null));
         }
         $this->http->postAsync($r['url'], $opts)->then(
             fn (ResponseInterface $res) => $this->answered($row, $step, $model, $token, $res),
             fn ($e) => $this->current($id, $token)
-                && $this->attempted($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, $e instanceof Throwable && ChatbotAiChain::timedOut($e->getMessage()))), null),
+                && $this->safely($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, $e instanceof Throwable && ChatbotAiChain::timedOut($e->getMessage()))), null),
         );
     }
 
     private static function failure(string $error): array
     {
         return ['ok' => false, 'text' => '', 'error' => $error, 'prompt_tokens' => null, 'completion_tokens' => null, 'kind' => 'failing'];
+    }
+
+    /**
+     * Ang palya ng timer o ng koneksyon: gaya ng attempted(), pero ang error (hal. sa pagsulat ng marka ng key) ay hindi
+     * nag-iiwan ng puwesto na hawak: ang row ay sending pa, at ang sweep ang magpapalya sa deadline.
+     */
+    private function safely(object $row, array $step, string $model, array $out, ?int $http): bool
+    {
+        try {
+            return $this->attempted($row, $step, $model, $out, $http);
+        } catch (Throwable $e) {
+            report($e);
+            $this->release((string) $row->request_id);
+            return true;
+        }
     }
 
     /** Ang subok na ito pa ba ang hinihintay ng request (hindi pa tapos, hindi pa lumipat)? */

@@ -37,7 +37,12 @@ class ChatbotAiLoad
     /** Ang note kapag "stopped" ang page (walang AI), o null (tumatakbo ang AI). */
     public function stopped(string $pageName, string $pageId): ?string
     {
-        $s = $this->state($pageName, $pageId);
+        try {
+            $s = $this->state($pageName, $pageId);
+        } catch (Throwable $e) {
+            report($e); // anumang error ay hindi pumipigil sa AI
+            return null;
+        }
 
         return ($s['state'] ?? null) === 'stopped' ? (string) ($s['note'] ?? '') : null;
     }
@@ -51,6 +56,18 @@ class ChatbotAiLoad
         if (is_array($hit) && $hit['at'] > now()->getTimestamp() - self::fresh()) return $hit;
         // Kapapalya lang ang tanong sa gateway na ito: tumatakbo ang AI, at hindi muna tinatanong ulit.
         if (Cache::has('chatbot-ai-load:' . $gw . ':down')) return null;
+        // Iisang tanong lang kada gateway nang sabay: ang iba ay ang huling sagot (hanggang 2 minuto), o tumatakbo ang AI.
+        $lock = Cache::lock('chatbot-ai-load:' . $gw . ':fetch', 10);
+        if (!$lock->get()) return is_array($hit) && $hit['at'] > now()->getTimestamp() - 2 * self::fresh() ? $hit : null;
+        try {
+            return $this->ask($gw, $pageId);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function ask(string $gw, string $pageId): ?array
+    {
         $ids = [$pageId];
         foreach (($this->known()[$gw] ?? []) as $other) {
             if (count($ids) >= self::BATCH) break;

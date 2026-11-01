@@ -32,7 +32,7 @@ class ChatbotAiWire
     }
 
     /** @return array{url: string, headers: array, body: array} */
-    public static function request(string $provider, string $key, string $model, array $messages, int $maxTokens): array
+    public static function request(string $provider, #[\SensitiveParameter] string $key, string $model, array $messages, int $maxTokens): array
     {
         return self::adapter($provider)->chatRequest($key, $model, $messages, $maxTokens);
     }
@@ -54,7 +54,7 @@ class ChatbotAiWire
      * Ang sagot (HTTP status at body) bilang resulta ng subok.
      * @return array{ok: bool, text: string, error: ?string, prompt_tokens: ?int, completion_tokens: ?int, kind: string}
      */
-    public static function read(string $provider, int $status, string $body, string $key): array
+    public static function read(string $provider, int $status, string $body, #[\SensitiveParameter] string $key): array
     {
         $label = ChatbotAiProviders::label($provider);
         $json = json_decode($body, true);
@@ -114,7 +114,7 @@ class ChatbotAiWire
      * Ang Test ng key: isang tawag na isang token lang ang sagot. @return string ok | invalid | no_credit | rate_limited |
      * failing | model | request
      */
-    public static function test(string $provider, string $key): string
+    public static function test(string $provider, #[\SensitiveParameter] string $key): string
     {
         $r = self::request($provider, $key, self::testModel($provider), [['role' => 'user', 'content' => 'Reply with OK.']], self::TEST_TOKENS);
         try {
