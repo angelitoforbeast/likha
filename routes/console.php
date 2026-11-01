@@ -195,6 +195,13 @@ Schedule::command('chatbot:forbeast-watch')
     ->withoutOverlapping(10)
     ->runInBackground();
 
+// Ang usage ng chatbot AI papunta sa Forbeast ng bawat page (spec 210): kada minuto, isang job sa queue na "chatbot" (iisa
+// lang ang tumatakbo; ang hindi naipadala ay sa susunod). Ang load ng mga page (ChatbotAiLoad) ay sa chatbot:ai-load.
+Schedule::job(new \App\Jobs\SendChatbotAiUsage())
+    ->everyMinute()
+    ->name('chatbot-ai-usage')
+    ->withoutOverlapping(10);
+
 // Kusang J&T track-sync (JntAutoTrackSync): kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload),
 // 04:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
 // kumukuha ng oras, kaya ang simula mula sa chatblast:auto sa parehong oras ay walang ginagawa. JNT_TRACK_SYNC_AUTO o
