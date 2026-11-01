@@ -50,6 +50,7 @@ class ChatbotRunner
                 ->reject(fn ($c) => ForbeastWatch::standby($c)); // standby: tumatakbo lang kapag lumipat sa Botcake (bagong chat)
             // Ang ad group ng customer (ang pinakabagong ad niya sa page), isang beses kada takbo; null = ang page values.
             $group = $this->groups->forCustomer((string) $chat->page_id, (string) $chat->psid, (string) $chat->page_name);
+            [$lookupNote, $unresolved] = [$this->groups->lookupNote, $this->groups->unresolved];
             $botfields = null;
             $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {
@@ -76,6 +77,9 @@ class ChatbotRunner
                 $run = new FlowRun($flow->id, $flow->graph, (string) $c->page_name, (string) $c->page_id, $botfields, $fields, $c->id,
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
                 $run->adGroup = $group;
+                $run->adGroupUnresolved = $unresolved;
+                // Ang lookup ng ad sa Meta na pumalya, nilaktawan o walang nakita: nasa talaan ng takbo (page values ang ginamit).
+                if ($lookupNote !== null) $run->event('ad_lookup', null, ['note' => $lookupNote]);
                 try {
                     $this->engine->run($run, $this->outbox);
                 } finally {

@@ -199,7 +199,7 @@ class AdBasedPagesTest extends ChatblastTestCase
 
         $add("111, 222\n333")->assertOk();
         $this->assertSame(['100', '111', '222', '333'], $groups->groups('Precious Lopez')[$id]['ads']);
-        $add('555, 12a')->assertStatus(422)->assertJson(['error' => 'Not an ad ID (digits only): 12a.']);
+        $add('555, 12a')->assertStatus(422)->assertJson(['error' => 'Not an ID (digits only): 12a.']);
         $add('555 444')->assertStatus(422)->assertJson(['error' => 'Ad 444 is already in the group "Toner".']);
         $add(' , ')->assertStatus(422);
         $this->assertSame(['100', '111', '222', '333'], $groups->groups('Precious Lopez')[$id]['ads'], 'walang naidagdag sa mga tinanggihan');

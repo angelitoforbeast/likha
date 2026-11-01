@@ -39,6 +39,9 @@ class AdGroupRunTest extends ChatblastTestCase
             'database/migrations/2026_10_24_100100_create_chatbot_events_and_reply_user.php',
             'database/migrations/2026_10_25_100000_create_chatbot_waits_table.php',
             'database/migrations/2026_10_26_100000_create_chatbot_sequence_tables.php',
+            'database/migrations/2025_07_15_232022_create_ads_manager_reports_table.php',
+            'database/migrations/2025_07_17_222429_add_headline_and_body_to_ads_manager_reports_table.php',
+            'database/migrations/2026_05_22_140000_create_ad_catalog_table.php',
         ]]);
         config(['services.chatbot.replies_enabled' => true, 'services.botcake.async_sends' => false, 'services.chatbot.ai_async' => false]);
         Http::fake([self::SEND => Http::response(['success' => true])]);
@@ -233,5 +236,429 @@ class AdGroupRunTest extends ChatblastTestCase
         $fields = new CustomerFields(1001, 7001);
         $fields->clearAll();
         $this->assertNotNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id));
+    }
+
+    // ---- Spec 212: ang group ay may ad, ad set o campaign ID; ang hindi kilalang ad ay tinatanong sa Meta nang isang beses ----
+
+    private int $graphCalls = 0;
+    private const META_TOKEN = 'EAAmetatesttokenSECRETabcdefghijklmnop123';
+    private const CAMPAIGN = '60001';
+    private const ADSET = '50001';
+    private const AD = '40001';
+
+    /** Ang ad sa ad_catalog: ang ad set at campaign nito (gaya ng isinusulat ng upload o sync). */
+    private function catalog(string $ad, ?string $adset, ?string $campaign): void
+    {
+        DB::table('ad_catalog')->insert(['ad_id' => $ad, 'ad_set_id' => $adset, 'campaign_id' => $campaign, 'created_at' => now(), 'updated_at' => now()]);
+    }
+
+    /** Ang hierarchy ng mga test: ad 40001 sa ad set 50001 sa campaign 60001; ang kapatid na 40002 sa ad set 50002 ng parehong campaign; 40003 sa ibang campaign. */
+    private function hierarchy(): void
+    {
+        $this->catalog(self::AD, self::ADSET, self::CAMPAIGN);
+        $this->catalog('40002', '50002', self::CAMPAIGN);
+        $this->catalog('40003', '50003', '60002');
+    }
+
+    /** Isang Meta Ads connection (ang token ay naka-encrypt sa app_settings, gaya ng Connect). */
+    private function metaConnection(): void
+    {
+        app(\App\Services\MetaAds\Connections::class)->save(1, self::META_TOKEN, ['fb_user_name' => 'Owner', 'ad_accounts' => [['id' => '777', 'name' => 'Acc']]]);
+    }
+
+    /** Ang sagot ng Meta sa GET /<ad>; $answer = callable(ad id) o ang JSON / [status, JSON]. */
+    private function meta(mixed $answer): void
+    {
+        Http::fake(['graph.facebook.com/*' => function (HttpRequest $r) use ($answer) {
+            $this->graphCalls++;
+            $ad = basename(parse_url($r->url(), PHP_URL_PATH));
+            $a = is_callable($answer) ? $answer($ad) : $answer;
+            if ($a instanceof \Throwable) throw $a;
+            [$status, $body] = is_array($a) && isset($a[0]) && is_int($a[0]) ? $a : [200, $a];
+
+            return Http::response($body, $status);
+        }, self::SEND => Http::response(['success' => true])]);
+    }
+
+    private function metaCalls(): int
+    {
+        return $this->graphCalls;
+    }
+
+    /** Isang group na may parehong values ng Item A (para pareho ang sagot), ang ID lang ang iba. */
+    private function groupWith(string $name, array $ids, array $values = []): int
+    {
+        $r = app(AdGroups::class)->save('Page P', null, $name, $ids, $values + ['item_name_in_jnt_dashboard' => 'Serum', 'price' => '499', 'main_flow' => 'X']);
+        $this->assertTrue($r['ok'], $r['error'] ?? '');
+
+        return $r['id'];
+    }
+
+    public static function levels(): array
+    {
+        return ['campaign (1.1)' => [self::CAMPAIGN], 'ad set (1.2)' => [self::ADSET], 'the ad itself' => [self::AD]];
+    }
+
+    #[DataProvider('levels')]
+    public function test_S_212_1_1_1_2_3_2_and_3_6_a_group_listing_the_ads_campaign_or_ad_set_answers_like_the_exact_ad(string $id): void
+    {
+        $this->hierarchy();
+        $this->groupWith('Serum', [$id]);
+        $this->chat(self::AD, run: true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent(), 'ang reply ng group, gaya ng sa eksaktong ad (hindi "Nothing to send")');
+        $this->assertSame(0, $this->metaCalls(), 'kilala ang ad: walang tawag sa Meta');
+    }
+
+    public function test_S_212_1_3_and_1_4_the_most_specific_level_wins_whatever_the_group_number(): void
+    {
+        $this->hierarchy();
+        $g = app(AdGroups::class);
+        // Ang group ng campaign ang una (pinakamababang numero), ang group ng ad mismo ang huli.
+        $a = $this->groupWith('By campaign', [self::CAMPAIGN], ['price' => '100']);
+        $b = $this->groupWith('By ad set', [self::ADSET], ['price' => '200']);
+        $c2 = $this->groupWith('By ad', [self::AD], ['price' => '300']);
+        $this->assertTrue($c2 > $b && $b > $a);
+
+        $this->assertSame($c2, $g->groupForAd('Page P', self::AD));
+        $this->chat(self::AD, '7001', true);
+        $this->assertSame(['X|Page MF2|300|PAGE: Page P' . "\nITEM: Serum\nPRICE: ₱300\nQUANTITY: 1"], $this->sent('7001'));
+        $g->removeAd('Page P', $c2, self::AD);
+        $this->assertSame($b, $g->groupForAd('Page P', self::AD), 'wala na ang ad: ang ad set');
+        $g->removeAd('Page P', $b, self::ADSET);
+        $this->assertSame($a, $g->groupForAd('Page P', self::AD), 'wala na ang ad set: ang campaign');
+        $g->removeAd('Page P', $a, self::CAMPAIGN);
+        $this->assertNull($g->groupForAd('Page P', self::AD), 'wala na: page values');
+    }
+
+    public function test_S_212_1_5_a_sibling_ad_set_or_another_campaign_does_not_match(): void
+    {
+        $this->hierarchy();
+        $this->groupWith('By ad set', [self::ADSET]);
+        $this->chat('40002', '7001', true);   // kapatid na ad set, parehong campaign
+        $this->chat('40003', '7002', true);   // ibang campaign
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'));
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7002'));
+    }
+
+    public static function latestAdLevels(): array
+    {
+        return [
+            'grouped campaign ad, then an ungrouped ad: the latest wins' => [[self::AD, '40003'], false],
+            'ungrouped, then the grouped campaign ad' => [['40003', self::AD], true],
+            'grouped campaign ad, then a chat without an ad' => [[self::AD, null], true],
+        ];
+    }
+
+    #[DataProvider('latestAdLevels')]
+    public function test_S_212_1_8_the_latest_ad_rule_holds_through_ad_set_and_campaign(array $ads, bool $group): void
+    {
+        $this->hierarchy();
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        foreach ($ads as $ad) {
+            $this->travel(1)->minutes();
+            $last = $this->chat($ad);
+        }
+        app(ChatbotRunner::class)->handle($last->id);
+        $this->assertSame([$group ? self::GROUP_TEXT : self::PAGE_TEXT], $this->sent());
+    }
+
+    public function test_S_212_1_9_2_9_and_3_7_page_based_pages_no_groups_and_exact_matches_never_look_up(): void
+    {
+        $this->metaConnection();
+        $this->meta(['id' => '49999', 'adset_id' => self::ADSET, 'campaign_id' => self::CAMPAIGN]);
+        $g = app(AdGroups::class);
+        // Ad-based na walang group: walang lookup.
+        $this->chat('49999', '7001', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'));
+        // Page-based na may group ng campaign: page values, walang lookup.
+        $g->setMode('Page P', false);
+        $this->groupWith('By campaign', [self::CAMPAIGN, '222']);
+        $this->chat('49999', '7002', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7002'));
+        // Ad-based, eksaktong ad: walang lookup.
+        $g->setMode('Page P', true);
+        $this->chat('222', '7003', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7003'));
+        $this->assertSame(0, $this->metaCalls());
+    }
+
+    public function test_S_212_1_10_an_ad_id_that_is_not_digits_or_too_long_is_ignored(): void
+    {
+        $this->metaConnection();
+        $this->meta(['id' => '1', 'adset_id' => self::ADSET, 'campaign_id' => self::CAMPAIGN]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('12ab', '7001', true);
+        $this->chat(str_repeat('9', 65), '7002', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'));
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7002'));
+        $this->assertNull(app(AdGroups::class)->groupForAd('Page P', str_repeat('9', 65)));
+        $this->assertSame(0, $this->metaCalls());
+    }
+
+    private function sequence(int $steps = 2): ChatbotSequence
+    {
+        $seq = ChatbotSequence::create(['name' => 'Drip', 'active' => true, 'exit_on_reply' => false]);
+        foreach (range(1, $steps) as $i) $seq->steps()->create(['position' => $i, 'delay_amount' => 0, 'delay_unit' => 'minutes', 'flow_id' => $this->flow('Seq {{PRICE}}')->id, 'active' => true]);
+
+        return $seq;
+    }
+
+    public function test_S_212_1_11_a_sequence_keeps_the_group_matched_by_campaign(): void
+    {
+        $this->hierarchy();
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $seq = $this->sequence();
+        $this->chat(self::AD, '7001');
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7001, 'other');
+        $this->travel(1)->minutes();
+        $this->chat('40003', '7001');   // lumipat sa ad na wala sa group
+        Artisan::call('chatbot:sequence-tick');
+        $this->travel(1)->minutes();
+        Artisan::call('chatbot:sequence-tick');
+        $this->assertSame(['Seq 499', 'Seq 499'], $this->sent('7001'));
+        $this->assertNotNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id));
+    }
+
+    public function test_S_212_2_1_and_2_2_an_unknown_ad_is_looked_up_once_stored_and_never_asked_again(): void
+    {
+        $this->metaConnection();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('40005', '7001', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7001'));
+        $this->assertSame(1, $this->metaCalls());
+        $this->assertSame(['40005', '50005', self::CAMPAIGN], array_values((array) DB::table('ad_catalog')->where('ad_id', '40005')->first(['ad_id', 'ad_set_id', 'campaign_id'])));
+        // Ang token ay nasa header lang, hindi sa URL.
+        $req = Http::recorded(fn (HttpRequest $r) => str_contains($r->url(), 'graph.facebook.com'))->first()[0];
+        $this->assertStringNotContainsString(self::META_TOKEN, $req->url());
+        $this->assertSame('Bearer ' . self::META_TOKEN, $req->header('Authorization')[0]);
+
+        $g = app(AdGroups::class);
+        foreach (range(1, 100) as $i) {
+            $this->chat('40005', (string) (8000 + $i));
+            $this->assertNotNull($g->forCustomer('1001', (string) (8000 + $i), 'Page P'));
+        }
+        \Illuminate\Support\Facades\Cache::flush();
+        $this->chat('40005', '7002', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7002'));
+        $this->assertSame(1, $this->metaCalls(), '100 pa at pagkatapos ng cache flush: walang bagong tawag');
+        $this->assertSame(1, DB::table('ad_catalog')->count(), 'isang row kada ad');
+    }
+
+    public function test_S_212_2_3_an_ad_already_in_the_reports_is_never_looked_up(): void
+    {
+        $this->metaConnection();
+        $this->meta(['id' => '40006', 'adset_id' => '1', 'campaign_id' => '2']);
+        DB::table('ads_manager_reports')->insert(['page_name' => 'Page P', 'day' => '2026-10-19', 'ad_id' => '40006', 'ad_set_id' => self::ADSET, 'campaign_id' => self::CAMPAIGN]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('40006', '7001', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7001'));
+        $this->assertSame(0, $this->metaCalls());
+    }
+
+    public function test_S_212_2_4_simultaneous_customers_of_one_new_ad_make_one_meta_call(): void
+    {
+        $this->metaConnection();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $g = app(AdGroups::class);
+        // Habang may nagtatanong na sa Meta (hawak ang lock): ang iba ay naghihintay hanggang 3 s, walang sariling tawag.
+        \Illuminate\Support\Sleep::fake();
+        $lock = \Illuminate\Support\Facades\Cache::lock('chatbot-adgroups:lookup:40005', 10);
+        $this->assertTrue($lock->get());
+        foreach (range(1, 19) as $i) {
+            $this->chat('40005', (string) (8000 + $i));
+            $this->assertNull($g->forCustomer('1001', (string) (8000 + $i), 'Page P'));
+        }
+        $this->assertTrue($g->unresolved);
+        \Illuminate\Support\Sleep::assertSleptTimes(19 * AdGroups::LOOKUP_TIMEOUT * 10);
+        $this->assertSame(0, $this->metaCalls());
+        $lock->release();
+        foreach (range(1, 20) as $i) $this->assertNotNull($g->forCustomer('1001', (string) (8000 + min($i, 19)), 'Page P'));
+        $this->assertSame(1, $this->metaCalls());
+    }
+
+    public function test_S_212_2_5_an_ad_unknown_to_meta_gets_page_values_and_is_remembered_for_an_hour(): void
+    {
+        $this->metaConnection();
+        $this->meta([400, ['error' => ['message' => 'Unsupported get request. Object with ID does not exist', 'code' => 100]]]);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('40007', '7001', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'));
+        $this->chat('40007', '7002', true);
+        $this->assertSame(1, $this->metaCalls(), 'tanda ang "wala"');
+        $this->travel(61)->minutes();
+        $this->chat('40007', '7003', true);
+        $this->assertSame(2, $this->metaCalls(), 'lampas isang oras: itinatanong ulit');
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7003'));
+    }
+
+    public static function metaDown(): array
+    {
+        return [
+            'timeout' => [new \Illuminate\Http\Client\ConnectionException('cURL error 28: Operation timed out after 3000 ms')],
+            '5xx' => [[503, 'Service Unavailable']],
+            'rate limit' => [[400, ['error' => ['message' => 'User request limit reached', 'code' => 17]]]],
+            'expired token' => [[400, ['error' => ['message' => 'Error validating access token: Session has expired access_token=' . self::META_TOKEN, 'code' => 190]]]],
+        ];
+    }
+
+    #[DataProvider('metaDown')]
+    public function test_S_212_2_6_and_2_10_meta_down_gives_page_values_a_run_log_note_no_retry_for_5_minutes_and_no_token_anywhere(mixed $answer): void
+    {
+        $logged = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Log\Events\MessageLogged::class, function ($e) use (&$logged) { $logged[] = $e->message . json_encode($e->context); });
+        $this->metaConnection();
+        $this->meta($answer);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('40008', '7001', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'), 'page values, walang exception');
+        $note = DB::table('chatbot_events')->where('psid', 7001)->where('type', 'ad_lookup')->value('detail');
+        $this->assertStringContainsString('failed', (string) $note);
+        $this->travel(4)->minutes();
+        $this->chat('40008', '7002', true);
+        $this->assertSame(1, $this->metaCalls(), 'hindi inuulit sa loob ng 5 minuto');
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7002'));
+        $all = DB::table('chatbot_events')->pluck('detail')->implode(' ') . implode(' ', $logged) . json_encode(DB::table('ad_catalog')->get());
+        $this->assertStringNotContainsString(self::META_TOKEN, $all);
+    }
+
+    public function test_S_212_2_6_and_8_3_the_meta_call_is_one_try_with_a_3_second_timeout_and_known_ads_never_wait_on_it(): void
+    {
+        $calls = [];
+        $this->app->instance(\App\Services\MetaAds\Graph::class, new class($calls) extends \App\Services\MetaAds\Graph {
+            public function __construct(private array &$calls) {}
+            public function get(string $pathOrUrl, array $query = [], ?string $token = null, bool $proof = true, int $tries = self::TRIES, int $timeout = 120): array
+            {
+                $this->calls[] = [$pathOrUrl, $tries, $timeout];
+                throw new \App\Services\MetaAds\GraphException('Graph request failed: timed out');
+            }
+        });
+        $this->metaConnection();
+        $this->hierarchy();
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('40009', '7001', true);
+        $this->assertSame([['40009', 1, AdGroups::LOOKUP_TIMEOUT]], $calls, 'isang subok, 3 segundo');
+        $this->assertSame(3, AdGroups::LOOKUP_TIMEOUT);
+        // Ang ibang customer (kilalang ad) ay hindi dumadaan sa Meta o sa lock nito.
+        $this->chat(self::AD, '7002', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7002'));
+        $this->assertCount(1, $calls);
+    }
+
+    public function test_S_212_2_6_no_meta_connection_gives_page_values_and_a_note(): void
+    {
+        $this->meta(['id' => '1']);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->chat('40010', '7001', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'));
+        $this->assertStringContainsString('no Meta Ads connection', (string) DB::table('chatbot_events')->where('type', 'ad_lookup')->value('detail'));
+        $this->assertSame(0, $this->metaCalls());
+    }
+
+    public function test_S_212_2_7_meta_back_after_the_wait_matches_and_a_sequence_entered_during_the_failure_re_resolves(): void
+    {
+        $this->metaConnection();
+        $down = true;
+        $this->meta(function ($ad) use (&$down) { return $down ? [503, 'down'] : ['id' => $ad, 'adset_id' => '50005', 'campaign_id' => self::CAMPAIGN]; });
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $seq = $this->sequence();
+        $this->chat('40011', '7001');
+        app(ChatbotSequences::class)->subscribe($seq->id, 1001, 7001, 'other');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id), 'ang pumalya ay hindi itinatala bilang page values');
+        Artisan::call('chatbot:sequence-tick');
+        $this->assertSame(['Seq 199'], $this->sent('7001'), 'step 1 habang down: page values');
+        $this->assertNull((new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id));
+
+        $down = false;
+        $this->travel(6)->minutes();
+        Artisan::call('chatbot:sequence-tick');
+        $this->assertSame(['Seq 199', 'Seq 499'], $this->sent('7001'), 'bumalik ang Meta: ang group');
+        $this->assertSame('1', (new CustomerFields(1001, 7001))->get(AdGroups::SEQ_PIN . $seq->id));
+        $this->chat('40011', '7002', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7002'));
+    }
+
+    public function test_S_212_2_8_many_new_ads_in_a_minute_stay_within_the_cap_and_known_ads_are_not_delayed(): void
+    {
+        \Illuminate\Support\Sleep::fake();
+        $this->metaConnection();
+        $this->hierarchy();
+        $this->meta(fn ($ad) => ['id' => $ad, 'adset_id' => '59999', 'campaign_id' => '69999']);
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $g = app(AdGroups::class);
+        foreach (range(1, 500) as $i) {
+            $this->chat((string) (100000 + $i), (string) (9000 + $i));
+            $this->assertNull($g->forCustomer('1001', (string) (9000 + $i), 'Page P'));
+        }
+        $this->assertSame(AdGroups::LOOKUPS_PER_MINUTE, $this->metaCalls());
+        $this->chat(self::AD, '7001', true);
+        $this->assertSame([self::GROUP_TEXT], $this->sent('7001'), 'ang kilalang ad ay tuloy');
+        \Illuminate\Support\Sleep::assertNeverSlept();
+    }
+
+    public function test_S_212_3_3_old_chats_are_not_answered_again_only_new_ones_match_the_new_way(): void
+    {
+        $this->hierarchy();
+        $old = $this->chat(self::AD, '7001', true);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'));
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        app(ChatbotRunner::class)->handle($old->id);
+        $this->assertSame([self::PAGE_TEXT], $this->sent('7001'), 'ang lumang chat ay hindi sinasagot ulit');
+        $this->travel(1)->minutes();
+        $this->chat(self::AD, '7001', true);
+        $this->assertSame([self::PAGE_TEXT, self::GROUP_TEXT], $this->sent('7001'));
+    }
+
+    public function test_S_212_3_4_an_ad_matching_nothing_with_empty_page_values_still_says_nothing_to_send(): void
+    {
+        $this->hierarchy();
+        app(ChatbotPage::class)->link('Page P', $this->flow('{{Main Flow 2}}'));
+        \App\Models\PageSetting::where('provider', 'chatbot')->where('key', 'main_flow_2')->update(['active' => false]);
+        PageSettings::forget('Page P');
+        $this->groupWith('By ad set', [self::ADSET]);
+        $this->actingAs($this->user());
+        $this->chat('40003', '7001', true);
+        $this->assertSame([], $this->sent('7001'));
+        $path = $this->postJson('/chatbot/test/send', ['page_name' => 'Page P', 'version' => 'published', 'message' => 'Hi'])->assertOk()->json('path');
+        $this->assertSame('Nothing to send', collect($path)->firstWhere('type', 'send')['note']);
+    }
+
+    public function test_S_212_3_5_the_test_tab_answers_with_a_group_matched_by_campaign_like_the_run(): void
+    {
+        $this->hierarchy();
+        $id = $this->groupWith('By campaign', [self::CAMPAIGN]);
+        $this->actingAs($this->user());
+        $this->chat(self::AD, '7001', true);
+        $this->assertSame(app(AdGroups::class)->forCustomer('1001', '7001', 'Page P'), $id);
+        $text = $this->postJson('/chatbot/test/send', ['page_name' => 'Page P', 'version' => 'published', 'message' => 'Hi', 'ad_group' => $id])->assertOk()->json('sends.0.messages.0.text');
+        $this->assertSame([$text], $this->sent('7001'));
+    }
+
+    public function test_S_212_8_1_matching_a_known_ad_adds_at_most_one_cache_read_and_one_query_whatever_the_number_of_groups(): void
+    {
+        $this->hierarchy();
+        $g = app(AdGroups::class);
+        $count = function (string $ad) use ($g) {
+            \Illuminate\Support\Facades\Cache::forget(AdGroups::PARENTS . $ad);
+            $g->groups('Page P'); // ang settings ng page ay naka-memo na (gaya ng takbo)
+            $n = 0;
+            DB::listen(function () use (&$n) { $n++; });
+            $reads = 0;
+            \Illuminate\Support\Facades\Event::listen([\Illuminate\Cache\Events\CacheHit::class, \Illuminate\Cache\Events\CacheMissed::class], function () use (&$reads) { $reads++; });
+            $group = $g->groupForAd('Page P', $ad);
+            DB::flushQueryLog();
+
+            return [$group, $n, $reads];
+        };
+        $this->groupWith('By campaign', [self::CAMPAIGN]);
+        [$group, $one] = $count(self::AD);
+        $this->assertNotNull($group);
+        foreach (range(1, 150) as $i) app(AdGroups::class)->save('Page P', null, 'G' . $i, [(string) (300000 + $i)], []);
+        [$group, $many, $reads] = $count(self::AD);
+        $this->assertNotNull($group);
+        $this->assertSame(1, $one, 'isang indexed query (ad_catalog.ad_id)');
+        $this->assertSame($one, $many, 'hindi lumalaki sa dami ng group');
+        $this->assertSame(1, $reads, 'isang basa ng cache');
     }
 }

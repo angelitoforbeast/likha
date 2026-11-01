@@ -8,9 +8,17 @@ use App\Models\ChatbotFlow;
 use App\Models\PageSetting;
 use App\Models\User;
 use App\Services\ChatbotFields;
+use App\Services\MetaAds\Connections;
+use App\Services\MetaAds\Graph;
+use App\Services\MetaAds\GraphException;
 use App\Services\PageSettings;
+use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Sleep;
+use Throwable;
 
 /**
  * Ang mga ad group ng isang chatbot page: ilang ad ID na iisa ang setup (item, presyo, Main Flow, flow, Seq …). Ang
@@ -36,6 +44,26 @@ class AdGroups
     /** Ang switch ng page: adgroup.mode = "ad" ay Ad-based; wala = Page-based (ang default). */
     public const MODE_KEY = 'mode';
     public const MODE_AD = 'ad';
+    /**
+     * Ang ID sa group ay ad, ad set o campaign. Ang ad set at campaign ng ad ng customer ay mula sa ad_catalog (o
+     * ads_manager_reports); kapag wala, isang tawag sa Meta (LOOKUP_*), at ang nakita ay isinusulat sa ad_catalog.
+     */
+    public const PARENTS = 'chatbot-adgroups:parents:';
+    public const PARENTS_TTL = 86400;
+    public const LOOKUP_TIMEOUT = 3;
+    public const LOOKUP_RETRY = 300;
+    public const LOOKUP_NOT_FOUND = 3600;
+    public const LOOKUPS_PER_MINUTE = 30;
+    /** Tahimik: Off nang QUIET_DAYS araw (o walang report), walang mensahe, at hindi bagong dagdag o bagong ayos. */
+    public const QUIET_DAYS = 7;
+    public const KINDS = ['ad' => 'Ad', 'adset' => 'Ad set', 'campaign' => 'Campaign'];
+
+    /**
+     * Ang huling forCustomer / forSequence: ang tala para sa run log kapag ang lookup sa Meta ay pumalya o nilaktawan, at
+     * unresolved = pumalya (subukan ulit sa susunod; hindi itinatala bilang page values ng sequence).
+     */
+    public ?string $lookupNote = null;
+    public bool $unresolved = false;
 
     /**
      * Ang group ay nakapagtatakda ng bawat value ng page (bawat botfield ng /chatbot/pages, ang flow na pinili, at ang AI
@@ -72,6 +100,29 @@ class AdGroups
         }
 
         return ['ids' => array_map('strval', array_keys($ids)), 'bad' => array_map('strval', array_keys($bad))];
+    }
+
+    /** Ang mali ng ID na hindi numero (ang unang lima). */
+    public static function notAnId(array $bad): string
+    {
+        return 'Not an ID (digits only): ' . implode(', ', array_slice($bad, 0, 5)) . '.';
+    }
+
+    /**
+     * Ad, ad set o campaign ang ID ayon sa ad_catalog (isang indexed query bawat antas); ang hindi kilala ay "ad", gaya ng
+     * dati. Para sa mensahe lang, hindi sa takbo.
+     */
+    public static function kindOf(string $id): string
+    {
+        try {
+            foreach (['ad_set_id' => 'adset', 'campaign_id' => 'campaign'] as $col => $kind) {
+                if (DB::table('ad_catalog')->where($col, $id)->exists()) return $kind;
+            }
+        } catch (QueryException) {
+            // walang ad_catalog
+        }
+
+        return 'ad';
     }
 
     /**
@@ -127,13 +178,203 @@ class AdGroups
         return $this->adBased($page) ? $this->groups($page) : [];
     }
 
-    /** Ang numero ng group ng page na may ad na ito, o null. */
+    /** Ang group ng bawat ID (ad, ad set o campaign) ng page: ID => numero ng group. */
+    public function index(string $page): array
+    {
+        $out = [];
+        foreach ($this->groups($page) as $id => $g) foreach ($g['ads'] as $a) $out[$a] ??= $id;
+
+        return $out;
+    }
+
+    /**
+     * Ang numero ng group ng page para sa ad na ito, o null: ang group na may ad mismo, saka ang may ad set nito, saka
+     * ang may campaign nito (ang pinakatiyak ang nananaig, hindi ang ayos ng group). Walang tawag sa Meta.
+     */
     public function groupForAd(string $page, ?string $adId): ?int
     {
-        if ($adId === null || $adId === '') return null;
-        foreach ($this->groups($page) as $id => $g) {
-            if (in_array($adId, $g['ads'], true)) return $id;
+        return $this->match($page, $adId, false)[0];
+    }
+
+    /**
+     * @return array{0: ?int, 1: ?string, 2: bool} ang group, ang tala ng lookup, at kung pumalya ang lookup
+     */
+    private function match(string $page, ?string $ad, bool $lookup): array
+    {
+        if ($ad === null || !preg_match('/^\d{1,64}$/', $ad)) return [null, null, false];
+        $index = $this->index($page);
+        if (isset($index[$ad])) return [$index[$ad], null, false];
+        if (!$index) return [null, null, false];
+        $p = $this->parents($ad, $page, $lookup);
+        foreach (['adset', 'campaign'] as $level) {
+            if ($p[$level] !== null && isset($index[$p[$level]])) return [$index[$p[$level]], null, false];
         }
+
+        return [null, $p['note'], $p['unresolved']];
+    }
+
+    /**
+     * Ang ad set at campaign ng ad: naka-cache, saka ad_catalog, saka ads_manager_reports (isang indexed query bawat isa);
+     * kapag hindi kilala at $lookup, ang Meta (lookup()).
+     * @return array{adset: ?string, campaign: ?string, note: ?string, unresolved: bool}
+     */
+    private function parents(string $ad, string $page, bool $lookup): array
+    {
+        $none = ['adset' => null, 'campaign' => null, 'note' => null, 'unresolved' => false];
+        if (is_array($p = Cache::get(self::PARENTS . $ad))) return $p + $none;
+        if ($p = self::knownParents($ad)) {
+            Cache::put(self::PARENTS . $ad, $p, self::PARENTS_TTL);
+            return $p + $none;
+        }
+
+        return $lookup ? $this->lookup($ad, $page) + $none : $none;
+    }
+
+    /** Ang numerong ID lang (hanggang 64 na digit), o null. */
+    private static function digits(mixed $v): ?string
+    {
+        $v = is_scalar($v) ? trim((string) $v) : '';
+
+        return preg_match('/^\d{1,64}$/', $v) ? $v : null;
+    }
+
+    /** @return ?array{adset: ?string, campaign: ?string} */
+    private static function knownParents(string $ad): ?array
+    {
+        foreach (['ad_catalog' => fn ($q) => $q, 'ads_manager_reports' => fn ($q) => $q->orderByDesc('day')->orderByDesc('id')] as $table => $order) {
+            try {
+                $r = $order(DB::table($table)->where('ad_id', $ad)->where(fn ($w) => $w->whereNotNull('ad_set_id')->orWhereNotNull('campaign_id')))->first(['ad_set_id', 'campaign_id']);
+            } catch (QueryException) {
+                continue; // wala ang table
+            }
+            $p = ['adset' => self::digits($r->ad_set_id ?? null), 'campaign' => self::digits($r->campaign_id ?? null)];
+            if ($p['adset'] !== null || $p['campaign'] !== null) return $p;
+        }
+
+        return null;
+    }
+
+    /**
+     * Isang tawag sa Meta para sa ad na hindi kilala: isa lang kada ad nang sabay (lock; ang iba ay naghihintay hanggang
+     * LOOKUP_TIMEOUT segundo), hanggang LOOKUPS_PER_MINUTE kada page, ang "wala" ay tanda nang LOOKUP_NOT_FOUND segundo
+     * at ang pumalya ay hindi inuulit nang LOOKUP_RETRY segundo. Walang ibinabato: ang mali ay page values lang.
+     * @return array{adset?: ?string, campaign?: ?string, note?: ?string, unresolved?: bool}
+     */
+    private function lookup(string $ad, string $page): array
+    {
+        $none = 'chatbot-adgroups:lookup:none:' . $ad;
+        $fail = 'chatbot-adgroups:lookup:fail:' . $ad;
+        $failed = ['note' => 'Ad lookup for ' . $ad . ' failed in the last ' . (self::LOOKUP_RETRY / 60) . ' minutes: page values', 'unresolved' => true];
+        try {
+            if (Cache::has($none)) return [];
+            if (Cache::has($fail)) return $failed;
+            $lock = Cache::lock('chatbot-adgroups:lookup:' . $ad, self::LOOKUP_TIMEOUT + 5);
+            if (!$lock->get()) {
+                // Ibang customer ang nagtatanong na sa Meta: hintayin ang sagot, hanggang LOOKUP_TIMEOUT segundo.
+                for ($i = 0; $i < self::LOOKUP_TIMEOUT * 10; $i++) {
+                    Sleep::for(100)->milliseconds();
+                    if (is_array($p = Cache::get(self::PARENTS . $ad))) return $p;
+                    if (Cache::has($none)) return [];
+                    if (Cache::has($fail)) return $failed;
+                }
+
+                return ['note' => 'Ad lookup for ' . $ad . ' still running: page values', 'unresolved' => true];
+            }
+            try {
+                if (is_array($p = Cache::get(self::PARENTS . $ad))) return $p;
+                $rate = 'chatbot-adgroups:lookup:rate:' . sha1($this->settings->pageKey($page));
+                if (RateLimiter::tooManyAttempts($rate, self::LOOKUPS_PER_MINUTE)) {
+                    return ['note' => 'Ad lookup for ' . $ad . ' skipped (' . self::LOOKUPS_PER_MINUTE . ' lookups this minute already): page values', 'unresolved' => true];
+                }
+                RateLimiter::hit($rate, 60);
+
+                return $this->fetchParents($ad, $page, $none, $fail);
+            } finally {
+                $lock->release();
+            }
+        } catch (Throwable $e) {
+            report(new \RuntimeException('Ad group lookup failed: ' . Graph::clean($e->getMessage())));
+
+            return ['note' => 'Ad lookup for ' . $ad . ' failed: page values', 'unresolved' => true];
+        }
+    }
+
+    /** Ang tawag mismo: GET /<ad>?fields=adset_id,campaign_id; ang mga ID lang ang kinukuha at iniimbak. */
+    private function fetchParents(string $ad, string $page, string $none, string $fail): array
+    {
+        $failed = function (string $why) use ($ad, $fail) {
+            Cache::put($fail, true, self::LOOKUP_RETRY);
+
+            return ['note' => 'Ad lookup for ' . $ad . ' failed (' . $why . '): page values', 'unresolved' => true];
+        };
+        $notFound = function () use ($ad, $none) {
+            Cache::put($none, true, self::LOOKUP_NOT_FOUND);
+
+            return ['note' => 'Ad ' . $ad . ' not found in Meta: page values'];
+        };
+        // Walang Meta Ads connection (o lahat ay expired): hindi maitatanong hanggang may mag-Connect. Gaya ng "wala" ito
+        // para sa sequence (page values ang itinatala, gaya ng dati), at hindi inuulit nang LOOKUP_RETRY segundo.
+        $token = $this->metaToken($page);
+        if ($token === null) {
+            Cache::put($none, true, self::LOOKUP_RETRY);
+
+            return ['note' => 'Ad lookup for ' . $ad . ' failed (no Meta Ads connection): page values'];
+        }
+        try {
+            $json = app(Graph::class)->get($ad, ['fields' => 'id,adset_id,campaign_id'], $token, true, 1, self::LOOKUP_TIMEOUT);
+        } catch (GraphException $e) {
+            // Wala, o hindi abot ng connection (100 / 803 / permission): hindi na itatanong nang isang oras.
+            if (in_array($e->graphCode, [10, 100, 803], true) || ($e->graphCode >= 200 && $e->graphCode < 300)) return $notFound();
+
+            return $failed($e->tokenExpired() ? 'Meta token expired' : ($e->graphCode ? 'Meta error ' . $e->graphCode : 'no answer from Meta'));
+        }
+        $p = ['adset' => self::digits($json['adset_id'] ?? null), 'campaign' => self::digits($json['campaign_id'] ?? null)];
+        if ((isset($json['id']) && (string) $json['id'] !== $ad) || ($p['adset'] === null && $p['campaign'] === null)) return $notFound();
+        $this->storeParents($ad, $p);
+        Cache::put(self::PARENTS . $ad, $p, self::PARENTS_TTL);
+
+        return $p;
+    }
+
+    /**
+     * Ang nakita ay isinusulat sa row ng ad sa ad_catalog (isang row kada ad, ID lang): pinupunan ng susunod na upload
+     * o sync ang pangalan at mga petsa, at hindi nito pinapalitan ang ID na nandoon na.
+     */
+    private function storeParents(string $ad, array $p): void
+    {
+        try {
+            $now = now();
+            if (DB::table('ad_catalog')->insertOrIgnore(['ad_id' => $ad, 'ad_set_id' => $p['adset'], 'campaign_id' => $p['campaign'], 'created_at' => $now, 'updated_at' => $now])) return;
+            foreach (['ad_set_id' => $p['adset'], 'campaign_id' => $p['campaign']] as $col => $v) {
+                if ($v !== null) DB::table('ad_catalog')->where('ad_id', $ad)->whereNull($col)->update([$col => $v, 'updated_at' => $now]);
+            }
+        } catch (QueryException) {
+            // wala ang ad_catalog: ang cache na lang
+        }
+    }
+
+    /**
+     * Ang token ng Meta Ads connection na gagamitin (gaya ng sync): ang may ad account ng page muna (ayon sa reports),
+     * saka ang unang hindi expired. Hindi kailanman ipinapakita o itinatala.
+     */
+    private function metaToken(string $page): ?string
+    {
+        try {
+            $connections = app(Connections::class);
+            $all = array_filter($connections->all(), fn ($c) => ($c['status'] ?? 'ok') !== 'expired');
+        } catch (QueryException) {
+            return null;
+        }
+        $bare = fn ($id) => preg_replace('/^act_/', '', trim((string) $id));
+        $mine = [];
+        try {
+            foreach (DB::table('ads_manager_reports')->where('page_name', $page)->whereNotNull('account_id')->distinct()->limit(20)->pluck('account_id') as $a) $mine[$bare($a)] = true;
+        } catch (QueryException) {
+            // walang reports o walang account_id: ang unang connection
+        }
+        $ours = fn (array $c) => (bool) array_filter($c['ad_accounts'] ?? [], fn ($x) => isset($mine[$bare($x['id'] ?? '')]));
+        uasort($all, fn ($a, $b) => $ours($b) <=> $ours($a));
+        foreach ($all as $c) if (($t = $connections->token($c)) !== null && $t !== '') return $t;
 
         return null;
     }
@@ -164,24 +405,28 @@ class AdGroups
      */
     public function forCustomer(int|string $pageId, int|string $psid, string $page): ?int
     {
+        [$this->lookupNote, $this->unresolved] = [null, false];
         if (!$this->activeGroups($page)) return null;
+        [$group, $this->lookupNote, $this->unresolved] = $this->match($page, $this->latestAd($pageId, $psid, $page), true);
 
-        return $this->groupForAd($page, $this->latestAd($pageId, $psid, $page));
+        return $group;
     }
 
     /**
      * Ang group ng customer sa isang sequence: ang naitala nang pumasok siya (pin), para hindi lumipat sa gitna. Ang walang
-     * pin (pumasok bago nagkaroon ng group ang page) ay kinukuha ngayon at itinatala. Ang na-delete na group = page values.
+     * pin (pumasok bago nagkaroon ng group ang page) ay kinukuha ngayon at itinatala; kapag pumalya ang lookup sa Meta,
+     * page values sa step na ito at walang pin (kinukuha ulit sa susunod na step). Ang na-delete na group = page values.
      * Ang Page-based na page: page values, at ang pin ay hindi ginagalaw (bumabalik kapag Ad-based ulit).
      */
     public function forSequence(int $sequenceId, CustomerFields $fields, string $page): ?int
     {
+        [$this->lookupNote, $this->unresolved] = [null, false];
         $groups = $this->activeGroups($page);
         if (!$groups) return null;
         $pin = $fields->get(self::SEQ_PIN . $sequenceId);
         if ($pin === null) {
-            $group = $this->groupForAd($page, $this->latestAd($fields->pageId, $fields->psid, $page));
-            $this->pin($sequenceId, $fields, $page, $group);
+            [$group, $this->lookupNote, $this->unresolved] = $this->match($page, $this->latestAd($fields->pageId, $fields->psid, $page), true);
+            if (!$this->unresolved) $this->pin($sequenceId, $fields, $page, $group);
 
             return $group;
         }
@@ -226,9 +471,13 @@ class AdGroups
             if ($id !== null && !isset($groups[$id])) return ['ok' => false, 'error' => 'This group was deleted.'];
             [$name, $ads, $values] = $build($groups[$id] ?? null);
             if (($error = $this->invalid($name, $ads, $values, $page, $groups[$id]['values'] ?? [])) !== null) return ['ok' => false, 'error' => $error];
+            // Iisang group lang ang bawat ID, anuman ang antas (ad, ad set, campaign). Ang ad sa isang group at ang ad set
+            // nito sa iba ay puwede: ang pinakatiyak ang nananaig sa takbo.
             foreach ($ads as $ad) {
                 foreach ($groups as $other) {
-                    if ($other['id'] !== $id && in_array($ad, $other['ads'], true)) return ['ok' => false, 'error' => 'Ad ' . $ad . ' is already in the group "' . $other['name'] . '".'];
+                    if ($other['id'] !== $id && in_array($ad, $other['ads'], true)) {
+                        return ['ok' => false, 'error' => self::KINDS[self::kindOf($ad)] . ' ' . $ad . ' is already in the group "' . $other['name'] . '".', 'group' => $other['id']];
+                    }
                 }
             }
             $id ??= $this->nextId($page);
@@ -249,7 +498,7 @@ class AdGroups
         if ($name === '') return 'Give the group a name.';
         if (mb_strlen($name) > self::MAX_NAME) return 'Name: ' . self::MAX_NAME . ' characters at most.';
         $parsed = self::parseAds(implode(',', array_map('strval', $ads)));
-        if ($parsed['bad']) return 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.';
+        if ($parsed['bad']) return self::notAnId($parsed['bad']);
         $ads = $parsed['ids'];
         sort($ads, SORT_STRING);
         if (count($ads) > self::MAX_ADS) return 'At most ' . self::MAX_ADS . ' ads in a group.';
@@ -316,8 +565,15 @@ class AdGroups
     public function addAds(string $page, ?int $id, ?string $name, array $ads, ?int $userId = null): array
     {
         if ($id === null) return $this->save($page, null, (string) $name, $ads, [], $userId);
+        $already = [];
+        $r = $this->change($page, $id, function (array $g) use ($ads, &$already) {
+            $already = array_values(array_intersect(array_map('strval', $ads), $g['ads']));
 
-        return $this->change($page, $id, fn (array $g) => [$g['name'], array_merge($g['ads'], $ads), []], $userId);
+            return [$g['name'], array_merge($g['ads'], $ads), []];
+        }, $userId);
+
+        // Ang naipasa nang dalawang beses (o nasa group na): isang beses lang nakatala, at sinasabi.
+        return $r['ok'] && $already ? $r + ['note' => 'Already in this group: ' . implode(', ', array_slice($already, 0, 5)) . (count($already) > 5 ? ' …' : '') . '.'] : $r;
     }
 
     /**
@@ -389,52 +645,220 @@ class AdGroups
     }
 
     /**
-     * Ang lahat ng kailangan ng row ng Ad-based na page: ang mga group na ang bawat ad ay may pangalan, status, ilang
-     * customer at huling oras (all_off = lahat ng ad ay Off), ang huling araw ng report (as_of), at ang "Ads not in a
-     * group yet": ang mga ad na nakita sa page sa huling UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang ad_id ng
-     * botcake_psids ng page) na wala pa sa group; ang bago muna, saka ang On, saka ang pinakamaraming customer, hanggang
-     * $limit; $q = bahagi ng ad ID o ng pangalan. new_unassigned = ilang bago ang wala pa sa group (hindi ayon sa $q).
-     * Iisang statuses() para sa lahat ng ad ng page; ang nakita ay naka-cache nang UNASSIGNED_TTL segundo kada page.
-     * @return array{groups: array<int, array<string, mixed>>, unassigned: array<int, array<string, mixed>>, unassigned_total: int, new_unassigned: int, as_of: ?string}
+     * Ang lahat ng kailangan ng row ng Ad-based na page: ang mga group na ang bawat ID ay may uri (Ad, Ad set, Campaign o
+     * hindi kilala), pangalan, status, ilang customer at huling oras (ang ad set at campaign: ang lahat ng ad sa ilalim
+     * nito), quiet (tahimik: tingnan ang quiet()), hidden ng group (lahat ng ID ay tahimik at lampas QUIET_DAYS na ang
+     * group), ang huling araw ng report (as_of), at ang "Ads not in a group yet": ang mga ad na nakita sa page sa huling
+     * UNASSIGNED_DAYS araw (ang ad_id ng mga chat, at ang ad_id ng botcake_psids ng page) na wala sa group, mismo man o
+     * sa ad set o campaign nito; ang hindi tahimik muna, saka ang bago, saka ang On, saka ang pinakamaraming customer,
+     * hanggang $limit; $q = bahagi ng ad ID o ng pangalan. new_unassigned = ilang bago ang wala pa sa group (hindi ayon
+     * sa $q). Ang pagtatago ay sa screen lang: walang isinusulat, at ang takbo ay hindi nagbabago. Walang tawag sa Meta.
+     * @return array{groups: array<int, array<string, mixed>>, unassigned: array<int, array<string, mixed>>, unassigned_total: int, new_unassigned: int, as_of: ?string, hidden: array{groups: int, ids: int, unassigned: int}}
      */
     public function overview(string $page, string $q = '', int $limit = self::UNASSIGNED_LIMIT): array
     {
         $seen = $this->seenCached($page);
         $groups = $this->groups($page);
-        $grouped = array_merge(...array_values(array_map(fn ($g) => $g['ads'], $groups)) ?: [[]]);
-        $rest = array_diff_key($seen, array_flip($grouped));
-        $all = array_values(array_unique(array_merge($grouped, array_map('strval', array_keys($rest)))));
+        $index = $this->index($page);
+        $parents = $this->parentsMany(array_values(array_unique(array_merge(array_map('strval', array_keys($seen)), array_map('strval', array_keys($index))))));
+        $levels = $this->levels(array_values(array_diff(array_map('strval', array_keys($index)), array_keys($parents))));
+        $rest = $this->uncovered($seen, $index, $parents);
+        // Ang mga ad sa ilalim ng bawat ad set o campaign ng group: ayon sa ad_catalog, at ang mga nakitang ad na doon kabilang.
+        $under = $levels['children'];
+        foreach ($parents as $ad => $p) foreach ($p as $parent) if ($parent !== null && isset($levels['kind'][$parent])) $under[$parent][$ad] = true;
+        $all = array_values(array_unique(array_merge(array_map('strval', array_keys($index)), array_map('strval', array_keys($rest)),
+            ...array_values(array_map(fn ($ads) => array_map('strval', array_keys($ads)), $under)) ?: [[]])));
         $status = $this->statuses($all);
-        $names = $this->adNames($all);
+        $names = $this->adNames(array_values(array_diff($all, array_keys($levels['kind']))));
         $row = fn (string $ad) => $this->adRow($ad, $names[$ad] ?? null, $seen[$ad] ?? null, $status['ads'][$ad] ?? null);
+        $times = $this->times($page);
+        $cut = now()->subDays(self::QUIET_DAYS);
 
         $outGroups = [];
+        $hidden = ['groups' => 0, 'ids' => 0, 'unassigned' => 0];
         foreach ($groups as $id => $g) {
-            $ads = array_map($row, $g['ads']);
-            $outGroups[$id] = $g + ['rows' => $ads, 'all_off' => $ads && !array_filter($ads, fn ($a) => $a['status'] !== 'off')];
+            $rows = [];
+            foreach ($g['ads'] as $x) {
+                $kind = $levels['kind'][$x] ?? (isset($status['ads'][$x]) || isset($seen[$x]) || isset($parents[$x]) ? 'ad' : 'unknown');
+                $r = $kind === 'adset' || $kind === 'campaign'
+                    ? $this->rollup($x, $levels['names'][$x] ?? null, array_map('strval', array_keys($under[$x] ?? [])), $seen, $status)
+                    : $row($x);
+                $touched = max($times['added'][$id][$x] ?? null, $times['edited'][$id] ?? null);
+                $rows[] = $r + ['kind' => $kind, 'quiet' => $this->quiet($r, $touched)];
+            }
+            $isHidden = $rows && ($times['created'][$id] ?? now())->lt($cut) && !array_filter($rows, fn ($r) => !$r['quiet']);
+            if ($isHidden) $hidden['groups']++;
+            else $hidden['ids'] += count(array_filter($rows, fn ($r) => $r['quiet']));
+            $outGroups[$id] = $g + ['rows' => $rows, 'all_off' => $rows && !array_filter($rows, fn ($a) => $a['status'] !== 'off'), 'hidden' => $isHidden];
         }
         $q = mb_strtolower(trim($q));
         $out = [];
         $new = 0;
         foreach (array_keys($rest) as $ad) {
             $r = $row((string) $ad);
+            $r += ['kind' => 'ad', 'quiet' => $this->quiet($r, null)];
             if ($r['new']) $new++;
             if ($q !== '' && !str_contains($r['ad_id'], $q) && !str_contains(mb_strtolower((string) $r['name']), $q)) continue;
+            if ($r['quiet']) $hidden['unassigned']++;
             $out[] = $r;
         }
-        usort($out, fn ($a, $b) => [$b['new'], $b['status'] === 'on', $b['customers'], (string) $b['last']] <=> [$a['new'], $a['status'] === 'on', $a['customers'], (string) $a['last']]);
+        usort($out, fn ($a, $b) => [!$b['quiet'], $b['new'], $b['status'] === 'on', $b['customers'], (string) $b['last']] <=> [!$a['quiet'], $a['new'], $a['status'] === 'on', $a['customers'], (string) $a['last']]);
 
-        return ['groups' => $outGroups, 'unassigned' => array_slice($out, 0, $limit), 'unassigned_total' => count($out), 'new_unassigned' => $new, 'as_of' => $status['as_of']];
+        return ['groups' => $outGroups, 'unassigned' => array_slice($out, 0, $limit), 'unassigned_total' => count($out), 'new_unassigned' => $new, 'as_of' => $status['as_of'], 'hidden' => $hidden];
     }
 
-    /** Ilang bagong ad (New) ang wala pa sa group ng page: ang badge ng nakasarang Ad-based na row. */
+    /** Ilang bagong ad (New) ang wala pa sa group ng page (mismo, o sa ad set o campaign nito): ang badge ng nakasarang Ad-based na row. */
     public function newUnassigned(string $page): int
     {
         $seen = $this->seenCached($page);
-        $rest = array_diff_key($seen, array_flip(array_merge(...array_values(array_map(fn ($g) => $g['ads'], $this->groups($page))) ?: [[]])));
+        $rest = $this->uncovered($seen, $this->index($page), $this->parentsMany(array_map('strval', array_keys($seen))));
         $status = $this->statuses(array_map('strval', array_keys($rest)));
 
         return count(array_filter(array_keys($rest), fn ($ad) => $this->adRow((string) $ad, null, $rest[$ad], $status['ads'][(string) $ad] ?? null)['new']));
+    }
+
+    /** Ang mga nakitang ad na wala sa group: hindi ang ad mismo, hindi ang ad set nito, hindi ang campaign nito. */
+    private function uncovered(array $seen, array $index, array $parents): array
+    {
+        return array_filter($seen, function ($v, $ad) use ($index, $parents) {
+            if (isset($index[(string) $ad])) return false;
+            foreach ($parents[(string) $ad] ?? [] as $p) if ($p !== null && isset($index[$p])) return false;
+
+            return true;
+        }, ARRAY_FILTER_USE_BOTH);
+    }
+
+    /**
+     * Tahimik ang ID kapag (a) Off nang QUIET_DAYS araw o higit (off_days gaya ng sa screen) o walang report data, (b)
+     * walang customer na nag-message nito (o sa ilalim nito) sa huling QUIET_DAYS araw, at (c) ang pagdagdag nito o ang
+     * huling ayos ng values ng group ($touched; null = wala, gaya ng ad na wala sa group) ay lampas QUIET_DAYS araw na.
+     */
+    private function quiet(array $r, ?Carbon $touched): bool
+    {
+        $cut = now()->subDays(self::QUIET_DAYS);
+        $off = $r['status'] === 'none' || ($r['status'] === 'off' && (int) $r['off_days'] >= self::QUIET_DAYS);
+
+        return $off && ($r['last'] === null || Carbon::parse($r['last'])->lt($cut)) && ($touched === null || $touched->lt($cut));
+    }
+
+    /**
+     * Ang ad set o campaign bilang isang row: On kapag may ad na On sa ilalim; kung wala, Off kapag may Off, mula sa
+     * pinakahuling off_since ng mga ad; ang customers ay ang iba't ibang customer ng mga ad sa ilalim, ang last ang
+     * pinakahuli. Ang walang kilalang ad sa ilalim ay "none".
+     */
+    private function rollup(string $id, ?string $name, array $ads, array $seen, array $status): array
+    {
+        $st = array_values(array_filter(array_map(fn ($a) => $status['ads'][$a] ?? null, $ads)));
+        $on = (bool) array_filter($st, fn ($s) => $s['status'] === 'on');
+        $since = $on ? null : (collect($st)->where('status', 'off')->max('off_since'));
+        $psids = [];
+        $last = null;
+        foreach ($ads as $a) {
+            foreach ($seen[$a]['psids'] ?? [] as $p) $psids[$p] = true;
+            if (($seen[$a]['last'] ?? null) !== null && ($last === null || $seen[$a]['last'] > $last)) $last = $seen[$a]['last'];
+        }
+
+        return ['ad_id' => $id, 'name' => $name !== null && $name !== '' ? $name : null, 'status' => $on ? 'on' : ($since !== null ? 'off' : 'none'), 'off_since' => $since,
+            'off_days' => $since === null || $status['as_of'] === null ? null : (int) Carbon::parse($since)->diffInDays(Carbon::parse($status['as_of'])) + 1,
+            'new' => false, 'customers' => count($psids), 'last' => $last !== null ? Carbon::parse($last)->format('Y-m-d H:i') : null, 'ads_under' => count($ads)];
+    }
+
+    /**
+     * Ang ad set at campaign ng mga ad (para sa "Ads not in a group yet" at ang pag-uuri): ad_catalog, saka
+     * ads_manager_reports para sa wala roon. Mga indexed na "ad_id IN (...)", 500 bawat isa; naka-cache nang STATUS_TTL.
+     * @param array<int, string> $ads
+     * @return array<string, array{0: ?string, 1: ?string}> ad => [ad set, campaign]
+     */
+    private function parentsMany(array $ads): array
+    {
+        $ads = array_values(array_filter($ads, fn ($a) => preg_match('/^\d{1,64}$/', $a)));
+        sort($ads, SORT_STRING);
+        if (!$ads) return [];
+
+        return Cache::remember('chatbot-adgroups:parents-many:' . sha1(implode(',', $ads)), self::STATUS_TTL, function () use ($ads) {
+            $out = [];
+            foreach (['ad_catalog', 'ads_manager_reports'] as $table) {
+                foreach (array_chunk(array_values(array_diff($ads, array_keys($out))), 500) as $chunk) {
+                    try {
+                        $rows = DB::table($table)->whereIn('ad_id', $chunk)->where(fn ($w) => $w->whereNotNull('ad_set_id')->orWhereNotNull('campaign_id'))
+                            ->groupBy('ad_id')->selectRaw('ad_id, MAX(ad_set_id) AS s, MAX(campaign_id) AS c')->get();
+                    } catch (QueryException) {
+                        continue 2;
+                    }
+                    foreach ($rows as $r) {
+                        $p = [self::digits($r->s), self::digits($r->c)];
+                        if ($p[0] !== null || $p[1] !== null) $out[(string) $r->ad_id] = $p;
+                    }
+                }
+            }
+
+            return $out;
+        });
+    }
+
+    /**
+     * Ang mga ID ng group na ad set o campaign (ayon sa ad_catalog: indexed na ad_set_id at campaign_id): ang uri, ang
+     * pangalan, at ang mga ad sa ilalim. Naka-cache nang STATUS_TTL.
+     * @param array<int, string> $ids
+     * @return array{kind: array<string, string>, names: array<string, string>, children: array<string, array<string, true>>}
+     */
+    private function levels(array $ids): array
+    {
+        $ids = array_values(array_filter($ids, fn ($a) => preg_match('/^\d{1,64}$/', $a)));
+        sort($ids, SORT_STRING);
+        $out = ['kind' => [], 'names' => [], 'children' => []];
+        if (!$ids) return $out;
+
+        return Cache::remember('chatbot-adgroups:levels:' . sha1(implode(',', $ids)), self::STATUS_TTL, function () use ($ids, $out) {
+            foreach (array_chunk($ids, 500) as $chunk) {
+                foreach (['ad_set_id' => ['adset', 'ad_set_name'], 'campaign_id' => ['campaign', 'campaign_name']] as $col => [$kind, $nameCol]) {
+                    try {
+                        $rows = DB::table('ad_catalog')->whereIn($col, $chunk)->get(['ad_id', $col, $nameCol]);
+                    } catch (QueryException) {
+                        return $out;
+                    }
+                    foreach ($rows as $r) {
+                        $id = (string) $r->{$col};
+                        $out['kind'][$id] = $kind;
+                        if (trim((string) $r->{$nameCol}) !== '') $out['names'][$id] ??= (string) $r->{$nameCol};
+                        if (($ad = self::digits($r->ad_id)) !== null) $out['children'][$id][$ad] = true;
+                    }
+                }
+            }
+
+            return $out;
+        });
+    }
+
+    /**
+     * Mula sa history ng page_settings (dalawang query): kailan nagawa ang bawat group, kailan huling inayos ang values
+     * nito, at kailan idinagdag ang bawat ID (ang pinakalumang sunod-sunod na ad list ng group na may ID na iyon).
+     * @return array{created: array<int, Carbon>, edited: array<int, Carbon>, added: array<int, array<string, Carbon>>}
+     */
+    private function times(string $page): array
+    {
+        $out = ['created' => [], 'edited' => [], 'added' => []];
+        $at = fn ($v) => $v ? Carbon::parse($v) : null;
+        $rows = $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'like', 'g%.%')->toBase()->get(['key', 'active', 'created_at', 'replaced_at']);
+        foreach ($rows as $s) {
+            if (!preg_match('/^g(\d+)\.(.+)$/', (string) $s->key, $m)) continue;
+            $id = (int) $m[1];
+            $c = $at($s->created_at);
+            if ($c && (!isset($out['created'][$id]) || $c->lt($out['created'][$id]))) $out['created'][$id] = $c;
+            if (!self::isValueKey($m[2])) continue;
+            foreach ([$c, $at($s->replaced_at)] as $t) if ($t && (!isset($out['edited'][$id]) || $t->gt($out['edited'][$id]))) $out['edited'][$id] = $t;
+        }
+        $lists = $this->settings->pageQuery($page)->where('provider', self::PROVIDER)->where('key', 'like', 'g%.ads')->orderBy('id')->get(['id', 'key', 'value', 'is_secret', 'created_at']);
+        foreach ($lists as $s) {
+            if (!preg_match('/^g(\d+)\.ads$/', (string) $s->key, $m)) continue;
+            $id = (int) $m[1];
+            $now = array_flip(array_filter(explode(',', (string) $s->plainValue()), fn ($a) => $a !== ''));
+            $prev = $out['added'][$id] ?? [];
+            $out['added'][$id] = [];
+            foreach (array_keys($now) as $ad) $out['added'][$id][(string) $ad] = $prev[(string) $ad] ?? ($s->created_at ?? now());
+        }
+
+        return $out;
     }
 
     /**
@@ -504,13 +928,13 @@ class AdGroups
         });
     }
 
-    /** @return array<string, array{customers: int, last: ?string, first: ?string}> */
+    /** @return array<string, array{customers: int, last: ?string, first: ?string, psids: array<int, string>}> */
     private function seenCached(string $page): array
     {
-        return Cache::remember('chatbot-adgroups:seen:v2:' . sha1($this->settings->pageKey($page)), self::UNASSIGNED_TTL, fn () => $this->seen($page));
+        return Cache::remember('chatbot-adgroups:seen:v3:' . sha1($this->settings->pageKey($page)), self::UNASSIGNED_TTL, fn () => $this->seen($page));
     }
 
-    /** @return array<string, array{customers: int, last: ?string, first: ?string}> ad => ilang customer, ang huli at ang unang oras */
+    /** @return array<string, array{customers: int, last: ?string, first: ?string, psids: array<int, string>}> ad => ilang customer (at sino, para sa ad set at campaign), ang huli at ang unang oras */
     private function seen(string $page): array
     {
         $since = now()->subDays(self::UNASSIGNED_DAYS);
@@ -540,7 +964,7 @@ class AdGroups
             ->each(fn ($r) => $add($r->ad_id, $r->psid, max((string) $r->last_interactive_at, (string) $r->first_seen_at) ?: null, $r->first_seen_at ?: null));
 
         $out = [];
-        foreach ($psids as $ad => $set) $out[(string) $ad] = ['customers' => count($set), 'last' => $last[$ad] ?? null, 'first' => $first[$ad] ?? null];
+        foreach ($psids as $ad => $set) $out[(string) $ad] = ['customers' => count($set), 'last' => $last[$ad] ?? null, 'first' => $first[$ad] ?? null, 'psids' => array_map('strval', array_keys($set))];
 
         return $out;
     }

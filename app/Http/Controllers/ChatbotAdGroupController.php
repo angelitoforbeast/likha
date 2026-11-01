@@ -49,7 +49,8 @@ class ChatbotAdGroupController extends Controller
 
     private function result(array $r)
     {
-        return $r['ok'] ? response()->json(['ok' => true, 'id' => $r['id']]) : response()->json(['error' => $r['error']], 422);
+        return $r['ok'] ? response()->json(['ok' => true, 'id' => $r['id']] + (isset($r['note']) ? ['note' => $r['note']] : []))
+            : response()->json(['error' => $r['error']] + (isset($r['group']) ? ['group' => $r['group']] : []), 422);
     }
 
     public function index(Request $request)
@@ -71,16 +72,17 @@ class ChatbotAdGroupController extends Controller
                 default => [],
             };
         }
-        // Ang bawat ad (sa group at sa "Ads not in a group yet") ay may pangalan, status, ilang customer at huling oras.
+        // Ang bawat ID (sa group at sa "Ads not in a group yet") ay may uri, pangalan, status, ilang customer, huling oras at
+        // quiet; ang group ay may hidden. Ang pagtatago ay sa screen lang. Walang tawag sa Meta.
         $o = $this->groups->overview($page, $q);
 
         return response()->json([
             'mode' => $this->groups->adBased($page) ? AdGroups::MODE_AD : 'page',
             'as_of' => $o['as_of'],
-            'groups' => array_values(array_map(fn ($g) => ['id' => $g['id'], 'name' => $g['name'], 'ads' => $g['rows'], 'all_off' => $g['all_off'], 'values' => (object) $g['values']], $o['groups'])),
+            'groups' => array_values(array_map(fn ($g) => ['id' => $g['id'], 'name' => $g['name'], 'ads' => $g['rows'], 'all_off' => $g['all_off'], 'hidden' => $g['hidden'], 'values' => (object) $g['values']], $o['groups'])),
             'keys' => array_values($keys),
             'flows' => ChatbotFlow::orderBy('name')->get(['id', 'name'])->map(fn ($f) => ['id' => $f->id, 'name' => $f->name])->all(),
-            'unassigned' => $o['unassigned'], 'unassigned_total' => $o['unassigned_total'], 'new_unassigned' => $o['new_unassigned'],
+            'unassigned' => $o['unassigned'], 'unassigned_total' => $o['unassigned_total'], 'new_unassigned' => $o['new_unassigned'], 'hidden' => $o['hidden'],
         ]);
     }
 
@@ -89,9 +91,9 @@ class ChatbotAdGroupController extends Controller
     {
         $this->checkAccess();
         $page = $this->page($request);
-        if (!is_scalar($request->input('ads', '')) || !is_scalar($request->input('name', ''))) return response()->json(['error' => 'Name and ad IDs are text.'], 422);
+        if (!is_scalar($request->input('ads', '')) || !is_scalar($request->input('name', ''))) return response()->json(['error' => 'Name and IDs are text.'], 422);
         $parsed = AdGroups::parseAds(mb_substr((string) $request->input('ads', ''), 0, 40000));
-        if ($parsed['bad']) return response()->json(['error' => 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.'], 422);
+        if ($parsed['bad']) return response()->json(['error' => AdGroups::notAnId($parsed['bad'])], 422);
         $values = [];
         foreach ((array) $request->input('values', []) as $key => $value) {
             if (!is_scalar($value) && $value !== null) return response()->json(['error' => 'Values are text.'], 422);
@@ -112,11 +114,11 @@ class ChatbotAdGroupController extends Controller
         $input = $request->input('ads', []);
         if (is_string($input)) {
             $parsed = AdGroups::parseAds(mb_substr($input, 0, 40000));
-            if ($parsed['bad']) return response()->json(['error' => 'Not an ad ID (digits only): ' . implode(', ', array_slice($parsed['bad'], 0, 5)) . '.'], 422);
+            if ($parsed['bad']) return response()->json(['error' => AdGroups::notAnId($parsed['bad'])], 422);
             $input = $parsed['ids'];
         }
         $ads = array_map(fn ($a) => is_scalar($a) ? (string) $a : '', array_slice((array) $input, 0, AdGroups::MAX_ADS));
-        if (!$ads) return response()->json(['error' => is_string($request->input('ads')) ? 'Type at least one ad ID.' : 'Tick at least one ad.'], 422);
+        if (!$ads) return response()->json(['error' => is_string($request->input('ads')) ? 'Type at least one ID.' : 'Tick at least one ad.'], 422);
         $id = $this->id($request);
 
         return $this->result($this->groups->addAds($page, $id, $id === null ? (is_scalar($n = $request->input('name', '')) ? (string) $n : '') : null, $ads, Auth::id()));

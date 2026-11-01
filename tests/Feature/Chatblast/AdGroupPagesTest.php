@@ -85,7 +85,7 @@ class AdGroupPagesTest extends ChatblastTestCase
     {
         $this->actingAs($this->user());
         $this->postJson('/chatbot/ad-groups', ['page' => 'Page P', 'name' => 'Item A', 'ads' => "111, abc\n333"])
-            ->assertStatus(422)->assertJson(['error' => 'Not an ad ID (digits only): abc.']);
+            ->assertStatus(422)->assertJson(['error' => 'Not an ID (digits only): abc.']);
         $id = $this->postJson('/chatbot/ad-groups', ['page' => 'Page P', 'name' => 'Item A', 'ads' => "111, 222\n333", 'values' => ['price' => '499', 'main_flow' => '']])
             ->assertOk()->json('id');
         $g = app(AdGroups::class)->groups('Page P')[$id];
