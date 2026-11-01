@@ -3609,3 +3609,6 @@ Stories: 1 match by ad, ad set or campaign (P1); 2 live lookup, once, stored, ne
 | S-212.8.4 (P1) | Two saves of the same id: the second, reading under the lock, is refused; nothing half saved | `test_S_212_8_4…` | passed |
 | S-212.8.5 (P1) | A 500-id group of mixed levels saves, matches and lists | `test_S_212_8_5…` | passed |
 | S-212.8.6 (P1) | The lookup store is one `ad_catalog` row per ad, ids only: no token or customer data | `test_S_212_8_6…` | passed |
+| S-212.A1 (P1) | Amendment 212-1. Given a new ad looked up in Meta, When its parents are found, Then they are cached first and the `ad_catalog` write is a queued job on the default queue: a write that waits (import lock) or fails never delays the match, never makes a second Meta call, and is not logged as a failed lookup | `test_S_212_A1_the_catalog_write_is_queued…`, `test_S_212_A1_a_failing_catalog_write…` | passed |
+| S-212.A2 (P1) | Amendment 212-1. The Inbox panel and the order-sheet preview show the known or cached group (or page values) and never call Meta or spend the page's lookup cap | `test_S_212_A2…` | passed |
+| S-212.A3 (P2) | Amendment 212-1. "Hide again" unticks hidden ticked ads in "Ads not in a group yet", so "Add N ads to group" counts and adds only visible ones | Node test (`test_S_212_4_5_4_6_and_7_4_to_7_9…`) | passed |

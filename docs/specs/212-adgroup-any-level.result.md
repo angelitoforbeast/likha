@@ -14,7 +14,11 @@
   3. `ads_manager_reports`
   4. one live Meta Graph call, `GET /<ad>?fields=id,adset_id,campaign_id`
 - **Limits on the Meta call.** One try, 3 s timeout. One call per ad at a time, under a lock; anyone else waits up to 3 s. At most 30 calls a minute per page. "Not found" is remembered for 1 h, and a failure for 5 min.
-- **What a found lookup writes.** The ids go into the ad's `ad_catalog` row, so later messages never call Meta again.
+- **What a found lookup writes.** The ids are cached first. Then a small queued job, `App\Jobs\StoreAdCatalogParents`, writes them into the ad's `ad_catalog` row, so later messages never call Meta again.
+  - The job goes to the default connection and queue (database, `default`), which the existing default worker group processes. It does not run under Horizon, which only runs the `chatbot` and `chatblast` queues on Redis.
+  - It has 3 tries, with backoff of 30 s and then 120 s.
+  - The reply never waits for this write: the Ads sync's import holds `ad_catalog` locks for a whole chunk, and a write that waits or fails costs no second Meta call (amendment 1).
+- **Staff screens never look up.** The Inbox panel and the order-sheet preview call `forCustomer(..., lookup: false)`. They show the known or cached group, or page values, and never call Meta or spend the page's 30-a-minute cap (amendment 1).
 - **When a lookup fails.**
   - The message uses the page values.
   - The run log gets an `ad_lookup` event.
@@ -25,6 +29,7 @@
   - "Ads not in a group yet" leaves out ads covered by a grouped ad set or campaign.
   - The 7-day quiet rule hides quiet groups and folds quiet ids, behind a "Show hidden (N)" / "Hide again" button with `aria-pressed`.
   - Hiding only changes the screen. It writes nothing and does not change routing.
+  - "Hide again" unticks hidden ticked ads, so "Add N ads to group" adds only ads on screen (amendment 1).
 
 ## Case table
 
@@ -32,6 +37,9 @@ New tests ran green on this branch. On `vps/main`'s code, 33 of the first 42 run
 
 | Case | Test | Result |
 |---|---|---|
+| A1 (amendment 1) | `AdGroupRunTest::test_S_212_A1_the_catalog_write_is_queued…` (the write waits in the queue; the match and the next customer don't, and there's one Meta call), `…_A1_a_failing_catalog_write…` (the write throws; the reply still goes out, with one Meta call) | pass |
+| A2 (amendment 1) | `AdGroupRunTest::test_S_212_A2…` (Inbox panel and `lookup: false`: no Meta call, the cap untouched; shows the group once a real reply has looked it up) | pass |
+| A3 (amendment 1) | `AdGroupPagesTest::test_S_212_4_5_4_6_and_7_4_to_7_9…`: ticks a quiet and a visible ad, presses "Hide again"; the button reads "Add 1 ad to group" and only the visible ad is posted. It fails on the code before the amendment ("Add 2 ads to group", posts the hidden ad) | pass |
 | 1.1, 1.2, 3.2, 3.6 | `AdGroupRunTest::test_S_212_1_1_1_2_3_2_and_3_6…` (campaign, ad set, ad: same text) | pass |
 | 1.3, 1.4 | `AdGroupRunTest::test_S_212_1_3_and_1_4…` | pass |
 | 1.5 | `AdGroupRunTest::test_S_212_1_5…` | pass |
@@ -102,7 +110,8 @@ New tests ran green on this branch. On `vps/main`'s code, 33 of the first 42 run
   - No Meta Ads connection at all: page values and a note, and a sequence is pinned as before. Without this, the existing S-172.6 test changes, because a test page has no connection.
 - **2.7 gains a wait-resume case** (from the review).
 - **3.5 covers four of the six places.** The runner, sequences, comment replies and the Test tab are tested. The inbox and the order sheet call the same `forCustomer` with no logic of their own, and are not tested separately.
-- **6.5 depends on the panel caches.** "Visible on the next load" means after the existing caches refresh: 2 min for chats and 5 min for status.
+- **6.5 depends on the panel caches.** "Visible on the next load" means after the existing caches refresh: 2 min for chats and 5 min for status. Amendment 1 accepts this delay.
+- **Amendment 1 adds three cases:** S-212.A1 (the catalog write is queued), S-212.A2 (staff screens never look up) and S-212.A3 (hiding unticks hidden ads).
 
 ## Done-when checklist
 
@@ -136,15 +145,22 @@ node docs/specs/212-evidence/shots.mjs <worktree> <fixture.json> <outdir>   # br
 ## Rulings
 
 - **Where lookups are stored.**
-  - **Ruling:** a lookup is stored in the ad's own `ad_catalog` row (`ad_id`, `ad_set_id`, `campaign_id`, timestamps). It is an `insertOrIgnore`, and it fills only empty parent columns. There is no migration and no new column.
+  - **Ruling:** a lookup is stored in the ad's own `ad_catalog` row (`ad_id`, `ad_set_id`, `campaign_id`, timestamps). It is an `insertOrIgnore`, and it fills only empty parent columns. There is no migration and no new column. Since amendment 1, the write runs in the queued job `StoreAdCatalogParents` (default connection and queue), after the ids are cached.
   - **Why:** the table already has one unique row per ad with these columns and indexes, and the upload and sync importer fills in names and dates later without overwriting.
   - **Cost if wrong:** the Ads Manager catalog viewer shows ads with no name or dates until the next sync.
 - **"Not found" and failures are cache-only.**
   - **Ruling:** "not found" (1 h) and "failed" (5 min) live only in the cache.
   - **Why:** they are short-lived by definition.
   - **Cost if wrong:** after a cache flush, one extra Meta call per unknown ad.
+- **How the catalog write leaves the reply path (amendment 1).**
+  - **Ruling:** the write is a queued job on the default connection and queue (`StoreAdCatalogParents`), dispatched after `Cache::put`. If dispatching itself fails, the error is reported and the match goes on. I did not use `defer()` or `afterResponse()`.
+  - **Why:** lookups run inside the `chatbot` Horizon workers, not in HTTP. `afterResponse()` does nothing there. A deferred callback would still run in the same worker, so it would hold the worker while it waits on the import's lock. A queued job runs in the separate default worker group, and its 3 tries cover a lock timeout.
+  - **Cost if wrong:**
+    - If the default queue's workers are down, the row isn't written until they come back.
+    - The ids stay cached for 24 h, so the only cost is one more Meta call per such ad a day.
+    - On the database queue, dispatching is one insert into `jobs`. That table is not locked by the Ads import.
 - **No Meta Ads connection at all.**
-  - **Ruling:** with no connection at all, the lookup behaves like "not found": page values, a run note, and a sequence pinned as before. If connections exist but all are expired or unreadable, it is a failure: not pinned, and retried after 5 min.
+  - **Ruling:** with no connection at all, the lookup behaves like "not found": page values, a run note, and a sequence pinned as before. If connections exist but all are expired or unreadable, it is a failure: not pinned, and retried after 5 min. Amendment 1 confirms this.
   - **Why:** this keeps S-172.6, and pages without Meta, exactly as they are today, while a lapsed token still follows the "don't pin a failure" rule.
   - **Cost if wrong:** on a site that never connects Meta Ads, a sequence entered from a new ad under a campaign-listed group is pinned to page values. That is today's behaviour.
 - **Which token is used.**
@@ -206,7 +222,7 @@ Three minors were also fixed: a strict `\z` on every id check, a re-check of the
   - The new code only runs when an ad has no exact match and the page has groups.
   - Any exception inside the lookup is caught and becomes page values.
 - **Deploy notes:**
-  - Nothing to run.
+  - Nothing to run. The new job `StoreAdCatalogParents` uses the default queue, which the existing default worker group already processes.
   - Customers of grouped campaigns or ad sets start getting their group's reply on their next message.
   - Earlier messages are not replayed.
 
@@ -217,9 +233,13 @@ Three minors were also fixed: a strict `\z` on every id check, a re-check of the
 
 ## Tests
 
-- **What runs:** 37 new test methods, 44 runs counting data sets, in `AdGroupRunTest` (23), `AdGroupPagesTest` (9, including the Node panel test), `AdGroupsTest` (4) and `CommentRepliesTest` (1). Plus the small DOM stub `tests/js/dom-stub.cjs`.
-- **Ad-group files:** `--filter "AdGroup|AdBased|CommentReplies|AdPreview|AdOpen"` gives 156 tests, all passing. The 52 deprecations are PHPUnit's own and are also present on `vps/main`.
+- **What runs:** 40 new test methods, 47 runs counting data sets, in `AdGroupRunTest` (26), `AdGroupPagesTest` (9, including the Node panel test), `AdGroupsTest` (4) and `CommentRepliesTest` (1). Plus the small DOM stub `tests/js/dom-stub.cjs`.
+- **Ad-group files:** `--filter "AdGroup|AdBased|CommentReplies|AdPreview|AdOpen"` gives 159 tests, all passing, after amendment 1. The 52 deprecations are PHPUnit's own and are also present on `vps/main`.
 - **Full suite on the final head:** 3,972 tests, 3 failures, all also failing on `vps/main` (`BigBroadcastTest` S-167.1, `ExampleTest`, `ItemTableFitScriptTest`). `AstraAddressRulesTest` S-26.18 failed on both `vps/main` and the earlier branch run, but passed this time, so it is flaky. No new failures.
+- **Full suite after amendment 1:** 3,975 tests, 5 failures.
+  - 3 are the known `vps/main` failures.
+  - 2 are `AstraAddressRulesTest`: S-26.18, flaky as above, and S-26.23. S-26.23 passes when run alone, both here and on `vps/main`, and this branch changes no Astra code, so both are load-sensitive flakes.
+  - No new failures from this change.
 
 ## Open questions
 
