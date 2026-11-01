@@ -278,9 +278,25 @@ class FlowEngine
             $run->sendPending = true;
             return ['port' => null, 'suspend' => true, 'note' => 'Sending ' . count($messages) . ' message' . (count($messages) === 1 ? '' : 's')];
         }
+        // Ang step ng sequence: ang padala ay sa chatbot:sequence-pool (Botcake o gateway), at umuusad ang step sa resulta.
+        if (BotcakeSendQueue::sequenceAsync($run, $outbox)) return $this->handOffSequence($run, $node['id'], $messages);
         $res = $outbox->send($run, $node['id'], $messages);
 
         return $this->afterSend($node, $c, $run, ['messages' => $messages, 'status' => $res['status'], 'error' => $res['error']]);
+    }
+
+    /**
+     * Ipinapasa ang padala ng sequence step: humihinto ang takbo hanggang sa resulta. Kapag hindi na hawak ng takbo ang step
+     * (hal. sumagot ang customer habang tumatakbo), walang ticket at walang padala: hihinto ang takbo.
+     */
+    private function handOffSequence(FlowRun $run, string $nodeId, array $messages): array
+    {
+        if (BotcakeSendQueue::submitSequence($run, $nodeId, $messages) === null) {
+            return ['port' => null, 'stop' => true, 'note' => 'Stopped: the sequence step moved on before the send (nothing sent).'];
+        }
+        $run->sendPending = true;
+
+        return ['port' => null, 'suspend' => true, 'note' => 'Sending ' . count($messages) . ' message' . (count($messages) === 1 ? '' : 's')];
     }
 
     /**
@@ -491,6 +507,7 @@ class FlowEngine
                 $run->sendPending = true;
                 return ['port' => null, 'suspend' => true, 'note' => 'AI answered; sending the answer'];
             }
+            if (BotcakeSendQueue::sequenceAsync($run, $outbox)) return $this->handOffSequence($run, $node['id'], $msg);
             $sent = $outbox->send($run, $node['id'], $msg);
             $run->sends[] = ['node' => $node['id'], 'messages' => $msg, 'status' => $sent['status'], 'error' => $sent['error']];
         }

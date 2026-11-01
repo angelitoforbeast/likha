@@ -49,6 +49,11 @@ class FlowRun
     /** Pinatakbo ng sequence: ang sequence at ang puwesto ng step (para sa Results). */
     public ?int $sequenceId = null;
     public ?int $sequenceStep = null;
+    /**
+     * Ang step ng sequence na hawak ng takbo (subscription_id, current_step, step, due, name, sequence_id, stamp, request_id,
+     * first_sent_at, side_effects): ang padala ay ipinapasa sa chatbot:sequence-pool kapag handa (BotcakeSendQueue::sequenceAsync).
+     */
+    public ?array $sequenceTicket = null;
     /** Ang ad group ng customer sa takbong ito (AdGroups); null = ang page values. Ang sequence na sinimulan dito ay ito ang itinatala. */
     public ?int $adGroup = null;
     /** Pumalya ang lookup ng ad sa Meta (page values ngayon): ang sequence na sinimulan dito ay hindi itinatala sa page values. */

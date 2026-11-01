@@ -141,6 +141,8 @@ return [
         'async_sends' => (bool) env('BOTCAKE_ASYNC_SENDS', true),
         // Ilang request sa Botcake nang sabay sa botcake:send-pool (lahat ng page), tig-isang ganito ang sagot ng bot at ang chatblast.
         'send_concurrency' => (int) env('BOTCAKE_SEND_CONCURRENCY', 100),
+        // Ilang ticket ng sequence nang sabay sa chatbot:sequence-pool (sariling proseso, hiwalay sa mga sagot at chatblast).
+        'sequence_concurrency' => (int) env('BOTCAKE_SEQUENCE_CONCURRENCY', 100),
         // Ilang segundo hinihintay ang Botcake sa sagot ng chatbot (send_content); ang unang mensahe na may larawan ay inaabot nang 8-15 s.
         'send_timeout' => (int) env('BOTCAKE_SEND_TIMEOUT', 30),
     ],
@@ -157,6 +159,12 @@ return [
         // AI step: true = hindi naghihintay ang worker (chatbot:ai-pool ang nagpapadala at nagtutuloy); false = naghihintay
         // ang takbo sa sagot (ang dati), pang-rollback nang walang deploy.
         'ai_async' => (bool) env('CHATBOT_AI_ASYNC', true),
+        // Sequence step: true = ang padala ay sa chatbot:sequence-pool at hindi naghihintay ang worker; false = naghihintay ang
+        // job sa padala (ang dati), pang-rollback nang walang deploy.
+        'sequence_handoff' => (bool) env('CHATBOT_SEQUENCE_HANDOFF', true),
+        // Ilang padala ng sequence nang sabay kada page sa gateway: walang rate ang Likha sa gateway (siya ang may pila), ito
+        // ang kapalit ng bilang ng worker na dating naghihintay.
+        'sequence_gateway_per_page' => (int) env('CHATBOT_SEQUENCE_GATEWAY_PER_PAGE', 30),
         // Ilang request sa OpenAI nang sabay sa chatbot:ai-pool (kahati ng Astra ang rate limit ng OpenAI).
         'ai_concurrency' => (int) env('CHATBOT_AI_CONCURRENCY', 100),
         // Read-only feed ng auto-switch events (/api/chatbot/provider-events, header X-CHATBOT-EVENTS-KEY); walang laman = 401.

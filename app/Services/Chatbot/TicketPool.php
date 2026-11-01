@@ -77,7 +77,13 @@ abstract class TicketPool
 
     public function beat(): void
     {
-        Cache::put(static::BEAT, ['owner' => $this->owner, 'at' => now()->getTimestamp()], 60);
+        Cache::put(static::BEAT, ['owner' => $this->owner, 'at' => now()->getTimestamp()] + $this->beatInfo(), 60);
+    }
+
+    /** Ang dagdag sa heartbeat (hal. ang kaya ng bersyong ito ng pool), para sa ibang proseso na nagpapasya ayon dito. */
+    protected function beatInfo(): array
+    {
+        return [];
     }
 
     public function stop(): void

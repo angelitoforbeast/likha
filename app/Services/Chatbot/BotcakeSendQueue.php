@@ -3,6 +3,7 @@
 namespace App\Services\Chatbot;
 
 use App\Jobs\ResumeChatbotSend;
+use App\Jobs\ResumeChatbotSequenceSend;
 use App\Jobs\SendChatblastMessage;
 use App\Models\BotcakeMessage;
 use App\Services\ChatblastSender;
@@ -115,7 +116,7 @@ class BotcakeSendQueue
      * ng chatblast ang pool, kaya ang mga sagot lang ang hinahanap (hindi binabasa ang daan-daang chatblast kada ikot).
      * @return array<int, object>
      */
-    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false): array
+    public static function claim(string $owner, int $n, ?callable $accept = null, ?callable $then = null, array $fullPages = [], array $fullForReplies = [], bool $repliesOnly = false, bool $sequence = false): array
     {
         if ($n <= 0) return [];
         $t = self::TABLE;
@@ -125,6 +126,8 @@ class BotcakeSendQueue
             ->when($fullPages, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', 0)->orWhereNotIn('t.page_name', $fullPages)))
             ->when($fullForReplies, fn ($q) => $q->where(fn ($w) => $w->where('t.priority', '>', 0)->orWhereNotIn('t.page_name', $fullForReplies)))
             ->when($repliesOnly, fn ($q) => $q->where('t.priority', 0))
+            // Ang sequence ticket ay sa chatbot:sequence-pool lang; ang botcake:send-pool ay hindi kailanman kumukuha nito.
+            ->where('t.priority', $sequence ? '=' : '<', self::SEQUENCE_PRIORITY)
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))->from("$t as o")->whereColumn('o.customer', 't.customer')->whereColumn('o.id', '<', 't.id')
                 ->whereIn('o.status', ['pending', 'sending']))
             ->orderBy('t.priority')->orderBy('t.id')->limit($n * 5)->get(['t.id', 't.request_id', 't.page_name', 't.kind', 't.priority']);
@@ -231,7 +234,7 @@ class BotcakeSendQueue
     {
         if (!Schema::hasTable(self::TABLE)) return 0;
         $n = 0;
-        $rows = DB::table(self::TABLE)->where('status', 'sending')->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->get();
+        $rows = DB::table(self::TABLE)->where('status', 'sending')->where('kind', '!=', self::SEQUENCE)->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->get();
         foreach ($rows as $row) {
             $back = fn () => DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)
                 ->update(['status' => 'pending', 'claimed_by' => null, 'called_at' => null, 'updated_at' => now()]);
@@ -268,7 +271,7 @@ class BotcakeSendQueue
         if (!Schema::hasTable(self::TABLE)) return $out;
         if (!BotcakeSendPool::alive(self::DEAD_POOL_SECONDS)) self::recover(null);
 
-        foreach (DB::table(self::TABLE)->where('status', 'pending')->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
+        foreach (DB::table(self::TABLE)->where('status', 'pending')->where('kind', '!=', self::SEQUENCE)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
             if ($row->kind === 'chatblast') {
                 if (DB::table(self::TABLE)->where('id', $row->id)->where('status', 'pending')->update(['status' => 'failed', 'error' => 'Not sent in time; queued again', 'done_at' => now(), 'updated_at' => now()]) !== 1) continue;
                 BotcakeMessage::whereKey($row->message_id)->where('status', 'sending')->update(['status' => 'queued']);
@@ -287,7 +290,189 @@ class BotcakeSendQueue
             $out['redispatched']++;
         }
 
-        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->whereIn('status', ['resumed', 'failed', 'done'])->orderBy('id')->limit(5000)->delete();
+        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->where('kind', '!=', self::SEQUENCE)->whereIn('status', ['resumed', 'failed', 'done'])->orderBy('id')->limit(5000)->delete();
+
+        return $out;
+    }
+
+    // ---- Ang sequence step (chatbot:sequence-pool) ----
+
+    public const SEQUENCE = 'sequence';
+    public const SEQUENCE_PRIORITY = 3;
+    public const SEQUENCE_SECONDS = 900; // ang ticket na hindi naipadala sa loob nito ay failed (ang 24 oras ay sinusuri pa rin bago ang tawag)
+    /** Ang mga node na walang epekto kapag inulit ang step mula sa Start (allowlist; ang Set ay set o clear lang). */
+    public const REPEATABLE = ['start', 'condition', 'send', 'end'];
+
+    public static function sequenceCustomer(int|string $pageId, int|string $psid): string
+    {
+        return 'sequence:' . $pageId . ':' . $psid;
+    }
+
+    /**
+     * Handa ba ang daan ng sequence: naka-on (services.chatbot.sequence_handoff), may column at table, buhay ang
+     * chatbot:sequence-pool (may tanda nito sa beat), at ang botcake:send-pool ay patay o bago (iniiwan ang sequence; ang
+     * luma ay kukunin ang ticket na parang chatblast).
+     */
+    public static function sequenceReady(): bool
+    {
+        return (bool) config('services.chatbot.sequence_handoff', true) && ChatbotSequences::hasInFlight() && Schema::hasTable(self::TABLE)
+            && SequenceSendPool::capable() && BotcakeSendPool::leavesSequences();
+    }
+
+    /** Ipapasa ba ang padala ng takbong ito: ang step ng sequence (live), naka-on ang mga sagot, at handa ang daan. Botcake at gateway, pareho. */
+    public static function sequenceAsync(FlowRun $run, Outbox $outbox): bool
+    {
+        return !$run->test && $run->sequenceTicket !== null && $outbox instanceof BotcakeOutbox && BotcakeOutbox::enabled() && self::sequenceReady();
+    }
+
+    /** May epekto na ba ang takbo na hindi dapat ulitin (anumang node maliban sa REPEATABLE at sa Set na set/clear lang)? */
+    public static function sideEffects(FlowRun $run): bool
+    {
+        if (!empty($run->sequenceTicket['side_effects'])) return true;
+        $nodes = [];
+        foreach ($run->graph['nodes'] ?? [] as $n) $nodes[$n['id']] = $n;
+        foreach ($run->path as $p) {
+            $type = (string) ($p['type'] ?? '');
+            if (in_array($type, self::REPEATABLE, true)) continue;
+            if ($type === 'set' && collect((array) ($nodes[$p['node']]['config']['ops'] ?? []))->every(fn ($o) => in_array($o['op'] ?? 'set', ['set', 'clear'], true))) continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Ang padala ng step bilang ticket, at ang tali ng subscription dito, sa iisang transaksyon: ang tali ay kondisyonal
+     * (active, parehong step, ang claim ng job o ang naunang ticket ng step), kaya hindi nakikita ng pool ang ticket na
+     * walang tali. null = hindi na hawak ng takbo ang step (hal. sumagot ang customer): walang ticket, walang padala.
+     */
+    public static function submitSequence(FlowRun $run, string $nodeId, array $messages): ?string
+    {
+        $s = (array) $run->sequenceTicket;
+        $id = (string) Str::uuid();
+        $run->runId ??= bin2hex(random_bytes(4));
+        $side = self::sideEffects($run);
+
+        return DB::transaction(function () use ($run, $nodeId, $messages, $s, $id, $side) {
+            $stamp = now()->format('Y-m-d H:i:s');
+            $prev = $s['request_id'] ?? null;
+            $linked = DB::table('chatbot_sequence_subscriptions')->where('id', (int) $s['subscription_id'])->where('status', 'active')->where('current_step', (int) $s['current_step'])
+                ->when(($s['stamp'] ?? null) !== null, fn ($q) => $q->where('dispatched_at', $s['stamp']))
+                ->where(fn ($q) => $prev === null ? $q->whereNull('send_request_id') : $q->where('send_request_id', $prev))
+                ->update(['send_request_id' => $id, 'dispatched_at' => $stamp, 'updated_at' => now()]);
+            if ($linked !== 1) return null;
+            $sequence = array_intersect_key($s, array_flip(['subscription_id', 'current_step', 'step', 'due', 'name', 'sequence_id', 'first_sent_at']));
+            DB::table(self::TABLE)->insert([
+                'request_id' => $id, 'kind' => self::SEQUENCE, 'priority' => self::SEQUENCE_PRIORITY, 'customer' => self::sequenceCustomer($run->pageId, $run->fields->psid),
+                'page_id' => (int) $run->pageId, 'page_name' => $run->pageName, 'psid' => (string) $run->fields->psid, 'chat_id' => null,
+                'flow_id' => $run->flowId, 'node_id' => $nodeId, 'run_id' => $run->runId,
+                'payload' => json_encode(['messages' => $messages] + ($run->tags ? ['tags' => $run->tags] : []), JSON_UNESCAPED_UNICODE),
+                'context' => json_encode(['input' => $run->input, 'full_name' => $run->fullName, 'received_at' => $run->receivedAt, 'ai_calls' => $run->aiCalls,
+                    'steps' => $run->steps, 'ad_group' => $run->adGroup, 'sequence' => $sequence, 'side_effects' => $side], JSON_UNESCAPED_UNICODE),
+                'status' => 'pending', 'deadline_at' => now()->addSeconds(self::SEQUENCE_SECONDS), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $run->sequenceTicket = ['request_id' => $id, 'stamp' => $stamp, 'side_effects' => $side] + $s;
+
+            return $id;
+        });
+    }
+
+    /** May sagot ba ng bot sa customer na hindi pa tapos (pending o sending) sa botcake:send-pool? Ang sequence ay naghihintay dito. */
+    public static function replyOpen(int|string $pageId, int|string $psid): bool
+    {
+        return DB::table(self::TABLE)->where('customer', self::chatbotCustomer($pageId, $psid))->whereIn('status', ['pending', 'sending'])->exists();
+    }
+
+    /** Ang called() ng sequence: itinatala rin ang daan at ang client_ref, para sa talaan kahit mamatay ang pool pagkatapos ng tawag. */
+    public static function calledSequence(object $row, string $owner, string $via, string $ref): bool
+    {
+        return DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $owner)->whereNull('called_at')
+            ->update(['called_at' => now(), 'result' => json_encode(['via' => $via, 'client_ref' => $ref]), 'updated_at' => now()]) === 1;
+    }
+
+    /** Ang ticket na kasama ng resume job ng sequence. */
+    public static function sequenceTicket(object $row): array
+    {
+        return ['request_id' => (string) $row->request_id];
+    }
+
+    /**
+     * Ang resulta ng padala ng sequence ($o: status sent | failed | skipped, error, http, raw, via, ref, check) ng ticket na
+     * hawak pa ng $owner (null = ang pending, para sa sweep): ang talaan (chatbot_replies, gaya ng padalang naghintay; ang
+     * skipped ng pagsusuri bago ang tawag, "check", ay walang row), saka ang resume. false = hindi na hawak.
+     */
+    public static function finishSequence(object $row, ?string $owner, array $o): bool
+    {
+        $q = DB::table(self::TABLE)->where('id', $row->id);
+        if ($owner !== null) $q->where('status', 'sending')->where('claimed_by', $owner);
+        else $q->where('status', 'pending');
+        $called = (array) json_decode((string) DB::table(self::TABLE)->where('id', $row->id)->value('result'), true);
+        $o += ['via' => $called['via'] ?? ChatbotProvider::BOTCAKE, 'ref' => $called['client_ref'] ?? null, 'at' => now()->format('Y-m-d H:i:s')];
+        $ok = $q->update(['status' => $o['status'] === 'failed' ? 'failed' : 'done', 'result' => json_encode($o, JSON_UNESCAPED_UNICODE),
+            'error' => $o['error'] === null ? null : mb_substr($o['error'], 0, 255), 'http' => $o['http'], 'done_at' => now(), 'updated_at' => now()]);
+        if ($ok !== 1) return false;
+        if (!isset($o['check'])) {
+            $payload = (array) json_decode((string) $row->payload, true);
+            BotcakeOutbox::record((int) $row->page_id, (int) $row->psid, null, $row->flow_id === null ? null : (int) $row->flow_id, (string) $row->node_id, 'send',
+                (array) ($payload['messages'] ?? []), $o['status'], $o['error'], $o['http'], $o['raw'] ?? null, is_array($payload['tags'] ?? null) ? $payload['tags'] : null,
+                $o['via'], $o['ref']);
+        }
+        ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
+
+        return true;
+    }
+
+    /** Ang error ng tawag na walang sagot, ayon sa daan. */
+    public static function noAnswer(?string $via): string
+    {
+        return (ChatbotProvider::isGateway($via) ? 'Gateway' : 'Botcake') . ' did not answer (HTTP 0)';
+    }
+
+    /**
+     * Ang naiwang "sending" ng sequence pool na namatay (hindi $owner): hindi pa natawag → pending (isang beses ng bagong
+     * pool); natawag na → failed na walang sagot, saka ang resume. Hindi kailanman inuulit.
+     */
+    public static function recoverSequence(?string $owner): int
+    {
+        if (!Schema::hasTable(self::TABLE)) return 0;
+        $n = 0;
+        $rows = DB::table(self::TABLE)->where('status', 'sending')->where('kind', self::SEQUENCE)
+            ->when($owner, fn ($q) => $q->where(fn ($w) => $w->whereNull('claimed_by')->orWhere('claimed_by', '!=', $owner)))->get();
+        foreach ($rows as $row) {
+            if ($row->called_at === null) {
+                DB::table(self::TABLE)->where('id', $row->id)->where('status', 'sending')->where('claimed_by', $row->claimed_by)->whereNull('called_at')
+                    ->update(['status' => 'pending', 'claimed_by' => null, 'updated_at' => now()]);
+            } else {
+                $via = json_decode((string) $row->result, true)['via'] ?? null;
+                self::finishSequence($row, $row->claimed_by, ['status' => 'failed', 'error' => self::noAnswer($via), 'http' => null]);
+            }
+            $n++;
+        }
+
+        return $n;
+    }
+
+    /**
+     * Ang paglilinis ng mga sequence ticket (ang pool kada 5 s, ang chatbot:sequence-tick kada minuto): ang pending na
+     * lampas sa deadline → failed, saka ang resume; ang done o failed na hindi pa naituloy → resume ulit (unique ang job,
+     * kaya hindi nagpapatong); ang luma → binubura nang paunti-unti.
+     * @return array{failed: int, redispatched: int, pruned: int}
+     */
+    public static function sweepSequence(): array
+    {
+        $out = ['failed' => 0, 'redispatched' => 0, 'pruned' => 0];
+        if (!Schema::hasTable(self::TABLE)) return $out;
+        foreach (DB::table(self::TABLE)->where('status', 'pending')->where('priority', self::SEQUENCE_PRIORITY)->where('deadline_at', '<=', now())->orderBy('id')->limit(500)->get() as $row) {
+            if (self::finishSequence($row, null, ['status' => 'failed', 'error' => 'The send pool did not send it in time', 'http' => null])) $out['failed']++;
+        }
+        foreach (DB::table(self::TABLE)->where('kind', self::SEQUENCE)->whereIn('status', ['done', 'failed'])->where('updated_at', '<=', now()->subSeconds(self::REDISPATCH_SECONDS))->orderBy('id')->limit(500)->get() as $row) {
+            DB::table(self::TABLE)->where('id', $row->id)->update(['updated_at' => now()]);
+            ResumeChatbotSequenceSend::dispatch(self::sequenceTicket($row));
+            $out['redispatched']++;
+        }
+        $out['pruned'] = DB::table(self::TABLE)->where('created_at', '<', now()->subDays(self::KEEP_DAYS))->where('kind', self::SEQUENCE)
+            ->whereIn('status', ['resumed', 'failed', 'done'])->orderBy('id')->limit(5000)->delete();
 
         return $out;
     }
