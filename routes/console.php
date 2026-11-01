@@ -237,6 +237,12 @@ Schedule::command('order-encode:compare-final')
     ->everyFifteenMinutes()
     ->withoutOverlapping(30);
 
+// Spec 211: ang mga padala ng order sa Forbeast na naka-pause (401/403 ng gateway): isang probe kada gateway kada 5 minuto,
+// saka ang lahat kapag tinanggap na ang site key. Walang gagawin kung walang naka-pause.
+Schedule::command('order-encode:forbeast-resume')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10);
+
 // Order encode: ang natutunang address (address_notes) mula sa mga itinamang at na-deliver na order ng nakaraang 3 araw, 05:30 Manila.
 // Ligtas ulitin: bawat order ay isang beses lang nabibilang. Ang buong 60 araw ay manu-mano: order-encode:notes-build --days=60.
 Schedule::command('order-encode:notes-build --days=3')

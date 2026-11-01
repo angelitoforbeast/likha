@@ -49,6 +49,7 @@ class LiveOrder
             'botcake_psid' => $o->psid ? (string) $o->psid : null,
         ]);
         $o->update(['macro_output_id' => $row->id]);
+        $this->toForbeast($o, $row, ForbeastOrders::ENCODED);
         $this->afterImport($v['_timestamp']);
 
         return $row;
@@ -136,7 +137,7 @@ class LiveOrder
         // PROCEED lang kapag ang lugar na nasa row ay ang mismong sinuri ng encode.
         if ($v['_proceed'] && !$keptPlace) $changes['STATUS'] = 'PROCEED';
 
-        return $this->write($row, $changes);
+        return $this->writeAndSend($row, $changes, $o);
     }
 
     /**
@@ -175,7 +176,22 @@ class LiveOrder
         }
         if ($v['_proceed'] && !$keptPlace) $changes['STATUS'] = 'PROCEED';
 
-        return $this->write($row, $changes);
+        return $this->writeAndSend($row, $changes, $o);
+    }
+
+    /** Ang write, saka ang padala sa Forbeast kapag may nabago sa row (ang walang pagbabago ay walang bagong ipapadala). */
+    private function writeAndSend(MacroOutput $row, array $changes, OrderEncode $o): bool
+    {
+        $ok = $this->write($row, $changes);
+        if ($ok && $changes) $this->toForbeast($o, $row, ForbeastOrders::ENCODED);
+
+        return $ok;
+    }
+
+    /** Ang padala ng row sa Forbeast (naka-queue, pagkatapos ng commit); hindi kailanman nagpapabagsak ng sulat. */
+    private function toForbeast(OrderEncode $o, MacroOutput $row, string $stage): void
+    {
+        app(ForbeastOrders::class)->queue($o, $row, $stage);
     }
 
     /**
@@ -219,6 +235,7 @@ class LiveOrder
             'botcake_psid' => $o->psid ? (string) $o->psid : null,
         ]);
         $o->update(['macro_output_id' => $row->id]);
+        $this->toForbeast($o, $row, ForbeastOrders::UPLOADED);
         DB::afterCommit(fn () => $this->afterImport($timestamp));
 
         return $row;

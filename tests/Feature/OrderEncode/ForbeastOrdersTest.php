@@ -37,6 +37,8 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
     private array $answers = [];
     /** @var array<int, int> ang mga job na napatakbo na */
     private array $ran = [];
+    /** @var array<int, Request> ang lahat ng tawag sa fake na Forbeast, pati ang walang sagot (timeout) */
+    private array $seen = [];
 
     protected function setUp(): void
     {
@@ -50,45 +52,43 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
             'order_encode.forbeast.since' => '2026-01-01T00:00:00+08:00',
         ]);
         app(PageSettings::class)->set(self::PAGE, 'chatbot', 'provider', 'gateway');
-        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'forbeast');
+        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'forbeast', false, null, true);
         $this->fields()->set('PHONE', '0918 111 2222');
         $this->fields()->set('CXD', $this->details());
         $this->answers = [[201, ['order_id' => 812]]];
         Http::fake([
-            'fb.example.test/*' => fn (Request $r) => $this->answer(),
-            'ix.example.test/*' => fn (Request $r) => $this->answer(),
+            'fb.example.test/*' => fn (Request $r) => $this->answer($r),
+            'ix.example.test/*' => fn (Request $r) => $this->answer($r),
         ]);
     }
 
-    private function answer()
+    private function answer(Request $r)
     {
+        $this->seen[] = $r;
         $a = count($this->answers) > 1 ? array_shift($this->answers) : $this->answers[0];
         if ($a[0] === 0) throw new ConnectionException('timed out');
 
         return Http::response($a[1], $a[0]);
     }
 
-    /** Ang mga SendOrderToForbeast na naka-queue na hindi pa napapatakbo; ang throw (retry ng queue) ay ibinabalik. */
+    /** Ang mga SendOrderToForbeast na naka-queue na hindi pa napapatakbo. @return array<int, SendOrderToForbeast> ang mga ibinalik sa queue (retry) */
     private function sendJobs(): array
     {
-        $thrown = [];
+        $released = [];
         foreach (Queue::pushed(SendOrderToForbeast::class) as $job) {
             if (in_array(spl_object_id($job), $this->ran, true)) continue;
             $this->ran[] = spl_object_id($job);
-            try {
-                $job->handle(app(ForbeastOrders::class));
-            } catch (RuntimeException $e) {
-                $thrown[] = $e;
-            }
+            $job->withFakeQueueInteractions()->handle(app(ForbeastOrders::class));
+            if ($job->job->isReleased()) $released[] = $job;
         }
 
-        return $thrown;
+        return $released;
     }
 
     /** @return array<int, Request> ang mga PUT sa Forbeast */
     private function puts(): array
     {
-        return collect(Http::recorded())->map(fn ($p) => $p[0])->filter(fn (Request $r) => $r->method() === 'PUT')->values()->all();
+        return array_values(array_filter($this->seen, fn (Request $r) => $r->method() === 'PUT'));
     }
 
     public function test_S_211_1_1_an_upload_insert_puts_the_order_to_the_pages_gateway_with_the_contract_mapping(): void
@@ -99,6 +99,7 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
         $o = OrderEncode::sole();
         $this->assertSame('next', $this->step($run, 'n2')['port']);
         Queue::assertPushed(SendOrderToForbeast::class, 1);
+        Queue::assertPushedOn('default', SendOrderToForbeast::class); // ang database queue na default, hindi ang encode
         $this->assertSame([], $this->puts()); // ang step ay hindi naghintay ng Forbeast
         $this->assertSame('queued', $o->forbeast_state);
 
@@ -143,7 +144,8 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
         $this->assertSame('sent', $o->fresh()->forbeast_state);
 
         // Ang encode na pumalya (walang address list): walang row, walang padala.
-        $this->writeList([]);
+        @unlink($this->addressFile);
+        $this->app->instance(\App\Services\OrderEncode\LocationList::class, new \App\Services\OrderEncode\LocationList($this->addressFile));
         $failed = OrderEncode::create([
             'page' => self::PAGE, 'psid' => self::PSID + 1, 'chat_id' => 14, 'flow_id' => 5, 'run_id' => 'e5f6a7b8',
             'spreadsheet_id' => 'flow-node', 'tab' => 'All Orders', 'row_number' => null, 'mode' => 'live', 'status' => 'queued',
@@ -195,7 +197,7 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
 
     public function test_S_211_1_4_pages_on_the_incepxionbot_gateway_send_to_the_incepxionbot_gateway(): void
     {
-        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'incepxionbot');
+        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'incepxionbot', false, null, true);
 
         $this->go($this->uploadGraph());
         $this->sendJobs();
@@ -225,7 +227,7 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
         $this->assertSame(['next', 1], [$this->step($run, 'n2')['port'], MacroOutput::count()]);
 
         // Naka-gateway ang page pero walang site key ang gateway: hindi naka-link.
-        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'forbeast');
+        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'forbeast', false, null, true);
         config(['services.forbeast_site.key' => '']);
         $run = $this->go($this->uploadGraph(), 'isa pa po', '2026-10-23 11:00', psid: self::PSID + 1);
         $this->assertSame(['next', 2], [$this->step($run, 'n2')['port'], MacroOutput::count()]);
@@ -264,18 +266,25 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
 
     public function test_S_211_1_8_a_redelivered_send_gets_duplicate_and_is_marked_sent(): void
     {
-        $this->answers = [[201, ['order_id' => 812]], [200, ['order_id' => 812, 'duplicate' => true]]];
+        // Ang unang PUT ay naitabi ng Forbeast pero nawala ang sagot (timeout); ang ulit ay "duplicate".
+        $this->answers = [[0, []], [200, ['order_id' => 812, 'duplicate' => true]]];
         $this->go($this->uploadGraph(), 'order po');
         $job = Queue::pushed(SendOrderToForbeast::class)->first();
 
-        $job->handle(app(ForbeastOrders::class));
-        $job->handle(app(ForbeastOrders::class)); // ang parehong job ulit (redelivery, nawalang sagot)
+        $job->withFakeQueueInteractions()->handle(app(ForbeastOrders::class));
+        $job->assertReleased();
+        $job->withFakeQueueInteractions()->handle(app(ForbeastOrders::class)); // ang ulit ng queue (parehong version)
 
         $puts = $this->puts();
         $this->assertCount(2, $puts);
         $this->assertSame($puts[0]->data()['version'], $puts[1]->data()['version']);
         $o = OrderEncode::sole();
         $this->assertSame(['sent', 812, true], [$o->forbeast_state, $o->forbeast['order_id'], $o->forbeast['duplicate']]);
+
+        // Ang redelivery ng job na naipadala na: walang bagong tawag.
+        $job->withFakeQueueInteractions()->handle(app(ForbeastOrders::class));
+        $this->assertCount(2, $this->puts());
+        $this->assertSame('sent', OrderEncode::sole()->forbeast_state);
     }
 
     /** @return array<string, array{0: int, 1: array}> */
@@ -297,20 +306,18 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
         $this->assertSame('next', $this->step($run, 'n2')['port']); // ang encode ay hindi naghintay
 
         $job = Queue::pushed(SendOrderToForbeast::class)->first();
-        try {
-            $job->handle(app(ForbeastOrders::class));
-            $this->fail('the outage must be thrown, so the queue retries it');
-        } catch (RuntimeException) {
-        }
+        $job->withFakeQueueInteractions()->handle(app(ForbeastOrders::class));
+
+        $backoff = $job->backoff();
+        $job->assertReleased($backoff[0]); // ibinalik sa queue nang may pagitan
         $o = OrderEncode::sole();
         $this->assertSame(['queued', 1], [$o->forbeast_state, $o->forbeast['tries']]);
         $this->assertNotSame('', (string) $o->forbeast['reason']);
-        $backoff = $job->backoff();
         $this->assertSame($backoff, array_values(array_unique($backoff)));
         $this->assertGreaterThan($backoff[0], end($backoff));
-        $this->assertTrue($job->retryUntil()->gt(now()->addHours(23)));
+        $this->assertTrue(\Illuminate\Support\Carbon::instance($job->retryUntil())->gt(now()->addHours(23)));
 
-        $job->handle(app(ForbeastOrders::class)); // ang retry
+        $job->withFakeQueueInteractions()->handle(app(ForbeastOrders::class)); // ang retry
 
         $this->assertSame(['sent', 9], [OrderEncode::sole()->forbeast_state, OrderEncode::sole()->forbeast['order_id']]);
     }
@@ -407,7 +414,7 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
         $this->sendJobs();
 
         $this->assertSame(['sent', 77], [$o->fresh()->forbeast_state, $o->fresh()->forbeast['order_id']]);
-        $this->get('/order-encode/forbeast')->assertOk()->assertDontSee('likha-mo-' . $row->id);
+        $this->get('/order-encode/forbeast')->assertOk()->assertSee('Nothing failed or paused.')->assertDontSee('Send again');
     }
 
     public function test_S_211_1_14_orders_from_before_go_live_are_never_sent(): void

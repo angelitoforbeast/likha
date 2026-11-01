@@ -37,7 +37,7 @@
      +08:00 (never in the future), status = the row's STATUS or the stage (`uploaded` / `encoded`).
    - `send(OrderEncode, version)`: one PUT with the gateway's site key; reads only `order_id`, `duplicate`, `stale`,
      `error`, `message` (cut) of the answer.
-3. **`App\Jobs\SendOrderToForbeast`** (database connection, queue `order_encode.queues.forbeast`, default
+3. **`App\Jobs\SendOrderToForbeast`** (database connection, queue `order_encode.forbeast.queue`, default
    `default`): 2xx → sent; 404/422/other 4xx → failed with the reason, no retry; 401/403 → paused (cache flag per
    gateway; later sends of that gateway are paused without a call); timeout, 5xx, 429 → thrown, retried with
    backoff until 24 h, then failed. Superseded (version changed) → nothing.
