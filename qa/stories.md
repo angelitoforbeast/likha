@@ -3528,3 +3528,28 @@ Tests: `tests/Feature/Chatblast/ChatbotNoHangTest.php` (the row cache, the reloa
 | S-209.5 (P1) | Undo after an Edit-window Save restores the old values and draws only that row again | timing run: "Undo the 58 fields", "grid = server: after Undo"; `test_S_209_1_and_5…` | passed |
 | S-209.6 (P1) | Each other Chatbot screen and /chatblast/page-settings: load and main action measured; any over target fixed | timing run (flows, editor, sequences, chats, inbox, replies, results, health, speed, live, page-settings) | passed (none over target) |
 | S-209.7 (P2) | The timing script runs with one command and prints a table (action, longest task, total) | `node tests/perf/run.mjs` | passed |
+
+## Slice 211 – Orders to Forbeast
+
+As the owner, I want every order the chatbot writes to the macro to reach Forbeast at the same time, so the page's client sees it in Forbeast's Orders screen.
+
+Slice 211. Threat model: untrusted = Forbeast's answers and the customer's order fields (text only, cut to the contract lengths); trusted = config, env, this repo. The site key goes only in the Authorization header. Risk tier: medium (partner API, customer data). Additive migration: three columns on `order_encodes`, no new table.
+Tests: `tests/Feature/OrderEncode/ForbeastOrdersTest.php` (real FlowEngine and Runner, fake OpenAI, Forbeast faked with `Http::fake`).
+
+### S-211.1 An encoded order reaches Forbeast once and follows its updates (P1)
+| Case | Type | Given / When / Then | Test | Last run |
+|------|------|---------------------|------|----------|
+| S-211.1.1 | happy | Given an `upload_macro` insert on a page whose `chatbot.gateway` is set up, when the row is written to `macro_output`, then a queued job PUTs the order to that gateway's `/api/v1/site/orders/{ref}` with the A..H values mapped per the contract and `fields` holding the raw values | | Not run |
+| S-211.1.2 | happy | Given an `encode_order` run, then the order is sent when `LiveOrder` writes `macro_output` (not when queued), so a failed encode is never sent | | Not run |
+| S-211.1.3 | happy | Given an `upload_macro` update of the same `macro_output` row, then the same `ref` is sent with a higher `version`, so Forbeast updates one order | | Not run |
+| S-211.1.4 | happy | Given pages on the incepxionbot gateway, then their orders go to the incepxionbot gateway | | Not run |
+| S-211.1.5 | negative | Given a test run (Test mode), then nothing is sent | | Not run |
+| S-211.1.6 | negative | Given a page with no gateway set up, then nothing is sent and nothing fails | | Not run |
+| S-211.1.7 | negative | Given `page_not_found` or a 422 from Forbeast, then the send is marked failed with the reason, not retried forever, and the encode and the sheet are unaffected | | Not run |
+| S-211.1.8 | edge | Given the same send retried (queue redelivery, lost reply), then Forbeast answers `duplicate` and it is marked sent | | Not run |
+| S-211.1.9 | edge | Given Forbeast down, timing out, 5xx or 429, then the send retries with backoff and lands later; encoding never waits for it | | Not run |
+| S-211.1.10 | edge | Given 401 (site key changed), then sending pauses and the failure is visible; nothing is dropped | | Not run |
+| S-211.1.11 | edge | Given times, then `ordered_at` carries the Manila offset (+08:00) | | Not run |
+| S-211.1.12 | edge | Given Filipino text and emoji in name, shop or input, then they are sent unchanged | | Not run |
+| S-211.1.13 | happy | Given sends that failed for good, then the owner sees them in a short list (order, page, reason, time) with "send again" | | Not run |
+| S-211.1.14 | edge | Given orders from before go-live, then none are sent (no backfill) | | Not run |
