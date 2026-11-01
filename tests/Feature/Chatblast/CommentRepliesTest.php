@@ -170,6 +170,22 @@ class CommentRepliesTest extends ChatblastTestCase
         $this->assertSame('Hi po! 499 lang po ito.', $this->event('111_333')->pm_text);
     }
 
+    public function test_S_212_3_5_a_commenter_whose_ad_is_under_a_grouped_campaign_gets_the_groups_comment_replies(): void
+    {
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_05_22_140000_create_ad_catalog_table.php']]);
+        \Illuminate\Support\Facades\DB::table('ad_catalog')->insert(['ad_id' => '40001', 'ad_set_id' => '50001', 'campaign_id' => '60001', 'created_at' => now(), 'updated_at' => now()]);
+        $this->forbeastPage();
+        $this->gateway();
+        CommentReplies::pickUsing(fn (array $options) => $options[0]);
+        $groups = app(\App\Services\Chatbot\AdGroups::class);
+        $groups->setMode('Page Uno', true);
+        $groups->save('Page Uno', null, 'Serum', ['60001'], ['comment_pm' => 'Serum PM {{PRICE}}', 'price' => '599']);
+        \App\Models\BotcakeChat::create(['page_id' => '1001', 'page_name' => 'Page Uno', 'psid' => '555', 'name' => 'Ana', 'message' => 'Hi', 'payload' => ['ad_id' => '40001'], 'received_at' => now()]);
+
+        $this->comment()->assertOk();
+        $this->assertSame('Serum PM 599', $this->event()->pm_text, 'ang campaign ng ad ang nasa group');
+    }
+
     /** @return array<string, array{0: array, 1: array<int, string>, 2: string, 3: ?string}> values, mga tawag, status, reason */
     public static function parts(): array
     {

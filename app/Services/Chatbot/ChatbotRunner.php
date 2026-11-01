@@ -50,6 +50,7 @@ class ChatbotRunner
                 ->reject(fn ($c) => ForbeastWatch::standby($c)); // standby: tumatakbo lang kapag lumipat sa Botcake (bagong chat)
             // Ang ad group ng customer (ang pinakabagong ad niya sa page), isang beses kada takbo; null = ang page values.
             $group = $this->groups->forCustomer((string) $chat->page_id, (string) $chat->psid, (string) $chat->page_name);
+            [$lookupNote, $unresolved] = [$this->groups->lookupNote, $this->groups->unresolved];
             $botfields = null;
             $staleBefore = now()->subMinutes(self::STALE_MINUTES);
             foreach ($pending as $c) {
@@ -76,6 +77,9 @@ class ChatbotRunner
                 $run = new FlowRun($flow->id, $flow->graph, (string) $c->page_name, (string) $c->page_id, $botfields, $fields, $c->id,
                     (string) $c->message, (string) $c->name, $c->received_at?->timezone('Asia/Manila')->format('Y-m-d H:i') ?? '');
                 $run->adGroup = $group;
+                $run->adGroupUnresolved = $unresolved;
+                // Ang lookup ng ad sa Meta na pumalya, nilaktawan o walang nakita: nasa talaan ng takbo (page values ang ginamit).
+                if ($lookupNote !== null) $run->event('ad_lookup', null, ['note' => $lookupNote]);
                 try {
                     $this->engine->run($run, $this->outbox);
                 } finally {
@@ -152,6 +156,8 @@ class ChatbotRunner
                 (string) $last->message, (string) $last->name, $last->received_at->timezone('Asia/Manila')->format('Y-m-d H:i'));
             $run->skippedAfter = $after;
             $run->adGroup = $group;
+            $run->adGroupUnresolved = $this->groups->unresolved;
+            if ($this->groups->lookupNote !== null) $run->event('ad_lookup', null, ['note' => $this->groups->lookupNote]);
             try {
                 $this->engine->run($run, $this->outbox);
             } finally {
@@ -234,7 +240,8 @@ class ChatbotRunner
             // ang walang naitala (lumang ticket o page values noon) ay ayon sa pinakabagong ad ngayon.
             $ctx = (array) json_decode((string) $row->context, true);
             $asked = $ctx['ad_group'] ?? null;
-            $group = is_int($asked) && isset($this->groups->activeGroups((string) $row->page_name)[$asked]) ? $asked : $this->groups->forCustomer($pageId, $psid, (string) $row->page_name);
+            $pinned = is_int($asked) && isset($this->groups->activeGroups((string) $row->page_name)[$asked]);
+            $group = $pinned ? $asked : $this->groups->forCustomer($pageId, $psid, (string) $row->page_name);
             $flow = $this->page->flow((string) $row->page_name, $group);
             $node = collect(is_array($flow?->graph) ? $flow->graph['nodes'] ?? [] : [])->firstWhere('id', $row->node_id);
             if (!$flow || $flow->id !== (int) $row->flow_id || !in_array($node['type'] ?? '', $nodeTypes, true)) return $drop('the flow changed', true);
@@ -243,6 +250,8 @@ class ChatbotRunner
             $run = new FlowRun($flow->id, $flow->graph, (string) $row->page_name, $pageId, $this->page->botfields((string) $row->page_name, $group), $fields,
                 $row->chat_id !== null ? (int) $row->chat_id : null, (string) ($ctx['input'] ?? ''), (string) ($ctx['full_name'] ?? ''), (string) ($ctx['received_at'] ?? ''));
             $run->adGroup = $group;
+            $run->adGroupUnresolved = !$pinned && $this->groups->unresolved;
+            if (!$pinned && $this->groups->lookupNote !== null) $run->event('ad_lookup', null, ['note' => $this->groups->lookupNote]);
             $run->runId = $row->run_id ?: null;
             $run->aiCalls = (int) ($ctx['ai_calls'] ?? 1);
             $run->steps = (int) ($ctx['steps'] ?? 0);

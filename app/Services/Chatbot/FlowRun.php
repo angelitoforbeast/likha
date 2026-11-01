@@ -51,6 +51,8 @@ class FlowRun
     public ?int $sequenceStep = null;
     /** Ang ad group ng customer sa takbong ito (AdGroups); null = ang page values. Ang sequence na sinimulan dito ay ito ang itinatala. */
     public ?int $adGroup = null;
+    /** Pumalya ang lookup ng ad sa Meta (page values ngayon): ang sequence na sinimulan dito ay hindi itinatala sa page values. */
+    public bool $adGroupUnresolved = false;
 
     /**
      * "Clear AI memory": live, ang marker ng customer (__ai_since: oras, ang chat na ito, at ang huling padala sa kanya);

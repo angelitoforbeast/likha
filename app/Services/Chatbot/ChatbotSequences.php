@@ -99,7 +99,9 @@ class ChatbotSequences
         }
         // Ang ad group ng customer sa pagpasok (ng takbong nagpasok, o ang pinakabagong ad niya): hindi lumilipat sa gitna.
         if (($page = BotcakeChat::pageMap()[(string) $pageId] ?? null) !== null) {
-            $this->groups->pin($seq->id, $run?->fields ?? new CustomerFields($pageId, $psid), $page, $run ? $run->adGroup : $this->groups->forCustomer($pageId, $psid, $page));
+            $group = $run ? $run->adGroup : $this->groups->forCustomer($pageId, $psid, $page);
+            // Ang pumalyang lookup sa Meta ay hindi itinatala: ang unang step ang kukuha ulit ng group.
+            if (!($run ? $run->adGroupUnresolved : $this->groups->unresolved)) $this->groups->pin($seq->id, $run?->fields ?? new CustomerFields($pageId, $psid), $page, $group);
         }
 
         return $out(['result' => 'subscribed', 'name' => $seq->name]);
@@ -331,6 +333,8 @@ class ChatbotSequences
             $run = new FlowRun($flow->id, $flow->graph, $page, (string) $sub->page_id, $this->page->botfields($page, $group), $fields, null,
                 '', (string) $last?->name, now()->format('Y-m-d H:i'));
             $run->adGroup = $group;
+            $run->adGroupUnresolved = $this->groups->unresolved;
+            if ($this->groups->lookupNote !== null) $run->event('ad_lookup', null, ['note' => $this->groups->lookupNote]);
             $run->startedBy = 'sequence ' . $seq->name . ' step ' . $step->position;
             [$run->sequenceId, $run->sequenceStep] = [(int) $seq->id, (int) $step->position];
             try {
