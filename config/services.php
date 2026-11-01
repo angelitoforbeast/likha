@@ -262,6 +262,11 @@ return [
             'back_gap_minutes' => (int) env('GATEWAY_SWITCH_BACK_GAP_MINUTES', 60),
             // Ilang segundo pagkalipat sa Forbeast (kahit sino ang naglipat) na ang chat ng Botcake ay hindi ebidensya.
             'settle_seconds' => (int) env('GATEWAY_SWITCH_SETTLE_SECONDS', 180),
+            // Ang walang sagot sa maraming page ng iisang gateway nang sabay (burst_pages na page sa loob ng burst_seconds) ay
+            // problema ng daan, hindi ng page: hold muna nang hold_minutes at susuriin ulit bago ilipat. 0 page = walang hold.
+            'hold_minutes' => (int) env('GATEWAY_SWITCH_HOLD_MINUTES', 2),
+            'burst_pages' => (int) env('GATEWAY_SWITCH_BURST_PAGES', 5),
+            'burst_seconds' => (int) env('GATEWAY_SWITCH_BURST_SECONDS', 60),
         ],
         // Ang echo (ChatEchoes): ilang minuto bago "hindi nasagot" ang mensahe ng customer, ilang customer na hindi nasagot
         // sa huling oras bago pula ang page, at ilang segundo ang layo ng dalawang app na "dobleng sagot".

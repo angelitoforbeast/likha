@@ -1533,3 +1533,11 @@ Minor review findings, accepted (none is on a new untrusted path, and no page us
 - **A partial edit of an important cell still auto-saves on the typing pause** (one stray backspace on `botcake.page_id` saves the shorter ID). Reason: the spec keeps today's auto-save except for an emptied cell; saving important non-secret cells only on leaving the cell is the follow-up.
 - **A column that first appears through the poll (`ensureColumn`) has `important: null`**, so a blank there gets the server's 422 "!" instead of the question until the page is reloaded. Reason: needs a new important key added by someone else after the page opened; the server still refuses the blank, and ⋯ → Clear the value works.
 - **`PageSettingsGrid::history` checks `Schema::hasColumn('page_settings', 'replaced_by')` per request.** Reason: same pattern as `PageSettings::deactivate`; one cheap query on a modal open.
+
+## Hold on a burst of no-answer (spec 214), accepted review minors
+
+- **A hold's lock that cannot be had within 3 s runs the burst update without it** (a burst entry may be lost or a second `held` row written). Reason: rare, harmless, and a send must never wait longer.
+- **`lastSwitch` reads only the last 20 `auto_switch` rows of a page**, so many held/recovered pairs on the page that started holds could push an older switch out. Reason: a probe-only recovery allows one hold at most now, so the pairs stay few.
+- **The first no-answer after the window switches every reached page in that one send job**; if the job dies partway, the pages it did not reach switch on their next no-answer. Reason: same switches as before, only in one job; `settleHolds` covers the case where no send comes.
+- **"Held on Forbeast" is the label for an Incepxionbot hold too** (history, Problems panel, page note). Reason: the reason text names the gateway; the label change touches three readers outside this spec.
+- **Health GET failing (5xx) on 5+ pages while sends work makes a held+recovered pair about every 3 minutes** (a probe burst starts a hold, the next send of a burst page ends it and resets the counters). Reason: the pages correctly stay on the gateway since sends work; only the feed gets the extra rows.
