@@ -31,6 +31,8 @@ class ForbeastOrders
     public const SENT = 'sent';
     public const FAILED = 'failed';
     public const PAUSED = 'paused';
+    /** Ang mas bagong padala ng parehong row ang naipadala na: ang lumang ito ay hindi na kailangan. */
+    public const SUPERSEDED = 'superseded';
 
     /** Ang status ng order kapag wala pang STATUS ang row: ang hilaw na upload, o ang encode. */
     public const UPLOADED = 'uploaded';
@@ -111,7 +113,7 @@ class ForbeastOrders
             $state = ['ref' => self::ref((int) $row->id), 'row' => (int) $row->id, 'gateway' => $gateway, 'stage' => $stage === self::ENCODED ? self::ENCODED : self::UPLOADED,
                 'tries' => 0, 'reason' => null, 'queued_at' => now()->toIso8601String()];
             $this->store($o, ['forbeast_state' => self::QUEUED, 'forbeast_version' => $version, 'forbeast' => $state]);
-            SendOrderToForbeast::dispatch((int) $o->id, $version)->afterCommit();
+            self::dispatch((int) $o->id, $version);
 
             return true;
         } catch (Throwable $e) {
@@ -129,7 +131,7 @@ class ForbeastOrders
     {
         $o = OrderEncode::find($id);
         if (!$o || (int) $o->forbeast_version !== $version) return ['result' => 'skipped', 'reason' => 'superseded'];
-        if ($o->forbeast_state === self::SENT) return ['result' => 'skipped', 'reason' => 'already sent'];
+        if ($o->forbeast_state !== self::QUEUED) return ['result' => 'skipped', 'reason' => 'not queued (' . $o->forbeast_state . ')'];
         $state = (array) $o->forbeast;
         $gateway = (string) ($state['gateway'] ?? '');
 
@@ -160,6 +162,7 @@ class ForbeastOrders
             $extra = ['order_id' => is_int($json['order_id'] ?? null) ? $json['order_id'] : null, 'duplicate' => ($json['duplicate'] ?? false) === true,
                 'stale' => ($json['stale'] ?? false) === true, 'sent_at' => now()->toIso8601String()];
             $done = $this->finish($o, $version, self::SENT, null, $extra);
+            $this->supersede((int) ($state['row'] ?? 0), $version);
             Cache::forget(self::pauseKey($gateway));
             $this->resume($gateway);
 
@@ -172,6 +175,8 @@ class ForbeastOrders
             return $this->pause($o, $version, $reason);
         }
         if ($status === 408 || $status === 429 || $status >= 500) return $this->retry($o, $version, $reason);
+        // 404 na hindi page_not_found: wala (pa) ang daan sa gateway (hal. maling URL), hindi pagtanggi sa order: inuulit.
+        if ($status === 404 && ($json['error'] ?? null) !== 'page_not_found') return $this->retry($o, $version, $reason);
 
         return $this->finish($o, $version, self::FAILED, $reason);
     }
@@ -188,6 +193,12 @@ class ForbeastOrders
     /** "Send again" ng may-ari: bagong version ng parehong row. @return bool false kapag hindi na maipapadala */
     public function again(OrderEncode $o): bool
     {
+        // Ang mas bagong padala ng parehong row (ibang order_encodes row) ang may pinakabagong laman: hindi ito papalitan ng luma.
+        if (self::newer($o)) {
+            $this->set($o, (int) $o->forbeast_version, self::SUPERSEDED, ['reason' => 'A newer send of this order went to Forbeast.']);
+
+            return false;
+        }
         $row = MacroOutput::find((int) (((array) $o->forbeast)['row'] ?? $o->macro_output_id));
         if (!$row) return false;
 
@@ -202,10 +213,10 @@ class ForbeastOrders
     {
         if (self::since() === null) return 0;
         $sent = 0;
-        $paused = OrderEncode::where('forbeast_state', self::PAUSED)->orderBy('id')->limit(self::RESUME_BATCH)->get(['id', 'forbeast_state', 'forbeast_version', 'forbeast']);
-        foreach ($paused->groupBy(fn (OrderEncode $o) => (string) (((array) $o->forbeast)['gateway'] ?? '')) as $gateway => $rows) {
-            if (Cache::has(self::pauseKey((string) $gateway))) continue;
-            $first = $rows->first();
+        foreach (Gateways::ALL as $gateway) {
+            if (Cache::has(self::pauseKey($gateway))) continue;
+            $first = self::paused($gateway)->first();
+            if (!$first) continue;
             $this->requeue($first, true);
             $sent++;
         }
@@ -337,16 +348,52 @@ class ForbeastOrders
     /** Ang lahat ng naka-pause ng gateway ay ipinapadala ulit (tinanggap na ang key). */
     private function resume(string $gateway): void
     {
-        OrderEncode::where('forbeast_state', self::PAUSED)->orderBy('id')->limit(self::RESUME_BATCH)->get(['id', 'forbeast_state', 'forbeast_version', 'forbeast'])
-            ->filter(fn (OrderEncode $o) => (((array) $o->forbeast)['gateway'] ?? '') === $gateway)
-            ->each(fn (OrderEncode $o) => $this->requeue($o, false));
+        self::paused($gateway)->limit(self::RESUME_BATCH)->get(['id', 'forbeast_state', 'forbeast_version', 'forbeast'])->each(fn (OrderEncode $o) => $this->requeue($o, false));
+    }
+
+    /** Ang mga naka-pause ng isang gateway, pinakaluma muna (ang filter ay sa SQL, kaya ang ibang gateway ay hindi nakakaharang). */
+    private static function paused(string $gateway)
+    {
+        return OrderEncode::where('forbeast_state', self::PAUSED)->where('forbeast->gateway', $gateway)->orderBy('id');
+    }
+
+    /**
+     * Naipadala ang version na ito ng row: ang mas lumang padala ng parehong row (ibang order_encodes row) na failed, paused
+     * o queued pa ay superseded (ang Forbeast ay may mas bago na), kaya hindi ito nasa listahan at hindi na ipapadala.
+     */
+    private function supersede(int $rowId, int $version): void
+    {
+        if ($rowId <= 0) return;
+        OrderEncode::whereIn('forbeast_state', [self::FAILED, self::PAUSED, self::QUEUED])->where('macro_output_id', $rowId)->where('forbeast_version', '<', $version)
+            ->update(['forbeast_state' => self::SUPERSEDED]);
+    }
+
+    /** May mas bagong padala na ba ang row ng order na ito (naipadala o naka-queue)? */
+    public static function newer(OrderEncode $o): bool
+    {
+        $row = (int) (((array) $o->forbeast)['row'] ?? $o->macro_output_id);
+
+        return $row > 0 && OrderEncode::whereIn('forbeast_state', [self::SENT, self::QUEUED])->where('macro_output_id', $row)->whereKeyNot($o->id)
+            ->where('forbeast_version', '>', (int) $o->forbeast_version)->exists();
+    }
+
+    /** Ang job, pagkatapos ng commit; ang pumalyang push ay hindi nagpapabagsak ng upload o encode (naiwang queued, makikita bilang stuck). */
+    private static function dispatch(int $id, int $version, bool $probe = false): void
+    {
+        \Illuminate\Support\Facades\DB::afterCommit(function () use ($id, $version, $probe) {
+            try {
+                SendOrderToForbeast::dispatch($id, $version, $probe);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 
     /** Ang naka-pause na padala ay naka-queue ulit (parehong version: parehong laman ng order). */
     private function requeue(OrderEncode $o, bool $probe): void
     {
         $version = (int) $o->forbeast_version;
-        if ($this->set($o, $version, self::QUEUED, [], self::PAUSED)) SendOrderToForbeast::dispatch((int) $o->id, $version, $probe)->afterCommit();
+        if ($this->set($o, $version, self::QUEUED, [], self::PAUSED)) self::dispatch((int) $o->id, $version, $probe);
     }
 
     /** Ang estado at mga detalye, kapag ang version ay ang padalang ito pa (at ang estado ay $from, kung ibinigay). */

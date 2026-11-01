@@ -24,14 +24,16 @@ class OrderEncodeForbeastController extends Controller
     public function index()
     {
         $this->checkAccess();
-        $rows = OrderEncode::whereIn('forbeast_state', [ForbeastOrders::FAILED, ForbeastOrders::PAUSED])->orderByDesc('id')->limit(self::LIMIT)
+        $rows = OrderEncode::where(fn ($q) => $q->whereIn('forbeast_state', [ForbeastOrders::FAILED, ForbeastOrders::PAUSED])
+                ->orWhere(fn ($s) => $s->where('forbeast_state', ForbeastOrders::QUEUED)->where('updated_at', '<', self::stuckBefore())))
+            ->orderByDesc('id')->limit(self::LIMIT)
             ->get(['id', 'page', 'macro_output_id', 'forbeast_state', 'forbeast', 'updated_at'])
             ->map(function (OrderEncode $o) {
                 $f = (array) $o->forbeast;
 
                 return [
                     'id' => (int) $o->id, 'ref' => (string) ($f['ref'] ?? ''), 'row' => (int) ($f['row'] ?? $o->macro_output_id), 'page' => (string) $o->page,
-                    'state' => (string) $o->forbeast_state, 'reason' => (string) ($f['reason'] ?? ''), 'gateway' => (string) ($f['gateway'] ?? ''),
+                    'state' => $o->forbeast_state === ForbeastOrders::QUEUED ? 'stuck (queued, never answered)' : (string) $o->forbeast_state, 'reason' => (string) ($f['reason'] ?? ''), 'gateway' => (string) ($f['gateway'] ?? ''),
                     'tries' => (int) ($f['tries'] ?? 0), 'at' => (string) ($f['failed_at'] ?? $f['paused_at'] ?? $f['tried_at'] ?? $o->updated_at?->toIso8601String() ?? ''),
                 ];
             });
@@ -39,11 +41,23 @@ class OrderEncodeForbeastController extends Controller
         return view('order-encode.forbeast', ['rows' => $rows, 'live' => ForbeastOrders::since() !== null]);
     }
 
+    /** Ang naka-queue na hindi nagalaw nang lampas sa oras ng retry (nawala ang job, hal. walang worker): makikita bilang stuck. */
+    private static function stuckBefore(): \Carbon\Carbon
+    {
+        return now()->subHours(max(1, (int) config('order_encode.forbeast.retry_hours', 24)) + 2);
+    }
+
     public function resend(OrderEncode $orderEncode)
     {
         $this->checkAccess();
-        if (!in_array($orderEncode->forbeast_state, [ForbeastOrders::FAILED, ForbeastOrders::PAUSED], true)) {
+        $stuck = $orderEncode->forbeast_state === ForbeastOrders::QUEUED && $orderEncode->updated_at?->lt(self::stuckBefore());
+        if (!$stuck && !in_array($orderEncode->forbeast_state, [ForbeastOrders::FAILED, ForbeastOrders::PAUSED], true)) {
             return redirect()->route('order-encode.forbeast')->with('status', 'That order is not failed or paused any more.');
+        }
+        if (ForbeastOrders::newer($orderEncode)) {
+            app(ForbeastOrders::class)->again($orderEncode); // minamarkahang superseded
+
+            return redirect()->route('order-encode.forbeast')->with('status', 'A newer send of this order already went to Forbeast, so this older one was not sent.');
         }
         $ok = app(ForbeastOrders::class)->again($orderEncode);
 

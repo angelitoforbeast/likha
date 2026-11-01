@@ -436,4 +436,80 @@ class ForbeastOrdersTest extends UploadEncodeTestCase
         Queue::assertNotPushed(SendOrderToForbeast::class);
         $this->assertSame([], $this->puts());
     }
+
+    public function test_S_211_1_7_a_404_that_is_not_page_not_found_is_retried_not_failed(): void
+    {
+        // Ang gateway na wala pang daan para sa orders (o maling URL): hindi pagtanggi sa order.
+        $this->answers = [[404, ['message' => 'Not Found']], [201, ['order_id' => 5]]];
+        $this->go($this->uploadGraph(), 'order po');
+
+        $released = $this->sendJobs();
+
+        $this->assertCount(1, $released);
+        $this->assertSame('queued', OrderEncode::sole()->forbeast_state);
+        $released[0]->withFakeQueueInteractions()->handle(app(ForbeastOrders::class));
+        $this->assertSame(['sent', 5], [OrderEncode::sole()->forbeast_state, OrderEncode::sole()->forbeast['order_id']]);
+    }
+
+    public function test_S_211_1_13_send_again_never_replaces_a_newer_send_of_the_same_order(): void
+    {
+        $this->answers = [[422, ['error' => 'invalid_request', 'message' => 'Send phone as text of at most 20 characters.']]];
+        $this->go($this->uploadGraph(), "hello\nBlk 5 Bungad QC", '2026-10-23 10:15');
+        $this->sendJobs();
+        $old = OrderEncode::orderBy('id')->first();
+        $this->assertSame('failed', $old->forbeast_state);
+
+        $this->answers = [[200, ['order_id' => 812]]];
+        $this->travel(2)->seconds();
+        $this->go($this->uploadGraph(['mode' => 'update']), "hello\nBlk 5 Bungad QC\nsa may simbahan po", '2026-10-23 10:20');
+        $this->sendJobs();
+
+        // Ang mas bagong padala ng parehong row ay naipadala: ang luma ay superseded, wala sa listahan.
+        $this->assertSame(['superseded', 'sent'], OrderEncode::orderBy('id')->pluck('forbeast_state')->all());
+        $this->actingAs($this->user('CEO'))->get('/order-encode/forbeast')->assertOk()->assertSee('Nothing failed or paused.');
+
+        // Kahit ipilit ang Send again ng luma (hal. bukas pa ang lumang listahan): walang padala.
+        OrderEncode::whereKey($old->id)->update(['forbeast_state' => 'failed']);
+        $this->post('/order-encode/forbeast/' . $old->id . '/resend')->assertRedirect()->assertSessionHas('status', 'A newer send of this order already went to Forbeast, so this older one was not sent.');
+        $this->assertSame('superseded', $old->fresh()->forbeast_state);
+        $this->sendJobs();
+        $this->assertCount(2, $this->puts());
+    }
+
+    public function test_S_211_1_13_a_send_stuck_in_queued_shows_and_can_be_sent_again(): void
+    {
+        $this->go($this->uploadGraph(), 'order po');
+        $o = OrderEncode::sole();
+        $this->ran = array_map('spl_object_id', Queue::pushed(SendOrderToForbeast::class)->all()); // ang job ay nawala (walang worker)
+
+        $this->actingAs($this->user('CEO'))->get('/order-encode/forbeast')->assertOk()->assertSee('Nothing failed or paused.');
+        $this->travel(27)->hours();
+        $this->get('/order-encode/forbeast')->assertOk()->assertSee('stuck (queued, never answered)')->assertSee('Send again');
+
+        $this->post('/order-encode/forbeast/' . $o->id . '/resend')->assertRedirect();
+        $this->sendJobs();
+
+        $this->assertSame('sent', $o->fresh()->forbeast_state);
+        $this->assertCount(1, $this->puts());
+    }
+
+    public function test_S_211_1_10_paused_sends_of_one_gateway_never_hold_back_the_other(): void
+    {
+        $this->answers = [[401, ['error' => 'unauthorized', 'message' => 'Missing, wrong or inactive key.']]];
+        $this->go($this->uploadGraph(), 'order po');
+        app(PageSettings::class)->set(self::PAGE, 'chatbot', 'gateway', 'incepxionbot', false, null, true);
+        $this->go($this->uploadGraph(), 'order po', '2026-10-23 11:00', psid: self::PSID + 1);
+        $this->sendJobs();
+        $this->assertSame(['paused', 'paused'], OrderEncode::orderBy('id')->pluck('forbeast_state')->all());
+
+        // Ang key ng incepxionbot lang ang naayos (lipas ang pause nito); ang forbeast ay naka-pause pa.
+        Cache::forget(ForbeastOrders::pauseKey('incepxionbot'));
+        $this->answers = [[201, ['order_id' => 3]]];
+        Artisan::call('order-encode:forbeast-resume');
+        $this->sendJobs();
+
+        $this->assertSame(['paused', 'sent'], OrderEncode::orderBy('id')->pluck('forbeast_state')->all());
+        $puts = $this->puts();
+        $this->assertStringStartsWith(self::IX, end($puts)->url());
+    }
 }

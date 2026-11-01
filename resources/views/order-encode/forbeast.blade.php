@@ -13,7 +13,7 @@
 
   <p class="mb-3 text-sm text-gray-600">
     Every order written to the macro is also sent to Forbeast, to the page's gateway. Listed here: sends Forbeast refused
-    (<b>failed</b>) and sends held because the gateway refused this site's key (<b>paused</b>; they resume by themselves once the key works).
+    (<b>failed</b>) and sends held because the gateway refused this site's key (<b>paused</b>; they resume by themselves once the key works), and sends still queued long after the retry time (<b>stuck</b>: the job was lost).
     @unless ($live) <b>Sending is off</b> (no go-live time is set). @endunless
   </p>
 
