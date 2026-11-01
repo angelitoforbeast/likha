@@ -28,6 +28,10 @@ class ForbeastHoldTest extends ChatblastTestCase
     private array $down = [self::GW => [], self::IXB => []];
     /** Ang mga page ID na sinasagot ng gateway ng HTTP 422 (may sagot, tinanggihan). */
     private array $refused = [];
+    /** Ang mga page ID na ang padala lang ang walang sagot (sumasagot ang health GET). */
+    private array $sendsDown = [];
+    /** Ang mga page ID na sinasagot ng health GET ng "hindi konektado". */
+    private array $notConnected = [];
 
     protected function setUp(): void
     {
@@ -52,9 +56,11 @@ class ForbeastHoldTest extends ChatblastTestCase
             $base = str_starts_with($r->url(), self::IXB) ? self::IXB : self::GW;
             if (!preg_match('#/v1/pages/(\d+)(/messages)?$#', $r->url(), $m)) return Http::response(['ok' => true]);
             if (in_array($m[1], $this->down[$base], true)) return Http::failedConnection()($r);
+            if (isset($m[2]) && in_array($m[1], $this->sendsDown, true)) return Http::failedConnection()($r);
             if (isset($m[2]) && in_array($m[1], $this->refused, true)) return Http::response(['message' => 'Page is in receive mode.'], 422);
+            $connected = !in_array($m[1], $this->notConnected, true);
 
-            return isset($m[2]) ? Http::response(['ok' => true]) : Http::response(['id' => $m[1], 'connected' => true, 'can_send' => true]);
+            return isset($m[2]) ? Http::response(['ok' => true]) : Http::response(['id' => $m[1], 'connected' => $connected, 'can_send' => $connected]);
         });
     }
 
@@ -165,6 +171,45 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->assertCount(1, $this->events(ForbeastWatch::RECOVERED));
     }
 
+    public function test_S_213_3_a_probe_that_answers_while_sends_still_fail_gives_one_hold_then_pages_switch_as_today(): void
+    {
+        // Sumasagot ang GET pero hindi ang padala: ang health ang tumapos sa hold, at ang mga padalang pumapalya pa rin ay
+        // lumilipat na gaya ng dati, walang pangalawang hold.
+        $this->burst();
+        $this->down[self::GW] = [];
+        $this->sendsDown = ['2001', '2002', '2003', '2004', '2005'];
+        $this->artisan('chatbot:forbeast-watch')->assertSuccessful();
+        $this->assertCount(1, $this->events(ForbeastWatch::RECOVERED));
+
+        foreach ([1, 2, 3, 4, 5] as $n) $this->send($n);
+        $this->send(1, 2);
+        $this->assertSame('botcake', $this->provider(1));
+        $this->assertCount(1, $this->events(ForbeastWatch::HELD));
+
+        // Ang naipadala ulit ay patunay: ang susunod na burst ay hold ulit.
+        $this->sendsDown = [];
+        $this->send(2);
+        $this->sendsDown = ['2002', '2003', '2004', '2005', '2006'];
+        $this->travel(61)->seconds();
+        foreach ([2, 3, 4, 5, 6] as $n) $this->send($n);
+        $this->send(2, 2);
+        $this->assertSame('gateway', $this->provider(2));
+        $this->assertCount(2, $this->events(ForbeastWatch::HELD));
+    }
+
+    public function test_S_213_3_a_probe_saying_the_page_is_not_connected_does_not_end_the_hold(): void
+    {
+        $this->burst();
+        $this->down[self::GW] = [];
+        $this->notConnected = ['2003'];
+        app(ForbeastWatch::class)->health('Page 3');
+
+        $this->assertSame([], $this->events(ForbeastWatch::RECOVERED));
+        $this->down[self::GW] = ['2002'];
+        $this->send(2, 2);
+        $this->assertSame('gateway', $this->provider(2));
+    }
+
     public function test_S_213_3_an_answer_from_a_page_outside_the_burst_does_not_end_the_hold(): void
     {
         $this->burst();
@@ -175,6 +220,8 @@ class ForbeastHoldTest extends ChatblastTestCase
         (new GatewayProvider())->send('Page 7', '2007', self::PSID, [['type' => 'text', 'text' => 'Hi']], ChatbotProvider::ref());
 
         $this->assertSame([], $this->events(ForbeastWatch::RECOVERED));
+        $this->send(2, 2);
+        $this->assertSame('gateway', $this->provider(2));
     }
 
     public function test_S_213_4_when_the_hold_ends_without_an_answer_every_page_that_reached_the_threshold_switches(): void
@@ -201,6 +248,23 @@ class ForbeastHoldTest extends ChatblastTestCase
         $this->send(3, 2);
         $this->assertSame('botcake', $this->provider(3));
         $this->assertCount(1, $this->events(ForbeastWatch::HELD));
+    }
+
+    public function test_S_213_4_the_first_no_answer_after_the_window_ends_the_hold_before_the_command_does(): void
+    {
+        $this->burst();
+        $this->travel(121)->seconds();
+        $this->send(2, 2);
+
+        // Lahat ng umabot sa bilang (Page 1 sa hold, Page 2 ngayon) ay lumipat; ang Page 3 ay hindi umabot.
+        $this->assertSame(['botcake', 'botcake', 'gateway'], [$this->provider(1), $this->provider(2), $this->provider(3)]);
+        app(ForbeastWatch::class)->settleHolds();
+        $this->assertCount(2, $this->events(ForbeastWatch::SWITCHED));
+
+        // Ang sagot pagkatapos ng hold na nauwi sa lipat: walang "recovered" (may nailipat na).
+        $this->down[self::GW] = [];
+        $this->send(3);
+        $this->assertSame([], $this->events(ForbeastWatch::RECOVERED));
     }
 
     public function test_S_213_5_refused_sends_with_an_answer_keep_the_failed_sends_rule_and_never_make_a_burst(): void
