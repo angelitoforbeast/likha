@@ -250,7 +250,7 @@ class AdGroupAllValuesTest extends ChatblastTestCase
         $this->travel(61)->seconds();
         $bad = fn (string $key, string $value) => $this->postJson('/chatbot/ad-groups/value', ['page' => 'Precious Lopez', 'id' => $id, 'key' => $key, 'value' => $value]);
         $bad('after_order_img_1', 'not a link')->assertStatus(422);
-        $bad('ai_provider', 'gemini')->assertStatus(422)->assertJson(['error' => 'AI provider: Pick OpenAI or Local.']);
+        $bad('ai_provider', 'gemini')->assertStatus(422)->assertJson(['error' => 'AI provider: Pick OpenAI, Claude, DeepSeek or Local.']);
         $bad('ai_local_timeout', '999')->assertStatus(422);
         $bad('ai_provider', 'default')->assertStatus(422)->assertJson(['error' => 'AI provider: leave it empty to use the page\'s.']);
         $bad('unknown_column', 'x')->assertStatus(422)->assertJson(['error' => 'unknown_column is not a value of the page.']);
