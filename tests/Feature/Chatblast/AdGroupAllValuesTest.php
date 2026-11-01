@@ -235,8 +235,9 @@ class AdGroupAllValuesTest extends ChatblastTestCase
             $this->assertTrue($keys->has($key), $key . ' ay value ng group');
         }
         $this->assertSame('FLOW', $keys['flow_id']['label']);
-        $this->assertSame([['openai', 'OpenAI'], ['local', 'Local']], $keys['ai_provider']['options']);
-        $this->assertSame([['openai', 'OpenAI'], ['local', 'Local'], ['none', 'None']], $keys['ai_fallback']['options']);
+        // Spec 210: Claude at DeepSeek ay mapipili rin (ang key ay sa pool ng kumpanya).
+        $this->assertSame([['openai', 'OpenAI'], ['anthropic', 'Claude'], ['deepseek', 'DeepSeek'], ['local', 'Local']], $keys['ai_provider']['options']);
+        $this->assertSame([['openai', 'OpenAI'], ['anthropic', 'Claude'], ['deepseek', 'DeepSeek'], ['local', 'Local'], ['none', 'None']], $keys['ai_fallback']['options']);
 
         $n = 0;
         foreach ($keys as $key => $k) {
@@ -249,7 +250,7 @@ class AdGroupAllValuesTest extends ChatblastTestCase
         $this->travel(61)->seconds();
         $bad = fn (string $key, string $value) => $this->postJson('/chatbot/ad-groups/value', ['page' => 'Precious Lopez', 'id' => $id, 'key' => $key, 'value' => $value]);
         $bad('after_order_img_1', 'not a link')->assertStatus(422);
-        $bad('ai_provider', 'gemini')->assertStatus(422)->assertJson(['error' => 'AI provider: Pick OpenAI or Local.']);
+        $bad('ai_provider', 'gemini')->assertStatus(422)->assertJson(['error' => 'AI provider: Pick OpenAI, Claude, DeepSeek or Local.']);
         $bad('ai_local_timeout', '999')->assertStatus(422);
         $bad('ai_provider', 'default')->assertStatus(422)->assertJson(['error' => 'AI provider: leave it empty to use the page\'s.']);
         $bad('unknown_column', 'x')->assertStatus(422)->assertJson(['error' => 'unknown_column is not a value of the page.']);

@@ -53,6 +53,13 @@ class ChatbotForbeastWatch extends Command
                 report($e); // isang page lang ang apektado
             }
         }
+        // Ang hold ng gateway na tumagal nang walang sagot: ang mga page na umabot sa bilang ay inililipat na. Pagkatapos ng
+        // mga health check, para ang sagot ng health ngayong minuto ang mauna (bumalik ang daan, walang lipat).
+        try {
+            $watch->settleHolds();
+        } catch (Throwable $e) {
+            report($e);
+        }
         // Ang page na inilipat ng bantay sa Botcake (inbound o padala): ibinabalik sa Forbeast kapag matagal nang maayos ang health.
         $back = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', ForbeastWatch::KEY)->where('active', true)->orderBy('id')->get()
             // Pati ang held at hindi makalipat: ang page sa kabilang gateway ay may lipat pa ring babalikan sa ilalim nito.

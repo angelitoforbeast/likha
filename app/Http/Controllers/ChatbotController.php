@@ -179,6 +179,10 @@ class ChatbotController extends Controller
                 'facebook' => $facebook[$this->settings->pageKey($page)] ?? null,
             ];
         }
+        // Ang note ng Forbeast kapag low o stopped ang load ng account ng page (spec 210), mula sa cache lang (walang tawag).
+        $loads = app(\App\Services\Chatbot\ChatbotAiLoad::class)->shown(array_column(array_map(fn ($r) => ['page' => $r['page'], 'id' => $r['page_id']], $rows), 'id', 'page'));
+        foreach ($rows as &$r) $r['ai_load'] = $loads[$r['page']] ?? null;
+        unset($r);
 
         return response()->json(['columns' => $columns, 'rows' => $rows, 'flows' => $this->flowNames(), 'gateway_ready' => ChatbotProvider::gatewayReady(),
             'gateway_labels' => Gateways::LABELS,

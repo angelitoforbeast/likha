@@ -45,6 +45,8 @@ class ForbeastWatch
     public const CANNOT = 'cannot_switch';
     public const HELD = 'held';
     public const SWITCHED_BACK = 'switched_back';
+    /** Natapos ang hold ng gateway dahil sumagot na ulit ito (walang nailipat). */
+    public const RECOVERED = 'recovered';
     /** Inilipat sa Forbeast ng tao o ng ibang sistema (hindi ng bantay): ang simula ng panahon sa Forbeast. */
     public const MOVED = 'moved';
     /** Ang mga lipat na kusang ibinabalik: ang sa koneksyon ng page (token, permiso) ay tao ang nag-aayos. */
@@ -111,6 +113,7 @@ class ForbeastWatch
         if ($gw !== Gateways::active($page)) return;
         if ($outcome['status'] === 'sent') {
             $this->reset($page, $gw, 'fails', 'no_answer');
+            $this->recovered($page, $gw, 'send');
             return;
         }
         if ($outcome['error'] === GatewayProvider::notSetUp($gw)) return; // walang tawag: hindi palya ng gateway
@@ -127,9 +130,192 @@ class ForbeastWatch
 
         $noAnswer = $http === 0 || $http >= 500;
         $fails = $this->bump($page, $gw, 'fails');
-        if ($noAnswer && $this->bump($page, $gw, 'no_answer') >= self::limit('no_answer')) $this->switch($page, 'no_answer', $error, [], [], $gw);
-        elseif ($fails >= self::limit('failed_sends')) $this->switch($page, 'failed_sends', $error, [], [], $gw);
+        if ($noAnswer) {
+            $reached = $this->bump($page, $gw, 'no_answer') >= self::limit('no_answer');
+            // Habang hold ang gateway (walang sagot sa maraming page nang sabay), ang walang sagot ay ebidensya ng daan, hindi
+            // ng page: walang lipat dahil dito, pati sa bilang ng palyang padala.
+            if ($this->burstHeld($page, $gw, $reached, $error)) return;
+            if ($reached) {
+                $this->switch($page, 'no_answer', $error, [], [], $gw);
+                return;
+            }
+        }
+        if ($fails >= self::limit('failed_sends')) $this->switch($page, 'failed_sends', $error, [], [], $gw);
         if (!$noAnswer) $this->reset($page, $gw, 'no_answer');
+    }
+
+    /**
+     * Ang walang sagot ng page sa burst ng gateway (ang mga page na walang sagot sa huling burst_seconds). Ang page na umabot
+     * sa bilang ng no_answer ($reached) habang burst_pages o higit pa ang nasa burst: hold ang gateway nang hold_minutes (isang
+     * "held" event) sa halip na lipat, dahil ang sabay-sabay na walang sagot ay sira sa daan, hindi sa page. Ang hold na
+     * lumampas na ang oras ay tinatapos dito (tumagal ang sira): ang mga page na umabot sa bilang ay inililipat na, gaya ng
+     * sa settleHolds. true: walang lipat dahil sa padalang ito (o kasama ang page sa mga inilipat ng hold).
+     * Ang health check na walang sagot ($condition "health", umabot sa health_fails) ay parehong ebidensya ng daan: iisang
+     * burst at iisang hold, at ang page ay inililipat sa dulo ng hold ayon sa unang bilang na inabot nito.
+     */
+    private function burstHeld(string $page, string $gw, bool $reached, string $error, string $condition = 'no_answer'): bool
+    {
+        $hash = sha1($this->settings->pageKey($page));
+        $now = now()->getTimestamp();
+        $start = $ended = null;
+        $mark = [$page, $error, $condition];
+        $held = $this->underHold($gw, function () use ($page, $gw, $reached, $mark, $hash, $now, &$start, &$ended) {
+            $burst = array_filter((array) Cache::get(self::holdKey($gw, 'burst')), fn ($b) => is_array($b) && (int) ($b[1] ?? 0) > $now - self::limit('burst_seconds'));
+            $burst[$hash] = [$page, $now];
+            Cache::put(self::holdKey($gw, 'burst'), $burst, self::COUNT_TTL);
+            $hold = Cache::get(self::holdKey($gw));
+            // Ang hold na tinapos ng health check lang (sumagot ang GET, hindi pa napatunayan ng padala): walang bagong hold
+            // hanggang may maipadala, para ang padalang pumapalya pa rin ay lumilipat gaya ng dati at hindi paulit-ulit na hold.
+            if (is_array($hold) && isset($hold['probed'])) return false;
+            // Nawala ang cache habang hold (flush, eviction): ang held row ang batayan, kaya hindi naiiba ang oras ng hold at
+            // hindi sabay-sabay na lumilipat ang mga page bago ito matapos.
+            if (!is_array($hold) && $reached) $hold = $this->heldRow($gw);
+            if (is_array($hold)) {
+                if (!empty($hold['ended'])) return false;
+                if ($now >= (int) $hold['until']) {
+                    // Ang unang walang sagot pagkatapos ng oras ang tumatapos (o ang settleHolds, alinman ang mauna).
+                    if ($reached) $hold['reached'][$hash] ??= $mark;
+                    Cache::put(self::holdKey($gw), ['ended' => $now] + $hold, self::CANNOT_TTL);
+                    $ended = $hold;
+
+                    return $reached;
+                }
+                $hold['seen'][$hash] = $page;
+                if ($reached) $hold['reached'][$hash] ??= $mark;
+                Cache::put(self::holdKey($gw), $hold, self::COUNT_TTL);
+
+                return true;
+            }
+            // Ang burst_pages na 0 ay walang hold (ang dating lipat kada page).
+            $size = (int) config('services.gateway.auto_switch.burst_pages');
+            if (!$reached || $size <= 0 || count($burst) < $size) return false;
+            $start = ['since' => $now, 'until' => $now + self::limit('hold_minutes') * 60, 'page' => $page,
+                'seen' => array_map(fn ($b) => $b[0], $burst), 'reached' => [$hash => $mark], 'trigger' => $mark[2] === 'health' ? 'health' : 'send'];
+            Cache::put(self::holdKey($gw), $start, self::COUNT_TTL);
+
+            return true;
+        });
+        if ($start !== null) {
+            $count = count($start['seen']);
+            Log::warning('forbeast watch: held on a burst of no answer', ['gateway' => $gw, 'pages' => $count, 'page' => $page]);
+            $this->event($page, self::HELD, null, 'no_answer', Gateways::label($gw) . ' did not answer on ' . $count . ' pages within '
+                . self::limit('burst_seconds') . ' s' . ($start['trigger'] === 'health' ? ' (health checks)' : '') . '; holding ' . self::limit('hold_minutes') . ' min before switching',
+                ['gateway' => $gw, 'page_count' => $count, 'trigger' => $start['trigger'], 'pages' => array_slice(array_values($start['seen']), 0, 50),
+                    'until' => now()->setTimestamp($start['until'])->toIso8601String()]);
+        }
+        if ($ended !== null) $this->switchHeld($gw, $ended, $now);
+
+        return $held;
+    }
+
+    /**
+     * Sumagot ang gateway sa page na kasama sa hold ($via: "send" o "health"): bumalik ang daan. Tapos ang hold at ang burst,
+     * mula sa simula ang bilang ng walang sagot at palya ng mga page sa hold, at isang "recovered" event (walang nailipat).
+     * Ang sagot mula sa page na wala sa hold ay hindi patunay: maaaring ibang daan o ibang sira iyon. Pagkatapos ng hold na
+     * nauwi sa lipat, ang sagot ay tahimik na nagtatapos dito (bagong burst, bagong hold). Ang tinapos ng health check lang
+     * ay may tandang "probed" nang back_minutes (walang bagong hold) hanggang may maipadala ulit ang isang page ng burst.
+     */
+    private function recovered(string $page, string $gw, string $via): void
+    {
+        $hash = sha1($this->settings->pageKey($page));
+        $peek = Cache::get(self::holdKey($gw));
+        if (!is_array($peek)) return; // ang karaniwang padala: isang basa lang ng cache
+        if (isset($peek['probed'])) {
+            // Ang naipadala ng page na nasa burst lang ang patunay: ang ibang page ay maaaring dumaan sa gumaganang bahagi.
+            if ($via === 'send' && isset($peek['seen'][$hash])) Cache::forget(self::holdKey($gw));
+            return;
+        }
+        if (!isset($peek['seen'][$hash])) return;
+        $hold = $this->underHold($gw, function () use ($gw, $hash, $via) {
+            $hold = Cache::get(self::holdKey($gw));
+            if (!is_array($hold) || !isset($hold['seen'][$hash])) return null;
+            if ($via === 'health' && empty($hold['ended'])) Cache::put(self::holdKey($gw), ['probed' => now()->getTimestamp(), 'seen' => $hold['seen']], self::limit('back_minutes') * 60);
+            else Cache::forget(self::holdKey($gw));
+            Cache::forget(self::holdKey($gw, 'burst'));
+
+            return $hold;
+        });
+        if ($hold === null || !empty($hold['ended'])) return;
+        foreach ($hold['seen'] as $name) $this->reset((string) $name, $gw, 'no_answer', 'fails', 'health');
+        $seconds = now()->getTimestamp() - (int) $hold['since'];
+        $count = count($hold['seen']);
+        Log::info('forbeast watch: recovered from a burst of no answer', ['gateway' => $gw, 'pages' => $count, 'held_seconds' => $seconds, 'via' => $via]);
+        $this->event((string) $hold['page'], self::RECOVERED, null, 'no_answer', Gateways::label($gw) . ' answered again after ' . $seconds . ' s ('
+            . ($via === 'health' ? 'health check' : 'a send') . ' of ' . $page . '); no page switched',
+            ['gateway' => $gw, 'page_count' => $count, 'held_seconds' => $seconds, 'via' => $via]);
+    }
+
+    /**
+     * Ang hold ng gateway ayon sa huling "held" row nito sa loob ng hold_minutes na walang "recovered" pagkatapos, o null.
+     * Ang mga page na kasama ay hindi na alam: sumasali ulit sila sa susunod nilang walang sagot.
+     */
+    private function heldRow(string $gw): ?array
+    {
+        $rows = PageSetting::where('provider', ChatbotFields::PROVIDER)->where('key', self::KEY)
+            ->where('created_at', '>=', now()->subMinutes(self::limit('hold_minutes')))->orderByDesc('id')->limit(200)->get();
+        foreach ($rows as $s) {
+            $e = json_decode((string) $s->plainValue(), true);
+            if (!is_array($e) || ($e['condition'] ?? null) !== 'no_answer' || ($e['gateway'] ?? null) !== $gw) continue;
+            if (($e['result'] ?? null) === self::RECOVERED) return null;
+            if (($e['result'] ?? null) !== self::HELD || $s->created_at === null) continue;
+            $since = $s->created_at->getTimestamp();
+
+            return ['since' => $since, 'until' => $since + self::limit('hold_minutes') * 60, 'page' => (string) $s->page_name, 'seen' => [], 'reached' => []];
+        }
+
+        return null;
+    }
+
+    /**
+     * Kada minuto (chatbot:forbeast-watch, pagkatapos ng health checks, para mauna ang sagot ng health): ang hold na lumampas
+     * sa hold_minutes nang walang sagot ay tapos na (tumagal ang sira), at ang bawat page na umabot sa bilang ng walang sagot
+     * ay inililipat gaya ng dati (parehong event, parehong balik). Ang tapos na hold ay naiiwan nang isang oras: ang page na
+     * aabot pa sa bilang ay lumilipat agad, walang bagong hold sa parehong sira.
+     */
+    public function settleHolds(): void
+    {
+        foreach (Gateways::ALL as $gw) {
+            $now = now()->getTimestamp();
+            $hold = $this->underHold($gw, function () use ($gw, $now) {
+                $hold = Cache::get(self::holdKey($gw));
+                if (!is_array($hold) || !isset($hold['until']) || !empty($hold['ended']) || $now < (int) $hold['until']) return null;
+                Cache::put(self::holdKey($gw), ['ended' => $now] + $hold, self::CANNOT_TTL);
+
+                return $hold;
+            });
+            if ($hold !== null) $this->switchHeld($gw, $hold, $now);
+        }
+    }
+
+    /** Ang hold na tumagal nang walang sagot: ang bawat page na umabot sa bilang ay inililipat gaya ng dati. */
+    private function switchHeld(string $gw, array $hold, int $now): void
+    {
+        $seconds = $now - (int) $hold['since'];
+        Log::warning('forbeast watch: hold ended without an answer', ['gateway' => $gw, 'pages' => count($hold['reached']), 'held_seconds' => $seconds]);
+        foreach ($hold['reached'] as $r) {
+            [$name, $error] = $r;
+            try {
+                $this->switch((string) $name, ($r[2] ?? 'no_answer') === 'health' ? 'health' : 'no_answer', (string) $error, [], ['held_seconds' => $seconds], $gw);
+            } catch (Throwable $e) {
+                report($e); // isang page lang ang apektado
+            }
+        }
+    }
+
+    /** Ang $fn sa ilalim ng lock ng hold ng gateway (ang burst at ang hold ay binabasa at isinusulat ng maraming worker). */
+    private function underHold(string $gw, callable $fn): mixed
+    {
+        try {
+            return Cache::lock('forbeast-watch:hold-lock:' . $gw, 10)->block(3, $fn);
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException) {
+            return $fn(); // ang lock na hindi makuha ay hindi dapat humarang sa padala
+        }
+    }
+
+    /** Ang cache key ng hold ng gateway ($what "hold"), o ng burst nito ($what "burst"). */
+    private static function holdKey(string $gw, string $what = 'hold'): string
+    {
+        return 'forbeast-watch:' . $what . ':' . $gw;
     }
 
     /**
@@ -166,15 +352,20 @@ class ForbeastWatch
                 if ($own) $this->switch($page, 'health', $l . ' says the page is ' . ($res->json('connected') === false ? 'not connected' : 'not able to send'), [], [], $gw);
                 return;
             }
+            // Sumagot at konektado ang page: bumalik ang daan (ang "hindi konektado" ay sira ng page, hindi patunay).
+            $this->recovered($page, $gw, 'health');
             $this->reset($page, $gw, 'health');
             $this->streak($page, $lag === null || $lag < self::limit('lag_seconds'), $gw);
             return;
         }
         $this->reset($page, $gw, 'lag');
         $this->streak($page, false, $gw);
-        if ($this->bump($page, $gw, 'health') >= self::limit('health_fails') && $own) {
-            $this->switch($page, 'health', $res === null ? $l . ' did not answer' : $l . ' answered HTTP ' . $res->status(), [], [], $gw);
-        }
+        $reached = $this->bump($page, $gw, 'health') >= self::limit('health_fails');
+        $error = $res === null ? $l . ' did not answer' : $l . ' answered HTTP ' . $res->status();
+        // Ang walang sagot (o 5xx) ng health ay ebidensya rin ng daan: kasama sa burst at hold ng gateway, gaya ng padala, kaya
+        // ang sira ng daan ay hindi naglilipat ng lahat ng page sa ikatlong minuto bago matapos ang hold.
+        if ($own && ($res === null || $res->status() >= 500) && $this->burstHeld($page, $gw, $reached, $error, 'health')) return;
+        if ($reached && $own) $this->switch($page, 'health', $error, [], [], $gw);
     }
 
     /** Maayos ang huling health check ng page sa gateway (may sunod-sunod na maayos na hindi pa luma). */
@@ -681,6 +872,8 @@ class ForbeastWatch
     public static function reason(array $e): string
     {
         if (in_array($e['result'] ?? null, [self::HELD, self::SWITCHED_BACK, self::MOVED], true)) return (string) ($e['error'] ?? '');
+        // Ang natapos na hold ng walang sagot: buo na rin ang dahilan (ang recovered ng send lag ay may kondisyon pa rin).
+        if (($e['result'] ?? null) === self::RECOVERED && ($e['condition'] ?? null) === 'no_answer') return (string) ($e['error'] ?? '');
         $label = self::REASONS[$e['condition'] ?? ''] ?? (string) ($e['condition'] ?? '');
         $gw = $e['gateway'] ?? null;
         if (Gateways::valid($gw) && $gw !== Gateways::FORBEAST) $label = str_replace('Forbeast', Gateways::label($gw), $label);

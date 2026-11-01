@@ -9,9 +9,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Read-only feed ng kusang lipat ng provider (ForbeastWatch) para sa assistant ng owner: ang mga "switched" at
- * "cannot_switch" event pagkatapos ng ?since=<id>, luma muna, hanggang LIMIT. Sariling key (X-CHATBOT-EVENTS-KEY,
- * services.chatbot.events_key); walang key o mali = 401. Walang secret at walang text ng customer.
+ * Read-only feed ng kusang lipat ng provider (ForbeastWatch) para sa assistant ng owner: ang mga "switched", "held",
+ * "recovered" at "cannot_switch" event pagkatapos ng ?since=<id>, luma muna, hanggang LIMIT. Sariling key
+ * (X-CHATBOT-EVENTS-KEY, services.chatbot.events_key); walang key o mali = 401. Walang secret at walang text ng customer.
  */
 class ChatbotProviderEventsController extends Controller
 {
@@ -38,6 +38,10 @@ class ChatbotProviderEventsController extends Controller
                     // Ang send lag alarm: ang mga page na apektado (ang row ay nasa una lang).
                     'reason' => $e ? ForbeastWatch::reason($e) : null,
                     'pages' => isset($e['pages']) && is_array($e['pages']) ? array_values($e['pages']) : null,
+                    // Ang hold sa burst ng walang sagot (held, recovered) at ang lipat pagkatapos nito: ang gateway, ilang page, ilang segundo.
+                    'gateway' => isset($e['gateway']) && is_string($e['gateway']) ? $e['gateway'] : null,
+                    'page_count' => isset($e['page_count']) && is_int($e['page_count']) ? $e['page_count'] : null,
+                    'held_seconds' => isset($e['held_seconds']) && is_int($e['held_seconds']) ? $e['held_seconds'] : null,
                 ];
             })->all();
 

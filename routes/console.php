@@ -195,6 +195,17 @@ Schedule::command('chatbot:forbeast-watch')
     ->withoutOverlapping(10)
     ->runInBackground();
 
+// Ang usage ng chatbot AI papunta sa Forbeast ng bawat page (spec 210): kada minuto, isang job sa queue na "chatbot" (iisa
+// lang ang tumatakbo; ang hindi naipadala ay sa susunod). Ang load ng mga page (ChatbotAiLoad) ay sa chatbot:ai-load.
+Schedule::job(new \App\Jobs\SendChatbotAiUsage())
+    ->everyMinute()
+    ->name('chatbot-ai-usage')
+    ->withoutOverlapping(10);
+Schedule::command('chatbot:ai-load')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->runInBackground();
+
 // Kusang J&T track-sync (JntAutoTrackSync): kada oras sa :20 Manila (mga 15 minuto pagkatapos ng hourly J&T upload),
 // 04:20–23:20 at 02:20. Hanggang 40 minuto; sa background para hindi maantala ang ibang naka-schedule. Ang command ang
 // kumukuha ng oras, kaya ang simula mula sa chatblast:auto sa parehong oras ay walang ginagawa. JNT_TRACK_SYNC_AUTO o
@@ -236,6 +247,12 @@ Schedule::command('order-encode:compare')
 Schedule::command('order-encode:compare-final')
     ->everyFifteenMinutes()
     ->withoutOverlapping(30);
+
+// Spec 211: ang mga padala ng order sa Forbeast na naka-pause (401/403 ng gateway): isang probe kada gateway kada 5 minuto,
+// saka ang lahat kapag tinanggap na ang site key. Walang gagawin kung walang naka-pause.
+Schedule::command('order-encode:forbeast-resume')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10);
 
 // Order encode: ang natutunang address (address_notes) mula sa mga itinamang at na-deliver na order ng nakaraang 3 araw, 05:30 Manila.
 // Ligtas ulitin: bawat order ay isang beses lang nabibilang. Ang buong 60 araw ay manu-mano: order-encode:notes-build --days=60.

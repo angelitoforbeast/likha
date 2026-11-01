@@ -100,6 +100,8 @@
         {{-- Aling AI ang sumasagot: ang site default (at ang Local cap at breaker), at ang paghahambing ng mga AI ng isang page. --}}
         <button id="ai-site-open" type="button" class="cb-btn">AI default</button>
         <button id="ai-compare-open" type="button" class="cb-btn">Compare AI</button>
+        {{-- Ang pool ng AI key ng kumpanya (spec 210): CEO lang, kaya ang link ay sa CEO lang. --}}
+        @if(\App\Http\Controllers\ChatbotAiKeyController::allowed())<a href="{{ route('chatbot.ai-keys') }}" class="cb-btn">AI keys</a>@endif
         @if($canSetUp)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>
@@ -214,9 +216,14 @@
                 <button type="button" data-close-dialog class="px-2 text-slate-500 hover:text-slate-800" aria-label="Close">✕</button>
             </div>
             <p id="ai-local-note" class="mb-2 hidden text-xs text-amber-700">Local AI is not set up on the server yet, so only OpenAI can be chosen.</p>
+            {{-- Ang note ng Forbeast kapag low o stopped ang AI load ng account ng page (spec 210). --}}
+            <p id="ai-load-dialog-note" class="ai-load-note mb-2 hidden break-words text-xs"></p>
             <div class="grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2">
                 <label class="flex flex-col">AI provider<select name="provider" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></select></label>
                 <label class="flex flex-col">If it fails, then<select name="fallback" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></select></label>
+                <label class="flex flex-col">If that fails too<select name="fallback2" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></select></label>
+                <label class="flex flex-col">Claude model<input name="anthropic_model" maxlength="100" autocomplete="off" spellcheck="false" class="mt-0.5 rounded border border-slate-300 px-1 py-1 font-mono text-sm text-gray-900"></label>
+                <label class="flex flex-col">DeepSeek model<input name="deepseek_model" maxlength="100" autocomplete="off" spellcheck="false" class="mt-0.5 rounded border border-slate-300 px-1 py-1 font-mono text-sm text-gray-900"></label>
                 <label class="flex flex-col">Local model<input name="local_model" maxlength="100" autocomplete="off" spellcheck="false" placeholder="e.g. qwen3:14b" class="mt-0.5 rounded border border-slate-300 px-1 py-1 font-mono text-sm text-gray-900"></label>
                 <label class="flex flex-col">Local timeout (s)<input name="local_timeout" type="number" min="1" max="60" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
                 <label data-ai-site-only class="flex flex-col">Local at a time<input name="local_concurrency" type="number" min="1" max="50" inputmode="numeric" class="mt-0.5 rounded border border-slate-300 px-1 py-1 text-sm text-gray-900"></label>
@@ -1121,6 +1128,7 @@
         paintSwitch(b, r.active);
         if (url.activeUrl) b.addEventListener('click', () => toggle(r, b)); else b.disabled = true; // CEO lang ang makakapag-switch
         td.append(b, providerSelect(r), gatewaySelect(r), aiButton(r));
+        if (r.ai_load) td.append(aiLoadNote(r.ai_load));
         if (r.auto_switched) td.append(autoSwitchNote(r.auto_switched));
         const err = errors.get(r.page);
         if (err) td.append(el('div', {class: 'mt-1 max-w-[12rem] text-xs text-red-600 break-words', text: err}));
@@ -1363,6 +1371,10 @@
     // Ang button sa row ay nagsasabi kung aling AI ang sumasagot ("(default)" = sumusunod sa site default).
     const aiLabel = p => (aiSite?.providers || []).find(x => x.name === p)?.label || p;
     let aiPage = null; // ang row na binubuksan sa AI dialog; null = ang site default
+    // Ang note ng Forbeast kapag low o stopped ang AI load ng account ng page (spec 210): ang text nila, gaya ng ibinigay.
+    function aiLoadNote(load) {
+        return el('p', {class: 'ai-load-note mt-1 max-w-[12rem] break-words text-xs ' + (load.state === 'stopped' ? 'text-red-700' : 'text-amber-700'), text: load.note || (load.state === 'stopped' ? 'AI stopped: no load.' : 'Low AI load.')});
+    }
     function aiButton(r) {
         if (!r.ai) return null;
         const b = el('button', {type: 'button', class: 'mt-1 block max-w-[9rem] truncate rounded border border-slate-300 px-1 py-0.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500',
@@ -1380,7 +1392,17 @@
         const provs = (aiSite?.providers || []).map(p => [p.name, p.label, p.name === 'local' && notReady]);
         aiOptions(f.elements.provider, r ? [['default', 'Default (' + aiLabel(aiSite?.provider) + ')'], ...provs] : provs, r ? (a.override ? a.provider : 'default') : a.provider);
         const falls = [...provs, ['none', 'None']];
-        aiOptions(f.elements.fallback, r ? [['default', 'Default'], ...falls] : [['', 'Default (Local → OpenAI, OpenAI → none)'], ...falls], r ? (a.fallback || 'default') : (a.fallback || ''));
+        // Ang fallback ay listahan (spec 210): ang una at ang ikalawa ("deepseek,openai").
+        const fallList = String(a.fallback || '').split(',').filter(Boolean);
+        aiOptions(f.elements.fallback, r ? [['default', 'Default'], ...falls] : [['', 'Default (Local → OpenAI, others → OpenAI, OpenAI → none)'], ...falls], fallList[0] || (r ? 'default' : ''));
+        aiOptions(f.elements.fallback2, [['', 'Nothing more'], ...provs], fallList[1] || '');
+        for (const k of ['anthropic_model', 'deepseek_model']) {
+            f.elements[k].value = a[k] || '';
+            f.elements[k].placeholder = r && aiSite?.[k] ? 'Default: ' + aiSite[k] : '';
+        }
+        const load = r ? r.ai_load : null, ln = $('ai-load-dialog-note');
+        ln.textContent = load ? (load.note || (load.state === 'stopped' ? 'AI stopped: no load.' : 'Low AI load.')) : '';
+        ln.className = 'ai-load-note mb-2 break-words text-xs ' + (!load ? 'hidden' : load.state === 'stopped' ? 'text-red-700' : 'text-amber-700');
         f.elements.local_model.value = a.local_model || '';
         f.elements.local_model.placeholder = r && aiSite?.local_model ? 'Default: ' + aiSite.local_model : 'e.g. qwen3:14b';
         f.elements.local_timeout.value = a.local_timeout ?? '';
@@ -1402,8 +1424,13 @@
     $('ai-form').addEventListener('submit', async e => {
         e.preventDefault();
         const f = e.target, r = aiPage && current(aiPage), body = r ? {page_name: r.page} : {};
-        for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout'] : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort']) {
-            const v = f.elements[k].value.trim();
+        const fb = f.elements.fallback.value, fb2 = f.elements.fallback2.value;
+        const fallback = fb && fb !== 'default' && fb !== 'none' && fb2 && fb2 !== fb ? fb + ',' + fb2 : fb;
+        for (const k of r ? ['provider', 'fallback', 'local_model', 'local_timeout', 'anthropic_model', 'deepseek_model']
+            : ['provider', 'fallback', 'local_model', 'local_timeout', 'local_concurrency', 'breaker_failures', 'breaker_seconds', 'local_reasoning_effort', 'anthropic_model', 'deepseek_model']) {
+            let v = k === 'fallback' ? fallback : f.elements[k].value.trim();
+            // Ang blangko ay nagiging null sa server (walang pagbabago): sa page, ang blangkong model o timeout ay "default".
+            if (r && v === '' && ['local_model', 'local_timeout', 'anthropic_model', 'deepseek_model'].includes(k)) v = 'default';
             // Sa page, ang blangkong model o timeout = bumalik sa default. Sa site, ang binago lang (ang default ng server ay hindi naisusulat).
             if (r || ((v !== '' || k === 'local_reasoning_effort') && v !== String(aiSite?.[k] ?? ''))) body[k] = v; // blangkong reasoning = hindi ipinapadala
         }

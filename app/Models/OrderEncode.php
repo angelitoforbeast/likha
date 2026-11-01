@@ -13,6 +13,7 @@ class OrderEncode extends Model
 
     protected $casts = [
         'input' => 'array', 'outputs' => 'array', 'steps' => 'array', 'usage' => 'array', 'sheet' => 'array', 'compare' => 'array', 'final_compare' => 'array',
+        'forbeast' => 'array', 'forbeast_version' => 'integer', // ang padala sa Forbeast (spec 211)
         'compare_equal' => 'boolean', 'encoded_at' => 'datetime', 'compared_at' => 'datetime',
     ];
 }

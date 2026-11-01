@@ -84,9 +84,18 @@ class ChatbotAiPool extends TicketPool
         $tried = $this->carried[$id] ?? [];
         unset($this->carried[$id]);
         $failed = array_column(array_filter($tried, fn ($a) => !$a['ok']), 'provider');
-        $steps = array_values(array_filter(ChatbotAiChain::forRow($row), fn ($s) => !in_array($s['provider'], $failed, true)));
-        $this->chains[$id] = ['steps' => $steps, 'i' => 0, 'attempts' => $tried, 'token' => 0, 'slot' => null, 'http' => null];
+        // Bawat provider na may pool ay isang hakbang kada key (ChatbotAiChain::steps, spec 210).
+        $steps = array_values(array_filter(ChatbotAiChain::steps(ChatbotAiChain::forRow($row)), fn ($s) => !in_array($s['provider'], $failed, true)));
+        $this->chains[$id] = ['steps' => $steps, 'i' => 0, 'attempts' => $tried, 'token' => 0, 'slot' => null, 'keySlot' => null, 'http' => null, 'skip' => null];
         $this->next($row);
+    }
+
+    /** Ang wakas ng chain: ang event at alert ng key (ChatbotAiChain::afterChain), saka ang finish. */
+    private function end(object $row): void
+    {
+        $id = (string) $row->request_id;
+        ChatbotAiChain::afterChain((string) $row->page_name, $this->chains[$id]['attempts']);
+        $this->done($row, ChatbotAiChain::outcome($this->chains[$id]['attempts']), $this->chains[$id]['http']);
     }
 
     /** Ang susunod na provider ng chain na maaaring tawagan, o ang wakas (sagot o palya) kapag wala na o ubos na ang oras. */
@@ -96,6 +105,7 @@ class ChatbotAiPool extends TicketPool
         while ($this->chains[$id]['i'] < count($this->chains[$id]['steps'])) {
             $step = $this->chains[$id]['steps'][$this->chains[$id]['i']++];
             $p = $step['provider'];
+            if ($p === $this->chains[$id]['skip']) continue; // model o request na palya: hindi na ang ibang key nito
             $model = $step['model'] ?? (string) $row->model;
             if ($skip = ChatbotAiChain::skip($step)) {
                 $this->chains[$id]['attempts'][] = ChatbotAiChain::skipped($step, $model, $skip);
@@ -111,15 +121,18 @@ class ChatbotAiPool extends TicketPool
             }
             $timeout = $step['timeout'] !== null ? (int) min($step['timeout'], max(1, floor($left))) : max(1, $left);
             $slot = ChatbotAiChain::capped($p) ? ChatbotAiChain::slot($p, (int) ceil($timeout) + 5) : false;
-            if ($slot === null) {
-                $busy = ChatbotAiProviders::label($p) . ' is busy.';
+            $keySlot = $slot !== null && $step['key'] !== null ? ChatbotAiKeys::slot($step['key'], (int) ceil($timeout) + 5) : false;
+            if ($slot === null || $keySlot === null) {
+                if ($slot) $slot->release();
+                $busy = ($step['key'] !== null && $keySlot === null ? 'The ' . ChatbotAiProviders::label($p) . ' key ' . $step['key']['label'] : ChatbotAiProviders::label($p)) . ' is busy.';
                 $this->chains[$id]['attempts'][] = ChatbotAiChain::skipped($step, $model, ['why' => $busy, 'error' => $busy]);
                 continue;
             }
+            $this->chains[$id]['keySlot'] = $keySlot ?: null;
             $this->call($row, $step, $model, $timeout, $slot ?: null);
             return;
         }
-        $this->done($row, ChatbotAiChain::outcome($this->chains[$id]['attempts']), $this->chains[$id]['http']);
+        $this->end($row);
     }
 
     private function call(object $row, array $step, string $model, float|int $timeout, ?Lock $slot): void
@@ -131,25 +144,40 @@ class ChatbotAiPool extends TicketPool
         $this->chains[$id]['token'] = $token;
         $this->chains[$id]['slot'] = $slot;
         $this->chains[$id]['start'] = $this->nowMs();
-        $r = ChatbotAiChain::request($p, $model, (array) json_decode((string) $row->messages, true), (int) $row->max_tokens);
+        $r = ChatbotAiChain::request($p, $model, (array) json_decode((string) $row->messages, true), (int) $row->max_tokens, $step['key']);
         $opts = ['headers' => $r['headers'], 'json' => $r['body'], 'timeout' => $timeout, 'connect_timeout' => min(10, $timeout)];
-        // Ang hindi OpenAI (Local): walang sinusundang redirect, mabilis na palya ng patay na koneksyon, at ang sariling oras ay
-        // binabantayan din ng pool (lumilipat kahit hindi pa sumusuko ang koneksyon; ang huling sagot ay hindi na binibilang).
+        // Ang hindi OpenAI (Local, Claude, DeepSeek): walang sinusundang redirect, mabilis na palya ng patay na koneksyon, at ang
+        // sariling oras ay binabantayan din ng pool (lumilipat kahit hindi pa sumusuko ang koneksyon; ang huling sagot ay hindi na binibilang).
         if ($p !== ChatbotAiProviders::OPENAI) {
             $opts = ['connect_timeout' => min(5, $timeout), 'allow_redirects' => false] + $opts;
             $this->after($id, (int) ($timeout * 1000) + 250, fn () => $this->current($id, $token)
-                && $this->attempted($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, true)), null));
+                && $this->safely($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, true)), null));
         }
         $this->http->postAsync($r['url'], $opts)->then(
             fn (ResponseInterface $res) => $this->answered($row, $step, $model, $token, $res),
             fn ($e) => $this->current($id, $token)
-                && $this->attempted($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, $e instanceof Throwable && ChatbotAiChain::timedOut($e->getMessage()))), null),
+                && $this->safely($row, $step, $model, self::failure(ChatbotAiProviders::noAnswer($p, $e instanceof Throwable && ChatbotAiChain::timedOut($e->getMessage()))), null),
         );
     }
 
     private static function failure(string $error): array
     {
-        return ['ok' => false, 'text' => '', 'error' => $error, 'prompt_tokens' => null, 'completion_tokens' => null];
+        return ['ok' => false, 'text' => '', 'error' => $error, 'prompt_tokens' => null, 'completion_tokens' => null, 'kind' => 'failing'];
+    }
+
+    /**
+     * Ang palya ng timer o ng koneksyon: gaya ng attempted(), pero ang error (hal. sa pagsulat ng marka ng key) ay hindi
+     * nag-iiwan ng puwesto na hawak: ang row ay sending pa, at ang sweep ang magpapalya sa deadline.
+     */
+    private function safely(object $row, array $step, string $model, array $out, ?int $http): bool
+    {
+        try {
+            return $this->attempted($row, $step, $model, $out, $http);
+        } catch (Throwable $e) {
+            report($e);
+            $this->release((string) $row->request_id);
+            return true;
+        }
     }
 
     /** Ang subok na ito pa ba ang hinihintay ng request (hindi pa tapos, hindi pa lumipat)? */
@@ -173,7 +201,10 @@ class ChatbotAiPool extends TicketPool
     private function handle(object $row, array $step, string $model, ResponseInterface $res): void
     {
         $p = $step['provider'];
-        if ($res->getStatusCode() === 429 && $p === ChatbotAiProviders::OPENAI) {
+        // Ang 429 ng iisang key ng server (walang pool): bumabagal ang buong pool gaya ng dati. Ang key ng pool ay minamarkahan
+        // at lumilipat sa susunod na key (ChatbotAiChain::settle).
+        $legacy = ($step['key'] ?? null) === null || ($step['key']['legacy'] ?? false);
+        if ($res->getStatusCode() === 429 && $p === ChatbotAiProviders::OPENAI && $legacy) {
             // Bumagal: kalahati ng sabay, hinto muna ang bago, at ibalik ang request (hindi failed).
             $after = $res->getHeaderLine('Retry-After');
             $wait = is_numeric($after) && (float) $after > 0 ? (int) ceil((float) $after) : 2 ** min(5, ++$this->backoffs);
@@ -186,11 +217,11 @@ class ChatbotAiPool extends TicketPool
             ChatbotAiQueue::later($row, $this->owner, now()->addSeconds($wait));
             return;
         }
-        if ($p === ChatbotAiProviders::OPENAI) {
+        if ($p === ChatbotAiProviders::OPENAI && $legacy) {
             $this->backoffs = 0;
             $this->limit = min($this->max(), $this->limit + 1);
         }
-        $this->attempted($row, $step, $model, ChatbotAiProviders::parse($p, $res->getStatusCode(), json_decode((string) $res->getBody(), true)), $res->getStatusCode());
+        $this->attempted($row, $step, $model, ChatbotAiChain::read($step, $res->getStatusCode(), (string) $res->getBody()), $res->getStatusCode());
     }
 
     /** Isang tapos na subok: ang sagot ang wakas; ang palya ay lipat sa susunod na provider (o ang wakas kapag wala na). */
@@ -200,21 +231,25 @@ class ChatbotAiPool extends TicketPool
         $this->chains[$id]['token'] = 0; // ang anumang huling callback ng subok na ito ay hindi na binibilang
         $this->chains[$id]['slot']?->release();
         $this->chains[$id]['slot'] = null;
+        $this->chains[$id]['keySlot']?->release();
+        $this->chains[$id]['keySlot'] = null;
         $p = $step['provider'];
-        $out['ok'] ? ChatbotAiChain::succeeded($p) : ChatbotAiChain::failed($p);
-        $this->chains[$id]['attempts'][] = ['provider' => $p, 'model' => $model, 'ms' => max(0, $this->nowMs() - (int) $this->chains[$id]['start']),
+        $attempt = ChatbotAiChain::settle(['provider' => $p, 'model' => $model, 'ms' => max(0, $this->nowMs() - (int) $this->chains[$id]['start']),
             'ok' => $out['ok'], 'why' => $out['error'], 'error' => $out['error'], 'text' => $out['text'],
-            'prompt_tokens' => $out['prompt_tokens'], 'completion_tokens' => $out['completion_tokens'], 'called' => true];
+            'prompt_tokens' => $out['prompt_tokens'], 'completion_tokens' => $out['completion_tokens'], 'called' => true, 'key' => $step['key'] ?? null, 'kind' => $out['kind'] ?? null]);
+        $this->chains[$id]['attempts'][] = $attempt;
         $this->chains[$id]['http'] = $http;
-        $out['ok'] ? $this->done($row, ChatbotAiChain::outcome($this->chains[$id]['attempts']), $http) : $this->next($row);
+        if (ChatbotAiChain::notTheKey($attempt)) $this->chains[$id]['skip'] = $p;
+        $out['ok'] ? $this->end($row) : $this->next($row);
 
         return true;
     }
 
-    /** Bitawan ang request sa pool (slot ng provider, chain, puwesto). */
+    /** Bitawan ang request sa pool (slot ng provider at ng key, chain, puwesto). */
     private function release(string $id): void
     {
         ($this->chains[$id]['slot'] ?? null)?->release();
+        ($this->chains[$id]['keySlot'] ?? null)?->release();
         unset($this->chains[$id], $this->inflight[$id]);
     }
 

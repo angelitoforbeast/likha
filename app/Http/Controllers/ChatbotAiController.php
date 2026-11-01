@@ -21,10 +21,17 @@ class ChatbotAiController extends Controller
     {
     }
 
-    private function checkAccess(): void
+    /** Ang may access sa /chatblast; ang parehong tanong ang nagbabantay sa pool ng AI key (ChatbotAiKeyController). */
+    public static function mayChange(): bool
     {
         $role = preg_replace('/\s+/u', ' ', trim((string) (Auth::user()?->employeeProfile?->role ?? Auth::user()?->role ?? '')));
-        if (!NavAccess::allows($role, '/chatblast')) abort(403);
+
+        return NavAccess::allows($role, '/chatblast');
+    }
+
+    private function checkAccess(): void
+    {
+        if (!self::mayChange()) abort(403);
     }
 
     /** Ang pangalan ng page sa listahan ng chatbot (trim, laki ng letra at espasyo ay hindi mahalaga), o null. */

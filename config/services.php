@@ -178,7 +178,15 @@ return [
     // nasa env: ang model, timeout, cap at breaker ay nae-edit sa screen (ito ang default nila).
     'chatbot_ai' => [
         'providers' => [
-            'openai' => ['label' => 'OpenAI', 'url' => 'https://api.openai.com/v1', 'key_config' => 'services.openai.key', 'needs_key' => true],
+            // pooled: ang mga key ay sa /chatbot/ai-keys (ang pool ng kumpanya, spec 210). Ang OpenAI na walang key sa pool ay ang
+            // services.openai.key gaya ng dati. key_concurrency: ilang sabay kada key (null = walang hangganan, gaya ng dati).
+            'openai' => ['label' => 'OpenAI', 'url' => 'https://api.openai.com/v1', 'key_config' => 'services.openai.key', 'needs_key' => true, 'pooled' => true,
+                'key_concurrency' => env('CHATBOT_AI_OPENAI_KEY_CONCURRENCY') ?: null, 'test_model' => 'gpt-4o-mini'],
+            // Claude at DeepSeek: ang sariling model at timeout (page, site, o ito); ang key ay sa pool lang.
+            'anthropic' => ['label' => 'Claude', 'url' => 'https://api.anthropic.com/v1', 'needs_key' => true, 'pooled' => true, 'model' => 'claude-haiku-4-5', 'timeout' => 20,
+                'key_concurrency' => env('CHATBOT_AI_ANTHROPIC_KEY_CONCURRENCY') ?: null],
+            'deepseek' => ['label' => 'DeepSeek', 'url' => 'https://api.deepseek.com', 'needs_key' => true, 'pooled' => true, 'model' => 'deepseek-chat', 'timeout' => 20,
+                'key_concurrency' => env('CHATBOT_AI_DEEPSEEK_KEY_CONCURRENCY') ?: null],
             // Ang Local ay sa localhost lang ng server (reverse SSH tunnel papunta sa office PC); ibang host = hindi naka-set up.
             'local' => [
                 'label' => 'Local', 'url' => env('CHATBOT_AI_LOCAL_URL', ''), 'key' => env('CHATBOT_AI_LOCAL_KEY', ''), 'localhost_only' => true,
@@ -187,6 +195,41 @@ return [
                 // none | low | medium | high, o '' = hindi ipinapadala. Hindi kailanman sa OpenAI.
                 'reasoning_effort' => 'none',
             ],
+        ],
+        // Ang pahinga ng key ng pool (segundo) ayon sa dahilan; ang ulit na palya pagkatapos ng pahinga ay doble, hanggang max_rest.
+        // Ang 401/403 (invalid) ay walang katapusan: hanggang pumasa ang Test. Ang failing (5xx, 529, timeout) ay pagkatapos lang ng
+        // failing_after na palya sa loob ng failing_window segundo.
+        'keys' => [
+            'rest' => ['rate_limited' => (int) env('CHATBOT_AI_KEY_REST_RATE_LIMITED', 120), 'no_credit' => (int) env('CHATBOT_AI_KEY_REST_NO_CREDIT', 1800),
+                'failing' => (int) env('CHATBOT_AI_KEY_REST_FAILING', 60)],
+            'max_rest' => (int) env('CHATBOT_AI_KEY_MAX_REST', 21600),
+            'failing_after' => (int) env('CHATBOT_AI_KEY_FAILING_AFTER', 3),
+            'failing_window' => (int) env('CHATBOT_AI_KEY_FAILING_WINDOW', 300),
+            'max' => 50, // ilang key sa pool
+        ],
+        // Ang presyo ng chatbot AI (USD kada 1M tokens: [input, output]) para sa cost_micros ng bawat sagot. Ang model na wala
+        // rito = walang gastos (null, may marka), hindi 0. Ang petsa sa dulo ng pangalan (gpt-4o-mini-2024-07-18) ay inaalis.
+        'prices' => [
+            'gpt-4o-mini' => [0.15, 0.60],
+            'gpt-4o' => [2.50, 10.00],
+            'gpt-4.1-nano' => [0.10, 0.40],
+            'gpt-4.1-mini' => [0.40, 1.60],
+            'gpt-4.1' => [2.00, 8.00],
+            'gpt-5-nano' => [0.05, 0.40],
+            'gpt-5-mini' => [0.25, 2.00],
+            'gpt-5' => [1.25, 10.00],
+            'gpt-5.2' => [1.75, 14.00],
+            'claude-haiku-4-5' => [1.00, 5.00],
+            'claude-sonnet-4-5' => [3.00, 15.00],
+            'deepseek-chat' => [0.28, 0.42],
+            'deepseek-reasoner' => [0.28, 0.42],
+        ],
+        // Ang padala ng usage sa Forbeast (SendChatbotAiUsage) at ang tanong ng load (ChatbotAiLoad).
+        'billing' => [
+            'batches_per_run' => (int) env('CHATBOT_AI_USAGE_BATCHES', 20), // 100 bawat isa; ang Forbeast ay 120 request kada minuto
+            'timeout' => (int) env('CHATBOT_AI_BILLING_TIMEOUT', 10),
+            'load_timeout' => (int) env('CHATBOT_AI_LOAD_TIMEOUT', 3),
+            'load_seconds' => 60,
         ],
     ],
 
@@ -219,6 +262,11 @@ return [
             'back_gap_minutes' => (int) env('GATEWAY_SWITCH_BACK_GAP_MINUTES', 60),
             // Ilang segundo pagkalipat sa Forbeast (kahit sino ang naglipat) na ang chat ng Botcake ay hindi ebidensya.
             'settle_seconds' => (int) env('GATEWAY_SWITCH_SETTLE_SECONDS', 180),
+            // Ang walang sagot sa maraming page ng iisang gateway nang sabay (burst_pages na page sa loob ng burst_seconds) ay
+            // problema ng daan, hindi ng page: hold muna nang hold_minutes at susuriin ulit bago ilipat. 0 page = walang hold.
+            'hold_minutes' => (int) env('GATEWAY_SWITCH_HOLD_MINUTES', 2),
+            'burst_pages' => (int) env('GATEWAY_SWITCH_BURST_PAGES', 5),
+            'burst_seconds' => (int) env('GATEWAY_SWITCH_BURST_SECONDS', 60),
         ],
         // Ang echo (ChatEchoes): ilang minuto bago "hindi nasagot" ang mensahe ng customer, ilang customer na hindi nasagot
         // sa huling oras bago pula ang page, at ilang segundo ang layo ng dalawang app na "dobleng sagot".
