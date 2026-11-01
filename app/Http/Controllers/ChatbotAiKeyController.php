@@ -12,8 +12,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang /chatbot/ai-keys: ang pool ng AI key ng kumpanya (spec 210). Ang makakapagpalit lang ng AI settings ng site ang
- * nakakakita at nagbabago (403 sa iba). Walang key na lumalabas: label, provider, status, huling gamit at huling 4 lang.
+ * Ang /chatbot/ai-keys: ang pool ng AI key ng kumpanya (spec 210). CEO lang ang nakakakita at nagbabago (403 sa iba, pati
+ * ang may /chatblast): ang mga key ay bayad na secret ng kumpanya. Ang AI default ng site ay may sariling access (pumipili
+ * lang ng provider at model). Walang key na lumalabas: label, provider, status, huling gamit at huling 4 lang.
  */
 class ChatbotAiKeyController extends Controller
 {
@@ -21,9 +22,15 @@ class ChatbotAiKeyController extends Controller
     {
     }
 
+    /** Ang iisang CEO check ng app (trim, pinagsamang espasyo, hindi case-sensitive), gaya ng Horizon at ng remembered login. */
+    public static function allowed(): bool
+    {
+        return \App\Listeners\RefuseRememberedLoginUnlessCeo::isCeo(Auth::user());
+    }
+
     private function checkAccess(): void
     {
-        if (!ChatbotAiController::mayChange()) abort(403);
+        if (!self::allowed()) abort(403);
     }
 
     public function index()

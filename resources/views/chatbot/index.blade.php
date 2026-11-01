@@ -100,8 +100,8 @@
         {{-- Aling AI ang sumasagot: ang site default (at ang Local cap at breaker), at ang paghahambing ng mga AI ng isang page. --}}
         <button id="ai-site-open" type="button" class="cb-btn">AI default</button>
         <button id="ai-compare-open" type="button" class="cb-btn">Compare AI</button>
-        {{-- Ang pool ng AI key ng kumpanya (spec 210). --}}
-        <a href="{{ route('chatbot.ai-keys') }}" class="cb-btn">AI keys</a>
+        {{-- Ang pool ng AI key ng kumpanya (spec 210): CEO lang, kaya ang link ay sa CEO lang. --}}
+        @if(\App\Http\Controllers\ChatbotAiKeyController::allowed())<a href="{{ route('chatbot.ai-keys') }}" class="cb-btn">AI keys</a>@endif
         @if($canSetUp)<button id="add-page" type="button" class="cb-btn cb-btn-primary">+ Page</button>@endif
         {{-- Paste: ang Edit ng bawat page (may paste box), o Ctrl/Cmd+V sa napiling cell ng grid. --}}
         <label class="flex items-center gap-1 text-xs"><input id="f-blanks" type="checkbox"> Paste blanks as empty</label>

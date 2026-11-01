@@ -105,20 +105,42 @@ class AiKeyScreenTest extends AiKeyPoolTestCase
         $this->assertSame(['DeepSeek', 'Down: no credit'], [$listed[$d]['provider_label'], $listed[$d]['status']]);
     }
 
-    public function test_S_210_1_5_a_user_who_may_not_change_the_site_ai_settings_gets_403_and_nothing_changes(): void
+    /** Ang link na /chatblast sa nav para sa mga role (ang access ng chatbot section at ng AI default). */
+    private function navLink(string $url, array $roles): void
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('nav_links')) {
+            \Illuminate\Support\Facades\Artisan::call('migrate', ['--path' => 'database/migrations/2026_05_18_140000_create_nav_links_and_visibility_tables.php', '--force' => true]);
+        }
+        $id = DB::table('nav_links')->insertGetId(['key' => 'chatblast', 'label' => 'Chatblast', 'route_url' => $url, 'icon' => 'fa-solid fa-link',
+            'active_pattern' => 'chatblast*', 'is_active' => true, 'sort_order' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        foreach ($roles as $role) {
+            DB::table('nav_link_role_visibility')->insert(['nav_link_id' => $id, 'role' => $role, 'is_visible' => true, 'created_at' => now(), 'updated_at' => now()]);
+        }
+    }
+
+    /** Amendment 210-1: ang pool ng key ay CEO lang; ang may /chatblast (hal. Marketing) ay 403 at walang link, pero ang AI default ay gaya ng dati. */
+    public function test_S_210_1_5_anyone_but_the_ceo_gets_403_on_the_key_screen_sees_no_link_and_nothing_changes(): void
     {
         $id = $this->addKey('openai', 'pool-1', self::KEY_A);
-        $before = PageSetting::count();
-        $this->actingAs($this->user('Data Encoder', 'enc@example.test'));
-        $this->get('/chatbot/ai-keys')->assertForbidden();
-        $this->getJson('/chatbot/ai-keys/data')->assertForbidden();
-        $this->add('openai', 'x', self::KEY_B)->assertForbidden();
-        $this->postJson('/chatbot/ai-keys/' . $id . '/test')->assertForbidden();
-        $this->postJson('/chatbot/ai-keys/' . $id . '/enabled', ['enabled' => false])->assertForbidden();
-        $this->postJson('/chatbot/ai-keys/' . $id . '/label', ['label' => 'x'])->assertForbidden();
-        $this->deleteJson('/chatbot/ai-keys/' . $id)->assertForbidden();
-        $this->assertSame($before, PageSetting::count());
+        $this->get('/chatbot/pages')->assertOk()->assertSee('/chatbot/ai-keys', false); // ang CEO ay may link
+        $this->navLink('/chatblast', ['Marketing']);
+        foreach ([['Data Encoder', 'enc@example.test'], ['Marketing', 'mkt@example.test'], ['  ceo office  ', 'not-ceo@example.test']] as [$role, $email]) {
+            $before = PageSetting::count();
+            $this->actingAs($this->user($role, $email));
+            $this->get('/chatbot/ai-keys')->assertForbidden();
+            $this->getJson('/chatbot/ai-keys/data')->assertForbidden();
+            $this->add('openai', 'x', self::KEY_B)->assertForbidden();
+            $this->postJson('/chatbot/ai-keys/' . $id . '/test')->assertForbidden();
+            $this->postJson('/chatbot/ai-keys/' . $id . '/enabled', ['enabled' => false])->assertForbidden();
+            $this->postJson('/chatbot/ai-keys/' . $id . '/label', ['label' => 'x'])->assertForbidden();
+            $this->deleteJson('/chatbot/ai-keys/' . $id)->assertForbidden();
+            $this->assertSame($before, PageSetting::count(), $role);
+        }
         $this->assertSame([], $this->providerCalls);
+        // Ang Marketing (may /chatblast) ay nakikita pa rin ang /chatbot/pages at nagpapalit ng AI default, pero walang link sa mga key.
+        $this->actingAs(\App\Models\User::where('email', 'mkt@example.test')->first());
+        $this->get('/chatbot/pages')->assertOk()->assertDontSee('/chatbot/ai-keys', false);
+        $this->postJson('/chatbot/ai/site', ['provider' => 'anthropic'])->assertOk();
     }
 
     public function test_S_210_1_6_the_same_key_pasted_twice_is_refused_as_a_duplicate(): void
