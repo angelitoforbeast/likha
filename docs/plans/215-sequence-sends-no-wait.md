@@ -257,4 +257,16 @@ One developer; tasks 2–5 share `ChatbotSequences`, `BotcakeSendQueue` and `Bot
 
 ## Base test counts (commit 96080bfe)
 
-BASE_COUNTS_PLACEHOLDER
+Full `vendor/bin/phpunit` (sqlite in memory, 21 min): 3,976 tests, 43,465 assertions, 4 failures, 4 skipped.
+
+| Failure on base | Note |
+|---|---|
+| `BigBroadcastTest::test_S_167_1…` ("all 5,000 handed to the pool at once": 2,133) | timing under full-suite load; the class passes alone (10/10) on the same commit |
+| `ExampleTest::test_the_application_returns_a_successful_response` (302) | known |
+| `ItemTableFitScriptTest::test_every_catalog_column_id…` (57 vs 45) | known |
+| `AstraAddressRulesTest::test_S_26_18…` (25.97 < 25.0) | timing bound under load |
+
+The listed suites on base, all green: ChatbotSequenceEngineTest 22, ChatbotPriorityTest 8, BotcakeAsyncSendTest 23,
+FailedSendKeepsConversationTest 12, ChatbotSequencePagesTest 7, ChatbotAfterOrderSequenceTest 3,
+GatewaySitePagesTest 26, GatewayTypingTest 9, ForbeastAutoSwitchTest 35, ChatbotTagsTest 12, ChatbotViaTest 3,
+RealSendTimeTest 15, BotcakeFailedReasonsTest 11, QueueRedisHorizonTest 5 (1 skipped).
