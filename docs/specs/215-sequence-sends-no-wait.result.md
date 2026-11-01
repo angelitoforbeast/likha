@@ -145,7 +145,24 @@ Peak 100 is the `sequence_concurrency` cap. First reply with 2,000 steps in flig
 
 ## Test counts
 
-TESTCOUNTS
+Full `vendor/bin/phpunit` (sqlite in memory):
+
+| | Tests | Assertions | Failures | Skipped |
+|---|---|---|---|---|
+| Base 96080bfe | 3,976 | 43,465 | 4 | 4 |
+| Head 8a2c4244 (before the fix list) | 4,028 | 74,224 | 3 | 4 |
+| Head after the fix list | 4,040 | 74,286 | 2 | 5 |
+
+- **No new failure.** The head's 2 failures are on the base list: `ExampleTest` (302) and `ItemTableFitScriptTest`
+  (57 vs 45). The base's timing failures (`BigBroadcastTest::test_S_167_1`, `AstraAddressRulesTest::test_S_26_18`, both
+  load-dependent) passed on this run. The extra skip is `test_14_mysql_only…` (MySQL only).
+- **64 new tests:** SequenceHandoffTest 11, SequenceSafetyTest 28, SequenceReRunTest 12 (1 skipped on sqlite),
+  SequenceVisibilityTest 3, SequenceBenchTest 10.
+- **The 14 listed suites, all green on the head, same counts as base:** ChatbotSequenceEngineTest 22, ChatbotPriorityTest 8,
+  BotcakeAsyncSendTest 23, FailedSendKeepsConversationTest 12, ChatbotSequencePagesTest 7, ChatbotAfterOrderSequenceTest 3,
+  GatewaySitePagesTest 26, GatewayTypingTest 9, ForbeastAutoSwitchTest 35, ChatbotTagsTest 12, ChatbotViaTest 3,
+  RealSendTimeTest 15, BotcakeFailedReasonsTest 11, QueueRedisHorizonTest 5 (1 skipped). ResponseSpeedTest (S-182.11,
+  S-185.5) 31 green; PageOwnersScreenTest 52 green.
 
 ## Story changes
 
